@@ -2,8 +2,13 @@ import {uiDocument,uiDocuments} from '../core/window-context.js';
 import { el } from '../core/core.js';
 
 import {icon, controlIcon} from '../theme/icons.js';
-import {showMenu, closeMenu, mnemonicText, menuIsOpen} from '../theme/menu.js';
-export {icon, controlIcon, showMenu, closeMenu, mnemonicText, menuIsOpen};
+import {showMenu as themedShowMenu, closeMenu, mnemonicText, menuIsOpen} from '../theme/menu.js';
+import {decorateCommandItems} from './command-bar-model.js';
+export {icon, controlIcon, closeMenu, mnemonicText, menuIsOpen};
+// IDE menus share the command catalog; application menus remain undecorated.
+export function showMenu(items,...args){
+  return themedShowMenu(decorateCommandItems(items),...args);
+}
 
 
 let dialogSequence=0;

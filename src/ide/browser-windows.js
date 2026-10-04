@@ -2,7 +2,8 @@ import {refreshGraphicsSurfaces} from '../graphics/surface.js';
 import {BrowserWindowHost} from './browser-window-host.js';
 import {el} from '../core/core.js';
 import {hasUIDialog} from '../core/window-context.js';
-import {showMenu, menuIsOpen, closeMenu} from '../theme/menu.js';
+import {menuIsOpen, closeMenu} from '../theme/menu.js';
+import {showMenu} from './ui.js';
 
 /** Wire the reusable host into tools, MDI documents and command bars. */
 export function installBrowserWindows(ide) {

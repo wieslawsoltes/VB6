@@ -26,6 +26,23 @@
   --vb-comment: #008000;
   --vb-breakpoint: #800000;
   --vb-execution: #ffff00;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -85,6 +102,23 @@
   --vb-comment: #008000;
   --vb-breakpoint: #800000;
   --vb-execution: #ffff00;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -144,6 +178,23 @@
   --vb-comment: #00ff00;
   --vb-breakpoint: #ff0000;
   --vb-execution: #ffff00;
+  --vb-icon-k: var(--vb-text);
+  --vb-icon-w: var(--vb-window);
+  --vb-icon-f: var(--vb-face);
+  --vb-icon-s: var(--vb-shadow);
+  --vb-icon-d: var(--vb-dark);
+  --vb-icon-n: #00ffff;
+  --vb-icon-b: #00ffff;
+  --vb-icon-t: #00ffff;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #00ff00;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #ffff00;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #ff8080;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #ff80ff;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -180,7 +231,10 @@
 [data-vb-theme] { color:var(--vb-text); color-scheme:light; }
 [data-vb-theme="contrast"] { color-scheme:dark; }
 .pixel-icon { display:inline-flex; flex:none; align-items:center; justify-content:center; vertical-align:middle; }
-.pixel-icon svg { display:block; overflow:visible; }
-button:disabled .pixel-icon { filter:grayscale(1); opacity:.5; }
-[data-vb-theme="contrast"] .pixel-icon { filter:invert(1); }
+.pixel-icon svg { display:block; overflow:hidden; flex:none; }
+.pixel-icon { pointer-events:none; }
+.pixel-icon .icon-disabled { display:none; }
+:is(button:disabled,[aria-disabled="true"]) .pixel-icon .icon-art { display:none; }
+:is(button:disabled,[aria-disabled="true"]) .pixel-icon .icon-disabled { display:inline; }
+
 [data-vb-theme="contrast"] .vb-command { text-shadow:none; }

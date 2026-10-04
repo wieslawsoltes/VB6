@@ -60,3 +60,19 @@
  [data-vb-theme] { --vb-face:ButtonFace;--vb-text:ButtonText;--vb-window:Canvas;--vb-window-text:CanvasText;--vb-light:ButtonText;--vb-shadow:ButtonText;--vb-dark:ButtonText;--vb-selection:Highlight;--vb-selection-text:HighlightText;--vb-gray:GrayText; }
  .pixel-icon { forced-color-adjust:auto;filter:none!important; }
 }
+
+/* Icon rendering is independent of the OS font and of CSS opacity filters. */
+.command-bar-large .tool-button > .pixel-icon { width:24px!important;height:24px!important; }
+.command-bar-large .tool-button > .pixel-icon svg { width:24px;height:24px; }
+.control-icon.pixel-icon > svg { width:16px;height:16px; }
+.member-kind { width:16px;display:inline-flex;align-items:center; }
+@media (forced-colors:active) {
+ .pixel-icon { --vb-icon-k:ButtonText;--vb-icon-w:ButtonFace;--vb-icon-f:ButtonFace;
+ --vb-icon-s:ButtonText;--vb-icon-d:ButtonText;--vb-icon-n:ButtonText;
+ --vb-icon-b:ButtonText;--vb-icon-t:ButtonText;--vb-icon-c:ButtonText;
+ --vb-icon-g:ButtonText;--vb-icon-l:ButtonText;--vb-icon-o:ButtonText;
+ --vb-icon-y:ButtonText;--vb-icon-h:ButtonFace;--vb-icon-r:ButtonText;
+ --vb-icon-e:ButtonText;--vb-icon-m:ButtonText;--vb-gray:GrayText;
+ forced-color-adjust:none; }
+ .pixel-icon .icon-disabled-light { display:none; }
+}
