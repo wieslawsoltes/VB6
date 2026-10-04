@@ -1,0 +1,53 @@
+name: Materialize MDI window-mode setting
+on:
+  push:
+    branches: [feat/mdi-window-mode-setting]
+    paths: [.mdi-stage/**, .github/workflows/materialize-mdi-setting.yml]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify and apply reviewed source changes
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, shutil
+          root = pathlib.Path.cwd()
+          stage = root / '.mdi-stage'
+          manifest = ''.join(p.read_text() for p in sorted(stage.glob('part-*.txt')))
+          assert hashlib.sha256(manifest.encode()).hexdigest() == '60f0c2399da27c2b048bfd804d291c5d7087d03683d1a28b8eb53035e9d220a2', 'Source transfer mismatch'
+          pending = []
+          digest = lambda text: hashlib.sha256(text.encode()).hexdigest()
+          for entry in json.loads(manifest):
+              path = root / entry['path']
+              assert path.resolve().is_relative_to(root) and '.git' not in path.parts
+              assert not entry['path'].startswith('.github/'), 'Workflow changes are not permitted'
+              before = path.read_text()
+              assert digest(before) == entry['before'], 'Source base changed: ' + entry['path']
+              after = before
+              for start, end, replacement in reversed(entry['edits']):
+                  assert 0 <= start <= end <= len(before)
+                  after = after[:start] + replacement + after[end:]
+              assert digest(after) == entry['after'], 'Source result mismatch: ' + entry['path']
+              pending.append((path, after))
+          for path, after in pending:
+              path.write_text(after)
+          shutil.rmtree(stage)
+          print('Applied', len(pending), 'verified source files')
+          PY
+      - run: npm run build
+      - run: npm test
+      - name: Commit source and regenerated applications
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: add persistent in-page MDI-only and optional browser-window modes'
+          git push origin HEAD:refs/heads/feat/mdi-window-mode-setting
