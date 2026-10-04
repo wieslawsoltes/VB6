@@ -92,10 +92,23 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
           if(!adapter)return {...result,adapter:false};
           const device=await adapter.requestDevice();globalThis.vb6SmokeGPU={adapter,device};
           device.lost.then(info=>{result.lost={reason:info.reason,message:info.message};});
+          const destroy=GPUDevice.prototype.destroy;
+          globalThis.vb6DeviceDestructions=[];
+          GPUDevice.prototype.destroy=function(){globalThis.vb6DeviceDestructions.push(new Error().stack);return destroy.call(this);};
           const buffer=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST});
           device.queue.writeBuffer(buffer,0,new Float32Array([1,2,3,4]));
-          await device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,100));
-          result.submitted=true;buffer.destroy();return result;
+          await device.queue.onSubmittedWorkDone();
+          result.submitted=true;
+          const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;document.body.append(canvas);
+          const context=canvas.getContext('webgpu');
+          device.pushErrorScope('validation');context.configure({device,format:navigator.gpu.getPreferredCanvasFormat(),alphaMode:'opaque'});
+          const encoder=device.createCommandEncoder();const pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),clearValue:{r:1,g:0,b:0,a:1},loadOp:'clear',storeOp:'store'}]});
+          pass.end();device.queue.submit([encoder.finish()]);await device.queue.onSubmittedWorkDone();
+          const validation=await device.popErrorScope();result.canvasValidation=validation?.message||null;
+          canvas.width=128;canvas.height=128;
+          await new Promise(resolve=>setTimeout(resolve,100));
+          result.canvasSubmitted=true;
+          context.unconfigure();canvas.remove();buffer.destroy();return result;
         }catch(error){return {...result,error:error.message};}
       })()`;
       report.gpuBootstrapAfterWindows=await js('({diagnostics:globalThis.vb6NativeGraphics,retained:!!globalThis.vb6NativeGPUDevice})');
@@ -105,7 +118,8 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await until(() => js('surface.backend === "webgpu" || surface.renderingBackend === "Canvas2D"'), 'graphics backend');
       if (report.graphics.webgpu) {
         await until(async () => {
-          const status = await js('({backend: surface.backend, error: surface.gpuError})');
+          const status = await js('({backend: surface.backend, error: surface.gpuError, destructions: globalThis.vb6DeviceDestructions, childDestructions:f1.nativeWindow.win.vb6DeviceDestructions})');
+          report.surface=status;
           if (status.error) throw new Error('Native graphics initialization failed: ' + status.error);
           return status.backend === 'webgpu';
         }, 'WebGPU surface');
