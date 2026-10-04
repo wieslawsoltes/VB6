@@ -1,3 +1,4 @@
+import {refreshToolLists} from './virtual-list.js';
 import {refreshGraphicsSurfaces} from '../graphics/surface.js';
 import {BrowserWindowHost} from './browser-window-host.js';
 import {el} from '../core/core.js';
@@ -78,6 +79,7 @@ export function installBrowserWindows(ide) {
     for (const editor of ide.documents.editors.values()) if (node.contains(editor.root)) editor.transferDocument();
     for (const designer of ide.documents.designers.values()) if (node.contains(designer.root)) designer.transferDocument();
     refreshGraphicsSurfaces(node);
+    refreshToolLists(node);
   };
   dock.detach = id => {
     const group = dock.group(id), view = group && dock.views.get(group.id);

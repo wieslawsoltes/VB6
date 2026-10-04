@@ -329,8 +329,13 @@ class BrowserWindows(unittest.TestCase):
         popup.get_by_label('Object Browser search', exact=True).fill('DateDiff')
         popup.get_by_role('button', name='Search', exact=True).click()
         self.assertIn('DateDiff', popup.get_by_label('Member definition', exact=True).inner_text())
-        popup.set_viewport_size({'width': 1024, 'height': 740})
+        # Repeated resizing must repaint the real virtual lists without observer feedback.
+        for width, height in [(680, 480), (1024, 740), (700, 550), (1024, 740)]:
+            popup.set_viewport_size({'width': width, 'height': height})
+            popup.wait_for_function('w => document.querySelector(".classic-object-browser").getBoundingClientRect().width > w - 24', arg=width)
         self.assertGreater(popup.locator('.classic-object-browser').bounding_box()['width'], 1000)
+        self.assertTrue(self.js('''() => {const tool=vb6Studio.documents.tools.get('tool:object-browser');
+          return tool.classList.observerWindow === tool.root.ownerDocument.defaultView;}'''))
         popup.get_by_label('Object Browser search', exact=True).focus()
         try:
             popup.keyboard.press('Control+F4')
