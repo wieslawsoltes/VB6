@@ -1,13 +1,13 @@
 name: Validate
 on:
   push:
-    branches: [main, feat/detached-browser-windows]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: validate-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 jobs:
   test:
