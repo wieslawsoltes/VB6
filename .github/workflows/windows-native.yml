@@ -54,6 +54,7 @@ jobs:
         working-directory: desktop
       - run: npm run fixtures:native
       - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --stage-only
+      - run: node tools/probe-windows-gpu.mjs .native-build/nativesmoke-x64
       - run: node tools/test-native-host.mjs .native-build/nativesmoke-x64
       - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --out release/windows/app
       - name: Launch isolated single-file application
