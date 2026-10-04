@@ -16,7 +16,11 @@
     "test:finalization": "python tools/browser-finalization-05.py",
     "probe:launch": "python tools/probe-launch.py",
     "package": "python tools/package-release.py",
-    "test:boundaries": "python tools/browser-boundaries-06.py"
+    "test:boundaries": "python tools/browser-boundaries-06.py",
+    "mcp:bridge": "node tools/mcp-bridge.mjs",
+    "mcp:stdio": "node tools/mcp-stdio.mjs",
+    "test:mcp": "node --test tests/mcp-*.test.mjs",
+    "test:mcp:browser": "python tools/mcp-browser-tests.py"
   },
   "engines": {
     "node": ">=22"

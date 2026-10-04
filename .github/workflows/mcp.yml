@@ -1,0 +1,46 @@
+name: MCP validation
+on:
+  pull_request:
+    paths: ['src/**', 'tools/**', 'tests/**', 'package.json', '.github/workflows/mcp.yml']
+  push:
+    branches: [main, feat/mcp-browser-and-local]
+    paths: ['src/**', 'tools/**', 'tests/**', 'package.json', '.github/workflows/mcp.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mcp-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: npm test
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - run: npm run test:mcp:browser
+      - name: Preserve reproducible source, app and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vb6-mcp-${{ github.sha }}
+          retention-days: 14
+          path: |
+            src
+            tools
+            tests
+            docs
+            dist
+            reports/mcp-browser.json
+            reports/screenshots/mcp-*.png
+            package.json
+            README.md
