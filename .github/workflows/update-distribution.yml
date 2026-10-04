@@ -1,10 +1,6 @@
 name: Update bundled distribution
 on:
   workflow_dispatch:
-  # Delivery bootstrap: removed after the initial reviewed source build.
-  push:
-    branches: [feat/mcp-browser-and-local]
-    paths: ['.github/workflows/update-distribution.yml']
 permissions:
   contents: write
 concurrency:

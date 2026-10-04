@@ -24,6 +24,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm run build
+      - name: Verify bundled app is reproducible
+        run: git diff --exit-code -- dist
       - run: npm test
       - run: pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium

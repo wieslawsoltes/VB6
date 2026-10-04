@@ -90,3 +90,24 @@ In-page floating windows are not detached OS windows. Native MDIForm/UserControl
 [User guide](docs/USER_GUIDE.md) · [Architecture / SDK embedding](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Visual audit](docs/VISUAL-AUDIT.md) · [Release notes](docs/RELEASE-NOTES-0.6.0.md) · [Worktrees](docs/WORKTREES.md)
 
 MIT-licensed original implementation. Visual Basic is a Microsoft trademark; this project is not Microsoft software or endorsed by Microsoft. Historical reconstruction evidence remains in `RECOVERY.md`; its old test failures and version marker describe the recovery snapshot, not this release.
+
+## Model Context Protocol
+
+Open **Tools → MCP Connections…** to connect to MCP servers or explicitly share
+the live IDE with MCP clients. The client and permission-gated server are bundled
+into both the hosted app and the single-file HTML. Support includes modern and
+legacy HTTP/SSE, tools/resources/prompts, OAuth with PKCE, cancellation,
+subscriptions, revision-checked editing with undo, and debugger integration.
+
+An optional dependency-free Node.js companion supplies desktop stdio access and
+configured local stdio servers; a static page cannot itself bind a TCP port or
+launch processes. Browser origin/CORS and local-network permissions still apply.
+
+```sh
+npm run mcp:bridge -- --serve dist --allow-file --origin https://wieslawsoltes.github.io
+```
+
+Sharing is off by default. Edits and execution need local allow-once approval;
+credentials stay in memory and are not included in project exports. See the
+[MCP setup, security, protocol matrix and API guide](docs/MCP.md) for direct-server
+connections, desktop client configuration, OAuth, deployment choices and tests.
