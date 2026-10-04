@@ -1,0 +1,20 @@
+name: Native integration snapshot
+on:
+  push:
+    branches: [feat/win32-standalone-webgpu]
+permissions:
+  contents: read
+jobs:
+  source-history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git bundle create native-integration.bundle HEAD refs/remotes/origin/main
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-integration-history
+          path: native-integration.bundle
+          retention-days: 1
