@@ -7,6 +7,7 @@ Public RejectClose As Boolean
 Public ResizeCount As Long
 Private Sub Form_Load()
     RejectClose = True
+    Me.Line (5, 5)-(60, 40), vbRed, BF
 End Sub
 Private Sub Command1_Click()
     Text1.Text = "Native event OK"

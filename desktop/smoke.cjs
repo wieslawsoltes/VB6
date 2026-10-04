@@ -84,49 +84,27 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js('host.vm.showForm(f2.instance)');
       await until(() => w2.isVisible(), 'show');
       check('hide/show retains form and HWND', true);
-      const probe = `(async()=>{
-        const result={secure:isSecureContext,gpu:!!navigator.gpu};
-        if(!navigator.gpu)return result;
-        try{
-          const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
-          if(!adapter)return {...result,adapter:false};
-          const device=await adapter.requestDevice();globalThis.vb6SmokeGPU={adapter,device};
-          device.lost.then(info=>{result.lost={reason:info.reason,message:info.message};});
-          const destroy=GPUDevice.prototype.destroy;
-          globalThis.vb6DeviceDestructions=[];
-          GPUDevice.prototype.destroy=function(){globalThis.vb6DeviceDestructions.push(new Error().stack);return destroy.call(this);};
-          const buffer=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST});
-          device.queue.writeBuffer(buffer,0,new Float32Array([1,2,3,4]));
-          await device.queue.onSubmittedWorkDone();
-          result.submitted=true;
-          const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;document.body.append(canvas);
-          const context=canvas.getContext('webgpu');
-          device.pushErrorScope('validation');context.configure({device,format:navigator.gpu.getPreferredCanvasFormat(),alphaMode:'opaque'});
-          const encoder=device.createCommandEncoder();const pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),clearValue:{r:1,g:0,b:0,a:1},loadOp:'clear',storeOp:'store'}]});
-          pass.end();device.queue.submit([encoder.finish()]);await device.queue.onSubmittedWorkDone();
-          const validation=await device.popErrorScope();result.canvasValidation=validation?.message||null;
-          canvas.width=128;canvas.height=128;
-          await new Promise(resolve=>setTimeout(resolve,100));
-          result.canvasSubmitted=true;
-          context.unconfigure();canvas.remove();buffer.destroy();return result;
-        }catch(error){return {...result,error:error.message};}
-      })()`;
-      report.gpuBootstrapAfterWindows=await js('({diagnostics:globalThis.vb6NativeGraphics,retained:!!globalThis.vb6NativeGPUDevice})');
-      report.gpuRootProbe=await js(probe);
-      report.gpuChildProbe=await w1.webContents.executeJavaScript(probe,true);
-      await js('globalThis.surface = f1.ensureSurface(); surface.add("rect", [5,5,60,40], 255, true);');
-      await until(() => js('surface.backend === "webgpu" || surface.renderingBackend === "Canvas2D"'), 'graphics backend');
-      if (report.graphics.webgpu) {
-        await until(async () => {
-          const status = await js('({backend: surface.backend, error: surface.gpuError, destructions: globalThis.vb6DeviceDestructions, childDestructions:f1.nativeWindow.win.vb6DeviceDestructions})');
-          report.surface=status;
-          if (status.error) throw new Error('Native graphics initialization failed: ' + status.error);
-          return status.backend === 'webgpu';
-        }, 'WebGPU surface');
-        await js('(async()=>{surface.device.pushErrorScope("validation");surface.render();await surface.device.queue.onSubmittedWorkDone();const error=await surface.device.popErrorScope();if(error)throw new Error(error.message);})()');
-        check('WebGPU submits native-window drawing', true);
-      } else {
-        check('explicit fallback is reported', manifest.graphics === 'auto' || manifest.graphics === 'canvas2d');
+      await js('globalThis.surface=f1.ensureSurface();surface.add("rect",[5,5,60,40],255,true);void 0;');
+      await js('surface.gpuReady');
+      if(report.graphics.webgpu){
+        check('native-window WebGPU initialized',await js('surface.backend==="webgpu" && !surface.gpuError'));
+        report.pixel=await js(`(async()=>{
+          const device=surface.device;device.pushErrorScope('validation');
+          const buffer=device.createBuffer({size:256,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
+          try{
+            surface.render();const encoder=device.createCommandEncoder();
+            encoder.copyTextureToBuffer({texture:surface.gpuContext.getCurrentTexture(),origin:[20,20]}, {buffer,bytesPerRow:256},[1,1]);
+            device.queue.submit([encoder.finish()]);const validation=device.popErrorScope();
+            await buffer.mapAsync(GPUMapMode.READ);const pixel=Array.from(new Uint8Array(buffer.getMappedRange(),0,4));buffer.unmap();
+            const error=await validation;if(error)throw new Error(error.message);
+            return {pixel,format:f1.nativeWindow.win.navigator.gpu.getPreferredCanvasFormat()};
+          }finally{buffer.destroy();}
+        })()`);
+        const red=report.pixel.format==='bgra8unorm'?2:0;
+        check('WebGPU native-window pixel readback',report.pixel.pixel[red]===255&&report.pixel.pixel[1]===0&&report.pixel.pixel[3]===255);
+      }else{
+        check('explicit graphics fallback has a reason',manifest.graphics==='canvas2d'||manifest.graphics==='auto'&&!!report.graphics.error);
+        check('fallback actually draws through Canvas2D',await js('surface.render();surface.context.getImageData(20*surface.dpr,20*surface.dpr,1,1).data[0]===255'));
       }
       check('remote navigation rejected', await js('(async()=>{try{await fetch("https://example.com");return false;}catch{return true;}})()'));
     }

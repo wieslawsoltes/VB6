@@ -93,7 +93,7 @@ export async function stageWindows(options) {
   if (output === stage || output.startsWith(stage + path.sep)) throw new Error('Output directory must not be inside the staging directory');
   await fs.rm(stage, { recursive: true, force: true }); await fs.mkdir(path.join(stage, 'web'), { recursive: true });
   for (const file of ['main.cjs', 'preload.cjs', 'policy.cjs', 'smoke.cjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, file));
-  for (const file of ['boot.mjs', 'studio.mjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, 'web', file));
+  for (const file of ['boot.mjs', 'studio.mjs', 'gpu-probe.mjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, 'web', file));
   await fs.copyFile(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
   let html;
   if (project) {

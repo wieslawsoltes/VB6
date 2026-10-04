@@ -1,3 +1,4 @@
+import {refreshGraphicsSurfaces} from '../graphics/surface.js';
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 export function installNativeHost(host, bridge = globalThis.vb6Native) {
   if (!bridge || bridge.version !== 1 || host.nativeWindows) return false;
@@ -11,6 +12,7 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
     const win = browser.open('about:blank', id, 'popup');
     if (!win) throw new Error('Native window creation was denied');
     const doc = win.document;
+    if(browser.vb6NativeGPUUnavailable)win.vb6NativeGPUUnavailable=browser.vb6NativeGPUUnavailable;
     for (const name of ['data-vb-theme', 'lang']) {
       const value = document.documentElement.getAttribute(name); if (value) doc.documentElement.setAttribute(name, value);
     }
@@ -51,6 +53,7 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
       forms.set(record.id, record);
       form.node.setAttribute('data-native-window', record.id);
       record.doc.body.append(form.node);
+      refreshGraphicsSurfaces(form.node);
       form.cancelWindowInteraction?.();
       record.doc.addEventListener('focusin', () => {
         if (form.shown && !record.focused) command(record.id, 'focus');

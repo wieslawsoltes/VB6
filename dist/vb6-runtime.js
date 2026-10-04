@@ -2,8 +2,191 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* native-windows.js */
+/* ../theme/theme.js */
 __modules[0]=(()=>{
+
+/** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
+ * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
+ */
+const classic = {
+  face:'#c0c0c0', light:'#ffffff', highlight:'#dfdfdf', shadow:'#808080', dark:'#000000',
+  text:'#000000', title:'#000080', titleEnd:'#000080', titleText:'#ffffff',
+  inactive:'#808080', inactiveEnd:'#808080', inactiveText:'#c0c0c0',
+  window:'#ffffff', windowText:'#000000', selection:'#000080', selectionText:'#ffffff',
+  workspace:'#808080', desktop:'#008080', gray:'#808080', info:'#ffffe1', infoText:'#000000',
+  link:'#0000ff', keyword:'#000080', comment:'#008000', breakpoint:'#800000', execution:'#ffff00'
+};
+const profile = (id, name, colors) => Object.freeze({id, name, colors:Object.freeze(colors)});
+const THEMES = Object.freeze({
+  classic:profile('classic','Windows Classic',classic),
+  standard:profile('standard','Windows Standard (2000)',{...classic,face:'#d4d0c8',highlight:'#e9e7e3',dark:'#404040',title:'#0a246a',titleEnd:'#a6caf0',inactiveEnd:'#c0c0c0',selection:'#0a246a'}),
+  contrast:profile('contrast','High Contrast Black',{...classic,face:'#000000',light:'#ffffff',highlight:'#ffffff',shadow:'#c0c0c0',dark:'#ffffff',text:'#ffffff',inactive:'#000000',inactiveEnd:'#000000',inactiveText:'#ffffff',window:'#000000',windowText:'#ffffff',selection:'#800080',selectionText:'#ffffff',workspace:'#000000',desktop:'#000000',gray:'#00ff00',info:'#000000',infoText:'#ffffff',link:'#ffff00',keyword:'#00ffff',comment:'#00ff00',breakpoint:'#ff0000'})
+});
+// Win32 GetSysColor indices. Reserved index 25 falls back to the button face.
+const SYSTEM_ROLES = Object.freeze(['face','desktop','title','inactive','face','window','dark','text','windowText','titleText','face','face','workspace','selection','selectionText','face','shadow','gray','text','inactiveText','light','dark','highlight','infoText','info','face','link','titleEnd','inactiveEnd','selection','face']);
+const SYSTEM_COLOR_NAMES = Object.freeze(['Scroll Bars','Desktop','Active Title Bar','Inactive Title Bar','Menu Bar','Window Background','Window Frame','Menu Text','Window Text','Title Bar Text','Active Border','Inactive Border','Application Workspace','Highlight','Highlight Text','Button Face','Button Shadow','Gray Text','Button Text','Inactive Caption Text','3D Highlight','3D Dark Shadow','3D Light','Info Text','Info Background']);
+function themeId(id) { return Object.hasOwn(THEMES,String(id)) ? String(id) : 'classic'; }
+function getTheme(element) {
+  return THEMES[themeId(typeof element === 'string' ? element : element?.closest?.('[data-vb-theme]')?.dataset.vbTheme || element?.ownerDocument?.documentElement?.dataset.vbTheme)];
+}
+function applyTheme(element, id) {
+  const value=themeId(id);element.dataset.vbTheme=value;
+  element.dispatchEvent(new CustomEvent('vb-theme-change',{bubbles:true,detail:{theme:value}}));return value;
+}
+function colorValue(value, fallback='#c0c0c0', theme='classic') {
+  if(typeof value==='string' && /^(#[\da-f]{3,8}|rgba?\(|hsla?\()/i.test(value))return value;
+  const n=Number(value);if(!Number.isFinite(n))return fallback;
+  const bits=n>>>0;
+  if(bits & 0x80000000) return (THEMES[themeId(theme)].colors[SYSTEM_ROLES[bits&0xff]]) || fallback;
+  return '#'+[bits&255,(bits>>>8)&255,(bits>>>16)&255].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+function cssColor(value,fallback='#c0c0c0') {
+  const bits=Number(value)>>>0;
+  return Number.isFinite(Number(value)) && bits&0x80000000 && SYSTEM_ROLES[bits&255]
+    ? `var(--vb-sys-${bits&255}, ${colorValue(value,fallback)})` : colorValue(value,fallback);
+}
+function fontFamily(name='MS Sans Serif') {
+  if(/^MS Sans Serif$/i.test(name))return '"MS Sans Serif", Tahoma, Arial, sans-serif';
+  if(/^MS Serif$/i.test(name))return '"MS Serif", "Times New Roman", serif';
+  // A quoted family cannot escape the declaration or turn into a URL.
+  return '"'+String(name).replace(/["\\\n\r]/g,'')+'", Tahoma, Arial, sans-serif';
+}
+const DEFAULT_APPEARANCE = Object.freeze({theme:'classic',windowMode:'hybrid',documentTabs:false,debugTabs:false,editorFont:'Courier New',editorSize:13,tooltips:true,procedureSeparators:true,autoIndent:true,autoListMembers:true,autoQuickInfo:true,autoDataTips:true,fullModule:true,margin:true,dragText:true,autoSyntaxCheck:true,requireVariableDeclaration:true,notifyStateLoss:false,largeToolbarIcons:false});
+function normalizeAppearance(value={}) {
+  return {...DEFAULT_APPEARANCE,windowMode:value.windowMode==='mdi'?'mdi':'hybrid',autoSyntaxCheck:value.autoSyntaxCheck!==false,requireVariableDeclaration:value.requireVariableDeclaration!==false,notifyStateLoss:value.notifyStateLoss===true,largeToolbarIcons:value.largeToolbarIcons===true,autoQuickInfo:value.autoQuickInfo!==false,autoDataTips:value.autoDataTips!==false,fullModule:value.fullModule!==false,margin:value.margin!==false,dragText:value.dragText!==false,codeColors:Object.fromEntries(Object.entries(value.codeColors||{}).filter(([key,color])=>['text','background','keyword','comment','selection','selectionText','breakpoint','execution'].includes(key)&&/^#[0-9a-f]{6}$/i.test(color))),theme:themeId(value.theme),documentTabs:value.documentTabs===true,debugTabs:value.debugTabs===true,editorFont:['Courier New','Consolas','monospace'].includes(value.editorFont)?value.editorFont:'Courier New',editorSize:[11,12,13,14,16,18,20].includes(Number(value.editorSize))?Number(value.editorSize):13,tooltips:value.tooltips!==false,procedureSeparators:value.procedureSeparators!==false,autoIndent:value.autoIndent!==false,autoListMembers:value.autoListMembers!==false};
+}
+
+return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,colorValue,cssColor,fontFamily,DEFAULT_APPEARANCE,normalizeAppearance};
+})();
+
+/* ../graphics/surface.js */
+__modules[1]=(()=>{
+const { colorValue, getTheme }=__modules[0];
+
+/** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
+const surfaces = new WeakMap();
+function refreshGraphicsSurfaces(root) { for (const canvas of root.querySelectorAll('canvas.graphics-surface')) surfaces.get(canvas)?.transferDocument(); }
+const sharedDevices = new WeakMap();
+function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
+function rgba(color,theme='classic'){const c=oleColor(color,'#c0c0c0',theme);return [parseInt(c.slice(1,3),16)/255,parseInt(c.slice(3,5),16)/255,parseInt(c.slice(5,7),16)/255,1];}
+async function getGPUDevice(view=globalThis) {
+  if(view.vb6NativeGPUUnavailable)return null;
+  if(view.vb6NativeGPUDevice)return view.vb6NativeGPUDevice;
+  const gpu=view.navigator?.gpu;if(!gpu)return null;
+  let pending=sharedDevices.get(view);
+  if(!pending){
+    pending=(async()=>{
+      try{
+        const adapter=await gpu.requestAdapter({powerPreference:'high-performance'});
+        if(!adapter)return null;
+        const device=await adapter.requestDevice();
+        device.lost.then(()=>{if(sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+        return device;
+      }catch{return null;}
+    })();
+    sharedDevices.set(view,pending);
+    pending.then(device=>{if(!device&&sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+  }
+  let timeout;
+  try{return await Promise.race([pending,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),3000))]);}
+  finally{clearTimeout(timeout);}
+}
+const SHADER=`struct Screen { size: vec2f, padding: vec2f };
+@group(0) @binding(0) var<uniform> screen: Screen;
+struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f };
+@vertex fn vs(@location(0) xy: vec2f, @location(1) color: vec4f) -> VertexOut {
+ var out: VertexOut; out.position = vec4f(xy.x / screen.size.x * 2.0 - 1.0, 1.0 - xy.y / screen.size.y * 2.0, 0.0, 1.0); out.color = color; return out;
+}
+@fragment fn fs(in: VertexOut) -> @location(0) vec4f { return in.color; }`;
+class GraphicsSurface {
+  constructor(container,{backend='auto',background=16777215,onBackend=()=>{}}={}){this.container=container;this.theme=getTheme(container).id;this.themeChanged=()=>{this.theme=getTheme(container).id;this.invalidate();};this.themeDocument=container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.requestedBackend=backend;this.backend='canvas2d';this.background=background;this.commands=[];this.onBackend=onBackend;this.dirty=false;this.disposed=false;this.width=1;this.height=1;this.canvas=container.ownerDocument.createElement('canvas');this.canvas.className='graphics-surface';this.canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';container.append(this.canvas);surfaces.set(this.canvas,this);this.context=this.canvas.getContext('2d');this.resizeObserver=new ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(container);this.resize();if(backend!=='canvas2d')this.gpuReady=this.initializeGPU();else onBackend('Canvas2D');}
+  releaseGPU(){
+    // A surface owns its buffers/context, never the window's shared device.
+    this.gpuGeneration=(this.gpuGeneration||0)+1;
+    this.vertexBuffer?.destroy();this.uniform?.destroy();this.gpuContext?.unconfigure();this.gpuCanvas?.remove();
+    this.vertexBuffer=this.uniform=this.gpuContext=this.gpuCanvas=this.pipeline=this.bindGroup=this.device=null;
+    this.bufferSize=0;this.backend='canvas2d';
+  }
+  async initializeGPU(){
+    const generation=this.gpuGeneration=(this.gpuGeneration||0)+1;
+    const document=this.container.ownerDocument,view=document.defaultView;
+    const current=()=>!this.disposed&&this.gpuGeneration===generation&&this.container.ownerDocument===document;
+    const device=await getGPUDevice(view);
+    if(!current())return false;
+    if(!device){this.gpuError='No WebGPU device became available';this.onBackend('Canvas2D');return false;}
+    let context,uniform;
+    try{
+      const canvas=document.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;
+      context=canvas.getContext('webgpu');if(!context)throw new Error('WebGPU canvas context unavailable in this window');
+      const format=view.navigator.gpu.getPreferredCanvasFormat();
+      const module=device.createShaderModule({code:SHADER});
+      const info=await module.getCompilationInfo();
+      if(!current())return false;
+      if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed: '+info.messages.filter(m=>m.type==='error').map(m=>m.message).join('; '));
+      let pipeline,bindGroup,validation;
+      device.pushErrorScope('validation');
+      try{
+        context.configure({device,format,alphaMode:'opaque',usage:view.GPUTextureUsage.RENDER_ATTACHMENT|view.GPUTextureUsage.COPY_SRC});
+        pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
+        uniform=device.createBuffer({size:16,usage:view.GPUBufferUsage.UNIFORM|view.GPUBufferUsage.COPY_DST});
+        bindGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:uniform}}]});
+      }finally{validation=await device.popErrorScope();}
+      if(validation)throw validation;
+      if(!current()){uniform.destroy();context.unconfigure();return false;}
+      Object.assign(this,{device,pipeline,uniform,bindGroup,gpuCanvas:canvas,gpuContext:context,gpuError:null});
+      this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';
+      device.lost.then(info=>{if(current()&&this.device===device){this.gpuError='WebGPU device lost: '+info.message;this.releaseGPU();this.onBackend('Canvas2D · device lost');this.invalidate();}});
+      this.resize();this.onBackend('WebGPU');return true;
+    }catch(error){
+      uniform?.destroy();context?.unconfigure();
+      if(current()){this.gpuError=error.message||String(error);this.releaseGPU();this.onBackend('Canvas2D');this.invalidate();}
+      return false;
+    }
+  }
+  scheduleResize(){
+    if(this.disposed||this.resizeFrame)return;
+    this.resizeWindow=this.container.ownerDocument.defaultView;
+    this.resizeFrame=this.resizeWindow.requestAnimationFrame(()=>{this.resizeFrame=0;this.resize();});
+  }
+  transferDocument(){
+    if(this.disposed)return;
+    const changed=this.themeDocument!==this.container.ownerDocument;
+    this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.resizeFrame=0;
+    this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);
+    (this.frameWindow||this.themeDocument.defaultView).cancelAnimationFrame(this.raf);this.dirty=false;
+    this.themeDocument=this.container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);
+    this.theme=getTheme(this.container).id;this.resizeObserver.disconnect();
+    this.resizeObserver=new this.themeDocument.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(this.container);
+    if(changed){this.releaseGPU();if(this.requestedBackend!=='canvas2d')this.gpuReady=this.initializeGPU();}
+    this.resize();
+  }
+  resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){const width=Math.max(1,Math.min(8192,Math.round(this.width*dpr))),height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;}this.dpr=dpr;this.invalidate();}
+  add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
+  text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}
+  clear(){this.commands=[];this.invalidate();}
+  setPicture(source){
+    if((source||'')===(this.pictureSource||''))return;this.pictureSource=source||'';this.picture=null;this.pictureError=null;
+    if(source){const image=new Image();image.onload=()=>{if(!this.disposed&&this.pictureSource===source){this.picture=image;this.invalidate();}};image.onerror=()=>{if(!this.disposed&&this.pictureSource===source){this.pictureError='Image decoding failed';this.invalidate();}};image.src=source;}
+    this.invalidate();
+  }
+  setGrid(spacing=8){this.grid=spacing;this.invalidate();}
+  invalidate(){if(this.dirty||this.disposed)return;this.dirty=true;this.frameWindow=this.container.ownerDocument.defaultView;this.raf=this.frameWindow.requestAnimationFrame(()=>{this.dirty=false;this.render();});}
+  vertices(){const out=[];const triangle=(p1,p2,p3,c)=>{for(const p of [p1,p2,p3])out.push(p[0],p[1],...c);};const rect=(x,y,w,h,c)=>{triangle([x,y],[x+w,y],[x,y+h],c);triangle([x+w,y],[x+w,y+h],[x,y+h],c);};const line=(x1,y1,x2,y2,width,c)=>{const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy)||1,ox=-dy/length*width/2,oy=dx/length*width/2;triangle([x1+ox,y1+oy],[x2+ox,y2+oy],[x1-ox,y1-oy],c);triangle([x1-ox,y1-oy],[x2+ox,y2+oy],[x2-ox,y2-oy],c);};
+    if(this.grid){const c=rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
+    for(const cmd of this.commands){const c=rgba(cmd.color,this.theme),a=cmd.coords;if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else if(cmd.kind==='line')line(...a,cmd.width,c);else if(cmd.kind==='rect'){const x=Math.min(a[0],a[2]),y=Math.min(a[1],a[3]),w=Math.abs(a[2]-a[0]),h=Math.abs(a[3]-a[1]);if(cmd.fill)rect(x,y,w,h,c);else{rect(x,y,w,cmd.width,c);rect(x,y+h-cmd.width,w,cmd.width,c);rect(x,y,cmd.width,h,c);rect(x+w-cmd.width,y,cmd.width,h,c);}}else if(cmd.kind==='circle'){const n=Math.min(180,Math.max(16,Math.round(a[2]*2))),[cx,cy,r]=a;for(let i=0;i<n;i++){const a1=i/n*Math.PI*2,a2=(i+1)/n*Math.PI*2,p1=[cx+Math.cos(a1)*r,cy+Math.sin(a1)*r],p2=[cx+Math.cos(a2)*r,cy+Math.sin(a2)*r];if(cmd.fill)triangle([cx,cy],p1,p2,c);else line(...p1,...p2,cmd.width,c);}}}return new Float32Array(out);}
+  render(){if(this.disposed)return;const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
+    if(this.backend==='canvas2d'||this.picture){ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);if(this.picture)ctx.drawImage(this.picture,0,0);if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}for(const cmd of this.commands){const a=cmd.coords;ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}}}
+    for(const cmd of this.commands)if(cmd.kind==='text'){ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...cmd.coords);}
+  }
+  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.releaseGPU();this.canvas.remove();}
+}
+
+return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
+})();
+
+/* native-windows.js */
+__modules[2]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[1];
 
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -18,6 +201,7 @@ function installNativeHost(host, bridge = globalThis.vb6Native) {
     const win = browser.open('about:blank', id, 'popup');
     if (!win) throw new Error('Native window creation was denied');
     const doc = win.document;
+    if(browser.vb6NativeGPUUnavailable)win.vb6NativeGPUUnavailable=browser.vb6NativeGPUUnavailable;
     for (const name of ['data-vb-theme', 'lang']) {
       const value = document.documentElement.getAttribute(name); if (value) doc.documentElement.setAttribute(name, value);
     }
@@ -58,6 +242,7 @@ function installNativeHost(host, bridge = globalThis.vb6Native) {
       forms.set(record.id, record);
       form.node.setAttribute('data-native-window', record.id);
       record.doc.body.append(form.node);
+      refreshGraphicsSurfaces(form.node);
       form.cancelWindowInteraction?.();
       record.doc.addEventListener('focusin', () => {
         if (form.shown && !record.focused) command(record.id, 'focus');
@@ -193,7 +378,7 @@ return {installNativeHost};
 })();
 
 /* ../language/errors.js */
-__modules[1]=(()=>{
+__modules[3]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -203,8 +388,8 @@ return {VBError};
 })();
 
 /* calendar.js */
-__modules[2]=(()=>{
-const {VBError}=__modules[1];
+__modules[4]=(()=>{
+const {VBError}=__modules[3];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -281,9 +466,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ../language/lexer.js */
-__modules[3]=(()=>{
-const {asDate}=__modules[2];
-const {VBError}=__modules[1];
+__modules[5]=(()=>{
+const {asDate}=__modules[4];
+const {VBError}=__modules[3];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -369,7 +554,7 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* ../core/window-context.js */
-__modules[4]=(()=>{
+__modules[6]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -401,8 +586,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ../core/core.js */
-__modules[5]=(()=>{
-const {uiDocument}=__modules[4];
+__modules[7]=(()=>{
+const {uiDocument}=__modules[6];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -464,10 +649,10 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* values.js */
-__modules[6]=(()=>{
-const {asDate,dateToSerial}=__modules[2];
-const { VBError }=__modules[3];
-const { lower }=__modules[5];
+__modules[8]=(()=>{
+const {asDate,dateToSerial}=__modules[4];
+const { VBError }=__modules[5];
+const { lower }=__modules[7];
 
 
 
@@ -650,9 +835,9 @@ return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterface
 })();
 
 /* binary-codec.js */
-__modules[7]=(()=>{
-const {VBError}=__modules[3];
-const {VBArray,VBCurrency,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[6];
+__modules[9]=(()=>{
+const {VBError}=__modules[5];
+const {VBArray,VBCurrency,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[8];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -746,9 +931,9 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* ../project/frx.js */
-__modules[8]=(()=>{
-const {VBError}=__modules[3];
-const {encodeANSI,decodeANSI}=__modules[7];
+__modules[10]=(()=>{
+const {VBError}=__modules[5];
+const {encodeANSI,decodeANSI}=__modules[9];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -839,9 +1024,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[9]=(()=>{
-const {VBError}=__modules[3];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[8];
+__modules[11]=(()=>{
+const {VBError}=__modules[5];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[10];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -933,11 +1118,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[10]=(()=>{
-const {VBError}=__modules[3];
-const {VBArray,bankersRound,numeric}=__modules[6];
-const {normalizeResources,decodeStringTable}=__modules[9];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[8];
+__modules[12]=(()=>{
+const {VBError}=__modules[5];
+const {VBArray,bankersRound,numeric}=__modules[8];
+const {normalizeResources,decodeStringTable}=__modules[11];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[10];
 
 
 
@@ -967,65 +1152,8 @@ class ResourceStore {
 return {ResourceStore};
 })();
 
-/* ../theme/theme.js */
-__modules[11]=(()=>{
-
-/** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
- * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
- */
-const classic = {
-  face:'#c0c0c0', light:'#ffffff', highlight:'#dfdfdf', shadow:'#808080', dark:'#000000',
-  text:'#000000', title:'#000080', titleEnd:'#000080', titleText:'#ffffff',
-  inactive:'#808080', inactiveEnd:'#808080', inactiveText:'#c0c0c0',
-  window:'#ffffff', windowText:'#000000', selection:'#000080', selectionText:'#ffffff',
-  workspace:'#808080', desktop:'#008080', gray:'#808080', info:'#ffffe1', infoText:'#000000',
-  link:'#0000ff', keyword:'#000080', comment:'#008000', breakpoint:'#800000', execution:'#ffff00'
-};
-const profile = (id, name, colors) => Object.freeze({id, name, colors:Object.freeze(colors)});
-const THEMES = Object.freeze({
-  classic:profile('classic','Windows Classic',classic),
-  standard:profile('standard','Windows Standard (2000)',{...classic,face:'#d4d0c8',highlight:'#e9e7e3',dark:'#404040',title:'#0a246a',titleEnd:'#a6caf0',inactiveEnd:'#c0c0c0',selection:'#0a246a'}),
-  contrast:profile('contrast','High Contrast Black',{...classic,face:'#000000',light:'#ffffff',highlight:'#ffffff',shadow:'#c0c0c0',dark:'#ffffff',text:'#ffffff',inactive:'#000000',inactiveEnd:'#000000',inactiveText:'#ffffff',window:'#000000',windowText:'#ffffff',selection:'#800080',selectionText:'#ffffff',workspace:'#000000',desktop:'#000000',gray:'#00ff00',info:'#000000',infoText:'#ffffff',link:'#ffff00',keyword:'#00ffff',comment:'#00ff00',breakpoint:'#ff0000'})
-});
-// Win32 GetSysColor indices. Reserved index 25 falls back to the button face.
-const SYSTEM_ROLES = Object.freeze(['face','desktop','title','inactive','face','window','dark','text','windowText','titleText','face','face','workspace','selection','selectionText','face','shadow','gray','text','inactiveText','light','dark','highlight','infoText','info','face','link','titleEnd','inactiveEnd','selection','face']);
-const SYSTEM_COLOR_NAMES = Object.freeze(['Scroll Bars','Desktop','Active Title Bar','Inactive Title Bar','Menu Bar','Window Background','Window Frame','Menu Text','Window Text','Title Bar Text','Active Border','Inactive Border','Application Workspace','Highlight','Highlight Text','Button Face','Button Shadow','Gray Text','Button Text','Inactive Caption Text','3D Highlight','3D Dark Shadow','3D Light','Info Text','Info Background']);
-function themeId(id) { return Object.hasOwn(THEMES,String(id)) ? String(id) : 'classic'; }
-function getTheme(element) {
-  return THEMES[themeId(typeof element === 'string' ? element : element?.closest?.('[data-vb-theme]')?.dataset.vbTheme || element?.ownerDocument?.documentElement?.dataset.vbTheme)];
-}
-function applyTheme(element, id) {
-  const value=themeId(id);element.dataset.vbTheme=value;
-  element.dispatchEvent(new CustomEvent('vb-theme-change',{bubbles:true,detail:{theme:value}}));return value;
-}
-function colorValue(value, fallback='#c0c0c0', theme='classic') {
-  if(typeof value==='string' && /^(#[\da-f]{3,8}|rgba?\(|hsla?\()/i.test(value))return value;
-  const n=Number(value);if(!Number.isFinite(n))return fallback;
-  const bits=n>>>0;
-  if(bits & 0x80000000) return (THEMES[themeId(theme)].colors[SYSTEM_ROLES[bits&0xff]]) || fallback;
-  return '#'+[bits&255,(bits>>>8)&255,(bits>>>16)&255].map(v=>v.toString(16).padStart(2,'0')).join('');
-}
-function cssColor(value,fallback='#c0c0c0') {
-  const bits=Number(value)>>>0;
-  return Number.isFinite(Number(value)) && bits&0x80000000 && SYSTEM_ROLES[bits&255]
-    ? `var(--vb-sys-${bits&255}, ${colorValue(value,fallback)})` : colorValue(value,fallback);
-}
-function fontFamily(name='MS Sans Serif') {
-  if(/^MS Sans Serif$/i.test(name))return '"MS Sans Serif", Tahoma, Arial, sans-serif';
-  if(/^MS Serif$/i.test(name))return '"MS Serif", "Times New Roman", serif';
-  // A quoted family cannot escape the declaration or turn into a URL.
-  return '"'+String(name).replace(/["\\\n\r]/g,'')+'", Tahoma, Arial, sans-serif';
-}
-const DEFAULT_APPEARANCE = Object.freeze({theme:'classic',windowMode:'hybrid',documentTabs:false,debugTabs:false,editorFont:'Courier New',editorSize:13,tooltips:true,procedureSeparators:true,autoIndent:true,autoListMembers:true,autoQuickInfo:true,autoDataTips:true,fullModule:true,margin:true,dragText:true,autoSyntaxCheck:true,requireVariableDeclaration:true,notifyStateLoss:false,largeToolbarIcons:false});
-function normalizeAppearance(value={}) {
-  return {...DEFAULT_APPEARANCE,windowMode:value.windowMode==='mdi'?'mdi':'hybrid',autoSyntaxCheck:value.autoSyntaxCheck!==false,requireVariableDeclaration:value.requireVariableDeclaration!==false,notifyStateLoss:value.notifyStateLoss===true,largeToolbarIcons:value.largeToolbarIcons===true,autoQuickInfo:value.autoQuickInfo!==false,autoDataTips:value.autoDataTips!==false,fullModule:value.fullModule!==false,margin:value.margin!==false,dragText:value.dragText!==false,codeColors:Object.fromEntries(Object.entries(value.codeColors||{}).filter(([key,color])=>['text','background','keyword','comment','selection','selectionText','breakpoint','execution'].includes(key)&&/^#[0-9a-f]{6}$/i.test(color))),theme:themeId(value.theme),documentTabs:value.documentTabs===true,debugTabs:value.debugTabs===true,editorFont:['Courier New','Consolas','monospace'].includes(value.editorFont)?value.editorFont:'Courier New',editorSize:[11,12,13,14,16,18,20].includes(Number(value.editorSize))?Number(value.editorSize):13,tooltips:value.tooltips!==false,procedureSeparators:value.procedureSeparators!==false,autoIndent:value.autoIndent!==false,autoListMembers:value.autoListMembers!==false};
-}
-
-return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,colorValue,cssColor,fontFamily,DEFAULT_APPEARANCE,normalizeAppearance};
-})();
-
 /* signatures.js */
-__modules[12]=(()=>{
+__modules[13]=(()=>{
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
 const BUILTIN_SIGNATURES={
@@ -1045,9 +1173,9 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* ../data/recordset.js */
-__modules[13]=(()=>{
-const {VBError}=__modules[3];
-const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[6];
+__modules[14]=(()=>{
+const {VBError}=__modules[5];
+const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[8];
 
 
 // Disconnected client-side provider. There is deliberately no SQL/COM/network fallback.
@@ -1156,15 +1284,15 @@ return {DisconnectedRecordset};
 })();
 
 /* library.js */
-__modules[14]=(()=>{
-const {ResourceStore}=__modules[10];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[2];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[12];
-const {DisconnectedRecordset}=__modules[13];
-const {recordLength}=__modules[7];
-const { VBError }=__modules[3];
-const { lower }=__modules[5];
-const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[6];
+__modules[15]=(()=>{
+const {ResourceStore}=__modules[12];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[4];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[13];
+const {DisconnectedRecordset}=__modules[14];
+const {recordLength}=__modules[9];
+const { VBError }=__modules[5];
+const { lower }=__modules[7];
+const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[8];
 
 
 
@@ -1257,9 +1385,9 @@ return {VB_CONSTANTS,MemoryRecordset,createLibrary};
 })();
 
 /* ../controls/rtf.js */
-__modules[15]=(()=>{
-const {VBError}=__modules[3];
-const {decodeANSI}=__modules[7];
+__modules[16]=(()=>{
+const {VBError}=__modules[5];
+const {decodeANSI}=__modules[9];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -1368,10 +1496,10 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* mdi.js */
-__modules[16]=(()=>{
-const {VBError}=__modules[3];
-const {el}=__modules[5];
-const {NOTHING}=__modules[6];
+__modules[17]=(()=>{
+const {VBError}=__modules[5];
+const {el}=__modules[7];
+const {NOTHING}=__modules[8];
 
 
 
@@ -1428,7 +1556,7 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../theme/icon-art.js */
-__modules[17]=(()=>{
+__modules[18]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -1586,8 +1714,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[18]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[17];
+__modules[19]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[18];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -1614,9 +1742,9 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../controls/dialog.js */
-__modules[19]=(()=>{
-const {el}=__modules[5];
-const {icon}=__modules[18];
+__modules[20]=(()=>{
+const {el}=__modules[7];
+const {icon}=__modules[19];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -1651,8 +1779,8 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/default-types.js */
-__modules[20]=(()=>{
-const {VBError}=__modules[3];
+__modules[21]=(()=>{
+const {VBError}=__modules[5];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -1678,8 +1806,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[21]=(()=>{
-const {lower}=__modules[5];
+__modules[22]=(()=>{
+const {lower}=__modules[7];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -1722,8 +1850,8 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[22]=(()=>{
-const { tokenize, VBError }=__modules[3];
+__modules[23]=(()=>{
+const { tokenize, VBError }=__modules[5];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -1798,10 +1926,10 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[23]=(()=>{
-const { VBError }=__modules[3];
-const { parseExpression }=__modules[22];
-const { binary, unary, truth }=__modules[6];
+__modules[24]=(()=>{
+const { VBError }=__modules[5];
+const { parseExpression }=__modules[23];
+const { binary, unary, truth }=__modules[8];
 
 
 
@@ -1840,13 +1968,13 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[24]=(()=>{
-const {defaultIdentifierType,addDefaultTypes}=__modules[20];
-const {validateInterfaces}=__modules[21];
-const { preprocess }=__modules[23];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[3];
-const { parseExpression, parseCall }=__modules[22];
-const { lower }=__modules[5];
+__modules[25]=(()=>{
+const {defaultIdentifierType,addDefaultTypes}=__modules[21];
+const {validateInterfaces}=__modules[22];
+const { preprocess }=__modules[24];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[5];
+const { parseExpression, parseCall }=__modules[23];
+const { lower }=__modules[7];
 
 
 
@@ -2035,8 +2163,8 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* debug-evaluation.js */
-__modules[25]=(()=>{
-const {VBError}=__modules[3];
+__modules[26]=(()=>{
+const {VBError}=__modules[5];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
 class DebugEvaluationAbort extends VBError {
@@ -2064,11 +2192,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[26]=(()=>{
-const {VBError}=__modules[3];
-const {parseExpression}=__modules[22];
-const {lower}=__modules[5];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[6];
+__modules[27]=(()=>{
+const {VBError}=__modules[5];
+const {parseExpression}=__modules[23];
+const {lower}=__modules[7];
+const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[8];
 
 
 
@@ -2118,8 +2246,8 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[27]=(()=>{
-const {VBError}=__modules[3];
+__modules[28]=(()=>{
+const {VBError}=__modules[5];
 
 const key=ins=>{const {line,source,procedure,...rest}=ins;return JSON.stringify(rest);};
 const linearInstruction=ins=>['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename','fileClose','fileOpen','stringMid','stringAlign','return','dim'].includes(ins.op);
@@ -2144,9 +2272,9 @@ return {linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[28]=(()=>{
-const {instructionMap,linearInstruction}=__modules[27];
-const {VBError}=__modules[3];
+__modules[29]=(()=>{
+const {instructionMap,linearInstruction}=__modules[28];
+const {VBError}=__modules[5];
 
 
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
@@ -2205,9 +2333,9 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* filesystem.js */
-__modules[29]=(()=>{
-const { VBError }=__modules[3];
-const {encodeANSI,decodeANSI}=__modules[7];
+__modules[30]=(()=>{
+const { VBError }=__modules[5];
+const {encodeANSI,decodeANSI}=__modules[9];
 
 
 const MAX_FILE=20*1024*1024;
@@ -2271,19 +2399,19 @@ return {VirtualFileSystem};
 })();
 
 /* vm.js */
-__modules[30]=(()=>{
-const {DebugEvaluationSession}=__modules[25];
-const {defaultIdentifierType}=__modules[20];
-const {DebugInspector}=__modules[26];
-const {planLiveEdit,nextStatementIndex}=__modules[28];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[7];
-const { Signal, lower, VERSION }=__modules[5];
-const { VBError }=__modules[3];
-const { parseExpression, parseCall }=__modules[22];
-const { compileProject }=__modules[24];
-const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[6];
-const { VirtualFileSystem }=__modules[29];
-const { createLibrary, MemoryRecordset }=__modules[14];
+__modules[31]=(()=>{
+const {DebugEvaluationSession}=__modules[26];
+const {defaultIdentifierType}=__modules[21];
+const {DebugInspector}=__modules[27];
+const {planLiveEdit,nextStatementIndex}=__modules[29];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[9];
+const { Signal, lower, VERSION }=__modules[7];
+const { VBError }=__modules[5];
+const { parseExpression, parseCall }=__modules[23];
+const { compileProject }=__modules[25];
+const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[8];
+const { VirtualFileSystem }=__modules[30];
+const { createLibrary, MemoryRecordset }=__modules[15];
 
 
 
@@ -2754,8 +2882,8 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* ../controls/form-window.js */
-__modules[31]=(()=>{
-const {el}=__modules[5];
+__modules[32]=(()=>{
+const {el}=__modules[7];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
 function installFormWindow(form){
@@ -2780,9 +2908,9 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[32]=(()=>{
-const {el}=__modules[5];
-const {getTheme}=__modules[11];
+__modules[33]=(()=>{
+const {el}=__modules[7];
+const {getTheme}=__modules[0];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -2856,8 +2984,8 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[33]=(()=>{
-const {el}=__modules[5];
+__modules[34]=(()=>{
+const {el}=__modules[7];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
 function scrollbarGeometry(min,max,value,length,page=1){
@@ -2897,11 +3025,11 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/menu.js */
-__modules[34]=(()=>{
-const {uiDocument}=__modules[4];
-const {el}=__modules[5];
-const {icon}=__modules[18];
-const {getTheme}=__modules[11];
+__modules[35]=(()=>{
+const {uiDocument}=__modules[6];
+const {el}=__modules[7];
+const {icon}=__modules[19];
+const {getTheme}=__modules[0];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -2985,112 +3113,11 @@ function showMenu(items,x,y,onCommand,options={}){closeMenu(false);active=new Me
 return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
-/* ../graphics/surface.js */
-__modules[35]=(()=>{
-const { colorValue, getTheme }=__modules[11];
-
-/** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
-const surfaces = new WeakMap();
-function refreshGraphicsSurfaces(root) { for (const canvas of root.querySelectorAll('canvas.graphics-surface')) surfaces.get(canvas)?.transferDocument(); }
-const sharedDevices = new WeakMap();
-function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
-function rgba(color,theme='classic'){const c=oleColor(color,'#c0c0c0',theme);return [parseInt(c.slice(1,3),16)/255,parseInt(c.slice(3,5),16)/255,parseInt(c.slice(5,7),16)/255,1];}
-async function getGPUDevice(view=globalThis) {
-  if(view.vb6NativeGPUDevice)return view.vb6NativeGPUDevice;
-  const gpu=view.navigator?.gpu;if(!gpu)return null;
-  let pending=sharedDevices.get(view);
-  if(!pending){
-    pending=(async()=>{
-      try{
-        const adapter=await gpu.requestAdapter({powerPreference:'high-performance'});
-        if(!adapter)return null;
-        const device=await adapter.requestDevice();
-        device.lost.then(()=>{if(sharedDevices.get(view)===pending)sharedDevices.delete(view);});
-        return device;
-      }catch{return null;}
-    })();
-    sharedDevices.set(view,pending);
-    pending.then(device=>{if(!device&&sharedDevices.get(view)===pending)sharedDevices.delete(view);});
-  }
-  let timeout;
-  try{return await Promise.race([pending,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),3000))]);}
-  finally{clearTimeout(timeout);}
-}
-const SHADER=`struct Screen { size: vec2f, padding: vec2f };
-@group(0) @binding(0) var<uniform> screen: Screen;
-struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f };
-@vertex fn vs(@location(0) xy: vec2f, @location(1) color: vec4f) -> VertexOut {
- var out: VertexOut; out.position = vec4f(xy.x / screen.size.x * 2.0 - 1.0, 1.0 - xy.y / screen.size.y * 2.0, 0.0, 1.0); out.color = color; return out;
-}
-@fragment fn fs(in: VertexOut) -> @location(0) vec4f { return in.color; }`;
-class GraphicsSurface {
-  constructor(container,{backend='auto',background=16777215,onBackend=()=>{}}={}){this.container=container;this.theme=getTheme(container).id;this.themeChanged=()=>{this.theme=getTheme(container).id;this.invalidate();};this.themeDocument=container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.requestedBackend=backend;this.backend='canvas2d';this.background=background;this.commands=[];this.onBackend=onBackend;this.dirty=false;this.disposed=false;this.width=1;this.height=1;this.canvas=container.ownerDocument.createElement('canvas');this.canvas.className='graphics-surface';this.canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';container.append(this.canvas);surfaces.set(this.canvas,this);this.context=this.canvas.getContext('2d');this.resizeObserver=new ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(container);this.resize();if(backend!=='canvas2d')this.initializeGPU();else onBackend('Canvas2D');}
-  async initializeGPU(){
-    const view=this.container.ownerDocument.defaultView;
-    const device=await getGPUDevice(view);
-    if(!device||this.disposed){if(!this.disposed){this.gpuError='No WebGPU device became available';this.onBackend('Canvas2D');}return;}
-    let context,uniform;
-    try{
-      const canvas=this.container.ownerDocument.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;
-      context=canvas.getContext('webgpu');if(!context)throw new Error('WebGPU canvas context unavailable in this window');
-      const format=view.navigator.gpu.getPreferredCanvasFormat();
-      const module=device.createShaderModule({code:SHADER});
-      const info=await module.getCompilationInfo();
-      if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed: '+info.messages.filter(m=>m.type==='error').map(m=>m.message).join('; '));
-      if(this.disposed)return;
-      let pipeline,bindGroup,validation;
-      device.pushErrorScope('validation');
-      try{
-        context.configure({device,format,alphaMode:'opaque'});
-        pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
-        uniform=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-        bindGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:uniform}}]});
-      }finally{validation=await device.popErrorScope();}
-      if(validation)throw validation;
-      if(this.disposed){uniform.destroy();context.unconfigure();return;}
-      Object.assign(this,{device,pipeline,uniform,bindGroup,gpuCanvas:canvas,gpuContext:context,gpuError:null});
-      this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';
-      device.lost.then(info=>{if(!this.disposed&&this.device===device){this.gpuError='WebGPU device lost: '+info.message;this.backend='canvas2d';this.gpuCanvas?.remove();this.gpuCanvas=null;this.onBackend('Canvas2D · device lost');this.invalidate();}});
-      this.resize();this.onBackend('WebGPU');
-    }catch(error){
-      uniform?.destroy();context?.unconfigure();this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas?.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');this.invalidate();
-    }
-  }
-  scheduleResize(){
-    if(this.disposed||this.resizeFrame)return;
-    this.resizeWindow=this.container.ownerDocument.defaultView;
-    this.resizeFrame=this.resizeWindow.requestAnimationFrame(()=>{this.resizeFrame=0;this.resize();});
-  }
-  transferDocument(){if(this.disposed)return;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.resizeFrame=0;this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);this.themeDocument=this.container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.themeDocument.defaultView).cancelAnimationFrame(this.raf);this.dirty=false;this.theme=getTheme(this.container).id;this.resizeObserver.disconnect();this.resizeObserver=new this.themeDocument.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(this.container);this.resize();}
-  resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){const width=Math.max(1,Math.min(8192,Math.round(this.width*dpr))),height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;}this.dpr=dpr;this.invalidate();}
-  add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
-  text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}
-  clear(){this.commands=[];this.invalidate();}
-  setPicture(source){
-    if((source||'')===(this.pictureSource||''))return;this.pictureSource=source||'';this.picture=null;this.pictureError=null;
-    if(source){const image=new Image();image.onload=()=>{if(!this.disposed&&this.pictureSource===source){this.picture=image;this.invalidate();}};image.onerror=()=>{if(!this.disposed&&this.pictureSource===source){this.pictureError='Image decoding failed';this.invalidate();}};image.src=source;}
-    this.invalidate();
-  }
-  setGrid(spacing=8){this.grid=spacing;this.invalidate();}
-  invalidate(){if(this.dirty||this.disposed)return;this.dirty=true;this.frameWindow=this.container.ownerDocument.defaultView;this.raf=this.frameWindow.requestAnimationFrame(()=>{this.dirty=false;this.render();});}
-  vertices(){const out=[];const triangle=(p1,p2,p3,c)=>{for(const p of [p1,p2,p3])out.push(p[0],p[1],...c);};const rect=(x,y,w,h,c)=>{triangle([x,y],[x+w,y],[x,y+h],c);triangle([x+w,y],[x+w,y+h],[x,y+h],c);};const line=(x1,y1,x2,y2,width,c)=>{const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy)||1,ox=-dy/length*width/2,oy=dx/length*width/2;triangle([x1+ox,y1+oy],[x2+ox,y2+oy],[x1-ox,y1-oy],c);triangle([x1-ox,y1-oy],[x2+ox,y2+oy],[x2-ox,y2-oy],c);};
-    if(this.grid){const c=rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
-    for(const cmd of this.commands){const c=rgba(cmd.color,this.theme),a=cmd.coords;if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else if(cmd.kind==='line')line(...a,cmd.width,c);else if(cmd.kind==='rect'){const x=Math.min(a[0],a[2]),y=Math.min(a[1],a[3]),w=Math.abs(a[2]-a[0]),h=Math.abs(a[3]-a[1]);if(cmd.fill)rect(x,y,w,h,c);else{rect(x,y,w,cmd.width,c);rect(x,y+h-cmd.width,w,cmd.width,c);rect(x,y,cmd.width,h,c);rect(x+w-cmd.width,y,cmd.width,h,c);}}else if(cmd.kind==='circle'){const n=Math.min(180,Math.max(16,Math.round(a[2]*2))),[cx,cy,r]=a;for(let i=0;i<n;i++){const a1=i/n*Math.PI*2,a2=(i+1)/n*Math.PI*2,p1=[cx+Math.cos(a1)*r,cy+Math.sin(a1)*r],p2=[cx+Math.cos(a2)*r,cy+Math.sin(a2)*r];if(cmd.fill)triangle([cx,cy],p1,p2,c);else line(...p1,...p2,cmd.width,c);}}}return new Float32Array(out);}
-  render(){if(this.disposed)return;const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
-    if(this.backend==='canvas2d'||this.picture){ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);if(this.picture)ctx.drawImage(this.picture,0,0);if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}for(const cmd of this.commands){const a=cmd.coords;ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}}}
-    for(const cmd of this.commands)if(cmd.kind==='text'){ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...cmd.coords);}
-  }
-  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.vertexBuffer?.destroy();this.uniform?.destroy();this.gpuContext?.unconfigure();this.canvas.remove();this.gpuCanvas?.remove();}
-}
-
-return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
-})();
-
 /* ../controls/richtext.js */
 __modules[36]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[15];
-const {VBError}=__modules[3];
-const {oleColor}=__modules[35];
+const {parseRTF,RichTextDocument,richText}=__modules[16];
+const {VBError}=__modules[5];
+const {oleColor}=__modules[1];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -3179,9 +3206,9 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 
 /* ../project/model.js */
 __modules[37]=(()=>{
-const { clone, lower, safeName }=__modules[5];
-const {normalizeResources}=__modules[9];
-const { VBError }=__modules[3];
+const { clone, lower, safeName }=__modules[7];
+const {normalizeResources}=__modules[11];
+const { VBError }=__modules[5];
 
 
 
@@ -3247,8 +3274,8 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 
 /* ../controls/collections.js */
 __modules[38]=(()=>{
-const { VBError }=__modules[3];
-const { lower }=__modules[5];
+const { VBError }=__modules[5];
+const { lower }=__modules[7];
 
 
 class ControlCollection {
@@ -3295,19 +3322,19 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 
 /* ../controls/controls.js */
 __modules[39]=(()=>{
-const {installFormWindow}=__modules[31];
-const {ClassicCombo,ClassicUpDown}=__modules[32];
-const {ClassicScrollbar}=__modules[33];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[34];
+const {installFormWindow}=__modules[32];
+const {ClassicCombo,ClassicUpDown}=__modules[33];
+const {ClassicScrollbar}=__modules[34];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[35];
 const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[36];
-const {parseRTF}=__modules[15];
-const { el, lower, clone }=__modules[5];
-const { VBError }=__modules[3];
-const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[6];
-const { MemoryRecordset }=__modules[14];
-const { GraphicsSurface }=__modules[35];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[11];
-const { icon, controlIcon }=__modules[18];
+const {parseRTF}=__modules[16];
+const { el, lower, clone }=__modules[7];
+const { VBError }=__modules[5];
+const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[8];
+const { MemoryRecordset }=__modules[15];
+const { GraphicsSurface }=__modules[1];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[0];
+const { icon, controlIcon }=__modules[19];
 const { CONTROL_DEFAULTS, createControl, newId }=__modules[37];
 const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[38];
 
@@ -3623,16 +3650,16 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 
 /* host.js */
 __modules[40]=(()=>{
-const {RuntimeMDI}=__modules[16];
-const {runtimeDialog,messageBoxOptions}=__modules[19];
-const { applyTheme, themeId }=__modules[11];
-const { icon }=__modules[18];
-const {rasterDataURL}=__modules[8];
-const { el, download, lower, clone }=__modules[5];
-const { compileProject }=__modules[24];
-const { VirtualMachine }=__modules[30];
-const { VirtualFileSystem }=__modules[29];
-const { describe }=__modules[6];
+const {RuntimeMDI}=__modules[17];
+const {runtimeDialog,messageBoxOptions}=__modules[20];
+const { applyTheme, themeId }=__modules[0];
+const { icon }=__modules[19];
+const {rasterDataURL}=__modules[10];
+const { el, download, lower, clone }=__modules[7];
+const { compileProject }=__modules[25];
+const { VirtualMachine }=__modules[31];
+const { VirtualFileSystem }=__modules[30];
+const { describe }=__modules[8];
 const { BrowserForm }=__modules[39];
 
 
@@ -3682,21 +3709,21 @@ return {ApplicationHost};
 
 /* entry.js */
 __modules[41]=(()=>{
-const {installNativeHost}=__modules[0];
-const {ResourceStore}=__modules[10];
-const {readRES,writeRES,setResource,setResourceString}=__modules[9];
-const {THEMES,applyTheme,colorValue}=__modules[11];
-const {MemoryRecordset}=__modules[14];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[15];
+const {installNativeHost}=__modules[2];
+const {ResourceStore}=__modules[12];
+const {readRES,writeRES,setResource,setResourceString}=__modules[11];
+const {THEMES,applyTheme,colorValue}=__modules[0];
+const {MemoryRecordset}=__modules[15];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[16];
 const { ApplicationHost }=__modules[40];
-const { VirtualMachine }=__modules[30];
-const { compileProject, compileModule }=__modules[24];
-const { parseExpression }=__modules[22];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency }=__modules[6];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[2];
-const { VirtualFileSystem }=__modules[29];
+const { VirtualMachine }=__modules[31];
+const { compileProject, compileModule }=__modules[25];
+const { parseExpression }=__modules[23];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency }=__modules[8];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[4];
+const { VirtualFileSystem }=__modules[30];
 const { BrowserControl, BrowserForm }=__modules[39];
-const { GraphicsSurface }=__modules[35];
+const { GraphicsSurface }=__modules[1];
 
 
 

@@ -1,23 +1,23 @@
+import {probeWebGPU} from './gpu-probe.mjs';
 /** Bootstrap bundled scripts only after the graphics requirement has been checked. */
 async function start() {
   const info = await globalThis.vb6Native.info();
   const diagnostics = { requested: info.graphics, webgpu: false, error: null };
   if (info.graphics !== 'canvas2d') {
-    try {
-      const adapter = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
-      if (!adapter) throw new Error('No compatible WebGPU adapter was found');
-      const device = await adapter.requestDevice();
-      diagnostics.webgpu = true;
-      diagnostics.adapter = { vendor: adapter.info?.vendor, architecture: adapter.info?.architecture, device: adapter.info?.device };
-      // Hand the validated device to the renderer instead of destroying its startup context.
-      globalThis.vb6NativeGPUDevice = device;
-      device.lost.then(info => {
-        if (globalThis.vb6NativeGPUDevice === device) delete globalThis.vb6NativeGPUDevice;
-        diagnostics.webgpu = false; diagnostics.error = 'Device lost: ' + info.message;
+    const result=await probeWebGPU();
+    diagnostics.webgpu=result.webgpu;
+    diagnostics.error=result.error||null;
+    diagnostics.adapter=result.adapter;
+    diagnostics.pixel=result.pixel;
+    if(result.webgpu){
+      const device=globalThis.vb6NativeGPUDevice=result.device;
+      device.lost.then(info=>{
+        if(globalThis.vb6NativeGPUDevice===device)delete globalThis.vb6NativeGPUDevice;
+        diagnostics.webgpu=false;diagnostics.error='Device lost: '+info.message;
       });
-    } catch (error) {
-      diagnostics.error = error.message;
-      if (info.graphics === 'webgpu') throw new Error('This executable requires WebGPU. ' + error.message + '. Update your graphics driver, or build with --graphics auto to permit Canvas2D fallback.');
+    }else{
+      globalThis.vb6NativeGPUUnavailable=result.error;
+      if(info.graphics==='webgpu')throw new Error('This executable requires WebGPU. '+result.error+'. Update the graphics driver or build with --graphics auto to permit Canvas2D fallback.');
     }
   }
   globalThis.vb6NativeGraphics = diagnostics;
