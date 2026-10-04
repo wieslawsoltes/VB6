@@ -1,0 +1,58 @@
+name: Materialize detached-window source
+on:
+  push:
+    branches: [feat/detached-browser-windows]
+    paths: [.windows-stage/**, .github/workflows/materialize-windows.yml]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify and apply exact source images
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, shutil
+          root = pathlib.Path.cwd()
+          stage = root / '.windows-stage'
+          manifest = (stage / 'fixes.json').read_text()
+          assert hashlib.sha256(manifest.encode()).hexdigest() == '69d2e270547252bc7a71511e895b6cdcd0c52f93a27206ba5174fc1efda83ce1', 'Manifest transfer mismatch'
+          pending = []
+          for entry in json.loads(manifest):
+              path = root / entry['path']
+              assert path.resolve().is_relative_to(root) and '.git' not in path.parts
+              assert not entry['path'].startswith('.github/'), 'No workflow mutation'
+              before = path.read_text()
+              digest = lambda text: hashlib.sha256(text.encode()).hexdigest()
+              assert digest(before) == entry['before'], 'Base changed: ' + entry['path']
+              after = before
+              for start, end, replacement in reversed(entry['edits']):
+                  assert 0 <= start <= end <= len(before)
+                  after = after[:start] + replacement + after[end:]
+              assert digest(after) == entry['after'], 'Post-image mismatch: ' + entry['path']
+              pending.append((path, after))
+          for path, after in pending:
+              path.write_text(after)
+          shutil.rmtree(stage)
+          PY
+      - run: npm run build
+      - run: npm test
+      - name: Commit source and reproducible bundles
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: defer resize-induced layout writes and disambiguate caption actions'
+          git push origin HEAD:refs/heads/feat/detached-browser-windows
+          git archive --format=tar HEAD > /tmp/windows-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: detached-window-source
+          path: /tmp/windows-source.tar
+          retention-days: 7
