@@ -1,10 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 const stage = path.resolve(process.argv[2] || '');
 if (process.platform !== 'win32') throw new Error('Native host smoke requires Windows');
 await fs.access(path.join(stage, 'manifest.json'));
-const executable = path.resolve('desktop/node_modules/electron/dist/electron.exe');
+// Electron 44 installs its development binary lazily when the package is required.
+const require = createRequire(new URL('../desktop/package.json', import.meta.url));
+const executable = require('electron');
+if (typeof executable !== 'string') throw new Error('Electron did not provide an executable path');
+await fs.access(executable);
 await fs.mkdir('validation', { recursive: true });
 const reportPath = path.resolve('validation', path.basename(stage) + '.host.json');
 let output = '', failure = null;
