@@ -44,7 +44,9 @@ jobs:
         run: python tools/browser-tests.py
       - name: Preserve source history for reproducibility
         if: always()
-        run: git bundle create repository.bundle --all
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          git bundle create repository.bundle --all
       - name: Preserve source, app and reports
         if: always()
         uses: actions/upload-artifact@v4
