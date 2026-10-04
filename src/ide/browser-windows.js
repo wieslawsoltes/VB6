@@ -56,6 +56,21 @@ export function installBrowserWindows(ide) {
     }
   });
   dock.browserWindows = mdi.browserWindows = bars.browserWindows = host;
+  ide.applyWindowMode = () => {
+    const active = mdi.active;
+    host.setEnabled(ide.appearance.windowMode !== 'mdi');
+    ide.root.dataset.windowMode = host.enabled ? 'hybrid' : 'mdi';
+    for (const button of ide.root.querySelectorAll('[data-browser-detach]')) button.disabled = !host.enabled;
+    if (active && mdi.windows.has(active)) mdi.activate(active);
+  };
+  ide.setWindowMode = mode => {
+    if (mode !== 'mdi' && mode !== 'hybrid') throw new TypeError('Unknown IDE window mode.');
+    ide.appearance.windowMode = mode;
+    ide.applyAppearance();
+    ide.status(mode === 'mdi' ? 'In-page MDI only. All windows remain inside the IDE.' :
+      'In-page MDI with optional browser windows. Use a caption or Window menu to detach a pane.');
+    return mode;
+  };
   const prepareSurfaces = node => {
     for (const editor of ide.documents.editors.values()) if (node.contains(editor.root)) editor.prepareDocumentTransfer();
   };
@@ -103,10 +118,14 @@ export function installBrowserWindows(ide) {
     if (name !== 'Window') return items;
     const key = mdi.active || ide.activeDoc?.key;
     items.unshift(
-      {label: 'Float Document in Browser Window', enabled: mdi.windows.has(key), action: () => mdi.detach(key)},
-      {label: 'Float Tool Group in Browser Window', items: [...dock.panels].filter(([id]) => !dock.model.windows.get(id)?.hidden).map(([id, panel]) => ({label: panel.title, action: () => dock.detach(id)}))},
+      {label: 'Window Mode', items: [
+        {label: 'In-page MDI only', checked: !host.enabled, action: () => ide.setWindowMode('mdi')},
+        {label: 'MDI with optional browser windows', checked: host.enabled, action: () => ide.setWindowMode('hybrid')}
+      ]}, null,
+      {label: 'Float Document in Browser Window', enabled: host.enabled && mdi.windows.has(key), action: () => mdi.detach(key)},
+      {label: 'Float Tool Group in Browser Window', enabled: host.enabled, items: [...dock.panels].filter(([id]) => !dock.model.windows.get(id)?.hidden).map(([id, panel]) => ({label: panel.title, action: () => dock.detach(id)}))},
       {label: 'Browser Windows', enabled: !!host.windows.size, items: [...host.windows.values()].map(record => ({label: record.doc.title, action: () => host.focus(record.key)}))},
-      {label: 'Restore Browser Window', enabled: !!host.pending.size, items: [...host.pending.keys()].map(key => ({label: key, action: () => ide.restoreBrowserWindow(key)}))},
+      {label: 'Restore Browser Window', enabled: host.enabled && !!host.pending.size, items: [...host.pending.keys()].map(key => ({label: key, action: () => ide.restoreBrowserWindow(key)}))},
       {label: 'Return All Browser Windows to IDE', enabled: !!host.windows.size, action: () => host.attachAll('return')}, null
     );
     return items;
@@ -129,6 +148,7 @@ export function installBrowserWindows(ide) {
     restore(layout);
     try { host.restore(layout?.browserWindows || []); }
     catch (error) { ide.status('Browser window layout ignored: ' + error.message); }
+    ide.applyWindowMode();
   };
   const capture = ide.captureWindowLayout.bind(ide), apply = ide.applyWindowLayout.bind(ide);
   ide.captureWindowLayout = () => ({...capture(), browserWindows: host.snapshot()});
@@ -137,7 +157,7 @@ export function installBrowserWindows(ide) {
     const result = apply(value);
     host.restore((result.browserWindows || []).filter(item => !item.key.startsWith('document:') || result.projectId === ide.project.id));
     prunePending();
-    if (host.pending.size) ide.status('Layout restored. Use Window → Restore Browser Window once per window to allow browser popups.');
+    if (host.enabled && host.pending.size) ide.status('Layout restored. Use Window → Restore Browser Window once per window to allow browser popups.');
     return result;
   };
   const command = ide.command.bind(ide);

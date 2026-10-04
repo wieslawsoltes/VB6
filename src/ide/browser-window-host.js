@@ -17,6 +17,7 @@ export class BrowserWindowHost {
     this.windows = new Map();
     this.pending = new Map();
     this.disposed = false;
+    this.enabled = true;
     this.unregister = registerUIDocument(this.document);
     this.pagehide = () => this.dispose();
     owner.addEventListener('pagehide', this.pagehide);
@@ -32,11 +33,20 @@ export class BrowserWindowHost {
     });
     this.styleObserver.observe(this.document.head, {childList: true, subtree: true, characterData: true, attributes: true});
   }
+  setEnabled(enabled) {
+    if (this.disposed || this.enabled === !!enabled) return;
+    this.enabled = !!enabled;
+    if (!this.enabled) {
+      const saved = this.snapshot();
+      this.attachAll('mode');
+      this.pending = new Map(saved.map(({key, bounds}) => [key, bounds]));
+    }
+  }
   has(key) { return this.windows.has(key); }
   mount(key) { return this.windows.get(key)?.content; }
   focus(key) { const record = this.windows.get(key); if (!record) return false; try { record.popup.focus(); } catch {} return true; }
   detach(key, node, options = {}) {
-    if (this.disposed || !node?.parentNode) return false;
+    if (this.disposed || !this.enabled || !node?.parentNode) return false;
     if (this.has(key)) return this.focus(key);
     const rect = node.getBoundingClientRect();
     const bounds = browserBounds(options.bounds || this.pending.get(key) || {

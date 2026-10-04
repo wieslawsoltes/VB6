@@ -5,6 +5,31 @@ project tools and command bars into separate top-level browser windows. This is
 `window.open` plus same-origin DOM adoption, not a fixed-position overlay, screenshot,
 iframe duplicate or second copy of the project/runtime.
 
+## Choosing in-page MDI or optional browser windows
+
+**Tools → Options → Docking → IDE window mode** offers two choices. The same
+preference is available directly under **Window → Window Mode**.
+
+- **In-page MDI only** keeps all IDE documents, tool windows and toolbars in the
+  page. Documents retain move/resize, minimize/maximize/restore, cascade, horizontal
+  and vertical tiling, Ctrl+Tab cycling and Ctrl+F4 closing. In-page tool docking
+  and floating remain available. Popup caption buttons are hidden; popup menu
+  commands and the detachment API are disabled.
+- **MDI with optional browser windows** preserves the existing default: documents
+  open inside MDI, and individual panes detach only when explicitly requested.
+  In-page and detached windows can be used together.
+
+Applying MDI-only returns existing detached panes to the IDE without closing their
+contents or resetting the project, undo history or debugger. Their browser geometry
+is remembered. Re-enabling optional windows never opens popups automatically; use
+**Window → Restore Browser Window** to reopen each remembered pane with a click.
+
+The choice is an IDE preference in workspace autosave, not a VB6 project property.
+It survives reload, project changes and Reset Window Layout. Named window profiles
+restore positions but do not override the current mode or enable detached windows.
+Options takes effect on **OK**; **Cancel** leaves the mode unchanged. Changing only
+this preference does not add a project undo entry.
+
 ## Using the feature
 
 Click **↗** in a tool/document caption. Caption and toolbar context menus also offer
@@ -93,6 +118,9 @@ Platform references: [Window.open](https://developer.mozilla.org/en-US/docs/Web/
 window, theme root and optional change/failure/decorate callbacks. Call
 `detach(key, liveNode, {title, onTransfer, onReturn})` from a user gesture;
 `attach`, `attachAll`, `focus`, `snapshot`, `restore` and `dispose` cover its lifecycle.
+`setEnabled(false)` returns live panes, remembers their geometry and blocks subsequent
+`detach` calls; `setEnabled(true)` permits explicit detachment again without opening
+anything. IDE integrations use `ide.setWindowMode('mdi' | 'hybrid')`.
 A `decorate` callback can return a cleanup function. `restore` validates and records
 pending geometry without opening popups. Integrations must preserve external mounts
 when rendering their own layout model, as the IDE docking/MDI/toolbar adapters do.
