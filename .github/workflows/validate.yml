@@ -12,17 +12,62 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Archive exact source
-        run: git archive --format=tar HEAD > source.tar
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: source-${{ github.sha }}
-          path: source.tar
-          retention-days: 7
+          python-version: '3.12'
       - run: npm run build
       - run: npm test
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Resolve browser executable
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PY
+      - name: Existing IDE and runtime integration regressions
+        run: |
+          python tools/browser-tests.py
+          python tools/browser-parity-tests.py
+          python tools/browser-features-04.py
+          python tools/recovery-browser-tests.py
+          python tools/browser-finalization-05.py
+          python tools/browser-boundaries-06.py
+      - name: Verify reproducible generated bundles
+        run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+  browser-windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Detached browser windows over HTTP and file origins
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:windows
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-windows-${{ matrix.browser }}
+          path: reports/browser-windows
+          if-no-files-found: ignore
+          retention-days: 7
