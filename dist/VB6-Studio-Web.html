@@ -4499,6 +4499,9 @@ function installBrowserWindows(ide) {
         if (event.defaultPrevented || hasUIDialog()) return;
         if (event.key === 'Alt') { alt = true; event.preventDefault(); return; }
         alt = false;
+        if ((event.ctrlKey || event.metaKey) && event.key === 'F4' && record.key.startsWith('document:')) {
+          event.preventDefault(); ide.closeDocument(record.key.slice(9)); return;
+        }
         if (event.key === 'F10' && !event.shiftKey && !event.ctrlKey) { event.preventDefault(); nav.firstElementChild.focus(); return; }
         if (event.altKey && !event.ctrlKey && !event.metaKey) {
           const name = {f: 'File', e: 'Edit', v: 'View', p: 'Project', o: 'Format', d: 'Debug', r: 'Run', t: 'Tools', w: 'Window', h: 'Help'}[event.key.toLowerCase()];

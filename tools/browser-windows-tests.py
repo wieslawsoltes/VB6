@@ -6,6 +6,7 @@ CHROMIUM_PATH optionally selects a system Chromium, otherwise Playwright's build
 No test-only window implementation is used; detach is invoked by real UI clicks.
 """
 import functools
+import json
 import http.server
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ import shutil
 import threading
 import unittest
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Error
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / 'reports' / 'browser-windows'
@@ -57,6 +58,7 @@ class BrowserWindows(unittest.TestCase):
         self.context = self.browser.new_context(viewport={'width': 1440, 'height': 1000})
         self.context.set_default_timeout(6000)
         self.errors = []
+        self.trace = []
         self.context.on('page', lambda page: page.on('pageerror', lambda error: self.errors.append(str(error))))
         self.page = self.context.new_page()
         self.boot_page(self.page)
@@ -69,9 +71,33 @@ class BrowserWindows(unittest.TestCase):
         page.wait_for_function('typeof vb6Studio === "object"')
 
     def tearDown(self):
+        if self.trace:
+            (REPORT / (self._testMethodName + '.json')).write_text(json.dumps(self.trace, indent=2))
         errors = self.errors[:]
         self.context.close()
         self.assertEqual(errors, [], 'Uncaught page errors')
+
+    def closing_action(self, popup, action):
+        # Firefox may acknowledge the page close before acknowledging its click.
+        with popup.expect_event('close'):
+            try:
+                action()
+            except Error as error:
+                if not popup.is_closed() or 'closed' not in str(error):
+                    raise
+
+    def ready_popup(self, popup):
+        popup.wait_for_selector('.browser-window-root')
+        popup.wait_for_function('''() => [...document.querySelectorAll('link[rel="stylesheet"]')].every(link => link.sheet) &&
+            getComputedStyle(document.querySelector('.browser-window-content')).display === 'flex' ''')
+        return popup
+
+    def editor_trace(self, stage):
+        self.trace.append(self.js('''stage => {const e=vb6Studio.editor,p=e.activePane,v=p.virtualizer;
+          return {stage,cursor:e.cursor(),range:p.range,logical:v.logical,first:v.first,
+            native:[p.input.selectionStart,p.input.selectionEnd],scroll:[p.input.scrollTop,v.rail.scrollTop],
+            active:p.input.ownerDocument.activeElement?.className,
+            undo:vb6Studio.history.undoStack.length,events:window.editorEvents||[]};}''', stage))
 
     def js(self, code, arg=None):
         return self.page.evaluate(code, arg)
@@ -86,8 +112,7 @@ class BrowserWindows(unittest.TestCase):
         with self.page.expect_popup() as result:
             self.page.get_by_label(f'Float {name} in Browser Window', exact=True).click()
         popup = result.value
-        popup.wait_for_selector('.browser-window-root')
-        return popup
+        return self.ready_popup(popup)
 
     def code(self, module='main'):
         self.js('p => { vb6Studio.loadProject(p); vb6Studio.openDocument("main", "code"); }', PROJECT)
@@ -98,8 +123,7 @@ class BrowserWindows(unittest.TestCase):
         with self.page.expect_popup() as result:
             self.page.locator('.mdi-active').get_by_label('Float document in Browser Window', exact=True).click()
         popup = result.value
-        popup.wait_for_selector('.browser-window-root')
-        return popup
+        return self.ready_popup(popup)
 
     def local_command(self, popup, menu, command):
         popup.get_by_role('menuitem', name=menu, exact=True).click()
@@ -113,7 +137,7 @@ class BrowserWindows(unittest.TestCase):
         self.assertTrue(self.js('livePanel === vb6Studio.propertiesPanel && livePanel.ownerDocument === document && livePanel.isConnected'))
         self.assertTrue(self.js('modelBefore === JSON.stringify(vb6Studio.docking.snapshot())'))
         self.assertIn('blocked', self.page.locator('.status-message').inner_text())
-        self.js('window.open = savedOpen')
+        self.js('() => { window.open = savedOpen; }')
         self.tool()
         self.count(1)
 
@@ -149,12 +173,12 @@ class BrowserWindows(unittest.TestCase):
 
     def test_blocked_second_window_does_not_disturb_first(self):
         first = self.tool()
-        self.js('window.savedOpen=window.open; window.open=()=>null')
+        self.js('() => { window.savedOpen=window.open; window.open=()=>null; }')
         self.page.get_by_label('Float Project Explorer in Browser Window', exact=True).click()
         self.count(1)
         self.assertFalse(first.is_closed())
         self.assertTrue(self.page.locator('[data-dock-window=project]').is_visible())
-        self.js('window.open=savedOpen')
+        self.js('() => { window.open=savedOpen; }')
 
     def test_duplicate_focus_and_repeated_return(self):
         for _ in range(3):
@@ -162,7 +186,7 @@ class BrowserWindows(unittest.TestCase):
             popup.get_by_label('Float Properties in Browser Window', exact=True).click()
             self.count(1)
             self.assertEqual(len([p for p in self.context.pages if not p.is_closed()]), 2)
-            popup.get_by_role('button', name='Return to IDE', exact=True).click()
+            self.closing_action(popup, lambda: popup.get_by_role('button', name='Return to IDE', exact=True).click())
             self.count(0)
             self.assertTrue(popup.is_closed())
         self.assertTrue(self.js('!vb6Studio.browserWindows.timer'))
@@ -175,7 +199,7 @@ class BrowserWindows(unittest.TestCase):
         self.assertTrue(popup.locator('[data-dock-window=project]').is_visible())
         popup.get_by_role('tab', name='Properties', exact=True).click()
         popup.locator('[data-dock-window=properties] .tool-caption').click(button='right')
-        popup.get_by_role('menuitem', name='Return to IDE', exact=True).click()
+        self.closing_action(popup, lambda: popup.get_by_role('menuitem', name='Return to IDE', exact=True).click())
         self.count(0)
         self.assertEqual(self.js('vb6Studio.docking.group("properties").id'), 'properties')
 
@@ -194,7 +218,7 @@ class BrowserWindows(unittest.TestCase):
         popup.keyboard.press('Control+Shift+z')
         self.assertIn('edited in popup', self.js('vb6Studio.activeModule.code'))
         source.evaluate('(input) => { input.focus(); input.setSelectionRange(2, 18, "backward"); }')
-        popup.get_by_role('button', name='Return to IDE', exact=True).click()
+        self.closing_action(popup, lambda: popup.get_by_role('button', name='Return to IDE', exact=True).click())
         self.count(0)
         self.assertEqual(self.js('[liveInput.selectionStart,liveInput.selectionEnd,liveInput.selectionDirection]'), [2, 18, 'backward'])
         self.assertTrue(self.js('liveInput === vb6Studio.editor.input'))
@@ -205,12 +229,16 @@ class BrowserWindows(unittest.TestCase):
         self.js(r'''() => { vb6Studio.project.modules[0].code="' line\n".repeat(50000);
           vb6Studio.renderAll(); vb6Studio.editor.goToLine(49980); }''')
         popup = self.document()
+        self.editor_trace('detached')
         self.assertGreater(self.js('vb6Studio.editor.cursor().line'), 49900)
         self.assertLess(self.js('vb6Studio.editor.input.value.split("\\n").length'), 1024)
         popup.get_by_label('Visual Basic source code', exact=True).focus()
+        self.editor_trace('focused')
         popup.keyboard.insert_text('edited')
+        self.editor_trace('inserted')
         self.assertEqual(self.js('vb6Studio.activeModule.code.split("\\n").length'), 50001)
         popup.keyboard.press('Control+z')
+        self.editor_trace('undone')
         self.assertNotIn('edited', self.js('vb6Studio.activeModule.code'))
         self.assertGreater(self.js('vb6Studio.editor.cursor().line'), 49900)
         popup.close()
@@ -283,6 +311,7 @@ class BrowserWindows(unittest.TestCase):
         popup = self.tool()
         popup.set_viewport_size({'width': 780, 'height': 660})
         self.page.wait_for_function('vb6Studio.browserWindows.snapshot()[0].bounds.width === 780')
+        popup.wait_for_function('document.querySelector(".browser-window-content > .dock-group").getBoundingClientRect().width > 760')
         box = popup.locator('.browser-window-content > .dock-group').bounding_box()
         self.assertGreater(box['width'], 760)
         self.js('vb6Studio.appearance.theme="contrast"; vb6Studio.applyAppearance()')
@@ -322,7 +351,7 @@ class BrowserWindows(unittest.TestCase):
         with popup.expect_download() as download:
             popup.locator('[data-command-bar=standard] [data-command=save]').click()
         self.assertTrue(download.value.suggested_filename.endswith('.vb6web'))
-        popup.get_by_role('button', name='Return to IDE', exact=True).click()
+        self.closing_action(popup, lambda: popup.get_by_role('button', name='Return to IDE', exact=True).click())
         self.count(0)
         self.assertTrue(self.page.get_by_role('toolbar', name='Standard toolbar', exact=True).is_visible())
 
@@ -433,7 +462,7 @@ class BrowserWindows(unittest.TestCase):
         popup = self.document()
         self.assertTrue(popup.get_by_label('Visual Basic source code', exact=True).is_visible())
         self.assertGreater(popup.get_by_label('Visual Basic source code', exact=True).bounding_box()['height'], 30)
-        popup.get_by_role('button', name='Return to IDE', exact=True).click()
+        self.closing_action(popup, lambda: popup.get_by_role('button', name='Return to IDE', exact=True).click())
         self.count(0)
         self.assertTrue(self.js('vb6Studio.documents.mdi.windows.get("main:code").minimized'))
 
@@ -462,6 +491,9 @@ class BrowserWindows(unittest.TestCase):
         second = result.value
         self.assertTrue(first.evaluate('document.querySelector("[data-dock-window=properties]") === opener.vb6Studio.propertiesPanel'))
         self.assertTrue(second.evaluate('document.querySelector("[data-dock-window=properties]") === opener.vb6Studio.propertiesPanel'))
+        self.trace.append({'stage': 'before owner close', 'owners': [page.evaluate('''() => ({url:location.href,
+          main:typeof vb6Studio==='object',keys:typeof vb6Studio==='object'?[...vb6Studio.browserWindows.windows.keys()]:[],
+          opener:!!opener,openerMain:!!opener&&typeof opener.vb6Studio==='object'})''') for page in self.context.pages]})
         with first.expect_event('close'):
             self.page.close()
         self.assertTrue(first.is_closed())
