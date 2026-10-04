@@ -113,7 +113,7 @@ def test_mdi_keyboard():
 
 def test_panels():
     with page_for() as p:
-        p.locator('.project-panel > .tool-caption button').click();check(not p.locator('.project-panel').is_visible());check(p.locator('.properties-panel').is_visible());check(p.locator('.layout-panel').is_visible());cmd(p,'projectExplorer');check(p.locator('.project-panel').is_visible());header=p.locator('.properties-panel > .tool-caption');header.focus();header.press('Control+Enter');check('panel-floating' in p.locator('.properties-panel').get_attribute('class'));check(p.locator('.project-panel').is_visible());screenshot(p,'floating-properties');header.press('Control+Enter');check('panel-floating' not in p.locator('.properties-panel').get_attribute('class'))
+        p.locator('.project-panel > .tool-caption button[title="Hide window"]').click();check(not p.locator('.project-panel').is_visible());check(p.locator('.properties-panel').is_visible());check(p.locator('.layout-panel').is_visible());cmd(p,'projectExplorer');check(p.locator('.project-panel').is_visible());header=p.locator('.properties-panel > .tool-caption');header.focus();header.press('Control+Enter');check('panel-floating' in p.locator('.properties-panel').get_attribute('class'));check(p.locator('.project-panel').is_visible());screenshot(p,'floating-properties');header.press('Control+Enter');check('panel-floating' not in p.locator('.properties-panel').get_attribute('class'))
 
 def test_new_project_tabs():
     with page_for() as p:
