@@ -20,43 +20,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Integrate without overwriting concurrent work
+      - name: Apply reviewed, hash-checked native refinements
         run: |
           test "$(git rev-parse origin/feat/win32-standalone-webgpu)" = "$GITHUB_SHA"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git merge --no-commit origin/main; then
-            node --input-type=module <<'JS'
-          import {execFileSync} from 'node:child_process';
-          import fs from 'node:fs';
-          const git=(...args)=>execFileSync('git',args,{encoding:'utf8'});
-          const conflicts=git('diff','--name-only','--diff-filter=U').trim().split('\n');
-          if(!conflicts.length||conflicts.some(p=>!['README.md','package.json'].includes(p)))throw new Error('Unexpected integration conflict; manual resolution required');
-          if(conflicts.includes('package.json')){
-            const ours=JSON.parse(git('show',':2:package.json')),theirs=JSON.parse(git('show',':3:package.json'));
-            for(const key of ['build:windows','build:classic','test:native','fixtures:native']){
-              if(theirs.scripts[key]&&theirs.scripts[key]!==ours.scripts[key])throw new Error('Conflicting native command '+key);
-              theirs.scripts[key]=ours.scripts[key];
-            }
-            fs.writeFileSync('package.json',JSON.stringify(theirs,null,2)+'\n');
-          }
-          if(conflicts.includes('README.md')){
-            const ours=git('show',':2:README.md'),theirs=git('show',':3:README.md'),marker='## Windows executables';
-            if(!ours.includes(marker)||theirs.includes(marker))throw new Error('Unexpected Windows documentation conflict');
-            fs.writeFileSync('README.md',theirs.trimEnd()+'\n\n'+ours.slice(ours.indexOf(marker)));
-          }
-          git('add',...conflicts);
-          JS
-          fi
+          node tools/native-refine.mjs
+          git rm tools/native-refine.mjs
       - run: npm run build
       - run: npm test
-      - name: Commit generated bundles on the feature branch only
+      - name: Commit validated source and generated bundles on the feature branch only
         run: |
-          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
-          if ! git diff --cached --quiet || test -f .git/MERGE_HEAD; then
-            git commit -m 'build: integrate current main and refresh native runtime distributions'
-            git push origin HEAD:refs/heads/feat/win32-standalone-webgpu
-          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add desktop/boot.mjs desktop/smoke.cjs src/graphics/surface.js src/runtime/native-windows.js tools/build-windows.mjs tools/native-fixtures.mjs dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git commit -m 'fix: validate native canvas readback and migrate GPU surfaces safely'
+          git push origin HEAD:refs/heads/feat/win32-standalone-webgpu
       - run: git bundle create native-integration.bundle HEAD refs/remotes/origin/main
         if: always()
       - uses: actions/upload-artifact@v4
