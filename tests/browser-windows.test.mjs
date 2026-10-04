@@ -64,3 +64,48 @@ test('browser host module is side-effect-free without a DOM', async () => {
   const module = await import('../src/ide/browser-window-host.js');
   assert.equal(typeof module.BrowserWindowHost, 'function');
 });
+
+test('window mode defaults preserve in-page MDI with optional detachment', async () => {
+  const {normalizeAppearance, DEFAULT_APPEARANCE} = await import('../src/theme/theme.js');
+  assert.equal(DEFAULT_APPEARANCE.windowMode, 'hybrid');
+  for (const value of [undefined, {}, {windowMode: 'invalid'}, {windowMode: false}]) {
+    assert.equal(normalizeAppearance(value).windowMode, 'hybrid');
+  }
+  const appearance = normalizeAppearance({windowMode: 'mdi', theme: 'contrast'});
+  assert.equal(appearance.windowMode, 'mdi');
+  assert.equal(appearance.theme, 'contrast');
+  assert.equal(normalizeAppearance(JSON.parse(JSON.stringify(appearance))).windowMode, 'mdi');
+});
+
+test('disabled host refuses detachment before accessing a node or opening a window', async () => {
+  const {BrowserWindowHost} = await import('../src/ide/browser-window-host.js');
+  const host = Object.assign(Object.create(BrowserWindowHost.prototype), {disposed: false, enabled: false});
+  const node = {get parentNode() { throw new Error('Must not inspect DOM while disabled'); }};
+  assert.equal(host.detach('document:test', node), false);
+});
+
+test('switching host to MDI saves geometry, disables first and returns all live panes', async () => {
+  const {BrowserWindowHost} = await import('../src/ide/browser-window-host.js');
+  const saved = [descriptor(), descriptor('toolbar:standard')];
+  let calls = 0;
+  const host = Object.assign(Object.create(BrowserWindowHost.prototype), {
+    enabled: true, disposed: false, snapshot: () => saved,
+    attachAll(reason) { assert.equal(reason, 'mode'); assert.equal(this.enabled, false); calls++; }
+  });
+  host.setEnabled(false);
+  assert.equal(calls, 1);
+  assert.deepEqual([...host.pending.keys()], ['document:main:code', 'toolbar:standard']);
+  host.setEnabled(false);
+  assert.equal(calls, 1);
+  host.setEnabled(true);
+  assert.equal(host.enabled, true);
+  assert.equal(calls, 1, 'Enabling must never automatically open or transfer windows');
+  assert.equal(host.pending.size, 2);
+});
+
+test('disposed browser hosts ignore mode changes', async () => {
+  const {BrowserWindowHost} = await import('../src/ide/browser-window-host.js');
+  const host = Object.assign(Object.create(BrowserWindowHost.prototype), {disposed: true, enabled: true});
+  host.setEnabled(false);
+  assert.equal(host.enabled, true);
+});

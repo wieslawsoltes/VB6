@@ -49,7 +49,7 @@ There are 37 offered browser control types, including classic intrinsic-style co
 
 ## Build and test
 
-Requires Node.js 22 or later. The browser build has no npm package dependencies:
+Requires Node.js 22 or later. The build has no npm package dependencies:
 
 ```sh
 npm run build
@@ -76,7 +76,6 @@ See [Testing and validation](docs/TESTING.md) for release counts, reproducible c
 | `src/controls`, `src/graphics`, `src/theme` | Browser controls, drawing and shared themes |
 | `src/editor`, `src/ide`, `src/designer` | Editor services, workspace/tool windows and form editing |
 | `src/project`, `src/exporter` | Project/native-text interchange, resource preservation and standalone export |
-| `desktop` | JavaScript native host, secure bridge and portable executable packaging dependencies |
 | `tools`, `tests`, `reports` | Reproducible build/package tools, regression tests and validation evidence |
 | `examples`, `dist`, `docs` | Editable examples, built applications and documentation |
 
@@ -86,11 +85,32 @@ Generated runtime and diagnostics payloads are rebuilt from readable source modu
 
 Automatic checking covers the implemented parser/compiler, generally one primary parser error per module. It is not a full native semantic analyzer. Auto-checking is capped at 2,048 modules and 16 Mi UTF-16 source units; manual Check remains available. A fallback yields between modules, not inside a single long compile. Large-module input is windowed, but the canonical source is still one complete string. This is not a rope editor or proof of native performance equality.
 
-IDE tool groups, code/form documents, modeless tools and toolbars can now detach into real top-level browser windows. Use the ↗ caption button or **Float in Browser Window** command; see [Browser windows](docs/BROWSER-WINDOWS.md) for restoration, lifecycle and platform constraints. Native MDIForm/UserControl/UserDocument/report designers, type-library/add-in loading, unrestricted Edit and Continue, complete control APIs and native pixel fidelity remain unfinished. Hardware WebGPU, physical Safari/mobile devices and every IME/accessibility path are not certified. Automated browser-window coverage is documented separately; it is not certification of complete VB6 parity.
+IDE tool groups, code/form documents, modeless tools and toolbars can now detach into real top-level browser windows. Choose **Tools → Options → Docking → IDE window mode** for **In-page MDI only** or **MDI with optional browser windows**. In optional mode, use the ↗ caption button or **Float in Browser Window** command; see [Browser windows](docs/BROWSER-WINDOWS.md) for restoration, lifecycle and platform constraints. Native MDIForm/UserControl/UserDocument/report designers, type-library/add-in loading, unrestricted Edit and Continue, complete control APIs and native pixel fidelity remain unfinished. Hardware WebGPU, physical Safari/mobile devices and every IME/accessibility path are not certified. Automated browser-window coverage is documented separately; it is not certification of complete VB6 parity.
 
 [User guide](docs/USER_GUIDE.md) · [Architecture / SDK embedding](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Visual audit](docs/VISUAL-AUDIT.md) · [Release notes](docs/RELEASE-NOTES-0.6.0.md) · [Worktrees](docs/WORKTREES.md)
 
 MIT-licensed original implementation. Visual Basic is a Microsoft trademark; this project is not Microsoft software or endorsed by Microsoft. Historical reconstruction evidence remains in `RECOVERY.md`; its old test failures and version marker describe the recovery snapshot, not this release.
+
+## Model Context Protocol
+
+Open **Tools → MCP Connections…** to connect to MCP servers or explicitly share
+the live IDE with MCP clients. The client and permission-gated server are bundled
+into both the hosted app and the single-file HTML. Support includes modern and
+legacy HTTP/SSE, tools/resources/prompts, OAuth with PKCE, cancellation,
+subscriptions, revision-checked editing with undo, and debugger integration.
+
+An optional dependency-free Node.js companion supplies desktop stdio access and
+configured local stdio servers; a static page cannot itself bind a TCP port or
+launch processes. Browser origin/CORS and local-network permissions still apply.
+
+```sh
+npm run mcp:bridge -- --serve dist --allow-file --origin https://wieslawsoltes.github.io
+```
+
+Sharing is off by default. Edits and execution need local allow-once approval;
+credentials stay in memory and are not included in project exports. See the
+[MCP setup, security, protocol matrix and API guide](docs/MCP.md) for direct-server
+connections, desktop client configuration, OAuth, deployment choices and tests.
 
 ## Windows executables
 
