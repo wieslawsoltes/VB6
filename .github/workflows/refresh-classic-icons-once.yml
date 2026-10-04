@@ -25,17 +25,26 @@ jobs:
           set -euo pipefail
           cat tools/.icon-patch-{0,1,2}.xzpart | xz -dc > /tmp/icons.patch
           echo 'cea6377cf1519c481307108d3e93a4fdedd0b772da62e833f57ae5b0e854f2d5  /tmp/icons.patch' | sha256sum --check
-          git apply --check /tmp/icons.patch
-          git apply /tmp/icons.patch
-      - run: npm run build && npm test
+          git apply --check --exclude='.github/workflows/*' /tmp/icons.patch
+          git apply --exclude='.github/workflows/*' /tmp/icons.patch
+      - run: npm run build && npm test | tee /tmp/icon-node-tests.log
       - name: Commit source and rebuilt distributions
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee /tmp/icon-push.log) 2>&1
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- .github/workflows/icon-validation.yml .github/workflows/pages.yml docs/ICON-AUDIT.md src/theme/icon-art.js src/theme/icons.js src/theme/common.css src/theme/palette.css src/ide/command-bar-model.js src/ide/ui.js src/ide/virtual-list.js tools/theme-css.mjs tools/icon-fixtures.mjs tools/browser-icon-tests.py tests/icons.test.mjs src/exporter/runtime-payload.js src/editor/diagnostics-payload.js dist
-          git rm -- .github/workflows/refresh-classic-icons-once.yml tools/.icon-patch-0.xzpart tools/.icon-patch-1.xzpart tools/.icon-patch-2.xzpart
+          git add -- docs/ICON-AUDIT.md src/theme/icon-art.js src/theme/icons.js src/theme/common.css src/theme/palette.css src/ide/command-bar-model.js src/ide/ui.js src/ide/virtual-list.js tools/theme-css.mjs tools/icon-fixtures.mjs tools/browser-icon-tests.py tests/icons.test.mjs src/exporter/runtime-payload.js src/editor/diagnostics-payload.js dist
+          git rm -- tools/.icon-patch-0.xzpart tools/.icon-patch-1.xzpart tools/.icon-patch-2.xzpart
           git diff --cached --stat
           git commit -m 'fix(icons): complete classic glyphs and rebuild distributions'
           git push origin HEAD:refs/heads/fix/classic-vb6-icon-coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: classic-icon-build
+          retention-days: 7
+          path: |
+            /tmp/icon-node-tests.log
+            /tmp/icon-push.log
