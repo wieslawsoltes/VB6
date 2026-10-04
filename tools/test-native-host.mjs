@@ -11,11 +11,12 @@ const executable = require('electron');
 if (typeof executable !== 'string') throw new Error('Electron did not provide an executable path');
 await fs.access(executable);
 await fs.mkdir('validation', { recursive: true });
-const reportPath = path.resolve('validation', path.basename(stage) + '.host.json');
+const allowGraphicsBlock=process.argv.includes('--allow-graphics-block');
+const reportPath = path.resolve('validation', path.basename(stage) + (allowGraphicsBlock?'.strict':'.host') + '.json');
 let output = '', failure = null;
 const code = await new Promise(resolve => {
   const child = spawn(executable, [stage, '--native-smoke'], { cwd: process.cwd(), shell: false,
-    env: { ...process.env, VB6_SMOKE_REPORT: reportPath, VB6_SMOKE_SOFTWARE_GPU: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    env: { ...process.env, VB6_SMOKE_REPORT: reportPath, VB6_SMOKE_SOFTWARE_GPU: '1', VB6_SMOKE_ALLOW_GRAPHICS_BLOCK: allowGraphicsBlock?'1':'0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   const capture = data => { output = (output + data).slice(-1024 * 1024); process.stdout.write(data); };
   child.stdout.on('data', capture); child.stderr.on('data', capture);
   const timer = setTimeout(() => {

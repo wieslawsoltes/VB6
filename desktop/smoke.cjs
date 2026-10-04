@@ -13,7 +13,18 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
   const js = text => root.webContents.executeJavaScript(text, true).catch(error => { throw new Error('Renderer evaluation failed: ' + text.slice(0, 240) + '\n' + error.message); });
   try {
     await until(() => js('globalThis.vb6NativeReady || globalThis.vb6NativeStartupError'), 'native bootstrap');
-    check('bootstrap', await js('!globalThis.vb6NativeStartupError'));
+    const startupError=await js('globalThis.vb6NativeStartupError || null');
+    if(startupError && manifest.graphics==='webgpu' && process.env.VB6_SMOKE_ALLOW_GRAPHICS_BLOCK==='1'){
+      report.graphics=await js('globalThis.vb6NativeGraphics');
+      check('strict WebGPU rejects unavailable canvas rendering',startupError.includes('requires WebGPU') && !report.graphics.webgpu);
+      check('unsupported graphics cannot start application code',await js('!globalThis.vb6Application') && records.size===0);
+      await until(()=>root.isVisible(),'visible graphics diagnostic');
+      check('graphics failure displays an actionable message',await js('document.body.textContent.includes("--graphics auto")'));
+      report.ok=true;report.result='strict-startup-rejection';
+      if(reportPath)fs.writeFileSync(reportPath,JSON.stringify(report,null,2));
+      app.quit();return;
+    }
+    check('bootstrap', !startupError);
     report.graphics = await js('globalThis.vb6NativeGraphics');
     check('renderer has no Node require', await js('typeof require === "undefined"'));
     check('unreserved popup blocked', await js('window.open("about:blank", "unreserved") === null'));

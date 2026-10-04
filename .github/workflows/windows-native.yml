@@ -9,6 +9,10 @@ on:
         description: 'Run licensed VB6 compiler tests on a trusted self-hosted Windows runner'
         type: boolean
         default: false
+      diagnostics:
+        description: 'Capture isolated stock Electron GPU backend diagnostics'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -50,11 +54,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci --no-audit --no-fund
         working-directory: desktop
       - run: npm run fixtures:native
+      - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics webgpu --stage-only
+      - name: Validate strict WebGPU startup or its explicit unsupported-hardware diagnostic
+        run: node tools/test-native-host.mjs .native-build/nativesmoke-x64 --allow-graphics-block
+      - name: Isolated GPU diagnostics
+        if: github.event_name == 'workflow_dispatch' && inputs.diagnostics
+        run: node tools/probe-windows-gpu.mjs
       - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --stage-only
-      - run: node tools/probe-windows-gpu.mjs .native-build/nativesmoke-x64
       - run: node tools/test-native-host.mjs .native-build/nativesmoke-x64
       - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --out release/windows/app
       - name: Launch isolated single-file application
