@@ -1,0 +1,17 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {run,main,module,pause,finish} from './helpers/compiler-runtime.mjs';
+for(const [expr,want] of [
+ ['InStr("abc", "b")','2'],['InStr(2, "ababa", "a")','3'],['InStr(99, "abc", "")','99'],['InStr("", "")','0'],['InStr("İAb", "b")','3'],['InStr(1, "abcABC", "BC", vbTextCompare)','2'],['InStr(1, "[a].*", ".*", vbTextCompare)','4'],['InStr(1, Null, "x")','Null'],
+ ['InStrRev("ababa", "aba")','3'],['InStrRev("abc", "b", 1)','0'],['InStrRev("abc", "", 2)','2'],['InStrRev("abc", "a", 99)','0'],['InStrRev("aAa", "A", -1, vbTextCompare)','3'],
+ ['Replace("abcabc", "ab", "$&")','$&c$&c'],['Replace("abcabc", "a", "X", 3)','cXbc'],['Replace("aba", "a", "X", 1, 1)','Xba'],['Replace("abc", "", "X")','abc'],['Replace("abc", "a", "X", 2, 0)','bc'],
+ ['Join(Split("a,b,c", ",", 2), "|")','a|b,c'],['Join(Split("a--b--", "--"), "|")','a|b|'],['Join(Split("a b"))','a b'],['Join(Split("abc", ""), "|")','abc'],['Join(Filter(Array("Alpha", "beta", "AL"), "al", True, vbTextCompare), "|")','Alpha|AL'],['Join(Filter(Array("Alpha", "beta"), "a", False, vbBinaryCompare), "|")',''],
+ ['StrComp("a", "A", vbTextCompare)','0'],['StrComp("a", "b")','-1'],['StrComp(Null, "b")','Null'],
+])test('String intrinsic '+expr,async()=>assert.deepEqual((await run(main('Debug.Print '+expr))).output,[want]));
+for(const expr of ['InStr(0,"a","a")','InStrRev("a","a",0)','InStrRev("a","a",-2)','Split("a",",",-2)','Replace("a","a","x",1,-2)','StrComp("a","b",2)'])test('Invalid string argument '+expr,async()=>assert.deepEqual((await run(main('On Error Resume Next\nDim x\nx = '+expr+'\nDebug.Print Err.Number'))).output,['5']));
+test('String intrinsics bind named arguments and omitted comparison slots',async()=>assert.deepEqual((await run('Option Compare Text\nSub Main()\nDebug.Print InStr(string2:="B", string1:="abc"), Replace(replace:="x", find:="A", expression:="aAB"), Join(Split("a B", , , vbTextCompare), "|")\nEnd Sub')).output,['2 xxB a|B']));
+test('Option Compare comes from executing module, not caller',async()=>assert.deepEqual((await run('Option Compare Binary\nSub Main()\nDebug.Print InStr("abc", "B"), Other.FindIt()\nEnd Sub',[module('Other','Option Compare Text\nPublic Function FindIt()\nFindIt = InStr("abc", "B")\nEnd Function')])).output,['0 2']));
+test('InStrRev defaults to binary while vbUseCompareOption honors its module',async()=>assert.deepEqual((await run('Option Compare Text\nSub Main()\nDebug.Print InStrRev("abc", "B"), InStrRev("abc", "B", , vbUseCompareOption)\nEnd Sub')).output,['0 2']));
+test('Empty Split result is zero-based and empty, not a singleton',async()=>assert.deepEqual((await run(main('Dim a\na = Split("")\nDebug.Print LBound(a), UBound(a), TypeName(a)'))).output,['0 -1 String()']));
+test('Join/Filter use lower-bound-independent arrays without mutation',async()=>assert.deepEqual((await run(main('Dim a(5 To 7) As String\na(5) = "a"\na(6) = "b"\na(7) = "c"\nDebug.Print Join(a(), "|"), Join(Filter(a, "b")), LBound(a), a(6)'))).output,['a|b|c b 5 b']));
+test('Join rejects multidimensional arrays with VB type mismatch',async()=>assert.deepEqual((await run(main('Dim a(1 To 2, 1 To 2) As String\nOn Error Resume Next\nDebug.Print Join(a)\nDebug.Print Err.Number'))).output,['13']));
+test('Automatic debug search obeys selected frame comparison without procedure execution',async()=>{const p=await pause('Option Compare Text\nSub Main()\nDebug.Print "done"\nEnd Sub',3);assert.equal(p.vm.debugInspector.evaluate('InStr("abc", "B")'),2);await finish(p);});

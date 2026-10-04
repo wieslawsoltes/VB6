@@ -21,6 +21,7 @@ export function planLiveEdit(current,next,stack){
     if(json(moduleShape(oldModule))!==json(moduleShape(newModule)))throw new VBError('Restart required: module declarations, types, events, forms, or options changed in '+oldModule.name,5);
     for(const [name,oldProc]of oldModule.procedures){
       const newProc=newModule.procedures.get(name);
+      if(newProc&&json(oldProc.constantBindings)!==json(newProc.constantBindings))throw new VBError('Restart required: local constant values changed: '+oldModule.name+'.'+oldProc.name,5);
       if(!newProc||json(signature(oldProc))!==json(signature(newProc)))throw new VBError('Restart required: procedure signature changed or removed: '+oldModule.name+'.'+oldProc.name,5);
       const same=sameActiveLayout(oldProc.code,newProc.code);
       if(active.has(oldProc)&&!same){
@@ -41,7 +42,7 @@ export function planLiveEdit(current,next,stack){
   }
   return {updates,lineMap,frameUpdates};
 }
-const BARRIERS=new Set(['dim','forInit','forNext','eachInit','eachNext','withPush','withPop','withUnwind','temp','case','branch','jump','gosub','gosubReturn','onError','resume','return','end']);
+const BARRIERS=new Set(['dim','forInit','forNext','eachInit','eachNext','withPush','withPop','withUnwind','temp','case','branch','jump','gosub','computedJump','lineNumber','gosubReturn','onError','resume','return','end']);
 export function nextStatementIndex(frame,line){
   if(!Number.isInteger(line)||line<1)throw new VBError('Invalid source line',5);
   const target=frame.proc.code.findIndex(ins=>ins.line===line);

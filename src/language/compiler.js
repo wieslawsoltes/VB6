@@ -1,3 +1,4 @@
+import {bindConstants} from './binding.js';
 import {defaultIdentifierType,addDefaultTypes} from './default-types.js';
 import {validateInterfaces} from './interfaces.js';
 import { preprocess } from './conditional.js';
@@ -12,9 +13,11 @@ export function parseDeclarations(text, isConst = false, defaultTypes = {}) {
     const withEvents=/^WithEvents\s+/i.test(part);part=part.replace(/^WithEvents\s+/i,'');
     const m=part.match(/^([A-Za-z_]\w*[$%&!#@]?)(?:\s*\((.*?)\))?\s*(?:As\s+(New\s+)?([\w.]+)(?:\s*\*\s*(\d+))?)?\s*(?:=\s*(.+))?$/i);
     if(!m)throw new VBError(`Invalid declaration: ${part}`,1002);
+    if(isConst&&(!m[6]||m[2]!==undefined||m[3]||m[5]))throw new VBError('Constant expression required',1002);
+    if(/^Decimal$/i.test(m[4]||''))throw new VBError('Decimal is a Variant subtype; use CDec instead of As Decimal',1002);
     const bounds=m[2]===undefined?null:m[2].trim()===''?[]:splitTop(m[2]).map(b=>{const r=b.split(/\s+To\s+/i);return r.length===2?[E(r[0]),E(r[1])]:[null,E(r[0])];});
     if(withEvents&&(bounds!==null||m[3]||isConst))throw new VBError('WithEvents cannot be combined with arrays, New, or Const',1002);
-    return {withEvents,name:m[1],type:m[4]||suffixType(m[1],defaultTypes),autoNew:!!m[3],fixedLength:m[5]?Number(m[5]):null,bounds,constant:isConst,initial:m[6]?E(m[6]):null};
+    return {withEvents,name:m[1],type:m[4]||suffixType(m[1],defaultTypes),explicitType:!!m[4]||/[$%&!#@]$/.test(m[1]),autoNew:!!m[3],fixedLength:m[5]?Number(m[5]):null,bounds,constant:isConst,initial:m[6]?E(m[6]):null};
   });
 }
 export function parseParameters(text,defaultTypes={}) {
@@ -46,18 +49,19 @@ class ProcedureCompiler {
   block(type,line){const b=this.blocks.at(-1);if(!b||b.type!==type)throw new VBError(`Expected matching ${type} block`,1002,this.module.name,line);return b;}
   compile(lines) {
     for(const {text,line,label} of lines) {
-      try { if(label){this.label(text,line);continue;} const num=text.match(/^(\d+)\s*(.*)$/);if(num&&num[2]){this.label(num[1],line);this.statement(num[2],line);}else this.statement(text,line); }
+      try { if(label){this.label(text,line);continue;} this.statement(text,line); }
       catch(error){if(error instanceof VBError){error.source ||= this.module.name;error.line ||= line;}throw error;}
     }
     if(this.blocks.length)throw new VBError(`Unclosed ${this.blocks.at(-1).type} block`,1002,this.module.name,lines.at(-1)?.line||1);
     this.emit('return',{implicit:true},lines.at(-1)?.line||this.proc.line);
-    for(const {index,label,field='target'} of this.patches){if(!this.labels.has(lower(label)))throw new VBError(`Label not defined: ${label}`,1002,this.module.name,this.code[index].line);this.code[index][field]=this.labels.get(lower(label));}
+    for(const {index,label,field='target',slot} of this.patches){if(!this.labels.has(/^\d+$/.test(label)?String(Number(label)):lower(label)))throw new VBError(`Label not defined: ${label}`,1002,this.module.name,this.code[index].line);if(slot===undefined)this.code[index][field]=this.labels.get(/^\d+$/.test(label)?String(Number(label)):lower(label));else this.code[index].targets[slot]=this.labels.get(/^\d+$/.test(label)?String(Number(label)):lower(label));}
     return this.code;
   }
-  label(name,line){const key=lower(name);if(this.labels.has(key))throw new VBError(`Duplicate label: ${name}`,1002,this.module.name,line);this.labels.set(key,this.code.length);}
+  label(name,line){const key=/^\d+$/.test(name)?String(Number(name)):lower(name);if(this.labels.has(key))throw new VBError(`Duplicate label: ${name}`,1002,this.module.name,line);this.labels.set(key,this.code.length);if(/^\d+$/.test(name)){const number=Number(name);if(number>65535)throw new VBError('Line number must be between 0 and 65535',1002,this.module.name,line);this.emit('lineNumber',{number,implicit:true},line);}}
   statement(original,line) {
     let text=original.trim(),m;
     if(!text||/^Rem\b/i.test(text))return;
+    if(/^\d+$/.test(text)){const index=this.jump(null,line);this.patches.push({index,label:text});return;}
     if((m=text.match(/^If\s+(.+?)\s+Then\s*(.*)$/i))) {
       const index=this.emit('branch',{test:E(m[1]),target:null},line);
       if(m[2]){
@@ -91,7 +95,16 @@ class ProcedureCompiler {
     if((m=text.match(/^ReDim\s+(Preserve\s+)?(.+)$/i))){this.emit('redim',{decls:parseDeclarations(m[2],false,this.module.defaultTypes),preserve:!!m[1]},line);return;}
     if((m=text.match(/^Erase\s+(.+)$/i))){this.emit('erase',{exprs:splitTop(m[1]).map(E)},line);return;}
     if((m=text.match(/^On\s+Error\s+(.+)$/i))){if(/^Resume\s+Next$/i.test(m[1]))this.emit('onError',{mode:'next'},line);else{const g=m[1].match(/^GoTo\s+(\w+)$/i);if(!g)throw new VBError('Invalid On Error statement',1002);const index=this.emit('onError',{mode:g[1]==='0'?'off':'goto',target:null},line);if(g[1]!=='0')this.patches.push({index,label:g[1]});}return;}
-    if((m=text.match(/^Resume(?:\s+(\w+))?$/i))){const index=this.emit('resume',{mode:!m[1]?'retry':/^Next$/i.test(m[1])?'next':'goto',target:null},line);if(m[1]&&!/^Next$/i.test(m[1]))this.patches.push({index,label:m[1]});return;}
+    if(/^On\s+/i.test(text)){
+      const tokens=tokenize(text),branch=tokens.find(t=>t.type==='id'&&/^(GoTo|GoSub)$/i.test(t.value));
+      if(!branch)throw new VBError('Expected GoTo or GoSub',1002);
+      const labels=splitTop(text.slice(branch.end));
+      if(!labels.length||labels.some(v=>! /^(?:[A-Za-z_]\w*|\d+)$/.test(v)))throw new VBError('Expected a list of line labels',1002);
+      const index=this.emit('computedJump',{expr:E(text.slice(tokens[0].end,branch.start)),gosub:/gosub/i.test(branch.value),targets:labels.map(()=>null)},line);
+      labels.forEach((label,slot)=>this.patches.push({index,label,slot}));return;
+    }
+    if((m=text.match(/^Error\s+(.+)$/i))){this.emit('raiseError',{expr:E(m[1])},line);return;}
+    if((m=text.match(/^Resume(?:\s+(\w+))?$/i))){const index=this.emit('resume',{mode:!m[1]||m[1]==='0'?'retry':/^Next$/i.test(m[1])?'next':'goto',target:null},line);if(m[1]&&m[1]!=='0'&&!/^Next$/i.test(m[1]))this.patches.push({index,label:m[1]});return;}
     if((m=text.match(/^Go(To|Sub)\s+(\w+)$/i))){const index=this.emit(/sub/i.test(m[1])?'gosub':'jump',{target:null},line);this.patches.push({index,label:m[2]});return;}
     if(/^Return$/i.test(text)){this.emit('gosubReturn',{},line);return;}
     if((m=text.match(/^Debug\.Print\s*(.*)$/i))){this.emit('print',{exprs:splitTop(m[1].replace(/;\s*$/,'').replace(/;(?=(?:[^"\n]*"[^"\n]*")*[^"\n]*$)/g,',')).filter(Boolean).map(E),newline:!m[1].endsWith(';')},line);return;}
@@ -135,7 +148,7 @@ export function compileModule(input) {
   for(const entry of lines){let {text,line}=entry,m;
     try {
       if(current){if(/^Def(?:Bool|Byte|Int|Lng|Cur|Sng|Dbl|Date|Str|Obj|Var)\b/i.test(text))throw new VBError('Default-type declarations are valid only at module level',1002);if(new RegExp(`^End\\s+${current.kind==='property'?'Property':current.kind}$`,'i').test(text)){current.code=new ProcedureCompiler(current,module).compile(body);const key=lower(current.name)+(current.kind==='property'?':'+current.accessor:'');if(module.procedures.has(key))throw new VBError(`Ambiguous name detected: ${current.name}`,1002);module.procedures.set(key,current);current=null;body=[];}else body.push(entry);continue;}
-      if(enumState){if(/^End\s+Enum$/i.test(text)){enumState=null;continue;}const e=text.match(/^(\w+)(?:\s*=\s*(.+))?$/);if(!e)throw new VBError('Invalid Enum member',1002);const value=e[2]?E(e[2]):{kind:'literal',value:enumState.next};module.declarations.push({name:e[1],line,type:'Long',constant:true,initial:value,bounds:null});if(value.kind==='literal')enumState.next=Number(value.value)+1;else enumState.next++;continue;}
+      if(enumState){if(/^End\s+Enum$/i.test(text)){if(!enumState.previous)throw new VBError('Enum requires at least one member',1002);enumState=null;continue;}const e=text.match(/^(\w+)(?:\s*=\s*(.+))?$/);if(!e)throw new VBError('Invalid Enum member',1002);const value=e[2]?E(e[2]):enumState.previous?{kind:'binary',op:'+',left:{kind:'id',name:enumState.previous},right:{kind:'literal',value:1}}:{kind:'literal',value:0};module.declarations.push({name:e[1],line,type:'Long',explicitType:true,constant:true,scope:enumState.scope,enumName:enumState.name,initial:value,bounds:null});module.enums[enumState.name].members.push(e[1]);enumState.previous=e[1];continue;}
       if(typeState){if(/^End\s+Type$/i.test(text)){typeState=null;continue;}if(splitTop(text).some(t=>! /\bAs\s+/i.test(t)))throw new VBError('User-defined type members require an explicit As type',1002);module.types[typeState].push(...parseDeclarations(text));continue;}
       if(/^Def\w+\b/i.test(text)){addDefaultTypes(module.defaultTypes,text);continue;}
       if((m=text.match(/^Implements\s+([A-Za-z_]\w*)$/i))){if(module.kind==='module')throw new VBError('Implements is valid only in a class or form module',1002);if(module.interfaces.some(i=>lower(i.name)===lower(m[1])))throw new VBError('Duplicate implemented interface: '+m[1],1002);module.interfaces.push({name:m[1],line});continue;}
@@ -144,7 +157,7 @@ export function compileModule(input) {
       if((m=text.match(/^(?:(Public\s+Static|Private\s+Static|Friend\s+Static|Public|Private|Friend|Static)\s+)?(Sub|Function|Property\s+(Get|Let|Set))\s+([A-Za-z_]\w*[$%&!#@]?)\s*\((.*)\)\s*(?:As\s+(\w+))?$/i))){const kind=/^Property/i.test(m[2])?'property':m[2].toLowerCase();current={name:m[4],kind,accessor:m[3]?.toLowerCase(),scope:(m[1]?.toLowerCase().split(/\s+/)[0]==='static'?'public':m[1]?.toLowerCase().split(/\s+/)[0])||'public',static:/static/i.test(m[1]||''),params:parseParameters(m[5],module.defaultTypes),returnType:m[6]||suffixType(m[4],module.defaultTypes),line,source:module.name};continue;}
       if((m=text.match(/^(?:(Public|Private|Global)\s+)?Const\s+(.+)$/i))){module.declarations.push(...parseDeclarations(m[2],true,module.defaultTypes).map(d=>({...d,line,scope:lower(m[1]||'private')})));continue;}
       if((m=text.match(/^(?:Public|Private|Global|Dim)\s+(.+)$/i))){if(/^(Enum|Type|Event|Declare)\b/i.test(m[1])){/* handled below */}else{module.declarations.push(...parseDeclarations(m[1],false,module.defaultTypes).map(d=>{if(d.withEvents&&module.kind==='module')throw new VBError('WithEvents is valid only in class and form modules',1002);return {...d,line,scope:/^(Public|Global)\b/i.test(text)?'public':'private'};}));continue;}}
-      if((m=text.match(/^(?:Public\s+|Private\s+)?Enum\s+(\w+)$/i))){enumState={name:m[1],next:0};module.enums[m[1]]=[];continue;}
+      if((m=text.match(/^(?:(Public|Private)\s+)?Enum\s+(\w+)$/i))){if(Object.keys(module.enums).some(n=>lower(n)===lower(m[2])))throw new VBError('Ambiguous enum name: '+m[2],1002);enumState={name:m[2],scope:lower(m[1]||'public'),previous:null};module.enums[m[2]]={name:m[2],scope:enumState.scope,members:[]};continue;}
       if((m=text.match(/^(?:Public\s+|Private\s+)?Type\s+(\w+)$/i))){typeState=m[1];module.types[typeState]=[];continue;}
       if((m=text.match(/^(?:Public\s+|Private\s+)?Event\s+(\w+)\s*\((.*)\)$/i))){if(module.kind==='module')throw new VBError('Events can be declared only in class and form modules',1002);module.events ||= new Map();const key=lower(m[1]);if(module.events.has(key))throw new VBError('Ambiguous event name: '+m[1],1002);module.events.set(key,{name:m[1],line,scope:/^Private\b/i.test(text)?'private':'public',params:parseParameters(m[2],module.defaultTypes)});continue;}
       if(/^Option\s+Private\s+Module$/i.test(text))continue;
@@ -152,6 +165,7 @@ export function compileModule(input) {
       throw new VBError(`Invalid statement outside procedure: ${text}`,1002);
     }catch(error){if(error instanceof VBError){error.source ||= module.name;error.line ||= line;}throw error;}
   }
+  for(const p of module.procedures.values())if(/^Decimal$/i.test(p.returnType))throw new VBError('Decimal is a Variant subtype; use a Variant return type',1002,module.name,p.line);
   if(current)throw new VBError(`Expected End ${current.kind}`,1002,module.name,current.line);
   if(enumState||typeState)throw new VBError('Unterminated type declaration',1002,module.name,lines.at(-1)?.line);
   for(const attribute of module.attributes){
@@ -173,7 +187,7 @@ export function compileProject(project) {
 
 /** Cross-module constraints shared by execution and background diagnostics. */
 export function validateCompiledModules(modules) {
-  const diagnostics=[];
+  const diagnostics=bindConstants(modules);
   const recordNames=new Set([...modules.values()].flatMap(m=>Object.keys(m.types).map(lower)));
   for(const module of modules.values())for(const proc of module.procedures.values())for(const param of proc.params)if(!param.byRef&&!param.paramArray&&(recordNames.has(lower(param.type))||param.bounds!==null))diagnostics.push({severity:'error',message:recordNames.has(lower(param.type))?'User-defined type may not be passed ByVal':'Array argument must be ByRef',number:1002,source:module.name,line:proc.line,column:1});
   const parents=[...modules.values()].filter(m=>m.form?.type==='MDIForm');

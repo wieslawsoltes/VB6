@@ -1,3 +1,5 @@
+import {VBDecimal} from './decimal.js';
+export {VBDecimal};
 import {asDate,dateToSerial} from './calendar.js';
 import { VBError } from '../language/lexer.js';
 import { lower } from '../core/core.js';
@@ -21,7 +23,15 @@ export function interfaceView(value,type){const target=objectIdentity(value),key
 export const isNothing = value => value === NOTHING;
 export function truth(value){if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);if(value===MISSING)throw new VBError('Argument not optional',449);if(value===NOTHING)throw new VBError('Object variable not set',91);return value != null && value !== undefined && (typeof value === 'string' ? value !== '' : Number(value) !== 0);}
 export function numeric(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return 0;if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return dateToSerial(value);const n=Number(value);if(!Number.isFinite(n))throw new VBError('Type mismatch',13);return n; }
-export function vbString(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return value.toLocaleString();if(value instanceof VBCurrency)return value.toString();return String(value); }
+export function decimal(value){
+  if(value instanceof VBDecimal)return value;
+  if(value instanceof VBCurrency)return VBDecimal.fromParts(value.raw,4);
+  if(value===MISSING)throw new VBError('Argument not optional',449);
+  if(value===NOTHING)throw new VBError('Object variable not set',91);
+  if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
+  return new VBDecimal(value instanceof Date?numeric(value):value);
+}
+export function vbString(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return value.toLocaleString();if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();return String(value); }
 /** Round an exact rational to the nearest integer, ties to even. */
 export function roundRatio(numerator, denominator) {
   if (denominator === 0n) throw new VBError('Division by zero',11);
@@ -84,12 +94,13 @@ export function coerce(value,type='Variant',fixedLength=null) {
   if(type==='variant')return cloneValue(value);
   if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   if(value===MISSING)throw new VBError('Argument not optional',449);
-  if(type==='object'){if(value===NOTHING || value&&typeof value==='object'&&!(value instanceof Date)&&!(value instanceof VBCurrency)&&!(value instanceof VBArray)&&!value.__fields)return value;throw new VBError(value===null?'Invalid use of Null':'Object required',value===null?94:424);}
+  if(type==='object'){if(value===NOTHING || value&&typeof value==='object'&&!(value instanceof Date)&&!(value instanceof VBCurrency)&&!(value instanceof VBDecimal)&&!(value instanceof VBArray)&&!value.__fields)return value;throw new VBError(value===null?'Invalid use of Null':'Object required',value===null?94:424);}
   if(type==='string'){const s=vbString(value);return fixedLength==null?s:s.padEnd(fixedLength,' ').slice(0,fixedLength);}
   if(type==='date')return asDate(value);
+  if(type==='decimal')return decimal(value);
   if(type==='currency')return value instanceof VBCurrency?value:new VBCurrency(value);
   if(type==='boolean'){if(typeof value==='string'&&/^(true|false)$/i.test(value))return /^true$/i.test(value)?-1:0;return numeric(value)!==0?-1:0;}
-  if(['byte','integer','long'].includes(type)){const n=bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
+  if(['byte','integer','long'].includes(type)){const n=value instanceof VBDecimal?Number(value.roundedInteger()):bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
   if(type==='single'){const n=Math.fround(numeric(value));if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;}
   if(type==='double')return numeric(value);
   if(value?.__fields){if(lower(value.__type)!==type)throw new VBError('Type mismatch',13);return cloneValue(value);}
@@ -153,15 +164,16 @@ export class VBDictionary {
   Items(){return VBArray.from([...this.map.values()].map(v=>v.value));}
   [Symbol.iterator](){return this.Keys()[Symbol.iterator]();}
 }
-export function unary(op,value){if(value===null)return null;if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
+export function unary(op,value){if(value===null)return null;if(value instanceof VBDecimal){if(op==='-')return value.negate();if(op==='+')return value;}if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
 export function binary(op,a,b,compare='binary') {
   if(a instanceof VBErrorValue||b instanceof VBErrorValue)throw new VBError('Type mismatch',13);
-  if(op==='is'){const object=v=>v===NOTHING||v&&typeof v==='object'&&!(v instanceof Date)&&!(v instanceof VBCurrency)&&!(v instanceof VBArray)&&!v.__fields;if(!object(a)||!object(b))throw new VBError('Object required',424);return objectIdentity(a)===objectIdentity(b)?-1:0;}
+  if(op==='is'){const object=v=>v===NOTHING||v&&typeof v==='object'&&!(v instanceof Date)&&!(v instanceof VBCurrency)&&!(v instanceof VBDecimal)&&!(v instanceof VBArray)&&!v.__fields;if(!object(a)||!object(b))throw new VBError('Object required',424);return objectIdentity(a)===objectIdentity(b)?-1:0;}
   if(isNothing(a)||isNothing(b))throw new VBError('Object variable not set',91);
   if(op==='&')return a===null&&b===null?null:(a==null?'':vbString(a))+(b==null?'':vbString(b));
   if(a===null||b===null){if(op==='and'&&(a===0||b===0))return 0;if(op==='or'&&(a===-1||b===-1))return -1;if(op==='imp'&&(a===0||b===-1))return -1;return null;}
   if(['=','<>','<','>','<=','>=','like'].includes(op)) {
     if(a===undefined)a=typeof b==='string'?'':0;if(b===undefined)b=typeof a==='string'?'':0;
+    if(op!=='like'&&(a instanceof VBDecimal||b instanceof VBDecimal)){const c=decimal(a).compare(decimal(b));return ({'=':c===0,'<>':c!==0,'<':c<0,'>':c>0,'<=':c<=0,'>=':c>=0}[op])?-1:0;}
     if(a instanceof VBCurrency&&b instanceof VBCurrency){a=a.raw;b=b.raw;}else{if(a instanceof VBCurrency)a=numeric(a);if(b instanceof VBCurrency)b=numeric(b);}
     if(a instanceof Date)a=numeric(a);if(b instanceof Date)b=numeric(b);
     if(compare==='text'&&typeof a==='string'&&typeof b==='string'){a=a.toLocaleLowerCase();b=b.toLocaleLowerCase();}
@@ -169,9 +181,10 @@ export function binary(op,a,b,compare='binary') {
     return ({'=':()=>a==b,'<>':()=>a!=b,'<':()=>a<b,'>':()=>a>b,'<=':()=>a<=b,'>=':()=>a>=b}[op]())?-1:0;
   }
   if(op==='+'&&typeof a==='string'&&typeof b==='string')return a+b;
+  if((a instanceof VBDecimal||b instanceof VBDecimal)&&['+','-','*','/'].includes(op)){const x=decimal(a),y=decimal(b);return op==='+'?x.add(y):op==='-'?x.subtract(y):op==='*'?x.multiply(y):x.divide(y);}
   if(a instanceof VBCurrency&&b instanceof VBCurrency){if(op==='+')return new VBCurrency(a.raw+b.raw,true);if(op==='-')return new VBCurrency(a.raw-b.raw,true);if(op==='*')return new VBCurrency(roundRatio(a.raw*b.raw,10000n),true);}
   const x=numeric(a),y=numeric(b);let n;
   switch(op){case '+':n=x+y;break;case '-':n=x-y;break;case '*':n=x*y;break;case '/':if(y===0)throw new VBError('Division by zero',11);n=x/y;break;case '\\':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=Math.trunc(bankersRound(x)/bankersRound(y));break;case 'mod':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=bankersRound(x)%bankersRound(y);break;case '^':n=x**y;break;case 'and':return bankersRound(x)&bankersRound(y);case 'or':return bankersRound(x)|bankersRound(y);case 'xor':return bankersRound(x)^bankersRound(y);case 'eqv':return ~(bankersRound(x)^bankersRound(y));case 'imp':return (~bankersRound(x))|bankersRound(y);default:throw new VBError(`Unknown operator ${op}`,1002);}
   if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;
 }
-export function describe(value){if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}
+export function describe(value){if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}

@@ -1,5 +1,5 @@
 import {VBError} from '../language/lexer.js';
-import {VBArray,VBCurrency,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord as buildRecord} from './values.js';
+import {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord as buildRecord} from './values.js';
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
 // Windows-1252 rather than silently writing UTF-8 or host-locale-dependent bytes.
@@ -9,7 +9,7 @@ const encodeMap=new Map(charCodes.map((code,i)=>[String.fromCharCode(code),i]));
 export function encodeANSI(text){return Uint8Array.from(String(text),c=>{const b=encodeMap.get(c);if(b===undefined)throw new VBError('Character is not representable in the Windows-1252 file encoding',5);return b;});}
 export function decodeANSI(bytes){let result='';for(let i=0;i<bytes.length;i+=8192)result+=String.fromCharCode(...Array.from(bytes.subarray(i,i+8192),byte=>charCodes[byte]));return result;}
 const TYPES={byte:[1,'Uint8'],integer:[2,'Int16'],long:[4,'Int32'],single:[4,'Float32'],double:[8,'Float64'],boolean:[2,'Int16'],date:[8,'Float64'],currency:[8,'BigInt64']};
-const VARTYPES={0:'Empty',1:'Null',2:'Integer',3:'Long',4:'Single',5:'Double',6:'Currency',7:'Date',8:'String',10:'Error',11:'Boolean',17:'Byte'};
+const VARTYPES={0:'Empty',1:'Null',2:'Integer',3:'Long',4:'Single',5:'Double',6:'Currency',7:'Date',8:'String',10:'Error',11:'Boolean',14:'Decimal',17:'Byte'};
 const MAX_BYTES=20*1024*1024;
 
 /** Builds a typed UDT value with non-enumerable field metadata. */
@@ -31,7 +31,7 @@ class Reader {
   read(length){if(!Number.isInteger(length)||length<0||this.position+length>this.bytes.length)throw new VBError('Input past end of file',62);const result=this.bytes.subarray(this.position,this.position+length);this.position+=length;return result;}
   number(type){const [size,method]=TYPES[type],b=this.read(size);return new DataView(b.buffer,b.byteOffset,b.byteLength)['get'+method](0,true);}
 }
-function variantType(value){if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
+function variantType(value){if(value instanceof VBDecimal)return 14;if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
 function* arrayIndices(bounds){if(!bounds.length)return;const idx=bounds.map(([l])=>l);while(true){yield [...idx];let d=0;for(;d<bounds.length;d++){if(++idx[d]<=bounds[d][1])break;idx[d]=bounds[d][0];}if(d===bounds.length)break;}}
 function put(writer,value,schema,mode,inRecord=false,depth=0){
   if(depth>32)throw new VBError('Record nesting exceeds runtime limit',7);
@@ -46,6 +46,7 @@ function put(writer,value,schema,mode,inRecord=false,depth=0){
   if(value?.__fields){for(const [,cell]of value.__fields)put(writer,cell.get(),cell,mode,true,depth+1);return;}
   if(value===NOTHING||type==='object')throw new VBError('Objects cannot be written with Put',458);
   if(type==='variant'){const kind=variantType(value);writer.number('integer',kind);if(kind<2)return;put(writer,value,{type:VARTYPES[kind]},mode,kind===8||inRecord,depth+1);return;}
+  if(type==='decimal'){writer.write(coerce(value,'Decimal').toBytes());return;}
   if(type==='error'){writer.number('long',value.number);return;}
   if(type==='string'){
     const text=coerce(value,'String',schema.fixedLength),bytes=encodeANSI(text);
@@ -77,6 +78,7 @@ function get(reader,schema,current,mode,inRecord=false,depth=0){
     const kind=reader.number('integer');if(kind===0)return undefined;if(kind===1)return null;if(!VARTYPES[kind])throw new VBError('Unsupported Variant file descriptor: '+kind,458);
     return get(reader,{type:VARTYPES[kind]},undefined,mode,kind===8||inRecord,depth+1);
   }
+  if(type==='decimal')return VBDecimal.fromBytes(reader.read(16));
   if(type==='error')return new VBErrorValue(reader.number('long'));
   if(type==='string'){
     const length=schema.fixedLength??((mode==='random'||inRecord)?reader.number('integer')&65535:vbString(current).length);

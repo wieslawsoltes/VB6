@@ -70,6 +70,12 @@ export function logicalLines(source) {
     if (/\s_\s*$/.test(s)) { carry += s.replace(/\s_\s*$/,' ') ; return; }
     s = (carry+s).trim(); carry='';
     if (!s) return;
+    // Numeric line labels are distinct from source line numbers. Strip them before
+    // recognizing a single-line If, whose complete consequent owns its colons.
+    const numbered=s.match(/^(\d+)(?=\s|:|$)\s*:?\s*/);
+    if(numbered){out.push({text:numbered[1],line:lineStart,label:true});s=s.slice(numbered[0].length);if(!s)return;}
+    const named=s.match(/^([A-Za-z_]\w*)\s*:(?!=)\s*/);
+    if(named){out.push({text:named[1],line:lineStart,label:true});s=s.slice(named[0].length);if(!s)return;}
     // Single-line If owns its colon-separated consequent statements.
     if (/^If\b/i.test(s) && /\bThen\s+\S/i.test(s)) { out.push({text:s,line:lineStart}); return; }
     const parts=splitTop(s,':');
