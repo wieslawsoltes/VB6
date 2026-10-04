@@ -1,6 +1,10 @@
 name: Update bundled distribution
 on:
   workflow_dispatch:
+  # Refresh combined bundles after integrating the concurrent main update.
+  push:
+    branches: [feat/mcp-browser-and-local]
+    paths: ['.github/workflows/update-distribution.yml']
 permissions:
   contents: write
 concurrency:
