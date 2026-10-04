@@ -1,7 +1,7 @@
 name: Native Windows
 on:
   push:
-    branches: [main, feat/win32-standalone-webgpu]
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -50,20 +50,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm --prefix desktop install --no-audit --no-fund
+      - run: npm install --no-audit --no-fund
+        working-directory: desktop
       - run: npm run fixtures:native
+      - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --stage-only
+      - run: node tools/test-native-host.mjs .native-build/nativesmoke-x64
       - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --out release/windows/app
       - name: Launch isolated single-file application
         shell: pwsh
         run: |
           $exe = (Get-ChildItem release/windows/app -Filter *.exe).FullName
           node tools/test-portable.mjs "$exe"
+      - run: npm run build:windows -- --graphics auto --stage-only
+      - run: node tools/test-native-host.mjs .native-build/vb6-studio-x64
       - run: npm run build:windows -- --graphics auto --out release/windows/studio
       - name: Launch isolated single-file IDE
         shell: pwsh
         run: |
           $exe = (Get-ChildItem release/windows/studio -Filter *.exe).FullName
           node tools/test-portable.mjs "$exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-windows-reports
+          path: |
+            validation/*.json
+            validation/*.log
+            desktop/package-lock.json
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: always()
         with:

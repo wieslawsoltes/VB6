@@ -73,7 +73,11 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js('globalThis.surface = f1.ensureSurface(); surface.add("rect", [5,5,60,40], 255, true);');
       await until(() => js('surface.backend === "webgpu" || surface.renderingBackend === "Canvas2D"'), 'graphics backend');
       if (report.graphics.webgpu) {
-        await until(() => js('surface.backend === "webgpu"'), 'WebGPU surface');
+        await until(async () => {
+          const status = await js('({backend: surface.backend, error: surface.gpuError})');
+          if (status.error) throw new Error('Native graphics initialization failed: ' + status.error);
+          return status.backend === 'webgpu';
+        }, 'WebGPU surface');
         await js('surface.render(); surface.device.queue.onSubmittedWorkDone()');
         check('WebGPU submits native-window drawing', true);
       } else {
