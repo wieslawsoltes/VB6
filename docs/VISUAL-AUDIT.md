@@ -1,3 +1,7 @@
+# Detached-window update
+
+The historical 0.3–0.5 observations below predate detached IDE windows. Tool groups, documents and command bars now support separate browser windows; see [Browser windows](BROWSER-WINDOWS.md) and the dedicated integration suite. This supersedes the older “in-page only” IDE limitation, not the unrelated native designer/runtime compatibility gaps.
+
 # Visual review — VB6 Studio Web 0.6.0
 
 Reviewed the new shared-theme Resource Editor, dockable explicit evaluator, runtime MDI parent/child window chrome, resizing, window lists, MDI designer properties and eleventh example. New feature screenshots are in reports/boundaries-06. Explicit evaluation now restores a previously minimized runtime preview after a visual check found it covering paused source.

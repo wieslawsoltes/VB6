@@ -1,0 +1,67 @@
+name: MCP validation
+on:
+  pull_request:
+    paths: ['src/**', 'tools/**', 'tests/**', 'package.json', '.github/workflows/mcp.yml']
+  push:
+    branches: [main, feat/mcp-browser-and-local]
+    paths: ['src/**', 'tools/**', 'tests/**', 'package.json', '.github/workflows/mcp.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mcp-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - name: Verify bundled app is reproducible
+        run: git diff --exit-code -- dist
+      - run: npm test
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Use Playwright-matched Chromium
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PY
+      - run: npm run test:mcp:browser
+      - name: Existing core browser regressions
+        if: success() || failure()
+        run: python tools/browser-tests.py
+      - name: Preserve source history for reproducibility
+        if: always()
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          git bundle create repository.bundle --all
+      - name: Preserve source, app and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vb6-mcp-${{ github.sha }}
+          retention-days: 14
+          path: |
+            repository.bundle
+            src
+            tools
+            tests
+            docs
+            examples
+            dist
+            reports
+            package.json
+            README.md
+            LICENSE
