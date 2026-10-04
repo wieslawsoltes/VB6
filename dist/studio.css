@@ -1164,6 +1164,9 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 .browser-window-content > [hidden] { display:none!important; }
 .browser-detach { flex:none; margin-left:auto; }
 
+/* MDI-only retains native in-page caption actions and hides the popup affordance. */
+.ide-shell[data-window-mode=mdi] [data-browser-detach] { display:none!important; }
+
 .mcp-panel{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;font:var(--font-ui,12px Tahoma,Arial,sans-serif);color:var(--text,#111);background:var(--face,#d4d0c8)}
 .mcp-heading{display:flex;justify-content:space-between;gap:12px;padding:9px 10px;border-bottom:1px solid var(--shadow,#808080)}
 .mcp-heading span{opacity:.75}.mcp-panel>.classic-tabs{flex:1;min-height:0;overflow:auto}.mcp-panel>.classic-tabs{display:flex;flex-direction:column}.mcp-panel .classic-tab-pages{flex:1;min-height:0;overflow:auto}.mcp-page{padding:10px;display:flex;flex-direction:column;gap:9px;overflow:auto;min-height:0}.mcp-page p{margin:0;line-height:1.5;max-width:95ch}
