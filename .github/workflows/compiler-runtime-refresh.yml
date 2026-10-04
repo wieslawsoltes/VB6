@@ -1,0 +1,98 @@
+name: Refresh compiler integration against Windows targets
+on:
+  push:
+    branches: [feat/compiler-runtime-completion]
+    paths: ['.github/workflows/compiler-runtime-refresh.yml']
+permissions:
+  contents: read
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/compiler-runtime-completion'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge reviewed main with explicit handwritten conflict resolution
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          git=lambda *a: subprocess.check_output(['git',*a],text=True)
+          base='5653aada9e6997f65ce59ae35c33ca7df0693317'
+          main='00a92a360a9946879d5fce84712e58d6076790db'
+          assert git('diff','--name-only',base,'HEAD').splitlines()==['.github/workflows/compiler-runtime-refresh.yml'], 'Feature branch changed unexpectedly'
+          readme=git('show',base+':README.md')
+          marker='### Compiler/runtime compatibility workstream'
+          assert readme.count(marker)==1
+          compiler_section=marker+readme.split(marker,1)[1]
+          result=subprocess.run(['git','merge','--no-ff','--no-commit',main])
+          assert result.returncode in (0,1)
+          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
+          allowed=lambda p: p.startswith('dist/') or p in ('README.md','src/runtime/entry.js','src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js')
+          assert all(allowed(p) for p in conflicts), f'Unreviewed conflict: {conflicts}'
+          for p in conflicts:
+              subprocess.run(['git','checkout','--theirs','--',p],check=True)
+          readme=git('show',main+':README.md')
+          assert readme.count('## Windows executables')==1 and marker not in readme
+          Path('README.md').write_text(readme.replace('## Windows executables',compiler_section.rstrip()+'\n\n## Windows executables'))
+          entry=git('show',main+':src/runtime/entry.js')
+          assert entry.count('VBCurrency }')==1 and entry.count('VBCurrency,VirtualFileSystem')==1
+          entry="import {FINANCIAL_FUNCTIONS} from './financial.js';\n"+entry
+          entry=entry.replace('VBCurrency }','VBCurrency,VBDecimal }').replace('VBCurrency,VirtualFileSystem','VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem')
+          assert 'installNativeHost(host)' in entry and 'nativeWindows!==false' in entry
+          Path('src/runtime/entry.js').write_text(entry)
+          subprocess.run(['git','add','--',*conflicts,'README.md','src/runtime/entry.js'],check=True)
+          assert not git('diff','--name-only','--diff-filter=U').strip()
+          print('Preserved native host, compiler SDK exports and both README feature sections')
+          PY
+      - name: Build and validate combined compiler, MCP, browser and Windows source
+        run: |
+          set -o pipefail
+          npm run build
+          npm test 2>&1 | tee "$RUNNER_TEMP/compiler-node.log"
+          git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git diff --cached --check
+          git commit -m 'Merge current Windows executable targets and regenerate combined compiler/runtime bundles'
+          npm run build
+          git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Publish only this feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/compiler-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *) printf '%s\n' "$GH_TOKEN" ;;
+          esac
+          SH
+          chmod 700 "$RUNNER_TEMP/compiler-askpass"
+          trap 'rm -f "$RUNNER_TEMP/compiler-askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/compiler-askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/compiler-runtime-completion
+      - name: Preserve exact history and logs
+        if: always()
+        run: |
+          mkdir -p compiler-refresh-artifact
+          cp "$RUNNER_TEMP/compiler-node.log" compiler-refresh-artifact/ 2>/dev/null || true
+          git rev-parse HEAD > compiler-refresh-artifact/head.txt
+          git diff > compiler-refresh-artifact/unstaged.diff
+          git diff --cached > compiler-refresh-artifact/staged.diff
+          git bundle create compiler-refresh-artifact/published.bundle HEAD --all
+          sha256sum compiler-refresh-artifact/published.bundle > compiler-refresh-artifact/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compiler-windows-integrated
+          path: compiler-refresh-artifact/
+          retention-days: 7
