@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {probeWebGPU} from '../desktop/gpu-probe.mjs';
+import {probeWebGPU,initializeNativeGraphics} from '../desktop/gpu-probe.mjs';
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 function fixture({pixel=[0,0,255,255],format='bgra8unorm',map,validation,available=true}={}){
   const calls=[],lost=deferred();
@@ -36,4 +36,23 @@ test('GPU loss cannot leave startup waiting on an unresolved mapping',async()=>{
 });
 test('startup timeout releases the failed device and canvas',async()=>{
   const f=fixture({map:deferred()}),r=await probeWebGPU(f.view,{timeout:10});assert.match(r.error,/timed out/);assert.ok(f.calls.includes('device-destroy'));assert.ok(f.calls.includes('remove'));
+});
+
+test('strict WebGPU startup rejects a broken adapter before application scripts load',async()=>{
+  const view={};await assert.rejects(initializeNativeGraphics(view,'webgpu',{probe:async()=>({webgpu:false,error:'Broken canvas'})}),/requires WebGPU.*Broken canvas/);
+  assert.equal(view.vb6NativeGPUUnavailable,'Broken canvas');assert.equal(view.vb6NativeGraphics.webgpu,false);
+});
+test('explicit Canvas2D policy never probes or enables WebGPU, including IDE surfaces',async()=>{
+  const view={};const result=await initializeNativeGraphics(view,'canvas2d',{probe:async()=>{throw new Error('Must not probe');}});
+  assert.equal(result.webgpu,false);assert.match(view.vb6NativeGPUUnavailable,/disabled/);
+});
+test('automatic graphics fallback preserves the actual failure reason',async()=>{
+  const view={};const result=await initializeNativeGraphics(view,'auto',{probe:async()=>({webgpu:false,error:'Driver reset'})});
+  assert.equal(result.error,'Driver reset');assert.equal(view.vb6NativeGPUUnavailable,result.error);
+});
+test('graphics startup retains the validated device and reports subsequent loss',async()=>{
+  const lost=deferred(),device={lost:lost.promise},view={};
+  await initializeNativeGraphics(view,'webgpu',{probe:async()=>({webgpu:true,device,pixel:[0,0,255,255]})});
+  assert.equal(view.vb6NativeGPUDevice,device);lost.resolve({message:'Reset'});await Promise.resolve();
+  assert.equal(view.vb6NativeGPUDevice,undefined);assert.equal(view.vb6NativeGraphics.webgpu,false);assert.match(view.vb6NativeGPUUnavailable,/Reset/);
 });

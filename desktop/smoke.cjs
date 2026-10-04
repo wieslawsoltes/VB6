@@ -45,6 +45,15 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await until(() => records.size === 2, 'second window');
       const id2 = await js('f2.nativeWindow.id'), w2 = records.get(id2).window;
       check('independent HWNDs', !w1.getNativeWindowHandle().equals(w2.getNativeWindowHandle()));
+      check('child frame cannot directly invoke controller IPC',await w1.webContents.executeJavaScript('(async()=>{if(typeof vb6Native==="undefined")return true;try{await vb6Native.info();return false;}catch{return true;}})()',true));
+      await js('globalThis.inputResult=null;host.inputBox("Input smoke","Native input","initial").then(value=>{inputResult=value;});void 0;');
+      await until(()=>records.size===3,'native InputBox window');
+      const inputWindow=[...records.values()].find(r=>r.window!==w1&&r.window!==w2).window;
+      await until(()=>!w1.isEnabled()&&!w2.isEnabled()&&inputWindow.isEnabled(),'InputBox modality');
+      await inputWindow.webContents.executeJavaScript('document.querySelector("input").value="Native input OK";document.querySelector("form").requestSubmit();void 0;',true);
+      await until(()=>js('inputResult==="Native input OK"'),'InputBox return');
+      await until(()=>records.size===2&&w1.isEnabled()&&w2.isEnabled(),'InputBox owner restoration');
+      check('native InputBox returns edited text and restores owner windows',true);
       w1.focus();
       await until(() => js('host.vm.library.get("screen").ActiveForm === f1.instance'), 'native focus updates Screen.ActiveForm');
       check('native focus updates Screen.ActiveForm', true);

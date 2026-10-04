@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { productName } from './build-windows.mjs';
 import { inspectPE, verifyClassicExecutable } from './pe.mjs';
-import { encodeANSI } from '../src/runtime/binary-codec.js';
+import { encodeANSI, decodeANSI } from '../src/runtime/binary-codec.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export function parseClassicOptions(args) {
   const result = { out: path.join(root, 'release', 'classic'), codegen: 'preserve', timeout: 120000 };
@@ -26,7 +26,9 @@ export function parseClassicOptions(args) {
   if (result.inspect && result.project) throw new Error('--inspect cannot be combined with --project');
   return result;
 }
+// Keep the document byte-preserving; decode only values used as filesystem paths.
 const decodeVBP = bytes => Buffer.from(bytes).toString('latin1');
+const ansiValue = value => decodeANSI(Buffer.from(value, 'latin1'));
 function fields(text) {
   const entries = [];
   for (const line of text.split(/\r?\n/)) {
@@ -91,7 +93,7 @@ export async function stageClassic(options) {
   const native = /\.vbp$/i.test(input);
   if (!native && !/\.(vb6web|vb6proj|json)$/i.test(input)) throw new Error('Expected .vbp or .vb6web project');
   const project = native ? null : JSON.parse(original.toString('utf8'));
-  const name = productName(options.name || (native ? field(decodeVBP(original), 'ExeName32').replace(/\.exe$/i, '') || path.basename(input, path.extname(input)) : project.name));
+  const name = productName(options.name || (native ? ansiValue(field(decodeVBP(original), 'ExeName32')).replace(/\.exe$/i, '') || path.basename(input, path.extname(input)) : project.name));
   const buildBase = path.join(root, '.native-build'); await fs.mkdir(buildBase, { recursive: true });
   const stage = await fs.mkdtemp(path.join(buildBase, 'classic-'));
   const source = path.join(stage, 'source'), output = path.resolve(options.out), bin = path.join(stage, 'bin');
@@ -102,7 +104,7 @@ export async function stageClassic(options) {
     if (!inside(sourceRoot, input)) throw new Error('Project must be inside --source-root');
     for (const entry of fields(decodeVBP(original))) {
       if (!['form', 'module', 'class', 'usercontrol', 'propertypage', 'userdocument', 'designer', 'resfile32'].includes(entry.key.toLowerCase())) continue;
-      const relative = unquote(['module', 'class'].includes(entry.key.toLowerCase()) ? entry.value.slice(entry.value.indexOf(';') + 1) : entry.value);
+      const relative = ansiValue(unquote(['module', 'class'].includes(entry.key.toLowerCase()) ? entry.value.slice(entry.value.indexOf(';') + 1) : entry.value));
       const candidate = path.resolve(path.dirname(input), relative.replace(/\\/g, '/'));
       if (path.win32.isAbsolute(relative) || !inside(sourceRoot, candidate)) throw new Error('Source reference escapes --source-root: ' + relative);
       if (!inside(sourceRoot, await fs.realpath(candidate))) throw new Error('Source reference escapes through a symlink');

@@ -37,3 +37,25 @@ export async function probeWebGPU(view=globalThis,{timeout=8000}={}){
   catch(error){abandoned=true;device?.destroy();return {webgpu:false,error:error.message};}
   finally{clearTimeout(timer);buffer?.destroy();context?.unconfigure();canvas?.remove();}
 }
+
+/** Apply the selected executable graphics policy before loading project scripts. */
+export async function initializeNativeGraphics(view,graphics,{probe=probeWebGPU}={}){
+  if(!['webgpu','auto','canvas2d'].includes(graphics))throw new Error('Invalid native graphics policy');
+  const result=graphics==='canvas2d'?{webgpu:false,error:'WebGPU disabled by the executable graphics policy'}:await probe(view);
+  const diagnostics={requested:graphics,webgpu:result.webgpu,error:result.error||null,adapter:result.adapter,pixel:result.pixel};
+  view.vb6NativeGraphics=diagnostics;
+  if(result.webgpu){
+    const device=view.vb6NativeGPUDevice=result.device;
+    delete view.vb6NativeGPUUnavailable;
+    device.lost.then(info=>{
+      if(view.vb6NativeGPUDevice!==device)return;
+      delete view.vb6NativeGPUDevice;
+      diagnostics.webgpu=false;diagnostics.error='Device lost: '+info.message;
+      view.vb6NativeGPUUnavailable=diagnostics.error;
+    });
+  }else{
+    view.vb6NativeGPUUnavailable=result.error;
+    if(graphics==='webgpu')throw new Error('This executable requires WebGPU. '+result.error+'. Update the graphics driver or build with --graphics auto to permit Canvas2D fallback.');
+  }
+  return diagnostics;
+}

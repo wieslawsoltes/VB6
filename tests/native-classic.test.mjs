@@ -76,3 +76,20 @@ test('classic process runner reports nonzero exits and enforces its timeout', as
   assert.equal((await runCompiler(process.execPath,['-e','process.exit(7)'],{cwd:process.cwd(),timeout:2000})).code,7);
   await assert.rejects(runCompiler(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),timeout:100}),/timed out/);
 });
+
+test('classic source paths and default output names decode Windows-1252 without rewriting source', async () => {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'classic-ansi-'));let plan;
+  try {
+    const input=path.join(dir,'app.vbp');
+    const original=Buffer.from('Type=Exe\r\nModule=Main; Caf\xe9.bas\r\nExeName32="Cost\x80.exe"\r\nCustom="\x80\xe9"\r\n','latin1');
+    await fs.writeFile(input,original);await fs.writeFile(path.join(dir,'Café.bas'),Buffer.from('Attribute VB_Name = "Main"\r\n','latin1'));
+    plan=await stageClassic(parseClassicOptions(['--project',input,'--stage-only']));
+    assert.equal(plan.name,'Cost€');assert.equal(path.basename(plan.executable),'Cost€.exe');
+    assert.deepEqual(await fs.readFile(input),original);
+    assert.ok((await fs.readFile(plan.vbp)).includes(Buffer.from('ExeName32="Cost\x80.exe"','latin1')));
+    assert.ok((await fs.stat(path.join(path.dirname(plan.vbp),'Café.bas'))).isFile());
+  } finally {await fs.rm(dir,{recursive:true,force:true});if(plan)await fs.rm(plan.stage,{recursive:true,force:true});}
+});
+test('classic output names reject non-ANSI characters instead of corrupting the EXE name', () => {
+  assert.throws(()=>configureVBP(Buffer.from('Type=Exe\r\n'),'App😀','native'),/Windows-1252/);
+});
