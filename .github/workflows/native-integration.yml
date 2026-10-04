@@ -2,16 +2,39 @@ name: Native integration snapshot
 on:
   push:
     branches: [feat/win32-standalone-webgpu]
+    paths: [.github/workflows/native-integration.yml]
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: native-integration-refresh
+  cancel-in-progress: false
 jobs:
   source-history:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Integrate without overwriting concurrent work
+        run: |
+          test "$(git rev-parse origin/feat/win32-standalone-webgpu)" = "$GITHUB_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-commit origin/main
+      - run: npm run build
+      - run: npm test
+      - name: Commit generated bundles on the feature branch only
+        run: |
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          if ! git diff --cached --quiet || test -f .git/MERGE_HEAD; then
+            git commit -m 'build: integrate current main and refresh native runtime distributions'
+            git push origin HEAD:refs/heads/feat/win32-standalone-webgpu
+          fi
       - run: git bundle create native-integration.bundle HEAD refs/remotes/origin/main
       - uses: actions/upload-artifact@v4
         with:
