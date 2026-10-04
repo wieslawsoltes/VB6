@@ -9,7 +9,12 @@ async function start() {
       const device = await adapter.requestDevice();
       diagnostics.webgpu = true;
       diagnostics.adapter = { vendor: adapter.info?.vendor, architecture: adapter.info?.architecture, device: adapter.info?.device };
-      device.destroy();
+      // Hand the validated device to the renderer instead of destroying its startup context.
+      globalThis.vb6NativeGPUDevice = device;
+      device.lost.then(info => {
+        if (globalThis.vb6NativeGPUDevice === device) delete globalThis.vb6NativeGPUDevice;
+        diagnostics.webgpu = false; diagnostics.error = 'Device lost: ' + info.message;
+      });
     } catch (error) {
       diagnostics.error = error.message;
       if (info.graphics === 'webgpu') throw new Error('This executable requires WebGPU. ' + error.message + '. Update your graphics driver, or build with --graphics auto to permit Canvas2D fallback.');

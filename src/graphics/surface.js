@@ -3,7 +3,7 @@ import { colorValue, getTheme } from '../theme/theme.js';
 let sharedDevicePromise;
 export function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
 function rgba(color,theme='classic'){const c=oleColor(color,'#c0c0c0',theme);return [parseInt(c.slice(1,3),16)/255,parseInt(c.slice(3,5),16)/255,parseInt(c.slice(5,7),16)/255,1];}
-export async function getGPUDevice(){if(!globalThis.navigator?.gpu)return null;if(!sharedDevicePromise)sharedDevicePromise=(async()=>{try{const adapter=await navigator.gpu.requestAdapter({powerPreference:'low-power'});if(!adapter)return null;const device=await adapter.requestDevice();device.lost.then(()=>sharedDevicePromise=null);return device;}catch{return null;}})();let timeout;const device=await Promise.race([sharedDevicePromise,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),1800))]);clearTimeout(timeout);return device;}
+export async function getGPUDevice(){if(globalThis.vb6NativeGPUDevice)return globalThis.vb6NativeGPUDevice;if(!globalThis.navigator?.gpu)return null;if(!sharedDevicePromise)sharedDevicePromise=(async()=>{try{const adapter=await navigator.gpu.requestAdapter({powerPreference:'low-power'});if(!adapter)return null;const device=await adapter.requestDevice();device.lost.then(()=>sharedDevicePromise=null);return device;}catch{return null;}})();let timeout;const device=await Promise.race([sharedDevicePromise,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),1800))]);clearTimeout(timeout);return device;}
 const SHADER=`struct Screen { size: vec2f, padding: vec2f };
 @group(0) @binding(0) var<uniform> screen: Screen;
 struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f };
