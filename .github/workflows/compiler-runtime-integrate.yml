@@ -1,0 +1,111 @@
+name: Integrate verified compiler source
+on:
+  push:
+    branches: [feat/compiler-runtime-completion]
+    paths: ['.github/workflows/compiler-runtime-integrate.yml']
+permissions:
+  contents: read
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/compiler-runtime-completion'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge the locally validated main revision
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-ff --no-edit bc051d446699adb1da90c41ee0c479bbe1266ffa
+      - name: Validate and apply the complete source transaction
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, lzma, os, subprocess
+          from pathlib import Path, PurePosixPath
+          digest=lambda data: hashlib.sha256(data).hexdigest()
+          chunks=[Path(f'.compiler-transfer/verified-{i}.b64').read_text() for i in range(4)]
+          packed=base64.b64decode(''.join(chunks), validate=True)
+          assert digest(packed)=='c7252db8326efb156e72da3e271ebc35e8ecb4e42a3129cd3077cf3c5ac26735', 'Incomplete or damaged upload'
+          decoder=lzma.LZMADecompressor(memlimit=256*1024*1024)
+          raw=decoder.decompress(packed,max_length=1024*1024)
+          assert decoder.eof and not decoder.unused_data
+          assert digest(raw)=='c165263e97c3c42508ec3d5743005888bf50d68090ff0f7625355394f5759538'
+          data=json.loads(raw)
+          assert data['base']=='bc051d446699adb1da90c41ee0c479bbe1266ffa'
+          assert len(data['files'])==28 and len(data['generated'])==30
+          names=[]
+          for record in data['files']:
+              name=record['path']; path=PurePosixPath(name)
+              assert not path.is_absolute() and '..' not in path.parts and str(path)==name
+              assert name=='README.md' or path.parts[0] in ('src','docs','tests','tools')
+              target=Path(name)
+              assert not target.is_symlink() and not any(p.is_symlink() for p in target.parents)
+              before=digest(target.read_bytes()) if target.exists() else None
+              assert before==record['before'], f'Stale source: {name}'
+              names.append(name)
+          assert len(set(names))==len(names)
+          subprocess.run(['git','apply','--index','--unidiff-zero','-'],input=data['patch'].encode(),check=True)
+          staged=subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines()
+          assert set(staged)==set(names), 'Unexpected changed paths'
+          for record in data['files']:
+              assert digest(Path(record['path']).read_bytes())==record['after'], record['path']
+          Path(os.environ['RUNNER_TEMP'],'compiler-source.json').write_bytes(raw)
+          print(f'Verified and applied {len(names)} complete source files')
+          PY
+      - name: Rebuild and run all Node tests
+        run: |
+          set -o pipefail
+          npm run build
+          npm test 2>&1 | tee "$RUNNER_TEMP/compiler-node.log"
+      - name: Verify build identity and commit source without transfer files
+        run: |
+          python - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          data=json.loads(Path(os.environ['RUNNER_TEMP'],'compiler-source.json').read_bytes())
+          for name,expected in data['generated'].items():
+              assert hashlib.sha256(Path(name).read_bytes()).hexdigest()==expected, name
+          print(f"All {len(data['generated'])} generated/example hashes match the tested build")
+          PY
+          git diff --check
+          git diff --cached --check
+          git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git rm -r -- .compiler-transfer
+          git commit -m 'feat(compiler-runtime): integrate Decimal, constant binding, computed branches and runtime intrinsics'
+      - name: Publish only this feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/compiler-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *) printf '%s\n' "$GH_TOKEN" ;;
+          esac
+          SH
+          chmod 700 "$RUNNER_TEMP/compiler-askpass"
+          trap 'rm -f "$RUNNER_TEMP/compiler-askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/compiler-askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/compiler-runtime-completion
+      - name: Preserve exact published source and validation
+        run: |
+          mkdir -p compiler-integration-artifact
+          cp "$RUNNER_TEMP/compiler-node.log" compiler-integration-artifact/
+          git rev-parse HEAD > compiler-integration-artifact/head.txt
+          git bundle create compiler-integration-artifact/published.bundle HEAD --all
+          git bundle verify compiler-integration-artifact/published.bundle
+          sha256sum compiler-integration-artifact/published.bundle > compiler-integration-artifact/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compiler-source-integrated
+          path: compiler-integration-artifact/
+          retention-days: 7
