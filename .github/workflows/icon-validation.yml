@@ -33,6 +33,20 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install playwright Pillow
       - run: python -m playwright install --with-deps chromium
+      - name: Select Playwright-matched Chromium
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.executable_path
+          if not Path(browser).is_file():
+              raise SystemExit('Playwright Chromium was not installed')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write(f'CHROMIUM_PATH={browser}\nCHROMIUM={browser}\n')
+          print(f'Browser: {browser}')
+          PY
       - id: build
         run: npm run build && npm test
       - name: Glyphs, themes, states, file and HTTP launch
@@ -60,7 +74,7 @@ jobs:
                   report = json.loads(path.read_text())
                   for test in report.get('tests', []):
                       if test.get('passed') is False:
-                          message = f"{test.get('name')}: {test.get('error', 'Assertion failed')}"
+                          message = f"{test.get('name')}: {test.get('error', 'Assertion failed')}"[:2000]
                           message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
                           print(f'::error file={path}::{message}')
               except (ValueError, AttributeError):
