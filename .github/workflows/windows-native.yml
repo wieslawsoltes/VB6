@@ -4,6 +4,11 @@ on:
     branches: [main, feat/win32-standalone-webgpu]
   pull_request:
   workflow_dispatch:
+    inputs:
+      classic:
+        description: 'Run licensed VB6 compiler tests on a trusted self-hosted Windows runner'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -19,6 +24,7 @@ jobs:
           node-version: '22'
       - run: npm run build
       - run: npm test
+      - run: npm run build:classic -- --project examples/classic/HelloRuntime.vbp --stage-only --codegen pcode
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -33,3 +39,69 @@ jobs:
             README.md
             LICENSE
           retention-days: 7
+  windows-package:
+    needs: runtime-tests
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm --prefix desktop install --no-audit --no-fund
+      - run: npm run fixtures:native
+      - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --out release/windows/app
+      - name: Launch isolated single-file application
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem release/windows/app -Filter *.exe).FullName
+          node tools/test-portable.mjs "$exe"
+      - run: npm run build:windows -- --graphics auto --out release/windows/studio
+      - name: Launch isolated single-file IDE
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem release/windows/studio -Filter *.exe).FullName
+          node tools/test-portable.mjs "$exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-portable-x64
+          path: |
+            release/windows/app/*.exe
+            release/windows/app/*.json
+            release/windows/app/*.txt
+            release/windows/studio/*.exe
+            release/windows/studio/*.json
+            release/windows/studio/*.txt
+            validation/*.json
+            desktop/package-lock.json
+          retention-days: 14
+  classic-compiler:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.classic
+    runs-on: [self-hosted, Windows, vb6]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build and run actual VB6 native-code and P-code executables
+        shell: pwsh
+        run: |
+          foreach ($mode in @('native', 'pcode')) {
+            $out = "release/classic/$env:GITHUB_RUN_ID-$mode"
+            node tools/build-classic.mjs --project examples/classic/HelloRuntime.vbp --codegen $mode --out $out
+            if ($LASTEXITCODE -ne 0) { throw "VB6 compilation failed: $mode" }
+            $exe = (Resolve-Path "$out/HelloRuntime.exe").Path
+            $process = Start-Process -FilePath $exe -ArgumentList '/smoke' -PassThru
+            if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'VB6 runtime test timed out' }
+            if ($process.ExitCode -ne 0) { throw 'VB6 runtime test failed' }
+            if ((Get-Content "$out/classic-smoke.txt").Trim() -ne 'VB6 runtime OK') { throw 'Missing VB6 runtime evidence' }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: classic-vb6-validation
+          path: release/classic/

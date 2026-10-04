@@ -1,0 +1,12 @@
+{
+  "name": "vb6-native-build-tools",
+  "version": "0.6.0",
+  "private": true,
+  "description": "JavaScript Windows host and self-contained portable executable build tools",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.17.0"
+  }
+}

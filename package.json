@@ -16,7 +16,11 @@
     "test:finalization": "python tools/browser-finalization-05.py",
     "probe:launch": "python tools/probe-launch.py",
     "package": "python tools/package-release.py",
-    "test:boundaries": "python tools/browser-boundaries-06.py"
+    "test:boundaries": "python tools/browser-boundaries-06.py",
+    "build:windows": "node tools/build-windows.mjs",
+    "build:classic": "node tools/build-classic.mjs",
+    "test:native": "node --test tests/native-*.test.mjs",
+    "fixtures:native": "node tools/native-fixtures.mjs"
   },
   "engines": {
     "node": ">=22"
