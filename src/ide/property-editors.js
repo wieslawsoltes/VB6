@@ -5,6 +5,7 @@ const PALETTE=['ffffff','e0e0e0','c0c0c0','808080','404040','000000','ff0000','8
 export function oleHex(value){return '&H'+(Number(value)>>>0).toString(16).toUpperCase().padStart(8,'0')+'&';}
 export function parsePropertyNumber(text){const s=String(text).trim();if(/^&H[\da-f]{1,8}&?$/i.test(s))return parseInt(s.slice(2).replace(/&$/,''),16)|0;if(/^#[\da-f]{6}$/i.test(s)){const n=parseInt(s.slice(1),16);return ((n&255)<<16)|(n&65280)|(n>>>16);}const n=Number(s);if(!s||!Number.isFinite(n))throw new Error('Enter a valid numeric value.');return n;}
 export function showColorPalette(anchor,value,onPick){
+  const document=anchor.ownerDocument,window=document.defaultView,{innerWidth,innerHeight}=window;
   document.querySelectorAll('.property-color-popup').forEach(n=>n.dismiss?.());
   const previous=document.activeElement,theme=getTheme(anchor).id,abort=new AbortController(),popup=el('div',{class:'property-color-popup','data-vb-theme':theme,role:'dialog','aria-label':'Color palette'});
   const finish=(result)=>{abort.abort();popup.remove();if(previous?.isConnected)previous.focus({preventScroll:true});if(result!==undefined)onPick(result);};popup.dismiss=()=>finish();
@@ -17,7 +18,7 @@ export function showColorPalette(anchor,value,onPick){
   document.body.append(popup);const r=anchor.getBoundingClientRect();popup.style.left=Math.max(2,Math.min(innerWidth-popup.offsetWidth-2,r.left))+'px';popup.style.top=Math.max(2,Math.min(innerHeight-popup.offsetHeight-2,r.bottom))+'px';
   popup.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish();}if(e.key==='Tab'){e.preventDefault();const nodes=[...popup.querySelectorAll('button')].filter(n=>n.offsetParent);const i=nodes.indexOf(document.activeElement);nodes[(i+(e.shiftKey?-1:1)+nodes.length)%nodes.length]?.focus();}});
   document.addEventListener('pointerdown',e=>{if(!popup.contains(e.target)&&!anchor.contains(e.target))finish();},{signal:abort.signal});
-  window.addEventListener('resize',()=>finish(),{signal:abort.signal});popup.querySelector('[aria-selected=true]')?.focus();return popup;
+  window.addEventListener('resize',()=>finish(),{signal:abort.signal});window.addEventListener('pagehide',()=>finish(),{signal:abort.signal});popup.querySelector('[aria-selected=true]')?.focus();return popup;
 }
 export async function fontDialog(properties){
   const font=el('input',{'aria-label':'Font name',value:properties.FontName||'MS Sans Serif',list:'local-font-options'}),names=el('datalist',{id:'local-font-options'},...['MS Sans Serif','Tahoma','Arial','Times New Roman','Courier New','Consolas'].map(n=>el('option',{value:n},n))),size=el('input',{type:'number','aria-label':'Font size',value:properties.FontSize||8.25,min:1,max:144,step:.25});

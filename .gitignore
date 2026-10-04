@@ -6,3 +6,6 @@ reports/saved-project.vb6web
 reports/exported-app.html
 
 reports/features-04/runtime-export.html
+
+# Generated top-level-window test screenshots; retained as CI artifacts.
+reports/browser-windows/

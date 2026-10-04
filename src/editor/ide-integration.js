@@ -1,3 +1,4 @@
+import {hasUIDialog} from '../core/window-context.js';
 import {CodeAssistance,SourceDragManager} from './assistance.js';
 import {el} from '../core/core.js';
 import {showMenu} from '../ide/ui.js';
@@ -26,5 +27,5 @@ export function installEditorFeatures(ide){
     for(const item of items){if(item?.id==='nextBookmark'||item?.id==='previousBookmark')delete item.shortcut;if(item?.items)for(const child of item.items)if(child?.id==='nextBookmark'||child?.id==='previousBookmark')delete child.shortcut;}
     items.push(null,{label:'List Members',id:'listMembers',shortcut:'Ctrl+J'},{label:'List Constants',id:'listConstants',shortcut:'Ctrl+Shift+J'},{label:'Quick Info',id:'quickInfo',shortcut:'Ctrl+I'},{label:'Parameter Info',id:'parameterInfo',shortcut:'Ctrl+Shift+I'},{label:'Complete Word',id:'completeWord',shortcut:'Ctrl+Space'},null,{label:'Indent',id:'indent',shortcut:'Ctrl+M'},{label:'Outdent',id:'outdent',shortcut:'Ctrl+Shift+M'});
   }if(name==='View')items.splice(3,0,{label:'Definition',id:'goToDefinition',shortcut:'Shift+F2'},{label:'Last Position',id:'lastPosition',shortcut:'Ctrl+Shift+F2',enabled:!!ide.definitionHistory.length});return items;};
-  const baseKey=ide.keydown.bind(ide);ide.keydown=e=>{if(!e.defaultPrevented&&!document.querySelector('.ide-modal-cover')&&e.key==='F2'&&e.shiftKey){if(e.altKey&&(e.ctrlKey||e.metaKey)){e.preventDefault();ide.nextBookmark(-1);return;}e.preventDefault();ide.command(e.ctrlKey||e.metaKey?'lastPosition':'goToDefinition');return;}if(!e.defaultPrevented&&e.key==='F2'&&e.altKey&&(e.ctrlKey||e.metaKey)){e.preventDefault();ide.nextBookmark(1);return;}return baseKey(e);};
+  const baseKey=ide.keydown.bind(ide);ide.keydown=e=>{if(!e.defaultPrevented&&!hasUIDialog()&&e.key==='F2'&&e.shiftKey){if(e.altKey&&(e.ctrlKey||e.metaKey)){e.preventDefault();ide.nextBookmark(-1);return;}e.preventDefault();ide.command(e.ctrlKey||e.metaKey?'lastPosition':'goToDefinition');return;}if(!e.defaultPrevented&&e.key==='F2'&&e.altKey&&(e.ctrlKey||e.metaKey)){e.preventDefault();ide.nextBookmark(1);return;}return baseKey(e);};
 }

@@ -1,3 +1,4 @@
+import {uiDocument} from './window-context.js';
 /** Small framework-independent primitives shared by the IDE and runtime. */
 export class Signal {
   constructor() { this.listeners = new Map(); }
@@ -36,7 +37,7 @@ export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => 
 export function debounce(fn, delay = 200) { let id; const f = (...args) => { clearTimeout(id); id = setTimeout(() => fn(...args), delay); }; f.cancel = () => clearTimeout(id); return f; }
 export function download(name, data, type = 'application/octet-stream') {
   const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], {type}));
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 3000);
+  const a = uiDocument().createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 3000);
 }
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
