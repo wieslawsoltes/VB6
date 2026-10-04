@@ -33,13 +33,39 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install playwright Pillow
       - run: python -m playwright install --with-deps chromium
-      - run: npm run build && npm test
+      - id: build
+        run: npm run build && npm test
       - name: Glyphs, themes, states, file and HTTP launch
         run: python tools/browser-icon-tests.py --launch all
       - name: Existing browser workflows
-        run: python tools/browser-tests.py
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p reports
+          set -o pipefail
+          python tools/browser-tests.py 2>&1 | tee reports/browser-workflows.log
       - name: Existing visual and interaction regression suite
-        run: python tools/browser-visual-tests.py
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p reports
+          set -o pipefail
+          python tools/browser-visual-tests.py 2>&1 | tee reports/browser-visual.log
+      - name: Annotate regression failures
+        if: failure()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path('reports').rglob('*.json'):
+              try:
+                  report = json.loads(path.read_text())
+                  for test in report.get('tests', []):
+                      if test.get('passed') is False:
+                          message = f"{test.get('name')}: {test.get('error', 'Assertion failed')}"
+                          message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                          print(f'::error file={path}::{message}')
+              except (ValueError, AttributeError):
+                  pass
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -52,8 +78,7 @@ jobs:
             docs/
             examples/
             dist/
-            reports/icons/
-            reports/visual/
+            reports/
             package.json
             LICENSE
             README.md
