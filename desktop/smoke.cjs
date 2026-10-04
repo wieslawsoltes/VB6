@@ -39,10 +39,24 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await w1.webContents.executeJavaScript('document.querySelector("[data-control=Command1]").click(); void 0;', true);
       await until(() => js('f1.controls[1].Text === "Native event OK"'), 'native control click');
       check('native DOM click dispatches into shared VM', true);
+      await until(() => js('f1.controls[1].input.value === "Native event OK"'), 'native visual refresh');
+      check('native control value is painted from VM state', true);
       await js('host.vm.showForm(f2.instance)');
       await until(() => records.size === 2, 'second window');
       const id2 = await js('f2.nativeWindow.id'), w2 = records.get(id2).window;
       check('independent HWNDs', !w1.getNativeWindowHandle().equals(w2.getNativeWindowHandle()));
+      w1.focus();
+      await until(() => js('host.vm.library.get("screen").ActiveForm === f1.instance'), 'native focus updates Screen.ActiveForm');
+      check('native focus updates Screen.ActiveForm', true);
+      await js('f1.WindowState = 1; void 0;');
+      await until(() => w1.isMinimized(), 'minimize from VB');
+      await js('f1.WindowState = 0; void 0;');
+      await until(() => !w1.isMinimized(), 'restore from VB');
+      await js('f1.WindowState = 2; void 0;');
+      await until(() => w1.isMaximized(), 'maximize from VB');
+      await js('f1.WindowState = 0; void 0;');
+      await until(() => !w1.isMaximized(), 'unmaximize from VB');
+      check('VB WindowState controls native minimize/maximize/restore', true);
       await js('f1.Caption = "Updated native caption"; f1.refresh()');
       await until(() => w1.getTitle() === 'Updated native caption', 'caption sync');
       check('VB caption updates native title', true);
@@ -78,7 +92,7 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
           if (status.error) throw new Error('Native graphics initialization failed: ' + status.error);
           return status.backend === 'webgpu';
         }, 'WebGPU surface');
-        await js('surface.render(); surface.device.queue.onSubmittedWorkDone()');
+        await js('(async()=>{surface.device.pushErrorScope("validation");surface.render();await surface.device.queue.onSubmittedWorkDone();const error=await surface.device.popErrorScope();if(error)throw new Error(error.message);})()');
         check('WebGPU submits native-window drawing', true);
       } else {
         check('explicit fallback is reported', manifest.graphics === 'auto' || manifest.graphics === 'canvas2d');

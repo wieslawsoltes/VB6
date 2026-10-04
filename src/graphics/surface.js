@@ -1,9 +1,29 @@
 import { colorValue, getTheme } from '../theme/theme.js';
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
-let sharedDevicePromise;
+const sharedDevices = new WeakMap();
 export function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
 function rgba(color,theme='classic'){const c=oleColor(color,'#c0c0c0',theme);return [parseInt(c.slice(1,3),16)/255,parseInt(c.slice(3,5),16)/255,parseInt(c.slice(5,7),16)/255,1];}
-export async function getGPUDevice(){if(globalThis.vb6NativeGPUDevice)return globalThis.vb6NativeGPUDevice;if(!globalThis.navigator?.gpu)return null;if(!sharedDevicePromise)sharedDevicePromise=(async()=>{try{const adapter=await navigator.gpu.requestAdapter({powerPreference:'low-power'});if(!adapter)return null;const device=await adapter.requestDevice();device.lost.then(()=>sharedDevicePromise=null);return device;}catch{return null;}})();let timeout;const device=await Promise.race([sharedDevicePromise,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),1800))]);clearTimeout(timeout);return device;}
+export async function getGPUDevice(view=globalThis) {
+  if(view.vb6NativeGPUDevice)return view.vb6NativeGPUDevice;
+  const gpu=view.navigator?.gpu;if(!gpu)return null;
+  let pending=sharedDevices.get(view);
+  if(!pending){
+    pending=(async()=>{
+      try{
+        const adapter=await gpu.requestAdapter({powerPreference:'high-performance'});
+        if(!adapter)return null;
+        const device=await adapter.requestDevice();
+        device.lost.then(()=>{if(sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+        return device;
+      }catch{return null;}
+    })();
+    sharedDevices.set(view,pending);
+    pending.then(device=>{if(!device&&sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+  }
+  let timeout;
+  try{return await Promise.race([pending,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),3000))]);}
+  finally{clearTimeout(timeout);}
+}
 const SHADER=`struct Screen { size: vec2f, padding: vec2f };
 @group(0) @binding(0) var<uniform> screen: Screen;
 struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f };
@@ -13,7 +33,37 @@ struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f
 @fragment fn fs(in: VertexOut) -> @location(0) vec4f { return in.color; }`;
 export class GraphicsSurface {
   constructor(container,{backend='auto',background=16777215,onBackend=()=>{}}={}){this.container=container;this.theme=getTheme(container).id;this.themeChanged=()=>{this.theme=getTheme(container).id;this.invalidate();};container.ownerDocument.addEventListener('vb-theme-change',this.themeChanged);this.requestedBackend=backend;this.backend='canvas2d';this.background=background;this.commands=[];this.onBackend=onBackend;this.dirty=false;this.disposed=false;this.width=1;this.height=1;this.canvas=container.ownerDocument.createElement('canvas');this.canvas.className='graphics-surface';this.canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';container.append(this.canvas);this.context=this.canvas.getContext('2d');this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();if(backend!=='canvas2d')this.initializeGPU();else onBackend('Canvas2D');}
-  async initializeGPU(){const device=await getGPUDevice();if(!device||this.disposed){if(!this.disposed)this.gpuError='No WebGPU device became available';this.onBackend('Canvas2D');return;}try{this.device=device;const canvas=this.container.ownerDocument.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;const context=canvas.getContext('webgpu');if(!context)throw new Error('WebGPU canvas context unavailable in this window');const format=navigator.gpu.getPreferredCanvasFormat();context.configure({device,format,alphaMode:'opaque'});device.pushErrorScope('validation');const module=device.createShaderModule({code:SHADER});const info=await module.getCompilationInfo();if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed: '+info.messages.filter(m=>m.type==='error').map(m=>m.message).join('; '));this.pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});this.uniform=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});this.bindGroup=device.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}}]});const error=await device.popErrorScope();if(error)throw error;if(this.disposed){this.uniform.destroy();return;}this.gpuCanvas=canvas;this.gpuContext=context;this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';device.lost.then(info=>{if(!this.disposed){this.gpuError='WebGPU device lost: '+info.message;this.backend='canvas2d';this.gpuCanvas?.remove();this.gpuCanvas=null;this.onBackend('Canvas2D · device lost');this.invalidate();}});this.resize();this.onBackend('WebGPU');}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas?.remove();this.onBackend('Canvas2D');this.invalidate();}}
+  async initializeGPU(){
+    const view=this.container.ownerDocument.defaultView;
+    const device=await getGPUDevice(view);
+    if(!device||this.disposed){if(!this.disposed){this.gpuError='No WebGPU device became available';this.onBackend('Canvas2D');}return;}
+    let context,uniform;
+    try{
+      const canvas=this.container.ownerDocument.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;
+      context=canvas.getContext('webgpu');if(!context)throw new Error('WebGPU canvas context unavailable in this window');
+      const format=view.navigator.gpu.getPreferredCanvasFormat();
+      const module=device.createShaderModule({code:SHADER});
+      const info=await module.getCompilationInfo();
+      if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed: '+info.messages.filter(m=>m.type==='error').map(m=>m.message).join('; '));
+      if(this.disposed)return;
+      let pipeline,bindGroup,validation;
+      device.pushErrorScope('validation');
+      try{
+        context.configure({device,format,alphaMode:'opaque'});
+        pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
+        uniform=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+        bindGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:uniform}}]});
+      }finally{validation=await device.popErrorScope();}
+      if(validation)throw validation;
+      if(this.disposed){uniform.destroy();context.unconfigure();return;}
+      Object.assign(this,{device,pipeline,uniform,bindGroup,gpuCanvas:canvas,gpuContext:context,gpuError:null});
+      this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';
+      device.lost.then(info=>{if(!this.disposed&&this.device===device){this.gpuError='WebGPU device lost: '+info.message;this.backend='canvas2d';this.gpuCanvas?.remove();this.gpuCanvas=null;this.onBackend('Canvas2D · device lost');this.invalidate();}});
+      this.resize();this.onBackend('WebGPU');
+    }catch(error){
+      uniform?.destroy();context?.unconfigure();this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas?.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');this.invalidate();
+    }
+  }
   resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){canvas.width=Math.max(1,Math.min(8192,Math.round(this.width*dpr)));canvas.height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));}this.dpr=dpr;this.invalidate();}
   add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
   text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}

@@ -52,6 +52,9 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
       form.node.setAttribute('data-native-window', record.id);
       record.doc.body.append(form.node);
       form.cancelWindowInteraction?.();
+      record.doc.addEventListener('focusin', () => {
+        if (form.shown && !record.focused) command(record.id, 'focus');
+      });
       record.doc.addEventListener('keydown', event => { if (event.altKey && event.key === 'F4') { event.preventDefault(); requestClose(record); } });
       sync();
     }
@@ -117,6 +120,10 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
       host.mdi?.layout();
     }
     record.applying = false;
+    if (event.focused) {
+      const active = form.type === 'MDIForm' && form.mdiController?.active?.shown ? form.mdiController.active.instance : form.instance;
+      host.vm.library.get('screen').ActiveForm = active;
+    }
     if (event.focused !== record.focused) { record.focused = event.focused; form.event(event.focused ? 'Activate' : 'Deactivate'); }
     const current = size(form);
     if (current.width !== previous.width || current.height !== previous.height) form.event('Resize', [], true);
