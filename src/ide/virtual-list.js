@@ -1,6 +1,6 @@
 import {el} from '../core/core.js';
 import {icon} from '../theme/icons.js';
-const GLYPHS={'◇':'code','▣':'properties','•':'properties','◆':'object','ϟ':'event','▤':'module'};
+const GLYPHS={'◇':'method','▣':'property','•':'constant','◆':'class','ϟ':'event','▤':'module'};
 /** Fixed-row listbox used by modeless tools. DOM cost depends on viewport, not item count. */
 let nextListId=0;
 export class ToolList {
@@ -19,7 +19,7 @@ export class ToolList {
   set(items,key){this.items=items;this.spacer.style.height=items.length*this.rowHeight+'px';this.selected=key?items.findIndex(i=>i.key===key):0;if(this.selected<0&&items.length)this.selected=0;this.root.scrollTop=0;this.paint();this.onSelect?.(items[this.selected]);}
   select(index,notify=true){if(!this.items.length)return;this.selected=Math.max(0,Math.min(this.items.length-1,index));const top=this.selected*this.rowHeight;if(top<this.root.scrollTop)this.root.scrollTop=top;else if(top+this.rowHeight>this.root.scrollTop+this.root.clientHeight)this.root.scrollTop=top-this.root.clientHeight+this.rowHeight;this.paint();if(notify)this.onSelect?.(this.items[this.selected]);}
   paint(){const start=Math.max(0,Math.floor(this.root.scrollTop/this.rowHeight)-2),end=Math.min(this.items.length,start+Math.ceil((this.root.clientHeight||190)/this.rowHeight)+5),nodes=[];
-    for(let i=start;i<end;i++){const item=this.items[i];nodes.push(el('div',{class:'tool-list-row'+(i===this.selected?' selected':''),id:this.id+'-'+i,role:'option','aria-selected':i===this.selected,'aria-posinset':i+1,'aria-setsize':this.items.length,'data-index':i,style:{top:i*this.rowHeight+'px'},title:item.label},el('span',{class:'member-kind','aria-hidden':'true'},icon(GLYPHS[item.glyph]||'properties',14)),el('span',{class:'tool-list-label'},item.label)));}
+    for(let i=start;i<end;i++){const item=this.items[i];nodes.push(el('div',{class:'tool-list-row'+(i===this.selected?' selected':''),id:this.id+'-'+i,role:'option','aria-selected':i===this.selected,'aria-posinset':i+1,'aria-setsize':this.items.length,'data-index':i,style:{top:i*this.rowHeight+'px'},title:item.label},el('span',{class:'member-kind','aria-hidden':'true'},icon(GLYPHS[item.glyph]||'property',16)),el('span',{class:'tool-list-label'},item.label)));}
     this.layer.replaceChildren(...nodes);if(this.selected>=start&&this.selected<end)this.root.setAttribute('aria-activedescendant',this.id+'-'+this.selected);else this.root.removeAttribute('aria-activedescendant');this.root.setAttribute('aria-label',this.root.getAttribute('aria-label')||'Items');
   }
   dispose(){this.observer.disconnect();}

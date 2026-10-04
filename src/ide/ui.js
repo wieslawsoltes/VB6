@@ -1,20 +1,28 @@
+import {uiDocument,uiDocuments} from '../core/window-context.js';
 import { el } from '../core/core.js';
 
 import {icon, controlIcon} from '../theme/icons.js';
-import {showMenu, closeMenu, mnemonicText, menuIsOpen} from '../theme/menu.js';
-export {icon, controlIcon, showMenu, closeMenu, mnemonicText, menuIsOpen};
+import {showMenu as themedShowMenu, closeMenu, mnemonicText, menuIsOpen} from '../theme/menu.js';
+import {decorateCommandItems} from './command-bar-model.js';
+export {icon, controlIcon, closeMenu, mnemonicText, menuIsOpen};
+// IDE menus share the command catalog; application menus remain undecorated.
+export function showMenu(items,...args){
+  return themedShowMenu(decorateCommandItems(items),...args);
+}
 
 
 let dialogSequence=0;
 export function modal(title,{width=480,content,buttons=[{label:'OK',value:true,primary:true},{label:'Cancel',value:false}],onReady}={}) {
   return new Promise(resolve=>{
     closeMenu(false);
+    const document=uiDocument();
     const previous=document.activeElement,cover=el('div',{class:'ide-modal-cover'}),id='ide-dialog-'+(++dialogSequence);
     const dialog=el('div',{class:'ide-dialog',role:'dialog','aria-modal':'true','aria-labelledby':id,style:{width:width+'px'},tabindex:-1});
     const body=el('div',{class:'ide-dialog-body'}),footer=el('div',{class:'ide-dialog-footer'});
-    const disabled=[...document.body.children].filter(n=>!n.inert&&n.tagName!=='SCRIPT'&&n.tagName!=='STYLE');disabled.forEach(n=>n.inert=true);
+    const disabled=uiDocuments().flatMap(doc=>[...doc.body.children]).filter(n=>!n.inert&&n.tagName!=='SCRIPT'&&n.tagName!=='STYLE');disabled.forEach(n=>n.inert=true);
     let closed=false,pending=false;
-    const finish=value=>{if(closed)return;closed=true;cover.remove();disabled.forEach(n=>n.inert=false);if(previous?.isConnected)previous.focus({preventScroll:true});resolve(value);};
+    const release=()=>finish(false);
+    const finish=value=>{if(closed)return;closed=true;document.defaultView.removeEventListener('pagehide',release);document.removeEventListener('vb-window-release',release);cover.remove();disabled.forEach(n=>n.inert=false);if(previous?.isConnected)previous.focus({preventScroll:true});resolve(value);};
     const titlebar=el('div',{class:'tool-caption dialog-caption'},el('strong',{id},title),el('button',{class:'caption-close',title:'Close dialog','aria-label':'Close dialog',onclick:()=>finish(false)},icon('close')));
     dialog.append(titlebar,body,footer);if(content)body.append(content);
     for(const button of buttons){const node=el('button',{type:'button',class:button.primary?'default-button':'',onclick:async()=>{
@@ -24,6 +32,7 @@ export function modal(title,{width=480,content,buttons=[{label:'OK',value:true,p
       finally{pending=false;}
     }},button.label);footer.append(node);}
     cover.append(dialog);document.body.append(cover);
+    document.defaultView.addEventListener('pagehide',release);document.addEventListener('vb-window-release',release);
     cover.addEventListener('keydown',e=>{
       if(e.defaultPrevented)return;
       if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish(false);return;}
@@ -48,9 +57,9 @@ export function makeDraggable(handle,node,{onEnd}={}){
   handle.style.touchAction='none';
   handle.addEventListener('pointerdown',event=>{
     if(event.button!==0||event.target.closest('button'))return;event.preventDefault();
-    const r=node.getBoundingClientRect(),x=event.clientX,y=event.clientY;
+    const view=node.ownerDocument.defaultView,r=node.getBoundingClientRect(),x=event.clientX,y=event.clientY;
     Object.assign(node.style,{position:'fixed',left:r.left+'px',top:r.top+'px',margin:'0',transform:'none'});handle.setPointerCapture(event.pointerId);
-    const move=e=>{node.style.left=Math.round(Math.max(0,Math.min(Math.max(0,innerWidth-node.offsetWidth),r.left+e.clientX-x)))+'px';node.style.top=Math.round(Math.max(0,Math.min(Math.max(0,innerHeight-24),r.top+e.clientY-y)))+'px';};
+    const move=e=>{node.style.left=Math.round(Math.max(0,Math.min(Math.max(0,view.innerWidth-node.offsetWidth),r.left+e.clientX-x)))+'px';node.style.top=Math.round(Math.max(0,Math.min(Math.max(0,view.innerHeight-24),r.top+e.clientY-y)))+'px';};
     const done=()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',done);handle.removeEventListener('pointercancel',done);handle.removeEventListener('lostpointercapture',done);onEnd?.();};
     handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',done);handle.addEventListener('pointercancel',done);handle.addEventListener('lostpointercapture',done);
   });

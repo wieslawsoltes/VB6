@@ -1,4 +1,5 @@
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
+import {uiDocument} from '../core/window-context.js';
 import {el} from '../core/core.js';
 import {icon} from './icons.js';
 import {getTheme} from './theme.js';
@@ -16,13 +17,12 @@ export function menuIsOpen(){return !!active;}
 export function closeMenu(restore=true){if(active){const old=active;active=null;old.dispose(restore);}}
 class MenuSession {
   constructor(items,x,y,onCommand,options){
-    this.document=options.opener?.ownerDocument||document;this.window=this.document.defaultView;
-    this.onCommand=onCommand;this.options=options;this.previous=options.opener||this.document.activeElement;this.stack=[];
+    this.document=options.document||uiDocument(options.opener);this.view=this.document.defaultView;this.onCommand=onCommand;this.options=options;this.previous=options.opener||this.document.activeElement;this.stack=[];
     this.theme=options.theme||getTheme(options.opener||this.document.activeElement).id;
-    this.abort=new this.window.AbortController();this.open(items,x,y,null);
+    this.abort=new this.view.AbortController();this.open(items,x,y,null);
     this.document.addEventListener('pointerdown',e=>{if(!this.stack.some(s=>s.node.contains(e.target))&&!options.opener?.closest('[role=menubar]')?.contains(e.target))closeMenu(false);},{capture:true,signal:this.abort.signal});
-    this.window.addEventListener('blur',()=>closeMenu(false),{signal:this.abort.signal});
-    this.window.addEventListener('resize',()=>closeMenu(false),{signal:this.abort.signal});
+    this.view.addEventListener('blur',()=>closeMenu(false),{signal:this.abort.signal});
+    this.view.addEventListener('resize',()=>closeMenu(false),{signal:this.abort.signal});
     if(options.opener){options.opener.classList.add('menu-open');options.opener.setAttribute('aria-expanded','true');}
   }
   open(items,x,y,parent){
@@ -45,9 +45,9 @@ class MenuSession {
     node.addEventListener('keydown',e=>this.keydown(state,e));
     this.document.body.append(node);this.stack.push(state);
     const width=node.offsetWidth,height=node.offsetHeight;
-    if(parent&&x+width>this.window.innerWidth-2)x=parent.row.getBoundingClientRect().left-width+2;
-    node.style.left=Math.round(Math.max(2,Math.min(x,this.window.innerWidth-width-2)))+'px';
-    node.style.top=Math.round(Math.max(2,Math.min(y,this.window.innerHeight-height-2)))+'px';
+    if(parent&&x+width>this.view.innerWidth-2)x=parent.row.getBoundingClientRect().left-width+2;
+    node.style.left=Math.round(Math.max(2,Math.min(x,this.view.innerWidth-width-2)))+'px';
+    node.style.top=Math.round(Math.max(2,Math.min(y,this.view.innerHeight-height-2)))+'px';
     if(!parent){node.focus({preventScroll:true});if(this.options.focusFirst)this.select(state,this.next(state,-1,1),true);}
     return state;
   }

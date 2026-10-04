@@ -8,3 +8,6 @@ reports/features-04/runtime-export.html
 .native-build/
 release/
 validation/
+
+# Generated top-level-window test screenshots; retained as CI artifacts.
+reports/browser-windows/

@@ -26,6 +26,23 @@
   --vb-comment: #008000;
   --vb-breakpoint: #800000;
   --vb-execution: #ffff00;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -85,6 +102,23 @@
   --vb-comment: #008000;
   --vb-breakpoint: #800000;
   --vb-execution: #ffff00;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -144,6 +178,23 @@
   --vb-comment: #00ff00;
   --vb-breakpoint: #ff0000;
   --vb-execution: #ffff00;
+  --vb-icon-k: var(--vb-text);
+  --vb-icon-w: var(--vb-window);
+  --vb-icon-f: var(--vb-face);
+  --vb-icon-s: var(--vb-shadow);
+  --vb-icon-d: var(--vb-dark);
+  --vb-icon-n: #00ffff;
+  --vb-icon-b: #00ffff;
+  --vb-icon-t: #00ffff;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #00ff00;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #ffff00;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #ff8080;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #ff80ff;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -180,9 +231,12 @@
 [data-vb-theme] { color:var(--vb-text); color-scheme:light; }
 [data-vb-theme="contrast"] { color-scheme:dark; }
 .pixel-icon { display:inline-flex; flex:none; align-items:center; justify-content:center; vertical-align:middle; }
-.pixel-icon svg { display:block; overflow:visible; }
-button:disabled .pixel-icon { filter:grayscale(1); opacity:.5; }
-[data-vb-theme="contrast"] .pixel-icon { filter:invert(1); }
+.pixel-icon svg { display:block; overflow:hidden; flex:none; }
+.pixel-icon { pointer-events:none; }
+.pixel-icon .icon-disabled { display:none; }
+:is(button:disabled,[aria-disabled="true"]) .pixel-icon .icon-art { display:none; }
+:is(button:disabled,[aria-disabled="true"]) .pixel-icon .icon-disabled { display:inline; }
+
 [data-vb-theme="contrast"] .vb-command { text-shadow:none; }
 
 /* Shared classic window primitives. All geometry is CSS px at 100% zoom. */
@@ -246,6 +300,22 @@ button:disabled .pixel-icon { filter:grayscale(1); opacity:.5; }
 @media (forced-colors:active) {
  [data-vb-theme] { --vb-face:ButtonFace;--vb-text:ButtonText;--vb-window:Canvas;--vb-window-text:CanvasText;--vb-light:ButtonText;--vb-shadow:ButtonText;--vb-dark:ButtonText;--vb-selection:Highlight;--vb-selection-text:HighlightText;--vb-gray:GrayText; }
  .pixel-icon { forced-color-adjust:auto;filter:none!important; }
+}
+
+/* Icon rendering is independent of the OS font and of CSS opacity filters. */
+.command-bar-large .tool-button > .pixel-icon { width:24px!important;height:24px!important; }
+.command-bar-large .tool-button > .pixel-icon svg { width:24px;height:24px; }
+.control-icon.pixel-icon > svg { width:16px;height:16px; }
+.member-kind { width:16px;display:inline-flex;align-items:center; }
+@media (forced-colors:active) {
+ .pixel-icon { --vb-icon-k:ButtonText;--vb-icon-w:ButtonFace;--vb-icon-f:ButtonFace;
+ --vb-icon-s:ButtonText;--vb-icon-d:ButtonText;--vb-icon-n:ButtonText;
+ --vb-icon-b:ButtonText;--vb-icon-t:ButtonText;--vb-icon-c:ButtonText;
+ --vb-icon-g:ButtonText;--vb-icon-l:ButtonText;--vb-icon-o:ButtonText;
+ --vb-icon-y:ButtonText;--vb-icon-h:ButtonFace;--vb-icon-r:ButtonText;
+ --vb-icon-e:ButtonText;--vb-icon-m:ButtonText;--vb-gray:GrayText;
+ forced-color-adjust:none; }
+ .pixel-icon .icon-disabled-light { display:none; }
 }
 
 
@@ -1070,3 +1140,26 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 .resource-toolbar{flex-wrap:wrap;min-height:27px;gap:3px}.resource-toolbar button{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}.resource-file-name{margin-left:auto;padding:0 5px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .resource-columns{display:grid;grid-template-columns:minmax(145px,29%) minmax(180px,1fr);flex:1;min-height:0;gap:4px;padding:3px}.resource-tree{display:flex;flex-direction:column;min-height:0;border:1px solid var(--vb-shadow);background:var(--vb-window)}.resource-tree .tool-list{flex:1;min-height:0}.resource-edit-pane{display:flex;flex-direction:column;min-height:0;min-width:0;gap:4px}.resource-fields{display:flex;flex-wrap:wrap;gap:5px}.resource-fields label{display:flex;align-items:center;gap:4px;flex:1;min-width:90px}.resource-fields input{min-width:45px;width:85px;flex:1}.resource-edit-pane textarea{flex:1;min-height:65px;width:100%;resize:none;box-sizing:border-box;background:var(--vb-window);color:var(--vb-window-text);font:13px/18px 'Courier New',monospace;white-space:pre}.resource-edit-pane img{max-height:85px;max-width:180px;object-fit:contain;align-self:flex-start}.resource-actions{display:flex;gap:3px;flex-wrap:wrap}.resource-actions button{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}.resource-editor .tool-note{font-size:11px;line-height:15px;margin:0}.resource-editor .tool-status{white-space:normal;min-height:19px;line-height:16px}
 @media(max-width:600px){.resource-columns{grid-template-columns:minmax(105px,33%) minmax(155px,1fr)}.resource-toolbar button{font-size:11px}.resource-actions button{font-size:11px}.resource-file-name{display:none}}
+
+/* The popup is a separate top-level browsing context, not a fixed overlay. */
+html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; height:100%; margin:0; overflow:hidden; }
+.browser-window-root.ide-shell { display:flex; flex-direction:column; position:relative; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; }
+.browser-window-caption { display:flex; align-items:center; gap:6px; padding:3px 5px; flex:0 0 auto; background:var(--vb-title); color:var(--vb-title-text); font:12px Tahoma,Arial,sans-serif; }
+.browser-window-caption strong { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.browser-window-caption button { flex:none; font:11px Tahoma,Arial,sans-serif; }
+.browser-window-menubar { flex:0 0 auto; flex-wrap:wrap; height:auto; min-height:21px; }
+.browser-window-content { position:relative; display:flex; flex:1 1 0; min-height:0; min-width:0; overflow:hidden; }
+.browser-window-content > .dock-group, .browser-window-content > .mdi-window,
+.browser-window-content > .command-bar { position:relative!important; inset:auto!important; width:100%!important; height:100%!important; max-width:none!important; max-height:none!important; margin:0!important; flex:1 1 0!important; }
+.browser-window-content > .dock-group { display:flex; flex-direction:column; }
+.browser-window-content > .mdi-window { display:flex; flex-direction:column; }
+.browser-window-content > .mdi-window .mdi-client { display:block; flex:1; min-height:0; }
+.browser-window-content > .mdi-window > .mdi-resize,
+.browser-window-content > .dock-group > .dock-resize,
+.browser-window-content > .command-bar .command-bar-caption { display:none!important; }
+.browser-window-content > .mdi-window > .document-title .window-buttons button:not([aria-label="Close current document"]) { display:none; }
+.browser-window-content > .command-bar { align-content:flex-start; align-items:flex-start; flex-direction:row; flex-wrap:wrap; }
+.browser-window-content > .command-bar .toolbar-grip { display:none; }
+.browser-window-content .managed-panel { min-width:0; }
+.browser-window-content > [hidden] { display:none!important; }
+.browser-detach { flex:none; margin-left:auto; }
