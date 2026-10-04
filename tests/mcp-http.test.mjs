@@ -153,3 +153,22 @@ test('MCP bridge: desktop stdio relay reaches the live browser project server', 
   const transport = new NodeStdioTransport({command: process.execPath, args: [path.resolve('tools/mcp-stdio.mjs'), '--url', bridge.url + '/mcp'], env: {VB6_MCP_TOKEN: bridge.clientToken}}), client = new McpClient(transport);
   t.after(async () => { await client.close(); await browser.close(); server.close(); await bridge.close(); }); await browser.connect(); await client.connect(); assert.equal((await client.callTool('echo', {text: 'desktop'})).structuredContent.text, 'desktop');
 });
+test('MCP stdio: companion credentials are excluded from inherited process environments', async t => {
+  const previousOwner = process.env.VB6_MCP_OWNER_TOKEN, previousClient = process.env.VB6_MCP_TOKEN;
+  process.env.VB6_MCP_OWNER_TOKEN = 'parent-owner-secret'; process.env.VB6_MCP_TOKEN = 'parent-client-secret';
+  t.after(() => { for (const [key, value] of [['VB6_MCP_OWNER_TOKEN', previousOwner], ['VB6_MCP_TOKEN', previousClient]]) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const source = `process.stdin.once('data', text => { const request = JSON.parse(text); console.log(JSON.stringify({jsonrpc:'2.0',id:request.id,result:{owner:!!process.env.VB6_MCP_OWNER_TOKEN,client:!!process.env.VB6_MCP_TOKEN,custom:process.env.MCP_TEST_VALUE}})); });`;
+  const transport = new NodeStdioTransport({command: process.execPath, args: ['-e', source], env: {MCP_TEST_VALUE: 'allowed'}}); t.after(() => transport.close());
+  const reply = await transport.exchange({jsonrpc: '2.0', id: 1, method: 'ping'}); assert.deepEqual(reply.result, {owner: false, client: false, custom: 'allowed'});
+});
+test('MCP stdio: a child stdin error rejects pending requests without an unhandled event', async t => {
+  const transport = new NodeStdioTransport({command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)']}); t.after(() => transport.close());
+  const pending = transport.exchange({jsonrpc: '2.0', id: 1, method: 'ping'}); const rejected = assert.rejects(pending, /stdin|write/i);
+  transport.child.stdin.emit('error', Object.assign(new Error('pipe closed'), {code: 'EPIPE'})); await rejected; assert.equal(transport.closed, true); assert.equal(transport.pending.size, 0);
+});
+test('MCP companion: invalid UTF-8 is rejected rather than silently rewritten', async t => {
+  const bridge = await createBridge({port: 0}); t.after(() => bridge.close());
+  const bytes = Buffer.concat([Buffer.from('{"id":"'), Buffer.from([0xff]), Buffer.from('"}')]);
+  const response = await fetch(bridge.url + '/bridge/attach', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + bridge.ownerToken}, body: bytes});
+  assert.equal(response.status, 400); assert.equal((await response.json()).error.code, -32700);
+});

@@ -15,7 +15,7 @@ export function bearerChallenge(header = '') {
 }
 /** Public-client OAuth. Tokens and verifiers stay in memory; no embedded client secrets. */
 export class McpOAuth {
-  constructor(endpoint, {fetch: fetchFn = globalThis.fetch.bind(globalThis)} = {}) { this.endpoint = httpURL(endpoint).href; this.fetch = fetchFn; this.pending = null; this.tokens = null; this.epoch = 0; }
+  constructor(endpoint, {fetch: fetchFn = globalThis.fetch.bind(globalThis)} = {}) { this.endpoint = httpURL(endpoint).href; this.fetch = fetchFn; this.pending = null; this.tokens = null; this.epoch = 0; this.discoverySequence = 0; this.registrationSequence = 0; }
   async json(url, options = {}) {
     const response = await this.fetch(httpURL(url).href, {...options, credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: options.signal || AbortSignal.timeout(15000), headers: {Accept: 'application/json', ...options.headers}});
     if (!response.ok) throw Object.assign(new McpError(-32001, 'OAuth endpoint returned HTTP ' + response.status + '.'), {status: response.status});
@@ -26,11 +26,16 @@ export class McpOAuth {
     let value; try { value = JSON.parse(text); } catch { throw new McpError(-32600, 'Invalid OAuth JSON.'); }
     if (!isRecord(value)) throw new McpError(-32600, 'Expected an OAuth metadata object.'); return value;
   }
+  assertCurrent(epoch, issuer = this.metadata?.issuer) {
+    if (epoch !== this.epoch || issuer !== this.metadata?.issuer) throw new McpError(-32001, 'OAuth operation was cleared or superseded.');
+  }
   async discover({challenge = '', authorizationServer} = {}) {
+    const epoch = this.epoch, sequence = ++this.discoverySequence;
+    const current = () => { this.assertCurrent(epoch); if (sequence !== this.discoverySequence) throw new McpError(-32001, 'OAuth discovery was superseded.'); };
     const hints = bearerChallenge(challenge), endpoint = new URL(this.endpoint);
     const candidates = hints.resource_metadata ? [httpURL(hints.resource_metadata).href] : [...new Set([endpoint.origin + '/.well-known/oauth-protected-resource' + (endpoint.pathname === '/' ? '' : endpoint.pathname), endpoint.origin + '/.well-known/oauth-protected-resource'])];
     let resource, failure;
-    for (const url of candidates) { try { resource = await this.json(url); break; } catch (error) { failure = error; if (error.status && ![404,405].includes(error.status)) throw error; } }
+    for (const url of candidates) { try { resource = await this.json(url); current(); break; } catch (error) { current(); failure = error; if (error.status && ![404,405].includes(error.status)) throw error; } }
     if (!resource) throw failure || new McpError(-32001, 'Protected resource metadata is unavailable.');
     if (canonical(resource.resource) !== canonical(this.endpoint)) throw new McpError(-32001, 'Protected resource metadata does not identify this MCP endpoint.');
     if (!Array.isArray(resource.authorization_servers) || !resource.authorization_servers.length || resource.authorization_servers.length > 16 || resource.authorization_servers.some(value => typeof value !== 'string')) throw new McpError(-32001, 'Metadata has no valid authorization servers.');
@@ -40,7 +45,7 @@ export class McpOAuth {
     const issuerPath = base.pathname.replace(/\/$/, '');
     const discovery = [...new Set([base.origin + '/.well-known/oauth-authorization-server' + issuerPath, base.origin + '/.well-known/openid-configuration' + issuerPath, base.origin + issuerPath + '/.well-known/openid-configuration'])];
     let metadata;
-    for (const url of discovery) { try { metadata = await this.json(url); break; } catch (error) { failure = error; if (error.status && ![404,405].includes(error.status)) throw error; } }
+    for (const url of discovery) { try { metadata = await this.json(url); current(); break; } catch (error) { current(); failure = error; if (error.status && ![404,405].includes(error.status)) throw error; } }
     if (!metadata) throw failure || new McpError(-32001, 'Authorization metadata is unavailable.');
     if (metadata.issuer !== issuer) throw new McpError(-32001, 'OAuth issuer mismatch.');
     httpURL(metadata.authorization_endpoint); httpURL(metadata.token_endpoint);
@@ -57,8 +62,10 @@ export class McpOAuth {
   }
   async register(redirectURI) {
     if (!this.metadata?.registration_endpoint) throw new McpError(-32001, 'This issuer does not advertise dynamic registration. Use a registered client ID or client metadata URL.');
+    const epoch = this.epoch, issuer = this.metadata.issuer, sequence = ++this.registrationSequence;
     const redirect = httpURL(redirectURI), native = ['127.0.0.1','localhost','[::1]'].includes(redirect.hostname);
     const value = await this.json(this.metadata.registration_endpoint, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({client_name: 'VB6 Studio Web', redirect_uris: [redirect.href], grant_types: ['authorization_code','refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none', application_type: native ? 'native' : 'web'})});
+    this.assertCurrent(epoch, issuer); if (sequence !== this.registrationSequence) throw new McpError(-32001, 'OAuth registration was superseded.');
     if (typeof value.client_id !== 'string' || value.client_secret || value.token_endpoint_auth_method && value.token_endpoint_auth_method !== 'none') throw new McpError(-32001, 'Issuer did not register a public client.');
     this.registration = {issuer: this.metadata.issuer, clientId: value.client_id}; return value.client_id;
   }
@@ -69,8 +76,13 @@ export class McpOAuth {
     const redirect = httpURL(redirectURI); if (redirect.search) throw new McpError(-32602, 'Use a redirect URI without a query or fragment.');
     if (/^https:\/\//.test(clientId) && this.metadata.client_id_metadata_document_supported) this.clientMetadata(clientId, redirect.href);
     if (!globalThis.crypto?.subtle) throw new McpError(-32000, 'OAuth PKCE requires a secure browser context.');
+    // A new sign-in supersedes older sign-ins and refreshes, but keeps the current
+    // access token available until a valid callback starts its exchange.
+    const epoch = ++this.epoch, issuer = this.metadata.issuer; this.pending = null; this.refreshing = null;
     const verifier = randomToken(32), challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))), state = randomToken(24);
-    const mergedScope = [...new Set((scope + ' ' + (this.tokens?.scope || '')).trim().split(/\s+/).filter(Boolean))].join(' ');
+    this.assertCurrent(epoch, issuer);
+    const previousScope = this.tokens?.issuer === issuer && this.tokens.clientId === clientId ? this.tokens.scope : '';
+    const mergedScope = [...new Set((scope + ' ' + (previousScope || '')).trim().split(/\s+/).filter(Boolean))].join(' ');
     this.pending = {clientId, redirectURI: redirect.href, issuer: this.metadata.issuer, state, verifier, created: Date.now(), scope: mergedScope};
     const url = httpURL(this.metadata.authorization_endpoint);
     for (const [key, value] of Object.entries({response_type: 'code', client_id: clientId, redirect_uri: redirect.href, resource: this.resource.resource, state, code_challenge: challenge, code_challenge_method: 'S256', ...(mergedScope ? {scope: mergedScope} : {})})) url.searchParams.set(key, value);
@@ -87,25 +99,33 @@ export class McpOAuth {
     this.pending = null;
     if (callback.searchParams.has('error')) throw new McpError(-32001, 'Authorization was declined or failed.');
     const code = callback.searchParams.get('code'); if (!code || code.length > 10000) throw new McpError(-32001, 'OAuth response has no valid code.');
+    this.epoch++; this.tokens = null; this.refreshing = null;
     return this.tokenRequest({grant_type: 'authorization_code', code, client_id: pending.clientId, redirect_uri: pending.redirectURI, code_verifier: pending.verifier, resource: this.resource.resource}, pending);
   }
   async tokenRequest(values, binding) {
     const epoch = this.epoch, issuer = this.metadata.issuer;
     const result = await this.json(this.metadata.token_endpoint, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams(values)});
-    if (epoch !== this.epoch || this.metadata.issuer !== issuer || binding.issuer !== issuer) throw new McpError(-32001, 'OAuth credentials were cleared or the issuer changed.');
+    this.assertCurrent(epoch, issuer);
+    const refresh = values.grant_type === 'refresh_token';
+    if (binding.issuer !== issuer || refresh && this.tokens !== binding) throw new McpError(-32001, 'OAuth credentials were cleared or superseded.');
     if (typeof result.access_token !== 'string' || !result.access_token || /[\r\n]/.test(result.access_token) || String(result.token_type).toLowerCase() !== 'bearer') throw new McpError(-32001, 'Issuer returned an invalid bearer token.');
-    this.tokens = {accessToken: result.access_token, refreshToken: result.refresh_token || this.tokens?.refreshToken, scope: result.scope ?? binding.scope, expires: typeof result.expires_in === 'number' ? Date.now() + result.expires_in * 1000 : Infinity, clientId: binding.clientId, issuer: binding.issuer}; return this.tokens.accessToken;
+    if (result.refresh_token !== undefined && (typeof result.refresh_token !== 'string' || !result.refresh_token || /[\r\n]/.test(result.refresh_token)) || result.expires_in !== undefined && (typeof result.expires_in !== 'number' || !Number.isFinite(result.expires_in) || result.expires_in < 0) || result.scope !== undefined && typeof result.scope !== 'string') throw new McpError(-32001, 'Issuer returned invalid token metadata.');
+    // Only refresh-token rotation may inherit a refresh token from the same grant.
+    this.tokens = {accessToken: result.access_token, refreshToken: result.refresh_token ?? (refresh ? binding.refreshToken : undefined), scope: result.scope ?? binding.scope, expires: typeof result.expires_in === 'number' ? Date.now() + result.expires_in * 1000 : Infinity, clientId: binding.clientId, issuer: binding.issuer}; return this.tokens.accessToken;
   }
   async accessToken() {
     if (!this.tokens) return '';
     if (this.tokens.issuer !== this.metadata?.issuer) { this.clear(); throw new McpError(-32001, 'OAuth issuer changed. Sign in again.'); }
     if (Date.now() >= this.tokens.expires - 30000) {
       if (!this.tokens.refreshToken) throw new McpError(-32001, 'OAuth access token expired. Sign in again.');
-      if (!this.refreshing) this.refreshing = this.tokenRequest({grant_type: 'refresh_token', refresh_token: this.tokens.refreshToken, client_id: this.tokens.clientId, resource: this.resource.resource}, this.tokens).finally(() => { this.refreshing = null; });
+      if (!this.refreshing) {
+        const refreshing = this.tokenRequest({grant_type: 'refresh_token', refresh_token: this.tokens.refreshToken, client_id: this.tokens.clientId, resource: this.resource.resource}, this.tokens).finally(() => { if (this.refreshing === refreshing) this.refreshing = null; });
+        this.refreshing = refreshing;
+      }
       await this.refreshing;
     }
     if (!this.tokens) throw new McpError(-32001, 'OAuth credentials were cleared.');
     return this.tokens.accessToken;
   }
-  clear() { this.epoch++; this.pending = null; this.tokens = null; this.registration = null; }
+  clear() { this.epoch++; this.pending = null; this.tokens = null; this.registration = null; this.refreshing = null; }
 }

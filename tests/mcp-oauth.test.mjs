@@ -67,3 +67,49 @@ test('MCP config: HTTP/SSE import is explicit, stdio is not executed, credential
   const exported = JSON.stringify(exportMcpConfig([{name: 'remote', url: 'https://server.example/mcp?access_token=secret&workspace=demo', token: 'secret', type: 'auto'}])); assert.ok(!exported.includes('secret')); assert.ok(exported.includes('workspace=demo'));
   assert.throws(() => parseMcpConfig({mcpServers: {x: {url: 'javascript:alert(1)'}}})); assert.throws(() => parseMcpConfig({servers: {x: {url: 'https://x.test', type: 'unsafe'}}}));
 });
+
+test('MCP OAuth: a new code grant never inherits a previous account refresh token', async () => {
+  const {oauth, issuer} = oauthFixture({token: () => Response.json({access_token: 'new-account', token_type: 'Bearer', expires_in: 3600})});
+  await oauth.discover(); oauth.tokens = {accessToken: 'old-account', refreshToken: 'old-account-refresh', issuer, clientId: 'old-client', scope: 'old-account-scope', expires: Infinity};
+  const url = new URL(await oauth.begin({clientId: 'new-client', redirectURI: 'https://app.example/callback'}));
+  assert.equal(url.searchParams.get('scope'), 'read');
+  await oauth.complete('https://app.example/callback?code=new&state=' + url.searchParams.get('state') + '&iss=' + encodeURIComponent(issuer));
+  assert.equal(oauth.tokens.accessToken, 'new-account'); assert.equal(oauth.tokens.refreshToken, undefined);
+  oauth.tokens.expires = 0; await assert.rejects(oauth.accessToken(), /expired/);
+});
+test('MCP OAuth: refresh without rotation preserves only the active account refresh token', async () => {
+  const {oauth, issuer} = oauthFixture({token: () => Response.json({access_token: 'renewed', token_type: 'Bearer', expires_in: 3600})});
+  await oauth.discover(); oauth.tokens = {accessToken: 'old', refreshToken: 'same-account-refresh', issuer, clientId: 'client', scope: 'read', expires: 0};
+  assert.equal(await oauth.accessToken(), 'renewed'); assert.equal(oauth.tokens.refreshToken, 'same-account-refresh');
+});
+test('MCP OAuth: clear cancels pending discovery and registration, even when fetch ignores abort', async () => {
+  const {oauth} = oauthFixture(); const original = oauth.fetch; let release;
+  oauth.fetch = (...args) => new Promise(resolve => { release = () => resolve(original(...args)); });
+  const discovery = oauth.discover(); oauth.clear(); release(); await assert.rejects(discovery, /cleared|superseded/); assert.equal(oauth.metadata, undefined);
+  oauth.fetch = original; await oauth.discover(); oauth.fetch = (...args) => new Promise(resolve => { release = () => resolve(original(...args)); });
+  const registration = oauth.register('https://app.example/callback'); oauth.clear(); release(); await assert.rejects(registration, /cleared|superseded/); assert.equal(oauth.registration, null);
+});
+test('MCP OAuth: clear and newer sign-in prevent pending PKCE operations from restoring state', async () => {
+  const {oauth} = oauthFixture(); await oauth.discover();
+  const first = oauth.begin({clientId: 'client', redirectURI: 'https://app.example/callback'}); oauth.clear();
+  await assert.rejects(first, /cleared|superseded/); assert.equal(oauth.pending, null);
+  const stale = oauth.begin({clientId: 'older', redirectURI: 'https://app.example/callback'});
+  const latest = oauth.begin({clientId: 'latest', redirectURI: 'https://app.example/callback'});
+  await assert.rejects(stale, /cleared|superseded/); await latest; assert.equal(oauth.pending.clientId, 'latest');
+});
+test('MCP OAuth: stale refresh cannot replace a completed new sign-in', async () => {
+  let release; let tokenCalls = 0;
+  const {oauth, issuer} = oauthFixture({token: () => ++tokenCalls === 1 ? new Promise(resolve => { release = resolve; }) : Response.json({access_token: 'new-account', token_type: 'Bearer', expires_in: 3600})});
+  await oauth.discover(); oauth.tokens = {accessToken: 'old', refreshToken: 'old-refresh', issuer, clientId: 'client', scope: 'read', expires: 0};
+  const oldRefresh = oauth.accessToken(); const rejected = assert.rejects(oldRefresh, /cleared|superseded/);
+  const url = new URL(await oauth.begin({clientId: 'client', redirectURI: 'https://app.example/callback'}));
+  await oauth.complete('https://app.example/callback?code=new&state=' + url.searchParams.get('state') + '&iss=' + encodeURIComponent(issuer));
+  release(Response.json({access_token: 'old-account-renewed', token_type: 'Bearer', expires_in: 3600}));
+  await rejected; assert.equal(await oauth.accessToken(), 'new-account'); assert.equal(oauth.tokens.refreshToken, undefined);
+});
+test('MCP OAuth: malformed refresh tokens and expiry metadata are rejected', async () => {
+  for (const extra of [{refresh_token: {}}, {refresh_token: ''}, {refresh_token: 'bad\r\ntoken'}, {expires_in: -1}, {expires_in: '3600'}, {scope: ['read']}]) {
+    const {oauth, issuer} = oauthFixture({token: () => Response.json({access_token: 'token', token_type: 'Bearer', ...extra})}); await oauth.discover();
+    await assert.rejects(oauth.tokenRequest({grant_type: 'authorization_code'}, {issuer, clientId: 'client'}), /invalid/i); assert.equal(oauth.tokens, null);
+  }
+});

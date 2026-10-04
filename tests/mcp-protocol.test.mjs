@@ -154,3 +154,29 @@ test('MCP: pagination cycles fail, invalid tool annotations are isolated, explic
   let calls = 0; const client = new McpClient({exchange: async message => { calls++; return {jsonrpc: '2.0', id: message.id, result: {resultType: 'complete', tools: [], nextCursor: 'same'}}; }}, {approveTool: async () => false}); client.connected = true;
   await assert.rejects(client.listTools(), /pagination/); const count = calls; await assert.rejects(client.callTool('x'), /declined/); assert.equal(calls, count); await client.close();
 });
+
+test('MCP: closing an in-flight discovery cannot resurrect a connection', async () => {
+  let release; const client = new McpClient({exchange: message => new Promise(resolve => { release = () => resolve({jsonrpc: '2.0', id: message.id, result: {resultType: 'complete', supportedVersions: [MCP_VERSION], capabilities: {}}}); })});
+  const connecting = client.connect(); const cancelled = assert.rejects(connecting, error => error.code === -32800);
+  await client.close(); release(); await cancelled; assert.equal(client.connected, false); assert.equal(client.controllers.size, 0);
+});
+test('MCP: a cancelled request rejects promptly even when its transport ignores cancellation', async () => {
+  let release; const client = new McpClient({exchange: message => new Promise(resolve => { release = () => resolve({jsonrpc: '2.0', id: message.id, result: {resultType: 'complete'}}); })}); client.connected = true;
+  const controller = new AbortController(), request = client.request('ping', {}, {signal: controller.signal}); controller.abort();
+  const result = await Promise.race([request.then(() => 'accepted', error => error.code), new Promise(resolve => setTimeout(() => resolve('hung'), 100))]);
+  release(); await request.catch(() => {}); await client.close(); assert.equal(result, -32800);
+});
+test('MCP: cancellation can dismiss an uncooperative remote-tool consent handler', async () => {
+  const client = new McpClient({exchange: () => { throw new Error('Must not contact server'); }}, {approveTool: () => new Promise(() => {})}); client.connected = true;
+  const controller = new AbortController(), request = client.callTool('test', {}, {signal: controller.signal}); controller.abort();
+  const result = await Promise.race([request.then(() => 'accepted', error => error.code), new Promise(resolve => setTimeout(() => resolve('hung'), 100))]);
+  await client.close(); assert.equal(result, -32800);
+});
+test('MCP: mirrored headers reject metadata downgrade and absent recognized parameters', () => {
+  assert.throws(() => validateHeaders({jsonrpc: '2.0', id: 1, method: 'ping'}, {'MCP-Protocol-Version': MCP_VERSION, 'Mcp-Method': 'ping'}), error => error.code === -32020);
+  assert.throws(() => validateHeaders({jsonrpc: '2.0', id: 1, method: 'ping'}, {'MCP-Protocol-Version': '2099-01-01'}), error => error.code === -32022);
+  const message = modern(1, 'tools/call', {name: 'test', arguments: {}}), schema = {type: 'object', properties: {tenant: {type: 'string', 'x-mcp-header': 'Tenant'}}};
+  const headers = requestHeaders(message, MCP_VERSION, schema); headers['Mcp-Param-Tenant'] = 'not-in-body';
+  assert.throws(() => validateHeaders(message, headers, schema), error => error.code === -32020);
+  delete headers['Mcp-Param-Tenant']; headers['Mcp-Param-Unknown'] = 'forward-compatible'; validateHeaders(message, headers, schema);
+});

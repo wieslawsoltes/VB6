@@ -5,7 +5,7 @@ import {HttpTransport, LegacySseTransport, McpHttpError} from './transports.js';
 export class McpClient {
   constructor(transport, {name = 'vb6-studio', version = '0.6.0', timeout = 30000, handlers = {}, onNotification = () => {}, onActivity = () => {}, approveTool, era = 'auto'} = {}) {
     this.transport = transport; this.info = {name, version}; this.timeout = timeout; this.handlers = handlers; this.onNotification = onNotification; this.onActivity = onActivity; this.approveTool = approveTool; this.era = era;
-    this.sequence = 0; this.prefix = randomToken(8); this.version = MCP_VERSION; this.connected = false; this.controllers = new Set(); this.toolSchemas = new Map();
+    this.lifetime = new AbortController(); this.sequence = 0; this.prefix = randomToken(8); this.version = MCP_VERSION; this.connected = false; this.controllers = new Set(); this.toolSchemas = new Map();
   }
   capabilities() {
     const result = {};
@@ -25,9 +25,10 @@ export class McpClient {
     } catch (error) { return errorResponse(message.id, error); }
   }
   async connect({signal} = {}) {
-    checkAbort(signal); this.connectSignal = signal;
+    checkAbort(signal); checkAbort(this.lifetime.signal);
     if (this.connected) return this.serverInfo;
-    if (this.connecting) return this.connecting;
+    if (this.connecting) return awaitAbort(this.connecting, signal);
+    this.connectSignal = signal;
     this.connecting = this.establish();
     try { return await this.connecting; } finally { this.connecting = null; }
   }
@@ -39,7 +40,7 @@ export class McpClient {
         if (!Array.isArray(discovery.supportedVersions) || !discovery.supportedVersions.includes(MCP_VERSION)) throw new McpError(-32022, 'Server discovery does not offer a supported modern version.');
         this.serverCapabilities = discovery.capabilities || {}; this.serverInfo = discovery._meta?.[MCP_META + 'serverInfo'] || {}; this.connected = true; return discovery;
       } catch (error) {
-        if (this.era === 'modern' || error.code === -32800 || error.status === 401 || error.status === 403 || [-32020,-32021].includes(error.code)) throw error;
+        if (this.lifetime.signal.aborted || this.era === 'modern' || error.code === -32800 || error.status === 401 || error.status === 403 || [-32020,-32021].includes(error.code)) throw error;
         if (error.code === -32022 && !error.data?.supported?.some(v => MCP_LEGACY_VERSIONS.includes(v))) throw error;
         const legacyError = error instanceof McpHttpError ? [400,404,405].includes(error.status) : [-32601,-32000,-32600].includes(error.code);
         if (!legacyError && error.code !== -32022) throw error;
@@ -58,7 +59,7 @@ export class McpClient {
     }
     if (!MCP_LEGACY_VERSIONS.includes(result.protocolVersion)) throw new McpError(-32022, 'Unsupported negotiated protocol version.');
     this.version = result.protocolVersion; this.serverInfo = result.serverInfo; this.serverCapabilities = result.capabilities || {};
-    await this.notify('notifications/initialized'); this.connected = true;
+    await awaitAbort(this.notify('notifications/initialized'), this.lifetime.signal); checkAbort(this.lifetime.signal); checkAbort(this.connectSignal); this.connected = true;
     if (this.transport instanceof HttpTransport && !(this.transport instanceof LegacySseTransport)) {
       this.listener?.abort(); this.listener = new AbortController();
       this.transport.listen(message => this.receive(message), {version: this.version, signal: this.listener.signal, onError: error => this.activity({direction: 'event', method: 'notifications', error: error.message})});
@@ -67,18 +68,20 @@ export class McpClient {
   activity(value) { try { this.onActivity(value); } catch {} }
   async notify(method, params = {}) { return this.transport.exchange({jsonrpc: '2.0', method, params}, {version: this.version, signal: AbortSignal.timeout(3000), onMessage: value => this.receive(value)}); }
   async request(method, params = {}, {signal, timeout = this.timeout, duringConnect = false, schema, onNotification} = {}) {
+    checkAbort(this.lifetime.signal);
     if (!duringConnect && !this.connected) throw new McpError(-32000, 'Connect to an MCP server first.');
     if (!isRecord(params)) throw new McpError(-32602, 'MCP parameters must be an object.');
     if (this.controllers.size >= 128) throw new McpError(-32000, 'Too many pending MCP requests.');
     const controller = new AbortController(), abort = () => controller.abort(); this.controllers.add(controller);
-    signal?.addEventListener('abort', abort, {once: true}); if (signal?.aborted) controller.abort();
+    signal?.addEventListener('abort', abort, {once: true}); this.lifetime.signal.addEventListener('abort', abort, {once: true}); if (signal?.aborted || this.lifetime.signal.aborted) controller.abort();
     const timer = timeout > 0 ? setTimeout(abort, timeout) : null, start = Date.now(); let activeId;
     try {
       let next = {...params};
       for (let round = 0; round < 16; round++) {
         checkAbort(controller.signal); activeId = this.prefix + ':' + (++this.sequence);
         const bodyParams = this.version === MCP_VERSION ? {...next, _meta: {...next._meta, [MCP_META + 'protocolVersion']: this.version, [MCP_META + 'clientInfo']: this.info, [MCP_META + 'clientCapabilities']: this.capabilities()}} : next;
-        const reply = await this.transport.exchange({jsonrpc: '2.0', id: activeId, method, params: bodyParams}, {version: this.version, signal: controller.signal, schema, onMessage: message => { try { onNotification?.(message); } catch {} return this.receive(message, {signal: controller.signal}); }});
+        const reply = await awaitAbort(this.transport.exchange({jsonrpc: '2.0', id: activeId, method, params: bodyParams}, {version: this.version, signal: controller.signal, schema, onMessage: message => { try { onNotification?.(message); } catch {} return this.receive(message, {signal: controller.signal}); }}), controller.signal);
+        checkAbort(controller.signal);
         if (!reply || checkMessage(reply) !== 'response' || reply.id !== activeId) throw new McpError(-32600, 'Invalid MCP response.');
         if (reply.error) throw new McpError(reply.error.code, reply.error.message, reply.error.data);
         const result = reply.result;
@@ -101,9 +104,9 @@ export class McpClient {
     } catch (error) {
       if (controller.signal.aborted && this.version !== MCP_VERSION && activeId && method !== 'initialize') this.notify('notifications/cancelled', {requestId: activeId, reason: 'Client cancelled or timed out.'}).catch(() => {});
       this.activity({direction: 'out', method, milliseconds: Date.now() - start, error: controller.signal.aborted ? 'Cancelled or timed out.' : error.message});
-      if (error.sessionExpired && !duringConnect) { this.connected = false; await this.initializeLegacy().catch(() => {}); }
+      if (error.sessionExpired && !duringConnect && !controller.signal.aborted && !this.lifetime.signal.aborted) { this.connected = false; await this.initializeLegacy().catch(() => {}); }
       if (controller.signal.aborted) throw new McpError(-32800, 'MCP request cancelled or timed out.'); throw error;
-    } finally { if (timer) clearTimeout(timer); signal?.removeEventListener('abort', abort); this.controllers.delete(controller); }
+    } finally { if (timer) clearTimeout(timer); signal?.removeEventListener('abort', abort); this.lifetime.signal.removeEventListener('abort', abort); this.controllers.delete(controller); }
   }
   async list(method, field, options = {}) {
     const result = [], cursors = new Set(); let cursor;
@@ -125,7 +128,9 @@ export class McpClient {
     return valid;
   }
   async callTool(name, args = {}, options = {}) {
-    if (this.approveTool && !await this.approveTool({name, arguments: args, endpoint: this.transport.url || 'local'}, options)) throw new McpError(-32001, 'Tool invocation declined.');
+    const signal = options.signal ? AbortSignal.any([options.signal, this.lifetime.signal]) : this.lifetime.signal; checkAbort(signal);
+    options = {...options, signal};
+    if (this.approveTool && !await awaitAbort(this.approveTool({name, arguments: args, endpoint: this.transport.url || 'local'}, options), signal)) throw new McpError(-32001, 'Tool invocation declined.');
     checkAbort(options.signal);
     if (!this.toolSchemas.has(name)) await this.listTools(options);
     if (!this.toolSchemas.has(name)) throw new McpError(-32602, 'Tool is not present in the validated catalog.');
@@ -143,5 +148,5 @@ export class McpClient {
   }
   subscribeResource(uri, options) { return this.request('resources/subscribe', {uri}, options); }
   unsubscribeResource(uri, options) { return this.request('resources/unsubscribe', {uri}, options); }
-  async close() { this.connected = false; this.listener?.abort(); for (const controller of this.controllers) controller.abort(); try { await this.transport.close?.(this.version); } catch (error) { this.activity({direction: 'event', method: 'disconnect', error: error.message}); } finally { this.toolSchemas.clear(); } }
+  async close() { this.lifetime.abort(); this.connected = false; this.listener?.abort(); for (const controller of this.controllers) controller.abort(); try { await this.transport.close?.(this.version); } catch (error) { this.activity({direction: 'event', method: 'disconnect', error: error.message}); } finally { this.toolSchemas.clear(); } }
 }

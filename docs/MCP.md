@@ -280,3 +280,29 @@ Primary references:
 - [Authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 - [Subscriptions](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/subscriptions)
 - [Legacy transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+
+## Lifecycle and integration guarantees
+
+OAuth code grants never inherit another sign-in's refresh token. Only an active
+refresh grant can retain its own token when the issuer does not rotate it. Clearing
+credentials or starting a newer sign-in invalidates pending discovery, registration,
+PKCE and token results. Invalid refresh-token, scope and expiry metadata is rejected.
+
+Disconnect cancels pending requests and tool approvals, even when a custom transport
+or approval handler ignores its abort signal. A closed `McpClient` is terminal;
+create a new client/transport to reconnect (the Connections UI does this). Cancelled
+mutations are not automatically replayed. The companion validates modern mirrored
+headers, rejects unsupported legacy HTTP versions and malformed UTF-8, and handles
+child-process pipe failure without an unhandled exception. Its owner/client tokens
+are not inherited by unrelated stdio servers; explicit per-server `env` remains
+available for the trusted desktop relay configuration above.
+
+The MCP modeless window can be detached using the normal **Float in Browser Window**
+caption command. Clients and project state remain in the owner IDE; approval dialogs
+follow the active window. Closing the detached window returns the tool to the IDE.
+
+`npm run test:mcp:browser` navigates the standalone file, linked HTTP and HTTPS hosted
+subpaths, and the localhost companion-served app. The HTTPS fixture uses an ephemeral
+self-signed certificate trusted only by its test context; it does not disable CORS,
+mixed-content checks or local-network policy. The `--opaque` mode is UI-only and is
+never substituted for deployment validation in CI.

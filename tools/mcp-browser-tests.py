@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MCP UI + real transport integration. Build first.
 
-Default: real file://, hosted subpath and localhost navigations with genuine CORS.
+Default: real file://, HTTP/HTTPS hosted subpaths and localhost navigations with genuine CORS.
 --opaque: UI-only set_content for policy-restricted environments; explicitly does
 not claim deployment or browser network validation. CI never uses --opaque.
 """
@@ -63,7 +63,9 @@ def revision(page):
     return page.evaluate('vb6Studio.mcp.adapter.revision')
 
 def exercise(browser, mode, info):
-    context = browser.new_context(viewport={'width': 1500, 'height': 1020}, accept_downloads=True)
+    # Trust only the fixture's ephemeral self-signed TLS certificate. CORS and
+    # browser mixed-content/local-network policies remain enabled.
+    context = browser.new_context(viewport={'width': 1500, 'height': 1020}, accept_downloads=True, ignore_https_errors=mode == 'https-hosted-subpath')
     page = context.new_page()
     page.set_default_timeout(12000)
     errors, requests = [], []
@@ -72,11 +74,11 @@ def exercise(browser, mode, info):
     if mode == 'opaque':
         page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text())
     else:
-        page.goto((ROOT / 'dist/VB6-Studio-Web.html').as_uri() if mode == 'file' else info['hosted'] if mode == 'hosted-subpath' else info['url'] + '/')
+        page.goto((ROOT / 'dist/VB6-Studio-Web.html').as_uri() if mode == 'file' else info['hosted'] if mode == 'hosted-subpath' else info['httpsHosted'] if mode == 'https-hosted-subpath' else info['url'] + '/')
     page.wait_for_function('!!globalThis.vb6Studio?.mcp')
     check(not page.evaluate('vb6Studio.mcp.adapter.enabled'), 'Sharing must be disabled on load')
     check(page.evaluate('vb6Studio.mcp.clients.size') == 0)
-    check(all(url.startswith(info['hosted']) or url.startswith(info['url']) for url in requests) if mode != 'opaque' else not requests, 'App boot must not contact outside services')
+    check(all(url.startswith(info['hosted']) or url.startswith(info['httpsHosted']) or url.startswith(info['url']) for url in requests) if mode != 'opaque' else not requests, 'App boot must not contact outside services')
     if mode == 'file':
         check(not requests, 'The single file must not fetch startup assets')
     page.evaluate("vb6Studio.loadProject(VB6StudioAPI.newProject('McpBrowser'))")
@@ -92,6 +94,25 @@ def exercise(browser, mode, info):
     page.get_by_role('button', name='Tools', exact=True).click()
     finished(page)
     check(page.locator('[aria-label="MCP catalog"] option').count() == 18)
+    detached_checked = False
+    if mode != 'opaque':
+        # The MCP modeless tool keeps live clients and popup-local approval UI.
+        with page.expect_popup() as opened:
+            page.locator('.mdi-active').get_by_label('Float document in Browser Window', exact=True).click()
+        popup = opened.value
+        popup.on('pageerror', lambda error: errors.append(str(error)))
+        popup.wait_for_selector('.browser-window-root[data-ready="true"]')
+        index = page.evaluate("vb6Studio.documents.tools.get('tool:mcp').catalog.findIndex(t=>t.name==='vb6.module.write')")
+        popup.get_by_label('MCP catalog', exact=True).select_option(str(index))
+        popup.get_by_label('MCP arguments', exact=True).fill(json.dumps({'module': 'Form1', 'code': 'popup-denied', 'expectedRevision': revision(page)}))
+        popup.get_by_role('button', name='Invoke selected', exact=True).click()
+        popup.get_by_role('dialog', name='Allow MCP operation?', exact=True).get_by_role('button', name='Deny', exact=True).click()
+        finished(page)
+        check('declined' in popup.get_by_label('MCP result', exact=True).inner_text())
+        popup.close()
+        page.wait_for_function('vb6Studio.browserWindows.windows.size===0')
+        check(page.evaluate('vb6Studio.mcp.clients.size') == 1)
+        detached_checked = True
     original = page.evaluate('vb6Studio.project.modules[0].code')
     project = invoke(page, 'vb6.project.get', {})
     check(project['structuredContent']['name'] == 'McpBrowser')
@@ -186,7 +207,7 @@ def exercise(browser, mode, info):
         page.wait_for_function('!!globalThis.vb6Studio?.mcp')
         check(not page.evaluate('vb6Studio.mcp.adapter.enabled') and page.evaluate('vb6Studio.mcp.clients.size') == 0, 'Reload must revoke sharing and credentials')
     context.close()
-    return {'tools': 18, 'approval': 'deny/allow/revoke', 'undo': True, 'runtime': 'paused/evaluate/stop', 'network': network_checked, 'reload': mode != 'opaque'}
+    return {'tools': 18, 'approval': 'deny/allow/revoke', 'undo': True, 'runtime': 'paused/evaluate/stop', 'network': network_checked, 'detachedWindow': detached_checked, 'reload': mode != 'opaque'}
 
 fixture = None
 try:
@@ -200,7 +221,7 @@ try:
             options['executable_path'] = os.environ['CHROMIUM_PATH']
         browser = playwright.chromium.launch(**options)
         version = browser.version
-        for mode in (['opaque'] if args.opaque else ['file', 'hosted-subpath', 'localhost']):
+        for mode in (['opaque'] if args.opaque else ['file', 'hosted-subpath', 'https-hosted-subpath', 'localhost']):
             started = time.monotonic()
             try:
                 details = exercise(browser, mode, info)

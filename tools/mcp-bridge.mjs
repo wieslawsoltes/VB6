@@ -17,7 +17,7 @@ async function body(req) {
   if (!req.headers['content-type']?.toLowerCase().startsWith('application/json')) throw Object.assign(new Error('Use application/json.'), {status: 415});
   const chunks = []; let size = 0;
   for await (const chunk of req) { size += chunk.length; if (size > MCP_LIMIT) throw Object.assign(new Error('Request is too large.'), {status: 413}); chunks.push(chunk); }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new McpError(-32700, 'Invalid JSON.'); }
+  try { return JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(Buffer.concat(chunks))); } catch { throw new McpError(-32700, 'Invalid JSON.'); }
 }
 
 /** Loopback-only authenticated relay. The browser remains the owner of project state and consent. */
@@ -63,7 +63,8 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
     }
     if (req.method !== 'POST') return json(res, 405, {});
     const message = await body(req), kind = checkMessage(message), modern = message.params?._meta?.[MCP_META + 'protocolVersion'] !== undefined;
-    if (modern) validateHeaders(message, req.headers);
+    validateHeaders(message, req.headers);
+    if (modern && kind === 'response') return json(res, 400, errorResponse(message.id, new McpError(-32600, 'Modern HTTP clients cannot send JSON-RPC responses.')));
     const key = modern ? 'modern:' + alias : sessionId || (message.method === 'initialize' ? randomToken() : null);
     if (!key) return json(res, 400, errorResponse(message.id, new McpError(-32000, 'Initialize this stdio gateway first.')));
     gateway = gateways.get(key);
@@ -144,7 +145,8 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
       }
       if (req.method !== 'POST') return json(res, 405, {});
       const message = await body(req), kind = checkMessage(message), modern = message.params?._meta?.[MCP_META + 'protocolVersion'] !== undefined;
-      if (modern) validateHeaders(message, req.headers);
+      validateHeaders(message, req.headers);
+    if (modern && kind === 'response') return json(res, 400, errorResponse(message.id, new McpError(-32600, 'Modern HTTP clients cannot send JSON-RPC responses.')));
       if (!modern && sid && !session) return json(res, 404, errorResponse(message.id, new McpError(-32000, 'MCP session expired.')));
       if (!modern && message.method === 'initialize' && !sid) {
         if (sessions.size >= 64) return json(res, 503, {}); const id = randomToken(); session = {id, seen: Date.now()}; sessions.set(id, session); res.setHeader('MCP-Session-Id', id);

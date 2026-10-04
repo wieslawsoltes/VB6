@@ -11,7 +11,10 @@ export class NodeStdioTransport {
     if (this.closed) throw new McpError(-32000, 'Stdio transport is closed.');
     if (this.child) return;
     const {command, args, env, cwd} = this.config;
-    this.child = spawn(command, args, {cwd, env: {...process.env, ...env}, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
+    // Companion credentials are not ambient credentials for unrelated child servers.
+    // Explicit per-server env entries remain available for trusted stdio relay setup.
+    const inherited = {...process.env}; delete inherited.VB6_MCP_TOKEN; delete inherited.VB6_MCP_OWNER_TOKEN;
+    this.child = spawn(command, args, {cwd, env: {...inherited, ...env}, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
     let buffer = ''; this.child.stdout.setEncoding('utf8'); this.child.stderr.setEncoding('utf8');
     this.child.stderr.on('data', text => { try { this.onStderr(text.slice(0, 4000)); } catch {} });
     this.child.stdout.on('data', text => {
@@ -21,6 +24,7 @@ export class NodeStdioTransport {
         if (buffer.length > MCP_LIMIT) throw new McpError(-32600, 'Stdio message exceeds size limit.');
       } catch (error) { this.fail(error); }
     });
+    this.child.stdin.on('error', () => this.fail(new McpError(-32000, 'Configured stdio server stdin write failed.')));
     this.child.on('error', () => this.fail(new McpError(-32000, 'Configured stdio server could not start.')));
     this.child.on('exit', () => this.fail(new McpError(-32000, 'Configured stdio server exited.')));
   }

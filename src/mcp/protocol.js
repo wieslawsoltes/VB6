@@ -98,8 +98,13 @@ export function requestHeaders(message, version, schema) {
 }
 export function validateHeaders(message, headers, schema) {
   const actual = new Headers(headers), version = message.params?._meta?.[MCP_META + 'protocolVersion'];
+  const headerVersion = actual.get('MCP-Protocol-Version');
+  if ((version !== undefined || headerVersion === MCP_VERSION) && headerVersion !== version) throw new McpError(-32020, 'Missing or mismatched MCP-Protocol-Version header.');
+  if (headerVersion && !MCP_VERSIONS.includes(headerVersion)) throw new McpError(-32022, 'Unsupported protocol version.', {supported: MCP_VERSIONS, requested: headerVersion});
   if (version !== MCP_VERSION) return;
   const expected = requestHeaders(message, version, schema);
+  const recognized = ['Mcp-Name', ...(schema && message.method === 'tools/call' ? headerAnnotations(schema).map(entry => 'Mcp-Param-' + entry.name) : [])];
+  for (const name of recognized) if (actual.has(name) && !Object.hasOwn(expected, name)) throw new McpError(-32020, 'Header has no corresponding body value: ' + name);
   for (const [name, value] of Object.entries(expected)) {
     if (!name.toLowerCase().startsWith('mcp')) continue;
     if (decodeHeader(actual.get(name)) !== decodeHeader(value)) throw new McpError(-32020, 'Missing or mismatched ' + name + ' header.');
