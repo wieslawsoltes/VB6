@@ -21,7 +21,11 @@
     "mcp:stdio": "node tools/mcp-stdio.mjs",
     "test:mcp": "node --test tests/mcp-*.test.mjs",
     "test:mcp:browser": "python tools/mcp-browser-tests.py",
-    "test:windows": "python tools/browser-windows-tests.py"
+    "test:windows": "python tools/browser-windows-tests.py",
+    "build:windows": "node tools/build-windows.mjs",
+    "build:classic": "node tools/build-classic.mjs",
+    "test:native": "node --test tests/native-*.test.mjs",
+    "fixtures:native": "node tools/native-fixtures.mjs"
   },
   "engines": {
     "node": ">=22"

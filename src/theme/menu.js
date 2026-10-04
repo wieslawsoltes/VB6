@@ -19,7 +19,7 @@ class MenuSession {
   constructor(items,x,y,onCommand,options){
     this.document=options.document||uiDocument(options.opener);this.view=this.document.defaultView;this.onCommand=onCommand;this.options=options;this.previous=options.opener||this.document.activeElement;this.stack=[];
     this.theme=options.theme||getTheme(options.opener||this.document.activeElement).id;
-    this.abort=new AbortController();this.open(items,x,y,null);
+    this.abort=new this.view.AbortController();this.open(items,x,y,null);
     this.document.addEventListener('pointerdown',e=>{if(!this.stack.some(s=>s.node.contains(e.target))&&!options.opener?.closest('[role=menubar]')?.contains(e.target))closeMenu(false);},{capture:true,signal:this.abort.signal});
     this.view.addEventListener('blur',()=>closeMenu(false),{signal:this.abort.signal});
     this.view.addEventListener('resize',()=>closeMenu(false),{signal:this.abort.signal});

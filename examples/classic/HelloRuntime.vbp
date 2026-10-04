@@ -1,0 +1,17 @@
+Type=Exe
+Form=Form1.frm
+Module=MainModule; Main.bas
+Startup="Sub Main"
+Name="HelloRuntime"
+Title="Classic VB6 Runtime"
+ExeName32="HelloRuntime.exe"
+MajorVer=1
+MinorVer=0
+RevisionVer=0
+AutoIncrementVer=0
+CompilationType=0
+OptimizationType=0
+Unattended=0
+Retained=0
+ThreadPerObject=0
+MaxNumberOfThreads=1

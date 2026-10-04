@@ -202,8 +202,383 @@ const FINANCIAL_FUNCTIONS = Object.freeze({FV,PV,PMT,IPMT,PPMT,NPER,RATE,NPV,IRR
 return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FINANCIAL_SIGNATURES,FINANCIAL_FUNCTIONS};
 })();
 
-/* calendar.js */
+/* ../theme/theme.js */
 __modules[2]=(()=>{
+
+/** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
+ * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
+ */
+const classic = {
+  face:'#c0c0c0', light:'#ffffff', highlight:'#dfdfdf', shadow:'#808080', dark:'#000000',
+  text:'#000000', title:'#000080', titleEnd:'#000080', titleText:'#ffffff',
+  inactive:'#808080', inactiveEnd:'#808080', inactiveText:'#c0c0c0',
+  window:'#ffffff', windowText:'#000000', selection:'#000080', selectionText:'#ffffff',
+  workspace:'#808080', desktop:'#008080', gray:'#808080', info:'#ffffe1', infoText:'#000000',
+  link:'#0000ff', keyword:'#000080', comment:'#008000', breakpoint:'#800000', execution:'#ffff00'
+};
+const profile = (id, name, colors) => Object.freeze({id, name, colors:Object.freeze(colors)});
+const THEMES = Object.freeze({
+  classic:profile('classic','Windows Classic',classic),
+  standard:profile('standard','Windows Standard (2000)',{...classic,face:'#d4d0c8',highlight:'#e9e7e3',dark:'#404040',title:'#0a246a',titleEnd:'#a6caf0',inactiveEnd:'#c0c0c0',selection:'#0a246a'}),
+  contrast:profile('contrast','High Contrast Black',{...classic,face:'#000000',light:'#ffffff',highlight:'#ffffff',shadow:'#c0c0c0',dark:'#ffffff',text:'#ffffff',inactive:'#000000',inactiveEnd:'#000000',inactiveText:'#ffffff',window:'#000000',windowText:'#ffffff',selection:'#800080',selectionText:'#ffffff',workspace:'#000000',desktop:'#000000',gray:'#00ff00',info:'#000000',infoText:'#ffffff',link:'#ffff00',keyword:'#00ffff',comment:'#00ff00',breakpoint:'#ff0000'})
+});
+// Win32 GetSysColor indices. Reserved index 25 falls back to the button face.
+const SYSTEM_ROLES = Object.freeze(['face','desktop','title','inactive','face','window','dark','text','windowText','titleText','face','face','workspace','selection','selectionText','face','shadow','gray','text','inactiveText','light','dark','highlight','infoText','info','face','link','titleEnd','inactiveEnd','selection','face']);
+const SYSTEM_COLOR_NAMES = Object.freeze(['Scroll Bars','Desktop','Active Title Bar','Inactive Title Bar','Menu Bar','Window Background','Window Frame','Menu Text','Window Text','Title Bar Text','Active Border','Inactive Border','Application Workspace','Highlight','Highlight Text','Button Face','Button Shadow','Gray Text','Button Text','Inactive Caption Text','3D Highlight','3D Dark Shadow','3D Light','Info Text','Info Background']);
+function themeId(id) { return Object.hasOwn(THEMES,String(id)) ? String(id) : 'classic'; }
+function getTheme(element) {
+  return THEMES[themeId(typeof element === 'string' ? element : element?.closest?.('[data-vb-theme]')?.dataset.vbTheme || element?.ownerDocument?.documentElement?.dataset.vbTheme)];
+}
+function applyTheme(element, id) {
+  const value=themeId(id);element.dataset.vbTheme=value;
+  element.dispatchEvent(new CustomEvent('vb-theme-change',{bubbles:true,detail:{theme:value}}));return value;
+}
+function colorValue(value, fallback='#c0c0c0', theme='classic') {
+  if(typeof value==='string' && /^(#[\da-f]{3,8}|rgba?\(|hsla?\()/i.test(value))return value;
+  const n=Number(value);if(!Number.isFinite(n))return fallback;
+  const bits=n>>>0;
+  if(bits & 0x80000000) return (THEMES[themeId(theme)].colors[SYSTEM_ROLES[bits&0xff]]) || fallback;
+  return '#'+[bits&255,(bits>>>8)&255,(bits>>>16)&255].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+function cssColor(value,fallback='#c0c0c0') {
+  const bits=Number(value)>>>0;
+  return Number.isFinite(Number(value)) && bits&0x80000000 && SYSTEM_ROLES[bits&255]
+    ? `var(--vb-sys-${bits&255}, ${colorValue(value,fallback)})` : colorValue(value,fallback);
+}
+function fontFamily(name='MS Sans Serif') {
+  if(/^MS Sans Serif$/i.test(name))return '"MS Sans Serif", Tahoma, Arial, sans-serif';
+  if(/^MS Serif$/i.test(name))return '"MS Serif", "Times New Roman", serif';
+  // A quoted family cannot escape the declaration or turn into a URL.
+  return '"'+String(name).replace(/["\\\n\r]/g,'')+'", Tahoma, Arial, sans-serif';
+}
+const DEFAULT_APPEARANCE = Object.freeze({theme:'classic',windowMode:'hybrid',documentTabs:false,debugTabs:false,editorFont:'Courier New',editorSize:13,tooltips:true,procedureSeparators:true,autoIndent:true,autoListMembers:true,autoQuickInfo:true,autoDataTips:true,fullModule:true,margin:true,dragText:true,autoSyntaxCheck:true,requireVariableDeclaration:true,notifyStateLoss:false,largeToolbarIcons:false});
+function normalizeAppearance(value={}) {
+  return {...DEFAULT_APPEARANCE,windowMode:value.windowMode==='mdi'?'mdi':'hybrid',autoSyntaxCheck:value.autoSyntaxCheck!==false,requireVariableDeclaration:value.requireVariableDeclaration!==false,notifyStateLoss:value.notifyStateLoss===true,largeToolbarIcons:value.largeToolbarIcons===true,autoQuickInfo:value.autoQuickInfo!==false,autoDataTips:value.autoDataTips!==false,fullModule:value.fullModule!==false,margin:value.margin!==false,dragText:value.dragText!==false,codeColors:Object.fromEntries(Object.entries(value.codeColors||{}).filter(([key,color])=>['text','background','keyword','comment','selection','selectionText','breakpoint','execution'].includes(key)&&/^#[0-9a-f]{6}$/i.test(color))),theme:themeId(value.theme),documentTabs:value.documentTabs===true,debugTabs:value.debugTabs===true,editorFont:['Courier New','Consolas','monospace'].includes(value.editorFont)?value.editorFont:'Courier New',editorSize:[11,12,13,14,16,18,20].includes(Number(value.editorSize))?Number(value.editorSize):13,tooltips:value.tooltips!==false,procedureSeparators:value.procedureSeparators!==false,autoIndent:value.autoIndent!==false,autoListMembers:value.autoListMembers!==false};
+}
+
+return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,colorValue,cssColor,fontFamily,DEFAULT_APPEARANCE,normalizeAppearance};
+})();
+
+/* ../graphics/surface.js */
+__modules[3]=(()=>{
+const { colorValue, getTheme }=__modules[2];
+
+/** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
+const surfaces = new WeakMap();
+function refreshGraphicsSurfaces(root) { for (const canvas of root.querySelectorAll('canvas.graphics-surface')) surfaces.get(canvas)?.transferDocument(); }
+const sharedDevices = new WeakMap();
+function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
+function rgba(color,theme='classic'){const c=oleColor(color,'#c0c0c0',theme);return [parseInt(c.slice(1,3),16)/255,parseInt(c.slice(3,5),16)/255,parseInt(c.slice(5,7),16)/255,1];}
+async function getGPUDevice(view=globalThis) {
+  if(view.vb6NativeGPUUnavailable)return null;
+  if(view.vb6NativeGPUDevice)return view.vb6NativeGPUDevice;
+  const gpu=view.navigator?.gpu;if(!gpu)return null;
+  let pending=sharedDevices.get(view);
+  if(!pending){
+    pending=(async()=>{
+      try{
+        const adapter=await gpu.requestAdapter({powerPreference:'high-performance'});
+        if(!adapter)return null;
+        const device=await adapter.requestDevice();
+        device.lost.then(()=>{if(sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+        return device;
+      }catch{return null;}
+    })();
+    sharedDevices.set(view,pending);
+    pending.then(device=>{if(!device&&sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+  }
+  let timeout;
+  try{return await Promise.race([pending,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),3000))]);}
+  finally{clearTimeout(timeout);}
+}
+const SHADER=`struct Screen { size: vec2f, padding: vec2f };
+@group(0) @binding(0) var<uniform> screen: Screen;
+struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f };
+@vertex fn vs(@location(0) xy: vec2f, @location(1) color: vec4f) -> VertexOut {
+ var out: VertexOut; out.position = vec4f(xy.x / screen.size.x * 2.0 - 1.0, 1.0 - xy.y / screen.size.y * 2.0, 0.0, 1.0); out.color = color; return out;
+}
+@fragment fn fs(in: VertexOut) -> @location(0) vec4f { return in.color; }`;
+class GraphicsSurface {
+  constructor(container,{backend='auto',background=16777215,onBackend=()=>{}}={}){this.container=container;this.theme=getTheme(container).id;this.themeChanged=()=>{this.theme=getTheme(container).id;this.invalidate();};this.themeDocument=container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.requestedBackend=backend;this.backend='canvas2d';this.background=background;this.commands=[];this.onBackend=onBackend;this.dirty=false;this.disposed=false;this.width=1;this.height=1;this.canvas=container.ownerDocument.createElement('canvas');this.canvas.className='graphics-surface';this.canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';container.append(this.canvas);surfaces.set(this.canvas,this);this.context=this.canvas.getContext('2d');this.resizeObserver=new ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(container);this.resize();if(backend!=='canvas2d')this.gpuReady=this.initializeGPU();else onBackend('Canvas2D');}
+  releaseGPU(){
+    // A surface owns its buffers/context, never the window's shared device.
+    this.gpuGeneration=(this.gpuGeneration||0)+1;
+    this.vertexBuffer?.destroy();this.uniform?.destroy();this.gpuContext?.unconfigure();this.gpuCanvas?.remove();
+    this.vertexBuffer=this.uniform=this.gpuContext=this.gpuCanvas=this.pipeline=this.bindGroup=this.device=null;
+    this.bufferSize=0;this.backend='canvas2d';
+  }
+  async initializeGPU(){
+    const generation=this.gpuGeneration=(this.gpuGeneration||0)+1;
+    const document=this.container.ownerDocument,view=document.defaultView;
+    const current=()=>!this.disposed&&this.gpuGeneration===generation&&this.container.ownerDocument===document;
+    const device=await getGPUDevice(view);
+    if(!current())return false;
+    if(!device){this.gpuError='No WebGPU device became available';this.onBackend('Canvas2D');return false;}
+    let context,uniform;
+    try{
+      const canvas=document.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;
+      context=canvas.getContext('webgpu');if(!context)throw new Error('WebGPU canvas context unavailable in this window');
+      const format=view.navigator.gpu.getPreferredCanvasFormat();
+      const module=device.createShaderModule({code:SHADER});
+      const info=await module.getCompilationInfo();
+      if(!current())return false;
+      if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed: '+info.messages.filter(m=>m.type==='error').map(m=>m.message).join('; '));
+      let pipeline,bindGroup,validation;
+      device.pushErrorScope('validation');
+      try{
+        context.configure({device,format,alphaMode:'opaque',usage:view.GPUTextureUsage.RENDER_ATTACHMENT|view.GPUTextureUsage.COPY_SRC});
+        pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
+        uniform=device.createBuffer({size:16,usage:view.GPUBufferUsage.UNIFORM|view.GPUBufferUsage.COPY_DST});
+        bindGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:uniform}}]});
+      }finally{validation=await device.popErrorScope();}
+      if(validation)throw validation;
+      if(!current()){uniform.destroy();context.unconfigure();return false;}
+      Object.assign(this,{device,pipeline,uniform,bindGroup,gpuCanvas:canvas,gpuContext:context,gpuError:null});
+      this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';
+      device.lost.then(info=>{if(current()&&this.device===device){this.gpuError='WebGPU device lost: '+info.message;this.releaseGPU();this.onBackend('Canvas2D · device lost');this.invalidate();}});
+      this.resize();this.onBackend('WebGPU');return true;
+    }catch(error){
+      uniform?.destroy();context?.unconfigure();
+      if(current()){this.gpuError=error.message||String(error);this.releaseGPU();this.onBackend('Canvas2D');this.invalidate();}
+      return false;
+    }
+  }
+  scheduleResize(){
+    if(this.disposed||this.resizeFrame)return;
+    this.resizeWindow=this.container.ownerDocument.defaultView;
+    this.resizeFrame=this.resizeWindow.requestAnimationFrame(()=>{this.resizeFrame=0;this.resize();});
+  }
+  transferDocument(){
+    if(this.disposed)return;
+    const changed=this.themeDocument!==this.container.ownerDocument;
+    this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.resizeFrame=0;
+    this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);
+    (this.frameWindow||this.themeDocument.defaultView).cancelAnimationFrame(this.raf);this.dirty=false;
+    this.themeDocument=this.container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);
+    this.theme=getTheme(this.container).id;this.resizeObserver.disconnect();
+    this.resizeObserver=new this.themeDocument.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(this.container);
+    if(changed){this.releaseGPU();if(this.requestedBackend!=='canvas2d')this.gpuReady=this.initializeGPU();}
+    this.resize();
+  }
+  resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){const width=Math.max(1,Math.min(8192,Math.round(this.width*dpr))),height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;}this.dpr=dpr;this.invalidate();}
+  add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
+  text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}
+  clear(){this.commands=[];this.invalidate();}
+  setPicture(source){
+    if((source||'')===(this.pictureSource||''))return;this.pictureSource=source||'';this.picture=null;this.pictureError=null;
+    if(source){const image=new Image();image.onload=()=>{if(!this.disposed&&this.pictureSource===source){this.picture=image;this.invalidate();}};image.onerror=()=>{if(!this.disposed&&this.pictureSource===source){this.pictureError='Image decoding failed';this.invalidate();}};image.src=source;}
+    this.invalidate();
+  }
+  setGrid(spacing=8){this.grid=spacing;this.invalidate();}
+  invalidate(){if(this.dirty||this.disposed)return;this.dirty=true;this.frameWindow=this.container.ownerDocument.defaultView;this.raf=this.frameWindow.requestAnimationFrame(()=>{this.dirty=false;this.render();});}
+  vertices(){const out=[];const triangle=(p1,p2,p3,c)=>{for(const p of [p1,p2,p3])out.push(p[0],p[1],...c);};const rect=(x,y,w,h,c)=>{triangle([x,y],[x+w,y],[x,y+h],c);triangle([x+w,y],[x+w,y+h],[x,y+h],c);};const line=(x1,y1,x2,y2,width,c)=>{const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy)||1,ox=-dy/length*width/2,oy=dx/length*width/2;triangle([x1+ox,y1+oy],[x2+ox,y2+oy],[x1-ox,y1-oy],c);triangle([x1-ox,y1-oy],[x2+ox,y2+oy],[x2-ox,y2-oy],c);};
+    if(this.grid){const c=rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
+    for(const cmd of this.commands){const c=rgba(cmd.color,this.theme),a=cmd.coords;if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else if(cmd.kind==='line')line(...a,cmd.width,c);else if(cmd.kind==='rect'){const x=Math.min(a[0],a[2]),y=Math.min(a[1],a[3]),w=Math.abs(a[2]-a[0]),h=Math.abs(a[3]-a[1]);if(cmd.fill)rect(x,y,w,h,c);else{rect(x,y,w,cmd.width,c);rect(x,y+h-cmd.width,w,cmd.width,c);rect(x,y,cmd.width,h,c);rect(x+w-cmd.width,y,cmd.width,h,c);}}else if(cmd.kind==='circle'){const n=Math.min(180,Math.max(16,Math.round(a[2]*2))),[cx,cy,r]=a;for(let i=0;i<n;i++){const a1=i/n*Math.PI*2,a2=(i+1)/n*Math.PI*2,p1=[cx+Math.cos(a1)*r,cy+Math.sin(a1)*r],p2=[cx+Math.cos(a2)*r,cy+Math.sin(a2)*r];if(cmd.fill)triangle([cx,cy],p1,p2,c);else line(...p1,...p2,cmd.width,c);}}}return new Float32Array(out);}
+  render(){if(this.disposed)return;const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
+    if(this.backend==='canvas2d'||this.picture){ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);if(this.picture)ctx.drawImage(this.picture,0,0);if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}for(const cmd of this.commands){const a=cmd.coords;ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}}}
+    for(const cmd of this.commands)if(cmd.kind==='text'){ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...cmd.coords);}
+  }
+  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.releaseGPU();this.canvas.remove();}
+}
+
+return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
+})();
+
+/* native-windows.js */
+__modules[4]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[3];
+
+/** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
+function installNativeHost(host, bridge = globalThis.vb6Native) {
+  if (!bridge || bridge.version !== 1 || host.nativeWindows) return false;
+  const document = host.container.ownerDocument, browser = document.defaultView;
+  const forms = new Map(), dialogs = new Map();
+  let disposed = false;
+  const report = error => host.send('output', { text: 'Native window: ' + error.message, newline: true });
+  const command = (id, name, value) => bridge.windowCommand(id, name, value).catch(report);
+  function open(options) {
+    const id = bridge.prepareWindow(options);
+    const win = browser.open('about:blank', id, 'popup');
+    if (!win) throw new Error('Native window creation was denied');
+    const doc = win.document;
+    if(browser.vb6NativeGPUUnavailable)win.vb6NativeGPUUnavailable=browser.vb6NativeGPUUnavailable;
+    for (const name of ['data-vb-theme', 'lang']) {
+      const value = document.documentElement.getAttribute(name); if (value) doc.documentElement.setAttribute(name, value);
+    }
+    for (const node of document.querySelectorAll('style,link[rel="stylesheet"]')) doc.head.append(node.cloneNode(true));
+    const style = doc.createElement('style');
+    style.textContent = `html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--vb-face,#c0c0c0)}
+      .vb-form[data-native-window]{position:relative!important;inset:0!important;transform:none!important;border:0!important;box-shadow:none!important;width:100%!important;height:100%!important}
+      .vb-form[data-native-window]:not([hidden]){display:flex!important;flex-direction:column}
+      .vb-form[data-native-window]>.vb-form-title,.vb-form[data-native-window]>.vb-form-grip{display:none!important}
+      .vb-form[data-native-window]>.vb-form-content{flex:1 1 auto;min-height:0;width:100%!important;height:0!important}
+      .vb-form[data-native-window]>.vb-form-menu{flex:none}`;
+    doc.head.append(style);
+    return { id, win, doc };
+  }
+  function size(form) {
+    const p = form.props;
+    return { x: Number(p.Left || 0) / 15, y: Number(p.Top || 0) / 15,
+      width: Math.max(96, Number(p.ClientWidth ?? p.Width ?? 9000) / 15),
+      height: Math.max(64, Number(p.ClientHeight ?? p.Height ?? 6000) / 15 + (form.menuBar.hidden ? 0 : 19)) };
+  }
+  function attach(form) {
+    if (form.MDIChild) return; // MDI children stay inside their native MDI parent, not independent taskbar windows.
+    const record = { form, id: null, win: null, state: Number(form.props.WindowState) || 0, focused: false, applying: false };
+    const refresh = form.refresh.bind(form), show = form.Show.bind(form), hide = form.Hide.bind(form), dispose = form.dispose.bind(form);
+    form.movedByUser = true;
+    form.nativeWindow = record;
+    function sync() {
+      if (!record.id || record.applying) return;
+      const title = String(form.props.Caption || form.model.name), bounds = size(form), signature = JSON.stringify(bounds);
+      if (title !== record.title) { record.title = title; record.win.document.title = title; command(record.id, 'title', title); }
+      if (signature !== record.bounds && record.state === 0) { record.bounds = signature; command(record.id, 'bounds', bounds); }
+    }
+    function ensure() {
+      if (record.id) return;
+      Object.assign(record, open({ ...size(form), title: String(form.props.Caption || form.model.name),
+        borderStyle: Number(form.props.BorderStyle ?? 2), minButton: form.props.MinButton !== 0,
+        maxButton: form.props.MaxButton !== 0, controlBox: form.props.ControlBox !== 0 }));
+      forms.set(record.id, record);
+      form.node.setAttribute('data-native-window', record.id);
+      record.doc.body.append(form.node);
+      refreshGraphicsSurfaces(form.node);
+      form.cancelWindowInteraction?.();
+      record.doc.addEventListener('focusin', () => {
+        if (form.shown && !record.focused) command(record.id, 'focus');
+      });
+      record.doc.addEventListener('keydown', event => { if (event.altKey && event.key === 'F4') { event.preventDefault(); requestClose(record); } });
+      sync();
+    }
+    form.refresh = () => { refresh(); sync(); };
+    form.Show = () => { ensure(); record.focused = true; show(); command(record.id, 'show'); command(record.id, 'state', record.state); command(record.id, 'focus'); };
+    form.Hide = () => { hide(); if (record.id) { command(record.id, 'modal', false); command(record.id, 'hide'); } };
+    Object.defineProperty(form, 'WindowState', { configurable: true, get: () => record.state, set: value => {
+      value = Number(value); if (!Number.isInteger(value) || value < 0 || value > 2) throw new Error('Invalid WindowState');
+      record.state = value; form.props.WindowState = value; if (record.id) command(record.id, 'state', value);
+    } });
+    form.toggleMinimize = () => { form.WindowState = record.state === 1 ? 0 : 1; };
+    form.toggleMaximize = () => { form.WindowState = record.state === 2 ? 0 : 2; };
+    form.showMenu = async (items, anchor, all) => {
+      ensure();
+      const map = entries => entries.filter(m => m.properties.Visible !== 0).map(m => m.properties.Caption === '-' ? null : {
+        id: m.name, label: String(m.properties.Caption || m.name), enabled: m.properties.Enabled !== 0,
+        checked: m.properties.Checked ? true : undefined,
+        items: all.some(c => c.parent === m.name) ? map(all.filter(c => c.parent === m.name)) : undefined
+      });
+      try {
+        const rect = anchor.getBoundingClientRect();
+        const selected = await bridge.popupMenu(record.id, map(items), { x: rect.left, y: rect.bottom });
+        if (selected && !form.disposed) await form.vm.dispatch(form.instance, selected + '_Click', []);
+      } catch (error) { report(error); }
+    };
+    form.dispose = () => {
+      if (form.disposed) return;
+      if (record.id) { forms.delete(record.id); command(record.id, 'destroy'); }
+      dispose();
+    };
+    record.ensure = ensure;
+  }
+  async function requestClose(record) {
+    if (record.closing) return;
+    record.closing = true;
+    try { await host.vm.requestUnload(record.form.instance); }
+    catch (error) { report(error); }
+    finally {
+      record.closing = false;
+      if (record.id && !record.form.disposed) await command(record.id, 'cancel-close');
+      // Unload releases the VB lifetime, not the reusable JS form object. Hide alone never exits.
+      if (!record.form.instance.loaded && ![...host.vm.formInstances].some(instance => instance.loaded)) {
+        setTimeout(() => { if (!disposed && ![...host.vm.formInstances].some(instance => instance.loaded)) command('controller', 'quit'); }, 0);
+      }
+    }
+  }
+  const unsubscribe = bridge.onWindowEvent(event => {
+    if (disposed) return;
+    const dialog = dialogs.get(event.id);
+    if (dialog) { if (event.type === 'close-request' || event.type === 'closed') dialog.finish(''); return; }
+    const record = forms.get(event.id); if (!record) return;
+    if (event.type === 'close-request') { requestClose(record); return; }
+    if (event.type === 'closed') { forms.delete(event.id); record.id = null; record.win = null; return; }
+    if (event.type !== 'state') return;
+    const form = record.form, previous = size(form), p = form.props;
+    record.applying = true;
+    record.state = event.state; p.WindowState = event.state;
+    if (event.state !== 1) {
+      p.Left = event.bounds.x * 15; p.Top = event.bounds.y * 15;
+      p.ClientWidth = Math.max(1, event.contentBounds.width) * 15;
+      p.ClientHeight = Math.max(1, event.contentBounds.height - (form.menuBar.hidden ? 0 : form.menuBar.offsetHeight || 19)) * 15;
+      record.bounds = JSON.stringify(size(form)); form.refresh(); form.surface?.resize();
+      host.mdi?.layout();
+    }
+    record.applying = false;
+    if (event.focused) {
+      const active = form.type === 'MDIForm' && form.mdiController?.active?.shown ? form.mdiController.active.instance : form.instance;
+      host.vm.library.get('screen').ActiveForm = active;
+    }
+    if (event.focused !== record.focused) { record.focused = event.focused; form.event(event.focused ? 'Activate' : 'Deactivate'); }
+    const current = size(form);
+    if (current.width !== previous.width || current.height !== previous.height) form.event('Resize', [], true);
+  });
+  const createForm = host.createForm.bind(host);
+  host.createForm = async (...args) => { const form = await createForm(...args); attach(form); return form; };
+  const beginModal = host.beginModal.bind(host);
+  host.beginModal = form => {
+    const end = beginModal(form), record = form.nativeWindow;
+    if (record) { record.ensure(); command(record.id, 'modal', true); }
+    return () => { end(); if (record?.id && forms.has(record.id)) command(record.id, 'modal', false); };
+  };
+  host.msgBox = async (message, style = 0, title = host.project.name) => {
+    const groups = [[['OK', 1]], [['OK', 1], ['Cancel', 2]], [['Abort', 3], ['Retry', 4], ['Ignore', 5]],
+      [['Yes', 6], ['No', 7], ['Cancel', 2]], [['Yes', 6], ['No', 7]], [['Retry', 4], ['Cancel', 2]]];
+    const buttons = groups[Number(style) & 7] || groups[0];
+    const index = await bridge.messageBox({ title: String(title), message: String(message), buttons: buttons.map(b => b[0]),
+      defaultId: Math.min(buttons.length - 1, (Number(style) >> 8) & 3), cancelId: buttons.some(b => b[1] === 2) ? buttons.findIndex(b => b[1] === 2) : buttons.length - 1,
+      type: ({ 16: 'error', 32: 'question', 48: 'warning', 64: 'info' })[Number(style) & 112] || 'none' });
+    return buttons[index]?.[1] ?? 2;
+  };
+  host.inputBox = (message, title = host.project.name, initial = '') => new Promise((resolve, reject) => {
+    let record;
+    try {
+      record = open({ title: String(title), width: 460, height: 170, borderStyle: 3, minButton: false, maxButton: false });
+      const doc = record.doc, cover = doc.createElement('form'), label = doc.createElement('label'), input = doc.createElement('input');
+      const ok = doc.createElement('button'), cancel = doc.createElement('button');
+      label.textContent = String(message); label.htmlFor = 'native-input'; input.id = 'native-input'; input.value = String(initial);
+      ok.textContent = 'OK'; ok.type = 'submit'; cancel.textContent = 'Cancel'; cancel.type = 'button';
+      cover.style.cssText = 'display:grid;gap:12px;padding:16px;font:14px sans-serif';
+      cover.append(label, input, ok, cancel); doc.body.append(cover);
+      let done = false;
+      record.finish = value => { if (done) return; done = true; dialogs.delete(record.id); host.dialogs = host.dialogs.filter(d => d !== cover); command(record.id, 'destroy'); resolve(value); };
+      cover.vbFinish = () => record.finish(''); host.dialogs.push(cover); dialogs.set(record.id, record);
+      cover.addEventListener('submit', event => { event.preventDefault(); record.finish(input.value); });
+      cancel.addEventListener('click', () => record.finish(''));
+      doc.addEventListener('keydown', event => { if (event.key === 'Escape') record.finish(''); });
+      command(record.id, 'modal', true); command(record.id, 'show'); input.focus(); input.select();
+    } catch (error) { if (record?.id) command(record.id, 'destroy'); reject(error); }
+  });
+  host.modal = async (title, body, buttons = [{caption:'OK',value:1}], input = null, options = {}) => {
+    if (input != null) return host.inputBox(body, title, input);
+    const index = await bridge.messageBox({title:String(title),message:String(body),buttons:buttons.map(b=>String(b.caption)),
+      defaultId:options.defaultIndex ?? 0,cancelId:buttons.length-1,type:'info'});
+    return buttons[index]?.value;
+  };
+  host.openFile = props => bridge.openFile({ title: String(props?.DialogTitle || 'Open') });
+  host.saveFile = (name, data) => bridge.saveFile(String(name), typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data));
+  const send = host.send.bind(host);
+  host.send = (type, data) => { send(type, data); if (type === 'stopped' && !disposed) command('controller','quit'); };
+  const start = host.start.bind(host);
+  host.start = async () => { const result = await start(); if (!forms.size) await command('controller', 'show'); return result; };
+  const dispose = host.dispose.bind(host);
+  host.dispose = () => { if (disposed) return; disposed = true; dispose(); for (const d of dialogs.values()) d.finish(''); unsubscribe(); };
+  host.nativeWindows = { forms, dialogs };
+  return true;
+}
+
+return {installNativeHost};
+})();
+
+/* calendar.js */
+__modules[5]=(()=>{
 const {VBError}=__modules[0];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
@@ -281,8 +656,8 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ../language/lexer.js */
-__modules[3]=(()=>{
-const {asDate}=__modules[2];
+__modules[6]=(()=>{
+const {asDate}=__modules[5];
 const {VBError}=__modules[0];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
@@ -375,7 +750,7 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* decimal.js */
-__modules[4]=(()=>{
+__modules[7]=(()=>{
 const {VBError}=__modules[0];
 
 const MAX=(1n<<96n)-1n;
@@ -453,7 +828,7 @@ return {VBDecimal};
 })();
 
 /* ../core/window-context.js */
-__modules[5]=(()=>{
+__modules[8]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -485,8 +860,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ../core/core.js */
-__modules[6]=(()=>{
-const {uiDocument}=__modules[5];
+__modules[9]=(()=>{
+const {uiDocument}=__modules[8];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -548,11 +923,11 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* values.js */
-__modules[7]=(()=>{
-const {VBDecimal}=__modules[4];
-const {asDate,dateToSerial}=__modules[2];
-const { VBError }=__modules[3];
-const { lower }=__modules[6];
+__modules[10]=(()=>{
+const {VBDecimal}=__modules[7];
+const {asDate,dateToSerial}=__modules[5];
+const { VBError }=__modules[6];
+const { lower }=__modules[9];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -745,9 +1120,9 @@ return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterface
 })();
 
 /* binary-codec.js */
-__modules[8]=(()=>{
-const {VBError}=__modules[3];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[7];
+__modules[11]=(()=>{
+const {VBError}=__modules[6];
+const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[10];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -843,9 +1218,9 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* ../project/frx.js */
-__modules[9]=(()=>{
-const {VBError}=__modules[3];
-const {encodeANSI,decodeANSI}=__modules[8];
+__modules[12]=(()=>{
+const {VBError}=__modules[6];
+const {encodeANSI,decodeANSI}=__modules[11];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -936,9 +1311,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[10]=(()=>{
-const {VBError}=__modules[3];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[9];
+__modules[13]=(()=>{
+const {VBError}=__modules[6];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[12];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -1030,11 +1405,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[11]=(()=>{
-const {VBError}=__modules[3];
-const {VBArray,bankersRound,numeric}=__modules[7];
-const {normalizeResources,decodeStringTable}=__modules[10];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[9];
+__modules[14]=(()=>{
+const {VBError}=__modules[6];
+const {VBArray,bankersRound,numeric}=__modules[10];
+const {normalizeResources,decodeStringTable}=__modules[13];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[12];
 
 
 
@@ -1064,65 +1439,8 @@ class ResourceStore {
 return {ResourceStore};
 })();
 
-/* ../theme/theme.js */
-__modules[12]=(()=>{
-
-/** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
- * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
- */
-const classic = {
-  face:'#c0c0c0', light:'#ffffff', highlight:'#dfdfdf', shadow:'#808080', dark:'#000000',
-  text:'#000000', title:'#000080', titleEnd:'#000080', titleText:'#ffffff',
-  inactive:'#808080', inactiveEnd:'#808080', inactiveText:'#c0c0c0',
-  window:'#ffffff', windowText:'#000000', selection:'#000080', selectionText:'#ffffff',
-  workspace:'#808080', desktop:'#008080', gray:'#808080', info:'#ffffe1', infoText:'#000000',
-  link:'#0000ff', keyword:'#000080', comment:'#008000', breakpoint:'#800000', execution:'#ffff00'
-};
-const profile = (id, name, colors) => Object.freeze({id, name, colors:Object.freeze(colors)});
-const THEMES = Object.freeze({
-  classic:profile('classic','Windows Classic',classic),
-  standard:profile('standard','Windows Standard (2000)',{...classic,face:'#d4d0c8',highlight:'#e9e7e3',dark:'#404040',title:'#0a246a',titleEnd:'#a6caf0',inactiveEnd:'#c0c0c0',selection:'#0a246a'}),
-  contrast:profile('contrast','High Contrast Black',{...classic,face:'#000000',light:'#ffffff',highlight:'#ffffff',shadow:'#c0c0c0',dark:'#ffffff',text:'#ffffff',inactive:'#000000',inactiveEnd:'#000000',inactiveText:'#ffffff',window:'#000000',windowText:'#ffffff',selection:'#800080',selectionText:'#ffffff',workspace:'#000000',desktop:'#000000',gray:'#00ff00',info:'#000000',infoText:'#ffffff',link:'#ffff00',keyword:'#00ffff',comment:'#00ff00',breakpoint:'#ff0000'})
-});
-// Win32 GetSysColor indices. Reserved index 25 falls back to the button face.
-const SYSTEM_ROLES = Object.freeze(['face','desktop','title','inactive','face','window','dark','text','windowText','titleText','face','face','workspace','selection','selectionText','face','shadow','gray','text','inactiveText','light','dark','highlight','infoText','info','face','link','titleEnd','inactiveEnd','selection','face']);
-const SYSTEM_COLOR_NAMES = Object.freeze(['Scroll Bars','Desktop','Active Title Bar','Inactive Title Bar','Menu Bar','Window Background','Window Frame','Menu Text','Window Text','Title Bar Text','Active Border','Inactive Border','Application Workspace','Highlight','Highlight Text','Button Face','Button Shadow','Gray Text','Button Text','Inactive Caption Text','3D Highlight','3D Dark Shadow','3D Light','Info Text','Info Background']);
-function themeId(id) { return Object.hasOwn(THEMES,String(id)) ? String(id) : 'classic'; }
-function getTheme(element) {
-  return THEMES[themeId(typeof element === 'string' ? element : element?.closest?.('[data-vb-theme]')?.dataset.vbTheme || element?.ownerDocument?.documentElement?.dataset.vbTheme)];
-}
-function applyTheme(element, id) {
-  const value=themeId(id);element.dataset.vbTheme=value;
-  element.dispatchEvent(new CustomEvent('vb-theme-change',{bubbles:true,detail:{theme:value}}));return value;
-}
-function colorValue(value, fallback='#c0c0c0', theme='classic') {
-  if(typeof value==='string' && /^(#[\da-f]{3,8}|rgba?\(|hsla?\()/i.test(value))return value;
-  const n=Number(value);if(!Number.isFinite(n))return fallback;
-  const bits=n>>>0;
-  if(bits & 0x80000000) return (THEMES[themeId(theme)].colors[SYSTEM_ROLES[bits&0xff]]) || fallback;
-  return '#'+[bits&255,(bits>>>8)&255,(bits>>>16)&255].map(v=>v.toString(16).padStart(2,'0')).join('');
-}
-function cssColor(value,fallback='#c0c0c0') {
-  const bits=Number(value)>>>0;
-  return Number.isFinite(Number(value)) && bits&0x80000000 && SYSTEM_ROLES[bits&255]
-    ? `var(--vb-sys-${bits&255}, ${colorValue(value,fallback)})` : colorValue(value,fallback);
-}
-function fontFamily(name='MS Sans Serif') {
-  if(/^MS Sans Serif$/i.test(name))return '"MS Sans Serif", Tahoma, Arial, sans-serif';
-  if(/^MS Serif$/i.test(name))return '"MS Serif", "Times New Roman", serif';
-  // A quoted family cannot escape the declaration or turn into a URL.
-  return '"'+String(name).replace(/["\\\n\r]/g,'')+'", Tahoma, Arial, sans-serif';
-}
-const DEFAULT_APPEARANCE = Object.freeze({theme:'classic',windowMode:'hybrid',documentTabs:false,debugTabs:false,editorFont:'Courier New',editorSize:13,tooltips:true,procedureSeparators:true,autoIndent:true,autoListMembers:true,autoQuickInfo:true,autoDataTips:true,fullModule:true,margin:true,dragText:true,autoSyntaxCheck:true,requireVariableDeclaration:true,notifyStateLoss:false,largeToolbarIcons:false});
-function normalizeAppearance(value={}) {
-  return {...DEFAULT_APPEARANCE,windowMode:value.windowMode==='mdi'?'mdi':'hybrid',autoSyntaxCheck:value.autoSyntaxCheck!==false,requireVariableDeclaration:value.requireVariableDeclaration!==false,notifyStateLoss:value.notifyStateLoss===true,largeToolbarIcons:value.largeToolbarIcons===true,autoQuickInfo:value.autoQuickInfo!==false,autoDataTips:value.autoDataTips!==false,fullModule:value.fullModule!==false,margin:value.margin!==false,dragText:value.dragText!==false,codeColors:Object.fromEntries(Object.entries(value.codeColors||{}).filter(([key,color])=>['text','background','keyword','comment','selection','selectionText','breakpoint','execution'].includes(key)&&/^#[0-9a-f]{6}$/i.test(color))),theme:themeId(value.theme),documentTabs:value.documentTabs===true,debugTabs:value.debugTabs===true,editorFont:['Courier New','Consolas','monospace'].includes(value.editorFont)?value.editorFont:'Courier New',editorSize:[11,12,13,14,16,18,20].includes(Number(value.editorSize))?Number(value.editorSize):13,tooltips:value.tooltips!==false,procedureSeparators:value.procedureSeparators!==false,autoIndent:value.autoIndent!==false,autoListMembers:value.autoListMembers!==false};
-}
-
-return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,colorValue,cssColor,fontFamily,DEFAULT_APPEARANCE,normalizeAppearance};
-})();
-
 /* error-messages.js */
-__modules[13]=(()=>{
+__modules[15]=(()=>{
 const {VBError}=__modules[0];
 
 /** Invariant English descriptions for the errors produced by this runtime.
@@ -1157,9 +1475,9 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[14]=(()=>{
-const {VBError}=__modules[3];
-const {MISSING,VBArray,coerce,vbString}=__modules[7];
+__modules[16]=(()=>{
+const {VBError}=__modules[6];
+const {MISSING,VBArray,coerce,vbString}=__modules[10];
 
 
 const invalid=()=>{throw new VBError('Invalid procedure call or argument',5);};
@@ -1252,9 +1570,9 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[15]=(()=>{
+__modules[17]=(()=>{
 const {VBError}=__modules[0];
-const {MISSING,VBArray,numeric}=__modules[7];
+const {MISSING,VBArray,numeric}=__modules[10];
 const {FINANCIAL_FUNCTIONS}=__modules[1];
 
 
@@ -1283,7 +1601,7 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[16]=(()=>{
+__modules[18]=(()=>{
 const {FINANCIAL_SIGNATURES}=__modules[1];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
@@ -1306,9 +1624,9 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* ../data/recordset.js */
-__modules[17]=(()=>{
-const {VBError}=__modules[3];
-const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[7];
+__modules[19]=(()=>{
+const {VBError}=__modules[6];
+const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[10];
 
 
 // Disconnected client-side provider. There is deliberately no SQL/COM/network fallback.
@@ -1417,7 +1735,7 @@ return {DisconnectedRecordset};
 })();
 
 /* constants.js */
-__modules[18]=(()=>{
+__modules[20]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -1444,19 +1762,19 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[19]=(()=>{
-const {errorDescription}=__modules[13];
-const {stringLibrary}=__modules[14];
-const {financialLibrary}=__modules[15];
-const {ResourceStore}=__modules[11];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[2];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[16];
-const {DisconnectedRecordset}=__modules[17];
-const {recordLength}=__modules[8];
-const { VBError }=__modules[3];
-const { lower }=__modules[6];
-const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[7];
-const {VB_CONSTANTS}=__modules[18];
+__modules[21]=(()=>{
+const {errorDescription}=__modules[15];
+const {stringLibrary}=__modules[16];
+const {financialLibrary}=__modules[17];
+const {ResourceStore}=__modules[14];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[5];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[18];
+const {DisconnectedRecordset}=__modules[19];
+const {recordLength}=__modules[11];
+const { VBError }=__modules[6];
+const { lower }=__modules[9];
+const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[10];
+const {VB_CONSTANTS}=__modules[20];
 
 
 
@@ -1535,9 +1853,9 @@ return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ../controls/rtf.js */
-__modules[20]=(()=>{
-const {VBError}=__modules[3];
-const {decodeANSI}=__modules[8];
+__modules[22]=(()=>{
+const {VBError}=__modules[6];
+const {decodeANSI}=__modules[11];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -1646,10 +1964,10 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* mdi.js */
-__modules[21]=(()=>{
-const {VBError}=__modules[3];
-const {el}=__modules[6];
-const {NOTHING}=__modules[7];
+__modules[23]=(()=>{
+const {VBError}=__modules[6];
+const {el}=__modules[9];
+const {NOTHING}=__modules[10];
 
 
 
@@ -1706,7 +2024,7 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../theme/icon-art.js */
-__modules[22]=(()=>{
+__modules[24]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -1864,8 +2182,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[23]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[22];
+__modules[25]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[24];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -1892,9 +2210,9 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../controls/dialog.js */
-__modules[24]=(()=>{
-const {el}=__modules[6];
-const {icon}=__modules[23];
+__modules[26]=(()=>{
+const {el}=__modules[9];
+const {icon}=__modules[25];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -1929,11 +2247,11 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[25]=(()=>{
+__modules[27]=(()=>{
 const {VBError}=__modules[0];
-const {lower}=__modules[6];
-const {VB_CONSTANTS}=__modules[18];
-const {VBCurrency,coerce,unary,binary}=__modules[7];
+const {lower}=__modules[9];
+const {VB_CONSTANTS}=__modules[20];
+const {VBCurrency,coerce,unary,binary}=__modules[10];
 
 
 
@@ -2045,8 +2363,8 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[26]=(()=>{
-const {VBError}=__modules[3];
+__modules[28]=(()=>{
+const {VBError}=__modules[6];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -2072,8 +2390,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[27]=(()=>{
-const {lower}=__modules[6];
+__modules[29]=(()=>{
+const {lower}=__modules[9];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -2116,8 +2434,8 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[28]=(()=>{
-const { tokenize, VBError }=__modules[3];
+__modules[30]=(()=>{
+const { tokenize, VBError }=__modules[6];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -2192,10 +2510,10 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[29]=(()=>{
-const { VBError }=__modules[3];
-const { parseExpression }=__modules[28];
-const { binary, unary, truth }=__modules[7];
+__modules[31]=(()=>{
+const { VBError }=__modules[6];
+const { parseExpression }=__modules[30];
+const { binary, unary, truth }=__modules[10];
 
 
 
@@ -2234,14 +2552,14 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[30]=(()=>{
-const {bindConstants}=__modules[25];
-const {defaultIdentifierType,addDefaultTypes}=__modules[26];
-const {validateInterfaces}=__modules[27];
-const { preprocess }=__modules[29];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[3];
-const { parseExpression, parseCall }=__modules[28];
-const { lower }=__modules[6];
+__modules[32]=(()=>{
+const {bindConstants}=__modules[27];
+const {defaultIdentifierType,addDefaultTypes}=__modules[28];
+const {validateInterfaces}=__modules[29];
+const { preprocess }=__modules[31];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[6];
+const { parseExpression, parseCall }=__modules[30];
+const { lower }=__modules[9];
 
 
 
@@ -2444,8 +2762,8 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* debug-evaluation.js */
-__modules[31]=(()=>{
-const {VBError}=__modules[3];
+__modules[33]=(()=>{
+const {VBError}=__modules[6];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
 class DebugEvaluationAbort extends VBError {
@@ -2473,11 +2791,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[32]=(()=>{
-const {VBError}=__modules[3];
-const {parseExpression}=__modules[28];
-const {lower}=__modules[6];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[7];
+__modules[34]=(()=>{
+const {VBError}=__modules[6];
+const {parseExpression}=__modules[30];
+const {lower}=__modules[9];
+const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[10];
 
 
 
@@ -2527,8 +2845,8 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[33]=(()=>{
-const {VBError}=__modules[3];
+__modules[35]=(()=>{
+const {VBError}=__modules[6];
 
 const key=ins=>{const {line,source,procedure,...rest}=ins;return JSON.stringify(rest);};
 const linearInstruction=ins=>['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename','fileClose','fileOpen','stringMid','stringAlign','return','dim'].includes(ins.op);
@@ -2553,9 +2871,9 @@ return {linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[34]=(()=>{
-const {instructionMap,linearInstruction}=__modules[33];
-const {VBError}=__modules[3];
+__modules[36]=(()=>{
+const {instructionMap,linearInstruction}=__modules[35];
+const {VBError}=__modules[6];
 
 
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
@@ -2615,9 +2933,9 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* filesystem.js */
-__modules[35]=(()=>{
-const { VBError }=__modules[3];
-const {encodeANSI,decodeANSI}=__modules[8];
+__modules[37]=(()=>{
+const { VBError }=__modules[6];
+const {encodeANSI,decodeANSI}=__modules[11];
 
 
 const MAX_FILE=20*1024*1024;
@@ -2681,20 +2999,20 @@ return {VirtualFileSystem};
 })();
 
 /* vm.js */
-__modules[36]=(()=>{
-const {errorDescription}=__modules[13];
-const {DebugEvaluationSession}=__modules[31];
-const {defaultIdentifierType}=__modules[26];
-const {DebugInspector}=__modules[32];
-const {planLiveEdit,nextStatementIndex}=__modules[34];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[8];
-const { Signal, lower, VERSION }=__modules[6];
-const { VBError }=__modules[3];
-const { parseExpression, parseCall }=__modules[28];
-const { compileProject }=__modules[30];
-const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[7];
-const { VirtualFileSystem }=__modules[35];
-const { createLibrary, MemoryRecordset }=__modules[19];
+__modules[38]=(()=>{
+const {errorDescription}=__modules[15];
+const {DebugEvaluationSession}=__modules[33];
+const {defaultIdentifierType}=__modules[28];
+const {DebugInspector}=__modules[34];
+const {planLiveEdit,nextStatementIndex}=__modules[36];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[11];
+const { Signal, lower, VERSION }=__modules[9];
+const { VBError }=__modules[6];
+const { parseExpression, parseCall }=__modules[30];
+const { compileProject }=__modules[32];
+const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[10];
+const { VirtualFileSystem }=__modules[37];
+const { createLibrary, MemoryRecordset }=__modules[21];
 
 
 
@@ -3194,8 +3512,8 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* ../controls/form-window.js */
-__modules[37]=(()=>{
-const {el}=__modules[6];
+__modules[39]=(()=>{
+const {el}=__modules[9];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
 function installFormWindow(form){
@@ -3220,9 +3538,9 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[38]=(()=>{
-const {el}=__modules[6];
-const {getTheme}=__modules[12];
+__modules[40]=(()=>{
+const {el}=__modules[9];
+const {getTheme}=__modules[2];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -3263,14 +3581,15 @@ class ClassicCombo {
     if(this.popup){this.preview=Number(p.ListIndex);this.layout();this.paint();}
   }
   open(simple=false){if(this.popup||(!simple&&(this.design||this.input.disabled)))return;
+    const document=this.node.ownerDocument,window=document.defaultView;
     const p=this.properties();this.popupSimple=simple;this.preview=Number(p.ListIndex);this.savedIndex=this.preview;
     this.popup=el('div',{id:this.id,class:'vb-combo-popup'+(simple?' simple-list':''),role:'listbox','aria-label':this.node.dataset.control+' items','data-vb-theme':getTheme(this.node).id});this.spacer=el('div',{class:'vb-combo-spacer'});this.popup.append(this.spacer);
-    Object.assign(this.popup.style,{font:getComputedStyle(this.input).font});(simple?this.node:document.body).append(this.popup);this.input.setAttribute('aria-controls',this.id);this.input.setAttribute('aria-expanded','true');this.popupAbort=new AbortController();const signal=this.popupAbort.signal;
+    Object.assign(this.popup.style,{font:getComputedStyle(this.input).font});(simple?this.node:document.body).append(this.popup);this.input.setAttribute('aria-controls',this.id);this.input.setAttribute('aria-expanded','true');this.popupAbort=new window.AbortController();const signal=this.popupAbort.signal;
     this.popup.addEventListener('scroll',()=>this.paint(),{signal});this.popup.addEventListener('pointerdown',e=>e.preventDefault(),{signal});
     document.addEventListener('pointerdown',e=>{if(!simple&&!this.node.contains(e.target)&&!this.popup?.contains(e.target))this.close(false);},{signal,capture:true});window.addEventListener('resize',()=>simple?this.layout():this.close(),{signal});
     window.addEventListener('blur',()=>{if(!simple)this.close(false);},{signal});this.layout();this.reveal();this.paint();
   }
-  layout(){if(!this.popup)return;const r=this.node.getBoundingClientRect();this.rowHeight=Math.max(15,Math.ceil(parseFloat(getComputedStyle(this.input).fontSize)||11)+3);this.spacer.style.height=this.items().length*this.rowHeight+'px';if(this.popupSimple)return;
+  layout(){if(!this.popup)return;const {innerWidth,innerHeight}=this.node.ownerDocument.defaultView;const r=this.node.getBoundingClientRect();this.rowHeight=Math.max(15,Math.ceil(parseFloat(getComputedStyle(this.input).fontSize)||11)+3);this.spacer.style.height=this.items().length*this.rowHeight+'px';if(this.popupSimple)return;
     const height=Math.min(8,Math.max(1,this.items().length))*this.rowHeight+4,width=Math.min(innerWidth-4,Math.max(80,r.width)),top=r.bottom+height>innerHeight-2&&r.top>=height?r.top-height:r.bottom;
     Object.assign(this.popup.style,{width:width+'px',height:Math.min(height,innerHeight-4)+'px',left:Math.max(2,Math.min(r.left,innerWidth-width-2))+'px',top:Math.max(2,Math.min(top,innerHeight-height-2))+'px'});
   }
@@ -3295,8 +3614,8 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[39]=(()=>{
-const {el}=__modules[6];
+__modules[41]=(()=>{
+const {el}=__modules[9];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
 function scrollbarGeometry(min,max,value,length,page=1){
@@ -3336,11 +3655,11 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/menu.js */
-__modules[40]=(()=>{
-const {uiDocument}=__modules[5];
-const {el}=__modules[6];
-const {icon}=__modules[23];
-const {getTheme}=__modules[12];
+__modules[42]=(()=>{
+const {uiDocument}=__modules[8];
+const {el}=__modules[9];
+const {icon}=__modules[25];
+const {getTheme}=__modules[2];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -3362,7 +3681,7 @@ class MenuSession {
   constructor(items,x,y,onCommand,options){
     this.document=options.document||uiDocument(options.opener);this.view=this.document.defaultView;this.onCommand=onCommand;this.options=options;this.previous=options.opener||this.document.activeElement;this.stack=[];
     this.theme=options.theme||getTheme(options.opener||this.document.activeElement).id;
-    this.abort=new AbortController();this.open(items,x,y,null);
+    this.abort=new this.view.AbortController();this.open(items,x,y,null);
     this.document.addEventListener('pointerdown',e=>{if(!this.stack.some(s=>s.node.contains(e.target))&&!options.opener?.closest('[role=menubar]')?.contains(e.target))closeMenu(false);},{capture:true,signal:this.abort.signal});
     this.view.addEventListener('blur',()=>closeMenu(false),{signal:this.abort.signal});
     this.view.addEventListener('resize',()=>closeMenu(false),{signal:this.abort.signal});
@@ -3424,62 +3743,11 @@ function showMenu(items,x,y,onCommand,options={}){closeMenu(false);active=new Me
 return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
-/* ../graphics/surface.js */
-__modules[41]=(()=>{
-const { colorValue, getTheme }=__modules[12];
-
-/** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
-const surfaces = new WeakMap();
-function refreshGraphicsSurfaces(root) { for (const canvas of root.querySelectorAll('canvas.graphics-surface')) surfaces.get(canvas)?.transferDocument(); }
-let sharedDevicePromise;
-function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
-function rgba(color,theme='classic'){const c=oleColor(color,'#c0c0c0',theme);return [parseInt(c.slice(1,3),16)/255,parseInt(c.slice(3,5),16)/255,parseInt(c.slice(5,7),16)/255,1];}
-async function getGPUDevice(){if(!globalThis.navigator?.gpu)return null;if(!sharedDevicePromise)sharedDevicePromise=(async()=>{try{const adapter=await navigator.gpu.requestAdapter({powerPreference:'low-power'});if(!adapter)return null;const device=await adapter.requestDevice();device.lost.then(()=>sharedDevicePromise=null);return device;}catch{return null;}})();let timeout;const device=await Promise.race([sharedDevicePromise,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),1800))]);clearTimeout(timeout);return device;}
-const SHADER=`struct Screen { size: vec2f, padding: vec2f };
-@group(0) @binding(0) var<uniform> screen: Screen;
-struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f };
-@vertex fn vs(@location(0) xy: vec2f, @location(1) color: vec4f) -> VertexOut {
- var out: VertexOut; out.position = vec4f(xy.x / screen.size.x * 2.0 - 1.0, 1.0 - xy.y / screen.size.y * 2.0, 0.0, 1.0); out.color = color; return out;
-}
-@fragment fn fs(in: VertexOut) -> @location(0) vec4f { return in.color; }`;
-class GraphicsSurface {
-  constructor(container,{backend='auto',background=16777215,onBackend=()=>{}}={}){this.container=container;this.theme=getTheme(container).id;this.themeChanged=()=>{this.theme=getTheme(container).id;this.invalidate();};this.themeDocument=container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.requestedBackend=backend;this.backend='canvas2d';this.background=background;this.commands=[];this.onBackend=onBackend;this.dirty=false;this.disposed=false;this.width=1;this.height=1;this.canvas=document.createElement('canvas');this.canvas.className='graphics-surface';this.canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';container.append(this.canvas);surfaces.set(this.canvas,this);this.context=this.canvas.getContext('2d');this.resizeObserver=new ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(container);this.resize();if(backend!=='canvas2d')this.initializeGPU();else onBackend('Canvas2D');}
-  async initializeGPU(){const device=await getGPUDevice();if(!device||this.disposed){this.onBackend('Canvas2D');return;}try{this.device=device;const canvas=document.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;const context=canvas.getContext('webgpu');if(!context)return;const format=navigator.gpu.getPreferredCanvasFormat();context.configure({device,format,alphaMode:'opaque'});device.pushErrorScope('validation');const module=device.createShaderModule({code:SHADER});const info=await module.getCompilationInfo();if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed');this.pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});this.uniform=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});this.bindGroup=device.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}}]});const error=await device.popErrorScope();if(error)throw error;if(this.disposed){this.uniform.destroy();return;}this.gpuCanvas=canvas;this.gpuContext=context;this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';device.lost.then(()=>{if(!this.disposed){this.backend='canvas2d';this.gpuCanvas?.remove();this.gpuCanvas=null;this.onBackend('Canvas2D · device lost');this.invalidate();}});this.resize();this.onBackend('WebGPU');}catch(error){this.backend='canvas2d';this.gpuCanvas?.remove();this.onBackend('Canvas2D');this.invalidate();}}
-  scheduleResize(){
-    if(this.disposed||this.resizeFrame)return;
-    this.resizeWindow=this.container.ownerDocument.defaultView;
-    this.resizeFrame=this.resizeWindow.requestAnimationFrame(()=>{this.resizeFrame=0;this.resize();});
-  }
-  transferDocument(){if(this.disposed)return;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.resizeFrame=0;this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);this.themeDocument=this.container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.themeDocument.defaultView).cancelAnimationFrame(this.raf);this.dirty=false;this.theme=getTheme(this.container).id;this.resizeObserver.disconnect();this.resizeObserver=new this.themeDocument.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(this.container);this.resize();}
-  resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){const width=Math.max(1,Math.min(8192,Math.round(this.width*dpr))),height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;}this.dpr=dpr;this.invalidate();}
-  add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
-  text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}
-  clear(){this.commands=[];this.invalidate();}
-  setPicture(source){
-    if((source||'')===(this.pictureSource||''))return;this.pictureSource=source||'';this.picture=null;this.pictureError=null;
-    if(source){const image=new Image();image.onload=()=>{if(!this.disposed&&this.pictureSource===source){this.picture=image;this.invalidate();}};image.onerror=()=>{if(!this.disposed&&this.pictureSource===source){this.pictureError='Image decoding failed';this.invalidate();}};image.src=source;}
-    this.invalidate();
-  }
-  setGrid(spacing=8){this.grid=spacing;this.invalidate();}
-  invalidate(){if(this.dirty||this.disposed)return;this.dirty=true;this.frameWindow=this.container.ownerDocument.defaultView;this.raf=this.frameWindow.requestAnimationFrame(()=>{this.dirty=false;this.render();});}
-  vertices(){const out=[];const triangle=(p1,p2,p3,c)=>{for(const p of [p1,p2,p3])out.push(p[0],p[1],...c);};const rect=(x,y,w,h,c)=>{triangle([x,y],[x+w,y],[x,y+h],c);triangle([x+w,y],[x+w,y+h],[x,y+h],c);};const line=(x1,y1,x2,y2,width,c)=>{const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy)||1,ox=-dy/length*width/2,oy=dx/length*width/2;triangle([x1+ox,y1+oy],[x2+ox,y2+oy],[x1-ox,y1-oy],c);triangle([x1-ox,y1-oy],[x2+ox,y2+oy],[x2-ox,y2-oy],c);};
-    if(this.grid){const c=rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
-    for(const cmd of this.commands){const c=rgba(cmd.color,this.theme),a=cmd.coords;if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else if(cmd.kind==='line')line(...a,cmd.width,c);else if(cmd.kind==='rect'){const x=Math.min(a[0],a[2]),y=Math.min(a[1],a[3]),w=Math.abs(a[2]-a[0]),h=Math.abs(a[3]-a[1]);if(cmd.fill)rect(x,y,w,h,c);else{rect(x,y,w,cmd.width,c);rect(x,y+h-cmd.width,w,cmd.width,c);rect(x,y,cmd.width,h,c);rect(x+w-cmd.width,y,cmd.width,h,c);}}else if(cmd.kind==='circle'){const n=Math.min(180,Math.max(16,Math.round(a[2]*2))),[cx,cy,r]=a;for(let i=0;i<n;i++){const a1=i/n*Math.PI*2,a2=(i+1)/n*Math.PI*2,p1=[cx+Math.cos(a1)*r,cy+Math.sin(a1)*r],p2=[cx+Math.cos(a2)*r,cy+Math.sin(a2)*r];if(cmd.fill)triangle([cx,cy],p1,p2,c);else line(...p1,...p2,cmd.width,c);}}}return new Float32Array(out);}
-  render(){if(this.disposed)return;const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch{this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
-    if(this.backend==='canvas2d'||this.picture){ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);if(this.picture)ctx.drawImage(this.picture,0,0);if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}for(const cmd of this.commands){const a=cmd.coords;ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}}}
-    for(const cmd of this.commands)if(cmd.kind==='text'){ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...cmd.coords);}
-  }
-  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.vertexBuffer?.destroy();this.uniform?.destroy();this.gpuContext?.unconfigure();this.canvas.remove();this.gpuCanvas?.remove();}
-}
-
-return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
-})();
-
 /* ../controls/richtext.js */
-__modules[42]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[20];
-const {VBError}=__modules[3];
-const {oleColor}=__modules[41];
+__modules[43]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[22];
+const {VBError}=__modules[6];
+const {oleColor}=__modules[3];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -3567,10 +3835,10 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[43]=(()=>{
-const { clone, lower, safeName }=__modules[6];
-const {normalizeResources}=__modules[10];
-const { VBError }=__modules[3];
+__modules[44]=(()=>{
+const { clone, lower, safeName }=__modules[9];
+const {normalizeResources}=__modules[13];
+const { VBError }=__modules[6];
 
 
 
@@ -3635,9 +3903,9 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[44]=(()=>{
-const { VBError }=__modules[3];
-const { lower }=__modules[6];
+__modules[45]=(()=>{
+const { VBError }=__modules[6];
+const { lower }=__modules[9];
 
 
 class ControlCollection {
@@ -3683,22 +3951,22 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[45]=(()=>{
-const {installFormWindow}=__modules[37];
-const {ClassicCombo,ClassicUpDown}=__modules[38];
-const {ClassicScrollbar}=__modules[39];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[40];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[42];
-const {parseRTF}=__modules[20];
-const { el, lower, clone }=__modules[6];
-const { VBError }=__modules[3];
-const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[7];
-const { MemoryRecordset }=__modules[19];
-const { GraphicsSurface }=__modules[41];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[12];
-const { icon, controlIcon }=__modules[23];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[43];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[44];
+__modules[46]=(()=>{
+const {installFormWindow}=__modules[39];
+const {ClassicCombo,ClassicUpDown}=__modules[40];
+const {ClassicScrollbar}=__modules[41];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[42];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[43];
+const {parseRTF}=__modules[22];
+const { el, lower, clone }=__modules[9];
+const { VBError }=__modules[6];
+const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[10];
+const { MemoryRecordset }=__modules[21];
+const { GraphicsSurface }=__modules[3];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[2];
+const { icon, controlIcon }=__modules[25];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[44];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[45];
 
 
 
@@ -4011,18 +4279,18 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* host.js */
-__modules[46]=(()=>{
-const {RuntimeMDI}=__modules[21];
-const {runtimeDialog,messageBoxOptions}=__modules[24];
-const { applyTheme, themeId }=__modules[12];
-const { icon }=__modules[23];
-const {rasterDataURL}=__modules[9];
-const { el, download, lower, clone }=__modules[6];
-const { compileProject }=__modules[30];
-const { VirtualMachine }=__modules[36];
-const { VirtualFileSystem }=__modules[35];
-const { describe }=__modules[7];
-const { BrowserForm }=__modules[45];
+__modules[47]=(()=>{
+const {RuntimeMDI}=__modules[23];
+const {runtimeDialog,messageBoxOptions}=__modules[26];
+const { applyTheme, themeId }=__modules[2];
+const { icon }=__modules[25];
+const {rasterDataURL}=__modules[12];
+const { el, download, lower, clone }=__modules[9];
+const { compileProject }=__modules[32];
+const { VirtualMachine }=__modules[38];
+const { VirtualFileSystem }=__modules[37];
+const { describe }=__modules[10];
+const { BrowserForm }=__modules[46];
 
 
 
@@ -4040,7 +4308,7 @@ class ApplicationHost {
   async createForm(model,instance,vm){const form=new BrowserForm(model,{vm,instance,assets:this.project.assets||{},backend:this.project.settings?.renderer||'auto',onBackend:backend=>{this.backend=backend;this.send('backend',{backend});}});this.forms.push(form);this.console.hidden=true;this.stage.append(form.node);this.mdi.register(form);this.layoutForms();return form;}
   beginModal(form){this.modalForms ||= [];this.modalForms.push(form);const update=()=>{const top=this.modalForms.at(-1);for(const f of this.forms){f.node.inert=!!top&&f!==top;f.node.setAttribute('aria-modal',String(f===top));if(f===top)f.node.style.zIndex=String(200000+this.modalForms.length);}};update();return()=>{this.modalForms=this.modalForms.filter(f=>f!==form);update();};}
   layoutForms(){const width=this.container.clientWidth||innerWidth,height=this.container.clientHeight||innerHeight;this.forms.forEach((form,index)=>{if(form.movedByUser||form.mdiChild)return;const naturalWidth=Number(form.props.ClientWidth??form.props.Width)/15+8,naturalHeight=Number(form.props.ClientHeight??form.props.Height)/15+32,scale=Math.min(1,(width-16)/naturalWidth,(height-16)/naturalHeight);if(width<640||height<480){form.node.style.transform=`scale(${Math.max(.3,scale)})`;form.node.style.transformOrigin='top left';form.props.Left=Math.max(4,(width-naturalWidth*scale)/2)*15;form.props.Top=Math.max(4,(height-naturalHeight*scale)/2)*15;}else{form.node.style.transform='';if(Number(form.props.StartUpPosition)!==0){form.props.Left=Math.max(8,(width-naturalWidth)/2+index*20)*15;form.props.Top=Math.max(8,(height-naturalHeight)/2+index*20)*15;}}form.refresh();});this.mdi.layout();}
-  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{fs:this.fs,settings:this.settings,createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>download(name,data,typeof data==='string'?'text/plain':'application/octet-stream'),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000});
+  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{fs:this.fs,settings:this.settings,createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000});
     this.vm.on('evaluation',data=>this.send('evaluation',data));this.vm.on('state',state=>this.send('state',{state}));this.vm.on('pause',e=>{this.send('pause',{source:e.instruction.source,line:e.instruction.line,procedure:e.instruction.procedure,reason:e.reason,pauseId:this.vm.debugPauseId,locals:this.vm.debugLocals(),stack:e.stack.map((f,index)=>({index,module:f.module.name,procedure:f.proc.name,line:f.proc.code[Math.min(f.pc,f.proc.code.length-1)]?.line||0,depth:f.depth}))});});this.vm.on('stop',()=>this.send('stopped'));this.vm.on('error',error=>this.send('error',{error}));
     for(const bp of this.options.breakpoints||[])this.vm.setBreakpoint(bp.module,bp.line,bp.condition||'');
     this.vm.library.set('loadpicture',path=>{if(!path)return '';const key=Object.keys(this.project.assets||{}).find(k=>k.toLowerCase()===String(path).replace(/\\/g,'/').toLowerCase());if(key)return key;if(this.fs.exists(path)){const bytes=this.fs.readBytes(path),image=rasterDataURL(bytes);if(image)return image;const text=this.fs.read(path);if(/^data:image\//.test(text))return text;}throw new Error('Image not found or not a supported raster: '+path);});
@@ -4048,7 +4316,7 @@ class ApplicationHost {
   }
   persist(){if(this.options.persist===false)return;try{localStorage.setItem(this.storageKey,JSON.stringify({vfs:this.fs.snapshot(),settings:this.settings}));}catch{this.send('storage',{message:'Persistent storage is unavailable. This session still works in memory.'});}}
   async onBridgeMessage(event){const data=event.data;if(event.source!==window.parent||data?.channel!=='vb6-ide'||data.token!==this.options.bridgeToken)return;const vm=this.vm;if(!vm)return;try{switch(data.command){
-      case 'debugEvaluate':{const value=await vm.evaluateExplicit(String(data.expression),{frameIndex:data.frameIndex??null,pauseId:data.pauseId,instructionLimit:data.instructionLimit??100000,timeLimit:data.timeLimit??5000});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value),locals:vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:vm.debugPauseId}});break;}
+      case 'debugEvaluate':{const value=await vm.evaluateExplicit(String(data.expression),{frameIndex:data.frameIndex??null,pauseId:data.pauseId,instructionLimit:data.instructionLimit??100000,timeLimit:data.timeLimit??5000});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value),locals:this.vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:this.vm.debugPauseId}});break;}
       case 'cancelEvaluation':this.send('commandResult',{id:data.id,ok:true,result:vm.cancelEvaluation()});break;
       case 'debugInspect':this.send('commandResult',{id:data.id,ok:true,result:vm.inspectDebug(String(data.expression),{frameIndex:data.frameIndex??null,offset:data.offset,limit:data.limit})});break;
       case 'debugLocals':this.send('commandResult',{id:data.id,ok:true,result:{locals:vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:vm.debugPauseId}});break;
@@ -4060,6 +4328,7 @@ class ApplicationHost {
   msgBox(text,style=0,title=this.project.name){const options=messageBoxOptions(style);return this.modal(title,text,options.buttons,null,options);}
   inputBox(text,title=this.project.name,def=''){return this.modal(title,text,[{caption:'OK',value:1},{caption:'Cancel',value:''}],String(def));}
   showError(error){this.send('output',{text:`Run-time error '${error.number||5}': ${error.message}\n${error.source||''}, line ${error.line||0}`,newline:true});this.modal(this.project.name,`Run-time error '${error.number||5}':\n\n${error.message}\n\n${error.source||''}, line ${error.line||0}`);}
+  saveFile(name,data){return download(name,data,typeof data==='string'?'text/plain':'application/octet-stream');}
   openFile(props={}){return new Promise((resolve,reject)=>{const input=el('input',{type:'file',style:{display:'none'}});const filter=String(props.Filter||'').split('|').filter((_,i)=>i%2).join(';').split(';').map(s=>s.trim().replace(/^\*/, '')).filter(s=>/^\.\w+$/.test(s));if(filter.length)input.accept=filter.join(',');this.container.append(input);let done=false;const finish=value=>{if(done)return;done=true;input.remove();resolve(value);};input.addEventListener('change',async()=>{try{const file=input.files[0];if(file&&file.size>20*1024*1024)throw new Error('File exceeds 20 MiB');finish(file?{name:file.name,bytes:new Uint8Array(await file.arrayBuffer())}:null);}catch(error){input.remove();done=true;reject(error);}});input.addEventListener('cancel',()=>finish(null));input.click();});}
   beep(){try{const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)return;const audio=new Audio(),osc=audio.createOscillator(),gain=audio.createGain();osc.connect(gain);gain.connect(audio.destination);osc.frequency.value=880;gain.gain.value=.04;osc.start();osc.stop(audio.currentTime+.12);osc.onended=()=>audio.close();}catch{}}
   dispose(){this.disposed=true;this.vm?.stop();clearInterval(this.autosave);this.resizeObserver.disconnect();this.mdi.dispose();window.removeEventListener('message',this.messageHandler);for(const form of this.forms)form.dispose();for(const dialog of [...this.dialogs].reverse())dialog.vbFinish?.();this.stage.remove();}
@@ -4069,22 +4338,23 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[47]=(()=>{
+__modules[48]=(()=>{
 const {FINANCIAL_FUNCTIONS}=__modules[1];
-const {ResourceStore}=__modules[11];
-const {readRES,writeRES,setResource,setResourceString}=__modules[10];
-const {THEMES,applyTheme,colorValue}=__modules[12];
-const {MemoryRecordset}=__modules[19];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[20];
-const { ApplicationHost }=__modules[46];
-const { VirtualMachine }=__modules[36];
-const { compileProject, compileModule }=__modules[30];
-const { parseExpression }=__modules[28];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[7];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[2];
-const { VirtualFileSystem }=__modules[35];
-const { BrowserControl, BrowserForm }=__modules[45];
-const { GraphicsSurface }=__modules[41];
+const {installNativeHost}=__modules[4];
+const {ResourceStore}=__modules[14];
+const {readRES,writeRES,setResource,setResourceString}=__modules[13];
+const {THEMES,applyTheme,colorValue}=__modules[2];
+const {MemoryRecordset}=__modules[21];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[22];
+const { ApplicationHost }=__modules[47];
+const { VirtualMachine }=__modules[38];
+const { compileProject, compileModule }=__modules[32];
+const { parseExpression }=__modules[30];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[10];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[5];
+const { VirtualFileSystem }=__modules[37];
+const { BrowserControl, BrowserForm }=__modules[46];
+const { GraphicsSurface }=__modules[3];
 
 
 
@@ -4100,10 +4370,11 @@ const { GraphicsSurface }=__modules[41];
 
 
 
-async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);await host.start();return host;}
-const RuntimeAPI={ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
+
+async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);if(options.nativeWindows!==false)installNativeHost(host);await host.start();return host;}
+const RuntimeAPI={installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[47];
+globalThis["VB6Runtime"]=__modules[48];
 })();

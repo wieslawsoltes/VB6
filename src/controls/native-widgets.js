@@ -39,14 +39,15 @@ export class ClassicCombo {
     if(this.popup){this.preview=Number(p.ListIndex);this.layout();this.paint();}
   }
   open(simple=false){if(this.popup||(!simple&&(this.design||this.input.disabled)))return;
+    const document=this.node.ownerDocument,window=document.defaultView;
     const p=this.properties();this.popupSimple=simple;this.preview=Number(p.ListIndex);this.savedIndex=this.preview;
     this.popup=el('div',{id:this.id,class:'vb-combo-popup'+(simple?' simple-list':''),role:'listbox','aria-label':this.node.dataset.control+' items','data-vb-theme':getTheme(this.node).id});this.spacer=el('div',{class:'vb-combo-spacer'});this.popup.append(this.spacer);
-    Object.assign(this.popup.style,{font:getComputedStyle(this.input).font});(simple?this.node:document.body).append(this.popup);this.input.setAttribute('aria-controls',this.id);this.input.setAttribute('aria-expanded','true');this.popupAbort=new AbortController();const signal=this.popupAbort.signal;
+    Object.assign(this.popup.style,{font:getComputedStyle(this.input).font});(simple?this.node:document.body).append(this.popup);this.input.setAttribute('aria-controls',this.id);this.input.setAttribute('aria-expanded','true');this.popupAbort=new window.AbortController();const signal=this.popupAbort.signal;
     this.popup.addEventListener('scroll',()=>this.paint(),{signal});this.popup.addEventListener('pointerdown',e=>e.preventDefault(),{signal});
     document.addEventListener('pointerdown',e=>{if(!simple&&!this.node.contains(e.target)&&!this.popup?.contains(e.target))this.close(false);},{signal,capture:true});window.addEventListener('resize',()=>simple?this.layout():this.close(),{signal});
     window.addEventListener('blur',()=>{if(!simple)this.close(false);},{signal});this.layout();this.reveal();this.paint();
   }
-  layout(){if(!this.popup)return;const r=this.node.getBoundingClientRect();this.rowHeight=Math.max(15,Math.ceil(parseFloat(getComputedStyle(this.input).fontSize)||11)+3);this.spacer.style.height=this.items().length*this.rowHeight+'px';if(this.popupSimple)return;
+  layout(){if(!this.popup)return;const {innerWidth,innerHeight}=this.node.ownerDocument.defaultView;const r=this.node.getBoundingClientRect();this.rowHeight=Math.max(15,Math.ceil(parseFloat(getComputedStyle(this.input).fontSize)||11)+3);this.spacer.style.height=this.items().length*this.rowHeight+'px';if(this.popupSimple)return;
     const height=Math.min(8,Math.max(1,this.items().length))*this.rowHeight+4,width=Math.min(innerWidth-4,Math.max(80,r.width)),top=r.bottom+height>innerHeight-2&&r.top>=height?r.top-height:r.bottom;
     Object.assign(this.popup.style,{width:width+'px',height:Math.min(height,innerHeight-4)+'px',left:Math.max(2,Math.min(r.left,innerWidth-width-2))+'px',top:Math.max(2,Math.min(top,innerHeight-height-2))+'px'});
   }

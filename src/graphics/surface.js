@@ -2,10 +2,31 @@ import { colorValue, getTheme } from '../theme/theme.js';
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
 const surfaces = new WeakMap();
 export function refreshGraphicsSurfaces(root) { for (const canvas of root.querySelectorAll('canvas.graphics-surface')) surfaces.get(canvas)?.transferDocument(); }
-let sharedDevicePromise;
+const sharedDevices = new WeakMap();
 export function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
 function rgba(color,theme='classic'){const c=oleColor(color,'#c0c0c0',theme);return [parseInt(c.slice(1,3),16)/255,parseInt(c.slice(3,5),16)/255,parseInt(c.slice(5,7),16)/255,1];}
-export async function getGPUDevice(){if(!globalThis.navigator?.gpu)return null;if(!sharedDevicePromise)sharedDevicePromise=(async()=>{try{const adapter=await navigator.gpu.requestAdapter({powerPreference:'low-power'});if(!adapter)return null;const device=await adapter.requestDevice();device.lost.then(()=>sharedDevicePromise=null);return device;}catch{return null;}})();let timeout;const device=await Promise.race([sharedDevicePromise,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),1800))]);clearTimeout(timeout);return device;}
+export async function getGPUDevice(view=globalThis) {
+  if(view.vb6NativeGPUUnavailable)return null;
+  if(view.vb6NativeGPUDevice)return view.vb6NativeGPUDevice;
+  const gpu=view.navigator?.gpu;if(!gpu)return null;
+  let pending=sharedDevices.get(view);
+  if(!pending){
+    pending=(async()=>{
+      try{
+        const adapter=await gpu.requestAdapter({powerPreference:'high-performance'});
+        if(!adapter)return null;
+        const device=await adapter.requestDevice();
+        device.lost.then(()=>{if(sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+        return device;
+      }catch{return null;}
+    })();
+    sharedDevices.set(view,pending);
+    pending.then(device=>{if(!device&&sharedDevices.get(view)===pending)sharedDevices.delete(view);});
+  }
+  let timeout;
+  try{return await Promise.race([pending,new Promise(resolve=>timeout=setTimeout(()=>resolve(null),3000))]);}
+  finally{clearTimeout(timeout);}
+}
 const SHADER=`struct Screen { size: vec2f, padding: vec2f };
 @group(0) @binding(0) var<uniform> screen: Screen;
 struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f };
@@ -14,14 +35,67 @@ struct VertexOut { @builtin(position) position: vec4f, @location(0) color: vec4f
 }
 @fragment fn fs(in: VertexOut) -> @location(0) vec4f { return in.color; }`;
 export class GraphicsSurface {
-  constructor(container,{backend='auto',background=16777215,onBackend=()=>{}}={}){this.container=container;this.theme=getTheme(container).id;this.themeChanged=()=>{this.theme=getTheme(container).id;this.invalidate();};this.themeDocument=container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.requestedBackend=backend;this.backend='canvas2d';this.background=background;this.commands=[];this.onBackend=onBackend;this.dirty=false;this.disposed=false;this.width=1;this.height=1;this.canvas=document.createElement('canvas');this.canvas.className='graphics-surface';this.canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';container.append(this.canvas);surfaces.set(this.canvas,this);this.context=this.canvas.getContext('2d');this.resizeObserver=new ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(container);this.resize();if(backend!=='canvas2d')this.initializeGPU();else onBackend('Canvas2D');}
-  async initializeGPU(){const device=await getGPUDevice();if(!device||this.disposed){this.onBackend('Canvas2D');return;}try{this.device=device;const canvas=document.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;const context=canvas.getContext('webgpu');if(!context)return;const format=navigator.gpu.getPreferredCanvasFormat();context.configure({device,format,alphaMode:'opaque'});device.pushErrorScope('validation');const module=device.createShaderModule({code:SHADER});const info=await module.getCompilationInfo();if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed');this.pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});this.uniform=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});this.bindGroup=device.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.uniform}}]});const error=await device.popErrorScope();if(error)throw error;if(this.disposed){this.uniform.destroy();return;}this.gpuCanvas=canvas;this.gpuContext=context;this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';device.lost.then(()=>{if(!this.disposed){this.backend='canvas2d';this.gpuCanvas?.remove();this.gpuCanvas=null;this.onBackend('Canvas2D · device lost');this.invalidate();}});this.resize();this.onBackend('WebGPU');}catch(error){this.backend='canvas2d';this.gpuCanvas?.remove();this.onBackend('Canvas2D');this.invalidate();}}
+  constructor(container,{backend='auto',background=16777215,onBackend=()=>{}}={}){this.container=container;this.theme=getTheme(container).id;this.themeChanged=()=>{this.theme=getTheme(container).id;this.invalidate();};this.themeDocument=container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.requestedBackend=backend;this.backend='canvas2d';this.background=background;this.commands=[];this.onBackend=onBackend;this.dirty=false;this.disposed=false;this.width=1;this.height=1;this.canvas=container.ownerDocument.createElement('canvas');this.canvas.className='graphics-surface';this.canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';container.append(this.canvas);surfaces.set(this.canvas,this);this.context=this.canvas.getContext('2d');this.resizeObserver=new ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(container);this.resize();if(backend!=='canvas2d')this.gpuReady=this.initializeGPU();else onBackend('Canvas2D');}
+  releaseGPU(){
+    // A surface owns its buffers/context, never the window's shared device.
+    this.gpuGeneration=(this.gpuGeneration||0)+1;
+    this.vertexBuffer?.destroy();this.uniform?.destroy();this.gpuContext?.unconfigure();this.gpuCanvas?.remove();
+    this.vertexBuffer=this.uniform=this.gpuContext=this.gpuCanvas=this.pipeline=this.bindGroup=this.device=null;
+    this.bufferSize=0;this.backend='canvas2d';
+  }
+  async initializeGPU(){
+    const generation=this.gpuGeneration=(this.gpuGeneration||0)+1;
+    const document=this.container.ownerDocument,view=document.defaultView;
+    const current=()=>!this.disposed&&this.gpuGeneration===generation&&this.container.ownerDocument===document;
+    const device=await getGPUDevice(view);
+    if(!current())return false;
+    if(!device){this.gpuError='No WebGPU device became available';this.onBackend('Canvas2D');return false;}
+    let context,uniform;
+    try{
+      const canvas=document.createElement('canvas');canvas.className='graphics-surface';canvas.style.cssText=this.canvas.style.cssText;
+      context=canvas.getContext('webgpu');if(!context)throw new Error('WebGPU canvas context unavailable in this window');
+      const format=view.navigator.gpu.getPreferredCanvasFormat();
+      const module=device.createShaderModule({code:SHADER});
+      const info=await module.getCompilationInfo();
+      if(!current())return false;
+      if(info.messages.some(m=>m.type==='error'))throw new Error('Graphics shader compilation failed: '+info.messages.filter(m=>m.type==='error').map(m=>m.message).join('; '));
+      let pipeline,bindGroup,validation;
+      device.pushErrorScope('validation');
+      try{
+        context.configure({device,format,alphaMode:'opaque',usage:view.GPUTextureUsage.RENDER_ATTACHMENT|view.GPUTextureUsage.COPY_SRC});
+        pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:24,attributes:[{shaderLocation:0,offset:0,format:'float32x2'},{shaderLocation:1,offset:8,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
+        uniform=device.createBuffer({size:16,usage:view.GPUBufferUsage.UNIFORM|view.GPUBufferUsage.COPY_DST});
+        bindGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:uniform}}]});
+      }finally{validation=await device.popErrorScope();}
+      if(validation)throw validation;
+      if(!current()){uniform.destroy();context.unconfigure();return false;}
+      Object.assign(this,{device,pipeline,uniform,bindGroup,gpuCanvas:canvas,gpuContext:context,gpuError:null});
+      this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';
+      device.lost.then(info=>{if(current()&&this.device===device){this.gpuError='WebGPU device lost: '+info.message;this.releaseGPU();this.onBackend('Canvas2D · device lost');this.invalidate();}});
+      this.resize();this.onBackend('WebGPU');return true;
+    }catch(error){
+      uniform?.destroy();context?.unconfigure();
+      if(current()){this.gpuError=error.message||String(error);this.releaseGPU();this.onBackend('Canvas2D');this.invalidate();}
+      return false;
+    }
+  }
   scheduleResize(){
     if(this.disposed||this.resizeFrame)return;
     this.resizeWindow=this.container.ownerDocument.defaultView;
     this.resizeFrame=this.resizeWindow.requestAnimationFrame(()=>{this.resizeFrame=0;this.resize();});
   }
-  transferDocument(){if(this.disposed)return;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.resizeFrame=0;this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);this.themeDocument=this.container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.themeDocument.defaultView).cancelAnimationFrame(this.raf);this.dirty=false;this.theme=getTheme(this.container).id;this.resizeObserver.disconnect();this.resizeObserver=new this.themeDocument.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(this.container);this.resize();}
+  transferDocument(){
+    if(this.disposed)return;
+    const changed=this.themeDocument!==this.container.ownerDocument;
+    this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.resizeFrame=0;
+    this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);
+    (this.frameWindow||this.themeDocument.defaultView).cancelAnimationFrame(this.raf);this.dirty=false;
+    this.themeDocument=this.container.ownerDocument;this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);
+    this.theme=getTheme(this.container).id;this.resizeObserver.disconnect();
+    this.resizeObserver=new this.themeDocument.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(this.container);
+    if(changed){this.releaseGPU();if(this.requestedBackend!=='canvas2d')this.gpuReady=this.initializeGPU();}
+    this.resize();
+  }
   resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){const width=Math.max(1,Math.min(8192,Math.round(this.width*dpr))),height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;}this.dpr=dpr;this.invalidate();}
   add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
   text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}
@@ -36,9 +110,9 @@ export class GraphicsSurface {
   vertices(){const out=[];const triangle=(p1,p2,p3,c)=>{for(const p of [p1,p2,p3])out.push(p[0],p[1],...c);};const rect=(x,y,w,h,c)=>{triangle([x,y],[x+w,y],[x,y+h],c);triangle([x+w,y],[x+w,y+h],[x,y+h],c);};const line=(x1,y1,x2,y2,width,c)=>{const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy)||1,ox=-dy/length*width/2,oy=dx/length*width/2;triangle([x1+ox,y1+oy],[x2+ox,y2+oy],[x1-ox,y1-oy],c);triangle([x1-ox,y1-oy],[x2+ox,y2+oy],[x2-ox,y2-oy],c);};
     if(this.grid){const c=rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
     for(const cmd of this.commands){const c=rgba(cmd.color,this.theme),a=cmd.coords;if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else if(cmd.kind==='line')line(...a,cmd.width,c);else if(cmd.kind==='rect'){const x=Math.min(a[0],a[2]),y=Math.min(a[1],a[3]),w=Math.abs(a[2]-a[0]),h=Math.abs(a[3]-a[1]);if(cmd.fill)rect(x,y,w,h,c);else{rect(x,y,w,cmd.width,c);rect(x,y+h-cmd.width,w,cmd.width,c);rect(x,y,cmd.width,h,c);rect(x+w-cmd.width,y,cmd.width,h,c);}}else if(cmd.kind==='circle'){const n=Math.min(180,Math.max(16,Math.round(a[2]*2))),[cx,cy,r]=a;for(let i=0;i<n;i++){const a1=i/n*Math.PI*2,a2=(i+1)/n*Math.PI*2,p1=[cx+Math.cos(a1)*r,cy+Math.sin(a1)*r],p2=[cx+Math.cos(a2)*r,cy+Math.sin(a2)*r];if(cmd.fill)triangle([cx,cy],p1,p2,c);else line(...p1,...p2,cmd.width,c);}}}return new Float32Array(out);}
-  render(){if(this.disposed)return;const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch{this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
+  render(){if(this.disposed)return;const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
     if(this.backend==='canvas2d'||this.picture){ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);if(this.picture)ctx.drawImage(this.picture,0,0);if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}for(const cmd of this.commands){const a=cmd.coords;ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}}}
     for(const cmd of this.commands)if(cmd.kind==='text'){ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...cmd.coords);}
   }
-  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.vertexBuffer?.destroy();this.uniform?.destroy();this.gpuContext?.unconfigure();this.canvas.remove();this.gpuCanvas?.remove();}
+  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.releaseGPU();this.canvas.remove();}
 }
