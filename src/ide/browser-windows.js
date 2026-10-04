@@ -55,6 +55,9 @@ export function installBrowserWindows(ide) {
     }
   });
   dock.browserWindows = mdi.browserWindows = bars.browserWindows = host;
+  const prepareSurfaces = node => {
+    for (const editor of ide.documents.editors.values()) if (node.contains(editor.root)) editor.prepareDocumentTransfer();
+  };
   const refreshSurfaces = node => {
     for (const editor of ide.documents.editors.values()) if (node.contains(editor.root)) editor.transferDocument();
     for (const designer of ide.documents.designers.values()) if (node.contains(designer.root)) designer.transferDocument();
@@ -67,6 +70,7 @@ export function installBrowserWindows(ide) {
     const result = host.detach('dock:' + group.id, view, {
       title: () => dock.model.visible(group).map(key => dock.title(key)).join(' / '),
       onFocus: () => view.classList.add('dock-active'),
+      onBeforeTransfer: () => prepareSurfaces(view),
       onTransfer: () => refreshSurfaces(view),
       onReturn: () => dock.render()
     });
@@ -78,6 +82,7 @@ export function installBrowserWindows(ide) {
     const result = host.detach('document:' + key, win.node, {
       title: () => win.label.textContent,
       onFocus: () => mdi.activate(key),
+      onBeforeTransfer: () => prepareSurfaces(win.node),
       onTransfer: () => refreshSurfaces(win.node),
       onReturn: () => mdi.layout(win)
     });

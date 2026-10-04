@@ -59,7 +59,26 @@ export class SourceEditor extends Signal {
     if(this.completion&&!this.composing)this.complete(this.completionMode,true);
     clearTimeout(this.infoTimer);if(this.appearance.autoQuickInfo&&!this.composing)this.infoTimer=setTimeout(()=>this.showInfo('parameter',true),160);
   }
-  transferDocument(){if(this.disposed)return;(this.paintWindow||this.root.ownerDocument.defaultView).cancelAnimationFrame(this.paintFrame);this.paintFrame=0;for(const pane of this.panes){pane.observer.disconnect();pane.observer=new this.root.ownerDocument.defaultView.ResizeObserver(()=>this.schedulePaint());pane.observer.observe(pane.viewport);}this.paint();this.schedulePaint();}
+  prepareDocumentTransfer(){
+    if(this.disposed||this.transferState)return;
+    this.transferState={text:this.text,panes:this.panes.map(p=>({pane:p,selection:{...this.selectionBounds(p)},direction:p.input.selectionDirection,first:p.virtualizer.first,top:p.input.scrollTop,left:p.input.scrollLeft,rail:p.virtualizer.rail.scrollTop}))};
+    // Adoption and unstyled layout can emit scroll/select events with zero geometry.
+    for(const pane of this.panes)pane.virtualizer.syncing=true;
+  }
+  restoreDocumentTransfer(){
+    const state=this.transferState;if(!state)return;this.transferState=null;
+    const change=textChange(state.text,this.text);
+    for(const saved of state.panes){
+      const p=saved.pane,v=p.virtualizer;if(!this.panes.includes(p))continue;
+      const start=mapOffset(change,saved.selection.start),end=mapOffset(change,saved.selection.end);
+      v.direction=saved.direction;v.forceFirst=saved.first;
+      this.syncPane(p,start,end);
+      p.input.setSelectionRange(Math.max(0,start-p.range.start),Math.max(0,end-p.range.start),saved.direction);
+      p.input.scrollTop=saved.top;p.input.scrollLeft=saved.left;v.rail.scrollTop=saved.rail;
+      v.syncing=false;
+    }
+  }
+  transferDocument(){if(this.disposed)return;this.restoreDocumentTransfer();(this.paintWindow||this.root.ownerDocument.defaultView).cancelAnimationFrame(this.paintFrame);this.paintFrame=0;for(const pane of this.panes){pane.observer.disconnect();pane.observer=new this.root.ownerDocument.defaultView.ResizeObserver(()=>this.schedulePaint());pane.observer.observe(pane.viewport);}this.paint();this.schedulePaint();}
   schedulePaint(){if(this.paintFrame||this.disposed)return;this.paintWindow=this.root.ownerDocument.defaultView;this.paintFrame=this.paintWindow.requestAnimationFrame(()=>{this.paintFrame=0;this.paint();});}
   paint(){if(!this.module||this.disposed)return;this.metrics.paints++;this.root.style.setProperty('--editor-gutter',this.appearance.margin===false?'0px':this.showLineNumbers?'32px':'18px');const breakpoints=new Set(this.breakpoints.filter(b=>lower(b.module)===lower(this.module.name)).map(b=>b.line)),separators=new Set(this.procedureIndex.map(p=>p.line)),bookmarks=new Set(this.module.bookmarks||[]);
     for(const pane of this.panes){const {input,viewport,syntax,gutter,lines,range}=pane,top=input.scrollTop,left=input.scrollLeft,first=Math.max(0,Math.floor((top-4)/this.lineHeight)),count=Math.ceil(viewport.clientHeight/this.lineHeight)+3,last=Math.min(lines.length,first+count),selection=this.selectionBounds(pane),select=this.root.ownerDocument.activeElement===input&&selection.start!==selection.end,selectionStart=selection.start-range.start,selectionEnd=selection.end-range.start;

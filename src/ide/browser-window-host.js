@@ -75,7 +75,9 @@ export class BrowserWindowHost {
       record.cleanups.push(() => tooltips.dispose());
       const cleanup = this.decorate(record);
       if (typeof cleanup === 'function') record.cleanups.push(cleanup);
-      const viewState = this.captureView(node);
+      options.onBeforeTransfer?.();
+      const viewState = record.viewState = this.captureView(node);
+      content.inert = true;
       node.before(anchor);
       this.windows.set(key, record);
       try { content.append(doc.adoptNode(node)); }
@@ -94,8 +96,16 @@ export class BrowserWindowHost {
       titles.observe(node, {childList: true, characterData: true, subtree: true});
       record.cleanups.push(() => titles.disconnect());
       this.updateTitle(record);
-      this.notifyTransfer(record);
-      this.restoreView(record, viewState);
+      record.stylesReady.then(() => {
+        if (this.windows.get(key) !== record) return;
+        popup.requestAnimationFrame(() => {
+          if (this.windows.get(key) !== record) return;
+          content.inert = false;
+          this.restoreView(record, viewState);
+          this.notifyTransfer(record);
+          root.dataset.ready = 'true';
+        });
+      }).catch(error => { this.attach(key, 'failed'); this.onFailure(error); });
       this.startPolling();
       popup.focus(); options.onFocus?.(); this.onChange();
       return true;
@@ -113,13 +123,21 @@ export class BrowserWindowHost {
     if (record.doc.title !== title + ' — VB6 Studio') record.doc.title = title + ' — VB6 Studio';
   }
   copyStyles(record) {
+    const ready = [];
     for (const style of record.doc.head.querySelectorAll('[data-owner-style]')) style.remove();
     for (const source of this.document.head.querySelectorAll('style,link[rel="stylesheet"]')) {
       const copy = source.cloneNode(true);
       copy.setAttribute('data-owner-style', '');
-      if (source.tagName === 'LINK') copy.href = source.href;
+      if (source.tagName === 'LINK') {
+        copy.href = source.href;
+        if (!copy.disabled) ready.push(new Promise(resolve => {
+          copy.addEventListener('load', resolve, {once: true});
+          copy.addEventListener('error', resolve, {once: true});
+        }));
+      }
       record.doc.head.append(copy);
     }
+    record.stylesReady = Promise.all(ready);
   }
   copyTheme(record) {
     record.doc.documentElement.dataset.vbTheme = this.document.documentElement.dataset.vbTheme || 'classic';
@@ -171,7 +189,8 @@ export class BrowserWindowHost {
     record.closing = true;
     this.measure(record);
     this.windows.delete(key);
-    const viewState = this.captureView(record.node);
+    record.options.onBeforeTransfer?.();
+    const viewState = record.content.inert ? record.viewState : this.captureView(record.node);
     closeMenu(false);
     record.doc.dispatchEvent(new this.owner.CustomEvent('vb-window-release'));
     record.doc.querySelectorAll('.property-color-popup').forEach(node => node.dismiss?.());
@@ -180,11 +199,11 @@ export class BrowserWindowHost {
     const node = this.document.adoptNode(record.node);
     if (record.anchor.parentNode) record.anchor.replaceWith(node);
     else this.themeRoot.append(node);
-    this.notifyTransfer(record);
     try { record.popup.close(); } catch {}
     if (!this.windows.size && this.timer) { this.owner.clearInterval(this.timer); this.timer = null; }
     record.options.onReturn?.(reason);
     this.restoreView(record, viewState);
+    this.notifyTransfer(record);
     if (!this.disposed) this.onChange();
     if (reason === 'return') { this.owner.focus(); node.querySelector('input,textarea,[tabindex="0"],button')?.focus(); }
     return true;

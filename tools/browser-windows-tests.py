@@ -87,7 +87,7 @@ class BrowserWindows(unittest.TestCase):
                     raise
 
     def ready_popup(self, popup):
-        popup.wait_for_selector('.browser-window-root')
+        popup.wait_for_selector('.browser-window-root[data-ready="true"]')
         popup.wait_for_function('''() => [...document.querySelectorAll('link[rel="stylesheet"]')].every(link => link.sheet) &&
             getComputedStyle(document.querySelector('.browser-window-content')).display === 'flex' ''')
         return popup
@@ -230,12 +230,14 @@ class BrowserWindows(unittest.TestCase):
           vb6Studio.renderAll(); vb6Studio.editor.goToLine(49980); }''')
         popup = self.document()
         self.editor_trace('detached')
+        self.assertGreater(self.js('vb6Studio.editor.activePane.range.firstLine'), 49700)
         self.assertGreater(self.js('vb6Studio.editor.cursor().line'), 49900)
         self.assertLess(self.js('vb6Studio.editor.input.value.split("\\n").length'), 1024)
         popup.get_by_label('Visual Basic source code', exact=True).focus()
         self.editor_trace('focused')
         popup.keyboard.insert_text('edited')
         self.editor_trace('inserted')
+        self.assertGreater(self.js('vb6Studio.editor.cursor().line'), 49900)
         self.assertEqual(self.js('vb6Studio.activeModule.code.split("\\n").length'), 50001)
         popup.keyboard.press('Control+z')
         self.editor_trace('undone')
@@ -366,7 +368,7 @@ class BrowserWindows(unittest.TestCase):
         self.assertTrue(popup.locator('.source-input').is_visible())
         popup.get_by_label('Visual Basic source code', exact=True).focus()
         popup.keyboard.press('F8')
-        self.page.wait_for_function('vb6Studio.runState === "paused" && vb6Studio.editor.execution.line === 5')
+        self.page.wait_for_function('vb6Studio.runState === "paused" && vb6Studio.editor.execution?.line === 5')
         popup.keyboard.press('Shift+F5')
         self.page.wait_for_function('vb6Studio.runState === "design"')
 

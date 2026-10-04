@@ -3219,7 +3219,9 @@ class BrowserWindowHost {
       record.cleanups.push(() => tooltips.dispose());
       const cleanup = this.decorate(record);
       if (typeof cleanup === 'function') record.cleanups.push(cleanup);
-      const viewState = this.captureView(node);
+      options.onBeforeTransfer?.();
+      const viewState = record.viewState = this.captureView(node);
+      content.inert = true;
       node.before(anchor);
       this.windows.set(key, record);
       try { content.append(doc.adoptNode(node)); }
@@ -3238,8 +3240,16 @@ class BrowserWindowHost {
       titles.observe(node, {childList: true, characterData: true, subtree: true});
       record.cleanups.push(() => titles.disconnect());
       this.updateTitle(record);
-      this.notifyTransfer(record);
-      this.restoreView(record, viewState);
+      record.stylesReady.then(() => {
+        if (this.windows.get(key) !== record) return;
+        popup.requestAnimationFrame(() => {
+          if (this.windows.get(key) !== record) return;
+          content.inert = false;
+          this.restoreView(record, viewState);
+          this.notifyTransfer(record);
+          root.dataset.ready = 'true';
+        });
+      }).catch(error => { this.attach(key, 'failed'); this.onFailure(error); });
       this.startPolling();
       popup.focus(); options.onFocus?.(); this.onChange();
       return true;
@@ -3257,13 +3267,21 @@ class BrowserWindowHost {
     if (record.doc.title !== title + ' — VB6 Studio') record.doc.title = title + ' — VB6 Studio';
   }
   copyStyles(record) {
+    const ready = [];
     for (const style of record.doc.head.querySelectorAll('[data-owner-style]')) style.remove();
     for (const source of this.document.head.querySelectorAll('style,link[rel="stylesheet"]')) {
       const copy = source.cloneNode(true);
       copy.setAttribute('data-owner-style', '');
-      if (source.tagName === 'LINK') copy.href = source.href;
+      if (source.tagName === 'LINK') {
+        copy.href = source.href;
+        if (!copy.disabled) ready.push(new Promise(resolve => {
+          copy.addEventListener('load', resolve, {once: true});
+          copy.addEventListener('error', resolve, {once: true});
+        }));
+      }
       record.doc.head.append(copy);
     }
+    record.stylesReady = Promise.all(ready);
   }
   copyTheme(record) {
     record.doc.documentElement.dataset.vbTheme = this.document.documentElement.dataset.vbTheme || 'classic';
@@ -3315,7 +3333,8 @@ class BrowserWindowHost {
     record.closing = true;
     this.measure(record);
     this.windows.delete(key);
-    const viewState = this.captureView(record.node);
+    record.options.onBeforeTransfer?.();
+    const viewState = record.content.inert ? record.viewState : this.captureView(record.node);
     closeMenu(false);
     record.doc.dispatchEvent(new this.owner.CustomEvent('vb-window-release'));
     record.doc.querySelectorAll('.property-color-popup').forEach(node => node.dismiss?.());
@@ -3324,11 +3343,11 @@ class BrowserWindowHost {
     const node = this.document.adoptNode(record.node);
     if (record.anchor.parentNode) record.anchor.replaceWith(node);
     else this.themeRoot.append(node);
-    this.notifyTransfer(record);
     try { record.popup.close(); } catch {}
     if (!this.windows.size && this.timer) { this.owner.clearInterval(this.timer); this.timer = null; }
     record.options.onReturn?.(reason);
     this.restoreView(record, viewState);
+    this.notifyTransfer(record);
     if (!this.disposed) this.onChange();
     if (reason === 'return') { this.owner.focus(); node.querySelector('input,textarea,[tabindex="0"],button')?.focus(); }
     return true;
@@ -3420,6 +3439,9 @@ function installBrowserWindows(ide) {
     }
   });
   dock.browserWindows = mdi.browserWindows = bars.browserWindows = host;
+  const prepareSurfaces = node => {
+    for (const editor of ide.documents.editors.values()) if (node.contains(editor.root)) editor.prepareDocumentTransfer();
+  };
   const refreshSurfaces = node => {
     for (const editor of ide.documents.editors.values()) if (node.contains(editor.root)) editor.transferDocument();
     for (const designer of ide.documents.designers.values()) if (node.contains(designer.root)) designer.transferDocument();
@@ -3432,6 +3454,7 @@ function installBrowserWindows(ide) {
     const result = host.detach('dock:' + group.id, view, {
       title: () => dock.model.visible(group).map(key => dock.title(key)).join(' / '),
       onFocus: () => view.classList.add('dock-active'),
+      onBeforeTransfer: () => prepareSurfaces(view),
       onTransfer: () => refreshSurfaces(view),
       onReturn: () => dock.render()
     });
@@ -3443,6 +3466,7 @@ function installBrowserWindows(ide) {
     const result = host.detach('document:' + key, win.node, {
       title: () => win.label.textContent,
       onFocus: () => mdi.activate(key),
+      onBeforeTransfer: () => prepareSurfaces(win.node),
       onTransfer: () => refreshSurfaces(win.node),
       onReturn: () => mdi.layout(win)
     });
@@ -5500,7 +5524,26 @@ class SourceEditor extends Signal {
     if(this.completion&&!this.composing)this.complete(this.completionMode,true);
     clearTimeout(this.infoTimer);if(this.appearance.autoQuickInfo&&!this.composing)this.infoTimer=setTimeout(()=>this.showInfo('parameter',true),160);
   }
-  transferDocument(){if(this.disposed)return;(this.paintWindow||this.root.ownerDocument.defaultView).cancelAnimationFrame(this.paintFrame);this.paintFrame=0;for(const pane of this.panes){pane.observer.disconnect();pane.observer=new this.root.ownerDocument.defaultView.ResizeObserver(()=>this.schedulePaint());pane.observer.observe(pane.viewport);}this.paint();this.schedulePaint();}
+  prepareDocumentTransfer(){
+    if(this.disposed||this.transferState)return;
+    this.transferState={text:this.text,panes:this.panes.map(p=>({pane:p,selection:{...this.selectionBounds(p)},direction:p.input.selectionDirection,first:p.virtualizer.first,top:p.input.scrollTop,left:p.input.scrollLeft,rail:p.virtualizer.rail.scrollTop}))};
+    // Adoption and unstyled layout can emit scroll/select events with zero geometry.
+    for(const pane of this.panes)pane.virtualizer.syncing=true;
+  }
+  restoreDocumentTransfer(){
+    const state=this.transferState;if(!state)return;this.transferState=null;
+    const change=textChange(state.text,this.text);
+    for(const saved of state.panes){
+      const p=saved.pane,v=p.virtualizer;if(!this.panes.includes(p))continue;
+      const start=mapOffset(change,saved.selection.start),end=mapOffset(change,saved.selection.end);
+      v.direction=saved.direction;v.forceFirst=saved.first;
+      this.syncPane(p,start,end);
+      p.input.setSelectionRange(Math.max(0,start-p.range.start),Math.max(0,end-p.range.start),saved.direction);
+      p.input.scrollTop=saved.top;p.input.scrollLeft=saved.left;v.rail.scrollTop=saved.rail;
+      v.syncing=false;
+    }
+  }
+  transferDocument(){if(this.disposed)return;this.restoreDocumentTransfer();(this.paintWindow||this.root.ownerDocument.defaultView).cancelAnimationFrame(this.paintFrame);this.paintFrame=0;for(const pane of this.panes){pane.observer.disconnect();pane.observer=new this.root.ownerDocument.defaultView.ResizeObserver(()=>this.schedulePaint());pane.observer.observe(pane.viewport);}this.paint();this.schedulePaint();}
   schedulePaint(){if(this.paintFrame||this.disposed)return;this.paintWindow=this.root.ownerDocument.defaultView;this.paintFrame=this.paintWindow.requestAnimationFrame(()=>{this.paintFrame=0;this.paint();});}
   paint(){if(!this.module||this.disposed)return;this.metrics.paints++;this.root.style.setProperty('--editor-gutter',this.appearance.margin===false?'0px':this.showLineNumbers?'32px':'18px');const breakpoints=new Set(this.breakpoints.filter(b=>lower(b.module)===lower(this.module.name)).map(b=>b.line)),separators=new Set(this.procedureIndex.map(p=>p.line)),bookmarks=new Set(this.module.bookmarks||[]);
     for(const pane of this.panes){const {input,viewport,syntax,gutter,lines,range}=pane,top=input.scrollTop,left=input.scrollLeft,first=Math.max(0,Math.floor((top-4)/this.lineHeight)),count=Math.ceil(viewport.clientHeight/this.lineHeight)+3,last=Math.min(lines.length,first+count),selection=this.selectionBounds(pane),select=this.root.ownerDocument.activeElement===input&&selection.start!==selection.end,selectionStart=selection.start-range.start,selectionEnd=selection.end-range.start;
