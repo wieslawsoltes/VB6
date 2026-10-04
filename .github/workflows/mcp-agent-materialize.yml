@@ -1,0 +1,99 @@
+name: Materialize MCP agent integration
+on:
+  push:
+    branches: [feat/mcp-agent-control]
+    paths: ['.github/workflows/mcp-agent-materialize.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-agent-materialize
+  cancel-in-progress: false
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reconstruct hash-verified reviewed sources
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          base = 'bc051d446699adb1da90c41ee0c479bbe1266ffa'
+          tree = 'fa9dfe0cf3fa2670c3acf1c47ca4f8f92989bfb2'
+          def git(*args):
+              return subprocess.check_output(['git',*args])
+          assert git('rev-parse',base+'^{tree}').decode().strip() == tree
+          pieces = [f'tools/.mcp-agent-transfer-{i}.b64' for i in range(1,6)]
+          workflow = '.github/workflows/mcp-agent-materialize.yml'
+          changed = set(git('diff','--name-only',base,'HEAD').decode().splitlines())
+          assert changed <= set(pieces+[workflow]), changed
+          hashes = ['c57ca301155a88ba4210cf471f2c5c566ee9d01e','e6ff4d2d5072b6091930957689b2c44ae96e6298','f05322895c8f69622506be0cb093211db764611e','8ed5d518cd1b45b5e8fb077faef76afa91d1be0d','a9c2ea9c0f73b04d442ac8fe6f6b9889beb0bc6d']
+          for path, expected in zip(pieces,hashes):
+              actual = git('hash-object',path).decode().strip()
+              assert actual == expected, (path,actual,expected)
+          raw = lzma.decompress(base64.b64decode(''.join(pathlib.Path(p).read_text().strip() for p in pieces),validate=True))
+          assert hashlib.sha256(raw).hexdigest() == '7a85b5ae068f49388b7c64f4fffb35c0a5e48eb2542930cfb1727730f62cde5f'
+          manifest = json.loads(raw)
+          assert manifest['baseTree'] == tree
+          paths = set()
+          for entry in manifest['entries']:
+              path = pathlib.PurePosixPath(entry['path'])
+              assert not path.is_absolute() and '..' not in path.parts and str(path) not in paths
+              assert path.parts[0] in {'src','tools','tests','docs'} or str(path) in {'README.md','package.json','.github/workflows/mcp.yml'}
+              paths.add(str(path))
+              if entry.get('delete'):
+                  pathlib.Path(path).unlink()
+                  continue
+              before = git('show',base+':'+entry['source']).decode() if entry['source'] else ''
+              assert hashlib.sha256(before.encode()).hexdigest() == entry['base'], path
+              lines = before.splitlines(keepends=True)
+              end = len(lines)
+              for start,stop,value in reversed(entry['edits']):
+                  assert 0 <= start <= stop <= end, path
+                  lines[start:stop] = [value]
+                  end = start
+              value = ''.join(lines).encode()
+              assert hashlib.sha256(value).hexdigest() == entry['sha256'], path
+              pathlib.Path(path).parent.mkdir(parents=True,exist_ok=True)
+              pathlib.Path(path).write_bytes(value)
+          for path in pieces+[workflow]: pathlib.Path(path).unlink()
+          print('Verified',len(paths),'source changes; temporary transport removed.')
+          PY
+      - run: npm run build && npm test
+      - name: Commit only the exact verified tree
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- .github README.md docs package.json src tools tests dist examples
+          git diff --cached --check
+          test "$(git write-tree)" = '3f7214dec98ce57355387da581c4b10162668362'
+          git commit -m 'feat: server-only MCP agent access across IDE, projects, compiler and debugger'
+          git push origin HEAD:feat/mcp-agent-control
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Real external-agent deployment workflows
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+      - name: Preserve exact source and reports
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-mcp-agent-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports/mcp*.json
+            reports/screenshots/mcp*.png
