@@ -1,0 +1,65 @@
+name: Integrate MCP with updated main
+on:
+  push:
+    branches: [feat/mcp-browser-and-local]
+    paths: ['.github/workflows/mcp-integrate-main.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-integration-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge pinned main; regenerate only generated-file conflicts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main:refs/remotes/origin/main
+          test "$(git rev-parse origin/main)" = '3cc687a22b13e42ac27bd91db9e310d39e4d8ea0'
+          python - <<'PY'
+          import subprocess
+          main = '3cc687a22b13e42ac27bd91db9e310d39e4d8ea0'
+          result = subprocess.run(['git','merge','--no-commit','--no-ff',main])
+          assert result.returncode in [0,1]
+          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts <= {'dist/VB6-Studio-Web.html','dist/studio.js','dist/studio.css'}, conflicts
+          print('Generated-file conflicts:', conflicts)
+          PY
+          git rm .github/workflows/mcp-integrate-main.yml
+          npm run build
+          npm test
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check
+          git commit -m 'merge: preserve concurrent MDI window-mode preference in MCP-enabled builds'
+          git push origin HEAD:feat/mcp-browser-and-local
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Validate combined real MCP deployment modes
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+      - name: Preserve exact source history
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-mcp-main-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
