@@ -1,3 +1,4 @@
+import {normalizeBrowserWindows} from './browser-window-state.js';
 import {DockLayout} from './dock-layout.js';
 import {CommandBarLayout} from './command-bar-model.js';
 import {normalizeEditorView} from '../editor/view-state.js';
@@ -17,7 +18,7 @@ export function normalizeWindowProfile(value,registered) {
   if(!plain(value.editorViews)||Object.keys(value.editorViews).length>256)throw new Error('Invalid editor view metadata.');
   const editorViews=Object.create(null);for(const [id,view]of Object.entries(value.editorViews)){if(!identifier(id)||!plain(view))throw new Error('Invalid editor view.');Object.defineProperty(editorViews,id,{value:normalizeEditorView(view),enumerable:true});}
   const tools=value.tools??[];if(!Array.isArray(tools)||tools.length>MODELESS_TOOLS.length||new Set(tools).size!==tools.length||tools.some(key=>!MODELESS_TOOLS.includes(key)))throw new Error('Invalid modeless tool list.');
-  return {version:2,tools:[...tools],activeWindow:identifier(value.activeWindow)?value.activeWindow:null,projectId:identifier(value.projectId)?value.projectId:null,docking:dock.snapshot(),commandBars:bars.snapshot(),docs,activeDoc:identifier(value.activeDoc)?value.activeDoc:null,windows,editorViews};
+  return {version:2,browserWindows:normalizeBrowserWindows(value.browserWindows),tools:[...tools],activeWindow:identifier(value.activeWindow)?value.activeWindow:null,projectId:identifier(value.projectId)?value.projectId:null,docking:dock.snapshot(),commandBars:bars.snapshot(),docs,activeDoc:identifier(value.activeDoc)?value.activeDoc:null,windows,editorViews};
 }
 export function parseWindowProfiles(text,registered) {
   registered=[...registered];

@@ -16,6 +16,7 @@ export function installWorkspaceState(ide) {
   ide.applyWindowLayout=value=>{
     const profile=normalizeWindowProfile(value,ide.docking.model.windows.keys());
     ide.docking.cancelInteraction?.();ide.commandBars.cancelInteraction?.();ide.documents.mdi.cancelInteraction?.();
+    ide.browserWindows?.attachAll('layout');
     ide.docking.restore(profile.version===1?profile:profile.docking);
     if(profile.version===2){ide.commandBars.restore(profile.commandBars);if(profile.projectId===ide.project.id){
       for(const doc of profile.docs){const module=ide.project.modules.find(m=>m.id===doc.id);if(module&&(doc.view!=='form'||module.form))ide.openDocument(doc.id,doc.view);}

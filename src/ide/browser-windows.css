@@ -1,0 +1,22 @@
+/* The popup is a separate top-level browsing context, not a fixed overlay. */
+html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; height:100%; margin:0; overflow:hidden; }
+.browser-window-root.ide-shell { display:flex; flex-direction:column; position:relative; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; }
+.browser-window-caption { display:flex; align-items:center; gap:6px; padding:3px 5px; flex:0 0 auto; background:var(--vb-title); color:var(--vb-title-text); font:12px Tahoma,Arial,sans-serif; }
+.browser-window-caption strong { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.browser-window-caption button { flex:none; font:11px Tahoma,Arial,sans-serif; }
+.browser-window-menubar { flex:0 0 auto; flex-wrap:wrap; height:auto; min-height:21px; }
+.browser-window-content { position:relative; display:flex; flex:1 1 0; min-height:0; min-width:0; overflow:hidden; }
+.browser-window-content > .dock-group, .browser-window-content > .mdi-window,
+.browser-window-content > .command-bar { position:relative!important; inset:auto!important; width:100%!important; height:100%!important; max-width:none!important; max-height:none!important; margin:0!important; flex:1 1 0!important; }
+.browser-window-content > .dock-group { display:flex; flex-direction:column; }
+.browser-window-content > .mdi-window { display:flex; flex-direction:column; }
+.browser-window-content > .mdi-window .mdi-client { display:block; flex:1; min-height:0; }
+.browser-window-content > .mdi-window > .mdi-resize,
+.browser-window-content > .dock-group > .dock-resize,
+.browser-window-content > .command-bar .command-bar-caption { display:none!important; }
+.browser-window-content > .mdi-window > .document-title .window-buttons button:not([aria-label="Close current document"]) { display:none; }
+.browser-window-content > .command-bar { align-content:flex-start; align-items:flex-start; flex-direction:row; flex-wrap:wrap; }
+.browser-window-content > .command-bar .toolbar-grip { display:none; }
+.browser-window-content .managed-panel { min-width:0; }
+.browser-window-content > [hidden] { display:none!important; }
+.browser-detach { flex:none; margin-left:auto; }
