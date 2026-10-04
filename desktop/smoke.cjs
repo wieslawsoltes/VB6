@@ -84,6 +84,23 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js('host.vm.showForm(f2.instance)');
       await until(() => w2.isVisible(), 'show');
       check('hide/show retains form and HWND', true);
+      const probe = `(async()=>{
+        const result={secure:isSecureContext,gpu:!!navigator.gpu};
+        if(!navigator.gpu)return result;
+        try{
+          const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
+          if(!adapter)return {...result,adapter:false};
+          const device=await adapter.requestDevice();globalThis.vb6SmokeGPU={adapter,device};
+          device.lost.then(info=>{result.lost={reason:info.reason,message:info.message};});
+          const buffer=device.createBuffer({size:16,usage:GPUBufferUsage.COPY_DST});
+          device.queue.writeBuffer(buffer,0,new Float32Array([1,2,3,4]));
+          await device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,100));
+          result.submitted=true;buffer.destroy();return result;
+        }catch(error){return {...result,error:error.message};}
+      })()`;
+      report.gpuBootstrapAfterWindows=await js('({diagnostics:globalThis.vb6NativeGraphics,retained:!!globalThis.vb6NativeGPUDevice})');
+      report.gpuRootProbe=await js(probe);
+      report.gpuChildProbe=await w1.webContents.executeJavaScript(probe,true);
       await js('globalThis.surface = f1.ensureSurface(); surface.add("rect", [5,5,60,40], 255, true);');
       await until(() => js('surface.backend === "webgpu" || surface.renderingBackend === "Canvas2D"'), 'graphics backend');
       if (report.graphics.webgpu) {
