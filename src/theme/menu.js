@@ -16,12 +16,13 @@ export function menuIsOpen(){return !!active;}
 export function closeMenu(restore=true){if(active){const old=active;active=null;old.dispose(restore);}}
 class MenuSession {
   constructor(items,x,y,onCommand,options){
-    this.onCommand=onCommand;this.options=options;this.previous=options.opener||document.activeElement;this.stack=[];
-    this.theme=options.theme||getTheme(options.opener||document.activeElement).id;
-    this.abort=new AbortController();this.open(items,x,y,null);
-    document.addEventListener('pointerdown',e=>{if(!this.stack.some(s=>s.node.contains(e.target))&&!options.opener?.closest('[role=menubar]')?.contains(e.target))closeMenu(false);},{capture:true,signal:this.abort.signal});
-    window.addEventListener('blur',()=>closeMenu(false),{signal:this.abort.signal});
-    window.addEventListener('resize',()=>closeMenu(false),{signal:this.abort.signal});
+    this.document=options.opener?.ownerDocument||document;this.window=this.document.defaultView;
+    this.onCommand=onCommand;this.options=options;this.previous=options.opener||this.document.activeElement;this.stack=[];
+    this.theme=options.theme||getTheme(options.opener||this.document.activeElement).id;
+    this.abort=new this.window.AbortController();this.open(items,x,y,null);
+    this.document.addEventListener('pointerdown',e=>{if(!this.stack.some(s=>s.node.contains(e.target))&&!options.opener?.closest('[role=menubar]')?.contains(e.target))closeMenu(false);},{capture:true,signal:this.abort.signal});
+    this.window.addEventListener('blur',()=>closeMenu(false),{signal:this.abort.signal});
+    this.window.addEventListener('resize',()=>closeMenu(false),{signal:this.abort.signal});
     if(options.opener){options.opener.classList.add('menu-open');options.opener.setAttribute('aria-expanded','true');}
   }
   open(items,x,y,parent){
@@ -42,11 +43,11 @@ class MenuSession {
       node.append(row);
     }
     node.addEventListener('keydown',e=>this.keydown(state,e));
-    document.body.append(node);this.stack.push(state);
+    this.document.body.append(node);this.stack.push(state);
     const width=node.offsetWidth,height=node.offsetHeight;
-    if(parent&&x+width>innerWidth-2)x=parent.row.getBoundingClientRect().left-width+2;
-    node.style.left=Math.round(Math.max(2,Math.min(x,innerWidth-width-2)))+'px';
-    node.style.top=Math.round(Math.max(2,Math.min(y,innerHeight-height-2)))+'px';
+    if(parent&&x+width>this.window.innerWidth-2)x=parent.row.getBoundingClientRect().left-width+2;
+    node.style.left=Math.round(Math.max(2,Math.min(x,this.window.innerWidth-width-2)))+'px';
+    node.style.top=Math.round(Math.max(2,Math.min(y,this.window.innerHeight-height-2)))+'px';
     if(!parent){node.focus({preventScroll:true});if(this.options.focusFirst)this.select(state,this.next(state,-1,1),true);}
     return state;
   }
@@ -73,6 +74,6 @@ class MenuSession {
     else handled=false;
     if(handled){e.preventDefault();e.stopPropagation();}
   }
-  dispose(restore){this.abort.abort();this.trim(0);document.querySelectorAll('.menu-open').forEach(n=>{n.classList.remove('menu-open');n.setAttribute('aria-expanded','false');});if(restore&&this.previous?.isConnected&&!this.previous.disabled)this.previous.focus({preventScroll:true});}
+  dispose(restore){this.abort.abort();this.trim(0);this.document.querySelectorAll('.menu-open').forEach(n=>{n.classList.remove('menu-open');n.setAttribute('aria-expanded','false');});if(restore&&this.previous?.isConnected&&!this.previous.disabled)this.previous.focus({preventScroll:true});}
 }
 export function showMenu(items,x,y,onCommand,options={}){closeMenu(false);active=new MenuSession(items,x,y,onCommand,options);return active.stack[0].node;}

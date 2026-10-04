@@ -49,7 +49,7 @@ There are 37 offered browser control types, including classic intrinsic-style co
 
 ## Build and test
 
-Requires Node.js 22 or later. The build has no npm package dependencies:
+Requires Node.js 22 or later. The browser build has no npm package dependencies:
 
 ```sh
 npm run build
@@ -76,6 +76,7 @@ See [Testing and validation](docs/TESTING.md) for release counts, reproducible c
 | `src/controls`, `src/graphics`, `src/theme` | Browser controls, drawing and shared themes |
 | `src/editor`, `src/ide`, `src/designer` | Editor services, workspace/tool windows and form editing |
 | `src/project`, `src/exporter` | Project/native-text interchange, resource preservation and standalone export |
+| `desktop` | JavaScript native host, secure bridge and portable executable packaging dependencies |
 | `tools`, `tests`, `reports` | Reproducible build/package tools, regression tests and validation evidence |
 | `examples`, `dist`, `docs` | Editable examples, built applications and documentation |
 
@@ -90,3 +91,15 @@ In-page floating windows are not detached OS windows. Native MDIForm/UserControl
 [User guide](docs/USER_GUIDE.md) · [Architecture / SDK embedding](docs/ARCHITECTURE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Visual audit](docs/VISUAL-AUDIT.md) · [Release notes](docs/RELEASE-NOTES-0.6.0.md) · [Worktrees](docs/WORKTREES.md)
 
 MIT-licensed original implementation. Visual Basic is a Microsoft trademark; this project is not Microsoft software or endorsed by Microsoft. Historical reconstruction evidence remains in `RECOVERY.md`; its old test failures and version marker describe the recovery snapshot, not this release.
+
+## Windows executables
+
+Two JavaScript-driven build targets are available: **modern Windows portable EXEs** with a bundled Electron/WebGPU host and native form windows, and **classic VB6 runtime EXEs** built by a separately installed licensed `VB6.EXE` compiler. See [Windows builds](docs/WINDOWS-BUILDS.md) for commands, architecture, validation and compatibility boundaries.
+
+```sh
+npm --prefix desktop install
+npm run build:windows -- --project examples/calculator.vb6web
+npm run build:classic -- --project examples/classic/HelloRuntime.vbp --codegen native
+```
+
+The modern portable EXE extracts its embedded runtime at launch. The classic EXE depends on the external 32-bit VB6 runtime and any project-specific OCX/COM components. Neither is advertised as a no-extraction, no-dependency implementation.
