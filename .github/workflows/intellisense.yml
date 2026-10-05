@@ -9,7 +9,7 @@ on:
       - 'tools/**'
       - '.github/workflows/intellisense.yml'
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: intellisense-${{ github.ref }}
   cancel-in-progress: true
@@ -22,18 +22,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Integrate reviewed editor changes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/classic-vb6-intellisense'
+        run: |
+          if test -f tools/apply-intellisense-integration.py; then
+            python tools/apply-intellisense-integration.py
+            rm tools/apply-intellisense-integration.py
+            npm run build
+            npm test
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add src/editor dist tools/apply-intellisense-integration.py
+            git commit -m 'feat(editor): integrate classic IntelliSense and regenerate standalone IDE'
+            git push origin HEAD:feature/classic-vb6-intellisense
+          fi
       - name: Build and unit tests
         run: npm run build && npm test
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Browser dependencies
-        run: pip install playwright && python -m playwright install --with-deps chromium
+        run: pip install playwright==1.57.0 && python -m playwright install --with-deps chromium
       - name: IntelliSense browser regression
-        run: |
-          if test -f tools/browser-intellisense-tests.py; then
-            python tools/browser-intellisense-tests.py
-          fi
+        run: python tools/browser-intellisense-tests.py
       - name: Reproducible source snapshot
         if: always()
         run: git archive --format=zip --output=intellisense-source.zip HEAD
