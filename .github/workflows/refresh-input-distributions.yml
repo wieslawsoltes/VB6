@@ -1,0 +1,37 @@
+name: Refresh input-fix distributions
+on:
+  push:
+    branches: [fix/form-keyboard-mouse-input]
+    paths: [src/**, tools/**, tests/**, .github/workflows/refresh-input-distributions.yml]
+permissions:
+  contents: write
+concurrency:
+  group: refresh-input-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'wieslawsoltes/VB6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/integrate-input-fix.mjs
+      - run: npm run build && npm test
+      - name: Commit verified source and regenerated bundles
+        env:
+          BRANCH: ${{ github.ref_name }}
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$BRANCH" = 'fix/form-keyboard-mouse-input'
+          git add src/controls/input.js tools/browser-form-input.py dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(input): retain right-button release and chorded button events'
+          git push origin "HEAD:refs/heads/$BRANCH"
