@@ -28,6 +28,6 @@ export function parseWin32Options(args) {
   return options;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  try { const options = parseWin32Options(process.argv.slice(2)); if (options.help) console.log('Build a no-extraction x86 Windows EXE in JavaScript:\n  npm run build:win32 -- --project file.vb6web|file.vbp [--out directory] [--name Name]\nNative controls/GDI; Byte/Integer/Long/Boolean, Single/Double, Strings and typed arrays. Unsupported features produce diagnostics, not an executable.'); else console.log(JSON.stringify(await buildWin32(options),null,2)); }
+  try { const options = parseWin32Options(process.argv.slice(2)); if (options.help) console.log('Build a no-extraction x86 Windows EXE in JavaScript:\n  npm run build:win32 -- --project file.vb6web|file.vbp [--out directory] [--name Name]\nNative controls/GDI; Byte/Integer/Long/Boolean, Single/Double, Currency, Strings and typed arrays. Unsupported features produce diagnostics, not an executable.'); else console.log(JSON.stringify(await buildWin32(options),null,2)); }
   catch(error) { console.error(error.message); process.exitCode = 1; }
 }

@@ -1,0 +1,13 @@
+LIBRARY vb6-abi-probe
+EXPORTS
+ EchoCurrency=_EchoCurrency@8
+ EchoDouble=_EchoDouble@8
+ EchoSingle=_EchoSingle@4
+ EchoInteger=_EchoInteger@4
+ EchoByte=_EchoByte@4
+ EchoBoolean=_EchoBoolean@4
+ BumpCurrency=_BumpCurrency@4
+ WholeDouble=_WholeDouble@0
+ InvalidDouble=_InvalidDouble@0
+ Calls=_Calls@0
+ ResetCalls=_ResetCalls@0

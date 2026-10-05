@@ -35,6 +35,8 @@ In the standalone browser IDE, open Calculator and choose **File > Make Calculat
 
 ## Still separate or unsupported
 
-This remains the direct **PE32/x86 native-control/GDI** target, not a no-extraction WebGPU backend. Electron is the separate WebGPU-capable target. Variant/Currency/Decimal storage, records/classes, full control APIs, dynamic control creation, COM/OCX and unrestricted native ABI/callback support are not implemented here. Native image/resource rendering and physical-GPU certification are not implied. Do not use these tests as certification of the proprietary Microsoft VB6 compiler or every Windows locale.
+This remains the direct **PE32/x86 native-control/GDI** target, not a no-extraction WebGPU backend. Electron is the separate WebGPU-capable target. Variant/Decimal storage, records/classes, full control APIs, dynamic control creation, COM/OCX and unrestricted native ABI/callback support are not implemented here. Native image/resource rendering and physical-GPU certification are not implied. Do not use these tests as certification of the proprietary Microsoft VB6 compiler or every Windows locale.
 
 Primary platform references: Microsoft Learn `VarR8FromStr`, `VarBstrFromR8`, `VarR8Pow`, x86 argument passing, VBA `Val` and `InStr` documentation. Windows API calls in the test harness are read/control operations on the harness's own child processes.
+
+Exact Currency storage, math, conversions and typed-array support are now provided by the separate lowering described in [Native Currency](WIN32-CURRENCY.md); Currency is not implemented by widening to Double.
