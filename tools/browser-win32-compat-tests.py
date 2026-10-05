@@ -35,6 +35,12 @@ def check(value, message):
     if not value:
         raise AssertionError(message)
 
+def click_control(page, name):
+    page.locator(f'[data-control="{name}"]').click()
+    # Declare buffers can be zero between awaited VB statements. Observe the
+    # entire input/procedure queue draining before checking retained resources.
+    page.wait_for_function("""()=>{const v=vb6Application.vm;return !v.processing && v.stack.length===0 && v.eventQueue.length===0;}""")
+
 def verify_app(page):
     page.wait_for_function('globalThis.vb6Application?.vm?.state === "running"')
     # VM state becomes running before asynchronous Form_Load has finished.
@@ -42,13 +48,13 @@ def verify_app(page):
     page.wait_for_function('''vb6Application.vm.lastError || document.querySelector('[data-control="txtValue"] input')?.value === "Hello from kernel32 and user32!"''')
     check(page.evaluate('vb6Application.vm.lastError?.message || null') is None, 'Runtime error')
     check(page.locator('[data-control="txtValue"] input').input_value() == 'Hello from kernel32 and user32!', 'INI output buffer did not reach textbox')
-    page.locator('[data-control="cmdText"]').click()
+    click_control(page, 'cmdText')
     page.wait_for_function('vb6Application.forms[0].controlMap.get("txtvalue").Text === "Text changed by user32.SetWindowTextA"')
-    page.locator('[data-control="cmdToggle"]').click()
+    click_control(page, 'cmdToggle')
     page.wait_for_function('vb6Application.forms[0].controlMap.get("txtvalue").Enabled === 0')
-    page.locator('[data-control="cmdToggle"]').click()
+    click_control(page, 'cmdToggle')
     page.wait_for_function('vb6Application.forms[0].controlMap.get("txtvalue").Enabled !== 0')
-    page.locator('[data-control="cmdDraw"]').click()
+    click_control(page, 'cmdDraw')
     page.wait_for_function('vb6Application.forms[0].controlMap.get("piccanvas").surface?.commands.length === 2')
     check(page.evaluate('vb6Application.win32 === undefined'), 'Unexpected host-global compatibility state')
     check(page.evaluate('vb6Application.vm.win32.api.memory.used') == 0, 'Transient Declare memory leaked')
@@ -56,7 +62,7 @@ def verify_app(page):
     # Drawn surface pixel in Canvas2D fallback or GPU screenshot: preserve commands.
     check(page.evaluate('vb6Application.forms[0].controlMap.get("piccanvas").surface.commands[0].color') == 11829830, 'COLORREF changed')
 
-    page.locator('[data-control="cmdBitmap"]').click()
+    click_control(page, 'cmdBitmap')
     page.wait_for_function('vb6Application.forms[0].controlMap.get("lblstatus").Caption.startsWith("Writable DIB")')
     page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
     raster=page.evaluate("""()=>{
@@ -78,12 +84,12 @@ def verify_app(page):
     check(raster['memory']==0 and raster['bitmapCount']==0,'Bitmap resources leaked: '+str(raster))
     # Repeated same-region writes must coalesce instead of retaining frames forever.
     for _ in range(3):
-        page.locator('[data-control="cmdBitmap"]').click()
+        click_control(page, 'cmdBitmap')
         page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
     check(page.evaluate('vb6Application.forms[0].controlMap.get("piccanvas").surface.commands.length')==raster['commandCount'],'Bitmap repaint command growth')
     check(page.evaluate('vb6Application.vm.lastError?.message || null') is None,'Bitmap declarations failed')
 
-    page.locator('[data-control="cmdRegions"]').click()
+    click_control(page, 'cmdRegions')
     page.wait_for_function('vb6Application.forms[0].controlMap.get("lblstatus").Caption.startsWith("Complex region:")')
     page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
     def region_pixels():
@@ -100,7 +106,7 @@ def verify_app(page):
     check(region['logical']==expected and region['displayed']==expected,'Complex clip pixels: '+str(region))
     check(region['regions']==0 and region['memory']==0 and '96 bytes' in region['caption'],'Region resource lifetime: '+str(region))
     for _ in range(3):
-        page.locator('[data-control="cmdRegions"]').click()
+        click_control(page, 'cmdRegions')
         page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
     again=region_pixels()
     check(again==region,'Repeated region repaint changed pixels or leaked retained commands: '+str(again))
