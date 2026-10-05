@@ -12,11 +12,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Snapshot exact repository
+      - name: Snapshot exact repository and concurrent main
         run: |
+          git fetch origin main
           mkdir -p /tmp/agent-source
           git rev-parse HEAD > /tmp/agent-source/head.txt
-          git bundle create /tmp/agent-source/repository.bundle HEAD
+          git rev-parse origin/main > /tmp/agent-source/main.txt
+          git bundle create /tmp/agent-source/repository.bundle --all
           cd /tmp/agent-source
           sha256sum repository.bundle > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
