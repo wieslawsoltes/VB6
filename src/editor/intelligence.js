@@ -1,4 +1,5 @@
-import {normalizeTypeLibrary} from './reference-metadata.js';
+import {normalizeTypeLibrary,referenceSnapshot} from './reference-metadata.js';
+import {typeCompletionContext,typeCandidates} from './type-completion.js';
 import {parseExpression} from '../language/expression.js';
 import {KEYWORDS} from './language-service.js';
 import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt,completionKey,completionMatches} from './source-context.js';
@@ -75,7 +76,16 @@ export class EditorIntelligence {
   prune(project){const ids=new Set(project.modules.map(m=>m.id));for(const id of this.cache.keys())if(!ids.has(id))this.cache.delete(id);}
   scope(project,module,line,offset=null){
     this.prune(project);const idx=this.index(module,project),proc=idx.procedures.find(p=>offset===null?line>=p.line&&line<=p.end:offset>=p.offset&&offset<=p.endOffset);
-    const local=idx.symbols.filter(s=>s.ownerId&&s.ownerId===proc?.id),global=idx.symbols.filter(s=>!s.owner);
+    let local=idx.symbols.filter(s=>s.ownerId&&s.ownerId===proc?.id);
+    if(local.some(s=>s.implicitRedim)){
+      const shared=new Set();
+      for(const other of project.modules){
+        if(other.id===module.id||other.kind!=='module')continue;
+        for(const symbol of this.index(other,project).symbols)if(!symbol.owner&&symbol.scope!=='private')shared.add(symbolKey(symbol.name));
+      }
+      local=local.filter(s=>!s.implicitRedim||!shared.has(symbolKey(s.name)));
+    }
+    const global=idx.symbols.filter(s=>!s.owner);
     return {idx,proc,symbols:[...local,...coalesce(global)]};
   }
   /** Explicit portable type-library descriptors. No registry lookup, fetching,
@@ -90,14 +100,13 @@ export class EditorIntelligence {
   referenceTypes(project){
     // Projects can persist the same JSON descriptor beside their native
     // reference identity. Check serialized contents to observe in-place edits.
-    const descriptors=(project.references||[]).filter(r=>r&&typeof r==='object'&&r.typeLibrary&&!r.missing).map(r=>r.typeLibrary).concat(project.typeLibraries||[]).filter(d=>d?.enabled!==false);
-    const key=JSON.stringify(descriptors);
+    const {descriptors,key}=referenceSnapshot(project);
     if(key!==this.referenceKey){const service=new EditorIntelligence();for(const d of descriptors)try{service.registerTypeLibrary(d.name,d.types);}catch{}this.referenceCache=[...service.libraries.values()].flat();this.referenceKey=key;}
     return [...this.libraries.values()].flat().concat(this.referenceCache||[]);
   }
   type(project,module,type,seen=new Set()){
     if(seen.has(symbolKey(type))||seen.size>=32)return null;seen.add(symbolKey(type));
-    type=String(type||'Variant').replace(/\[([^\]]+)\]/g,'$1').replace(/\s+/g,'');
+    type=String(type||'Variant').replace(/\s*\.\s*/g,'.').trim().replace(/\[([^\]]+)\]/g,'$1');
     if(project.name&&type.toLowerCase().startsWith(project.name.toLowerCase()+'.'))type=type.slice(project.name.length+1);
     const target=eq(module.name,type)?module:project.modules.find(m=>eq(m.name,type));
     if(target)return {name:target.name,type:target.name,kind:target.kind,moduleId:target.id,members:coalesce(this.index(target,project).symbols.filter(s=>!s.owner&&(target.id===module.id||s.scope!=='private'))).concat(target.form?builtinType(target.form.type||'Form')?.members||[]:[])};
@@ -254,17 +263,11 @@ export class EditorIntelligence {
       const unique=new Map();for(const s of items){const key=completionKey(s.name);if(visible(s)&&(unfiltered||completionMatches(s.name,span.prefix))&&!unique.has(key))unique.set(key,s);}
       return [...unique.values()].sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     };
-    const typeContext=st.masked.slice(0,Math.max(0,span.start-st.start)).match(/\b(As\s+(?:New\s+)?|New\s+|Implements\s+)([\w.\[\]]*)$/i);
+    const typeContext=typeCompletionContext(st.masked.slice(0,Math.max(0,span.start-st.start)));
     const labelContext=/\b(?:GoTo|GoSub|Resume)\s+[^\s]*$/i.test(st.masked);
     if(labelContext&&!constants){return {...span,items:filter([...scope.idx.labels.filter(l=>l.ownerId===scope.proc?.id),...(/\bResume\s+/i.test(st.masked)?[{name:'Next',kind:'keyword'}]:/\bOn\s+Error\s+GoTo\s+/i.test(st.masked)?[{name:'0',kind:'constant'}]:[])]),context:'labels'};}
     if(typeContext&&!constants){
-      const construct=/New/i.test(typeContext[1]),implementsType=/Implements/i.test(typeContext[1]),qualifier=typeContext[2].replace(/\.$/,'');
-      let types=[...PRIMITIVE_TYPES.map(name=>({name,kind:'type',type:name,aliases:['VBA.'+name]})),...project.modules.filter(m=>m.kind!=='module').map(m=>({name:m.name,kind:'class',type:m.name,moduleId:m.id,line:1,creatable:m.form?.type!=='MDIForm'})),...project.modules.flatMap(m=>this.index(m,project).records.filter(r=>m.id===module.id||r.scope!=='private')),...TYPE_CATALOG.values(),...ENUM_TYPES.values(),...this.referenceTypes(project)].map(t=>({...t,type:t.type||t.name}));
-      if(construct)types=types.filter(t=>['class','form'].includes(t.kind)&&t.creatable!==false);
-      if(implementsType)types=types.filter(t=>['class','interface'].includes(t.kind));
-      if(qualifier){if(eq(qualifier,project.name))types=types.filter(t=>t.moduleId);else types=types.filter(t=>t.name.toLowerCase().startsWith(qualifier.toLowerCase()+'.')||(t.aliases||[]).some(a=>a.toLowerCase().startsWith(qualifier.toLowerCase()+'.')));types=types.map(t=>({...t,name:t.name.split('.').at(-1)}));}
-      else types.push(...['VB','VBA','ADODB','DAO','Scripting',project.name,...this.referenceTypes(project).map(t=>t.library)].filter(Boolean).map(name=>({name,kind:'module'})));
-      return {...span,items:filter(types),context:'types'};
+      return {...span,items:filter(typeCandidates(this,project,module,typeContext)),context:'types'};
     }
     let items=[],context='global';
     if(memberAccess&&!constants){

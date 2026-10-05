@@ -1,3 +1,4 @@
+import {referenceSnapshot} from './reference-metadata.js';
 import {EditorIntelligence,wordAt} from './intelligence.js';
 import {statementBefore} from './source-context.js';
 
@@ -36,7 +37,7 @@ export class ExpressionAssistance {
     const prefix=this.input.value.match(/^\s*\?\s*/)?.[0].length||0,text=this.input.value.slice(prefix),offset=Math.max(0,this.input.selectionStart-prefix);
     return {...scope,text,offset,prefix};
   }
-  revision(context){return JSON.stringify([context.module.id,context.line,context.frame,this.ide.runState,this.service.libraryRevision,context.project.modules.map(m=>[m.id,m.name,m.code,m.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),m.attributes,m.form?.menus]),context.project.references,context.project.typeLibraries,context.project.dataSources,context.project.settings?.conditionalConstants]);}
+  revision(context){return JSON.stringify([context.module.id,context.line,context.frame,this.ide.runState,this.service.libraryRevision,context.project.modules.map(m=>[m.id,m.name,m.code,m.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),m.attributes,m.form?.menus]),referenceSnapshot(context.project).key,context.project.dataSources,context.project.settings?.conditionalConstants]);}
   place(node){
     const input=this.input,doc=input.ownerDocument,view=doc.defaultView,r=input.getBoundingClientRect();
     Object.assign(node.style,{position:'fixed',zIndex:32000,maxWidth:Math.max(1,view.innerWidth-10)+'px',boxSizing:'border-box',overflowWrap:'anywhere',width:node===this.tip?'max-content':'240px'});

@@ -64,9 +64,54 @@ Public scalar/object interface fields generate their get/let or get/set contract
 
 DAO no longer aliases its Recordset type to ADODB.Recordset. Workspace, Database, QueryDef, TableDef, Index, Field, Parameter and typed collections describe the shipped DAO adapter, including explicit Edit, Find/Seek, Clone and CopyQueryDef. DAO argument enums use the shared runtime constants. The metadata does not implement Jet/ACE providers, native catalog security or unsupported forced/batch cursor operations. GDI-backed Form/MDIForm/PictureBox hDC metadata does not acquire a live DC. RDO metadata for unmerged runtime work is not added.
 
+## Qualified type paths, implicit arrays and project-reference snapshots
+
+Type lists now project one namespace segment at a time. `As Models.` lists that
+module's visible UDTs/enums, and `As Project1.Models.` retains the same identity.
+`As Project1.` offers module paths rather than inventing `Project1.Point` for a
+record actually declared in `Models`. Private records remain visible only in
+their declaring module. Same-named records retain their declaring module when
+selected. `As New` and `Implements` filter terminal types before emitting their
+namespace paths, so unavailable factories do not create misleading branches.
+
+Portable library names and aliases can include nested paths. For a library
+`Vendor.Api` containing `Nested.Record`, completion follows `Vendor` → `Api` →
+`Nested` → `Record`; it does not insert `Vendor.Record`. The tolerant language
+service preserves Unicode/bracketed type qualifiers and spaces inside bracketed
+names. This does not relax the separate project loader's existing module-name
+validation or certify Windows locale behavior.
+
+An otherwise undeclared, procedure-local `ReDim items(...) As Customer` now
+provides `items(index).Name` member assistance and ranked subscript hints.
+Explicit local, parameter, control-array, module and accessible public module
+symbols take precedence, including declarations later in the source. A resize
+does not retype an explicitly declared `Variant` or turn it into an assumed
+concrete object. `ReDim Preserve`, multiple declarators, nested bound expressions,
+DefType and active conditional compilation are indexed without evaluating bounds.
+Repeated declarations are deduplicated using sets; source indexes remain cached.
+This is declaration-based assistance, not control-flow analysis of runtime array
+sizes or a guarantee that a resize with incompatible types is executable.
+
+Project reference snapshots now share the same data-only boundary as explicit
+registration. Source completion, expression-field revision checks and the type
+resolver read own data descriptors before serializing. Callback-bearing entries,
+getters, cyclic graphs and malformed arrays are rejected without invoking their
+callbacks; unrelated valid entries remain usable. Missing native references and
+disabled portable libraries remain excluded. In-place descriptor edits still
+invalidate stale suggestions. Native reference identity strings are not rewritten.
+The snapshot accepts at most 4,096 entries per input list and 4 MiB of enabled
+serialized descriptor data; an over-budget snapshot is ignored. Host integrations
+must supply ordinary non-proxy data objects, not active JavaScript proxy objects.
+
+The classic language rules are documented in Microsoft's retained
+[ReDim statement](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/redim-statement)
+and [Avoiding naming conflicts](https://learn.microsoft.com/en-us/office/vba/language/concepts/getting-started/avoiding-naming-conflicts)
+references. Nested portable-library namespaces are this implementation's metadata
+convention, not a claim that native VB6 creates nested project modules.
+
 ## Validation
 
-`tests/intellisense-compatibility.test.mjs` adds service, metadata and executable generated-handler regressions. `tools/browser-intellisense-compatibility.py` runs all 18 original browser scenarios plus 21 new scenarios, including handler generation/undo, a single-event Timer, live declaration changes, interface accessors, mouse selection, menu routing, no-evaluation commits, read-only guards, labels, namespaces/suffixes, Select Case constants and reference priority. The permanent read-only IntelliSense workflow runs the complete 39-case suite in Chromium, Firefox and WebKit over modular HTTP, standalone HTTP and standalone file URLs, with no inline-content fallback or scenario skips. Each browser job checks committed generated distributions.
+`tests/intellisense-compatibility.test.mjs` adds service, metadata and executable generated-handler regressions. `tools/browser-intellisense-compatibility.py` runs all 18 original browser scenarios plus 21 new scenarios, including handler generation/undo, a single-event Timer, live declaration changes, interface accessors, mouse selection, menu routing, no-evaluation commits, read-only guards, labels, namespaces/suffixes, Select Case constants and reference priority. The permanent read-only IntelliSense workflow runs the complete 49-case suite in Chromium, Firefox and WebKit over modular HTTP, standalone HTTP and standalone file URLs, with no inline-content fallback or scenario skips. Each browser job checks committed generated distributions. The follow-up adds 10 browser workflows for qualified module/project/library paths, Unicode library qualifiers, ReDim members/rank/shadowing, callback-free source/Immediate snapshots and rejection of stale reference commits (49 scenarios × 3 browsers × 3 origins = 441 executions). `tests/intellisense-qualified-arrays.test.mjs` adds 39 focused cases, including an executable object-array runtime regression and a cached 5,000-array declaration index.
 
 ```sh
 npm run build

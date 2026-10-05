@@ -28,6 +28,39 @@ function metadataCopy(input){
   };
   return copy(input,0);
 }
+// Read only own data descriptors. Neither native-reference wrappers nor
+// portable project metadata are allowed to run accessors/toJSON while an editor
+// constructs a cache key. Malformed entries are isolated from valid neighbors.
+function ownData(object,key){
+  if(!object||typeof object!=='object')return undefined;
+  const descriptor=Object.getOwnPropertyDescriptor(object,key);
+  return descriptor&&Object.hasOwn(descriptor,'value')?descriptor.value:undefined;
+}
+function dataEntries(array){
+  if(!Array.isArray(array)||array.length>4096)return [];
+  const entries=[];
+  for(let i=0;i<array.length;i++){const value=ownData(array,String(i));if(value!==undefined)entries.push(value);}
+  return entries;
+}
+export function referenceSnapshot(project){
+  const attached=dataEntries(ownData(project,'references')).flatMap(reference=>{
+    if(!reference||typeof reference!=='object')return [];
+    const missing=Object.getOwnPropertyDescriptor(reference,'missing');
+    if(missing&&(!Object.hasOwn(missing,'value')||missing.value))return [];
+    const library=ownData(reference,'typeLibrary');return library?[library]:[];
+  });
+  const descriptors=[];let size=0;
+  for(const value of [...attached,...dataEntries(ownData(project,'typeLibraries'))]){
+    try{
+      const safe=metadataCopy(value);
+      if(!safe||typeof safe!=='object'||Array.isArray(safe)||safe.enabled===false)continue;
+      const json=JSON.stringify(safe);size+=json.length;
+      if(size>4*1024*1024)return {key:'[]',descriptors:[]};
+      descriptors.push(safe);
+    }catch{/* Reject data with callbacks, cycles or invalid limits, not the editor. */}
+  }
+  return {key:JSON.stringify(descriptors),descriptors};
+}
 const clean=value=>String(value).replace(/\[([^\]]+)\]/g,'$1').replace(/\s*\.\s*/g,'.');
 /** Portable, bounded, data-only metadata. Type names in signatures are resolved
  * in the declaring library, never accidentally in the consumer's module. */

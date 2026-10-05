@@ -1,3 +1,4 @@
+import {referenceSnapshot} from './reference-metadata.js';
 import {declarationTargets} from './event-completion.js';
 import {FindIndex,replaceMatches} from './find-index.js';
 import {VirtualTextInput} from './virtual-input.js';
@@ -192,7 +193,7 @@ export class SourceEditor extends Signal {
     if(e.key==='Tab'&&!this.input.readOnly){e.preventDefault();const bounds=this.selectionBounds();if(bounds.start!==bounds.end||e.shiftKey)this.indentBlock(e.shiftKey);else this.replaceSelection(' '.repeat(this.project.settings.tabWidth||4));return;}
     if(e.key==='Enter'&&!this.input.readOnly){e.preventDefault();const previous=this.input.value.slice(0,this.input.selectionStart).split('\n').at(-1),indent=this.appearance.autoIndent?previous.match(/^\s*/)[0]:'';this.replaceSelection('\n'+indent,undefined,undefined,'typing');return;}
   }
-  completionSnapshot(){return {project:this.project,module:this.module.id,library:this.intelligence.libraryRevision,references:JSON.stringify([this.project.references||[],this.project.typeLibraries||[]]),dataSources:JSON.stringify(this.project.dataSources||{}),modules:this.project.modules.map(m=>({id:m.id,name:m.name,kind:m.kind,code:m.id===this.module.id?null:m.code,metadata:JSON.stringify([m.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),m.form?.menus,m.attributes])})),conditions:JSON.stringify(this.project.settings?.conditionalConstants||{})};}
+  completionSnapshot(){return {project:this.project,module:this.module.id,library:this.intelligence.libraryRevision,references:referenceSnapshot(this.project).key,dataSources:JSON.stringify(this.project.dataSources||{}),modules:this.project.modules.map(m=>({id:m.id,name:m.name,kind:m.kind,code:m.id===this.module.id?null:m.code,metadata:JSON.stringify([m.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),m.form?.menus,m.attributes])})),conditions:JSON.stringify(this.project.settings?.conditionalConstants||{})};}
   sameCompletionSnapshot(a,b){return a&&a.project===b.project&&a.module===b.module&&a.library===b.library&&a.references===b.references&&a.dataSources===b.dataSources&&a.conditions===b.conditions&&a.modules.length===b.modules.length&&a.modules.every((m,i)=>Object.keys(m).every(k=>m[k]===b.modules[i][k]));}
   complete(mode='members',reuse=false){
     if(!this.module||this.composing||this.input.readOnly)return;
