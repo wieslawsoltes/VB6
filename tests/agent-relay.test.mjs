@@ -91,3 +91,13 @@ test('relay: at most four upstream requests can be active', async t => {
   release.forEach(resolve => resolve()); await Promise.all(pending);
   assert.equal((await f.request({method: 'OPTIONS', body: ''})).status, 204);
 });
+
+for (const [value, expected] of [['2.5', '3'], ['9000', '300'], ['private-secret-not-a-date', undefined]]) test('relay: retry delay is bounded and sanitized: ' + value, async t => {
+  const f = await fixture(t, async () => new Response('private-error-body', {status: 429, headers: {'retry-after': value, 'x-provider-secret': 'private-secret'}}));
+  const response = await f.request();
+  assert.equal(response.status, 429); assert.equal(response.text, '');
+  assert.equal(response.headers['retry-after'], expected);
+  assert.equal(response.headers['access-control-expose-headers'], 'Retry-After');
+  assert.equal(response.headers['x-provider-secret'], undefined);
+  assert.ok(!JSON.stringify(response).includes('private-secret'));
+});

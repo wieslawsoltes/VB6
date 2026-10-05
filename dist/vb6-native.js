@@ -130,7 +130,7 @@ function tokenize(text) {
     if (/[a-z_\u0080-\uffff]/i.test(c) || c === '[') {
       let name;
       if (c === '[') { const end = text.indexOf(']', i); if (end < 0) throw new VBError('Expected ]', 1002); name = text.slice(i+1, end); i = end+1; }
-      else { i++; while (i < text.length && /[\w\u0080-\uffff]/.test(text[i])) i++; if (/[$%&!#@]/.test(text[i] || '\0')) i++; name = text.slice(start,i); }
+      else { i++; while (i < text.length && /[\w\u0080-\uffff]/.test(text[i])) i++; if (/[$%&!#@]/.test(text[i] || '\0') && !(text[i] === '!' && /[a-z_\u0080-\uffff\[]/i.test(text[i+1] || ''))) i++; name = text.slice(start,i); }
       if (name.toLowerCase() === 'rem' && (!out.length || out.at(-1).value === ':')) break;
       push('id', name, start); continue;
     }
@@ -570,7 +570,7 @@ const DATA_CONSTANTS = Object.freeze({
   adParamReturnValue:4, adSchemaTables:20, adSchemaColumns:4,
   adModeRead:1, adModeWrite:2, adModeReadWrite:3,
   adSmallInt:2, adInteger:3, adSingle:4, adDouble:5, adCurrency:6,
-  adDate:7, adBoolean:11, adVariant:12, adUnsignedTinyInt:17, adBigInt:20,
+  adDate:7, adBoolean:11, adVariant:12, adDecimal:14, adGUID:72, adNumeric:131, adDBDate:133, adDBTime:134, adDBTimeStamp:135, adUnsignedTinyInt:17, adBigInt:20,
   adBinary:128, adChar:129, adWChar:130, adVarChar:200, adLongVarChar:201,
   adVarWChar:202, adLongVarWChar:203, adVarBinary:204, adLongVarBinary:205,
   adAffectCurrent:1, adAffectGroup:2, adAffectAll:3, adLockUnspecified:-1,
@@ -582,7 +582,12 @@ const DATA_CONSTANTS = Object.freeze({
   adBookmark:8192, adApproxPosition:16384, adMovePrevious:512, adHoldRecords:256,
   adFind:524288, adUpdateBatch:65536, adResync:131072,
   adAddNew:16778240, adDelete:16779264, adUpdate:16809984,
-  dbOpenSnapshot:4, dbOpenDynaset:2, dbOpenTable:1, dbReadOnly:4,
+  dbOpenSnapshot:4, dbOpenDynaset:2, dbOpenTable:1, dbOpenForwardOnly:8, dbReadOnly:4,
+  dbFailOnError:128, dbUseJet:2, dbUseODBC:1, dbEditNone:0, dbEditInProgress:1, dbEditAdd:2,
+  dbUpdateRegular:1, dbUpdateBatch:4, dbOptimistic:3, dbOptimisticValue:1, dbPessimistic:2, dbOptimisticBatch:5, dbAutoIncrField:16, dbDescending:1,
+  dbBoolean:1, dbByte:2, dbInteger:3, dbLong:4, dbCurrency:5, dbSingle:6,
+  dbDouble:7, dbDate:8, dbBinary:9, dbText:10, dbLongBinary:11, dbMemo:12, dbGUID:15,
+  dbBigInt:16, dbDecimal:20, dbNumeric:21, dbTimeStamp:23,
 });
 function dataError(message, number=3001){return new VBError(message,number,'VB6.Data');}
 function assertData(condition,message,number=3001){if(!condition)throw dataError(message,number);}

@@ -1,8 +1,9 @@
+import {DAOEngine} from './dao.js';
 import {normalizeDataSources,assertData,DATA_CONSTANTS} from './common.js';
 import {SQLiteProvider} from './sqlite.js';
 import {HTTPProvider,GatewayProvider} from './http.js';
 import {FileDataProvider} from './files.js';
-import {ADOConnection,ADOCommand,DataCollection,DAOEngine} from './connection.js';
+import {ADOConnection,ADOCommand,DataCollection} from './connection.js';
 import {ConnectedRecordset} from './connected-recordset.js';
 import {VirtualFileSystem} from '../runtime/filesystem.js';
 
@@ -19,7 +20,7 @@ export class DataContext {
     if(this.credentials.has(name))return this.credentials.get(name);
     const value=await this.credentialProvider?.(name);assertData(value,'A runtime credential is required: '+name,70);this.credentials.set(name,value);return value;
   }
-  isObjectType(name){return /^(?:ADODB\.(?:Connection|Command|Recordset|Parameter)|DAO\.(?:DBEngine|Database|Recordset)|VB6\.Data\.(?:Connection|Command))$/i.test(String(name));}
+  isObjectType(name){return /^(?:ADODB\.(?:Connection|Command|Recordset|Parameter)|DAO\.(?:DBEngine|Workspace|Database|Recordset|QueryDef|TableDef|Index|Field|Parameter)|VB6\.Data\.(?:Connection|Command))$/i.test(String(name));}
   createObject(name){
     switch(String(name).toLowerCase()){
       case 'adodb.connection':case 'vb6.data.connection':return this.connection();
@@ -51,7 +52,7 @@ export class DataContext {
   install(vm){
     for(const [name,value]of Object.entries(DATA_CONSTANTS))vm.library.set(name.toLowerCase(),value);
     const environment=this.environment();vm.library.set('dataenvironment1',environment);vm.library.set('dataenvironment',environment);
-    vm.library.set('dbengine',new DAOEngine(this));vm.library.set('opendatabase',(...args)=>new DAOEngine(this).OpenDatabase(...args));
+    const engine=this.daoEngine||(this.daoEngine=new DAOEngine(this));vm.library.set('dbengine',engine);vm.library.set('opendatabase',(...args)=>engine.OpenDatabase(...args));vm.library.set('createdatabase',(...args)=>engine.CreateDatabase(...args));
   }
   close(){
     if(this.closing)return this.closing;

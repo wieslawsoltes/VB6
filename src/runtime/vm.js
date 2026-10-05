@@ -2,6 +2,7 @@ import {VBWin32Bridge} from './win32.js';
 import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
+import {hasDataDefault} from '../data/defaults.js';
 import {defaultIdentifierType} from '../language/default-types.js';
 import {DebugInspector} from './debug-inspector.js';
 import {planLiveEdit,nextStatementIndex} from './live-edit.js';
@@ -183,6 +184,7 @@ export class VirtualMachine extends Signal {
     if(value===this.err)return this.err.Number;
     if(depth>32)throw new VBError('Circular default-member evaluation',28);
     if(value?.__control)return value.defaultValue();
+    if(hasDataDefault(value))return this.defaultValue(value.Value,depth+1);
     const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;
     if(instance?.__vbInstance&&name){const member=await this.getMember(value,name,this.currentFrame),result=member?.__procedure?await this.callProcedure(member.instance,member.__procedure,[],this.currentFrame):member;return this.defaultValue(result,depth+1);}
     return value;
@@ -265,7 +267,7 @@ export class VirtualMachine extends Signal {
       const key=lower(node.name);if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return frame.result;
       let cell=frame.locals.get(key)||frame.instance.fields.get(key);
       if(!cell){for(const instance of this.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private')){cell=instance.fields.get(key);break;}}
-      if(cell){if(!objectSet){const value=await cell.get();if(value?.__control)return value.defaultRef();const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;if(instance?.__vbInstance&&name)return this.memberReference(value,name,frame);}return cell;}
+      if(cell){if(!objectSet){const value=await cell.get();if(value?.__control)return value.defaultRef();if(hasDataDefault(value))return new Ref(()=>value.Value,v=>{value.Value=v;});const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;if(instance?.__vbInstance&&name)return this.memberReference(value,name,frame);}return cell;}
       if(frame.proc.constantBindings?.has(key)||frame.module.constantBindings?.has(key)||frame.module.globalEnumMembers?.has(key))throw new VBError('Assignment to constant not permitted',500);
       const setter=frame.module.procedures.get(key+':let')||frame.module.procedures.get(key+':set');if(setter)return new Ref(()=>this.getIdentifier(node.name,frame),v=>this.callProcedure(frame.instance,setter,[v],frame));
       if(frame.instance.formObject&&this.hasMember(frame.instance.formObject,node.name))return this.memberReference(frame.instance.formObject,node.name,frame);
