@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
+import {createNativeDebuggerBridge} from '../packages/native-debugger/src/bridge.mjs';
 import {CdbSession,findCdb,breakWindowsProcess} from '../packages/native-debugger/src/cdb-session.mjs';
 
 if(process.platform!=='win32')throw new Error('Run this test on Windows with Microsoft Debugging Tools installed.');
@@ -67,6 +68,33 @@ try{
   const attached=await make({pid:outside.pid});assert.equal(attached.pid,outside.pid);record('attach to an independently launched process',{pid:outside.pid});
   const attachedBreakpoint=await hit(attached,'DebugTarget!DebugTick');await attached.request('removeBreakpoint',{id:attachedBreakpoint.id,pauseId:attached.pauseId});await attached.request('continue',{pauseId:attached.pauseId});await attached.request('pause');assert.equal(attached.state,'paused');assert.ok(report.breakRequests>=1);record('break running native process through DebugBreakProcess');
   await attached.request('detach');assert.equal(alive(outside.pid),true);record('attached process survives debugger shutdown');
+  // Exercise the same authenticated HTTP surface used by the browser, with a
+  // real CDB session and real target. The test authorizes only its own fixture.
+  const bridge=await createNativeDebuggerBridge({port:0,origins:['https://ide.example'],authorize:async request=>request.operation==='attach'&&request.pid===outside.pid});
+  const rpc=async(method,params={},overrides={})=>{
+    const response=await fetch(bridge.url,{method:'POST',headers:{Origin:'https://ide.example','Content-Type':'application/json',Authorization:'Bearer '+bridge.token,...overrides},body:JSON.stringify({method,params})});
+    return {status:response.status,...await response.json()};
+  };
+  try{
+    assert.equal((await rpc('attach',{pid:outside.pid},{Authorization:'Bearer wrong'})).status,401);
+    assert.equal((await rpc('attach',{pid:outside.pid},{Origin:'https://unapproved.example'})).status,403);
+    assert.equal((await rpc('attach',{pid:process.pid})).error.code,'CONSENT_DENIED');
+    assert.equal((await rpc('capabilities')).result.interpreterFrames,false);
+    const connected=await rpc('attach',{pid:outside.pid});assert.equal(connected.status,200,JSON.stringify(connected));
+    const id=connected.result.id,pauseId=connected.result.pauseId;
+    assert.ok((await rpc('threads',{session:id})).result.threads.length>=2);
+    assert.equal((await rpc('continue',{session:id,pauseId:pauseId+1})).error.code,'STALE_PAUSE');
+    assert.equal((await rpc('continue',{session:id,pauseId})).result.state,'running');
+    const stopped=await rpc('pause',{session:id});assert.equal(stopped.status,200,JSON.stringify(stopped));assert.equal(stopped.result.state,'paused');
+    assert.ok((await rpc('stack',{session:id})).result.frames.length>0);
+    assert.equal((await rpc('command',{session:id,command:'.shell forbidden'})).error.code,'UNKNOWN_OPERATION');
+    assert.ok((await rpc('events',{session:id,after:0})).result.events.length>0);
+    assert.equal((await rpc('detach',{session:id})).status,200);
+    assert.equal((await rpc('status',{session:id})).error.code,'UNKNOWN_SESSION');
+    assert.equal(alive(outside.pid),true);record('real authenticated HTTP bridge enforces consent, origins and stale pauses');
+    assert.equal((await rpc('attach',{pid:outside.pid})).status,200);
+  }finally{await bridge.close();}
+  assert.equal(alive(outside.pid),true);record('closing the HTTP bridge detaches rather than terminates its target');
   report.passed=true;
 }catch(error){report.passed=false;report.error={message:error.message,stack:error.stack};throw error;}
 finally{

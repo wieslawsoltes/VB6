@@ -1,0 +1,53 @@
+name: Integrate debugger with reviewed main
+on:
+  push:
+    branches: [feat/debugger-compatibility-boundaries]
+    paths: ['.github/workflows/debugger-main-sync.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/debugger-compatibility-boundaries'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Preserve all source edits and regenerate only generated conflicts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          target='2b4f9dd50fc20c36f2a48d3c8586e4063277ff69'
+          result=subprocess.run(['git','merge','--no-commit','--no-ff',target])
+          if result.returncode:
+              conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+              assert conflicts, 'Merge failed without conflicts'
+              for path in conflicts:
+                  assert path.startswith('dist/') or path in ['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js'], 'Source conflict requires review: '+path
+                  subprocess.run(['git','checkout','--ours','--',path],check=True)
+                  subprocess.run(['git','add','--',path],check=True)
+          PY
+      - run: npm test
+      - run: npm run build
+      - name: Commit validated combined source
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          git add -A
+          git diff --cached --check
+          git commit -m 'merge: preserve classic HTML rendering fixes alongside debugger extensions'
+          test "$(git ls-remote origin refs/heads/feat/debugger-compatibility-boundaries | cut -f1)" = "$EXPECTED_HEAD"
+          git push origin HEAD:refs/heads/feat/debugger-compatibility-boundaries
+          git bundle create /tmp/debugger-current.bundle --all
+          git rev-parse HEAD > /tmp/debugger-current.sha
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debugger-current
+          path: /tmp/debugger-current.*
+          retention-days: 3
