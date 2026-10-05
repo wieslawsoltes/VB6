@@ -100,14 +100,14 @@ rendered or included in the downloadable activity transcript. Model-provided tex
 is displayed as plain text, not executable HTML or automatically trusted Markdown.
 
 The agent inspects, edits and validates the **actual IDE project**. It uses all
-106 existing typed tools, subject to the chosen permission mode:
+114 existing typed tools, subject to the chosen permission mode:
 
 | Area | Examples |
 | --- | --- |
 | Code | Source ranges, search, definitions, references, rename, formatting, procedures, atomic UTF-16 range edits and module replacement. |
-| Projects | Modules, metadata, references, project settings, original project files, archives and source formats supported by this IDE. |
+| Projects | Modules, metadata, references, project settings, native project groups, active/startup project selection, original project files, archives and source formats supported by this IDE. |
 | Designer | Forms, controls, control arrays, menus, properties, layout and selection. |
-| Compiler | Compile the active project and inspect real diagnostics. |
+| Compiler/builds | Compile the active project, inspect real diagnostics, and produce inert project JSON, HTML, source ZIP or supported Win32 artifacts with SHA-256 verification and bounded chunk reads. Builds do not execute generated code. |
 | Debugger/runtime | Inspect state, breakpoints, frames, watches, evaluate, step, continue, stop and use the supported runtime-control tools. |
 | Files/workspace | Project virtual files, assets, resources, document/window layouts, editor views, normal Undo/Redo and the existing typed commands. |
 

@@ -266,3 +266,15 @@ test('agents: generated IDE parses, while exported apps contain no agent UI or c
   const runtime = fs.readFileSync(new URL('../dist/vb6-runtime.js', import.meta.url), 'utf8');
   assert.ok(!runtime.includes('class CodingAgent'));
 });
+
+// Corrupt UTF-8 must not silently replace source characters and then run a tool.
+test('agents: invalid UTF-8 in JSON or SSE fails before a corrupted tool can run', async () => {
+  for (const sse of [false, true]) {
+    const prefix = sse ? 'data: {"text":"' : '{"text":"';
+    const suffix = sse ? '"}\n\n' : '"}';
+    const bytes = new Uint8Array([...new TextEncoder().encode(prefix), 0xc3, 0x28, ...new TextEncoder().encode(suffix)]);
+    let received = false;
+    await assert.rejects(readEvents(new Response(bytes, {headers: {'content-type': sse ? 'text/event-stream' : 'application/json'}}), () => { received = true; }));
+    assert.equal(received, false);
+  }
+});

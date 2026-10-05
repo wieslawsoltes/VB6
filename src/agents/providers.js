@@ -40,7 +40,7 @@ export async function readEvents(response, receive, {signal, maxBytes = 8 * 1024
   const reader = response.body?.getReader();
   if (!reader) throw new Error('The provider returned no response body.');
   let size = 0, buffer = '', json = '', pendingCR = false;
-  const decoder = new TextDecoder(), sse = (response.headers.get('content-type') || '').includes('text/event-stream');
+  const decoder = new TextDecoder('utf-8', {fatal: true}), sse = (response.headers.get('content-type') || '').includes('text/event-stream');
   const abort = () => { void reader.cancel().catch(() => {}); };
   signal?.addEventListener('abort', abort, {once: true});
   const event = block => {

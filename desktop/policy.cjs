@@ -2,7 +2,29 @@
 const path = require('node:path');
 const ORIGIN = 'vb6://app';
 const MAX_WINDOWS = 64;
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'";
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'";
+/** Declared fetch origins are capabilities; never accept wildcards or CSP syntax. */
+function dataOrigins(values = []) {
+  if (!Array.isArray(values) || values.length > 64) throw new TypeError('At most 64 data origins are allowed');
+  return [...new Set(values.map(value => {
+    if (typeof value !== 'string' || value.length > 2048 || /[\s*'";]/.test(value)) throw new TypeError('Expected an exact HTTP(S) data origin');
+    const u = new URL(value);
+    if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password || u.pathname !== '/' || u.search || u.hash) throw new TypeError('Expected an exact HTTP(S) data origin');
+    return u.origin;
+  }))].sort();
+}
+function dataCSP(origins = []) {
+  const allowed = dataOrigins(origins);
+  return CSP.replace("connect-src 'self'", "connect-src 'self'" + (allowed.length ? ' ' + allowed.join(' ') : ''));
+}
+function dataRequestAllowed(details, origins = []) {
+  // Fetch and XMLHttpRequest use xhr. Scripts, frames, workers and navigation remain denied.
+  if (details.resourceType !== 'xhr') return false;
+  try {
+    const u = new URL(details.url);
+    return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password && origins.includes(u.origin);
+  } catch { return false; }
+}
 function integer(value, fallback, min, max) {
   if (value === undefined) return fallback;
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError('Expected a finite number');
@@ -55,4 +77,4 @@ function menuTemplate(items, onSelect, budget = { count: 0 }, depth = 0) {
     return entry;
   });
 }
-module.exports = { ORIGIN, MAX_WINDOWS, CSP, integer, text, trustedURL, assetPath, clampBounds, windowOptions, menuTemplate };
+module.exports = { ORIGIN, MAX_WINDOWS, CSP, dataOrigins, dataCSP, dataRequestAllowed, integer, text, trustedURL, assetPath, clampBounds, windowOptions, menuTemplate };

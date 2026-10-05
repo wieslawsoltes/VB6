@@ -1,3 +1,7 @@
+import {installBuildTools} from './agent-build.js';
+import {mergedProject} from '../project/import-merge.js';
+import {normalizedEntries, listProjectEntries} from '../project/native-project.js';
+import {NATIVE_ENCODINGS} from '../project/native-text.js';
 import {clone} from '../core/core.js';
 import {newProject, normalizeProject} from '../project/model.js';
 import {importFiles, sourceFiles} from '../project/formats.js';
@@ -66,19 +70,25 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
   },{write:true,destructive:true});
   function replace(project,label) {const before=clone(ide.project),saved=ide.savedJSON;ide.loadProject(project);ide.savedJSON=saved;ide.record(before,label);changed();return adapter.snapshot();}
   const fileEntry=O({path:S,content:TEXT,encoding:E(['utf8','base64'])},['path','content']);
-  add('project.import','Open or add original VB6/native or web source files, or a base64 ZIP. Uses the existing importer and reports format diagnostics. Does not access the host filesystem.',{files:A(fileEntry,2000),zip:TEXT,add:B,expectedRevision:REV},['expectedRevision'],async(args,ctx)=>{
+  async function incoming(args) {
+    if (!!args.files === !!args.zip) fail('Provide files or zip, not both.');
+    return normalizedEntries(args.zip ? await readZip(decodeFile(args.zip, 'base64'), {maxExpandedBytes: 20000000, maxFiles: 2000}) : args.files.map(f => [f.path, decodeFile(f.content, f.encoding)]));
+  }
+  add('project.entries', 'Inspect supplied files or ZIP and list selectable native, group and web project entry paths before importing. Reads supplied data only.', {files:A(fileEntry,2000),zip:TEXT}, [], async (args,ctx) => {
+    const entries = await incoming(args); checkAbort(ctx.signal); return output({entries: listProjectEntries(entries), encodings: NATIVE_ENCODINGS});
+  });
+  add('project.import','Open or add original VB6/native or web source files, or a base64 ZIP. Uses the existing importer and reports format diagnostics. Does not access the host filesystem.',{files:A(fileEntry,2000),zip:TEXT,add:B,entryPath:S,encoding:E(NATIVE_ENCODINGS),basenameFallback:B,expectedRevision:REV},['expectedRevision'],async(args,ctx)=>{
     if(!!args.files===!!args.zip) fail('Provide files or zip, not both.');
     await consent('vb6.project.import',args,ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision);
-    const entries=args.zip?await readZip(decodeFile(args.zip,'base64'),{maxExpandedBytes:20000000,maxFiles:2000}):new Map();
-    if(args.files) for(const f of args.files){const path=cleanProjectPath(f.path);if(entries.has(path)) fail('Duplicate file path.');entries.set(path,decodeFile(f.content,f.encoding));}
-    const result=await importFiles(entries);checkAbort(ctx.signal);adapter.assertEnabled();checkRevision(args.expectedRevision);
-    if(args.add){const next=clone(ide.project);next.modules.push(...result.project.modules);Object.assign(next.assets,result.project.assets);commit(normalizeProject(next),'MCP: import modules');}
+    const entries = await incoming(args);
+    const result=await importFiles(entries, {entryPath:args.entryPath,encoding:args.encoding,basenameFallback:args.basenameFallback});checkAbort(ctx.signal);adapter.assertEnabled();checkRevision(args.expectedRevision);
+    if(args.add) commit(mergedProject(ide.project,result.project),'MCP: import modules');
     else replace(result.project,'MCP: import workspace');
-    return output({project:adapter.snapshot(),diagnostics:result.diagnostics});
+    return output({project:adapter.snapshot(),diagnostics:result.diagnostics,entryPath:result.entryPath,format:result.format});
   },{write:true,destructive:true});
-  add('project.files','List or read original/native-style exported project files without downloads. Read binary resources as base64; text uses UTF-8.',{path:S,offset:N(),limit:N(1,1000)},[],args=>{
+  add('project.files','List or read original/native-style exported project files without downloads. Read binary resources as base64; text uses UTF-8.',{path:S,offset:N(),limit:N(1,1000),byteOffset:N(0,50000000),byteCount:N(1,262144)},[],args=>{
     const files=sourceFiles(ide.project);
-    if(args.path){const path=cleanProjectPath(args.path);if(!Object.hasOwn(files,path))fail('Unknown exported file.');const value=files[path];return output({path,encoding:typeof value==='string'?'utf8':'base64',content:typeof value==='string'?value:toBase64(value)});}
+    if(args.path){const path=cleanProjectPath(args.path);if(!Object.hasOwn(files,path))fail('Unknown exported file.');const value=files[path];if(args.byteOffset!==undefined||args.byteCount!==undefined){const bytes=typeof value==='string'?new TextEncoder().encode(value):value,offset=args.byteOffset||0;if(offset>bytes.length)fail('Offset outside exported file.');const chunk=bytes.slice(offset,offset+(args.byteCount||65536));return output({path,encoding:'base64',content:toBase64(chunk),offset,total:bytes.length,hasMore:offset+chunk.length<bytes.length});}return output({path,encoding:typeof value==='string'?'utf8':'base64',content:typeof value==='string'?value:toBase64(value)});}
     return output(page(Object.entries(files).map(([path,value])=>({path,size:value.length,encoding:typeof value==='string'?'utf8':'base64'})),args));
   });
   add('project.archive','Return a source/workspace ZIP as base64 data, never an automatic download. Native export has the same compatibility limits as the IDE.',{},[],()=>{const files=sourceFiles(ide.project);files[ide.project.name+'.vb6web']=JSON.stringify(ide.project);return output({name:ide.project.name+'.zip',encoding:'base64',data:toBase64(writeZip(files))});});
@@ -129,6 +139,7 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
   mutate('resources.import','Import an original Win32 RES file supplied as base64 data.',{data:TEXT,fileName:S},['data']);
   add('resources.export','Export original/current Win32 RES bytes as base64, without a browser download.',{},[],()=>{if(!ide.project.resources)fail('No resource file.');return output({fileName:ide.project.resources.fileName,data:toBase64(writeRES(ide.project.resources)),encoding:'base64'});});
 
+  installBuildTools(ide,adapter,{add,output,consent,commit,changed,checkRevision});
   installWorkbenchTools(ide,adapter,{add,output,consent,commit,changed,debugSnapshot,page,resource});
   resource('vb6://agent/capabilities','Agent capabilities',()=>adapter.tools.find(t=>t.name==='vb6.agent.capabilities').execute({},{}));
   resource('vb6://project/settings','Project settings',()=>output({settings:clone(ide.project.settings),references:clone(ide.project.references)}));

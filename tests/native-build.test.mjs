@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { parseOptions, productName, externalizeScripts, stageWindows } from '../tools/build-windows.mjs';
+import { parseOptions, productName, externalizeScripts, stageWindows, readProject } from '../tools/build-windows.mjs';
 const require = createRequire(import.meta.url);
 const policy = require('../desktop/policy.cjs');
 test('native targets reject unsupported architectures, graphics and false no-extraction claims', () => {
@@ -61,4 +61,26 @@ test('staged native application contains all hashed assets and separate script e
     const entry = await fs.readFile(path.join(result.stage,'web','index.html'),'utf8');
     assert.doesNotMatch(entry, /<script>\s*\/\* VB6/); assert.match(entry,/boot.mjs/);
   } finally { await fs.rm(result.stage,{recursive:true,force:true}); }
+});
+
+test('declared native data origins allow fetch only, not remote code or navigation', () => {
+  const origins=policy.dataOrigins(['https://api.example.test/','https://api.example.test','http://127.0.0.1:4286']);
+  assert.deepEqual(origins,['http://127.0.0.1:4286','https://api.example.test']);
+  const csp=policy.dataCSP(origins);
+  assert.match(csp,/script-src 'self' 'wasm-unsafe-eval';/);assert.doesNotMatch(csp,/'unsafe-eval'/);
+  assert.match(csp,/connect-src 'self' http:\/\/127.0.0.1:4286 https:\/\/api.example.test;/);
+  assert(policy.dataRequestAllowed({url:'https://api.example.test/data?q=x',resourceType:'xhr'},origins));
+  for(const resourceType of ['script','mainFrame','subFrame','webSocket','worker','image','other'])assert(!policy.dataRequestAllowed({url:'https://api.example.test/data',resourceType},origins));
+  for(const url of ['https://api.example.test.evil/data','http://api.example.test/data','https://api.example.test:444/data','https://user:pw@api.example.test/data'])assert(!policy.dataRequestAllowed({url,resourceType:'xhr'},origins));
+  for(const origin of ['https://*.example.test','https://example.test/path','https://example.test/?key=x','https://u:p@example.test','https://example.test;script-src','https://example.test\n','file:///tmp','wss://example.test'])assert.throws(()=>policy.dataOrigins([origin]));
+  assert.throws(()=>policy.dataOrigins(Array(65).fill('https://example.test')));
+  assert.deepEqual(parseOptions(['--data-origin','https://api.example.test','--data-origin','http://127.0.0.1:4286']).dataOrigins,origins);
+});
+test('packaged REST example declares only its API origins and includes SQLite license',async()=>{
+  const result=await stageWindows(parseOptions(['--project','examples/rest-customers.vb6web','--name','Native REST Stage','--stage-only']));
+  try{
+    assert.deepEqual(result.manifest.dataOrigins,['http://127.0.0.1:4286']);
+    assert.match(await fs.readFile(path.join(result.stage,'LICENSE.sql.js'),'utf8'),/Permission is hereby granted/);
+    assert.match(await fs.readFile(path.join(result.stage,'THIRD-PARTY-NOTICES.md'),'utf8'),/sql.js/);
+  }finally{await fs.rm(result.stage,{recursive:true,force:true});}
 });

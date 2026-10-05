@@ -1,0 +1,44 @@
+{
+  "port": 4287,
+  "origins": ["http://127.0.0.1:4173"],
+  "profiles": {
+    "local": {
+      "driver": "sqlite",
+      "filename": "./private-data/customers.sqlite",
+      "allowAdHoc": false,
+      "commands": {
+        "InitializeCustomers": "CREATE TABLE IF NOT EXISTS customers(id INTEGER PRIMARY KEY, name TEXT)",
+        "Customers": "SELECT id,name FROM customers ORDER BY id",
+        "AddCustomer": {"text": "INSERT INTO customers(name) VALUES(?)", "parameterCount": 1}
+      }
+    },
+    "postgres": {
+      "driver": "pg",
+      "options": {"host": "127.0.0.1", "database": "application", "user": "application"},
+      "environment": {"password": "APP_PG_PASSWORD"},
+      "commands": {"CustomerById": {"text": "SELECT id,name FROM customers WHERE id=$1", "parameterCount": 1}}
+    },
+    "mysql": {
+      "driver": "mysql",
+      "options": {"host": "127.0.0.1", "database": "application", "user": "application"},
+      "environment": {"password": "APP_MYSQL_PASSWORD"},
+      "commands": {"CustomerById": {"text": "SELECT id,name FROM customers WHERE id=?", "parameterCount": 1}}
+    },
+    "sqlserver": {
+      "driver": "mssql",
+      "options": {"server": "database.example.test", "database": "application", "user": "application", "options": {"encrypt": true, "trustServerCertificate": false}},
+      "environment": {"password": "APP_SQL_PASSWORD"},
+      "commands": {"CustomerById": {"text": "SELECT id,name FROM dbo.Customers WHERE id=@p1", "parameterCount": 1}}
+    },
+    "access": {
+      "driver": "oledb",
+      "environment": {"connectionString": "APP_ACCESS_CONNECTION_STRING"},
+      "commands": {"CustomerById": {"text": "SELECT ID,CompanyName FROM Customers WHERE ID=?", "parameterCount": 1}}
+    },
+    "odbc": {
+      "driver": "odbc",
+      "environment": {"connectionString": "APP_ODBC_CONNECTION_STRING"},
+      "commands": {"CustomerById": {"text": "SELECT id,name FROM customers WHERE id=?", "parameterCount": 1}}
+    }
+  }
+}

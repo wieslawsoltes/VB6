@@ -23,7 +23,7 @@ export class BrowserBridge {
     this.lifetime = new AbortController(); const lifetime = this.lifetime; this.id = randomToken(12);
     try {
       const result = await this.post('/bridge/attach', {id: this.id}, AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(10000)]), null);
-      this.lease = result.lease; checkAbort(lifetime.signal); if (this.closed) throw new McpError(-32800, 'Companion was closed.'); this.connected = true; this.status('Connected'); this.task = this.poll(); return this;
+      this.lease = result.lease; this.principal = typeof result.principal === 'string' && result.principal ? result.principal : this.id; checkAbort(lifetime.signal); if (this.closed) throw new McpError(-32800, 'Companion was closed.'); this.connected = true; this.status('Connected'); this.task = this.poll(); return this;
     } catch (error) { lifetime.abort(); if (this.lease) { try { await this.post('/bridge/detach', {}, AbortSignal.timeout(2000)); } catch {} } throw error; }
   }
   async poll() {
@@ -40,7 +40,7 @@ export class BrowserBridge {
         }
       }
     } catch (error) { if (!this.lifetime?.signal.aborted) this.status('Disconnected: ' + error.message); }
-    finally { this.connected = false; this.lifetime?.abort(); for (const controller of this.requests.values()) controller.abort(); for (const key of this.sessions) this.server.closeSession(key); this.sessions.clear(); this.requests.clear(); }
+    finally { if (this.principal) this.server.revokePrincipal?.(this.principal); this.connected = false; this.lifetime?.abort(); for (const controller of this.requests.values()) controller.abort(); for (const key of this.sessions) this.server.closeSession(key); this.sessions.clear(); this.requests.clear(); }
   }
   async dispatch(event, controller) {
     const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
@@ -52,7 +52,7 @@ export class BrowserBridge {
     };
     const notify = message => this.post('/bridge/notify', {sessionKey: event.sessionKey, message}, this.lifetime.signal).catch(() => {});
     try {
-      const reply = await this.server.dispatch(event.message, {sessionKey: event.sessionKey, requestId: event.message.id, peer: 'Companion MCP client', headers: event.headers, signal, emit: message => { send(message).catch(() => {}); }, notify});
+      const reply = await this.server.dispatch(event.message, {sessionKey: event.sessionKey, principal: this.principal, requestId: event.message.id, peer: 'Companion MCP client', headers: event.headers, signal, emit: message => { send(message).catch(() => {}); }, notify});
       checkAbort(signal); await send(reply, true);
     } catch (error) { if (!signal.aborted) this.status('Companion request failed: ' + error.message); }
     finally { this.requests.delete(event.key); if (event.ephemeral) { this.server.closeSession(event.sessionKey); this.sessions.delete(event.sessionKey); } }

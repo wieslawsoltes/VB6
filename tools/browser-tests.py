@@ -227,11 +227,11 @@ def runtime_tests(browser):
 
     def all_controls():
         page=open_fixture(browser,'controls')
-        check(page.evaluate('vb6Application.forms[0].controls.length')==37)
+        check(page.evaluate('vb6Application.forms[0].controls.length')==38)
         check(page.evaluate('vb6Application.vm.lastError === null || vb6Application.vm.lastError === undefined'))
         healthy(page);page.close()
         return {'offeredTypes':FIXTURES['types']}
-    case('All 37 offered browser control types initialize without script errors',all_controls)
+    case('All 38 offered browser control types initialize without script errors',all_controls)
 
     def boundary():
         page=open_example(browser,'controls')

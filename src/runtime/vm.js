@@ -1,3 +1,4 @@
+import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
 import {defaultIdentifierType} from '../language/default-types.js';
@@ -39,6 +40,7 @@ export class VirtualMachine extends Signal {
     this.library.set('screen',{TwipsPerPixelX:15,TwipsPerPixelY:15,Width:14400,Height:10800,MousePointer:0,ActiveForm:null});
     this.library.set('forms',{get Count(){return [...vm.formInstances].filter(i=>i.loaded).length;},Item(key){const forms=[...vm.formInstances].filter(i=>i.loaded),item=typeof key==='number'?forms[key]:forms.find(i=>lower(i.module.name)===lower(key));if(!item)throw new VBError('Form not found in Forms collection',9);return item;},[Symbol.iterator](){return [...vm.formInstances].filter(i=>i.loaded).values();}});
     this.library.set('debug',{Print:(...a)=>this.output(a.map(v=>v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v)).join(' '))});
+    this.data=host.data||new DataContext(this.program.sourceProject,{fs:this.fs,persist:host.persist,fetch:host.dataFetch,credentialProvider:host.dataCredential});this.data.install(this);
     this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
     this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.clipboard||'',Clear:()=>{this.clipboard='';}});
   }
@@ -65,7 +67,7 @@ export class VirtualMachine extends Signal {
     if(decl.bounds!==null&&decl.bounds!==undefined){const bounds=await this.evalBounds(decl.bounds,frame);value=await this.createArray(bounds,type,frame,decl.fixedLength);value.dynamic=!bounds.length;}
     else if(decl.autoNew){const cell=new LazyCell(decl.type,()=>this.createObject(decl.type,frame));cell.scope=decl.scope;target.set(key,cell);if(staticFlag)staticCells.set(staticKey,cell);return cell;}
     else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame);
-    else value=decl.constant?(frame.proc.constantBindings?.has(key)?frame.proc.constantBindings.get(key):frame.module.constantBindings.get(key)):decl.initial?await this.evaluate(decl.initial,frame):this.program.modules.has(lower(decl.type))?NOTHING:defaultValue(type);
+    else value=decl.constant?(frame.proc.constantBindings?.has(key)?frame.proc.constantBindings.get(key):frame.module.constantBindings.get(key)):decl.initial?await this.evaluate(decl.initial,frame):this.program.modules.has(lower(decl.type))||this.data.isObjectType(decl.type)?NOTHING:defaultValue(type);
     const cell=new Cell(decl.bounds!==null&&decl.bounds!==undefined?'Variant':type,value,decl.constant,decl.fixedLength);cell.scope=decl.scope;cell.isArray=decl.bounds!==null&&decl.bounds!==undefined;cell.elementType=type;target.set(key,cell);if(decl.withEvents)this.bindEventCell(cell,frame.instance,decl.name);if(staticFlag)staticCells.set(staticKey,cell);return cell;
   }
   recordSchema(name,module){const local=Object.entries(module.types).find(([key])=>lower(key)===lower(name));if(local)return local[1];for(const candidate of this.program.modules.values()){const match=Object.entries(candidate.types).find(([key])=>lower(key)===lower(name));if(match)return match[1];}return null;}
@@ -100,7 +102,7 @@ export class VirtualMachine extends Signal {
   }
   async attachForm(instance){if(this.host.createForm){instance.formObject=await this.host.createForm(structuredClone(instance.module.form),instance,this);for(const [name,control]of instance.formObject.controlMap||[])instance.fields.set(lower(name),new Cell('Object',control));this.formInstances.add(instance);}}
   formProcedure(instance,event){return instance.module.procedures.get((instance.module.form?.type==='MDIForm'?'mdiform_':'form_')+event);}
-  async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){instance.loaded=true;const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
+  async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){instance.loaded=true;await instance.formObject.initializeDataBindings?.();const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
   async showForm(instance,modal=false){
     if(modal&&(instance.module.form?.type==='MDIForm'||Number(instance.module.form?.properties?.MDIChild)))throw new VBError('MDI forms and child forms cannot be shown modally',401);
     if(instance.formObject?.mdiChild){const parent=instance.formObject.mdiController.parent?.instance;if(!parent)throw new VBError('MDI child requires an MDI Form',366);if(!parent.formObject.shown&&!parent.showing)await this.showForm(parent);}
@@ -120,7 +122,7 @@ export class VirtualMachine extends Signal {
   }
   requestUnload(instance){if(this.state==='stopped')return Promise.resolve();return new Promise(resolve=>{this.eventQueue.push({action:()=>this.unloadForm(instance,0),resolve,key:'unload:'+instance.module.name});this.processEvents();});}
   async doEvents(){await new Promise(resolve=>setTimeout(resolve,0));for(let i=0;i<32&&this.eventQueue.length&&this.state==='running';i++)await this.runQueuedEvent(this.eventQueue.shift());return [...this.formInstances].filter(i=>i.loaded).length;}
-  async createObject(name,frame=this.currentFrame){const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();if(key==='adodb.recordset')return new MemoryRecordset();const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
+  async createObject(name,frame=this.currentFrame){const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();const dataObject=this.data.createObject(name);if(dataObject)return dataObject;const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
   async getIdentifier(name,frame,{noInvoke=false}={}) {
     const key=lower(name);
     if(key==='me')return frame.instance;
@@ -235,7 +237,7 @@ export class VirtualMachine extends Signal {
     const slots=this.argumentSlots(node.args,params,!!proc?.params.at(-1)?.paramArray||!!fn?.vbVariadic);
     const actual=[];
     for(const {index,node:arg}of slots){
-      const param=signature?.params[index];
+      const param=params?.[index];
       if(arg.kind==='missing'){actual[index]=proc||fn?.vbPreserveMissing?MISSING:undefined;continue;}
       if(param?.byRef&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
         try{actual[index]={ref:await this.reference(arg,frame,true)};continue;}catch(error){if(!(error instanceof VBError))throw error;}
@@ -382,7 +384,7 @@ export class VirtualMachine extends Signal {
   }
   pause(){if(this.state==='running')this.pauseRequested=true;}
   resume(mode='continue'){if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
-  stop(){this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
+  stop(){this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
   async execute(frame){
     while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.pc++;
       try{

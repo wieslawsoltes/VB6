@@ -60,6 +60,36 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js('vb6Studio.stop()');
     } else {
       await until(() => js('!!globalThis.vb6Application?.nativeWindows'), 'application host');
+      check('embedded SQLite executes with strict WebAssembly-only CSP', await js(`(async()=>{
+        const context=new VB6Runtime.RuntimeAPI.DataContext();
+        try{const cn=context.connection();await cn.Open({provider:'sqlite',database:':memory:'});
+          await cn.Execute('CREATE TABLE smoke(value TEXT)');await cn.query('INSERT INTO smoke VALUES(?)',["native SQLite π"]);
+          await cn.BeginTrans();await cn.Execute("DELETE FROM smoke");await cn.RollbackTrans();
+          return (await cn.Execute('SELECT value FROM smoke')).Item('value')==='native SQLite π';
+        }finally{await context.close();}
+      })()`));
+      if ((manifest.dataOrigins || []).includes('http://127.0.0.1:4286')) {
+        // A disposable HTTP fixture in the main-process test harness, never a production proxy.
+        const server=require('node:http').createServer((req,res)=>{
+          if(req.headers.origin!=='vb6://app'){res.writeHead(403);res.end();return;}
+          res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'vb6://app','Cache-Control':'no-store'});
+          res.end(JSON.stringify([{id:1,name:'Native REST π'}]));
+        });
+        await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(4286,'127.0.0.1',resolve);});
+        try {
+          check('declared API origin is usable by exported data runtime with CORS',await js(`(async()=>{
+            const context=new VB6Runtime.RuntimeAPI.DataContext();
+            try{const cn=context.connection();await cn.Open({provider:'rest',url:'http://127.0.0.1:4286/customers',readOnly:true});
+              return (await cn.Execute('')).Item('name')==='Native REST π';
+            }finally{await context.close();}
+          })()`));
+          check('API capability does not allow remote scripts',await js(`new Promise(resolve=>{
+            const script=document.createElement('script');script.src='http://127.0.0.1:4286/script.js';
+            script.onload=()=>resolve(false);script.onerror=()=>{script.remove();resolve(true);};document.head.append(script);
+          })`));
+        } finally { await new Promise(resolve=>server.close(resolve)); }
+      }
+
       await js('globalThis.host = globalThis.vb6Application; globalThis.f1 = host.forms.find(f => f.model.name === "Form1"); globalThis.f2 = host.forms.find(f => f.model.name === "Form2"); void 0;');
       await until(() => records.size === 1 && [...records.values()][0].window.isVisible(), 'first native form');
       check('one native window for startup form', records.size === 1);

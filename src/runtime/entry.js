@@ -1,3 +1,7 @@
+import {DataContext} from '../data/context.js';
+import {ADOConnection,ADOCommand} from '../data/connection.js';
+import {ConnectedRecordset} from '../data/connected-recordset.js';
+import {DATA_CONSTANTS} from '../data/common.js';
 import {FINANCIAL_FUNCTIONS} from './financial.js';
 import {installNativeHost} from './native-windows.js';
 import {ResourceStore} from './resources.js';
@@ -15,4 +19,4 @@ import { VirtualFileSystem } from './filesystem.js';
 import { BrowserControl, BrowserForm } from '../controls/controls.js';
 import { GraphicsSurface } from '../graphics/surface.js';
 export async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);if(options.nativeWindows!==false)installNativeHost(host);await host.start();return host;}
-export const RuntimeAPI={installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
+export const RuntimeAPI={DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};

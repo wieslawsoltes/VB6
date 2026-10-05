@@ -124,3 +124,10 @@ test('Frame controls retain native parent handles and forward their notification
   // The importer accepts declaration order that places children before their parents.
   const reversed=structuredClone(p);reversed.modules[0].form.controls.reverse();assert.ok(compileWin32(reversed).bytes.length);
 });
+
+test('freestanding compiler rejects modern data connections and bound fields explicitly',()=>{
+  const p=newProject('NativeData');p.dataSources={version:1,connections:[{name:'Database',provider:'sqlite'}],commands:[]};
+  assert.throws(()=>compileWin32(p),/data.*runtime/i);
+  p.dataSources.connections=[];const control=createControl('TextBox','Text1');control.properties.DataSource='Database';p.modules[0].form.controls.push(control);
+  assert.throws(()=>compileWin32(p),/Electron desktop target/);
+});

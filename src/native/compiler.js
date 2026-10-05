@@ -39,6 +39,7 @@ export function extractNativeDeclarations(module) {
 class NativeCompiler {
   constructor(project) {
     this.project = normalizeProject(project); this.externals = new Map();
+    if (this.project.dataSources?.connections?.length || this.project.modules.some(m => m.form?.controls?.some(c => c.properties?.DataSource || c.properties?.DataMember || /^(?:Data|Adodc)$/i.test(c.type)))) this.fail('Data-source providers and data-bound controls require the HTML or Electron desktop target; freestanding PE32 AOT does not implement the data runtime');
     if (project.resources?.entries?.length) this.fail('Native resource lowering is not yet implemented; use the classic or desktop target');
     const targetType = project.nativeProject?.entries?.find(e => key(e.key) === 'type')?.value;
     if (targetType && key(targetType) !== 'exe') this.fail('Freestanding AOT currently requires a Standard EXE project');

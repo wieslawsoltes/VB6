@@ -18,7 +18,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   function invalidateAuthority() { authorityEpoch++; authorityLifetime.abort(); authorityLifetime = new AbortController(); permissions.revoke(); }
   const listeners = new Set(), originals = new Map();
   const permissions = new AgentPermissions({changed:()=>changed()});
-  const notify = () => { eventSequence++; clearTimeout(changeTimer); changeTimer = setTimeout(() => { for (const listener of listeners) listener({}); }, 50); };
+  const notify = () => { eventSequence++; clearTimeout(changeTimer); changeTimer = setTimeout(() => { for (const listener of listeners) { try { listener({}); } catch {} } }, 50); };
   const changed = () => { if(observedProjectId!==ide.project.id){observedProjectId=ide.project.id;invalidateAuthority();} revision++; notify(); };
   for (const name of ['markDirty', 'loadProject', 'syncBreakpoints', 'openDocument', 'closeDocument', 'applyAppearance']) if (typeof ide[name] === 'function') {
     const original = ide[name]; originals.set(name, original);
@@ -54,7 +54,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
       return [{uri, mimeType, text: typeof data === 'string' ? data : JSON.stringify(data, null, 2)}];
     },
     complete(params) {
-      if (!isRecord(params.ref) || !isRecord(params.argument) || typeof params.argument.value !== 'string') throw new McpError(-32602, 'Invalid completion request.');
+      if (!isRecord(params.ref) || !isRecord(params.argument) || typeof params.argument.value !== 'string' || !((params.ref.type === 'ref/prompt' && params.ref.name === 'explain-module' && params.argument.name === 'module') || (params.ref.type === 'ref/resource' && adapter.templates.some(t => t.uriTemplate === params.ref.uri) && params.argument.name === 'name'))) throw new McpError(-32602, 'Invalid completion request.');
       const matches = ide.project.modules.map(m => m.name).filter(name => name.toLowerCase().startsWith(params.argument.value.toLowerCase()));
       return {completion: {values: matches.slice(0, 100), total: matches.length, hasMore: matches.length > 100}};
     }
@@ -79,7 +79,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   }
   function tool(name, description, properties, required, execute, {write = false, destructive = false, open = false} = {}) {
     const inputSchema = objectSchema(properties, required);
-    adapter.tools.push({name, description, inputSchema, annotations: {readOnlyHint: !write, destructiveHint: destructive, idempotentHint: !write, openWorldHint: open}, execute: async (args, context = {}) => {
+    adapter.tools.push({name, title: name.replace(/^vb6\./, '').split('.').map(part => part[0].toUpperCase() + part.slice(1)).join(' / '), description, inputSchema, outputSchema: {type:'object'}, annotations: {readOnlyHint: !write, destructiveHint: destructive, idempotentHint: !write, openWorldHint: open}, execute: async (args, context = {}) => {
       adapter.assertEnabled();
       validateArguments(args, inputSchema);
       // Isolate caller/consent objects and keep the transport request distinct from

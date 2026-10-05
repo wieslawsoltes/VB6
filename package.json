@@ -33,8 +33,12 @@
     "test:project-browser": "python tools/native-project-browser-tests.py",
     "test:mcp:agent": "python tools/mcp-agent-browser-tests.py",
     "agent:relay": "node tools/agent-relay.mjs",
-    "test:agents": "node --test tests/coding-agents.test.mjs tests/agent-relay.test.mjs",
-    "test:agents:browser": "python tools/coding-agents-browser-tests.py"
+    "test:agents": "node --test tests/coding-agents*.test.mjs tests/agent-relay.test.mjs",
+    "test:agents:browser": "python tools/coding-agents-browser-tests.py",
+    "test:data": "node --test tests/data-*.test.mjs",
+    "test:data:browser": "python tools/browser-data-sources.py",
+    "data:examples": "node tools/data-example-server.mjs",
+    "data:gateway": "node tools/data-gateway.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -1,3 +1,4 @@
+import {dataSidecarPath,encodeDataSidecar} from '../data/project-sidecar.js';
 import {importNativeFiles,parseNativeProject,patchNativeProject,workspaceFiles,normalizedEntries,listProjectEntries,parseVBG,workspaceProjects,selectWorkspaceProject} from './native-project.js';
 import {encodeNativeText,nativePathValue} from './native-text.js';
 import {patchNativeSource,serializeNativeCode} from './native-source.js';
@@ -55,6 +56,7 @@ function singleSourceFiles(project,options={}){
   const prepared=prepareResources(project),files=Object.assign(Object.create(null),prepared.files),seen=new Set(Object.keys(files).map(p=>p.toLowerCase()));
   const put=(path,value)=>{path=cleanProjectPath(path);const key=path.toLowerCase();if(seen.has(key))throw new VBError('Native output path collision: '+path,1002);seen.add(key);files[path]=value;};
   const owner=project.nativeProject?.path||project.name+'.vbp';
+  const sidecar=encodeDataSidecar(project);if(sidecar)put(dataSidecarPath(owner),sidecar);
   if(project.resources)put(project.resources.fileName,writeRES(project.resources));
   put(owner,encodeNativeText(serializeVBP({...project,modules:prepared.modules}),project.nativeProject?.document,options.encoding));
   for(const m of prepared.modules){for(const node of m.form?[m.form,...m.form.controls,...m.form.menus]:[])for(const [key,value]of Object.entries(node.properties||{}))if(value&&typeof value==='object'&&!value.resource&&Object.keys(value).length)throw new VBError('Native export cannot encode structured property '+node.name+'.'+key+'. Save as a browser project to retain this data.',1002);const source=patchNativeSource(m,canonicalSource(m,!m.nativeSource),parseVBValue);put(modulePath(m),encodeNativeText(source,m.nativeSource||{encoding:m.sourceEncoding||'windows-1252',bom:false},options.encoding));}

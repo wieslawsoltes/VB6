@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const { dataOrigins } = createRequire(import.meta.url)('../desktop/policy.cjs');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 export function parseOptions(args) {
   const options = { arch: 'x64', graphics: 'webgpu', out: path.join(root, 'release', 'windows'), stageOnly: false, unpacked: false };
@@ -12,6 +13,10 @@ export function parseOptions(args) {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--stage-only') options.stageOnly = true;
+    else if (arg === '--data-origin') {
+      if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error('Missing value for --data-origin');
+      (options.dataOrigins ||= []).push(args[++i]);
+    }
     else if (arg === '--dir') options.unpacked = true;
     else if (arg === '--help') options.help = true;
     else if (arg === '--no-extract') throw new Error('The portable target is one distributable EXE but extracts its embedded runtime at launch. Use build:win32 for the separate no-extraction x86 native/GDI target.');
@@ -22,6 +27,7 @@ export function parseOptions(args) {
   }
   if (!['x64', 'arm64'].includes(options.arch)) throw new Error('--arch must be x64 or arm64');
   if (!['webgpu', 'auto', 'canvas2d'].includes(options.graphics)) throw new Error('--graphics must be webgpu, auto, or canvas2d');
+  if (options.dataOrigins) options.dataOrigins = dataOrigins(options.dataOrigins);
   return options;
 }
 export function productName(value) {
@@ -64,7 +70,7 @@ export async function readProject(filename, sourceRoot) {
         if (entry.isSymbolicLink() || ['.git', 'node_modules', '.native-build', 'release', 'dist'].includes(entry.name)) continue;
         const full = path.join(directory, entry.name);
         if (entry.isDirectory()) await walk(full);
-        else if (/\.(frm|bas|cls|frx|res|png|jpe?g|gif|bmp|ico|wmf|emf|rtf)$/i.test(entry.name)) {
+        else if (/\.(frm|bas|cls|frx|res|png|jpe?g|gif|bmp|ico|wmf|emf|rtf)$/i.test(entry.name) || /\.vbp\.vb6data\.json$/i.test(entry.name)) {
           const stat = await fs.stat(full);
           if (stat.size > 20 * 1024 * 1024 || (total += stat.size) > 100 * 1024 * 1024 || entries.length >= 10000) throw new Error('Project resource limit exceeded');
           entries.push([path.relative(base, full).split(path.sep).join('/'), new Uint8Array(await fs.readFile(full))]);
@@ -95,6 +101,8 @@ export async function stageWindows(options) {
   for (const file of ['main.cjs', 'preload.cjs', 'policy.cjs', 'smoke.cjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, file));
   for (const file of ['boot.mjs', 'studio.mjs', 'gpu-probe.mjs', 'window-transport.mjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, 'web', file));
   await fs.copyFile(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
+  await fs.copyFile(path.join(root, 'THIRD-PARTY-NOTICES.md'), path.join(stage, 'THIRD-PARTY-NOTICES.md'));
+  await fs.copyFile(path.join(root, 'src/data/vendor/LICENSE.sql.js'), path.join(stage, 'LICENSE.sql.js'));
   let html;
   if (project) {
     project.settings = { ...project.settings, renderer: options.graphics };
@@ -110,7 +118,9 @@ export async function stageWindows(options) {
   const files = {};
   for (const file of (await fs.readdir(path.join(stage, 'web'))).sort()) files[file] = sha256(await fs.readFile(path.join(stage, 'web', file)));
   for (const file of entry.scripts) if (!Object.hasOwn(files, file.replace(/^\.\//, ''))) throw new Error('Missing bundled entry script: ' + file);
-  const manifest = { version: 1, name, appId, kind: project ? 'application' : 'studio', graphics: options.graphics, scripts: entry.scripts, files };
+  const origins = dataOrigins([...(options.dataOrigins || []), ...(project?.dataSources?.connections || [])
+    .filter(c => ['rest', 'odata', 'graphql', 'gateway'].includes(c.provider)).map(c => new URL(c.url).origin)]);
+  const manifest = { version: 1, name, appId, dataOrigins: origins, kind: project ? 'application' : 'studio', graphics: options.graphics, scripts: entry.scripts, files };
   await fs.writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   await fs.writeFile(path.join(stage, 'package.json'), JSON.stringify({ name: 'vb6-' + slug, version: pkg.version, productName: name, description: project ? 'VB6 standalone Windows application' : 'VB6 Studio for Windows', main: 'main.cjs', author: 'VB6 Studio contributors', license: 'MIT' }, null, 2) + '\n');
   return { stage, output, manifest, version: pkg.version };
@@ -140,7 +150,7 @@ export async function buildWindows(options) {
   const artifacts = await builder.build({ targets, projectDir: result.stage, publish: 'never', config: {
     appId: result.manifest.appId, productName: result.manifest.name, electronVersion: desktopPackage.devDependencies.electron,
     asar: true, npmRebuild: false, directories: { output: result.output },
-    files: ['*.cjs', 'manifest.json', 'web/**/*', 'package.json', 'LICENSE'],
+    files: ['*.cjs', 'manifest.json', 'web/**/*', 'package.json', 'LICENSE', 'LICENSE.sql.js', 'THIRD-PARTY-NOTICES.md'],
     win: { target: ['portable'], artifactName: '${productName}-${version}-win-${arch}.${ext}', requestedExecutionLevel: 'asInvoker' },
     portable: { requestExecutionLevel: 'user' }
   } });
@@ -158,7 +168,7 @@ export async function buildWindows(options) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
     const options = parseOptions(process.argv.slice(2));
-    if (options.help) console.log('Build a single-distribution Windows EXE:\n  npm run build:windows -- [--project file.vb6web|file.vbp] [--arch x64|arm64]\n  [--graphics webgpu|auto|canvas2d] [--name "My App"] [--out directory]\n  [--source-root directory] [--stage-only] [--dir]\nThe portable target extracts its embedded Electron runtime at launch.');
+    if (options.help) console.log('Build a single-distribution Windows EXE:\n  npm run build:windows -- [--project file.vb6web|file.vbp] [--arch x64|arm64]\n  [--graphics webgpu|auto|canvas2d] [--name "My App"] [--out directory]\n  [--source-root directory] [--data-origin https://api.example.com] [--stage-only] [--dir]\nThe portable target extracts its embedded Electron runtime at launch.');
     else await buildWindows(options);
   } catch (error) { console.error(error.stack || error.message); process.exitCode = 1; }
 }

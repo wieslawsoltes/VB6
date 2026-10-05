@@ -6,6 +6,12 @@ A browser-native classic Visual Basic development environment, source runtime an
 
 **Not a complete, native or pixel-identical Microsoft VB6 replacement.** Detailed supported behavior and limits are in [Compatibility](docs/COMPATIBILITY.md), with [release notes](docs/RELEASE-NOTES-0.6.0.md) and [validation](docs/TESTING.md).
 
+## Data sources
+
+Classic Data Environment/Data View and Data Link Properties now share a provider-backed ADO-style layer with exported HTML/Electron apps. Use embedded offline **SQLite**, **REST CRUD**, **OData**, **GraphQL**, **JSON/CSV**, or an authenticated native gateway for PostgreSQL, MySQL, SQL Server and installed OLE DB/ODBC providers. Four runnable examples demonstrate SQLite editing and modern HTTP data sources.
+
+See [data sources, examples and deployment](docs/DATA-SOURCES.md) for the compatibility matrix, connection dialogs, binding, credentials and gateway setup. This is not exhaustive native VB6/ADO/DAO/RDO parity; installed native providers and the PE32 AOT compiler have separate deployment boundaries.
+
 ## Run
 
 The complete IDE is `dist/VB6-Studio-Web.html`. It is designed to open directly in a browser. Browser origin policies can restrict local files, clipboard or persistent storage. A local static server is the alternative:
@@ -100,7 +106,7 @@ Gemini** using your API account. Refresh Models lists account-accessible models;
 manual model IDs are also supported. No cloud requests are made until you request
 model discovery or approve starting a task.
 
-The agent uses the same 106 typed IDE operations as external coding agents:
+The agent uses the same 114 typed IDE operations as external coding agents:
 project/source inspection, atomic multi-module edits, form/control/menu design,
 compiler diagnostics, debugger/runtime control, virtual files/resources, and
 workspace management. It is a real iterative tool-use loop, not just a chat box.
@@ -126,7 +132,7 @@ Open **Tools → MCP Agent Access…** to expose this IDE to an external coding 
 The IDE is an **MCP server only**: it does not connect to external MCP servers,
 run their tools, perform OAuth sign-in, or launch configured stdio servers.
 
-Its **106 structured tools** cover projects and source interchange, code edits,
+Its **114 structured tools** cover projects and source interchange, code edits,
 compiler diagnostics, forms/controls/menus, resources and virtual files,
 editor/workspace management, Object Browser, debugger/live edits and sandboxed
 application interaction. The same server is bundled into the static app and
