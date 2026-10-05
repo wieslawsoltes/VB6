@@ -1,0 +1,75 @@
+name: Prepare reviewed native call source
+on:
+  push:
+    branches: [feat/win32-call-arguments]
+    paths: [.github/workflows/native-call-prepare.yml]
+permissions:
+  contents: write
+concurrency:
+  group: native-call-prepare
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/win32-call-arguments
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact reviewed source delta
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git merge-base --is-ancestor a344a8fa8d667adbd934e595dd618836930b2120 HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          patch=Path('tools/.native-calls-core.patch').read_bytes().replace(b'\n diff --git ',b'\ndiff --git ')
+          assert hashlib.sha256(patch).hexdigest()=='3cd96e95c4d7d8b112c610caeeeb8d79ca7076990b7e5f2742134151e15584a2','Incorrect patch transport'
+          subprocess.run(['git','apply','--check','-'],input=patch,check=True)
+          subprocess.run(['git','apply','-'],input=patch,check=True)
+          PY
+      - run: npm run build
+      - run: npm test
+      - run: node tools/win32-call-fixtures.mjs
+      - name: Verify source and generated bundle fingerprints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          expected={
+           '.github/workflows/win32-calls.yml':'e14535ef8f2ee42c86b5feb3b1f9c7695b0fe756aab3ddb48bb9df080efd4dd5',
+           'dist/VB6-Studio-Web.html':'e3320e75da3ca3dd59cea9bd152a12b655a78af69f984afd4effc471e706ca60',
+           'dist/studio.js':'9a746456f7adfd07c896a4a5e91ea82931d3233f7ecccee9ddc6808945bb3ea6',
+           'dist/vb6-native.js':'6abb9a4de51ed0011143549555ecaea014d4e5ddd494fc43e562b21e3b0dd744',
+           'docs/WIN32-AOT.md':'d2dfd5f67bab27f627e50385003689de912792889d424e28afd9d3313cbab380',
+           'docs/WIN32-CALLS.md':'ded21e287acf40810bc79d450f1f3df4b6a282e8df27efbe5045294713c286bb',
+           'src/native/calls.js':'fd922806e391d92e8b611d98b3494cea928c3acb88d234242e246ccf2f7290fc',
+           'src/native/compiler.js':'423199e109e798e607caaa12a0cd815b3bd5688ab8070622d94396e80642ba68',
+           'src/native/numeric.js':'f3976c1c0cc3eb7cf44d4356acd7766ead85f1782fb365915333e1038fddd36f',
+           'tests/win32-calls.test.mjs':'220e2868077131b1db929b49d3f33ce78e3ea0c55032463b2b43a980e0dbd2c7',
+           'tools/browser-native-build-tests.py':'a5a153e1daa4987873a27cdb5d3e47355f2d49bcc6006f79656635653d2fdf63',
+           'tools/test-win32-calls.ps1':'7c97b0fd2b7564f75d1fa9fd65a224146570523d74b4f8cfecd719ecba75ae84',
+           'tools/win32-call-fixtures.mjs':'19b1e4a0130ab4e665c18718f662f776268533b1dc359690e17f8e347a6febb7'
+          }
+          for p,h in expected.items():
+           assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==h,'Unexpected output: '+p
+          print('Every reviewed source and rebuilt distribution matches')
+          PY
+      - name: Publish readable implementation and generated distributions
+        run: |
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git add src/native/compiler.js src/native/numeric.js docs/WIN32-AOT.md tools/browser-native-build-tests.py dist
+          git rm tools/.native-calls-core.patch
+          git diff --cached --check
+          git commit -m 'feat(native): lower typed optional and named arguments with owned reference copies' -m 'Recover the reviewed local implementation on current main, verify exact source and bundle fingerprints, and pass the combined Node suite. Actual Windows execution remains a separate PR merge gate.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/win32-call-arguments
