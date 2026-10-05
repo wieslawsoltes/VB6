@@ -2,6 +2,26 @@
 from input_designer_test_support import fixture
 
 
+def context_menu_prevented(target, button):
+    """Observe the app's policy without opening native UI during a synthetic test.
+
+    WebKit can open a native menu for an uncancelled synthetic contextmenu,
+    consuming the next pointer release. Observe the runtime's cancellation at
+    the end of propagation, THEN cancel this test event only. Real right-button
+    presses below still exercise the unmodified production event listeners.
+    """
+    return target.evaluate("""(node, button) => {
+      const view=node.ownerDocument.defaultView;
+      const event=new view.MouseEvent('contextmenu',{bubbles:true,cancelable:true,button});
+      let prevented;
+      const observe=e=>{if(e!==event)return;prevented=e.defaultPrevented;e.preventDefault();};
+      view.addEventListener('contextmenu',observe);
+      try{node.dispatchEvent(event);}finally{view.removeEventListener('contextmenu',observe);}
+      if(typeof prevented!=='boolean')throw new Error('Context-menu policy probe did not reach the observer');
+      return prevented;
+    }""", button)
+
+
 def expect_trace(page, expected):
     # Browser delivery and the interpreter queue are separate asynchronous stages.
     # Retain the exact trace assertion while waiting for both to finish.
@@ -76,8 +96,8 @@ End Sub`;
     page.evaluate('drain()')
     assert page.evaluate("value('Moves')") >= 1, 'Form_MouseMove must execute'
     assert page.evaluate("[value('LastX'),value('LastY'),value('LastButton')]") == [25, 35, 0]
-    assert page.evaluate("form.content.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2}))") is False
-    assert page.evaluate("form.content.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:0}))") is True
+    assert context_menu_prevented(content, 2) is True
+    assert context_menu_prevented(content, 0) is False
     page.mouse.down(button='right')
     page.mouse.up(button='right')
     page.evaluate('drain()')
@@ -150,7 +170,7 @@ End Sub`;
       host=new Fixture.ApplicationHost(p,document.querySelector('#test'),{persist:false});await host.start();
       host.forms.find(f=>f.type==='Form').controls[0].SetFocus();
     }''')
-    assert page.evaluate("host.forms.find(f=>f.type==='Form').controls[0].node.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2}))") is True
+    assert context_menu_prevented(page.locator('[data-control="Text1"] input'), 2) is False
     page.keyboard.press('q')
     page.evaluate('drain()')
     assert page.evaluate("host.vm.instances.get('child').fields.get('trace').get()") == 'form:text:'
