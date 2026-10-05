@@ -35,4 +35,4 @@ jobs:
           python tools/browser-designer-selection.py
           python tools/browser-editor-control-list.py
           python tools/browser-editor-event-selection.py
-          python tools/browser-form-input.py
+          python tools/browser-input-diagnostics.py
