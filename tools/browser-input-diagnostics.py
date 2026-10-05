@@ -9,16 +9,15 @@ import input_designer_test_support as support
 original_fixture = support.fixture
 
 
-def native_probes(context):
-    # Failure-only diagnostics. These do not change the application or its tests.
+def native_probes(browser):
     for mode in ['context', 'context-prelude', 'down', 'pointer', 'capture']:
-        probe = context.new_page()
+        probe = browser.new_page()
         try:
             probe.set_content('<!doctype html><div id="surface" tabindex="0" style="width:400px;height:300px">Native input probe</div>')
             probe.evaluate('''mode => {
               window.events=[];const surface=document.querySelector('#surface');
               for(const type of ['pointerdown','pointerup','pointermove','pointercancel','mousedown','mouseup','contextmenu'])
-                document.addEventListener(type,e=>{const item={type,button:e.button,buttons:e.buttons,target:e.target.id||e.target.tagName};events.push(item);queueMicrotask(()=>item.prevented=e.defaultPrevented);});
+                document.addEventListener(type,e=>{const item={type,button:e.button,buttons:e.buttons,target:e.target.id||e.target.tagName};events.push(item);setTimeout(()=>item.prevented=e.defaultPrevented,0);});
               surface.addEventListener('contextmenu',e=>e.preventDefault());
               if(mode==='down')surface.addEventListener('mousedown',e=>e.preventDefault());
               if(mode==='pointer')surface.addEventListener('pointerdown',e=>e.preventDefault());
@@ -45,11 +44,18 @@ def diagnostic_fixture():
           for(const type of ['pointerdown','pointerup','pointercancel','mousedown','mouseup','contextmenu','keydown','keypress','keyup'])
             document.addEventListener(type,e=>{
               const target=e.target,item={type,button:e.button,buttons:e.buttons,key:e.key,
-                x:e.clientX,y:e.clientY,pointerType:e.pointerType,
+                x:e.clientX,y:e.clientY,pointerType:e.pointerType,cancelable:e.cancelable,
                 target:target?.dataset?.control||target?.className||target?.tagName};
-              nativeInputTrace.push(item);queueMicrotask(()=>item.defaultPrevented=e.defaultPrevented);
+              nativeInputTrace.push(item);setTimeout(()=>item.defaultPrevented=e.defaultPrevented,0);
               if(nativeInputTrace.length>80)nativeInputTrace.shift();
             },true);
+          document.addEventListener('contextmenu',e=>{
+            nativeInputTrace.push({phase:'bubble',prevented:e.defaultPrevented,cancelable:e.cancelable,
+              state:window.host?.vm?.state,props:window.form?{enabled:form.props.Enabled,visible:form.props.Visible,disposed:form.disposed}:null,
+              connected:window.form?.node.isConnected,hidden:!!window.form?.node.closest('[hidden],[inert]'),
+              ownerTarget:e.target===window.form?.content,
+              procedures:window.form?[...form.instance.module.procedures.keys()]:[]});
+          });
         }''')
         try:
             yield page
@@ -60,7 +66,7 @@ def diagnostic_fixture():
               vbTrace:typeof window.value==='function'?window.value('Trace'):null,
               focus:document.activeElement?.outerHTML?.slice(0,500)
             })''')),flush=True)
-            native_probes(page.context)
+            native_probes(page.context.browser)
             raise
 
 support.fixture = diagnostic_fixture
