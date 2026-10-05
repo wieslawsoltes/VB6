@@ -1,5 +1,5 @@
 import {validParameterList} from './signature-syntax.js';
-import {IDENTIFIER,TYPE_NAME,symbolKey} from './source-context.js';
+import {IDENTIFIER,TYPE_NAME,symbolKey,mapParameterType} from './source-context.js';
 import {parameterSymbol} from './declaration-index.js';
 import {member} from './type-catalog.js';
 
@@ -89,7 +89,7 @@ export function normalizeTypeLibrary(name,types){
       if(++count>50000)throw new RangeError('Too many type-library members');
       if(!raw||raw.accessors!==undefined||raw.kind!==undefined&&!memberKinds.has(raw.kind)||raw.accessor!==undefined&&!['get','let','set'].includes(raw.accessor)||typeof raw.name!=='string'||!identifier.test(raw.name)||raw.type!==undefined&&(typeof raw.type!=='string'||!typeName.test(raw.type))||raw.params!==undefined&&!validParameterList(raw.params))throw new TypeError('Invalid member descriptor');
       if(raw.accessor&&(!raw.params||raw.accessor!=='get'&&(!raw.params.length||/^\s*(?:Optional|ParamArray)\b/i.test(raw.params.at(-1)))))throw new TypeError('Invalid property accessor descriptor');
-      const params=raw.params?.map(p=>p.replace(new RegExp('(\\bAs\\s+(?:New\\s+)?)('+TYPE_NAME+')','i'),(_,as,t)=>as+qualify(t)));
+      const params=raw.params?.map(p=>mapParameterType(p,qualify));
       const valueType=kind==='enum'?type.name:qualify(raw.type);
       const result={...member(clean(raw.name),valueType,params??null),...raw,name:clean(raw.name),type:valueType,library,params,parameters:params?.map(p=>parameterSymbol(p)),insertText:raw.name};
       if(kind==='enum'){result.kind='constant';result.parentType=type.name;delete result.params;delete result.parameters;}

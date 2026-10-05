@@ -233,4 +233,44 @@ def mutated_reference_rejects_stale_commit(p):
     check(p.evaluate('vb6Studio.editor.text.endsWith("client.")'));p.keyboard.press('Control+j');check(names(p)==['Updated'])
 
 base.CASES += [qualified_module_path,project_type_path,unicode_type_path,nested_reference_path,redim_array_members,redim_array_hints,redim_shared_declaration,inert_project_references,inert_immediate_references,mutated_reference_rejects_stale_commit]
+
+# Preserve the declaration's lexical context, not the active caller's defaults.
+def default_type_arguments(p):
+    library={'id':'library','name':'Library','kind':'module','code':'DefInt A-Z\nPublic Sub Read(value)\nEnd Sub'}
+    setup(p,'DefStr A-Z\nPrivate Sub Form_Load()\nLibrary.Read ',others=[library])
+    p.keyboard.press('Control+Shift+i')
+    check(p.evaluate('vb6Studio.editor.lastInfo.parameters[0].type')=='Integer')
+    check('value As Integer' in p.locator('.source-info strong').inner_text())
+    base.shot(p,'default-type-argument')
+
+def unchanged_literal_defaults(p):
+    library={'id':'library','name':'Library','kind':'module','code':'Public Type Point\nX As Long\nEnd Type\nPublic Sub Read(Optional value = "As Point")\nEnd Sub'}
+    setup(p,'Private Sub Form_Load()\nLibrary.Read ',others=[library]);p.keyboard.press('Control+Shift+i')
+    check(p.evaluate('vb6Studio.editor.lastInfo.params[0]')=='Optional value = "As Point"')
+    check('"As Point"' in p.locator('.source-info').inner_text());check('As Library.Point' not in p.locator('.source-info').inner_text())
+
+def same_line_with_scope(p):
+    one={'id':'one','name':'One','kind':'class','code':'Public First As String'}
+    two={'id':'two','name':'Two','kind':'class','code':'Public Second As String\nPublic Parent As Two'}
+    setup(p,'Sub A(): Dim obj As One: End Sub: Sub B(): Dim obj As Two: With obj: With .Parent: .',others=[one,two])
+    p.keyboard.press('Control+j');check('Second' in names(p) and 'First' not in names(p),names(p))
+    put(p,'Sec');p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endsWith(".Second")'))
+
+def same_line_select_scope(p):
+    setup(p,'Public Enum A\nFirstOnly=1\nEnd Enum\nPublic Enum B\nSecondOnly=2\nEnd Enum\nSub One(): Dim choice As A: End Sub: Sub Two(): Dim choice As B: Select Case choice: Case ')
+    p.keyboard.press('Control+j');check(names(p)==['SecondOnly'],names(p))
+
+def inline_conditional_redim(p):
+    setup(p,'Private Sub Form_Load()\nIf True Then ReDim items(1) As Customer Else ReDim others(1) As Customer\nothers(0)',others=[base.CUSTOMER])
+    put(p,'.');check('Name' in names(p),names(p));put(p,'Nam');p.keyboard.press('Tab')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("others(0).Name")'));p.evaluate('vb6Studio.command("undo")')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("others(0).Nam")'))
+
+def reference_literal_signature(p):
+    setup(p,'Private Sub Form_Load()\nLibrary.Api.Read ')
+    p.evaluate('''()=>{vb6Studio.project.typeLibraries=[{name:'Library',types:[{name:'Point',kind:'type',members:[]},{name:'Api',kind:'module',members:[{name:'Read',kind:'sub',type:'Void',params:['Optional value = "As Point"']}]}]}];}''')
+    p.keyboard.press('Control+Shift+i');check(p.evaluate('vb6Studio.editor.lastInfo.params[0]')=='Optional value = "As Point"')
+    check('"As Point"' in p.locator('.source-info').inner_text())
+
+base.CASES += [default_type_arguments,unchanged_literal_defaults,same_line_with_scope,same_line_select_scope,inline_conditional_redim,reference_literal_signature]
 if __name__=='__main__':sys.exit(base.main())

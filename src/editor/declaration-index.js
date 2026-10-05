@@ -1,6 +1,6 @@
 import {preprocess} from '../language/conditional.js';
 import {addDefaultTypes,defaultIdentifierType} from '../language/default-types.js';
-import {IDENTIFIER,TYPE_NAME,sourceStatements,splitArguments,symbolKey,maskSource} from './source-context.js';
+import {IDENTIFIER,TYPE_NAME,sourceStatements,splitArguments,symbolKey,maskSource,conditionalStatementBodies} from './source-context.js';
 
 const variableName=new RegExp('^('+IDENTIFIER+')','i');
 export function parameterSymbol(text, defaults={}) {
@@ -81,13 +81,15 @@ export function scanDeclarations(module) {
     const withMatch=clean.match(/^\s*With\s+/i);
     if(withMatch&&owner){const block={expression:text.slice(withMatch[0].length).trim(),line,start:end,end:source.length,endLine:lineCount,ownerId:owner.id,parent:withStack.at(-1)||null};withBlocks.push(block);withStack.push(block);continue;}
     if(/^\s*End\s+With\b/i.test(clean)){const block=withStack.pop();if(block){block.end=start;block.endLine=line;}continue;}
-    const redim=clean.match(/^\s*ReDim\s+(?:Preserve\s+)?/i);
-    if(redim&&owner){
-      for(const part of splitArguments(text.slice(redim[0].length))){
-        const candidate=variable(part,statement,'variable');
-        if(candidate?.array)redimCandidates.push({...candidate,implicitRedim:true});
+    if(owner){
+      for(const body of conditionalStatementBodies(statement,source,lexical.masked)){
+        const redim=body.clean.match(/^\s*(?:\d+\s+)?ReDim\s+(?:Preserve\s+)?/i);
+        if(!redim)continue;
+        for(const part of splitArguments(body.text.slice(redim[0].length))){
+          const candidate=variable(part,body,'variable');
+          if(candidate?.array)redimCandidates.push({...candidate,implicitRedim:true});
+        }
       }
-      continue;
     }
     const decl=clean.match(/^\s*(Dim|Private|Public|Global|Friend|Static|Const)\s+(?:(Const)\s+)?/i);
     if(decl){const scope=/^(Public|Global|Friend)$/i.test(decl[1])?(decl[1].toLowerCase()==='friend'?'friend':'public'):'private';for(const p of splitArguments(text.slice(decl[0].length))){const v=variable(p,statement,decl[2]||/^Const$/i.test(decl[1])?'constant':'variable',scope);if(v)symbols.push(v);}}

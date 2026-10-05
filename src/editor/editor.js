@@ -260,7 +260,7 @@ export class SourceEditor extends Signal {
     if(!this.info){this.info=el('div',{class:'source-info',role:'tooltip','aria-label':'Code information'});this.viewport.append(this.info);}
     const doc=this.root.ownerDocument;
     if(info.params){
-      this.info.replaceChildren(doc.createTextNode(info.name+'('),...info.params.flatMap((p,i)=>[i?', ':'',el(i===info.active?'strong':'span',{},/^Optional\s+/i.test(p)?'['+p.replace(/^Optional\s+/i,'')+']':p.endsWith('?')?'['+p.slice(0,-1)+']':p)]),doc.createTextNode(')'+(info.type&&info.type!=='Void'?' As '+info.type:'')));
+      this.info.replaceChildren(doc.createTextNode(info.name+'('),...(info.displayParams||info.params).flatMap((p,i)=>[i?', ':'',el(i===info.active?'strong':'span',{},/^Optional\s+/i.test(p)?'['+p.replace(/^Optional\s+/i,'')+']':p.endsWith('?')?'['+p.slice(0,-1)+']':p)]),doc.createTextNode(')'+(info.type&&info.type!=='Void'?' As '+info.type:'')));
       this.info.dataset.parameter=String(info.active??-1);
     }else{this.info.textContent=info.signature||info.name+' As '+(info.type||'Variant');delete this.info.dataset.parameter;}
     if(info.description)this.info.append(el('div',{class:'source-info-description'},info.description));

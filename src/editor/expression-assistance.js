@@ -79,7 +79,7 @@ export class ExpressionAssistance {
     if(!value&&quick&&statementBefore(c.text,c.offset).state==='code')value=this.service.resolve(c.project,c.module,c.line,wordAt(c.text,c.offset).text);
     this.tip?.remove();this.tip=null;if(!value){if(!this.list){this.observer?.disconnect();this.observer=null;}return;}
     const tip=this.tip=this.node('div','',{class:'source-info',role:'tooltip'});this.caret=this.input.selectionStart;this.state=this.revision(c);this.project=c.project;
-    if(value.params){tip.append(this.node('span',value.name+'('));value.params.forEach((p,i)=>{if(i)tip.append(', ');tip.append(this.node(i===value.active?'strong':'span',/^Optional\s+/i.test(p)?'['+p.replace(/^Optional\s+/i,'')+']':p));});tip.append(')'+(value.type&&value.type!=='Void'?' As '+value.type:''));}else tip.textContent=value.signature||value.name+' As '+value.type;
+    if(value.params){tip.append(this.node('span',value.name+'('));(value.displayParams||value.params).forEach((p,i)=>{if(i)tip.append(', ');tip.append(this.node(i===value.active?'strong':'span',/^Optional\s+/i.test(p)?'['+p.replace(/^Optional\s+/i,'')+']':p));});tip.append(')'+(value.type&&value.type!=='Void'?' As '+value.type:''));}else tip.textContent=value.signature||value.name+' As '+value.type;
     this.place(tip);if(this.list){const r=this.list.getBoundingClientRect();tip.style.top=Math.max(2,r.top-tip.offsetHeight-2)+'px';}
   }
   keydown(e){

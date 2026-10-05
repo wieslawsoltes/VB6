@@ -109,9 +109,33 @@ and [Avoiding naming conflicts](https://learn.microsoft.com/en-us/office/vba/lan
 references. Nested portable-library namespaces are this implementation's metadata
 convention, not a claim that native VB6 creates nested project modules.
 
+## Declaration-context correctness
+
+Argument metadata and hints preserve the declaring module's `DefType` defaults,
+including coalesced indexed properties. Inferred types are shown in parameter
+help without rewriting the stored source signatures. Qualifying an explicit
+`As` type never searches inside bracketed parameter names, bounds, or literal
+defaults: `Optional value = "As Point"` remains unchanged. The same rule applies
+to portable reference metadata.
+
+Nested `With` and `Select Case` receivers carry canonical source offsets, so
+multiple procedures on one physical line cannot borrow another procedure's
+locals. Declarative `ReDim` statements are also indexed inside single-line
+`If ... Then ... Else` branches, including nested conditionals and continuations.
+Bounds are not executed; explicit declarations still take precedence. Original
+physical positions are retained for navigation. Empty host modules without a
+`code` field now cache an empty index safely.
+
+See Microsoft's retained [DefType contract](https://learn.microsoft.com/en-us/office/vba/language/concepts/getting-started/deftype-statements): defaults apply in their declaring module, including formal arguments and function/property return types. Static declaration metadata does not certify runtime numeric subtype tagging.
+
 ## Validation
 
-`tests/intellisense-compatibility.test.mjs` adds service, metadata and executable generated-handler regressions. `tools/browser-intellisense-compatibility.py` runs all 18 original browser scenarios plus 21 new scenarios, including handler generation/undo, a single-event Timer, live declaration changes, interface accessors, mouse selection, menu routing, no-evaluation commits, read-only guards, labels, namespaces/suffixes, Select Case constants and reference priority. The permanent read-only IntelliSense workflow runs the complete 49-case suite in Chromium, Firefox and WebKit over modular HTTP, standalone HTTP and standalone file URLs, with no inline-content fallback or scenario skips. Each browser job checks committed generated distributions. The follow-up adds 10 browser workflows for qualified module/project/library paths, Unicode library qualifiers, ReDim members/rank/shadowing, callback-free source/Immediate snapshots and rejection of stale reference commits (49 scenarios × 3 browsers × 3 origins = 441 executions). `tests/intellisense-qualified-arrays.test.mjs` adds 39 focused cases, including an executable object-array runtime regression and a cached 5,000-array declaration index.
+`tests/intellisense-compatibility.test.mjs` adds service, metadata and executable generated-handler regressions. `tools/browser-intellisense-compatibility.py` runs all 18 original browser scenarios plus 21 new scenarios, including handler generation/undo, a single-event Timer, live declaration changes, interface accessors, mouse selection, menu routing, no-evaluation commits, read-only guards, labels, namespaces/suffixes, Select Case constants and reference priority. The permanent read-only IntelliSense workflow runs the complete 55-case suite in Chromium, Firefox and WebKit over modular HTTP, standalone HTTP and standalone file URLs, with no inline-content fallback or scenario skips. Each browser job checks committed generated distributions. The follow-up adds 10 browser workflows for qualified module/project/library paths, Unicode library qualifiers, ReDim members/rank/shadowing, callback-free source/Immediate snapshots and rejection of stale reference commits (49 scenarios × 3 browsers × 3 origins = 441 executions before this audit). `tests/intellisense-qualified-arrays.test.mjs` adds 39 focused cases, including an executable object-array runtime regression and a cached 5,000-array declaration index.
+
+The declaration-context audit adds 28 focused Node cases and six browser scenarios
+covering inferred parameter display, literal-preserving qualification, same-line
+With/Select scope, inline conditional arrays and reference signatures. The full
+matrix now runs **55 × 3 browsers × 3 origins = 495 scenario executions**.
 
 ```sh
 npm run build

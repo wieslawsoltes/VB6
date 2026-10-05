@@ -1,8 +1,9 @@
+import {displayParameter} from './signature-syntax.js';
 import {normalizeTypeLibrary,referenceSnapshot} from './reference-metadata.js';
 import {typeCompletionContext,typeCandidates} from './type-completion.js';
 import {parseExpression} from '../language/expression.js';
 import {KEYWORDS} from './language-service.js';
-import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt,completionKey,completionMatches} from './source-context.js';
+import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt,completionKey,completionMatches,mapParameterType} from './source-context.js';
 import {scanDeclarations,parameterSymbol} from './declaration-index.js';
 import {PRIMITIVE_TYPES,CONSTANT_SYMBOLS,BUILTIN_SYMBOLS,GLOBAL_OBJECTS,TYPE_CATALOG,ENUM_TYPES,builtinType,member,runtimeType,builtinGroup} from './type-catalog.js';
 export {maskSource,splitArguments,wordAt,scanDeclarations};
@@ -16,7 +17,7 @@ function coalesce(items) {
   return [...groups.values()].map(s=>{
     if(!s.accessor)return s;
     const params=s.accessor==='get'?s.params:s.params.slice(0,-1);
-    return {...s,kind:'property',accessors:items.filter(m=>eq(m.name,s.name)&&m.accessor),params,parameters:params.map(p=>parameterSymbol(p)).filter(Boolean)};
+    return {...s,kind:'property',accessors:items.filter(m=>eq(m.name,s.name)&&m.accessor),params,parameters:s.parameters?.slice(0,params.length)||params.map(p=>parameterSymbol(p)).filter(Boolean)};
   });
 }
 
@@ -69,7 +70,7 @@ export class EditorIntelligence {
     const condition=project?.settings?.conditionalConstants||module.conditionalConstants||{},conditionalKey=JSON.stringify(condition);
     const formKey=JSON.stringify([module.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),module.form?.menus,module.attributes]);
     const cached=this.cache.get(module.id);
-    if(cached?.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey&&cached.conditionalKey===conditionalKey)return cached.index;
+    if(cached&&cached.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey&&cached.conditionalKey===conditionalKey)return cached.index;
     const index=scanDeclarations({...module,conditionalConstants:condition});this.scanCount++;
     this.cache.set(module.id,{code:module.code,name:module.name,kind:module.kind,formKey,conditionalKey,index});return index;
   }
@@ -124,8 +125,12 @@ export class EditorIntelligence {
     const owner=symbol.moduleId===module.id?module:project.modules.find(m=>m.id===symbol.moduleId);
     if(!owner)return symbol;
     const qualify=type=>this.index(owner,project).records.some(r=>eq(r.name,type))?owner.name+'.'+type:type;
-    const params=symbol.params?.map(p=>p.replace(new RegExp('(\\bAs\\s+)('+TYPE_NAME+')','i'),(_,as,type)=>as+qualify(type)));
-    return {...symbol,type:qualify(symbol.type),...(params?{params,parameters:params.map(p=>parameterSymbol(p))}:{})};
+    const params=symbol.params?.map(p=>mapParameterType(p,qualify));
+    const parameters=params?.map((text,i)=>{
+      const value=symbol.parameters?.[i]||parameterSymbol(text,this.index(owner,project).defaults);
+      return value?{...value,type:qualify(value.type),signature:text}:null;
+    }).filter(Boolean);
+    return {...symbol,type:qualify(symbol.type),...(params?{params,parameters}:{})};
   }
   referenceGlobals(project){
     return this.referenceTypes(project).filter(t=>visible(t)&&(t.kind==='enum'||t.kind==='module'||t.global)).flatMap(t=>t.members.filter(visible));
@@ -173,7 +178,7 @@ export class EditorIntelligence {
     const idx=this.index(module,project);
     block ||= idx.withBlocks.filter(b=>offset===null?line>b.line&&line<b.endLine:offset>=b.start&&offset<=b.end).at(-1);
     if(!block)return null;
-    return this.resolve(project,module,block.line,block.expression,{withBlock:block.parent,depth:depth+1,withoutImplicitWith:true});
+    return this.resolve(project,module,block.line,block.expression,{withBlock:block.parent,depth:depth+1,withoutImplicitWith:true,offset:block.start});
   }
   resolve(project,module,line,expression,options={}){
     expression=String(expression||'').trim().replace(/\s+_\s*\r?\n/g,' ');
@@ -226,7 +231,7 @@ export class EditorIntelligence {
     let active=next;
     if(context.named){active=parameters.findIndex(p=>eq(p.name,context.named));}
     else if(active>=parameters.length){active=parameters.at(-1)?.paramArray?parameters.length-1:-1;}
-    return {...symbol,parameters,active,context};
+    return {...symbol,parameters,displayParams:symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
   }
   definition(project,module,line,text,offset,expression=wordAt(text,offset).text){
     if(statementBefore(text,offset).state!=='code')return null;
@@ -238,7 +243,7 @@ export class EditorIntelligence {
     const st=statementBefore(text,offset),masked=st.masked;
     if(/^\s*Case\s+/i.test(masked)){
       const block=this.index(module,project).selectBlocks.filter(b=>text===module.code?offset>=b.start&&offset<=b.end:line>b.line&&line<b.endLine).at(-1);
-      if(block)return this.resolve(project,module,block.line,block.expression)?.type||null;
+      if(block)return this.resolve(project,module,block.line,block.expression,{offset:block.start})?.type||null;
     }
     let depth=0,bracket=false,assignment=-1;
     for(let i=0;i<masked.length;i++){
