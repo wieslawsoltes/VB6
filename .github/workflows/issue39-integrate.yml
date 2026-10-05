@@ -5,12 +5,19 @@ on:
     paths: [.github/workflows/issue39-integrate.yml]
 permissions:
   contents: write
+concurrency:
+  group: issue39-source-integration
+  cancel-in-progress: true
 jobs:
   integrate:
     if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/issue-39-visual-fidelity'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -19,7 +26,6 @@ jobs:
         with:
           node-version: 22
       - name: Merge pinned main, rejecting handwritten conflicts
-        shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
@@ -41,14 +47,14 @@ jobs:
           git diff --exit-code
           test "$(git ls-remote origin refs/heads/fix/issue-39-visual-fidelity | cut -f1)" = '${{ github.sha }}'
           git push origin HEAD:fix/issue-39-visual-fidelity
-      - name: Archive reviewed integration sources
+      - name: Archive integration sources
         run: |
-          mkdir -p /tmp/issue39-source
-          git archive --format=tar.gz HEAD > /tmp/issue39-source/source.tar.gz
-          git rev-parse HEAD HEAD^{tree} > /tmp/issue39-source/revision.txt
-          sha256sum /tmp/issue39-source/source.tar.gz > /tmp/issue39-source/SHA256SUMS.txt
+          mkdir -p issue39-artifact
+          git archive --format=tar.gz HEAD > issue39-artifact/source.tar.gz
+          git rev-parse HEAD HEAD^{tree} > issue39-artifact/revision.txt
+          sha256sum issue39-artifact/source.tar.gz > issue39-artifact/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: issue39-integrated-source
-          path: /tmp/issue39-source/
+          path: issue39-artifact/
           retention-days: 3
