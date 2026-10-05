@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using TYPEDESC = System.Runtime.InteropServices.ComTypes.TYPEDESC;
 using DISPPARAMS = System.Runtime.InteropServices.ComTypes.DISPPARAMS;
 using EXCEPINFO = System.Runtime.InteropServices.ComTypes.EXCEPINFO;
 namespace VB6Interop {
