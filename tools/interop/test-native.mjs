@@ -21,7 +21,7 @@ other.Add "nested", 7
 Set d.Item("object") = other
 Dim same As Object
 Set same = d("object")
-Debug.Print same Is other
+Debug.Print same Is other, CInt(same Is other), VarType(same Is other)
 values = d.Keys
 Debug.Print UBound(values), values(0)
 Dim k As Variant
@@ -39,7 +39,7 @@ Set doc = Nothing
 End Sub`}]});
   check('VB compiler',()=>assert.deepEqual(program.diagnostics,[]));
   const vm=new VirtualMachine(program,{automation:client.registry(),print:s=>output.push(s)});
-  await vm.start();check('JavaScript VB runtime invokes real Windows components',()=>assert.deepEqual(output,['1 Zażółć 日本語','updated','-1','1 key','key','object','-1','Unicode Żółć']));
+  await vm.start();check('JavaScript VB runtime invokes real Windows components',()=>assert.deepEqual(output,['1 Zażółć 日本語','updated','True -1 11','1 key','key','object','-1','Unicode Żółć']));
   check('objects allocated',()=>assert.ok(client.adapters.size>=4));vm.stop();await vm.automationClose;
   const status=await client.request({op:'info'});check('native objects released at stop',()=>assert.equal(status.objects,0));
   await assert.rejects(()=>client.request({op:'create',progId:'WScript.Shell'}),/not allowed/);checks.push('ungranted ProgID denied');
