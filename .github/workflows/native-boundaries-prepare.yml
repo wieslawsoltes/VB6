@@ -7,10 +7,10 @@ permissions:
   contents: read
 concurrency:
   group: native-boundaries-prepare
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   apply:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 8
     permissions:
       contents: write
