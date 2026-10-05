@@ -5234,7 +5234,7 @@ class MenuSession {
       row.append(mark,label,el('span',{class:'menu-shortcut'},item.shortcut||''),el('span',{class:'menu-arrow'},item.items?icon('arrow-right'):null));
       const entry={row,item,enabled,level:depth};state.rows.push(entry);
       row.addEventListener('click',()=>this.activate(state,entry));
-      row.addEventListener('pointerenter',()=>{if(!enabled)return;this.select(state,state.rows.indexOf(entry),false);clearTimeout(this.timer);this.timer=setTimeout(()=>{if(active===this&&entry.item.items)this.submenu(state,entry,false);else this.trim(depth+1);},180);});
+      row.addEventListener('pointerenter',()=>{if(!enabled)return;this.select(state,state.rows.indexOf(entry),true);clearTimeout(this.timer);this.timer=setTimeout(()=>{if(active===this&&entry.item.items)this.submenu(state,entry,false);else this.trim(depth+1);},180);});
       node.append(row);
     }
     node.addEventListener('keydown',e=>this.keydown(state,e));
