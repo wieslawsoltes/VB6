@@ -75,7 +75,19 @@ export function prepareResources(project){
   const modules=structuredClone(project.modules),files=Object.create(null);for(const [path,asset]of Object.entries(project.assets||{})){cleanProjectPath(path);if(asset.encoding==='base64')files[path]=fromBase64(asset.data);}
   const append=(path,value,kind,options)=>{path=cleanProjectPath(path);const record=writeFRXRecord(value,kind,options),before=files[path]||new Uint8Array();if(before.length+record.length>MAX_RESOURCE_BYTES)fail('resource exceeds 20 MiB limit');const all=new Uint8Array(before.length+record.length);all.set(before);all.set(record,before.length);files[path]=all;return before.length.toString(16).toUpperCase().padStart(4,'0');};
   for(const module of modules){if(!module.form)continue;const source=module.sourcePath||module.name+'.frm';for(const node of [module.form,...module.form.controls,...module.form.menus])for(const [key,value]of Object.entries(node.properties||{})){
-    if(value?.resource)continue;const binding=node.resourceBindings?.[key],same=binding&&JSON.stringify(value)===JSON.stringify(binding.originalValue);if(same){const reference={...binding.reference};let resolved;try{resolved=resolveProjectPath(Object.keys(files),source,reference.resource);}catch{}if(resolved?.toLowerCase()!==binding.assetPath.toLowerCase())reference.resource=relativeProjectPath(source,binding.assetPath);node.properties[key]=reference;continue;}
+    if(value?.resource){
+      const originalSource=module.nativeSource?.path||project.nativeProject?.files?.find(file=>file.moduleId===module.id)?.resolved||source;
+      const references=module.nativeSource?.resourceReferences;
+      const oldReference=Array.isArray(references)?references.find(r=>r.id===node.id&&r.key===key)?.value:undefined;
+      // An explicitly edited/new reference is relative to the current module.
+      if(Array.isArray(references)&&JSON.stringify(oldReference)!==JSON.stringify(value))continue;
+      if(originalSource!==source){
+        const assetPath=resolveProjectPath(Object.keys(files),originalSource,value.resource);
+        if(!assetPath)fail('cannot relocate missing opaque resource '+node.name+'.'+key+'; keep the original source path or supply its companion file');
+        node.properties[key]={...value,resource:relativeProjectPath(source,assetPath)};
+      }
+      continue;
+    }const binding=node.resourceBindings?.[key],same=binding&&JSON.stringify(value)===JSON.stringify(binding.originalValue);if(same){const reference={...binding.reference};let resolved;try{resolved=resolveProjectPath(Object.keys(files),source,reference.resource);}catch{}if(resolved?.toLowerCase()!==binding.assetPath.toLowerCase())reference.resource=relativeProjectPath(source,binding.assetPath);node.properties[key]=reference;continue;}
     const lower=key.toLowerCase(),picture=['picture','icon','mouseicon'].includes(lower),list=lower==='list'&&Array.isArray(value),text=TEXT_PROPERTIES.has(lower)&&typeof value==='string';
     if(!binding&&!list&&!(picture&&value)&&!(text&&(/[\r\n]/.test(value)||value.length>255)))continue;
     if(picture&&!value){delete node.properties[key];continue;}if(!list&&!picture&&!text)fail('cannot serialize edited opaque resource '+node.name+'.'+key);

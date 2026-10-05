@@ -1,9 +1,8 @@
 import {importNativeFiles,parseNativeProject,patchNativeProject,workspaceFiles,normalizedEntries,listProjectEntries,parseVBG,workspaceProjects,selectWorkspaceProject} from './native-project.js';
 import {encodeNativeText,nativePathValue} from './native-text.js';
-import {patchNativeSource} from './native-source.js';
+import {patchNativeSource,serializeNativeCode} from './native-source.js';
 import {readRES,writeRES} from './res.js';
 import {newId,createForm,newProject,normalizeProject,CONTROL_DEFAULTS,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES} from './model.js';
-import {lower} from '../core/core.js';
 import {VBError} from '../language/lexer.js';
 import {decodeANSI,encodeANSI} from '../runtime/binary-codec.js';
 import {cleanProjectPath,relativeProjectPath,resolveProjectPath,hydrateResources,prepareResources,toBase64} from './frx.js';
@@ -17,12 +16,6 @@ const nativePropertyNames=new Map(['Name','Index','Caption','Text','Left','Top',
 const nativeControlNames=new Map([...BASIC_CONTROL_TYPES,...EXTENDED_CONTROL_TYPES,'Form','MDIForm','Menu','UserControl','PropertyPage','UserDocument'].map(k=>[k.toLowerCase(),k]));
 const fontKeys={Name:'FontName',Size:'FontSize',Weight:'FontWeight',Charset:'FontCharset',Italic:'FontItalic',Underline:'FontUnderline',Strikethrough:'FontStrikethrough'};
 function splitAttributes(lines){const attributes=lines.filter(line=>/^Attribute\s+/i.test(line.trim())).map(l=>l.trim()),code=lines.filter(line=>!/^Attribute\s+/i.test(line.trim())).join('\n').trim()+'\n';return {attributes,code};}
-function nativeCode(module,defaults=[]){
-  const attributes=module.attributes||defaults,moduleAttributes=attributes.filter(a=>!/^Attribute\s+\w+\./i.test(a)&&!/^Attribute\s+VB_Name\b/i.test(a)),memberAttributes=attributes.filter(a=>/^Attribute\s+\w+\./i.test(a));
-  const lines=[`Attribute VB_Name = "${module.name}"`,...moduleAttributes],code=module.code.replace(/\r\n?/g,'\n').trim().split('\n');
-  for(const line of code){lines.push(line);const m=line.match(/^\s*(?:(?:Public|Private|Friend|Static)\s+)*(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+(\w+)/i);if(m)for(const attribute of memberAttributes)if(lower(attribute.match(/^Attribute\s+(\w+)\./i)[1])===lower(m[1]))lines.push(attribute);}
-  return lines.join('\r\n');
-}
 export function parseFRM(text,fileName='Form1.frm'){
   const lines=text.replace(/\r\n?/g,'\n').split('\n'),module=createForm(fileName.split(/[\\/]/).at(-1).replace(/\.(frm|ctl|pag|dob)$/i,'')),stack=[],groups=[],diagnostics=[];let rootSeen=false,rootEnded=false,codeStart=lines.length;module.form.controls=[];module.form.menus=[];module.nativeHeaders=[];
   for(let i=0;i<lines.length;i++){const line=lines[i].trim();let m;if(rootEnded){codeStart=i;break;}
@@ -36,7 +29,7 @@ export function parseFRM(text,fileName='Form1.frm'){
   if(!rootSeen)throw new VBError('No Begin VB.Form declaration found in '+fileName,1002);if(!rootEnded)throw new VBError('Unterminated form declaration in '+fileName,1002);
   Object.assign(module,splitAttributes(lines.slice(codeStart)),{kind:'form',id:newId(),sourcePath:cleanProjectPath(fileName)});return {module,diagnostics};
 }
-export function serializeFRM(module){
+export function serializeFRM(module,strict=false){
   const lines=module.nativeHeaders?.length?[...module.nativeHeaders]:['VERSION 5.00'],form=module.form;
   const write=(node,depth)=>{const grouped=new Set();const collect=g=>{for(const e of g.entries||[])grouped.add(e.key);for(const child of g.groups||[])collect(child);};for(const g of node.propertyGroups||[])collect(g);const indent='   '.repeat(depth),type=node.originalType||(['Form','MDIForm','Menu','PictureBox','Label','TextBox','Frame','CommandButton','CheckBox','OptionButton','ComboBox','ListBox','HScrollBar','VScrollBar','Timer','DriveListBox','DirListBox','FileListBox','Shape','Line','Image','Data','OLE'].includes(node.type)?'VB.'+node.type:node.type);lines.push(`${indent}Begin ${type} ${node.name}`);
     for(const [key,value]of Object.entries(node.properties||{})){if(key==='Name'||['FontName','FontSize','FontWeight','FontBold','FontItalic','FontUnderline','FontStrikethrough','FontCharset'].includes(key)||grouped.has(key)||['List','GridData','Nodes','Columns','Items','Tabs','Panels','Buttons'].includes(key)&&!value?.resource||typeof value==='object'&&!value?.resource)continue;lines.push(`${indent}   ${key.padEnd(16)}=   ${serializeVBValue(value)}`);}
@@ -44,7 +37,7 @@ export function serializeFRM(module){
     const groups=node.propertyGroups||[];for(const group of groups)writeGroup(group,depth+1);
     if(node.properties.FontName&&!groups.some(g=>g.name.toLowerCase()==='font')){lines.push(`${indent}   BeginProperty Font`,`${indent}      Name            =   ${serializeVBValue(node.properties.FontName)}`,`${indent}      Size            =   ${node.properties.FontSize||8.25}`,`${indent}      Charset         =   ${node.properties.FontCharset||0}`,`${indent}      Weight          =   ${node.properties.FontBold?700:400}`,`${indent}      Underline       =   ${node.properties.FontUnderline||0}`,`${indent}      Italic          =   ${node.properties.FontItalic||0}`,`${indent}      Strikethrough   =   ${node.properties.FontStrikethrough||0}`,`${indent}   EndProperty`);}
     const belongs=c=>{const parent=c.parent||null;if(parent!==(node===form?null:node.name))return false;const old=[...form.controls,...form.menus].find(p=>p.id===c.nativeParentId);return !old||old.name!==parent||old===node;};for(const c of form.controls.filter(belongs))write(c,depth+1);for(const c of form.menus.filter(belongs))write(c,depth+1);lines.push(indent+'End');
-  };write(form,0);lines.push(nativeCode(module,['Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = False']));return lines.join('\r\n')+'\r\n';
+  };write(form,0);lines.push(serializeNativeCode(module,['Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = False'],strict));return lines.join('\r\n')+'\r\n';
 }
 export function parseCodeModule(text,fileName){const name=text.match(/^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"/im)?.[1]||fileName.split(/[\\/]/).at(-1).replace(/\.(bas|cls|dsr)$/i,''),kind=/\.cls$/i.test(fileName)?'class':'module';let code=text.replace(/\r\n?/g,'\n'),nativeClassHeader;
   if(kind==='class'){const wrapper=code.match(/^VERSION[^\n]*\nBEGIN[\s\S]*?^END\s*\n/im);if(wrapper){nativeClassHeader=wrapper[0].trim();code=code.replace(wrapper[0],'');}}
@@ -54,9 +47,9 @@ export function parseVBP(text){return parseNativeProject(text);}
 function modulePath(m){return m.sourcePath||m.name+(m.kind==='form'?'.frm':m.kind==='class'?'.cls':'.bas');}
 function serializeVBPBase(project){const native=project.nativeProject||{},owner=native.path||project.name+'.vbp',raw=(native.entries||[]).filter(e=>!project.resources||e.key.toLowerCase()!=='resfile32'),lines=raw.length?raw.map(e=>e.key+'='+e.value):['Type=Exe','MajorVer=0','MinorVer=2','RevisionVer=0','AutoIncrementVer=0'];for(const m of project.modules){const path=nativePathValue(relativeProjectPath(owner,modulePath(m)));{const kind=m.nativeKind||(m.kind==='form'?'Form':m.kind==='class'?'Class':'Module');lines.push(`${kind}=${['Module','Class'].includes(kind)?m.name+'; ':''}${path}`);};}if(project.resources)lines.push('ResFile32="'+relativeProjectPath(owner,project.resources.fileName)+'"');for(const r of project.references||[])lines.push(`${r.kind}=${r.value}`);lines.push(`Startup="${project.startup}"`,`Name="${project.name}"`);if(!raw.some(e=>e.key.toLowerCase()==='title'))lines.push(`Title="${project.name}"`);return lines.join('\r\n')+'\r\n';}
 export function serializeVBP(project){return patchNativeProject(project,serializeVBPBase(project));}
-export function canonicalSource(m){
-  if(m.kind==='form')return serializeFRM(m);
-  return (m.kind==='class'?(m.nativeClassHeader||'VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1\nEND').replace(/\r\n?/g,'\n').replace(/\n/g,'\r\n')+'\r\n':'')+nativeCode(m)+'\r\n';
+export function canonicalSource(m,strict=false){
+  if(m.kind==='form')return serializeFRM(m,strict);
+  return (m.kind==='class'?(m.nativeClassHeader||'VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1\nEND').replace(/\r\n?/g,'\n').replace(/\n/g,'\r\n')+'\r\n':'')+serializeNativeCode(m,[],strict)+'\r\n';
 }
 function singleSourceFiles(project,options={}){
   const prepared=prepareResources(project),files=Object.assign(Object.create(null),prepared.files),seen=new Set(Object.keys(files).map(p=>p.toLowerCase()));
@@ -64,7 +57,7 @@ function singleSourceFiles(project,options={}){
   const owner=project.nativeProject?.path||project.name+'.vbp';
   if(project.resources)put(project.resources.fileName,writeRES(project.resources));
   put(owner,encodeNativeText(serializeVBP({...project,modules:prepared.modules}),project.nativeProject?.document,options.encoding));
-  for(const m of prepared.modules){for(const node of m.form?[m.form,...m.form.controls,...m.form.menus]:[])for(const [key,value]of Object.entries(node.properties||{}))if(value&&typeof value==='object'&&!value.resource&&Object.keys(value).length)throw new VBError('Native export cannot encode structured property '+node.name+'.'+key+'. Save as a browser project to retain this data.',1002);const source=patchNativeSource(m,canonicalSource(m),parseVBValue);put(modulePath(m),encodeNativeText(source,m.nativeSource||{encoding:m.sourceEncoding||'windows-1252',bom:false},options.encoding));}
+  for(const m of prepared.modules){for(const node of m.form?[m.form,...m.form.controls,...m.form.menus]:[])for(const [key,value]of Object.entries(node.properties||{}))if(value&&typeof value==='object'&&!value.resource&&Object.keys(value).length)throw new VBError('Native export cannot encode structured property '+node.name+'.'+key+'. Save as a browser project to retain this data.',1002);const source=patchNativeSource(m,canonicalSource(m,!m.nativeSource),parseVBValue);put(modulePath(m),encodeNativeText(source,m.nativeSource||{encoding:m.sourceEncoding||'windows-1252',bom:false},options.encoding));}
   return files;
 }
 export function sourceFiles(project,options={}){const files=project.nativeWorkspace?workspaceFiles(project,options,singleSourceFiles):singleSourceFiles(project,options);normalizedEntries(Object.entries(files));return files;}

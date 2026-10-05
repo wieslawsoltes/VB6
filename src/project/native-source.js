@@ -1,12 +1,11 @@
 /** Lossless native source overlay. The original is authoritative for unedited data. */
 import {linesOf,lineBody,lineEnding,preferredEOL,replaceLineValue,commentAt,quote} from './native-text.js';
+import {nativeCodeStatements,nativeAttributeKey} from './native-code.js';
 import {VBError} from '../language/lexer.js';
 const fail=message=>{throw new VBError('Native source: '+message,1002);};
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const nodeKey=node=>node.name.toLowerCase()+'#'+(node.properties?.Index??'');
 const modelNodes=module=>module.form?[module.form,...module.form.controls,...module.form.menus]:[];
-const declaration=line=>line.match(/^\s*(?:(?:Public|Private|Friend|Static)\s+)*(Sub|Function|Property\s+(?:Get|Let|Set))\s+(\w+)/i);
-const declarationKey=line=>{const m=declaration(line);return m?(m[1]+' '+m[2]).replace(/\s+/g,' ').toLowerCase():null;};
 
 /** Parse only the designer envelope; the remainder is code, never designer input. */
 export function nativeTree(text){
@@ -74,12 +73,12 @@ function mergeContainer(original,before,after,parse,renderChild){
 }
 
 export function rememberNativeSource(module,document,canonical){
-  module.nativeSource={...document,canonical,classHeader:module.nativeClassHeader||null,name:module.name,code:module.code,attributes:structuredClone(module.attributes||[]),identities:modelNodes(module).map(n=>({id:n.id,key:nodeKey(n)}))};
+  module.nativeSource={...document,path:module.sourcePath,canonical,resourceReferences:modelNodes(module).flatMap(node=>Object.entries(node.properties||{}).filter(([,value])=>value?.resource).map(([key,value])=>({id:node.id,key,value:structuredClone(value)}))),classHeader:module.nativeClassHeader||null,name:module.name,code:module.code,attributes:structuredClone(module.attributes||[]),identities:modelNodes(module).map(n=>({id:n.id,key:nodeKey(n)}))};
   return module;
 }
 
 /** Hidden member attributes follow their original accessor, not every same-named procedure. */
-function mergeCode(module,source,original,generated){
+function mergeCode(module,source,original,{strict=true}={}){
   const classChanged=module.nativeClassHeader!==(source.classHeader??module.nativeClassHeader);
   if(module.code===source.code&&!classChanged&&same(module.attributes||[],source.attributes)){
     if(module.name===source.name)return original;
@@ -88,25 +87,22 @@ function mergeCode(module,source,original,generated){
       return line;
     }).join('');if(found)return renamed;
   }
-  const eol=preferredEOL(original||source.text),attributes=module.attributes||[],used=new Set(),header=[],members=new Map();
-  const attrKey=line=>line.match(/^\s*Attribute\s+([^=]+?)\s*=/i)?.[1].trim().toLowerCase();
+  const eol=preferredEOL(original||source.text||''),attributes=module.attributes||[],used=new Set(),header=[],members=new Map();
+  const attrKey=nativeAttributeKey;
   const terminate=line=>lineEnding(line)?line:line+eol;
-  const anchor=line=>{
-    const procedure=declaration(line);if(procedure)return {key:declarationKey(line),name:procedure[2].toLowerCase()};
-    const variable=line.match(/^\s*(?:Public|Private|Friend|Dim|Global|Static)\s+(?:(?:WithEvents|Const|Event)\s+)?(\w+)\b/i);
-    return variable?{key:'declaration '+variable[1].toLowerCase(),name:variable[1].toLowerCase()}:null;
-  };
-  const oldAnchors=linesOf(original).map(anchor).filter(Boolean),newAnchors=linesOf(module.code).map(anchor).filter(Boolean);
-  let owner=null;
-  for(const line of linesOf(original)){
-    owner=anchor(line)||owner;const key=attrKey(line);if(!key)continue;
+  const oldStatements=nativeCodeStatements(original),newStatements=nativeCodeStatements(module.code);
+  const oldAnchors=oldStatements.flatMap(s=>s.anchors),newAnchors=newStatements.flatMap(s=>s.anchors);
+  let owners=[];
+  for(const statement of oldStatements){
+    if(statement.anchors.length)owners=statement.anchors;
+    const line=statement.raw,key=attrKey(line);if(!key)continue;
     if(key==='vb_name'){header.push(terminate(replaceLineValue(line,quote(module.name))));continue;}
     let index=attributes.findIndex((a,i)=>!used.has(i)&&a.trim()===line.trim());
     if(index<0)index=attributes.findIndex((a,i)=>!used.has(i)&&attrKey(a)===key);
     if(index<0)continue;used.add(index);
     const replacement=attributes[index].trim()===line.trim()?line:replaceLineValue(line,attributes[index].slice(attributes[index].indexOf('=')+1).trim());
     if(!key.includes('.')){header.push(terminate(replacement));continue;}
-    const name=key.split('.')[0],target=owner?.name===name?owner:oldAnchors.find(a=>a.name===name);
+    const name=key.split('.')[0],target=owners.find(a=>a.name===name)||oldAnchors.find(a=>a.name===name);
     if(!target)fail('member attribute without an identifiable declaration: '+key);
     const list=members.get(target.key)||[];list.push(terminate(replacement));members.set(target.key,list);
   }
@@ -118,20 +114,30 @@ function mergeCode(module,source,original,generated){
     const name=key.split('.')[0],candidates=newAnchors.filter(a=>a.name===name);
     // A VB property has several accessors but only one COM member. Prefer the
     // original owning accessor, then Get, rather than duplicating attributes.
+    if(strict&&!source.text&&new Set(candidates.map(a=>a.base)).size<candidates.length)fail('ambiguous hidden attribute owner: '+attributes[i]);
     const target=candidates.find(a=>members.has(a.key))||candidates.find(a=>a.key.startsWith('property get '))||candidates[0];
-    if(!target)fail('cannot place new or renamed member attribute: '+attributes[i]);
+    if(!target){if(strict)fail('cannot place new or renamed member attribute: '+attributes[i]);continue;}
     const list=members.get(target.key)||[];list.push(attributes[i]+eol);members.set(target.key,list);
   }
   const originalClassHeader=original.match(/^(?:VERSION[^\r\n]*[\r\n]+)?BEGIN[\s\S]*?^END[^\r\n]*(?:\r\n|\r|\n)/im)?.[0]||'';
   const classHeader=classChanged?(module.nativeClassHeader||'').replace(/\r\n|\r|\n/g,eol).replace(/[\r\n]*$/,eol):originalClassHeader;
-  let output=classHeader+header.join('');const written=new Set(),codeLines=linesOf(String(module.code).replace(/\r\n|\r|\n/g,eol));
-  for(const line of codeLines){
-    if(/^\s*Attribute\s+/i.test(line))fail('edit hidden attributes through module metadata, not visible code');
-    output+=line;const key=anchor(line)?.key;
-    if(key&&members.has(key)&&!written.has(key)){if(!lineEnding(line))output+=eol;output+=members.get(key).join('');written.add(key);}
+  let output=classHeader+header.join('');const written=new Set();
+  for(const statement of newStatements){
+    if(/^\s*Attribute\s+/i.test(statement.text))fail('edit hidden attributes through module metadata, not visible code');
+    output+=statement.raw.replace(/\r\n|\r|\n/g,eol);
+    for(const {key} of statement.anchors)if(members.has(key)&&!written.has(key)){
+      if(!/[\r\n]$/.test(output))output+=eol;
+      output+=members.get(key).join('');written.add(key);
+    }
   }
   for(const key of members.keys())if(!written.has(key))fail('procedure '+key+' owns hidden attributes; remove or retarget its attributes before deleting/renaming it');
   return output;
+}
+
+/** Generate code for a fresh module; attributes are attached once, after logical declarations. */
+export function serializeNativeCode(module,defaults=[],strict=false){
+  const value={...module,attributes:module.attributes||defaults,code:module.code.replace(/\r\n|\r|\n/g,'\n').trim()+'\n'};
+  return mergeCode(value,{code:null,name:module.name,attributes:[],classHeader:module.nativeClassHeader},'',{strict}).replace(/[\r\n]+$/,'');
 }
 
 export function patchNativeSource(module,generated,parse){
@@ -141,7 +147,7 @@ export function patchNativeSource(module,generated,parse){
     return source.text;
   }
   const original=nativeTree(source.text),before=nativeTree(source.canonical),after=nativeTree(generated);
-  if(!original.root)return mergeCode(module,source,source.text,generated);
+  if(!original.root)return mergeCode(module,source,source.text);
   if(!before.root||!after.root)fail('designer root removed');
   const oldMap=mapNodes(original,source.identities),beforeMap=mapNodes(before,source.identities),newMap=mapNodes(after,modelNodes(module).map(n=>({id:n.id,key:nodeKey(n)})));
   const render=node=>{
@@ -150,5 +156,5 @@ export function patchNativeSource(module,generated,parse){
     return begin+mergeContainer(raw,old,node,parse,render)+raw.end;
   };
   const prefix=before.prefix===after.prefix?original.prefix:after.prefix;
-  return prefix+render(newMap.get(after.root.id))+mergeCode(module,source,original.tail,after.tail);
+  return prefix+render(newMap.get(after.root.id))+mergeCode(module,source,original.tail);
 }

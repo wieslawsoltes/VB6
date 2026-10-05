@@ -22,21 +22,29 @@ async function existingBytes(handle,path){const file=await fileAt(handle,path);i
 const manifestOrder=path=>/\.vbg$/i.test(path)?2:/\.vbp$/i.test(path)?1:0;
 /** Preflight every path and collect original bytes before the first mutation. */
 export async function planNativeDirectoryWrite(handle,input){
-  const entries=normalizedEntries(Object.entries(input)),plan=[];let oldTotal=0;
-  for(const [name,value]of entries){const path=nativeOutputPath(name),bytes=bytesOf(value).slice(),before=await existingBytes(handle,path);oldTotal+=before?.length||0;if(oldTotal>MAX_NATIVE_BYTES)fail('Existing output files exceed the 50 MiB comparison limit');if(!before||!equalBytes(before,bytes))plan.push({path,bytes,before});}
-  plan.sort((a,b)=>manifestOrder(a.path)-manifestOrder(b.path));return {handle,entries:plan,unchanged:entries.size-plan.length};
+  const entries=normalizedEntries(Object.entries(input)),plan=[],observed=[];let oldTotal=0;
+  for(const [name,value]of entries){const path=nativeOutputPath(name),bytes=bytesOf(value).slice(),before=await existingBytes(handle,path);oldTotal+=before?.length||0;if(oldTotal>MAX_NATIVE_BYTES)fail('Existing output files exceed the 50 MiB comparison limit');const entry={path,bytes,before};observed.push(entry);if(!before||!equalBytes(before,bytes))plan.push(entry);}
+  plan.sort((a,b)=>manifestOrder(a.path)-manifestOrder(b.path));return {handle,entries:plan,observed,unchanged:entries.size-plan.length};
 }
 function matches(before,current){return before===null?current===null:current!==null&&equalBytes(before,current);}
 /** Revision checks cancel stale saves. File-system APIs do not offer a directory transaction. */
 export async function writeNativeDirectory(plan){
-  for(const entry of plan.entries)if(!matches(entry.before,await existingBytes(plan.handle,entry.path)))fail('File changed since save confirmation: '+entry.path+'; nothing was written');
-  const written=[];
+  const observed=plan.observed||plan.entries;
+  for(const entry of observed)if(!matches(entry.before,await existingBytes(plan.handle,entry.path)))fail('File changed since save confirmation: '+entry.path+'; nothing was written');
+  const written=[],completed=new Set();
+  const verify=async()=>{
+    for(const entry of observed)if(!matches(completed.has(entry.path)?entry.bytes:entry.before,await existingBytes(plan.handle,entry.path)))fail('File changed during save: '+entry.path);
+  };
   try{
+    let phase=0;
     for(const entry of plan.entries){
+      // Recheck source/resource dependencies before publishing VBP/VBG manifests.
+      if(manifestOrder(entry.path)>phase){await verify();phase=manifestOrder(entry.path);}
       if(!matches(entry.before,await existingBytes(plan.handle,entry.path)))fail('File changed during save: '+entry.path);
       const dir=await directory(plan.handle,entry.path,true),file=await dir.getFileHandle(entry.path.split('/').at(-1),{create:true}),stream=await file.createWritable({keepExistingData:false});
-      try{await stream.write(entry.bytes);await stream.close();}catch(error){try{await stream.abort();}catch{}throw error;}written.push(entry.path);
+      try{await stream.write(entry.bytes);await stream.close();}catch(error){try{await stream.abort();}catch{}throw error;}written.push(entry.path);completed.add(entry.path);
     }
+    await verify();
   }catch(error){throw new Error(error.message+'; '+written.length+' files completed. The project remains unsaved. Review the destination before retrying.');}
   return {written,unchanged:plan.unchanged};
 }

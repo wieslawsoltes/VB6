@@ -234,6 +234,60 @@ class NativeProjects(unittest.TestCase):
         self.js('() => {vb6Studio.addingFiles=true;vb6Studio.fileInput.dispatchEvent(new Event("cancel"));}')
         self.assertFalse(self.js('vb6Studio.addingFiles'))
 
+    def case_legacy_zip_and_zip64_roundtrip(self):
+        # Python zipfile is independent of the JS ZIP reader/writer. Its forced
+        # ZIP64 output covers small files with 64-bit local size records too.
+        class OEMInfo(zipfile.ZipInfo):
+            def _encodeFilenameFlags(self):
+                return self.filename.encode('cp437'), self.flag_bits & ~0x800
+
+        source = (b'Attribute VB_Name = "M"\r\nPublic Function Sum(a As Long, _\r\n'
+                  b' b As Long) As Long\r\nAttribute Sum.VB_Description = "Sum"\r\n'
+                  b'Sum = a + b\r\nEnd Function\r\nPublic Sub Main()\r\nEnd Sub\r\n')
+        for variant in ['cp437', 'unicode-extra', 'zip64']:
+            with self.subTest(variant=variant):
+                name = 'caf\u00e9.bas' if variant == 'cp437' else '\u65e5\u672c\u8a9e.bas' if variant == 'unicode-extra' else 'M.bas'
+                manifest = ('Type=Exe\r\nName="ZipAudit"\r\nModule=M; ' + name + '\r\nStartup="Sub Main"\r\n').encode('utf-8-sig')
+                output = io.BytesIO()
+                with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as z:
+                    z.writestr('P.vbp', manifest)
+                    info = OEMInfo(name if variant != 'unicode-extra' else 'legacy.bas')
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    if variant == 'unicode-extra':
+                        import struct, binascii
+                        data = b'\x01' + struct.pack('<I', binascii.crc32(b'legacy.bas')) + name.encode('utf-8')
+                        info.extra = struct.pack('<HH', 0x7075, len(data)) + data
+                    with z.open(info, 'w', force_zip64=variant == 'zip64') as target:
+                        target.write(source)
+                self.page.locator('input[type=file]').first.set_input_files({'name': variant + '.zip', 'mimeType': 'application/zip', 'buffer': output.getvalue()})
+                self.page.get_by_label('Project entry', exact=True).select_option('P.vbp')
+                self.page.get_by_label('Native text encoding', exact=True).select_option('auto')
+                self.button('Open'); self.page.wait_for_function('vb6Studio.project.name === "ZipAudit"')
+                self.assertEqual(self.js('vb6Studio.project.modules.length'), 1)
+                self.assertEqual(self.native_download(), {'P.vbp': manifest, name: source})
+                self.js('''() => {vb6Studio.openDocument(vb6Studio.project.modules[0].id,'code');vb6Studio.editor.input.setAttribute('data-zip-editor','true');}''')
+                editor = self.page.locator('[data-zip-editor=true]')
+                editor.fill(editor.input_value().replace('Sum = a + b', 'Sum = a + b + 1'))
+                self.page.wait_for_function('vb6Studio.project.modules[0].code.includes("a + b + 1")')
+                files = self.native_download()
+                self.assertIn(b' b As Long) As Long\r\nAttribute Sum.VB_Description', files[name])
+                self.assertNotIn(b'_\r\nAttribute', files[name])
+                self.load(files, 'P.vbp', 'auto')
+                self.assertEqual(self.js('vb6Studio.project.modules[0].sourcePath'), name)
+
+    def case_apostrophe_path_and_opaque_resource_move(self):
+        entries = {'P.vbp': b'Type=Exe\r\nForm=ui\\O\'Brien.frm\r\nName="Opaque"\r\nStartup="F"\r\n',
+                   "ui/O'Brien.frm": b'VERSION 5.00\r\nBegin VB.Form F\r\n PersistState = "F.frx":0000\r\nEnd\r\nAttribute VB_Name = "F"\r\n',
+                   'ui/F.frx': bytes([0, 255, 128, 9])}
+        self.load(entries, 'P.vbp', 'auto'); self.assertEqual(self.js('vb6Studio.project.modules.length'), 1)
+        self.assertEqual(self.native_download(), entries)
+        self.edit('vb6Studio.project.modules[0].sourcePath="moved/F.frm"')
+        files = self.native_download()
+        self.assertIn(b'PersistState = "..\\ui\\F.frx":0000', files['moved/F.frm'])
+        self.assertEqual(files['ui/F.frx'], entries['ui/F.frx'])
+        self.load(files, 'P.vbp', 'auto')
+        self.assertEqual(self.js('vb6Studio.project.modules[0].form.properties.PersistState.resource'), '..\\ui\\F.frx')
+
     def case_directory_real_handle(self):
         if self.mode != 'http': self.skipTest('OPFS is tested over HTTP; other import/download coverage is separate.')
         self.load()
@@ -246,6 +300,14 @@ class NativeProjects(unittest.TestCase):
         self.edit('vb6Studio.project.description="Changed"'); self.start('vb6Studio.saveProject({format:"folder",directoryHandle:nativeRoot})')
         self.page.get_by_text('Replace Native Project Files', exact=True).wait_for(); self.button('Cancel'); self.result(False)
         self.assertTrue(self.js('vb6Studio.dirty')); self.start('vb6Studio.saveProject({format:"folder",directoryHandle:nativeRoot})')
+        self.page.get_by_text('Replace Native Project Files', exact=True).wait_for()
+        # Only the VBP changed; the untouched BAS must still invalidate this plan.
+        self.js('''async () => {const app=await nativeRoot.getDirectoryHandle('app'),dir=await app.getDirectoryHandle('code');const f=await dir.getFileHandle('Utils.bas');const w=await f.createWritable();await w.write('external source edit');await w.close();}''')
+        self.button('Save Files'); self.page.get_by_text('File changed since save confirmation:', exact=False).wait_for()
+        self.button('OK'); self.result(False)
+        original = self.js('async () => await(await(await nativeRoot.getDirectoryHandle("app")).getFileHandle("App.vbp")).getFile().then(f=>f.arrayBuffer()).then(b=>Array.from(new Uint8Array(b)))')
+        self.assertEqual(bytes(original), FIXTURE['app/App.vbp']); self.assertTrue(self.js('vb6Studio.dirty'))
+        self.start('vb6Studio.saveProject({format:"folder",directoryHandle:nativeRoot})')
         self.page.get_by_text('Replace Native Project Files', exact=True).wait_for()
         self.js('''async () => {const dir=await nativeRoot.getDirectoryHandle('app');const f=await dir.getFileHandle('App.vbp');const w=await f.createWritable();await w.write('external edit');await w.close();}''')
         self.button('Save Files'); self.page.get_by_text('File changed since save confirmation:', exact=False).wait_for()
