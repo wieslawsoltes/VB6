@@ -271,6 +271,13 @@ End Sub
         call('code.edit',{'edits':[{'module':'Form1','start':start,'end':start+len('value = value + 1'),'expectedText':'value = value + 1','text':'value = value + 2'}]})
         check(call('debug.snapshot')['pendingEdits'])
         call('debug.applyEdits',{'pauseId':pause});check(not call('debug.snapshot')['pendingEdits'])
+        # Applying source changes advances the pause identity. Assert that old
+        # mutations are rejected, then refresh the selected live frame.
+        try: call('debug.immediate',{'text':'value = 999','pauseId':pause,'frameIndex':frame})
+        except Exception as error: check('stale' in str(error).lower(),str(error))
+        else: raise AssertionError('Live edit accepted a stale debugger mutation')
+        state=call('debug.snapshot');check(state['pauseId']>pause)
+        pause=state['pauseId'];frame=state['frameIndex']
         value=call('debug.evaluate',{'expression':'MathTools.Twice(value)'});check('80' in json.dumps(value),str(value))
         call('debug.immediate',{'text':'value = 41','pauseId':pause,'frameIndex':frame})
         call('debug.command',{'command':'stepOver'})
