@@ -15,38 +15,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply independently hash-verified source changes
+      - name: Wait for rendered modal before injecting pointer input
         run: |
           python - <<'PY'
-          import json,hashlib
           from pathlib import Path
-          updates={}
-          for item in json.loads(Path('.github/debugger-modality-edits.json').read_text()):
-              p=Path(item['path'])
-              assert not p.is_absolute() and '..' not in p.parts and not p.is_symlink()
-              s=p.read_text()
-              assert hashlib.sha256(s.encode()).hexdigest()==item['old'], 'Source changed: '+str(p)
-              for old,new in item['changes']:
-                  assert s.count(old)==1, 'Unexpected replacement count: '+str(p)
-                  s=s.replace(old,new)
-              assert hashlib.sha256(s.encode()).hexdigest()==item['new'], 'Integrity mismatch: '+str(p)
-              updates[p]=s
-          for p,s in updates.items():p.write_text(s)
+          import hashlib
+          p=Path('tools/browser-debugger-runtime.py');s=p.read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='c915d92f7ff6e84f9af1c443d25f7b0a7192ddd04695079348e5a8f529949d26'
+          old='    dialog.wait_for()\n    return dialog'
+          new="    dialog.wait_for()\n    # Give the compositor a completed frame after hiding the cross-origin iframe;\n    # DOM visibility alone does not synchronize headless Chromium's OOPIF hit test.\n    page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')\n    return dialog"
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          assert hashlib.sha256(s.encode()).hexdigest()=='1b3201ec340377395422946a5bb4a2bcb4636cb9c70727d853a0e1f3d10fabee'
+          p.write_text(s)
           PY
       - run: npm test
       - run: npm run build
-      - name: Commit sources and regenerated output
+      - name: Verify generated output is unchanged and commit test synchronization
         run: |
-          rm .github/debugger-modality-edits.json
+          git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add tools/browser-debugger-runtime.py
           git diff --cached --check
-          git commit -m 'fix: isolate debugger error dialog from sandbox focus with native modality'
+          git commit -m 'test: synchronize error-dialog clicks with compositor frame completion'
           git push origin HEAD:refs/heads/feat/vb6-debugger-runtime
-          git archive --format=tar.gz HEAD > /tmp/debugger-modal.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: debugger-modal
-          path: /tmp/debugger-modal.tar.gz
-          retention-days: 3
