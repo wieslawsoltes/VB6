@@ -1,0 +1,76 @@
+name: Coding agents bundle preparation
+on:
+  push:
+    branches: [feat/coding-agents]
+    paths: [.github/workflows/coding-agents-bootstrap.yml]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/feat/coding-agents'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply checksum-verified integration patch
+        run: |
+          set -eu
+          test "$GITHUB_REF" = refs/heads/feat/coding-agents
+          git merge-base --is-ancestor 6e6162cbad5edcad474a2121e65e586eb53a687a HEAD
+          echo '2919c37df1dc4fde48093c12c15975cb0ae3aa852eced5d758b12aa0b365e014  .agent-transfer/integration.patch' | sha256sum -c -
+          git apply --check .agent-transfer/integration.patch
+          git apply .agent-transfer/integration.patch
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/agents/agents.css')
+          text=p.read_text()
+          rule='.agent-tool-catalog select{min-width:0;width:100%}'
+          p.write_text(text.replace(rule+rule,rule))
+          p=Path('tests/coding-agents.test.mjs')
+          p.write_text(p.read_text().replace('approvals++; return false; } });','approvals++; return false; }});'))
+          PY
+      - name: Verify all published source matches the locally tested revision
+        run: |
+          sha256sum -c <<'SUM'
+          9744b04be06cb5cfcbb915a5c110cdc31d82355a4f3ab7902e687d3fdafe3cad  .gitignore
+          41674863e2824460515211b61432acccb5648ed6e15ef1fa4d3389d265311b22  README.md
+          f9d2793f6f4face0dd71a53374ea7eed53bc4fb5e683b9c13714fbf79947e26f  docs/coding-agents.md
+          2eda7354281efbde84be961cb32202106679e9ed5cee59303457125c7cf0726c  package.json
+          de162e352c581a93f823e270bde9c338ab1edcfd0d96e51a7caf66b07c35aefd  src/agents/agent.js
+          1d1aa5eb6c2a1b9309d4d17a7a53c604dc63de4d4d39772735b0a89b77d27305  src/agents/agents.css
+          42b050e3291fdd73c5479a46744ff7129f54845f80bd94448d01f42d48e7168a  src/agents/providers.js
+          4a75c43df8d8e6ac6b53daefde0d06ae8b3b6327643ef0aff0a935c47c8f1294  src/agents/review.js
+          54410ea374c99de871a52b1d82cf421016fa9f896866fe1dda33c0f98c7d9b97  src/agents/studio.js
+          e1c0bbbcaa4d9472c719443984a3dd7c383e2704380d8b16abb413769284e95d  src/ide/window-profile.js
+          42940d6d312204a6f82feab759e08a656465bb2986faf35ec234bfe396f7a466  src/ide/workspace-state.js
+          c29424a5f65423f7db7ab7c0b0ec1c0082f6b3c12d3c501a0a1953d3d7a29832  src/mcp/ide-adapter.js
+          be5ff2914d14f8e8ff2dfa4d3d8fd74befbd59c4219f7b7c761b8bc485ed1ceb  src/mcp/studio-entry.js
+          fb4b012f0a117473c240d4ce21c476a65718049c11d01910e1b06e6ec7453427  tests/agent-relay.test.mjs
+          2f3e3779fe3c73b40292c634d7834778cb4e9d0909b4a29bca92350be26736a6  tests/coding-agents.test.mjs
+          49d5a9fc313b7428b001cc7f9e5057707492b9e015b94b63ee2c059e034e9481  tools/agent-relay.mjs
+          8cb83671262604af7f9bbf3f2b894e328200f2747bd8d36ebebade809dae16df  tools/build.mjs
+          9527c9083f30f48f65f35008d220c538856e3bcce392d4f0461c7734510b3a1d  tools/coding-agents-browser-tests.py
+          SUM
+      - run: npm run build && node --check dist/studio.js && npm test
+      - name: Verify generated bundle checksums
+        run: |
+          sha256sum -c <<'SUM'
+          28416c318c31fa33c6d4145cf7b9d422650c522d16574a9858c871d16c761917  dist/studio.js
+          c8807f47801ec3efa717c339a0174dd522d4e9dd81da0817bcec80f147366c1e  dist/studio.css
+          24d0bb5f9a1ea924c95537fe72ec82ff2c80ba5cba705f864bbe9439bf4040c6  dist/VB6-Studio-Web.html
+          SUM
+      - name: Commit verified integration and bundles to feature branch only
+        run: |
+          set -eu
+          git rm .agent-transfer/integration.patch
+          git add .gitignore README.md package.json src/agents src/ide/window-profile.js src/ide/workspace-state.js src/mcp/ide-adapter.js src/mcp/studio-entry.js tests/coding-agents.test.mjs tools/build.mjs dist/studio.js dist/studio.css dist/VB6-Studio-Web.html
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: integrate verified coding agents and rebuild standalone IDE bundles'
+          git push origin HEAD:refs/heads/feat/coding-agents
