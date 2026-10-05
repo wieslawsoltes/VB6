@@ -39,9 +39,15 @@ serial representation; do not assume it is a linear UTC timestamp.
 ## Calendar, locale, and failures
 
 Calendar operations are Gregorian. `DateSerial` uses signed Integer arguments,
-nearest-even numeric conversion, month/day normalization and a final year-range
-check (100 through 9999), including normalization across intermediate range
-boundaries. Two-digit years use the Windows user's Gregorian calendar window;
+nearest-even numeric conversion and Gregorian normalization. The month is
+normalized first; the resulting short year is expanded with the Windows user's
+Gregorian calendar window. That expanded year must be within 100 through 9999
+before normalizing the day, and the final date must also remain in range.
+`DateSerial(99,13,1)` therefore denotes year 0100, while
+`DateSerial(9999,13,-30)` fails: a negative day cannot rescue normalized year
+10000. The separate installed Script Host suite measures these edge cases;
+ordinary-calendar tests alone did not expose the earlier normalization-order bug.
+Two-digit years use the Windows user's Gregorian calendar window;
 `Weekday(date, 0)` uses the user's first-day setting. Explicit `Weekday` starts
 are 1 (Sunday) through 7 (Saturday). Four-digit years avoid ambiguous windows.
 
@@ -104,3 +110,10 @@ array-element pins, failure unwinding and 2,000 repeated recursion/error cycles.
 The permanent Windows matrix runs basic storage, independent C ABI, Windows
 Script Host reference and call-lifetime suites independently; a failure in one
 does not prevent the others from writing their own diagnostics.
+
+The Script Host suite retains its original 177 expressions and adds 195 probes
+for negative years, cutoff-adjacent years and extreme signed month/day offsets.
+Expected values and errors are obtained from the installed host on each run,
+not recomputed using the native compiler's arithmetic. The ordinary Date fixture
+also checks both intermediate-year and final-date rejection without overwriting
+the assignment target. This reference is not licensed Microsoft VB6 certification.

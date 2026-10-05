@@ -19,6 +19,11 @@ export const DATE_CONTRACTS = [
  // results stay independent input data; no native result is treated as its oracle.
  ...[-1,0,29,30,99,100,101,9999,10000].flatMap(y=>[-13,0,1,13].flatMap(m=>[-31,0,1,32].map(d=>[
    `DateSerial boundary (${y},${m},${d})`, `CLng(CDbl(DateSerial(${y},${m},${d})))`
+ ]))),
+ // Extend, never replace, the original 177 independent reference expressions.
+ // Negative years and large month/day offsets exercise both normalization orders.
+ ...[-32768,-2001,-2000,-1999,-1901,-1900,-1899,-101,-100,-99,49,50,32767].flatMap(y=>[-32768,0,1,13,32767].flatMap(m=>[-32768,1,32767].map(d=>[
+   `DateSerial extended (${y},${m},${d})`, `CLng(CDbl(DateSerial(${y},${m},${d})))`
  ])))
 ];
 export function writeReference(directory='validation/dates') {

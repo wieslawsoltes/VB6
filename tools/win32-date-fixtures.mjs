@@ -61,7 +61,9 @@ export function dateFixture(){
   check('DateSerial(2024,2,29) = #2024-02-29# And DateSerial(2023,2,29) = #2023-03-01#','DateSerial Gregorian leap normalization');
   check('DateSerial(2024,3,0) = #2024-02-29# And DateSerial(2024,13,1) = #2025-01-01#','DateSerial zero day and overflowing month');
   check('DateSerial(2024,0,1) = #2023-12-01# And DateSerial(2024,-12,1) = #2022-12-01#','DateSerial negative month floor division');
-  check('DateSerial(100,0,32) = #0100-01-01# And DateSerial(9999,13,-30) = #9999-12-01#','DateSerial checks final normalized range, not intermediate fields');
+  check('DateSerial(99,13,1) = #0100-01-01# And DateSerial(101,0,1) = #0100-12-01#','DateSerial normalizes months before expanding a short year');
+  check('DateSerial(10000,0,1) = #9999-12-01#','month normalization can first bring a large year back in range');
+  check('DateSerial(100,0,32) = DateSerial(99,12,32)','month-derived short years use the same current NLS window');
   check('DateSerial(2000,2,29) = #2000-02-29# And DateSerial(1900,2,29) = #1900-03-01#','Gregorian century exceptions');
   check('DateSerial(2024.5,2,29) = #2024-02-29#','DateSerial arguments use nearest-even Integer conversion');
   check('TimeSerial(6,-15,0) = #05:45:00# And TimeSerial(0,75,0) = #01:15:00#','TimeSerial normalizes minutes');
@@ -73,7 +75,8 @@ export function dateFixture(){
   for(const [stmt,error,label]of [
     ['d = CDate(2958466)',6,'positive Date range overflow'],['d = CDate(-657435)',6,'negative Date range overflow'],
     ['d = CDate("invalid")',13,'date parse failure'],['d = #9999-12-31# + 1',6,'typed Date arithmetic overflow'],
-    ['d = DateSerial(100,1,0)',5,'DateSerial final result out of range'],['d = DateSerial(40000,1,1)',6,'DateSerial Integer input overflow'],
+    ['d = DateSerial(100,1,0)',5,'DateSerial final result out of range'],
+    ['d = DateSerial(9999,13,-30)',5,'DateSerial invalid normalized year cannot be rescued by a negative day'],['d = DateSerial(40000,1,1)',6,'DateSerial Integer input overflow'],
     ['d = TimeSerial(40000,0,0)',6,'TimeSerial Integer input overflow'],['n = Weekday(#2024-02-29#,8)',5,'Weekday argument range'],
     ['d = ErrorDate()',13,'Date-returning error procedure unwinds before FPU use']]){
     add('d = #2024-02-29#\nOn Error Resume Next\nErr.Clear\n'+stmt+'\nn = Err.Number\nErr.Clear\nOn Error GoTo 0');check(`n = ${error}`,label);check('d = #2024-02-29#','failed Date operation does not overwrite the target: '+label);
