@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply reviewed patches to exact source and rebuild distributions
+      - name: Apply reviewed patches and integrate pinned agent-thread main
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 75e3bc9c122ed255ed1401a7ae08b3021a000eac HEAD
@@ -44,6 +44,19 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(ui): correct cross-engine toolbar sizing and selector bevel paint'
+          git merge --no-commit --no-ff f4ee8d47bed69ae26b65d20637b8f5f8da13d815 || {
+            test -n "$(git diff --name-only --diff-filter=U)"
+            while IFS= read -r path; do
+              case "$path" in
+                dist/*|src/exporter/runtime-payload.js|src/editor/diagnostics-payload.js) git checkout --ours -- "$path"; git add -- "$path" ;;
+                *) echo "Handwritten conflict requires review: $path"; exit 1 ;;
+              esac
+            done < <(git diff --name-only --diff-filter=U)
+          }
+          npm run build
+          npm test
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git commit -m 'Merge agent-thread main into issue 39 and regenerate combined distributions'
           npm run build
           git diff --exit-code
           mkdir -p issue39-chrome-artifact
