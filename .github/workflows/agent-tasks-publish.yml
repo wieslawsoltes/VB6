@@ -1,0 +1,87 @@
+name: Verified agent task integration
+on:
+  push:
+    branches: [feat/agent-conversations]
+    paths: [.github/workflows/agent-tasks-publish.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/agent-conversations'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Integrate pinned main and checksum-bound reviewed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 7dbaa4015e1d11cf1d6d6a2cb63e79e9dc1866db
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          git merge --no-ff --no-commit f8c01b7c986b519e909fd7cc86f1a2014d6dbf74
+          python - <<'PY'
+          from pathlib import Path
+          import base64, lzma, hashlib, json
+          paths=[Path('.agent-task-transfer-'+str(i)+'.txt') for i in range(1,5)]
+          encoded=''.join(p.read_text().strip() for p in paths)
+          raw=lzma.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(raw).hexdigest()=='6a34c92e725ba4855764922fddafa40a1b94d133ab12a3e4cd8c79a027eefa1e'
+          changes=json.loads(raw)
+          allowed={'README.md','docs/coding-agents.md','src/agents/agent.js','src/agents/agents.css','src/agents/conversations.js','src/agents/providers.js','src/agents/studio.js','src/agents/task-tools.js','src/mcp/ide-adapter.js','tests/agent-relay.test.mjs','tests/coding-agents-integration.test.mjs','tests/coding-agents-tasks.test.mjs','tools/agent-relay.mjs','tools/coding-agents-browser-tests.py'}
+          assert set(changes)==allowed
+          for name, change in changes.items():
+              p=Path(name)
+              old=p.read_bytes() if p.exists() else b''
+              assert (hashlib.sha256(old).hexdigest() if p.exists() else None)==change['base'], 'Unexpected base: '+name
+              lines=old.decode('utf-8').splitlines(True)
+              for start,end,text in reversed(change['edits']):
+                  assert 0<=start<=end<=len(lines)
+                  lines[start:end]=text.splitlines(True)
+              result=''.join(lines).encode('utf-8')
+              assert hashlib.sha256(result).hexdigest()==change['result'], 'Wrong output: '+name
+              p.write_bytes(result)
+          for p in paths: p.unlink()
+          PY
+      - name: Build and test integrated source, then check reproducibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/agent-tasks-validated
+          npm run build
+          node --check dist/studio.js
+          npm test | tee /tmp/agent-tasks-validated/node-tests.txt
+          npm run test:agents | tee /tmp/agent-tasks-validated/agent-tests.txt
+          git add -A
+          npm run build
+          git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git diff --cached --check
+      - name: Verify locally tested tree and publish without force
+        shell: bash
+        run: |
+          set -euo pipefail
+          index=$(mktemp)
+          cp .git/index "$index"
+          GIT_INDEX_FILE="$index" git update-index --force-remove .github/workflows/agent-tasks-publish.yml
+          actual=$(GIT_INDEX_FILE="$index" git write-tree)
+          rm "$index"
+          echo "$actual" > /tmp/agent-tasks-validated/product-tree.txt
+          test "$actual" = 89a3f7cd56eff70fa70ccfc6b691b570ce7e3104
+          git commit -m 'feat(agents): named tasks, native continuations, plans and local questions' -m 'Preserve current DAO runtime; validate memory-only task isolation, fresh permissions, reviewed handoffs and bounded native context.'
+          git push origin HEAD:refs/heads/feat/agent-conversations
+          git rev-parse HEAD > /tmp/agent-tasks-validated/head.txt
+          git bundle create /tmp/agent-tasks-validated/repository.bundle HEAD
+          cd /tmp/agent-tasks-validated
+          sha256sum repository.bundle > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-tasks-validated-source
+          path: /tmp/agent-tasks-validated/
+          retention-days: 3
