@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm run build
-      - run: node --test tests/win32-date.test.mjs
+      - run: node --test tests/win32-date.test.mjs tests/win32-date-reference.test.mjs
       - run: node tools/win32-date-fixtures.mjs
       - name: Execute single-file Date storage, calendar, calls and array tests
         shell: pwsh
@@ -28,6 +28,9 @@ jobs:
       - name: Verify DATE ABI and calendar results against independently compiled Windows API calls
         shell: pwsh
         run: ./tools/test-win32-date-abi.ps1
+      - name: Compare legacy date edge cases with installed Windows Script Host
+        shell: pwsh
+        run: ./tools/test-win32-date-reference.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
