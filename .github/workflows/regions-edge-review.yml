@@ -1,0 +1,66 @@
+name: Region clipping edge review
+on:
+  push:
+    branches: [feature/win32-gdi-regions]
+    paths: [.github/workflows/regions-edge-review.yml]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record native region statuses and stored geometry
+        shell: pwsh
+        run: |
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          public static class EdgeProbe {
+            [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr p);
+            [DllImport("gdi32.dll")] static extern IntPtr CreateBitmap(int w,int h,uint p,uint b,IntPtr data);
+            [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc,IntPtr obj);
+            [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int l,int t,int r,int b);
+            [DllImport("gdi32.dll")] static extern int SelectClipRgn(IntPtr dc,IntPtr r);
+            [DllImport("gdi32.dll")] static extern int ExtSelectClipRgn(IntPtr dc,IntPtr r,int mode);
+            [DllImport("gdi32.dll")] static extern int OffsetClipRgn(IntPtr dc,int x,int y);
+            [DllImport("gdi32.dll")] static extern int IntersectClipRect(IntPtr dc,int l,int t,int r,int b);
+            [DllImport("gdi32.dll")] static extern int ExcludeClipRect(IntPtr dc,int l,int t,int r,int b);
+            [DllImport("gdi32.dll")] static extern int GetClipRgn(IntPtr dc,IntPtr r);
+            [DllImport("gdi32.dll")] static extern int GetClipBox(IntPtr dc,[Out]int[] r);
+            [DllImport("gdi32.dll",SetLastError=true)] static extern uint GetRegionData(IntPtr r,uint n,IntPtr p);
+            [DllImport("gdi32.dll")] static extern int DeleteObject(IntPtr p);
+            [DllImport("gdi32.dll")] static extern int DeleteDC(IntPtr p);
+            [DllImport("kernel32.dll")] static extern void SetLastError(uint e);
+            static int[] Data(IntPtr r) { var n=GetRegionData(r,0,IntPtr.Zero);var p=Marshal.AllocHGlobal((int)n);try{GetRegionData(r,n,p);var a=new int[n/4];Marshal.Copy(p,a,0,a.Length);return a;}finally{Marshal.FreeHGlobal(p);} }
+            public static object Run() {
+              var output=new List<object>();var dc=CreateCompatibleDC(IntPtr.Zero);var bitmap=CreateBitmap(8,8,1,32,IntPtr.Zero);var old=SelectObject(dc,bitmap);var copy=CreateRectRgn(0,0,0,0);
+              try {
+                foreach(var rect in new int[][] {new[]{0,0,0,0},new[]{20,20,30,30},new[]{2,2,6,6},new[]{-2,-2,10,10}}) {
+                  var r=CreateRectRgn(rect[0],rect[1],rect[2],rect[3]);
+                  try {
+                    foreach(var op in new[]{"select","intersect","exclude","offset","and","or","xor","diff","copy"}) {
+                      SelectClipRgn(dc,IntPtr.Zero);int value=0;
+                      if(op=="select") value=SelectClipRgn(dc,r);
+                      if(op=="intersect") value=IntersectClipRect(dc,rect[0],rect[1],rect[2],rect[3]);
+                      if(op=="exclude") value=ExcludeClipRect(dc,rect[0],rect[1],rect[2],rect[3]);
+                      if(op=="offset") {SelectClipRgn(dc,r);value=OffsetClipRgn(dc,20,20);}
+                      int mode=Array.IndexOf(new[]{"and","or","xor","diff","copy"},op)+1;if(mode>0)value=ExtSelectClipRgn(dc,r,mode);
+                      var box=new int[4];var type=GetClipBox(dc,box);var has=GetClipRgn(dc,copy);
+                      output.Add(new {rect,op,value,boxType=type,box,has,data=has==1?Data(copy):new int[0]});
+                    }
+                  } finally {DeleteObject(r);}
+                }
+                var small=Marshal.AllocHGlobal(16);try{SetLastError(0);var v=GetRegionData(copy,16,small);output.Add(new {op="small-buffer",value=v,error=Marshal.GetLastWin32Error()});}finally{Marshal.FreeHGlobal(small);}
+                return output;
+              } finally {SelectObject(dc,old);DeleteObject(bitmap);DeleteObject(copy);DeleteDC(dc);}
+            }
+          }
+          '@
+          [EdgeProbe]::Run() | ConvertTo-Json -Depth 12 | Out-File -Encoding utf8 regions-edges-windows.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regions-edges-windows
+          path: regions-edges-windows.json
+          retention-days: 7
