@@ -1,0 +1,62 @@
+name: Integrate MCP with native Currency compiler
+on:
+  push:
+    branches: [feat/mcp-lifecycle-and-data]
+    paths: ['.github/workflows/mcp-currency-integration.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-final-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge pinned main without replacing feature sources
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          base='71581d98e53f41f894cccdb08fffe95b52a6c055'
+          main='900c3c3f82af1f6020e496cb252043010af90666'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          assert changed=={'.github/workflows/mcp-currency-integration.yml'},changed
+          result=subprocess.run(['git','merge','--no-commit','--no-ff',main])
+          assert result.returncode in [0,1]
+          conflicts=set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts <= {'dist/VB6-Studio-Web.html','dist/studio.js'},conflicts
+          PY
+          npm run build
+          npm test
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git -c core.whitespace=-blank-at-eof diff --cached --check
+          git rm --cached .github/workflows/mcp-currency-integration.yml
+          mkdir -p reports
+          git write-tree | tee reports/mcp-product-tree.txt
+          git restore --staged --source=HEAD -- .github/workflows/mcp-currency-integration.yml
+          git commit -m 'merge: preserve native Currency and typed bindings in MCP refinement'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/mcp-lifecycle-and-data
+      - name: Retain combined source for independent verification
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mcp-currency-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports/mcp-product-tree.txt
