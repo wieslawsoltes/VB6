@@ -1,0 +1,63 @@
+name: Native debugger and compatibility
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test tests/native-debugger*.test.mjs
+      - run: npm run build
+      - run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Locate or install Microsoft Debugging Tools for Windows
+        shell: pwsh
+        run: |
+          $cdb = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\${{ matrix.architecture }}\cdb.exe"
+          if (!(Test-Path $cdb)) {
+            $setup = Join-Path $env:RUNNER_TEMP 'winsdk-debuggers.exe'
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/?linkid=2349110' -OutFile $setup
+            $signature = Get-AuthenticodeSignature $setup
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') { throw 'SDK installer signature verification failed' }
+            $process = Start-Process $setup -ArgumentList '/features OptionId.WindowsDesktopDebuggers /q /norestart' -Wait -PassThru
+            if ($process.ExitCode -notin @(0,3010)) { throw "SDK debugger installation failed: $($process.ExitCode)" }
+          }
+          if (!(Test-Path $cdb)) { throw 'Microsoft CDB is required; native tests must not be skipped' }
+          "VB6_CDB_PATH=$cdb" >> $env:GITHUB_ENV
+      - name: Compile native EXE and DLL with matching debug symbols
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.architecture }}
+          mkdir reports\native-debugger\${{ matrix.architecture }}
+          cd reports\native-debugger\${{ matrix.architecture }}
+          cl /nologo /Zi /Od /LD ..\..\..\tests\fixtures\native-debugger\library.c /Fe:DebugLibrary.dll /link /DEBUG /DEF:..\..\..\tests\fixtures\native-debugger\library.def
+          if errorlevel 1 exit /b 1
+          cl /nologo /Zi /Od ..\..\..\tests\fixtures\native-debugger\target.c /Fe:DebugTarget.exe /link /DEBUG ole32.lib
+          if errorlevel 1 exit /b 1
+      - name: Real process, native DLL, threading, memory and detach tests
+        run: node tools/native-debugger-smoke.mjs reports/native-debugger/${{ matrix.architecture }}/DebugTarget.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-debugger-${{ matrix.architecture }}
+          path: reports/native-debugger/${{ matrix.architecture }}
+          retention-days: 7

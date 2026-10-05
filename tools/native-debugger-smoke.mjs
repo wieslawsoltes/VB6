@@ -1,0 +1,50 @@
+/** Real Windows integration; never substituted by mocks or marked a pass when
+ * CDB, a target architecture, symbols or a command are unavailable. */
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {CdbSession,findCdb,breakWindowsProcess} from '../packages/native-debugger/src/cdb-session.mjs';
+
+if(process.platform!=='win32')throw new Error('Run this test on Windows with Microsoft Debugging Tools installed.');
+const target=await fs.realpath(process.argv[2]||'reports/native-debugger/x64/DebugTarget.exe'),directory=path.dirname(target),cdbPath=await findCdb();
+const report={platform:process.platform,architecture:process.arch,target,cdbPath,checks:[]},owned=new Set(),sessions=[];
+const record=(name,details={})=>{report.checks.push({name,passed:true,...details});console.log('PASS '+name);};
+const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
+async function make(options){const session=new CdbSession({cdbPath,timeout:30000,breakProcess:async pid=>{report.breakRequests=(report.breakRequests||0)+1;await breakWindowsProcess(pid);}});sessions.push(session);session.on('output',e=>{report.output=((report.output||'')+e.text).slice(-200000);});await session.start(options);if(options.executable)owned.add(session.pid);return session;}
+async function hit(session,symbol,max=30){
+  const breakpoint=await session.request('setBreakpoint',{location:symbol,pauseId:session.pauseId});
+  for(let i=0;i<max;i++){
+    await session.request('continue',{pauseId:session.pauseId});await session.waitPaused();const stack=await session.request('stack');
+    if(stack.text.includes(symbol)){record('breakpoint '+symbol,{pauseId:session.pauseId});return breakpoint;}
+  }
+  throw new Error('Did not reach '+symbol+' after '+max+' debugger stops.');
+}
+try{
+  const launched=await make({executable:target,args:['--children'],debugChildren:true});assert.ok(launched.pid>0);record('launch attaches before application startup',{pid:launched.pid});
+  const bp=await hit(launched,'DebugTarget!DebugTick');
+  const processes=await launched.request('processes');assert.ok(processes.processes.length>=2,JSON.stringify(processes));for(const p of processes.processes)owned.add(p.pid);
+  record('native child process tracking',{processes:processes.processes});
+  const threads=await launched.request('threads');assert.ok(threads.threads.length>=2);record('native thread enumeration',{threads:threads.threads.length});
+  const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);record('cross-process native stack snapshots restore current context');
+  const registers=await launched.request('registers');assert.ok(registers.registers.rip||registers.registers.eip);record('native x86 or x64 register context',{registers:registers.registers});
+  const disassembly=await launched.request('disassemble');assert.match(disassembly.text,/DebugTick|[0-9a-f]{8}/i);record('native machine disassembly');
+  const counter=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugCounter'});const memory=await launched.request('readMemory',{address:counter.address,count:4});assert.equal(memory.unreadableBytes,0);record('resolve exported data address and read native memory',{address:counter.address});
+  await launched.request('writeMemory',{address:counter.address,bytes:[37,0,0,0],pauseId:launched.pauseId});assert.deepEqual((await launched.request('readMemory',{address:counter.address,count:4})).bytes,[37,0,0,0]);record('native memory write and independent readback');
+  await launched.request('stepMode',{mode:'source',pauseId:launched.pauseId});const at=launched.pauseId;await launched.request('stepOver',{pauseId:at});await launched.waitPaused();assert.ok(launched.pauseId>at);record('source-line step using matching fixture symbols');
+  await assert.rejects(launched.request('setRegister',{register:registers.registers.rip?'rax':'eax',value:'1',pauseId:at}),{code:'STALE_PAUSE'});record('stale native mutation rejected');
+  await launched.request('stepMode',{mode:'assembly',pauseId:launched.pauseId});await launched.request('removeBreakpoint',{id:bp.id,pauseId:launched.pauseId});
+  await hit(launched,'DebugLibrary!LibraryTick');const dllStack=await launched.request('stack');assert.match(dllStack.text,/DebugLibrary!LibraryTick/);assert.match(dllStack.text,/DebugTarget!/);record('native DLL call stack includes caller in host executable');
+  const detachedPid=launched.pid;await launched.request('detach');assert.equal(alive(detachedPid),true);record('detach preserves running target',{pid:detachedPid});
+
+  const outside=spawn(target,[],{cwd:directory,stdio:'ignore',windowsHide:true});owned.add(outside.pid);await new Promise((resolve,reject)=>{outside.once('spawn',resolve);outside.once('error',reject);});
+  const attached=await make({pid:outside.pid});assert.equal(attached.pid,outside.pid);record('attach to an independently launched process',{pid:outside.pid});
+  const attachedBreakpoint=await hit(attached,'DebugTarget!DebugTick');await attached.request('removeBreakpoint',{id:attachedBreakpoint.id,pauseId:attached.pauseId});await attached.request('continue',{pauseId:attached.pauseId});await attached.request('pause');assert.equal(attached.state,'paused');assert.ok(report.breakRequests>=1);record('break running native process through DebugBreakProcess');
+  await attached.request('detach');assert.equal(alive(outside.pid),true);record('attached process survives debugger shutdown');
+  report.passed=true;
+}catch(error){report.passed=false;report.error={message:error.message,stack:error.stack};throw error;}
+finally{
+  for(const session of sessions)await session.abort();
+  for(const pid of owned)if(pid&&alive(pid))try{process.kill(pid);}catch{}
+  await fs.mkdir(directory,{recursive:true});await fs.writeFile(path.join(directory,'native-debugger-results.json'),JSON.stringify(report,null,2)+'\n');
+}
