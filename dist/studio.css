@@ -736,6 +736,8 @@ input:focus,select:focus,textarea:focus{outline:none}
 .ide-dialog-body{padding:14px;overflow:auto;min-height:0;line-height:1.5}
 .ide-dialog-footer{display:flex;justify-content:flex-end;gap:8px;padding:2px 12px 12px}
 .ide-dialog-footer button{min-width:76px}
+.ide-native-dialog{position:fixed;inset:0;margin:auto;height:fit-content}
+.ide-native-dialog::backdrop{background:transparent}
 .default-button{outline:1px solid var(--vb-text);outline-offset:0}
 .dialog-message{white-space:pre-wrap;max-height:60vh;overflow:auto}
 .dialog-input{width:100%;margin-top:8px}
@@ -949,7 +951,8 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 .syn-string,.syn-number{color:var(--vb-window-text)}
 .breakpoint-line{background:var(--vb-breakpoint);color:white}
 .breakpoint-line span{color:inherit}
-.execution-line,.execution-line span{background:var(--vb-execution);color:#000}
+.execution-line:not(.execution-range),.execution-line:not(.execution-range) span,.code-execution{background:var(--vb-execution);color:#000}
+.execution-line.execution-range{background:transparent}
 .code-gutter{width:var(--editor-gutter);background:var(--vb-face);border-right:1px solid var(--vb-shadow)}
 .gutter-line{height:var(--editor-line-height);line-height:var(--editor-line-height);padding:0 3px;color:var(--vb-gray);font-size:10px}
 .gutter-line.has-breakpoint{color:var(--vb-breakpoint);font-size:13px}

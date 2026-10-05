@@ -4751,8 +4751,124 @@ class RichTextDocument {
 return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
-/* ../controls/form-window.js */
+/* ../controls/input.js */
 __modules[53]=(()=>{
+const {Cell,truth}=__modules[14];
+const {lower}=__modules[13];
+
+
+// Browser/Windows button bitmasks agree, but `button` is an ordinal and a
+// released button is no longer in `buttons`. Never infer a hover button.
+const shiftMask=event=>(event.shiftKey?1:0)|(event.ctrlKey?2:0)|(event.altKey?4:0);
+const mouseButton=(event,kind)=>kind==='MouseMove'?(Number(event.buttons)||0)&7:([1,4,2][event.button]||0);
+// A chorded press/release is a pointermove, not another pointerdown/up.
+function pointerMouseEvent(event){
+  if(event.type==='pointerdown')return 'MouseDown';
+  if(event.type==='pointerup')return 'MouseUp';
+  const button=[1,4,2][event.button]||0;
+  return button?(event.buttons&button?'MouseDown':'MouseUp'):'MouseMove';
+}
+const namedKeys={Backspace:8,Tab:9,Enter:13,Shift:16,Control:17,Alt:18,Pause:19,CapsLock:20,Escape:27,' ':32,PageUp:33,PageDown:34,End:35,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,PrintScreen:44,Insert:45,Delete:46,Meta:91,ContextMenu:93,NumLock:144,ScrollLock:145};
+const punctuation={';':186,'=':187,',':188,'-':189,'.':190,'/':191,'`':192,'[':219,'\\':220,']':221,"'":222};
+function virtualKey(event){
+  const code=String(event.code||''),key=String(event.key||'');
+  if(/^Numpad[0-9]$/.test(code))return 96+Number(code.at(-1));
+  const numpad={NumpadMultiply:106,NumpadAdd:107,NumpadSubtract:109,NumpadDecimal:110,NumpadDivide:111};
+  if(numpad[code])return numpad[code];
+  if(namedKeys[key])return namedKeys[key];
+  if(/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(key))return 111+Number(key.slice(1));
+  if(/^[a-z0-9]$/i.test(key))return key.toUpperCase().charCodeAt(0);
+  // Preserve browser layout-specific OEM keys when available.
+  if(Number(event.keyCode)>0&&Number(event.keyCode)<256)return Number(event.keyCode);
+  if(punctuation[key])return punctuation[key];
+  if(/^Key[A-Z]$/.test(code))return code.charCodeAt(3);
+  if(/^Digit[0-9]$/.test(code))return code.charCodeAt(5);
+  return 0;
+}
+function characterKey(event){
+  if(event.key==='Enter')return 13;if(event.key==='Backspace')return 8;if(event.key==='Tab')return 9;if(event.key==='Escape')return 27;
+  const key=String(event.key||'');
+  if(key.length!==1)return 0;
+  // This runtime uses UTF-16 text; retain the signed Integer event ABI.
+  const value=key.charCodeAt(0);return value>32767?value-65536:value;
+}
+const owners=new WeakMap();
+function ownerOf(node){for(let current=node?.nodeType===1?node:node?.parentElement;current;current=current.parentElement){const owner=owners.get(current);if(owner)return owner;}return null;}
+function acceptsInput(control){
+  if(!control||control.design||control.disposed||!control.vm||['ready','paused','stopped','error'].includes(control.vm.state))return false;
+  if(!control.node.isConnected||control.node.closest('[inert],[hidden]'))return false;
+  for(let node=control.node;node;node=node.parentElement){const owner=owners.get(node);if(owner&&(owner.disposed||!truth(owner.props.Enabled)||!truth(owner.props.Visible)))return false;}
+  return true;
+}
+function eventName(control,event){return (control.type==='Form'?'Form':control.type==='MDIForm'?'MDIForm':control.model.name)+'_'+event;}
+function procedure(control,event){return control.instance?.module?.procedures.get(lower(eventName(control,event)));}
+function argumentsFor(control,args){return control.props.Index===undefined?args:[Number(control.props.Index),...args];}
+async function invoke(control,event,args){const proc=procedure(control,event);if(proc&&acceptsInput(control))return control.vm.callProcedure(control.instance,proc,argumentsFor(control,args));}
+const scaleUnits={0:1,1:15,2:.75,3:1,4:1/8,5:1/96,6:25.4/96,7:2.54/96};
+// VB character units are 120 twips wide and 240 twips high (8x16 CSS pixels).
+const inputScaleFactor=(mode,vertical=false)=>Number(mode)===4&&vertical?1/16:scaleUnits[Number(mode)]??15;
+function mouseCoordinates(control,event){
+  const selfScale=['Form','MDIForm','PictureBox'].includes(control.type),surface=control.content||control.node;
+  const rect=surface.getBoundingClientRect(),sx=surface.offsetWidth?rect.width/surface.offsetWidth:1,sy=surface.offsetHeight?rect.height/surface.offsetHeight:1;
+  const x=(event.clientX-rect.left)/(sx||1)-(surface.clientLeft||0)+(surface.scrollLeft||0);
+  const y=(event.clientY-rect.top)/(sy||1)-(surface.clientTop||0)+(surface.scrollTop||0);
+  let scale=control;
+  if(!selfScale){scale=ownerOf(control.node.parentElement)||control.form;while(scale&&scale!==scale.form&&!['PictureBox','Form','MDIForm'].includes(scale.type))scale=ownerOf(scale.node.parentElement)||scale.form;}
+  const props=scale?.props||{},mode=Number(props.ScaleMode??1),area=scale?.content||scale?.node;
+  let ux=inputScaleFactor(mode),uy=inputScaleFactor(mode,true);
+  if(mode===0){ux=Number(props.ScaleWidth??area?.clientWidth??1)/(area?.clientWidth||1);uy=Number(props.ScaleHeight??area?.clientHeight??1)/(area?.clientHeight||1);}
+  return [x*ux+(selfScale?Number(props.ScaleLeft)||0:0),y*uy+(selfScale?Number(props.ScaleTop)||0:0)];
+}
+
+function bindMouseInput(control){
+  owners.set(control.node,control);
+  const root=control.content||control.node,moveKey={};
+  root.addEventListener('contextmenu',e=>{
+    // WebKit's native context menu consumes the subsequent pointerup. When VB
+    // handles the right button, keep its complete down/up stream in the app.
+    // Unhandled targets and keyboard-invoked native menus remain unchanged.
+    if(e.button===2&&ownerOf(e.target)===control&&acceptsInput(control)&&
+      (procedure(control,'MouseDown')||procedure(control,'MouseUp')))e.preventDefault();
+  });
+  for(const dom of ['pointerdown','pointermove','pointerup'])root.addEventListener(dom,e=>{
+    if(ownerOf(e.target)!==control||!acceptsInput(control))return;
+    const event=pointerMouseEvent(e);
+    if(event==='MouseDown'&&control.content&&!(control.controls||[]).some(c=>c.TabStop&&acceptsInput(c)))control.SetFocus();
+    if(!procedure(control,event))return;
+    const args=[mouseButton(e,event),shiftMask(e),...mouseCoordinates(control,e)];
+    control.vm.enqueueInput(control.instance,event==='MouseMove'?moveKey:null,()=>invoke(control,event,args),{coalesce:event==='MouseMove',valid:()=>acceptsInput(control)});
+  });
+}
+
+function bindKeyboardInput(control){
+  owners.set(control.node,control);
+  for(const [dom,event]of [['keydown','KeyDown'],['keypress','KeyPress'],['keyup','KeyUp']])control.node.addEventListener(dom,e=>{
+    if(e.isComposing||e.keyCode===229)return;
+    const owner=ownerOf(e.target);
+    if(!owner||!acceptsInput(owner))return;
+    if(control.content?owner.form!==control:owner!==control)return;
+    // Menus and window chrome retain their own keyboard implementation.
+    if(control.content&&e.target!==control.node&&!control.content.contains(e.target))return;
+    const form=owner.form,preview=owner!==form&&form&&truth(form.props.KeyPreview);
+    if(!procedure(owner,event)&&!(preview&&procedure(form,event)))return;
+    const value=event==='KeyPress'?characterKey(e):virtualKey(e);if(!value)return;
+    const key=new Cell('Integer',value),args=event==='KeyPress'?[{ref:key}]:[{ref:key},shiftMask(e)];
+    // Capture once at the form, but serialize preview and target as a single VB
+    // event action. Both see the SAME ByRef cell, never two independent copies.
+    owner.vm.enqueueInput(owner.instance,null,async()=>{
+      if(preview)await invoke(form,event,args);
+      if(key.get()!==0&&acceptsInput(owner))await invoke(owner,event,args);
+    },{valid:()=>acceptsInput(owner)});
+  },true);
+}
+
+function ownsInputEvent(control,event){return ownerOf(event.target)===control&&acceptsInput(control);}
+
+return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsInput,inputScaleFactor,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
+})();
+
+/* ../controls/form-window.js */
+__modules[54]=(()=>{
 const {el}=__modules[13];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
@@ -4778,7 +4894,7 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[54]=(()=>{
+__modules[55]=(()=>{
 const {el}=__modules[13];
 const {getTheme}=__modules[38];
 
@@ -4854,7 +4970,7 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[55]=(()=>{
+__modules[56]=(()=>{
 const {el}=__modules[13];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
@@ -4895,7 +5011,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/icon-art.js */
-__modules[56]=(()=>{
+__modules[57]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -5054,8 +5170,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[57]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[56];
+__modules[58]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[57];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -5082,10 +5198,10 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../theme/menu.js */
-__modules[58]=(()=>{
+__modules[59]=(()=>{
 const {uiDocument}=__modules[12];
 const {el}=__modules[13];
-const {icon}=__modules[57];
+const {icon}=__modules[58];
 const {getTheme}=__modules[38];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
@@ -5171,7 +5287,7 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ../controls/richtext.js */
-__modules[59]=(()=>{
+__modules[60]=(()=>{
 const {parseRTF,RichTextDocument,richText}=__modules[52];
 const {VBError}=__modules[10];
 const {oleColor}=__modules[39];
@@ -5262,7 +5378,7 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[60]=(()=>{
+__modules[61]=(()=>{
 const {normalizeDataSources}=__modules[17];
 const { clone, lower, safeName }=__modules[13];
 const {normalizeResources}=__modules[44];
@@ -5333,7 +5449,7 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[61]=(()=>{
+__modules[62]=(()=>{
 const { VBError }=__modules[10];
 const { lower }=__modules[13];
 
@@ -5381,12 +5497,13 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[62]=(()=>{
-const {installFormWindow}=__modules[53];
-const {ClassicCombo,ClassicUpDown}=__modules[54];
-const {ClassicScrollbar}=__modules[55];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[58];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[59];
+__modules[63]=(()=>{
+const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[53];
+const {installFormWindow}=__modules[54];
+const {ClassicCombo,ClassicUpDown}=__modules[55];
+const {ClassicScrollbar}=__modules[56];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[59];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[60];
 const {parseRTF}=__modules[52];
 const { el, lower, clone }=__modules[13];
 const { VBError }=__modules[10];
@@ -5394,9 +5511,10 @@ const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[14];
 const { MemoryRecordset }=__modules[51];
 const { GraphicsSurface }=__modules[39];
 const { cssColor : oleColor, fontFamily, getTheme }=__modules[38];
-const { icon, controlIcon }=__modules[57];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[60];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[61];
+const { icon, controlIcon }=__modules[58];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[61];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[62];
+
 
 
 
@@ -5448,8 +5566,8 @@ class BrowserControl {
     if(key==='Value'&&['DTPicker','MonthView'].includes(this.type)){const value=this.props.Value;if(value instanceof Date)return value;return new Date(String(value)+'T00:00:00');}
     if(key==='DataSource')return this._dataSource;
     if(key==='Data'&&this.type==='MSChart')return this.gridData[(this.props.Row||1)-1]?.[(this.props.Column||1)-1]||0;
-    if(key==='ScaleWidth')return this.props.ScaleWidth??this.node.clientWidth*units(this.props.ScaleMode||1);
-    if(key==='ScaleHeight')return this.props.ScaleHeight??this.node.clientHeight*units(this.props.ScaleMode||1);
+    if(key==='ScaleWidth')return this.props.ScaleWidth??(this.content||this.node).clientWidth*inputScaleFactor(this.props.ScaleMode??1);
+    if(key==='ScaleHeight')return this.props.ScaleHeight??(this.content||this.node).clientHeight*inputScaleFactor(this.props.ScaleMode??1,true);
     if(key==='TextRTF')return this.rich?.rtf||'';
     if(this.type==='RichTextBox'&&RICH_SELECTION_PROPERTIES.includes(key)){const value=this.rich.style(key);return value===null?null:['SelIndent','SelHangingIndent','SelRightIndent'].includes(key)?value/15*units(this.form?.props.ScaleMode||1):value;}
     return this.props[key]??(['Text','Caption','ToolTipText','Tag','Path','Pattern','SimpleText','FileName','DialogTitle'].includes(key)?'':0);
@@ -5481,9 +5599,13 @@ class BrowserControl {
   }
   invalidate(){if(this.pending||this.disposed)return;this.pending=true;this.raf=requestAnimationFrame(()=>{this.pending=false;if(!this.disposed)this.refresh();});}
   event(name,args=[],coalesce=false){if(this.design||!this.vm||this.disposed)return Promise.resolve();const allArgs=this.props.Index!==undefined?[Number(this.props.Index),...args]:args;return this.vm.dispatch(this.instance,this.model.name+'_'+name,allArgs,{coalesce});}
-  attachEvents(){if(this.design)return;this.node.addEventListener('click',e=>{if(!this.props.Enabled||e.vbHandled)return;if(!['TreeView','ListView','Toolbar','TabStrip','SSTab','MonthView','ListBox','ComboBox','FileListBox','DirListBox','DriveListBox'].includes(this.type))this.event('Click');});this.node.addEventListener('dblclick',()=>this.event('DblClick'));this.node.addEventListener('focusin',()=>this.event('GotFocus'));this.node.addEventListener('focusout',()=>this.event('LostFocus'));
-    for(const [dom,event]of [['pointerdown','MouseDown'],['pointermove','MouseMove'],['pointerup','MouseUp']])this.node.addEventListener(dom,e=>{if(!this.vm?.program.modules.get(lower(this.instance.module.name))?.procedures.has(lower(this.model.name+'_'+event)))return;const r=this.node.getBoundingClientRect();this.event(event,[e.buttons||[1,4,2][e.button]||0,(e.shiftKey?1:0)+(e.ctrlKey?2:0)+(e.altKey?4:0),Math.round((e.clientX-r.left)*15),Math.round((e.clientY-r.top)*15)],event==='MouseMove');});
-    for(const [dom,event]of [['keydown','KeyDown'],['keyup','KeyUp']])this.node.addEventListener(dom,e=>{const key=new Cell('Integer',e.keyCode||0);this.event(event,[{ref:key},(e.shiftKey?1:0)+(e.ctrlKey?2:0)+(e.altKey?4:0)]);});this.node.addEventListener('keypress',e=>this.event('KeyPress',[{ref:new Cell('Integer',e.key.charCodeAt(0)||0)}]));
+  attachEvents(){
+    if(this.design)return;
+    bindMouseInput(this);if(!this.form)bindKeyboardInput(this);
+    this.node.addEventListener('click',e=>{if(!ownsInputEvent(this,e)||e.vbHandled)return;if(!['TreeView','ListView','Toolbar','TabStrip','SSTab','MonthView','ListBox','ComboBox','FileListBox','DirListBox','DriveListBox'].includes(this.type))this.event('Click');});
+    this.node.addEventListener('dblclick',e=>{if(ownsInputEvent(this,e))this.event('DblClick');});
+    this.node.addEventListener('focusin',e=>{if(ownsInputEvent(this,e))this.event('GotFocus');});
+    this.node.addEventListener('focusout',e=>{if(ownsInputEvent(this,e))this.event('LostFocus');});
   }
   build(){const n=this.node,p=this.props;const addClass=c=>n.classList.add(c);
     switch(this.type){
@@ -5698,8 +5820,8 @@ class BrowserForm extends BrowserControl {
   static frontSequence=0;
   constructor(model,options={}){const p=model.properties||{},normalized={...model,properties:{...p,Width:p.ClientWidth??p.Width??9000,Height:p.ClientHeight??p.Height??6000}};super(normalized,options);this.originalModel=model;this.controls=[];this.controlMap=new Map();this.shown=false;this.form=this;this.mountControls(model.controls||[]);const form=this;this.Controls={get Count(){return form.controls.length;},Item:key=>{const control=typeof key==='number'?form.controls[key]:form.controlMap.get(lower(key));if(!control)throw new VBError('Control not found: '+key,35601);return control;},Add:(type,name,container)=>form.addControl(type,name,container),Remove:key=>form.removeControl(typeof key==='string'?form.controlMap.get(lower(key)):key),[Symbol.iterator]:()=>form.controls.values()};this.Controls.Add.vbRawArgs=true;this.Controls.Remove.vbRawArgs=true;this.attachWindowDragging();if(!this.design){this.node.addEventListener('pointerdown',()=>this.activateChrome(),true);this.node.addEventListener('focusin',()=>this.activateChrome());}if(this.props.Picture)this.ensureSurface().setPicture(safeImage(this.props.Picture,this.assets));}
   build(){this.node.className='vb-form';this.node.setAttribute('role','dialog');this.titleBar=el('div',{class:'vb-form-title'});this.captionNode=el('span',{class:'caption'});this.closeButton=el('button',{class:'vb-window-button',title:'Close','aria-label':'Close',onclick:()=>this.vm?.requestUnload(this.instance)});this.closeButton.append(icon('close'));this.minButton=el('button',{class:'vb-window-button',title:'Minimize','aria-label':'Minimize',onclick:()=>this.toggleMinimize()},icon('minimize'));this.maxButton=el('button',{class:'vb-window-button',title:'Maximize','aria-label':'Maximize',onclick:()=>this.toggleMaximize()},icon('maximize'));this.titleBar.append(el('span',{class:'vb-form-icon'},icon('form',16)),this.captionNode,this.minButton,this.maxButton,this.closeButton);this.menuBar=el('div',{class:'vb-form-menu'});this.content=el('div',{class:'vb-form-content'});this.childHost=this.content;this.node.append(this.titleBar,this.menuBar,this.content);this.form=this;}
-  attachEvents(){if(this.design)return;this.content.addEventListener('click',e=>{if(e.target===this.content)this.event('Click');});this.node.addEventListener('keydown',e=>{if(e.defaultPrevented)return;if(e.key==='F10'){e.preventDefault();this.menuBar.querySelector('button:not(:disabled)')?.click();return;}if(e.key==='Enter'&&!e.target.matches('textarea,[contenteditable]')){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.node.contains(e.target)&&c.Enabled&&c.Visible)||this.controls?.find(c=>c.type==='CommandButton'&&c.Default&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.key==='Escape'){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.Cancel&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.altKey&&e.key.length===1){const key=e.key.toLowerCase(),match=text=>{const value=String(text||'').replace(/&&/g,'');return /&./.test(value)&&value.match(/&./)[0][1].toLowerCase()===key;};const control=this.controls?.find(c=>c.Enabled&&c.Visible&&match(c.props.Caption));if(control){e.preventDefault();if(control.type==='Label'){this.controls.filter(c=>c.TabStop&&c.Enabled&&c.Visible&&c.TabIndex>control.TabIndex).sort((a,b)=>a.TabIndex-b.TabIndex)[0]?.SetFocus();}else{control.SetFocus();control.node.click();}}else{const menus=(this.originalModel?.menus||[]).filter(m=>!m.parent&&m.properties.Visible!==0);const i=menus.findIndex(m=>match(m.properties.Caption));if(i>=0){e.preventDefault();this.menuBar.children[i]?.click();}}}if(this.props.KeyPreview)this.event('KeyDown',[{ref:new Cell('Integer',e.keyCode||0)},(e.shiftKey?1:0)+(e.ctrlKey?2:0)+(e.altKey?4:0)]);});}
-  event(name,args=[],coalesce=false){if(this.design||!this.vm)return Promise.resolve();return this.vm.dispatch(this.instance,(this.type==='MDIForm'?'MDIForm_':'Form_')+name,args,{coalesce});}
+  attachEvents(){if(this.design)return;bindMouseInput(this);bindKeyboardInput(this);this.content.addEventListener('click',e=>{if(ownsInputEvent(this,e))this.event('Click');});this.content.addEventListener('dblclick',e=>{if(ownsInputEvent(this,e))this.event('DblClick');});this.node.addEventListener('keydown',e=>{if(e.defaultPrevented)return;if(e.key==='F10'){e.preventDefault();this.menuBar.querySelector('button:not(:disabled)')?.click();return;}if(e.key==='Enter'&&!e.target.matches('textarea,[contenteditable]')){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.node.contains(e.target)&&c.Enabled&&c.Visible)||this.controls?.find(c=>c.type==='CommandButton'&&c.Default&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.key==='Escape'){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.Cancel&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.altKey&&e.key.length===1){const key=e.key.toLowerCase(),match=text=>{const value=String(text||'').replace(/&&/g,'');return /&./.test(value)&&value.match(/&./)[0][1].toLowerCase()===key;};const control=this.controls?.find(c=>c.Enabled&&c.Visible&&match(c.props.Caption));if(control){e.preventDefault();if(control.type==='Label'){this.controls.filter(c=>c.TabStop&&c.Enabled&&c.Visible&&c.TabIndex>control.TabIndex).sort((a,b)=>a.TabIndex-b.TabIndex)[0]?.SetFocus();}else{control.SetFocus();control.node.click();}}else{const menus=(this.originalModel?.menus||[]).filter(m=>!m.parent&&m.properties.Visible!==0);const i=menus.findIndex(m=>match(m.properties.Caption));if(i>=0){e.preventDefault();this.menuBar.children[i]?.click();}}}});}
+  event(name,args=[],coalesce=false){if(this.design||!this.vm||this.disposed)return Promise.resolve();return this.vm.dispatch(this.instance,(this.type==='MDIForm'?'MDIForm_':'Form_')+name,args,{coalesce});}
   refresh(){if(!this.content)return;const p=this.props,w=Number(p.ClientWidth??p.Width??9000)/15,h=Number(p.ClientHeight??p.Height??6000)/15;this.captionNode.textContent=p.Caption||this.model.name;this.node.setAttribute('aria-label',this.captionNode.textContent);this.node.style.fontFamily=fontFamily(p.FontName);this.node.style.fontSize=Number(p.FontSize||8.25)*96/72+'px';this.node.style.width=w+8+'px';this.node.style.height='auto';this.content.style.width=w+'px';this.content.style.height=h+'px';this.content.style.background=oleColor(p.BackColor);this.node.hidden=!this.design&&!this.shown;this.node.style.left=Number(p.Left||0)/15+'px';this.node.style.top=Number(p.Top||0)/15+'px';const border=Number(p.BorderStyle??2);this.titleBar.hidden=border===0;this.node.classList.toggle('vb-borderless',border===0);this.node.classList.toggle('vb-tool-window',border===4||border===5);this.node.style.width=w+(border===0?0:8)+'px';this.minButton.hidden=p.ControlBox===0||border===3||border>=4;this.maxButton.hidden=p.ControlBox===0||border===3||border>=4;this.closeButton.hidden=p.ControlBox===0;this.minButton.disabled=p.MinButton===0;this.maxButton.disabled=p.MaxButton===0;this.node.classList.toggle('vb-fixed-window',![2,5].includes(border)||this.minimized||!!this.savedBounds);this.renderMenus();if(this.surface){this.surface.background=p.BackColor;this.surface.invalidate();}}
   renderMenus(){const menus=this.originalModel?.menus||this.model.menus||[],signature=JSON.stringify(menus);if(this.menuSnapshot===signature)return;this.menuSnapshot=signature;const roots=menus.filter(m=>!m.parent&&m.properties.Visible!==0);this.menuBar.hidden=!roots.length;this.menuBar.setAttribute('role','menubar');this.menuBar.replaceChildren(...roots.map((menu,index)=>{const button=el('button',{role:'menuitem','aria-haspopup':menus.some(m=>m.parent===menu.name)||menu.properties.WindowList?'menu':null,'aria-expanded':'false',disabled:menu.properties.Enabled===0});updateMnemonic(button,menu.properties.Caption||menu.name);button.addEventListener('click',()=>{const children=menus.filter(m=>m.parent===menu.name&&m.properties.Visible!==0);if(!children.length&&!menu.properties.WindowList){this.vm?.dispatch(this.instance,menu.name+'_Click',[]);return;}this.showMenu(children,button,menus,index);});button.addEventListener('pointerenter',()=>{if(menuIsOpen()&&!button.disabled)button.click();});button.addEventListener('keydown',e=>{if(['ArrowDown','Enter',' '].includes(e.key)){e.preventDefault();e.stopPropagation();button.click();}});return button;}));}
   showMenu(items,anchor,all,index=0){const map=values=>values.filter(m=>m.properties.Visible!==0).map(item=>item.properties.Caption==='-'?null:{label:item.properties.Caption||item.name,enabled:item.properties.Enabled!==0,checked:item.properties.Checked?true:undefined,items:all.some(m=>m.parent===item.name&&m.properties.Visible!==0)?()=>map(all.filter(m=>m.parent===item.name)):undefined,action:()=>this.vm?.dispatch(this.instance,item.name+'_Click',[])});const rect=anchor.getBoundingClientRect();const values=map(items),root=all.filter(m=>!m.parent&&m.properties.Visible!==0)[index];if(root?.properties.WindowList&&this.mdiController){const windows=this.mdiController.windowItems();if(values.length&&windows.length)values.push(null);values.push(...windows);}openClassicMenu(values,rect.left,rect.bottom,null,{opener:anchor,runtime:true,theme:getTheme(this.node).id,focusFirst:true,onSwitch:direction=>{const list=[...this.menuBar.children];for(let n=1;n<=list.length;n++){const next=list[(index+direction*n+list.length*2)%list.length];if(!next.disabled){next.click();break;}}}});}
@@ -5738,7 +5860,7 @@ class BrowserForm extends BrowserControl {
     control.dispose();
   }
   activateChrome(){if(this.design)return;if(!this.node.inert)this.node.style.zIndex=String((this.node.getAttribute('aria-modal')==='true'?200000:0)+ ++BrowserForm.frontSequence);for(const node of this.node.parentElement?.querySelectorAll(':scope > .vb-form')||[])node.classList.toggle('vb-inactive',node!==this.node);}
-  Show(){this.activateChrome(false);this.shown=true;this.node.hidden=false;this.refresh();if(!this.windowStateApplied){this.windowStateApplied=true;this.WindowState=Number(this.props.WindowState)||0;}for(const c of this.controls)c.updateTimer();this.node.style.zIndex=String(++BrowserForm.frontSequence);this.event('Paint');const first=this.controls.filter(c=>c.TabStop&&c.Visible&&c.Enabled).sort((a,b)=>a.TabIndex-b.TabIndex)[0];first?.SetFocus();}
+  Show(){this.activateChrome(false);this.shown=true;this.node.hidden=false;this.refresh();if(!this.windowStateApplied){this.windowStateApplied=true;this.WindowState=Number(this.props.WindowState)||0;}for(const c of this.controls)c.updateTimer();this.node.style.zIndex=String(++BrowserForm.frontSequence);this.event('Paint');const first=this.controls.filter(c=>c.TabStop&&acceptsInput(c)&&!NONVISUAL_TYPES.has(c.type)).sort((a,b)=>a.TabIndex-b.TabIndex)[0];(first||this).SetFocus();}
   Hide(){this.shown=false;this.node.hidden=true;this.suspendTimers();const siblings=[...(this.node.parentElement?.querySelectorAll(':scope > .vb-form:not([hidden])')||[])].sort((a,b)=>Number(b.style.zIndex)-Number(a.style.zIndex));siblings.forEach((node,index)=>node.classList.toggle('vb-inactive',index!==0));}
   suspendTimers(){for(const c of this.controls){clearInterval(c.timerId);c.timerId=null;}}
   chromeHeight(){return (this.titleBar.hidden?0:20)+(this.menuBar.hidden?0:19)+(Number(this.props.BorderStyle)===0?0:8);}
@@ -5759,10 +5881,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[63]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[62];
+__modules[64]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[63];
 const {clone}=__modules[13];
-const {newId}=__modules[60];
+const {newId}=__modules[61];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -5841,7 +5963,7 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[64]=(()=>{
+__modules[65]=(()=>{
 const {VBError}=__modules[10];
 const {el}=__modules[13];
 const {NOTHING}=__modules[14];
@@ -5901,9 +6023,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../controls/dialog.js */
-__modules[65]=(()=>{
+__modules[66]=(()=>{
 const {el}=__modules[13];
-const {icon}=__modules[57];
+const {icon}=__modules[58];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -5938,7 +6060,7 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[66]=(()=>{
+__modules[67]=(()=>{
 const {VBError}=__modules[8];
 const {lower}=__modules[13];
 const {VB_CONSTANTS}=__modules[50];
@@ -6054,7 +6176,7 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[67]=(()=>{
+__modules[68]=(()=>{
 const {VBError}=__modules[10];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
@@ -6081,7 +6203,7 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[68]=(()=>{
+__modules[69]=(()=>{
 const {lower}=__modules[13];
 
 const json=x=>JSON.stringify(x);
@@ -6125,7 +6247,7 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[69]=(()=>{
+__modules[70]=(()=>{
 const { tokenize, VBError }=__modules[10];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
@@ -6203,9 +6325,9 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[70]=(()=>{
+__modules[71]=(()=>{
 const { VBError }=__modules[10];
-const { parseExpression }=__modules[69];
+const { parseExpression }=__modules[70];
 const { binary, unary, truth }=__modules[14];
 
 
@@ -6245,13 +6367,13 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[71]=(()=>{
-const {bindConstants}=__modules[66];
-const {defaultIdentifierType,addDefaultTypes}=__modules[67];
-const {validateInterfaces}=__modules[68];
-const { preprocess }=__modules[70];
+__modules[72]=(()=>{
+const {bindConstants}=__modules[67];
+const {defaultIdentifierType,addDefaultTypes}=__modules[68];
+const {validateInterfaces}=__modules[69];
+const { preprocess }=__modules[71];
 const { VBError, logicalLines, splitTop, tokenize }=__modules[10];
-const { parseExpression, parseCall }=__modules[69];
+const { parseExpression, parseCall }=__modules[70];
 const { lower }=__modules[13];
 
 
@@ -6295,10 +6417,18 @@ function parseParameters(text,defaultTypes={}) {
   return params;
 }
 
+const DEBUG_SOURCE_LINES=new WeakMap();
 class ProcedureCompiler {
-  constructor(proc,module) { this.proc=proc;this.module=module;this.code=[];this.blocks=[];this.labels=new Map();this.patches=[];this.temp=0; }
-  emit(op,data={},line=0){const index=this.code.length;this.code.push({op,...data,line,source:this.module.name,procedure:this.proc.name});return index;}
-  jump(target,line){return this.emit('jump',{target},line);}
+  constructor(proc,module) { this.proc=proc;this.module=module;this.code=[];this.blocks=[];this.labels=new Map();this.patches=[];this.temp=0;this.debugStatement=null;this.debugColumns=new Map();if(!DEBUG_SOURCE_LINES.has(module))DEBUG_SOURCE_LINES.set(module,module.source.replace(/\r\n?/g,'\n').split('\n'));this.sourceLines=DEBUG_SOURCE_LINES.get(module); }
+  emit(op,data={},line=0){
+    const index=this.code.length,statement=this.debugStatement;
+    // A VB statement may lower to several instructions. Only its first visible
+    // instruction is a sequence point; declarations and synthetic jumps are not.
+    const sequencePoint=!!statement&&!statement.emitted&&!data.implicit&&op!=='dim'&&data.sequencePoint!==false;
+    if(sequencePoint)statement.emitted=true;
+    this.code.push({op,...data,line,source:this.module.name,procedure:this.proc.name,sequencePoint,...(sequencePoint&&statement.column?{column:statement.column,endColumn:statement.endColumn}:{})});return index;
+  }
+  jump(target,line,hidden=false){return this.emit('jump',{target,...(hidden?{sequencePoint:false}:{})},line);}
   patch(index,target){this.code[index].target=target;}
   block(type,line){const b=this.blocks.at(-1);if(!b||b.type!==type)throw new VBError(`Expected matching ${type} block`,1002,this.module.name,line);return b;}
   compile(lines) {
@@ -6312,7 +6442,17 @@ class ProcedureCompiler {
     return this.code;
   }
   label(name,line){const key=/^\d+$/.test(name)?String(Number(name)):lower(name);if(this.labels.has(key))throw new VBError(`Duplicate label: ${name}`,1002,this.module.name,line);this.labels.set(key,this.code.length);if(/^\d+$/.test(name)){const number=Number(name);if(number>65535)throw new VBError('Line number must be between 0 and 65535',1002,this.module.name,line);this.emit('lineNumber',{number,implicit:true},line);}}
-  statement(original,line) {
+  statement(original,line,column=null) {
+    const previous=this.debugStatement,text=original.trim(),source=this.sourceLines[line-1]||'';
+    const offset=column===null?source.indexOf(text,this.debugColumns.get(line)||0):column-1;
+    // Continued statements keep their physical starting line; do not invent a
+    // single-line span when the logical statement is absent from that line.
+    const found=offset>=0&&source.slice(offset,offset+text.length)===text;
+    this.debugStatement={emitted:false,column:found?offset+1:null,endColumn:found?offset+text.length+1:null};
+    if(column===null&&found)this.debugColumns.set(line,offset+text.length);
+    try{return this.compileStatement(original,line);}finally{this.debugStatement=previous;}
+  }
+  compileStatement(original,line) {
     let text=original.trim(),m;
     if(!text||/^Rem\b/i.test(text))return;
     if(/^\d+$/.test(text)){const index=this.jump(null,line);this.patches.push({index,label:text});return;}
@@ -6323,13 +6463,16 @@ class ProcedureCompiler {
         // Use tokens to distinguish an Else keyword from string contents.
         const ts=tokenize(m[2]);const et=ts.find(t=>t.type==='id'&&lower(t.value)==='else');if(et)at=et.start;
         const yes=at<0?m[2]:m[2].slice(0,at), no=at<0?'':m[2].slice(at+4);
-        for(const s of splitTop(yes,':'))this.statement(s,line);
-        if(no){const end=this.jump(null,line);this.patch(index,this.code.length);for(const s of splitTop(no,':'))this.statement(s,line);this.patch(end,this.code.length);}else this.patch(index,this.code.length);
+        const origin=this.debugStatement.column,bodyOffset=text.length-m[2].length;
+        if(origin)this.code[index].endColumn=origin+bodyOffset;
+        const compileParts=(body,offset)=>{let cursor=0;for(const s of splitTop(body,':')){const at=body.indexOf(s,cursor);this.statement(s,line,origin===null?null:origin+offset+at);cursor=at+s.length;}};
+        compileParts(yes,bodyOffset);
+        if(no){const end=this.jump(null,line,true);this.patch(index,this.code.length);compileParts(no,bodyOffset+at+4);this.patch(end,this.code.length);}else this.patch(index,this.code.length);
       }else this.blocks.push({type:'If',pending:index,ends:[]});
       return;
     }
-    if((m=text.match(/^ElseIf\s+(.+?)\s+Then$/i))){const b=this.block('If',line);b.ends.push(this.jump(null,line));this.patch(b.pending,this.code.length);b.pending=this.emit('branch',{test:E(m[1]),target:null},line);return;}
-    if(/^Else$/i.test(text)){const b=this.block('If',line);b.ends.push(this.jump(null,line));this.patch(b.pending,this.code.length);b.pending=null;return;}
+    if((m=text.match(/^ElseIf\s+(.+?)\s+Then$/i))){const b=this.block('If',line);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=this.emit('branch',{test:E(m[1]),target:null},line);return;}
+    if(/^Else$/i.test(text)){const b=this.block('If',line);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=null;return;}
     if(/^End\s*If$/i.test(text)){const b=this.block('If',line);if(b.pending!=null)this.patch(b.pending,this.code.length);for(const i of b.ends)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^For\s+Each\s+(\w+)\s+In\s+(.+)$/i))){const id=`$each${this.temp++}`,index=this.emit('eachInit',{name:m[1],expr:E(m[2]),id,target:null},line);this.blocks.push({type:'For',kind:'each',id,index,start:this.code.length,name:m[1],exits:[]});return;}
     if((m=text.match(/^For\s+([\w.$%&!#@]+)\s*=\s*(.+?)\s+To\s+(.+?)(?:\s+Step\s+(.+))?$/i))){const id=`$for${this.temp++}`,index=this.emit('forInit',{name:m[1],start:E(m[2]),end:E(m[3]),step:E(m[4]||'1'),id,target:null},line);this.blocks.push({type:'For',kind:'numeric',id,index,start:this.code.length,name:m[1],exits:[]});return;}
@@ -6339,7 +6482,7 @@ class ProcedureCompiler {
     if((m=text.match(/^While\s+(.+)$/i))){const start=this.code.length,test=this.emit('branch',{test:E(m[1]),target:null},line);this.blocks.push({type:'While',start,test,exits:[]});return;}
     if(/^Wend$/i.test(text)){const b=this.block('While',line);this.jump(b.start,line);this.patch(b.test,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^Select\s+Case\s+(.+)$/i))){const id=`$select${this.temp++}`;this.emit('temp',{id,expr:E(m[1])},line);this.blocks.push({type:'Select',id,pending:null,ends:[],hasCase:false});return;}
-    if((m=text.match(/^Case\s+(.+)$/i))){const b=this.block('Select',line);if(b.hasCase)b.ends.push(this.jump(null,line));if(b.pending!=null)this.patch(b.pending,this.code.length);b.hasCase=true;if(/^Else$/i.test(m[1]))b.pending=null;else {const cases=splitTop(m[1]).map(s=>{const r=s.match(/^(.+)\s+To\s+(.+)$/i),c=s.match(/^Is\s*(<=|>=|<>|=|<|>)\s*(.+)$/i);return r?{kind:'range',low:E(r[1]),high:E(r[2])}:c?{kind:'compare',op:c[1],expr:E(c[2])}:{kind:'value',expr:E(s)};});b.pending=this.emit('case',{id:b.id,cases,target:null},line);}return;}
+    if((m=text.match(/^Case\s+(.+)$/i))){const b=this.block('Select',line);if(b.hasCase)b.ends.push(this.jump(null,line,true));if(b.pending!=null)this.patch(b.pending,this.code.length);b.hasCase=true;if(/^Else$/i.test(m[1]))b.pending=null;else {const cases=splitTop(m[1]).map(s=>{const r=s.match(/^(.+)\s+To\s+(.+)$/i),c=s.match(/^Is\s*(<=|>=|<>|=|<|>)\s*(.+)$/i);return r?{kind:'range',low:E(r[1]),high:E(r[2])}:c?{kind:'compare',op:c[1],expr:E(c[2])}:{kind:'value',expr:E(s)};});b.pending=this.emit('case',{id:b.id,cases,target:null},line);}return;}
     if(/^End\s+Select$/i.test(text)){const b=this.block('Select',line);if(b.pending!=null)this.patch(b.pending,this.code.length);for(const i of b.ends)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^With\s+(.+)$/i))){this.emit('withPush',{expr:E(m[1])},line);this.blocks.push({type:'With'});return;}
     if(/^End\s+With$/i.test(text)){this.block('With',line);this.emit('withPop',{},line);this.blocks.pop();return;}
@@ -6462,8 +6605,152 @@ function validateCompiledModules(modules) {
 return {parseDeclarations,parseParameters,compileModule,compileProject,validateCompiledModules};
 })();
 
+/* debug-control.js */
+__modules[73]=(()=>{
+const {VBError,tokenize}=__modules[10];
+const {lower}=__modules[13];
+const {truth}=__modules[14];
+
+
+
+/** Reset/cancellation is not a trappable VB run-time error. */
+class StopExecution extends Error {}
+const MODES=new Set(['all','class','unhandled']);
+const isSequencePoint=instruction=>!!instruction&&!instruction.implicit&&instruction.sequencePoint!==false;
+
+/** Select one executable statement, optionally within a colon-separated line. */
+function statementIndex(code,line,column=null){
+  const candidates=code.map((ins,index)=>({ins,index})).filter(({ins})=>ins.line===line&&isSequencePoint(ins));
+  if(!candidates.length)return -1;
+  if(column===null||column===undefined)return candidates[0].index;
+  if(!Number.isInteger(column)||column<1)throw new VBError('Invalid source column',5);
+  return (candidates.find(({ins})=>ins.column<=column&&column<ins.endColumn)||candidates.find(({ins})=>ins.column>=column)||candidates.at(-1)).index;
+}
+
+/** Source-level execution control, shared by IDE, embedders and agent commands.
+ * Automatic inspection never invokes user procedures. Error breaks are opt-in
+ * for headless hosts, so shipping an application cannot leave it suspended with
+ * no debugger available to resume it.
+ */
+class RuntimeDebugger {
+  constructor(vm){this.vm=vm;this.presentedErrors=new WeakSet();this.nextFrameId=1;this.pendingError=null;}
+  configure({enabled=this.vm.options.debuggerEnabled,errorTrapping=this.vm.options.errorTrapping||'unhandled'}={}){
+    if(typeof enabled!=='boolean'||!MODES.has(errorTrapping))throw new VBError('Invalid debugger error-trapping options',5);
+    this.vm.options.debuggerEnabled=enabled;this.vm.options.errorTrapping=errorTrapping;
+    return {enabled,errorTrapping};
+  }
+  location(frame,top=frame===this.vm.currentFrame){
+    const instruction=top?frame.proc.code[frame.pc]:frame.activeInstruction;
+    return instruction||frame.activeInstruction||frame.proc.code.at(-1)||{source:frame.module.name,procedure:frame.proc.name,line:frame.proc.line};
+  }
+  stack(){return this.vm.stack.map((frame,index)=>{const ins=this.location(frame,index===this.vm.stack.length-1);return {index,id:frame.debugId,module:frame.module.name,procedure:frame.proc.name,line:ins.line,column:ins.column,endColumn:ins.endColumn,depth:frame.depth};});}
+  async suspend(instruction,frame,reason,details={}){
+    const vm=this.vm;
+    if(vm.debugEvaluation)return;
+    if(vm.state==='stopped')throw new StopExecution();
+    vm.pauseRequested=false;vm.stepMode=null;vm.runTarget=null;
+    vm.debugPauseId++;vm.pauseReason=reason;vm.currentFrame=frame;
+    // Install the resolver before notifying synchronous pause listeners.
+    const suspended=new Promise(resolve=>vm.pauseResolver=resolve);
+    vm.setState('paused');
+    vm.emit('pause',{instruction,frame,stack:[...vm.stack],reason,pauseId:vm.debugPauseId,...details});
+    await suspended;vm.pauseResolver=null;
+    if(vm.state==='stopped')throw new StopExecution();
+  }
+  async checkpoint(ins,frame){
+    const visible=isSequencePoint(ins);if(!visible&&!(ins?.op==='return'&&ins.implicit))return;
+    const vm=this.vm,lineChanged=frame.lastLine!==ins.line||frame.pc<=frame.lastPc;
+    const bp=vm.breakpoints.get(lower(ins.source)+':'+ins.line);
+    let reason=null,details={};
+    if(visible&&lineChanged&&bp&&bp.enabled!==false){
+      try{if(!bp.condition||truth(vm.debugInspector.node(vm.debugInspector.parse(bp.condition),frame,{count:0},0)))reason='breakpoint';}
+      catch(error){reason='breakpoint-condition';details.conditionError=error.message;}
+    }
+    if(visible&&vm.stepMode&&(vm.stepMode.mode==='into'||vm.stepMode.mode==='over'&&frame.depth<=vm.stepMode.depth||vm.stepMode.mode==='out'&&frame.depth<vm.stepMode.depth))reason ||= 'step';
+    if(visible&&vm.runTarget&&lower(ins.source)===lower(vm.runTarget.module)&&ins.line===vm.runTarget.line&&(!vm.runTarget.column||ins.column===vm.runTarget.column))reason ||= 'run-to-cursor';
+    for(const watch of vm.watchpoints){
+      // Procedure watches observe each live invocation, including a suspended
+      // caller modified ByRef by a callee. Module watches retain one baseline
+      // per instance instead of losing it whenever a procedure returns.
+      const frames=watch.module||watch.procedure?vm.stack.filter(f=>(!watch.module||lower(f.module.name)===lower(watch.module))&&(!watch.procedure||lower(f.proc.name)===lower(watch.procedure))):[frame];
+      if(watch.module&&!watch.procedure&&!frames.length){const instance=vm.instances.get(lower(watch.module));if(instance)frames.push(vm.makeFrame(instance));}
+      const observed=new Set();
+      for(const scope of [...frames].reverse()){
+        const owner=watch.procedure?scope:watch.module?scope.instance:scope;
+        if(observed.has(owner))continue;observed.add(owner);
+        let values=vm.watchpointValues.get(watch.id);if(!values)vm.watchpointValues.set(watch.id,values=new WeakMap());
+        try{
+          const context=watch.module&&!watch.procedure?vm.makeFrame(scope.instance):scope;
+          const value=vm.debugInspector.node(watch.node,context,{count:0},0),prior=values.get(owner);
+          if(watch.mode==='true'?truth(value)&&(visible||!prior||!vm.sameWatchValue(prior.value,value)):prior!==undefined&&!vm.sameWatchValue(prior.value,value)){reason ||= 'watch:'+watch.expression;details.watch={id:watch.id,expression:watch.expression,frameIndex:vm.stack.indexOf(scope)};}
+          values.set(owner,{value:vm.watchSnapshot(value)});
+        }catch{/* Out of scope, uninitialized and effectful expressions are not executed. */}
+      }
+    }
+    if(visible&&vm.pauseRequested)reason ||= 'break';
+    if(visible){frame.lastLine=ins.line;frame.lastPc=frame.pc;}
+    if(reason)await this.suspend(ins,frame,reason,details);
+  }
+  async breakAfter(ins,frame,reason){
+    const vm=this.vm;if(vm.debugEvaluation)return;
+    frame.pc=frame.activePc;frame.debugRedirect=false;
+    try{await this.suspend(ins,frame,reason);}finally{
+      // A debugger jump is intentional; otherwise Stop/Assert has already run.
+      if(!frame.debugRedirect)frame.pc++;
+    }
+  }
+  async error(error,frame,current,ins){
+    const vm=this.vm;
+    if(!vm.options.debuggerEnabled||vm.debugEvaluation||this.presentedErrors.has(error))return false;
+    const localHandler=!frame.errorActive&&frame.errorMode!=='off';
+    const handled=vm.stack.some(f=>!f.errorActive&&f.errorMode!=='off');
+    const mode=vm.options.errorTrapping||'unhandled',isClass=frame.module.kind!=='module';
+    const pause=mode==='all'||mode==='class'&&(isClass&&!localHandler||!handled)||mode==='unhandled'&&!handled&&(!isClass||vm.stack.length===1);
+    if(!pause)return false;
+    this.presentedErrors.add(error);
+    const pending={error,frame,action:handled?'handler':'retry'};this.pendingError=pending;
+    frame.pc=current;frame.debugRedirect=false;
+    try{
+      await this.suspend(ins,frame,'error',{error:{number:error.number,message:error.message,source:error.source,line:error.line,erl:error.erl,handled,trapping:mode}});
+      if(frame.debugRedirect||pending.action==='next'){if(!frame.debugRedirect)frame.pc++;vm.err.Clear();return true;}
+      if(pending.action==='retry'){this.presentedErrors.delete(error);vm.err.Clear();return true;}
+      return frame.pc++;
+    }finally{this.pendingError=null;}
+  }
+  resumeError(action='retry'){
+    if(!['retry','next','handler'].includes(action))throw new VBError('Invalid debugger error action',5);
+    if(!this.pendingError||this.vm.state!=='paused')throw new VBError('The debugger is not paused on a run-time error',5);
+    if(this.vm.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);
+    this.pendingError.action=action;this.vm.resume();
+    return {action};
+  }
+}
+
+/** Token offsets distinguish statement separators from strings, dates, named
+ * arguments, type suffixes and comments. Comments consume only their own line. */
+function immediateStatements(text){
+  const statements=[];
+  for(const line of String(text).replace(/\r\n?/g,'\n').split('\n')){
+    let start=0,depth=0;
+    for(const token of tokenize(line.replace(/\?/g,' '))){
+      if(token.type==='op'&&token.value==='(')depth++;
+      else if(token.type==='op'&&token.value===')')depth--;
+      if(token.type==='eof'||token.type==='op'&&token.value===':'&&depth===0){
+        const statement=line.slice(start,token.start).trim();
+        // A Rem comment's EOF includes the scanned keyword; it is not a call.
+        if(statement&&!/^Rem(?:\s|$)/i.test(statement))statements.push(statement);
+        start=token.end;
+      }
+    }
+  }
+  return statements;
+}
+
+return {StopExecution,isSequencePoint,statementIndex,RuntimeDebugger,immediateStatements};
+})();
+
 /* win32.js */
-__modules[72]=(()=>{
+__modules[74]=(()=>{
 const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[7];
 const {VBError}=__modules[10];
 const {VBArray,VBCurrency,numeric,coerce}=__modules[14];
@@ -6583,7 +6870,7 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[73]=(()=>{
+__modules[75]=(()=>{
 const {VBError}=__modules[10];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
@@ -6612,9 +6899,9 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[74]=(()=>{
+__modules[76]=(()=>{
 const {VBError}=__modules[10];
-const {parseExpression}=__modules[69];
+const {parseExpression}=__modules[70];
 const {lower}=__modules[13];
 const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[14];
 
@@ -6666,10 +6953,11 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[75]=(()=>{
+__modules[77]=(()=>{
 const {VBError}=__modules[10];
 
-const key=ins=>{const {line,source,procedure,...rest}=ins;return JSON.stringify(rest);};
+const instructionKey=ins=>{const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;return JSON.stringify(rest);};
+const key=instructionKey;
 const linearInstruction=ins=>['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename','fileClose','fileOpen','stringMid','stringAlign','return','dim'].includes(ins.op);
 /** Deterministic bounded edit alignment. Large edited gaps are rejected rather
  * than guessing where a suspended instruction should execute. */
@@ -6688,20 +6976,23 @@ function instructionMap(oldCode,newCode,shape){
  return map;
 }
 
-return {linearInstruction,instructionMap};
+return {instructionKey,linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[76]=(()=>{
-const {instructionMap,linearInstruction}=__modules[75];
+__modules[78]=(()=>{
+const {statementIndex}=__modules[73];
+const {instructionMap,linearInstruction,instructionKey}=__modules[77];
 const {VBError}=__modules[10];
 
 
+
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
+const executionSettings=settings=>{const {errorTrapping,...rest}=settings||{};return rest;};
 const signature=p=>({name:p.name,kind:p.kind,scope:p.scope,accessor:p.accessor,static:p.static,params:p.params,returnType:p.returnType});
 const moduleShape=m=>({kind:m.kind,interfaces:m.interfaces,defaultTypes:m.defaultTypes,defaultMember:m.defaultMember,declarations:m.declarations,types:m.types,events:m.events,enums:m.enums,form:m.form,optionExplicit:m.optionExplicit,optionBase:m.optionBase,optionCompare:m.optionCompare});
 function instructionShape(ins){
-  const {line,source,procedure,...rest}=ins;
+  const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;
   if(['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename'].includes(ins.op))return {op:ins.op};
   if(ins.op==='dim')return {...rest,decls:rest.decls.map(({initial,...decl})=>decl)};
   return rest;
@@ -6711,7 +7002,7 @@ function sameActiveLayout(a,b){return a.length===b.length&&a.every((ins,i)=>json
 function planLiveEdit(current,next,stack){
   if(!next.valid){const d=next.diagnostics[0];throw new VBError('Code changes were not applied: '+d.message,d.number,d.source,d.line);}
   if(json([...current.modules.keys()])!==json([...next.modules.keys()]))throw new VBError('Restart required: modules cannot be added, removed, or reordered while running',5);
-  if(current.startup!==next.startup||json(current.settings)!==json(next.settings))throw new VBError('Restart required: project execution settings changed',5);
+  if(current.startup!==next.startup||json(executionSettings(current.settings))!==json(executionSettings(next.settings)))throw new VBError('Restart required: project execution settings changed',5);
   const updates=[],lineMap=new Map(),frameUpdates=[],active=new Set(stack.map(f=>f.proc));
   for(const [key,oldModule]of current.modules){
     const newModule=next.modules.get(key);
@@ -6726,23 +7017,23 @@ function planLiveEdit(current,next,stack){
         const mapping=instructionMap(oldProc.code,newProc.code,ins=>json(instructionShape(ins)));
         for(const frame of stack.filter(f=>f.proc===oldProc)){
           const top=frame===stack.at(-1);let pc=mapping.get(frame.pc);
-          if(!top){const prior=frame.pc-1,mapped=mapping.get(prior);if(mapped===undefined||json({...oldProc.code[prior],line:0})!==json({...newProc.code[mapped],line:0}))throw new VBError('Restart required: the active caller statement changed',5);pc=mapped+1;}
+          if(!top){const prior=frame.pc-1,mapped=mapping.get(prior);if(mapped===undefined||instructionKey(oldProc.code[prior])!==instructionKey(newProc.code[mapped]))throw new VBError('Restart required: the active caller statement changed',5);pc=mapped+1;}
           if(pc===undefined)throw new VBError('Restart required: the active procedure statement was removed or cannot be relocated',5);
           frameUpdates.push({frame,pc,lastPc:pc,lastLine:newProc.code[pc]?.line??null});
         }
         for(const [oldIndex,newIndex]of mapping)if(oldProc.code[oldIndex]&&newProc.code[newIndex]&&!oldProc.code[oldIndex].implicit)lineMap.set(key+':'+oldProc.code[oldIndex].line,newProc.code[newIndex].line);
       }
       else if(same)oldProc.code.forEach((ins,i)=>{if(!ins.implicit)lineMap.set(key+':'+ins.line,newProc.code[i].line);});
-      else for(const ins of oldProc.code.filter(i=>!i.implicit)){const comparable=({...ins,line:0}),matches=newProc.code.filter(n=>json({...n,line:0})===json(comparable));if(matches.length===1)lineMap.set(key+':'+ins.line,matches[0].line);}
+      else for(const ins of oldProc.code.filter(i=>!i.implicit)){const comparable=instructionKey(ins),matches=newProc.code.filter(n=>instructionKey(n)===comparable);if(matches.length===1)lineMap.set(key+':'+ins.line,matches[0].line);}
       updates.push({oldProc,newProc});
     }
   }
   return {updates,lineMap,frameUpdates};
 }
 const BARRIERS=new Set(['dim','forInit','forNext','eachInit','eachNext','withPush','withPop','withUnwind','temp','case','branch','jump','gosub','computedJump','lineNumber','gosubReturn','onError','resume','return','end']);
-function nextStatementIndex(frame,line){
+function nextStatementIndex(frame,line,column=null){
   if(!Number.isInteger(line)||line<1)throw new VBError('Invalid source line',5);
-  const target=frame.proc.code.findIndex(ins=>ins.line===line);
+  const target=statementIndex(frame.proc.code,line,column);
   if(target<0)throw new VBError('Select an executable line in the active procedure',5);
   if(frame.errorActive)throw new VBError('Cannot move the next statement while an error handler is active',5);
   const a=Math.min(frame.pc,target),b=Math.max(frame.pc,target);
@@ -6754,21 +7045,22 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[77]=(()=>{
-const {VBWin32Bridge}=__modules[72];
+__modules[79]=(()=>{
+const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[73];
+const {VBWin32Bridge}=__modules[74];
 const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[15];
 const {DataContext}=__modules[36];
 const {errorDescription}=__modules[46];
-const {DebugEvaluationSession}=__modules[73];
+const {DebugEvaluationSession}=__modules[75];
 const {hasDataDefault,hasDataMember}=__modules[18];
-const {defaultIdentifierType}=__modules[67];
-const {DebugInspector}=__modules[74];
-const {planLiveEdit,nextStatementIndex}=__modules[76];
+const {defaultIdentifierType}=__modules[68];
+const {DebugInspector}=__modules[76];
+const {planLiveEdit,nextStatementIndex}=__modules[78];
 const {encodeVariable,decodeVariable,makeRecord}=__modules[34];
 const { Signal, lower, VERSION }=__modules[13];
-const { VBError }=__modules[10];
-const { parseExpression, parseCall }=__modules[69];
-const { compileProject }=__modules[71];
+const { VBError, splitTop, tokenize }=__modules[10];
+const { parseExpression, parseCall }=__modules[70];
+const { compileProject }=__modules[72];
 const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[14];
 const { VirtualFileSystem }=__modules[35];
 const { createLibrary, MemoryRecordset }=__modules[51];
@@ -6789,14 +7081,14 @@ const { createLibrary, MemoryRecordset }=__modules[51];
 
 
 
+
 const BLOCKED_MEMBERS=new Set(['constructor','__proto__','prototype','caller','callee','arguments','__definegetter__','__definesetter__','__lookupgetter__','__lookupsetter__']);
-class StopExecution extends Error {}
 class VBInstance {
   constructor(module){this.staticCells=new Map();this.__vbInstance=true;this.__type=module.name;this.module=module;this.fields=new Map();this.formObject=null;this.loaded=false;this.initialized=false;}
 }
 class VirtualMachine extends Signal {
   constructor(program,host={},options={}) {
-    super();this.program=program.modules instanceof Map?program:compileProject(program);this.host=host;this.options={instructionLimit:5000000,sliceMilliseconds:8,maxCallDepth:256,...options};
+    super();this.program=program.modules instanceof Map?program:compileProject(program);this.host=host;this.options={instructionLimit:5000000,sliceMilliseconds:8,maxCallDepth:256,debuggerEnabled:false,errorTrapping:'unhandled',...options};
     this.fs=host.fs||new VirtualFileSystem();this.settings=host.settings||{};this.instances=new Map();this.formInstances=new Set();this.stack=[];this.library=createLibrary(this);this.state='ready';this.instructionCount=0;this.lastYield=0;this.breakpoints=new Map();this.stepMode=null;this.pauseRequested=false;this.pauseResolver=null;this.currentFrame=null;this.eventQueue=[];this.processing=false;this.staticCells=new Map();this.eventSinks=new WeakMap();this.lastError=null;
     const vm=this;this.lastErrorErl=0;
     this.err={Number:0,Description:'',Source:'',HelpFile:'',HelpContext:0,LastDLLError:0,
@@ -6818,15 +7110,46 @@ class VirtualMachine extends Signal {
     this.library.set('debug',{Print:(...a)=>this.output(a.map(v=>v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v)).join(' '))});
     this.automation=host.automation?.createSession();
     this.data=host.data||new DataContext(this.program.sourceProject,{fs:this.fs,persist:host.persist,fetch:host.dataFetch,credentialProvider:host.dataCredential});this.data.install(this);
-    this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
+    this.debugger=new RuntimeDebugger(this);this.debugger.configure();this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
     this.win32=new VBWin32Bridge(this);
     this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);this.win32.api.setClipboardText(this.clipboard);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.win32.api.getClipboardText(),Clear:()=>{this.clipboard='';this.win32.api.setClipboardText(null);}});
   }
   output(text,newline=true){this.emit('output',{text:String(text),newline});this.host.print?.(String(text),newline);}
-  setState(state){this.state=state;this.emit('state',state);}
-  setBreakpoint(module,line,condition=''){const key=lower(module)+':'+line;this.breakpoints.set(key,{module,line,condition});this.emit('breakpoints',[...this.breakpoints.values()]);}
+  setState(state){this.state=state;if(['paused','stopped','error'].includes(state)){this.inputEpoch=(this.inputEpoch||0)+1;const pending=this.eventQueue.filter(e=>e.input);this.eventQueue=this.eventQueue.filter(e=>!e.input);for(const event of pending)event.resolve();}this.emit('state',state);}
+  breakpointLocation(module,line,column=null){
+    const source=this.program.modules.get(lower(module));
+    if(!Number.isInteger(line)||line<1||!source)throw new VBError('The selected line is not executable',5);
+    const proc=[...source.procedures.values()].find(p=>statementIndex(p.code,line,column)>=0);
+    if(!proc)throw new VBError('The selected line is not executable: comments and declarations cannot have breakpoints',5);
+    return {module:source.name,line,...(column===null?{}:{column:proc.code[statementIndex(proc.code,line,column)].column})};
+  }
+  setBreakpoint(module,line,condition='',enabled=true){
+    const location=this.breakpointLocation(module,line);condition=String(condition);
+    if(condition.length>4096)throw new VBError('Breakpoint condition is too long',5);
+    if(condition)this.debugInspector.parse(condition);
+    const value={...location,condition,enabled:enabled!==false};this.breakpoints.set(lower(location.module)+':'+line,value);
+    this.emit('breakpoints',[...this.breakpoints.values()]);return value;
+  }
+  replaceBreakpoints(breakpoints=[]){
+    if(!Array.isArray(breakpoints)||breakpoints.length>10000)throw new VBError('Invalid breakpoint list',5);
+    const next=new Map();for(const bp of breakpoints){const value={...this.breakpointLocation(bp.module,bp.line),condition:String(bp.condition||''),enabled:bp.enabled!==false};if(value.condition.length>4096)throw new VBError('Breakpoint condition is too long',5);if(value.condition)this.debugInspector.parse(value.condition);next.set(lower(value.module)+':'+value.line,value);}
+    this.breakpoints=next;this.emit('breakpoints',[...next.values()]);
+  }
   removeBreakpoint(module,line){this.breakpoints.delete(lower(module)+':'+line);this.emit('breakpoints',[...this.breakpoints.values()]);}
   toggleBreakpoint(module,line){const key=lower(module)+':'+line;if(this.breakpoints.has(key))this.removeBreakpoint(module,line);else this.setBreakpoint(module,line);}
+  configureDebugger(options){return this.debugger.configure(options);}
+  debugStack(){return this.debugger.stack();}
+  resumeError(action){return this.debugger.resumeError(action);}
+  /** Prepare module storage without running Sub Main or form startup events.
+   * This is an opt-in debugger session, never a shipping application's startup. */
+  async prepareImmediateContext(){
+    if(this.state==='stopped')throw new VBError('The Immediate runtime was reset',5);
+    if(this.immediatePreparation)return this.immediatePreparation;
+    if(!this.options.debuggerEnabled||this.state!=='ready'||this.instances.size)throw new VBError('A fresh debugger runtime is required for design-mode Immediate',5);
+    this.immediateContext=true;
+    this.immediatePreparation=(async()=>{try{await this.initialize();if(this.state==='stopped')throw new StopExecution();this.setState('idle');return this;}catch(error){this.stop();throw error;}})();
+    return this.immediatePreparation;
+  }
   async initialize() {
     if(!this.program.valid)throw new VBError(this.program.diagnostics.map(d=>`${d.source}:${d.line}: ${d.message}`).join('\n'),1002);
     for(const module of this.program.modules.values())if(module.kind!=='class')this.instances.set(lower(module.name),new VBInstance(module));
@@ -6835,7 +7158,7 @@ class VirtualMachine extends Signal {
     }
     for(const instance of this.instances.values())await this.initializeFields(instance);
   }
-  makeFrame(instance,proc={name:'(Declarations)',params:[],returnType:'Variant',code:[]}){return {instance,module:instance.module,proc,locals:new Map(),pc:0,temps:new Map(),withStack:[],gosubStack:[],errorMode:'off',errorTarget:null,errorActive:false,errorPc:null,lastLine:null,lastPc:-1,erl:0,result:new Cell(proc.storageReturnType||proc.returnType||'Variant'),depth:this.stack.length};}
+  makeFrame(instance,proc={name:'(Declarations)',params:[],returnType:'Variant',code:[]}){return {debugId:this.debugger.nextFrameId++,instance,module:instance.module,proc,locals:new Map(),pc:0,temps:new Map(),withStack:[],gosubStack:[],errorMode:'off',errorTarget:null,errorActive:false,errorPc:null,lastLine:null,lastPc:-1,erl:0,result:new Cell(proc.storageReturnType||proc.returnType||'Variant'),depth:this.stack.length};}
   async initializeFields(instance){const frame=this.makeFrame(instance);for(const decl of [...instance.module.declarations.filter(d=>d.constant),...instance.module.declarations.filter(d=>!d.constant)])await this.declare(decl,frame,instance.fields);instance.initialized=true;}
   async declare(decl,frame,target=frame.locals,staticFlag=false) {
     const key=lower(decl.name);if(target.has(key))return target.get(key);
@@ -6869,8 +7192,9 @@ class VirtualMachine extends Signal {
     this.emit('event',{instance,name,args:args.map(a=>a?.ref?a.ref.get():a)});
   }
   async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluate(lo,frame)):frame.module.optionBase,numeric(await this.evaluate(hi,frame))]);return result;}
-  async start({breakOnEntry=false}={}) {
-    try { await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
+  async start({breakOnEntry=false,runToCursor=null}={}) {
+    if(this.immediateContext)throw new VBError('Reset design-mode Immediate before starting the project',5);
+    try { if(runToCursor)this.runTarget=this.breakpointLocation(runToCursor.module,runToCursor.line,runToCursor.column??null);await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
       for(const instance of this.instances.values()){const init=this.formProcedure(instance,'initialize');if(init)await this.callProcedure(instance,init,[]);}
       const name=lower(this.program.startup||'');let instance=this.instances.get(name);
       if(instance?.module.kind==='form'){await this.showForm(instance);return;}
@@ -6882,11 +7206,12 @@ class VirtualMachine extends Signal {
   formProcedure(instance,event){return instance.module.procedures.get((instance.module.form?.type==='MDIForm'?'mdiform_':'form_')+event);}
   async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){instance.loaded=true;await instance.formObject.initializeDataBindings?.();const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
   async showForm(instance,modal=false){
+    if(this.immediateContext)this.host.debugInteraction?.();
     if(modal&&(instance.module.form?.type==='MDIForm'||Number(instance.module.form?.properties?.MDIChild)))throw new VBError('MDI forms and child forms cannot be shown modally',401);
     if(instance.formObject?.mdiChild){const parent=instance.formObject.mdiController.parent?.instance;if(!parent)throw new VBError('MDI child requires an MDI Form',366);if(!parent.formObject.shown&&!parent.showing)await this.showForm(parent);}
     instance.showing=true;try{await this.loadForm(instance);}finally{instance.showing=false;}if(modal&&instance.formObject.shown)throw new VBError('Form already displayed; cannot show modally',400);
     const previous=this.library.get('screen').ActiveForm;this.library.get('screen').ActiveForm=instance;instance.formObject.Show?.(modal);if(instance.module.form?.type==='MDIForm'&&instance.formObject.mdiController?.active?.shown)this.library.get('screen').ActiveForm=instance.formObject.mdiController.active.instance;const activate=this.formProcedure(instance,'activate');if(activate)await this.callProcedure(instance,activate,[]);
-    if(modal){const evaluation=this.debugEvaluation,finish=this.host.beginModal?.(instance.formObject);try{while(instance.formObject.shown&&this.state!=='stopped'&&this.state!=='error'){evaluation?.check();if(this.eventQueue.length)await this.runQueuedEvent(this.eventQueue.shift());else await new Promise(resolve=>setTimeout(resolve,8));}}finally{if(evaluation?.reason)instance.formObject.Hide?.();finish?.();this.library.get('screen').ActiveForm=previous;}}
+    if(modal){const evaluation=this.debugEvaluation,finish=this.host.beginModal?.(instance.formObject);try{while(instance.formObject.shown&&this.state!=='stopped'&&this.state!=='error'){evaluation?.check();if(this.state!=='paused'&&this.eventQueue.length)await this.runQueuedEvent(this.eventQueue.shift());else await new Promise(resolve=>setTimeout(resolve,8));}}finally{if(evaluation?.reason)instance.formObject.Hide?.();finish?.();this.library.get('screen').ActiveForm=previous;}}
   }
   async unloadForm(instance,mode=1){
     if(!instance?.__vbInstance)throw new VBError('Object required',424);if(!instance.loaded)return true;
@@ -7129,21 +7454,13 @@ class VirtualMachine extends Signal {
     }
     this.stack.push(frame);this.currentFrame=frame;
     try {await this.execute(frame);return frame.result.get();}
-    finally{for(const key of this.watchpointValues.keys())if(key.includes(':'+frame.depth+':'))this.watchpointValues.delete(key);this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
+    finally{this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&!this.debugEvaluation&&frame.proc.code.some(isSequencePoint))this.stepMode=null;if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
   }
   async checkpoint(ins,frame){
     if(this.state==='stopped')throw new StopExecution();
     if(this.debugEvaluation){await this.debugEvaluation.checkpoint();return;}
     this.instructionCount++;if(this.instructionCount>this.options.instructionLimit)throw new VBError(`Instruction budget exceeded (${this.options.instructionLimit.toLocaleString()}); execution stopped`,7);
-    const locationChanged=frame.lastLine!==ins.line||frame.pc<=frame.lastPc;const bp=!ins.implicit&&this.breakpoints.get(lower(ins.source)+':'+ins.line);
-    let pause=false,pauseReason=null;
-    if(locationChanged&&bp){pause=true;if(bp.condition){try{pause=truth(this.debugInspector.node(this.debugInspector.parse(bp.condition),frame,{count:0},0));}catch{pause=true;}}}
-    if(locationChanged&&this.stepMode){if(this.stepMode.mode==='into'||this.stepMode.mode==='over'&&frame.depth<=this.stepMode.depth||this.stepMode.mode==='out'&&frame.depth<this.stepMode.depth)pause=true;}
-    if(locationChanged&&this.runTarget&&lower(ins.source)===lower(this.runTarget.module)&&ins.line===this.runTarget.line){pause=true;pauseReason='run-to-cursor';this.runTarget=null;}
-    if(locationChanged&&this.watchpoints.length){for(const watch of this.watchpoints){if(watch.module&&lower(watch.module)!==lower(frame.module.name)||watch.procedure&&lower(watch.procedure)!==lower(frame.proc.name))continue;try{const value=this.debugInspector.node(watch.node,frame,{count:0},0),key=watch.id+':'+frame.depth+':'+lower(frame.module.name+'.'+frame.proc.name),prior=this.watchpointValues.get(key);if(watch.mode==='true'?truth(value):prior!==undefined&&!this.sameWatchValue(prior.value,value)){pause=true;pauseReason='watch:'+watch.expression;}this.watchpointValues.set(key,{value:this.watchSnapshot(value)});}catch{/* Out of scope or non-evaluable values do not run user code. */}}}
-    if(this.pauseRequested)pause=true;
-    frame.lastLine=ins.line;frame.lastPc=frame.pc;
-    if(pause){this.pauseRequested=false;this.stepMode=null;this.debugPauseId++;this.pauseReason=pauseReason||'breakpoint/step';const suspended=new Promise(resolve=>this.pauseResolver=resolve);this.setState('paused');this.currentFrame=frame;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:this.pauseReason,pauseId:this.debugPauseId});await suspended;this.pauseResolver=null;if(this.state==='stopped')throw new StopExecution();}
+    if(this.breakpoints.size||this.stepMode||this.runTarget||this.watchpoints.length||this.pauseRequested)await this.debugger.checkpoint(ins,frame);
     const now=performance.now();if(now-this.lastYield>=this.options.sliceMilliseconds){await new Promise(resolve=>setTimeout(resolve,0));this.lastYield=performance.now();if(this.state==='stopped')throw new StopExecution();}
   }
   applyEdits(project){
@@ -7154,35 +7471,36 @@ class VirtualMachine extends Signal {
     // class instances and suspended caller frames all observe the committed code.
     for(const {oldProc,newProc}of plan.updates)Object.assign(oldProc,newProc);
     for(const {frame,...update}of plan.frameUpdates)Object.assign(frame,update);
+    for(const frame of this.stack.slice(0,-1)){frame.activePc=frame.pc-1;frame.activeInstruction=frame.proc.code[frame.activePc];}
     for(const [key,module]of this.program.modules){const replacement=next.modules.get(key);for(const [name,proc]of replacement.procedures)if(!module.procedures.has(name))module.procedures.set(name,proc);module.source=replacement.source;}
     const breakpoints=[];for(const bp of this.breakpoints.values()){const mapped=plan.lineMap.get(lower(bp.module)+':'+bp.line);if(mapped===undefined)invalidated.push(bp);else breakpoints.push({...bp,line:mapped});}
     this.breakpoints=new Map(breakpoints.map(bp=>[lower(bp.module)+':'+bp.line,bp]));
-    this.program.sourceProject=structuredClone(project);this.codeRevision=(this.codeRevision||0)+1;
+    this.program.settings=next.settings;this.program.sourceProject=structuredClone(project);this.codeRevision=(this.codeRevision||0)+1;
     this.emit('breakpoints',breakpoints);
-    if(this.state==='paused'){const frame=this.currentFrame,ins=frame.proc.code[frame.pc];frame.lastLine=ins?.line??null;frame.lastPc=frame.pc;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:'code-edit'});}
+    if(this.state==='paused'){this.debugPauseId++;const frame=this.currentFrame,ins=frame.proc.code[frame.pc];frame.lastLine=ins?.line??null;frame.lastPc=frame.pc;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:'code-edit',pauseId:this.debugPauseId});}
     const result={revision:this.codeRevision,breakpoints,invalidatedBreakpoints:invalidated,updatedProcedures:plan.updates.length};
     this.emit('codeChanged',result);return result;
   }
-  setNextStatement(module,line){
+  setNextStatement(module,line,column=null){
     if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before moving execution',5);
     const frame=this.currentFrame;if(this.state!=='paused'||!frame)throw new VBError('Set Next Statement is available only in break mode',5);
     if(lower(module)!==lower(frame.module.name))throw new VBError('The next statement must remain in the active procedure',5);
-    frame.pc=nextStatementIndex(frame,Number(line));frame.lastPc=frame.pc;frame.lastLine=frame.proc.code[frame.pc].line;
-    this.emit('pause',{instruction:frame.proc.code[frame.pc],frame,stack:[...this.stack],reason:'set-next'});
+    frame.pc=nextStatementIndex(frame,Number(line),column);frame.debugRedirect=true;frame.lastPc=frame.pc;frame.lastLine=frame.proc.code[frame.pc].line;
+    this.debugPauseId++;this.emit('pause',{instruction:frame.proc.code[frame.pc],frame,stack:[...this.stack],reason:'set-next',pauseId:this.debugPauseId});
     return {source:frame.module.name,line:frame.lastLine,procedure:frame.proc.name};
   }
   pause(){if(this.state==='running')this.pauseRequested=true;}
-  resume(mode='continue'){if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
-  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.automationClose=this.automation?.close();this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
+  resume(mode='continue'){if(!['continue','into','over','out'].includes(mode))throw new VBError('Invalid stepping mode',5);if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
+  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();for(const event of this.eventQueue)event.resolve?.();this.eventQueue=[];this.runTarget=null;this.stepMode=null;this.pauseRequested=false;this.automationClose=this.automation?.close();this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
   async execute(frame){
-    while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.pc++;
+    while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.activePc=current;frame.activeInstruction=ins;frame.pc++;
       try{
         switch(ins.op){
           case 'dim':for(const decl of ins.decls)await this.declare(decl,frame,frame.locals,ins.static||frame.proc.static);break;
           case 'assign':{const ref=await this.reference(ins.target,frame,ins.objectSet);const value=await this.evaluate(ins.expr,frame);if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);await ref.set(ins.objectSet?value:await this.defaultValue(value));break;}
           case 'expr':await this.evaluate(ins.expr,frame);break;
           case 'print':{const values=[];for(const e of ins.exprs){const v=await this.defaultValue(await this.evaluate(e,frame));values.push(v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v));}this.output(values.join(' '),ins.newline);break;}
-          case 'assert':if(!truth(await this.evaluate(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);this.pauseRequested=true;}break;
+          case 'assert':if(this.options.debugStatements!==false&&!truth(await this.evaluate(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);await this.debugger.breakAfter(ins,frame,'assert');}break;
           case 'branch':{const test=truth(await this.evaluate(ins.test,frame));if(ins.invert?test:!test)frame.pc=ins.target;break;}
           case 'jump':frame.pc=ins.target;break;
           case 'computedJump':{
@@ -7222,7 +7540,7 @@ class VirtualMachine extends Signal {
           case 'gosub':frame.gosubStack.push(frame.pc);frame.pc=ins.target;break;
           case 'gosubReturn':if(!frame.gosubStack.length)throw new VBError('Return without GoSub',3);frame.pc=frame.gosubStack.pop();break;
           case 'return':if(frame.errorActive)this.err.Clear();return;
-          case 'stop':if(!this.debugEvaluation)this.pauseRequested=true;break;
+          case 'stop':if(this.options.debugStatements===false){this.stop();throw new StopExecution();}await this.debugger.breakAfter(ins,frame,'stop');break;
           case 'end':this.stop();throw new StopExecution();
           case 'form':{if(ins.expr.kind==='call'){const array=await this.evaluate(ins.expr.callee,frame,{raw:true});if(array?.__type==='ControlArray'){if(ins.expr.args.length!==1)throw new VBError('Control arrays require one index',450);const index=await this.evaluate(ins.expr.args[0],frame);if(ins.action==='load')array.Load(index);else array.Unload(index);break;}}const object=await this.evaluate(ins.expr,frame,{raw:true});if(ins.action==='unload')await this.unloadForm(object);else await this.loadForm(object);break;}
           case 'fileOpen':this.fs.open(await this.evaluate(ins.path,frame),ins.mode,await this.evaluate(ins.handle,frame),ins.recordLength?await this.evaluate(ins.recordLength,frame):128,ins.access,ins.sharing);break;
@@ -7242,34 +7560,83 @@ class VirtualMachine extends Signal {
         if(error instanceof StopExecution||error.debugEvaluationAbort)throw error;
         if(!(error instanceof VBError))error=new VBError(error.message||String(error),Number.isInteger(error.number)?error.number:5);
         error.source ||= ins.source;error.line ||= ins.line;if(error.erl===undefined)error.erl=frame.erl;this.lastErrorErl=error.erl;this.err.Number=error.number;this.err.Description=error.message;this.err.Source=error.source;this.err.HelpFile=error.helpFile||'';this.err.HelpContext=error.helpContext||0;this.lastError=error;
-        if(!frame.errorActive&&frame.errorMode!=='off'){frame.errorPc=current;if(frame.errorMode==='goto'){frame.errorActive=true;frame.pc=frame.errorTarget;}else frame.pc=current+1;}
+        const debugResult=await this.debugger.error(error,frame,current,ins);if(debugResult===true)continue;
+        const failedPc=typeof debugResult==='number'?debugResult:current;
+        if(!frame.errorActive&&frame.errorMode!=='off'){frame.errorPc=failedPc;if(frame.errorMode==='goto'){frame.errorActive=true;frame.pc=frame.errorTarget;}else frame.pc=failedPc+1;}
         else throw error;
       }
     }
   }
   parseCSV(text){const values=[];let quoted=false,s='',wasString=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){wasString=true;if(quoted&&text[i+1]==='"'){s+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){values.push(wasString?s:Number(s));s='';wasString=false;}else s+=c;}values.push(wasString?s:Number(s));return values;}
   reportError(error){if(error instanceof StopExecution)return;this.lastError=error;this.emit('error',{message:error.message,number:error.number||5,source:error.source,line:error.line});this.host.error?.(error);this.setState('error');}
+  // Trusted host input uses the normal interpreter queue, including debugger
+  // stepping and DoEvents. Pending mouse motion is latest-value, per target and
+  // actual instance; timers retain their existing dispatch/coalescing contract.
+  enqueueInput(instance,key,action,{coalesce=false,valid=()=>true}={}){
+    if(!['running','idle'].includes(this.state)||!valid())return Promise.resolve();
+    const epoch=this.inputEpoch||0,guarded=()=>epoch===(this.inputEpoch||0)&&['running','idle'].includes(this.state)&&valid()?action():undefined;
+    // Never move later pointer state ahead of a key/button/timer boundary.
+    let existing;
+    if(coalesce)for(let i=this.eventQueue.length-1;i>=0;i--){const pending=this.eventQueue[i];if(!pending.input||!pending.coalesce)break;if(pending.instance===instance&&pending.key===key){existing=pending;break;}}
+    if(existing){existing.action=guarded;return existing.promise;}
+    if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest input discarded.');return Promise.resolve();}
+    const event={input:true,coalesce,instance,key,action:guarded};event.promise=new Promise(resolve=>event.resolve=resolve);
+    this.eventQueue.push(event);this.processEvents();return event.promise;
+  }
   dispatch(module,name,args=[],{coalesce=false}={}){
-    if(this.state==='stopped'||this.state==='error')return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
+    if(this.state==='stopped'||this.state==='error'||this.immediateContext)return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
     if(coalesce&&this.eventQueue.some(e=>e.key===key))return Promise.resolve();if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest event discarded.');return Promise.resolve();}
     return new Promise((resolve,reject)=>{this.eventQueue.push({instance,proc,args,key,resolve,reject});this.processEvents();});
   }
   async runQueuedEvent(event){try{event.resolve(await(event.action?event.action():this.callProcedure(event.instance,event.proc,event.args)));}catch(error){if(!(error instanceof StopExecution))this.reportError(error);event.resolve(undefined);}}
-  async processEvents(){if(this.processing||this.stack.length)return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
-  async immediate(text,options={}){if(this.state==='paused')return this.evaluateExplicit(text,{...options,immediate:true});return this.immediateAt(text);}
-  async immediateAt(text,selectedFrame=null){const instance=this.instances.values().next().value;if(!selectedFrame&&!this.currentFrame&&!instance)throw new VBError('Start the runtime before evaluating an expression',5);const frame=selectedFrame||this.currentFrame||this.makeFrame(instance);if(!frame.instance)throw new VBError('Start the runtime before evaluating an expression',5);if(/^\s*\?/.test(text)){const value=await this.evaluate(parseExpression(text.replace(/^\s*\?/,'')),frame);this.output(describe(value));return value;}const assignment=String(text).match(/^\s*(?:Let\s+|Set\s+)?([A-Za-z_][A-Za-z0-9_.$%&!#@]*(?:\([^)]*\))?)\s*=\s*([\s\S]+)$/i);if(assignment){const ref=await this.reference(parseExpression(assignment[1]),frame);const value=await this.evaluate(parseExpression(assignment[2]),frame,{raw:/^\s*Set\s/i.test(text)});await ref.set(value);return value;}const value=await this.evaluate(parseCall(text),frame);if(value!==undefined)this.output(describe(value));return value;}
+  async processEvents(){if(this.processing||this.stack.length||this.state==='paused'||this.debugEvaluation||this.immediateContext)return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
+  async immediate(text,options={}){
+    if(this.state==='paused')return this.evaluateExplicit(text,{...options,immediate:true});
+    if(!['ready','idle','running'].includes(this.state)||this.stack.length)throw new VBError('Pause execution before using the Immediate window',5);
+    if(!this.instances.size)throw new VBError('Start or prepare the runtime before evaluating an expression',5);
+    return this.evaluateExplicit(text,{...options,immediate:true,allowIdle:true});
+  }
+  async immediateAt(text,selectedFrame=null){
+    const instance=this.instances.values().next().value,frame=selectedFrame||this.currentFrame||(instance&&this.makeFrame(instance));
+    if(!frame?.instance)throw new VBError('Start the runtime before evaluating an expression',5);
+    if(this.state==='running'&&this.stack.length&&!selectedFrame)throw new VBError('Pause execution before using the Immediate window',5);
+    text=String(text);if(text.length>65536)throw new VBError('Enter at most 65,536 characters',5);
+    let value;
+    for(let statement of immediateStatements(text)){
+      this.debugEvaluation?.check();statement=statement.trim();if(!statement)continue;
+      if(/^\?/.test(statement)||/^(?:Debug\.)?Print\b/i.test(statement)){
+        const expression=statement.replace(/^(?:\?|(?:Debug\.)?Print\s*)/i,'');
+        value=await this.evaluate(parseExpression(expression),frame);this.output(describe(value));continue;
+      }
+      const objectSet=/^Set\s/i.test(statement),source=statement.replace(/^(?:Let|Set)\s+/i,'');
+      let depth=0,equal=null;for(const token of tokenize(source)){if(token.value==='(')depth++;else if(token.value===')')depth--;else if(token.value==='='&&depth===0){equal=token;break;}}
+      if(equal){
+        const target=parseExpression(source.slice(0,equal.start));if(!['id','member','call'].includes(target.kind))throw new VBError('Invalid assignment target',1002);
+        const ref=await this.reference(target,frame,objectSet);
+        value=await this.evaluate(parseExpression(source.slice(equal.end)),frame);
+        if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);
+        await ref.set(objectSet?value:await this.defaultValue(value));
+      }else{
+        value=await this.evaluate(parseCall(statement.replace(/^Call\s+/i,'')),frame);if(value!==undefined)this.output(describe(value));
+      }
+    }
+    return value;
+  }
   debugAwait(value){return this.debugEvaluation?this.debugEvaluation.wait(value):value;}
   cancelEvaluation(){this.debugEvaluation?.cancel();return {cancelled:!!this.debugEvaluation};}
-  async evaluateExplicit(text,{frameIndex=null,pauseId,instructionLimit=100000,timeLimit=5000,immediate=false}={}){
-    if(this.state!=='paused')throw new VBError('Explicit debugger evaluation requires break mode',5);
+  async evaluateExplicit(text,{frameIndex=null,pauseId,instructionLimit=100000,timeLimit=5000,immediate=false,allowIdle=false,module=null}={}){
+    if(this.state!=='paused'&&!(allowIdle&&immediate&&!this.stack.length&&['ready','idle','running'].includes(this.state)))throw new VBError('Explicit debugger evaluation requires break mode',5);
     if(this.debugEvaluation)throw new VBError('Another debugger evaluation is in progress',5);
     if(pauseId!==undefined&&pauseId!==this.debugPauseId)throw new VBError('The debugger context changed; refresh before evaluating',5);
     text=String(text);if(!text.trim()||text.length>65536)throw new VBError('Enter an expression of at most 65,536 characters',5);
-    const frame=this.debugInspector.frame(frameIndex);if(!frame)throw new VBError('No selected stack frame',5);
+    let frame=this.debugInspector.frame(frameIndex);
+    if(this.state!=='paused'&&module!==null){const instance=this.instances.get(lower(module));if(!instance)throw new VBError('No initialized module context: '+module,5);frame=this.makeFrame(instance);}
+    if(!frame)throw new VBError('No selected stack frame',5);
+    if(this.state!=='paused'){this.immediateFrames ||= new WeakMap();const instance=frame.instance;if(!this.immediateFrames.has(instance))this.immediateFrames.set(instance,frame);frame=this.immediateFrames.get(instance);}
     const session=new DebugEvaluationSession(this,{instructionLimit,timeLimit}),saved={frame:this.currentFrame,err:{...this.err},lastError:this.lastError,erl:this.lastErrorErl,step:this.stepMode,pauseRequested:this.pauseRequested,runTarget:this.runTarget};
     this.debugEvaluation=session;this.currentFrame=frame;this.emit('evaluation',{active:true,frameIndex:this.stack.indexOf(frame)});
     try {const value=immediate?await this.immediateAt(text,frame):await this.evaluate(parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return value;}
-    finally {session.dispose();this.debugEvaluation=null;this.currentFrame=saved.frame;if(this.state==='stopped')this.pauseResolver?.();Object.assign(this.err,saved.err);this.lastError=saved.lastError;this.lastErrorErl=saved.erl;this.stepMode=saved.step;this.pauseRequested=saved.pauseRequested;this.runTarget=saved.runTarget;this.emit('evaluation',{active:false,instructions:session.instructions,milliseconds:performance.now()-session.started});}
+    finally {session.dispose();this.debugEvaluation=null;this.currentFrame=saved.frame;if(this.state==='stopped')this.pauseResolver?.();Object.assign(this.err,saved.err);this.lastError=saved.lastError;this.lastErrorErl=saved.erl;this.stepMode=saved.step;this.pauseRequested=saved.pauseRequested;this.runTarget=saved.runTarget;this.emit('evaluation',{active:false,instructions:session.instructions,milliseconds:performance.now()-session.started});if(this.eventQueue.length&&!this.stack.length&&this.state!=='paused')queueMicrotask(()=>this.processEvents());}
   }
   async evaluateWatch(text,options={}){return this.debugInspector.evaluate(text,options.frameIndex??null);}
   inspectDebug(expression,options={}){return this.debugInspector.inspect(expression,options);}
@@ -7278,7 +7645,7 @@ class VirtualMachine extends Signal {
   setWatchpoints(watches=[]){if(!Array.isArray(watches)||watches.length>100)throw new VBError('At most 100 break watches are supported',5);const next=watches.map((w,i)=>{if(!['true','change'].includes(w.mode))throw new VBError('Invalid watch type',5);return {id:String(w.id??i),expression:String(w.expression),mode:w.mode,module:String(w.module||''),procedure:String(w.procedure||''),node:this.debugInspector.parse(w.expression)};});this.watchpoints=next;this.watchpointValues.clear();}
   watchSnapshot(value){return value instanceof VBDecimal?{decimal:value}:value instanceof VBCurrency?{currency:value.raw}:value instanceof Date?{date:value.getTime()}:value instanceof VBErrorValue?{error:value.number}:value;}
   sameWatchValue(before,after){if(before&&typeof before==='object'){if(Object.hasOwn(before,'decimal'))return after instanceof VBDecimal&&before.decimal.compare(after)===0;if(Object.hasOwn(before,'currency'))return after instanceof VBCurrency&&before.currency===after.raw;if(Object.hasOwn(before,'date'))return after instanceof Date&&before.date===after.getTime();if(Object.hasOwn(before,'error'))return after instanceof VBErrorValue&&before.error===after.number;}return Object.is(before,after);}
-  runToCursor(module,line){if(this.state!=='paused')throw new VBError('Run to Cursor requires break mode',5);const source=this.program.modules.get(lower(module));if(!source||![...source.procedures.values()].some(p=>p.code.some(ins=>ins.line===line)))throw new VBError('The selected line is not executable',5);this.runTarget={module:source.name,line};this.resume('continue');return {module:source.name,line};}
+  runToCursor(module,line,column=null){if(this.state!=='paused')throw new VBError('Run to Cursor requires break mode',5);const target=this.breakpointLocation(module,line,column);this.runTarget=target;this.resume('continue');return target;}
   locals(){return this.debugInspector.locals({includeFields:false}).map(({name,type,value})=>({name,type,value}));}
   saveSetting(app,section,key,value){const k=[app,section,key].join('/');this.settings[k]=String(value);this.host.persist?.();}
   getSetting(app,section,key,def=''){return this.settings[[app,section,key].join('/')]??def;}
@@ -7289,19 +7656,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[78]=(()=>{
-const {RuntimeAgentControl}=__modules[63];
-const {RuntimeMDI}=__modules[64];
-const {runtimeDialog,messageBoxOptions}=__modules[65];
+__modules[80]=(()=>{
+const {RuntimeAgentControl}=__modules[64];
+const {RuntimeMDI}=__modules[65];
+const {runtimeDialog,messageBoxOptions}=__modules[66];
 const { applyTheme, themeId }=__modules[38];
-const { icon }=__modules[57];
+const { icon }=__modules[58];
 const {rasterDataURL}=__modules[43];
 const { el, download, lower, clone }=__modules[13];
-const { compileProject }=__modules[71];
-const { VirtualMachine }=__modules[77];
+const { compileProject }=__modules[72];
+const { VirtualMachine }=__modules[79];
 const { VirtualFileSystem }=__modules[35];
 const { describe }=__modules[14];
-const { BrowserForm }=__modules[62];
+const { BrowserForm }=__modules[63];
 
 
 
@@ -7320,27 +7687,32 @@ class ApplicationHost {
   async createForm(model,instance,vm){const form=new BrowserForm(model,{vm,instance,assets:this.project.assets||{},backend:this.project.settings?.renderer||'auto',onBackend:backend=>{this.backend=backend;this.send('backend',{backend});}});this.forms.push(form);this.console.hidden=true;this.stage.append(form.node);this.mdi.register(form);this.layoutForms();return form;}
   beginModal(form){this.modalForms ||= [];this.modalForms.push(form);const update=()=>{const top=this.modalForms.at(-1);for(const f of this.forms){f.node.inert=!!top&&f!==top;f.node.setAttribute('aria-modal',String(f===top));if(f===top)f.node.style.zIndex=String(200000+this.modalForms.length);}};update();return()=>{this.modalForms=this.modalForms.filter(f=>f!==form);update();};}
   layoutForms(){const width=this.container.clientWidth||innerWidth,height=this.container.clientHeight||innerHeight;this.forms.forEach((form,index)=>{if(form.movedByUser||form.mdiChild)return;const naturalWidth=Number(form.props.ClientWidth??form.props.Width)/15+8,naturalHeight=Number(form.props.ClientHeight??form.props.Height)/15+32,scale=Math.min(1,(width-16)/naturalWidth,(height-16)/naturalHeight);if(width<640||height<480){form.node.style.transform=`scale(${Math.max(.3,scale)})`;form.node.style.transformOrigin='top left';form.props.Left=Math.max(4,(width-naturalWidth*scale)/2)*15;form.props.Top=Math.max(4,(height-naturalHeight*scale)/2)*15;}else{form.node.style.transform='';if(Number(form.props.StartUpPosition)!==0){form.props.Left=Math.max(8,(width-naturalWidth)/2+index*20)*15;form.props.Top=Math.max(8,(height-naturalHeight)/2+index*20)*15;}}form.refresh();});this.mdi.layout();}
-  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{win32Options:this.options.win32,automation:this.options.automation,controlRegistry:this.options.controlRegistry,fs:this.fs,settings:this.settings,dataFetch:this.options.dataFetch,dataCredential:this.options.dataCredential||(name=>this.modal('Data Connection Credentials','Runtime bearer token for '+name+' (not saved):',[{caption:'&OK',value:1},{caption:'&Cancel',value:0}],'',{inputType:'password'})),createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000});
-    this.vm.on('evaluation',data=>this.send('evaluation',data));this.vm.on('state',state=>this.send('state',{state}));this.vm.on('pause',e=>{this.send('pause',{source:e.instruction.source,line:e.instruction.line,procedure:e.instruction.procedure,reason:e.reason,pauseId:this.vm.debugPauseId,locals:this.vm.debugLocals(),stack:e.stack.map((f,index)=>({index,module:f.module.name,procedure:f.proc.name,line:f.proc.code[Math.min(f.pc,f.proc.code.length-1)]?.line||0,depth:f.depth}))});});this.vm.on('stop',()=>this.send('stopped'));this.vm.on('error',error=>this.send('error',{error}));
-    for(const bp of this.options.breakpoints||[])this.vm.setBreakpoint(bp.module,bp.line,bp.condition||'');
+  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{win32Options:this.options.win32,automation:this.options.automation,controlRegistry:this.options.controlRegistry,debugInteraction:()=>this.send('interaction'),fs:this.fs,settings:this.settings,dataFetch:this.options.dataFetch,dataCredential:this.options.dataCredential||(name=>this.modal('Data Connection Credentials','Runtime bearer token for '+name+' (not saved):',[{caption:'&OK',value:1},{caption:'&Cancel',value:0}],'',{inputType:'password'})),createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000,debuggerEnabled:!!(this.options.bridgeToken||this.options.debuggerEnabled),debugStatements:!!(this.options.bridgeToken||this.options.debuggerEnabled),errorTrapping:this.options.errorTrapping||this.project.settings?.errorTrapping||'unhandled'});
+    this.vm.on('evaluation',data=>this.send('evaluation',data));this.vm.on('state',state=>this.send('state',{state}));this.vm.on('pause',e=>{this.send('pause',{source:e.instruction.source,line:e.instruction.line,column:e.instruction.column,endColumn:e.instruction.endColumn,procedure:e.instruction.procedure,reason:e.reason,error:e.error,conditionError:e.conditionError,watch:e.watch,pauseId:this.vm.debugPauseId,locals:this.vm.debugLocals(),stack:this.vm.debugStack()});});this.vm.on('stop',()=>this.send('stopped'));this.vm.on('error',error=>this.send('error',{error}));
+    for(const bp of this.options.breakpoints||[]){try{this.vm.setBreakpoint(bp.module,bp.line,bp.condition||'',bp.enabled!==false);}catch(error){this.send('output',{text:'Unresolved breakpoint '+bp.module+':'+bp.line+' — '+error.message,newline:true});}}
+    this.vm.setWatchpoints(this.options.watchpoints||[]);
     this.vm.library.set('loadpicture',path=>{if(!path)return '';const key=Object.keys(this.project.assets||{}).find(k=>k.toLowerCase()===String(path).replace(/\\/g,'/').toLowerCase());if(key)return key;if(this.fs.exists(path)){const bytes=this.fs.readBytes(path),image=rasterDataURL(bytes);if(image)return image;const text=this.fs.read(path);if(/^data:image\//.test(text))return text;}throw new Error('Image not found or not a supported raster: '+path);});
-    try{await this.vm.start({breakOnEntry:!!this.options.breakOnEntry});this.layoutForms();this.send('ready',{name:this.project.name,backend:this.backend,instructions:this.vm.instructionCount});this.autosave=setInterval(()=>{if(this.fs.dirty){this.persist();this.fs.dirty=false;}},1000);return this.vm;}catch(error){this.send('error',{error:{message:error.message,number:error.number,source:error.source,line:error.line}});return this.vm;}
+    try{if(this.options.immediateContext)await this.vm.prepareImmediateContext();else await this.vm.start({breakOnEntry:!!this.options.breakOnEntry,runToCursor:this.options.runToCursor||null});this.layoutForms();this.send('ready',{name:this.project.name,backend:this.backend,instructions:this.vm.instructionCount});this.autosave=setInterval(()=>{if(this.fs.dirty){this.persist();this.fs.dirty=false;}},1000);return this.vm;}catch(error){this.send('error',{error:{message:error.message,number:error.number,source:error.source,line:error.line}});return this.vm;}
   }
   persist(){if(this.options.persist===false)return;try{localStorage.setItem(this.storageKey,JSON.stringify({vfs:this.fs.snapshot(),settings:this.settings}));}catch{this.send('storage',{message:'Persistent storage is unavailable. This session still works in memory.'});}}
   async onBridgeMessage(event){const data=event.data;if(event.source!==window.parent||data?.channel!=='vb6-ide'||data.token!==this.options.bridgeToken)return;const vm=this.vm;if(!vm)return;try{if(data.agentGuard){if(data.agentGuard.state!==vm.state&&!(data.agentGuard.state==='running'&&vm.state==='idle'))throw new Error('Runtime state changed before the command.');if(data.agentGuard.state==='paused'&&data.agentGuard.pauseId!==vm.debugPauseId)throw new Error('Stale debugger pause.');}switch(data.command){
       case 'agentInspect':this.agentControl ||= new RuntimeAgentControl(this);this.send('commandResult',{id:data.id,ok:true,result:this.agentControl.inspect(data)});break;
       case 'agentInteract':this.agentControl ||= new RuntimeAgentControl(this);this.send('commandResult',{id:data.id,ok:true,result:this.agentControl.interact(data)});break;
       case 'agentSnapshot':this.send('commandResult',{id:data.id,ok:true,result:{vfs:this.fs.snapshot(),settings:clone(this.settings)}});break;
+      case 'designImmediate':{if(!this.options.immediateContext)throw new Error('Not a design-mode Immediate session');const value=await vm.immediate(String(data.text),{module:data.module??null,instructionLimit:data.instructionLimit??100000,timeLimit:data.timeLimit??5000});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value)}});break;}
       case 'agentImmediate':{const value=await vm.immediate(String(data.text),{frameIndex:data.frameIndex??null,pauseId:data.pauseId});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value),locals:vm.debugLocals({frameIndex:data.frameIndex??null})}});break;}
       case 'debugEvaluate':{const value=await vm.evaluateExplicit(String(data.expression),{frameIndex:data.frameIndex??null,pauseId:data.pauseId,instructionLimit:data.instructionLimit??100000,timeLimit:data.timeLimit??5000});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value),locals:vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:vm.debugPauseId}});break;}
+      case 'debuggerOptions':this.send('commandResult',{id:data.id,ok:true,result:vm.configureDebugger({errorTrapping:data.errorTrapping})});break;
+      case 'resumeError':this.send('commandResult',{id:data.id,ok:true,result:vm.resumeError(data.action)});break;
+      case 'debugStack':this.send('commandResult',{id:data.id,ok:true,result:{stack:vm.debugStack(),pauseId:vm.debugPauseId}});break;
       case 'cancelEvaluation':this.send('commandResult',{id:data.id,ok:true,result:vm.cancelEvaluation()});break;
       case 'debugInspect':this.send('commandResult',{id:data.id,ok:true,result:vm.inspectDebug(String(data.expression),{frameIndex:data.frameIndex??null,offset:data.offset,limit:data.limit})});break;
       case 'debugLocals':this.send('commandResult',{id:data.id,ok:true,result:{locals:vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:vm.debugPauseId}});break;
       case 'debugAssign':this.send('commandResult',{id:data.id,ok:true,result:{entry:vm.assignDebug(String(data.expression),String(data.value),{frameIndex:data.frameIndex??null,pauseId:data.pauseId}),locals:vm.debugLocals({frameIndex:data.frameIndex??null})}});break;
-      case 'runToCursor':this.send('commandResult',{id:data.id,ok:true,result:vm.runToCursor(String(data.module),Number(data.line))});break;
+      case 'runToCursor':this.send('commandResult',{id:data.id,ok:true,result:vm.runToCursor(String(data.module),Number(data.line),data.column??null)});break;
       case 'watchpoints':vm.setWatchpoints(data.watches||[]);break;
-      case 'applyEdits':{const result=vm.applyEdits(data.project);this.project=clone(data.project);this.send('commandResult',{id:data.id,ok:true,result});break;}case 'setNextStatement':{const result=vm.setNextStatement(data.module,Number(data.line));this.send('commandResult',{id:data.id,ok:true,result});break;}case 'pause':vm.pause();break;case 'resume':vm.resume(data.mode||'continue');break;case 'stop':vm.stop();break;case 'breakpoints':vm.breakpoints.clear();for(const bp of data.breakpoints||[])vm.setBreakpoint(bp.module,bp.line,bp.condition||'');break;case 'immediate':{const value=await vm.immediate(String(data.text),{frameIndex:data.frameIndex??null,pauseId:data.pauseId});this.send('immediate',{id:data.id,value:describe(value),locals:vm.locals()});break;}case 'watch':{const values=[];for(const text of (data.expressions||[]).slice(0,100)){try{const result=vm.inspectDebug(text,{frameIndex:data.frameIndex??null,limit:1});values.push({...result,expression:text});}catch(error){values.push({expression:text,value:'<'+error.message+'>'});}}this.send('watches',{values});break;}case 'snapshot':this.send('snapshot',{vfs:this.fs.snapshot(),settings:this.settings});break;}}catch(error){if(data.command==='immediate')this.send('output',{text:'Error: '+error.message,newline:true});else if(data.id)this.send('commandResult',{id:data.id,ok:false,error:{message:error.message,number:error.number,source:error.source,line:error.line}});else this.send('output',{text:'Error: '+error.message,newline:true});}}
-  modal(title,body,buttons=[{caption:'OK',value:1}],input=null,options={}){const result=runtimeDialog(this,title,body,buttons,input,options),dialog=this.dialogs.at(-1);if(this.vm?.debugEvaluation&&dialog)this.vm.debugEvaluation.dialogs.add(dialog);return result;}
+      case 'applyEdits':{const result=vm.applyEdits(data.project);this.project=clone(data.project);this.send('commandResult',{id:data.id,ok:true,result});break;}case 'setNextStatement':{const result=vm.setNextStatement(data.module,Number(data.line),data.column??null);this.send('commandResult',{id:data.id,ok:true,result});break;}case 'pause':vm.pause();break;case 'resume':vm.resume(data.mode||'continue');break;case 'stop':vm.stop();break;case 'breakpoints':vm.replaceBreakpoints(data.breakpoints||[]);break;case 'immediate':{const value=await vm.immediate(String(data.text),{frameIndex:data.frameIndex??null,pauseId:data.pauseId});this.send('immediate',{id:data.id,value:describe(value),locals:vm.locals()});break;}case 'watch':{const values=[];for(const text of (data.expressions||[]).slice(0,100)){try{const result=vm.inspectDebug(text,{frameIndex:data.frameIndex??null,limit:1});values.push({...result,expression:text});}catch(error){values.push({expression:text,value:'<'+error.message+'>'});}}this.send('watches',{values});break;}case 'snapshot':this.send('snapshot',{vfs:this.fs.snapshot(),settings:this.settings});break;}}catch(error){if(data.command==='immediate')this.send('output',{text:'Error: '+error.message,newline:true});else if(data.id)this.send('commandResult',{id:data.id,ok:false,error:{message:error.message,number:error.number,source:error.source,line:error.line}});else this.send('output',{text:'Error: '+error.message,newline:true});}}
+  modal(title,body,buttons=[{caption:'OK',value:1}],input=null,options={}){if(this.options.immediateContext)this.send('interaction');const result=runtimeDialog(this,title,body,buttons,input,options),dialog=this.dialogs.at(-1);if(this.vm?.debugEvaluation&&dialog)this.vm.debugEvaluation.dialogs.add(dialog);return result;}
   msgBox(text,style=0,title=this.project.name){const options=messageBoxOptions(style);return this.modal(title,text,options.buttons,null,options);}
   inputBox(text,title=this.project.name,def=''){return this.modal(title,text,[{caption:'OK',value:1},{caption:'Cancel',value:''}],String(def));}
   showError(error){this.send('output',{text:`Run-time error '${error.number||5}': ${error.message}\n${error.source||''}, line ${error.line||0}`,newline:true});this.modal(this.project.name,`Run-time error '${error.number||5}':\n\n${error.message}\n\n${error.source||''}, line ${error.line||0}`);}
@@ -7354,7 +7726,7 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[79]=(()=>{
+__modules[81]=(()=>{
 const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[7];
 const {AutomationRegistry}=__modules[15];
 const {ControlAdapterRegistry}=__modules[16];
@@ -7369,14 +7741,14 @@ const {readRES,writeRES,setResource,setResourceString}=__modules[44];
 const {THEMES,applyTheme,colorValue}=__modules[38];
 const {MemoryRecordset}=__modules[51];
 const {RichTextDocument,parseRTF,writeRTF}=__modules[52];
-const { ApplicationHost }=__modules[78];
-const { VirtualMachine }=__modules[77];
-const { compileProject, compileModule }=__modules[71];
-const { parseExpression }=__modules[69];
+const { ApplicationHost }=__modules[80];
+const { VirtualMachine }=__modules[79];
+const { compileProject, compileModule }=__modules[72];
+const { parseExpression }=__modules[70];
 const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[14];
 const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[9];
 const { VirtualFileSystem }=__modules[35];
-const { BrowserControl, BrowserForm }=__modules[62];
+const { BrowserControl, BrowserForm }=__modules[63];
 const { GraphicsSurface }=__modules[39];
 
 
@@ -7406,5 +7778,5 @@ const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Bro
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[79];
+globalThis["VB6Runtime"]=__modules[81];
 })();

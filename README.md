@@ -6,6 +6,10 @@ A browser-native classic Visual Basic development environment, source runtime an
 
 **Not a complete, native or pixel-identical Microsoft VB6 replacement.** Detailed supported behavior and limits are in [Compatibility](docs/COMPATIBILITY.md), with [release notes](docs/RELEASE-NOTES-0.6.0.md) and [validation](docs/TESTING.md).
 
+## Debugger and runtime execution control
+
+The classic debugger now includes statement-level stepping and source highlighting, all three Error Trapping modes, recoverable error breaks with retained live frames, scoped break watches, column-aware Run to Cursor and Set Next Statement, and improved caller-frame inspection and Immediate assignment. See the [debugger guide](docs/DEBUGGER.md) for shortcuts, runtime APIs, validation, and remaining compatibility limits.
+
 ## Data sources
 
 Classic Data Environment/Data View and Data Link Properties now share a provider-backed ADO-style layer with exported HTML/Electron apps. Use embedded offline **SQLite**, **REST CRUD**, **OData**, **GraphQL**, **JSON/CSV**, or an authenticated native gateway for PostgreSQL, MySQL, SQL Server and installed OLE DB/ODBC providers. Four runnable examples demonstrate SQLite editing and modern HTTP data sources.
@@ -16,7 +20,7 @@ See [data sources, examples and deployment](docs/DATA-SOURCES.md) for the compat
 
 Classic List Members, List Constants, Complete Word, Quick Info and Parameter Info now share typed resolution across source panes, Immediate, Watch and Evaluation fields. Nested `With`, arrays/default members, classes/UDTs/enums, runtime/data adapters and explicit portable reference metadata feed the same Object Browser. Automatic assistance never executes project code or opens a connection.
 
-See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
+See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). The [browser compatibility follow-up](docs/INTELLISENSE-COMPATIBILITY.md) adds WithEvents/interface handler dropdowns, labels, reference priority, strict metadata validation and DAO-specific typed chains. Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
 
 ## Run
 
