@@ -1,0 +1,61 @@
+name: Apply Win32 browser test corrections
+on:
+  push:
+    branches: [feature/win32-browser-compat]
+    paths: ['.github/workflows/win32-test-fixes.yml']
+permissions:
+  contents: read
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/feature/win32-browser-compat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+      - name: Apply exact reviewed test corrections
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python - <<'PY'
+          import hashlib, ast
+          from pathlib import Path
+          def blob(s):
+              b=s.encode()
+              return hashlib.sha1(f'blob {len(b)}\0'.encode()+b).hexdigest()
+          p=Path('tools/browser-win32-compat-tests.py')
+          s=p.read_text()
+          assert blob(s)=='1102e47b0d018fdfacb0c7f578ba426806e03e88'
+          before="    check(page.evaluate('vb6Application.vm.lastError?.message || null') is None, 'Runtime error')"
+          added='    # VM state becomes running before asynchronous Form_Load has finished.\n    # Wait for its observable output, not a fixed delay or only the VM state.\n'
+          added+='    page.wait_for_function('+"'''"+'vb6Application.vm.lastError || document.querySelector(\'[data-control="txtValue"] input\')?.value === "Hello from kernel32 and user32!"'+"'''"+')\n'
+          assert s.count(before)==1
+          s=s.replace(before,added+before)
+          assert blob(s)=='ab2435d1be2c29e0e1b75eaa324c783c1edab513'
+          ast.parse(s);p.write_text(s)
+          p=Path('tools/browser-visual-tests.py')
+          s=p.read_text()
+          assert blob(s)=='5746cdbfc2b66ca0501e5b25716c11c2f6f63994'
+          before="check(d.get_by_role('option').count()==16)"
+          assert s.count(before)==1
+          s=s.replace(before,"check(d.get_by_role('option').count()==17)")
+          before="for name in ('SQLite Customers','REST Customers','Public REST Users','GraphQL and OData')"
+          assert s.count(before)==1
+          s=s.replace(before,"for name in ('SQLite Customers','REST Customers','Public REST Users','GraphQL and OData','Win32 API Workbench')")
+          assert blob(s)=='6d10770b16a655eb083cf1ce5259f3f7ca86a164'
+          ast.parse(s);p.write_text(s)
+          PY
+          git diff --check
+          git diff --stat
+          git fetch origin feature/win32-browser-compat
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD"
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git add tools/browser-win32-compat-tests.py tools/browser-visual-tests.py
+          git commit -m 'test(win32-browser): await Form_Load output and cover new project template'
+          git push origin HEAD:refs/heads/feature/win32-browser-compat
