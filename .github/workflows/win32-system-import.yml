@@ -1,0 +1,73 @@
+name: Import reviewed Win32 system APIs
+on:
+  push:
+    branches: [feature/win32-browser-system-apis]
+    paths: [.github/workflows/win32-system-import.yml]
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply hash-verified reviewed sources
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, lzma
+          from pathlib import Path
+          parts=sorted(Path('.win32-system-transfer').glob('*.b64'))
+          assert len(parts)==4
+          raw=lzma.decompress(base64.b64decode(''.join(p.read_text() for p in parts)))
+          assert hashlib.sha256(raw).hexdigest()=='665f6ce348d0ce603fd70e509186c5b1206b2d9a6769bc709b3479fbed9e55f4'
+          changes=json.loads(raw)
+          for r in changes:
+              p=Path(r['path'])
+              assert not p.is_absolute() and '..' not in p.parts
+              if r['base'] is None:
+                  assert not p.exists(),str(p)
+                  text=r['text']
+              else:
+                  text=p.read_text(encoding='utf-8')
+                  assert hashlib.sha256(text.encode()).hexdigest()==r['base'],str(p)
+                  for a,b,replacement in reversed(r['edits']):
+                      text=text[:a]+replacement+text[b:]
+              assert hashlib.sha256(text.encode()).hexdigest()==r['sha256'],str(p)
+              p.parent.mkdir(parents=True,exist_ok=True)
+              p.write_text(text,encoding='utf-8')
+              print(p,r['sha256'])
+          PY
+      - name: Build, regressions and isolated package
+        run: |
+          npm run build
+          npm test | tee /tmp/win32-system-tests.txt
+          npm run pack:win32-browser | tee /tmp/win32-system-package.txt
+      - name: Remove transfer helpers and commit reviewed sources
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git rm -r .win32-system-transfer .github/workflows/win32-system-import.yml
+          git add README.md packages/win32-browser src/project/win32-example.js src/project/win32-system-example.js src/runtime/win32.js tests/win32-browser-extended-vm.test.mjs tests/win32-browser-package.test.mjs tools/browser-win32-compat-tests.py tools/pack-win32-browser.mjs tools/win32-browser-oracle.mjs tools/win32-browser-oracle.ps1 .github/workflows/win32-browser-oracle.yml dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          test "$(git ls-remote origin refs/heads/feature/win32-browser-system-apis | cut -f1)" = "$EXPECTED_SHA"
+          git commit -m 'feat(win32-browser): add file discovery, NLS, synchronization and registry APIs'
+          git push origin HEAD:refs/heads/feature/win32-browser-system-apis
+          git rev-parse HEAD HEAD^{tree} > /tmp/win32-system-revision.txt
+          git bundle create /tmp/win32-system-source.bundle HEAD refs/remotes/origin/main
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-system-import-validation
+          path: |
+            /tmp/win32-system-tests.txt
+            /tmp/win32-system-package.txt
+            /tmp/win32-system-revision.txt
+            /tmp/win32-system-source.bundle
+          retention-days: 7
