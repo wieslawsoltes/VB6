@@ -41,6 +41,7 @@ jobs:
             subprocess.run(['git','checkout','--ours','--',p],check=True)
             subprocess.run(['git','add','--',p],check=True)
           PY
+          fi
           npm run build
           npm test
           git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
