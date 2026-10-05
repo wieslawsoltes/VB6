@@ -1,3 +1,4 @@
+import {attachNativeWindowState} from './native-window-state.js';
 import {dataSidecarPath,decodeDataSidecar} from '../data/project-sidecar.js';
 /** VB6 project/workspace interchange. No native code, COM activation or network I/O. */
 import {newProject,newId,normalizeProject} from './model.js';
@@ -100,6 +101,7 @@ function singleProject(entries,path,options,api,diagnostics){
   for(const reference of project.references)diagnostics.push({severity:'warning',source:project.name,message:'Native reference retained; browser reimplementation required: '+reference.value});
   const type=meta?.rawEntries.find(r=>r.key.toLowerCase()==='type')?.value;
   if(type&&!/^Exe$/i.test(type))diagnostics.push({severity:'warning',source:project.name,message:'Project type '+type+' retained; opening/saving does not install native COM components.'});
+  attachNativeWindowState(project,entries,options);
   return normalizeProject(project);
 }
 export async function importNativeFiles(input,options,api){

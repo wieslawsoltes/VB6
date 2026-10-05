@@ -2,6 +2,11 @@ import {normalizeProject} from '../project/model.js';
 import {compileProject, parseParameters} from '../language/compiler.js';
 import {PE32Image, BinarySection} from './pe32.js';
 import {X86} from './x86.js';
+import {nativeBindingMethods} from './bindings.js';
+import {nativeCallMethods} from './calls.js';
+import {nativeCurrencyMethods,emitNativeCurrencyHelpers} from './currency.js';
+import {FLOAT_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes} from './numeric.js';
+import {nativeControlArrayMethods} from './control-arrays.js';
 import {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers} from './storage.js';
 import {nativeArrayMethods,emitNativeArrayHelpers} from './arrays.js';
 import {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers} from './errors.js';
@@ -27,8 +32,8 @@ export function extractNativeDeclarations(module) {
     const dll = /\.dll$/i.test(m[4]) ? m[4] : m[4] + '.dll', name = key(m[3]);
     const params = parseParameters(m[6]);
     if (declarations.has(name)) throw new NativeCompileError('Duplicate native declaration: ' + m[3], module.name, index + 1);
-    if (params.some(p => !INT_TYPES.has(key(p.type)) || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])))) {
-      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
+    if (params.some(p => !INT_TYPES.has(key(p.type)) && !FLOAT_TYPES.has(key(p.type)) && key(p.type)!=='currency' || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !FLOAT_TYPES.has(key(m[7])) && key(m[7])!=='currency')) {
+      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean/Single/Double/Currency parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
     }
     declarations.set(name, {name:m[3],kind:key(m[2]),scope:key(m[1] || 'public'),params,returnType:m[7] || 'Long',dll,symbol:/^#\d+$/.test(m[5] || '') ? Number(m[5].slice(1)) : m[5] || m[3],line:index + 1});
     return ''; // Keep line numbers stable.
@@ -55,7 +60,7 @@ class NativeCompiler {
     if (parents.length > 1) this.fail('Only one MDI parent is supported'); this.mdi = parents[0];
     for (const module of this.modules.values()) if (module.form?.properties.MDIChild && !this.mdi) this.fail('MDI child requires an MDIForm', module);
   }
-  fail(message, context = this.context) { throw new NativeCompileError(message, context?.module?.name || context?.name || '', this.instruction?.line || 0); }
+  fail(message, context = this.context) { throw new NativeCompileError(message, context?.module?.name || context?.name || '', this.instruction?.line || context?.proc?.line || 0); }
   slot(label, value = 0) { this.data.align(4).label(label).u32(value); return label; }
   string(text) { text = String(text); if (text.length > MAX_NATIVE_STRING) this.fail('Native text exceeds 1,048,576 UTF-16 units'); if (!this.strings.has(text)) { const name = 'string:' + this.strings.size; this.ro.align(4).u32(text.length * 2).label(name).utf16(text); this.strings.set(text,name); } return this.strings.get(text); }
   buffer() { if(this.context?.proc?.name) { this.context.size+=8192; if(this.context.size>512*1024)this.fail('Native procedure text workspace exceeds 512 KiB'); return {address:-this.context.size}; } if (++this.bufferCount > 1024) this.fail('Native text-buffer limit exceeded'); const name = 'buffer:' + this.bufferCount; this.data.align(4).label(name).zero(8192); return name; }
@@ -63,7 +68,7 @@ class NativeCompiler {
   prepareModule(module) {
     this.preparingModule=module;this.preparingProcedure=null;
     if (!['form','module'].includes(module.kind) || module.interfaces.length || Object.keys(module.types).length) this.fail('Native AOT does not yet lower classes, interfaces or UDTs', module);
-    const result = {module,name:module.name,form:module.form,globals:new Map(),procedures:new Map(),controls:new Map(),externals:this.externals.get(key(module.name))};
+    const result = {module,name:module.name,form:module.form,globals:new Map(),procedures:new Map(),controls:new Map(),controlArrays:new Map(),externals:this.externals.get(key(module.name))};
     this.modules.set(key(module.name), result);
     for (const decl of module.declarations) {
       if (decl.constant) continue; this.scalar(decl);
@@ -72,19 +77,22 @@ class NativeCompiler {
     for (const proc of module.procedures.values()) {
       this.preparingProcedure=proc;
       if (!['sub','function'].includes(proc.kind)) this.fail('Native AOT does not lower property procedures', module);
-      if (proc.kind === 'function' && !INT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='string') this.fail('Native functions must return a supported scalar: ' + proc.name, module);
+      if (proc.kind === 'function' && !INT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='string' && !FLOAT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='currency') this.fail('Native functions must return a supported scalar: ' + proc.name, module);
       const context = {module:result,proc,label:'proc:' + module.name + ':' + proc.name,locals:new Map(),temporaries:new Map(),loops:new Map(),size:NATIVE_ERROR_FRAME_BYTES};
       const local = (name, type = 'Long',decl={}) => { context.size += decl.nativeBytes || 4; if(context.size>512*1024)this.fail('Native procedure workspace exceeds 512 KiB',module); const variable = {...decl,name,type,offset:-context.size}; context.locals.set(key(name),variable); return variable; };
-      proc.params.forEach((p,i) => { p=this.scalar({...p,parameter:true}); if (p.optional || p.paramArray) this.fail('Optional/ParamArray native parameters are not lowered',module); if(key(p.type)==='string'&&!p.byRef){const v=local(p.name,p.type,{...p,parameter:false});v.incomingOffset=8+i*4;v.ownedParameter=true;}else context.locals.set(key(p.name),{...p,offset:8+i*4,parameter:true}); });
-      if (proc.kind === 'function') context.returnValue = local(proc.name,proc.returnType);
+      this.prepareNativeParameters(context);
+      let argumentOffset=8;
+      proc.params.forEach(p => { p=this.scalar({...p,parameter:true}); if(key(p.type)==='string'&&!p.byRef){const v=local(p.name,p.type,{...p,parameter:false});v.incomingOffset=argumentOffset;v.ownedParameter=true;}else context.locals.set(key(p.name),{...p,offset:argumentOffset,parameter:true}); argumentOffset+=nativeParameterBytes(p); });
+      context.argumentBytes=argumentOffset-8;
+      if (proc.kind === 'function') context.returnValue = local(proc.name,proc.returnType,this.scalar({name:proc.name,type:proc.returnType}));
       for (const instruction of proc.code) {
         if (instruction.op === 'dim') for (const decl of instruction.decls) {
           if (decl.constant) continue; this.scalar(decl); if (context.locals.has(key(decl.name))) this.fail('Duplicate local: ' + decl.name,module);
           if (instruction.static || proc.static) { if(decl.initial) this.fail('Native static initializers are not yet lowered',module); const variable = {...decl,label:'static:' + context.label + ':' + decl.name}; this.allocateStorage(variable);if(variable.fixedLength)variable.initialized=this.slot(variable.label+':initialized'); context.locals.set(key(decl.name),variable); }
           else local(decl.name,decl.type,decl);
         }
-        if (instruction.op === 'forInit') { const end = local(instruction.id + ':end'), step = local(instruction.id + ':step'); context.loops.set(instruction.id,{...instruction,endVariable:end,stepVariable:step}); }
-        if (instruction.op === 'temp') context.temporaries.set(instruction.id,local(instruction.id));
+        if (instruction.op === 'forInit') { const end = local(instruction.id + ':end','Long',{nativeBytes:8}), step = local(instruction.id + ':step','Long',{nativeBytes:8}); context.loops.set(instruction.id,{...instruction,endVariable:end,stepVariable:step}); }
+        if (instruction.op === 'temp') context.temporaries.set(instruction.id,local(instruction.id,'Long',{nativeBytes:8}));
       }
       result.procedures.set(key(proc.name),context);
     }
@@ -102,18 +110,19 @@ class NativeCompiler {
     let id = 100;
     for (const model of module.form.controls) {
       if (model.properties.Picture || model.properties.Icon) this.fail('Native picture/icon resources are not yet lowered',module);
-      if (!Object.hasOwn(CLASSES,model.type) || model.properties.Index !== undefined) this.fail('Unsupported native control or control array: ' + model.type, module);
-      const control = {model,module:result,id:id++,handle:this.slot('hwnd:' + module.name + ':' + model.name)};
-      if (model.type === 'Frame') control.oldProcedure=this.slot('frame-old-procedure:'+module.name+':'+model.name);
-      if (model.type === 'Timer') { control.interval = this.slot('timer-interval:' + module.name + ':' + model.name,Number(model.properties.Interval) || 0); control.enabled = this.slot('timer-enabled:' + module.name + ':' + model.name,model.properties.Enabled === 0 ? 0 : -1); }
-      result.controls.set(key(model.name),control);
+      if (!Object.hasOwn(CLASSES,model.type)) this.fail('Unsupported native control: ' + model.type, module);
+      const controlKey=this.nativeControlKey(model,module);
+      const control = {model,module:result,id:id++,handle:this.slot('hwnd:' + module.name + ':' + controlKey)};
+      if (model.type === 'Frame') control.oldProcedure=this.slot('frame-old-procedure:'+module.name+':'+controlKey);
+      if (model.type === 'Timer') { control.interval = this.slot('timer-interval:' + module.name + ':' + controlKey,Number(model.properties.Interval) || 0); control.enabled = this.slot('timer-enabled:' + module.name + ':' + controlKey,model.properties.Enabled === 0 ? 0 : -1); }
+      control.key=controlKey;this.registerNativeControl(result,control);
     }
     const supported = new Set(['load','initialize','activate','deactivate','resize','queryunload','unload']);
     for (const context of result.procedures.values()) {
       const name = key(context.proc.name), match = name.match(/^(?:mdi)?form_(.*)$/);
       if (match && !supported.has(match[1])) this.fail('Native form event is not yet routed: ' + context.proc.name,module);
-      for (const [controlName,control] of result.controls) if (name.startsWith(controlName + '_')) {
-        const event = name.slice(controlName.length + 1);
+      for (const control of result.controls.values()) if (name.startsWith(key(control.model.name) + '_')) {
+        const event = name.slice(control.model.name.length + 1);
         const events = {CommandButton:['click'], Label:['click','dblclick'], TextBox:['change'], CheckBox:['click'],OptionButton:['click'],Frame:[], ListBox:['click','dblclick'], ComboBox:['click','change'], Timer:['timer']}[control.model.type];
         if (!events.includes(event)) this.fail('Native control event is not yet routed: ' + context.proc.name,module);
       }
@@ -132,13 +141,14 @@ class NativeCompiler {
   }
   publicVariable(name) { const matches = [...this.modules.values()].flatMap(m => [...m.globals.values()].filter(v => key(v.name) === key(name) && v.scope === 'public')); if (matches.length > 1) this.fail('Ambiguous global: ' + name); return matches[0]; }
   constant(node) {
-    if (node.kind !== 'id') return undefined; const name = key(node.name), c = this.context;
-    for (const map of [c?.proc.constantBindings, c?.module.module.constantBindings, c?.module.module.importedConstantBindings, c?.module.module.globalEnumMembers]) if (map?.has(name)) return map.get(name);
-    return CONSTANTS[name];
+    const binding=this.nativeConstant(node);if(binding)return binding.value;
+    return node.kind==='id'&&!this.variable(node)?CONSTANTS[key(node.name)]:undefined;
   }
   address(variable) { if(!variable)this.fail('Expression is not addressable'); if(variable.elementOf)return this.elementAddress(variable); this.rawStorageAddress(variable);return null; }
   load(variable) {
     if(variable.nativeArray&&!variable.elementOf)this.fail('Array requires indices: '+variable.name);
+    if(key(variable.type)==='currency')return this.loadCurrency(variable);
+    if(FLOAT_TYPES.has(key(variable.type)))return this.loadFloat(variable);
     const pin=this.address(variable); const type=key(variable.type);
     this.x.emit(...(type==='byte'?[0x0f,0xb6,0x00]:['integer','boolean'].includes(type)?[0x0f,0xbf,0x00]:[0x8b,0x00]));
     if(type==='string'){this.x.push().call('native:string:copy');this.ownString();}
@@ -146,28 +156,34 @@ class NativeCompiler {
   }
   check(type) { type = key(type); if (type === 'boolean') this.x.test().emit(0x0f,0x95,0xc0,0x0f,0xb6,0xc0,0xf7,0xd8); else if (type === 'integer') this.x.compare(-32768).branch('l','error:6').compare(32767).branch('g','error:6'); else if (type === 'byte') this.x.compare(255).branch('g','error:6').compare(0).branch('l','error:6'); }
   store(variable) {
+    if(key(variable.type)==='currency')return this.storeCurrency(variable);
+    if(FLOAT_TYPES.has(key(variable.type)))return this.storeFloat(variable);
     if(key(variable.type)==='string'){
       if(variable.fixedLength){this.x.emit(0x89,0xc3).push(variable.fixedLength).emit(0x53).call('native:string:fixed');this.ownString();}
       this.x.push();const pin=this.address(variable);this.x.push().call('native:string:assign');this.releaseArrayPin(pin);return;
     }
     this.check(variable.type); this.x.push(); const pin=this.address(variable); this.x.emit(0x5a); const type = key(variable.type); this.x.emit(...(type === 'byte' ? [0x88,0x10] : ['integer','boolean'].includes(type) ? [0x66,0x89,0x10] : [0x89,0x10])); this.x.emit(0x89,0xd0);this.releaseArrayPin(pin); }
   object(node) {
-    if (node.kind === 'id') { if (key(node.name) === 'me') return this.context?.module.form ? this.context.module : null; return this.context?.module.controls.get(key(node.name)) || (this.modules.get(key(node.name))?.form ? this.modules.get(key(node.name)) : null); }
-    if (node.kind === 'member' && node.object.kind === 'id') return this.modules.get(key(node.object.name))?.controls.get(key(node.name));
+    const indexed=this.indexedControl(node);if(indexed)return indexed;
+    if (node.kind === 'id') { if (key(node.name) === 'me') return this.context?.module.form ? this.context.module : null; return this.context?.module.controls.get(key(node.name)) || this.context?.module.controlArrays.get(key(node.name)) || (this.modules.get(key(node.name))?.form ? this.modules.get(key(node.name)) : null); }
+    if (node.kind === 'member' && node.object.kind === 'id') return this.modules.get(key(node.object.name))?.controls.get(key(node.name)) || this.modules.get(key(node.object.name))?.controlArrays.get(key(node.name));
     return null;
   }
-  ensure(object) { const form = object.form ? object : object.module; this.x.call(form.create); }
-  handle(object) { this.ensure(object); this.x.value(mem(object.handle)); }
+  ensure(object) { const form = object.form ? object : object.module; this.x.call(form.create); if(object.indexed)this.resolveControlHandle(object); }
+  handle(object) { this.ensure(object); this.x.value(this.controlHandleRef(object)); }
   type(node) {
+    const bound=this.nativeConstant(node);if(bound)return bound.type;
+    const currencyType=this.currencyType(node);if(currencyType)return currencyType;
+    const numericType=this.numericType(node);if(numericType)return numericType;
     if (node.kind === 'group') return this.type(node.expr);
     const errorProperty=this.errorProperty(node);if(errorProperty)return errorProperty==='number'?'long':'string';
     const variable=this.variable(node);if(variable)return key(variable.type);
     if(node.kind==='call'){
       const name=node.callee.kind==='id'?key(node.callee.name).replace(/\$$/,''):'';
       if(['cstr','left','right','mid','chrw'].includes(name))return 'string';
-      const proc=this.resolveProcedure(node.callee);if(proc?.proc?.kind==='function')return key(proc.proc.returnType);
+      const result=this.nativeFunctionType(node);if(result)return result;
     }
-    if(node.kind==='id'){const proc=this.resolveProcedure(node);if(proc?.proc?.kind==='function')return key(proc.proc.returnType);}
+    if(node.kind==='id'||node.kind==='member'){const result=this.nativeFunctionType(node);if(result)return result;}
     if (node.kind === 'id' && key(node.name)==='caption' && this.context?.module.form && !this.variable(node)) return 'string';
     if (node.kind === 'literal') return typeof node.value === 'string' ? 'string' : 'long';
     const constant = this.constant(node); if (constant !== undefined) return typeof constant === 'string' ? 'string' : 'long';
@@ -176,17 +192,23 @@ class NativeCompiler {
     if (node.kind === 'call' && node.callee.kind === 'id' && key(node.callee.name) === 'cstr') return 'string';
     return 'long';
   }
-  numeric(node) { if (this.type(node) === 'string') this.fail('Use CLng/CInt explicitly to convert native text to a number'); this.expression(node); }
-  textExpression(node) { this.expression(node); if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); }
+  numeric(node) { if (this.type(node) === 'string') this.fail('Use CLng/CInt explicitly to convert native text to a number'); this.expression(node);if(this.type(node)==='currency')this.currencyToInteger();else if(FLOAT_TYPES.has(this.type(node)))this.floatToInteger(); }
+  textExpression(node) { this.expression(node); if(this.type(node)==='currency'){this.currencyToString();}else if(FLOAT_TYPES.has(this.type(node))){this.floatToString(this.type(node));}else if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); }
   expression(node) {
     if (!node) this.fail('Missing expression'); const x = this.x;
+    const bound=this.nativeConstant(node);if(bound)return this.emitNativeConstant(bound);
+    if(this.currencyOperation(node))return;
+    if(this.numericExpression(node))return;
     if (node.kind === 'group') return this.expression(node.expr);
     if (node.kind === 'unary' && node.op === '-' && node.expr?.kind === 'literal' && node.expr.value === 2147483648) { x.value(-2147483648); return; }
     if (node.kind === 'literal') { if (typeof node.value === 'string') x.value(this.string(node.value)); else if (typeof node.value === 'boolean') x.value(node.value ? -1 : 0); else if (Number.isInteger(node.value) && node.value >= -2147483648 && node.value <= 2147483647) x.value(node.value); else this.fail('Native AOT currently requires signed 32-bit integer or string-literal values'); return; }
     const constant = this.constant(node); if (constant !== undefined) return this.expression(lit(constant));
     const variable = this.variable(node); if (variable) return this.load(variable);
     if(this.errorExpression(node))return;
-    if (node.kind === 'member') return this.getProperty(this.object(node.object),key(node.name));
+    if (node.kind === 'member') {
+      if(this.nativeFunctionType(node))return this.call({kind:'call',callee:node,args:[]});
+      return this.getProperty(this.object(node.object),key(node.name));
+    }
     if (node.kind === 'id') { if (this.context?.module.form && ['caption','hwnd','visible','enabled','windowstate','scalewidth','scaleheight'].includes(key(node.name))) return this.getProperty(this.context.module,key(node.name)); return this.call({kind:'call',callee:node,args:[]}); }
     if (node.kind === 'call') return this.call(node);
     if (node.kind === 'unary') {
@@ -215,29 +237,30 @@ class NativeCompiler {
   boolean(op) { this.x.emit(0x0f,BOOL_CONDITIONS[op],0xc0,0x0f,0xb6,0xc0,0xf7,0xd8); }
   getProperty(object, property) {
     if (!object) this.fail('Unknown native object'); const x = this.x;
+    if(this.controlArrayProperty(object,property))return;
     if (property === 'hwnd') { if (object.model?.type === 'Timer') this.fail('Timer has no hWnd'); this.handle(object); return; }
     if (['text','caption'].includes(property)) {
       if (object.model?.type === 'Timer') this.fail('Timer has no text');
       const buffer = this.buffer(); this.handle(object); x.push().invoke('user32.dll','GetWindowTextLengthW').compare(4095).branch('g','error:7');
-      x.api('user32.dll','GetWindowTextW',[mem(object.handle),buffer,4096]).push(buffer).invoke('oleaut32.dll','SysAllocString').test().branch('e','error:7');this.ownString(); return;
+      x.api('user32.dll','GetWindowTextW',[this.controlHandleRef(object),buffer,4096]).push(buffer).invoke('oleaut32.dll','SysAllocString').test().branch('e','error:7');this.ownString(); return;
     }
     if (property === 'enabled' || property === 'visible') { if (object.model?.type === 'Timer') { if (property !== 'enabled') this.fail('Timer has no Visible property'); x.value(mem(object.enabled)); } else { this.handle(object); x.push().invoke('user32.dll',property === 'enabled' ? 'IsWindowEnabled' : 'IsWindowVisible').emit(0xf7,0xd8); } return; }
     if (property === 'interval' && object.model?.type === 'Timer') { x.value(mem(object.interval)); return; }
-    if (property === 'value' && ['CheckBox','OptionButton'].includes(object.model?.type)) { this.ensure(object); x.api('user32.dll','SendMessageW',[mem(object.handle),0xf0,0,0]); if (object.model.type === 'OptionButton') x.emit(0xf7,0xd8); return; }
-    if (['listindex','listcount'].includes(property) && ['ListBox','ComboBox'].includes(object.model?.type)) { this.ensure(object); const combo = object.model.type === 'ComboBox'; x.api('user32.dll','SendMessageW',[mem(object.handle),property === 'listindex' ? combo ? 0x147 : 0x188 : combo ? 0x146 : 0x18b,0,0]); return; }
-    if (property === 'windowstate' && object.form) { const done = x.unique(), normal = x.unique(); this.ensure(object); x.api('user32.dll','IsIconic',[mem(object.handle)]).test().branch('e',normal).value(1).jump(done).label(normal).api('user32.dll','IsZoomed',[mem(object.handle)]).emit(0xd1,0xe0).label(done); return; }
-    if (['scalewidth','scaleheight'].includes(property) && object.form) { this.ensure(object); x.api('user32.dll','GetClientRect',[mem(object.handle),object.rect]).value({memory:object.rect,addend:property === 'scalewidth' ? 8 : 12}); if(Number(object.form.properties.ScaleMode ?? 1)===1)x.emit(0x6b,0xc0,15); return; }
+    if (property === 'value' && ['CheckBox','OptionButton'].includes(object.model?.type)) { this.ensure(object); x.api('user32.dll','SendMessageW',[this.controlHandleRef(object),0xf0,0,0]); if (object.model.type === 'OptionButton') x.emit(0xf7,0xd8); return; }
+    if (['listindex','listcount'].includes(property) && ['ListBox','ComboBox'].includes(object.model?.type)) { this.ensure(object); const combo = object.model.type === 'ComboBox'; x.api('user32.dll','SendMessageW',[this.controlHandleRef(object),property === 'listindex' ? combo ? 0x147 : 0x188 : combo ? 0x146 : 0x18b,0,0]); return; }
+    if (property === 'windowstate' && object.form) { const done = x.unique(), normal = x.unique(); this.ensure(object); x.api('user32.dll','IsIconic',[this.controlHandleRef(object)]).test().branch('e',normal).value(1).jump(done).label(normal).api('user32.dll','IsZoomed',[this.controlHandleRef(object)]).emit(0xd1,0xe0).label(done); return; }
+    if (['scalewidth','scaleheight'].includes(property) && object.form) { this.ensure(object); x.api('user32.dll','GetClientRect',[this.controlHandleRef(object),object.rect]).value({memory:object.rect,addend:property === 'scalewidth' ? 8 : 12}); if(Number(object.form.properties.ScaleMode ?? 1)===1)x.emit(0x6b,0xc0,15); return; }
     this.fail('Native property is not lowered: ' + property);
   }
   setProperty(object, property, expr) {
     if (!object) this.fail('Unknown native assignment target'); const x = this.x;
     this.ensure(object);
-    if (['text','caption'].includes(property) && object.model?.type !== 'Timer') { this.textExpression(expr); x.push().push(mem(object.handle)).invoke('user32.dll','SetWindowTextW'); return; }
+    if (['text','caption'].includes(property) && object.model?.type !== 'Timer') { this.textExpression(expr); x.push().push(this.controlHandleRef(object)).invoke('user32.dll','SetWindowTextW'); return; }
     if (property === 'enabled' && object.model?.type === 'Timer' || property === 'interval' && object.model?.type === 'Timer') { this.numeric(expr); if (property === 'enabled') this.check('Boolean'); else x.compare(0).branch('l','error:5').compare(65535).branch('g','error:5'); x.store(property === 'enabled' ? object.enabled : object.interval); this.timer(object); return; }
-    if (['enabled','visible'].includes(property)) { this.numeric(expr); this.check('Boolean'); x.emit(0xf7,0xd8); if (property === 'visible') x.emit(0x6b,0xc0,5); x.push().push(mem(object.handle)).invoke('user32.dll',property === 'enabled' ? 'EnableWindow' : 'ShowWindow'); return; }
-    if (property === 'windowstate' && object.form) { const normal = x.unique(), minimize = x.unique(), done = x.unique(); this.numeric(expr); x.compare(0).branch('e',normal).compare(1).branch('e',minimize).compare(2).branch('ne','error:5').value(3).jump(done).label(minimize).value(6).jump(done).label(normal).value(9).label(done).push().push(mem(object.handle)).invoke('user32.dll','ShowWindow'); return; }
-    if (property === 'value' && ['CheckBox','OptionButton'].includes(object.model?.type)) { this.numeric(expr); if (object.model.type === 'OptionButton') { this.check('Boolean'); x.emit(0xf7,0xd8); } x.compare(0).branch('l','error:5').compare(2).branch('g','error:5'); x.emit(0x89,0xc3).push(0).emit(0x53).push(0xf1).push(mem(object.handle)).invoke('user32.dll','SendMessageW'); return; }
-    if (property === 'listindex' && ['ListBox','ComboBox'].includes(object.model?.type)) { this.numeric(expr); x.emit(0x89,0xc3).push(0).emit(0x53).push(object.model.type === 'ComboBox' ? 0x14e : 0x186).push(mem(object.handle)).invoke('user32.dll','SendMessageW'); return; }
+    if (['enabled','visible'].includes(property)) { this.numeric(expr); this.check('Boolean'); x.emit(0xf7,0xd8); if (property === 'visible') x.emit(0x6b,0xc0,5); x.push().push(this.controlHandleRef(object)).invoke('user32.dll',property === 'enabled' ? 'EnableWindow' : 'ShowWindow'); return; }
+    if (property === 'windowstate' && object.form) { const normal = x.unique(), minimize = x.unique(), done = x.unique(); this.numeric(expr); x.compare(0).branch('e',normal).compare(1).branch('e',minimize).compare(2).branch('ne','error:5').value(3).jump(done).label(minimize).value(6).jump(done).label(normal).value(9).label(done).push().push(this.controlHandleRef(object)).invoke('user32.dll','ShowWindow'); return; }
+    if (property === 'value' && ['CheckBox','OptionButton'].includes(object.model?.type)) { this.numeric(expr); if (object.model.type === 'OptionButton') { this.check('Boolean'); x.emit(0xf7,0xd8); } x.compare(0).branch('l','error:5').compare(2).branch('g','error:5'); x.emit(0x89,0xc3).push(0).emit(0x53).push(0xf1).push(this.controlHandleRef(object)).invoke('user32.dll','SendMessageW'); return; }
+    if (property === 'listindex' && ['ListBox','ComboBox'].includes(object.model?.type)) { this.numeric(expr); x.emit(0x89,0xc3).push(0).emit(0x53).push(object.model.type === 'ComboBox' ? 0x14e : 0x186).push(this.controlHandleRef(object)).invoke('user32.dll','SendMessageW'); return; }
     this.fail('Native assignment is not lowered: ' + property);
   }
   resolveProcedure(callee) {
@@ -256,6 +279,8 @@ class NativeCompiler {
   call(node) {
     const x = this.x, args = node.args, name = node.callee.kind === 'id' ? key(node.callee.name).replace(/\$$/,'') : null;
     if(this.errorCall(node))return;
+    if(this.currencyBuiltin(node,name))return;
+    if(this.numericBuiltin(node,name))return;
     if(this.stringBuiltin(node,name))return;
     if(name==='lbound'||name==='ubound'){this.arrayBoundCall(node,name==='ubound');return;}
     if (name === 'msgbox') {
@@ -282,36 +307,21 @@ class NativeCompiler {
           if(args[1]){const owner=this.object(args[1]);if(!owner?.form)this.fail('Native Show owner must be a form');this.handle(owner);}else x.api('user32.dll','GetActiveWindow');
           x.emit(0x59,0x50,0x51).call('show:'+object.name);return;
         }
-        if (method === 'hide' && object.form && !args.length) { x.api('user32.dll','ShowWindow',[mem(object.handle),0]); return; }
-        if (method === 'setfocus' && !args.length) { x.api('user32.dll','SetFocus',[mem(object.handle)]); return; }
+        if (method === 'hide' && object.form && !args.length) { x.api('user32.dll','ShowWindow',[this.controlHandleRef(object),0]); return; }
+        if (method === 'setfocus' && !args.length) { x.api('user32.dll','SetFocus',[this.controlHandleRef(object)]); return; }
         if (['ListBox','ComboBox'].includes(object.model?.type)) {
           const combo = object.model.type === 'ComboBox';
-          if (method === 'additem' && args.length === 1) { this.textExpression(args[0]); x.push().push(0).push(combo ? 0x143 : 0x180).push(mem(object.handle)).invoke('user32.dll','SendMessageW').test().branch('s','error:7'); return; }
-          if (method === 'clear' && !args.length) { x.api('user32.dll','SendMessageW',[mem(object.handle),combo ? 0x14b : 0x184,0,0]); return; }
-          if (method === 'removeitem' && args.length === 1) { this.numeric(args[0]); x.emit(0x89,0xc3).push(0).emit(0x53).push(combo ? 0x144 : 0x182).push(mem(object.handle)).invoke('user32.dll','SendMessageW').test().branch('s','error:5'); return; }
+          if (method === 'additem' && args.length === 1) { this.textExpression(args[0]); x.push().push(0).push(combo ? 0x143 : 0x180).push(this.controlHandleRef(object)).invoke('user32.dll','SendMessageW').test().branch('s','error:7'); return; }
+          if (method === 'clear' && !args.length) { x.api('user32.dll','SendMessageW',[this.controlHandleRef(object),combo ? 0x14b : 0x184,0,0]); return; }
+          if (method === 'removeitem' && args.length === 1) { this.numeric(args[0]); x.emit(0x89,0xc3).push(0).emit(0x53).push(combo ? 0x144 : 0x182).push(this.controlHandleRef(object)).invoke('user32.dll','SendMessageW').test().branch('s','error:5'); return; }
         }
       }
     }
     const target = this.resolveProcedure(node.callee);
     if (!target) this.fail('Native procedure is not available: ' + (name || node.callee.name));
-    const signature = target.proc || target;
-    if (args.length !== signature.params.length) this.fail('Native call argument count mismatch: ' + signature.name);
+    const plan=this.nativeCallPlan(target,args);
     if(target.module?.form && target.module!==this.context.module)x.call(target.module.initialize);
-    const callPins=[];
-    for (let i = 0; i < args.length; i++) {
-      const param = signature.params[i];
-      if (param.bounds !== null && param.bounds !== undefined) {
-        const array=this.variable(args[i]);
-        if(!target.proc || !param.byRef || !array?.nativeArray || array.elementOf || key(array.type)!==key(param.type))this.fail('ByRef array argument must have the exact declared element type');
-        if(array.fixedLength)this.fail('Fixed-length String whole-array arguments are not yet lowered');
-        this.rawStorageAddress(array);
-      } else if (param.byRef) { if(args[i].kind==='group') this.fail('Parenthesized ByRef temporaries are not yet lowered'); const v = this.variable(args[i]); if (!v || v.nativeArray&&!v.elementOf || key(v.type) !== key(param.type)) this.fail('ByRef native argument must be a scalar of the exact declared type');if(v.fixedLength)this.fail('Fixed-length String ByRef copy-back is not yet lowered');const pin=this.address(v);if(pin)callPins.push(pin); }
-      else { if(key(param.type)==='string')this.textExpression(args[i]);else {this.numeric(args[i]);this.check(param.type);} }
-      x.push();
-    }
-    // VB evaluates arguments left-to-right; reverse only their stack slots for stdcall.
-    for (let i = 0; i < Math.floor(args.length / 2); i++) { const a = i * 4, b = (args.length - i - 1) * 4; x.emit(0x8b,0x84,0x24).imm(a).emit(0x8b,0x8c,0x24).imm(b).emit(0x89,0x8c,0x24).imm(a).emit(0x89,0x84,0x24).imm(b); }
-    if (target.proc) {x.call(target.label);this.checkNativeError();for(const pin of callPins)this.releaseArrayPin(pin);if(key(signature.returnType)==='string'&&signature.kind==='function')this.ownString();} else { x.invoke(target.dll,target.symbol);for(const pin of callPins)this.releaseArrayPin(pin); if (['integer','boolean'].includes(key(signature.returnType))) x.emit(0x0f,0xbf,0xc0); else if (key(signature.returnType) === 'byte') x.emit(0x0f,0xb6,0xc0); }
+    this.nativeTypedCall(target,plan);
   }
   procedure(context) {
     this.context = context; const outer=this.x, body=new BinarySection('.body',0), x=this.x=new X86(body,this.image), code=context.proc.code, end=context.label+':return';
@@ -334,7 +344,7 @@ class NativeCompiler {
       else if(ins.op==='redim'){for(const decl of ins.decls)this.redimArrayStorage(decl,ins.preserve);}
       else if(ins.op==='erase'){for(const expr of ins.exprs)this.eraseStorage(expr);}
       else if (ins.op === 'expr') this.expression(ins.expr);
-      else if (ins.op === 'branch') { this.numeric(ins.test); x.test().branch('e',context.label + ':' + ins.target); }
+      else if (ins.op === 'branch') { this.truth(ins.test); x.test().branch('e',context.label + ':' + ins.target); }
       else if (ins.op === 'jump') x.jump(context.label + ':' + ins.target);
       else if (ins.op === 'return') {if(!ins.implicit)x.call('native:error:clear');x.jump(end);}
       else if (ins.op === 'lineNumber') { /* Debug metadata remains in the map. */ }
@@ -342,16 +352,17 @@ class NativeCompiler {
       else if (ins.op === 'form') {
         const object = this.object(ins.expr); if (!object?.form) this.fail('Native Load/Unload requires a form');
         if (ins.action === 'load') this.ensure(object);
-        else if (ins.action === 'unload') { const done = x.unique(); x.value(mem(object.handle)).test().branch('e',done).api('user32.dll','SendMessageW',[mem(object.handle),0x10,1,0]).label(done); }
+        else if (ins.action === 'unload') { const done = x.unique(); x.value(this.controlHandleRef(object)).test().branch('e',done).api('user32.dll','SendMessageW',[this.controlHandleRef(object),0x10,1,0]).label(done); }
         else this.fail('Unsupported native form operation');
       }
       else if (ins.op === 'forInit') {
         const loop = context.loops.get(ins.id), variable = this.variable({kind:'id',name:ins.name}); if (!variable) this.fail('Undeclared native For variable: ' + ins.name);
-        this.numeric(ins.start); this.store(variable); this.numeric(ins.end); this.store(loop.endVariable); this.numeric(ins.step); this.store(loop.stepVariable); this.forTest(loop,variable,context.label + ':' + ins.target);
+        loop.endVariable.type=loop.stepVariable.type=variable.type;
+        this.storageExpression(variable,ins.start); this.store(variable); this.storageExpression(loop.endVariable,ins.end); this.store(loop.endVariable); this.storageExpression(loop.stepVariable,ins.step); this.store(loop.stepVariable); this.forTest(loop,variable,context.label + ':' + ins.target);
       }
       else if (ins.op === 'forNext') {
         const loop = context.loops.get(ins.id), variable = this.variable({kind:'id',name:loop.name});
-        this.load(variable); x.push(); this.load(loop.stepVariable); x.emit(0x59,0x01,0xc8).branch('o','error:6'); this.store(variable);
+        this.expression({kind:'binary',op:'+',left:{kind:'id',name:variable.name},right:{kind:'id',name:loop.stepVariable.name}}); this.store(variable);
         const done = x.unique(); this.forTest(loop,variable,done); x.jump(context.label + ':' + ins.target).label(done);
       }
       else if(ins.op==='temp'){const variable=context.temporaries.get(ins.id);variable.type=this.type(ins.expr);this.storageExpression(variable,ins.expr);this.store(variable);}
@@ -372,10 +383,10 @@ class NativeCompiler {
       this.rawStorageAddress(context.returnValue);x.emit(0x8b,0x00);x.push();this.rawStorageAddress(context.returnValue);x.emit(0xc7,0x00,0,0,0,0,0x58);
     }else if(context.returnValue)this.load(context.returnValue);else x.value(0);
     const cleanup=context.label+':cleanup';x.jump(cleanup);
-    x.label(context.label+':error-return').value(0);
+    x.label(context.label+':error-return').value(context.returnValue&&key(context.returnValue.type)==='currency'?this.currencyLiteral('0'):context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type))?this.floatLiteral(0):0);
     x.label(cleanup).push().call(context.label+':clear-strings');
     for(const variable of context.locals.values())if(!variable.label&&!variable.parameter){if(variable.nativeArray)this.destroyArrayStorage(variable);else if(key(variable.type)==='string')this.clearStringStorage(variable);}
-    x.emit(0x58);this.leaveErrorFrame();x.leave(context.proc.params.length*4);
+    x.emit(0x58);this.leaveErrorFrame();if(context.returnValue&&key(context.returnValue.type)==='currency')x.emit(0x8b,0x50,4,0x8b,0x00);if(context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type)))x.emit(0xdd,0x00);x.leave(context.argumentBytes);
     this.emitErrorDispatch(context);
     x.label(context.label+':clear-strings');for(const pin of context.arrayPins)this.releaseArrayPin(pin);for(const variable of context.stringTemps)this.clearStringStorage(variable);x.emit(0xc3);
     this.instruction=null;this.x=outer;outer.sequence=x.sequence;outer.label(context.label).enter(context.size);
@@ -393,13 +404,16 @@ class NativeCompiler {
     for(const byte of body.bytes)this.text.bytes.push(byte);
   }
   forTest(loop,variable,exit) {
-    const negative = this.x.unique(), done = this.x.unique(); this.load(loop.stepVariable); this.x.test().branch('s',negative);
-    this.load(variable); this.x.push(); this.load(loop.endVariable); this.x.emit(0x59,0x39,0xc1).branch('g',exit).jump(done).label(negative);
-    this.load(variable); this.x.push(); this.load(loop.endVariable); this.x.emit(0x59,0x39,0xc1).branch('l',exit).label(done);
+    const x=this.x,negative=x.unique(),done=x.unique();
+    const compare=(op,a,b)=>this.expression({kind:'binary',op,left:{kind:'id',name:a.name},right:typeof b==='number'?lit(b):{kind:'id',name:b.name}});
+    compare('<',loop.stepVariable,0);x.test().branch('ne',negative);
+    compare('>',variable,loop.endVariable);x.test().branch('ne',exit).jump(done).label(negative);
+    compare('<',variable,loop.endVariable);x.test().branch('ne',exit).label(done);
   }
   handler(module, name, args = []) {
     const proc = module.procedures.get(key(name)); if (!proc) return;
     if(proc.proc.kind!=='sub') this.fail('Native event handler must be a Sub: '+name,module);
+    if (proc.proc.params.some(p=>p.optional||p.paramArray))this.fail('Native event parameters cannot be Optional or ParamArray: '+name,module);
     if (proc.proc.params.length !== args.length) this.fail('Native event signature mismatch: ' + name,module);
     args.forEach((arg,i) => { const param = proc.proc.params[i]; if (arg.ref && (!param.byRef || key(param.type) !== 'integer')) this.fail('Native event requires ByRef Integer: ' + param.name,module); });
     for (const arg of [...args].reverse()) { if (arg.ref) this.x.local(arg.ref).push(); else this.x.push(arg); }
@@ -430,9 +444,9 @@ class NativeCompiler {
       const model = control.model, p = model.properties;
       if (model.type === 'Timer') { this.timer(control); continue; }
       let style = 0x40000000 | (p.Visible === 0 ? 0 : 0x10000000) | (p.Enabled === 0 ? 0x08000000 : 0) | (p.TabStop === 0 ? 0 : 0x10000), ex = 0;
-      if (model.type === 'TextBox') { ex = 0x200; style |= p.MultiLine ? 0x4 | 0x40 | 0x1000 : 0x80; if (p.Locked) style |= 0x800; if (p.PasswordChar) style |= 0x20; if (p.ScrollBars === 1 || p.ScrollBars === 3) style |= 0x100000; if (p.ScrollBars >= 2) style |= 0x200000; }
+      if (model.type === 'TextBox') { ex = 0x200; style |= ({0:0,1:2,2:1})[Number(p.Alignment||0)]||0; style |= p.MultiLine ? 0x4 | 0x40 | 0x1000 : 0x80; if (p.Locked) style |= 0x800; if (p.PasswordChar) style |= 0x20; if (p.ScrollBars === 1 || p.ScrollBars === 3) style |= 0x100000; if (p.ScrollBars >= 2) style |= 0x200000; }
       if (model.type === 'CommandButton') style |= p.Default ? 1 : 0;
-      if (model.type === 'Label') style = style & ~0x10000 | 0x100;
+      if (model.type === 'Label') style = style & ~0x10000 | 0x100 | (({0:0,1:2,2:1})[Number(p.Alignment||0)]||0);
       if (model.type === 'CheckBox') style |= p.TripleState ? 6 : 3;
       if (model.type === 'OptionButton') style |= 9;
       if (model.type === 'Frame') style = style & ~0x10000 | 7 | 0x02000000;
@@ -441,8 +455,8 @@ class NativeCompiler {
       const left = Number(p.Left || 0), top = Number(p.Top || 0), parent = model.parent ? module.controls.get(key(model.parent)) : module;
       const width = this.pixels(p.Width ?? 1440), height = this.pixels(p.Height ?? 420) + (model.type === 'ComboBox' && p.Style !== 1 ? 160 : 0);
       x.api('user32.dll','CreateWindowExW',[ex,this.string(CLASSES[model.type]),this.string(p.Text ?? p.Caption ?? ''),style,this.pixels(left),this.pixels(top),width,height,mem(parent.handle),control.id,mem('instance'),0]).test().branch('e','error:7').store(control.handle);
-      if (model.type === 'Frame') x.api('user32.dll','SetWindowLongW',[mem(control.handle),-4,'frame-procedure:'+module.name+':'+model.name]).test().branch('e','error:7').store(control.oldProcedure);
-      x.api('gdi32.dll','GetStockObject',[17]).emit(0x89,0xc3).push(1).emit(0x53).push(0x30).push(mem(control.handle)).invoke('user32.dll','SendMessageW');
+      if (model.type === 'Frame') x.api('user32.dll','SetWindowLongW',[mem(control.handle),-4,'frame-procedure:'+module.name+':'+control.key]).test().branch('e','error:7').store(control.oldProcedure);
+      this.applyNativeControlFont(control);
       if (model.type === 'TextBox' && p.MaxLength) x.api('user32.dll','SendMessageW',[mem(control.handle),0xc5,Number(p.MaxLength),0]);
       if (['CheckBox','OptionButton'].includes(model.type)) x.api('user32.dll','SendMessageW',[mem(control.handle),0xf1,p.Value ? 1 : 0,0]);
       if (['ListBox','ComboBox'].includes(model.type)) {
@@ -512,7 +526,7 @@ class NativeCompiler {
     x.label(done).value(mem(module.handle)).leave();
     for(const control of module.controls.values())if(control.oldProcedure){
       const forward=x.unique();
-      x.label('frame-procedure:'+module.name+':'+control.model.name).enter().value({argument:12}).compare(0x111).branch('e',forward);
+      x.label('frame-procedure:'+module.name+':'+control.key).enter().value({argument:12}).compare(0x111).branch('e',forward);
       x.api('user32.dll','CallWindowProcW',[mem(control.oldProcedure),{argument:8},{argument:12},{argument:16},{argument:20}]).leave(16);
       x.label(forward).api('user32.dll','SendMessageW',[mem(module.handle),{argument:12},{argument:16},{argument:20}]).leave(16);
     }
@@ -548,7 +562,7 @@ class NativeCompiler {
   }
   windowProcedure(module,wnd,prefix) {
     const x = this.x, fallback = x.unique(), zero = x.unique(), exit = x.unique(), close = x.unique(), destroy = x.unique(), command = x.unique(), timer = x.unique(), size = x.unique(), focus = x.unique();
-    x.label(wnd).enter(12);this.enterCallbackBoundary(-12);
+    x.label(wnd).enter(16);this.enterCallbackBoundary(-12);
     x.value({argument:12}).compare(2).branch('e',destroy).compare(0x10).branch('e',close);
     x.value(mem(module.loaded)).test().branch('e',fallback);
     x.value({argument:12}).compare(0x111).branch('e',command).compare(0x113).branch('e',timer).compare(5).branch('e',size).compare(6).branch('e',focus).jump(fallback);
@@ -559,13 +573,13 @@ class NativeCompiler {
       const events = control.model.type === 'TextBox' ? [[0x300,'Change']] : control.model.type === 'ComboBox' ? [[1,'Click'],[5,'Change']] : control.model.type === 'ListBox' ? [[1,'Click'],[2,'DblClick']] : [[0,'Click'],[1,'DblClick']];
       for (const [code,event] of events) { const another = x.unique(); x.emit(0x83,0xfb,code & 255); if (code > 127) { // Replace sign-extended short comparison with imm32.
           this.text.bytes.splice(this.text.bytes.length - 3,3); x.emit(0x81,0xfb).imm(code);
-        } x.branch('ne',another); this.handler(module,control.model.name + '_' + event); x.jump(zero).label(another); }
+        } x.branch('ne',another); this.controlHandler(module,control,event); x.jump(zero).label(another); }
       x.jump(fallback).label(next);
     }
     for (const [id,event] of module.menuCommands || []) { const next = x.unique(); x.compare(id).branch('ne',next); this.handler(module,event); x.jump(zero).label(next); }
     x.jump(fallback);
     x.label(timer).value({argument:16});
-    for (const control of module.controls.values()) if (control.model.type === 'Timer') { const next = x.unique(); x.compare(control.id).branch('ne',next); this.handler(module,control.model.name + '_Timer'); x.jump(zero).label(next); }
+    for (const control of module.controls.values()) if (control.model.type === 'Timer') { const next = x.unique(); x.compare(control.id).branch('ne',next); this.controlHandler(module,control,'Timer'); x.jump(zero).label(next); }
     x.jump(fallback);
     x.label(size);
     if (module.form.type === 'MDIForm') {
@@ -591,6 +605,7 @@ class NativeCompiler {
   }
   helpers() {
     const x = this.x;
+    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);
     emitNativeStorageHelpers(this);
     emitNativeArrayHelpers(this);
     // int-to-string(value, buffer), including INT_MIN without signed negation overflow.
@@ -628,10 +643,10 @@ class NativeCompiler {
     x.label(dispatch).api('user32.dll','TranslateMessage',['msg']).api('user32.dll','DispatchMessageW',['msg']).jump(loop).label(quit).api('kernel32.dll','ExitProcess',[0]);
     this.image.manifest('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo><dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="x86" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency></assembly>');
     const linked = this.image.finish('entry');
-    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
+    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods);
+Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods);
 export function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');

@@ -1,6 +1,6 @@
 # Native dynamic arrays
 
-The direct JavaScript-to-PE32 compiler now lowers typed fixed and dynamic arrays to
+The direct JavaScript-to-PE32 compiler lowers typed fixed and dynamic arrays to
 owned Windows Automation SAFEARRAYs. Generated programs still run as one EXE with
 no extraction or bundled interpreter. `OleAut32.dll` is an imported Windows system
 library, not a redistributed VB6 runtime. This does not add WebGPU or general COM
@@ -26,13 +26,16 @@ Public Sub Main()
 End Sub
 ```
 
-Element types are Byte, Integer, Boolean, Long and String. Dynamic arrays begin
-unallocated. `ReDim` accepts one through eight dimensions with runtime signed
-32-bit bounds and Option Base for omitted lower bounds. ReDim without Preserve
-creates zero/empty-initialized storage, and can change rank. ReDim Preserve retains
-existing elements and allows only the final dimension's upper bound to change.
-All lower bounds and other dimensions must match. Shrinking String arrays releases
-the removed BSTR elements; growing initializes new elements. Fixed-length String
+Element types are Byte, Integer, Boolean, Long, Single, Double, Currency and String. Single
+and Double elements occupy four and eight bytes respectively. Floating element
+reads produce value snapshots and Single stores round to Single precision; see
+[Native numeric storage](WIN32-NUMERIC.md). Currency uses eight-byte VT_CY elements and exact scaled-bit snapshots; see [Native Currency](WIN32-CURRENCY.md). Dynamic arrays begin unallocated.
+`ReDim` accepts one through eight dimensions with runtime signed 32-bit bounds and
+Option Base for omitted lower bounds. ReDim without Preserve creates
+zero/empty-initialized storage and can change rank. ReDim Preserve retains existing
+elements and allows only the final dimension's upper bound to change. All lower
+bounds and other dimensions must match. Shrinking String arrays releases the
+removed BSTR elements; growing initializes new elements. Fixed-length String
 arrays pad new elements and truncate/pad assignments to the declared length.
 
 `LBound` and `UBound` have a checked optional dimension. Unallocated arrays, invalid
@@ -87,8 +90,11 @@ parameter forwarding, deterministic PE bytes and required ownership APIs. The
 resizing, preservation, deep copies, locks, error recovery, recursion, statics,
 Unicode/embedded NUL data, element widths and 2,000 repeated String-array lifetimes.
 It runs alongside the existing storage/error, native-control and native-MDI EXEs in
-`tools/test-win32-aot.ps1`. A source-level compile pass is not a Windows execution
-pass; consult the matching GitHub Actions artifact for the tested commit.
+`tools/test-win32-aot.ps1`. The `AotNumbers` fixture and
+`tools/test-win32-numeric.ps1` additionally exercise Single/Double fixed/dynamic
+arrays, multidimensional Preserve, ByRef mutation, pinned resize errors and size
+limits. A source-level compile pass is not a Windows execution pass; consult the
+matching GitHub Actions artifact for the tested commit.
 
 Platform references:
 - ReDim: https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/redim-statement

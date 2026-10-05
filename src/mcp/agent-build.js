@@ -12,14 +12,19 @@ import {S, N, E, REV} from './agent-schema.js';
 /** Build outputs are inert bytes; this surface never executes an EXE or touches host files. */
 export function installBuildTools(ide, adapter, {add, output, consent, commit, changed, checkRevision}) {
   const artifacts = new Map(), maxBytes = 32 * 1024 * 1024, ttlMs = 300000;
+  const observers=new Set();
+  const notify=()=>{for(const fn of observers){try{Promise.resolve(fn()).catch(()=>{});}catch{}}};
   const owner = ctx => ctx.principal || ctx.sessionKey || 'embedded';
-  const remove = id => { const item = artifacts.get(id); if (!item) return; clearTimeout(item.timer); item.authority.removeEventListener('abort', item.revoke); artifacts.delete(id); };
+  const remove = id => { const item = artifacts.get(id); if (!item) return; clearTimeout(item.timer); item.authority.removeEventListener('abort', item.revoke); artifacts.delete(id); notify(); };
   const purge = () => { for (const [id, item] of artifacts) if (item.epoch !== adapter.authorityEpoch || item.expiresAt <= Date.now()) remove(id); };
+  adapter.onArtifactsChange = fn => { observers.add(fn); return () => observers.delete(fn); };
+  adapter.inspectArtifacts = () => { purge(); return [...artifacts.values()].map(metadata); };
+  adapter.releaseArtifactLocal = id => { const found=artifacts.has(id); remove(id); return found; };
   adapter.revokeArtifacts = () => { for (const id of artifacts.keys()) remove(id); };
   const priorRevoke = adapter.revokePrincipal;
   adapter.revokePrincipal = principal => { for (const [id,item] of artifacts) if (item.owner === principal) remove(id); priorRevoke?.(principal); };
   const dispose = adapter.dispose.bind(adapter);
-  adapter.dispose = () => { for (const id of artifacts.keys()) remove(id); dispose(); };
+  adapter.dispose = () => { for (const id of artifacts.keys()) remove(id); observers.clear(); dispose(); };
   const find = (id, ctx) => { purge(); const item = artifacts.get(id); if (!item || item.owner !== owner(ctx)) throw new McpError(-32602, 'Build artifact not found or expired.'); return item; };
   const metadata = item => ({artifactId: item.id, name: item.name, mimeType: item.mimeType, size: item.bytes.length, sha256: item.sha256, sourceRevision: item.sourceRevision, expiresAt: item.expiresAt});
   add('build.targets', 'Describe build/export targets. Building returns inert bytes; desktop packaging and the licensed classic compiler require their local CLI.', {}, [], () => output({
@@ -48,7 +53,7 @@ export function installBuildTools(ide, adapter, {add, output, consent, commit, c
     while (artifacts.size >= 8 || [...artifacts.values()].reduce((n, item) => n + item.bytes.length, 0) + bytes.length > maxBytes) remove(artifacts.keys().next().value);
     const id = randomToken(24), item = {id, bytes, owner: owner(ctx), epoch, sourceRevision, mimeType, name: project.name + extension,
       authority: adapter.authoritySignal, expiresAt: Date.now() + ttlMs, sha256: [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')};
-    item.revoke = () => remove(id); item.timer = setTimeout(item.revoke, ttlMs); item.timer.unref?.(); artifacts.set(id, item); item.authority.addEventListener('abort', item.revoke, {once: true});
+    item.revoke = () => remove(id); item.timer = setTimeout(item.revoke, ttlMs); item.timer.unref?.(); artifacts.set(id, item); item.authority.addEventListener('abort', item.revoke, {once: true}); notify();
     return output({valid: true, artifact: metadata(item), ...(report ? {report} : {})});
   });
   adapter.tools.at(-1).annotations.idempotentHint = false;

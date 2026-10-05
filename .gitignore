@@ -15,7 +15,17 @@ reports/browser-windows/
 # Generated native-project browser artifacts.
 reports/native-projects/
 
+# Win32 compatibility screenshots/results are uploaded by CI.
+reports/win32-browser/
 # Data integration evidence and local gateway secrets.
 reports/data-sources/
 server-profiles.local.json
 *.sqlite
+
+# Generated debugger browser evidence; retained as CI artifacts.
+reports/debugger-runtime/
+# Coding-agent browser validation reports and screenshots (CI artifacts).
+reports/coding-agents/
+
+# Classic HTML pixel fixtures and benchmark evidence
+reports/classic-html/

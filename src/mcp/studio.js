@@ -1,3 +1,4 @@
+import {McpOperationsView} from './operations-panel.js';
 import {AGENT_SCOPES, agentScope} from './agent-permissions.js';
 import {el, download} from '../core/core.js';
 import {modal, tabbedPages, icon} from '../ide/ui.js';
@@ -105,7 +106,8 @@ class McpPanel {
     this.status = el('div', {class: 'mcp-status', role: 'status', 'aria-live': 'polite'}, 'Ready');
     this.summary = el('span', {class: 'mcp-summary-state'}, 'Disabled');
     const access = this.sharingPage(), agent = this.agentPage(), catalog = this.catalogPage(), activity = this.activityPage();
-    this.tabs = tabbedPages([{id:'access',label:'Agent access',node:access},{id:'agent',label:'Agent permissions',node:agent},{id:'capabilities',label:'Capabilities',node:catalog},{id:'activity',label:'Activity',node:activity}], {label:'MCP settings'});
+    this.operationsView = new McpOperationsView(api);
+    this.tabs = tabbedPages([{id:'access',label:'Agent access',node:access},{id:'agent',label:'Agent permissions',node:agent},{id:'capabilities',label:'Capabilities',node:catalog},{id:'activity',label:'Activity',node:activity},{id:'operations',label:'Operations',node:this.operationsView.root}], {label:'MCP settings'});
     const close = button('Close', () => this.api.closePanel?.()); close.className = 'default-button';
     this.root.append(el('div', {class:'mcp-heading'}, icon('properties'), el('div', {}, el('strong', {}, 'MCP Agent Access'), el('div', {class:'tool-note'}, 'External agents → VB6 Studio')), this.summary), this.tabs,
       el('div', {class:'mcp-footer'}, this.status, button('Stop sharing', () => { this.operation?.abort(); this.api.setSharing(false).catch(e => this.showError(e)); }), close));
@@ -119,7 +121,7 @@ class McpPanel {
       }
     });
   }
-  dispose() { this.disposed = true; this.operation?.abort(); this.bridgeToken.value = ''; this.disposeChange?.(); this.disposeState?.(); }
+  dispose() { this.disposed = true; this.operationsView.dispose(); this.operation?.abort(); this.bridgeToken.value = ''; this.disposeChange?.(); this.disposeState?.(); }
   showError(error) { this.status.textContent = String(error.message || error); this.status.classList.add('tool-error'); }
   refresh() {
     if (this.disposed) return;

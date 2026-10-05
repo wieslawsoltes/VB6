@@ -1,119 +1,299 @@
-import {lower} from '../core/core.js';
-import {KEYWORDS,BUILTINS} from './language-service.js';
-import {BUILTIN_SIGNATURES} from '../runtime/signatures.js';
-import {VB_CONSTANTS} from '../runtime/library.js';
-import {CONTROL_DEFAULTS,createControl,createForm} from '../project/model.js';
+import {displayParameter} from './signature-syntax.js';
+import {normalizeTypeLibrary,referenceSnapshot} from './reference-metadata.js';
+import {typeCompletionContext,typeCandidates} from './type-completion.js';
+import {parseExpression} from '../language/expression.js';
+import {KEYWORDS} from './language-service.js';
+import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt,completionKey,completionMatches,mapParameterType} from './source-context.js';
+import {scanDeclarations,parameterSymbol} from './declaration-index.js';
+import {PRIMITIVE_TYPES,CONSTANT_SYMBOLS,BUILTIN_SYMBOLS,GLOBAL_OBJECTS,TYPE_CATALOG,ENUM_TYPES,builtinType,member,runtimeType,builtinGroup} from './type-catalog.js';
+export {maskSource,splitArguments,wordAt,scanDeclarations};
 
-/** A tolerant declaration index: does not execute or compile incomplete code. */
-export function maskSource(source){
-  let out='',string=false,comment=false,date=false;
-  for(let i=0;i<source.length;i++){
-    const c=source[i];
-    if(c==='\n'){out+='\n';comment=false;continue;}
-    if(comment){out+=' ';continue;}
-    if(string){out+=' ';if(c==='"'){if(source[i+1]==='"'){out+=' ';i++;}else string=false;}continue;}
-    if(date){out+=' ';if(c==='#')date=false;continue;}
-    if(c==='"'){string=true;out+=' ';continue;}
-    if(c==="'"||(c==='r'||c==='R')&&/^Rem(?:\s|$)/i.test(source.slice(i))&&(i===0||/[\s:]/.test(source[i-1]))){comment=true;out+=' ';continue;}
-    if(c==='#'&&source.indexOf('#',i+1)>=0){date=true;out+=' ';continue;}
-    out+=c;
+const eq=(a,b)=>symbolKey(a)===symbolKey(b);
+const visible=s=>!s.hidden&&!s.restricted;
+const find=(items,name)=>items.find(s=>String(s.name).toLowerCase()===String(name).toLowerCase())||items.find(s=>eq(s.name,name));
+function coalesce(items) {
+  const groups=new Map();
+  for(const s of items){const key=symbolKey(s.name),old=groups.get(key);if(!old)groups.set(key,s);else if(s.accessor==='get'&&old.accessor!=='get')groups.set(key,s);}
+  return [...groups.values()].map(s=>{
+    if(!s.accessor)return s;
+    const params=s.accessor==='get'?s.params:s.params.slice(0,-1);
+    return {...s,kind:'property',accessors:items.filter(m=>eq(m.name,s.name)&&m.accessor),params,parameters:s.parameters?.slice(0,params.length)||params.map(p=>parameterSymbol(p)).filter(Boolean)};
+  });
+}
+
+/** Nested and statement-form call contexts; named/omitted arguments retain
+ * their source position. Parenthesized grouping is not mistaken for a call. */
+export function callContext(text,offset,{outer=false}={}) {
+  const st=statementBefore(text,offset),masked=st.masked;
+  if(st.state==='comment'||masked.length>65536||/^\s*(?:(?:Public|Private|Friend|Static)\s+)*(?:Declare\s+)?(?:Sub|Function|Property|Event|Type|Enum)\b/i.test(masked))return null;
+  const stack=[];
+  const head=masked.match(new RegExp('^\\s*(?:(?:Call|RaiseEvent)\\s+)?(\\.?'+IDENTIFIER+')','i'));
+  if(head){
+    let end=head[0].length,nameStart=end-head[1].length;
+    // Consume complete index/call groups only when they qualify a following
+    // member; an incomplete argument group is handled by the stack below.
+    while(end<masked.length){
+      const dot=masked.slice(end).match(new RegExp('^\\s*\\.\\s*'+IDENTIFIER,'i'));
+      if(dot){end+=dot[0].length;continue;}
+      let i=end;while(/[ \t]/.test(masked[i]||'!'))i++;
+      if(masked[i]!=='(')break;
+      let depth=1,j=i+1,bracket=false;
+      for(;j<masked.length&&depth;j++){const c=masked[j];if(c==='[')bracket=true;else if(c===']')bracket=false;if(bracket)continue;if(c==='(')depth++;else if(c===')')depth--;}
+      if(depth||!/^\s*\./.test(masked.slice(j)))break;end=j;
+    }
+    const name=st.text.slice(nameStart,end).trim(),tail=masked.slice(end);
+    if(/^[ \t]+/.test(tail)&&!/^\s*[=(]/.test(tail)&&(!KEYWORDS.some(k=>eq(k,name))||BUILTIN_SYMBOLS.some(s=>eq(s.name,name)))){
+      const argumentStart=end+tail.match(/^[ \t]+/)[0].length;
+      stack.push({name,start:st.start+argumentStart,comma:0,last:argumentStart,argumentStart,statement:true});
+    }
   }
-  return out;
-}
-export function splitArguments(source){
-  const masked=maskSource(source);let depth=0,start=0,result=[];
-  for(let i=0;i<masked.length;i++){if(masked[i]==='(')depth++;if(masked[i]===')')depth--;if(masked[i]===','&&depth===0){result.push(source.slice(start,i).trim());start=i+1;}}
-  if(source.slice(start).trim())result.push(source.slice(start).trim());return result;
-}
-const typesBySuffix={'%':'Integer','&':'Long','!':'Single','#':'Double','@':'Currency','$':'String'};
-function parseVariable(text,line,moduleId,owner=null,scope='private',kind='variable'){
-  const clean=text.replace(/^\s*(?:(?:ByVal|ByRef|Optional|ParamArray|WithEvents|Static)\s+)*/i,'');
-  const m=clean.match(/^([A-Za-z_]\w*[$%&!#@]?)(\s*\([^)]*\))?\s*(?:As\s+(?:New\s+)?([\w.]+))?/i);if(!m)return null;
-  return {name:m[1],type:m[3]||typesBySuffix[m[1].slice(-1)]||'Variant',array:!!m[2],line,moduleId,owner,scope,kind,signature:text.trim(),optional:/^\s*Optional\b/i.test(text)};
-}
-export function scanDeclarations(module){
-  const lines=module.code.split('\n'),masked=maskSource(module.code).split('\n'),symbols=[],procedures=[],records=[];let owner=null,record=null;
-  for(let i=0;i<lines.length;i++){
-    let text=lines[i],clean=masked[i],line=i+1;
-    while(/_\s*$/.test(clean)&&i+1<lines.length){text=text.replace(/_\s*$/,' ')+lines[++i];clean=clean.replace(/_\s*$/,' ')+masked[i];}
-    const proc=clean.match(/^\s*(?:(Public|Private|Friend|Static)\s+)*(Sub|Function|Property\s+(?:Get|Let|Set))\s+(\w+[$%&!#@]?)\s*(?:\((.*)\))?\s*(?:As\s+([\w.]+))?/i);
-    if(proc){const scope=/^\s*Private\b/i.test(clean)?'private':/^\s*Friend\b/i.test(clean)?'friend':'public';owner={name:proc[3],kind:proc[2].toLowerCase(),line,end:lines.length,moduleId:module.id,scope,type:proc[5]||typesBySuffix[proc[3].slice(-1)]||'Variant',signature:text.trim(),params:[]};const open=text.indexOf('('),close=text.lastIndexOf(')');owner.params=open<0?[]:splitArguments(text.slice(open+1,close));procedures.push(owner);symbols.push(owner);for(const p of owner.params){const variable=parseVariable(p,line,module.id,owner.name,'private','parameter');if(variable)symbols.push(variable);}continue;}
-    if(/^\s*End\s+(Sub|Function|Property)\b/i.test(clean)){if(owner)owner.end=line;owner=null;continue;}
-    const recordStart=clean.match(/^\s*(?:(Public|Private)\s+)?(Type|Enum)\s+(\w+)/i);
-    if(recordStart){record={name:recordStart[3],kind:recordStart[2].toLowerCase(),scope:lower(recordStart[1]||'public'),line,moduleId:module.id,members:[]};records.push(record);symbols.push(record);continue;}
-    if(/^\s*End\s+(Type|Enum)\b/i.test(clean)){record=null;continue;}
-    if(record){const value=parseVariable(text,line,module.id,null,record.scope,record.kind==='enum'?'constant':'field');if(value){value.parentType=record.name;value.signature=record.name+'.'+text.trim();record.members.push(value);if(record.kind==='enum')symbols.push(value);}continue;}
-    const decl=clean.match(/^\s*(Dim|Private|Public|Friend|Static|Const)\s+(?:(Const)\s+)?(.*)/i);
-    if(decl){const original=text.slice(text.length-decl[3].length),scope=/^(Public|Friend)$/i.test(decl[1])?lower(decl[1]):'private';for(const p of splitArguments(original)){const value=parseVariable(p,line,module.id,owner?.name||null,scope,lower(decl[1])==='const'||decl[2]?'constant':'variable');if(value)symbols.push(value);}}
+  let bracket=false;
+  for(let i=0;i<masked.length;i++){
+    const c=masked[i];if(c==='[')bracket=true;else if(c===']')bracket=false;if(bracket)continue;
+    if(c==='('){
+      if(stack.length>=64)return null;
+      const name=expressionBefore(st.text,i).text;
+      stack.push({name:/^[\w\u0080-\uffff[.(]/.test(name)&&!KEYWORDS.some(k=>eq(k,name)&&!BUILTIN_SYMBOLS.some(s=>eq(s.name,name)))?name:'',start:st.start+i+1,comma:0,last:i+1,argumentStart:i+1});
+    }else if(c===')'){if(stack.length&&!stack.at(-1).statement)stack.pop();}
+    else if(c===','&&stack.length){stack.at(-1).comma++;stack.at(-1).last=i+1;}
   }
-  for(const control of module.form?.controls||[])symbols.push({name:control.name,type:control.type,kind:'control',scope:'public',line:1,moduleId:module.id,array:control.properties.Index!==undefined,signature:control.name+' As '+control.type});
-  return {moduleId:module.id,name:module.name,symbols,procedures,records};
-}
-const controlMembers=new Map();
-const commonMethods={Move:'Left, Top?, Width?, Height?',SetFocus:'',Refresh:'',ZOrder:'Position?'};
-const specificMethods={Form:{Show:'Modal?, Owner?',Hide:'',Print:'OutputList',Cls:'',Unload:''},ListBox:{AddItem:'Item, Index?',RemoveItem:'Index',Clear:''},ComboBox:{AddItem:'Item, Index?',RemoveItem:'Index',Clear:''},PictureBox:{Cls:'',Print:'OutputList',PSet:'X, Y, Color?'},RichTextBox:{LoadFile:'FileName, FileType?',SaveFile:'FileName, FileType?',Find:'String, Start?, End?, Options?'},CommonDialog:{ShowOpen:'',ShowSave:'',ShowColor:'',ShowFont:''}};
-function adapterMembers(type){
-  type=type.replace(/^VB\./i,'');if(controlMembers.has(type))return controlMembers.get(type);
-  const result=[];
-  if(type==='Form'||Object.hasOwn(CONTROL_DEFAULTS,type)){
-    const props=type==='Form'?createForm().form.properties:createControl(type).properties;
-    for(const [name,value]of Object.entries(props))result.push({name,kind:'property',type:typeof value==='number'?'Long':'String',signature:name+' As '+(typeof value==='number'?'Long':'String')});
-    for(const [name,args]of Object.entries({...commonMethods,...specificMethods[type]}))result.push({name,kind:'method',signature:name+'('+args+')',params:args?args.split(',').map(s=>s.trim()):[]});
-    if(['TextBox','RichTextBox'].includes(type))for(const name of ['SelStart','SelLength','SelText'])result.push({name,kind:'property',type:name==='SelText'?'String':'Long',signature:name+' As '+(name==='SelText'?'String':'Long')});
-  }else if(/^(?:Scripting\.)?Dictionary$/i.test(type)){
-    for(const [name,args]of Object.entries({Add:'Key, Item',Item:'Key',Exists:'Key',Keys:'',Items:'',Remove:'Key',RemoveAll:''}))result.push({name,kind:'method',signature:name+'('+args+')',params:args?args.split(', '):[]});
-    result.push({name:'Count',kind:'property',type:'Long',signature:'Count As Long'},{name:'CompareMode',kind:'property',type:'Long',signature:'CompareMode As Long'});
-  }else if(/^Collection$/i.test(type))for(const [name,args]of Object.entries({Add:'Item, Key?, Before?, After?',Item:'Index',Remove:'Index',Count:''}))result.push({name,kind:name==='Count'?'property':'method',signature:name+'('+args+')',params:args?args.split(', '):[]});
-  controlMembers.set(type,result);return result;
+  const calls=stack.filter(c=>c.name),found=outer?calls[0]:calls.at(-1);if(!found)return null;
+  const last=masked.slice(found.last).replace(/_\s*\r?\n/g,' '),argumentName=last.match(new RegExp('^\\s*('+IDENTIFIER+')\\s*:=','i'))?.[1]||null;
+  return {...found,named:argumentName,args:splitArguments(st.text.slice(found.argumentStart),true),last:st.start+found.last};
 }
 
-export function wordAt(text,offset){let start=offset,end=offset;while(start>0&&/[\w.$%&!#@]/.test(text[start-1]))start--;while(end<text.length&&/[\w$%&!#@]/.test(text[end]))end++;return {start,end,text:text.slice(start,end)};}
-/** Locate nested calls, ignoring commas in strings, dates and nested expressions. */
-export function callContext(text,offset,{outer=false}={}){
-  let start=text.lastIndexOf('\n',offset-1)+1;
-  // Join VB explicit line continuations without losing source offsets.
-  while(start>0){const previous=text.lastIndexOf('\n',start-2)+1;if(!/_\s*$/.test(text.slice(previous,start-1)))break;start=previous;}
-  const original=text.slice(start,offset),masked=maskSource(original),stack=[];
-  for(let i=0;i<masked.length;i++){const c=masked[i];if(c==='('){const match=masked.slice(0,i).match(/([A-Za-z_][\w.$]*)\s*$/);stack.push({name:match?.[1]||'',start:start+i+1,comma:0,last:i+1});}else if(c===')')stack.pop();else if(c===','&&stack.length){stack.at(-1).comma++;stack.at(-1).last=i+1;}}
-  let found=(outer?stack.find(c=>c.name):[...stack].reverse().find(c=>c.name));
-  if(!found){const m=masked.match(/^\s*(?:Call\s+)?([A-Za-z_][\w.$]*)\s+(?![=])(.*)$/i);if(!m||KEYWORDS.some(k=>lower(k)===lower(m[1])))return null;const at=masked.indexOf(m[2]);let depth=0,comma=0,last=at;for(let i=at;i<masked.length;i++){if(masked[i]==='(')depth++;else if(masked[i]===')')depth--;else if(masked[i]===','&&!depth){comma++;last=i+1;}}found={name:m[1],start:start+at,comma,last};}
-  const named=masked.slice(found.last).replace(/_\s*\n/g,' ').match(/^\s*([A-Za-z_]\w*)\s*:=/);return {...found,named:named?.[1]||null};
-}
-
+/** Standalone, synchronous, side-effect-free language service. The only mutable
+ * state is bounded declaration/AST metadata caches, not a live VB runtime. */
 export class EditorIntelligence {
-  constructor(){this.cache=new Map();this.scanCount=0;}
-  index(module){const cached=this.cache.get(module.id),formKey=JSON.stringify((module.form?.controls||[]).map(c=>[c.name,c.type,c.properties.Index]));if(cached?.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey)return cached.index;const index=scanDeclarations(module);this.scanCount++;this.cache.set(module.id,{code:module.code,name:module.name,kind:module.kind,formKey,index});return index;}
+  constructor(){this.cache=new Map();this.scanCount=0;this.expressionCache=new Map();this.libraries=new Map();this.libraryRevision=0;}
+  index(module,project=null){
+    const condition=project?.settings?.conditionalConstants||module.conditionalConstants||{},conditionalKey=JSON.stringify(condition);
+    const formKey=JSON.stringify([module.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),module.form?.menus,module.attributes]);
+    const cached=this.cache.get(module.id);
+    if(cached&&cached.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey&&cached.conditionalKey===conditionalKey)return cached.index;
+    const index=scanDeclarations({...module,conditionalConstants:condition});this.scanCount++;
+    this.cache.set(module.id,{code:module.code,name:module.name,kind:module.kind,formKey,conditionalKey,index});return index;
+  }
   prune(project){const ids=new Set(project.modules.map(m=>m.id));for(const id of this.cache.keys())if(!ids.has(id))this.cache.delete(id);}
-  scope(project,module,line){this.prune(project);const idx=this.index(module),proc=idx.procedures.find(p=>line>=p.line&&line<=p.end);return {idx,proc,symbols:idx.symbols.filter(s=>!s.owner||lower(s.owner)===lower(proc?.name))};}
-  resolve(project,module,line,expression){
-    const parts=expression.split('.').filter(Boolean);if(!parts.length)return null;
-    const {idx,proc,symbols}=this.scope(project,module,line);let first=parts.shift(),result;
-    if(lower(first)==='me')result={name:'Me',type:module.name,moduleId:module.id,kind:'variable'};
-    else result=symbols.find(s=>s.owner&&lower(s.name)===lower(first))||symbols.find(s=>!s.owner&&lower(s.name)===lower(first));
-    if(!result){const target=project.modules.find(m=>lower(m.name)===lower(first));if(target)result={name:target.name,type:target.name,moduleId:target.id,kind:'module',line:1};}
-    if(!result)for(const other of project.modules){if(other.kind!=='module'||other.id===module.id)continue;result=this.index(other).symbols.find(s=>!s.owner&&s.scope!=='private'&&lower(s.name)===lower(first));if(result)break;}
-    if(!result){const name=Object.keys(BUILTIN_SIGNATURES).find(k=>lower(k)===lower(first));if(name)result={name,kind:'function',signature:name+'('+BUILTIN_SIGNATURES[name].replaceAll(',',', ')+')',params:BUILTIN_SIGNATURES[name]?BUILTIN_SIGNATURES[name].split(','):[]};}
-    if(!result){const name=Object.keys(VB_CONSTANTS).find(k=>lower(k)===lower(first));if(name)result={name,kind:'constant',signature:name+' = '+JSON.stringify(VB_CONSTANTS[name])};}
-    if(!result)return null;
-    for(const part of parts){const members=this.members(project,module,result.type||result.name);result=members.find(s=>lower(s.name)===lower(part));if(!result)return null;}
-    return result;
+  scope(project,module,line,offset=null){
+    this.prune(project);const idx=this.index(module,project),proc=idx.procedures.find(p=>offset===null?line>=p.line&&line<=p.end:offset>=p.offset&&offset<=p.endOffset);
+    let local=idx.symbols.filter(s=>s.ownerId&&s.ownerId===proc?.id);
+    if(local.some(s=>s.implicitRedim)){
+      const shared=new Set();
+      for(const other of project.modules){
+        if(other.id===module.id||other.kind!=='module')continue;
+        for(const symbol of this.index(other,project).symbols)if(!symbol.owner&&symbol.scope!=='private')shared.add(symbolKey(symbol.name));
+      }
+      local=local.filter(s=>!s.implicitRedim||!shared.has(symbolKey(s.name)));
+    }
+    const global=idx.symbols.filter(s=>!s.owner);
+    return {idx,proc,symbols:[...local,...coalesce(global)]};
   }
-  members(project,module,type){
-    const target=project.modules.find(m=>lower(m.name)===lower(type));if(target){const result=this.index(target).symbols.filter(s=>!s.owner&&(target.id===module.id||s.scope!=='private'));return target.form?result.concat(adapterMembers('Form')):result;}
-    for(const m of project.modules){const record=this.index(m).records.find(r=>lower(r.name)===lower(type)&&(m.id===module.id||r.scope!=='private'));if(record)return record.members;}
-    return adapterMembers(type||'Variant');
+  /** Explicit portable type-library descriptors. No registry lookup, fetching,
+   * getters, method invocation or native library loading is performed. */
+  registerTypeLibrary(name,types){
+    const normalized=normalizeTypeLibrary(name,types),key=symbolKey(name);
+    this.libraries.set(key,normalized);this.libraryRevision++;
+    // A disposer from an older registration must not remove its replacement.
+    return ()=>this.libraries.get(key)===normalized&&this.unregisterTypeLibrary(name);
   }
-  completions(project,module,line,text,offset,{constants=false,unfiltered=false}={}){
-    const before=text.slice(0,offset),word=before.match(/[A-Za-z_]\w*[$%&!#@]?$/)?.[0]||'',prefix=lower(word),left=before.slice(0,before.length-word.length),member=left.match(/([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.$/);
-    // Inside a literal/comment there is no meaningful identifier completion.
-    const lineText=before.slice(before.lastIndexOf('\n')+1),masked=maskSource(lineText);
-    if(word&&masked.slice(-word.length).trim()==='')return {start:offset-word.length,items:[]};
-    let items=[];
-    if(constants){items=Object.entries(VB_CONSTANTS).map(([name,value])=>({name,kind:'constant',signature:name+' = '+JSON.stringify(value)}));for(const m of project.modules)items.push(...this.index(m).symbols.filter(s=>s.kind==='constant'&&(s.scope!=='private'||m.id===module.id)&&(!s.owner||m.id===module.id&&lower(s.owner)===lower(this.scope(project,module,line).proc?.name))));}
-    else if(member){const object=this.resolve(project,module,line,member[1]);items=object?this.members(project,module,object.type||object.name):[];}
-    else {items=this.scope(project,module,line).symbols.slice();for(const other of project.modules){items.push({name:other.name,kind:'module',type:other.name,moduleId:other.id,line:1});if(other.kind==='module'&&other.id!==module.id)items.push(...this.index(other).symbols.filter(s=>!s.owner&&s.scope!=='private'));}items.push(...KEYWORDS.map(name=>({name,kind:'keyword'})),...BUILTINS.map(name=>({name,kind:'function'})),...Object.keys(VB_CONSTANTS).map(name=>({name,kind:'constant'})));}
-    const unique=new Map();for(const item of items){const key=lower(item.name);if((unfiltered||key.startsWith(prefix))&&!unique.has(key))unique.set(key,item);}
-    return {start:offset-word.length,items:[...unique.values()].sort((a,b)=>lower(a.name).localeCompare(lower(b.name)))};
+  unregisterTypeLibrary(name){const changed=this.libraries.delete(symbolKey(name));if(changed)this.libraryRevision++;return changed;}
+  referenceTypes(project){
+    // Projects can persist the same JSON descriptor beside their native
+    // reference identity. Check serialized contents to observe in-place edits.
+    const {descriptors,key}=referenceSnapshot(project);
+    if(key!==this.referenceKey){const service=new EditorIntelligence();for(const d of descriptors)try{service.registerTypeLibrary(d.name,d.types);}catch{}this.referenceCache=[...service.libraries.values()].flat();this.referenceKey=key;}
+    return [...this.libraries.values()].flat().concat(this.referenceCache||[]);
   }
-  parameterInfo(project,module,line,text,offset,options){const context=callContext(text,offset,options);if(!context)return null;const symbol=this.resolve(project,module,line,context.name);if(!symbol?.params)return null;let active=context.comma;if(context.named){const index=symbol.params.findIndex(p=>lower(p.replace(/^(?:(?:Optional|ByVal|ByRef|ParamArray)\s+)*/i,'').match(/^\w+/)?.[0]||'')===lower(context.named));if(index>=0)active=index;}return {...symbol,active,context};}
+  type(project,module,type,seen=new Set()){
+    if(seen.has(symbolKey(type))||seen.size>=32)return null;seen.add(symbolKey(type));
+    type=String(type||'Variant').replace(/\s*\.\s*/g,'.').trim().replace(/\[([^\]]+)\]/g,'$1');
+    if(project.name&&type.toLowerCase().startsWith(project.name.toLowerCase()+'.'))type=type.slice(project.name.length+1);
+    const target=eq(module.name,type)?module:project.modules.find(m=>eq(m.name,type));
+    if(target)return {name:target.name,type:target.name,kind:target.kind,moduleId:target.id,members:coalesce(this.index(target,project).symbols.filter(s=>!s.owner&&(target.id===module.id||s.scope!=='private'))).concat(target.form?builtinType(target.form.type||'Form')?.members||[]:[])};
+    const pieces=type.split('.'),qualifier=pieces.length>1?pieces.slice(0,-1).join('.'):null,recordName=pieces.at(-1);
+    for(const m of [module,...project.modules.filter(m=>m.id!==module.id)]){
+      if(qualifier&&!eq(m.name,qualifier))continue;
+      const record=this.index(m,project).records.find(r=>eq(r.name,recordName)&&(m.id===module.id||r.scope!=='private'));
+      if(record)return record;
+    }
+    const references=this.referenceTypes(project),ref=references.find(t=>eq(t.name,type)||(t.aliases||[]).some(a=>eq(a,type)))||references.find(t=>eq(t.name.split('.').at(-1),type));
+    return ref?.kind==='alias'?this.type(project,module,ref.target,seen):(ref?{...ref,members:coalesce(ref.members)}:null)||runtimeType(project,type)||builtinType(type);
+  }
+  declared(project,module,symbol){
+    if(!symbol?.moduleId)return symbol;
+    const owner=symbol.moduleId===module.id?module:project.modules.find(m=>m.id===symbol.moduleId);
+    if(!owner)return symbol;
+    const qualify=type=>this.index(owner,project).records.some(r=>eq(r.name,type))?owner.name+'.'+type:type;
+    const params=symbol.params?.map(p=>mapParameterType(p,qualify));
+    const parameters=params?.map((text,i)=>{
+      const value=symbol.parameters?.[i]||parameterSymbol(text,this.index(owner,project).defaults);
+      return value?{...value,type:qualify(value.type),signature:text}:null;
+    }).filter(Boolean);
+    return {...symbol,type:qualify(symbol.type),...(params?{params,parameters}:{})};
+  }
+  referenceGlobals(project){
+    return this.referenceTypes(project).filter(t=>visible(t)&&(t.kind==='enum'||t.kind==='module'||t.global)).flatMap(t=>t.members.filter(visible));
+  }
+  members(project,module,type){return (this.type(project,module,type)?.members||[]).filter(visible);}
+  objectMembers(project,module,symbol){
+    if(!symbol)return [];
+    if(symbol.namespace){
+      if(eq(symbol.namespace,project.name))return project.modules.map(m=>({name:m.name,type:m.name,kind:m.kind==='class'&&!this.index(m,project).predeclared?'class':'module',moduleId:m.id,line:1}));
+      if(eq(symbol.namespace,'VBA'))return [...BUILTIN_SYMBOLS,...CONSTANT_SYMBOLS,...PRIMITIVE_TYPES.map(name=>({name,type:name,kind:'type'})),...new Set(BUILTIN_SYMBOLS.map(s=>builtinGroup(s.name)))].map(s=>typeof s==='string'?{name:s,namespace:'VBA.'+s,kind:'module'}:s);
+      if(symbol.namespace.startsWith('VBA.'))return BUILTIN_SYMBOLS.filter(s=>eq('VBA.'+builtinGroup(s.name),symbol.namespace));
+      const types=[...TYPE_CATALOG.values(),...ENUM_TYPES.values(),...this.referenceTypes(project)];
+      const matching=types.filter(t=>visible(t)&&(t.name.toLowerCase().startsWith(symbol.namespace.toLowerCase()+'.')||eq(symbol.namespace,'VB')&&(t.aliases||[]).some(a=>a.startsWith('VB.'))));
+      return matching.flatMap(t=>{
+        const relative=t.name.toLowerCase().startsWith(symbol.namespace.toLowerCase()+'.')?t.name.slice(symbol.namespace.length+1):t.name;
+        if(relative.includes('.'))return [{name:relative.split('.')[0],namespace:symbol.namespace+'.'+relative.split('.')[0],kind:'module'}];
+        const named={name:relative,type:t.name,kind:t.predeclared?'object':t.kind};
+        return [named,...(t.kind==='enum'||t.kind==='module'||t.global?t.members.filter(visible):[])];
+      });
+    }
+    if(symbol.controlArray)return [member('Count','Long'),member('LBound','Long'),member('UBound','Long'),member('Item',symbol.type,'Index As Integer')];
+    if(symbol.array)return [];
+    if(symbol.kind==='class'&&!symbol.instance)return [];
+    const declared=this.declared(project,module,symbol);
+    if(this.type(project,module,declared.type)?.kind==='enum'&&symbol.kind!=='enum')return [];
+    return this.members(project,module,declared.type||declared.name).filter(s=>s.kind!=='event');
+  }
+  root(project,module,line,name,offset=null){
+    const {symbols}=this.scope(project,module,line,offset);
+    if(eq(name,'Me'))return module.kind==='module'?null:{name:'Me',type:module.name,kind:'object',moduleId:module.id};
+    let result=find(symbols,name);if(result)return result;
+    const target=project.modules.find(m=>eq(m.name,name));
+    if(target){const index=this.index(target,project);return {name:target.name,type:target.name,moduleId:target.id,kind:target.kind==='class'&&!index.predeclared?'class':'module',line:1};}
+    for(const other of project.modules){if(other.kind!=='module'||other.id===module.id)continue;result=find(coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&s.scope!=='private')),name);if(result)return result;}
+    if(module.form){result=find(builtinType(module.form.type||'Form')?.members||[],name);if(result)return result;}
+    result=find(GLOBAL_OBJECTS,name)||find(BUILTIN_SYMBOLS,name)||find(CONSTANT_SYMBOLS,name)||find(this.referenceGlobals(project),name);if(result)return result;
+    if(eq(name,'Forms'))return {name:'Forms',type:'Forms',kind:'object'};
+    const namespace=[project.name,'VBA','VB','ADODB','DAO','Scripting',...this.referenceTypes(project).map(t=>t.library)].find(n=>n&&eq(n,name));
+    if(namespace)return {name:namespace,namespace,kind:'module'};
+    const type=this.type(project,module,name);if(type)return {name:type.name,type:type.name,kind:type.predeclared?'object':type.kind||'class'};
+    return null;
+  }
+  withObject(project,module,line,offset=null,block=null,depth=0){
+    if(depth>32)return null;
+    const idx=this.index(module,project);
+    block ||= idx.withBlocks.filter(b=>offset===null?line>b.line&&line<b.endLine:offset>=b.start&&offset<=b.end).at(-1);
+    if(!block)return null;
+    return this.resolve(project,module,block.line,block.expression,{withBlock:block.parent,depth:depth+1,withoutImplicitWith:true,offset:block.start});
+  }
+  resolve(project,module,line,expression,options={}){
+    expression=String(expression||'').trim().replace(/\s+_\s*\r?\n/g,' ');
+    if(!expression||expression.length>4096||(options.depth||0)>64)return null;
+    let ast=this.expressionCache.get(expression);
+    if(!ast){try{ast=parseExpression(expression);}catch{return null;}if(this.expressionCache.size>=128)this.expressionCache.delete(this.expressionCache.keys().next().value);this.expressionCache.set(expression,ast);}
+    const visit=(node,depth=0)=>{
+      if(depth>64)return null;
+      if(node.kind==='id')return this.root(project,module,line,node.name,options.offset??null);
+      if(node.kind==='with')return options.withBlock?this.withObject(project,module,line,null,options.withBlock,(options.depth||0)+1):options.withoutImplicitWith?null:this.withObject(project,module,line,options.offset??null);
+      if(node.kind==='group')return visit(node.expr,depth+1);
+      if(node.kind==='new'){const type=this.type(project,module,node.name);return type?{name:node.name,type:type.name,kind:'object',instance:true}:null;}
+      if(node.kind==='member')return this.declared(project,module,find(this.objectMembers(project,module,visit(node.object,depth+1)),node.name))||null;
+      if(node.kind==='call'){
+        const target=visit(node.callee,depth+1);if(!target)return null;
+        if(target.params){
+          if(target.kind==='event'||eq(target.type,'Void'))return null;
+          if(target.kind==='property'&&!target.params.length){
+            if(target.array)return {...target,kind:'value',params:undefined,array:false,instance:true};
+            const propertyType=this.type(project,module,target.type),name=propertyType?.defaultMember||propertyType?.members?.find(m=>m.defaultMember)?.name;
+            const defaultSymbol=name?find(this.objectMembers(project,module,target),name):null;
+            return defaultSymbol?{...defaultSymbol,kind:'value',params:undefined,instance:true}:null;
+          }
+          return {...target,kind:'value',params:undefined,instance:true};
+        }
+        if(target.array||target.controlArray)return {...target,array:false,controlArray:false};
+        const type=this.type(project,module,target.type||target.name),defaultMember=type?.defaultMember||type?.members?.find(s=>s.defaultMember)?.name;
+        const item=defaultMember?find(this.objectMembers(project,module,target),defaultMember):null;
+        return item?{...item,kind:'value',params:undefined,instance:true}:null;
+      }
+      return null;
+    };
+    return this.declared(project,module,visit(ast));
+  }
+  parameterInfo(project,module,line,text,offset,options={}){
+    const context=callContext(text,offset,options);if(!context)return null;
+    let symbol=this.resolve(project,module,line,context.name,{offset:text===module.code?offset:null});
+    if(symbol?.array&&(!symbol.params||symbol.kind==='property'&&!symbol.params.length)){symbol={...symbol,kind:'array',params:Array.from({length:Math.min(60,symbol.rank||1)},(_,i)=>'Index'+(i+1)+' As Long'),parameters:undefined};}
+    if(symbol&&(!symbol.params||symbol.kind==='property'&&!symbol.params.length)){const type=this.type(project,module,symbol.type),name=type?.defaultMember||type?.members?.find(m=>m.defaultMember)?.name;symbol=name?find(this.objectMembers(project,module,symbol),name):null;}
+    if(!symbol?.params)return null;
+    const declared=this.declared(project,module,symbol);symbol=declared;
+    const parameters=symbol.parameters||symbol.params.map(p=>parameterSymbol(p)).filter(Boolean);
+    const used=new Set();let next=0;
+    for(const arg of context.args.slice(0,-1)){
+      const named=maskSource(arg).match(new RegExp('^\\s*('+IDENTIFIER+')\\s*:=','i'))?.[1];
+      if(named){const slot=parameters.findIndex(p=>eq(p.name,named));if(slot>=0)used.add(slot);}
+      else{while(used.has(next))next++;used.add(next++);}
+    }
+    while(used.has(next))next++;
+    let active=next;
+    if(context.named){active=parameters.findIndex(p=>eq(p.name,context.named));}
+    else if(active>=parameters.length){active=parameters.at(-1)?.paramArray?parameters.length-1:-1;}
+    return {...symbol,parameters,displayParams:symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
+  }
+  definition(project,module,line,text,offset,expression=wordAt(text,offset).text){
+    if(statementBefore(text,offset).state!=='code')return null;
+    const scope=this.scope(project,module,line,text===module.code?offset:null);
+    const label=scope.idx.labels.find(l=>l.ownerId===scope.proc?.id&&eq(l.name,expression));
+    return label||this.resolve(project,module,line,expression,{offset:text===module.code?offset:undefined});
+  }
+  expectedType(project,module,line,text,offset){
+    const st=statementBefore(text,offset),masked=st.masked;
+    if(/^\s*Case\s+/i.test(masked)){
+      const block=this.index(module,project).selectBlocks.filter(b=>text===module.code?offset>=b.start&&offset<=b.end:line>b.line&&line<b.endLine).at(-1);
+      if(block)return this.resolve(project,module,block.line,block.expression,{offset:block.start})?.type||null;
+    }
+    let depth=0,bracket=false,assignment=-1;
+    for(let i=0;i<masked.length;i++){
+      const c=masked[i];if(c==='[')bracket=true;else if(c===']')bracket=false;if(bracket)continue;
+      if(c==='(')depth++;else if(c===')')depth--;
+      else if(c==='='&&!depth&&!/[:<>]/.test(masked[i-1]||''))assignment=i;
+    }
+    const info=this.parameterInfo(project,module,line,text,offset);
+    // An open call on the RHS supplies a more specific expectation than its LHS.
+    if(info&&info.context.start>st.start+assignment&&info.parameters[info.active])return info.parameters[info.active].type;
+    if(assignment>=0){
+      const access=expressionBefore(st.text,assignment),symbol=this.resolve(project,module,line,access.text,{offset:text===module.code?offset:null});
+      if(symbol)return symbol.type;
+    }
+    return info?.parameters[info.active]?.type||null;
+  }
+  completions(project,module,line,text,offset,{constants=false,unfiltered=false,contextual=false}={}){
+    const span=completionSpan(text,offset),st=statementBefore(text,offset),empty={...span,items:[],context:'none'};
+    if(st.state!=='code'||/^\s*(?:Attribute\b|Rem\b|#)/i.test(st.masked))return empty;
+    const before=text.slice(0,span.start),memberAccess=/\.\s*$/.test(before),left=memberAccess?expressionBefore(before,before.trimEnd().length-1):null;
+    const scope=this.scope(project,module,line,text===module.code?offset:null),prefix=symbolKey(span.prefix),filter=items=>{
+      const unique=new Map();for(const s of items){const key=completionKey(s.name);if(visible(s)&&(unfiltered||completionMatches(s.name,span.prefix))&&!unique.has(key))unique.set(key,s);}
+      return [...unique.values()].sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    };
+    const typeContext=typeCompletionContext(st.masked.slice(0,Math.max(0,span.start-st.start)));
+    const labelContext=/\b(?:GoTo|GoSub|Resume)\s+[^\s]*$/i.test(st.masked);
+    if(labelContext&&!constants){return {...span,items:filter([...scope.idx.labels.filter(l=>l.ownerId===scope.proc?.id),...(/\bResume\s+/i.test(st.masked)?[{name:'Next',kind:'keyword'}]:/\bOn\s+Error\s+GoTo\s+/i.test(st.masked)?[{name:'0',kind:'constant'}]:[])]),context:'labels'};}
+    if(typeContext&&!constants){
+      return {...span,items:filter(typeCandidates(this,project,module,typeContext)),context:'types'};
+    }
+    let items=[],context='global';
+    if(memberAccess&&!constants){
+      const object=left?.text?this.resolve(project,module,line,left.text,{offset:text===module.code?offset:null}):this.withObject(project,module,line,text===module.code?offset:null);
+      items=this.objectMembers(project,module,object);context='members';
+    }else {
+      const expected=this.expectedType(project,module,line,text,offset),enumType=this.type(project,module,expected);
+      if(expected&&(enumType?.kind==='enum'||eq(expected,'Boolean'))){items=(enumType?.members||[]).filter(s=>s.kind==='constant');context='constants';}
+      else if(constants){items=[...scope.symbols.filter(s=>s.kind==='constant'),...project.modules.filter(m=>m.id!==module.id&&m.kind==='module').flatMap(m=>this.index(m,project).symbols.filter(s=>!s.owner&&s.scope!=='private'&&s.kind==='constant')),...CONSTANT_SYMBOLS,...this.referenceGlobals(project).filter(s=>s.kind==='constant')];context='constants';}
+      else if(/^\s*RaiseEvent\s+/i.test(st.masked)){items=scope.symbols.filter(s=>s.kind==='event');context='events';}
+      else if(contextual)return empty;
+      else {
+        items=scope.symbols.filter(s=>s.kind!=='event');
+        for(const other of project.modules){if(other.kind==='module'||this.index(other,project).predeclared)items.push({name:other.name,kind:'module',type:other.name,moduleId:other.id,line:1});if(other.kind==='module'&&other.id!==module.id)items.push(...coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&s.scope!=='private'&&s.kind!=='event')));}
+        if(module.kind!=='module')items.push({name:'Me',type:module.name,kind:'object'});
+        if(module.form)items.push(...this.members(project,module,module.form.type||'Form'));
+        items.push(...GLOBAL_OBJECTS,{name:'Forms',type:'Forms',kind:'object'},...BUILTIN_SYMBOLS,...CONSTANT_SYMBOLS,...this.referenceGlobals(project),...KEYWORDS.filter(name=>!eq(name,'Me')||module.kind!=='module').map(name=>({name,kind:'keyword'})));
+        const info=this.parameterInfo(project,module,line,text,offset);
+        if(info&&!['event','array'].includes(info.kind)){const used=new Set(info.context.args.slice(0,-1).map(a=>a.match(/^\s*([\w\[\]]+)\s*:=/)?.[1]).filter(Boolean).map(symbolKey));items.unshift(...info.parameters.filter(p=>!p.paramArray&&!used.has(symbolKey(p.name))).map(p=>({...p,name:p.name+':=',insertText:p.name+':=',kind:'parameter'})));}
+      }
+    }
+    return {...span,items:filter(items),context};
+  }
 }

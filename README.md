@@ -6,11 +6,21 @@ A browser-native classic Visual Basic development environment, source runtime an
 
 **Not a complete, native or pixel-identical Microsoft VB6 replacement.** Detailed supported behavior and limits are in [Compatibility](docs/COMPATIBILITY.md), with [release notes](docs/RELEASE-NOTES-0.6.0.md) and [validation](docs/TESTING.md).
 
+## Debugger and runtime execution control
+
+The classic debugger now includes statement-level stepping and source highlighting, all three Error Trapping modes, recoverable error breaks with retained live frames, scoped break watches, column-aware Run to Cursor and Set Next Statement, and improved caller-frame inspection and Immediate assignment. See the [debugger guide](docs/DEBUGGER.md) for shortcuts, runtime APIs, validation, and remaining compatibility limits.
+
 ## Data sources
 
 Classic Data Environment/Data View and Data Link Properties now share a provider-backed ADO-style layer with exported HTML/Electron apps. Use embedded offline **SQLite**, **REST CRUD**, **OData**, **GraphQL**, **JSON/CSV**, or an authenticated native gateway for PostgreSQL, MySQL, SQL Server and installed OLE DB/ODBC providers. Four runnable examples demonstrate SQLite editing and modern HTTP data sources.
 
 See [data sources, examples and deployment](docs/DATA-SOURCES.md) for the compatibility matrix, connection dialogs, binding, credentials and gateway setup. This is not exhaustive native VB6/ADO/DAO/RDO parity; installed native providers and the PE32 AOT compiler have separate deployment boundaries.
+
+## IntelliSense
+
+Classic List Members, List Constants, Complete Word, Quick Info and Parameter Info now share typed resolution across source panes, Immediate, Watch and Evaluation fields. Nested `With`, arrays/default members, classes/UDTs/enums, runtime/data adapters and explicit portable reference metadata feed the same Object Browser. Automatic assistance never executes project code or opens a connection.
+
+See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). The [browser compatibility follow-up](docs/INTELLISENSE-COMPATIBILITY.md) adds WithEvents/interface handler dropdowns, labels, reference priority, strict metadata validation and DAO-specific typed chains. Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
 
 ## Run
 
@@ -97,13 +107,51 @@ IDE tool groups, code/form documents, modeless tools and toolbars can now detach
 
 MIT-licensed original implementation. Visual Basic is a Microsoft trademark; this project is not Microsoft software or endorsed by Microsoft. Historical reconstruction evidence remains in `RECOVERY.md`; its old test failures and version marker describe the recovery snapshot, not this release.
 
+## API-key coding agents
+
+**Tools → AI Coding Agents…** opens a classic VB6 modeless MDI tool window, with the
+existing bevels, title bar, tabs, menus, keyboard navigation and window layouts.
+It runs coding tasks through **OpenAI Responses, Anthropic Messages, or Google
+Gemini** using your API account. Refresh Models lists account-accessible models;
+manual model IDs are also supported. No cloud requests are made until you request
+model discovery or approve starting a task.
+
+The agent uses the same 125 typed IDE operations as external coding agents:
+project/source inspection, atomic multi-module edits, form/control/menu design,
+compiler diagnostics, debugger/runtime control, public Data Environment definitions,
+virtual files/resources, and workspace management. It is a real iterative tool-use loop, not just a chat box.
+Streaming text, tool activity, before/after edit review, Stop, normal Undo,
+request/tool/token limits and downloadable in-memory transcripts are included.
+
+The classic **Tasks** tab supports eight independent named conversations, drafts
+and cumulative usage. **Continue** explicitly resumes a limited task or retries
+a transient provider request without replaying completed IDE operations. Local
+plan and question tools provide structured progress and clarification; neither
+grants permission. **New Task with Context…** lets you review/edit a public-message
+excerpt before creating a fresh draft, without copying signatures, tools or grants.
+Tasks stay memory-only and all operate on the same live project.
+
+Review each change is the default. Read-only mode excludes mutators/execution;
+Agent mode can authorize selected scopes for one run, up to ten minutes. These
+permissions **never enable or inherit external MCP sharing**. Provider/API keys,
+tasks, reasoning state and grants are not saved in projects, browser storage,
+window-layout exports or shipped applications.
+
+The optional `npm run agent:relay` keeps provider keys in local environment
+variables; only a process-local relay token enters the browser. Direct API
+mode is available for personal use after an explicit browser-key exposure warning.
+See **[Coding agents: setup, workflows, security and validation](docs/coding-agents.md)**
+for exact setup instructions, examples and limitations. Provider usage is billed
+by your API account; no subscription login or bundled API credit is implied.
+
 ## MCP access for coding agents
 
 Open **Tools → MCP Agent Access…** to expose this IDE to an external coding agent.
 The IDE is an **MCP server only**: it does not connect to external MCP servers,
 run their tools, perform OAuth sign-in, or launch configured stdio servers.
 
-Its **114 structured tools** cover projects and source interchange, code edits,
+Its **125 structured tools** cover projects and source interchange, public Data
+Environment definitions, bounded source reads, code edits,
 compiler diagnostics, forms/controls/menus, resources and virtual files,
 editor/workspace management, Object Browser, debugger/live edits and sandboxed
 application interaction. The same server is bundled into the static app and
@@ -124,6 +172,10 @@ or act as an outbound MCP gateway. Browser origin/local-network policy still app
 
 [MCP setup and migration](docs/MCP.md) ·
 [Coding-agent workflow and complete tool reference](docs/MCP-AGENTS.md)
+
+The classic MCP dialog also has an **Operations** tab for local task cancellation
+and build-download cleanup. Data definition edits have a separate, locally granted
+**data** scope and do not execute SQL or access a runtime credential cache.
 
 ### Compiler/runtime compatibility workstream
 
@@ -158,3 +210,30 @@ See [Direct Win32/AOT contract, examples and SDK](docs/WIN32-AOT.md), [all Windo
 ## Original Visual Basic project files
 
 Open `.vbp` projects and `.vbg` groups from complete selected files, folders or ZIPs, alongside existing browser snapshots. Save native source/companion files as a ZIP or to an explicitly selected directory, or keep a `.vb6web` snapshot with native metadata. Unchanged bytes, source encodings, hidden attributes, duplicate project settings and unknown companions are retained; unsafe or unsupported native edits fail rather than silently discard data. Project-group switching keeps peer edits and detects shared-file conflicts. See [Native project files](docs/NATIVE-PROJECTS.md) for usage, filesystem safeguards, encoding choices and the distinction between file preservation and native COM/runtime compatibility.
+
+
+### Reusable Win32 browser compatibility
+
+Browser IDE runs, the runtime SDK and published single-file HTML apps now share
+[`@vb6/win32-browser`](packages/win32-browser/README.md), an independent,
+zero-dependency MIT package. Version 0.3.0 registers 231 export names for
+common kernel/memory/file/INI, registry, window/message/timer, clipboard, GDI and
+safe URL operations. `Declare`, `Alias`, typed ByRef buffers, aligned UDTs,
+`AddressOf` callbacks and runtime `hWnd` values are integrated without changing
+the classic IDE layout. Memory DCs, writable DIBs, 15 raster operations, bitmap
+blitting, alpha blending and complex region clipping are supported; forms and picture
+boxes expose read-only `hDC`. Bitmap surfaces use an explicit Canvas2D fallback.
+Try **Bitmap blitting** and **Region clipping** in **Win32 API Workbench**.
+The region layer adds Boolean geometry, RGNDATA interchange, copied clips and
+region painting. See the [GDI guide](packages/win32-browser/GDI.md) and
+[region compatibility guide](packages/win32-browser/REGIONS.md).
+
+This is a browser-compatible subset, not native DLL execution or full Win32
+parity. Private files/registry/clipboard stay application-local; unsupported
+APIs, flags, messages and ABI shapes fail explicitly. See the package's
+[compatibility boundaries](packages/win32-browser/README.md#vb6-adapter) and
+[API inventory](packages/win32-browser/API.md). `npm run pack:win32-browser`
+builds and tests a standalone `.tgz` after `npm run build`; it does not publish to npm.
+### Native workspace and interoperability
+
+Native project support also includes explicit ZIP filename-codepage selection, preserved/restored VBW document windows, recoverable folder-save journals, exclusive immutable ZIP snapshots, trusted custom-control/Automation adapter registries, an opt-in x86/x64 Windows stdio host, and a separately licensed compiler round-trip harness. Native activation is never granted by opening a project. See [native workspace and interoperability](docs/NATIVE-WORKSPACE-INTEROP.md) for commands, deployment contracts, tests, and remaining boundaries.

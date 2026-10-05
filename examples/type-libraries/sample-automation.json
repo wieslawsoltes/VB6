@@ -1,0 +1,17 @@
+{
+  "name": "ExampleAutomation",
+  "types": [
+    {
+      "name": "Client",
+      "members": [
+        { "name": "Title", "type": "String" },
+        { "name": "Ready", "type": "Boolean" },
+        {
+          "name": "Find",
+          "type": "ExampleAutomation.Client",
+          "params": ["Key As String", "Optional Exact As Boolean = True"]
+        }
+      ]
+    }
+  ]
+}

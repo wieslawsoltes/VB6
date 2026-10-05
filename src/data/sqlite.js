@@ -84,31 +84,42 @@ export class SQLiteProvider {
     return {columns:['TABLE_NAME','COLUMN_NAME','DATA_TYPE','IS_NULLABLE','PRIMARY_KEY'].map(Name=>({Name,Type:12})),values,rowsAffected:0};
   }
   table(name){
-    this.requireAccess();const exists=this.execute('SELECT type FROM sqlite_master WHERE name = ? COLLATE NOCASE',[name]);
+    this.requireAccess();return this.projectTable({table:name,columns:null},this.execute('SELECT * FROM '+quoteIdentifier(name)));
+  }
+  projectTable(select,result){
+    this.requireAccess();const name=select.table,exists=this.execute('SELECT type FROM sqlite_master WHERE name = ? COLLATE NOCASE',[name]);
     assertData(exists.values.length,'Table does not exist',3265);
     const info=this.execute('PRAGMA table_info('+quoteIdentifier(name)+')');
     const keys=info.values.filter(r=>r[5]).sort((a,b)=>a[5]-b[5]).map(r=>r[1]);
-    const result=this.execute('SELECT * FROM '+quoteIdentifier(name));
+    const actual=result.columns.map(c=>info.values.find(r=>r[1].toLowerCase()===c.Name.toLowerCase())?.[1]);
+    if(actual.some(n=>!n)||new Set(actual).size!==actual.length||keys.some(k=>!actual.includes(k)))return result;
+    result.columns=result.columns.map((c,i)=>({...c,Name:actual[i]}));
     const writable=exists.values[0][0]==='table'&&keys.length>0&&!this.config.readOnly;
     if(writable)result.write=(kind,row,before)=>{
-      this.requireAccess();
-      const names=result.columns.map(c=>c.Name),q=quoteIdentifier(name);
+      this.requireAccess();const names=actual,q=quoteIdentifier(name);
       if(kind==='insert'){
         const supplied=names.filter(n=>row[n]!==null&&row[n]!==undefined);
         this.execute(supplied.length?'INSERT INTO '+q+' ('+supplied.map(quoteIdentifier).join(',')+') VALUES ('+supplied.map(()=>'?').join(',')+')':'INSERT INTO '+q+' DEFAULT VALUES',supplied.map(n=>row[n]));
         if(keys.length===1&&row[keys[0]]==null){const keyInfo=info.values.find(r=>r[1]===keys[0]);if(/^INTEGER$/i.test(keyInfo[2]))row[keys[0]]=this.execute('SELECT last_insert_rowid()').values[0][0];}
       }else{
-        const where=names.map(n=>quoteIdentifier(n)+' IS ?').join(' AND ');
-        const original=names.map(n=>before[n]);
+        const where=names.map(n=>quoteIdentifier(n)+' IS ?').join(' AND '),original=names.map(n=>before[n]);
         const response=kind==='delete'?this.execute('DELETE FROM '+q+' WHERE '+where,original):this.execute('UPDATE '+q+' SET '+names.map(n=>quoteIdentifier(n)+' = ?').join(',')+' WHERE '+where,[...names.map(n=>row[n]),...original]);
         assertData(response.rowsAffected===1,'Record was changed or deleted by another writer',3197);
       }
       if(kind!=='delete'){
-        const refreshed=this.execute('SELECT * FROM '+q+' WHERE '+keys.map(k=>quoteIdentifier(k)+' IS ?').join(' AND '),keys.map(k=>row[k]));
+        const refreshed=this.execute('SELECT '+names.map(quoteIdentifier).join(',')+' FROM '+q+' WHERE '+keys.map(k=>quoteIdentifier(k)+' IS ?').join(' AND '),keys.map(k=>row[k]));
         if(refreshed.values.length===1)result.columns.forEach((c,i)=>row[c.Name]=refreshed.values[0][i]);
       }
     };
+    if(keys.length)result.refresh=(row,before)=>{
+      this.requireAccess();const record=this.execute('SELECT '+actual.map(quoteIdentifier).join(',')+' FROM '+quoteIdentifier(name)+' WHERE '+keys.map(k=>quoteIdentifier(k)+' IS ?').join(' AND '),keys.map(k=>(before||row)[k]));
+      return record.values.length?Object.fromEntries(record.columns.map((c,i)=>[c.Name,record.values[0][i]])):null;
+    };
     return result;
+  }
+  rollbackLevel(){
+    this.requireAccess();assertData(this.level,'No active transaction',3246);if(this.level===1)return this.rollback();
+    const savepoint='vb6_'+(this.level-1);this.entry.db.run('ROLLBACK TO SAVEPOINT '+savepoint);this.entry.db.run('RELEASE SAVEPOINT '+savepoint);this.level--;
   }
   close(){
     if(!this.entry)return;if(this.level)this.rollback();this.flush();

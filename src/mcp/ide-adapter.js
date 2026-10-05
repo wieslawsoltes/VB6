@@ -11,25 +11,25 @@ const objectSchema = (properties, required = []) => ({type: 'object', properties
 const moduleURI = (name, type = 'source') => 'vb6://module/' + encodeURIComponent(name) + '/' + type;
 
 /** Adapts the real IDE project/history/runtime APIs, never a second shadow workspace. */
-export function createIdeAdapter(ide, {approve = async () => false, onActivity = () => {}} = {}) {
+export function createIdeAdapter(ide, {approve = async () => false, onActivity = () => {}, historyLabel = 'MCP'} = {}) {
   let observedProjectId=ide.project.id;
-  let revision = 1, eventSequence = 1, authorityEpoch = 1, enabled = false, changeTimer;
+  let revision = 1, eventSequence = 1, authorityEpoch = 1, workspaceEpoch = 1, enabled = false, changeTimer;
   let authorityLifetime = new AbortController(), sharingLifetime = new AbortController();
-  function invalidateAuthority() { authorityEpoch++; authorityLifetime.abort(); authorityLifetime = new AbortController(); permissions.revoke(); }
+  function invalidateAuthority(workspace = false) { if (workspace) workspaceEpoch++; authorityEpoch++; authorityLifetime.abort(); authorityLifetime = new AbortController(); permissions.revoke(); }
   const listeners = new Set(), originals = new Map();
   const permissions = new AgentPermissions({changed:()=>changed()});
   const notify = () => { eventSequence++; clearTimeout(changeTimer); changeTimer = setTimeout(() => { for (const listener of listeners) { try { listener({}); } catch {} } }, 50); };
-  const changed = () => { if(observedProjectId!==ide.project.id){observedProjectId=ide.project.id;invalidateAuthority();} revision++; notify(); };
+  const changed = () => { if(observedProjectId!==ide.project.id){observedProjectId=ide.project.id;invalidateAuthority(true);} revision++; notify(); };
   for (const name of ['markDirty', 'loadProject', 'syncBreakpoints', 'openDocument', 'closeDocument', 'applyAppearance']) if (typeof ide[name] === 'function') {
     const original = ide[name]; originals.set(name, original);
-    ide[name] = function(...args) { if(name==='loadProject')invalidateAuthority(); const result = original.apply(this, args); changed(); return result; };
+    ide[name] = function(...args) { if(name==='loadProject')invalidateAuthority(true); const result = original.apply(this, args); changed(); return result; };
   }
   if(typeof ide.onRuntimeMessage==='function'){const original=ide.onRuntimeMessage;originals.set('onRuntimeMessage',original);ide.onRuntimeMessage=function(event){const d=event.data,valid=this.runtimeFrame&&event.source===this.runtimeFrame.contentWindow&&d?.channel==='vb6-runtime'&&d.token===this.bridgeToken;const result=original.call(this,event);if(valid){if(d.type==='state'||d.type==='immediate')changed();else if(['output','watches','error','agentActivity'].includes(d.type))notify();}return result;};}
   const unlisten = ['run','stop','pause'].map(type => ide.on?.(type, changed)).filter(Boolean);
   const adapter = {
     permissions, tools: [], templates: [{uriTemplate: 'vb6://module/{name}/source', name: 'Module source', mimeType: 'text/plain'}, {uriTemplate: 'vb6://module/{name}/form', name: 'Form model', mimeType: 'application/json'}],
     get revision() { return revision; }, get eventSequence() { return eventSequence; }, get enabled() { return enabled; },
-    get authorityEpoch() { return authorityEpoch; }, get authoritySignal() { return authorityLifetime.signal; },
+    get workspaceEpoch() { return workspaceEpoch; }, get authorityEpoch() { return authorityEpoch; }, get authoritySignal() { return authorityLifetime.signal; },
     setEnabled(value) { sharingLifetime.abort(); sharingLifetime = new AbortController(); invalidateAuthority(); enabled = !!value; changed(); },
     assertEnabled() { if (!enabled) throw new McpError(-32001, 'MCP sharing is disabled. Enable it in Tools → MCP Agent Access.'); },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -74,7 +74,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   }
   function commit(next, label) {
     const candidate = normalizeProject(next), before = clone(ide.project);
-    ide.project = candidate; if(ide.docs){ide.docs=ide.docs.filter(d=>findModule(candidate,d.id));if(!ide.docs.some(d=>d.key===ide.activeDoc?.key))ide.activeDoc=ide.docs[0]||null;} ide.record(before, label); changed();
+    ide.project = candidate; if(ide.docs){ide.docs=ide.docs.filter(d=>findModule(candidate,d.id));if(!ide.docs.some(d=>d.key===ide.activeDoc?.key))ide.activeDoc=ide.docs[0]||null;} ide.record(before, label.replace(/^MCP:/, historyLabel + ':')); changed();
     return adapter.snapshot();
   }
   function tool(name, description, properties, required, execute, {write = false, destructive = false, open = false} = {}) {

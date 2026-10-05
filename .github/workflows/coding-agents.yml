@@ -1,0 +1,51 @@
+name: Coding agents
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: coding-agents-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  agents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: node --check dist/studio.js
+      - name: Native protocols, real IDE adapter and localhost relay (no paid APIs)
+        run: npm run test:agents && node --test tests/mcp-agent.test.mjs tests/workspace-finalization-05.test.mjs
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Resolve browser executable
+        if: matrix.browser == 'chromium'
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PY
+      - name: Classic IDE coding agents over HTTP and standalone file origins
+        run: python tools/coding-agents-browser-tests.py --browser ${{ matrix.browser }}
+      - name: Verify reproducible generated IDE bundles
+        run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coding-agents-validation-${{ matrix.browser }}
+          path: reports/coding-agents/${{ matrix.browser }}/
+          retention-days: 7

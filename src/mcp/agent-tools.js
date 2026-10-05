@@ -1,3 +1,4 @@
+import {installDataTools} from './agent-data.js';
 import {installBuildTools} from './agent-build.js';
 import {mergedProject} from '../project/import-merge.js';
 import {normalizedEntries, listProjectEntries} from '../project/native-project.js';
@@ -51,7 +52,7 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
   add('agent.capabilities','Discover the entire supported agent surface, scope categories, current authority, command routing, and explicit host-only boundaries.',{},[],()=>output({
     apiVersion:1,permissions:adapter.permissions?.snapshot(ide.project.id),scopes:AGENT_SCOPES,
     tools:adapter.tools.map(t=>({name:t.name,scope:agentScope(t.name),readOnly:t.annotations.readOnlyHint})),
-    limits:{sourceOffsets:'zero-based UTF-16, end-exclusive',toolMessageBytes:8*1024*1024,sourceReadLines:1000,defaultPage:100},
+    limits:{sourceOffsets:'zero-based UTF-16, end-exclusive',toolMessageBytes:8*1024*1024,sourceReadLines:1000,sourceReadCodeUnits:262144,defaultPage:100},
     boundaries:['No arbitrary JavaScript, shell, DOM or MCP permission/credential control.','Host file dialogs, clipboard, printing and popup creation require local browser interaction.','Native project formats and debugger live-edit semantics follow the existing IDE implementation.'],
     workflow:'Read project.get. Pass expectedRevision for every mutation. Read debug.snapshot for pauseId. Code edits while paused are staged until debug.applyEdits. Runtime input is queued; use agent.wait then inspect. Read commands.list for structured alternatives to native UI dialogs.'
   }));
@@ -103,6 +104,13 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
     return commit(next,'MCP: atomic source edits');
   },{write:true});
   mutate('code.transform','Format source or lexically rename an identifier. Omitting module applies to all modules. Strings/comments are preserved by rename; it is not semantic rename.',{module:S,action:E(['format','rename']),from:S,to:S},['action'],{design:false});
+  add('code.read','Read a bounded UTF-16 source range, including very long single lines. Supply the same expectedRevision for every chunk to avoid mixing edits. Offset and nextOffset are zero-based and end-exclusive.',{module:S,offset:N(0,5000000),count:N(1,262144),expectedRevision:REV},['module'],args=>{
+    if(args.expectedRevision!==undefined)checkRevision(args.expectedRevision);
+    const m=moduleOf(ide.project,args.module),offset=args.offset??0;
+    if(offset>m.code.length)fail('Source offset is beyond the end of the module.');
+    const code=m.code.slice(offset,offset+(args.count??65536)),nextOffset=offset+code.length;
+    return output({module:m.name,moduleId:m.id,offset,nextOffset,totalCodeUnits:m.code.length,code,hasMore:nextOffset<m.code.length,offsetEncoding:'utf-16'});
+  });
   add('code.symbols','Read declaration symbols and procedure signatures, with module scoping, literal filtering and pagination.',{module:S,query:S,offset:N(),limit:N(1,1000)},[],args=>output(page((args.module?[moduleOf(ide.project,args.module)]:ide.project.modules).flatMap(m=>scanDeclarations(m).symbols.map(s=>({...s,module:m.name}))).filter(s=>!args.query||s.name.toLowerCase().includes(args.query.toLowerCase())),args)));
   add('code.complete','Return declaration-aware completion, quick info or parameter info at a UTF-16 source offset without changing editor selection.',{module:S,offset:N(0,5000000),kind:E(['completions','constants','resolve','parameters']),expression:S},['module','offset'],args=>{
     const m=moduleOf(ide.project,args.module);if(args.offset>m.code.length)fail('Offset outside module.');const line=m.code.slice(0,args.offset).split('\n').length;
@@ -139,6 +147,7 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
   mutate('resources.import','Import an original Win32 RES file supplied as base64 data.',{data:TEXT,fileName:S},['data']);
   add('resources.export','Export original/current Win32 RES bytes as base64, without a browser download.',{},[],()=>{if(!ide.project.resources)fail('No resource file.');return output({fileName:ide.project.resources.fileName,data:toBase64(writeRES(ide.project.resources)),encoding:'base64'});});
 
+  installDataTools(ide,adapter,{add,output,consent,commit,checkRevision,page,resource});
   installBuildTools(ide,adapter,{add,output,consent,commit,changed,checkRevision});
   installWorkbenchTools(ide,adapter,{add,output,consent,commit,changed,debugSnapshot,page,resource});
   resource('vb6://agent/capabilities','Agent capabilities',()=>adapter.tools.find(t=>t.name==='vb6.agent.capabilities').execute({},{}));

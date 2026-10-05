@@ -125,8 +125,9 @@ Large exact integer/decimal gateway values may remain strings to avoid rounding.
 
 SQLite arbitrary SELECTs are read-only. For editable SQLite data, open a keyed table
 using `adCmdTable`; the writer verifies original values to prevent lost updates.
-REST writes must be configured explicitly. Calls with unsupported batch/pessimistic
-locking, dynamic/keyset cursors, stored-procedure CommandType, output parameters or
+REST writes must be configured explicitly. Client batch optimistic locking is supported
+(see below). Calls requesting pessimistic locking, dynamic/keyset cursors,
+stored-procedure CommandType, output parameters or
 native asynchronous flags fail with a capability error. XML/ADTG persistence,
 server-side cursors, every ADO event, distributed transactions, full DAO catalogs/
 QueryDefs/workspaces and RDO are not provided. DAO convenience APIs are not a Jet
@@ -304,3 +305,132 @@ Primary API references: [Microsoft ADO](https://learn.microsoft.com/en-us/sql/ad
 [MySQL2](https://sidorares.github.io/node-mysql2/docs),
 [node-mssql](https://github.com/tediousjs/node-mssql),
 [node-odbc](https://github.com/IBM/node-odbc).
+
+## Client recordset compatibility
+
+`ADODB.Recordset` supports `adLockBatchOptimistic` on writable keyed SQLite and
+configured REST/JSON/CSV results, and on field-defined disconnected cursors.
+`Update`, navigation and `AddNew` commit the edit to the client cache in this mode;
+only `UpdateBatch` sends changes to the provider. `CancelBatch` restores originals
+and removes uncommitted inserts. Both accept current/group/all scope. Partial
+failures preserve failed rows and their original values, add `Connection.Errors`
+entries and expose `Status`/`adFilterConflictingRecords`; successful rows are not
+resent on retry. A batch is **not implicitly an atomic database transaction**.
+Use explicit connection transactions where the provider supports them.
+
+`Clone` shares row data, batch state and bookmarks but has independent positions
+and filters; the clone begins at the first unfiltered row. A read-only clone rejects
+writes. Requery detaches the refreshed original from existing clones. Edits and
+provider writes through different clones are serialized; finish a pending edit on
+one clone before editing another. Batch/read-only cursors can detach with
+`Set rs.ActiveConnection = Nothing`; batch writes require reconnection to their
+original open connection. `Close` refuses a pending immediate edit instead of
+silently writing it; explicitly call `Update` or `CancelUpdate` first. Closing a
+batch cursor discards pending batch changes, without closing the other cursors.
+
+Implemented cursor APIs include bookmark-array filters, pending/affected/fetched/
+conflicting filter groups, `PageSize`, `PageCount`, `AbsolutePage`, `Supports`, field
+`OriginalValue`, `ActualSize`, and text/binary `GetChunk`/`AppendChunk`. SQLite keyed
+table cursors additionally implement `Resync` and `UnderlyingValue` by querying the
+original primary key; they do not substitute a cached value for a database read.
+Client cursors remain materialized static cursors: this does not implement native
+server-side dynamic/keyset/pessimistic cursors, chapters, join-update inference,
+or native ADO event sinks. `Supports` reports only the implemented capabilities.
+
+Validation: `node --test tests/data-batch.test.mjs` and
+`python tools/browser-data-recordsets.py --browser chromium` exercise batch
+writeback/conflicts, clone lifetimes, original values, typed chunks, pagination,
+and actual VB source in the exported runtime. The browser test also accepts
+`firefox`/`webkit` when the matching Playwright browsers are installed.
+
+Behavior references: [ADO batch mode](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/batch-mode),
+[UpdateBatch](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/updatebatch-method-ado),
+[Clone](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/clone-method-ado),
+[Close](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/close-method-ado),
+and [filter groups](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/filtergroupenum).
+
+
+## DAO workspaces, databases, QueryDefs and catalogs
+
+The portable source runtime now provides `DAO.DBEngine`, `DAO.Workspace`,
+`DAO.Database`, `DAO.QueryDef`, `DAO.TableDef`, `DAO.Index`, `DAO.Field`,
+`DAO.Parameter` and `DAO.Recordset` object surfaces. `DBEngine`, `OpenDatabase`
+and `CreateDatabase` are also VB globals. `DAO.DBEngine.36` and `.120` activate
+this portable implementation, **not** the Microsoft COM binaries.
+
+`OpenDatabase` accepts a named configured provider or a virtual SQLite path.
+Use an explicitly configured gateway for a native database: a `.mdb`/`.accdb`
+path is never guessed to be SQLite. SQLite `CreateDatabase` and
+`CompactDatabase` write genuine independent database files and validate integrity;
+Jet/ACE format creation, encryption, workgroup security, replication, locale
+collation and native file sharing still require the native provider/host.
+
+DAO cursors implement the distinct **Edit → assign → Update** copy-buffer
+contract. Assignment without Edit/AddNew raises 3020. Moving, CancelUpdate and
+Close discard unposted edits; Clone shares posted records but not edit buffers.
+Failed optimistic updates retain the private copy buffer. AddNew does not create
+an observable row before Update, preserves the previous position, and exposes
+`LastModified` for moving to the newly inserted/generated-key row. Bookmarks,
+zero-based AbsolutePosition, PercentPosition, advancing GetRows, Find methods,
+NoMatch, Index/Seek, Filter/Sort-derived OpenRecordset, Requery and CopyQueryDef
+are supported. Snapshot and forward-only cursors are read-only. These are
+**bounded materialized client views**, not native dynamic/pessimistic page-lock
+cursors; `RecordCount` is the full materialized count, not an unknown server count.
+
+`Find*` and filtered child cursors use a bounded, non-evaluating criteria parser:
+AND/OR/NOT, comparisons, IS NULL, IN, BETWEEN, date literals and DAO-style LIKE
+wildcards. Index/Seek uses real table/index metadata. Writable SQL projection
+support is intentionally conservative: direct columns from a single keyed SQLite
+table, with every key included. Computed columns, aliases, joins and aggregate
+queries are not guessed to be writable. Updating a projection preserves columns
+not selected by that projection.
+
+QueryDefs accept `PARAMETERS` declarations, typed/named/positional values,
+`RecordsAffected`, `MaxRecords`, and per-query `ODBCTimeout`. Declared parameter
+names are rewritten lexically, not by string replacement; comments, string
+literals, quoted identifiers and qualified names remain intact. Named QueryDefs
+are stored in the SQLite file's hidden `__vb6_dao_querydefs` catalog and survive
+binary export/reopen. Rename/Delete/SQL edits update that catalog and participate
+in transactions. Their parameters support VB default-value assignment. TableDefs
+and Indexes create real SQLite DDL with AutoNumber keys, null/zero-length checks,
+literal defaults, uniqueness and index direction; failed DDL rolls back only its
+own savepoint. Attached field schema edits use explicit SQL, not pretend in-memory
+schema updates. Native catalog mutation is not implemented by this portable layer.
+
+A workspace shares one connection for duplicate handles to the same configuration,
+including concurrent opens. BeginTrans/CommitTrans support nesting on that
+resource; Rollback cancels the entire workspace transaction and refreshes catalog
+state. Different workspaces do not borrow each other's active transaction.
+**Multi-resource/distributed atomicity is rejected**, not emulated with sequential
+commits. A connection cannot join an already active workspace transaction. Closing
+a database rolls back an active workspace transaction and discards pending edits.
+
+The supported command timeout range remains 1–600 seconds; QueryDef -1 inherits
+Database.QueryTimeout (60 seconds by default). Infinite timeout, pass-through
+connection reconfiguration on QueryDef, server cursors and pessimistic locking
+are diagnosed rather than silently accepted. Native DAO SQL grammar beyond the
+parameter preamble is not a replacement for Jet's complete expression language.
+
+```vb
+Dim db As DAO.Database, q As DAO.QueryDef, rs As DAO.Recordset
+Set db = OpenDatabase("/customers.sqlite")
+db.Execute "CREATE TABLE IF NOT EXISTS Customers(id INTEGER PRIMARY KEY, name TEXT)"
+Set q = db.CreateQueryDef("", "PARAMETERS key Long; SELECT * FROM Customers WHERE id=key")
+q.Parameters("key") = 1
+Set rs = q.OpenRecordset(dbOpenDynaset)
+If Not rs.EOF Then
+    rs.Edit
+    rs!name = "Updated"
+    rs.Update
+    Debug.Print rs.Fields("name")
+End If
+rs.Close
+db.Close
+```
+
+Only registered library Field/Parameter objects receive VB default-member
+coercion; a forged `__type` label does not expose arbitrary JavaScript objects.
+`Set f = rs.Fields("name")` retains the object, while `Debug.Print f` and `f = ...`
+use its Value. GUID, Decimal and database date/time ADO fields now validate and
+coerce through the shared typed field implementation. Regression fixtures run
+compiled VB programs in the Node VM and exported Chromium/Firefox/WebKit runtimes.

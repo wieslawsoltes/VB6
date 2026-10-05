@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 VERSION=json.loads((ROOT/'package.json').read_text())['version']
 PREFIX=f'VB6-Studio-Web-{VERSION}'
-DIRS={'src','tools','tests','docs','examples','dist','reports'}
+DIRS={'LICENSES','src','tools','tests','docs','examples','dist','reports'}
 ROOT_FILES={'README.md','RELEASE-NOTES.md','THIRD-PARTY-NOTICES.md','LICENSE','package.json','.gitignore','RECOVERY.md'}
 EXCLUDED={'reports/saved-project.vb6web','reports/exported-app.html','reports/features-04/runtime-export.html'}
 def digest(data:bytes)->str:return hashlib.sha256(data).hexdigest()
@@ -34,16 +34,18 @@ def main():
     validation=json.loads((ROOT/'reports/release-validation-06.json').read_text())
     if validation.get('version')!=VERSION or not validation.get('passed'):
         raise RuntimeError('A passing integrated validation report for this version is required.')
+    notices={rel.as_posix():p.read_bytes() for rel,p in files() if rel.parts[0]=='LICENSES'}
     source={f'{PREFIX}/{rel.as_posix()}':p.read_bytes() for rel,p in files()}
     manifest=''.join(f'{digest(data)}  {name[len(PREFIX)+1:]}\n' for name,data in sorted(source.items()))
     source[f'{PREFIX}/SOURCE-SHA256SUMS.txt']=manifest.encode()
     archive(out/f'{PREFIX}-Source.zip',source)
-    archive(out/f'{PREFIX}-Browser.zip',{str(p.relative_to(ROOT/'dist')):p.read_bytes() for p in sorted((ROOT/'dist').rglob('*')) if p.is_file()})
+    archive(out/f'{PREFIX}-Browser.zip',{str(p.relative_to(ROOT/'dist')):p.read_bytes() for p in sorted((ROOT/'dist').rglob('*')) if p.is_file()} | notices)
     examples={f'apps/{p.name}':p.read_bytes() for p in sorted((ROOT/'dist/examples').glob('*.html'))}
     examples.update({f'projects/{p.name}':p.read_bytes() for p in sorted((ROOT/'examples').glob('*.vb6web'))})
+    examples.update(notices)
     examples['README.md']=b'# Standalone examples\n\nEleven independent HTML apps plus their editable browser projects. No IDE or CDN is required to run an app. Open projects in VB6 Studio Web to edit. Browser-specific file-origin restrictions may require serving these files locally.\n'
     archive(out/f'VB6-Example-Apps-{VERSION}.zip',examples)
-    sdk={}
+    sdk=dict(notices)
     for rel,p in files():
         if rel.parts[0]=='src' and rel.parts[1] not in {'ide','designer','editor','exporter'}:sdk[rel.as_posix()]=p.read_bytes()
     for name in ['LICENSE','THIRD-PARTY-NOTICES.md']:sdk[name]=(ROOT/name).read_bytes()

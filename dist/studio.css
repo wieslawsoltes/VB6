@@ -736,6 +736,8 @@ input:focus,select:focus,textarea:focus{outline:none}
 .ide-dialog-body{padding:14px;overflow:auto;min-height:0;line-height:1.5}
 .ide-dialog-footer{display:flex;justify-content:flex-end;gap:8px;padding:2px 12px 12px}
 .ide-dialog-footer button{min-width:76px}
+.ide-native-dialog{position:fixed;inset:0;margin:auto;height:fit-content}
+.ide-native-dialog::backdrop{background:transparent}
 .default-button{outline:1px solid var(--vb-text);outline-offset:0}
 .dialog-message{white-space:pre-wrap;max-height:60vh;overflow:auto}
 .dialog-input{width:100%;margin-top:8px}
@@ -949,7 +951,8 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 .syn-string,.syn-number{color:var(--vb-window-text)}
 .breakpoint-line{background:var(--vb-breakpoint);color:white}
 .breakpoint-line span{color:inherit}
-.execution-line,.execution-line span{background:var(--vb-execution);color:#000}
+.execution-line:not(.execution-range),.execution-line:not(.execution-range) span,.code-execution{background:var(--vb-execution);color:#000}
+.execution-line.execution-range{background:transparent}
 .code-gutter{width:var(--editor-gutter);background:var(--vb-face);border-right:1px solid var(--vb-shadow)}
 .gutter-line{height:var(--editor-line-height);line-height:var(--editor-line-height);padding:0 3px;color:var(--vb-gray);font-size:10px}
 .gutter-line.has-breakpoint{color:var(--vb-breakpoint);font-size:13px}
@@ -1046,7 +1049,7 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 @media(max-width:620px){.object-columns{grid-template-columns:minmax(80px,35%) 4px minmax(90px,1fr)}.object-toolbar button{font-size:10px;padding:1px 3px}.object-search{flex-wrap:wrap}.object-search label{font-size:10px}.object-definition{height:80px}.project-search-fields{flex-wrap:wrap}.project-search-fields label:first-child{flex-basis:55%}.project-replace-row label{flex-direction:column;align-items:stretch}.project-search-options{font-size:10px;gap:3px}}
 
 .source-info{position:absolute;z-index:30;max-width:min(620px,100%);max-height:90px;overflow:auto;padding:4px 6px;border:1px solid var(--vb-dark);box-shadow:1px 1px var(--vb-shadow);background:var(--vb-info);color:var(--vb-info-text);font:12px/17px Tahoma,Arial,sans-serif;white-space:pre-wrap;user-select:text}
-.source-info strong{font-weight:700;text-decoration:underline}
+.source-info strong{font-weight:700}
 .source-editor .completion-list{width:240px;max-height:190px;padding:0;overflow:auto;box-sizing:border-box}
 .source-editor .completion-item{white-space:nowrap;overflow:hidden;min-height:19px;box-sizing:border-box}
 .source-editor.overwrite-mode .source-input{caret-shape:block}
@@ -1061,6 +1064,8 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 .source-data-tip{position:absolute;z-index:90;max-width:min(540px,95%);max-height:120px;overflow:auto;padding:3px 6px;background:var(--vb-info,#ffffe1);color:var(--vb-info-text,#000);border:1px solid var(--vb-window-frame,#000);box-shadow:1px 1px var(--vb-shadow);font:12px/17px var(--ui-font,Arial,sans-serif);white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none}
 .data-tip-type{opacity:.8}.source-drag-ghost{position:fixed;z-index:30000;max-width:min(300px,80vw);padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--vb-window-text);background:var(--vb-window);color:var(--vb-window-text);pointer-events:none;font:12px/17px monospace}.source-drag-ghost[data-valid="false"]{opacity:.5}.source-drag-ghost[data-copy="true"]::before{content:"+ ";font-weight:bold}.source-drop-caret{position:absolute;z-index:91;width:2px;background:var(--vb-window-text);pointer-events:none}
 @media (forced-colors:active){.source-data-tip,.source-drag-ghost{color:CanvasText;background:Canvas;border-color:CanvasText}.source-drop-caret{background:Highlight}}
+
+.source-info-description{margin-top:3px;border-top:1px solid var(--vb-shadow);padding-top:2px}
 
 /* Explicit grid tracks allow genuine docking on every document edge. */
 .ide-shell .workspace.dock-workspace{display:grid!important;position:relative;min-width:0;min-height:0;overflow:hidden;gap:0;grid-template-columns:var(--dock-left,74px) var(--dock-gap-left,4px) minmax(0,1fr) var(--dock-gap-right,4px) var(--dock-right,250px)!important;grid-template-rows:var(--dock-top,0px) var(--dock-gap-top,0px) minmax(0,1fr) var(--dock-gap-bottom,0px) var(--dock-bottom,0px)!important}
@@ -1195,7 +1200,7 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 /* Match the shared classic IDE primitives; no independent palette or web-card theme. */
 .mcp-panel{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0;overflow:hidden;padding:8px;gap:8px;font:var(--vb-size)/1.4 var(--vb-font);color:var(--vb-text);background:var(--vb-face);container-type:inline-size}
 .mcp-heading{display:flex;align-items:center;gap:8px;min-height:32px;flex:none}.mcp-heading .tool-note{margin:0}.mcp-summary-state{margin-left:auto;padding:3px 7px;border:1px solid;border-color:var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow);white-space:nowrap}
-.mcp-panel>.classic-tabs{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0}.mcp-panel .dialog-tabs{flex:none;margin-bottom:0}.mcp-panel .classic-tab-pages{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:0}
+.mcp-panel>.classic-tabs{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0}.mcp-panel .dialog-tabs{flex:none;margin-bottom:0;height:auto;min-height:25px;row-gap:3px}.mcp-panel .classic-tab-pages{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:0}
 .mcp-page{padding:10px;display:flex;flex-direction:column;gap:9px;min-height:0;overflow:auto;flex:1}.mcp-page p{margin:0}.mcp-page .tool-note{color:var(--vb-text);line-height:1.45}
 .mcp-page fieldset{margin:0;display:flex;flex-direction:column;gap:8px;padding:10px;min-width:0;border:1px solid var(--vb-shadow);box-shadow:1px 1px var(--vb-light)}.mcp-page fieldset>button{align-self:flex-start}.mcp-page legend{padding:0 4px;color:var(--vb-text)}
 .mcp-field{display:flex;align-items:center;gap:8px;min-width:0}.mcp-field>span:first-child{flex:0 0 116px}.mcp-field>input:not([type=checkbox]),.mcp-field>select,.mcp-field>textarea{flex:1;min-width:0}.mcp-field>input[type=number]{flex:0 0 64px;width:64px}
@@ -1208,3 +1213,124 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 .mcp-agent-indicator{position:absolute;right:8px;bottom:2px;z-index:20;font:inherit;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @container(max-width:560px){.mcp-heading{flex-wrap:wrap}.mcp-summary-state{white-space:normal}.mcp-page{padding:7px}.mcp-field{align-items:stretch;flex-direction:column;gap:3px}.mcp-field>span:first-child,.mcp-filter-row .mcp-field>span:first-child{flex-basis:auto}.mcp-field>input[type=number]{flex-basis:auto}.mcp-catalog{grid-template-columns:1fr;grid-template-rows:140px minmax(100px,1fr);min-height:255px}.mcp-catalog-page{overflow:auto}.mcp-filter-row{flex-wrap:wrap}.mcp-filter-row .mcp-field{min-width:110px}.mcp-footer{flex-wrap:wrap}.mcp-footer .mcp-status{min-width:100px}.mcp-panel .dialog-tabs{flex-wrap:wrap}}
 @media(forced-colors:active){.mcp-page fieldset,.mcp-summary-state,.mcp-description,.mcp-activity,.mcp-permission-status{border-color:CanvasText;box-shadow:none}.mcp-activity th{border-color:CanvasText}}
+
+.mcp-operation-grid{display:grid;grid-template-columns:minmax(170px,2fr) minmax(200px,3fr);gap:8px;min-width:0}.mcp-operation-grid select{width:100%;min-width:0;height:120px}.mcp-operation-grid .mcp-description{height:120px;max-height:120px}.mcp-operations-page fieldset{flex:none}
+@container(max-width:560px){.mcp-operation-grid{grid-template-columns:1fr}.mcp-operation-grid select{height:100px}}
+
+/* Use the same bevels, palette, fonts, tab control and MDI chrome as the IDE. */
+.agent-panel{display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;background:var(--vb-face);color:var(--vb-text);font-family:var(--vb-font);font-size:var(--vb-size)}
+.agent-toolbar,.agent-actions{display:flex;flex-wrap:wrap;gap:4px;padding:4px;align-items:center}.agent-toolbar{border-bottom:1px solid var(--vb-shadow)}.agent-toolbar button{display:inline-flex;align-items:center;gap:3px}
+.agent-panel>.classic-tabs{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}.agent-panel .classic-tab-pages{flex:1;min-height:0;overflow:auto}
+.agent-page{display:flex;flex-direction:column;gap:8px;padding:8px;min-height:0;height:100%;overflow:auto;box-sizing:border-box}.agent-page p{margin:3px 0;line-height:1.4}.agent-page fieldset{display:flex;flex-direction:column;gap:7px;min-width:0;padding:9px}.agent-page fieldset[hidden]{display:none}
+.agent-field{display:flex;align-items:center;gap:8px;min-width:0}.agent-field>span{flex:0 0 150px}.agent-field>input:not([type=checkbox]),.agent-field>select,.agent-field>textarea{flex:1;min-width:0;padding:3px}.agent-field>textarea{resize:vertical;min-height:64px}
+.agent-log{margin:0;padding:6px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;background:var(--vb-window);color:var(--vb-window-text);border:2px solid;border-color:var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow);font:12px/1.4 Consolas,'Courier New',monospace;min-height:80px}.agent-conversation,.agent-activity{flex:1;min-height:120px}.agent-review .agent-log{max-height:220px}.agent-review p{line-height:1.4}.agent-tool-catalog{display:grid;grid-template-columns:minmax(170px,1fr) minmax(200px,2fr);gap:8px;flex:1;min-height:180px;overflow:hidden}.agent-tool-catalog select{min-width:0;width:100%}.agent-status{padding:4px 7px;border-top:1px solid var(--vb-shadow);min-height:22px;overflow-wrap:anywhere;flex:none}
+@media(max-width:680px){.agent-field{flex-direction:column;align-items:stretch;gap:3px}.agent-field>span{flex-basis:auto}.agent-tool-catalog{grid-template-columns:1fr;overflow:auto}.agent-tool-catalog select{min-height:100px}.agent-page{padding:5px}}
+
+.agent-diff{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}.agent-diff>div{min-width:0}.agent-review fieldset{margin:6px 0}.agent-diff pre{max-height:180px;white-space:pre;overflow:auto}@media(max-width:680px){.agent-diff{grid-template-columns:1fr}}
+.agent-context{padding:3px 5px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);overflow-wrap:anywhere;font-size:var(--vb-size)}
+.agent-plan{padding-left:25px;margin:0;overflow:auto}.agent-plan li{padding:5px 2px;border-bottom:1px solid var(--vb-shadow)}.agent-plan li[data-status=in_progress]{background:var(--vb-window);color:var(--vb-window-text)}
+.agent-handoff{display:block;width:100%;box-sizing:border-box;min-height:220px;resize:vertical;font:12px/1.4 Consolas,'Courier New',monospace}.agent-page>select[aria-label="Agent tasks"]{width:100%;min-height:120px}
+
+/*!
+ * Classic staircase bevels adapted from the inset box-shadow technique in
+ * 98.css by Jordan Scales. Source attribution requested in:
+ * https://news.ycombinator.com/item?id=49963404
+ * https://jdan.github.io/98.css/
+ * https://notes.jordanscales.com/98-css-reflections#when-buttons-were-good
+ * License source: https://github.com/jdan/98.css/blob/main/LICENSE
+ *
+ * 98.css — classic bevel technique
+ * Copyright 2020 Jordan Scales
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+/* Declare at every theme boundary: nested runtime forms must not inherit a
+   bevel whose colors were resolved in their parent IDE's theme. */
+:root, [data-vb-theme] {
+ --vb-bevel-raised: inset -1px -1px var(--vb-dark), inset 1px 1px var(--vb-light), inset -2px -2px var(--vb-shadow), inset 2px 2px var(--vb-highlight);
+ --vb-bevel-sunken: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-dark);
+ --vb-bevel-pressed: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-dark), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-shadow);
+ --vb-bevel-raised-thin: inset -1px -1px var(--vb-shadow), inset 1px 1px var(--vb-light);
+ /* Equivalent staircase paint for chrome whose original borders must remain
+    in layout. A fractional-DPI border may not equal its nominal CSS width;
+    replacing it with fixed padding shifted WebKit content. Border-box background
+    strips keep the original border metrics without adding nodes or JS reads. */
+ --vb-bevel-raised-image: linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-highlight),var(--vb-highlight)),linear-gradient(var(--vb-highlight),var(--vb-highlight));
+ --vb-bevel-sunken-thin: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow);
+}
+/* Removing a layout border requires compensating padding. These explicit
+   selectors preserve authored control bounds and content origins; flat menu
+   items, native radio circles, editor layers and user-drawn shapes are not
+   indiscriminately restyled. No runtime layout measurements or extra DOM are
+   needed. Forced-colors deliberately uses the existing real-border rules. */
+@media (forced-colors: none) {
+ .classic-bevel-raised { border:0;box-shadow:var(--vb-bevel-raised); }
+ .classic-bevel-sunken { border:0;box-shadow:var(--vb-bevel-sunken); }
+ .classic-bevel-raised:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed); }
+
+ .vb-command { border:0!important;box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+ .vb-command:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed);padding:5px 8px 3px 10px; }
+ .vb-command:disabled,.vb-command[aria-disabled=true] { box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+
+ /* Preserve these containers' original border widths and padding exactly.
+    Transparent border paint avoids diagonal joins; the equivalent border-box
+    staircase is independent of WebKit's fractional border-width rounding. */
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,.vb-popup-menu.classic-menu {
+   border-color:transparent;
+   background-image:var(--vb-bevel-raised-image);
+   background-origin:border-box;background-clip:border-box;background-repeat:no-repeat;
+   background-size:1px 100%,100% 1px,1px 100%,100% 1px,2px 100%,100% 2px,2px 100%,100% 2px;
+   background-position:right top,left bottom,left top,left top,right top,left bottom,left top,left top;
+   box-shadow:none;
+ }
+ .vb-popup-menu.classic-menu { border-color:transparent; }
+ .ide-dialog { box-shadow:1px 1px var(--vb-text); }
+ .ide-dialog-footer button,.vb-dialog-actions button { border:0;box-shadow:var(--vb-bevel-raised);padding:4px 10px;background:var(--vb-face);color:var(--vb-text); }
+ .ide-dialog-footer button:active:not(:disabled),.vb-dialog-actions button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .ide-dialog-footer button:disabled,.vb-dialog-actions button:disabled { color:var(--vb-gray);text-shadow:1px 1px var(--vb-light); }
+
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.vb-form-title .vb-window-button {
+   border:0;padding:1px;box-shadow:var(--vb-bevel-raised);flex-shrink:0;
+ }
+ .window-buttons button:active:not(:disabled),.caption-close:active:not(:disabled),.tool-caption button:active:not(:disabled),.vb-window-button:active:not(:disabled),.vb-form-title .vb-window-button:active:not(:disabled) {
+   box-shadow:var(--vb-bevel-pressed);padding:2px 0 0 2px;
+ }
+ .vb-combo-arrow,.vb-spin-button { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+ .vb-combo-arrow:active:not(:disabled),.vb-spin-button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .vb-scroll-arrow { border:0!important;padding:1px!important;box-shadow:var(--vb-bevel-raised)!important; }
+ .vb-scroll-arrow:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed)!important; }
+ .vb-scroll-thumb { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+
+ /* Text fields and list boxes keep the same inset (old 2px border + padding).
+    Custom combo fields and checkbox/radio controls have separate geometry. */
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field),.vb-control textarea,.vb-control select {
+   border:0;box-shadow:var(--vb-bevel-sunken);padding:4px 5px;
+ }
+ .vb-control .vb-list,.vb-control .vb-combo { padding:3px!important; }
+ .vb-classic-combo .vb-combo-field { border:0;padding:3px 3px 3px 5px;box-shadow:var(--vb-bevel-sunken); }
+ .vb-classic-combo.simple .vb-combo-field { border:0;padding-right:5px; }
+ .vb-dialog input:not([type=checkbox]):not([type=radio]) { border:0;padding:5px;box-shadow:var(--vb-bevel-sunken); }
+
+ /* Retain native layout/scrollbar mechanics; replace only the beveled paint. */
+ *::-webkit-scrollbar-thumb,*::-webkit-scrollbar-button:single-button { border:0;box-shadow:var(--vb-bevel-raised); }
+ *::-webkit-scrollbar-button:single-button:active { box-shadow:var(--vb-bevel-pressed); }
+ .vb-range::-webkit-slider-thumb { border:0;box-shadow:var(--vb-bevel-raised); }
+}
+
+/* Explicit high-contrast suppression also covers engines which expose the
+   forced-colors media query without suppressing computed author shadows.
+   Keep the original real borders, native colors and keyboard focus outlines. */
+@media (forced-colors: active) {
+ .classic-bevel-raised,.classic-bevel-sunken,.vb-command,
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,
+ .vb-popup-menu.classic-menu,.ide-dialog-footer button,.vb-dialog-actions button,
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,
+ .vb-combo-arrow,.vb-spin-button,.vb-scroll-arrow,.vb-scroll-thumb,
+ .vb-control input,.vb-control textarea,.vb-control select,.vb-dialog input {
+   box-shadow:none!important;text-shadow:none!important;
+ }
+}

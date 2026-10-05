@@ -4,7 +4,7 @@ import {randomToken, MCP_VERSION, MCP_LIMIT, MCP_VERSIONS, MCP_LEGACY_VERSIONS, 
 /** MCP server reusable with a browser IDE, a headless adapter, MessagePort, stdio or HTTP. */
 export class McpServer {
   constructor(adapter, {name = 'vb6-studio', version = '0.6.0', taskTools = ['vb6.agent.wait']} = {}) {
-    this.adapter = adapter; this.info = {name, version}; this.sessions = new Map(); this.active = new Map(); this.listeners = new Set();
+    this.closed = false; this.adapter = adapter; this.info = {name, version}; this.sessions = new Map(); this.active = new Map(); this.listeners = new Set();
     this.tools = new Map(adapter.tools.map(tool => [tool.name, tool]));
     this.taskTools = new Set(taskTools);
     this.tasks = new McpTasks({changed: (task, principal) => {
@@ -43,24 +43,43 @@ export class McpServer {
       }).catch(() => {});
     }
   }
-  revokePrincipal(principal) { if (!principal) return; this.tasks.clear(principal); this.adapter.revokePrincipal?.(principal); }
+  revokePrincipal(principal) {
+    if (!principal) return;
+    // One authenticated principal may have several concurrent HTTP requests.
+    // Revoke their active work as well as already-returned handles.
+    for (const [id,request] of this.active) if (request.principal===principal) { request.controller.abort(); this.active.delete(id); }
+    for (const [key,session] of this.sessions) if (session.principal===principal) this.closeSession(key);
+    for (const listener of this.listeners) if (listener.principal===principal) this.listeners.delete(listener);
+    this.tasks.clear(principal); this.adapter.revokePrincipal?.(principal);
+  }
   closeSession(key) {
     this.sessions.delete(key);
     for (const [id, request] of this.active) if (request.sessionKey === key) { request.controller.abort(); this.active.delete(id); }
     for (const listener of this.listeners) if (listener.sessionKey === key) this.listeners.delete(listener);
   }
   revoke() { this.tasks.clear(); this.adapter.revokeArtifacts?.(); for (const request of this.active.values()) request.controller.abort(); this.active.clear(); this.sessions.clear(); this.listeners.clear(); }
-  close() { this.revoke(); this.disposeChange?.(); }
+  close() { if(this.closed)return; this.closed=true; this.revoke(); this.disposeChange?.(); }
   async dispatch(message, context = {}) {
     let kind;
     try { kind = checkMessage(message); if (utf8Length(JSON.stringify(message)) > MCP_LIMIT) throw new McpError(-32600, 'MCP request exceeds the 8 MiB message limit.'); } catch (error) { return errorResponse(message?.id, error); }
     if (kind === 'response') return undefined;
+    if (this.closed) return kind==='notification'?undefined:errorResponse(message.id,new McpError(-32000,'MCP server is closed.'));
+    // Modern calls do not require tools/list or an established subscription.
+    this.tools = new Map(this.adapter.tools.map(tool => [tool.name, tool]));
     const sessionKey = context.sessionKey || 'local', session = this.sessions.get(sessionKey);
+    // Transport-authenticated identity, never clientInfo, owns a legacy session.
+    // Fail closed even when an embedder accidentally reuses a session key.
+    const principal = context.principal || sessionKey;
+    if (session && session.principal !== principal)
+      return kind === 'notification' ? undefined : errorResponse(message.id, new McpError(-32001, 'MCP session belongs to a different authenticated caller.'));
     const params = message.params || {}, version = params._meta?.[MCP_META + 'protocolVersion'];
     const modern = version !== undefined, emit = context.emit || (() => {});
     if (kind === 'notification') {
       if (message.method === 'notifications/initialized' && session) session.ready = true;
-      if (message.method === 'notifications/cancelled') this.active.get(sessionKey + ':' + typeof params.requestId + ':' + params.requestId)?.controller.abort();
+      if (message.method === 'notifications/cancelled') {
+        const pending = this.active.get(sessionKey + ':' + typeof params.requestId + ':' + params.requestId);
+        if (pending?.principal === principal) pending.controller.abort();
+      }
       return undefined;
     }
     const key = sessionKey + ':' + typeof message.id + ':' + message.id;
@@ -68,8 +87,8 @@ export class McpServer {
     if (this.active.size >= 128) return errorResponse(message.id, new McpError(-32000, 'Too many pending requests.'));
     const controller = new AbortController(), abort = () => controller.abort();
     context.signal?.addEventListener('abort', abort, {once: true}); if (context.signal?.aborted) controller.abort();
-    this.active.set(key, {controller, sessionKey});
-    const ctx = {...context, requestId: message.id, sessionKey, signal: controller.signal, emit};
+    this.active.set(key, {controller, sessionKey, principal:context.principal||sessionKey});
+    const ctx = {...context, requestId: message.id, sessionKey, signal: controller.signal, emit, createdTaskId: null};
     let progress = -1;
     ctx.reportProgress = (value, total, text) => {
       const token = params._meta?.progressToken;
@@ -102,8 +121,8 @@ export class McpServer {
         const stamp = await awaitAbort(this.catalogStamp(), ctx.signal); checkAbort(ctx.signal);
         if (this.sessions.has(sessionKey)) throw new McpError(-32600, 'This session is already initialized.');
         if (this.sessions.size >= 64) throw new McpError(-32000, 'Too many MCP sessions.');
-        this.sessions.set(sessionKey, {version: selected, ready: false, subscriptions: new Set(), clientInfo: params.clientInfo});
-        this.listeners.add({sessionKey, legacy: true, emit: context.notify || emit, meta: {}, stamp,
+        this.sessions.set(sessionKey, {principal:ctx.principal||sessionKey, version: selected, ready: false, subscriptions: new Set(), clientInfo: params.clientInfo});
+        this.listeners.add({sessionKey, principal:ctx.principal||sessionKey, legacy: true, emit: context.notify || emit, meta: {}, stamp,
           filter: {toolsListChanged: true, promptsListChanged: true, resourcesListChanged: true, resourceSubscriptions: []}});
         result = {protocolVersion: selected, capabilities: this.capabilities(), serverInfo: this.info, instructions: 'Enable MCP sharing in the IDE. Edits require expectedRevision and local approval or an unexpired locally authorized scope.'};
       } else if (message.method === 'ping') result = {};
@@ -119,6 +138,9 @@ export class McpServer {
       if (utf8Length(JSON.stringify({jsonrpc: '2.0', id: message.id, result})) > MCP_LIMIT) throw new McpError(-32000, 'MCP result exceeds the 8 MiB message limit; read smaller source ranges.');
       return {jsonrpc: '2.0', id: message.id, result};
     } catch (error) {
+      // A task owns its lifetime only once the initiating response can return.
+      // If dispatch was cancelled before delivering the handle, revoke it.
+      if (ctx.createdTaskId) this.tasks.remove(ctx.createdTaskId);
       // -32002 is reserved as legacy resource-not-found by modern MCP. Preserve
       // its diagnostic/data while translating stale arguments and missing URIs.
       if (modern && error instanceof McpError && error.code === -32002) error = new McpError(-32602, error.message, error.data);
@@ -147,8 +169,11 @@ export class McpServer {
             return {content: [{type: 'text', text: String(error.message || error).slice(0, 2000)}], isError: true};
           }
         };
-        if (modern && this.taskTools.has(tool.name) && isRecord(params._meta?.[MCP_META + 'clientCapabilities']?.extensions?.[TASK_EXTENSION]))
-          return this.tasks.create(run, context, this.adapter.authoritySignal);
+        if (modern && this.taskTools.has(tool.name) && isRecord(params._meta?.[MCP_META + 'clientCapabilities']?.extensions?.[TASK_EXTENSION])) {
+          const handle = this.tasks.create(run, context, this.adapter.authoritySignal, {toolName:tool.name});
+          context.createdTaskId = handle.taskId;
+          return handle;
+        }
         return run(context);
       }
       case 'tasks/get': case 'tasks/update': case 'tasks/cancel': {
@@ -179,10 +204,16 @@ export class McpServer {
       case 'resources/subscribe': case 'resources/unsubscribe': {
         if (modern) throw new McpError(-32601, 'Use subscriptions/listen with modern MCP.');
         if (typeof params.uri !== 'string') throw new McpError(-32602, 'A resource URI is required.');
-        await this.adapter.readResource(params.uri, context);
+        await awaitAbort(this.adapter.readResource(params.uri, context), context.signal);
+        checkAbort(context.signal);
         if (method === 'resources/subscribe') session.subscriptions.add(params.uri); else session.subscriptions.delete(params.uri);
         let listener = [...this.listeners].find(l => l.sessionKey === context.sessionKey && l.legacy);
-        if (!listener) { listener = {stamp: await this.catalogStamp(), sessionKey: context.sessionKey, legacy: true, emit: context.notify || context.emit, meta: {}, filter: {resourceSubscriptions: []}}; this.listeners.add(listener); }
+        if (!listener) {
+          const stamp = await awaitAbort(this.catalogStamp(), context.signal); checkAbort(context.signal);
+          listener = {stamp, principal:context.principal||context.sessionKey, sessionKey:context.sessionKey,
+            legacy:true, emit:context.notify||context.emit, meta:{}, filter:{resourceSubscriptions:[]}};
+          this.listeners.add(listener);
+        }
         listener.filter.resourceSubscriptions = [...session.subscriptions]; return {};
       }
       case 'subscriptions/listen': {
