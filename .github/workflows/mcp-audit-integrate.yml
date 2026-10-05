@@ -1,0 +1,70 @@
+name: Integrate MCP audit with native project fixes
+on:
+  push:
+    branches: [feat/mcp-audit-classic-dialog]
+    paths: ['.github/workflows/mcp-audit-integrate.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-audit-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge pinned current main and rebuild generated conflicts
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          changed = set(subprocess.check_output(['git','diff','--name-only','fe107c602f38184103cb912b7ffd5c8053cc3f76','HEAD'],text=True).splitlines())
+          assert changed == {'.github/workflows/mcp-audit-integrate.yml'}, changed
+          result = subprocess.run(['git','merge','--no-commit','--no-ff','e6c9dfc6732b9e99b8eb9756f9562784048fa114'])
+          assert result.returncode in [0,1]
+          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts <= {'dist/VB6-Studio-Web.html','dist/studio.js'}, conflicts
+          PY
+          npm run build
+          npm test
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check
+          git rm --cached .github/workflows/mcp-audit-integrate.yml
+          test "$(git write-tree)" = 'b0594fdc24609c668611981836316bcb08bf8662'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-audit-integrate.yml
+          git commit -m 'merge: preserve native-project audit alongside MCP task, build and classic dialog work'
+          npm run build
+          git diff --exit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Integrated real MCP and external-agent deployment workflows
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+      - name: Publish without forcing or modifying workflow files
+        run: git push origin HEAD:refs/heads/feat/mcp-audit-classic-dialog
+      - name: Preserve source and reports
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-mcp-audit-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
