@@ -91,6 +91,35 @@ IDE tool groups, code/form documents, modeless tools and toolbars can now detach
 
 MIT-licensed original implementation. Visual Basic is a Microsoft trademark; this project is not Microsoft software or endorsed by Microsoft. Historical reconstruction evidence remains in `RECOVERY.md`; its old test failures and version marker describe the recovery snapshot, not this release.
 
+## API-key coding agents
+
+**Tools → AI Coding Agents…** opens a classic VB6 modeless MDI tool window, with the
+existing bevels, title bar, tabs, menus, keyboard navigation and window layouts.
+It runs coding tasks through **OpenAI Responses, Anthropic Messages, or Google
+Gemini** using your API account. Refresh Models lists account-accessible models;
+manual model IDs are also supported. No cloud requests are made until you request
+model discovery or approve starting a task.
+
+The agent uses the same 106 typed IDE operations as external coding agents:
+project/source inspection, atomic multi-module edits, form/control/menu design,
+compiler diagnostics, debugger/runtime control, virtual files/resources, and
+workspace management. It is a real iterative tool-use loop, not just a chat box.
+Streaming text, tool activity, before/after edit review, Stop, normal Undo,
+request/token limits and downloadable in-memory transcripts are included.
+
+Review each change is the default. Read-only mode excludes mutators/execution;
+Agent mode can authorize selected scopes for one run, up to ten minutes. These
+permissions **never enable or inherit external MCP sharing**. Provider/API keys,
+tasks, reasoning state and grants are not saved in projects, browser storage,
+window-layout exports or shipped applications.
+
+The optional `npm run agent:relay` keeps provider keys in local environment
+variables; only a process-local relay token enters the browser. Direct API
+mode is available for personal use after an explicit browser-key exposure warning.
+See **[Coding agents: setup, workflows, security and validation](docs/coding-agents.md)**
+for exact setup instructions, examples and limitations. Provider usage is billed
+by your API account; no subscription login or bundled API credit is implied.
+
 ## MCP access for coding agents
 
 Open **Tools → MCP Agent Access…** to expose this IDE to an external coding agent.

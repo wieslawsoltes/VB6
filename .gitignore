@@ -14,3 +14,6 @@ reports/browser-windows/
 
 # Generated native-project browser artifacts.
 reports/native-projects/
+
+# Coding-agent browser validation reports and screenshots (CI artifacts).
+reports/coding-agents/

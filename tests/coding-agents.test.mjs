@@ -195,7 +195,7 @@ test('agents: revision changed during approval rejects edit and returns error to
   assert.equal(f.ide.project.modules[0].code, original); assert.equal(f.ide.history.undoStack.length, 0);
 });
 test('agents: scoped code permission is local, run-only and not an MCP sharing grant', async t => {
-  let approvals = 0; const f = fixture(t, {approve: async () => { approvals++; return false; } });
+  let approvals = 0; const f = fixture(t, {approve: async () => { approvals++; return false; }});
   const other = createIdeAdapter(f.ide); t.after(() => other.dispose());
   await run(f.agent, async (_, {receive}) => receive(response('openai', [{name: 'vb6_module_write', arguments: {module: 'Form1', code: 'Option Explicit', expectedRevision: f.adapter.revision}}])), {mode: 'scoped', scopes: ['code'], maxTurns: 1});
   assert.equal(approvals, 0); assert.equal(f.ide.project.modules[0].code, 'Option Explicit');

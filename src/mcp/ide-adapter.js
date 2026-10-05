@@ -11,7 +11,7 @@ const objectSchema = (properties, required = []) => ({type: 'object', properties
 const moduleURI = (name, type = 'source') => 'vb6://module/' + encodeURIComponent(name) + '/' + type;
 
 /** Adapts the real IDE project/history/runtime APIs, never a second shadow workspace. */
-export function createIdeAdapter(ide, {approve = async () => false, onActivity = () => {}} = {}) {
+export function createIdeAdapter(ide, {approve = async () => false, onActivity = () => {}, historyLabel = 'MCP'} = {}) {
   let observedProjectId=ide.project.id;
   let revision = 1, eventSequence = 1, authorityEpoch = 1, enabled = false, changeTimer;
   let authorityLifetime = new AbortController(), sharingLifetime = new AbortController();
@@ -74,7 +74,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   }
   function commit(next, label) {
     const candidate = normalizeProject(next), before = clone(ide.project);
-    ide.project = candidate; if(ide.docs){ide.docs=ide.docs.filter(d=>findModule(candidate,d.id));if(!ide.docs.some(d=>d.key===ide.activeDoc?.key))ide.activeDoc=ide.docs[0]||null;} ide.record(before, label); changed();
+    ide.project = candidate; if(ide.docs){ide.docs=ide.docs.filter(d=>findModule(candidate,d.id));if(!ide.docs.some(d=>d.key===ide.activeDoc?.key))ide.activeDoc=ide.docs[0]||null;} ide.record(before, label.replace(/^MCP:/, historyLabel + ':')); changed();
     return adapter.snapshot();
   }
   function tool(name, description, properties, required, execute, {write = false, destructive = false, open = false} = {}) {
