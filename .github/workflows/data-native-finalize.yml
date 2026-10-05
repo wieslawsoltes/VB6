@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Merge reviewed RDO revision and apply remaining snapshot fixes
+      - name: Apply reviewed exact Decimal and UInt64 ordering
         shell: bash
         run: |
           set -euo pipefail
@@ -25,28 +25,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python - <<'PY'
-          import subprocess, pathlib, json, gzip, base64, hashlib
-          target='2d7591ca10067ea39699f98ff07ace4f86b1399d'
-          merge=subprocess.run(['git','merge','--no-commit','--no-ff',target])
-          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
-          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
-          assert merge.returncode==0 or conflicts
-          if conflicts: subprocess.run(['git','restore','--source=HEAD','--staged','--worktree','--',*conflicts],check=True)
-          # Imported CI files must be identical to the reviewed parent branch.
-          workflows=subprocess.check_output(['git','diff','--name-only','HEAD','--','.github/workflows'],text=True).splitlines()
-          for name in workflows:
-              actual=subprocess.run(['git','show',':'+name],capture_output=True)
-              expected=subprocess.run(['git','show',target+':'+name],capture_output=True)
-              assert actual.returncode==expected.returncode and actual.stdout==expected.stdout, name
-          m=json.loads(pathlib.Path('tools/data-native-reviewed.json').read_text())
-          encoded=m['gzipBase64'].replace('/JFVV2FpucShv','/JFV2FpucShv').replace('FyeSXX1nzyPC1','FyeSX1nzyPC1')
-          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
-          assert hashlib.sha256(patch).hexdigest()=='0849222e3f2e0d64893160a91e6442e8ce12b3ed7a1a5f99938beca9367e78df'
-          options=['--include=tools/native-snapshot.mjs','--include=tests/native-snapshot.test.mjs']
-          subprocess.run(['git','apply','--check','--index',*options,'-'],input=patch,check=True)
-          subprocess.run(['git','apply','--index',*options,'-'],input=patch,check=True)
+          from pathlib import Path
+          p=Path('src/data/recordset.js');s=p.read_text()
+          old="if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;"
+          new="if(a instanceof VBDecimal||b instanceof VBDecimal)return coerce(a,'Decimal').compare(coerce(b,'Decimal'));"+old
+          assert s.count(old)==1 and new not in s
+          p.write_text(s.replace(old,new))
           PY
-          git rm tools/data-native-reviewed.json
       - name: Regenerate and test complete integrated source
         shell: bash
         run: |
@@ -54,13 +39,14 @@ jobs:
           npm run build
           npm test > /tmp/native-final-result/node-tests.log 2>&1
           tail -15 /tmp/native-final-result/node-tests.log
-      - name: Publish reviewed merge without rewriting history
+      - name: Publish reviewed fix without rewriting history
         shell: bash
         run: |
           set -euo pipefail
-          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git add src/data/recordset.js dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git diff --exit-code HEAD -- .github/workflows
           git diff --check --cached
-          git commit -m 'Merge validated RDO and fix canonical Windows snapshot output boundaries'
+          git commit -m 'fix(data): sort native unsigned 64-bit and Decimal fields without precision loss'
           test "$(git ls-remote origin refs/heads/feat/data-native-provider-validation | cut -f1)" = "$GITHUB_SHA"
           git push origin HEAD:refs/heads/feat/data-native-provider-validation
       - name: Preserve exact source and results
