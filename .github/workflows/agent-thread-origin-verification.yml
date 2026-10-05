@@ -1,0 +1,71 @@
+name: Exact agent conversation origin verification
+on:
+  push:
+    branches: [validate/agent-thread-browser-origins]
+permissions:
+  contents: read
+concurrency:
+  group: agent-thread-origin-verification
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d6ad3bd43e2bc2f676dbaa46cd6aaeb5224fe17d
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact candidate, complete tests and reproducible build
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p reports/agent-origin-verification
+          test "$(git rev-parse HEAD)" = d6ad3bd43e2bc2f676dbaa46cd6aaeb5224fe17d
+          test "$(git rev-parse HEAD^{tree})" = eb7c6a8647c6a3e8ca84afb7d73f3cc83b439fdf
+          git rev-parse HEAD HEAD^{tree} > reports/agent-origin-verification/candidate.txt
+          test ! -e .github/workflows/agent-thread-prepare.yml
+          test ! -e tools/.agent-thread-update.part0
+          npm run build 2>&1 | tee reports/agent-origin-verification/build.log
+          git diff --exit-code
+          npm test 2>&1 | tee reports/agent-origin-verification/node-tests.log
+          npm run test:agents 2>&1 | tee reports/agent-origin-verification/agent-tests.log
+      - name: Install pinned browser engines and dependencies
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium firefox webkit
+      - name: Resolve Chromium executable
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PY
+      - name: Test all three engines on HTTP modules, HTTP standalone and file standalone
+        shell: bash
+        run: |
+          set -o pipefail
+          outcome=0
+          for browser in chromium firefox webkit; do
+            if ! python tools/coding-agents-browser-tests.py --browser "$browser" 2>&1 | tee "reports/agent-origin-verification/$browser.log"; then
+              outcome=1
+            fi
+          done
+          exit "$outcome"
+      - name: Check generated files after browser tests
+        run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-agent-origin-verification
+          path: |
+            reports/agent-origin-verification/
+            reports/coding-agents/
+          retention-days: 7
