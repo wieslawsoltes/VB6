@@ -125,8 +125,9 @@ Large exact integer/decimal gateway values may remain strings to avoid rounding.
 
 SQLite arbitrary SELECTs are read-only. For editable SQLite data, open a keyed table
 using `adCmdTable`; the writer verifies original values to prevent lost updates.
-REST writes must be configured explicitly. Calls with unsupported batch/pessimistic
-locking, dynamic/keyset cursors, stored-procedure CommandType, output parameters or
+REST writes must be configured explicitly. Client batch optimistic locking is supported
+(see below). Calls requesting pessimistic locking, dynamic/keyset cursors,
+stored-procedure CommandType, output parameters or
 native asynchronous flags fail with a capability error. XML/ADTG persistence,
 server-side cursors, every ADO event, distributed transactions, full DAO catalogs/
 QueryDefs/workspaces and RDO are not provided. DAO convenience APIs are not a Jet
@@ -304,3 +305,46 @@ Primary API references: [Microsoft ADO](https://learn.microsoft.com/en-us/sql/ad
 [MySQL2](https://sidorares.github.io/node-mysql2/docs),
 [node-mssql](https://github.com/tediousjs/node-mssql),
 [node-odbc](https://github.com/IBM/node-odbc).
+
+## Client recordset compatibility
+
+`ADODB.Recordset` supports `adLockBatchOptimistic` on writable keyed SQLite and
+configured REST/JSON/CSV results, and on field-defined disconnected cursors.
+`Update`, navigation and `AddNew` commit the edit to the client cache in this mode;
+only `UpdateBatch` sends changes to the provider. `CancelBatch` restores originals
+and removes uncommitted inserts. Both accept current/group/all scope. Partial
+failures preserve failed rows and their original values, add `Connection.Errors`
+entries and expose `Status`/`adFilterConflictingRecords`; successful rows are not
+resent on retry. A batch is **not implicitly an atomic database transaction**.
+Use explicit connection transactions where the provider supports them.
+
+`Clone` shares row data, batch state and bookmarks but has independent positions
+and filters; the clone begins at the first unfiltered row. A read-only clone rejects
+writes. Requery detaches the refreshed original from existing clones. Edits and
+provider writes through different clones are serialized; finish a pending edit on
+one clone before editing another. Batch/read-only cursors can detach with
+`Set rs.ActiveConnection = Nothing`; batch writes require reconnection to their
+original open connection. `Close` refuses a pending immediate edit instead of
+silently writing it; explicitly call `Update` or `CancelUpdate` first. Closing a
+batch cursor discards pending batch changes, without closing the other cursors.
+
+Implemented cursor APIs include bookmark-array filters, pending/affected/fetched/
+conflicting filter groups, `PageSize`, `PageCount`, `AbsolutePage`, `Supports`, field
+`OriginalValue`, `ActualSize`, and text/binary `GetChunk`/`AppendChunk`. SQLite keyed
+table cursors additionally implement `Resync` and `UnderlyingValue` by querying the
+original primary key; they do not substitute a cached value for a database read.
+Client cursors remain materialized static cursors: this does not implement native
+server-side dynamic/keyset/pessimistic cursors, chapters, join-update inference,
+or native ADO event sinks. `Supports` reports only the implemented capabilities.
+
+Validation: `node --test tests/data-batch.test.mjs` and
+`python tools/browser-data-recordsets.py --browser chromium` exercise batch
+writeback/conflicts, clone lifetimes, original values, typed chunks, pagination,
+and actual VB source in the exported runtime. The browser test also accepts
+`firefox`/`webkit` when the matching Playwright browsers are installed.
+
+Behavior references: [ADO batch mode](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/batch-mode),
+[UpdateBatch](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/updatebatch-method-ado),
+[Clone](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/clone-method-ado),
+[Close](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/close-method-ado),
+and [filter groups](https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/filtergroupenum).

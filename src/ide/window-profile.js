@@ -3,7 +3,7 @@ import {DockLayout} from './dock-layout.js';
 import {CommandBarLayout} from './command-bar-model.js';
 import {normalizeEditorView} from '../editor/view-state.js';
 const plain=value=>value&&typeof value==='object'&&!Array.isArray(value);
-export const MODELESS_TOOLS=Object.freeze(['tool:object-browser','tool:project-search','tool:resources']);
+export const MODELESS_TOOLS=Object.freeze(['tool:object-browser','tool:project-search','tool:resources','tool:coding-agents']);
 const identifier=value=>typeof value==='string'&&value.length>0&&value.length<=160;
 /** Validate all components on isolated models before changing any live window. */
 export function normalizeWindowProfile(value,registered) {

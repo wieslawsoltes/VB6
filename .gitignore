@@ -21,3 +21,6 @@ reports/win32-browser/
 reports/data-sources/
 server-profiles.local.json
 *.sqlite
+
+# Coding-agent browser validation reports and screenshots (CI artifacts).
+reports/coding-agents/
