@@ -1,8 +1,9 @@
+import {dataDefault} from './defaults.js';
 import {VBError} from '../language/lexer.js';
 import {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth} from '../runtime/values.js';
 
 // Disconnected client-side cursor. ConnectedRecordset adds explicit provider I/O.
-const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Variant'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
+const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Variant'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
 const fold=value=>String(value).toLowerCase();
 const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
 const args=value=>value instanceof VBArray?[...value]:Array.isArray(value)?value:[value];
@@ -11,7 +12,8 @@ function integer(value){return bankersRound(numeric(value));}
 export function fieldValue(column,value){
   if(value===null||value===undefined)return null;
   const type=TYPES.get(column.Type);if(!type)fail('Field type is not supported by the disconnected provider',3251);
-  if(type==='Binary'){const bytes=value instanceof VBArray?Uint8Array.from([...value]):value;if(!(bytes instanceof Uint8Array))fail('Binary field requires a byte array',13);if(column.DefinedSize&&bytes.length>column.DefinedSize)fail('Binary field exceeds DefinedSize',372);return bytes.slice();}
+  if(type==='Binary'){if(value instanceof VBArray&&[...value].some(v=>!Number.isInteger(v)||v<0||v>255))fail('Binary field requires byte values',13);const bytes=value instanceof VBArray?Uint8Array.from([...value]):value;if(!(bytes instanceof Uint8Array))fail('Binary field requires a byte array',13);if(column.DefinedSize&&bytes.length>column.DefinedSize)fail('Binary field exceeds DefinedSize',372);return bytes.slice();}
+  if(type==='GUID'){const text=String(value).replace(/^\{(.*)\}$/,'$1');if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text))fail('Invalid GUID value',13);return '{'+text.toUpperCase()+'}';}
   const result=coerce(value,type);
   if(type==='String'&&column.DefinedSize&&result.length>column.DefinedSize)fail('Field value exceeds DefinedSize',372);
   return result;
@@ -34,7 +36,8 @@ export class DisconnectedRecordset {
         rs.columns.push(Object.freeze({Name:name,Type:type,DefinedSize:size}));
       },
       get Count(){return rs.columns.length;},
-      Item(key){const col=rs.column(key);return {Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}};},
+      setItem(key,value){this.Item(key).Value=value;},
+      Item(key){const col=rs.column(key);return dataDefault({Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}});},
       [Symbol.iterator](){return rs.columns.map(c=>this.Item(c.Name)).values();}
     };
   }

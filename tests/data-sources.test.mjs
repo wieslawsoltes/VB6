@@ -74,7 +74,7 @@ test('read-only connection and recordset policies fail explicitly',async t=>{
 test('DAO database convenience executes SQL and opens keyed SQLite recordsets',async t=>{
  const context=new DataContext();t.after(()=>context.close());const database=await context.createObject('DAO.DBEngine.36').OpenDatabase('/dao.sqlite');
  await database.Execute('CREATE TABLE t(id INTEGER PRIMARY KEY,name TEXT)');await database.Execute("INSERT INTO t VALUES(1,'DAO')");assert.equal(database.RecordsAffected,1);
- const rs=await database.OpenRecordset('t');assert.equal(rs.Item('name'),'DAO');rs.Fields.Item('name').Value='updated';await rs.Update();await database.Close();assert.equal(rs.State,0);
+ const rs=await database.OpenRecordset('t');assert.equal(rs.Item('name'),'DAO');rs.Edit();rs.Fields.Item('name').Value='updated';await rs.Update();await database.Close();assert.equal(rs.State,0);
 });
 test('Data Environment preserves recordset identity for declarative bindings',async t=>{
  const context=new DataContext(config([{name:'Local',provider:'sqlite'}],[{name:'Customers',connection:'Local',text:'SELECT ? AS value',parameters:[{name:'value',type:3,value:2}]}]));t.after(()=>context.close());
