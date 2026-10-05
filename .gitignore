@@ -15,6 +15,8 @@ reports/browser-windows/
 # Generated native-project browser artifacts.
 reports/native-projects/
 
+# Win32 compatibility screenshots/results are uploaded by CI.
+reports/win32-browser/
 # Data integration evidence and local gateway secrets.
 reports/data-sources/
 server-profiles.local.json

@@ -35,7 +35,10 @@
     "test:data": "node --test tests/data-*.test.mjs",
     "test:data:browser": "python tools/browser-data-sources.py",
     "data:examples": "node tools/data-example-server.mjs",
-    "data:gateway": "node tools/data-gateway.mjs"
+    "data:gateway": "node tools/data-gateway.mjs",
+    "test:win32-browser": "node --test tests/win32-browser*.test.mjs",
+    "test:win32-browser:browser": "python tools/browser-win32-compat-tests.py",
+    "pack:win32-browser": "node tools/pack-win32-browser.mjs"
   },
   "engines": {
     "node": ">=22"

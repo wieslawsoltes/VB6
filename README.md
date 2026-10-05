@@ -158,3 +158,21 @@ See [Direct Win32/AOT contract, examples and SDK](docs/WIN32-AOT.md), [all Windo
 ## Original Visual Basic project files
 
 Open `.vbp` projects and `.vbg` groups from complete selected files, folders or ZIPs, alongside existing browser snapshots. Save native source/companion files as a ZIP or to an explicitly selected directory, or keep a `.vb6web` snapshot with native metadata. Unchanged bytes, source encodings, hidden attributes, duplicate project settings and unknown companions are retained; unsafe or unsupported native edits fail rather than silently discard data. Project-group switching keeps peer edits and detects shared-file conflicts. See [Native project files](docs/NATIVE-PROJECTS.md) for usage, filesystem safeguards, encoding choices and the distinction between file preservation and native COM/runtime compatibility.
+
+
+### Reusable Win32 browser compatibility
+
+Browser IDE runs, the runtime SDK and published single-file HTML apps now share
+[`@vb6/win32-browser`](packages/win32-browser/README.md), an independent,
+zero-dependency MIT package. Its first release registers 170 export names for
+common kernel/memory/file/INI, registry, window/message/timer, clipboard, GDI and
+safe URL operations. `Declare`, `Alias`, typed ByRef buffers, aligned UDTs,
+`AddressOf` callbacks and runtime `hWnd` values are integrated without changing
+the classic IDE layout. Try **Win32 API Workbench** in the examples list.
+
+This is a browser-compatible subset, not native DLL execution or full Win32
+parity. Private files/registry/clipboard stay application-local; unsupported
+APIs, flags, messages and ABI shapes fail explicitly. See the package's
+[compatibility boundaries](packages/win32-browser/README.md#vb6-adapter) and
+[API inventory](packages/win32-browser/API.md). `npm run pack:win32-browser`
+builds and tests a standalone `.tgz` after `npm run build`; it does not publish to npm.

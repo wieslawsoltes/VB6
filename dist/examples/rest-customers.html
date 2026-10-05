@@ -551,8 +551,384 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* ../language/errors.js */
+/* ../../packages/win32-browser/src/core.js */
 __modules[0]=(()=>{
+
+/** MIT. A bounded, process-private 32-bit address and handle space. */
+const ERROR = Object.freeze({SUCCESS:0,FILE_NOT_FOUND:2,PATH_NOT_FOUND:3,ACCESS_DENIED:5,INVALID_HANDLE:6,NOT_ENOUGH_MEMORY:8,INVALID_DATA:13,SHARING_VIOLATION:32,NOT_SUPPORTED:50,FILE_EXISTS:80,INVALID_PARAMETER:87,INSUFFICIENT_BUFFER:122,MOD_NOT_FOUND:126,PROC_NOT_FOUND:127,DIR_NOT_EMPTY:145,ALREADY_EXISTS:183,ENVVAR_NOT_FOUND:203,MORE_DATA:234,NO_MORE_ITEMS:259,OPERATION_ABORTED:995,INVALID_WINDOW_HANDLE:1400});
+class Win32Error extends Error {
+  constructor(message,code=ERROR.INVALID_PARAMETER){super(message);this.name='Win32Error';this.code=code;}
+}
+function integer(value,min=0,max=0xffffffff){value=Number(value);if(!Number.isSafeInteger(value)||value<min||value>max)throw new Win32Error('Invalid integer argument');return value;}
+function unsigned(value){return integer(value,-0x80000000,0xffffffff)>>>0;}
+class Handles {
+  constructor(limit=16384){this.limit=limit;this.next=0x40000000;this.entries=new Map();}
+  add(type,value){if(this.entries.size>=this.limit||this.next>=0x7fffffff)throw new Win32Error('Handle quota exceeded',8);const h=this.next++;this.entries.set(h,{type,value});return h;}
+  get(handle,type){const e=this.entries.get(Number(handle));if(!e||type&&e.type!==type)throw new Win32Error('Invalid '+(type||'object')+' handle',6);return e.value;}
+  has(handle,type){const e=this.entries.get(Number(handle));return !!e&&(!type||e.type===type);}
+  close(handle,type){const value=this.get(handle,type);this.entries.delete(Number(handle));return value;}
+}
+// Explicit CP1252 table: some Node/ICU builds alias this label to ISO-8859-1.
+const extended=[0x20ac,0x81,0x201a,0x192,0x201e,0x2026,0x2020,0x2021,0x2c6,0x2030,0x160,0x2039,0x152,0x8d,0x17d,0x8f,0x90,0x2018,0x2019,0x201c,0x201d,0x2022,0x2013,0x2014,0x2dc,0x2122,0x161,0x203a,0x153,0x9d,0x17e,0x178];
+const ansiChars=Array.from({length:256},(_,i)=>String.fromCharCode(i>=128&&i<160?extended[i-128]:i));
+const ansiCodes=new Map(ansiChars.map((c,i)=>[c,i]));
+function encodeANSI(text){return Uint8Array.from(String(text),c=>ansiCodes.get(c)??63);}
+function decodeANSI(bytes){let result='';for(let offset=0;offset<bytes.length;offset+=8192)result+=Array.from(bytes.subarray(offset,offset+8192),n=>ansiChars[n]).join('');return result;}
+class Memory {
+  constructor({maxBytes=32*1024*1024,ansi={encode:encodeANSI,decode:decodeANSI}}={}){this.maxBytes=integer(maxBytes,1,0x20000000);this.ansi=ansi;this.blocks=[];this.freeBlocks=[];this.next=0x10000;this.used=0;}
+  alloc(size){size=Math.max(1,integer(size,0,this.maxBytes));if(this.used+size>this.maxBytes)throw new Win32Error('Memory quota exceeded',8);const span=Math.ceil(size/16)*16;let ptr,slot=this.freeBlocks.findIndex(b=>b.span>=span);if(slot>=0){const b=this.freeBlocks[slot];ptr=b.ptr;b.ptr+=span;b.span-=span;if(!b.span)this.freeBlocks.splice(slot,1);}else{if(this.next+span>=0x40000000)throw new Win32Error('Virtual address space exhausted',8);ptr=this.next;this.next+=span;}const block={ptr,size,span,bytes:new Uint8Array(size)};let lo=0,hi=this.blocks.length;while(lo<hi){const mid=(lo+hi)>>>1;if(this.blocks[mid].ptr<ptr)lo=mid+1;else hi=mid;}this.blocks.splice(lo,0,block);this.used+=size;return ptr;}
+  block(pointer,length=1){const p=unsigned(pointer),n=integer(length,0,this.maxBytes);let lo=0,hi=this.blocks.length;while(lo<hi){const mid=(lo+hi)>>>1;if(this.blocks[mid].ptr<=p)lo=mid+1;else hi=mid;}const b=this.blocks[lo-1];if(!b||p<b.ptr||p-b.ptr+n>b.size)throw new Win32Error('Pointer is outside an allocated buffer',87);return b;}
+  bytes(pointer,length){const b=this.block(pointer,length);return b.bytes.subarray(unsigned(pointer)-b.ptr,unsigned(pointer)-b.ptr+length);}
+  view(pointer,length){const b=this.bytes(pointer,length);return new DataView(b.buffer,b.byteOffset,b.byteLength);}
+  size(pointer){const b=this.block(pointer,0);return b.size-(unsigned(pointer)-b.ptr);}
+  free(pointer){const i=this.blocks.findIndex(b=>b.ptr===unsigned(pointer));if(i<0)throw new Win32Error('Invalid allocation base',6);const [b]=this.blocks.splice(i,1);b.bytes.fill(0);this.used-=b.size;this.freeBlocks.push({ptr:b.ptr,span:b.span});this.freeBlocks.sort((a,b)=>a.ptr-b.ptr);for(let j=this.freeBlocks.length-1;j>0;j--){const a=this.freeBlocks[j-1],v=this.freeBlocks[j];if(a.ptr+a.span===v.ptr){a.span+=v.span;this.freeBlocks.splice(j,1);}}}
+  readU32(p){return this.view(p,4).getUint32(0,true);}
+  writeU32(p,n){this.view(p,4).setUint32(0,unsigned(n),true);}
+  readI32(p){return this.view(p,4).getInt32(0,true);}
+  writeI32(p,n){this.view(p,4).setInt32(0,Number(n),true);}
+  stringBytes(text,wide=false){if(!wide)return this.ansi.encode(String(text));const s=String(text),b=new Uint8Array(s.length*2),v=new DataView(b.buffer);for(let i=0;i<s.length;i++)v.setUint16(i*2,s.charCodeAt(i),true);return b;}
+  decode(bytes,wide=false){if(!wide)return this.ansi.decode(bytes);let s='';for(let i=0;i+1<bytes.length;i+=2)s+=String.fromCharCode(bytes[i]|bytes[i+1]<<8);return s;}
+  string(pointer,wide=false){if(typeof pointer==='string')return pointer.split('\0')[0];if(!pointer)return '';const b=this.block(pointer),offset=unsigned(pointer)-b.ptr,step=wide?2:1;let end=offset;for(;end+step<=b.size;end+=step)if(!b.bytes[end]&&(!wide||!b.bytes[end+1]))return this.decode(b.bytes.subarray(offset,end),wide);throw new Win32Error('Unterminated string');}
+  putString(pointer,text,capacity,wide=false,multi=false){
+    const step=wide?2:1;capacity=integer(capacity,0,Math.floor(this.maxBytes/step));if(!capacity)return 0;
+    const out=this.bytes(pointer,capacity*step),source=this.stringBytes(text,wide),units=source.length/step;
+    // Enumeration source includes each entry's NUL; append the final NUL. On
+    // truncation Win32 requires two terminators and returns capacity minus two.
+    const terminators=multi&&units+1>capacity?Math.min(2,capacity):1;
+    const n=Math.min(units,capacity-terminators);out.set(source.subarray(0,n*step));out.fill(0,n*step,(n+terminators)*step);
+    if(multi&&!units&&capacity>1)out.fill(0,0,2*step);return n;
+  }
+  allocString(text,wide=false){const bytes=this.stringBytes(text,wide),p=this.alloc(bytes.length+(wide?2:1));this.bytes(p,bytes.length).set(bytes);return p;}
+  clear(){for(const b of this.blocks)b.bytes.fill(0);this.blocks=[];this.freeBlocks=[];this.used=0;this.next=0x10000;}
+}
+/** Case-insensitive, app-private in-memory disk. Embedders can supply a disk adapter. */
+class MemoryFileSystem {
+  constructor(){this.files=new Map();this.directories=new Set(['/']);this.cwd='/';}
+  normalize(path){const raw=String(path).replace(/\\/g,'/').replace(/^[a-z]:/i,'');const parts=[];for(const p of ((raw.startsWith('/')?'':this.cwd+'/')+raw).split('/')){if(p==='..')parts.pop();else if(p&&p!=='.')parts.push(p);}return ('/'+parts.join('/')).toLowerCase();}
+  exists(p){return this.files.has(this.normalize(p));}
+  readBytes(p){const b=this.files.get(this.normalize(p));if(!b)throw new Win32Error('File not found',2);return b.slice();}
+  writeBytes(p,bytes){this.files.set(this.normalize(p),Uint8Array.from(bytes));}
+  remove(p){if(!this.files.delete(this.normalize(p)))throw new Win32Error('File not found',2);}
+  read(p){return decodeANSI(this.readBytes(p));}
+  write(p,s){this.writeBytes(p,encodeANSI(s));}
+}
+
+return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
+})();
+
+/* ../../packages/win32-browser/src/clipboard.js */
+__modules[1]=(()=>{
+const {Win32Error,unsigned}=__modules[0];
+
+/** Synchronous, app-private clipboard. System clipboard synchronization is explicit. */
+function installClipboard(w){
+  const m=w.memory,h=w.handles;w.clipboard={open:false,owner:0,formats:new Map(),sequence:0};
+  const c=w.clipboard,requireOpen=()=>{if(!c.open)throw new Win32Error('Clipboard is not open',1418);};
+  const clear=()=>{for(const handle of c.formats.values()){if(h.has(handle,'memory')){const block=h.close(handle,'memory');m.free(block.ptr);}}c.formats.clear();};
+  const add=(name,arity,fn)=>w.register('user32',name,fn,{arity,mode:'emulated',notes:'Application-private clipboard. Browser system clipboard requires explicit async synchronization and permission.'});
+  add('OpenClipboard',1,owner=>{if(owner)h.get(owner,'window');if(c.open)throw new Win32Error('Clipboard already open',5);c.open=true;c.pendingOwner=Number(owner);return 1;});
+  add('CloseClipboard',0,()=>{requireOpen();c.open=false;return 1;});
+  add('EmptyClipboard',0,()=>{requireOpen();clear();c.owner=c.pendingOwner;c.sequence++;return 1;});
+  add('SetClipboardData',2,(format,handle)=>{requireOpen();format=unsigned(format);if(![1,13].includes(format))throw new Win32Error('Only text clipboard formats are implemented',50);if(!c.owner)throw new Win32Error('OpenClipboard needs a window owner before EmptyClipboard/SetClipboardData',5);const block=h.get(handle,'memory');if(block.prefix!=='Global'||block.clipboard||block.locks)throw new Win32Error('Clipboard requires unlocked moveable global memory',6);m.string(block.ptr,format===13);for(const old of new Set(c.formats.values())){const prior=h.close(old,'memory');m.free(prior.ptr);}c.formats.clear();block.clipboard=true;c.formats.set(format,Number(handle));c.sequence++;return handle;});
+  const getData=format=>{requireOpen();format=unsigned(format);if(![1,13].includes(format))return 0;if(c.formats.has(format))return c.formats.get(format);const source=c.formats.entries().next().value;if(!source)return 0;const text=m.string(h.get(source[1],'memory').ptr,source[0]===13),p=m.allocString(text,format===13),handle=h.add('memory',{ptr:p,prefix:'Global',locks:0,clipboard:true});c.formats.set(format,handle);return handle;};
+  add('GetClipboardData',1,getData);
+  add('IsClipboardFormatAvailable',1,format=>[1,13].includes(Number(format))&&c.formats.size?1:0);
+  add('CountClipboardFormats',0,()=>c.formats.size?2:0);
+  add('EnumClipboardFormats',1,format=>{requireOpen();if(!c.formats.size)return 0;if(Number(format)===0)return 1;if(Number(format)===1)return 13;w.lastError=0;return 0;});
+  add('GetClipboardOwner',0,()=>c.owner);
+  add('GetOpenClipboardWindow',0,()=>c.open?c.pendingOwner:0);
+  add('GetClipboardSequenceNumber',0,()=>c.sequence>>>0);
+  w.getClipboardText=()=>{const first=c.formats.entries().next().value;return first?m.string(h.get(first[1],'memory').ptr,first[0]===13):'';};
+  w.setClipboardText=text=>{if(c.open)throw new Win32Error('Clipboard already open',5);clear();if(text!==null){const ptr=m.allocString(String(text),true),handle=h.add('memory',{ptr,prefix:'Global',locks:0,clipboard:true});c.formats.set(13,handle);}c.sequence++;};
+  // No automatic reads, writes, or permission prompts. Call from a user gesture.
+  w.readSystemClipboard=async()=>{if(!w.options.allowClipboard||!w.options.clipboard?.readText)throw new Win32Error('System clipboard access is not enabled',5);const text=await w.options.clipboard.readText();if(w.disposed)throw new Win32Error('Disposed',995);w.setClipboardText(text);return text;};
+  w.writeSystemClipboard=async()=>{if(!w.options.allowClipboard||!w.options.clipboard?.writeText)throw new Win32Error('System clipboard access is not enabled',5);return w.options.clipboard.writeText(w.getClipboardText());};
+}
+
+return {installClipboard};
+})();
+
+/* ../../packages/win32-browser/src/kernel32.js */
+__modules[2]=(()=>{
+const {ERROR,Win32Error,integer,unsigned}=__modules[0];
+
+function installKernel32(w){
+  const m=w.memory,h=w.handles,fs=w.fs;
+  const add=(name,arity,fn,options={})=>w.register('kernel32',name,fn,{arity,...options});
+  const aw=(name,arity,fn,options={})=>{for(const wide of [false,true])add(name+(wide?'W':'A'),arity,(...args)=>fn(wide,...args),options);};
+  const text=(p,wide)=>m.string(p,wide);
+  add('GetLastError',0,()=>w.lastError);
+  add('SetLastError',1,n=>{w.lastError=unsigned(n);});
+  add('GetTickCount',0,()=>Math.floor(w.clock()-w.epoch)>>>0,{mode:'browser',notes:'Elapsed milliseconds since this compatibility process was created, not host OS boot.'});
+  add('GetTickCount64',0,()=>Math.floor(w.clock()-w.epoch),{mode:'browser',notes:'JavaScript number; exact within the safe integer range.'});
+  add('QueryPerformanceFrequency',1,p=>{m.view(p,8).setBigInt64(0,1000000n,true);return 1;});
+  add('QueryPerformanceCounter',1,p=>{m.view(p,8).setBigInt64(0,BigInt(Math.floor((w.clock()-w.epoch)*1000)),true);return 1;},{mode:'browser',notes:'Microsecond units; precision is limited by browser timer policy.'});
+  add('Sleep',1,ms=>w.sleep(unsigned(ms)),{mode:'browser',notes:'Asynchronous cooperative delay; does not block the UI thread.'});
+  add('MulDiv',3,(a,b,c)=>{a=integer(a,-2147483648,2147483647);b=integer(b,-2147483648,2147483647);c=integer(c,-2147483648,2147483647);if(!c)return -1;let v=BigInt(a)*BigInt(b),d=BigInt(c),sign=(v<0n)!==(d<0n)?-1n:1n;v=v<0n?-v:v;d=d<0n?-d:d;const n=sign*((v+d/2n)/d);return n < -2147483648n||n>2147483647n?-1:Number(n);},{failure:-1});
+  for(const utc of [false,true])add(utc?'GetSystemTime':'GetLocalTime',1,p=>{const d=w.now(),prefix=utc?'getUTC':'get',v=m.view(p,16),values=[d[prefix+'FullYear'](),d[prefix+'Month']()+1,d[prefix+'Day'](),d[prefix+'Date'](),d[prefix+'Hours'](),d[prefix+'Minutes'](),d[prefix+'Seconds'](),d[prefix+'Milliseconds']()];values.forEach((n,i)=>v.setUint16(i*2,n,true));});
+  add('GetSystemTimeAsFileTime',1,p=>m.view(p,8).setBigUint64(0,(BigInt(w.now().getTime())+11644473600000n)*10000n,true));
+  for(const name of ['RtlMoveMemory','CopyMemory','MoveMemory'])add(name,3,(dst,src,n)=>{n=integer(n,0,m.maxBytes);if(n)m.bytes(dst,n).set(m.bytes(src,n).slice());});
+  for(const name of ['RtlZeroMemory','ZeroMemory'])add(name,2,(dst,n)=>{if(n)m.bytes(dst,integer(n,0,m.maxBytes)).fill(0);});
+  for(const name of ['RtlFillMemory','FillMemory'])add(name,3,(dst,n,value)=>{if(n)m.bytes(dst,integer(n,0,m.maxBytes)).fill(unsigned(value)&255);});
+  for(const prefix of ['Global','Local']){
+    add(prefix+'Alloc',2,(flags,n)=>{flags=unsigned(flags);if(flags&~0x42)throw new Win32Error('Unsupported allocation flags',50);const ptr=m.alloc(n),value={ptr,locks:0,prefix};if(!(flags&2))return ptr;try{return h.add('memory',value);}catch(error){m.free(ptr);throw error;}});
+    add(prefix+'Lock',1,handle=>{if(h.has(handle,'memory')){const a=h.get(handle,'memory');a.locks++;return a.ptr;}m.block(handle);return unsigned(handle);});
+    add(prefix+'Unlock',1,handle=>{if(!h.has(handle,'memory')){m.block(handle);w.lastError=0;return 0;}const a=h.get(handle,'memory');if(!a.locks){w.lastError=158;return 0;}a.locks--;w.lastError=0;return a.locks?1:0;});
+    add(prefix+'Size',1,handle=>m.size(h.has(handle,'memory')?h.get(handle,'memory').ptr:handle));
+    add(prefix+'Free',1,handle=>{if(!handle)return 0;const a=h.has(handle,'memory')?h.get(handle,'memory'):null;if(a?.clipboard){w.lastError=5;return handle;}if(a&&a.locks){w.lastError=158;return handle;}m.free(a?a.ptr:handle);if(a)h.close(handle,'memory');return 0;},{failure:args=>args[0]});
+  }
+  aw('lstrlen',1,(wide,p)=>m.stringBytes(text(p,wide),wide).length/(wide?2:1));
+  aw('lstrcpyn',3,(wide,dst,src,n)=>{m.putString(dst,text(src,wide),n,wide);return dst;});
+  aw('lstrcpy',2,(wide,dst,src)=>{const s=text(src,wide);m.putString(dst,s,m.stringBytes(s,wide).length/(wide?2:1)+1,wide);return dst;});
+  const envName=p=>text(p,false).toUpperCase();
+  aw('GetEnvironmentVariable',3,(wide,name,out,size)=>{const key=text(name,wide).toUpperCase();if(!w.environment.has(key)){w.lastError=203;return 0;}const s=w.environment.get(key),n=m.stringBytes(s,wide).length/(wide?2:1);if(unsigned(size)<=n)return n+1;m.putString(out,s,size,wide);return n;});
+  aw('SetEnvironmentVariable',2,(wide,name,value)=>{const key=text(name,wide).toUpperCase();if(!key||key.includes('='))throw new Win32Error('Invalid environment variable');if(!value)w.environment.delete(key);else w.environment.set(key,text(value,wide));return 1;});
+  aw('GetCurrentDirectory',2,(wide,size,out)=>{const s='C:'+fs.cwd.replace(/\//g,'\\'),n=m.stringBytes(s,wide).length/(wide?2:1);if(unsigned(size)<=n)return n+1;m.putString(out,s,size,wide);return n;});
+  aw('SetCurrentDirectory',1,(wide,p)=>{const path=fs.normalize(text(p,wide));if(!fs.directories.has(path))throw new Win32Error('Directory not found',3);fs.cwd=path;return 1;});
+  aw('GetTempPath',2,(wide,size,out)=>{const s='C:\\Temp\\';if(unsigned(size)<=s.length)return s.length+1;m.putString(out,s,size,wide);return s.length;},{notes:'Path is in the application-private virtual filesystem.'});
+  const openFiles=()=>[...h.entries.values()].filter(e=>e.type==='file').map(e=>e.value);
+  const pathOf=(p,wide)=>{const raw=text(p,wide);if(/^(?:\\\\|\/\/)/.test(raw)||/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:[.:]|$)/i.test(raw.split(/[\\/]/).at(-1)))throw new Win32Error('Devices and UNC paths are not supported',50);return fs.normalize(raw);};
+  const ensureParent=path=>{const parent=path.slice(0,path.lastIndexOf('/'))||'/';if(!fs.directories.has(parent))throw new Win32Error('Parent directory not found',3);};
+  const assertMutable=path=>{if(openFiles().some(f=>f.path===path))throw new Win32Error('File is open',32);};
+  aw('CreateFile',7,(wide,p,access,share,security,disposition,flags,template)=>{
+    const path=pathOf(p,wide);access=unsigned(access);share=unsigned(share);flags=unsigned(flags);integer(disposition,1,5);
+    if(security||template||flags&~0x80||share&~3||access&~0xc0000000)throw new Win32Error('Only synchronous ordinary files and read/write sharing are supported',50);
+    if(fs.directories.has(path))throw new Win32Error('Cannot open directory as a file',5);ensureParent(path);
+    const read=!!(access&0x80000000),write=!!(access&0x40000000),exists=fs.exists(path);
+    if(openFiles().some(f=>f.path===path&&((read&&!(f.share&1))||(write&&!(f.share&2))||(f.read&&!(share&1))||(f.write&&!(share&2)))))throw new Win32Error('Sharing violation',32);
+    if(disposition===1&&exists)throw new Win32Error('File exists',80);
+    if((disposition===3||disposition===5)&&!exists)throw new Win32Error('File not found',2);
+    if(disposition===5&&!write)throw new Win32Error('Write access required',5);
+    const handle=h.add('file',{path,read,write,share,position:0});
+    try{if(!exists||disposition===2||disposition===5)fs.writeBytes(path,[]);}catch(error){h.close(handle,'file');throw error;}
+    if(disposition===2||disposition===4)w.lastError=exists?183:0;return handle;
+  },{failure:-1,notes:'Synchronous app-private disk. No device paths, native disk, overlapped I/O, or security descriptors.'});
+  add('CloseHandle',1,handle=>{h.close(handle,'file');return 1;});
+  add('ReadFile',5,(handle,out,n,read,overlapped)=>{if(overlapped)throw new Win32Error('Overlapped I/O is not supported',50);n=integer(n,0,m.maxBytes);const f=h.get(handle,'file');if(!f.read)throw new Win32Error('Read access denied',5);m.writeU32(read,0);if(!n)return 1;const dest=m.bytes(out,n);const b=fs.readBytes(f.path).subarray(f.position,f.position+n);dest.set(b);f.position+=b.length;m.writeU32(read,b.length);return 1;});
+  add('WriteFile',5,(handle,input,n,written,overlapped)=>{if(overlapped)throw new Win32Error('Overlapped I/O is not supported',50);n=integer(n,0,m.maxBytes);const f=h.get(handle,'file');if(!f.write)throw new Win32Error('Write access denied',5);m.writeU32(written,0);if(!n)return 1;const src=m.bytes(input,n).slice();const old=fs.readBytes(f.path),end=f.position+n;if(end>w.maxFileBytes)throw new Win32Error('File quota exceeded',8);const b=new Uint8Array(Math.max(old.length,end));b.set(old);b.set(src,f.position);fs.writeBytes(f.path,b);f.position=end;m.writeU32(written,n);return 1;});
+  add('GetFileSize',2,(handle,high)=>{const n=fs.readBytes(h.get(handle,'file').path).length;if(high)m.writeU32(high,0);return n;},{failure:0xffffffff});
+  add('SetFilePointer',4,(handle,low,high,method)=>{const f=h.get(handle,'file');integer(method,0,2);let offset=BigInt(integer(low,-2147483648,2147483647));if(high)offset=BigInt(m.readI32(high))*0x100000000n+BigInt(unsigned(low));const base=method===0?0:method===1?f.position:fs.readBytes(f.path).length;const next=BigInt(base)+offset;if(next<0||next>BigInt(w.maxFileBytes))throw new Win32Error('Invalid file position');if(high)m.writeU32(high,0);f.position=Number(next);w.lastError=0;return f.position;},{failure:0xffffffff});
+  add('SetEndOfFile',1,handle=>{const f=h.get(handle,'file');if(!f.write)throw new Win32Error('Write access denied',5);const b=new Uint8Array(f.position);b.set(fs.readBytes(f.path).subarray(0,f.position));fs.writeBytes(f.path,b);return 1;});
+  aw('DeleteFile',1,(wide,p)=>{const path=pathOf(p,wide);assertMutable(path);fs.remove(path);return 1;});
+  aw('CopyFile',3,(wide,a,b,fail)=>{a=pathOf(a,wide);b=pathOf(b,wide);if(a===b)throw new Win32Error('Source and destination are identical',87);ensureParent(b);if(fail&&fs.exists(b))throw new Win32Error('File exists',80);assertMutable(a);assertMutable(b);fs.writeBytes(b,fs.readBytes(a));return 1;});
+  aw('MoveFile',2,(wide,a,b)=>{a=pathOf(a,wide);b=pathOf(b,wide);if(fs.exists(b))throw new Win32Error('File exists',183);ensureParent(b);assertMutable(a);assertMutable(b);const bytes=fs.readBytes(a);fs.writeBytes(b,bytes);fs.remove(a);return 1;});
+  aw('GetFileAttributes',1,(wide,p)=>{const path=pathOf(p,wide);if(fs.directories.has(path))return 16;if(fs.exists(path))return 128;throw new Win32Error('File not found',2);},{failure:0xffffffff});
+  aw('CreateDirectory',2,(wide,p,security)=>{if(security)throw new Win32Error('Security descriptors are not supported',50);const path=pathOf(p,wide);ensureParent(path);if(fs.exists(path)||fs.directories.has(path))throw new Win32Error('Already exists',183);fs.directories.add(path);fs.dirty=true;return 1;});
+  aw('RemoveDirectory',1,(wide,p)=>{const path=pathOf(p,wide);if(!fs.directories.has(path))throw new Win32Error('Directory not found',3);if(path==='/'||path===fs.cwd)throw new Win32Error('Directory in use',5);if([...fs.files.keys(),...fs.directories].some(x=>x.startsWith(path+'/')))throw new Win32Error('Directory not empty',145);fs.directories.delete(path);fs.dirty=true;return 1;});
+  installProfiles(w,aw);
+  w.register('winmm','timeGetTime',()=>Math.floor(w.clock()-w.epoch)>>>0,{arity:0,mode:'browser',notes:'Process-relative monotonic browser time.'});
+}
+
+function installProfiles(w,aw){
+  const m=w.memory,fs=w.fs,ci=s=>String(s).trim().toLowerCase();
+  function path(p,wide){const s=m.string(p,wide);return fs.normalize(s.includes('\\')||s.includes('/')||s.includes(':')?s:'/Windows/'+s);}
+  function read(p,wide){const file=path(p,wide);if(!fs.exists(file)){w.lastError=2;return {file,lines:[],sections:new Map()};}const b=fs.readBytes(file);const str=b[0]===255&&b[1]===254?m.decode(b.subarray(2),true):m.decode(b);const lines=str.replace(/^\uFEFF/,'').split(/\r?\n/),sections=new Map();let current=null;
+    lines.forEach((line,i)=>{const s=line.trim(),match=/^\[([^\]]+)\]/.exec(s);if(match){const key=ci(match[1]);if(!sections.has(key))sections.set(key,{name:match[1],start:i,keys:new Map()});current=sections.get(key);}else if(current&&s&&!/^[;#]/.test(s)){const eq=s.indexOf('=');if(eq>=0){const name=s.slice(0,eq).trim(),key=ci(name);if(!current.keys.has(key))current.keys.set(key,{name,value:s.slice(eq+1).trim(),line:i});}}});return {file,lines,sections};}
+  aw('GetPrivateProfileString',6,(wide,app,key,def,out,n,file)=>{const doc=read(file,wide),section=doc.sections.get(ci(m.string(app,wide)));if(!app||!key){const names=!app?[...doc.sections.values()].map(s=>s.name):[...(section?.keys.values()||[])].map(k=>k.name);const value=names.length?names.join('\0')+'\0':'';return m.putString(out,value,n,wide,true);}const entry=section?.keys.get(ci(m.string(key,wide)));let value=entry?.value??m.string(def,wide).replace(/ +$/,'');if(entry&&value.length>=2&&(['"',"'"].includes(value[0]))&&value.at(-1)===value[0])value=value.slice(1,-1);return m.putString(out,value,n,wide);});
+  aw('GetPrivateProfileInt',4,(wide,app,key,def,file)=>{const doc=read(file,wide),entry=doc.sections.get(ci(m.string(app,wide)))?.keys.get(ci(m.string(key,wide)));if(!entry)return unsigned(def);const n=parseInt(entry.value,10);return (Number.isNaN(n)?0:n)>>>0;});
+  aw('WritePrivateProfileString',4,(wide,app,key,value,file)=>{if(!app&&!key&&!value)return 1;if(!app)throw new Win32Error('Section required');const doc=read(file,wide),name=m.string(app,wide),k=m.string(key,wide),s=doc.sections.get(ci(name)),entry=s?.keys.get(ci(k));if(/[\r\n\[\]]/.test(name)||/[\r\n=]/.test(k)||/[\r\n]/.test(m.string(value,wide)))throw new Win32Error('Invalid INI field');
+    let lines=doc.lines;if(!key){if(s){let end=lines.length;for(let i=s.start+1;i<lines.length;i++)if(/^\s*\[/.test(lines[i])){end=i;break;}lines.splice(s.start,end-s.start);}}
+    else if(!value){if(entry)lines.splice(entry.line,1);}
+    else if(entry)lines[entry.line]=entry.name+'='+m.string(value,wide);
+    else if(s){let end=lines.length;for(let i=s.start+1;i<lines.length;i++)if(/^\s*\[/.test(lines[i])){end=i;break;}lines.splice(end,0,k+'='+m.string(value,wide));}
+    else lines.push('['+name+']',k+'='+m.string(value,wide));
+    const str=lines.join('\r\n');const old=fs.exists(doc.file)?fs.readBytes(doc.file):[];const unicode=old[0]===255&&old[1]===254;const b=m.stringBytes(str,unicode);if(unicode){const bytes=new Uint8Array(b.length+2);bytes.set([255,254]);bytes.set(b,2);fs.writeBytes(doc.file,bytes);}else fs.writeBytes(doc.file,b);return 1;
+  },{notes:'Project-private INI files. Preserves unrelated lines; does not implement Windows registry IniFileMapping.'});
+}
+
+return {installKernel32};
+})();
+
+/* ../../packages/win32-browser/src/user32.js */
+__modules[3]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
+
+/** Registered windows only: never queries or controls unrelated page DOM. */
+function installUser32(w){
+  const m=w.memory,h=w.handles;
+  const add=(name,arity,fn,options={})=>w.register('user32',name,fn,{arity,mode:'browser',...options});
+  const aw=(name,arity,fn,options={})=>{for(const wide of [false,true])add(name+(wide?'W':'A'),arity,(...args)=>fn(wide,...args),options);};
+  const win=handle=>{if(!h.has(handle,'window'))throw new Win32Error('Invalid window handle',1400);return h.get(handle,'window');};
+  const parent=entry=>Number(typeof entry.parent==='function'?entry.parent():entry.parent??0);
+  const rect=entry=>{const r=entry.getRect?.()??entry.node?.getBoundingClientRect?.();if(!r)throw new Win32Error('Window has no geometry',50);return [r.left,r.top,r.right??r.left+r.width,r.bottom??r.top+r.height].map(Math.round);};
+  const client=entry=>{const r=entry.getClientRect?.();if(r)return [r.left??0,r.top??0,r.right??r.width,r.bottom??r.height].map(Math.round);const n=entry.input||entry.node;return [0,0,n?.clientWidth||0,n?.clientHeight||0];};
+  const writeRect=(p,r)=>{const v=m.view(p,16);r.forEach((n,i)=>v.setInt32(i*4,n,true));return 1;};
+  const getText=entry=>String(entry.getText?.()??entry.input?.value??entry.node?.textContent??'');
+  const setText=(entry,s)=>{if(entry.setText)entry.setText(s);else if(entry.input)entry.input.value=s;else if(entry.node)entry.node.textContent=s;else throw new Win32Error('Window text is not writable',50);return 1;};
+  const visible=entry=>entry.isVisible?!!entry.isVisible():!entry.node?.hidden;
+  const enabled=entry=>entry.isEnabled?!!entry.isEnabled():!entry.input?.disabled;
+  add('IsWindow',1,handle=>h.has(handle,'window')?1:0);
+  add('IsWindowVisible',1,handle=>{let entry=win(handle),seen=new Set();while(entry){if(seen.has(entry)||!visible(entry))return 0;seen.add(entry);const p=parent(entry);entry=p?win(p):null;}return 1;});
+  add('IsWindowEnabled',1,handle=>enabled(win(handle))?1:0);
+  add('EnableWindow',2,(handle,on)=>{const entry=win(handle),wasDisabled=!enabled(entry);if(entry.setEnabled)entry.setEnabled(!!on);else if(entry.input)entry.input.disabled=!on;else throw new Win32Error('Window enabled state is not writable',50);return wasDisabled?1:0;});
+  add('ShowWindow',2,(handle,command)=>{const entry=win(handle);command=integer(command,0,11);const was=visible(entry);if(entry.show)entry.show(command);else if([0,1,5,8,9].includes(command)&&entry.node)entry.node.hidden=command===0;else throw new Win32Error('Show command needs a window adapter',50);return was?1:0;});
+  aw('GetWindowText',3,(wide,handle,out,n)=>m.putString(out,getText(win(handle)),n,wide));
+  aw('SetWindowText',2,(wide,handle,p)=>setText(win(handle),m.string(p,wide)));
+  aw('GetWindowTextLength',1,(wide,handle)=>m.stringBytes(getText(win(handle)),wide).length/(wide?2:1));
+  aw('GetClassName',3,(wide,handle,out,n)=>m.putString(out,win(handle).className||'Window',n,wide));
+  const find=(wide,parentHandle,after,klass,title,topOnly)=>{if(parentHandle)win(parentHandle);if(after)win(after);let passed=!after;for(const [id,e]of h.entries){if(e.type!=='window')continue;if(!passed){if(id===Number(after))passed=true;continue;}const entry=e.value,p=parent(entry);if(topOnly?p!==0:p!==Number(parentHandle))continue;if(klass&&String(entry.className||'Window').toLowerCase()!==m.string(klass,wide).toLowerCase())continue;if(title&&getText(entry).toLowerCase()!==m.string(title,wide).toLowerCase())continue;return id;}return 0;};
+  aw('FindWindow',2,(wide,klass,title)=>find(wide,0,0,klass,title,true));
+  aw('FindWindowEx',4,(wide,p,after,klass,title)=>find(wide,p,after,klass,title,false));
+  add('GetParent',1,handle=>parent(win(handle)));
+  add('IsChild',2,(ancestor,handle)=>{win(ancestor);let p=parent(win(handle)),seen=new Set();while(p&&!seen.has(p)){if(p===Number(ancestor))return 1;seen.add(p);p=parent(win(p));}return 0;});
+  add('GetDlgCtrlID',1,handle=>win(handle).controlId||0);
+  add('GetDlgItem',2,(handle,id)=>{win(handle);for(const [key,e]of h.entries)if(e.type==='window'&&parent(e.value)===Number(handle)&&e.value.controlId===Number(id))return key;return 0;});
+  add('GetWindowRect',2,(handle,p)=>writeRect(p,rect(win(handle))));
+  add('GetClientRect',2,(handle,p)=>writeRect(p,client(win(handle))));
+  for(const screen of [false,true])add(screen?'ClientToScreen':'ScreenToClient',2,(handle,p)=>{const entry=win(handle),origin=entry.clientOrigin?.()||rect(entry).slice(0,2),v=m.view(p,8),sign=screen?1:-1;v.setInt32(0,v.getInt32(0,true)+origin[0]*sign,true);v.setInt32(4,v.getInt32(4,true)+origin[1]*sign,true);return 1;});
+  const move=(entry,x,y,width,height,repaint)=>{for(const n of [x,y,width,height])integer(n,-2147483648,2147483647);if(width<0||height<0)throw new Win32Error('Negative window size');if(entry.move)entry.move(x,y,width,height,!!repaint);else if(entry.node)Object.assign(entry.node.style,{position:'absolute',left:x+'px',top:y+'px',width:width+'px',height:height+'px'});else throw new Win32Error('Window cannot move',50);return 1;};
+  add('MoveWindow',6,(handle,x,y,width,height,repaint)=>move(win(handle),x,y,width,height,repaint));
+  add('SetWindowPos',7,(handle,after,x,y,width,height,flags)=>{const entry=win(handle);flags=unsigned(flags);if(flags&~0xdf)throw new Win32Error('Unsupported positioning flags',50);if(!(flags&4)&&![0,1,-1,-2,0xffffffff,0xfffffffe].includes(Number(after)))throw new Win32Error('Arbitrary sibling ordering is not supported',50);const r=entry.getPosition?.()||rect(entry);if(flags&2){x=r[0];y=r[1];}if(flags&1){width=r[2]-r[0];height=r[3]-r[1];}move(entry,x,y,width,height,!(flags&8));if(!(flags&4)&&entry.node)entry.node.style.zIndex=[-1,0xffffffff].includes(Number(after))?'10000':Number(after)===1?'0':'';if(flags&0x40)w.invoke('user32','ShowWindow',[handle,5]);if(flags&0x80)w.invoke('user32','ShowWindow',[handle,0]);return 1;},{notes:'App-local position and CSS stacking; no desktop topmost guarantee.'});
+  add('GetFocus',0,()=>{for(const [id,e]of h.entries)if(e.type==='window'){const n=e.value.input||e.value.node;if(n&&n.ownerDocument?.activeElement===n)return id;}return 0;});
+  add('SetFocus',1,handle=>{const prior=w.invoke('user32','GetFocus',[]);if(!handle){for(const e of h.entries.values())if(e.type==='window')e.value.input?.blur?.();return prior;}const entry=win(handle);if(!enabled(entry))throw new Win32Error('Window is disabled',5);const node=entry.input||entry.node;if(!node?.focus)throw new Win32Error('Focus not supported',50);node.focus();return prior;});
+  add('GetForegroundWindow',0,()=>{let handle=w.invoke('user32','GetFocus',[]);while(handle&&parent(win(handle)))handle=parent(win(handle));return handle;});
+  add('SetForegroundWindow',1,handle=>{const entry=win(handle);if(entry.activate)entry.activate();else (entry.input||entry.node)?.focus?.();return 1;},{notes:'Activates only an app-local window, not the OS browser window.'});
+  aw('GetWindowLong',2,(wide,handle,index)=>{const e=win(handle);if(![-16,-20,-21,-12].includes(Number(index)))throw new Win32Error('Window procedure/instance addresses are unavailable',50);if([-16,-20].includes(Number(index))&&!e.longs?.has(Number(index)))throw new Win32Error('Window style values need an explicit adapter',50);return Number(index)===-12?e.controlId||0:(e.longs?.get(Number(index))||0);});
+  aw('SetWindowLong',3,(wide,handle,index,value)=>{const e=win(handle);if(![-21,-12].includes(Number(index)))throw new Win32Error('Only user data and control IDs are writable; subclassing is unsupported',50);const old=Number(index)===-12?e.controlId||0:e.longs?.get(Number(index))||0;if(Number(index)===-12)e.controlId=Number(value);else{e.longs||=new Map();e.longs.set(Number(index),Number(value)|0);}w.lastError=0;return old;});
+  add('GetSystemMetrics',1,index=>{const view=w.options.window||globalThis.window;const metrics={0:view?.innerWidth??1024,1:view?.innerHeight??768,5:1,6:1,16:view?.innerWidth??1024,17:view?.innerHeight??768,19:1,43:3,78:view?.innerWidth??1024,79:view?.innerHeight??768,80:1};if(!(index in metrics))throw new Win32Error('System metric is not implemented',50);return metrics[index];},{notes:'CSS-pixel app viewport metrics, not physical desktop measurements.'});
+  aw('MessageBox',4,(wide,handle,message,title,type)=>{if(handle)win(handle);if(!w.options.messageBox)throw new Win32Error('Message box adapter unavailable',50);return w.options.messageBox(m.string(message,wide),unsigned(type),m.string(title,wide));});
+  aw('SendMessage',4,async(wide,handle,msg,wp,lp)=>{
+    const e=win(handle);msg=unsigned(msg);
+    if(msg===12)return setText(e,m.string(lp,wide));
+    if(msg===13)return m.putString(lp,getText(e),wp,wide);
+    if(msg===14)return m.stringBytes(getText(e),wide).length/(wide?2:1);
+    if(msg===0xb0){const start=e.input?.selectionStart??0,end=e.input?.selectionEnd??0;if(wp)m.writeU32(wp,start);if(lp)m.writeU32(lp,end);return start>65535||end>65535?-1:(end<<16)|start;}
+    if(msg===0xb1){if(!e.input?.setSelectionRange)throw new Win32Error('Not an edit control',50);let start=Number(wp)|0,end=Number(lp)|0;if(start===-1)start=end=e.input.selectionEnd??0;else if(end===-1)end=getText(e).length;e.input.setSelectionRange(start,end);return 0;}
+    if(msg===0xc2){if(!e.input?.setSelectionRange)throw new Win32Error('Not an edit control',50);const value=getText(e),start=e.input.selectionStart??0,end=e.input.selectionEnd??0,replacement=m.string(lp,wide);setText(e,value.slice(0,start)+replacement+value.slice(end));e.input.setSelectionRange(start+replacement.length,start+replacement.length);return 0;}
+    if(msg===0xf0){if(!e.getCheck)throw new Win32Error('Not a checkable button',50);return e.getCheck();}
+    if(msg===0xf1){if(!e.setCheck)throw new Win32Error('Not a checkable button',50);e.setCheck(integer(wp,0,2));return 0;}
+    if(msg===0xf5){if(e.click)await e.click();else if(e.input?.click)e.input.click();else throw new Win32Error('Not a button',50);return 0;}
+    if(e.message){const result=await e.message(msg,wp,lp,wide);if(result!==undefined)return result;}
+    throw new Win32Error('Window message '+msg+' is not implemented',50);
+  },{notes:'WM text, edit selection/replacement and button check/click messages; unknown messages fail explicitly.'});
+  add('EnumWindows',2,async(callback,data)=>{const fn=h.get(callback,'callback');for(const [id,e]of [...h.entries])if(e.type==='window'&&!parent(e.value)&&h.has(id,'window'))if(!await fn(id,data))return 0;return 1;});
+  add('SetTimer',4,(handle,id,ms,callback)=>{if(handle)win(handle);if(!callback)throw new Win32Error('WM_TIMER message queue is not implemented; supply a callback',50);h.get(callback,'callback');id=handle&&id?unsigned(id):w.nextTimer++;const key=handle+':'+id;if(w.timers.has(key))clearInterval(w.timers.get(key).timer);if(w.timers.size>=1024)throw new Win32Error('Timer quota exceeded',8);const state={handle,id,callback,busy:false,timer:null};state.timer=setInterval(async()=>{if(state.busy||w.disposed)return;state.busy=true;try{await (w.timerCallbacks.get(callback)||h.get(callback,'callback'))(handle,0x113,id,Math.floor(w.clock()-w.epoch)>>>0);}catch(error){w.options.onError?.(error);}finally{state.busy=false;}},Math.max(10,Math.min(unsigned(ms),0x7fffffff)));w.timers.set(key,state);return id;},{notes:'Browser timers are throttled in background tabs; callbacks are coalesced.'});
+  add('KillTimer',2,(handle,id)=>{const key=handle+':'+unsigned(id),state=w.timers.get(key);if(!state)return 0;clearInterval(state.timer);w.timers.delete(key);return 1;});
+  installRectangles(w,add);
+}
+function installRectangles(w,add){
+  const m=w.memory,read=p=>{const v=m.view(p,16);return [0,4,8,12].map(i=>v.getInt32(i,true));},write=(p,r)=>{const v=m.view(p,16);r.forEach((n,i)=>v.setInt32(i*4,n,true));return 1;},empty=r=>r[0]>=r[2]||r[1]>=r[3];
+  add('SetRect',5,(p,l,t,r,b)=>write(p,[l,t,r,b]),{mode:'emulated'});
+  add('SetRectEmpty',1,p=>write(p,[0,0,0,0]),{mode:'emulated'});
+  add('CopyRect',2,(a,b)=>write(a,read(b)),{mode:'emulated'});
+  add('OffsetRect',3,(p,x,y)=>write(p,read(p).map((v,i)=>v+Number(i%2?y:x))),{mode:'emulated'});
+  add('InflateRect',3,(p,x,y)=>write(p,read(p).map((v,i)=>v+Number(i%2?y:x)*(i<2?-1:1))),{mode:'emulated'});
+  add('IsRectEmpty',1,p=>empty(read(p))?1:0,{mode:'emulated'});
+  add('EqualRect',2,(a,b)=>{const x=read(a),y=read(b);return x.every((v,i)=>v===y[i])?1:0;},{mode:'emulated'});
+  add('PtInRect',3,(p,x,y)=>{const r=read(p);return x>=r[0]&&x<r[2]&&y>=r[1]&&y<r[3]?1:0;},{mode:'emulated',notes:'POINT is passed by value as two 32-bit arguments.'});
+  add('IntersectRect',3,(p,a,b)=>{const x=read(a),y=read(b),r=[Math.max(x[0],y[0]),Math.max(x[1],y[1]),Math.min(x[2],y[2]),Math.min(x[3],y[3])],none=empty(r);write(p,none?[0,0,0,0]:r);return none?0:1;},{mode:'emulated'});
+  add('UnionRect',3,(p,a,b)=>{const x=read(a),y=read(b),r=empty(x)?y:empty(y)?x:[Math.min(x[0],y[0]),Math.min(x[1],y[1]),Math.max(x[2],y[2]),Math.max(x[3],y[3])],none=empty(r);write(p,none?[0,0,0,0]:r);return none?0:1;},{mode:'emulated'});
+}
+
+return {installUser32};
+})();
+
+/* ../../packages/win32-browser/src/advapi32.js */
+__modules[4]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
+
+/** App-private registry: no machine registry is read or modified. */
+function installRegistry(w){
+  const m=w.memory,h=w.handles,roots=new Map([[0x80000000,'HKCR'],[0x80000001,'HKCU'],[0x80000002,'HKLM'],[0x80000003,'HKU'],[0x80000005,'HKCC']]);
+  const store=w.registry=new Map([...roots.values()].map(name=>[name,{name,values:new Map()}]));
+  const allowed=0xf003f; // KEY_ALL_ACCESS excluding WOW64 view selectors.
+  const keyOf=(handle,access=0)=>{handle=unsigned(handle);if(roots.has(handle))return roots.get(handle);const e=h.get(handle,'registry');if((e.access&access)!==access)throw new Win32Error('Registry handle access denied',5);if(!store.has(e.path))throw new Win32Error('Registry key was deleted',1018);return e.path;};
+  const sub=(base,name)=>{const parts=String(name).replace(/\//g,'\\').split('\\').filter(Boolean);if(parts.some(p=>p==='.'||p==='..'))throw new Win32Error('Invalid registry key');return base+(parts.length?'\\'+parts.join('\\').toLowerCase():'');};
+  const save=()=>w.options.onRegistryChange?.(w.registrySnapshot());
+  const add=(name,arity,fn)=>w.register('advapi32',name,fn,{arity,statusError:true,mode:'emulated',notes:'Isolated application registry, not the operating-system registry.'});
+  const aw=(name,arity,fn)=>{for(const wide of [false,true])add(name+(wide?'W':'A'),arity,(...a)=>fn(wide,...a));};
+  const accessOf=access=>{access=unsigned(access);if(access&~allowed)throw new Win32Error('Unsupported registry access flags',50);return access;};
+  aw('RegCreateKeyEx',9,(wide,root,name,reserved,klass,options,access,security,result,disposition)=>{if(reserved||klass||options||security)throw new Win32Error('Registry security/classes/options are not supported',50);access=accessOf(access);m.view(result,4);if(disposition)m.view(disposition,4);const base=keyOf(root,4),path=sub(base,m.string(name,wide)),existed=store.has(path),parts=path.split('\\');for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('\\');if(!store.has(p))store.set(p,{name:parts[i-1],values:new Map()});}const handle=h.add('registry',{path,access});m.writeU32(result,handle);if(disposition)m.writeU32(disposition,existed?2:1);save();return 0;});
+  aw('RegOpenKeyEx',5,(wide,root,name,options,access,result)=>{if(options)throw new Win32Error('Registry options unsupported',50);access=accessOf(access);m.view(result,4);const path=sub(keyOf(root),m.string(name,wide));if(!store.has(path))return 2;m.writeU32(result,h.add('registry',{path,access}));return 0;});
+  add('RegCloseKey',1,handle=>{if(!roots.has(unsigned(handle)))h.close(handle,'registry');return 0;});
+  aw('RegSetValueEx',6,(wide,handle,name,reserved,type,data,size)=>{if(reserved)throw new Win32Error('Reserved must be zero');type=unsigned(type);if(![1,2,3,4,7,11].includes(type))throw new Win32Error('Registry type not implemented',50);size=integer(size,0,w.maxFileBytes);const path=keyOf(handle,2),bytes=size?m.bytes(data,size):new Uint8Array();if(type===4&&size!==4||type===11&&size!==8)throw new Win32Error('Invalid registry integer size');if(wide&&[1,2,7].includes(type)&&size%2)throw new Win32Error('Invalid Unicode registry value');const value=[1,2,7].includes(type)?m.decode(bytes,wide):Array.from(bytes);store.get(path).values.set(m.string(name,wide).toLowerCase(),{name:m.string(name,wide),type,value});save();return 0;});
+  aw('RegQueryValueEx',6,(wide,handle,name,reserved,typeOut,data,sizeOut)=>{if(reserved||data&&!sizeOut)throw new Win32Error('Invalid registry query arguments');const path=keyOf(handle,1),entry=store.get(path).values.get(m.string(name,wide).toLowerCase());if(!entry)return 2;const bytes=typeof entry.value==='string'?m.stringBytes(entry.value,wide):Uint8Array.from(entry.value);if(typeOut)m.view(typeOut,4);let capacity=sizeOut?m.readU32(sizeOut):0;if(data)m.bytes(data,capacity);if(typeOut)m.writeU32(typeOut,entry.type);if(sizeOut)m.writeU32(sizeOut,bytes.length);if(!data)return 0;if(capacity<bytes.length)return 234;m.bytes(data,bytes.length).set(bytes);return 0;});
+  aw('RegDeleteValue',2,(wide,handle,name)=>{const path=keyOf(handle,2);if(!store.get(path).values.delete(m.string(name,wide).toLowerCase()))return 2;save();return 0;});
+  aw('RegDeleteKey',2,(wide,handle,name)=>{const path=sub(keyOf(handle,4),m.string(name,wide));if(roots.has(unsigned(handle))&&!m.string(name,wide))return 5;if(!store.has(path))return 2;if([...store.keys()].some(k=>k.startsWith(path+'\\')))return 5;store.delete(path);save();return 0;});
+  aw('RegEnumKeyEx',8,(wide,handle,index,name,size,reserved,klass,classSize,time)=>{if(reserved||klass||classSize||time)throw new Win32Error('Registry class/timestamp enumeration is not implemented',50);const path=keyOf(handle,8),children=[...store].filter(([k])=>k.startsWith(path+'\\')&&!k.slice(path.length+1).includes('\\')),entry=children[integer(index)]?.[1];if(!entry)return 259;const capacity=m.readU32(size),n=m.stringBytes(entry.name,wide).length/(wide?2:1);if(capacity<=n)return 234;m.putString(name,entry.name,capacity,wide);m.writeU32(size,n);return 0;});
+}
+
+return {installRegistry};
+})();
+
+/* ../../packages/win32-browser/src/gdi32.js */
+__modules[5]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
+
+function colorRef(value){const n=unsigned(value);return '#'+[n&255,n>>>8&255,n>>>16&255].map(v=>v.toString(16).padStart(2,'0')).join('');}
+function installGDI(w){
+  const h=w.handles,m=w.memory,add=(name,arity,fn,options={})=>w.register('gdi32',name,fn,{arity,mode:'browser',...options});
+  const stocks=new Map(),stock=(index,type,value)=>stocks.set(index,h.add(type,{...value,stock:true}));
+  stock(0,'brush',{color:0xffffff});stock(4,'brush',{color:0});stock(5,'brush',{null:true});stock(6,'pen',{color:0xffffff,width:1});stock(7,'pen',{color:0,width:1});stock(8,'pen',{null:true,width:1});
+  add('GetStockObject',1,index=>{if(!stocks.has(Number(index)))throw new Win32Error('Stock object is not implemented',50);return stocks.get(Number(index));});
+  add('CreateSolidBrush',1,color=>h.add('brush',{color:unsigned(color)}));
+  add('CreatePen',3,(style,width,color)=>{if(![0,5].includes(Number(style)))throw new Win32Error('Only solid and null pens are supported',50);return h.add('pen',{null:Number(style)===5,width:Math.max(1,integer(width,0,4096)),color:unsigned(color)});});
+  const dc=handle=>h.get(handle,'dc');
+  const draw=(state,operation,args)=>{const style={pen:h.get(state.pen,'pen'),brush:h.get(state.brush,'brush'),textColor:state.textColor,backgroundColor:state.backgroundColor,backgroundMode:state.backgroundMode};if(state.window.draw)return state.window.draw(operation,args,style);const ctx=state.window.context||state.window.node?.getContext?.('2d');if(!ctx)throw new Win32Error('No drawing adapter or Canvas2D context',50);ctx.save();try{ctx.strokeStyle=colorRef(style.pen.color||0);ctx.lineWidth=style.pen.width||1;ctx.fillStyle=colorRef(style.brush.color||0);switch(operation){case 'line':ctx.beginPath();ctx.moveTo(args[0],args[1]);ctx.lineTo(args[2],args[3]);if(!style.pen.null)ctx.stroke();break;case 'rect':if(!style.brush.null)ctx.fillRect(args[0],args[1],args[2]-args[0],args[3]-args[1]);if(!style.pen.null)ctx.strokeRect(args[0],args[1],args[2]-args[0],args[3]-args[1]);break;case 'ellipse':ctx.beginPath();ctx.ellipse((args[0]+args[2])/2,(args[1]+args[3])/2,Math.abs(args[2]-args[0])/2,Math.abs(args[3]-args[1])/2,0,0,Math.PI*2);if(!style.brush.null)ctx.fill();if(!style.pen.null)ctx.stroke();break;case 'pixel':ctx.fillStyle=colorRef(args[2]);ctx.fillRect(args[0],args[1],1,1);break;case 'text':ctx.font='12px Arial';ctx.textBaseline='top';if(style.backgroundMode===2){ctx.fillStyle=colorRef(style.backgroundColor);ctx.fillRect(args[0],args[1],ctx.measureText(args[2]).width,14);}ctx.fillStyle=colorRef(style.textColor);ctx.fillText(args[2],args[0],args[1]);break;default:throw new Win32Error('Unsupported drawing operation',50);}}finally{ctx.restore();}};
+  w.register('user32','GetDC',handle=>{const window=h.get(handle,'window');if(!window.draw&&!window.context&&!window.node?.getContext)throw new Win32Error('No drawing adapter',50);return h.add('dc',{window,handle:Number(handle),pen:stocks.get(7),brush:stocks.get(0),x:0,y:0,textColor:0,backgroundColor:0xffffff,backgroundMode:2});},{arity:1,mode:'browser'});
+  w.register('user32','ReleaseDC',(handle,hdc)=>{const state=dc(hdc);if(state.handle!==Number(handle))throw new Win32Error('DC does not belong to window',6);h.close(hdc,'dc');return 1;},{arity:2,mode:'browser'});
+  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(!entry||!['pen','brush'].includes(entry.type))throw new Win32Error('Invalid pen or brush',6);const old=state[entry.type];state[entry.type]=Number(object);return old;});
+  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(!entry||!['pen','brush'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if([...h.entries.values()].some(e=>e.type==='dc'&&(e.value.pen===Number(object)||e.value.brush===Number(object))))return 0;h.close(object,entry.type);return 1;});
+  add('MoveToEx',4,(handle,x,y,old)=>{const state=dc(handle);if(old){m.writeI32(old,state.x);m.writeI32(old+4,state.y);}state.x=Number(x);state.y=Number(y);return 1;});
+  add('LineTo',3,(handle,x,y)=>{const state=dc(handle);draw(state,'line',[state.x,state.y,Number(x),Number(y)]);state.x=Number(x);state.y=Number(y);return 1;});
+  for(const [name,operation]of [['Rectangle','rect'],['Ellipse','ellipse']])add(name,5,(handle,l,t,r,b)=>{draw(dc(handle),operation,[l,t,r,b].map(Number));return 1;});
+  add('SetPixel',4,(handle,x,y,color)=>{draw(dc(handle),'pixel',[Number(x),Number(y),unsigned(color)]);return unsigned(color)&0xffffff;},{failure:0xffffffff});
+  for(const [name,field]of [['SetTextColor','textColor'],['SetBkColor','backgroundColor']])add(name,2,(handle,color)=>{const state=dc(handle),old=state[field];state[field]=unsigned(color)&0xffffff;return old;},{failure:0xffffffff});
+  add('SetBkMode',2,(handle,mode)=>{integer(mode,1,2);const state=dc(handle),old=state.backgroundMode;state.backgroundMode=Number(mode);return old;});
+  for(const wide of [false,true])add('TextOut'+(wide?'W':'A'),5,(handle,x,y,p,n)=>{n=integer(n,0,m.maxBytes/(wide?2:1));const text=typeof p==='string'?p.slice(0,n):m.decode(m.bytes(p,n*(wide?2:1)),wide);draw(dc(handle),'text',[Number(x),Number(y),text]);return 1;},{notes:'Browser font metrics and rasterization, not pixel-identical GDI.'});
+  add('GetDeviceCaps',2,(handle,index)=>{const state=dc(handle),r=state.window.getClientRect?.(),n=state.window.node;const values={8:r?.width??n?.clientWidth??0,10:r?.height??n?.clientHeight??0,12:32,14:1,88:96,90:96};if(!(index in values))throw new Win32Error('Device capability not implemented',50);return values[index];});
+}
+
+return {colorRef,installGDI};
+})();
+
+/* ../../packages/win32-browser/src/index.js */
+__modules[6]=(()=>{
+const {installClipboard}=__modules[1];
+const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
+const {installKernel32}=__modules[2];
+const {installUser32}=__modules[3];
+const {installRegistry}=__modules[4];
+const {installGDI,colorRef}=__modules[5];
+
+
+
+
+
+
+
+const WIN32_CONSTANTS=Object.freeze({INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
+function normalizeDLL(name){const dll=String(name).replace(/\\/g,'/').split('/').at(-1).replace(/\.dll$/i,'').toLowerCase();if(!/^[a-z0-9_.-]+$/.test(dll))throw new Win32Error('Invalid DLL name',126);return dll;}
+/** Reusable browser/worker/Node compatibility process; never loads native code. */
+class Win32Browser {
+  constructor(options={}){
+    this.options=options;this.memory=new Memory(options);this.handles=new Handles(options.maxHandles);this.fs=options.fs||new MemoryFileSystem();this.lastError=0;this.disposed=false;this.modules=new Map();this.timers=new Map();this.timerCallbacks=new Map();this.nextTimer=1;this.delays=new Set();this.clock=options.clock||(()=>globalThis.performance?.now?.()??Date.now());this.now=options.now||(()=>new Date());this.epoch=this.clock();this.maxFileBytes=integer(options.maxFileBytes??Math.min(20*1024*1024,this.memory.maxBytes),1,this.memory.maxBytes);this.environment=new Map(Object.entries(options.environment||{}).map(([k,v])=>[k.toUpperCase(),String(v)]));
+    for(const name of ['/Windows','/Temp'])this.fs.directories.add(this.fs.normalize(name));
+    installKernel32(this);installUser32(this);installRegistry(this);installGDI(this);installClipboard(this);
+    if(options.registry){for(const [path,record]of options.registry){if(!/^(HKCR|HKCU|HKLM|HKU|HKCC)(\\|$)/.test(path)||!Array.isArray(record.values))throw new Win32Error('Invalid registry snapshot');this.registry.set(path,{name:String(record.name),values:new Map(record.values)});}}
+    this.register('shell32','ShellExecuteA',(handle,operation,file,parameters,directory,show)=>this.openURL(false,handle,operation,file,parameters,directory,show),{arity:6,failure:5,mode:'browser',notes:'Only explicitly enabled http/https/mailto navigation; no executable launch.'});
+    this.register('shell32','ShellExecuteW',(handle,operation,file,parameters,directory,show)=>this.openURL(true,handle,operation,file,parameters,directory,show),{arity:6,failure:5,mode:'browser',notes:'Only explicitly enabled http/https/mailto navigation; no executable launch.'});
+  }
+  register(dll,name,fn,{arity,mode='emulated',notes='',failure=0,statusError=false,replace=false}={}){dll=normalizeDLL(dll);if(typeof fn!=='function'||!Number.isInteger(arity)||arity<0||arity>64||!/^[A-Za-z_]\w*$/.test(name))throw new Win32Error('Invalid API registration');let exports=this.modules.get(dll);if(!exports)this.modules.set(dll,exports=new Map());if(exports.has(name)&&!replace)throw new Win32Error('Duplicate API export');exports.set(name,{dll,name,fn,arity,mode,notes,failure,statusError});return this;}
+  resolve(dll,name){dll=normalizeDLL(dll);const module=this.modules.get(dll);if(!module)throw new Win32Error('DLL has no browser compatibility module: '+dll,126);const api=module.get(String(name));if(!api)throw new Win32Error('Win32 API is not implemented: '+dll+'!'+name,127);return api;}
+  invoke(dll,name,args=[]){if(this.disposed)throw new Win32Error('Compatibility process is disposed',995);const api=this.resolve(dll,name);if(!Array.isArray(args)||args.length!==api.arity)throw new Win32Error('Invalid argument count for '+api.dll+'!'+name,87);const failure=error=>{if(!(error instanceof Win32Error))throw error;if(api.statusError)return error.code;this.lastError=error.code;this.options.onDiagnostic?.({dll:api.dll,name,code:error.code,message:error.message});return typeof api.failure==='function'?api.failure(args):api.failure;};try{const value=api.fn(...args);return value?.then?value.catch(failure):value;}catch(error){return failure(error);}}
+  manifest(){return [...this.modules.values()].flatMap(exports=>[...exports.values()].map(({dll,name,arity,mode,notes})=>({dll,name,arity,mode,notes}))).sort((a,b)=>(a.dll+'!'+a.name).localeCompare(b.dll+'!'+b.name));}
+  registerWindow(descriptor){if(!descriptor||typeof descriptor!=='object')throw new Win32Error('Window descriptor required');return this.handles.add('window',descriptor);}
+  unregisterWindow(handle){if(!this.handles.has(handle,'window'))return;for(const [key,t]of this.timers)if(t.handle===Number(handle)){clearInterval(t.timer);this.timers.delete(key);}for(const [id,e]of this.handles.entries)if(e.type==='dc'&&e.value.handle===Number(handle))this.handles.close(id,'dc');this.handles.close(handle,'window');}
+  registerCallback(fn,{onTimer=fn}={}){if(typeof fn!=='function'||typeof onTimer!=='function')throw new Win32Error('Callback must be a function');const handle=this.handles.add('callback',fn);this.timerCallbacks.set(handle,onTimer);return handle;}
+  unregisterCallback(handle){for(const t of this.timers.values())if(t.callback===handle)throw new Win32Error('Callback is still used by a timer',5);this.handles.close(handle,'callback');this.timerCallbacks.delete(handle);}
+  sleep(milliseconds){milliseconds=unsigned(milliseconds);return new Promise((resolve,reject)=>{const state={timer:null,reject};this.delays.add(state);const end=this.clock()+milliseconds;const next=()=>{if(this.disposed){this.delays.delete(state);reject(new Win32Error('Sleep cancelled',995));return;}const remaining=end-this.clock();if(remaining<=0){this.delays.delete(state);resolve();}else state.timer=setTimeout(next,Math.min(remaining,0x7fffffff));};state.timer=setTimeout(next,Math.min(milliseconds,0x7fffffff));});}
+  registrySnapshot(){return [...this.registry].map(([path,r])=>[path,{name:r.name,values:[...r.values].map(([key,v])=>[key,{...v,value:Array.isArray(v.value)?v.value.slice():v.value}])}]);}
+  async openURL(wide,handle,operation,file,parameters,directory,show){if(handle)this.handles.get(handle,'window');const verb=this.memory.string(operation,wide).toLowerCase();if(verb&&verb!=='open'||this.memory.string(parameters,wide)||this.memory.string(directory,wide))return 31;let url;try{url=new URL(this.memory.string(file,wide));}catch{throw new Win32Error('Invalid navigation URL',87);}if(!['http:','https:','mailto:'].includes(url.protocol)||!this.options.allowNavigation||typeof this.options.openURL!=='function')return 5;return await this.options.openURL(url.href,show)?33:5;}
+  dispose(){if(this.disposed)return;this.disposed=true;for(const t of this.timers.values())clearInterval(t.timer);this.timers.clear();for(const d of this.delays){clearTimeout(d.timer);d.reject(new Win32Error('Operation cancelled',995));}this.delays.clear();this.handles.entries.clear();this.timerCallbacks.clear();this.memory.clear();}
+}
+function createWin32(options={}){return new Win32Browser(options);}
+
+return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
+})();
+
+/* ../language/errors.js */
+__modules[7]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -562,8 +938,8 @@ return {VBError};
 })();
 
 /* calendar.js */
-__modules[1]=(()=>{
-const {VBError}=__modules[0];
+__modules[8]=(()=>{
+const {VBError}=__modules[7];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -640,9 +1016,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ../language/lexer.js */
-__modules[2]=(()=>{
-const {asDate}=__modules[1];
-const {VBError}=__modules[0];
+__modules[9]=(()=>{
+const {asDate}=__modules[8];
+const {VBError}=__modules[7];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -734,8 +1110,8 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* decimal.js */
-__modules[3]=(()=>{
-const {VBError}=__modules[0];
+__modules[10]=(()=>{
+const {VBError}=__modules[7];
 
 const MAX=(1n<<96n)-1n;
 const abs=n=>n<0n?-n:n;
@@ -812,7 +1188,7 @@ return {VBDecimal};
 })();
 
 /* ../core/window-context.js */
-__modules[4]=(()=>{
+__modules[11]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -844,8 +1220,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ../core/core.js */
-__modules[5]=(()=>{
-const {uiDocument}=__modules[4];
+__modules[12]=(()=>{
+const {uiDocument}=__modules[11];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -907,11 +1283,11 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* values.js */
-__modules[6]=(()=>{
-const {VBDecimal}=__modules[3];
-const {asDate,dateToSerial}=__modules[1];
-const { VBError }=__modules[2];
-const { lower }=__modules[5];
+__modules[13]=(()=>{
+const {VBDecimal}=__modules[10];
+const {asDate,dateToSerial}=__modules[8];
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -1104,9 +1480,9 @@ return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterface
 })();
 
 /* ../data/common.js */
-__modules[7]=(()=>{
-const {VBError}=__modules[2];
-const {VBArray, VBCurrency, VBDecimal}=__modules[6];
+__modules[14]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray, VBCurrency, VBDecimal}=__modules[13];
 
 
 const DATA_LIMITS = Object.freeze({rows:100000, cells:1000000, bytes:20*1024*1024, pages:100});
@@ -1268,7 +1644,7 @@ return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,
 })();
 
 /* ../data/vendor/sqlite.js */
-__modules[8]=(()=>{
+__modules[15]=(()=>{
 
 // Generated by tools/vendor-sqlite.mjs. sql.js 1.14.2 (MIT); SQLite public domain.
 // JavaScript SHA256 35e39a73b2e0bc1c2202a4cadb23bcf7a3a77071a39c270f014402968785b95f; WASM SHA256 38c14f6e379210bc942bdc4ebca44e7bfdb4318ecc1c72ca666a28fdce96670a.
@@ -1465,9 +1841,9 @@ return {initializeSQLite};
 })();
 
 /* ../data/sqlite.js */
-__modules[9]=(()=>{
-const {initializeSQLite}=__modules[8];
-const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[7];
+__modules[16]=(()=>{
+const {initializeSQLite}=__modules[15];
+const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[14];
 
 
 /** Real embedded SQLite. A context owns a disk; connections share its live database handles. */
@@ -1590,9 +1966,9 @@ return {SQLiteProvider};
 })();
 
 /* ../data/wire.js */
-__modules[10]=(()=>{
-const {VBCurrency,VBDecimal}=__modules[6];
-const {assertData}=__modules[7];
+__modules[17]=(()=>{
+const {VBCurrency,VBDecimal}=__modules[13];
+const {assertData}=__modules[14];
 
 
 /** Explicit tagged cells: transport cannot silently round BigInt or turn BLOBs into objects. */
@@ -1618,9 +1994,9 @@ return {encodeCell,decodeCell,encodeResult,decodeResult};
 })();
 
 /* ../data/http.js */
-__modules[11]=(()=>{
-const {encodeCell,decodeResult}=__modules[10];
-const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[7];
+__modules[18]=(()=>{
+const {encodeCell,decodeResult}=__modules[17];
+const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[14];
 
 
 async function boundedBody(response,limit){
@@ -1759,9 +2135,9 @@ return {HTTPProvider,GatewayProvider};
 })();
 
 /* ../data/recordset.js */
-__modules[12]=(()=>{
-const {VBError}=__modules[2];
-const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[6];
+__modules[19]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[13];
 
 
 // Disconnected client-side cursor. ConnectedRecordset adds explicit provider I/O.
@@ -1871,9 +2247,9 @@ return {fieldValue,DisconnectedRecordset};
 })();
 
 /* ../data/files.js */
-__modules[13]=(()=>{
-const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[7];
-const {fieldValue}=__modules[12];
+__modules[20]=(()=>{
+const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[14];
+const {fieldValue}=__modules[19];
 
 
 function parseCSV(text){
@@ -1926,9 +2302,9 @@ return {parseCSV,writeCSV,FileDataProvider};
 })();
 
 /* ../data/connected-recordset.js */
-__modules[14]=(()=>{
-const {DisconnectedRecordset,fieldValue}=__modules[12];
-const {assertData,after,DATA_LIMITS,sameValue}=__modules[7];
+__modules[21]=(()=>{
+const {DisconnectedRecordset,fieldValue}=__modules[19];
+const {assertData,after,DATA_LIMITS,sameValue}=__modules[14];
 
 
 /** The same observable cursor as the bound controls use, with awaited provider writes. */
@@ -2045,10 +2421,10 @@ return {ConnectedRecordset};
 })();
 
 /* ../data/connection.js */
-__modules[15]=(()=>{
-const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[7];
-const {ConnectedRecordset}=__modules[14];
-const {fieldValue}=__modules[12];
+__modules[22]=(()=>{
+const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[14];
+const {ConnectedRecordset}=__modules[21];
+const {fieldValue}=__modules[19];
 
 
 
@@ -2174,9 +2550,9 @@ return {DataCollection,ADOConnection,ADOCommand,DAODatabase,DAOEngine};
 })();
 
 /* binary-codec.js */
-__modules[16]=(()=>{
-const {VBError}=__modules[2];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[6];
+__modules[23]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[13];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -2272,9 +2648,9 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* filesystem.js */
-__modules[17]=(()=>{
-const { VBError }=__modules[2];
-const {encodeANSI,decodeANSI}=__modules[16];
+__modules[24]=(()=>{
+const { VBError }=__modules[9];
+const {encodeANSI,decodeANSI}=__modules[23];
 
 
 const MAX_FILE=20*1024*1024;
@@ -2338,14 +2714,14 @@ return {VirtualFileSystem};
 })();
 
 /* ../data/context.js */
-__modules[18]=(()=>{
-const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[7];
-const {SQLiteProvider}=__modules[9];
-const {HTTPProvider,GatewayProvider}=__modules[11];
-const {FileDataProvider}=__modules[13];
-const {ADOConnection,ADOCommand,DataCollection,DAOEngine}=__modules[15];
-const {ConnectedRecordset}=__modules[14];
-const {VirtualFileSystem}=__modules[17];
+__modules[25]=(()=>{
+const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[14];
+const {SQLiteProvider}=__modules[16];
+const {HTTPProvider,GatewayProvider}=__modules[18];
+const {FileDataProvider}=__modules[20];
+const {ADOConnection,ADOCommand,DataCollection,DAOEngine}=__modules[22];
+const {ConnectedRecordset}=__modules[21];
+const {VirtualFileSystem}=__modules[24];
 
 
 
@@ -2412,8 +2788,8 @@ return {DataContext};
 })();
 
 /* financial.js */
-__modules[19]=(()=>{
-const {VBError}=__modules[0];
+__modules[26]=(()=>{
+const {VBError}=__modules[7];
 /**
  * Double-precision financial functions for the browser VB runtime.
  * Pure ES module: no DOM, network, filesystem or dynamic evaluation.
@@ -2602,7 +2978,7 @@ return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FI
 })();
 
 /* ../theme/theme.js */
-__modules[20]=(()=>{
+__modules[27]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
@@ -2659,8 +3035,8 @@ return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,color
 })();
 
 /* ../graphics/surface.js */
-__modules[21]=(()=>{
-const { colorValue, getTheme }=__modules[20];
+__modules[28]=(()=>{
+const { colorValue, getTheme }=__modules[27];
 
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
 const surfaces = new WeakMap();
@@ -2784,8 +3160,8 @@ return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
 })();
 
 /* native-windows.js */
-__modules[22]=(()=>{
-const {refreshGraphicsSurfaces}=__modules[21];
+__modules[29]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[28];
 
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -2977,8 +3353,8 @@ return {installNativeHost};
 })();
 
 /* ../project/binary-assets.js */
-__modules[23]=(()=>{
-const {VBError}=__modules[2];
+__modules[30]=(()=>{
+const {VBError}=__modules[9];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
 const fail=message=>{throw new VBError(message,1002);};
@@ -2989,10 +3365,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ../project/native-text.js */
-__modules[24]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[16];
-const {VBError}=__modules[2];
-const {fromBase64,toBase64}=__modules[23];
+__modules[31]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[23];
+const {VBError}=__modules[9];
+const {fromBase64,toBase64}=__modules[30];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -3056,9 +3432,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ../project/frx.js */
-__modules[25]=(()=>{
-const {VBError}=__modules[2];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[24];
+__modules[32]=(()=>{
+const {VBError}=__modules[9];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[31];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -3161,9 +3537,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[26]=(()=>{
-const {VBError}=__modules[2];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[25];
+__modules[33]=(()=>{
+const {VBError}=__modules[9];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[32];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -3255,11 +3631,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[27]=(()=>{
-const {VBError}=__modules[2];
-const {VBArray,bankersRound,numeric}=__modules[6];
-const {normalizeResources,decodeStringTable}=__modules[26];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[25];
+__modules[34]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray,bankersRound,numeric}=__modules[13];
+const {normalizeResources,decodeStringTable}=__modules[33];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[32];
 
 
 
@@ -3290,8 +3666,8 @@ return {ResourceStore};
 })();
 
 /* error-messages.js */
-__modules[28]=(()=>{
-const {VBError}=__modules[0];
+__modules[35]=(()=>{
+const {VBError}=__modules[7];
 
 /** Invariant English descriptions for the errors produced by this runtime.
  * Localized Windows resource tables and arbitrary COM HRESULT messages are not
@@ -3325,9 +3701,9 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[29]=(()=>{
-const {VBError}=__modules[2];
-const {MISSING,VBArray,coerce,vbString}=__modules[6];
+__modules[36]=(()=>{
+const {VBError}=__modules[9];
+const {MISSING,VBArray,coerce,vbString}=__modules[13];
 
 
 const invalid=()=>{throw new VBError('Invalid procedure call or argument',5);};
@@ -3420,10 +3796,10 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[30]=(()=>{
-const {VBError}=__modules[0];
-const {MISSING,VBArray,numeric}=__modules[6];
-const {FINANCIAL_FUNCTIONS}=__modules[19];
+__modules[37]=(()=>{
+const {VBError}=__modules[7];
+const {MISSING,VBArray,numeric}=__modules[13];
+const {FINANCIAL_FUNCTIONS}=__modules[26];
 
 
 
@@ -3451,8 +3827,8 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[31]=(()=>{
-const {FINANCIAL_SIGNATURES}=__modules[19];
+__modules[38]=(()=>{
+const {FINANCIAL_SIGNATURES}=__modules[26];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
 const BUILTIN_SIGNATURES={
@@ -3474,7 +3850,7 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* constants.js */
-__modules[32]=(()=>{
+__modules[39]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -3501,19 +3877,19 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[33]=(()=>{
-const {errorDescription}=__modules[28];
-const {stringLibrary}=__modules[29];
-const {financialLibrary}=__modules[30];
-const {ResourceStore}=__modules[27];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[1];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[31];
-const {DisconnectedRecordset}=__modules[12];
-const {recordLength}=__modules[16];
-const { VBError }=__modules[2];
-const { lower }=__modules[5];
-const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[6];
-const {VB_CONSTANTS}=__modules[32];
+__modules[40]=(()=>{
+const {errorDescription}=__modules[35];
+const {stringLibrary}=__modules[36];
+const {financialLibrary}=__modules[37];
+const {ResourceStore}=__modules[34];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[8];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[38];
+const {DisconnectedRecordset}=__modules[19];
+const {recordLength}=__modules[23];
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
+const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[13];
+const {VB_CONSTANTS}=__modules[39];
 
 
 
@@ -3592,9 +3968,9 @@ return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ../controls/rtf.js */
-__modules[34]=(()=>{
-const {VBError}=__modules[2];
-const {decodeANSI}=__modules[16];
+__modules[41]=(()=>{
+const {VBError}=__modules[9];
+const {decodeANSI}=__modules[23];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -3703,8 +4079,8 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* ../controls/form-window.js */
-__modules[35]=(()=>{
-const {el}=__modules[5];
+__modules[42]=(()=>{
+const {el}=__modules[12];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
 function installFormWindow(form){
@@ -3729,9 +4105,9 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[36]=(()=>{
-const {el}=__modules[5];
-const {getTheme}=__modules[20];
+__modules[43]=(()=>{
+const {el}=__modules[12];
+const {getTheme}=__modules[27];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -3805,8 +4181,8 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[37]=(()=>{
-const {el}=__modules[5];
+__modules[44]=(()=>{
+const {el}=__modules[12];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
 function scrollbarGeometry(min,max,value,length,page=1){
@@ -3846,7 +4222,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/icon-art.js */
-__modules[38]=(()=>{
+__modules[45]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -4005,8 +4381,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[39]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[38];
+__modules[46]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[45];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -4033,11 +4409,11 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../theme/menu.js */
-__modules[40]=(()=>{
-const {uiDocument}=__modules[4];
-const {el}=__modules[5];
-const {icon}=__modules[39];
-const {getTheme}=__modules[20];
+__modules[47]=(()=>{
+const {uiDocument}=__modules[11];
+const {el}=__modules[12];
+const {icon}=__modules[46];
+const {getTheme}=__modules[27];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -4122,10 +4498,10 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ../controls/richtext.js */
-__modules[41]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[34];
-const {VBError}=__modules[2];
-const {oleColor}=__modules[21];
+__modules[48]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[41];
+const {VBError}=__modules[9];
+const {oleColor}=__modules[28];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -4213,11 +4589,11 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[42]=(()=>{
-const {normalizeDataSources}=__modules[7];
-const { clone, lower, safeName }=__modules[5];
-const {normalizeResources}=__modules[26];
-const { VBError }=__modules[2];
+__modules[49]=(()=>{
+const {normalizeDataSources}=__modules[14];
+const { clone, lower, safeName }=__modules[12];
+const {normalizeResources}=__modules[33];
+const { VBError }=__modules[9];
 
 
 
@@ -4284,9 +4660,9 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[43]=(()=>{
-const { VBError }=__modules[2];
-const { lower }=__modules[5];
+__modules[50]=(()=>{
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
 
 
 class ControlCollection {
@@ -4332,22 +4708,22 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[44]=(()=>{
-const {installFormWindow}=__modules[35];
-const {ClassicCombo,ClassicUpDown}=__modules[36];
-const {ClassicScrollbar}=__modules[37];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[40];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[41];
-const {parseRTF}=__modules[34];
-const { el, lower, clone }=__modules[5];
-const { VBError }=__modules[2];
-const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[6];
-const { MemoryRecordset }=__modules[33];
-const { GraphicsSurface }=__modules[21];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[20];
-const { icon, controlIcon }=__modules[39];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[42];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[43];
+__modules[51]=(()=>{
+const {installFormWindow}=__modules[42];
+const {ClassicCombo,ClassicUpDown}=__modules[43];
+const {ClassicScrollbar}=__modules[44];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[47];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[48];
+const {parseRTF}=__modules[41];
+const { el, lower, clone }=__modules[12];
+const { VBError }=__modules[9];
+const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[13];
+const { MemoryRecordset }=__modules[40];
+const { GraphicsSurface }=__modules[28];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[27];
+const { icon, controlIcon }=__modules[46];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[49];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[50];
 
 
 
@@ -4381,6 +4757,7 @@ class BrowserControl {
     const props=new Set([...RICH_SELECTION_PROPERTIES,...Object.keys(this.props),'Text','Caption','Value','ListIndex','Enabled','Visible','Left','Top','Width','Height','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','ToolTipText','Tag','MaxLength','Locked','PasswordChar','Default','Cancel','Min','Max','Rows','Cols','FixedRows','FixedCols','Row','Col','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataSource','RecordSource','DatabaseName','Connect','ConnectionString','CommandType','CursorType','LockType','ReadOnly','RecordsetType','DataMember','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Picture','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','CancelError','FileName','Filter','FilterIndex','DialogTitle','Flags','FontStrikethru','TextRTF','MultiLine','ScrollBars']);
     for(const key of props)if(!['Nodes','Tabs','Panels','Buttons','ListItems','ColumnHeaders','ListImages'].includes(key)&&!(key in this))Object.defineProperty(this,key,{enumerable:true,configurable:true,get:()=>this.get(key),set:value=>this.set(key,value)});
     this.build();this.attachEvents();this.refresh();
+    if(!this.design&&this.vm?.win32)Object.defineProperty(this,'hWnd',{enumerable:true,value:this.vm.win32.registerControl(this)});
   }
   get(key){
     if(key==='Text'){
@@ -4593,7 +4970,7 @@ class BrowserControl {
   async ShowOpen(){const result=await this.vm?.host.openFile?.(this.props);if(!result){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=result.name;if(result.bytes)this.vm.fs.writeBytes(result.name,result.bytes);else this.vm.fs.write(result.name,result.text);}
   async ShowSave(){const name=await this.vm?.host.inputBox?.('File name:',this.props.DialogTitle||'Save As',this.props.FileName||'Untitled.txt');if(!name){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=name;this.vm?.host.saveFile?.(name,this.vm.fs.exists(name)?this.vm.fs.readBytes(name):'');}
   async ShowColor(){const value=await this.vm?.host.inputBox?.('Color as #RRGGBB:','Color',oleColor(this.props.Color||0));if(/^#[0-9a-f]{6}$/i.test(value)){this.Color=parseInt(value.slice(1,3),16)+(parseInt(value.slice(3,5),16)<<8)+(parseInt(value.slice(5,7),16)<<16);}}
-  dispose(){this._unsubscribeData?.();this._unsubscribeData=null;this.gridEditor=null;this.disposed=true;cancelAnimationFrame(this.raf);clearInterval(this.timerId);this.surface?.dispose();this.rich?.dispose();this.scrollbar?.dispose();this.combo?.dispose();this.stepper?.dispose();this.node.remove();}
+  dispose(){this.vm?.win32?.unregisterControl(this.hWnd);this._unsubscribeData?.();this._unsubscribeData=null;this.gridEditor=null;this.disposed=true;cancelAnimationFrame(this.raf);clearInterval(this.timerId);this.surface?.dispose();this.rich?.dispose();this.scrollbar?.dispose();this.combo?.dispose();this.stepper?.dispose();this.node.remove();}
   buildTree(){this.node.classList.add('vb-tree');this.viewport=el('div',{class:'vb-virtual-viewport',role:'tree',tabindex:0});this.spacer=el('div',{class:'vb-virtual-spacer'});this.viewport.append(this.spacer);this.node.append(this.viewport);this._selectedNode=null;this.Nodes=new TreeNodes(()=>this.invalidate(),item=>{this._selectedNode=item;this.invalidate();});this.viewport.addEventListener('scroll',()=>this.paintTreeRows());this.viewport.addEventListener('keydown',e=>{const rows=this.treeRows||[];let i=rows.findIndex(r=>r.node===this._selectedNode);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();i=Math.max(0,Math.min(rows.length-1,i+(e.key==='ArrowDown'?1:-1)));if(rows[i]){this._selectedNode=rows[i].node;this.viewport.scrollTop=Math.max(0,i*20-this.viewport.clientHeight/2);this.paintTreeRows();this.event('NodeClick',[this._selectedNode]);}}else if(e.key==='ArrowRight'&&this._selectedNode){this._selectedNode.Expanded=-1;}else if(e.key==='ArrowLeft'&&this._selectedNode){this._selectedNode.Expanded=0;}});for(const item of this.props.Nodes||[]){const node=this.Nodes.Add(item.Parent||undefined,item.Parent?4:0,item.Key,item.Text);node.Expanded=item.Expanded??-1;}}
   get SelectedItem(){if(this.type==='TreeView')return this._selectedNode;if(this.type==='ListView')return this._selectedItem;if(this.type==='TabStrip'||this.type==='SSTab')return this.Tabs.items[this.props.Tab||0]||null;return null;}
   set SelectedItem(item){if(this.type==='TreeView')this._selectedNode=item;else if(this.type==='ListView')this._selectedItem=item;else if(this.Tabs)this.props.Tab=this.Tabs.items.indexOf(item);this.invalidate();}
@@ -4702,10 +5079,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[45]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[44];
-const {clone}=__modules[5];
-const {newId}=__modules[42];
+__modules[52]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[51];
+const {clone}=__modules[12];
+const {newId}=__modules[49];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -4784,10 +5161,10 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[46]=(()=>{
-const {VBError}=__modules[2];
-const {el}=__modules[5];
-const {NOTHING}=__modules[6];
+__modules[53]=(()=>{
+const {VBError}=__modules[9];
+const {el}=__modules[12];
+const {NOTHING}=__modules[13];
 
 
 
@@ -4844,9 +5221,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../controls/dialog.js */
-__modules[47]=(()=>{
-const {el}=__modules[5];
-const {icon}=__modules[39];
+__modules[54]=(()=>{
+const {el}=__modules[12];
+const {icon}=__modules[46];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -4881,11 +5258,11 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[48]=(()=>{
-const {VBError}=__modules[0];
-const {lower}=__modules[5];
-const {VB_CONSTANTS}=__modules[32];
-const {VBCurrency,coerce,unary,binary}=__modules[6];
+__modules[55]=(()=>{
+const {VBError}=__modules[7];
+const {lower}=__modules[12];
+const {VB_CONSTANTS}=__modules[39];
+const {VBCurrency,coerce,unary,binary}=__modules[13];
 
 
 
@@ -4997,8 +5374,8 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[49]=(()=>{
-const {VBError}=__modules[2];
+__modules[56]=(()=>{
+const {VBError}=__modules[9];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -5024,8 +5401,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[50]=(()=>{
-const {lower}=__modules[5];
+__modules[57]=(()=>{
+const {lower}=__modules[12];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -5068,8 +5445,8 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[51]=(()=>{
-const { tokenize, VBError }=__modules[2];
+__modules[58]=(()=>{
+const { tokenize, VBError }=__modules[9];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -5085,6 +5462,7 @@ class ExpressionParser {
     if(this.peek().type==='id'&&this.tokens[this.i+1]?.value===':='){
       const name=this.take().value;this.take();return {kind:'named',name,expr:this.expression()};
     }
+    if(this.match('byval'))return {kind:'byval',expr:this.expression()};
     return this.expression();
   }
   qualifiedName() {
@@ -5098,6 +5476,7 @@ class ExpressionParser {
     else if(t.type==='date') node={kind:'date',value:t.value};
     else if(value==='('){node=this.expression();this.expect(')');node={kind:'group',expr:node};}
     else if(value==='+'||value==='-'||value==='not') node={kind:'unary',op:value,expr:this.expression(value==='not'?6:13)};
+    else if(value==='addressof')node={kind:'addressOf',name:this.qualifiedName()};
     else if(value==='new')node={kind:'new',name:this.qualifiedName()};
     else if(value==='typeof'){const expr=this.expression(8);this.expect('is');node={kind:'typeof',expr,name:this.qualifiedName()};}
     else if(value==='.') { const name=this.take();if(name.type!=='id')throw new VBError('Expected member name',1002);node={kind:'member',object:{kind:'with'},name:name.value}; }
@@ -5144,10 +5523,10 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[52]=(()=>{
-const { VBError }=__modules[2];
-const { parseExpression }=__modules[51];
-const { binary, unary, truth }=__modules[6];
+__modules[59]=(()=>{
+const { VBError }=__modules[9];
+const { parseExpression }=__modules[58];
+const { binary, unary, truth }=__modules[13];
 
 
 
@@ -5186,14 +5565,14 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[53]=(()=>{
-const {bindConstants}=__modules[48];
-const {defaultIdentifierType,addDefaultTypes}=__modules[49];
-const {validateInterfaces}=__modules[50];
-const { preprocess }=__modules[52];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[2];
-const { parseExpression, parseCall }=__modules[51];
-const { lower }=__modules[5];
+__modules[60]=(()=>{
+const {bindConstants}=__modules[55];
+const {defaultIdentifierType,addDefaultTypes}=__modules[56];
+const {validateInterfaces}=__modules[57];
+const { preprocess }=__modules[59];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[9];
+const { parseExpression, parseCall }=__modules[58];
+const { lower }=__modules[12];
 
 
 
@@ -5356,7 +5735,15 @@ function compileModule(input) {
       if((m=text.match(/^(?:Public\s+|Private\s+)?Type\s+(\w+)$/i))){typeState=m[1];module.types[typeState]=[];continue;}
       if((m=text.match(/^(?:Public\s+|Private\s+)?Event\s+(\w+)\s*\((.*)\)$/i))){if(module.kind==='module')throw new VBError('Events can be declared only in class and form modules',1002);module.events ||= new Map();const key=lower(m[1]);if(module.events.has(key))throw new VBError('Ambiguous event name: '+m[1],1002);module.events.set(key,{name:m[1],line,scope:/^Private\b/i.test(text)?'private':'public',params:parseParameters(m[2],module.defaultTypes)});continue;}
       if(/^Option\s+Private\s+Module$/i.test(text))continue;
-      if(/^(?:Public\s+|Private\s+)?Declare\b/i.test(text))throw new VBError('Native DLL declarations cannot execute in this browser runtime',453);
+      if(/^(?:Public\s+|Private\s+)?Declare\b/i.test(text)){
+        const d=text.match(/^(?:(Public|Private)\s+)?Declare\s+(Function|Sub)\s+([A-Za-z_]\w*[$%&!#@]?)\s+Lib\s+"([^"\r\n]+)"\s*(?:Alias\s+"([^"\r\n]+)"\s*)?\((.*)\)\s*(?:As\s+(\w+))?$/i);
+        if(!d)throw new VBError('Invalid Declare statement',1002);
+        const name=d[3],key=lower(name);if(module.procedures.has(key))throw new VBError('Ambiguous procedure name: '+name,1002);
+        const params=parseParameters(d[6],module.defaultTypes);
+        if(params.some(p=>p.optional||p.paramArray||p.autoNew))throw new VBError('Declare parameters cannot be Optional, ParamArray or As New',1002);
+        if(lower(d[2])==='sub'&&d[7])throw new VBError('Declare Sub cannot have a return type',1002);
+        module.procedures.set(key,{name,kind:lower(d[2]),scope:lower(d[1]||'public'),params,returnType:d[7]||suffixType(name,module.defaultTypes),line,source:module.name,code:[],external:{library:d[4],entry:d[5]||name}});continue;
+      }
       throw new VBError(`Invalid statement outside procedure: ${text}`,1002);
     }catch(error){if(error instanceof VBError){error.source ||= module.name;error.line ||= line;}throw error;}
   }
@@ -5395,9 +5782,124 @@ function validateCompiledModules(modules) {
 return {parseDeclarations,parseParameters,compileModule,compileProject,validateCompiledModules};
 })();
 
+/* win32.js */
+__modules[61]=(()=>{
+const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[6];
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,numeric,coerce}=__modules[13];
+
+
+
+const align=(n,a)=>Math.ceil(n/a)*a;
+const scalar={byte:[1,'Uint8'],integer:[2,'Int16'],boolean:[2,'Int16'],long:[4,'Int32'],single:[4,'Float32'],double:[8,'Float64'],currency:[8,'BigInt64']};
+const bad=message=>new VBError('Win32 ABI: '+message,49);
+/** A VB6 ANSI Declare adapter. All pointers belong to this VM, never the host. */
+class VBWin32Bridge {
+  constructor(vm){
+    this.vm=vm;this.callbacks=new Map();
+    const fs=vm.fs,translate=fn=>(...args)=>{try{return fn(...args);}catch(error){if(error instanceof Win32Error)throw error;throw new Win32Error(error.message,({53:2,76:3,70:5,75:5,61:8})[error.number]||87);}};
+    // Win32 paths are case insensitive; the VB filesystem is shared, not copied.
+    const normalize=path=>{const target=fs.normalize(path);return [...fs.files.keys(),...fs.directories].find(k=>k.toLowerCase()===target.toLowerCase())||target;};
+    const virtualFS={normalize,files:fs.files,directories:fs.directories,get cwd(){return fs.cwd;},set cwd(v){fs.cwd=v;},get dirty(){return fs.dirty;},set dirty(v){fs.dirty=v;},exists:translate(p=>fs.exists(normalize(p))),readBytes:translate(p=>fs.readBytes(normalize(p))),writeBytes:translate((p,b)=>fs.writeBytes(normalize(p),b)),read:translate(p=>fs.read(normalize(p))),write:translate((p,s)=>fs.write(normalize(p),s)),remove:translate(p=>fs.remove(normalize(p)))};
+    this.api=createWin32({...vm.host.win32Options,fs:virtualFS,registry:vm.settings.__win32Registry,
+      messageBox:vm.host.msgBox?(text,flags,title)=>vm.host.msgBox(text,flags,title):undefined,
+      onRegistryChange:state=>{vm.settings.__win32Registry=state;vm.host.persist?.();},
+      onError:error=>vm.reportError(error)});
+  }
+  layout(value,type,fixedLength=null,depth=0){
+    if(depth>32)throw bad('structure nesting exceeds 32');type=String(type).toLowerCase();
+    if(value instanceof VBArray){if(value.dynamic&&!value.data.length)throw bad('array is not allocated');const fields=value.data.map(v=>this.layout(v,value.type,value.fixedLength,depth+1));let size=0,max=1;for(const f of fields){size=align(size,f.align);f.offset=size;size+=f.size;max=Math.max(max,f.align);}return {kind:'array',fields,size:align(size,max),align:max};}
+    if(value?.__fields instanceof Map){let size=0,max=1;const fields=[];for(const [name,cell]of value.__fields){const f=this.layout(cell.get(),cell.type,cell.fixedLength,depth+1);size=align(size,f.align);fields.push({...f,name,offset:size});size+=f.size;max=Math.max(max,f.align);}return {kind:'record',fields,size:align(size,max),align:max};}
+    if(type==='string'&&fixedLength!=null)return {kind:'fixedString',size:fixedLength,align:1};
+    const spec=scalar[type];if(!spec)throw bad('unsupported native storage type '+type+' (Variants, objects and dynamic UDT strings require an explicit adapter)');
+    return {kind:'scalar',type,size:spec[0],method:spec[1],align:Math.min(spec[0],4)};
+  }
+  write(layout,value,pointer){const m=this.api.memory;if(layout.kind==='record'){for(const f of layout.fields)this.write(f,value.__fields.get(f.name).get(),pointer+f.offset);}
+    else if(layout.kind==='array'){layout.fields.forEach((f,i)=>this.write(f,value.data[i],pointer+f.offset));}
+    else if(layout.kind==='fixedString')m.bytes(pointer,layout.size).set(encodeANSI(value).subarray(0,layout.size));
+    else m.view(pointer,layout.size)['set'+layout.method](0,layout.type==='currency'?value.raw:layout.type==='long'?numeric(value)|0:numeric(value),true);
+  }
+  read(layout,value,pointer){const m=this.api.memory;if(layout.kind==='record'){for(const f of layout.fields){const cell=value.__fields.get(f.name);cell.set(this.read(f,cell.get(),pointer+f.offset));}return value;}
+    if(layout.kind==='array'){layout.fields.forEach((f,i)=>value.data[i]=this.read(f,value.data[i],pointer+f.offset));return value;}
+    if(layout.kind==='fixedString')return decodeANSI(m.bytes(pointer,layout.size));
+    const n=m.view(pointer,layout.size)['get'+layout.method](0,true);return layout.type==='currency'?new VBCurrency(n,true):n;
+  }
+  async invoke(proc,args){
+    const w=this.api,m=w.memory,allocated=[],copybacks=[],pins=new Map();
+    const alloc=size=>{const p=m.alloc(size);allocated.push(p);return p;};
+    try{
+      const api=w.resolve(proc.external.library,proc.external.entry);
+      if(proc.params.length!==api.arity)throw bad('declaration for '+api.name+' requires '+api.arity+' parameters');
+      if(args.length!==proc.params.length)throw new VBError('Wrong number of arguments to '+proc.name,450);
+      const actual=[];
+      for(let i=0;i<args.length;i++){
+        const param=proc.params[i],arg=args[i],ref=arg?.ref,value=ref?await ref.get():arg?.__win32ByVal?arg.value:arg;
+        let type=(param.storageType||param.type).toLowerCase(),byRef=param.byRef&&!arg?.__win32ByVal;
+        if(arg?.__win32ByVal&&!param.byRef)throw bad('ByVal override requires a ByRef declaration parameter');
+        if(type==='any'){type=ref?.type?.toLowerCase()||(typeof value==='string'?'string':'long');if(type==='variant'&&value instanceof VBArray)type=value.type.toLowerCase();else if(type==='variant'&&value?.__fields)type=value.__type.toLowerCase();else if(type==='variant')throw bad('As Any requires typed storage, not a Variant');}
+        if(byRef&&ref&&type!=='any'&&ref.type.toLowerCase()!==type&&!(value instanceof VBArray)&&param.type.toLowerCase()!=='any')throw new VBError('ByRef argument type mismatch',13);
+        if(type==='string'){
+          // VB6 Declare As String is ANSI even when the export is named ...W.
+          // Use explicit Integer/Byte buffers and ByVal pointers for Unicode APIs.
+          const text=String(value??''),bytes=encodeANSI(text),p=alloc(bytes.length+1);m.bytes(p,bytes.length).set(bytes);
+          if(byRef){const pp=alloc(4);m.writeU32(pp,p);actual.push(pp);if(ref)copybacks.push(()=>ref.set(m.readU32(pp)===p?decodeANSI(m.bytes(p,bytes.length)):m.string(m.readU32(pp))));}
+          else {actual.push(p);if(ref)copybacks.push(()=>ref.set(decodeANSI(m.bytes(p,bytes.length))));}
+          continue;
+        }
+        if(!byRef){if(!scalar[type]&&type!=='any')throw bad('ByVal structures and arrays are not supported');actual.push(numeric(value));continue;}
+        if(ref&&pins.has(ref)){actual.push(pins.get(ref));continue;}
+        // A pointer to an array element exposes the remaining contiguous array.
+        const array=ref?.win32Array,offset=ref?.win32Offset??0;
+        const storage=array?Object.assign(Object.create(VBArray.prototype),array,{data:array.data.slice(offset)}):value;
+        const layout=this.layout(storage,type,ref?.fixedLength),p=alloc(layout.size);this.write(layout,storage,p);actual.push(p);if(ref)pins.set(ref,p);
+        if(ref)copybacks.push(async()=>{const next=this.read(layout,storage,p);if(array){next.data.forEach((v,n)=>array.data[offset+n]=v);}else await ref.set(next);});
+      }
+      const result=await w.invoke(proc.external.library,proc.external.entry,actual);
+      if(!w.disposed)for(const copyback of copybacks)await copyback();
+      if(proc.kind==='sub')return undefined;
+      const type=proc.returnType.toLowerCase();if(type==='long')return Number(result||0)|0;if(type==='integer')return (Number(result||0)<<16)>>16;if(type==='string')throw bad('pointer-returning String functions require an explicit pointer declaration');return coerce(result,type);
+    }catch(error){if(error instanceof Win32Error){w.lastError=error.code;this.vm.err.LastDLLError=error.code;throw new VBError(error.message,error.code===126?48:error.code===127?453:49);}throw error;}
+    finally{if(!w.disposed)for(const p of allocated.reverse())m.free(p);if(w.lastError)this.vm.err.LastDLLError=w.lastError;else if(!w.disposed)this.vm.err.LastDLLError=0;}
+  }
+  callback(target){
+    const proc=target?.__procedure,instance=target?.instance;
+    if(!proc||proc.external||instance.module.kind!=='module'||proc.params.some(p=>p.byRef||p.type.toLowerCase()!=='long')||!['long','variant'].includes(proc.returnType.toLowerCase()))throw bad('AddressOf requires a standard-module callback with ByVal Long parameters');
+    if(this.callbacks.has(proc))return this.callbacks.get(proc);
+    const convert=args=>args.map(n=>Number(n)|0),check=args=>{if(args.length!==proc.params.length)throw bad('callback parameter count mismatch');};
+    const handle=this.api.registerCallback(async(...args)=>{check(args);if(['stopped','error'].includes(this.vm.state))return 0;return this.vm.callProcedure(instance,proc,convert(args),this.vm.currentFrame);},{onTimer:(...args)=>{check(args);return this.vm.dispatch(instance,proc.name,convert(args),{coalesce:true});}});
+    this.callbacks.set(proc,handle);return handle;
+  }
+  registerControl(control){
+    if(['Timer','ImageList','CommonDialog','Label','Shape','Line','Image'].includes(control.type))return 0;
+    const c=control,isForm=['Form','MDIForm'].includes(c.type),textKey=['TextBox','RichTextBox','ComboBox'].includes(c.type)?'Text':'Caption';
+    const descriptor={node:c.node,get input(){return c.input;},className:({TextBox:'ThunderRT6TextBox',CommandButton:'ThunderRT6CommandButton',Form:'ThunderRT6FormDC',PictureBox:'ThunderRT6PictureBoxDC'})[c.type]||'ThunderRT6'+c.type,
+      parent:()=>isForm?0:c.form?.hWnd||0,controlId:Number(c.props.TabIndex||0)+1,
+      getText:()=>c.get(textKey),setText:s=>c.set(textKey,s),isVisible:()=>!!c.props.Visible,isEnabled:()=>!!c.props.Enabled,
+      setEnabled:enabled=>c.set('Enabled',enabled?-1:0),show:command=>{if(![0,1,4,5,8,9].includes(command))throw new Win32Error('Window state is not supported by this browser adapter',50);c.set('Visible',command===0?0:-1);},
+      getRect:()=>c.node.getBoundingClientRect(),getClientRect:()=>({width:(c.content||c.input||c.node).clientWidth,height:(c.content||c.input||c.node).clientHeight}),clientOrigin:()=>{const r=(c.content||c.input||c.node).getBoundingClientRect();return [r.left,r.top];},
+      getPosition:()=>[c.props.Left/15,c.props.Top/15,(c.props.Left+c.props.Width)/15,(c.props.Top+c.props.Height)/15],
+      move:(x,y,width,height)=>{c.movedByUser=true;Object.assign(c.props,{Left:x*15,Top:y*15,Width:width*15,Height:height*15});if(isForm)Object.assign(c.props,{ClientWidth:Math.max(0,width-8)*15,ClientHeight:Math.max(0,height-32)*15});c.refresh();},
+      getCheck:()=>Number(c.props.Value||0),setCheck:state=>c.set('Value',state),click:()=>c.node.click()};
+    if(['Form','MDIForm','PictureBox'].includes(c.type))descriptor.draw=(operation,args,state)=>{
+      const surface=c.ensureSurface(),pen=state.pen,brush=state.brush;
+      if(operation==='line'){if(!pen.null)surface.add('line',args,pen.color,false,pen.width);}
+      else if(operation==='rect'){if(!brush.null)surface.add('rect',args,brush.color,true);if(!pen.null)surface.add('rect',args,pen.color,false,pen.width);}
+      else if(operation==='pixel')surface.add('pixel',args,args[2]);
+      else if(operation==='text'){if(state.backgroundMode===2)throw new Win32Error('Opaque GDI text backgrounds require a Canvas adapter',50);surface.text(args[2],args[0],args[1],state.textColor);}
+      else throw new Win32Error('Drawing operation not available on this surface',50);
+    };
+    return this.api.registerWindow(descriptor);
+  }
+  unregisterControl(handle){if(handle&&!this.api.disposed)this.api.unregisterWindow(handle);}
+  dispose(){this.api.dispose();this.callbacks.clear();}
+}
+
+return {VBWin32Bridge};
+})();
+
 /* debug-evaluation.js */
-__modules[54]=(()=>{
-const {VBError}=__modules[2];
+__modules[62]=(()=>{
+const {VBError}=__modules[9];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
 class DebugEvaluationAbort extends VBError {
@@ -5425,11 +5927,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[55]=(()=>{
-const {VBError}=__modules[2];
-const {parseExpression}=__modules[51];
-const {lower}=__modules[5];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[6];
+__modules[63]=(()=>{
+const {VBError}=__modules[9];
+const {parseExpression}=__modules[58];
+const {lower}=__modules[12];
+const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[13];
 
 
 
@@ -5479,8 +5981,8 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[56]=(()=>{
-const {VBError}=__modules[2];
+__modules[64]=(()=>{
+const {VBError}=__modules[9];
 
 const key=ins=>{const {line,source,procedure,...rest}=ins;return JSON.stringify(rest);};
 const linearInstruction=ins=>['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename','fileClose','fileOpen','stringMid','stringAlign','return','dim'].includes(ins.op);
@@ -5505,9 +6007,9 @@ return {linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[57]=(()=>{
-const {instructionMap,linearInstruction}=__modules[56];
-const {VBError}=__modules[2];
+__modules[65]=(()=>{
+const {instructionMap,linearInstruction}=__modules[64];
+const {VBError}=__modules[9];
 
 
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
@@ -5567,21 +6069,23 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[58]=(()=>{
-const {DataContext}=__modules[18];
-const {errorDescription}=__modules[28];
-const {DebugEvaluationSession}=__modules[54];
-const {defaultIdentifierType}=__modules[49];
-const {DebugInspector}=__modules[55];
-const {planLiveEdit,nextStatementIndex}=__modules[57];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[16];
-const { Signal, lower, VERSION }=__modules[5];
-const { VBError }=__modules[2];
-const { parseExpression, parseCall }=__modules[51];
-const { compileProject }=__modules[53];
-const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[6];
-const { VirtualFileSystem }=__modules[17];
-const { createLibrary, MemoryRecordset }=__modules[33];
+__modules[66]=(()=>{
+const {VBWin32Bridge}=__modules[61];
+const {DataContext}=__modules[25];
+const {errorDescription}=__modules[35];
+const {DebugEvaluationSession}=__modules[62];
+const {defaultIdentifierType}=__modules[56];
+const {DebugInspector}=__modules[63];
+const {planLiveEdit,nextStatementIndex}=__modules[65];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[23];
+const { Signal, lower, VERSION }=__modules[12];
+const { VBError }=__modules[9];
+const { parseExpression, parseCall }=__modules[58];
+const { compileProject }=__modules[60];
+const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[13];
+const { VirtualFileSystem }=__modules[24];
+const { createLibrary, MemoryRecordset }=__modules[40];
+
 
 
 
@@ -5625,7 +6129,8 @@ class VirtualMachine extends Signal {
     this.library.set('debug',{Print:(...a)=>this.output(a.map(v=>v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v)).join(' '))});
     this.data=host.data||new DataContext(this.program.sourceProject,{fs:this.fs,persist:host.persist,fetch:host.dataFetch,credentialProvider:host.dataCredential});this.data.install(this);
     this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
-    this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.clipboard||'',Clear:()=>{this.clipboard='';}});
+    this.win32=new VBWin32Bridge(this);
+    this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);this.win32.api.setClipboardText(this.clipboard);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.win32.api.getClipboardText(),Clear:()=>{this.clipboard='';this.win32.api.setClipboardText(null);}});
   }
   output(text,newline=true){this.emit('output',{text:String(text),newline});this.host.print?.(String(text),newline);}
   setState(state){this.state=state;this.emit('state',state);}
@@ -5717,7 +6222,7 @@ class VirtualMachine extends Signal {
     const enumeration=frame.module.enumBindings?.get(key);if(enumeration){if(enumeration.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return enumeration;}
     const localProc=frame.module.procedures.get(key);if(localProc)return {__procedure:localProc,instance:frame.instance};
     const property=frame.module.procedures.get(key+':get');if(property)return await this.callProcedure(frame.instance,property,[]);
-    if(frame.instance.formObject&&this.hasMember(frame.instance.formObject,name))return this.nativeMember(frame.instance.formObject,name);
+    if(frame.instance.formObject&&!(String(name).endsWith('$')&&this.library.has(key+'$'))&&this.hasMember(frame.instance.formObject,name))return this.nativeMember(frame.instance.formObject,name);
     const constant=frame.module.importedConstantBindings?.get(key);if(constant){if(constant.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return constant.value;}
     if(this.instances.has(key))return this.instances.get(key);
     for(const instance of this.instances.values())if(instance.module.kind==='module'){
@@ -5735,7 +6240,7 @@ class VirtualMachine extends Signal {
     const isRecord=Object.getPrototypeOf(object)===Object.prototype&&!!object.__type;let obj=object,privateMatch=false;
     for(let depth=0;obj&&depth<5;depth++,obj=Object.getPrototypeOf(obj)){
       const candidates=Object.getOwnPropertyNames(obj).filter(k=>lower(k)===key&&!BLOCKED_MEMBERS.has(lower(k)));
-      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord);if(publicKey)return publicKey;
+      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||key==='hwnd'&&object.__control);if(publicKey)return publicKey;
       if(candidates.length)privateMatch=true;
     }
     if(privateMatch)throw new VBError('Implementation members are not exposed to Visual Basic: '+name,438);
@@ -5776,6 +6281,7 @@ class VirtualMachine extends Signal {
       case 'id':value=await this.getIdentifier(node.name,frame);break;
       case 'with':if(!frame.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);
       case 'member':value=await this.getMember(await this.evaluate(node.object,frame,{raw:true}),node.name,frame);break;
+      case 'addressOf':return this.win32.callback(await this.evaluate(parseExpression(node.name),frame,{raw:true}));
       case 'new':return this.createObject(node.name,frame);
       case 'typeof':{
         const object=await this.evaluate(node.expr,frame,{raw:true}),type=lower(node.name).replace(/^vb\./,'');
@@ -5822,7 +6328,8 @@ class VirtualMachine extends Signal {
     for(const {index,node:arg}of slots){
       const param=params?.[index];
       if(arg.kind==='missing'){actual[index]=proc||fn?.vbPreserveMissing?MISSING:undefined;continue;}
-      if(param?.byRef&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
+      if(arg.kind==='byval'){if(!proc?.external)throw new VBError('ByVal call-site override is supported only for Declare calls',49);actual[index]={__win32ByVal:true,value:await this.evaluate(arg.expr,frame)};continue;}
+      if((param?.byRef||proc?.external&&param?.type.toLowerCase()==='string')&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
         try{actual[index]={ref:await this.reference(arg,frame,true)};continue;}catch(error){if(!(error instanceof VBError))throw error;}
       }
       const value=await this.evaluate(arg,frame);
@@ -5857,7 +6364,7 @@ class VirtualMachine extends Signal {
       const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
       if(instance?.__vbInstance&&defaultName){const getter=()=>this.callExpression(node,frame);if(target.__vbInterface){const member=this.interfaceProcedure(target,defaultName,objectSet?'set':'let');return new Ref(getter,v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}const setter=instance.module.procedures.get(defaultName+':'+(objectSet?'set':'let'));if(!setter)throw new VBError('Default property is read-only',383);return new Ref(getter,v=>this.callProcedure(instance,setter,[...args,v],frame));}
       if(target instanceof VBArray&&!args.length&&node.callee.kind==='id')return this.reference(node.callee,frame,true);
-      if(target instanceof VBArray)return new Ref(()=>target.get(...args),value=>target.set(args,value),target.type);
+      if(target instanceof VBArray){const ref=new Ref(()=>target.get(...args),value=>target.set(args,value),target.type,target.fixedLength);ref.win32Array=target;ref.win32Offset=target.offset(args);return ref;}
       if(target instanceof VBDictionary)return new Ref(()=>target.Item(...args),value=>target.setItem(...args,value));
       if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args),v=>target.receiver.setItem(...args,v));
       if(node.callee.kind==='member'){
@@ -5910,6 +6417,7 @@ class VirtualMachine extends Signal {
     object[native]=args[0];return args[0];
   }
   async callProcedure(instance,proc,args=[],caller=null){
+    if(proc.external)return this.debugAwait(this.win32.invoke(proc,args));
     if(this.stack.length>=this.options.maxCallDepth)throw new VBError('Out of stack space',28);
     const frame=this.makeFrame(instance,proc);frame.caller=caller;if(this.recordSchema(proc.returnType,frame.module))frame.result=new Cell(proc.returnType,await this.createRecord(proc.returnType,frame));
     if(args.length>proc.params.length&&!proc.params.at(-1)?.paramArray)throw new VBError(`Wrong number of arguments to ${proc.name}`,450);
@@ -5967,7 +6475,7 @@ class VirtualMachine extends Signal {
   }
   pause(){if(this.state==='running')this.pauseRequested=true;}
   resume(mode='continue'){if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
-  stop(){this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
+  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
   async execute(frame){
     while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.pc++;
       try{
@@ -6083,19 +6591,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[59]=(()=>{
-const {RuntimeAgentControl}=__modules[45];
-const {RuntimeMDI}=__modules[46];
-const {runtimeDialog,messageBoxOptions}=__modules[47];
-const { applyTheme, themeId }=__modules[20];
-const { icon }=__modules[39];
-const {rasterDataURL}=__modules[25];
-const { el, download, lower, clone }=__modules[5];
-const { compileProject }=__modules[53];
-const { VirtualMachine }=__modules[58];
-const { VirtualFileSystem }=__modules[17];
-const { describe }=__modules[6];
-const { BrowserForm }=__modules[44];
+__modules[67]=(()=>{
+const {RuntimeAgentControl}=__modules[52];
+const {RuntimeMDI}=__modules[53];
+const {runtimeDialog,messageBoxOptions}=__modules[54];
+const { applyTheme, themeId }=__modules[27];
+const { icon }=__modules[46];
+const {rasterDataURL}=__modules[32];
+const { el, download, lower, clone }=__modules[12];
+const { compileProject }=__modules[60];
+const { VirtualMachine }=__modules[66];
+const { VirtualFileSystem }=__modules[24];
+const { describe }=__modules[13];
+const { BrowserForm }=__modules[51];
 
 
 
@@ -6114,7 +6622,7 @@ class ApplicationHost {
   async createForm(model,instance,vm){const form=new BrowserForm(model,{vm,instance,assets:this.project.assets||{},backend:this.project.settings?.renderer||'auto',onBackend:backend=>{this.backend=backend;this.send('backend',{backend});}});this.forms.push(form);this.console.hidden=true;this.stage.append(form.node);this.mdi.register(form);this.layoutForms();return form;}
   beginModal(form){this.modalForms ||= [];this.modalForms.push(form);const update=()=>{const top=this.modalForms.at(-1);for(const f of this.forms){f.node.inert=!!top&&f!==top;f.node.setAttribute('aria-modal',String(f===top));if(f===top)f.node.style.zIndex=String(200000+this.modalForms.length);}};update();return()=>{this.modalForms=this.modalForms.filter(f=>f!==form);update();};}
   layoutForms(){const width=this.container.clientWidth||innerWidth,height=this.container.clientHeight||innerHeight;this.forms.forEach((form,index)=>{if(form.movedByUser||form.mdiChild)return;const naturalWidth=Number(form.props.ClientWidth??form.props.Width)/15+8,naturalHeight=Number(form.props.ClientHeight??form.props.Height)/15+32,scale=Math.min(1,(width-16)/naturalWidth,(height-16)/naturalHeight);if(width<640||height<480){form.node.style.transform=`scale(${Math.max(.3,scale)})`;form.node.style.transformOrigin='top left';form.props.Left=Math.max(4,(width-naturalWidth*scale)/2)*15;form.props.Top=Math.max(4,(height-naturalHeight*scale)/2)*15;}else{form.node.style.transform='';if(Number(form.props.StartUpPosition)!==0){form.props.Left=Math.max(8,(width-naturalWidth)/2+index*20)*15;form.props.Top=Math.max(8,(height-naturalHeight)/2+index*20)*15;}}form.refresh();});this.mdi.layout();}
-  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{fs:this.fs,settings:this.settings,dataFetch:this.options.dataFetch,dataCredential:this.options.dataCredential||(name=>this.modal('Data Connection Credentials','Runtime bearer token for '+name+' (not saved):',[{caption:'&OK',value:1},{caption:'&Cancel',value:0}],'',{inputType:'password'})),createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000});
+  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{win32Options:this.options.win32,fs:this.fs,settings:this.settings,dataFetch:this.options.dataFetch,dataCredential:this.options.dataCredential||(name=>this.modal('Data Connection Credentials','Runtime bearer token for '+name+' (not saved):',[{caption:'&OK',value:1},{caption:'&Cancel',value:0}],'',{inputType:'password'})),createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000});
     this.vm.on('evaluation',data=>this.send('evaluation',data));this.vm.on('state',state=>this.send('state',{state}));this.vm.on('pause',e=>{this.send('pause',{source:e.instruction.source,line:e.instruction.line,procedure:e.instruction.procedure,reason:e.reason,pauseId:this.vm.debugPauseId,locals:this.vm.debugLocals(),stack:e.stack.map((f,index)=>({index,module:f.module.name,procedure:f.proc.name,line:f.proc.code[Math.min(f.pc,f.proc.code.length-1)]?.line||0,depth:f.depth}))});});this.vm.on('stop',()=>this.send('stopped'));this.vm.on('error',error=>this.send('error',{error}));
     for(const bp of this.options.breakpoints||[])this.vm.setBreakpoint(bp.module,bp.line,bp.condition||'');
     this.vm.library.set('loadpicture',path=>{if(!path)return '';const key=Object.keys(this.project.assets||{}).find(k=>k.toLowerCase()===String(path).replace(/\\/g,'/').toLowerCase());if(key)return key;if(this.fs.exists(path)){const bytes=this.fs.readBytes(path),image=rasterDataURL(bytes);if(image)return image;const text=this.fs.read(path);if(/^data:image\//.test(text))return text;}throw new Error('Image not found or not a supported raster: '+path);});
@@ -6148,27 +6656,29 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[60]=(()=>{
-const {DataContext}=__modules[18];
-const {ADOConnection,ADOCommand}=__modules[15];
-const {ConnectedRecordset}=__modules[14];
-const {DATA_CONSTANTS}=__modules[7];
-const {FINANCIAL_FUNCTIONS}=__modules[19];
-const {installNativeHost}=__modules[22];
-const {ResourceStore}=__modules[27];
-const {readRES,writeRES,setResource,setResourceString}=__modules[26];
-const {THEMES,applyTheme,colorValue}=__modules[20];
-const {MemoryRecordset}=__modules[33];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[34];
-const { ApplicationHost }=__modules[59];
-const { VirtualMachine }=__modules[58];
-const { compileProject, compileModule }=__modules[53];
-const { parseExpression }=__modules[51];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[6];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[1];
-const { VirtualFileSystem }=__modules[17];
-const { BrowserControl, BrowserForm }=__modules[44];
-const { GraphicsSurface }=__modules[21];
+__modules[68]=(()=>{
+const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[6];
+const {DataContext}=__modules[25];
+const {ADOConnection,ADOCommand}=__modules[22];
+const {ConnectedRecordset}=__modules[21];
+const {DATA_CONSTANTS}=__modules[14];
+const {FINANCIAL_FUNCTIONS}=__modules[26];
+const {installNativeHost}=__modules[29];
+const {ResourceStore}=__modules[34];
+const {readRES,writeRES,setResource,setResourceString}=__modules[33];
+const {THEMES,applyTheme,colorValue}=__modules[27];
+const {MemoryRecordset}=__modules[40];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[41];
+const { ApplicationHost }=__modules[67];
+const { VirtualMachine }=__modules[66];
+const { compileProject, compileModule }=__modules[60];
+const { parseExpression }=__modules[58];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[13];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[8];
+const { VirtualFileSystem }=__modules[24];
+const { BrowserControl, BrowserForm }=__modules[51];
+const { GraphicsSurface }=__modules[28];
+
 
 
 
@@ -6190,10 +6700,10 @@ const { GraphicsSurface }=__modules[21];
 
 
 async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);if(options.nativeWindows!==false)installNativeHost(host);await host.start();return host;}
-const RuntimeAPI={DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
+const RuntimeAPI={createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[60];
+globalThis["VB6Runtime"]=__modules[68];
 })();
 VB6Runtime.mountApplication(JSON.parse(document.getElementById('vb6-project').textContent),document.getElementById('app'),{"persist":true}).then(host=>{globalThis.vb6Application=host;});</script></body></html>
