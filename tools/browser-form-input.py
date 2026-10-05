@@ -67,10 +67,20 @@ End Sub`;
     page.evaluate('drain()')
     assert page.evaluate("value('Moves')") >= 1, 'Form_MouseMove must execute'
     assert page.evaluate("[value('LastX'),value('LastY'),value('LastButton')]") == [25, 35, 0]
+    assert page.evaluate("form.content.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2}))") is False
+    assert page.evaluate("form.content.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:0}))") is True
     page.mouse.down(button='right')
     page.mouse.up(button='right')
     page.evaluate('drain()')
-    assert page.evaluate("value('Trace')") == 'D2U2'
+    assert page.evaluate("value('Trace')") == 'D2U2', page.evaluate("value('Trace')")
+    page.evaluate('clearTrace()')
+    # Additional pressed/released buttons arrive as pointermove, not down/up.
+    page.mouse.down(button='left')
+    page.mouse.down(button='middle')
+    page.mouse.up(button='left')
+    page.mouse.up(button='middle')
+    page.evaluate('drain()')
+    assert page.evaluate("value('Trace')") == 'D1D4U1U4', page.evaluate("value('Trace')")
     page.evaluate('clearTrace()')
     page.locator('[data-control="Paddle"]').focus()
     page.keyboard.press('ArrowRight')
@@ -130,6 +140,7 @@ End Sub`;
       host=new Fixture.ApplicationHost(p,document.querySelector('#test'),{persist:false});await host.start();
       host.forms.find(f=>f.type==='Form').controls[0].SetFocus();
     }''')
+    assert page.evaluate("host.forms.find(f=>f.type==='Form').controls[0].node.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2}))") is True
     page.keyboard.press('q')
     page.evaluate('drain()')
     assert page.evaluate("host.vm.instances.get('child').fields.get('trace').get()") == 'form:text:'

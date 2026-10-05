@@ -4261,6 +4261,13 @@ const {lower}=__modules[13];
 // released button is no longer in `buttons`. Never infer a hover button.
 const shiftMask=event=>(event.shiftKey?1:0)|(event.ctrlKey?2:0)|(event.altKey?4:0);
 const mouseButton=(event,kind)=>kind==='MouseMove'?(Number(event.buttons)||0)&7:([1,4,2][event.button]||0);
+// A chorded press/release is a pointermove, not another pointerdown/up.
+function pointerMouseEvent(event){
+  if(event.type==='pointerdown')return 'MouseDown';
+  if(event.type==='pointerup')return 'MouseUp';
+  const button=[1,4,2][event.button]||0;
+  return button?(event.buttons&button?'MouseDown':'MouseUp'):'MouseMove';
+}
 const namedKeys={Backspace:8,Tab:9,Enter:13,Shift:16,Control:17,Alt:18,Pause:19,CapsLock:20,Escape:27,' ':32,PageUp:33,PageDown:34,End:35,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,PrintScreen:44,Insert:45,Delete:46,Meta:91,ContextMenu:93,NumLock:144,ScrollLock:145};
 const punctuation={';':186,'=':187,',':188,'-':189,'.':190,'/':191,'`':192,'[':219,'\\':220,']':221,"'":222};
 function virtualKey(event){
@@ -4314,8 +4321,16 @@ function mouseCoordinates(control,event){
 function bindMouseInput(control){
   owners.set(control.node,control);
   const root=control.content||control.node,moveKey={};
-  for(const [dom,event]of [['pointerdown','MouseDown'],['pointermove','MouseMove'],['pointerup','MouseUp']])root.addEventListener(dom,e=>{
+  root.addEventListener('contextmenu',e=>{
+    // WebKit's native context menu consumes the subsequent pointerup. When VB
+    // handles the right button, keep its complete down/up stream in the app.
+    // Unhandled targets and keyboard-invoked native menus remain unchanged.
+    if(e.button===2&&ownerOf(e.target)===control&&acceptsInput(control)&&
+      (procedure(control,'MouseDown')||procedure(control,'MouseUp')))e.preventDefault();
+  });
+  for(const dom of ['pointerdown','pointermove','pointerup'])root.addEventListener(dom,e=>{
     if(ownerOf(e.target)!==control||!acceptsInput(control))return;
+    const event=pointerMouseEvent(e);
     if(event==='MouseDown'&&control.content&&!(control.controls||[]).some(c=>c.TabStop&&acceptsInput(c)))control.SetFocus();
     if(!procedure(control,event))return;
     const args=[mouseButton(e,event),shiftMask(e),...mouseCoordinates(control,e)];
@@ -4347,7 +4362,7 @@ function bindKeyboardInput(control){
 
 function ownsInputEvent(control,event){return ownerOf(event.target)===control&&acceptsInput(control);}
 
-return {shiftMask,mouseButton,virtualKey,characterKey,acceptsInput,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
+return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsInput,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
 })();
 
 /* ../controls/form-window.js */
