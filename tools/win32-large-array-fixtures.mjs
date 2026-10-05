@@ -28,6 +28,14 @@ export function largeArrayFixture() {
  check('copy(0) = "first" And copy(262144) = "last" & ChrW(0) & "tail"','Large BSTR array copy has independent ownership including NUL');
  const sub=Array(60).fill('-1').join(',');lines.push(`many(${sub}) = 71`);
  check(`many(${sub}) = 71 And LBound(many,60) = -1 And UBound(many,60) = -1`,'Sixty dimensions retain last-dimension bounds and index layout');
+ const bounds=Array.from({length:60},(_,i)=>`${i-30} To ${i-30+(i===59?1:0)}`);
+ const point=Array.from({length:60},(_,i)=>String(i-30)),next=[...point];next[59]='30';
+ lines.push('Dim ranked() As Long',`ReDim ranked(${bounds.join(',')})`,`ranked(${point.join(',')}) = 71`,`ranked(${next.join(',')}) = 83`);
+ check(`ranked(${point.join(',')}) = 71 And ranked(${next.join(',')}) = 83 And LBound(ranked,17) = -14 And UBound(ranked,60) = 30`,'Distinct sixty-dimensional metadata and adjacent last-axis elements');
+ bounds[59]='29 To 31';lines.push(`ReDim Preserve ranked(${bounds.join(',')})`);
+ const tail=[...point];tail[59]='31';
+ check(`ranked(${point.join(',')}) = 71 And ranked(${next.join(',')}) = 83 And ranked(${tail.join(',')}) = 0`,'Sixty-dimensional Preserve keeps values and initializes new last-axis tail');
+ lines.push('Erase ranked');
  failure('ReDim longs(0 To 536870911)',7,'Long byte-size overflow rejected before allocation');
  check('longs(-2) = 19 And longs(524285) = 37 And UBound(longs) = 524285','Failed overflow leaves Long descriptor and values intact');
  failure('ReDim dates(0 To 268435455)',7,'Date byte-size overflow rejected before allocation');

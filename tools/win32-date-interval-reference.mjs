@@ -78,6 +78,16 @@ Function ContractAdd(interval, number, value)
  Case Else: Err.Raise 5
  End Select
  If Abs(number) > limit Then Err.Raise 5
+ ' The host wraps some counts above Long. Monotonic substeps stay within its
+ ' scalar ABI without duplicating its calendar implementation.
+ Do While number > 1000000000
+  value = DateAdd(interval, 1000000000, value)
+  number = number - 1000000000
+ Loop
+ Do While number < -1000000000
+  value = DateAdd(interval, -1000000000, value)
+  number = number + 1000000000
+ Loop
  ContractAdd = DateAdd(interval, number, value)
 End Function
 Function ContractDiff(interval, date1, date2, OptionalFirstDay, OptionalFirstWeek)
@@ -107,6 +117,7 @@ export function writeIntervalReference(directory='validation/date-intervals') {
    const {kind}=record,assigned=referenceExpression(record,adapted);
    lines.push('Err.Clear','result = '+assigned,'savedError = Err.Number','If savedError <> 0 Then',` WScript.Echo "${i}|error|" & savedError`,'Else');
    if(kind==='string')lines.push(` WScript.Echo "${i}|string|" & Encode(CStr(result))`);
+   else if(kind==='date')lines.push(` WScript.Echo "${i}|date|" & Replace(CStr(CDbl(result)), ",", ".") & ";" & Replace(CStr(CDbl(result) - CDbl(CStr(CDbl(result)))), ",", ".")`);
    else lines.push(` WScript.Echo "${i}|${kind}|" & Replace(CStr(CDbl(result)), ",", ".")`);
    lines.push('End If');
   });
@@ -131,8 +142,11 @@ export function readIntervalRecords(text) {
    if(!/^(?:[0-9A-Fa-f]{4})*$/.test(m[3]))throw Error('Invalid UTF-16 reference');
    value=(m[3].match(/.{4}/g)||[]).map(s=>String.fromCharCode(parseInt(s,16))).join('');
   }else{
-   if(!/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:E[+-]?\d+)?$/i.test(m[3]))throw Error('Invalid numeric reference');
-   value=Number(m[3]);
+   const components=m[3].split(';');
+   if(components.length>2||components.length>1&&m[2]!=='date'||components.some(n=>! /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:E[+-]?\d+)?$/i.test(n)))throw Error('Invalid numeric reference');
+   // CStr exposes only 15 significant digits; add a measured low-order residual
+   // instead of weakening the 1e-9-day native assertion near the year-9999 limit.
+   value=Number(components[0])+(components.length===2?Number(components[1]):0);
    if(!Number.isFinite(value)||m[2]==='error'&&(!Number.isInteger(value)||value<=0||value>65535)||m[2]==='long'&&(!Number.isInteger(value)||value< -2147483648||value>2147483647))throw Error('Out-of-range reference at '+i+': '+line);
   }
   return {...cases[i],outcome:m[2],value,index:i};
@@ -149,7 +163,7 @@ export function intervalProject(records,name='AotDateIntervals') {
   const v=variable[r.kind],id=r.index??i;
   code.push('On Error Resume Next','Err.Clear',v+' = '+r.expression,'actualError = Err.Number','Err.Clear','On Error GoTo 0',
    'If actualError <> 0 Then',` Record "${id}|error|" & CStr(actualError)`, 'Else',
-   ` Record "${id}|${r.kind}|" & ${r.kind==='date'?`CStr(CDbl(${v}))`:r.kind==='string'?`Encode(${v})`:`CStr(${v})`}`, 'End If',
+   ` Record "${id}|${r.kind}|" & ${r.kind==='date'?`NumberRecord(CDbl(${v}))`:r.kind==='string'?`Encode(${v})`:`CStr(${v})`}`, 'End If',
    `If actualError <> ${r.outcome==='error'?r.value:0} Then`, ` If firstFailure = 0 Then firstFailure = ${i+1}`,'Else');
   if(r.outcome!=='error'){
    const comparison=r.kind==='date'?`Abs(CDbl(${v}) - (${r.value})) > 0.000000001`:
@@ -171,6 +185,11 @@ Private Sub Record(ByVal text As String)
  If WriteFile(output, StrPtr(text), Len(text) * 2, written, 0) = 0 Then ExitProcess 251
  If written <> Len(text) * 2 Then ExitProcess 251
 End Sub
+Private Function NumberRecord(ByVal value As Double) As String
+ Dim high As String
+ high = CStr(value)
+ NumberRecord = high & ";" & CStr(value - CDbl(high))
+End Function
 Private Function Encode(ByVal text As String) As String
  Dim i As Long, value As Long, result As String, digits As String, part As Long, j As Long
  For i = 1 To Len(text)
