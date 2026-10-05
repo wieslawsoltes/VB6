@@ -21,8 +21,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/data-sources | cut -f1)" = "$GITHUB_SHA"
-          git config user.name 'Wiesław Šoltés'
-          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           mkdir -p /tmp/data-integration-result
           cp -r .data-transfer /tmp/data-integration-result/transfer
           python - <<'PY'
@@ -38,7 +38,6 @@ jobs:
           assert hashlib.sha256(dictionary).hexdigest() == spec['dictionary_sha256']
           pathlib.Path('/tmp/data-dictionary').write_bytes(dictionary)
           chunks = [(root/f'part{i}.txt').read_text() for i in range(1,spec['parts']+1)]
-          # Repair the single known transport transcription, then require the original Git blob hash.
           chunks[0] = chunks[0].replace('OAVLGCgwLbekeGGID8E8','OAVLGCgwLbekeGID8E8')
           original = chunks[0].encode()
           assert hashlib.sha1(b'blob '+str(len(original)).encode()+b'\0'+original).hexdigest() == '9f7a254270f2b2a7e3693643b00699f779e4bd50'
@@ -48,8 +47,8 @@ jobs:
           patch = pathlib.Path('/tmp/data-source.patch').read_bytes()
           assert hashlib.sha256(patch).hexdigest() == spec['patch_sha256']
           PY
-          git merge --no-edit 6e6162cbad5edcad474a2121e65e586eb53a687a
-          git apply --3way --index /tmp/data-source.patch
+          git merge --no-edit e6c9dfc6732b9e99b8eb9756f9562784048fa114
+          git apply --3way --index --exclude=.github/workflows/data-sources.yml /tmp/data-source.patch
       - name: Reproduce pinned engine and all distributions
         run: |
           set -euo pipefail
@@ -58,16 +57,20 @@ jobs:
           node tools/vendor-sqlite.mjs /tmp/vb6-data-engine/package
           npm run build
           npm test | tee /tmp/data-integration-result/data-node-tests.log
-      - name: Publish validated feature commit and remove integration transport
+      - name: Prepare validated source commit
+        run: |
+          set -euo pipefail
+          git rm -rf .data-transfer
+          git add -A
+          git commit -m 'feat(data): classic Data Environment, SQLite, REST and native gateway in shipped apps'
+          git rev-parse HEAD > /tmp/data-integration-result/head.txt
+          git archive HEAD | gzip > /tmp/data-integration-result/source.tar.gz
+      - name: Publish source without modifying workflow files
         run: |
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/data-sources | cut -f1)" = "$GITHUB_SHA"
-          git rm -rf .data-transfer .github/workflows/data-access-work.yml
-          git add -A
-          git commit -m 'feat(data): classic Data Environment, SQLite, REST and native gateway in shipped apps'
+          git diff --exit-code HEAD^ HEAD -- .github/workflows
           git push origin HEAD:refs/heads/feature/data-sources
-          git rev-parse HEAD > /tmp/data-integration-result/head.txt
-          git archive HEAD | gzip > /tmp/data-integration-result/source.tar.gz
       - uses: actions/upload-artifact@v4
         if: always()
         with:
