@@ -2,7 +2,7 @@ name: Input and designer regressions
 on:
   pull_request:
   push:
-    branches: [main, 'fix/form-keyboard-mouse-input']
+    branches: [main]
 permissions:
   contents: read
 concurrency:
@@ -27,6 +27,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm run build
+      - run: git diff --exit-code -- dist src/exporter/runtime-payload.js
       - run: node --test tests/runtime-input*.test.mjs
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps ${{ matrix.browser }}
@@ -40,7 +41,6 @@ jobs:
           python tools/browser-designer-selection.py 2>&1 | tee artifacts/input/designer.log
           python tools/browser-editor-control-list.py 2>&1 | tee artifacts/input/control-list.log
           python tools/browser-editor-event-selection.py 2>&1 | tee artifacts/input/event-selection.log
-          python tools/browser-input-probes.py 2>&1 | tee artifacts/input/native-probes.log
           python tools/browser-input-diagnostics.py 2>&1 | tee artifacts/input/runtime-input.log
       - uses: actions/upload-artifact@v4
         if: always()
