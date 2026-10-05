@@ -1,0 +1,65 @@
+name: GDI merge validation
+on:
+  push:
+    branches: [feature/win32-gdi-boundaries]
+    paths: [.github/workflows/gdi-merge-validation.yml]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve reviewed upstream source and regenerate conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git merge --no-commit --no-ff a098f73921a624e30c26a3aad07c76a14e10073e || true
+          python3 - <<'PY'
+          import subprocess
+          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          allowed=('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js')
+          if any(not (p.startswith('dist/') or p in allowed) for p in conflicts):
+              raise SystemExit('Unreviewed source conflicts: '+repr(conflicts))
+          PY
+          npm run build
+          node tools/win32-api-inventory.mjs
+          git add -A
+          test -z "$(git diff --name-only --diff-filter=U)"
+          npm test | tee /tmp/gdi-merge-tests.txt
+          npm run pack:win32-browser | tee /tmp/gdi-merge-package-tests.txt
+          git diff --exit-code
+          git diff --cached --check a098f73921a624e30c26a3aad07c76a14e10073e
+          git commit -m 'fix(win32-browser): preserve native data-provider changes in rebuilt advanced GDI integration'
+      - name: Publish exact tested feature source with branch lease
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/feature/win32-gdi-boundaries | cut -f1)" = "$EXPECTED_SHA"
+          git push origin HEAD:refs/heads/feature/win32-gdi-boundaries
+          git archive --format=zip HEAD -o /tmp/vb6-gdi-merge-source.zip
+          git bundle create /tmp/vb6-gdi-merge.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} > /tmp/gdi-merge-revision.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdi-merge-validation
+          path: |
+            /tmp/vb6-gdi-merge-source.zip
+            /tmp/vb6-gdi-merge.bundle
+            /tmp/gdi-merge-revision.txt
+            /tmp/gdi-merge-tests.txt
+            /tmp/gdi-merge-package-tests.txt
+            release/vb6-win32-browser-*.tgz
+          retention-days: 7
