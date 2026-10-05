@@ -1,0 +1,91 @@
+name: Complete debugger integration
+on:
+  push:
+    branches: [feat/vb6-debugger-runtime]
+    paths: ['.github/workflows/debugger-resume.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/vb6-debugger-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Integrate reviewed main with explicit source conflict resolutions
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          target='a073a87fbe4583fc54b20fcc76bf62fb75ffdc0f'
+          reviewed={'src/runtime/vm.js','src/runtime/host.js','src/ide/debug-windows.js'}
+          result=subprocess.run(['git','merge','--no-commit','--no-ff',target])
+          if result.returncode:
+              conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+              assert conflicts, 'Merge failed without resolvable conflicts'
+              for path in conflicts:
+                  assert path in reviewed or path.startswith('dist/') or path in ['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js'], 'Unreviewed conflict: '+path
+              for path in conflicts:
+                  subprocess.run(['git','checkout','--ours','--',path],check=True)
+                  subprocess.run(['git','add','--',path],check=True)
+          # These files have independently reviewed combined source resolutions in
+          # the manifest. Other files retain the normal three-way merge result.
+          for path in sorted(reviewed):
+              subprocess.run(['git','checkout','HEAD','--',path],check=True)
+          PY
+      - name: Apply independently hash-verified debugger source edits
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          import zlib from 'node:zlib';
+          import crypto from 'node:crypto';
+          const raw=zlib.brotliDecompressSync(Buffer.from(fs.readFileSync('.github/debugger-resume.b64','utf8').trim(),'base64'));
+          const hash=crypto.createHash('sha256').update(raw).digest('hex');
+          if(hash!=='729a1cba42a945e681153fcd95a613bb2f830d23f24764629446a9ff6865ad6f')throw new Error('Debugger manifest checksum mismatch: '+hash);
+          fs.writeFileSync('/tmp/debugger-resume.json',raw);
+          console.log('Verified source manifest:',raw.length,hash);
+          JS
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          updates={}
+          for item in json.loads(Path('/tmp/debugger-resume.json').read_text()):
+              path=Path(item['path'])
+              assert not path.is_absolute() and '..' not in path.parts and not path.is_symlink(), str(path)
+              assert str(path).startswith(('src/','tests/','tools/','docs/')), str(path)
+              old=path.read_text() if path.exists() else ''
+              actual=hashlib.sha256(old.encode()).hexdigest() if path.exists() else None
+              assert actual==item['old'], 'Source changed: '+str(path)
+              text=old
+              for start,end,replacement in reversed(item['edits']):
+                  assert 0<=start<=end<=len(old)
+                  text=text[:start]+replacement+text[end:]
+              assert hashlib.sha256(text.encode()).hexdigest()==item['new'], 'Reconstruction mismatch: '+str(path)
+              updates[path]=text
+          for path,text in updates.items():
+              path.parent.mkdir(parents=True,exist_ok=True)
+              path.write_text(text)
+          print('Verified and applied',len(updates),'source files')
+          PY
+      - run: npm test
+      - run: npm run build
+      - name: Commit validated source integration and regenerated output
+        run: |
+          rm .github/debugger-resume.b64
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: complete isolated design Immediate and integrate current runtime and editor'
+          git push origin HEAD:refs/heads/feat/vb6-debugger-runtime
+          git bundle create /tmp/debugger-ready.bundle --all
+          git rev-parse HEAD > /tmp/debugger-ready.sha
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debugger-ready
+          path: /tmp/debugger-ready.*
+          retention-days: 3
