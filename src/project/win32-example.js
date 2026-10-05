@@ -1,10 +1,10 @@
 import {newProject,createForm,createControl} from './model.js';
 /** Ordinary Declare statements; the exporter embeds the same reusable package. */
 export function win32Example(){
-  const p=newProject('Win32Workbench'),form=createForm('frmWin32','Win32 API Workbench');p.modules=[form];p.startup='frmWin32';p.description='Browser Win32 Declare APIs: handles, INI files, GDI drawing, writable DIBs and memory DC bitmap blitting.';
-  Object.assign(form.form.properties,{ClientWidth:7800,ClientHeight:4800});
+  const p=newProject('Win32Workbench'),form=createForm('frmWin32','Win32 API Workbench');p.modules=[form];p.startup='frmWin32';p.description='Browser Win32 Declare APIs: handles, INI files, GDI drawing, writable DIBs, memory DC bitmap blitting and complex region clipping.';
+  Object.assign(form.form.properties,{ClientWidth:7800,ClientHeight:5520});
   const c=(type,name,x,y,w,h,properties)=>{const control=createControl(type,name,x*15,y*15);Object.assign(control.properties,{Width:w*15,Height:h*15,...properties});return control;};
-  form.form.controls=[c('Label','lblTitle',16,16,488,24,{Caption:'Win32 APIs in a browser',FontBold:-1,FontSize:12}),c('TextBox','txtValue',16,56,488,24,{Text:'',BackColor:16777215}),c('CommandButton','cmdText',16,96,152,28,{Caption:'SetWindowText'}),c('CommandButton','cmdToggle',184,96,152,28,{Caption:'EnableWindow'}),c('CommandButton','cmdDraw',352,96,152,28,{Caption:'GDI drawing'}),c('PictureBox','picCanvas',16,144,488,104,{BackColor:16777215}),c('CommandButton','cmdBitmap',16,264,152,28,{Caption:'Bitmap blitting'}),c('Label','lblStatus',184,264,320,36,{Caption:'Starting compatibility process...',WordWrap:-1})];
+  form.form.controls=[c('Label','lblTitle',16,16,488,24,{Caption:'Win32 APIs in a browser',FontBold:-1,FontSize:12}),c('TextBox','txtValue',16,56,488,24,{Text:'',BackColor:16777215}),c('CommandButton','cmdText',16,96,152,28,{Caption:'SetWindowText'}),c('CommandButton','cmdToggle',184,96,152,28,{Caption:'EnableWindow'}),c('CommandButton','cmdDraw',352,96,152,28,{Caption:'GDI drawing'}),c('PictureBox','picCanvas',16,144,488,104,{BackColor:16777215}),c('CommandButton','cmdBitmap',16,264,152,28,{Caption:'Bitmap blitting'}),c('CommandButton','cmdRegions',184,264,152,28,{Caption:'Region clipping'}),c('Label','lblStatus',16,304,488,36,{Caption:'Starting compatibility process...',WordWrap:-1})];
   form.code=`Option Explicit
 Private Type BITMAPINFOHEADER
     biSize As Long
@@ -40,6 +40,11 @@ Private Declare Function StretchBlt Lib "gdi32" (ByVal dc As Long, ByVal x As Lo
 Private Declare Function SetStretchBltMode Lib "gdi32" (ByVal dc As Long, ByVal mode As Long) As Long
 Private Declare Function SaveDC Lib "gdi32" (ByVal dc As Long) As Long
 Private Declare Function RestoreDC Lib "gdi32" (ByVal dc As Long, ByVal saved As Long) As Long
+Private Declare Function CreateRectRgn Lib "gdi32" (ByVal left As Long, ByVal top As Long, ByVal right As Long, ByVal bottom As Long) As Long
+Private Declare Function CombineRgn Lib "gdi32" (ByVal destination As Long, ByVal first As Long, ByVal second As Long, ByVal mode As Long) As Long
+Private Declare Function SelectClipRgn Lib "gdi32" (ByVal dc As Long, ByVal region As Long) As Long
+Private Declare Function GetRegionData Lib "gdi32" (ByVal region As Long, ByVal count As Long, ByVal buffer As Long) As Long
+Private Declare Function PatBlt Lib "gdi32" (ByVal dc As Long, ByVal x As Long, ByVal y As Long, ByVal width As Long, ByVal height As Long, ByVal rop As Long) As Long
 Private Sub Form_Load()
     Dim buffer As String, count As Long
     WriteIni "Demo", "Message", "Hello from kernel32 and user32!", "win32-demo.ini"
@@ -98,6 +103,34 @@ Cleanup:
     If oldBitmap <> 0 Then SelectObject memoryDC, oldBitmap
     If bitmap <> 0 Then DeleteObject bitmap
     If memoryDC <> 0 Then DeleteDC memoryDC
+End Sub
+Private Sub cmdRegions_Click()
+    Dim target As Long, outer As Long, hole As Long, brush As Long, saved As Long, size As Long
+    On Error GoTo Failed
+    picCanvas.Cls
+    target = picCanvas.hDC
+    saved = SaveDC(target)
+    outer = CreateRectRgn(8, 8, 472, 96)
+    hole = CreateRectRgn(152, 24, 328, 80)
+    If outer = 0 Or hole = 0 Then Err.Raise 5, , "Region allocation failed"
+    If CombineRgn(outer, outer, hole, 4) = 0 Then Err.Raise 5, , "CombineRgn failed"
+    size = GetRegionData(outer, 0, 0)
+    If SelectClipRgn(target, outer) = 0 Then Err.Raise 5, , "SelectClipRgn failed"
+    DeleteObject outer
+    outer = 0
+    brush = CreateSolidBrush(RGB(32, 128, 192))
+    SelectObject target, brush
+    If PatBlt(target, 0, 0, 488, 104, &HF00021) = 0 Then Err.Raise 5, , "PatBlt failed"
+    lblStatus.Caption = "Complex region: copied clip survives DeleteObject. RGNDATA=" & CStr(size) & " bytes."
+    GoTo Cleanup
+Failed:
+    lblStatus.Caption = "Region error: " & Err.Description & " / " & CStr(Err.LastDLLError)
+Cleanup:
+    If saved <> 0 Then RestoreDC target, saved
+    If brush <> 0 Then DeleteObject brush
+    If outer <> 0 Then DeleteObject outer
+    If hole <> 0 Then DeleteObject hole
+    If target <> 0 Then ReleaseDC picCanvas.hWnd, target
 End Sub
 `;
   return p;
