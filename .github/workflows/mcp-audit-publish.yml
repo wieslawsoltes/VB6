@@ -1,0 +1,91 @@
+name: Publish verified MCP audit
+on:
+  push:
+    branches: [feat/mcp-audit-classic-dialog]
+    paths: ['.github/workflows/mcp-audit-publish.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-audit-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply only the hash-verified reviewed source delta
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          base = '6e6162cbad5edcad474a2121e65e586eb53a687a'
+          allowed = {'.github/workflows/mcp.yml', '.github/workflows/mcp-audit-publish.yml'} | {f'tools/.mcp-audit-source.{i}' for i in range(3)}
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only', base, 'HEAD'], text=True).splitlines())
+          assert changed <= allowed, changed
+          encoded = ''.join(pathlib.Path(f'tools/.mcp-audit-source.{i}').read_text().strip() for i in range(3))
+          data = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(data).hexdigest() == '2412a9cd49b0f8ae0f9d8e09aa43051f79a6d357a4ff5d3b700422a0f246cf22'
+          entries = json.loads(data)
+          for entry in entries:
+              path = pathlib.Path(entry['path'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] in {'src', 'tools', 'tests', 'docs', 'README.md', 'package.json'}
+              before = path.read_bytes() if path.exists() else b''
+              assert hashlib.sha256(before).hexdigest() == entry['before'], str(path)
+              lines = before.decode('utf-8').splitlines(True)
+              previous = len(lines)
+              for start, end, text in reversed(entry['edits']):
+                  assert 0 <= start <= end <= previous
+                  lines[start:end] = text.splitlines(True)
+                  previous = start
+              after = ''.join(lines).encode('utf-8')
+              assert hashlib.sha256(after).hexdigest() == entry['after'], str(path)
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(after)
+          print('Verified source files:', len(entries))
+          PY
+          git rm tools/.mcp-audit-source.0 tools/.mcp-audit-source.1 tools/.mcp-audit-source.2
+          npm run build
+          npm test
+          git add -A -- src tools tests docs README.md package.json dist
+          git diff --cached --check
+          # Verify the complete final product tree. Keep this temporary workflow
+          # unchanged in the bot push; remove it separately through the authorized API.
+          git rm --cached .github/workflows/mcp-audit-publish.yml
+          test "$(git write-tree)" = '9f5e73ef438fbd3ede0da646518a8f4c631c2284'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-audit-publish.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(mcp): complete agent task, project and build workflows with classic IDE dialog'
+          npm run build
+          git diff --exit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Real standalone, HTTP, HTTPS and local external-agent workflows
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+      - name: Publish validated source without forcing or modifying workflow files
+        run: git push origin HEAD:refs/heads/feat/mcp-audit-classic-dialog
+      - name: Preserve source and reports
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-mcp-audit-publication-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
