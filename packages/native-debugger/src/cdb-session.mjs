@@ -5,6 +5,8 @@ import {randomBytes} from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+export {breakWindowsProcess} from './windows-break.mjs';
+import {breakWindowsProcess} from './windows-break.mjs';
 import {NativeDebugError, integer, address, symbol, expression, location, parseProcesses, parseThreads, parseRegisters, parseMemory, parseStack, debuggerFailure} from './protocol.mjs';
 const exec = promisify(execFile);
 const PROMPT = /(?:^|\r?\n)(\d+):([0-9a-f]+)(?::([a-z0-9]+))?>\s*$/i;
@@ -25,13 +27,6 @@ export async function listWindowsProcesses() {
   const items = JSON.parse(stdout || '[]');
   return (Array.isArray(items) ? items : [items]).map(p => ({pid: p.Id, name: p.ProcessName}));
 }
-export async function breakWindowsProcess(pid) {
-  integer(pid, 'process ID', 1);
-  if (process.platform !== 'win32') throw new NativeDebugError('A Windows host is required', 'WINDOWS_REQUIRED');
-  // No shell, interpolation of text, elevation, remote process or inherited handle.
-  const script = `$ErrorActionPreference='Stop'; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class VB6DebugBreak { [DllImport("kernel32.dll",SetLastError=true)] public static extern IntPtr OpenProcess(uint access,bool inherit,uint pid); [DllImport("kernel32.dll",SetLastError=true)] public static extern bool DebugBreakProcess(IntPtr process); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle); }'; $h=[VB6DebugBreak]::OpenProcess(0x1F0FFF,$false,${pid}); if($h -eq [IntPtr]::Zero){throw 'OpenProcess denied'}; try { if(-not [VB6DebugBreak]::DebugBreakProcess($h)){throw 'DebugBreakProcess failed'} } finally { [void][VB6DebugBreak]::CloseHandle($h) }`;
-  await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {windowsHide: true, timeout: 15000, maxBuffer: 65536});
-}
 
 /** Single Windows debugger process. CDB supplies native x86/x64/WOW64 stack,
  * symbols and machine instructions; the bridge does not pretend these are VB6
@@ -40,49 +35,61 @@ export class CdbSession extends EventEmitter {
   constructor({cdbPath, spawnProcess = spawn, breakProcess = breakWindowsProcess, timeout = 15000, platform = process.platform} = {}) {
     super(); this.cdbPath = cdbPath; this.spawnProcess = spawnProcess; this.breakProcess = breakProcess;
     this.timeout = integer(timeout, 'command timeout', 100, 120000); this.platform = platform;
-    this.operations = Promise.resolve(); this.state = 'new'; this.pauseId = 0; this.queue = Promise.resolve(); this.buffer = ''; this.pending = null; this.breakpoints = new Map(); this.sequence = 0;
+    this.generation = 0; this.processIds = new Map(); this.operations = Promise.resolve(); this.state = 'new'; this.pauseId = 0; this.queue = Promise.resolve(); this.buffer = ''; this.pending = null; this.breakpoints = new Map(); this.sequence = 0;
   }
-  snapshot() { return {state: this.state, stepMode:this.stepMode||'assembly', pauseId: this.pauseId, pid: this.pid ?? null, processIndex: this.processIndex ?? 0, threadIndex: this.threadIndex ?? 0, breakpoints: [...this.breakpoints.values()]}; }
+  snapshot() { return {state: this.state, stepMode:this.stepMode||'assembly', pauseId: this.pauseId, pid: this.pid ?? null, targetPid: this.targetPid ?? null, processIndex: this.processIndex ?? 0, threadIndex: this.threadIndex ?? 0, breakpoints: [...this.breakpoints.values()]}; }
   setState(state) { this.state = state; this.emit('state', this.snapshot()); }
   async start({pid, executable, args = [], debugChildren = false} = {}) {
     if (this.state !== 'new') throw new NativeDebugError('Debugger session already started', 'INVALID_STATE');
     if (this.platform !== 'win32') throw new NativeDebugError('A Windows host is required', 'WINDOWS_REQUIRED');
     if ((pid !== undefined) === (executable !== undefined)) throw new NativeDebugError('Choose a process ID or an executable, not both', 'INVALID_ARGUMENT');
-    if (pid !== undefined) this.pid = integer(pid, 'process ID', 1);
+    if (pid !== undefined) this.pid = this.targetPid = integer(pid, 'process ID', 1);
     if (!Array.isArray(args) || args.length > 128 || args.some(s => typeof s !== 'string' || s.length > 8192 || s.includes('\0'))) throw new NativeDebugError('Invalid application arguments', 'INVALID_ARGUMENT');
     if (typeof debugChildren !== 'boolean') throw new NativeDebugError('Invalid child-process option', 'INVALID_ARGUMENT');
     if (executable !== undefined) {
       if (typeof executable !== 'string' || !path.win32.isAbsolute(executable) || !/\.exe$/i.test(executable) || /[\0\r\n]/.test(executable)) throw new NativeDebugError('Select an absolute Windows executable path', 'INVALID_ARGUMENT');
-      if (this.platform === process.platform) { executable = await fs.realpath(executable); if (!(await fs.stat(executable)).isFile()) throw new NativeDebugError('Executable not found'); }
     }
-    const cdb = this.cdbPath || await findCdb();
-    this.directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vb6-debugger-'));
-    const initial = path.join(this.directory, 'initial.txt'); await fs.writeFile(initial, '', {mode: 0o600});
-    const argv = ['-pd', '-G', '-ee', 'masm', '-lines', '-noshell', '-noinh', '-nosqm', '-sins', '-netsyms:no', '-cf', initial];
-    if (debugChildren) argv.push('-o');
-    if (pid !== undefined) argv.push('-p', String(pid)); else argv.push(executable, ...args);
+    const generation = ++this.generation;
+    const check = () => { if (generation !== this.generation) throw new NativeDebugError('Debugger startup was cancelled', 'DEBUGGER_EXITED'); };
     this.setState('starting');
     try {
+      if (executable !== undefined && this.platform === process.platform) { executable = await fs.realpath(executable); check(); if (!(await fs.stat(executable)).isFile()) throw new NativeDebugError('Executable not found'); check(); }
+      const cdb = this.cdbPath || await findCdb(); check();
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vb6-debugger-'));
+      if (generation !== this.generation) { await fs.rm(directory, {recursive:true, force:true}); check(); }
+      this.directory = directory;
+      const initial = path.join(directory, 'initial.txt'); await fs.writeFile(initial, '', {mode: 0o600}); check();
+      const argv = ['-pd', '-G', '-ee', 'masm', '-lines', '-noshell', '-noinh', '-nosqm', '-sins', '-netsyms:no', '-cf', initial];
+      if (debugChildren) argv.push('-o');
+      if (pid !== undefined) argv.push('-p', String(pid)); else argv.push(executable, ...args);
       this.child = this.spawnProcess(cdb, argv, {cwd: this.directory, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false});
       this.child.stdout.on('data', bytes => this.receive(bytes));
       this.child.stderr.on('data', bytes => this.receive(bytes));
       this.child.on('error', error => this.fail(error));
-      this.child.on('exit', (code, signal) => { this.settlePending(new NativeDebugError('Debugger exited', 'DEBUGGER_EXITED')); this.setState('closed'); this.emit('closed', {code, signal}); this.cleanup(); });
+      this.child.on('exit', (code, signal) => { this.settlePending(new NativeDebugError('Debugger exited', 'DEBUGGER_EXITED')); if (this.state !== 'closed') { this.setState('closed'); this.emit('closed', {code, signal}); } this.cleanup(); });
       await this.waitPaused();
       if (debugChildren) await this.command('.childdbg 1');
-      const processes = parseProcesses(await this.command('|'));
-      if (!this.pid) this.pid = (processes.find(p => p.current) || processes[0])?.pid;
+      this.rememberProcesses(parseProcesses(await this.command('|')), true);
+      this.targetPid ??= this.pid;
       this.emit('ready', this.snapshot()); return this.snapshot();
     } catch (error) { await this.abort(); throw error; }
   }
+  rememberProcesses(items, replace = false) {
+    if (replace) this.processIds.clear();
+    for (const item of items) this.processIds.set(item.index, item.pid);
+    this.pid = this.processIds.get(this.processIndex) ?? null;
+    return items;
+  }
   cleanup() { const dir = this.directory; this.directory = null; if (dir) fs.rm(dir, {recursive: true, force: true}).catch(() => {}); }
-  fail(error) { this.settlePending(error); this.setState('failed'); this.emit('failure', {message: error.message}); }
+  fail(error) { if (this.state === 'closed') return; this.lastFailure = error; this.settlePending(error); this.setState('failed'); this.emit('failure', {message: error.message}); }
   settlePending(error, value) { const pending = this.pending; this.pending = null; if (!pending) return; clearTimeout(pending.timer); error ? pending.reject(error) : pending.resolve(value); }
   receive(bytes) {
+    if (['closed', 'failed'].includes(this.state)) return;
     const text = bytes.toString('utf8'); this.emit('output', {text: text.slice(0, 65536)}); this.buffer += text;
     if (this.buffer.length > MAX_OUTPUT) { this.fail(new NativeDebugError('Debugger output limit exceeded', 'OUTPUT_LIMIT')); void this.abort(); return; }
     const prompt = PROMPT.exec(this.buffer); if (!prompt) return;
     this.processIndex = Number(prompt[1]); this.threadIndex = Number(prompt[2]); this.architecture = prompt[3] || null;
+    this.pid = this.processIds.get(this.processIndex) ?? null;
     if (this.pending) {
       const marker = '\n' + this.pending.marker + '\n', normalized = this.buffer.replaceAll('\r\n', '\n');
       const end = normalized.lastIndexOf(marker); if (end < 0 && !normalized.startsWith(this.pending.marker + '\n')) return;
@@ -94,6 +101,8 @@ export class CdbSession extends EventEmitter {
   }
   waitPaused() {
     if (this.state === 'paused') return Promise.resolve(this.snapshot());
+    if (this.state === 'failed') return Promise.reject(this.lastFailure || new NativeDebugError('Debugger failed', 'DEBUGGER_EXITED'));
+    if (['closed', 'new', 'detaching'].includes(this.state)) return Promise.reject(new NativeDebugError('Debugger is not waiting for a stop', 'DEBUGGER_EXITED'));
     return new Promise((resolve, reject) => {
       const finish = (error, value) => { clearTimeout(timer); this.off('paused', paused); this.off('closed', closed); this.off('failure', failed); error ? reject(error) : resolve(value); };
       const paused = value => finish(null, value), closed = () => finish(new NativeDebugError('Debugger exited before stopping', 'DEBUGGER_EXITED')), failed = e => finish(new NativeDebugError(e.message));
@@ -124,19 +133,19 @@ export class CdbSession extends EventEmitter {
     const pause = params.pauseId;
     switch (operation) {
       case 'status': return this.snapshot();
-      case 'pause': { if (this.state === 'paused') return this.snapshot(); if (this.state !== 'running') throw new NativeDebugError('Process is not running'); if (!this.pid) throw new NativeDebugError('Target PID is unavailable'); const stopped = this.waitPaused(); this.setState('breaking'); try { await this.breakProcess(this.pid); return await stopped; } catch (error) { stopped.catch(() => {}); if (this.state === 'breaking') this.setState('running'); throw error; } }
+      case 'pause': { if (this.state === 'paused') return this.snapshot(); if (this.state !== 'running') throw new NativeDebugError('Process is not running'); const pid = this.pid || this.targetPid; if (!pid) throw new NativeDebugError('Target PID is unavailable'); const stopped = this.waitPaused(); this.setState('breaking'); try { await this.breakProcess(pid); return await stopped; } catch (error) { stopped.catch(() => {}); if (this.state === 'breaking') this.setState('running'); throw error; } }
       case 'continue': case 'stepInto': case 'stepOver': case 'stepOut': {
         await this.queue; this.assertPaused(pause); const command = {continue: 'g', stepInto: 't', stepOver: 'p', stepOut: 'gu'}[operation];
         this.buffer = ''; this.setState('running'); this.child.stdin.write(command + '\n'); return this.snapshot();
       }
-      case 'processes': return {processes: parseProcesses(await this.command('|', pause))};
+      case 'processes': return {processes: this.rememberProcesses(parseProcesses(await this.command('|', pause)), true)};
       case 'threads': return {threads: parseThreads(await this.command('~', pause))};
       case 'selectThread': { await this.command('~' + integer(params.index, 'thread index', 0, 100000) + 's', pause); this.pauseId++; return this.snapshot(); }
-      case 'selectProcess': { await this.command('|' + integer(params.index, 'process index', 0, 10000) + 's', pause); const items = parseProcesses(await this.command('|.')); this.pid = items[0]?.pid ?? this.pid; this.pauseId++; return this.snapshot(); }
+      case 'selectProcess': { await this.command('|' + integer(params.index, 'process index', 0, 10000) + 's', pause); this.rememberProcesses(parseProcesses(await this.command('|.'))); this.pauseId++; return this.snapshot(); }
       case 'stack': { const text = await this.command('kn 0x' + integer(params.count ?? 64, 'frame count', 1, 256).toString(16), pause); return {frames: parseStack(text), text}; }
       case 'allStacks': return {text: await this.command('~* kn 0x' + integer(params.count ?? 32, 'frame count', 1, 128).toString(16), pause)};
       case 'allProcessStacks': {
-        this.assertPaused(pause);const processIndex=this.processIndex,threadIndex=this.threadIndex,processes=parseProcesses(await this.command('|',pause));
+        this.assertPaused(pause);const processIndex=this.processIndex,threadIndex=this.threadIndex,processes=this.rememberProcesses(parseProcesses(await this.command('|',pause)), true);
         if(processes.length>64)throw new NativeDebugError('Select at most 64 processes for one stack snapshot','PROCESS_LIMIT');
         const result=[];
         try{for(const process of processes){await this.command('|'+process.index+'s');result.push({process,text:await this.command('~* kn 0x'+integer(params.count??32,'frame count',1,128).toString(16))});}}
@@ -192,9 +201,10 @@ export class CdbSession extends EventEmitter {
     this.setState('detaching'); this.child.stdin.write('qd\n'); return closed;
   }
   async abort() {
+    this.generation++;
     this.settlePending(new NativeDebugError('Debugger session closed', 'DEBUGGER_EXITED'));
     // -pd prevents ending this debugger from terminating the attached target.
     if (this.child && !this.child.killed && this.state !== 'closed') this.child.kill();
-    this.setState('closed'); this.cleanup();
+    if (this.state !== 'closed') { this.setState('closed'); this.emit('closed', {aborted:true}); } this.cleanup();
   }
 }

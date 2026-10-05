@@ -21,7 +21,7 @@ async function body(request) {
 export async function createNativeDebuggerBridge({port=8767,token=randomBytes(32).toString('hex'),origins=[],authorize=async()=>false,createSession=()=>new CdbSession(),listProcesses=listWindowsProcesses,leaseMilliseconds=120000}={}){
   integer(port,'port',0,65535);integer(leaseMilliseconds,'lease time',1000,3600000);
   if(typeof token!=='string'||token.length<32||token.length>512)throw new Error('Use a random token of at least 32 characters');
-  const allowed=new Set(origins.map(originValue)),sessions=new Map();let opening=0,closing=false;
+  const allowed=new Set(origins.map(originValue)),sessions=new Map(),starting=new Set(),shutdown=new AbortController();let opening=0,closing=false,closePromise;
   function record(id){const entry=sessions.get(id);if(!entry)throw new NativeDebugError('Unknown native debugger session','UNKNOWN_SESSION');entry.lastAccess=Date.now();return entry;}
   async function detach(id){const entry=record(id);if(entry.detaching)return entry.detaching;entry.detaching=(async()=>{try{return await entry.session.request('detach');}finally{sessions.delete(id);await entry.session.abort();}})();return entry.detaching;}
   async function invoke(method,params={},signal){
@@ -42,10 +42,10 @@ export async function createNativeDebuggerBridge({port=8767,token=randomBytes(32
       try{
         if(await authorize({operation:method,...structuredClone(options)},{signal})!==true)throw new NativeDebugError('Native process debugging was not approved','CONSENT_DENIED');
         if(closing||signal?.aborted)throw new NativeDebugError('Debugging request was cancelled','CANCELLED');
-        session=createSession();const id=randomBytes(16).toString('hex'),entry={session,events:[],sequence:0,lastAccess:Date.now()};
+        session=createSession();starting.add(session);const id=randomBytes(16).toString('hex'),entry={session,events:[],sequence:0,lastAccess:Date.now()};
         for(const type of ['state','paused','output','failure','closed'])session.on(type,data=>{entry.events.push({sequence:++entry.sequence,type,data:type==='output'?{text:String(data.text).slice(0,8192)}:data});if(entry.events.length>256)entry.events.shift();});
-        await session.start(options);if(signal?.aborted)throw new NativeDebugError('Debugging request was cancelled','CANCELLED');sessions.set(id,entry);return {id,...session.snapshot()};
-      }catch(error){await session?.abort();throw error;}finally{opening--;}
+        await session.start(options);if(closing||signal?.aborted)throw new NativeDebugError('Debugging request was cancelled','CANCELLED');sessions.set(id,entry);return {id,...session.snapshot()};
+      }catch(error){await session?.abort();throw error;}finally{starting.delete(session);opening--;}
     }
     const entry=record(params.session);
     if(method==='events'){
@@ -60,7 +60,7 @@ export async function createNativeDebuggerBridge({port=8767,token=randomBytes(32
   const server=http.createServer(async(request,response)=>{
     response.setHeader('Cache-Control','no-store');response.setHeader('X-Content-Type-Options','nosniff');response.setHeader('Content-Type','application/json; charset=utf-8');
     const origin=request.headers.origin,host=request.headers.host;
-    const respond=(status,data)=>{response.writeHead(status);response.end(JSON.stringify(data));};
+    const respond=(status,data)=>{if(response.destroyed||response.writableEnded)return;response.writeHead(status);response.end(JSON.stringify(data));};
     if(host!=='127.0.0.1:'+server.address()?.port){respond(403,{error:{code:'HOST_DENIED',message:'Loopback Host required'}});return;}
     if(origin!==undefined&&!allowed.has(origin)){respond(403,{error:{code:'ORIGIN_DENIED',message:'Origin is not approved'}});return;}
     if(origin!==undefined){response.setHeader('Access-Control-Allow-Origin',origin);response.setHeader('Vary','Origin');}
@@ -74,11 +74,18 @@ export async function createNativeDebuggerBridge({port=8767,token=randomBytes(32
     if(!equal(String(request.headers.authorization||''),'Bearer '+token)){respond(401,{error:{code:'UNAUTHORIZED',message:'Invalid debugger token'}});return;}
     if(!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type']||'')){respond(415,{error:{message:'application/json required'}});return;}
     const cancelled=new AbortController();request.once('aborted',()=>cancelled.abort());response.once('close',()=>{if(!response.writableEnded)cancelled.abort();});
-    try{const value=await body(request);if(!value||typeof value!=='object'||Array.isArray(value))throw new NativeDebugError('Invalid request','INVALID_ARGUMENT');const result=await invoke(value.method,value.params,cancelled.signal);respond(200,{result});}
+    try{const value=await body(request);if(!value||typeof value!=='object'||Array.isArray(value))throw new NativeDebugError('Invalid request','INVALID_ARGUMENT');const result=await invoke(value.method,value.params,AbortSignal.any([cancelled.signal,shutdown.signal]));respond(200,{result});}
     catch(error){respond(error.code==='CONSENT_DENIED'?403:400,{error:{message:error.message,code:error.code||'DEBUGGER_ERROR'}});}
   });
   server.requestTimeout=30000;server.headersTimeout=10000;server.maxRequestsPerSocket=1000;
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
   const lease=setInterval(()=>{for(const [id,entry]of sessions)if(Date.now()-entry.lastAccess>leaseMilliseconds){entry.lastAccess=Date.now();void detach(id).catch(()=>{});}},Math.min(10000,leaseMilliseconds));lease.unref();
-  return {server,token,url:'http://127.0.0.1:'+server.address().port+'/debugger',async close(){closing=true;clearInterval(lease);await Promise.all([...sessions.keys()].map(id=>detach(id).catch(()=>{})));await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});}};
+  return {server,token,url:'http://127.0.0.1:'+server.address().port+'/debugger',close(){
+    if(closePromise)return closePromise;
+    closing=true;shutdown.abort();clearInterval(lease);
+    closePromise=(async()=>{
+      await Promise.all([...sessions.keys()].map(id=>detach(id).catch(()=>{})).concat([...starting].map(s=>s.abort().catch(()=>{}))));
+      await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});
+    })();return closePromise;
+  }};
 }

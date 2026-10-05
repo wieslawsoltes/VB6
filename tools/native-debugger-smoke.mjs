@@ -22,7 +22,7 @@ async function hit(session,symbol,max=30){
 }
 try{
   const launched=await make({executable:target,args:['--children'],debugChildren:true});assert.ok(launched.pid>0);record('launch attaches before application startup',{pid:launched.pid});
-  const bp=await hit(launched,'DebugTarget!DebugTick');
+  const parentPid=launched.pid,bp=await hit(launched,'DebugTarget!DebugTick');
   // Windows may deliver the child's CREATE_PROCESS event after an already
   // pending breakpoint in the parent. Drive the debug event loop, not wall-clock
   // sleeps, until CDB has observed both. Never treat a missing child as a pass.
@@ -40,9 +40,16 @@ try{
   assert.ok(processes.processes.some(p=>p.pid===childPid),JSON.stringify({childPid,processes}));
   assert.ok(processes.processes.length>=2,JSON.stringify(processes));for(const p of processes.processes)owned.add(p.pid);
   // Inspect the requested parent even when the last event arrived in its child.
-  const parent=processes.processes.find(p=>p.pid===launched.pid);
+  const parent=processes.processes.find(p=>p.pid===parentPid);
   assert.ok(parent,'Parent remains attached');
   await launched.request('selectProcess',{index:parent.index,pauseId:launched.pauseId});
+  // Return to an actual source breakpoint rather than stepping a thread that
+  // was only suspended while Windows delivered the child creation event.
+  for(let n=0;n<30;n++){
+    if((await launched.request('stack')).text.includes('DebugTarget!DebugTick'))break;
+    await launched.request('continue',{pauseId:launched.pauseId});await launched.waitPaused();
+  }
+  assert.match((await launched.request('stack')).text,/DebugTarget!DebugTick/);
   record('native child process tracking',{processes:processes.processes});
   const threads=await launched.request('threads');assert.ok(threads.threads.length>=2);record('native thread enumeration',{threads:threads.threads.length});
   const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);record('cross-process native stack snapshots restore current context');
@@ -50,7 +57,7 @@ try{
   const disassembly=await launched.request('disassemble');assert.match(disassembly.text,/DebugTick|[0-9a-f]{8}/i);record('native machine disassembly');
   const counter=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugCounter'});const memory=await launched.request('readMemory',{address:counter.address,count:4});assert.equal(memory.unreadableBytes,0);record('resolve exported data address and read native memory',{address:counter.address});
   await launched.request('writeMemory',{address:counter.address,bytes:[37,0,0,0],pauseId:launched.pauseId});assert.deepEqual((await launched.request('readMemory',{address:counter.address,count:4})).bytes,[37,0,0,0]);record('native memory write and independent readback');
-  await launched.request('stepMode',{mode:'source',pauseId:launched.pauseId});const at=launched.pauseId;await launched.request('stepOver',{pauseId:at});await launched.waitPaused();assert.ok(launched.pauseId>at);record('source-line step using matching fixture symbols');
+  await launched.request('stepMode',{mode:'source',pauseId:launched.pauseId});const lineBefore=/target\.c @ (\d+)/i.exec((await launched.request('stack')).text)?.[1];assert.ok(lineBefore,'Source breakpoint requires line symbols');const at=launched.pauseId;await launched.request('stepOver',{pauseId:at});await launched.waitPaused();assert.ok(launched.pauseId>at);const lineAfter=/target\.c @ (\d+)/i.exec((await launched.request('stack')).text)?.[1];assert.ok(lineAfter,'Source step retains line symbols');assert.notEqual(lineAfter,lineBefore);record('source-line step using matching fixture symbols',{lineBefore,lineAfter});
   await assert.rejects(launched.request('setRegister',{register:registers.registers.rip?'rax':'eax',value:'1',pauseId:at}),{code:'STALE_PAUSE'});record('stale native mutation rejected');
   await launched.request('stepMode',{mode:'assembly',pauseId:launched.pauseId});await launched.request('removeBreakpoint',{id:bp.id,pauseId:launched.pauseId});
   await hit(launched,'DebugLibrary!LibraryTick');const dllStack=await launched.request('stack');assert.match(dllStack.text,/DebugLibrary!LibraryTick/);assert.match(dllStack.text,/DebugTarget!/);record('native DLL call stack includes caller in host executable');
