@@ -20,13 +20,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Preserve reviewed upstream source and regenerate conflicts
+      - name: Preserve reviewed upstream source and reproduce the tested product tree
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'Wiesław Šoltés'
           git config user.email 'wieslawsoltes@users.noreply.github.com'
-          git merge --no-commit --no-ff a098f73921a624e30c26a3aad07c76a14e10073e || true
+          test "$(git rev-parse f4ee8d47bed69ae26b65d20637b8f5f8da13d815^{tree})" = eb7c6a8647c6a3e8ca84afb7d73f3cc83b439fdf
+          git merge --no-commit --no-ff f4ee8d47bed69ae26b65d20637b8f5f8da13d815 || test -f .git/MERGE_HEAD
           python3 - <<'PY'
           import subprocess
           conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
@@ -39,12 +40,23 @@ jobs:
           rm .github/workflows/gdi-merge-validation.yml
           git add -A
           test -z "$(git diff --name-only --diff-filter=U)"
-          test "$(git write-tree)" = dee82f35b13d88a2b6b367272d289a4ffaf08892
+          test "$(git write-tree)" = bece3b7af2069285e71699885a0272d7242caeb7
           npm test | tee /tmp/gdi-merge-tests.txt
           npm run pack:win32-browser | tee /tmp/gdi-merge-package-tests.txt
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path=Path('release/vb6-win32-browser-0.4.0.tgz')
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          assert actual=='e0b85f665c3b6b00dfbc5902e2120f929810cd960a9bad8d0efe4c53b00b751b',actual
+          print(actual,path)
+          PY
           git diff --exit-code
-          git diff --cached --check a098f73921a624e30c26a3aad07c76a14e10073e
-          git commit -m 'fix(win32-browser): preserve data-provider main in independently reproduced advanced GDI release'
+          git diff --cached --check f4ee8d47bed69ae26b65d20637b8f5f8da13d815
+          git commit -m 'fix(win32-browser): preserve current agent and provider features in verified GDI integration'
+          git archive --format=zip HEAD -o /tmp/vb6-gdi-merge-source.zip
+          git bundle create /tmp/vb6-gdi-merge.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} > /tmp/gdi-merge-revision.txt
       - name: Publish exact tested feature source with branch lease
         shell: bash
         env:
@@ -53,9 +65,6 @@ jobs:
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/win32-gdi-boundaries | cut -f1)" = "$EXPECTED_SHA"
           git push origin HEAD:refs/heads/feature/win32-gdi-boundaries
-          git archive --format=zip HEAD -o /tmp/vb6-gdi-merge-source.zip
-          git bundle create /tmp/vb6-gdi-merge.bundle HEAD refs/remotes/origin/main
-          git rev-parse HEAD HEAD^{tree} > /tmp/gdi-merge-revision.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
