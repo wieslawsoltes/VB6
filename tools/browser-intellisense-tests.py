@@ -55,7 +55,7 @@ def with_split(p):
 def constants(p):
     setup(p,'Private Sub Form_Load()\n    MsgBox "Choose",');put(p,' ')
     check('vbYesNo' in names(p),names(p));check('vbRed' not in names(p));p.keyboard.press('Control+Shift+i')
-    check(p.locator('.source-info strong').inner_text().startswith('[buttons'),p.locator('.source-info').inner_text());check(p.evaluate('()=>{const e=vb6Studio.editor,a=e.info.getBoundingClientRect(),b=e.viewport.getBoundingClientRect();return a.left>=b.left&&a.right<=b.right&&e.info.scrollWidth<=e.info.clientWidth+1;}'),'Parameter hint overflowed the code pane');shot(p,'constants-parameters')
+    check(p.locator('.source-info strong').inner_text().startswith('[buttons'),p.locator('.source-info').inner_text());check(p.evaluate('()=>{const e=vb6Studio.editor,a=e.info.getBoundingClientRect(),b=e.viewport.getBoundingClientRect();return a.left>=b.left&&a.right<=b.right&&e.info.scrollWidth<=e.info.clientWidth+1;}'),p.evaluate('()=>{const e=vb6Studio.editor;return JSON.stringify({info:e.info.getBoundingClientRect(),pane:e.viewport.getBoundingClientRect(),scrollWidth:e.info.scrollWidth,clientWidth:e.info.clientWidth});}'));shot(p,'constants-parameters')
 
 def nested_info(p):
     setup(p,'Private Sub Form_Load()\n    MsgBox Format(123, ')
