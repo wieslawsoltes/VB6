@@ -515,3 +515,27 @@ values remain separately bound. Ordinary ADO/native SQL is never rewritten (incl
 PostgreSQL JSON `?` operators). A server-allowlisted positional command must declare
 `parameterStyle: "odbc"`; the client cannot override a named command's dialect.
 This translates parameter markers, not the rest of Access SQL or server dialects.
+
+## Installed native-provider conformance
+
+`tools/data-provider-tests.mjs odbc` runs through a genuine installed UnixODBC
+SQLite driver. `tools/data-provider-tests.mjs windows` creates disposable files
+using native ADOX and probes Jet 4.0 and ACE 12/16 in 32-bit and 64-bit workers.
+Only successfully created provider fixtures are exercised; unavailable providers
+are recorded explicitly, and 32-bit Jet plus the Access ODBC bridge are required
+by the Windows suite. Provider inventory is not a substitute for passed operations.
+The suites check parameter binding, binary/Null values, empty rowsets, transactions,
+close rollback, schema, recovery after errors, DAO QueryDefs and RDO queries.
+All databases are newly created in an isolated temporary directory and deleted.
+
+A trusted OLE DB gateway profile can set `architecture: "x86"` for Jet or a 32-bit
+ACE installation, or `architecture: "x64"` for a 64-bit provider. The worker reports
+its actual bitness and rejects a mismatch. `powershell` remains an explicit
+server-administrator override; neither option can be supplied by gateway clients.
+Command, parameter, field and recordset COM references are released on success and
+failure, and connection cleanup also runs when standard input closes.
+
+No proprietary provider is bundled or downloaded by these tests. Missing ACE,
+third-party ODBC drivers, passwords, linked servers and licensed native VB6 compiler
+execution still need the corresponding installation and authorized environment.
+The JSON reports identify which installed combinations actually passed.
