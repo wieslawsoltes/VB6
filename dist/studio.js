@@ -11200,11 +11200,11 @@ class SourceEditor extends Signal {
     node.style.maxWidth=Math.max(1,this.viewport.clientWidth-4)+'px';node.style.boxSizing='border-box';
     if(node.classList.contains('source-info')){node.style.width='max-content';node.style.overflowWrap='anywhere';}
     node.style.left='0px';
-    const cursor=this.cursor(),height=node.offsetHeight||(node.classList.contains('completion-list')?180:50),width=node.offsetWidth||240;
+    const bounds=node.getBoundingClientRect(),cursor=this.cursor(),height=Math.ceil(bounds.height)||(node.classList.contains('completion-list')?180:50),width=Math.ceil(bounds.width)||240;
     const y=(cursor.line-this.activePane.range.firstLine)*this.lineHeight+4-this.input.scrollTop;
     let top=y;if(node===this.info&&this.completion)top=y-height-this.lineHeight-2;
     if(top<0)top=this.completion?y+this.completion.offsetHeight+2:y;
-    node.style.left=Math.max(0,Math.min(this.viewport.clientWidth-width,(cursor.column-1)*this.characterWidth+(this.appearance.margin===false?0:this.showLineNumbers?32:18)-this.input.scrollLeft))+'px';
+    node.style.left=Math.max(0,Math.min(this.viewport.clientWidth-width-2,(cursor.column-1)*this.characterWidth+(this.appearance.margin===false?0:this.showLineNumbers?32:18)-this.input.scrollLeft))+'px';
     node.style.top=Math.max(0,Math.min(this.viewport.clientHeight-height,top))+'px';
   }
   renderCompletion(){if(!this.completion)return;const rowHeight=19,count=this.completionItems.length,start=Math.max(0,Math.floor(this.completion.scrollTop/rowHeight)-1),end=Math.min(count,start+13);const spacer=el('div',{'aria-hidden':'true',style:{height:count*rowHeight+'px',pointerEvents:'none'}}),rows=[];
