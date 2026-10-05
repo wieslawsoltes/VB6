@@ -378,19 +378,8 @@ function createWin32(options={}){return new Win32Browser(options);}
 return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
 
-/* ../data/defaults.js */
-__modules[7]=(()=>{
-
-// Registration is private to trusted library objects; a forged __type never grants a default property.
-const values = new WeakSet();
-function dataDefault(object) { values.add(object); return object; }
-function hasDataDefault(object) { return object != null && (typeof object === 'object' || typeof object === 'function') && values.has(object); }
-
-return {dataDefault,hasDataDefault};
-})();
-
 /* ../language/errors.js */
-__modules[8]=(()=>{
+__modules[7]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -400,8 +389,8 @@ return {VBError};
 })();
 
 /* calendar.js */
-__modules[9]=(()=>{
-const {VBError}=__modules[8];
+__modules[8]=(()=>{
+const {VBError}=__modules[7];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -478,9 +467,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ../language/lexer.js */
-__modules[10]=(()=>{
-const {asDate}=__modules[9];
-const {VBError}=__modules[8];
+__modules[9]=(()=>{
+const {asDate}=__modules[8];
+const {VBError}=__modules[7];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -572,8 +561,8 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* decimal.js */
-__modules[11]=(()=>{
-const {VBError}=__modules[8];
+__modules[10]=(()=>{
+const {VBError}=__modules[7];
 
 const MAX=(1n<<96n)-1n;
 const abs=n=>n<0n?-n:n;
@@ -650,7 +639,7 @@ return {VBDecimal};
 })();
 
 /* ../core/window-context.js */
-__modules[12]=(()=>{
+__modules[11]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -682,8 +671,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ../core/core.js */
-__modules[13]=(()=>{
-const {uiDocument}=__modules[12];
+__modules[12]=(()=>{
+const {uiDocument}=__modules[11];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -745,11 +734,11 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* values.js */
-__modules[14]=(()=>{
-const {VBDecimal}=__modules[11];
-const {asDate,dateToSerial}=__modules[9];
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
+__modules[13]=(()=>{
+const {VBDecimal}=__modules[10];
+const {asDate,dateToSerial}=__modules[8];
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -942,9 +931,9 @@ return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterface
 })();
 
 /* ../data/common.js */
-__modules[15]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray, VBCurrency, VBDecimal}=__modules[14];
+__modules[14]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray, VBCurrency, VBDecimal}=__modules[13];
 
 
 const DATA_LIMITS = Object.freeze({rows:100000, cells:1000000, bytes:20*1024*1024, pages:100});
@@ -1119,9 +1108,25 @@ function resultFromRows(rows,fields){
 return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,quoteIdentifier,sameValue,parseConnectionString,connectionConfiguration,assertPublicConfiguration,normalizeDataSources,safeHttpURL,pathValue,columnType,resultFromRows};
 })();
 
+/* ../data/defaults.js */
+__modules[15]=(()=>{
+
+// Registration is private to trusted library objects; a forged __type never grants a default property.
+const values = new WeakSet();
+function dataDefault(object) { values.add(object); return object; }
+function hasDataDefault(object) { return object != null && (typeof object === 'object' || typeof object === 'function') && values.has(object); }
+
+// A private allowlist for legacy public lowercase names such as rdoConnections.
+const members = new WeakMap();
+function dataMembers(object,names) { members.set(object,new Set(names.map(name=>name.toLowerCase()))); return object; }
+function hasDataMember(object,name) { return members.get(object)?.has(String(name).toLowerCase()) || false; }
+
+return {dataDefault,hasDataDefault,dataMembers,hasDataMember};
+})();
+
 /* ../data/collection.js */
 __modules[16]=(()=>{
-const {assertData}=__modules[15];
+const {assertData}=__modules[14];
 
 class DataCollection {
   constructor(items=[]){this.items=items;}
@@ -1144,9 +1149,9 @@ return {DataCollection,NamedCollection};
 
 /* ../data/recordset.js */
 __modules[17]=(()=>{
-const {dataDefault}=__modules[7];
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[14];
+const {dataDefault}=__modules[15];
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[13];
 
 
 
@@ -1261,7 +1266,7 @@ return {fieldValue,DisconnectedRecordset};
 /* ../data/provider-recordset.js */
 __modules[18]=(()=>{
 const {DisconnectedRecordset,fieldValue}=__modules[17];
-const {assertData,after,DATA_LIMITS,sameValue}=__modules[15];
+const {assertData,after,DATA_LIMITS,sameValue}=__modules[14];
 
 
 /** The same observable cursor as the bound controls use, with awaited provider writes. */
@@ -1381,7 +1386,7 @@ return {ProviderRecordset};
 __modules[19]=(()=>{
 const {ProviderRecordset}=__modules[18];
 const {DisconnectedRecordset,fieldValue}=__modules[17];
-const {assertData,after,dataList,sameValue}=__modules[15];
+const {assertData,after,dataList,sameValue}=__modules[14];
 
 
 
@@ -1608,7 +1613,7 @@ return {ConnectedRecordset};
 
 /* ../data/sql-parameters.js */
 __modules[20]=(()=>{
-const {assertData}=__modules[15];
+const {assertData}=__modules[14];
 
 /** Lossless SQL token positions. Parameter substitution never visits quoted strings or comments. */
 function sqlTokens(source) {
@@ -1686,7 +1691,7 @@ return {sqlTokens,DAO_TYPES,parameterPlan,simpleSelect};
 
 /* ../data/criteria.js */
 __modules[21]=(()=>{
-const {assertData}=__modules[15];
+const {assertData}=__modules[14];
 const {sqlTokens}=__modules[20];
 
 
@@ -1748,8 +1753,8 @@ return {compareData,compileCriteria};
 
 /* ../data/dao-recordset.js */
 __modules[22]=(()=>{
-const {dataDefault}=__modules[7];
-const {assertData,after,dataList,sameValue}=__modules[15];
+const {dataDefault}=__modules[15];
+const {assertData,after,dataList,sameValue}=__modules[14];
 const {fieldValue}=__modules[17];
 const {compileCriteria,compareData}=__modules[21];
 const {DAO_TYPES}=__modules[20];
@@ -1855,8 +1860,192 @@ class DAORecordset {
 return {DAORecordset};
 })();
 
-/* ../data/vendor/sqlite.js */
+/* ../data/rdo.js */
 __modules[23]=(()=>{
+const {assertData,DATA_LIMITS,quoteIdentifier}=__modules[14];
+const {dataDefault,dataMembers}=__modules[15];
+const {DataCollection}=__modules[16];
+const {ConnectedRecordset}=__modules[19];
+const {DAORecordset}=__modules[22];
+const {fieldValue}=__modules[17];
+const {sqlTokens,simpleSelect}=__modules[20];
+const {VBArray}=__modules[13];
+
+
+
+
+
+
+
+
+// RDO uses ODBC SQL type numbers, not ADO DataTypeEnum or DAO DataTypeEnum.
+const RDO_TYPES=Object.freeze({0:12,1:129,2:131,3:14,4:3,5:2,6:5,7:4,8:5,9:133,10:134,11:135,12:202,[-1]:203,[-2]:128,[-3]:204,[-4]:205,[-5]:20,[-6]:17,[-7]:11});
+const RDO_CONSTANTS=Object.freeze({rdOpenForwardOnly:0,rdOpenKeyset:1,rdOpenDynamic:2,rdOpenStatic:3,rdConcurReadOnly:1,rdConcurLock:2,rdConcurRowVer:3,rdConcurValues:4,rdConcurBatch:5,rdUseIfNeeded:0,rdUseOdbc:1,rdUseServer:2,rdUseClientBatch:3,rdUseNone:4,rdDriverPrompt:0,rdDriverNoPrompt:1,rdDriverComplete:2,rdDriverCompleteRequired:3,rdParamUnknown:0,rdParamInput:1,rdParamOutput:2,rdParamInputOutput:3,rdParamReturnValue:4,rdTypeCHAR:1,rdTypeNUMERIC:2,rdTypeDECIMAL:3,rdTypeINTEGER:4,rdTypeSMALLINT:5,rdTypeFLOAT:6,rdTypeREAL:7,rdTypeDOUBLE:8,rdTypeDATE:9,rdTypeTIME:10,rdTypeTIMESTAMP:11,rdTypeVARCHAR:12,rdTypeLONGVARCHAR:-1,rdTypeBINARY:-2,rdTypeVARBINARY:-3,rdTypeLONGVARBINARY:-4,rdTypeBIGINT:-5,rdTypeTINYINT:-6,rdTypeBIT:-7,rdRowUnmodified:0,rdRowModified:1,rdRowNew:2,rdRowDeleted:3,rdRowDBDeleted:4,rdEditNone:0,rdEditInProgress:1,rdEditAdd:2,rdQSelect:0,rdQAction:1,rdQProcedures:2,rdQCompound:3,rdAsyncEnable:32,rdExecDirect:64,rdFetchLongColumns:128});
+const bit=value=>value?-1:0;
+const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
+const remove=(collection,item)=>{const i=collection.items.indexOf(item);if(i>=0)collection.items.splice(i,1);};
+const name=value=>{value=String(value);assertData(value.length<=255&&!value.includes('\0'),'Invalid RDO object name',5);return value;};
+const timeout=value=>{value=Number(value);assertData(Number.isFinite(value)&&value>=1&&value<=600,'Timeout must be 1–600 seconds',5);return value;};
+const driver=value=>{value=Number(value);assertData([0,3,4].includes(value),'Native ODBC/server cursor libraries require the native RDO provider',3251);return value;};
+const options=value=>{value=Number(value);assertData(Number.isInteger(value)&&(value&~192)===0,'Unsupported RDO options; VB calls await provider I/O',3251);return value;};
+const reverseType=ado=>({2:5,3:4,4:7,5:8,6:3,7:11,8:12,11:-7,12:0,14:3,17:-6,20:-5,128:-2,129:1,130:1,131:2,133:9,134:10,135:11,200:12,201:-1,202:12,203:-1,204:-3,205:-4}[ado]??0);
+const rows=result=>result.values.map(row=>Object.fromEntries(result.columns.map((column,i)=>[column.Name.toUpperCase(),row[i]])));
+
+class RDOParameter {
+  constructor(ordinal){this.__type='RDO.rdoParameter';this._name='Parameter'+(ordinal+1);this._type=0;this._size=0;this._value=null;dataDefault(this);}
+  get Name(){return this._name;}
+  get Type(){return this._type;}set Type(value){value=Number(value);assertData(Object.hasOwn(RDO_TYPES,value),'Unsupported ODBC parameter type',3251);const next=fieldValue({Type:RDO_TYPES[value],DefinedSize:this.Size},this._value);this._type=value;this._value=next;}
+  get Size(){return this._size;}set Size(value){value=Number(value);assertData(Number.isSafeInteger(value)&&value>=0&&value<=DATA_LIMITS.bytes,'Invalid parameter size',5);const next=fieldValue({Type:RDO_TYPES[this.Type],DefinedSize:value},this._value);this._size=value;this._value=next;}
+  get Direction(){return 1;}set Direction(value){assertData(Number(value)===1,'Output/return parameters require native procedure metadata and execution',3251);}
+  get Value(){return copy(this._value);}set Value(value){this._value=fieldValue({Type:RDO_TYPES[this.Type],DefinedSize:this.Size},value);}
+}
+
+class RDOQuery {
+  constructor(context,connection=null,queryName='',sql=''){
+    this.__type='RDO.rdoQuery';this._context=context;this._connection=connection;this._name=name(queryName);this._sql='';this._parameters=new DataCollection();this._parameters.setItem=(key,value)=>{this._parameters.Item(key).Value=value;};this._closed=false;this._busy=false;this._maxRows=0;this._timeout=null;this._affected=0;this.SQL=sql;dataMembers(this,['rdoParameters']);
+  }
+  require(){assertData(!this._closed,'Query is closed',3420);assertData(!this._busy,'Query operation is pending',3219);}
+  get Name(){return this._name;}
+  get ActiveConnection(){return this._connection;}set ActiveConnection(value){this.require();assertData(value instanceof RDOConnection&&value._context===this._context,'Expected an RDO connection from this runtime',13);this._connection=value;}
+  get SQL(){return this._sql;}set SQL(value){this.require();value=String(value);const tokens=sqlTokens(value);assertData(!tokens.some((t,i)=>t.kind==='symbol'&&[':', '@','$'].includes(t.value)&&tokens[i-1]?.value!=='@'&&tokens[i+1]?.value!=='@'),'RDO queries use positional question-mark parameters',3251);const count=tokens.filter(t=>t.kind==='symbol'&&t.value==='?').length;assertData(count<=1024,'Parameter limit exceeded',7);this._sql=value;this._parameters.items=Array.from({length:count},(_,i)=>new RDOParameter(i));}
+  get rdoParameters(){return this._parameters;}
+  Item(key){this.require();return this._parameters.Item(key);}setItem(key,value){this.Item(key).Value=value;}
+  get Type(){const token=sqlTokens(this.SQL)[0]?.value.toUpperCase();return token==='SELECT'||token==='WITH'?0:1;}
+  get RowCount(){return this._affected;}
+  get MaxRows(){return this._maxRows;}set MaxRows(value){value=Number(value);assertData(Number.isSafeInteger(value)&&value>=0&&value<=DATA_LIMITS.rows,'Invalid MaxRows',5);this._maxRows=value;}
+  get QueryTimeout(){return this._timeout??this._connection?.QueryTimeout??30;}set QueryTimeout(value){this._timeout=timeout(value);}
+  async run(){this.require();const cn=this._connection;assertData(cn instanceof RDOConnection,'Query requires an ActiveConnection',3709);cn.require();this._busy=true;try{const result=await cn._guard(()=>cn._ado.query(this.SQL,this._parameters.items.map(p=>p.Value),1,this.QueryTimeout,'odbc'));this._affected=Number(result.rowsAffected||0);cn._affected=this._affected;if(this.MaxRows)result.values=result.values.slice(0,this.MaxRows);return result;}finally{this._busy=false;}}
+  async Execute(flags=0){options(flags);const result=await this.run();assertData(!result.columns.length,'Execute requires an action query; use OpenResultset',40041);}
+  async OpenResultset(type=0,lock=1,flags=0){options(flags);this.require();const cn=this._connection;assertData(cn instanceof RDOConnection,'Query requires an ActiveConnection',3709);const mode=cn.cursorMode(type,lock);const result=await this.run();assertData(result.columns.length,'Query did not return columns',40041);return cn.result(result,this,mode);}
+  Cancel(){this._connection?.Cancel();}
+  Close(){this.require();this._closed=true;this._connection&&remove(this._connection.rdoQueries,this);}
+}
+
+class RDOResultset {
+  constructor(connection,result,source,mode){
+    this.__type='RDO.rdoResultset';this._connection=connection;this._source=source;this._mode=mode;this._collisions=[];this._conflicts=new WeakMap();this._deletedInBatch=false;
+    const cursor=new ConnectedRecordset(connection._context);cursor.ActiveConnection=connection._ado;cursor.Source=source instanceof RDOQuery?source.SQL:String(source);cursor.load(result,mode.lock===5?4:mode.lock===1?1:3);connection._ado.recordsets.add(cursor);
+    this._dao=new DAORecordset(cursor,null,mode.type===0?8:2,cursor.Source);this._columns=this.columns();dataMembers(this,['rdoColumns']);connection.rdoResultsets.items.push(this);
+  }
+  require(){this._connection.require();this._dao.require();}
+  get _cursor(){return this._dao.cursor;}
+  columns(){const rs=this,collection=new DataCollection(this._cursor.columns.map(c=>{
+    const field=()=>rs._dao.field(c.Name);return dataDefault({__type:'RDO.rdoColumn',Name:c.Name,Type:reverseType(c.Type),Size:c.DefinedSize||0,
+      get Value(){return field().Value;},set Value(value){field().Value=value;},get OriginalValue(){return rs._dao.EditMode?field().OriginalValue:rs._cursor.Fields.Item(c.Name).OriginalValue;},
+      get BatchConflictValue(){rs.require();const row=rs._cursor.cursorRow();assertData(rs._conflicts.has(row),'No refreshed provider value for this conflict',3251);const fresh=rs._conflicts.get(row);assertData(fresh,'Record was deleted from the provider',3021);return copy(fresh[c.Name]);},
+      get Updatable(){return rs.Updatable;},get ColumnSize(){return field().FieldSize;},GetChunk(offset,length){return field().GetChunk(offset,length);},AppendChunk(value){return field().AppendChunk(value);}});
+    }));collection.setItem=(key,value)=>{collection.Item(key).Value=value;};return collection;}
+  get rdoColumns(){return this._columns;}
+  Item(key){this.require();return this._columns.Item(key);}setItem(key,value){this.Item(key).Value=value;}
+  get Name(){return this._source instanceof RDOQuery?this._source.Name:String(this._source);}
+  get SQL(){return this._cursor.Source;}
+  get Type(){return this._mode.type;}get LockType(){return this._mode.lock;}
+  get BOF(){return this._dao.BOF;}get EOF(){return this._dao.EOF;}
+  get RowCount(){return this._dao.RecordCount;}get Updatable(){return this._dao.Updatable;}get Bookmarkable(){return this._dao.Bookmarkable;}
+  get EditMode(){return this._dao.EditMode;}
+  get AbsolutePosition(){return this._dao.AbsolutePosition;}set AbsolutePosition(value){this._dao.AbsolutePosition=value;this._deletedInBatch=false;}
+  get PercentPosition(){return this._dao.PercentPosition;}set PercentPosition(value){this._dao.PercentPosition=value;this._deletedInBatch=false;}
+  get Bookmark(){return this._dao._deleted&&this._deletedInBatch?this._cursor.Bookmark:this._dao.Bookmark;}
+  set Bookmark(value){this.require();const cursor=this._cursor,row=cursor.rows.find(row=>cursor._bookmarks.get(row)===Number(value));if(cursor._family.batch.get(row)?.kind==='delete'){this._dao.CancelUpdate();cursor._deletedCurrent=row;cursor._cache=null;cursor.position=cursor.view().indexOf(row);this._dao._deleted=true;this._deletedInBatch=true;cursor.notify('move');}else{this._dao.Bookmark=value;this._deletedInBatch=false;}}
+  get LastModified(){return this._dao.LastModified;}
+  get Status(){this.require();const entry=this._cursor._family.batch.get(this._cursor.cursorRow());return entry?.kind==='insert'?2:entry?.kind==='delete'?3:entry?1:0;}
+  get BatchCollisionCount(){return this._collisions.length;}get BatchCollisionRows(){return VBArray.from(this._collisions);}
+  Edit(){return this._dao.Edit();}AddNew(){this._deletedInBatch=false;return this._dao.AddNew();}CancelUpdate(){return this._dao.CancelUpdate();}
+  async Update(force=false){assertData(!force,'Forced overwrites are not enabled for portable providers',3251);return this._connection._guard(()=>this._dao.Update());}
+  async Delete(){await this._connection._guard(()=>this._dao.Delete());this._deletedInBatch=this.LockType===5&&!!this._cursor._deletedCurrent;}
+  MoveNext(){if(this._deletedInBatch){this._deletedInBatch=false;return this._dao.move(this._cursor.position+1,true);}return this._dao.MoveNext();}
+  MovePrevious(){this._deletedInBatch=false;return this._dao.MovePrevious();}MoveFirst(){this._deletedInBatch=false;return this._dao.MoveFirst();}MoveLast(){this._deletedInBatch=false;return this._dao.MoveLast();}
+  Move(count,start){this._deletedInBatch=false;return this._dao.Move(count,start);}
+  GetRows(count){return this._dao.GetRows(count);}
+  async BatchUpdate(singleRow=false,force=false){
+    this.require();assertData(this.LockType===5,'BatchUpdate requires rdConcurBatch',3251);assertData(!force,'Forced overwrite is not enabled',3251);assertData(!this.EditMode,'Update or CancelUpdate the copy buffer first',3219);
+    const cursor=this._cursor,selected=cursor.selection(singleRow?1:3),bookmarks=new Map(selected.map(row=>[row,cursor._bookmarks.get(row)]));this._collisions=[];this._conflicts=new WeakMap();
+    try{await this._connection._guard(()=>cursor.UpdateBatch(singleRow?1:3));}
+    finally{
+      for(const row of selected)if(cursor._family.batch.get(row)?.error){this._collisions.push(bookmarks.get(row));if(cursor._resync&&cursor.State&&cursor.ActiveConnection?.State===1){try{this._conflicts.set(row,await cursor._resync(row,cursor._family.batch.get(row).before));}catch{/* Preserve the original update error; unavailable values remain explicitly unavailable. */}}}
+      this._dao._deleted=false;this._deletedInBatch=false;
+    }
+  }
+  CancelBatch(singleRow=false){this.require();assertData(this.LockType===5,'CancelBatch requires rdConcurBatch',3251);this._dao.CancelUpdate();this._cursor.CancelBatch(singleRow?1:3);this._dao._deleted=false;this._deletedInBatch=false;}
+  async Requery(flags=0){options(flags);this.require();this.CancelUpdate();assertData(!this._cursor._family.batch.size,'BatchUpdate or CancelBatch before Requery',3219);const fresh=this._source instanceof RDOQuery?await this._source.OpenResultset(this.Type,this.LockType):await this._connection.OpenResultset(this._source,this.Type,this.LockType);const old=this._cursor;this._dao=fresh._dao;this._columns=this.columns();remove(this._connection.rdoResultsets,fresh);old.dispose();this._collisions=[];this._conflicts=new WeakMap();this._deletedInBatch=false;}
+  async Refresh(){this.require();this.CancelUpdate();await this._connection._guard(()=>this._cursor.Resync(3,2));this._dao._deleted=false;this._deletedInBatch=false;}
+  async Close(){await this._dao.Close();remove(this._connection.rdoResultsets,this);}
+}
+
+class RDOConnection {
+  constructor(context,environment=null,connectionName=''){
+    this.__type='RDO.rdoConnection';this._context=context;this._environment=environment;this._name=name(connectionName);this._ado=context.connection();this._driver=environment?.CursorDriver??0;this._timeout=environment?.QueryTimeout??30;this._loginTimeout=environment?.LoginTimeout??15;this._connect='';this._readOnly=false;this._affected=0;this._levels=0;this._opening=false;
+    this.rdoQueries=new DataCollection();this.rdoResultsets=new DataCollection();this.rdoTables=new DataCollection();this.rdoTables.Refresh=()=>this.refreshTables();dataMembers(this,['rdoQueries','rdoResultsets','rdoTables']);
+  }
+  get Name(){return this._name;}
+  get Connect(){return this._connect;}set Connect(value){assertData(!this._ado.State,'Connection is already open',3705);this._connect=value;}
+  get StillConnecting(){return bit(this._opening);}
+  get CursorDriver(){return this._driver;}set CursorDriver(value){assertData(!this.rdoResultsets.Count,'Close resultsets before changing CursorDriver',3219);this._driver=driver(value);}
+  get QueryTimeout(){return this._timeout;}set QueryTimeout(value){this._timeout=timeout(value);}
+  get LoginTimeout(){return this._loginTimeout;}set LoginTimeout(value){this._loginTimeout=timeout(value);}
+  get RowCount(){return this._affected;}
+  require(){assertData(this._ado.State===1,'Connection is closed',3709);}
+  async _guard(action){this._ado.Errors.Clear();this._environment?._engine.rdoErrors.Clear();try{return await action();}catch(error){const errors=this._ado.Errors.items;this._environment?._engine.capture(error,errors);throw error;}}
+  async EstablishConnection(prompt=1,readOnly=false,flags=0){assertData(Number(prompt)===1,'Interactive native ODBC login dialogs are unavailable; use rdDriverNoPrompt',3251);options(flags);assertData(!this._opening&&!this._ado.State,'Connection is already open or opening',3705);this._opening=true;try{await this._guard(async()=>{this._ado.ConnectionTimeout=this.LoginTimeout;this._ado.Mode=readOnly?1:3;this._ado.CommandTimeout=this.QueryTimeout;await this._ado.Open(this.Connect||this.Name);this._readOnly=!!readOnly;});}finally{this._opening=false;}}
+  async Execute(sql,flags=0){options(flags);this.require();const result=await this._guard(()=>this._ado.query(String(sql),[],1,this.QueryTimeout));this._affected=Number(result.rowsAffected||0);assertData(!result.columns.length,'Execute requires an action query; use OpenResultset',40041);}
+  cursorMode(type,lock){
+    this.require();type=Number(type);lock=Number(lock);assertData([0,1,2,3].includes(type),'Invalid resultset type',5);assertData([1,4,5].includes(lock),'Pessimistic/row-version native concurrency is unavailable',3251);
+    if(this.CursorDriver===3){assertData(lock===1||lock===5,'Client batch cursors require rdConcurReadOnly or rdConcurBatch',3251);type=3;}
+    else{assertData([0,3].includes(type),'Native keyset/dynamic cursors require a native cursor provider',3251);assertData(lock!==5,'Set CursorDriver to rdUseClientBatch for batch writes',3251);}
+    assertData(this.CursorDriver!==4||type===0,'rdUseNone only permits forward-only reads',3251);assertData(type!==0||lock===1,'Forward-only portable cursors are read-only',3251);assertData(!this._readOnly||lock===1,'Connection is read-only',3027);return {type,lock};
+  }
+  async result(result,source,mode){const select=simpleSelect(source instanceof RDOQuery?source.SQL:String(source));if(select&&this._ado.adapter.projectTable)result=await this._ado.adapter.projectTable(select,result);return new RDOResultset(this,result,source,mode);}
+  async OpenResultset(sql,type=0,lock=1,flags=0){options(flags);const mode=this.cursorMode(type,lock),query=this.rdoQueries.items.find(q=>q.Name.toLowerCase()===String(sql).toLowerCase());if(query)return query.OpenResultset(type,lock,flags);
+    const table=this.rdoTables.items.find(t=>t.Name.toLowerCase()===String(sql).toLowerCase());if(table)sql='SELECT * FROM '+quoteIdentifier(table.Name);
+    const result=await this._guard(()=>this._ado.query(String(sql),[],1,this.QueryTimeout));assertData(result.columns.length,'Query did not return columns',40041);return this.result(result,String(sql),mode);
+  }
+  CreateQuery(queryName,sql=''){this.require();queryName=name(queryName);assertData(!this.rdoQueries.items.some(q=>q.Name.toLowerCase()===queryName.toLowerCase()),'Duplicate RDO query name',3265);const query=new RDOQuery(this._context,this,queryName,sql);this.rdoQueries.items.push(query);return query;}
+  async refreshTables(){this.require();const result=await this._guard(()=>this._ado.adapter.schema(20));this.rdoTables.items=rows(result).map(row=>{const table={__type:'RDO.rdoTable',Name:String(row.TABLE_NAME),Type:String(row.TABLE_TYPE||'TABLE')};return table;});}
+  async BeginTrans(){this.require();assertData(!this.rdoResultsets.items.some(rs=>rs.EditMode),'Post or cancel edits before starting a transaction',3219);const result=await this._guard(()=>this._ado.BeginTrans());this._levels++;return result;}
+  async CommitTrans(){this.require();assertData(this._levels,'No transaction is active',3219);await this._guard(()=>this._ado.CommitTrans());this._levels--;}
+  async RollbackTrans(){this.require();assertData(this._levels,'No transaction is active',3219);await this._guard(()=>this._ado.RollbackTrans());this._levels--;}
+  Cancel(){this._ado.Cancel();}
+  async Close(){this.Cancel();for(const rs of [...this.rdoResultsets.items]){if(rs._cursor.State)await rs.Close();else remove(this.rdoResultsets,rs);}while(this._levels){await this._ado.RollbackTrans();this._levels--;}for(const query of this.rdoQueries.items)query._closed=true;this.rdoQueries.items=[];await this._ado.Close();this._environment&&remove(this._environment.rdoConnections,this);}
+}
+
+class RDOEnvironment {
+  constructor(engine,environmentName=''){
+    this.__type='RDO.rdoEnvironment';this._engine=engine;this._name=name(environmentName);this._driver=0;this._timeout=30;this._loginTimeout=15;this._closed=false;this._pending=0;this.rdoConnections=new DataCollection();dataMembers(this,['rdoConnections']);
+  }
+  get Name(){return this._name;}get CursorDriver(){return this._driver;}set CursorDriver(value){this._driver=driver(value);}
+  get QueryTimeout(){return this._timeout;}set QueryTimeout(value){this._timeout=timeout(value);}
+  get LoginTimeout(){return this._loginTimeout;}set LoginTimeout(value){this._loginTimeout=timeout(value);}
+  async OpenConnection(connectionName,prompt=1,readOnly=false,connect='',flags=0){assertData(!this._closed,'Environment is closed',3420);connectionName=name(connectionName);assertData(!this.rdoConnections.items.some(c=>c.Name.toLowerCase()===connectionName.toLowerCase()),'Duplicate connection name',3265);const cn=new RDOConnection(this._engine._context,this,connectionName);cn.Connect=connect||connectionName;this.rdoConnections.items.push(cn);this._pending++;try{await cn.EstablishConnection(prompt,readOnly,flags);assertData(!this._closed,'Environment closed while connecting',3420);return cn;}catch(error){await cn.Close();throw error;}finally{this._pending--;}}
+  async transaction(method){assertData(!this._closed&&!this._pending,'Environment is closed or a connection is opening',3219);const connections=this.rdoConnections.items.filter(c=>c._ado.State===1);assertData(connections.length,'No open connections',3709);const completed=[];try{for(const cn of connections){await cn[method]();completed.push(cn);}}catch(error){if(method==='BeginTrans')for(const cn of completed.reverse()){try{await cn.RollbackTrans();}catch{/* Original begin failure remains the primary error. */}}throw error;}}
+  BeginTrans(){return this.transaction('BeginTrans');}CommitTrans(){return this.transaction('CommitTrans');}RollbackTrans(){return this.transaction('RollbackTrans');}
+  async Close(){this._closed=true;await Promise.all(this.rdoConnections.items.map(c=>c.Close()));remove(this._engine.rdoEnvironments,this);}
+}
+
+class RDOEngine {
+  constructor(context){this.__type='RDO.rdoEngine';this._context=context;this.rdoEnvironments=new DataCollection();this.rdoErrors=new DataCollection();this.rdoErrors.Clear=()=>{this.rdoErrors.items=[];};this.rdoEnvironments.items.push(new RDOEnvironment(this,'Default_Environment'));dataMembers(this,['rdoEnvironments','rdoErrors','rdoCreateEnvironment']);}
+  capture(error,errors=[]){this.rdoErrors.items=errors.length?errors.map(e=>({...e})): [{Number:error.number||3001,Description:error.message,Source:error.source||'VB6.RDO',SQLState:error.SQLState||'',NativeError:error.NativeError||error.number||3001}];}
+  rdoCreateEnvironment(environmentName='',userName='',password=''){assertData(!userName&&!password,'Use a named authenticated gateway profile; native environment credentials are not browser connection credentials',3251);environmentName=name(environmentName);assertData(!environmentName||!this.rdoEnvironments.items.some(e=>e.Name.toLowerCase()===environmentName.toLowerCase()),'Duplicate environment name',3265);const environment=new RDOEnvironment(this,environmentName);if(environmentName)this.rdoEnvironments.items.push(environment);return environment;}
+}
+
+for(const [prototype,method,names,required] of [
+  [RDOConnection.prototype,'EstablishConnection',['Prompt','ReadOnly','Options'],0],
+  [RDOConnection.prototype,'OpenResultset',['Name','Type','LockType','Options'],1],
+  [RDOConnection.prototype,'Execute',['Source','Options'],1],
+  [RDOConnection.prototype,'CreateQuery',['Name','SQL'],1],
+  [RDOQuery.prototype,'OpenResultset',['Type','LockType','Options'],0],
+  [RDOQuery.prototype,'Execute',['Options'],0],
+  [RDOEnvironment.prototype,'OpenConnection',['Name','Prompt','ReadOnly','Connect','Options'],1],
+  [RDOEngine.prototype,'rdoCreateEnvironment',['Name','UserName','Password'],0],
+  [RDOResultset.prototype,'BatchUpdate',['SingleRow','Force'],0],
+  [RDOResultset.prototype,'CancelBatch',['SingleRow'],0],
+  [RDOResultset.prototype,'Update',['Force'],0]
+])prototype[method].vbParams=names.map((name,i)=>({name,optional:i>=required}));
+
+return {RDO_TYPES,RDO_CONSTANTS,RDOParameter,RDOQuery,RDOResultset,RDOConnection,RDOEnvironment,RDOEngine};
+})();
+
+/* ../data/vendor/sqlite.js */
+__modules[24]=(()=>{
 
 // Generated by tools/vendor-sqlite.mjs. sql.js 1.14.2 (MIT); SQLite public domain.
 // JavaScript SHA256 35e39a73b2e0bc1c2202a4cadb23bcf7a3a77071a39c270f014402968785b95f; WASM SHA256 38c14f6e379210bc942bdc4ebca44e7bfdb4318ecc1c72ca666a28fdce96670a.
@@ -2053,15 +2242,15 @@ return {initializeSQLite};
 })();
 
 /* ../data/dao.js */
-__modules[24]=(()=>{
-const {dataDefault}=__modules[7];
-const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[15];
+__modules[25]=(()=>{
+const {dataDefault}=__modules[15];
+const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[14];
 const {DataCollection,NamedCollection}=__modules[16];
 const {ConnectedRecordset}=__modules[19];
 const {DAORecordset}=__modules[22];
 const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[20];
 const {fieldValue}=__modules[17];
-const {initializeSQLite}=__modules[23];
+const {initializeSQLite}=__modules[24];
 
 
 
@@ -2125,7 +2314,7 @@ class DAOQueryDef {
   values(){return this.plan.bindings.map(i=>this.Parameters.Item(i).Value);}
   async OpenRecordset(type=2,options=0,lockEdit=0){this.require();this.validateOptions();assertData(!this.Connect,'Use a database opened with a named gateway profile for pass-through queries',3251);assertData(this.ReturnsRecords,'QueryDef does not return records',3065);const rs=await this.database.openResult(this.plan.text,this.values(),type,options,lockEdit,this);if(this.MaxRecords){assertData(Number.isSafeInteger(this.MaxRecords)&&this.MaxRecords>0&&this.MaxRecords<=DATA_LIMITS.rows,'Invalid MaxRecords',5);rs.cursor.rows.splice(this.MaxRecords);rs.cursor._cache=null;}return rs;}
   validateOptions(){assertData(!this.Connect,'Open a named gateway profile on the Database for pass-through queries',3251);assertData(Number.isSafeInteger(this.MaxRecords)&&this.MaxRecords>=0&&this.MaxRecords<=DATA_LIMITS.rows,'Invalid MaxRecords',5);assertData(this.ODBCTimeout===-1||Number.isFinite(this.ODBCTimeout)&&this.ODBCTimeout>=1&&this.ODBCTimeout<=600,'ODBCTimeout must inherit (-1) or be 1–600 seconds',5);}
-  async Execute(options=0){this.require();this.validateOptions();assertData(this.Type!==0,'Cannot execute a SELECT query with Execute',3065);this.RecordsAffected=0;this.RecordsAffected=await this.database.executePlan(this.plan.text,this.values(),options,this.ODBCTimeout===-1?this.database.QueryTimeout:this.ODBCTimeout);}
+  async Execute(options=0){this.require();this.validateOptions();assertData(this.Type!==0,'Cannot execute a SELECT query with Execute',3065);this.RecordsAffected=0;this.RecordsAffected=await this.database.executePlan(this.plan.text,this.values(),options,this.ODBCTimeout===-1?this.database.QueryTimeout:this.ODBCTimeout,'odbc');}
   Close(){this.require();this._closed=true;}
 }
 
@@ -2188,16 +2377,16 @@ class DAODatabase {
     this.require();if(type===undefined){const ts=sqlTokens(source);type=this.TableDefs.items.some(t=>folded(t.Name)===folded(source))||ts.length===1&&['word','identifier'].includes(ts[0].kind)?1:2;}type=Number(type);options=Number(options);assertData([1,2,4,8].includes(type),'Only table, dynaset, snapshot and forward-only client records are supported',3251);assertData((options&~4)===0,'Unsupported DAO OpenRecordset options',3251);assertData([0,1,3,4].includes(Number(lockEdit)),'Pessimistic/batch DAO locking is unavailable',3251);assertData(!(options&4)||Number(lockEdit)!==4,'Read-only cannot be specified twice',3001);
     const adapter=this.connection.adapter,tokens=sqlTokens(source),known=this.TableDefs.items.find(t=>folded(t.Name)===folded(source)),isTable=!!known||tokens.length===1&&['word','identifier'].includes(tokens[0].kind);assertData(type!==1||isTable,'A table cursor requires a table name',3219);let result,table=null;
     if(isTable){const name=known?.Name||tokens[0].value;assertData(adapter.table,'Provider does not expose keyed table access',3251);if(!known)await this.refreshTables();result=await adapter.table(name);table=this.TableDefs.items.find(t=>folded(t.Name)===folded(name));}
-    else{result=await this.connection.query(source,parameters,1,query&&query.ODBCTimeout!==-1?query.ODBCTimeout:this.QueryTimeout);const select=simpleSelect(source);if(select&&adapter.projectTable)result=await adapter.projectTable(select,result);table=select&&this.TableDefs.items.find(t=>folded(t.Name)===folded(select.table));}
+    else{result=await this.connection.query(source,parameters,1,query&&query.ODBCTimeout!==-1?query.ODBCTimeout:this.QueryTimeout,query?'odbc':'native');const select=simpleSelect(source);if(select&&adapter.projectTable)result=await adapter.projectTable(select,result);table=select&&this.TableDefs.items.find(t=>folded(t.Name)===folded(select.table));}
     assertData(result.columns?.length,'The command does not return a recordset',3065);
     if(table)result.columns=result.columns.map(c=>{const field=table.Fields.items.find(f=>folded(f.Name)===folded(c.Name));return field?{...c,Type:DAO_TYPES[field.Type]||c.Type,DefinedSize:field.Size}:c;});
     const readonly=this._readOnly||!!(options&4)||Number(lockEdit)===4||type===4||type===8||!result.write;
     const cursor=new ConnectedRecordset(this.connection.context);cursor.ActiveConnection=this.connection;cursor.Source=isTable?(known?.Name||tokens[0].value):source;cursor._options=isTable?2:1;cursor._parameters=parameters;cursor.load(result,readonly?1:3);this.connection.recordsets.add(cursor);
     const rs=new DAORecordset(cursor,this,type,query?.Name||source,table);rs._queryDef=query;rs._reload=()=>this.openResult(source,query?query.values():parameters,type,options,lockEdit,query);return rs;
   }
-  async executePlan(text,parameters=[],options=0,timeout=this.QueryTimeout){
+  async executePlan(text,parameters=[],options=0,timeout=this.QueryTimeout,parameterStyle='native'){
     this.checkWritable();options=Number(options);assertData([0,128].includes(options),'Only dbFailOnError is supported for DAO Execute',3251);assertData(!/^(SELECT|WITH)\b/i.test(text.trim()),'Cannot execute a SELECT query with Execute',3065);
-    const result=await this.connection.query(text,parameters,1,timeout);this.RecordsAffected=Number(result.rowsAffected||0);return this.RecordsAffected;
+    const result=await this.connection.query(text,parameters,1,timeout,parameterStyle);this.RecordsAffected=Number(result.rowsAffected||0);return this.RecordsAffected;
   }
   async Execute(text,options=0){this.RecordsAffected=0;const query=this.QueryDefs.items.find(q=>folded(q.Name)===folded(text));if(query){await query.Execute(options);this.RecordsAffected=query.RecordsAffected;}else await this.executePlan(String(text),[],options);}
   BeginTrans(){this.require();return this.workspace?this.workspace.BeginTrans():this.connection.BeginTrans();}
@@ -2248,9 +2437,9 @@ return {DAOField,DAOIndex,DAOTableDef,DAOParameter,DAOQueryDef,DAODatabase,DAOWo
 })();
 
 /* ../data/sqlite.js */
-__modules[25]=(()=>{
-const {initializeSQLite}=__modules[23];
-const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[15];
+__modules[26]=(()=>{
+const {initializeSQLite}=__modules[24];
+const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[14];
 
 
 /** Real embedded SQLite. A context owns a disk; connections share its live database handles. */
@@ -2384,9 +2573,9 @@ return {SQLiteProvider};
 })();
 
 /* ../data/wire.js */
-__modules[26]=(()=>{
-const {VBCurrency,VBDecimal}=__modules[14];
-const {assertData}=__modules[15];
+__modules[27]=(()=>{
+const {VBCurrency,VBDecimal}=__modules[13];
+const {assertData}=__modules[14];
 
 
 /** Explicit tagged cells: transport cannot silently round BigInt or turn BLOBs into objects. */
@@ -2412,9 +2601,9 @@ return {encodeCell,decodeCell,encodeResult,decodeResult};
 })();
 
 /* ../data/http.js */
-__modules[27]=(()=>{
-const {encodeCell,decodeResult}=__modules[26];
-const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[15];
+__modules[28]=(()=>{
+const {encodeCell,decodeResult}=__modules[27];
+const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[14];
 
 
 async function boundedBody(response,limit){
@@ -2542,6 +2731,7 @@ class GatewayProvider extends HTTPProvider {
   async open(){super.open();assertData(/^[A-Za-z0-9_-]{1,64}$/.test(this.config.profile||''),'A gateway profile name is required');this.session=null;}
   async call(operation,args={}){const response=await this.request(this.base.href,{method:'POST',body:{operation,profile:this.config.profile,session:this.session,...args},closing:operation==='rollback'});const result=response.data;assertData(result&&typeof result==='object','Invalid gateway response',13);return result;}
   async execute(text,parameters=[]){return decodeResult(await this.call('execute',{text,parameters:parameters.map(encodeCell)}));}
+  async executePositional(text,parameters=[]){return decodeResult(await this.call('execute',{text,parameters:parameters.map(encodeCell),parameterStyle:'odbc'}));}
   async schema(kind=20){return decodeResult(await this.call('schema',{kind}));}
   async begin(){assertData(!this.session,'Nested gateway transactions are not supported',3251);const result=await this.call('begin');this.session=result.session;return 1;}
   async commit(){assertData(this.session,'No active transaction',3246);await this.call('commit');this.session=null;}
@@ -2553,8 +2743,8 @@ return {HTTPProvider,GatewayProvider};
 })();
 
 /* ../data/files.js */
-__modules[28]=(()=>{
-const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[15];
+__modules[29]=(()=>{
+const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[14];
 const {fieldValue}=__modules[17];
 
 
@@ -2608,13 +2798,13 @@ return {parseCSV,writeCSV,FileDataProvider};
 })();
 
 /* ../data/connection.js */
-__modules[29]=(()=>{
-const {dataDefault}=__modules[7];
-const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[15];
+__modules[30]=(()=>{
+const {dataDefault}=__modules[15];
+const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[14];
 const {ConnectedRecordset}=__modules[19];
 const {fieldValue}=__modules[17];
 const {DataCollection}=__modules[16];
-const {DAOEngine,DAODatabase}=__modules[24];
+const {DAOEngine,DAODatabase}=__modules[25];
 
 
 
@@ -2655,12 +2845,13 @@ class ADOConnection {
       }catch(error){await this.adapter?.close?.();this.adapter=null;this._state=0;throw error;}
     });
   }
-  async query(text,parameters=[],options=1,timeout=this.CommandTimeout){
+  async query(text,parameters=[],options=1,timeout=this.CommandTimeout,parameterStyle='native'){
     return this.guard(async()=>{
       assertData(this.State===1,'Connection is closed',3709);assertData(Number.isFinite(timeout)&&timeout>=1&&timeout<=600,'Invalid command timeout',5);this.adapter.timeout=timeout;
       if(Number(options)===2){assertData(this.adapter.table,'This provider does not support table commands',3251);return this.adapter.table(String(text));}
       assertData([1,128,129].includes(Number(options)),'Only text/table commands are supported by this provider',3251);
-      return this.adapter.execute(String(text??''),parameters);
+      assertData(['native','odbc'].includes(parameterStyle),'Invalid parameter style',5);
+      return parameterStyle==='odbc'&&this.adapter.executePositional?this.adapter.executePositional(String(text??''),parameters):this.adapter.execute(String(text??''),parameters);
     });
   }
   async execute(text,affected,options=1){
@@ -2721,9 +2912,9 @@ return {ADOConnection,ADOCommand,DataCollection,DAOEngine,DAODatabase};
 })();
 
 /* binary-codec.js */
-__modules[30]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[14];
+__modules[31]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[13];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -2819,9 +3010,9 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* filesystem.js */
-__modules[31]=(()=>{
-const { VBError }=__modules[10];
-const {encodeANSI,decodeANSI}=__modules[30];
+__modules[32]=(()=>{
+const { VBError }=__modules[9];
+const {encodeANSI,decodeANSI}=__modules[31];
 
 
 const MAX_FILE=20*1024*1024;
@@ -2885,15 +3076,17 @@ return {VirtualFileSystem};
 })();
 
 /* ../data/context.js */
-__modules[32]=(()=>{
-const {DAOEngine}=__modules[24];
-const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[15];
-const {SQLiteProvider}=__modules[25];
-const {HTTPProvider,GatewayProvider}=__modules[27];
-const {FileDataProvider}=__modules[28];
-const {ADOConnection,ADOCommand,DataCollection}=__modules[29];
+__modules[33]=(()=>{
+const {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS}=__modules[23];
+const {DAOEngine}=__modules[25];
+const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[14];
+const {SQLiteProvider}=__modules[26];
+const {HTTPProvider,GatewayProvider}=__modules[28];
+const {FileDataProvider}=__modules[29];
+const {ADOConnection,ADOCommand,DataCollection}=__modules[30];
 const {ConnectedRecordset}=__modules[19];
-const {VirtualFileSystem}=__modules[31];
+const {VirtualFileSystem}=__modules[32];
+
 
 
 
@@ -2915,9 +3108,12 @@ class DataContext {
     if(this.credentials.has(name))return this.credentials.get(name);
     const value=await this.credentialProvider?.(name);assertData(value,'A runtime credential is required: '+name,70);this.credentials.set(name,value);return value;
   }
-  isObjectType(name){return /^(?:ADODB\.(?:Connection|Command|Recordset|Parameter)|DAO\.(?:DBEngine|Workspace|Database|Recordset|QueryDef|TableDef|Index|Field|Parameter)|VB6\.Data\.(?:Connection|Command))$/i.test(String(name));}
+  isObjectType(name){return /^(?:ADODB\.(?:Connection|Command|Recordset|Parameter)|DAO\.(?:DBEngine|Workspace|Database|Recordset|QueryDef|TableDef|Index|Field|Parameter)|(?:RDO\.)?rdo(?:Engine|Connection|Environment|Query|Resultset|Parameter|Column|Table)|VB6\.Data\.(?:Connection|Command))$/i.test(String(name));}
   createObject(name){
     switch(String(name).toLowerCase()){
+      case 'rdo.rdoengine':case 'rdoengine':return new RDOEngine(this);
+      case 'rdo.rdoconnection':case 'rdoconnection':return new RDOConnection(this,(this.rdoEngine||(this.rdoEngine=new RDOEngine(this))).rdoEnvironments.Item(0));
+      case 'rdo.rdoquery':case 'rdoquery':return new RDOQuery(this);
       case 'adodb.connection':case 'vb6.data.connection':return this.connection();
       case 'adodb.command':case 'vb6.data.command':return this.command();
       case 'adodb.recordset':return new ConnectedRecordset(this);
@@ -2945,8 +3141,9 @@ class DataContext {
     return environment;
   }
   install(vm){
-    for(const [name,value]of Object.entries(DATA_CONSTANTS))vm.library.set(name.toLowerCase(),value);
+    for(const [name,value]of Object.entries({...DATA_CONSTANTS,...RDO_CONSTANTS}))vm.library.set(name.toLowerCase(),value);
     const environment=this.environment();vm.library.set('dataenvironment1',environment);vm.library.set('dataenvironment',environment);
+    const rdo=this.rdoEngine||(this.rdoEngine=new RDOEngine(this));vm.library.set('rdoengine',rdo);vm.library.set('rdoenvironments',rdo.rdoEnvironments);vm.library.set('rdoerrors',rdo.rdoErrors);vm.library.set('rdocreateenvironment',(...args)=>rdo.rdoCreateEnvironment(...args));
     const engine=this.daoEngine||(this.daoEngine=new DAOEngine(this));vm.library.set('dbengine',engine);vm.library.set('opendatabase',(...args)=>engine.OpenDatabase(...args));vm.library.set('createdatabase',(...args)=>engine.CreateDatabase(...args));
   }
   close(){
@@ -2961,8 +3158,8 @@ return {DataContext};
 })();
 
 /* financial.js */
-__modules[33]=(()=>{
-const {VBError}=__modules[8];
+__modules[34]=(()=>{
+const {VBError}=__modules[7];
 /**
  * Double-precision financial functions for the browser VB runtime.
  * Pure ES module: no DOM, network, filesystem or dynamic evaluation.
@@ -3151,7 +3348,7 @@ return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FI
 })();
 
 /* ../theme/theme.js */
-__modules[34]=(()=>{
+__modules[35]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
@@ -3208,8 +3405,8 @@ return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,color
 })();
 
 /* ../graphics/surface.js */
-__modules[35]=(()=>{
-const { colorValue, getTheme }=__modules[34];
+__modules[36]=(()=>{
+const { colorValue, getTheme }=__modules[35];
 
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
 const surfaces = new WeakMap();
@@ -3333,8 +3530,8 @@ return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
 })();
 
 /* native-windows.js */
-__modules[36]=(()=>{
-const {refreshGraphicsSurfaces}=__modules[35];
+__modules[37]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[36];
 
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -3526,8 +3723,8 @@ return {installNativeHost};
 })();
 
 /* ../project/binary-assets.js */
-__modules[37]=(()=>{
-const {VBError}=__modules[10];
+__modules[38]=(()=>{
+const {VBError}=__modules[9];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
 const fail=message=>{throw new VBError(message,1002);};
@@ -3538,10 +3735,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ../project/native-text.js */
-__modules[38]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[30];
-const {VBError}=__modules[10];
-const {fromBase64,toBase64}=__modules[37];
+__modules[39]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[31];
+const {VBError}=__modules[9];
+const {fromBase64,toBase64}=__modules[38];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -3605,9 +3802,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ../project/frx.js */
-__modules[39]=(()=>{
-const {VBError}=__modules[10];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[38];
+__modules[40]=(()=>{
+const {VBError}=__modules[9];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[39];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -3710,9 +3907,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[40]=(()=>{
-const {VBError}=__modules[10];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[39];
+__modules[41]=(()=>{
+const {VBError}=__modules[9];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[40];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -3804,11 +4001,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[41]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray,bankersRound,numeric}=__modules[14];
-const {normalizeResources,decodeStringTable}=__modules[40];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[39];
+__modules[42]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray,bankersRound,numeric}=__modules[13];
+const {normalizeResources,decodeStringTable}=__modules[41];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[40];
 
 
 
@@ -3839,8 +4036,8 @@ return {ResourceStore};
 })();
 
 /* error-messages.js */
-__modules[42]=(()=>{
-const {VBError}=__modules[8];
+__modules[43]=(()=>{
+const {VBError}=__modules[7];
 
 /** Invariant English descriptions for the errors produced by this runtime.
  * Localized Windows resource tables and arbitrary COM HRESULT messages are not
@@ -3874,9 +4071,9 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[43]=(()=>{
-const {VBError}=__modules[10];
-const {MISSING,VBArray,coerce,vbString}=__modules[14];
+__modules[44]=(()=>{
+const {VBError}=__modules[9];
+const {MISSING,VBArray,coerce,vbString}=__modules[13];
 
 
 const invalid=()=>{throw new VBError('Invalid procedure call or argument',5);};
@@ -3969,10 +4166,10 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[44]=(()=>{
-const {VBError}=__modules[8];
-const {MISSING,VBArray,numeric}=__modules[14];
-const {FINANCIAL_FUNCTIONS}=__modules[33];
+__modules[45]=(()=>{
+const {VBError}=__modules[7];
+const {MISSING,VBArray,numeric}=__modules[13];
+const {FINANCIAL_FUNCTIONS}=__modules[34];
 
 
 
@@ -4000,8 +4197,8 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[45]=(()=>{
-const {FINANCIAL_SIGNATURES}=__modules[33];
+__modules[46]=(()=>{
+const {FINANCIAL_SIGNATURES}=__modules[34];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
 const BUILTIN_SIGNATURES={
@@ -4023,7 +4220,7 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* constants.js */
-__modules[46]=(()=>{
+__modules[47]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -4050,19 +4247,19 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[47]=(()=>{
-const {errorDescription}=__modules[42];
-const {stringLibrary}=__modules[43];
-const {financialLibrary}=__modules[44];
-const {ResourceStore}=__modules[41];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[9];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[45];
+__modules[48]=(()=>{
+const {errorDescription}=__modules[43];
+const {stringLibrary}=__modules[44];
+const {financialLibrary}=__modules[45];
+const {ResourceStore}=__modules[42];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[8];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[46];
 const {DisconnectedRecordset}=__modules[17];
-const {recordLength}=__modules[30];
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
-const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[14];
-const {VB_CONSTANTS}=__modules[46];
+const {recordLength}=__modules[31];
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
+const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[13];
+const {VB_CONSTANTS}=__modules[47];
 
 
 
@@ -4141,9 +4338,9 @@ return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ../controls/rtf.js */
-__modules[48]=(()=>{
-const {VBError}=__modules[10];
-const {decodeANSI}=__modules[30];
+__modules[49]=(()=>{
+const {VBError}=__modules[9];
+const {decodeANSI}=__modules[31];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -4252,8 +4449,8 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* ../controls/form-window.js */
-__modules[49]=(()=>{
-const {el}=__modules[13];
+__modules[50]=(()=>{
+const {el}=__modules[12];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
 function installFormWindow(form){
@@ -4278,9 +4475,9 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[50]=(()=>{
-const {el}=__modules[13];
-const {getTheme}=__modules[34];
+__modules[51]=(()=>{
+const {el}=__modules[12];
+const {getTheme}=__modules[35];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -4354,8 +4551,8 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[51]=(()=>{
-const {el}=__modules[13];
+__modules[52]=(()=>{
+const {el}=__modules[12];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
 function scrollbarGeometry(min,max,value,length,page=1){
@@ -4395,7 +4592,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/icon-art.js */
-__modules[52]=(()=>{
+__modules[53]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -4554,8 +4751,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[53]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[52];
+__modules[54]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[53];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -4582,11 +4779,11 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../theme/menu.js */
-__modules[54]=(()=>{
-const {uiDocument}=__modules[12];
-const {el}=__modules[13];
-const {icon}=__modules[53];
-const {getTheme}=__modules[34];
+__modules[55]=(()=>{
+const {uiDocument}=__modules[11];
+const {el}=__modules[12];
+const {icon}=__modules[54];
+const {getTheme}=__modules[35];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -4671,10 +4868,10 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ../controls/richtext.js */
-__modules[55]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[48];
-const {VBError}=__modules[10];
-const {oleColor}=__modules[35];
+__modules[56]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[49];
+const {VBError}=__modules[9];
+const {oleColor}=__modules[36];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -4762,11 +4959,11 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[56]=(()=>{
-const {normalizeDataSources}=__modules[15];
-const { clone, lower, safeName }=__modules[13];
-const {normalizeResources}=__modules[40];
-const { VBError }=__modules[10];
+__modules[57]=(()=>{
+const {normalizeDataSources}=__modules[14];
+const { clone, lower, safeName }=__modules[12];
+const {normalizeResources}=__modules[41];
+const { VBError }=__modules[9];
 
 
 
@@ -4833,9 +5030,9 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[57]=(()=>{
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
+__modules[58]=(()=>{
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
 
 
 class ControlCollection {
@@ -4881,22 +5078,22 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[58]=(()=>{
-const {installFormWindow}=__modules[49];
-const {ClassicCombo,ClassicUpDown}=__modules[50];
-const {ClassicScrollbar}=__modules[51];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[54];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[55];
-const {parseRTF}=__modules[48];
-const { el, lower, clone }=__modules[13];
-const { VBError }=__modules[10];
-const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[14];
-const { MemoryRecordset }=__modules[47];
-const { GraphicsSurface }=__modules[35];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[34];
-const { icon, controlIcon }=__modules[53];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[56];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[57];
+__modules[59]=(()=>{
+const {installFormWindow}=__modules[50];
+const {ClassicCombo,ClassicUpDown}=__modules[51];
+const {ClassicScrollbar}=__modules[52];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[55];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[56];
+const {parseRTF}=__modules[49];
+const { el, lower, clone }=__modules[12];
+const { VBError }=__modules[9];
+const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[13];
+const { MemoryRecordset }=__modules[48];
+const { GraphicsSurface }=__modules[36];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[35];
+const { icon, controlIcon }=__modules[54];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[57];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[58];
 
 
 
@@ -5252,10 +5449,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[59]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[58];
-const {clone}=__modules[13];
-const {newId}=__modules[56];
+__modules[60]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[59];
+const {clone}=__modules[12];
+const {newId}=__modules[57];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -5334,10 +5531,10 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[60]=(()=>{
-const {VBError}=__modules[10];
-const {el}=__modules[13];
-const {NOTHING}=__modules[14];
+__modules[61]=(()=>{
+const {VBError}=__modules[9];
+const {el}=__modules[12];
+const {NOTHING}=__modules[13];
 
 
 
@@ -5394,9 +5591,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../controls/dialog.js */
-__modules[61]=(()=>{
-const {el}=__modules[13];
-const {icon}=__modules[53];
+__modules[62]=(()=>{
+const {el}=__modules[12];
+const {icon}=__modules[54];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -5431,11 +5628,11 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[62]=(()=>{
-const {VBError}=__modules[8];
-const {lower}=__modules[13];
-const {VB_CONSTANTS}=__modules[46];
-const {VBCurrency,coerce,unary,binary}=__modules[14];
+__modules[63]=(()=>{
+const {VBError}=__modules[7];
+const {lower}=__modules[12];
+const {VB_CONSTANTS}=__modules[47];
+const {VBCurrency,coerce,unary,binary}=__modules[13];
 
 
 
@@ -5547,8 +5744,8 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[63]=(()=>{
-const {VBError}=__modules[10];
+__modules[64]=(()=>{
+const {VBError}=__modules[9];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -5574,8 +5771,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[64]=(()=>{
-const {lower}=__modules[13];
+__modules[65]=(()=>{
+const {lower}=__modules[12];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -5618,8 +5815,8 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[65]=(()=>{
-const { tokenize, VBError }=__modules[10];
+__modules[66]=(()=>{
+const { tokenize, VBError }=__modules[9];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -5696,10 +5893,10 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[66]=(()=>{
-const { VBError }=__modules[10];
-const { parseExpression }=__modules[65];
-const { binary, unary, truth }=__modules[14];
+__modules[67]=(()=>{
+const { VBError }=__modules[9];
+const { parseExpression }=__modules[66];
+const { binary, unary, truth }=__modules[13];
 
 
 
@@ -5738,14 +5935,14 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[67]=(()=>{
-const {bindConstants}=__modules[62];
-const {defaultIdentifierType,addDefaultTypes}=__modules[63];
-const {validateInterfaces}=__modules[64];
-const { preprocess }=__modules[66];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[10];
-const { parseExpression, parseCall }=__modules[65];
-const { lower }=__modules[13];
+__modules[68]=(()=>{
+const {bindConstants}=__modules[63];
+const {defaultIdentifierType,addDefaultTypes}=__modules[64];
+const {validateInterfaces}=__modules[65];
+const { preprocess }=__modules[67];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[9];
+const { parseExpression, parseCall }=__modules[66];
+const { lower }=__modules[12];
 
 
 
@@ -5956,10 +6153,10 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* win32.js */
-__modules[68]=(()=>{
+__modules[69]=(()=>{
 const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[6];
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,numeric,coerce}=__modules[14];
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,numeric,coerce}=__modules[13];
 
 
 
@@ -6071,8 +6268,8 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[69]=(()=>{
-const {VBError}=__modules[10];
+__modules[70]=(()=>{
+const {VBError}=__modules[9];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
 class DebugEvaluationAbort extends VBError {
@@ -6100,11 +6297,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[70]=(()=>{
-const {VBError}=__modules[10];
-const {parseExpression}=__modules[65];
-const {lower}=__modules[13];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[14];
+__modules[71]=(()=>{
+const {VBError}=__modules[9];
+const {parseExpression}=__modules[66];
+const {lower}=__modules[12];
+const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[13];
 
 
 
@@ -6154,8 +6351,8 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[71]=(()=>{
-const {VBError}=__modules[10];
+__modules[72]=(()=>{
+const {VBError}=__modules[9];
 
 const key=ins=>{const {line,source,procedure,...rest}=ins;return JSON.stringify(rest);};
 const linearInstruction=ins=>['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename','fileClose','fileOpen','stringMid','stringAlign','return','dim'].includes(ins.op);
@@ -6180,9 +6377,9 @@ return {linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[72]=(()=>{
-const {instructionMap,linearInstruction}=__modules[71];
-const {VBError}=__modules[10];
+__modules[73]=(()=>{
+const {instructionMap,linearInstruction}=__modules[72];
+const {VBError}=__modules[9];
 
 
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
@@ -6242,23 +6439,23 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[73]=(()=>{
-const {VBWin32Bridge}=__modules[68];
-const {DataContext}=__modules[32];
-const {errorDescription}=__modules[42];
-const {DebugEvaluationSession}=__modules[69];
-const {hasDataDefault}=__modules[7];
-const {defaultIdentifierType}=__modules[63];
-const {DebugInspector}=__modules[70];
-const {planLiveEdit,nextStatementIndex}=__modules[72];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[30];
-const { Signal, lower, VERSION }=__modules[13];
-const { VBError }=__modules[10];
-const { parseExpression, parseCall }=__modules[65];
-const { compileProject }=__modules[67];
-const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[14];
-const { VirtualFileSystem }=__modules[31];
-const { createLibrary, MemoryRecordset }=__modules[47];
+__modules[74]=(()=>{
+const {VBWin32Bridge}=__modules[69];
+const {DataContext}=__modules[33];
+const {errorDescription}=__modules[43];
+const {DebugEvaluationSession}=__modules[70];
+const {hasDataDefault,hasDataMember}=__modules[15];
+const {defaultIdentifierType}=__modules[64];
+const {DebugInspector}=__modules[71];
+const {planLiveEdit,nextStatementIndex}=__modules[73];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[31];
+const { Signal, lower, VERSION }=__modules[12];
+const { VBError }=__modules[9];
+const { parseExpression, parseCall }=__modules[66];
+const { compileProject }=__modules[68];
+const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[13];
+const { VirtualFileSystem }=__modules[32];
+const { createLibrary, MemoryRecordset }=__modules[48];
 
 
 
@@ -6415,7 +6612,7 @@ class VirtualMachine extends Signal {
     const isRecord=Object.getPrototypeOf(object)===Object.prototype&&!!object.__type;let obj=object,privateMatch=false;
     for(let depth=0;obj&&depth<5;depth++,obj=Object.getPrototypeOf(obj)){
       const candidates=Object.getOwnPropertyNames(obj).filter(k=>lower(k)===key&&!BLOCKED_MEMBERS.has(lower(k)));
-      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||key==='hwnd'&&object.__control);if(publicKey)return publicKey;
+      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||key==='hwnd'&&object.__control||hasDataMember(object,k));if(publicKey)return publicKey;
       if(candidates.length)privateMatch=true;
     }
     if(privateMatch)throw new VBError('Implementation members are not exposed to Visual Basic: '+name,438);
@@ -6767,19 +6964,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[74]=(()=>{
-const {RuntimeAgentControl}=__modules[59];
-const {RuntimeMDI}=__modules[60];
-const {runtimeDialog,messageBoxOptions}=__modules[61];
-const { applyTheme, themeId }=__modules[34];
-const { icon }=__modules[53];
-const {rasterDataURL}=__modules[39];
-const { el, download, lower, clone }=__modules[13];
-const { compileProject }=__modules[67];
-const { VirtualMachine }=__modules[73];
-const { VirtualFileSystem }=__modules[31];
-const { describe }=__modules[14];
-const { BrowserForm }=__modules[58];
+__modules[75]=(()=>{
+const {RuntimeAgentControl}=__modules[60];
+const {RuntimeMDI}=__modules[61];
+const {runtimeDialog,messageBoxOptions}=__modules[62];
+const { applyTheme, themeId }=__modules[35];
+const { icon }=__modules[54];
+const {rasterDataURL}=__modules[40];
+const { el, download, lower, clone }=__modules[12];
+const { compileProject }=__modules[68];
+const { VirtualMachine }=__modules[74];
+const { VirtualFileSystem }=__modules[32];
+const { describe }=__modules[13];
+const { BrowserForm }=__modules[59];
 
 
 
@@ -6832,28 +7029,28 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[75]=(()=>{
+__modules[76]=(()=>{
 const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[6];
-const {DataContext}=__modules[32];
-const {ADOConnection,ADOCommand}=__modules[29];
+const {DataContext}=__modules[33];
+const {ADOConnection,ADOCommand}=__modules[30];
 const {ConnectedRecordset}=__modules[19];
-const {DATA_CONSTANTS}=__modules[15];
-const {FINANCIAL_FUNCTIONS}=__modules[33];
-const {installNativeHost}=__modules[36];
-const {ResourceStore}=__modules[41];
-const {readRES,writeRES,setResource,setResourceString}=__modules[40];
-const {THEMES,applyTheme,colorValue}=__modules[34];
-const {MemoryRecordset}=__modules[47];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[48];
-const { ApplicationHost }=__modules[74];
-const { VirtualMachine }=__modules[73];
-const { compileProject, compileModule }=__modules[67];
-const { parseExpression }=__modules[65];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[14];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[9];
-const { VirtualFileSystem }=__modules[31];
-const { BrowserControl, BrowserForm }=__modules[58];
-const { GraphicsSurface }=__modules[35];
+const {DATA_CONSTANTS}=__modules[14];
+const {FINANCIAL_FUNCTIONS}=__modules[34];
+const {installNativeHost}=__modules[37];
+const {ResourceStore}=__modules[42];
+const {readRES,writeRES,setResource,setResourceString}=__modules[41];
+const {THEMES,applyTheme,colorValue}=__modules[35];
+const {MemoryRecordset}=__modules[48];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[49];
+const { ApplicationHost }=__modules[75];
+const { VirtualMachine }=__modules[74];
+const { compileProject, compileModule }=__modules[68];
+const { parseExpression }=__modules[66];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[13];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[8];
+const { VirtualFileSystem }=__modules[32];
+const { BrowserControl, BrowserForm }=__modules[59];
+const { GraphicsSurface }=__modules[36];
 
 
 
@@ -6880,5 +7077,5 @@ const RuntimeAPI={createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnec
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[75];
+globalThis["VB6Runtime"]=__modules[76];
 })();

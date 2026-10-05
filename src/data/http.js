@@ -126,6 +126,7 @@ export class GatewayProvider extends HTTPProvider {
   async open(){super.open();assertData(/^[A-Za-z0-9_-]{1,64}$/.test(this.config.profile||''),'A gateway profile name is required');this.session=null;}
   async call(operation,args={}){const response=await this.request(this.base.href,{method:'POST',body:{operation,profile:this.config.profile,session:this.session,...args},closing:operation==='rollback'});const result=response.data;assertData(result&&typeof result==='object','Invalid gateway response',13);return result;}
   async execute(text,parameters=[]){return decodeResult(await this.call('execute',{text,parameters:parameters.map(encodeCell)}));}
+  async executePositional(text,parameters=[]){return decodeResult(await this.call('execute',{text,parameters:parameters.map(encodeCell),parameterStyle:'odbc'}));}
   async schema(kind=20){return decodeResult(await this.call('schema',{kind}));}
   async begin(){assertData(!this.session,'Nested gateway transactions are not supported',3251);const result=await this.call('begin');this.session=result.session;return 1;}
   async commit(){assertData(this.session,'No active transaction',3246);await this.call('commit');this.session=null;}

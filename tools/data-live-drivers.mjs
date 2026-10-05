@@ -22,6 +22,14 @@ try{
  await cn.BeginTrans();await cn.query(insert,[2,'committed',new Uint8Array([2]),null]);await cn.CommitTrans();assert.equal(Number((await cn.Execute('SELECT count(*) AS n FROM vb6_data_test')).Item('n')),2);
  const schema=await cn.OpenSchema(20);assert(schema.RecordCount>0);const columns=await cn.OpenSchema(4);assert(columns.RecordCount>=4);
  await cn.BeginTrans();await cn.query(insert,[3,'close rolls back',new Uint8Array([3]),null]);await cn.Close();await cn.Open('Database');assert.equal(Number((await cn.Execute('SELECT count(*) AS n FROM vb6_data_test')).Item('n')),2);
- await assert.rejects(()=>cn.query(insert,[1,'duplicate',new Uint8Array([4]),null]));await cn.query('DROP TABLE vb6_data_test');
- console.log(JSON.stringify({driver:kind,passed:true,checks:['authenticated HTTP gateway','prepared SQL injection-shaped Unicode value','binary and null values','schema','transaction commit','transaction rollback','close rollback','provider failure']},null,2));
+ await assert.rejects(()=>cn.query(insert,[1,'duplicate',new Uint8Array([4]),null]));
+ // Actual DAO/RDO clients use canonical question marks, not hand-written per-driver SQL.
+ const db=await context.createObject('DAO.DBEngine.36').OpenDatabase('Database');
+ const add=db.CreateQueryDef('', 'PARAMETERS pId Long, pName Text(100); INSERT INTO vb6_data_test(id,name) VALUES([pId],[pName])');
+ add.Parameters.Item('pId').Value=8;add.Parameters.Item('pName').Value=value;await add.Execute();assert.equal(add.RecordsAffected,1);
+ const rdo=context.createObject('RDO.rdoEngine'),rcn=await rdo.rdoEnvironments.Item(0).OpenConnection('NativeTest',1,false,'Database');
+ const query=rcn.CreateQuery('ReadById','SELECT name FROM vb6_data_test WHERE id = ?');query.Item(0).Type=4;query.Item(0).Value=8;
+ assert.equal((await query.OpenResultset(3,1)).Item(0).Value,value);await rcn.Close();await db.Close();
+ await cn.query('DROP TABLE vb6_data_test');
+ console.log(JSON.stringify({driver:kind,passed:true,checks:['authenticated HTTP gateway','prepared SQL injection-shaped Unicode value','binary and null values','schema','transaction commit','transaction rollback','close rollback','provider failure','DAO typed action QueryDef','RDO positional query']},null,2));
 }finally{await context.close();await gateway.close();}

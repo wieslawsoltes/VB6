@@ -434,3 +434,84 @@ coercion; a forged `__type` label does not expose arbitrary JavaScript objects.
 use its Value. GUID, Decimal and database date/time ADO fields now validate and
 coerce through the shared typed field implementation. Regression fixtures run
 compiled VB programs in the Node VM and exported Chromium/Firefox/WebKit runtimes.
+
+## RDO client object model
+
+The same data context also exposes `rdoEngine`, `rdoEnvironments`, `rdoErrors`,
+`RDO.rdoConnection` and `RDO.rdoQuery` (`New` or `CreateObject`). Connections,
+queries, resultsets, typed parameters and columns retain the classic RDO names,
+including case-insensitive collection/default/bang access. The lowercase `rdo*`
+public members are explicitly allowlisted by object identity; private JavaScript
+implementation members are not made accessible to VB.
+
+```vb
+Dim cn As rdoConnection, q As rdoQuery, rs As rdoResultset
+rdoEnvironments(0).CursorDriver = rdUseClientBatch
+Set cn = rdoEnvironments(0).OpenConnection("Local", _
+    Prompt:=rdDriverNoPrompt, Connect:="Provider=SQLite;Data Source=/customers.db")
+Set q = cn.CreateQuery("CustomersById", "SELECT id,name FROM Customers WHERE id >= ?")
+q.rdoParameters(0).Type = rdTypeINTEGER
+q(0) = 1
+Set rs = q.OpenResultset(rdOpenStatic, rdConcurBatch)
+rs.Edit
+rs!name = "Edited locally"
+rs.Update
+rs.BatchUpdate
+rs.Close
+cn.Close
+```
+
+RDO parameter types use the **ODBC numbers**, not ADO/DAO type numbers. Positional
+question-mark markers are recognized outside quoted text and comments. Parameter
+collections are obtained from the SQL, rather than accepting fabricated Append or
+Delete operations. Input values are bound and typed. Queries are temporary and
+close with their connection; `Requery` uses the current parameter values.
+
+Resultsets expose explicit edit buffers, movement, bookmarks, zero-based
+`AbsolutePosition`, `GetRows`, `LastModified`, real column types and text/binary
+chunks. `Update` posts the copy buffer; moving away discards an unposted buffer.
+With `rdUseClientBatch`/`rdConcurBatch`, writes remain in the shared client cursor
+until `BatchUpdate`. `CancelBatch True` affects the current row, while the default
+cancels all unsent rows. Partial update failures retain `BatchCollisionRows`,
+`BatchCollisionCount`, per-row `Status` and `rdoErrors`; previously successful
+rows are not resent. SQLite conflicts fetch the actual newer provider values for
+`BatchConflictValue`, including failed deletions addressable by bookmark. No
+server value is invented when a provider cannot refresh a keyed row.
+
+Connection transactions use the actual provider. Environment transactions process
+connections **sequentially**, matching RDO's non-distributed transaction scope:
+a partially failed commit is not an atomic distributed commit. A partial begin
+attempt rolls back the transactions it successfully started. Connection close
+rolls back outstanding transactions and discards unsent edits. `rdoTables.Refresh`
+reads the provider's actual table catalog; refreshed names can be opened directly.
+
+This is a portable, materialized **client** implementation. Forward-only cursors
+are read-only. `rdUseClientBatch` requests return `Type = rdOpenStatic`, even when
+a caller requested a native keyset/dynamic cursor; this is an explicit cursor
+fallback, not a claim to implement native server cursors. Portable static cursors
+also support explicit value-based optimistic writes where a keyed writer exists.
+`rdUseOdbc`/`rdUseServer`, pessimistic/row-version locking, forced overwrites,
+raw HDBC/HSTMT handles, native login dialogs, procedure output/return parameters,
+server-side cursors, asynchronous RDO events and native RemoteData OCX execution
+are not claimed. Native connection details belong in the authenticated gateway's
+named profile, not in an arbitrary browser-supplied DSN. `QueryTimeout` and
+`MaxRows` are validated; bounded client providers do not accept an infinite timeout.
+
+Contract references (Microsoft-authored archived Remote Data Objects help):
+- [Type and enum domains](https://techshelps.github.io/RDO98/html/rdprotype.htm)
+- [Environment and sequential transactions](https://techshelps.github.io/RDO98/html/rdobjrdoenvironment.htm)
+- [CancelBatch](https://techshelps.github.io/RDO98/html/rdmthcancelbatch.htm)
+- [Batch collisions](https://techshelps.github.io/RDO98/html/rdprobatchcollisioncount.htm)
+- [Actual conflicting provider values](https://techshelps.github.io/RDO98/html/rdprobatchconflictvalue.htm)
+
+`tests/data-rdo.test.mjs` and `tests/fixtures/rdo-compat.bas` validate this scope.
+The same VB fixture executes in exported HTML under Chromium, Firefox and WebKit;
+these are portable implementation tests, not a licensed native VB6/RDO oracle.
+
+DAO typed QueryDefs and RDO question-mark parameters travel over the gateway with
+an explicit positional dialect. The trusted server translates only markers outside
+strings, identifiers and comments to PostgreSQL `$1` or SQL Server `@p1` syntax;
+values remain separately bound. Ordinary ADO/native SQL is never rewritten (including
+PostgreSQL JSON `?` operators). A server-allowlisted positional command must declare
+`parameterStyle: "odbc"`; the client cannot override a named command's dialect.
+This translates parameter markers, not the rest of Access SQL or server dialects.
