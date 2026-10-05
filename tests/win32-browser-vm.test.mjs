@@ -115,7 +115,13 @@ Debug.Print KillTimer(0, id)
 End Sub
 Sub Main()
 timer = SetTimer(0, 0, 10, AddressOf Tick)
-End Sub`);for(let until=Date.now()+2000;out.length<2&&Date.now()<until;)await new Promise(r=>setTimeout(r,10));assert.deepEqual(out,['tick','1']);assert.equal(vm.stack.length,0);assert.equal(vm.win32.api.timers.size,0);vm.stop();assert.equal(vm.win32.api.handles.entries.size,0);});
+End Sub`);
+// Debug.Print is observable before callProcedure's finally pops the frame. Wait
+// for dispatch completion as well as output; a slow runner may yield between them.
+for(let until=Date.now()+2000;(out.length<2||vm.stack.length||vm.processing)&&Date.now()<until;)await new Promise(r=>setTimeout(r,10));
+assert.deepEqual(out,['tick','1']);assert.equal(vm.stack.length,0);assert.equal(vm.processing,false);assert.equal(vm.win32.api.timers.size,0);
+vm.stop();assert.equal(vm.win32.api.handles.entries.size,0);
+});
 test('bad signatures and unsupported Variant ABI fail before calls; writable buffers are bounded',async t=>{const {out,vm}=await run(t,`Declare Function Bad Lib "kernel32" Alias "GetTickCount" (ByVal extra As Long) As Long
 Declare Function ReadText Lib "kernel32" Alias "lstrcpynA" (ByVal dst As String, ByVal src As String, ByVal size As Long) As Long
 Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (destination As Any, source As Any, ByVal bytes As Long)

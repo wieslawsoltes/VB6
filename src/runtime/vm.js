@@ -4,7 +4,7 @@ import {isAutomationObject,automationDefaultName,automationMember,automationRefe
 import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
-import {hasDataDefault} from '../data/defaults.js';
+import {hasDataDefault,hasDataMember} from '../data/defaults.js';
 import {defaultIdentifierType} from '../language/default-types.js';
 import {DebugInspector} from './debug-inspector.js';
 import {planLiveEdit,nextStatementIndex} from './live-edit.js';
@@ -190,7 +190,7 @@ export class VirtualMachine extends Signal {
     const isRecord=Object.getPrototypeOf(object)===Object.prototype&&!!object.__type;let obj=object,privateMatch=false;
     for(let depth=0;obj&&depth<5;depth++,obj=Object.getPrototypeOf(obj)){
       const candidates=Object.getOwnPropertyNames(obj).filter(k=>lower(k)===key&&!BLOCKED_MEMBERS.has(lower(k)));
-      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||['hwnd','hdc'].includes(key)&&object.__control);if(publicKey)return publicKey;
+      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||['hwnd','hdc'].includes(key)&&object.__control||hasDataMember(object,k));if(publicKey)return publicKey;
       if(candidates.length)privateMatch=true;
     }
     if(privateMatch)throw new VBError('Implementation members are not exposed to Visual Basic: '+name,438);

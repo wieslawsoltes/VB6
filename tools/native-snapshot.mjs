@@ -25,5 +25,25 @@ export async function publishAtomicSnapshot(filename,bytes){
     return {path:filename,size:bytes.length,sha256:sha256(bytes),publication:'exclusive-hard-link',powerLossCertified:false};
   }finally{await handle?.close().catch(()=>{});await fs.rm(temporary,{force:true}).catch(()=>{});}
 }
-export async function nativeSnapshot(root,out){const absolute=await fs.realpath(root),destination=path.resolve(out),relative=path.relative(absolute,destination);if(relative===''||!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative))throw Error('Snapshot output must be outside the source folder');const entries=await readStableNativeFolder(absolute);return publishAtomicSnapshot(destination,writeZip(Object.fromEntries(entries)));}
+// Resolve existing ancestors even when the output file/directories do not exist.
+// Windows short (8.3) paths and directory junctions can otherwise appear outside
+// the source while referring to the same folder as its canonical long path.
+async function canonicalOutputPath(filename){
+  let current=path.resolve(filename);const missing=[];
+  for(;;){
+    try{return path.join(await fs.realpath(current),...missing);}
+    catch(error){
+      if(error.code!=='ENOENT')throw error;
+      const parent=path.dirname(current);if(parent===current)throw error;
+      missing.unshift(path.basename(current));current=parent;
+    }
+  }
+}
+export async function nativeSnapshot(root,out){
+  const absolute=await fs.realpath(root),destination=await canonicalOutputPath(out);
+  const relative=path.relative(absolute,destination);
+  if(relative===''||relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative))throw Error('Snapshot output must be outside the source folder');
+  const entries=await readStableNativeFolder(absolute);
+  return publishAtomicSnapshot(destination,writeZip(Object.fromEntries(entries)));
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){try{if(process.argv.length!==4)throw Error('Usage: node tools/native-snapshot.mjs SOURCE_FOLDER NEW_OUTPUT.zip');console.log(JSON.stringify(await nativeSnapshot(process.argv[2],process.argv[3]),null,2));}catch(error){console.error(error.message);process.exitCode=1;}}

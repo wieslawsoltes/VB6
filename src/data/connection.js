@@ -40,12 +40,13 @@ export class ADOConnection {
       }catch(error){await this.adapter?.close?.();this.adapter=null;this._state=0;throw error;}
     });
   }
-  async query(text,parameters=[],options=1,timeout=this.CommandTimeout){
+  async query(text,parameters=[],options=1,timeout=this.CommandTimeout,parameterStyle='native'){
     return this.guard(async()=>{
       assertData(this.State===1,'Connection is closed',3709);assertData(Number.isFinite(timeout)&&timeout>=1&&timeout<=600,'Invalid command timeout',5);this.adapter.timeout=timeout;
       if(Number(options)===2){assertData(this.adapter.table,'This provider does not support table commands',3251);return this.adapter.table(String(text));}
       assertData([1,128,129].includes(Number(options)),'Only text/table commands are supported by this provider',3251);
-      return this.adapter.execute(String(text??''),parameters);
+      assertData(['native','odbc'].includes(parameterStyle),'Invalid parameter style',5);
+      return parameterStyle==='odbc'&&this.adapter.executePositional?this.adapter.executePositional(String(text??''),parameters):this.adapter.execute(String(text??''),parameters);
     });
   }
   async execute(text,affected,options=1){
