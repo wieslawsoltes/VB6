@@ -7,7 +7,7 @@ export function installWorkspaceState(ide) {
   const snapshot=ide.layoutSnapshot.bind(ide),restore=ide.restoreLayout.bind(ide),restoreDocs=ide.restoreDocuments.bind(ide),command=ide.command.bind(ide);
   const editorViews=()=>Object.fromEntries([...ide.documents.editors].slice(0,256).map(([id,e])=>[id,snapshotEditorView(e)]));
   const tools=()=>[...ide.documents.tools.keys()].filter(key=>MODELESS_TOOLS.includes(key));
-  const openTools=keys=>{for(const key of Array.isArray(keys)?keys:[])if(key==='tool:resources')ide.openResourceEditor?.();else if(key==='tool:object-browser')ide.objectBrowser();else if(key==='tool:project-search')ide.projectSearch();};
+  const openTools=keys=>{for(const key of Array.isArray(keys)?keys:[])if(key==='tool:resources')ide.openResourceEditor?.();else if(key==='tool:object-browser')ide.objectBrowser();else if(key==='tool:project-search')ide.projectSearch();else if(key==='tool:coding-agents')ide.codingAgents?.open();};
   ide.layoutSnapshot=()=>({...snapshot(),tools:tools(),activeWindow:ide.documents.mdi.active,editorViews:editorViews()});
   const restoreViews=views=>{if(!views||typeof views!=='object')return;for(const [id,value]of Object.entries(views).slice(0,256)){const editor=ide.documents.editors.get(id);if(editor)restoreEditorView(editor,value);}};
   ide.restoreDocuments=()=>{const saved=ide.savedDocumentLayout;restoreDocs();openTools(saved?.tools);ide.documents.mdi.restoreSnapshot(saved?.windows);restoreViews(saved?.editorViews);if(saved?.activeDoc){const doc=ide.docs.find(d=>d.key===saved.activeDoc);if(doc)ide.documents.activate(doc);}if(saved?.activeWindow&&ide.documents.mdi.windows.has(saved.activeWindow))ide.documents.mdi.activate(saved.activeWindow);};

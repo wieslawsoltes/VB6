@@ -68,6 +68,15 @@ def error_dialog(page):
     return dialog
 
 
+def dismiss_error_for_debugging(page):
+    dialog = error_dialog(page)
+    dialog.get_by_role('button', name='Debug', exact=True).click()
+    # Modal teardown restores focus asynchronously; shortcut input must target
+    # the editor, not an outgoing dialog or the isolated runtime frame.
+    dialog.wait_for(state='hidden')
+    page.wait_for_function('document.activeElement===vb6Studio.editor.input')
+
+
 def screenshot(page, name):
     page.screenshot(path=str(REPORT / (name + '.png')), caret='hide', animations='disabled')
 
@@ -115,7 +124,7 @@ def handled_error(page):
     command(page, 'run')
     info = paused(page)
     check(info['error']['handled'] and info['error']['trapping'] == 'all', info)
-    error_dialog(page).get_by_role('button', name='Debug', exact=True).click()
+    dismiss_error_for_debugging(page)
     page.keyboard.press('F5')
     output(page, '5')
     check(page.evaluate('debugPauses.length') == 1)
@@ -219,10 +228,11 @@ def live_error_settings(page):
     page.get_by_role('tab', name='General', exact=True).click()
     page.get_by_label('Error Trapping', exact=True).select_option('all')
     page.get_by_role('button', name='OK', exact=True).click()
+    page.get_by_role('dialog').wait_for(state='hidden')
     page.keyboard.press('F5')
     info = paused(page, 2)
     check(info['reason'] == 'error', info)
-    error_dialog(page).get_by_role('button', name='Debug', exact=True).click()
+    dismiss_error_for_debugging(page)
     page.keyboard.press('F5')
     output(page, '5')
 
