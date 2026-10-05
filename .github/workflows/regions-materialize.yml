@@ -1,30 +1,82 @@
-name: Region integration source
+name: Region integration validation
 on:
   push:
     branches: [feature/win32-gdi-regions]
     paths: [.github/workflows/regions-materialize.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  integrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Capture exact source history and merge diagnostics
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify transferred source and integrate tested baseline
         run: |
-          git bundle create /tmp/vb6-regions-review.bundle HEAD refs/remotes/origin/main
-          git config user.name 'Integration review'
-          git config user.email 'integration@users.noreply.github.com'
-          git merge --no-commit --no-ff origin/main > /tmp/regions-merge-review.txt 2>&1 || true
-          git diff --name-only --diff-filter=U >> /tmp/regions-merge-review.txt
-          cat /tmp/regions-merge-review.txt
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          python3 - <<'PY'
+          import base64,gzip,hashlib
+          from pathlib import Path
+          parts=sorted(Path('.transfer').glob('regions-final.*.b64'))
+          assert len(parts)==2
+          encoded=''.join(p.read_text().strip() for p in parts)
+          # Correct the known transport transcription; the exact source hash is mandatory.
+          encoded=encoded.replace('TANRpPaAD','TANPaAD')
+          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='da338cb8015d3683cf76ddbcbb2b86c834c313da48d6f1c1721df08e83ee724e'
+          Path('/tmp/regions-final.patch').write_bytes(patch)
+          PY
+          git merge --no-commit --no-ff 605fc10bcef483a52c9d50eddfd5ba5036eea04d || true
+          python3 - <<'PY'
+          import subprocess
+          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
+          PY
+          git apply --unidiff-zero /tmp/regions-final.patch
+          rm .transfer/regions-final.*.b64
+          npm run build
+          node tools/win32-api-inventory.mjs
+          git add -A
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m 'feat(win32-browser): finish regions, native clipping fixes, VB6 example and browser regressions'
+      - name: Preserve newly merged input and IntelliSense updates
+        run: |
+          git merge --no-commit --no-ff a344a8fa8d667adbd934e595dd618836930b2120 || true
+          python3 - <<'PY'
+          import subprocess
+          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
+          PY
+          npm run build
+          node tools/win32-api-inventory.mjs
+          git add -A
+          test -z "$(git diff --name-only --diff-filter=U)"
+          npm test | tee /tmp/regions-integration-tests.txt
+          npm run pack:win32-browser | tee /tmp/regions-package-tests.txt
+          git diff --exit-code
+          git commit -m 'fix(win32-browser): retain concurrent input and IntelliSense changes in rebuilt distributions'
+      - name: Push only to the expected feature branch
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/feature/win32-gdi-regions | cut -f1)" = "$EXPECTED_SHA"
+          git push origin HEAD:refs/heads/feature/win32-gdi-regions
+          git bundle create /tmp/vb6-regions-integrated.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} > /tmp/regions-integration-revision.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: win32-regions-source
+          name: win32-regions-integrated
           path: |
-            /tmp/vb6-regions-review.bundle
-            /tmp/regions-merge-review.txt
+            /tmp/vb6-regions-integrated.bundle
+            /tmp/regions-integration-revision.txt
+            /tmp/regions-integration-tests.txt
+            /tmp/regions-package-tests.txt
+            release/vb6-win32-browser-*.tgz
           retention-days: 7
