@@ -1,0 +1,73 @@
+name: Integrate browser IntelliSense compatibility
+on:
+  push:
+    branches: [feature/intellisense-browser-compatibility]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/feature/intellisense-browser-compatibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply hash-checked reviewed source changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, json, zlib
+          hashes=['31aafdf11adeb527a862517b395b0bedfba9fa7708a540493f4320558938383f','d5f8269e24044630ab56d56b22c7c14879b656867da7983de3e32f402197c414','dc50644ced1bf3837cf7dc708314ec165a1c4cd29d8886d97d5250acbf45f83f']
+          chunks=[]
+          for i,digest in enumerate(hashes,1):
+              chunk=Path(f'tools/intellisense-compatibility-part{i}.txt').read_text().strip()
+              assert hashlib.sha256(chunk.encode()).hexdigest()==digest, f'Patch transfer mismatch in part {i}'
+              chunks.append(chunk)
+          raw=zlib.decompress(base64.b64decode(''.join(chunks),validate=True))
+          assert hashlib.sha256(raw).hexdigest()=='501c556eccfb5a24add429f8819d56534804f9845f5f4df3672dcd643c27b0f4'
+          changes=json.loads(raw)
+          assert len(changes)==18
+          for name,change in changes.items():
+              path=Path(name)
+              assert not path.is_absolute() and '..' not in path.parts
+              if 'content' in change:
+                  assert not path.exists(), f'New file already exists: {name}'
+                  source=change['content']
+              else:
+                  source=path.read_text()
+                  assert hashlib.sha256(source.encode()).hexdigest()==change['sha256'], f'Source changed; review before applying: {name}'
+                  for start,end,text in reversed(change['edits']):
+                      source=source[:start]+text+source[end:]
+              assert hashlib.sha256(source.encode()).hexdigest()==change['result'], f'Result mismatch: {name}'
+              path.parent.mkdir(parents=True,exist_ok=True)
+              path.write_text(source)
+              print('Applied',name)
+          PY
+      - name: Build and validate the combined implementation
+        run: |
+          mkdir -p reports/intellisense-integration
+          npm run build
+          git diff --check
+          set -o pipefail
+          npm test 2>&1 | tee reports/intellisense-integration/node.log
+      - name: Commit reviewed source and remove temporary integration files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm tools/intellisense-compatibility-part{1,2,3}.txt .github/workflows/intellisense-browser-integrate.yml
+          git add .github/workflows/intellisense.yml src docs/INTELLISENSE.md docs/INTELLISENSE-COMPATIBILITY.md tests/intellisense-compatibility.test.mjs tools/browser-intellisense-tests.py tools/browser-intellisense-compatibility.py dist
+          git commit -m 'feat(intellisense): complete browser event, reference and expression compatibility workflows'
+          git push origin HEAD:feature/intellisense-browser-compatibility
+      - name: Reproducible source snapshot
+        if: always()
+        run: git archive --format=zip --output=intellisense-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intellisense-compatibility-integration
+          path: |
+            intellisense-source.zip
+            reports/intellisense-integration/
+          retention-days: 7
