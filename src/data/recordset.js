@@ -1,16 +1,17 @@
 import {VBError} from '../language/lexer.js';
 import {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth} from '../runtime/values.js';
 
-// Disconnected client-side provider. There is deliberately no SQL/COM/network fallback.
-const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String']]);
+// Disconnected client-side cursor. ConnectedRecordset adds explicit provider I/O.
+const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Variant'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
 const fold=value=>String(value).toLowerCase();
-const copy=value=>value instanceof Date?new Date(value):value;
-const args=value=>value instanceof VBArray?[...value]:[value];
+const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
+const args=value=>value instanceof VBArray?[...value]:Array.isArray(value)?value:[value];
 function fail(message,number=3001){throw new VBError(message,number);}
 function integer(value){return bankersRound(numeric(value));}
-function fieldValue(column,value){
+export function fieldValue(column,value){
   if(value===null||value===undefined)return null;
   const type=TYPES.get(column.Type);if(!type)fail('Field type is not supported by the disconnected provider',3251);
+  if(type==='Binary'){const bytes=value instanceof VBArray?Uint8Array.from([...value]):value;if(!(bytes instanceof Uint8Array))fail('Binary field requires a byte array',13);if(column.DefinedSize&&bytes.length>column.DefinedSize)fail('Binary field exceeds DefinedSize',372);return bytes.slice();}
   const result=coerce(value,type);
   if(type==='String'&&column.DefinedSize&&result.length>column.DefinedSize)fail('Field value exceeds DefinedSize',372);
   return result;

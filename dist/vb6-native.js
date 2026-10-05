@@ -2,103 +2,8 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* ../core/window-context.js */
-__modules[0]=(()=>{
-
-/** Documents belonging to one live IDE session. No global DOM monkey-patching. */
-const documents = new Set();
-let current = null;
-function registerUIDocument(doc) {
-  documents.add(doc);
-  const activate = () => { current = doc; };
-  doc.addEventListener('focusin', activate, true);
-  doc.addEventListener('pointerdown', activate, true);
-  return () => {
-    documents.delete(doc);
-    doc.removeEventListener('focusin', activate, true);
-    doc.removeEventListener('pointerdown', activate, true);
-    if (current === doc) current = null;
-  };
-}
-function uiDocuments() {
-  return [...new Set([...(typeof document === 'undefined' ? [] : [document]), ...documents])];
-}
-function uiDocument(node) {
-  if (node?.ownerDocument) return node.ownerDocument;
-  return current || uiDocuments().find(doc => doc.hasFocus()) || document;
-}
-function hasUIDialog() {
-  return uiDocuments().some(doc => doc.querySelector('.ide-modal-cover'));
-}
-
-return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
-})();
-
-/* ../core/core.js */
-__modules[1]=(()=>{
-const {uiDocument}=__modules[0];
-
-/** Small framework-independent primitives shared by the IDE and runtime. */
-class Signal {
-  constructor() { this.listeners = new Map(); }
-  on(type, fn) { const list = this.listeners.get(type) || new Set(); list.add(fn); this.listeners.set(type, list); return () => list.delete(fn); }
-  emit(type, value) { for (const fn of this.listeners.get(type) || []) fn(value); }
-  clear() { this.listeners.clear(); }
-}
-class History extends Signal {
-  constructor(limit=120,maxBytes=32*1024*1024){super();this.limit=limit;this.maxBytes=maxBytes;this.undoStack=[];this.redoStack=[];}
-  trim(){let size=this.undoStack.reduce((n,e)=>n+(e.bytes??(e.before.length+e.after.length)*2),0);while(this.undoStack.length>1&&(this.undoStack.length>this.limit||size>this.maxBytes)){const e=this.undoStack.shift();size-=(e.bytes??(e.before.length+e.after.length)*2);}}
-  record(before,after,label='Edit'){
-    const a=JSON.stringify(before),b=JSON.stringify(after);if(a===b)return false;
-    this.undoStack.push({before:a,after:b,label});this.redoStack=[];this.trim();this.emit('change');return true;
-  }
-  // Text edits keep only source strings; they never copy/serialize form trees or image assets.
-  recordValue(key,before,after,apply,label='Edit',merge=false){
-    if(before===after)return false;const last=this.undoStack.at(-1);
-    if(merge&&last?.kind==='value'&&last.key===key)last.after=after;
-    else this.undoStack.push({kind:'value',key,before,after,apply,label});
-    this.redoStack=[];this.trim();this.emit('change');return true;
-  }
-  // Sparse edit history: memory is proportional to changed text, not module size.
-  recordPatch(key,patch,apply,label='Edit',merge=false){
-    if(patch.before===patch.after)return false;const item=structuredClone(patch),bytes=JSON.stringify(item).length*2,last=this.undoStack.at(-1);
-    if(merge&&last?.kind==='patch'&&last.key===key&&last.patches.length<256){last.patches.push(item);last.bytes+=bytes;}
-    else this.undoStack.push({kind:'patch',key,patches:[item],bytes,apply,label,before:'',after:''});
-    this.redoStack=[];this.trim();this.emit('change');return true;
-  }
-  undo(current){const e=this.undoStack.at(-1);if(!e)return null;const value=e.kind==='patch'?e.apply(structuredClone(current),e.patches,true):e.kind==='value'?e.apply(structuredClone(current),e.before):JSON.parse(e.before);this.undoStack.pop();this.redoStack.push(e);this.emit('change');return value;}
-  redo(current){const e=this.redoStack.at(-1);if(!e)return null;const value=e.kind==='patch'?e.apply(structuredClone(current),e.patches,false):e.kind==='value'?e.apply(structuredClone(current),e.after):JSON.parse(e.after);this.redoStack.pop();this.undoStack.push(e);this.emit('change');return value;}
-  reset(){this.undoStack=[];this.redoStack=[];this.emit('change');}
-}
-const clone = value => structuredClone(value);
-const lower = name => String(name).toLowerCase().replace(/[$%&!#@]$/, '');
-const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function debounce(fn, delay = 200) { let id; const f = (...args) => { clearTimeout(id); id = setTimeout(() => fn(...args), delay); }; f.cancel = () => clearTimeout(id); return f; }
-function download(name, data, type = 'application/octet-stream') {
-  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], {type}));
-  const a = uiDocument().createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 3000);
-}
-function el(tag, attrs = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [k,v] of Object.entries(attrs)) {
-    if (k === 'class') node.className = v;
-    else if (k === 'text') node.textContent = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
-    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (v != null && (k.startsWith('aria-') || ['spellcheck','draggable','contenteditable'].includes(k))) node.setAttribute(k,String(v));
-    else if (v !== false && v != null) node.setAttribute(k, v === true ? '' : v);
-  }
-  for (const child of children.flat()) if (child != null) node.append(child.nodeType ? child : document.createTextNode(String(child)));
-  return node;
-}
-function safeName(name, fallback = 'Project1') { const s = String(name).replace(/[^\w .-]/g, '_').slice(0, 100); return s || fallback; }
-const VERSION = '0.6.0';
-
-return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERSION};
-})();
-
 /* ../language/errors.js */
-__modules[2]=(()=>{
+__modules[0]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -108,8 +13,8 @@ return {VBError};
 })();
 
 /* ../runtime/calendar.js */
-__modules[3]=(()=>{
-const {VBError}=__modules[2];
+__modules[1]=(()=>{
+const {VBError}=__modules[0];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -186,9 +91,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ../language/lexer.js */
-__modules[4]=(()=>{
-const {asDate}=__modules[3];
-const {VBError}=__modules[2];
+__modules[2]=(()=>{
+const {asDate}=__modules[1];
+const {VBError}=__modules[0];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -280,8 +185,8 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* ../runtime/decimal.js */
-__modules[5]=(()=>{
-const {VBError}=__modules[2];
+__modules[3]=(()=>{
+const {VBError}=__modules[0];
 
 const MAX=(1n<<96n)-1n;
 const abs=n=>n<0n?-n:n;
@@ -357,12 +262,107 @@ class VBDecimal {
 return {VBDecimal};
 })();
 
+/* ../core/window-context.js */
+__modules[4]=(()=>{
+
+/** Documents belonging to one live IDE session. No global DOM monkey-patching. */
+const documents = new Set();
+let current = null;
+function registerUIDocument(doc) {
+  documents.add(doc);
+  const activate = () => { current = doc; };
+  doc.addEventListener('focusin', activate, true);
+  doc.addEventListener('pointerdown', activate, true);
+  return () => {
+    documents.delete(doc);
+    doc.removeEventListener('focusin', activate, true);
+    doc.removeEventListener('pointerdown', activate, true);
+    if (current === doc) current = null;
+  };
+}
+function uiDocuments() {
+  return [...new Set([...(typeof document === 'undefined' ? [] : [document]), ...documents])];
+}
+function uiDocument(node) {
+  if (node?.ownerDocument) return node.ownerDocument;
+  return current || uiDocuments().find(doc => doc.hasFocus()) || document;
+}
+function hasUIDialog() {
+  return uiDocuments().some(doc => doc.querySelector('.ide-modal-cover'));
+}
+
+return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
+})();
+
+/* ../core/core.js */
+__modules[5]=(()=>{
+const {uiDocument}=__modules[4];
+
+/** Small framework-independent primitives shared by the IDE and runtime. */
+class Signal {
+  constructor() { this.listeners = new Map(); }
+  on(type, fn) { const list = this.listeners.get(type) || new Set(); list.add(fn); this.listeners.set(type, list); return () => list.delete(fn); }
+  emit(type, value) { for (const fn of this.listeners.get(type) || []) fn(value); }
+  clear() { this.listeners.clear(); }
+}
+class History extends Signal {
+  constructor(limit=120,maxBytes=32*1024*1024){super();this.limit=limit;this.maxBytes=maxBytes;this.undoStack=[];this.redoStack=[];}
+  trim(){let size=this.undoStack.reduce((n,e)=>n+(e.bytes??(e.before.length+e.after.length)*2),0);while(this.undoStack.length>1&&(this.undoStack.length>this.limit||size>this.maxBytes)){const e=this.undoStack.shift();size-=(e.bytes??(e.before.length+e.after.length)*2);}}
+  record(before,after,label='Edit'){
+    const a=JSON.stringify(before),b=JSON.stringify(after);if(a===b)return false;
+    this.undoStack.push({before:a,after:b,label});this.redoStack=[];this.trim();this.emit('change');return true;
+  }
+  // Text edits keep only source strings; they never copy/serialize form trees or image assets.
+  recordValue(key,before,after,apply,label='Edit',merge=false){
+    if(before===after)return false;const last=this.undoStack.at(-1);
+    if(merge&&last?.kind==='value'&&last.key===key)last.after=after;
+    else this.undoStack.push({kind:'value',key,before,after,apply,label});
+    this.redoStack=[];this.trim();this.emit('change');return true;
+  }
+  // Sparse edit history: memory is proportional to changed text, not module size.
+  recordPatch(key,patch,apply,label='Edit',merge=false){
+    if(patch.before===patch.after)return false;const item=structuredClone(patch),bytes=JSON.stringify(item).length*2,last=this.undoStack.at(-1);
+    if(merge&&last?.kind==='patch'&&last.key===key&&last.patches.length<256){last.patches.push(item);last.bytes+=bytes;}
+    else this.undoStack.push({kind:'patch',key,patches:[item],bytes,apply,label,before:'',after:''});
+    this.redoStack=[];this.trim();this.emit('change');return true;
+  }
+  undo(current){const e=this.undoStack.at(-1);if(!e)return null;const value=e.kind==='patch'?e.apply(structuredClone(current),e.patches,true):e.kind==='value'?e.apply(structuredClone(current),e.before):JSON.parse(e.before);this.undoStack.pop();this.redoStack.push(e);this.emit('change');return value;}
+  redo(current){const e=this.redoStack.at(-1);if(!e)return null;const value=e.kind==='patch'?e.apply(structuredClone(current),e.patches,false):e.kind==='value'?e.apply(structuredClone(current),e.after):JSON.parse(e.after);this.redoStack.pop();this.undoStack.push(e);this.emit('change');return value;}
+  reset(){this.undoStack=[];this.redoStack=[];this.emit('change');}
+}
+const clone = value => structuredClone(value);
+const lower = name => String(name).toLowerCase().replace(/[$%&!#@]$/, '');
+const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function debounce(fn, delay = 200) { let id; const f = (...args) => { clearTimeout(id); id = setTimeout(() => fn(...args), delay); }; f.cancel = () => clearTimeout(id); return f; }
+function download(name, data, type = 'application/octet-stream') {
+  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], {type}));
+  const a = uiDocument().createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) {
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (v != null && (k.startsWith('aria-') || ['spellcheck','draggable','contenteditable'].includes(k))) node.setAttribute(k,String(v));
+    else if (v !== false && v != null) node.setAttribute(k, v === true ? '' : v);
+  }
+  for (const child of children.flat()) if (child != null) node.append(child.nodeType ? child : document.createTextNode(String(child)));
+  return node;
+}
+function safeName(name, fallback = 'Project1') { const s = String(name).replace(/[^\w .-]/g, '_').slice(0, 100); return s || fallback; }
+const VERSION = '0.6.0';
+
+return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERSION};
+})();
+
 /* ../runtime/values.js */
 __modules[6]=(()=>{
-const {VBDecimal}=__modules[5];
-const {asDate,dateToSerial}=__modules[3];
-const { VBError }=__modules[4];
-const { lower }=__modules[1];
+const {VBDecimal}=__modules[3];
+const {asDate,dateToSerial}=__modules[1];
+const { VBError }=__modules[2];
+const { lower }=__modules[5];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -554,9 +554,173 @@ function describe(value){if(value instanceof VBErrorValue)return value.toString(
 return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,vbString,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
 })();
 
-/* ../runtime/binary-codec.js */
+/* ../data/common.js */
 __modules[7]=(()=>{
-const {VBError}=__modules[4];
+const {VBError}=__modules[2];
+const {VBArray, VBCurrency, VBDecimal}=__modules[6];
+
+
+const DATA_LIMITS = Object.freeze({rows:100000, cells:1000000, bytes:20*1024*1024, pages:100});
+const DATA_CONSTANTS = Object.freeze({
+  adStateClosed:0, adStateOpen:1, adStateConnecting:2, adStateExecuting:4,
+  adOpenForwardOnly:0, adOpenKeyset:1, adOpenDynamic:2, adOpenStatic:3,
+  adLockReadOnly:1, adLockPessimistic:2, adLockOptimistic:3, adLockBatchOptimistic:4,
+  adUseServer:2, adUseClient:3, adCmdText:1, adCmdTable:2, adCmdStoredProc:4,
+  adExecuteNoRecords:128, adParamInput:1, adParamOutput:2, adParamInputOutput:3,
+  adParamReturnValue:4, adSchemaTables:20, adSchemaColumns:4,
+  adModeRead:1, adModeWrite:2, adModeReadWrite:3,
+  adSmallInt:2, adInteger:3, adSingle:4, adDouble:5, adCurrency:6,
+  adDate:7, adBoolean:11, adVariant:12, adUnsignedTinyInt:17, adBigInt:20,
+  adBinary:128, adChar:129, adWChar:130, adVarChar:200, adLongVarChar:201,
+  adVarWChar:202, adLongVarWChar:203, adVarBinary:204, adLongVarBinary:205,
+  dbOpenSnapshot:4, dbOpenDynaset:2, dbOpenTable:1, dbReadOnly:4,
+});
+function dataError(message, number=3001){return new VBError(message,number,'VB6.Data');}
+function assertData(condition,message,number=3001){if(!condition)throw dataError(message,number);}
+function after(value,callback){return value && typeof value.then==='function'?value.then(callback):callback(value);}
+function dataList(value){return value instanceof VBArray?[...value]:Array.isArray(value)?value:value===undefined?[]:[value];}
+function sqlValue(value){
+  if(value==null)return null;
+  if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();
+  if(value instanceof Date)return value.toISOString();
+  if(value instanceof VBArray)return Uint8Array.from([...value]);
+  if(value instanceof Uint8Array)return value;
+  if(typeof value==='boolean')return value?1:0;
+  assertData(typeof value==='string'||typeof value==='number','Unsupported parameter value',13);
+  assertData(typeof value!=='number'||Number.isFinite(value),'Non-finite data value',13);
+  return value;
+}
+function quoteIdentifier(value){return '"'+String(value).replace(/"/g,'""')+'"';}
+function sameValue(a,b){
+  if(a instanceof Uint8Array&&b instanceof Uint8Array)return a.length===b.length&&a.every((v,i)=>v===b[i]);
+  if(a instanceof Date&&b instanceof Date)return +a===+b;
+  return Object.is(a,b);
+}
+/** ADO/ODBC strings: quotes, braces, escaped delimiters, case-insensitive keys. */
+function parseConnectionString(text){
+  const result=Object.create(null);text=String(text??'');let i=0;
+  assertData(text.length<=32768,'Connection string is too long',7);
+  while(i<text.length){
+    while(/[;\s]/.test(text[i]||'')&&i<text.length)i++;
+    if(i===text.length)break;
+    const start=i;while(i<text.length&&text[i]!=='='&&text[i]!==';')i++;
+    assertData(text[i]==='=','Expected key=value in connection string');
+    const key=text.slice(start,i++).trim().toLowerCase();assertData(key,'Empty connection property');
+    while(/\s/.test(text[i]||'')&&i<text.length)i++;
+    let value='';const opening=text[i],closing=opening==='{'?'}':opening;
+    if(['"',"'",'{'].includes(opening)){
+      i++;let closed=false;
+      while(i<text.length){const ch=text[i++];if(ch===closing){if(text[i]===closing){value+=closing;i++;}else{closed=true;break;}}else value+=ch;}
+      assertData(closed,'Unterminated connection-string value');
+      while(/\s/.test(text[i]||'')&&i<text.length)i++;
+      assertData(i===text.length||text[i]===';','Unexpected text after quoted value');
+    }else{const start=i;while(i<text.length&&text[i]!==';')i++;value=text.slice(start,i).trim();}
+    assertData(!Object.hasOwn(result,key),'Duplicate connection property: '+key);
+    result[key]=value;
+  }
+  return result;
+}
+function connectionConfiguration(value,profiles=[]){
+  if(value&&typeof value==='object')return structuredClone(value);
+  const text=String(value??'');const named=profiles.find(p=>p.name.toLowerCase()===text.toLowerCase());
+  if(named)return structuredClone(named);
+  const fields=parseConnectionString(text);
+  if(fields.name){const profile=profiles.find(p=>p.name.toLowerCase()===fields.name.toLowerCase());assertData(profile,'Data connection not found',3706);return structuredClone(profile);}
+  const provider=(fields.provider||'SQLite').toLowerCase();
+  const result={provider,database:fields['data source']||fields.database||':memory:'};
+  if(['rest','json','odata','graphql','gateway'].includes(provider))result.url=fields['data source']||fields.url||'';
+  if(fields['rows path'])result.rowsPath=fields['rows path'];
+  if(fields['credential reference'])result.credentialRef=fields['credential reference'];
+  if(fields.profile)result.profile=fields.profile;
+  if(fields['read only'])result.readOnly=/^(true|yes|1)$/i.test(fields['read only']);
+  return result;
+}
+const SECRET=/^(?:(?:x|proxy)[-_ ]?)?(password|pwd|token|secret|authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|cookie|set[-_ ]?cookie)$/i;
+function assertPublicConfiguration(config){
+  function check(value){
+    if(!value||typeof value!=='object')return;
+    for(const [key,item] of Object.entries(value)){
+      assertData(!SECRET.test(key)||item==null||item==='','Store credentials at runtime, not in project data connections',70);
+      if(typeof item==='string'&&/connectionstring/i.test(key)){
+        for(const [part,v] of Object.entries(parseConnectionString(item)))assertData(!SECRET.test(part)||!v,'Remove credentials from connection strings before saving',70);
+      }
+      if(typeof item==='string'&&/^(url|endpoint|nexturl|baseurl)$/i.test(key)&&item){
+        const u=new URL(item,'http://project.invalid');assertData(!u.username&&!u.password,'Credentials in URLs cannot be shipped',70);
+        for(const param of u.searchParams.keys())assertData(!SECRET.test(param),'Secret query parameters cannot be shipped',70);
+      }
+      check(item);
+    }
+  }
+  check(config);return config;
+}
+function normalizeDataSources(value){
+  if(!value)return {version:1,connections:[],commands:[]};
+  assertData(value.version===1,'Unsupported data-source configuration version');
+  assertData(Array.isArray(value.connections)&&Array.isArray(value.commands),'Invalid data-source configuration');
+  assertData(value.connections.length<=256&&value.commands.length<=2048,'Too many data objects',7);
+  const result=structuredClone(value),names=new Set(['connections','commands','setcredential','clearcredentials','constructor','prototype','__type']);
+  for(const entry of [...result.connections,...result.commands]){
+    assertData(/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(entry.name),'Use a Visual Basic identifier for data objects');
+    const key=entry.name.toLowerCase();assertData(!names.has(key),'Duplicate data object: '+entry.name);names.add(key);
+  }
+  for(const command of result.commands){
+    assertData(!names.has(('rs'+command.name).toLowerCase()),'A generated recordset name conflicts with a data object');names.add(('rs'+command.name).toLowerCase());
+    assertData(result.connections.some(c=>c.name.toLowerCase()===String(command.connection).toLowerCase()),'Command connection does not exist');
+    assertData(!command.parameters||Array.isArray(command.parameters)&&command.parameters.length<=1024,'Invalid command parameters');
+    const parameters=new Set();for(const p of command.parameters||[]){assertData(/^[A-Za-z][A-Za-z0-9_]*$/.test(p.name)&&!parameters.has(p.name.toLowerCase()),'Invalid or duplicate parameter name');parameters.add(p.name.toLowerCase());}
+  }
+  for(const connection of result.connections){
+    assertData(typeof connection.provider==='string'&&connection.provider,'A provider is required');
+    if(connection.fields){assertData(Array.isArray(connection.fields)&&connection.fields.length<=1024,'Invalid field mapping');const fields=new Set();for(const f of connection.fields){assertData(typeof f.name==='string'&&f.name&&!fields.has(f.name.toLowerCase()),'Duplicate or empty field mapping');fields.add(f.name.toLowerCase());pathValue({},f.path||f.name);}}
+    if(connection.timeout!=null)assertData(Number.isFinite(Number(connection.timeout))&&Number(connection.timeout)>0&&Number(connection.timeout)<=600,'Invalid connection timeout');
+  }
+  return assertPublicConfiguration(result);
+}
+function safeHttpURL(value,base){
+  let url;try{url=new URL(value,base);}catch{throw dataError('Invalid HTTP data-source URL');}
+  assertData(['http:','https:'].includes(url.protocol)&&!url.username&&!url.password,'Only HTTP(S) URLs without embedded credentials are supported',70);
+  url.hash='';return url;
+}
+function pathValue(value,path=''){
+  if(!path)return value;
+  if(value&&Object.hasOwn(Object(value),path))return value[path];
+  const parts=String(path).replace(/^\$\.?/,'').split('.');
+  for(const key of parts){assertData(key&&!['__proto__','constructor','prototype'].includes(key),'Invalid JSON field path');value=value!=null&&Object.hasOwn(Object(value),key)?value[key]:undefined;}
+  return value;
+}
+function columnType(value){
+  if(value instanceof Uint8Array)return 204;
+  if(value instanceof Date)return 7;
+  if(typeof value==='boolean')return 11;
+  if(typeof value==='number')return Number.isInteger(value)&&value>=-2147483648&&value<=2147483647?3:5;
+  if(value===null||value===undefined)return 12;
+  return typeof value==='string'?202:12;
+}
+function resultFromRows(rows,fields){
+  assertData(Array.isArray(rows),'Data response must contain an array of records',13);
+  assertData(rows.length<=DATA_LIMITS.rows,'Row limit exceeded',7);
+  assertData(rows.every(r=>r&&typeof r==='object'&&!Array.isArray(r)),'Every record must be a JSON object',13);
+  const keys=new Set();if(!fields?.length)for(const row of rows)for(const key of Object.keys(row)){keys.add(key);assertData(keys.size<=1024,'Column limit exceeded',7);}
+  const names=fields?.length?fields.map(f=>f.name):[...keys];
+  assertData(names.length<=1024&&names.length*rows.length<=DATA_LIMITS.cells,'Result allocation limit exceeded',7);
+  const columns=names.map((name,index)=>{
+    const definition=fields?.[index],path=definition?.path||name;
+    const samples=rows.map(row=>pathValue(row,path)).filter(v=>v!=null);
+    const types=new Set(samples.map(columnType));
+    let type=types.size===1?[...types][0]:[...types].every(t=>[3,5].includes(t))?5:12;
+    if(definition?.type!=null)type=Number(definition.type);
+    return {Name:name,Type:type,DefinedSize:definition?.size||0,path};
+  });
+  const values=rows.map(row=>columns.map(col=>pathValue(row,col.path)??null));
+  return {columns,values,rowsAffected:0};
+}
+
+return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,quoteIdentifier,sameValue,parseConnectionString,connectionConfiguration,assertPublicConfiguration,normalizeDataSources,safeHttpURL,pathValue,columnType,resultFromRows};
+})();
+
+/* ../runtime/binary-codec.js */
+__modules[8]=(()=>{
+const {VBError}=__modules[2];
 const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[6];
 
 
@@ -653,8 +817,8 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* ../project/binary-assets.js */
-__modules[8]=(()=>{
-const {VBError}=__modules[4];
+__modules[9]=(()=>{
+const {VBError}=__modules[2];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
 const fail=message=>{throw new VBError(message,1002);};
@@ -665,10 +829,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ../project/native-text.js */
-__modules[9]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[7];
-const {VBError}=__modules[4];
-const {fromBase64,toBase64}=__modules[8];
+__modules[10]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[8];
+const {VBError}=__modules[2];
+const {fromBase64,toBase64}=__modules[9];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -732,9 +896,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ../project/frx.js */
-__modules[10]=(()=>{
-const {VBError}=__modules[4];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[9];
+__modules[11]=(()=>{
+const {VBError}=__modules[2];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[10];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -837,9 +1001,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[11]=(()=>{
-const {VBError}=__modules[4];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[10];
+__modules[12]=(()=>{
+const {VBError}=__modules[2];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[11];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -931,10 +1095,12 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* ../project/model.js */
-__modules[12]=(()=>{
-const { clone, lower, safeName }=__modules[1];
-const {normalizeResources}=__modules[11];
-const { VBError }=__modules[4];
+__modules[13]=(()=>{
+const {normalizeDataSources}=__modules[7];
+const { clone, lower, safeName }=__modules[5];
+const {normalizeResources}=__modules[12];
+const { VBError }=__modules[2];
+
 
 
 
@@ -942,9 +1108,9 @@ const PROJECT_SCHEMA=1;
 let sequence=0;
 const newId=()=>`id_${Date.now().toString(36)}_${(++sequence).toString(36)}`;
 const BASIC_CONTROL_TYPES=['Pointer','PictureBox','Label','TextBox','Frame','CommandButton','CheckBox','OptionButton','ComboBox','ListBox','HScrollBar','VScrollBar','Timer','DriveListBox','DirListBox','FileListBox','Shape','Line','Image','Data','OLE'];
-const EXTENDED_CONTROL_TYPES=['TreeView','ListView','ProgressBar','Slider','StatusBar','Toolbar','TabStrip','SSTab','RichTextBox','MSFlexGrid','MSHFlexGrid','DataGrid','DTPicker','MonthView','UpDown','ImageList','CommonDialog','MSChart'];
+const EXTENDED_CONTROL_TYPES=['TreeView','ListView','ProgressBar','Slider','StatusBar','Toolbar','TabStrip','SSTab','RichTextBox','MSFlexGrid','MSHFlexGrid','DataGrid','DTPicker','MonthView','UpDown','ImageList','CommonDialog','MSChart','Adodc'];
 const CONTROL_DEFAULTS={
-  Label:{Caption:'Label',Width:1440,Height:300,BackStyle:0,Alignment:0},TextBox:{BackColor:-2147483643,Text:'',Width:1800,Height:315,MultiLine:0,ScrollBars:0,MaxLength:0,PasswordChar:'',Locked:0,Alignment:0},CommandButton:{Caption:'Command',Width:1440,Height:420,Default:0,Cancel:0},Frame:{Caption:'Frame',Width:3300,Height:1800},CheckBox:{Caption:'Check',Value:0,Width:1800,Height:300},OptionButton:{Caption:'Option',Value:0,Width:1800,Height:300},ComboBox:{BackColor:-2147483643,Text:'',List:[],Width:2100,Height:315,Style:0,ListIndex:-1},ListBox:{BackColor:-2147483643,List:[],Width:2400,Height:1800,ListIndex:-1,MultiSelect:0,Sorted:0},PictureBox:{Width:2400,Height:1800,BackColor:-2147483633,ScaleMode:3,AutoRedraw:-1,BorderStyle:1},Image:{Width:1440,Height:1440,Stretch:-1},Shape:{Width:1440,Height:900,Shape:0,FillStyle:1,FillColor:16777215,BorderColor:0},Line:{Width:1440,Height:15,BorderColor:0,BorderWidth:1},Timer:{Interval:1000,Enabled:0,Width:420,Height:420},HScrollBar:{Width:2400,Height:255,Min:0,Max:32767,Value:0,SmallChange:1,LargeChange:100},VScrollBar:{Width:255,Height:2400,Min:0,Max:32767,Value:0,SmallChange:1,LargeChange:100},ProgressBar:{Width:2700,Height:315,Min:0,Max:100,Value:30},Slider:{Width:2700,Height:450,Min:0,Max:10,Value:3,TickFrequency:1},TreeView:{BackColor:-2147483643,Width:2700,Height:2100,LineStyle:1},ListView:{BackColor:-2147483643,Width:3600,Height:2100,View:3,FullRowSelect:-1,GridLines:0},StatusBar:{Width:5400,Height:315,SimpleText:'Ready',Style:1},Toolbar:{Width:5400,Height:450},TabStrip:{Width:4500,Height:2400},SSTab:{Width:4500,Height:2400,Tab:0,Tabs:3},RichTextBox:{BackColor:-2147483643,Width:3600,Height:2100,Text:'Rich text',MultiLine:-1,ScrollBars:3},MSFlexGrid:{Width:4200,Height:2100,Rows:5,Cols:3,FixedRows:1,FixedCols:1,Row:1,Col:1},MSHFlexGrid:{Width:4200,Height:2100,Rows:5,Cols:3,FixedRows:1,FixedCols:1,Row:1,Col:1},DataGrid:{Width:4200,Height:2100,Rows:5,Cols:3},DTPicker:{BackColor:-2147483643,Width:2400,Height:330,Value:'2026-10-03',Format:0},MonthView:{BackColor:-2147483643,Width:3300,Height:2700,Value:'2026-10-03'},UpDown:{Width:255,Height:450,Min:0,Max:100,Value:0,Increment:1,Wrap:0,Orientation:0},ImageList:{Width:420,Height:420,ImageWidth:16,ImageHeight:16},CommonDialog:{Width:420,Height:420,Filter:'Text files|*.txt|All files|*.*',FileName:'',DialogTitle:'Open'},MSChart:{BackColor:-2147483643,Width:4200,Height:2550,ChartType:1,RowCount:5,ColumnCount:1},FileListBox:{BackColor:-2147483643,Width:2400,Height:1500,Pattern:'*.*',Path:'/'},DirListBox:{BackColor:-2147483643,Width:2400,Height:1500,Path:'/'},DriveListBox:{BackColor:-2147483643,Width:2400,Height:315,Drive:'C:'},Data:{Width:2400,Height:315,Caption:'Data'},OLE:{Width:1800,Height:1200,Caption:'OLE (unsupported)'}
+  Label:{Caption:'Label',Width:1440,Height:300,BackStyle:0,Alignment:0},TextBox:{BackColor:-2147483643,Text:'',Width:1800,Height:315,MultiLine:0,ScrollBars:0,MaxLength:0,PasswordChar:'',Locked:0,Alignment:0},CommandButton:{Caption:'Command',Width:1440,Height:420,Default:0,Cancel:0},Frame:{Caption:'Frame',Width:3300,Height:1800},CheckBox:{Caption:'Check',Value:0,Width:1800,Height:300},OptionButton:{Caption:'Option',Value:0,Width:1800,Height:300},ComboBox:{BackColor:-2147483643,Text:'',List:[],Width:2100,Height:315,Style:0,ListIndex:-1},ListBox:{BackColor:-2147483643,List:[],Width:2400,Height:1800,ListIndex:-1,MultiSelect:0,Sorted:0},PictureBox:{Width:2400,Height:1800,BackColor:-2147483633,ScaleMode:3,AutoRedraw:-1,BorderStyle:1},Image:{Width:1440,Height:1440,Stretch:-1},Shape:{Width:1440,Height:900,Shape:0,FillStyle:1,FillColor:16777215,BorderColor:0},Line:{Width:1440,Height:15,BorderColor:0,BorderWidth:1},Timer:{Interval:1000,Enabled:0,Width:420,Height:420},HScrollBar:{Width:2400,Height:255,Min:0,Max:32767,Value:0,SmallChange:1,LargeChange:100},VScrollBar:{Width:255,Height:2400,Min:0,Max:32767,Value:0,SmallChange:1,LargeChange:100},ProgressBar:{Width:2700,Height:315,Min:0,Max:100,Value:30},Slider:{Width:2700,Height:450,Min:0,Max:10,Value:3,TickFrequency:1},TreeView:{BackColor:-2147483643,Width:2700,Height:2100,LineStyle:1},ListView:{BackColor:-2147483643,Width:3600,Height:2100,View:3,FullRowSelect:-1,GridLines:0},StatusBar:{Width:5400,Height:315,SimpleText:'Ready',Style:1},Toolbar:{Width:5400,Height:450},TabStrip:{Width:4500,Height:2400},SSTab:{Width:4500,Height:2400,Tab:0,Tabs:3},RichTextBox:{BackColor:-2147483643,Width:3600,Height:2100,Text:'Rich text',MultiLine:-1,ScrollBars:3},MSFlexGrid:{Width:4200,Height:2100,Rows:5,Cols:3,FixedRows:1,FixedCols:1,Row:1,Col:1},MSHFlexGrid:{Width:4200,Height:2100,Rows:5,Cols:3,FixedRows:1,FixedCols:1,Row:1,Col:1},DataGrid:{Width:4200,Height:2100,Rows:5,Cols:3},DTPicker:{BackColor:-2147483643,Width:2400,Height:330,Value:'2026-10-03',Format:0},MonthView:{BackColor:-2147483643,Width:3300,Height:2700,Value:'2026-10-03'},UpDown:{Width:255,Height:450,Min:0,Max:100,Value:0,Increment:1,Wrap:0,Orientation:0},ImageList:{Width:420,Height:420,ImageWidth:16,ImageHeight:16},CommonDialog:{Width:420,Height:420,Filter:'Text files|*.txt|All files|*.*',FileName:'',DialogTitle:'Open'},MSChart:{BackColor:-2147483643,Width:4200,Height:2550,ChartType:1,RowCount:5,ColumnCount:1},FileListBox:{BackColor:-2147483643,Width:2400,Height:1500,Pattern:'*.*',Path:'/'},DirListBox:{BackColor:-2147483643,Width:2400,Height:1500,Path:'/'},DriveListBox:{BackColor:-2147483643,Width:2400,Height:315,Drive:'C:'},Data:{Width:2400,Height:315,Caption:'Data',DatabaseName:'',Connect:'',RecordSource:'',RecordsetType:2,ReadOnly:0},Adodc:{Width:2400,Height:315,Caption:'Adodc',ConnectionString:'',RecordSource:'',CommandType:1,CursorType:3,LockType:3,ReadOnly:0},OLE:{Width:1800,Height:1200,Caption:'OLE (unsupported)'}
 };
 function createControl(type,name=null,left=300,top=300){const id=newId();return {id,name:name||type+'1',type,parent:null,properties:{Name:name||type+'1',Left:left,Top:top,Width:1800,Height:450,Visible:-1,Enabled:-1,TabIndex:0,TabStop:['Label','Frame','Shape','Line','Image','StatusBar','ProgressBar','Timer','ImageList','CommonDialog'].includes(type)?0:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,ForeColor:-2147483640,BackColor:-2147483633,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[type]||{})}};}
 function createForm(name='Form1',caption=name){return {id:newId(),name,kind:'form',code:`Option Explicit\n\nPrivate Sub Form_Load()\n    \nEnd Sub\n`,form:{id:newId(),name,type:'Form',properties:{Name:name,Caption:caption,ClientWidth:9000,ClientHeight:6000,Width:9120,Height:6450,Left:300,Top:300,StartUpPosition:2,BorderStyle:2,BackColor:-2147483633,ForeColor:-2147483640,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,ScaleMode:1,KeyPreview:0,Visible:-1,Enabled:-1},controls:[],menus:[]}};}
@@ -988,6 +1154,7 @@ function normalizeProject(value){
   if(!Number.isInteger(Number(project.settings.tabWidth))||Number(project.settings.tabWidth)<1||Number(project.settings.tabWidth)>32)project.settings.tabWidth=4;else project.settings.tabWidth=Number(project.settings.tabWidth);
   const grid=Number(project.settings.gridSize);project.settings.gridSize=Number.isFinite(grid)?Math.max(15,Math.min(1200,grid)):120;
   project.settings.renderer=project.settings.renderer==='canvas2d'?'canvas2d':'auto';
+  if(project.dataSources)project.dataSources=normalizeDataSources(project.dataSources);
   if(project.resources)project.resources=normalizeResources(project.resources);
   return project;
 }
@@ -999,7 +1166,7 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../runtime/constants.js */
-__modules[13]=(()=>{
+__modules[14]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -1026,10 +1193,10 @@ return {VB_CONSTANTS};
 })();
 
 /* ../language/binding.js */
-__modules[14]=(()=>{
-const {VBError}=__modules[2];
-const {lower}=__modules[1];
-const {VB_CONSTANTS}=__modules[13];
+__modules[15]=(()=>{
+const {VBError}=__modules[0];
+const {lower}=__modules[5];
+const {VB_CONSTANTS}=__modules[14];
 const {VBCurrency,coerce,unary,binary}=__modules[6];
 
 
@@ -1142,8 +1309,8 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[15]=(()=>{
-const {VBError}=__modules[4];
+__modules[16]=(()=>{
+const {VBError}=__modules[2];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -1169,8 +1336,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[16]=(()=>{
-const {lower}=__modules[1];
+__modules[17]=(()=>{
+const {lower}=__modules[5];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -1213,8 +1380,8 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[17]=(()=>{
-const { tokenize, VBError }=__modules[4];
+__modules[18]=(()=>{
+const { tokenize, VBError }=__modules[2];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -1289,9 +1456,9 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[18]=(()=>{
-const { VBError }=__modules[4];
-const { parseExpression }=__modules[17];
+__modules[19]=(()=>{
+const { VBError }=__modules[2];
+const { parseExpression }=__modules[18];
 const { binary, unary, truth }=__modules[6];
 
 
@@ -1331,14 +1498,14 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[19]=(()=>{
-const {bindConstants}=__modules[14];
-const {defaultIdentifierType,addDefaultTypes}=__modules[15];
-const {validateInterfaces}=__modules[16];
-const { preprocess }=__modules[18];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[4];
-const { parseExpression, parseCall }=__modules[17];
-const { lower }=__modules[1];
+__modules[20]=(()=>{
+const {bindConstants}=__modules[15];
+const {defaultIdentifierType,addDefaultTypes}=__modules[16];
+const {validateInterfaces}=__modules[17];
+const { preprocess }=__modules[19];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[2];
+const { parseExpression, parseCall }=__modules[18];
+const { lower }=__modules[5];
 
 
 
@@ -1541,7 +1708,7 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* pe32.js */
-__modules[20]=(()=>{
+__modules[21]=(()=>{
 
 /** Deterministic PE32 linker. Browser-safe: no Node, native compiler, or binary template. */
 const PE32_BASE = 0x400000;
@@ -1662,7 +1829,7 @@ return {PE32_BASE,BinarySection,PE32Image};
 })();
 
 /* x86.js */
-__modules[21]=(()=>{
+__modules[22]=(()=>{
 
 /** Small checked x86 assembler for the native VB backend (stdcall, 32-bit registers). */
 class X86 {
@@ -1706,7 +1873,7 @@ return {X86};
 })();
 
 /* storage.js */
-__modules[22]=(()=>{
+__modules[23]=(()=>{
 
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
 const key = value => String(value).toLowerCase();
@@ -1877,7 +2044,7 @@ return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHe
 })();
 
 /* arrays.js */
-__modules[23]=(()=>{
+__modules[24]=(()=>{
 
 /** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
  * passes a descriptor slot by reference; it is never exposed to browser code. */
@@ -2080,7 +2247,7 @@ return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayMethods,emitNati
 })();
 
 /* errors.js */
-__modules[24]=(()=>{
+__modules[25]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -2215,14 +2382,14 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[25]=(()=>{
-const {normalizeProject}=__modules[12];
-const {compileProject, parseParameters}=__modules[19];
-const {PE32Image, BinarySection}=__modules[20];
-const {X86}=__modules[21];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[22];
-const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[23];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[24];
+__modules[26]=(()=>{
+const {normalizeProject}=__modules[13];
+const {compileProject, parseParameters}=__modules[20];
+const {PE32Image, BinarySection}=__modules[21];
+const {X86}=__modules[22];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[23];
+const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[24];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[25];
 
 
 
@@ -2263,6 +2430,7 @@ function extractNativeDeclarations(module) {
 class NativeCompiler {
   constructor(project) {
     this.project = normalizeProject(project); this.externals = new Map();
+    if (this.project.dataSources?.connections?.length || this.project.modules.some(m => m.form?.controls?.some(c => c.properties?.DataSource || c.properties?.DataMember || /^(?:Data|Adodc)$/i.test(c.type)))) this.fail('Data-source providers and data-bound controls require the HTML or Electron desktop target; freestanding PE32 AOT does not implement the data runtime');
     if (project.resources?.entries?.length) this.fail('Native resource lowering is not yet implemented; use the classic or desktop target');
     const targetType = project.nativeProject?.entries?.find(e => key(e.key) === 'type')?.value;
     if (targetType && key(targetType) !== 'exe') this.fail('Freestanding AOT currently requires a Standard EXE project');
@@ -2866,10 +3034,10 @@ return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[26]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[25];
-const {PE32Image, BinarySection, PE32_BASE}=__modules[20];
-const {X86}=__modules[21];
+__modules[27]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[26];
+const {PE32Image, BinarySection, PE32_BASE}=__modules[21];
+const {X86}=__modules[22];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
 
 
@@ -2877,5 +3045,5 @@ const {X86}=__modules[21];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[26];
+globalThis["VB6Native"]=__modules[27];
 })();

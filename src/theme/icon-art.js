@@ -129,6 +129,7 @@ ctl('HScrollBar',scroll());ctl('VScrollBar',scroll().turn());ctl('Timer',p().ova
 ctl('DriveListBox',p().bevel(0,4,16,9).rect(2,6,10,2,'s').line(2,10,10,10).dot(13,10,'l'));
 ctl('DirListBox',folder());ctl('FileListBox',p().frame(1,1,14,14).rect(2,2,4,5,'f').line(7,3,12,3,'n').line(7,5,11,5,'n').rect(2,9,4,5,'f').line(7,10,12,10,'n').line(7,12,11,12,'n'));
 ctl('Shape',p().oval(0,0,10,10,'n','c').frame(6,6,10,10,'r','e'));ctl('Line',p().line(1,14,14,1));
+ctl('Adodc',p().bevel(0,5,16,9).line(2,7,2,11).line(5,7,3,9).line(3,9,5,11).line(10,7,12,9).line(12,9,10,11).line(13,7,13,11).rect(4,0,8,4,'n').text('A',6,0,'w'));
 ctl('Data',p().bevel(0,4,16,9).line(2,6,2,10).line(5,6,3,8).line(3,8,5,10).line(10,6,12,8).line(12,8,10,10).line(13,6,13,10));ctl('OLE',p().frame(0,3,16,11,'s','w').text('OLE',2,6));
 // Distinct common-controls/ActiveX silhouettes (not generic grid aliases).
 ctl('TreeView',p().frame(0,0,16,16).line(3,3,3,12,'s').line(3,7,8,7,'s').line(3,12,8,12,'s').frame(1,1,5,4,'o','h').frame(8,5,6,4,'o','h').frame(8,10,6,4,'o','h'));

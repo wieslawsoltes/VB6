@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import { newProject, createForm, createControl } from '../src/project/model.js';
 const p = newProject('NativeSmoke');
 p.settings.renderer = 'auto';
+// Explicit network capability for the disposable Electron smoke fixture only.
+p.dataSources = {version:1, connections:[{name:'NativeDataFixture',provider:'rest',url:'http://127.0.0.1:4286/customers',readOnly:true}], commands:[]};
 p.modules[0].code = `Option Explicit
 Public RejectClose As Boolean
 Public ResizeCount As Long

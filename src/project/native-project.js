@@ -1,3 +1,4 @@
+import {dataSidecarPath,decodeDataSidecar} from '../data/project-sidecar.js';
 /** VB6 project/workspace interchange. No native code, COM activation or network I/O. */
 import {newProject,newId,normalizeProject} from './model.js';
 import {readRES} from './res.js';
@@ -92,6 +93,7 @@ function singleProject(entries,path,options,api,diagnostics){
   project.startup=meta?.startup||project.modules.find(m=>m.form)?.name||'Sub Main';
   const res=meta?.rawEntries.find(r=>r.key.toLowerCase()==='resfile32');
   if(res){const ref=unquote(res.value),resolved=resolve(entries,path,ref,diagnostics,{fallback:options.basenameFallback!==false});if(!resolved)diagnostics.push({severity:'error',source:project.name,message:'Missing referenced resource file: '+ref});else{try{project.resources=readRES(bytesOf(entries.get(resolved)),resolved);native.resourcePath=resolved;native.resourceRelocated=exactPath(entries,path,ref)!==resolved;consumed.add(resolved);}catch(error){diagnostics.push({severity:'warning',source:resolved,message:'Resource file retained without decoding: '+error.message});}}}
+  if(path){const sidecar=[...entries.keys()].find(name=>name.toLowerCase()===dataSidecarPath(path).toLowerCase());if(sidecar){Object.assign(project,decodeDataSidecar(bytesOf(entries.get(sidecar))));consumed.add(sidecar);diagnostics.push({severity:'info',source:sidecar,message:'Loaded portable browser data definitions and virtual data files. These are not a native VB6 Data Environment designer.'});}}
   const resourcePaths=new Set();for(const m of project.modules)for(const node of m.form?[m.form,...m.form.controls,...m.form.menus]:[])for(const value of Object.values(node.properties||{}))if(value?.resource){const resolved=resolve(entries,m.sourcePath,value.resource,diagnostics);if(resolved)resourcePaths.add(resolved);}
   for(const [name,value]of entries)if(!consumed.has(name)&&(!options.group||resourcePaths.has(name)))project.assets[name]=asset(value);
   hydrateResources(project,diagnostics);

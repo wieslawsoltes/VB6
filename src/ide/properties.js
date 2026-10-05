@@ -29,6 +29,7 @@ export class PropertyInspector {
     [...this.tabs.children].forEach((b,i)=>{const active=(i===0?'alphabetic':'categorized')===this.mode;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;});
     this.ide.propertyCaption.querySelector('strong').textContent='Properties - '+(selected.length>1?'Multiple Controls':selected[0]?.name||module.name);
     const target=this.targets[0],props={Name:target.name,...(target.properties||{})};if(target===form&&form){props.WindowState??=0;if(form.type!=='MDIForm')props.MDIChild??=0;}if(target!==form&&form){props.Index??='';if(['PictureBox','Toolbar','StatusBar'].includes(target.type))props.Align??=0;}if(!form)props.Kind=module.kind;
+    if(form&&target!==form&&['TextBox','Label','CheckBox','ComboBox','DTPicker','DataGrid','MSFlexGrid','MSHFlexGrid'].includes(target.type)){props.DataSource??='';props.DataField??='';props.DataMember??='';}
     let keys=Object.keys(props).filter(key=>!['GridData','ColumnHeaders','ListItems','Nodes','Font'].includes(key));
     if(this.targets.length>1)keys=keys.filter(key=>key!=='Name'&&this.targets.every(t=>Object.hasOwn(t.properties||{},key)));
     const fontKeys=keys.filter(k=>FONTS.includes(k));keys=keys.filter(k=>!FONTS.includes(k));if(fontKeys.length){keys.push('Font');props.Font='(Font)';}
