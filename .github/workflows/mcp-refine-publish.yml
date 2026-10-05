@@ -1,4 +1,4 @@
-name: Publish verified MCP refinements
+name: Finalize verified MCP refinements
 on:
   push:
     branches: [feat/mcp-lifecycle-and-data]
@@ -20,53 +20,48 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply verified source delta and reproduce reviewed product tree
+      - name: Verify input tree and apply the reproduced local-expiry regression fix
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import base64, hashlib, json, lzma, pathlib, subprocess
-          base = '7d821e026b7c7cd34cfc07c452647260080e492e'
-          allowed = {'.github/workflows/mcp-refine-publish.yml'} | {f'tools/.mcp-refine-source.{i}' for i in range(3)}
-          changed = set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
-          assert changed <= allowed, changed
-          encoded = ''.join(pathlib.Path(f'tools/.mcp-refine-source.{i}').read_text().strip() for i in range(3))
-          data = lzma.decompress(base64.b64decode(encoded,validate=True))
-          assert hashlib.sha256(data).hexdigest() == '0ad13086669af29e8761746ee482ebf5c81711ff25b31002c73b1ad7bfa3a2ec'
-          def apply(entries):
-              for entry in entries:
-                  path = pathlib.Path(entry['path'])
-                  assert not path.is_absolute() and '..' not in path.parts
-                  assert path.parts[0] in {'src','tools','tests','docs','README.md'}
-                  before = path.read_bytes() if path.exists() else b''
-                  assert hashlib.sha256(before).hexdigest() == entry['before'], str(path)
-                  lines = before.decode('utf-8').splitlines(True)
-                  previous = len(lines)
-                  for start,end,text in reversed(entry['edits']):
-                      assert 0 <= start <= end <= previous
-                      lines[start:end] = text.splitlines(True)
-                      previous = start
-                  after = ''.join(lines).encode('utf-8')
-                  assert hashlib.sha256(after).hexdigest() == entry['after'], str(path)
-                  path.parent.mkdir(parents=True,exist_ok=True)
-                  path.write_bytes(after)
-              print('Hash-verified source files:',len(entries))
-          apply(json.loads(data))
-          correction = '/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4AjZBDVdAC2ewEcDQ4pS1guZDjBOiklZTdv9U1EUKgsN8LajnLWruWuZCMUvf95PrDpJplFOSnrEJG/3XNrRqi2IpyGFfELor9DdsYBHliFDMZYbIYqU1pGbo4OCiUMVKZcgY4q81SLO1leJPtvve3qGsXMGa/T9sgpRt7jaPt04A5z0+vPp0a5QkSQ/WkH2t0pLNuUm3GFPWB4fotWkjm7kyEg6EGKK9XH3DVmt0eVYLqbpVXGpuzxP838oiKEyj4T/LGVlpyW4iovDK1fXZYZS57nU68LZhQS42pOzqS3aApJgOkY5QoakkcoZLATAXNQqeG6luCTuRPUYCPSuX8eK296aqV1WITS1MzRoSksPGJXPjozSvVJzdCmgm7UI76HR04r96FTLEzvv3k0/o8dBBun2xU4dG09qCovXrsDZJZM0P15niODZkciQ0vewSoILE/0pedA+IiWnMAKEHSNpTo/ENevCCMX9rbcrc6o64dhY6IYYRilcvPZ+gqudM00IWiVfz2qS5FXaT30lLL5GTg4OQgpl4Aff4zlV9EsciVDEACDKUoiXgU3OTK0CZsGEoTdPkj+fXyPa5eUc94Zy9JTl+szqhK22LAuAv7eTJWHGCaIiWgcN4ffq8YC+FPjqvXH3ifgqHnbQ3vX3qrddKCYVslU7EodMeA5OAej5hiHZ/PHdX6BoFjhcTDk3icIw6aOzUnuuWzLfuznS181k0symnK+5y2gI3pMEq+uhAGcKg3wY/zraDHymM0DiYNqrnu3Rv4IWNOwibo2rZzwGmsrGGEFA3LAIWCFcld35jY3un0TiI09uLKWhXbtQ0/2u4XNJ5kamKIbwchP+pCRcheY/QsUdGruw5COmWevV1xpS8oX04tPwl5gUm0YhAzabT86/XxFF7B1h8rDxewfQei+e3dvGMWZjF3361YBtvyjEAvuwHN519S+YbXq2FBg8uZ0CdOujK6JwZHIsRu9VjsbbTs3VbQ5yd5QWvOFubMPFxfhcsOmtjQr9iO+eVO/TY59motMKLkVP0/urqqZeUKz804mCBazKul5T7WkFTHVvx7oVPDFQEsyFpeLmaBzbth5hJ0Y73kjNzOKTtk6frW161Ivkpr8t4VZr9ffkUjNoWDbaVXeODdJELgrb4Ezqm/UduLFZWvozN6J/0HzCtGbeRegOkF7mlX3U6W2frhGy29tLHV5WhMdvtXLKsNq1q5SKQcagImuZ6j2RocFPpjhCoM5cvszv42j2tI3TzQwxqdazcUJs1Kct+qRypTZOg/267qQlN83eZFaQvdmEd0NvoXRQ6u7ZwfEbUlZsaz5YsavbIxvQl5OsMAdPLXgHyoGC7rI6CogKgGYsba2A5PaKTOvyHJHjQPE6AhrAS9Fu+RA09EME3OnxLrrWVzYGG8an/Js8PpPw6VvfDSkRFhugmhGvMT+UXQAAAACuR3YrPdUyfgAB0QjaEQAALMBKfrHEZ/sCAAAAAARZWg=='
-          data = lzma.decompress(base64.b64decode(correction,validate=True))
-          assert hashlib.sha256(data).hexdigest() == '7a77cf78fa129650ae4cac4de1edb0712054107208b1a5633f1d109d079ec7e2'
-          apply(json.loads(data))
-          PY
-          git rm tools/.mcp-refine-source.0 tools/.mcp-refine-source.1 tools/.mcp-refine-source.2
-          npm run build
-          npm test
-          git add -A -- src tools tests docs README.md dist
-          git diff --cached --check
           git rm --cached .github/workflows/mcp-refine-publish.yml
           test "$(git write-tree)" = 'b7cca34f9a137be9b07ac7f1669b31080c27f946'
           git restore --staged --source=HEAD -- .github/workflows/mcp-refine-publish.yml
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/mcp/tasks.js');s=p.read_text()
+          old="  cancelLocal(id) { const entry=this.entries.get(id); if (!entry) return false; this.cancel(id,{principal:entry.principal}); return true; }"
+          new="  cancelLocal(id) { this.purge(); const entry=this.entries.get(id); if (!entry) return false; this.cancelEntry(entry); return true; }"
+          assert old in s;s=s.replace(old,new)
+          old="  cancel(id, ctx) {\n    const entry = this.find(id, ctx);"
+          new="  cancel(id, ctx) { this.cancelEntry(this.find(id, ctx)); return {}; }\n  cancelEntry(entry) {"
+          assert old in s;s=s.replace(old,new)
+          old="    return {};\n  }\n  update(id, responses, ctx)"
+          assert old in s;s=s.replace(old,"  }\n  update(id, responses, ctx)")
+          p.write_text(s)
+          p=Path('tests/mcp-refinement.test.mjs')
+          s=p.read_text()+'''
+          test('MCP tasks: local cancellation safely handles expiry before the timer fires',()=>{
+            let now=0;
+            const tasks=new McpTasks({now:()=>now,ttlMs:100});
+            const handle=tasks.create(()=>new Promise(()=>{}),{principal:'A'});
+            now=101;
+            assert.equal(tasks.cancelLocal(handle.taskId),false);
+            assert.equal(tasks.inspect().length,0);
+            tasks.clear();
+          });
+          '''
+          p.write_text(s)
+          PY
+          npm run build
+          npm test
+          git add src/mcp/tasks.js tests/mcp-refinement.test.mjs dist
+          git diff --cached --check
+          git rm --cached .github/workflows/mcp-refine-publish.yml
+          test "$(git write-tree)" = 'd4c8ba91736868ebe51ebad6c16896a89d5136e9'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-refine-publish.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'feat(mcp): add public data definitions, bounded source reads and local operation controls'
+          git commit -m 'fix(mcp): cancel expired local tasks without a stale-handle exception'
           npm run build
           git diff --exit-code
       - uses: actions/setup-python@v5
@@ -74,7 +69,7 @@ jobs:
           python-version: '3.12'
       - run: pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium
-      - name: Real standalone, HTTP, HTTPS and localhost agent workflows
+      - name: Final standalone, HTTP, HTTPS and localhost agent workflows
         run: |
           export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
           npm run test:mcp:browser
