@@ -3,7 +3,7 @@
 import {coerce, defaultValue} from '../runtime/values.js';
 import {nativeParameterBytes} from './numeric.js';
 const key=value=>String(value).toLowerCase().replace(/[$%&!#@]$/, '');
-const scalarTypes=new Set(['byte','integer','long','boolean','single','double','currency','string']);
+const scalarTypes=new Set(['byte','integer','long','boolean','single','double','currency','date','string']);
 
 /** Pure binding; validates the complete list before emitting any argument code. */
 export function planNativeArguments(signature,args,fail=message=>{throw new Error(message);}) {
@@ -81,7 +81,7 @@ export const nativeCallMethods={
     // caller-owned typed temporary. Strings have a zeroed BSTR owner even when a
     // later argument fails or the callee changes the BSTR and raises an error.
     const temporary=key(parameter.type)==='string'?this.temporaryString():
-      this.arrayWorkspace(['double','currency'].includes(key(parameter.type))?8:4,'byref-value');
+      this.arrayWorkspace(['double','currency','date'].includes(key(parameter.type))?8:4,'byref-value');
     temporary.type=parameter.type;
     this.storageExpression(temporary,node);this.store(temporary);this.rawStorageAddress(temporary);
     return {temporary};

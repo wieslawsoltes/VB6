@@ -9,7 +9,7 @@ new IDE interface or an embedded JavaScript/VB6 execution engine.
 ## Typed Optional arguments
 
 Sub and Function parameters can be declared Optional with Byte, Integer, Long,
-Boolean, Single, Double, Currency or String. Both ByVal and ByRef forms are
+Boolean, Single, Double, Currency, Date or String. Both ByVal and ByRef forms are
 supported. A constant default is bound in the **declaring module**, not the
 caller's scope, and checked for the declared type before machine code is emitted.
 An omitted scalar without an explicit default receives zero, False or an empty
@@ -42,7 +42,7 @@ native numeric backend requires conversion from String text.
 An unsupported default expression, out-of-range default or unsupported type is
 a compile diagnostic. Call-specific default errors identify the declaration's
 module and line. The compiler does not evaluate user procedures or variables to
-obtain a default. Optional Variant/Date/objects/arrays, ParamArray, and IsMissing
+obtain a default. Optional Variant/objects/arrays, ParamArray, and IsMissing
 semantics remain outside the native typed target. Startup Main and native event
 handlers retain their fixed signatures; they cannot gain Optional parameters.
 
@@ -160,5 +160,5 @@ gate once this patch has been pushed to GitHub.
 - ByRef mismatch and explicit grouping: https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/byref-argument-type-mismatch
 
 This remains the direct native-controls/GDI target. It does not add WebGPU,
-Variant containers, Date/Decimal storage, arbitrary classes/COM/OCX, full native
+Variant containers, Decimal storage, arbitrary classes/COM/OCX, full native
 callback/structure interoperability, or licensed Microsoft compiler certification.

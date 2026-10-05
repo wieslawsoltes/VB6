@@ -70,7 +70,7 @@ for(const [decl,body,pattern]of [
  ['Private Sub P(Optional x As Variant)\nEnd Sub','P',/supported scalar/],
  ['Private Sub P(ParamArray x() As Variant)\nEnd Sub','P',/ParamArray/],
  ['Private Sub P(Optional ByRef x() As Long)\nEnd Sub','P',/Optional.*array/i],
- ['Private Sub P(Optional x As Date)\nEnd Sub','P',/supported scalar/],
+ ['Private Sub P(Optional x As Object)\nEnd Sub','P',/supported scalar/],
  ['Private Sub P(Optional x As Byte = 256)\nEnd Sub','P',/Invalid.*default|Overflow/i],
  ['Private Sub P(Optional x As Long = 2147483648#)\nEnd Sub','P',/Invalid.*default|Overflow/i],
  ['Private Sub P(Optional x As Integer = "bad")\nEnd Sub','P',/Invalid.*default|mismatch/i],

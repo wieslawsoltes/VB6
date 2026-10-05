@@ -5,7 +5,7 @@ import {VBCurrency} from '../runtime/values.js';
 const C='native:currency:', DLL='oleaut32.dll';
 const key=value=>String(value).toLowerCase();
 const arg=argument=>({argument}), addr=address=>({address});
-const floats=new Set(['single','double']);
+const floats=new Set(['single','double','date']);
 const scalars=new Set(['byte','integer','long','boolean','single','double','currency']);
 
 export const nativeCurrencyMethods = {
@@ -111,7 +111,7 @@ export const nativeCurrencyMethods = {
       if(query.kind==='literal'&&typeof query.value==='number')this.fail('Native '+name+' needs an explicitly typed value; use a typed variable or conversion');
       const variable=this.variable(query),array=variable?.nativeArray&&!variable.elementOf;
       const type=array?key(variable.type):this.nativeQueryType(query);
-      const descriptor={byte:[17,'Byte'],integer:[2,'Integer'],long:[3,'Long'],boolean:[11,'Boolean'],single:[4,'Single'],double:[5,'Double'],currency:[6,'Currency'],string:[8,'String']}[type];
+      const descriptor={byte:[17,'Byte'],integer:[2,'Integer'],long:[3,'Long'],boolean:[11,'Boolean'],single:[4,'Single'],double:[5,'Double'],date:[7,'Date'],currency:[6,'Currency'],string:[8,'String']}[type];
       if(!descriptor)this.fail('Native '+name+' requires a supported typed value');
       if(!array)this.expression(args[0]);
       x.value(name==='vartype'?descriptor[0]+(array?8192:0):this.string(descriptor[1]+(array?'()':'')));return true;
