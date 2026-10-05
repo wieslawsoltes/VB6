@@ -1,0 +1,106 @@
+name: Prepare reviewed native compatibility source
+on:
+  push:
+    branches: [feat/native-compatibility-boundaries]
+    paths: [.github/workflows/native-boundaries-prepare.yml, 'tools/.native-boundaries-transfer-*']
+permissions:
+  contents: read
+concurrency:
+  group: native-boundaries-prepare
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.publish.outputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify every source preimage and result before publishing
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, lzma, re, subprocess
+          encoded = ''.join(Path(f'tools/.native-boundaries-transfer-{i}').read_text().strip() for i in range(1,5))
+          patch = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '3a67ca997e99819ec18b370c7e836c5027a4b1269d6a3ab6bca4e9f4e6f53f3e', 'Source transfer digest mismatch'
+          entries = []
+          for block in patch.decode().split('diff --git ')[1:]:
+              first = block.splitlines()[0]
+              m = re.fullmatch(r'a/([A-Za-z0-9_./-]+) b/([A-Za-z0-9_./-]+)', first)
+              assert m and m[1] == m[2] and '..' not in m[1] and m[1].startswith(('src/','tests/','tools/')), 'Unapproved patch path'
+              hashes = re.search(r'^index ([a-f0-9]{40})\.\.([a-f0-9]{40})', block, re.M)
+              assert hashes, 'Missing full preimage/result fingerprints'
+              filename = m[1]
+              result = subprocess.run(['git','rev-parse','HEAD:'+filename],capture_output=True,text=True)
+              actual = result.stdout.strip() if result.returncode == 0 else '0'*40
+              assert actual == hashes[1], 'Changed source preimage: '+filename
+              entries.append((filename, hashes[2]))
+          Path('/tmp/native-source.patch').write_bytes(patch)
+          subprocess.run(['git','apply','--index','--unidiff-zero','--check','/tmp/native-source.patch'],check=True)
+          subprocess.run(['git','apply','--index','--unidiff-zero','/tmp/native-source.patch'],check=True)
+          for filename, expected in entries:
+              actual = subprocess.check_output(['git','hash-object',filename],text=True).strip()
+              assert actual == expected, 'Changed source result: '+filename
+          print('Verified', len(entries), 'handwritten source/test/tool files')
+          PY
+          git rm tools/.native-boundaries-transfer-{1,2,3,4}
+          npm run build
+          npm test
+          git add src tests tools dist
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git commit -m 'feat(native): calendar interval intrinsics and checked large SAFEARRAY storage'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-compatibility-boundaries
+          echo "source=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  windows:
+    needs: apply
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [intervals, arrays]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.apply.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run build
+      - name: Compare all calendar cases with installed Windows Script Host
+        if: matrix.suite == 'intervals'
+        shell: pwsh
+        run: ./tools/test-win32-date-intervals.ps1
+      - name: Execute large arrays, sixty dimensions and failed-resize recovery
+        if: matrix.suite == 'arrays'
+        shell: pwsh
+        run: |
+          node tools/win32-large-array-fixtures.mjs
+          if($LASTEXITCODE -ne 0){throw 'Large-array fixture compilation failed'}
+          ./tools/test-win32-dates.ps1 -Directory validation/large-arrays -Program AotLargeArrays -Manifest large-array-build.json -ReportName large-array-execution.json -LifetimeCycles 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-boundaries-initial-${{ matrix.suite }}
+          path: |
+            validation/date-intervals/
+            validation/large-arrays/
+          retention-days: 14
