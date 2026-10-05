@@ -219,3 +219,6 @@ APIs, flags, messages and ABI shapes fail explicitly. See the package's
 [compatibility boundaries](packages/win32-browser/README.md#vb6-adapter) and
 [API inventory](packages/win32-browser/API.md). `npm run pack:win32-browser`
 builds and tests a standalone `.tgz` after `npm run build`; it does not publish to npm.
+### Native workspace and interoperability
+
+Native project support also includes explicit ZIP filename-codepage selection, preserved/restored VBW document windows, recoverable folder-save journals, exclusive immutable ZIP snapshots, trusted custom-control/Automation adapter registries, an opt-in x86/x64 Windows stdio host, and a separately licensed compiler round-trip harness. Native activation is never granted by opening a project. See [native workspace and interoperability](docs/NATIVE-WORKSPACE-INTEROP.md) for commands, deployment contracts, tests, and remaining boundaries.

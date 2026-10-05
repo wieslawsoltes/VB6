@@ -270,8 +270,8 @@ class AgentPanel {
     this.taskList.value = task.id;
     if (this.displayedTask !== task.id) { this.displayedTask = task.id; this.taskName.value = task.title; }
     this.taskDetails.textContent = 'Task: ' + task.title + '\nProvider/model: ' + (agent.provider ? agent.provider + ' / ' + agent.model : '(not started)') + '\nState: ' + agent.state + '\nProject session: ' + (agent.matchesWorkspace() ? 'current' : 'changed — cannot resume') + '\nContext is memory-only; no signatures, tool history or grants are copied by New Task with Context.';
-    this.log.textContent = entries.filter(event => ['user', 'assistant', 'answer'].includes(event.type)).map(event => (event.type === 'assistant' ? 'Agent' : 'You') + ':\n' + event.text).join('\n\n').slice(-200000) + (this.pendingText ? '\n\nAgent:\n' + this.pendingText : '');
-    this.activity.textContent = entries.filter(event => !['user', 'assistant', 'answer'].includes(event.type)).map(event => event.time.slice(11, 19) + ' ' + event.type + ': ' + event.text + (event.arguments ? '\n' + JSON.stringify(event.arguments, null, 2) : '') + (event.result ? '\n' + JSON.stringify(event.result, null, 2) : '')).join('\n').slice(-200000);
+    this.log.textContent = entries.filter(event => ['user', 'assistant', 'question', 'answer'].includes(event.type)).map(event => (event.type === 'assistant' ? 'Agent' : event.type === 'question' ? 'Agent question' : event.type === 'answer' ? 'Your answer' : 'You') + ':\n' + event.text).join('\n\n').slice(-200000) + (this.pendingText ? '\n\nAgent:\n' + this.pendingText : '');
+    this.activity.textContent = entries.filter(event => !['user', 'assistant', 'question', 'answer'].includes(event.type)).map(event => event.time.slice(11, 19) + ' ' + event.type + ': ' + event.text + (event.arguments ? '\n' + JSON.stringify(event.arguments, null, 2) : '') + (event.result ? '\n' + JSON.stringify(event.result, null, 2) : '')).join('\n').slice(-200000);
   }
   refresh() {
     const busy = !!this.pending || this.api.agent.busy;

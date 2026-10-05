@@ -35,6 +35,9 @@ export function taskTools(agent, askUser) {
       async execute(args, {signal} = {}) {
         checkAbort(signal); validateArguments(args, schema);
         if (!args.question.trim() || (args.options && !args.options.length) || args.options?.some(option => !option.trim()) || (args.options && new Set(args.options).size !== args.options.length)) throw new McpError(-32602, 'Use a nonempty question and distinct nonempty options.');
+        // Keep the prompt paired with its answer in public transcripts/handoffs.
+        // Only validated public text is recorded; no native history or authority.
+        agent.emit('question', args.question);
         const answer = await awaitAbort(Promise.resolve(askUser(structuredClone(args), {signal})), signal);
         checkAbort(signal);
         if (answer === null || answer === undefined || answer === false) throw new McpError(-32001, 'The local user cancelled the question.');

@@ -229,3 +229,40 @@ test('tasks: each oversized public text event is bounded with an explicit omissi
   const f = fixture(t); f.agent.emit('assistant', '漢'.repeat(1000000));
   assert.ok(f.agent.transcriptBytes < 512000); assert.match(f.agent.transcript[0].text, /omitted/);
 });
+
+for (const provider of providers) test(`tasks: ${provider} public handoff preserves each question before its answer`, async t => {
+  let current = 0;
+  const f = fixture(t, {askUser: async ({question}) => {
+    assert.equal(f.agent.transcript.at(-1).type, 'question');
+    assert.equal(f.agent.transcript.at(-1).text, question);
+    return question.startsWith('Use') ? 'Yes' : 'No';
+  }});
+  await run(f.agent, async (_, {receive}) => {
+    const questions = ['Use a Customer form?', 'Include a delete button?'];
+    receive(packet(provider, current < questions.length ? [{name: 'vb6_agent_question', args: {question: questions[current++], options: ['Yes', 'No']}}] : []));
+  }, provider, {mode: 'readonly'});
+  const publicContext = f.conversations.handoff();
+  assert.match(publicContext, /Agent question:\nUse a Customer form\?\n\nUser answer:\nYes/);
+  assert.match(publicContext, /Agent question:\nInclude a delete button\?\n\nUser answer:\nNo/);
+  assert.ok(!publicContext.includes('private-signature'));
+  assert.ok(!publicContext.includes('private-thought'));
+  const task = f.conversations.createFromContext(publicContext);
+  assert.ok(task.draft.includes('Use a Customer form?')); assert.equal(task.agent.history.length, 0);
+  assert.equal(f.approvals(), 0); assert.equal(f.ide.history.undoStack.length, 0);
+});
+
+test('tasks: cancelled question remains visible without inventing an answer', async t => {
+  const f = fixture(t, {askUser: async () => null});
+  await assert.rejects(run(f.agent, async (_, {receive}) => receive(packet('openai', [{name: 'vb6_agent_question', args: {question: 'Should the project be changed?'}}]))), /denied/);
+  assert.equal(f.agent.transcript.filter(event => event.type === 'question').length, 1);
+  assert.equal(f.agent.transcript.filter(event => event.type === 'answer').length, 0);
+  assert.ok(f.conversations.handoff().includes('Agent question:\nShould the project be changed?'));
+  assert.equal(f.agent.canResume, false);
+});
+
+test('tasks: rejected question arguments do not enter the public conversation', async t => {
+  const f = fixture(t, {askUser: async () => { throw new Error('must not ask'); }});
+  const question = f.agent.tools.find(tool => tool.name === 'vb6.agent.question');
+  await assert.rejects(question.execute({question: 'Should this be trusted?', options: ['duplicate', 'duplicate']}));
+  assert.equal(f.agent.transcript.length, 0);
+});

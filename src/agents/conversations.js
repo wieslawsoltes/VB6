@@ -44,8 +44,8 @@ export class AgentConversations {
   /** Public messages only; intentionally excludes raw tool data, signatures and connection settings. */
   handoff(id = this.activeId) {
     this.idle(); const task = this.tasks.get(id); if (!task) throw new Error('Task no longer exists.');
-    const messages = task.agent.transcript.filter(event => ['user', 'assistant', 'answer'].includes(event.type));
-    const text = messages.map(event => (event.type === 'assistant' ? 'Agent' : event.type === 'answer' ? 'User answer' : 'User') + ':\n' + event.text).join('\n\n');
+    const messages = task.agent.transcript.filter(event => ['user', 'assistant', 'question', 'answer'].includes(event.type));
+    const text = messages.map(event => (event.type === 'assistant' ? 'Agent' : event.type === 'question' ? 'Agent question' : event.type === 'answer' ? 'User answer' : 'User') + ':\n' + event.text).join('\n\n');
     // Keep recent public context, clearly noting dropped text rather than silently compacting signatures.
     return (text.length > 58000 ? '[Earlier public messages omitted.]\n' : '') + text.slice(-58000);
   }

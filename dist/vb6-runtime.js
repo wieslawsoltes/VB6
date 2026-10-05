@@ -378,19 +378,8 @@ function createWin32(options={}){return new Win32Browser(options);}
 return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
 
-/* ../data/defaults.js */
-__modules[7]=(()=>{
-
-// Registration is private to trusted library objects; a forged __type never grants a default property.
-const values = new WeakSet();
-function dataDefault(object) { values.add(object); return object; }
-function hasDataDefault(object) { return object != null && (typeof object === 'object' || typeof object === 'function') && values.has(object); }
-
-return {dataDefault,hasDataDefault};
-})();
-
 /* ../language/errors.js */
-__modules[8]=(()=>{
+__modules[7]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -400,8 +389,8 @@ return {VBError};
 })();
 
 /* calendar.js */
-__modules[9]=(()=>{
-const {VBError}=__modules[8];
+__modules[8]=(()=>{
+const {VBError}=__modules[7];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -478,9 +467,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ../language/lexer.js */
-__modules[10]=(()=>{
-const {asDate}=__modules[9];
-const {VBError}=__modules[8];
+__modules[9]=(()=>{
+const {asDate}=__modules[8];
+const {VBError}=__modules[7];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -572,8 +561,8 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* decimal.js */
-__modules[11]=(()=>{
-const {VBError}=__modules[8];
+__modules[10]=(()=>{
+const {VBError}=__modules[7];
 
 const MAX=(1n<<96n)-1n;
 const abs=n=>n<0n?-n:n;
@@ -650,7 +639,7 @@ return {VBDecimal};
 })();
 
 /* ../core/window-context.js */
-__modules[12]=(()=>{
+__modules[11]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -682,8 +671,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ../core/core.js */
-__modules[13]=(()=>{
-const {uiDocument}=__modules[12];
+__modules[12]=(()=>{
+const {uiDocument}=__modules[11];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -745,11 +734,11 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* values.js */
-__modules[14]=(()=>{
-const {VBDecimal}=__modules[11];
-const {asDate,dateToSerial}=__modules[9];
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
+__modules[13]=(()=>{
+const {VBDecimal}=__modules[10];
+const {asDate,dateToSerial}=__modules[8];
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -941,10 +930,106 @@ function describe(value){if(value instanceof VBErrorValue)return value.toString(
 return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,vbString,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
 })();
 
-/* ../data/common.js */
+/* automation.js */
+__modules[14]=(()=>{
+const {VBError}=__modules[9];
+const {Ref,MISSING}=__modules[13];
+/** Trusted host-installed Automation adapters. Projects never supply executable factories. */
+
+
+const objects=new WeakMap();
+const nameOK=n=>typeof n==='string'&&n.length<=255&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(n)&&!['constructor','prototype','caller','callee','arguments'].includes(n.toLowerCase());
+const isAutomationObject=o=>!!o&&objects.has(o);
+function state(o){const s=objects.get(o);if(!s||s.closed||s.session.closed)throw new VBError('Automation object has been released',91);return s;}
+function member(o,name,mode){const s=state(o),m=s.members.get(String(name).toLowerCase());if(!nameOK(name)||!m||mode&&!m.modes.includes(mode))throw new VBError('Automation member or invocation mode not supported: '+name,438);return {s,m};}
+function automationDefaultName(o){return state(o).defaultMember;}
+async function automationInvoke(o,name,mode,args=[]){
+  const {s,m}=member(o,name,mode);if(args.length>65)throw new VBError('Too many Automation arguments',450);
+  const params=(mode===4||mode===8)?[...m.params,{name:'value'}]:m.params;if(args.length>params.length||params.some((p,i)=>!p.optional&&(i>=args.length||args[i]===MISSING)))throw new VBError('Wrong number of Automation arguments',450);
+  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(await arg.ref.get());}else values.push(arg);}
+  const result=await s.adapter.invoke(m.name,mode,values,refs.map(([i])=>i));
+  // An adapter must return an explicit value and optional copyback array.
+  if(s.closed||s.session.closed)throw new VBError('Automation session closed during invocation',91);
+  if(!result||typeof result!=='object'||!Object.hasOwn(result,'value'))throw new VBError('Invalid Automation adapter response',440);
+  if(refs.length){if(!Array.isArray(result.args)||result.args.length!==args.length)throw new VBError('Invalid Automation ByRef response',440);for(const [i,ref]of refs)await ref.set(result.args[i]);}
+  if(s.closed||s.session.closed)throw new VBError('Automation session closed during invocation',91);
+  return result.value;
+}
+function automationMember(o,name,readProperty=false){
+  const {m}=member(o,name),mode=m.modes.includes(2)?2:m.modes.includes(1)?1:0;
+  if(!mode)throw new VBError('Automation property is write-only',394);
+  if(readProperty&&mode===2&&!m.params.length)return automationInvoke(o,m.name,mode,[]);
+  const fn=(...args)=>automationInvoke(o,m.name,mode,args);fn.vbRawArgs=true;fn.vbPreserveMissing=true;fn.vbParams=m.params;
+  return {__native:fn,__signature:{params:m.params},receiver:o};
+}
+function automationReference(o,name,args=[],objectSet=false){
+  member(o,name,objectSet?8:4);return new Ref(()=>automationInvoke(o,name,2,args),v=>automationInvoke(o,name,objectSet?8:4,[...args,v]));
+}
+class AutomationRegistry {
+  #factories=new Map();
+  register(progId,factory){if(!nameOK(progId)||typeof factory!=='function')throw new TypeError('A valid ProgID and trusted factory are required');const key=progId.toLowerCase();if(this.#factories.has(key))throw Error('Automation ProgID already registered');this.#factories.set(key,factory);return this;}
+  createSession(){return new AutomationSession(new Map(this.#factories));}
+}
+class AutomationSession {
+  constructor(factories){this.factories=factories;this.adapters=new Map();this.closed=false;this.pending=new Set();}
+  has(name){return !this.closed&&this.factories.has(String(name).toLowerCase());}
+  async create(name){if(this.closed)throw new VBError('Automation session closed',91);const factory=this.factories.get(String(name).toLowerCase());if(!factory)throw new VBError('Automation ProgID not registered',429);const pending=Promise.resolve().then(()=>factory(this));this.pending.add(pending);let adapter;try{adapter=await pending;return this.adopt(adapter);}catch(error){try{await adapter?.release?.();}catch{}throw error;}finally{this.pending.delete(pending);}}
+  adopt(adapter){
+    if(this.closed)throw new VBError('Automation session closed',91);if(this.adapters.has(adapter))return this.adapters.get(adapter);
+    if(!adapter||typeof adapter.invoke!=='function'||typeof adapter.release!=='function'||!Array.isArray(adapter.metadata?.members)||adapter.metadata.members.length>1024||this.adapters.size>=128)throw new VBError('Invalid or excessive Automation adapter',440);
+    const members=new Map();for(const m of adapter.metadata.members){if(!nameOK(m.name)||members.has(m.name.toLowerCase())||!Array.isArray(m.modes)||!m.modes.length||m.modes.some(v=>![1,2,4,8].includes(v))||!Array.isArray(m.params)||m.params.length>64||m.params.some(p=>!nameOK(p.name)))throw new VBError('Invalid Automation member metadata',440);members.set(m.name.toLowerCase(),{name:m.name,modes:[...m.modes],params:m.params.map(p=>({name:p.name,byRef:!!p.byRef,optional:!!p.optional,type:'Variant'}))});}
+    const defaultMember=adapter.metadata.defaultMember||null;if(defaultMember&&!members.has(String(defaultMember).toLowerCase()))throw new VBError('Invalid Automation default member',440);
+    const object=Object.freeze(Object.create(null));objects.set(object,{session:this,adapter,members,defaultMember,closed:false});this.adapters.set(adapter,object);return object;
+  }
+  async close(){if(this.closePromise)return this.closePromise;this.closed=true;return this.closePromise=(async()=>{await Promise.allSettled([...this.pending]);const results=await Promise.allSettled([...this.adapters].map(async([a,o])=>{objects.get(o).closed=true;await a.release();}));this.adapters.clear();return results;})();}
+}
+
+/** Bounded enumeration snapshot, not an unrestricted native iterator lifetime. */
+async function automationEnumerate(o){const s=state(o);if(typeof s.adapter.enumerate!=='function')throw new VBError('Automation object does not expose enumeration',451);const values=await s.adapter.enumerate();state(o);if(!Array.isArray(values)||values.length>10000)throw new VBError('Invalid Automation enumeration',7);return values;}
+
+return {isAutomationObject,automationDefaultName,automationInvoke,automationMember,automationReference,AutomationRegistry,automationEnumerate};
+})();
+
+/* ../controls/adapters.js */
 __modules[15]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray, VBCurrency, VBDecimal}=__modules[14];
+
+/** Host code only. Native project data cannot register code or fetch plug-ins. */
+class ControlAdapterRegistry {
+  #entries=new Map();
+  register(type,{runtime,designer}={}){
+    if(typeof type!=='string'||!type.length||type.length>255||!runtime&&!designer||[runtime,designer].some(f=>f!==undefined&&typeof f!=='function'))throw new TypeError('A control type and trusted runtime/designer factories are required');
+    if(this.#entries.has(type.toLowerCase()))throw Error('Control adapter already registered');
+    this.#entries.set(type.toLowerCase(),{runtime,designer});return this;
+  }
+  create(model,options={}){
+    const entry=this.#entries.get(String(model.type).toLowerCase()),factory=options.design?entry?.designer:entry?.runtime;
+    if(!factory)return null;
+    const control=factory(model,options);
+    if(!control||!control.__control||!control.node||typeof control.dispose!=='function'||typeof control.refresh!=='function'||control.model?.id!==model.id){try{control?.dispose?.();}catch{}throw new TypeError('Custom control factory must return a synchronous BrowserControl-compatible adapter');}
+    return control;
+  }
+  has(type,design=false){const entry=this.#entries.get(String(type).toLowerCase());return typeof(design?entry?.designer:entry?.runtime)==='function';}
+  types(){return [...this.#entries.keys()];}
+}
+
+return {ControlAdapterRegistry};
+})();
+
+/* ../data/defaults.js */
+__modules[16]=(()=>{
+
+// Registration is private to trusted library objects; a forged __type never grants a default property.
+const values = new WeakSet();
+function dataDefault(object) { values.add(object); return object; }
+function hasDataDefault(object) { return object != null && (typeof object === 'object' || typeof object === 'function') && values.has(object); }
+
+return {dataDefault,hasDataDefault};
+})();
+
+/* ../data/common.js */
+__modules[17]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray, VBCurrency, VBDecimal}=__modules[13];
 
 
 const DATA_LIMITS = Object.freeze({rows:100000, cells:1000000, bytes:20*1024*1024, pages:100});
@@ -1120,8 +1205,8 @@ return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,
 })();
 
 /* ../data/collection.js */
-__modules[16]=(()=>{
-const {assertData}=__modules[15];
+__modules[18]=(()=>{
+const {assertData}=__modules[17];
 
 class DataCollection {
   constructor(items=[]){this.items=items;}
@@ -1143,10 +1228,10 @@ return {DataCollection,NamedCollection};
 })();
 
 /* ../data/recordset.js */
-__modules[17]=(()=>{
-const {dataDefault}=__modules[7];
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[14];
+__modules[19]=(()=>{
+const {dataDefault}=__modules[16];
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[13];
 
 
 
@@ -1259,9 +1344,9 @@ return {fieldValue,DisconnectedRecordset};
 })();
 
 /* ../data/provider-recordset.js */
-__modules[18]=(()=>{
-const {DisconnectedRecordset,fieldValue}=__modules[17];
-const {assertData,after,DATA_LIMITS,sameValue}=__modules[15];
+__modules[20]=(()=>{
+const {DisconnectedRecordset,fieldValue}=__modules[19];
+const {assertData,after,DATA_LIMITS,sameValue}=__modules[17];
 
 
 /** The same observable cursor as the bound controls use, with awaited provider writes. */
@@ -1378,10 +1463,10 @@ return {ProviderRecordset};
 })();
 
 /* ../data/connected-recordset.js */
-__modules[19]=(()=>{
-const {ProviderRecordset}=__modules[18];
-const {DisconnectedRecordset,fieldValue}=__modules[17];
-const {assertData,after,dataList,sameValue}=__modules[15];
+__modules[21]=(()=>{
+const {ProviderRecordset}=__modules[20];
+const {DisconnectedRecordset,fieldValue}=__modules[19];
+const {assertData,after,dataList,sameValue}=__modules[17];
 
 
 
@@ -1607,8 +1692,8 @@ return {ConnectedRecordset};
 })();
 
 /* ../data/sql-parameters.js */
-__modules[20]=(()=>{
-const {assertData}=__modules[15];
+__modules[22]=(()=>{
+const {assertData}=__modules[17];
 
 /** Lossless SQL token positions. Parameter substitution never visits quoted strings or comments. */
 function sqlTokens(source) {
@@ -1685,9 +1770,9 @@ return {sqlTokens,DAO_TYPES,parameterPlan,simpleSelect};
 })();
 
 /* ../data/criteria.js */
-__modules[21]=(()=>{
-const {assertData}=__modules[15];
-const {sqlTokens}=__modules[20];
+__modules[23]=(()=>{
+const {assertData}=__modules[17];
+const {sqlTokens}=__modules[22];
 
 
 function compareData(a,b){
@@ -1747,12 +1832,12 @@ return {compareData,compileCriteria};
 })();
 
 /* ../data/dao-recordset.js */
-__modules[22]=(()=>{
-const {dataDefault}=__modules[7];
-const {assertData,after,dataList,sameValue}=__modules[15];
-const {fieldValue}=__modules[17];
-const {compileCriteria,compareData}=__modules[21];
-const {DAO_TYPES}=__modules[20];
+__modules[24]=(()=>{
+const {dataDefault}=__modules[16];
+const {assertData,after,dataList,sameValue}=__modules[17];
+const {fieldValue}=__modules[19];
+const {compileCriteria,compareData}=__modules[23];
+const {DAO_TYPES}=__modules[22];
 
 
 
@@ -1856,7 +1941,7 @@ return {DAORecordset};
 })();
 
 /* ../data/vendor/sqlite.js */
-__modules[23]=(()=>{
+__modules[25]=(()=>{
 
 // Generated by tools/vendor-sqlite.mjs. sql.js 1.14.2 (MIT); SQLite public domain.
 // JavaScript SHA256 35e39a73b2e0bc1c2202a4cadb23bcf7a3a77071a39c270f014402968785b95f; WASM SHA256 38c14f6e379210bc942bdc4ebca44e7bfdb4318ecc1c72ca666a28fdce96670a.
@@ -2053,15 +2138,15 @@ return {initializeSQLite};
 })();
 
 /* ../data/dao.js */
-__modules[24]=(()=>{
-const {dataDefault}=__modules[7];
-const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[15];
-const {DataCollection,NamedCollection}=__modules[16];
-const {ConnectedRecordset}=__modules[19];
-const {DAORecordset}=__modules[22];
-const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[20];
-const {fieldValue}=__modules[17];
-const {initializeSQLite}=__modules[23];
+__modules[26]=(()=>{
+const {dataDefault}=__modules[16];
+const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[17];
+const {DataCollection,NamedCollection}=__modules[18];
+const {ConnectedRecordset}=__modules[21];
+const {DAORecordset}=__modules[24];
+const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[22];
+const {fieldValue}=__modules[19];
+const {initializeSQLite}=__modules[25];
 
 
 
@@ -2248,9 +2333,9 @@ return {DAOField,DAOIndex,DAOTableDef,DAOParameter,DAOQueryDef,DAODatabase,DAOWo
 })();
 
 /* ../data/sqlite.js */
-__modules[25]=(()=>{
-const {initializeSQLite}=__modules[23];
-const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[15];
+__modules[27]=(()=>{
+const {initializeSQLite}=__modules[25];
+const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[17];
 
 
 /** Real embedded SQLite. A context owns a disk; connections share its live database handles. */
@@ -2384,9 +2469,9 @@ return {SQLiteProvider};
 })();
 
 /* ../data/wire.js */
-__modules[26]=(()=>{
-const {VBCurrency,VBDecimal}=__modules[14];
-const {assertData}=__modules[15];
+__modules[28]=(()=>{
+const {VBCurrency,VBDecimal}=__modules[13];
+const {assertData}=__modules[17];
 
 
 /** Explicit tagged cells: transport cannot silently round BigInt or turn BLOBs into objects. */
@@ -2412,9 +2497,9 @@ return {encodeCell,decodeCell,encodeResult,decodeResult};
 })();
 
 /* ../data/http.js */
-__modules[27]=(()=>{
-const {encodeCell,decodeResult}=__modules[26];
-const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[15];
+__modules[29]=(()=>{
+const {encodeCell,decodeResult}=__modules[28];
+const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[17];
 
 
 async function boundedBody(response,limit){
@@ -2553,9 +2638,9 @@ return {HTTPProvider,GatewayProvider};
 })();
 
 /* ../data/files.js */
-__modules[28]=(()=>{
-const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[15];
-const {fieldValue}=__modules[17];
+__modules[30]=(()=>{
+const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[17];
+const {fieldValue}=__modules[19];
 
 
 function parseCSV(text){
@@ -2608,13 +2693,13 @@ return {parseCSV,writeCSV,FileDataProvider};
 })();
 
 /* ../data/connection.js */
-__modules[29]=(()=>{
-const {dataDefault}=__modules[7];
-const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[15];
-const {ConnectedRecordset}=__modules[19];
-const {fieldValue}=__modules[17];
-const {DataCollection}=__modules[16];
-const {DAOEngine,DAODatabase}=__modules[24];
+__modules[31]=(()=>{
+const {dataDefault}=__modules[16];
+const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[17];
+const {ConnectedRecordset}=__modules[21];
+const {fieldValue}=__modules[19];
+const {DataCollection}=__modules[18];
+const {DAOEngine,DAODatabase}=__modules[26];
 
 
 
@@ -2721,9 +2806,9 @@ return {ADOConnection,ADOCommand,DataCollection,DAOEngine,DAODatabase};
 })();
 
 /* binary-codec.js */
-__modules[30]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[14];
+__modules[32]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[13];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -2819,9 +2904,9 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* filesystem.js */
-__modules[31]=(()=>{
-const { VBError }=__modules[10];
-const {encodeANSI,decodeANSI}=__modules[30];
+__modules[33]=(()=>{
+const { VBError }=__modules[9];
+const {encodeANSI,decodeANSI}=__modules[32];
 
 
 const MAX_FILE=20*1024*1024;
@@ -2885,15 +2970,15 @@ return {VirtualFileSystem};
 })();
 
 /* ../data/context.js */
-__modules[32]=(()=>{
-const {DAOEngine}=__modules[24];
-const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[15];
-const {SQLiteProvider}=__modules[25];
-const {HTTPProvider,GatewayProvider}=__modules[27];
-const {FileDataProvider}=__modules[28];
-const {ADOConnection,ADOCommand,DataCollection}=__modules[29];
-const {ConnectedRecordset}=__modules[19];
-const {VirtualFileSystem}=__modules[31];
+__modules[34]=(()=>{
+const {DAOEngine}=__modules[26];
+const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[17];
+const {SQLiteProvider}=__modules[27];
+const {HTTPProvider,GatewayProvider}=__modules[29];
+const {FileDataProvider}=__modules[30];
+const {ADOConnection,ADOCommand,DataCollection}=__modules[31];
+const {ConnectedRecordset}=__modules[21];
+const {VirtualFileSystem}=__modules[33];
 
 
 
@@ -2961,8 +3046,8 @@ return {DataContext};
 })();
 
 /* financial.js */
-__modules[33]=(()=>{
-const {VBError}=__modules[8];
+__modules[35]=(()=>{
+const {VBError}=__modules[7];
 /**
  * Double-precision financial functions for the browser VB runtime.
  * Pure ES module: no DOM, network, filesystem or dynamic evaluation.
@@ -3151,7 +3236,7 @@ return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FI
 })();
 
 /* ../theme/theme.js */
-__modules[34]=(()=>{
+__modules[36]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
@@ -3208,8 +3293,8 @@ return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,color
 })();
 
 /* ../graphics/surface.js */
-__modules[35]=(()=>{
-const { colorValue, getTheme }=__modules[34];
+__modules[37]=(()=>{
+const { colorValue, getTheme }=__modules[36];
 
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
 const surfaces = new WeakMap();
@@ -3333,8 +3418,8 @@ return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
 })();
 
 /* native-windows.js */
-__modules[36]=(()=>{
-const {refreshGraphicsSurfaces}=__modules[35];
+__modules[38]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[37];
 
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -3526,8 +3611,8 @@ return {installNativeHost};
 })();
 
 /* ../project/binary-assets.js */
-__modules[37]=(()=>{
-const {VBError}=__modules[10];
+__modules[39]=(()=>{
+const {VBError}=__modules[9];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
 const fail=message=>{throw new VBError(message,1002);};
@@ -3538,10 +3623,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ../project/native-text.js */
-__modules[38]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[30];
-const {VBError}=__modules[10];
-const {fromBase64,toBase64}=__modules[37];
+__modules[40]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[32];
+const {VBError}=__modules[9];
+const {fromBase64,toBase64}=__modules[39];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -3605,9 +3690,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ../project/frx.js */
-__modules[39]=(()=>{
-const {VBError}=__modules[10];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[38];
+__modules[41]=(()=>{
+const {VBError}=__modules[9];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[40];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -3710,9 +3795,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[40]=(()=>{
-const {VBError}=__modules[10];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[39];
+__modules[42]=(()=>{
+const {VBError}=__modules[9];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[41];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -3804,11 +3889,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[41]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray,bankersRound,numeric}=__modules[14];
-const {normalizeResources,decodeStringTable}=__modules[40];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[39];
+__modules[43]=(()=>{
+const {VBError}=__modules[9];
+const {VBArray,bankersRound,numeric}=__modules[13];
+const {normalizeResources,decodeStringTable}=__modules[42];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[41];
 
 
 
@@ -3839,8 +3924,8 @@ return {ResourceStore};
 })();
 
 /* error-messages.js */
-__modules[42]=(()=>{
-const {VBError}=__modules[8];
+__modules[44]=(()=>{
+const {VBError}=__modules[7];
 
 /** Invariant English descriptions for the errors produced by this runtime.
  * Localized Windows resource tables and arbitrary COM HRESULT messages are not
@@ -3874,9 +3959,9 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[43]=(()=>{
-const {VBError}=__modules[10];
-const {MISSING,VBArray,coerce,vbString}=__modules[14];
+__modules[45]=(()=>{
+const {VBError}=__modules[9];
+const {MISSING,VBArray,coerce,vbString}=__modules[13];
 
 
 const invalid=()=>{throw new VBError('Invalid procedure call or argument',5);};
@@ -3969,10 +4054,10 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[44]=(()=>{
-const {VBError}=__modules[8];
-const {MISSING,VBArray,numeric}=__modules[14];
-const {FINANCIAL_FUNCTIONS}=__modules[33];
+__modules[46]=(()=>{
+const {VBError}=__modules[7];
+const {MISSING,VBArray,numeric}=__modules[13];
+const {FINANCIAL_FUNCTIONS}=__modules[35];
 
 
 
@@ -4000,8 +4085,8 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[45]=(()=>{
-const {FINANCIAL_SIGNATURES}=__modules[33];
+__modules[47]=(()=>{
+const {FINANCIAL_SIGNATURES}=__modules[35];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
 const BUILTIN_SIGNATURES={
@@ -4023,7 +4108,7 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* constants.js */
-__modules[46]=(()=>{
+__modules[48]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -4050,19 +4135,19 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[47]=(()=>{
-const {errorDescription}=__modules[42];
-const {stringLibrary}=__modules[43];
-const {financialLibrary}=__modules[44];
-const {ResourceStore}=__modules[41];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[9];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[45];
-const {DisconnectedRecordset}=__modules[17];
-const {recordLength}=__modules[30];
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
-const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[14];
-const {VB_CONSTANTS}=__modules[46];
+__modules[49]=(()=>{
+const {errorDescription}=__modules[44];
+const {stringLibrary}=__modules[45];
+const {financialLibrary}=__modules[46];
+const {ResourceStore}=__modules[43];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[8];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[47];
+const {DisconnectedRecordset}=__modules[19];
+const {recordLength}=__modules[32];
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
+const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[13];
+const {VB_CONSTANTS}=__modules[48];
 
 
 
@@ -4141,9 +4226,9 @@ return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ../controls/rtf.js */
-__modules[48]=(()=>{
-const {VBError}=__modules[10];
-const {decodeANSI}=__modules[30];
+__modules[50]=(()=>{
+const {VBError}=__modules[9];
+const {decodeANSI}=__modules[32];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -4252,8 +4337,8 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* ../controls/form-window.js */
-__modules[49]=(()=>{
-const {el}=__modules[13];
+__modules[51]=(()=>{
+const {el}=__modules[12];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
 function installFormWindow(form){
@@ -4278,9 +4363,9 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[50]=(()=>{
-const {el}=__modules[13];
-const {getTheme}=__modules[34];
+__modules[52]=(()=>{
+const {el}=__modules[12];
+const {getTheme}=__modules[36];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -4354,8 +4439,8 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[51]=(()=>{
-const {el}=__modules[13];
+__modules[53]=(()=>{
+const {el}=__modules[12];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
 function scrollbarGeometry(min,max,value,length,page=1){
@@ -4395,7 +4480,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/icon-art.js */
-__modules[52]=(()=>{
+__modules[54]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -4554,8 +4639,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[53]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[52];
+__modules[55]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[54];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -4582,11 +4667,11 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../theme/menu.js */
-__modules[54]=(()=>{
-const {uiDocument}=__modules[12];
-const {el}=__modules[13];
-const {icon}=__modules[53];
-const {getTheme}=__modules[34];
+__modules[56]=(()=>{
+const {uiDocument}=__modules[11];
+const {el}=__modules[12];
+const {icon}=__modules[55];
+const {getTheme}=__modules[36];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -4671,10 +4756,10 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ../controls/richtext.js */
-__modules[55]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[48];
-const {VBError}=__modules[10];
-const {oleColor}=__modules[35];
+__modules[57]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[50];
+const {VBError}=__modules[9];
+const {oleColor}=__modules[37];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -4762,11 +4847,11 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[56]=(()=>{
-const {normalizeDataSources}=__modules[15];
-const { clone, lower, safeName }=__modules[13];
-const {normalizeResources}=__modules[40];
-const { VBError }=__modules[10];
+__modules[58]=(()=>{
+const {normalizeDataSources}=__modules[17];
+const { clone, lower, safeName }=__modules[12];
+const {normalizeResources}=__modules[42];
+const { VBError }=__modules[9];
 
 
 
@@ -4833,9 +4918,9 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[57]=(()=>{
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
+__modules[59]=(()=>{
+const { VBError }=__modules[9];
+const { lower }=__modules[12];
 
 
 class ControlCollection {
@@ -4881,22 +4966,22 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[58]=(()=>{
-const {installFormWindow}=__modules[49];
-const {ClassicCombo,ClassicUpDown}=__modules[50];
-const {ClassicScrollbar}=__modules[51];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[54];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[55];
-const {parseRTF}=__modules[48];
-const { el, lower, clone }=__modules[13];
-const { VBError }=__modules[10];
-const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[14];
-const { MemoryRecordset }=__modules[47];
-const { GraphicsSurface }=__modules[35];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[34];
-const { icon, controlIcon }=__modules[53];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[56];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[57];
+__modules[60]=(()=>{
+const {installFormWindow}=__modules[51];
+const {ClassicCombo,ClassicUpDown}=__modules[52];
+const {ClassicScrollbar}=__modules[53];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[56];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[57];
+const {parseRTF}=__modules[50];
+const { el, lower, clone }=__modules[12];
+const { VBError }=__modules[9];
+const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[13];
+const { MemoryRecordset }=__modules[49];
+const { GraphicsSurface }=__modules[37];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[36];
+const { icon, controlIcon }=__modules[55];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[58];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[59];
 
 
 
@@ -4922,8 +5007,8 @@ function units(mode){return ({0:1,1:15,2:.75,3:1,4:8,5:1/96,6:25.4/96,7:2.54/96}
 function safeImage(picture,assets={}){if(typeof picture==='string'){if(/^data:image\//i.test(picture)||/^blob:/i.test(picture))return picture;const a=assets[picture];if(a?.encoding==='base64'){const ext=picture.split('.').at(-1).toLowerCase(),mime={png:'png',jpg:'jpeg',jpeg:'jpeg',gif:'gif',bmp:'bmp',svg:'svg+xml',webp:'webp',ico:'x-icon'}[ext];return mime?'data:image/'+mime+';base64,'+a.data:'';}}return '';}
 
 class BrowserControl {
-  constructor(model,{design=false,vm=null,instance=null,form=null,assets={},backend='auto',onBackend=()=>{}}={}) {
-    this.__control=true;this.__type=model.type;this.model=model;this.design=design;this.vm=vm;this.instance=instance;this.form=form;this.assets=assets;this.backend=backend;this.onBackend=onBackend;this.disposed=false;this.type=model.type;
+  constructor(model,{controlRegistry=null,design=false,vm=null,instance=null,form=null,assets={},backend='auto',onBackend=()=>{}}={}) {
+    this.controlRegistry=controlRegistry||vm?.host?.controlRegistry;this.__control=true;this.__type=model.type;this.model=model;this.design=design;this.vm=vm;this.instance=instance;this.form=form;this.assets=assets;this.backend=backend;this.onBackend=onBackend;this.disposed=false;this.type=model.type;
     this.props={Left:0,Top:0,Width:1800,Height:450,Visible:-1,Enabled:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,BackColor:-2147483633,ForeColor:-2147483640,TabIndex:0,TabStop:-1,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[model.type]||{}),...clone(model.properties||{}),Name:model.name};
     for(const [key,value]of Object.entries(this.props))if(value?.resource)this.props[key]=CONTROL_DEFAULTS[model.type]?.[key]??'';
     this.node=el('div',{class:'vb-control','data-control':model.name,'data-control-id':model.id,'data-type':model.type,tabindex:0});this.node.style.touchAction=design?'none':'auto';this.input=null;this.childHost=this.node;this.items=[...(this.props.List||[])];this.itemData=[];this.selectedIndices=new Set();this.gridData=clone(this.props.GridData||[]);this._colWidths=[];this.currentX=0;this.currentY=0;
@@ -5197,14 +5282,14 @@ class BrowserForm extends BrowserControl {
   renderMenus(){const menus=this.originalModel?.menus||this.model.menus||[],signature=JSON.stringify(menus);if(this.menuSnapshot===signature)return;this.menuSnapshot=signature;const roots=menus.filter(m=>!m.parent&&m.properties.Visible!==0);this.menuBar.hidden=!roots.length;this.menuBar.setAttribute('role','menubar');this.menuBar.replaceChildren(...roots.map((menu,index)=>{const button=el('button',{role:'menuitem','aria-haspopup':menus.some(m=>m.parent===menu.name)||menu.properties.WindowList?'menu':null,'aria-expanded':'false',disabled:menu.properties.Enabled===0});updateMnemonic(button,menu.properties.Caption||menu.name);button.addEventListener('click',()=>{const children=menus.filter(m=>m.parent===menu.name&&m.properties.Visible!==0);if(!children.length&&!menu.properties.WindowList){this.vm?.dispatch(this.instance,menu.name+'_Click',[]);return;}this.showMenu(children,button,menus,index);});button.addEventListener('pointerenter',()=>{if(menuIsOpen()&&!button.disabled)button.click();});button.addEventListener('keydown',e=>{if(['ArrowDown','Enter',' '].includes(e.key)){e.preventDefault();e.stopPropagation();button.click();}});return button;}));}
   showMenu(items,anchor,all,index=0){const map=values=>values.filter(m=>m.properties.Visible!==0).map(item=>item.properties.Caption==='-'?null:{label:item.properties.Caption||item.name,enabled:item.properties.Enabled!==0,checked:item.properties.Checked?true:undefined,items:all.some(m=>m.parent===item.name&&m.properties.Visible!==0)?()=>map(all.filter(m=>m.parent===item.name)):undefined,action:()=>this.vm?.dispatch(this.instance,item.name+'_Click',[])});const rect=anchor.getBoundingClientRect();const values=map(items),root=all.filter(m=>!m.parent&&m.properties.Visible!==0)[index];if(root?.properties.WindowList&&this.mdiController){const windows=this.mdiController.windowItems();if(values.length&&windows.length)values.push(null);values.push(...windows);}openClassicMenu(values,rect.left,rect.bottom,null,{opener:anchor,runtime:true,theme:getTheme(this.node).id,focusFirst:true,onSwitch:direction=>{const list=[...this.menuBar.children];for(let n=1;n<=list.length;n++){const next=list[(index+direction*n+list.length*2)%list.length];if(!next.disabled){next.click();break;}}}});}
 
-  mountControls(models){const adapters=new Map();for(const model of models){const control=new BrowserControl(model,{design:this.design,vm:this.vm,instance:this.instance,form:this,assets:this.assets,backend:this.backend,onBackend:this.onBackend});this.controls.push(control);adapters.set(model.name,control);if(model.properties?.Index!==undefined){let array=this.controlMap.get(lower(model.name));if(!(array instanceof ControlArray)){array=new ControlArray(index=>this.loadArrayElement(array,model,index),index=>this.removeControl(array.Item(index)));this.controlMap.set(lower(model.name),array);}array.items.set(Number(model.properties.Index),control);}else this.controlMap.set(lower(model.name),control);}
+  mountControls(models){const adapters=new Map();for(const model of models){const control=createBrowserControl(model,{controlRegistry:this.controlRegistry,design:this.design,vm:this.vm,instance:this.instance,form:this,assets:this.assets,backend:this.backend,onBackend:this.onBackend});this.controls.push(control);adapters.set(model.name,control);if(model.properties?.Index!==undefined){let array=this.controlMap.get(lower(model.name));if(!(array instanceof ControlArray)){array=new ControlArray(index=>this.loadArrayElement(array,model,index),index=>this.removeControl(array.Item(index)));this.controlMap.set(lower(model.name),array);}array.items.set(Number(model.properties.Index),control);}else this.controlMap.set(lower(model.name),control);}
     for(const control of this.controls){const parent=control.model.parent&&adapters.get(control.model.parent);(parent?.childHost||this.content).append(control.node);if(control.type==='MSChart')control.invalidate();}
     for(const menu of this.originalModel?.menus||this.model.menus||[]){const object={};for(const [key,value]of Object.entries(menu.properties||{})){let state=value;Object.defineProperty(object,key,{enumerable:true,get:()=>state,set:v=>{state=v;menu.properties[key]=v;this.renderMenus();}});}this.controlMap.set(lower(menu.name),object);}
   }
   mountDynamic(model){
     if(this.controls.length>=10000)throw new VBError('Control limit exceeded (10,000)',7);
     const parent=model.parent?this.controls.find(c=>lower(c.model.name)===lower(model.parent)):null;
-    const control=new BrowserControl(model,{design:this.design,vm:this.vm,instance:this.instance,form:this,assets:this.assets,backend:this.backend,onBackend:this.onBackend});
+    const control=createBrowserControl(model,{controlRegistry:this.controlRegistry,design:this.design,vm:this.vm,instance:this.instance,form:this,assets:this.assets,backend:this.backend,onBackend:this.onBackend});
     control.dynamic=true;this.controls.push(control);(parent?.childHost||this.content).append(control.node);control.invalidate();control.updateTimer();return control;
   }
   loadArrayElement(array,template,index){
@@ -5214,7 +5299,7 @@ class BrowserForm extends BrowserControl {
     const control=this.mountDynamic(model);array.items.set(index,control);return control;
   }
   addControl(progId,name,container){
-    const type=Object.keys(CONTROL_DEFAULTS).find(t=>lower(t)===lower(String(progId).split('.').at(-1)));
+    const type=this.controlRegistry?.has(String(progId))?String(progId):Object.keys(CONTROL_DEFAULTS).find(t=>lower(t)===lower(String(progId).split('.').at(-1)));
     if(!type||type==='OLE')throw new VBError('No browser control adapter for '+progId,429);
     if(!/^[A-Za-z_]\w*$/.test(String(name))||this.controlMap.has(lower(name)))throw new VBError('Control name must be a unique identifier',730);
     let parent=null;if(container){const value=typeof container==='string'?this.controlMap.get(lower(container)):container?.__vbInstance?container.formObject:container;if(value!==this){if(!this.controls.includes(value)||!['Frame','PictureBox','TabStrip','SSTab'].includes(value.type))throw new VBError('Invalid control container',380);parent=value.model.name;}}
@@ -5246,16 +5331,16 @@ class BrowserForm extends BrowserControl {
   dispose(){this.cancelWindowInteraction?.();for(const c of this.controls||[])c.dispose();super.dispose();}
 }
 
-function createBrowserControl(model,options){return model.type==='Form'||model.type==='MDIForm'?new BrowserForm(model,options):new BrowserControl(model,options);}
+function createBrowserControl(model,options={}){const custom=(options.controlRegistry||options.vm?.host?.controlRegistry)?.create(model,options);if(custom)return custom;return model.type==='Form'||model.type==='MDIForm'?new BrowserForm(model,options):new BrowserControl(model,options);}
 
 return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm,createBrowserControl};
 })();
 
 /* agent-control.js */
-__modules[59]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[58];
-const {clone}=__modules[13];
-const {newId}=__modules[56];
+__modules[61]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[60];
+const {clone}=__modules[12];
+const {newId}=__modules[58];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -5334,10 +5419,10 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[60]=(()=>{
-const {VBError}=__modules[10];
-const {el}=__modules[13];
-const {NOTHING}=__modules[14];
+__modules[62]=(()=>{
+const {VBError}=__modules[9];
+const {el}=__modules[12];
+const {NOTHING}=__modules[13];
 
 
 
@@ -5394,9 +5479,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../controls/dialog.js */
-__modules[61]=(()=>{
-const {el}=__modules[13];
-const {icon}=__modules[53];
+__modules[63]=(()=>{
+const {el}=__modules[12];
+const {icon}=__modules[55];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -5431,11 +5516,11 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[62]=(()=>{
-const {VBError}=__modules[8];
-const {lower}=__modules[13];
-const {VB_CONSTANTS}=__modules[46];
-const {VBCurrency,coerce,unary,binary}=__modules[14];
+__modules[64]=(()=>{
+const {VBError}=__modules[7];
+const {lower}=__modules[12];
+const {VB_CONSTANTS}=__modules[48];
+const {VBCurrency,coerce,unary,binary}=__modules[13];
 
 
 
@@ -5547,8 +5632,8 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[63]=(()=>{
-const {VBError}=__modules[10];
+__modules[65]=(()=>{
+const {VBError}=__modules[9];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -5574,8 +5659,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[64]=(()=>{
-const {lower}=__modules[13];
+__modules[66]=(()=>{
+const {lower}=__modules[12];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -5618,8 +5703,8 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[65]=(()=>{
-const { tokenize, VBError }=__modules[10];
+__modules[67]=(()=>{
+const { tokenize, VBError }=__modules[9];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -5696,10 +5781,10 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[66]=(()=>{
-const { VBError }=__modules[10];
-const { parseExpression }=__modules[65];
-const { binary, unary, truth }=__modules[14];
+__modules[68]=(()=>{
+const { VBError }=__modules[9];
+const { parseExpression }=__modules[67];
+const { binary, unary, truth }=__modules[13];
 
 
 
@@ -5738,14 +5823,14 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[67]=(()=>{
-const {bindConstants}=__modules[62];
-const {defaultIdentifierType,addDefaultTypes}=__modules[63];
-const {validateInterfaces}=__modules[64];
-const { preprocess }=__modules[66];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[10];
-const { parseExpression, parseCall }=__modules[65];
-const { lower }=__modules[13];
+__modules[69]=(()=>{
+const {bindConstants}=__modules[64];
+const {defaultIdentifierType,addDefaultTypes}=__modules[65];
+const {validateInterfaces}=__modules[66];
+const { preprocess }=__modules[68];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[9];
+const { parseExpression, parseCall }=__modules[67];
+const { lower }=__modules[12];
 
 
 
@@ -5956,10 +6041,10 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* win32.js */
-__modules[68]=(()=>{
+__modules[70]=(()=>{
 const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[6];
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,numeric,coerce}=__modules[14];
+const {VBError}=__modules[9];
+const {VBArray,VBCurrency,numeric,coerce}=__modules[13];
 
 
 
@@ -6071,8 +6156,8 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[69]=(()=>{
-const {VBError}=__modules[10];
+__modules[71]=(()=>{
+const {VBError}=__modules[9];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
 class DebugEvaluationAbort extends VBError {
@@ -6100,11 +6185,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[70]=(()=>{
-const {VBError}=__modules[10];
-const {parseExpression}=__modules[65];
-const {lower}=__modules[13];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[14];
+__modules[72]=(()=>{
+const {VBError}=__modules[9];
+const {parseExpression}=__modules[67];
+const {lower}=__modules[12];
+const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[13];
 
 
 
@@ -6154,8 +6239,8 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[71]=(()=>{
-const {VBError}=__modules[10];
+__modules[73]=(()=>{
+const {VBError}=__modules[9];
 
 const key=ins=>{const {line,source,procedure,...rest}=ins;return JSON.stringify(rest);};
 const linearInstruction=ins=>['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename','fileClose','fileOpen','stringMid','stringAlign','return','dim'].includes(ins.op);
@@ -6180,9 +6265,9 @@ return {linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[72]=(()=>{
-const {instructionMap,linearInstruction}=__modules[71];
-const {VBError}=__modules[10];
+__modules[74]=(()=>{
+const {instructionMap,linearInstruction}=__modules[73];
+const {VBError}=__modules[9];
 
 
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
@@ -6242,23 +6327,25 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[73]=(()=>{
-const {VBWin32Bridge}=__modules[68];
-const {DataContext}=__modules[32];
-const {errorDescription}=__modules[42];
-const {DebugEvaluationSession}=__modules[69];
-const {hasDataDefault}=__modules[7];
-const {defaultIdentifierType}=__modules[63];
-const {DebugInspector}=__modules[70];
-const {planLiveEdit,nextStatementIndex}=__modules[72];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[30];
-const { Signal, lower, VERSION }=__modules[13];
-const { VBError }=__modules[10];
-const { parseExpression, parseCall }=__modules[65];
-const { compileProject }=__modules[67];
-const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[14];
-const { VirtualFileSystem }=__modules[31];
-const { createLibrary, MemoryRecordset }=__modules[47];
+__modules[75]=(()=>{
+const {VBWin32Bridge}=__modules[70];
+const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[14];
+const {DataContext}=__modules[34];
+const {errorDescription}=__modules[44];
+const {DebugEvaluationSession}=__modules[71];
+const {hasDataDefault}=__modules[16];
+const {defaultIdentifierType}=__modules[65];
+const {DebugInspector}=__modules[72];
+const {planLiveEdit,nextStatementIndex}=__modules[74];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[32];
+const { Signal, lower, VERSION }=__modules[12];
+const { VBError }=__modules[9];
+const { parseExpression, parseCall }=__modules[67];
+const { compileProject }=__modules[69];
+const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[13];
+const { VirtualFileSystem }=__modules[33];
+const { createLibrary, MemoryRecordset }=__modules[49];
+
 
 
 
@@ -6302,6 +6389,7 @@ class VirtualMachine extends Signal {
     this.library.set('screen',{TwipsPerPixelX:15,TwipsPerPixelY:15,Width:14400,Height:10800,MousePointer:0,ActiveForm:null});
     this.library.set('forms',{get Count(){return [...vm.formInstances].filter(i=>i.loaded).length;},Item(key){const forms=[...vm.formInstances].filter(i=>i.loaded),item=typeof key==='number'?forms[key]:forms.find(i=>lower(i.module.name)===lower(key));if(!item)throw new VBError('Form not found in Forms collection',9);return item;},[Symbol.iterator](){return [...vm.formInstances].filter(i=>i.loaded).values();}});
     this.library.set('debug',{Print:(...a)=>this.output(a.map(v=>v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v)).join(' '))});
+    this.automation=host.automation?.createSession();
     this.data=host.data||new DataContext(this.program.sourceProject,{fs:this.fs,persist:host.persist,fetch:host.dataFetch,credentialProvider:host.dataCredential});this.data.install(this);
     this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
     this.win32=new VBWin32Bridge(this);
@@ -6385,7 +6473,7 @@ class VirtualMachine extends Signal {
   }
   requestUnload(instance){if(this.state==='stopped')return Promise.resolve();return new Promise(resolve=>{this.eventQueue.push({action:()=>this.unloadForm(instance,0),resolve,key:'unload:'+instance.module.name});this.processEvents();});}
   async doEvents(){await new Promise(resolve=>setTimeout(resolve,0));for(let i=0;i<32&&this.eventQueue.length&&this.state==='running';i++)await this.runQueuedEvent(this.eventQueue.shift());return [...this.formInstances].filter(i=>i.loaded).length;}
-  async createObject(name,frame=this.currentFrame){const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();const dataObject=this.data.createObject(name);if(dataObject)return dataObject;const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
+  async createObject(name,frame=this.currentFrame){if(this.automation?.has(name))return this.automation.create(name);const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();const dataObject=this.data.createObject(name);if(dataObject)return dataObject;const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
   async getIdentifier(name,frame,{noInvoke=false}={}) {
     const key=lower(name);
     if(key==='me')return frame.instance;
@@ -6434,6 +6522,7 @@ class VirtualMachine extends Signal {
     return {__procedure:object.target.module.procedures.get(member.procedure),__signature:member.signature,instance:object.target};
   }
   async getMember(object,name,frame){
+    if(isAutomationObject(object))return automationMember(object,name,true);
     if(object?.__vbEnum){const key=lower(name);if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return object.values[key];}
     if(object?.__vbInterface){const members=object.target.module.interfaceBindings[object.interfaceName].members,key=lower(name);const value=this.interfaceProcedure(object,name,members[key]?null:'get');return value.__signature.kind==='property'&&!value.__signature.params.length?this.callProcedure(value.instance,value.__procedure,[],frame):value;}
     this.assertVisible(object,name,frame);
@@ -6445,6 +6534,7 @@ class VirtualMachine extends Signal {
     if(depth>32)throw new VBError('Circular default-member evaluation',28);
     if(value?.__control)return value.defaultValue();
     if(hasDataDefault(value))return this.defaultValue(value.Value,depth+1);
+    if(isAutomationObject(value)){const name=automationDefaultName(value);if(!name)throw new VBError('Automation object has no default value',438);return this.defaultValue(await automationInvoke(value,name,2,[]),depth+1);}
     const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;
     if(instance?.__vbInstance&&name){const member=await this.getMember(value,name,this.currentFrame),result=member?.__procedure?await this.callProcedure(member.instance,member.__procedure,[],this.currentFrame):member;return this.defaultValue(result,depth+1);}
     return value;
@@ -6496,6 +6586,7 @@ class VirtualMachine extends Signal {
   }
   async callExpression(node,frame){
     let target=node.callee.kind==='id'&&lower(node.callee.name)===lower(frame.proc.name)?{__procedure:frame.proc,instance:frame.instance}:await this.evaluate(node.callee,frame,{raw:true});
+    if(isAutomationObject(target)){const name=automationDefaultName(target);if(!name)throw new VBError('Automation object has no default property',438);target=automationMember(target,name);}
     const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
     if(instance?.__vbInstance&&defaultName)target=await this.getMember(target,defaultName,frame);
     const proc=target?.__procedure,signature=target?.__signature||proc,fn=target?.__native||(typeof target==='function'?target:null),params=signature?.params||(fn?.vbShortParams&&node.args.length===2&&node.args.every(n=>n.kind!=='named')?fn.vbShortParams:fn?.vbParams);
@@ -6527,7 +6618,7 @@ class VirtualMachine extends Signal {
       const key=lower(node.name);if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return frame.result;
       let cell=frame.locals.get(key)||frame.instance.fields.get(key);
       if(!cell){for(const instance of this.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private')){cell=instance.fields.get(key);break;}}
-      if(cell){if(!objectSet){const value=await cell.get();if(value?.__control)return value.defaultRef();if(hasDataDefault(value))return new Ref(()=>value.Value,v=>{value.Value=v;});const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;if(instance?.__vbInstance&&name)return this.memberReference(value,name,frame);}return cell;}
+      if(cell){if(!objectSet){const value=await cell.get();if(value?.__control)return value.defaultRef();if(hasDataDefault(value))return new Ref(()=>value.Value,v=>{value.Value=v;});if(isAutomationObject(value))return automationReference(value,automationDefaultName(value));const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;if(instance?.__vbInstance&&name)return this.memberReference(value,name,frame);}return cell;}
       if(frame.proc.constantBindings?.has(key)||frame.module.constantBindings?.has(key)||frame.module.globalEnumMembers?.has(key))throw new VBError('Assignment to constant not permitted',500);
       const setter=frame.module.procedures.get(key+':let')||frame.module.procedures.get(key+':set');if(setter)return new Ref(()=>this.getIdentifier(node.name,frame),v=>this.callProcedure(frame.instance,setter,[v],frame));
       if(frame.instance.formObject&&this.hasMember(frame.instance.formObject,node.name))return this.memberReference(frame.instance.formObject,node.name,frame);
@@ -6537,6 +6628,7 @@ class VirtualMachine extends Signal {
     if(node.kind==='member')return this.memberReference(await this.evaluate(node.object,frame,{raw:true}),node.name,frame,objectSet);
     if(node.kind==='call'){
       let target=await this.evaluate(node.callee,frame,{raw:true});const args=[];for(const a of node.args)args.push(await this.evaluate(a,frame));
+      if(isAutomationObject(target))return automationReference(target,automationDefaultName(target),args,objectSet);
       const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
       if(instance?.__vbInstance&&defaultName){const getter=()=>this.callExpression(node,frame);if(target.__vbInterface){const member=this.interfaceProcedure(target,defaultName,objectSet?'set':'let');return new Ref(getter,v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}const setter=instance.module.procedures.get(defaultName+':'+(objectSet?'set':'let'));if(!setter)throw new VBError('Default property is read-only',383);return new Ref(getter,v=>this.callProcedure(instance,setter,[...args,v],frame));}
       if(target instanceof VBArray&&!args.length&&node.callee.kind==='id')return this.reference(node.callee,frame,true);
@@ -6545,6 +6637,7 @@ class VirtualMachine extends Signal {
       if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args),v=>target.receiver.setItem(...args,v));
       if(node.callee.kind==='member'){
         const object=await this.evaluate(node.callee.object,frame,{raw:true});const name=lower(node.callee.name);
+        if(isAutomationObject(object))return automationReference(object,node.callee.name,args,objectSet);
         if(object?.__vbInterface){const member=this.interfaceProcedure(object,node.callee.name,objectSet?'set':'let');return new Ref(()=>this.callExpression(node,frame),v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}
         if(object?.__vbInstance){const proc=object.module.procedures.get(name+':let')||object.module.procedures.get(name+':set');if(proc){if(proc.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,node.callee.name,frame),v=>this.callProcedure(object,proc,[...args,v],frame));}}
         if(object?.setIndexed)return new Ref(()=>object[node.callee.name](...args),value=>object.setIndexed(node.callee.name,args,value));
@@ -6555,6 +6648,7 @@ class VirtualMachine extends Signal {
     throw new VBError('Invalid assignment target',1002);
   }
   async memberReference(object,name,frame,objectSet=false){
+    if(isAutomationObject(object))return automationReference(object,name,[],objectSet);
     if(object?.__vbInterface){const member=this.interfaceProcedure(object,name,objectSet?'set':'let');return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(member.instance,member.__procedure,[v],frame));}
     this.assertVisible(object,name,frame);
     if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key);const setter=object.module.procedures.get(key+':let')||object.module.procedures.get(key+':set');if(setter){if(setter.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(object,setter,[v],frame));}if(object.formObject)return this.memberReference(object.formObject,name,frame);throw new VBError(`Method or data member not found: ${name}`,438);}
@@ -6567,6 +6661,7 @@ class VirtualMachine extends Signal {
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable not set',91);
     if(typeof object!=='object'||object instanceof VBArray||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBErrorValue||object===MISSING||object.__fields)throw new VBError('Object required',424);
     if(callType===8){const value=args.at(-1);if(value!==NOTHING&&(!value||typeof value!=='object'||value instanceof VBArray||value instanceof Date||value instanceof VBCurrency||value instanceof VBDecimal||value instanceof VBErrorValue||value.__fields))throw new VBError('Object required',424);}
+    if(isAutomationObject(object))return this.debugAwait(automationInvoke(object,name,callType,args));
     if(object.__vbInterface){const member=this.interfaceProcedure(object,name,({2:'get',4:'let',8:'set'})[callType]||null);return this.callProcedure(member.instance,member.__procedure,args,frame);}
     if(object.__vbInstance){
       // Automation dispatch is public even when invoked by code in the same class.
@@ -6651,7 +6746,7 @@ class VirtualMachine extends Signal {
   }
   pause(){if(this.state==='running')this.pauseRequested=true;}
   resume(mode='continue'){if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
-  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
+  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.automationClose=this.automation?.close();this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
   async execute(frame){
     while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.pc++;
       try{
@@ -6674,7 +6769,7 @@ class VirtualMachine extends Signal {
           case 'case':{const value=frame.temps.get(ins.id);let matched=false;for(const c of ins.cases){if(c.kind==='range')matched=truth(binary('>=',value,await this.evaluate(c.low,frame),frame.module.optionCompare))&&truth(binary('<=',value,await this.evaluate(c.high,frame),frame.module.optionCompare));else matched=truth(binary(c.op||'=',value,await this.evaluate(c.expr,frame),frame.module.optionCompare));if(matched)break;}if(!matched)frame.pc=ins.target;break;}
           case 'forInit':{const ref=await this.reference(parseExpression(ins.name),frame),start=numeric(await this.evaluate(ins.start,frame)),end=numeric(await this.evaluate(ins.end,frame)),step=numeric(await this.evaluate(ins.step,frame));if(step===0)throw new VBError('For Step cannot be zero in the browser runtime',5);await ref.set(start);frame.temps.set(ins.id,{ref,end,step});if(step>0?start>end:start<end)frame.pc=ins.target;break;}
           case 'forNext':{const data=frame.temps.get(ins.id),next=numeric(await data.ref.get())+data.step;await data.ref.set(next);if(data.step>0?next<=data.end:next>=data.end)frame.pc=ins.target;break;}
-          case 'eachInit':{const value=await this.evaluate(ins.expr,frame);if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
+          case 'eachInit':{let value=await this.evaluate(ins.expr,frame);if(isAutomationObject(value))value=await this.debugAwait(automationEnumerate(value));if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
           case 'eachNext':{const data=frame.temps.get(ins.id),next=data.iterator.next();if(!next.done){await data.ref.set(next.value);frame.pc=ins.target;}break;}
           case 'stringAlign':{
             const ref=await this.reference(ins.target,frame,true),current=await ref.get();
@@ -6767,19 +6862,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[74]=(()=>{
-const {RuntimeAgentControl}=__modules[59];
-const {RuntimeMDI}=__modules[60];
-const {runtimeDialog,messageBoxOptions}=__modules[61];
-const { applyTheme, themeId }=__modules[34];
-const { icon }=__modules[53];
-const {rasterDataURL}=__modules[39];
-const { el, download, lower, clone }=__modules[13];
-const { compileProject }=__modules[67];
-const { VirtualMachine }=__modules[73];
-const { VirtualFileSystem }=__modules[31];
-const { describe }=__modules[14];
-const { BrowserForm }=__modules[58];
+__modules[76]=(()=>{
+const {RuntimeAgentControl}=__modules[61];
+const {RuntimeMDI}=__modules[62];
+const {runtimeDialog,messageBoxOptions}=__modules[63];
+const { applyTheme, themeId }=__modules[36];
+const { icon }=__modules[55];
+const {rasterDataURL}=__modules[41];
+const { el, download, lower, clone }=__modules[12];
+const { compileProject }=__modules[69];
+const { VirtualMachine }=__modules[75];
+const { VirtualFileSystem }=__modules[33];
+const { describe }=__modules[13];
+const { BrowserForm }=__modules[60];
 
 
 
@@ -6798,7 +6893,7 @@ class ApplicationHost {
   async createForm(model,instance,vm){const form=new BrowserForm(model,{vm,instance,assets:this.project.assets||{},backend:this.project.settings?.renderer||'auto',onBackend:backend=>{this.backend=backend;this.send('backend',{backend});}});this.forms.push(form);this.console.hidden=true;this.stage.append(form.node);this.mdi.register(form);this.layoutForms();return form;}
   beginModal(form){this.modalForms ||= [];this.modalForms.push(form);const update=()=>{const top=this.modalForms.at(-1);for(const f of this.forms){f.node.inert=!!top&&f!==top;f.node.setAttribute('aria-modal',String(f===top));if(f===top)f.node.style.zIndex=String(200000+this.modalForms.length);}};update();return()=>{this.modalForms=this.modalForms.filter(f=>f!==form);update();};}
   layoutForms(){const width=this.container.clientWidth||innerWidth,height=this.container.clientHeight||innerHeight;this.forms.forEach((form,index)=>{if(form.movedByUser||form.mdiChild)return;const naturalWidth=Number(form.props.ClientWidth??form.props.Width)/15+8,naturalHeight=Number(form.props.ClientHeight??form.props.Height)/15+32,scale=Math.min(1,(width-16)/naturalWidth,(height-16)/naturalHeight);if(width<640||height<480){form.node.style.transform=`scale(${Math.max(.3,scale)})`;form.node.style.transformOrigin='top left';form.props.Left=Math.max(4,(width-naturalWidth*scale)/2)*15;form.props.Top=Math.max(4,(height-naturalHeight*scale)/2)*15;}else{form.node.style.transform='';if(Number(form.props.StartUpPosition)!==0){form.props.Left=Math.max(8,(width-naturalWidth)/2+index*20)*15;form.props.Top=Math.max(8,(height-naturalHeight)/2+index*20)*15;}}form.refresh();});this.mdi.layout();}
-  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{win32Options:this.options.win32,fs:this.fs,settings:this.settings,dataFetch:this.options.dataFetch,dataCredential:this.options.dataCredential||(name=>this.modal('Data Connection Credentials','Runtime bearer token for '+name+' (not saved):',[{caption:'&OK',value:1},{caption:'&Cancel',value:0}],'',{inputType:'password'})),createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000});
+  async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{win32Options:this.options.win32,automation:this.options.automation,controlRegistry:this.options.controlRegistry,fs:this.fs,settings:this.settings,dataFetch:this.options.dataFetch,dataCredential:this.options.dataCredential||(name=>this.modal('Data Connection Credentials','Runtime bearer token for '+name+' (not saved):',[{caption:'&OK',value:1},{caption:'&Cancel',value:0}],'',{inputType:'password'})),createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000});
     this.vm.on('evaluation',data=>this.send('evaluation',data));this.vm.on('state',state=>this.send('state',{state}));this.vm.on('pause',e=>{this.send('pause',{source:e.instruction.source,line:e.instruction.line,procedure:e.instruction.procedure,reason:e.reason,pauseId:this.vm.debugPauseId,locals:this.vm.debugLocals(),stack:e.stack.map((f,index)=>({index,module:f.module.name,procedure:f.proc.name,line:f.proc.code[Math.min(f.pc,f.proc.code.length-1)]?.line||0,depth:f.depth}))});});this.vm.on('stop',()=>this.send('stopped'));this.vm.on('error',error=>this.send('error',{error}));
     for(const bp of this.options.breakpoints||[])this.vm.setBreakpoint(bp.module,bp.line,bp.condition||'');
     this.vm.library.set('loadpicture',path=>{if(!path)return '';const key=Object.keys(this.project.assets||{}).find(k=>k.toLowerCase()===String(path).replace(/\\/g,'/').toLowerCase());if(key)return key;if(this.fs.exists(path)){const bytes=this.fs.readBytes(path),image=rasterDataURL(bytes);if(image)return image;const text=this.fs.read(path);if(/^data:image\//.test(text))return text;}throw new Error('Image not found or not a supported raster: '+path);});
@@ -6832,28 +6927,32 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[75]=(()=>{
+__modules[77]=(()=>{
 const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[6];
-const {DataContext}=__modules[32];
-const {ADOConnection,ADOCommand}=__modules[29];
-const {ConnectedRecordset}=__modules[19];
-const {DATA_CONSTANTS}=__modules[15];
-const {FINANCIAL_FUNCTIONS}=__modules[33];
-const {installNativeHost}=__modules[36];
-const {ResourceStore}=__modules[41];
-const {readRES,writeRES,setResource,setResourceString}=__modules[40];
-const {THEMES,applyTheme,colorValue}=__modules[34];
-const {MemoryRecordset}=__modules[47];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[48];
-const { ApplicationHost }=__modules[74];
-const { VirtualMachine }=__modules[73];
-const { compileProject, compileModule }=__modules[67];
-const { parseExpression }=__modules[65];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[14];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[9];
-const { VirtualFileSystem }=__modules[31];
-const { BrowserControl, BrowserForm }=__modules[58];
-const { GraphicsSurface }=__modules[35];
+const {AutomationRegistry}=__modules[14];
+const {ControlAdapterRegistry}=__modules[15];
+const {DataContext}=__modules[34];
+const {ADOConnection,ADOCommand}=__modules[31];
+const {ConnectedRecordset}=__modules[21];
+const {DATA_CONSTANTS}=__modules[17];
+const {FINANCIAL_FUNCTIONS}=__modules[35];
+const {installNativeHost}=__modules[38];
+const {ResourceStore}=__modules[43];
+const {readRES,writeRES,setResource,setResourceString}=__modules[42];
+const {THEMES,applyTheme,colorValue}=__modules[36];
+const {MemoryRecordset}=__modules[49];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[50];
+const { ApplicationHost }=__modules[76];
+const { VirtualMachine }=__modules[75];
+const { compileProject, compileModule }=__modules[69];
+const { parseExpression }=__modules[67];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[13];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[8];
+const { VirtualFileSystem }=__modules[33];
+const { BrowserControl, BrowserForm }=__modules[60];
+const { GraphicsSurface }=__modules[37];
+
+
 
 
 
@@ -6876,9 +6975,9 @@ const { GraphicsSurface }=__modules[35];
 
 
 async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);if(options.nativeWindows!==false)installNativeHost(host);await host.start();return host;}
-const RuntimeAPI={createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
+const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[75];
+globalThis["VB6Runtime"]=__modules[77];
 })();

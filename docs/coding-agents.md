@@ -327,3 +327,7 @@ Continuation-specific references:
 - [OpenAI conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
 - [Anthropic extended thinking and signatures](https://platform.claude.com/docs/en/docs/build-with-claude/extended-thinking)
 - [Gemini thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures)
+
+### Questions in task context
+
+The public conversation and reviewed context handoff keep each validated agent question before its answer, so short answers such as “Yes” do not lose their meaning when switching tasks. Cancelling a question records the question but does not invent an answer or permit continuation. Questions remain inert text; the handoff is an editable excerpt, not authorization or proof of the current project state. Native provider signatures, raw tool results and permission grants remain excluded.
