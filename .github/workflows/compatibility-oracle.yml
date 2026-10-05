@@ -1,0 +1,38 @@
+name: Windows compatibility oracle
+on:
+  push:
+    branches: [main, feat/runtime-interop-compatibility]
+    paths: ['tools/conformance/**', '.github/workflows/compatibility-oracle.yml']
+  pull_request:
+    paths: ['src/runtime/**', 'tools/conformance/**', '.github/workflows/compatibility-oracle.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  oracle:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: New-Item -ItemType Directory -Force reports/conformance
+      - run: node tools/conformance/vectors.mjs reports/conformance/vectors.json
+      - name: Query actual Windows Automation and NLS APIs
+        shell: powershell
+        run: |
+          Start-Transcript -Path reports/conformance/oracle-transcript.txt
+          try { & tools/conformance/windows-oracle.ps1 -Vectors reports/conformance/vectors.json -Output reports/conformance/windows-oracle.json }
+          catch { $_ | Format-List * -Force; $_.Exception.ToString() | Set-Content reports/conformance/oracle-error.txt; exit 1 }
+          finally { Stop-Transcript }
+      - name: Verify complete oracle evidence and native sentinel results
+        run: node tools/conformance/verify-oracle.mjs reports/conformance/vectors.json reports/conformance/windows-oracle.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-compatibility-oracle
+          path: reports/conformance/
+          retention-days: 14
