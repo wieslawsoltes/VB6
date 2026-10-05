@@ -37,3 +37,22 @@ test('wire cells retain binary, dates, and large integer strings',()=>{
  for(const input of [new Uint8Array([0,128,255]),new Date('2026-10-05T00:00:00Z')])assert.deepEqual(decodeCell(encodeCell(input)),input);
  assert.equal(decodeCell(encodeCell(9223372036854775807n)),'9223372036854775807');assert.throws(()=>decodeCell({$vb6:'surprise',value:'bad'}));
 });
+test('gateway positional mode preserves native SQL and server-owned command dialects',async t=>{
+ let sql;const driverFactory=async()=>({execute:async(text)=>{sql=text;return {columns:[],values:[],rowsAffected:0};},close:async()=>{}});
+ const {post}=await gateway(t,{driverFactory,profiles:{Local:{driver:'pg',allowAdHoc:true,commands:{Native:{text:'SELECT $1',parameterCount:1},Portable:{text:'SELECT ?',parameterCount:1,parameterStyle:'odbc'}}}}});
+ const run=(text,parameters,parameterStyle)=>post({profile:'Local',operation:'execute',text,parameters,parameterStyle});
+ assert.equal((await run('SELECT ?', [42],'odbc')).status,200);assert.equal(sql,'SELECT $1');
+ assert.equal((await run("SELECT '{}'::jsonb ? 'key'",[])).status,200);assert.equal(sql,"SELECT '{}'::jsonb ? 'key'");
+ assert.equal((await run('Native',[42],'odbc')).status,400);assert.equal((await run('Native',[42])).status,200);assert.equal(sql,'SELECT $1');
+ assert.equal((await run('Portable',[42],'odbc')).status,200);assert.equal(sql,'SELECT $1');
+ assert.equal((await run('SELECT ?',[], 'odbc')).status,400);assert.equal((await run('SELECT ?',[], 'unknown')).status,400);
+});
+test('DAO typed QueryDefs and RDO positional parameters run through a real gateway',async t=>{
+ const {context,cn}=await gateway(t);await cn.Execute('CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)');
+ const engine=context.createObject('DAO.DBEngine.36'),db=await engine.OpenDatabase('Native');
+ const add=db.CreateQueryDef('', 'PARAMETERS id Long, name Text(100); INSERT INTO t VALUES([id],[name])');add.Parameters.Item('id').Value=7;add.Parameters.Item('name').Value="quote '?'; π";await add.Execute();assert.equal(add.RecordsAffected,1);
+ const rdo=context.createObject('RDO.rdoEngine'),rcn=await rdo.rdoEnvironments.Item(0).OpenConnection('Test',1,false,'Native');
+ const q=rcn.CreateQuery('Read','SELECT name FROM t WHERE id = ?');q.Item(0).Value=7;
+ assert.equal((await q.OpenResultset(3,1)).Item(0).Value,"quote '?'; π");
+ await rcn.Close();await db.Close();
+});

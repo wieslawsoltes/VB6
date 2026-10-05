@@ -1,3 +1,4 @@
+import {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS} from './rdo.js';
 import {DAOEngine} from './dao.js';
 import {normalizeDataSources,assertData,DATA_CONSTANTS} from './common.js';
 import {SQLiteProvider} from './sqlite.js';
@@ -20,9 +21,12 @@ export class DataContext {
     if(this.credentials.has(name))return this.credentials.get(name);
     const value=await this.credentialProvider?.(name);assertData(value,'A runtime credential is required: '+name,70);this.credentials.set(name,value);return value;
   }
-  isObjectType(name){return /^(?:ADODB\.(?:Connection|Command|Recordset|Parameter)|DAO\.(?:DBEngine|Workspace|Database|Recordset|QueryDef|TableDef|Index|Field|Parameter)|VB6\.Data\.(?:Connection|Command))$/i.test(String(name));}
+  isObjectType(name){return /^(?:ADODB\.(?:Connection|Command|Recordset|Parameter)|DAO\.(?:DBEngine|Workspace|Database|Recordset|QueryDef|TableDef|Index|Field|Parameter)|(?:RDO\.)?rdo(?:Engine|Connection|Environment|Query|Resultset|Parameter|Column|Table)|VB6\.Data\.(?:Connection|Command))$/i.test(String(name));}
   createObject(name){
     switch(String(name).toLowerCase()){
+      case 'rdo.rdoengine':case 'rdoengine':return new RDOEngine(this);
+      case 'rdo.rdoconnection':case 'rdoconnection':return new RDOConnection(this,(this.rdoEngine||(this.rdoEngine=new RDOEngine(this))).rdoEnvironments.Item(0));
+      case 'rdo.rdoquery':case 'rdoquery':return new RDOQuery(this);
       case 'adodb.connection':case 'vb6.data.connection':return this.connection();
       case 'adodb.command':case 'vb6.data.command':return this.command();
       case 'adodb.recordset':return new ConnectedRecordset(this);
@@ -50,8 +54,9 @@ export class DataContext {
     return environment;
   }
   install(vm){
-    for(const [name,value]of Object.entries(DATA_CONSTANTS))vm.library.set(name.toLowerCase(),value);
+    for(const [name,value]of Object.entries({...DATA_CONSTANTS,...RDO_CONSTANTS}))vm.library.set(name.toLowerCase(),value);
     const environment=this.environment();vm.library.set('dataenvironment1',environment);vm.library.set('dataenvironment',environment);
+    const rdo=this.rdoEngine||(this.rdoEngine=new RDOEngine(this));vm.library.set('rdoengine',rdo);vm.library.set('rdoenvironments',rdo.rdoEnvironments);vm.library.set('rdoerrors',rdo.rdoErrors);vm.library.set('rdocreateenvironment',(...args)=>rdo.rdoCreateEnvironment(...args));
     const engine=this.daoEngine||(this.daoEngine=new DAOEngine(this));vm.library.set('dbengine',engine);vm.library.set('opendatabase',(...args)=>engine.OpenDatabase(...args));vm.library.set('createdatabase',(...args)=>engine.CreateDatabase(...args));
   }
   close(){

@@ -1,9 +1,11 @@
 import {dataDefault} from './defaults.js';
 import {VBError} from '../language/lexer.js';
-import {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth} from '../runtime/values.js';
+import {VBArray,VBCurrency,VBDecimal,coerce,bankersRound,numeric,binary,truth} from '../runtime/values.js';
 
 // Disconnected client-side cursor. ConnectedRecordset adds explicit provider I/O.
-const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Variant'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
+const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[16,'Integer'],[18,'Long'],[19,'Double'],[21,'Decimal'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Decimal'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
+// Additional integer widths returned by native OLE DB schema rowsets.
+const INTEGER_RANGES=new Map([[16,[-128n,127n]],[18,[0n,65535n]],[19,[0n,4294967295n]],[20,[-(1n<<63n),(1n<<63n)-1n]],[21,[0n,(1n<<64n)-1n]]]);
 const fold=value=>String(value).toLowerCase();
 const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
 const args=value=>value instanceof VBArray?[...value]:Array.isArray(value)?value:[value];
@@ -12,13 +14,21 @@ function integer(value){return bankersRound(numeric(value));}
 export function fieldValue(column,value){
   if(value===null||value===undefined)return null;
   const type=TYPES.get(column.Type);if(!type)fail('Field type is not supported by the disconnected provider',3251);
+  const bounds=INTEGER_RANGES.get(column.Type);
+  if(bounds){
+    // Reject already-rounded JS 64-bit inputs; strings/Decimal/BigInt are exact.
+    if((column.Type===20||column.Type===21)&&typeof value==='number'&&Math.abs(value)>Number.MAX_SAFE_INTEGER)fail('Overflow',6);
+    const n=Number.isSafeInteger(value)?BigInt(value):coerce(value,'Decimal').roundedInteger();
+    if(n<bounds[0]||n>bounds[1])fail('Overflow',6);
+    return column.Type===20||column.Type===21?VBDecimal.fromParts(n,0):Number(n);
+  }
   if(type==='Binary'){if(value instanceof VBArray&&[...value].some(v=>!Number.isInteger(v)||v<0||v>255))fail('Binary field requires byte values',13);const bytes=value instanceof VBArray?Uint8Array.from([...value]):value;if(!(bytes instanceof Uint8Array))fail('Binary field requires a byte array',13);if(column.DefinedSize&&bytes.length>column.DefinedSize)fail('Binary field exceeds DefinedSize',372);return bytes.slice();}
   if(type==='GUID'){const text=String(value).replace(/^\{(.*)\}$/,'$1');if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text))fail('Invalid GUID value',13);return '{'+text.toUpperCase()+'}';}
   const result=coerce(value,type);
   if(type==='String'&&column.DefinedSize&&result.length>column.DefinedSize)fail('Field value exceeds DefinedSize',372);
   return result;
 }
-function compare(a,b){if(a===b)return 0;if(a==null)return -1;if(b==null)return 1;if(typeof a==='string'&&typeof b==='string'){a=fold(a);b=fold(b);}if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;return a<b?-1:a>b?1:0;}
+function compare(a,b){if(a===b)return 0;if(a==null)return -1;if(b==null)return 1;if(typeof a==='string'&&typeof b==='string'){a=fold(a);b=fold(b);}if(a instanceof VBDecimal||b instanceof VBDecimal){const exact=v=>Number.isSafeInteger(v)?VBDecimal.fromParts(BigInt(v),0):coerce(v,'Decimal');return exact(a).compare(exact(b));}if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;return a<b?-1:a>b?1:0;}
 
 /** Cached row view, typed fields, pending edits and stable row bookmarks. */
 export class DisconnectedRecordset {

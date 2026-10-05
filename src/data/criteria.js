@@ -1,8 +1,15 @@
+import {VBDecimal,VBCurrency} from '../runtime/values.js';
 import {assertData} from './common.js';
 import {sqlTokens} from './sql-parameters.js';
 
 export function compareData(a,b){
   if(a==null||b==null)return null;
+  if(a instanceof VBDecimal||b instanceof VBDecimal){
+    // Integer criteria represented by safe Numbers must not take the fifteen-digit Double-to-Decimal conversion path.
+    const exact=value=>value instanceof VBCurrency?new VBDecimal(value.toString()):Number.isSafeInteger(value)?VBDecimal.fromParts(BigInt(value),0):new VBDecimal(value);
+    return exact(a).compare(exact(b));
+  }
+  if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;
   if(a instanceof Date)a=+a;if(b instanceof Date)b=+b;
   if(typeof a==='string'&&typeof b==='string'){a=a.toLocaleLowerCase('en-US');b=b.toLocaleLowerCase('en-US');}
   if(a instanceof Uint8Array||b instanceof Uint8Array){assertData(a instanceof Uint8Array&&b instanceof Uint8Array,'Incompatible binary comparison',13);for(let i=0;i<Math.min(a.length,b.length);i++)if(a[i]!==b[i])return a[i]<b[i]?-1:1;return Math.sign(a.length-b.length);}
@@ -35,7 +42,7 @@ export function compileCriteria(text,columns){
   const is=value=>tokens[at]?.value.toUpperCase()===value,take=()=>tokens[at++],eat=value=>is(value)?(at++,true):false;
   const expect=value=>assertData(eat(value),'Expected '+value+' in criteria',3001);
   const value=()=>{let sign=1;if(eat('-'))sign=-1;else eat('+');const t=take();assertData(t,'Expected a criteria value');
-    if(t.kind==='number'){const n=Number(t.value)*sign;assertData(Number.isFinite(n),'Invalid numeric criterion',13);return()=>n;}
+    if(t.kind==='number'){const n=Number(t.value)*sign;assertData(Number.isFinite(n),'Invalid numeric criterion',13);const exact=!Number.isSafeInteger(n)&&/^\d+$/.test(t.value)?new VBDecimal((sign<0?'-':'')+t.value):n;return()=>exact;}
     assertData(sign===1,'A sign requires a numeric literal');if(t.kind==='string')return()=>t.value;
     if(t.kind==='word'&&/^(TRUE|FALSE|NULL)$/i.test(t.value))return()=>t.value.toUpperCase()==='NULL'?null:t.value.toUpperCase()==='TRUE'?-1:0;
     if(t.kind==='word'&&/^__DAO_DATE_\d+$/.test(t.value)){const d=dates[Number(t.value.slice(11))];assertData(d,'Invalid date reference');return()=>d;}
