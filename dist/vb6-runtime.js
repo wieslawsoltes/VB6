@@ -6838,10 +6838,12 @@ class VirtualMachine extends Signal {
   enqueueInput(instance,key,action,{coalesce=false,valid=()=>true}={}){
     if(!['running','idle'].includes(this.state)||!valid())return Promise.resolve();
     const epoch=this.inputEpoch||0,guarded=()=>epoch===(this.inputEpoch||0)&&['running','idle'].includes(this.state)&&valid()?action():undefined;
-    const existing=coalesce&&this.eventQueue.find(e=>e.input&&e.instance===instance&&e.key===key);
+    // Never move later pointer state ahead of a key/button/timer boundary.
+    let existing;
+    if(coalesce)for(let i=this.eventQueue.length-1;i>=0;i--){const pending=this.eventQueue[i];if(!pending.input||!pending.coalesce)break;if(pending.instance===instance&&pending.key===key){existing=pending;break;}}
     if(existing){existing.action=guarded;return existing.promise;}
     if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest input discarded.');return Promise.resolve();}
-    const event={input:true,instance,key,action:guarded};event.promise=new Promise(resolve=>event.resolve=resolve);
+    const event={input:true,coalesce,instance,key,action:guarded};event.promise=new Promise(resolve=>event.resolve=resolve);
     this.eventQueue.push(event);this.processEvents();return event.promise;
   }
   dispatch(module,name,args=[],{coalesce=false}={}){
