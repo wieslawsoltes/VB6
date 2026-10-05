@@ -14,6 +14,15 @@ export const DATA_CONSTANTS = Object.freeze({
   adDate:7, adBoolean:11, adVariant:12, adUnsignedTinyInt:17, adBigInt:20,
   adBinary:128, adChar:129, adWChar:130, adVarChar:200, adLongVarChar:201,
   adVarWChar:202, adLongVarWChar:203, adVarBinary:204, adLongVarBinary:205,
+  adAffectCurrent:1, adAffectGroup:2, adAffectAll:3, adLockUnspecified:-1,
+  adFilterNone:0, adFilterPendingRecords:1, adFilterAffectedRecords:2,
+  adFilterFetchedRecords:3, adFilterConflictingRecords:5,
+  adRecOK:0, adRecNew:1, adRecModified:2, adRecDeleted:4,
+  adRecPendingChanges:128, adRecConcurrencyViolation:2048, adRecIntegrityViolation:4096,
+  adResyncUnderlyingValues:1, adResyncAllValues:2, adClipString:2,
+  adBookmark:8192, adApproxPosition:16384, adMovePrevious:512, adHoldRecords:256,
+  adFind:524288, adUpdateBatch:65536, adResync:131072,
+  adAddNew:16778240, adDelete:16779264, adUpdate:16809984,
   dbOpenSnapshot:4, dbOpenDynaset:2, dbOpenTable:1, dbReadOnly:4,
 });
 export function dataError(message, number=3001){return new VBError(message,number,'VB6.Data');}
