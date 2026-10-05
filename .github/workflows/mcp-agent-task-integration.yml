@@ -1,0 +1,110 @@
+name: MCP and local agent task integration
+on:
+  push:
+    branches: [feat/mcp-lifecycle-and-data]
+    paths: ['.github/workflows/mcp-agent-task-integration.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-final-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Integrate pinned agent changes and preserve both catalogs
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess, re
+          from pathlib import Path
+          base='57e3c2c9655b5522618fa42a1047bb76009466fb'
+          main='0cc1fee9beb68e418a773eb57d9ee3313a1c9e63'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          assert changed=={'.github/workflows/mcp-agent-task-integration.yml'},changed
+          result=subprocess.run(['git','merge','--no-commit','--no-ff',main])
+          assert result.returncode in [0,1]
+          conflicts=set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts == {'dist/VB6-Studio-Web.html','dist/studio.js','tests/coding-agents-integration.test.mjs','tools/coding-agents-browser-tests.py'},conflicts
+          pattern=r'<<<<<<< HEAD\n(.*?)=======\n.*?>>>>>>> 0cc1fee9beb68e418a773eb57d9ee3313a1c9e63\n'
+          p=Path('tests/coding-agents-integration.test.mjs');s=p.read_text()
+          s,n=re.subn(pattern,lambda m:m[1].replace('adapter.tools.map(tool => tool.name.replaceAll','agent.tools.map(tool => tool.name.replaceAll'),s,flags=re.S)
+          assert n==1
+          assert 'function fixture(t) {' in s;s=s.replace('function fixture(t) {','function fixture(t, options = {}) {')
+          assert 'new CodingAgent(adapter);' in s;s=s.replace('new CodingAgent(adapter);','new CodingAgent(adapter, options);')
+          s+='''
+          for (const provider of providers) test(`agents integration: ${provider} preserves local planning tools without exposing them through MCP`, async t => {
+            let questions = 0;
+            const {adapter, agent} = fixture(t, {askUser: async () => { questions++; return 'Local answer'; }});
+            assert.equal(adapter.tools.length, 125);
+            assert.equal(agent.tools.length, 127);
+            for (const name of ['vb6.agent.plan', 'vb6.agent.question']) {
+              assert.ok(agent.tools.some(tool => tool.name === name));
+              assert.ok(!adapter.tools.some(tool => tool.name === name), 'Local tool leaked into external MCP: ' + name);
+            }
+            await agent.run({provider, model: 'test-model', prompt: 'Inspect the combined catalog.', transport: async (body, {receive}) => {
+              const definitions = provider === 'google' ? body.tools[0].functionDeclarations : body.tools;
+              assert.equal(definitions.length, 127);
+              assert.equal(new Set(definitions.map(tool => tool.name)).size, 127);
+              for (const name of ['vb6_agent_plan', 'vb6_agent_question', 'vb6_data_connection_set', 'vb6_code_read'])
+                assert.ok(definitions.some(tool => tool.name === name), name);
+              receive(reply(provider));
+            }});
+            assert.equal(questions, 0, 'Catalog discovery must not open a question dialog');
+            assert.equal(adapter.enabled, false);
+          });
+          '''
+          p.write_text(s)
+          p=Path('tools/coding-agents-browser-tests.py');s=p.read_text()
+          s,n=re.subn(pattern,lambda m:m[1].replace('.count()==125)','.count()==127)'),s,flags=re.S)
+          assert n==1;p.write_text(s)
+          p=Path('docs/coding-agents.md');s=p.read_text();assert '**114 IDE operations**' in s
+          s=s.replace('**114 IDE operations**','**125 IDE operations**')
+          s=s.replace('| Files/workspace |','| Data definitions | Public providers, connections and commands; validation, atomic renames and undoable definition edits under the separate data scope. No SQL/network execution or runtime credentials. |\n| Files/workspace |')
+          p.write_text(s)
+          PY
+          npm run build
+          npm test
+          git add dist tests/coding-agents-integration.test.mjs tools/coding-agents-browser-tests.py docs/coding-agents.md
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git -c core.whitespace=-blank-at-eof diff --cached --check
+          git rm --cached .github/workflows/mcp-agent-task-integration.yml
+          test "$(git write-tree)" = '6276d20f4439544924ba9b682a42633d20aeb53d'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-agent-task-integration.yml
+          git commit -m 'merge: retain local planning tools and public MCP data catalog with independent permissions'
+          npm run build
+          git diff --exit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify actual external and embedded agent journeys
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+          npm run test:agents:browser
+      - name: Publish verified combined source without force
+        run: git push origin HEAD:refs/heads/feat/mcp-lifecycle-and-data
+      - name: Retain source and reports
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mcp-agent-task-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
