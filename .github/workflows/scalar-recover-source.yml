@@ -1,4 +1,5 @@
 name: Recover scalar source objects
+# Final integration snapshot includes main 523da10a94f3ed70708ff25d309921baaca7278e.
 on:
   push:
     branches: [feat/variant-scalar-compatibility]
@@ -14,30 +15,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Recover existing source objects and exact history
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Preserve exact history
         run: |
           mkdir recovery
-          python - <<'PY'
-          import base64, hashlib, json, lzma, subprocess
-          from pathlib import Path
-          parts=[]
-          for sha in ['2ad75c7503da01f54078837534b7f99f5626288d','ddc8f7c658a952dbe78aae59f8a1943aa9a9d0ce']:
-              obj=json.loads(subprocess.check_output(['gh','api',f'repos/wieslawsoltes/VB6/git/blobs/{sha}']))
-              raw=base64.b64decode(obj['content'])
-              assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==sha
-              parts.append(raw)
-          packed=b''.join(parts)
-          dec=lzma.LZMADecompressor(memlimit=256*1024*1024)
-          raw=dec.decompress(packed,max_length=16*1024*1024)
-          Path('recovery/scalar-source-prefix.txt').write_bytes(raw)
-          Path('recovery/recovery.json').write_text(json.dumps({'complete':dec.eof,'packedBytes':len(packed),'decodedBytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()},indent=2))
-          print('Recovered prefix bytes:',len(raw),'complete:',dec.eof)
-          PY
           git bundle create recovery/repository.bundle --all HEAD
           git show-ref > recovery/refs.txt
-          sha256sum recovery/* > recovery/SHA256SUMS.txt
+          git bundle verify recovery/repository.bundle
+          sha256sum recovery/repository.bundle > recovery/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: recovered-scalar-source
