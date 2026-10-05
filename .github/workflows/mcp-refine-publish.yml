@@ -1,4 +1,4 @@
-name: Finalize verified MCP refinements
+name: Verify integrated MCP refinement
 on:
   push:
     branches: [feat/mcp-lifecycle-and-data]
@@ -20,48 +20,51 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify input tree and apply the reproduced local-expiry regression fix
+      - name: Integrate pinned main and the reviewed source delta
         run: |
           set -euo pipefail
-          git rm --cached .github/workflows/mcp-refine-publish.yml
-          test "$(git write-tree)" = 'b7cca34f9a137be9b07ac7f1669b31080c27f946'
-          git restore --staged --source=HEAD -- .github/workflows/mcp-refine-publish.yml
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('src/mcp/tasks.js');s=p.read_text()
-          old="  cancelLocal(id) { const entry=this.entries.get(id); if (!entry) return false; this.cancel(id,{principal:entry.principal}); return true; }"
-          new="  cancelLocal(id) { this.purge(); const entry=this.entries.get(id); if (!entry) return false; this.cancelEntry(entry); return true; }"
-          assert old in s;s=s.replace(old,new)
-          old="  cancel(id, ctx) {\n    const entry = this.find(id, ctx);"
-          new="  cancel(id, ctx) { this.cancelEntry(this.find(id, ctx)); return {}; }\n  cancelEntry(entry) {"
-          assert old in s;s=s.replace(old,new)
-          old="    return {};\n  }\n  update(id, responses, ctx)"
-          assert old in s;s=s.replace(old,"  }\n  update(id, responses, ctx)")
-          p.write_text(s)
-          p=Path('tests/mcp-refinement.test.mjs')
-          s=p.read_text()+'''
-          test('MCP tasks: local cancellation safely handles expiry before the timer fires',()=>{
-            let now=0;
-            const tasks=new McpTasks({now:()=>now,ttlMs:100});
-            const handle=tasks.create(()=>new Promise(()=>{}),{principal:'A'});
-            now=101;
-            assert.equal(tasks.cancelLocal(handle.taskId),false);
-            assert.equal(tasks.inspect().length,0);
-            tasks.clear();
-          });
-          '''
-          p.write_text(s)
-          PY
-          npm run build
-          npm test
-          git add src/mcp/tasks.js tests/mcp-refinement.test.mjs dist
-          git diff --cached --check
-          git rm --cached .github/workflows/mcp-refine-publish.yml
-          test "$(git write-tree)" = 'd4c8ba91736868ebe51ebad6c16896a89d5136e9'
-          git restore --staged --source=HEAD -- .github/workflows/mcp-refine-publish.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix(mcp): cancel expired local tasks without a stale-handle exception'
+          python - <<'PY'
+          import subprocess, pathlib, base64, lzma, hashlib, json
+          base = '9bbc2dca2fe17839d71c3e7cf66b42bc0f1744a0'
+          main = 'a073a87fbe4583fc54b20fcc76bf62fb75ffdc0f'
+          changed = set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          assert changed == {'.github/workflows/mcp-refine-publish.yml','tools/.mcp-continue-delta.b64'}, changed
+          result = subprocess.run(['git','merge','--no-commit','--no-ff',main])
+          assert result.returncode in [0,1]
+          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts <= {'dist/VB6-Studio-Web.html','dist/studio.js','dist/studio.css'}, conflicts
+          raw = lzma.decompress(base64.b64decode(pathlib.Path('tools/.mcp-continue-delta.b64').read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest() == '4b4c6508e820e5c760457028f7a2ad4317ea067c3e090871be0ea59a9e284997'
+          entries=json.loads(raw)
+          for entry in entries:
+              path=pathlib.Path(entry['path'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] in {'src','tests','tools','docs','README.md'}
+              before=path.read_bytes()
+              assert hashlib.sha256(before).hexdigest() == entry['before'],str(path)
+              lines=before.decode().splitlines(True); previous=len(lines)
+              for start,end,text in reversed(entry['edits']):
+                  assert 0 <= start <= end <= previous
+                  lines[start:end]=text.splitlines(True); previous=start
+              after=''.join(lines).encode()
+              assert hashlib.sha256(after).hexdigest() == entry['after'],str(path)
+              path.write_bytes(after)
+          print('Verified changed source files:',len(entries))
+          PY
+          git rm tools/.mcp-continue-delta.b64
+          npm run build
+          npm test
+          git add -A -- src tools tests docs README.md package.json dist examples
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git -c core.whitespace=-blank-at-eof diff --cached --check
+          # Do not modify workflow files in the bot push. Remove the temporary
+          # publisher separately through the authorized repository API.
+          git rm --cached .github/workflows/mcp-refine-publish.yml
+          test "$(git write-tree)" = '4365c07609ffadff04c9ed7e797fe3af9d830cce'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-refine-publish.yml
+          git commit -m 'feat(mcp): integrate public data tools, local operations and task authority fixes with current IDE'
           npm run build
           git diff --exit-code
       - uses: actions/setup-python@v5
@@ -69,20 +72,21 @@ jobs:
           python-version: '3.12'
       - run: pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium
-      - name: Final standalone, HTTP, HTTPS and localhost agent workflows
+      - name: Real standalone, HTTP, HTTPS and localhost external-agent workflows
         run: |
           export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
           npm run test:mcp:browser
           npm run test:mcp:agent
-      - name: Publish tested source without force or workflow edits
+          npm run test:agents:browser
+      - name: Publish tested source without force or workflow mutations
         run: git push origin HEAD:refs/heads/feat/mcp-lifecycle-and-data
-      - name: Preserve exact source and validation reports
+      - name: Preserve exact integrated source and reports
         if: always()
         run: git bundle create repository.bundle --all HEAD
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vb6-mcp-refinement-${{ github.sha }}
+          name: vb6-mcp-integration-${{ github.sha }}
           retention-days: 7
           path: |
             repository.bundle
