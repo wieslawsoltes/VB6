@@ -19,6 +19,7 @@ jobs:
           node-version: 22
       - name: Verify transferred source and integrate tested baseline
         run: |
+          set -euo pipefail
           git config user.name 'Wiesław Šoltés'
           git config user.email 'wieslawsoltes@users.noreply.github.com'
           python3 - <<'PY'
@@ -27,7 +28,6 @@ jobs:
           parts=sorted(Path('.transfer').glob('regions-final.*.b64'))
           assert len(parts)==2
           encoded=''.join(p.read_text().strip() for p in parts)
-          # Correct the known transport transcription; the exact source hash is mandatory.
           encoded=encoded.replace('TANRpPaAD','TANPaAD')
           patch=gzip.decompress(base64.b64decode(encoded,validate=True))
           assert hashlib.sha256(patch).hexdigest()=='da338cb8015d3683cf76ddbcbb2b86c834c313da48d6f1c1721df08e83ee724e'
@@ -40,6 +40,14 @@ jobs:
           assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
           PY
           git apply --unidiff-zero /tmp/regions-final.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('packages/win32-browser/src/index.js');s=p.read_text()
+          assert "export {RegionStore} from './gdi-region.js';" in s
+          s=s.replace("import {REGION_CONSTANTS} from './gdi-region.js';","import {REGION_CONSTANTS,RegionStore} from './gdi-region.js';").replace("export {RegionStore} from './gdi-region.js';\n",'').replace('export {ERROR,','export {RegionStore,ERROR,')
+          p.write_text(s)
+          p=Path('tests/win32-browser-package.test.mjs');p.write_text(p.read_text()+"\nimport '../packages/win32-browser/test/bundle.test.mjs';\n")
+          PY
           rm .transfer/regions-final.*.b64
           npm run build
           node tools/win32-api-inventory.mjs
@@ -48,6 +56,7 @@ jobs:
           git commit -m 'feat(win32-browser): finish regions, native clipping fixes, VB6 example and browser regressions'
       - name: Preserve newly merged input and IntelliSense updates
         run: |
+          set -euo pipefail
           git merge --no-commit --no-ff a344a8fa8d667adbd934e595dd618836930b2120 || true
           python3 - <<'PY'
           import subprocess
@@ -66,6 +75,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/win32-gdi-regions | cut -f1)" = "$EXPECTED_SHA"
           git push origin HEAD:refs/heads/feature/win32-gdi-regions
           git bundle create /tmp/vb6-regions-integrated.bundle HEAD refs/remotes/origin/main
