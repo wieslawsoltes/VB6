@@ -8,8 +8,11 @@ permissions:
 jobs:
   integrate:
     if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
-    runs-on: ubuntu-24.04-arm
+    runs-on: windows-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write
     steps:
@@ -20,8 +23,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Merge pinned main and reject any unexpected source conflict
+      - name: Preserve source bytes and merge pinned main
         run: |
+          git config core.autocrlf false
+          git checkout-index --all --force
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python - <<'PY'
@@ -48,18 +53,23 @@ jobs:
               assert git('diff','--cached','--name-only',feature,'--',path)=='', path
           print('Both handwritten implementations preserved; generated conflicts will be rebuilt.')
           PY
-      - name: Build and test combined source
+      - name: Rebuild and validate scalar source on Windows
         run: |
           set -o pipefail
           npm run build 2>&1 | tee "$RUNNER_TEMP/scalar-refresh-build.log"
-          npm test 2>&1 | tee "$RUNNER_TEMP/scalar-refresh-node.log"
+          node --test tests/scalar-runtime.test.mjs tests/scalar-boundaries.test.mjs tests/scalar-conformance.test.mjs 2>&1 | tee "$RUNNER_TEMP/scalar-refresh-focused.log"
+      - name: Execute genuine x86 and x64 Windows Automation regression
+        run: |
+          set -o pipefail
+          VB6_COM_ARCH=x86 node tools/interop/test-native.mjs 2>&1 | tee "$RUNNER_TEMP/scalar-refresh-com-x86.log"
+          VB6_COM_ARCH=x64 node tools/interop/test-native.mjs 2>&1 | tee "$RUNNER_TEMP/scalar-refresh-com-x64.log"
+      - name: Commit and verify the independently rebuilt full product tree
+        run: |
           git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
           git diff --cached --check
           git commit -m 'Merge native Date support and regenerate combined scalar compiler bundles'
           npm run build
           git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
-      - name: Verify independently reproduced x64 product tree on ARM64
-        run: |
           export GIT_INDEX_FILE="$RUNNER_TEMP/scalar-product-index"
           git read-tree HEAD
           git rm --cached -- .github/workflows/scalar-main-refresh.yml
@@ -84,6 +94,7 @@ jobs:
         run: |
           mkdir scalar-refresh
           cp "$RUNNER_TEMP/scalar-refresh-"*.log scalar-refresh/ 2>/dev/null || true
+          cp reports/native-interop/*.json scalar-refresh/ 2>/dev/null || true
           git rev-parse HEAD > scalar-refresh/head.txt
           git status --porcelain > scalar-refresh/status.txt
           git diff > scalar-refresh/unstaged.diff
