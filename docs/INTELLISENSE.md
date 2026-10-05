@@ -122,3 +122,5 @@ This is a browser implementation of the classic IntelliSense workflows, not cert
 Behavioral references: Microsoft's retained classic Visual Basic editor documentation for the [Edit menu](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/edit-menu) and [Options dialog](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/options-dialog-box). These describe the classic editor interaction model; the automated screenshots here are of this implementation, not native VB6 reference captures.
 
 For WithEvents/interface dropdowns, reference priority, strict descriptor validation, labels, DAO chains and the real-navigation regression matrix, see [Browser IDE compatibility](INTELLISENSE-COMPATIBILITY.md).
+
+Qualified module/library type paths, implicit ReDim array assistance and inert project-reference cache keys are described in the [qualified type and array follow-up](INTELLISENSE-COMPATIBILITY.md#qualified-type-paths-implicit-arrays-and-project-reference-snapshots).

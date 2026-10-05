@@ -1,5 +1,5 @@
 import {validParameterList} from './signature-syntax.js';
-import {IDENTIFIER,TYPE_NAME,symbolKey} from './source-context.js';
+import {IDENTIFIER,TYPE_NAME,symbolKey,mapParameterType} from './source-context.js';
 import {parameterSymbol} from './declaration-index.js';
 import {member} from './type-catalog.js';
 
@@ -27,6 +27,39 @@ function metadataCopy(input){
     active.delete(value);return result;
   };
   return copy(input,0);
+}
+// Read only own data descriptors. Neither native-reference wrappers nor
+// portable project metadata are allowed to run accessors/toJSON while an editor
+// constructs a cache key. Malformed entries are isolated from valid neighbors.
+function ownData(object,key){
+  if(!object||typeof object!=='object')return undefined;
+  const descriptor=Object.getOwnPropertyDescriptor(object,key);
+  return descriptor&&Object.hasOwn(descriptor,'value')?descriptor.value:undefined;
+}
+function dataEntries(array){
+  if(!Array.isArray(array)||array.length>4096)return [];
+  const entries=[];
+  for(let i=0;i<array.length;i++){const value=ownData(array,String(i));if(value!==undefined)entries.push(value);}
+  return entries;
+}
+export function referenceSnapshot(project){
+  const attached=dataEntries(ownData(project,'references')).flatMap(reference=>{
+    if(!reference||typeof reference!=='object')return [];
+    const missing=Object.getOwnPropertyDescriptor(reference,'missing');
+    if(missing&&(!Object.hasOwn(missing,'value')||missing.value))return [];
+    const library=ownData(reference,'typeLibrary');return library?[library]:[];
+  });
+  const descriptors=[];let size=0;
+  for(const value of [...attached,...dataEntries(ownData(project,'typeLibraries'))]){
+    try{
+      const safe=metadataCopy(value);
+      if(!safe||typeof safe!=='object'||Array.isArray(safe)||safe.enabled===false)continue;
+      const json=JSON.stringify(safe);size+=json.length;
+      if(size>4*1024*1024)return {key:'[]',descriptors:[]};
+      descriptors.push(safe);
+    }catch{/* Reject data with callbacks, cycles or invalid limits, not the editor. */}
+  }
+  return {key:JSON.stringify(descriptors),descriptors};
 }
 const clean=value=>String(value).replace(/\[([^\]]+)\]/g,'$1').replace(/\s*\.\s*/g,'.');
 /** Portable, bounded, data-only metadata. Type names in signatures are resolved
@@ -56,7 +89,7 @@ export function normalizeTypeLibrary(name,types){
       if(++count>50000)throw new RangeError('Too many type-library members');
       if(!raw||raw.accessors!==undefined||raw.kind!==undefined&&!memberKinds.has(raw.kind)||raw.accessor!==undefined&&!['get','let','set'].includes(raw.accessor)||typeof raw.name!=='string'||!identifier.test(raw.name)||raw.type!==undefined&&(typeof raw.type!=='string'||!typeName.test(raw.type))||raw.params!==undefined&&!validParameterList(raw.params))throw new TypeError('Invalid member descriptor');
       if(raw.accessor&&(!raw.params||raw.accessor!=='get'&&(!raw.params.length||/^\s*(?:Optional|ParamArray)\b/i.test(raw.params.at(-1)))))throw new TypeError('Invalid property accessor descriptor');
-      const params=raw.params?.map(p=>p.replace(new RegExp('(\\bAs\\s+(?:New\\s+)?)('+TYPE_NAME+')','i'),(_,as,t)=>as+qualify(t)));
+      const params=raw.params?.map(p=>mapParameterType(p,qualify));
       const valueType=kind==='enum'?type.name:qualify(raw.type);
       const result={...member(clean(raw.name),valueType,params??null),...raw,name:clean(raw.name),type:valueType,library,params,parameters:params?.map(p=>parameterSymbol(p)),insertText:raw.name};
       if(kind==='enum'){result.kind='constant';result.parentType=type.name;delete result.params;delete result.parameters;}

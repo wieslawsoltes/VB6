@@ -1,6 +1,6 @@
 import {preprocess} from '../language/conditional.js';
 import {addDefaultTypes,defaultIdentifierType} from '../language/default-types.js';
-import {IDENTIFIER,TYPE_NAME,sourceStatements,splitArguments,symbolKey,maskSource} from './source-context.js';
+import {IDENTIFIER,TYPE_NAME,sourceStatements,splitArguments,symbolKey,maskSource,conditionalStatementBodies} from './source-context.js';
 
 const variableName=new RegExp('^('+IDENTIFIER+')','i');
 export function parameterSymbol(text, defaults={}) {
@@ -33,7 +33,7 @@ export function scanDeclarations(module) {
     } catch(error) { conditionalError=error.message; }
   }
   const lexical=sourceStatements(source),{statements,lineCount}=lexical;
-  const symbols=[],procedures=[],records=[],withBlocks=[],selectBlocks=[],labels=[],interfaces=[],defaults={};
+  const symbols=[],procedures=[],records=[],withBlocks=[],selectBlocks=[],labels=[],interfaces=[],redimCandidates=[],defaults={};
   let owner=null,record=null,withStack=[],selectStack=[];
   const variable=(text,statement,kind,scope='private',parent=owner)=>{
     const value=parameterSymbol(text,defaults);if(!value)return null;
@@ -61,7 +61,7 @@ export function scanDeclarations(module) {
       const kind=head[3].toLowerCase(),name=head[4].replace(/^\[|\]$/g,''),open=clean.indexOf('(',head[0].length),close=closingParen(clean,open);
       const params=open<0?[]:splitArguments(text.slice(open+1,close>open?close:undefined));
       const tail=close>open&&open>=0?clean.slice(close+1):clean.slice(head[0].length);
-      const type=tail.match(new RegExp('^\\s*As\\s+('+TYPE_NAME+')','i'))?.[1]?.replace(/\s+/g,'')||(kind==='sub'||kind==='event'?'Void':defaultIdentifierType(name,defaults));
+      const type=tail.match(new RegExp('^\\s*As\\s+('+TYPE_NAME+')','i'))?.[1]?.replace(/\s*\.\s*/g,'.')||(kind==='sub'||kind==='event'?'Void':defaultIdentifierType(name,defaults));
       const proc={name,insertText:head[4],kind,line,end:lineCount,offset:start,endOffset:source.length,id:start+':'+kind,owner:null,moduleId:module.id,scope,type,array:/\)\s*$/.test(tail)&&/As\s+/i.test(tail),signature:text.trim(),params,parameters:params.map(p=>parameterSymbol(p,defaults)).filter(Boolean),external:!!head[2],accessor:kind.startsWith('property ')?kind.split(' ')[1]:null};
       if(proc.accessor&&proc.accessor!=='get')proc.type=proc.parameters.at(-1)?.type||'Variant';
       symbols.push(proc);
@@ -81,6 +81,16 @@ export function scanDeclarations(module) {
     const withMatch=clean.match(/^\s*With\s+/i);
     if(withMatch&&owner){const block={expression:text.slice(withMatch[0].length).trim(),line,start:end,end:source.length,endLine:lineCount,ownerId:owner.id,parent:withStack.at(-1)||null};withBlocks.push(block);withStack.push(block);continue;}
     if(/^\s*End\s+With\b/i.test(clean)){const block=withStack.pop();if(block){block.end=start;block.endLine=line;}continue;}
+    if(owner){
+      for(const body of conditionalStatementBodies(statement,source,lexical.masked)){
+        const redim=body.clean.match(/^\s*(?:\d+\s+)?ReDim\s+(?:Preserve\s+)?/i);
+        if(!redim)continue;
+        for(const part of splitArguments(body.text.slice(redim[0].length))){
+          const candidate=variable(part,body,'variable');
+          if(candidate?.array)redimCandidates.push({...candidate,implicitRedim:true});
+        }
+      }
+    }
     const decl=clean.match(/^\s*(Dim|Private|Public|Global|Friend|Static|Const)\s+(?:(Const)\s+)?/i);
     if(decl){const scope=/^(Public|Global|Friend)$/i.test(decl[1])?(decl[1].toLowerCase()==='friend'?'friend':'public'):'private';for(const p of splitArguments(text.slice(decl[0].length))){const v=variable(p,statement,decl[2]||/^Const$/i.test(decl[1])?'constant':'variable',scope);if(v)symbols.push(v);}}
   }
@@ -95,5 +105,18 @@ export function scanDeclarations(module) {
   }
   for(const control of module.form?.controls||[])symbols.push({name:control.name,type:control.type,kind:'control',scope:'public',line:1,moduleId:module.id,array:control.properties?.Index!==undefined,controlArray:control.properties?.Index!==undefined,signature:control.name+' As '+control.type});
   const menus=[...(module.form?.menus||[])];while(menus.length){const menu=menus.shift();if(menu.name)symbols.push({name:menu.name,type:'Menu',kind:'control',scope:'public',moduleId:module.id,line:1});menus.push(...(menu.items||menu.children||[]));}
+  // Bind explicit names first, even when declared after the resize. Sets keep
+  // large generated modules linear rather than rescanning symbols per ReDim.
+  const globals=new Set(),locals=new Map();
+  for(const symbol of symbols){
+    const key=symbolKey(symbol.name);
+    if(!symbol.owner)globals.add(key);
+    else{if(!locals.has(symbol.ownerId))locals.set(symbol.ownerId,new Set());locals.get(symbol.ownerId).add(key);}
+  }
+  for(const candidate of redimCandidates){
+    const key=symbolKey(candidate.name),local=locals.get(candidate.ownerId)||new Set();
+    if(globals.has(key)||local.has(key))continue;
+    symbols.push(candidate);local.add(key);locals.set(candidate.ownerId,local);
+  }
   return {moduleId:module.id,name:module.name,symbols,procedures,records,withBlocks,selectBlocks,labels,interfaces,defaults,conditionalError,masked:lexical.masked,statements,privateModule:/^\s*Option\s+Private\s+Module\b/im.test(source),predeclared:!!module.form||/VB_PredeclaredId\s*=\s*True/i.test((module.attributes||[]).join('\n'))};
 }
