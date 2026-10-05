@@ -29,22 +29,22 @@ def automatic(p):
     setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.')
     p.wait_for_selector('.completion-list');check('SelStart' in names(p),names(p));check('Nodes' not in names(p))
     put(p,'SelSt');check(names(p)==['SelStart'],names(p));p.keyboard.press('Tab')
-    check(p.evaluate('vb6Studio.editor.text.endswith("Text1.SelStart")'))
+    check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelStart")'))
     check(not p.locator('.completion-list').count())
 
 def enter_and_undo(p):
     setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.');put(p,'SelSt');p.keyboard.press('Enter')
-    check(p.evaluate('vb6Studio.editor.text.endswith("Text1.SelStart\\n    ")'))
-    p.evaluate('vb6Studio.command("undo")');check(p.evaluate('vb6Studio.editor.text.endswith("Text1.SelSt")'))
+    check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelStart\\n    ")'))
+    p.evaluate('vb6Studio.command("undo")');check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelSt")'))
 
 def punctuation(p):
     setup(p,'Private Sub Form_Load()\n    Dim customer As Customer\n    customer',[ ],[CUSTOMER]);put(p,'.');put(p,'Par');p.keyboard.press('.')
-    check(p.evaluate('vb6Studio.editor.text.endswith("customer.Parent.")'));check('Name' in names(p));shot(p,'members')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("customer.Parent.")'));check('Name' in names(p));shot(p,'members')
 
 def suffix(p):
     source='Private Sub Form_Load()\n    Text1.SelStale';setup(p,source,[{'name':'Text1','type':'TextBox'}])
     p.evaluate('vb6Studio.editor.selectGlobal(vb6Studio.editor.text.indexOf("SelStale")+5)');p.keyboard.press('Control+Space')
-    check(p.evaluate('vb6Studio.editor.text.endswith("Text1.SelStart")'),p.evaluate('vb6Studio.editor.text'))
+    check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelStart")'),p.evaluate('vb6Studio.editor.text'))
 
 def with_split(p):
     source='Private Sub Form_Load()\nDim customer As Customer\nWith customer\n    With .Parent\n        .\n    End With\nEnd With\nEnd Sub'
@@ -70,7 +70,7 @@ def literals(p):
 
 def types(p):
     setup(p,'Private Sub Form_Load()\n    Dim connection As');put(p,' ');check('Long' in names(p));put(p,'ADO');check('ADODB' in names(p));p.keyboard.press('.')
-    check('Connection' in names(p),names(p));put(p,'Conne');p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endswith("As ADODB.Connection")'))
+    check('Connection' in names(p),names(p));put(p,'Conne');p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endsWith("As ADODB.Connection")'))
 
 def escape_options(p):
     setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.');escaped(p);p.wait_for_timeout(200);check(not p.locator('.completion-list').count())
@@ -88,7 +88,7 @@ def accessibility(p):
 def stale(p):
     setup(p,'Private Sub Form_Load()\nDim customer As Customer\n    customer.',others=[CUSTOMER]);p.keyboard.press('Control+j');check('Name' in names(p))
     p.evaluate('vb6Studio.project.modules[1].code="Public Updated As Long"');p.keyboard.press('Tab')
-    check(p.evaluate('vb6Studio.editor.text.endswith("customer.")'))
+    check(p.evaluate('vb6Studio.editor.text.endsWith("customer.")'))
 
 def large(p):
     source="' padding\n"*49995+'Private Sub Form_Load()\nDim localAlpha As Long, localBeta As Long\nlocal\nEnd Sub'

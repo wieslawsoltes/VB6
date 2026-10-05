@@ -69,7 +69,7 @@ export class VirtualTextInput {
   next(offset,word=false){const text=this.editor.text;if(word){const next=text.slice(offset,this.full.end).match(/^(?:\s+|[^\w\s]+|\w+)/);return Math.min(this.full.end,offset+(next?.[0].length||1));}return Math.min(this.full.end,offset+(text.codePointAt(offset)>65535?2:1));}
   keydown(event){
     if(!this.active||event.isComposing||this.editor.composing)return;
-    if(this.editor.completion&&['ArrowUp','ArrowDown','Enter','Tab','Escape'].includes(event.key))return;
+    if(this.editor.completion&&['ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Enter','Tab','Escape'].includes(event.key))return;
     const ctrl=event.ctrlKey||event.metaKey,key=event.key,e=this.editor,p=this.pane,s=this.selection(),focus=s.focus??s.end,pos=positionAt(e.index,focus);let next=null;
     if(ctrl&&key.toLowerCase()==='a'){event.preventDefault();event.stopImmediatePropagation();this.select(this.full.start,this.full.end);return;}
     if(ctrl&&['ArrowUp','ArrowDown'].includes(key))return;

@@ -11680,7 +11680,7 @@ class VirtualTextInput {
   next(offset,word=false){const text=this.editor.text;if(word){const next=text.slice(offset,this.full.end).match(/^(?:\s+|[^\w\s]+|\w+)/);return Math.min(this.full.end,offset+(next?.[0].length||1));}return Math.min(this.full.end,offset+(text.codePointAt(offset)>65535?2:1));}
   keydown(event){
     if(!this.active||event.isComposing||this.editor.composing)return;
-    if(this.editor.completion&&['ArrowUp','ArrowDown','Enter','Tab','Escape'].includes(event.key))return;
+    if(this.editor.completion&&['ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Enter','Tab','Escape'].includes(event.key))return;
     const ctrl=event.ctrlKey||event.metaKey,key=event.key,e=this.editor,p=this.pane,s=this.selection(),focus=s.focus??s.end,pos=positionAt(e.index,focus);let next=null;
     if(ctrl&&key.toLowerCase()==='a'){event.preventDefault();event.stopImmediatePropagation();this.select(this.full.start,this.full.end);return;}
     if(ctrl&&['ArrowUp','ArrowDown'].includes(key))return;
@@ -11851,6 +11851,10 @@ class SourceEditor extends Signal {
     const kind=pane.editKind||(/^insertFrom|^deleteBy|^history/.test(pane.beforeInput?.type||'')?'command':'typing');pane.editKind=null;const local=pane.editHint||inputChange(oldValue,nextValue,pane.beforeInput,pane.input.selectionStart);pane.editHint=pane.beforeInput=null;
     const hint=local?{...local,start:local.start+pane.range.start,oldEnd:local.oldEnd+pane.range.start,newEnd:local.newEnd+pane.range.start}:null;
     this.assignSource(newText,{start,end},hint);this.emit('change',{module:this.module,oldText,newText,change:hint,kind});this.updateSelectors(false);this.cursorChanged();
+    this.refreshAssistance();
+  }
+  refreshAssistance(){
+    const start=this.cursor().offset;
     if(!this.composing&&!this.acceptingCompletion){
       if(this.completion)this.complete(this.completionMode,true);
       else if(this.appearance.autoListMembers&&this.selectionBounds().start===this.selectionBounds().end&&/[.=,( \t]$/.test(this.text.slice(Math.max(0,start-1),start)))this.complete('auto');
@@ -11889,10 +11893,17 @@ class SourceEditor extends Signal {
   goToLine(line,column=1){const offset=offsetAt(this.index,line,column),pane=this.activePane;pane.explicitDeclarations=false;this.syncPane(pane,offset);this.input.focus();const y=(positionAt(this.index,offset).line-1-pane.range.firstLine)*this.lineHeight;if(y<this.input.scrollTop||y>this.input.scrollTop+this.viewport.clientHeight-50)this.input.scrollTop=Math.max(0,y-this.viewport.clientHeight*.35);this.cursorChanged();}
   setViewMode(mode){const cursor=this.cursor();this.activePane.mode=mode==='procedure'?'procedure':'module';this.syncPane(this.activePane,cursor.offset,cursor.offset,{scroll:false});this.goToLine(cursor.line,cursor.column);}
   setValue(value){if(this.readOnly||String(value)===this.text)return;this.closeCompletion();this.closeInfo();const oldText=this.text;this.assignSource(value);this.emit('change',{module:this.module,oldText,newText:this.text,kind:'command'});this.updateSelectors(false);this.cursorChanged();}
-  setReadOnly(value){this.readOnly=!!value;for(const pane of this.panes)pane.input.readOnly=this.readOnly;this.root.classList.toggle('read-only',this.readOnly);}
+  setReadOnly(value){if(value){this.closeCompletion();this.closeInfo();}this.readOnly=!!value;for(const pane of this.panes)pane.input.readOnly=this.readOnly;this.root.classList.toggle('read-only',this.readOnly);}
   setBreakpoints(values){this.breakpoints=values;this.paint();}setDiagnostics(values){this.diagnostics=values;this.diagnosticRevision=(this.diagnosticRevision||0)+1;this.diagnosticMap=new Map();for(const d of values){const key=lower(d.source)+':'+d.line;if(!this.diagnosticMap.has(key))this.diagnosticMap.set(key,d);}this.paint();}setExecution(value){this.execution=value;this.paint();}
   replaceSelection(text,start=undefined,end=undefined,kind='command'){if(this.input.readOnly)return;if(this.activePane.virtualizer?.active){const bounds=this.selectionBounds();return this.replaceGlobal(text,start===undefined?bounds.start:this.activePane.range.start+start,end===undefined?bounds.end:this.activePane.range.start+end,kind);}start??=this.input.selectionStart;end??=this.input.selectionEnd;this.input.focus();this.activePane.editKind=kind;this.activePane.editHint=replacementChange(start,end,String(text).length);this.input.setRangeText(text,start,end,'end');this.changed();}
-  replaceGlobal(text,start,end,kind='command'){if(this.readOnly)return;const oldText=this.text,newText=oldText.slice(0,start)+text+oldText.slice(end),change=replacementChange(start,end,text.length),cursor=start+text.length;this.assignSource(newText,{start:cursor,end:cursor},change);this.emit('change',{module:this.module,oldText,newText,change,kind});this.updateSelectors(false);this.goToLine(positionAt(this.index,cursor).line,positionAt(this.index,cursor).column);if(this.completion)this.complete(this.completionMode,true);clearTimeout(this.infoTimer);if(this.appearance.autoQuickInfo)this.infoTimer=setTimeout(()=>this.showInfo('parameter',true),160);}
+  replaceGlobal(text,start,end,kind='command'){
+    if(this.readOnly)return;this.changingSource=true;
+    try{
+      const oldText=this.text,newText=oldText.slice(0,start)+text+oldText.slice(end),change=replacementChange(start,end,text.length),cursor=start+text.length;
+      this.assignSource(newText,{start:cursor,end:cursor},change);this.emit('change',{module:this.module,oldText,newText,change,kind});this.updateSelectors(false);
+      this.goToLine(positionAt(this.index,cursor).line,positionAt(this.index,cursor).column);this.refreshAssistance();
+    }finally{this.changingSource=false;}
+  }
   toggleSplit(value=!this.secondary,ratio=.5){
     if(value&&!this.secondary){this.secondary=this.createPane();this.secondary.mode=this.activePane.mode;this.secondary.explicitDeclarations=this.activePane.explicitDeclarations;this.syncPane(this.secondary,this.cursor().offset);this.splitBar=el('div',{class:'code-pane-splitter',tabindex:0,role:'separator','aria-label':'Code pane splitter','aria-orientation':'horizontal','aria-valuemin':5,'aria-valuemax':95});this.area.insertBefore(this.splitBar,this.splitGrip);this.area.insertBefore(this.secondary.node,this.splitGrip);this.bindSplitter(this.splitBar);this.splitBar.addEventListener('dblclick',()=>this.toggleSplit(false));this.splitBar.addEventListener('keydown',e=>{if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();this.setSplitRatio(this.splitRatio+(e.key==='ArrowUp'?-.02:.02));}else if(['Home','End','Enter'].includes(e.key)){e.preventDefault();this.toggleSplit(false);this.input.focus();}});this.setSplitRatio(ratio);}
     else if(!value&&this.secondary){const cursor=this.cursor(),end=this.selectionBounds().end,top=this.input.scrollTop,mode=this.activePane.mode,wasActive=this.panes.some(p=>p.input.dataset.activeEditor==='true');this.secondary.observer.disconnect();this.secondary.virtualizer?.dispose();this.secondary.node.remove();this.panes=this.panes.filter(p=>p!==this.secondary);this.secondary=null;this.splitBar.remove();this.splitBar=null;this.activePane=this.primary;this.primary.node.classList.add('active-code-pane');if(wasActive)this.primary.input.dataset.activeEditor='true';this.primary.mode=mode;this.syncPane(this.primary,cursor.offset,end);this.input.scrollTop=top;this.area.style.gridTemplateRows='minmax(0,1fr)';}
