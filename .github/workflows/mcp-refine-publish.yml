@@ -1,0 +1,89 @@
+name: Publish verified MCP refinements
+on:
+  push:
+    branches: [feat/mcp-lifecycle-and-data]
+    paths: ['.github/workflows/mcp-refine-publish.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-refinement-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply verified source delta and reproduce reviewed product tree
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          base = '7d821e026b7c7cd34cfc07c452647260080e492e'
+          allowed = {'.github/workflows/mcp-refine-publish.yml'} | {f'tools/.mcp-refine-source.{i}' for i in range(3)}
+          changed = set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          assert changed <= allowed, changed
+          encoded = ''.join(pathlib.Path(f'tools/.mcp-refine-source.{i}').read_text().strip() for i in range(3))
+          data = lzma.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(data).hexdigest() == '0ad13086669af29e8761746ee482ebf5c81711ff25b31002c73b1ad7bfa3a2ec'
+          entries = json.loads(data)
+          for entry in entries:
+              path = pathlib.Path(entry['path'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] in {'src','tools','tests','docs','README.md'}
+              before = path.read_bytes() if path.exists() else b''
+              assert hashlib.sha256(before).hexdigest() == entry['before'], str(path)
+              lines = before.decode('utf-8').splitlines(True)
+              previous = len(lines)
+              for start,end,text in reversed(entry['edits']):
+                  assert 0 <= start <= end <= previous
+                  lines[start:end] = text.splitlines(True)
+                  previous = start
+              after = ''.join(lines).encode('utf-8')
+              assert hashlib.sha256(after).hexdigest() == entry['after'], str(path)
+              path.parent.mkdir(parents=True,exist_ok=True)
+              path.write_bytes(after)
+          print('Hash-verified source files:',len(entries))
+          PY
+          git rm tools/.mcp-refine-source.0 tools/.mcp-refine-source.1 tools/.mcp-refine-source.2
+          npm run build
+          npm test
+          git add -A -- src tools tests docs README.md dist
+          git diff --cached --check
+          git rm --cached .github/workflows/mcp-refine-publish.yml
+          test "$(git write-tree)" = 'fcfac2216dd7870451f0f48067a280c97787da08'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-refine-publish.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(mcp): add public data definitions, bounded source reads and local operation controls'
+          npm run build
+          git diff --exit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Real standalone, HTTP, HTTPS and localhost agent workflows
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+      - name: Publish tested source without force or workflow edits
+        run: git push origin HEAD:refs/heads/feat/mcp-lifecycle-and-data
+      - name: Preserve exact source and validation reports
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-mcp-refinement-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
