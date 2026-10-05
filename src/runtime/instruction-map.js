@@ -1,5 +1,6 @@
 import {VBError} from '../language/lexer.js';
-const key=ins=>{const {line,source,procedure,...rest}=ins;return JSON.stringify(rest);};
+export const instructionKey=ins=>{const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;return JSON.stringify(rest);};
+const key=instructionKey;
 export const linearInstruction=ins=>['assign','expr','print','assert','graphics','filePrint','fileInput','fileRecord','fileSeek','fileCopy','fileRename','fileClose','fileOpen','stringMid','stringAlign','return','dim'].includes(ins.op);
 /** Deterministic bounded edit alignment. Large edited gaps are rejected rather
  * than guessing where a suspended instruction should execute. */
