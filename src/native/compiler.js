@@ -3,6 +3,7 @@ import {compileProject, parseParameters} from '../language/compiler.js';
 import {PE32Image, BinarySection} from './pe32.js';
 import {X86} from './x86.js';
 import {nativeBindingMethods} from './bindings.js';
+import {nativeCallMethods} from './calls.js';
 import {nativeCurrencyMethods,emitNativeCurrencyHelpers} from './currency.js';
 import {nativeDateMethods,emitNativeDateHelpers} from './dates.js';
 import {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes} from './numeric.js';
@@ -60,7 +61,7 @@ class NativeCompiler {
     if (parents.length > 1) this.fail('Only one MDI parent is supported'); this.mdi = parents[0];
     for (const module of this.modules.values()) if (module.form?.properties.MDIChild && !this.mdi) this.fail('MDI child requires an MDIForm', module);
   }
-  fail(message, context = this.context) { throw new NativeCompileError(message, context?.module?.name || context?.name || '', this.instruction?.line || 0); }
+  fail(message, context = this.context) { throw new NativeCompileError(message, context?.module?.name || context?.name || '', this.instruction?.line || context?.proc?.line || 0); }
   slot(label, value = 0) { this.data.align(4).label(label).u32(value); return label; }
   string(text) { text = String(text); if (text.length > MAX_NATIVE_STRING) this.fail('Native text exceeds 1,048,576 UTF-16 units'); if (!this.strings.has(text)) { const name = 'string:' + this.strings.size; this.ro.align(4).u32(text.length * 2).label(name).utf16(text); this.strings.set(text,name); } return this.strings.get(text); }
   buffer() { if(this.context?.proc?.name) { this.context.size+=8192; if(this.context.size>512*1024)this.fail('Native procedure text workspace exceeds 512 KiB'); return {address:-this.context.size}; } if (++this.bufferCount > 1024) this.fail('Native text-buffer limit exceeded'); const name = 'buffer:' + this.bufferCount; this.data.align(4).label(name).zero(8192); return name; }
@@ -80,8 +81,9 @@ class NativeCompiler {
       if (proc.kind === 'function' && !INT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='string' && !REAL_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='currency') this.fail('Native functions must return a supported scalar: ' + proc.name, module);
       const context = {module:result,proc,label:'proc:' + module.name + ':' + proc.name,locals:new Map(),temporaries:new Map(),loops:new Map(),size:NATIVE_ERROR_FRAME_BYTES};
       const local = (name, type = 'Long',decl={}) => { context.size += decl.nativeBytes || 4; if(context.size>512*1024)this.fail('Native procedure workspace exceeds 512 KiB',module); const variable = {...decl,name,type,offset:-context.size}; context.locals.set(key(name),variable); return variable; };
+      this.prepareNativeParameters(context);
       let argumentOffset=8;
-      proc.params.forEach(p => { p=this.scalar({...p,parameter:true}); if (p.optional || p.paramArray) this.fail('Optional/ParamArray native parameters are not lowered',module); if(key(p.type)==='string'&&!p.byRef){const v=local(p.name,p.type,{...p,parameter:false});v.incomingOffset=argumentOffset;v.ownedParameter=true;}else context.locals.set(key(p.name),{...p,offset:argumentOffset,parameter:true}); argumentOffset+=nativeParameterBytes(p); });
+      proc.params.forEach(p => { p=this.scalar({...p,parameter:true}); if(key(p.type)==='string'&&!p.byRef){const v=local(p.name,p.type,{...p,parameter:false});v.incomingOffset=argumentOffset;v.ownedParameter=true;}else context.locals.set(key(p.name),{...p,offset:argumentOffset,parameter:true}); argumentOffset+=nativeParameterBytes(p); });
       context.argumentBytes=argumentOffset-8;
       if (proc.kind === 'function') context.returnValue = local(proc.name,proc.returnType,this.scalar({name:proc.name,type:proc.returnType}));
       for (const instruction of proc.code) {
@@ -208,7 +210,10 @@ class NativeCompiler {
     const constant = this.constant(node); if (constant !== undefined) return this.expression(lit(constant));
     const variable = this.variable(node); if (variable) return this.load(variable);
     if(this.errorExpression(node))return;
-    if (node.kind === 'member') return this.getProperty(this.object(node.object),key(node.name));
+    if (node.kind === 'member') {
+      if(this.nativeFunctionType(node))return this.call({kind:'call',callee:node,args:[]});
+      return this.getProperty(this.object(node.object),key(node.name));
+    }
     if (node.kind === 'id') { if (this.context?.module.form && ['caption','hwnd','visible','enabled','windowstate','scalewidth','scaleheight'].includes(key(node.name))) return this.getProperty(this.context.module,key(node.name)); return this.call({kind:'call',callee:node,args:[]}); }
     if (node.kind === 'call') return this.call(node);
     if (node.kind === 'unary') {
@@ -320,10 +325,9 @@ class NativeCompiler {
     }
     const target = this.resolveProcedure(node.callee);
     if (!target) this.fail('Native procedure is not available: ' + (name || node.callee.name));
-    const signature = target.proc || target;
-    if (args.length !== signature.params.length) this.fail('Native call argument count mismatch: ' + signature.name);
+    const plan=this.nativeCallPlan(target,args);
     if(target.module?.form && target.module!==this.context.module)x.call(target.module.initialize);
-    this.nativeTypedCall(target,args);
+    this.nativeTypedCall(target,plan);
   }
   procedure(context) {
     this.context = context; const outer=this.x, body=new BinarySection('.body',0), x=this.x=new X86(body,this.image), code=context.proc.code, end=context.label+':return';
@@ -415,6 +419,7 @@ class NativeCompiler {
   handler(module, name, args = []) {
     const proc = module.procedures.get(key(name)); if (!proc) return;
     if(proc.proc.kind!=='sub') this.fail('Native event handler must be a Sub: '+name,module);
+    if (proc.proc.params.some(p=>p.optional||p.paramArray))this.fail('Native event parameters cannot be Optional or ParamArray: '+name,module);
     if (proc.proc.params.length !== args.length) this.fail('Native event signature mismatch: ' + name,module);
     args.forEach((arg,i) => { const param = proc.proc.params[i]; if (arg.ref && (!param.byRef || key(param.type) !== 'integer')) this.fail('Native event requires ByRef Integer: ' + param.name,module); });
     for (const arg of [...args].reverse()) { if (arg.ref) this.x.local(arg.ref).push(); else this.x.push(arg); }
@@ -647,7 +652,7 @@ class NativeCompiler {
     return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods);
+Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods);
 export function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');

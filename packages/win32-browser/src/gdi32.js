@@ -1,8 +1,9 @@
 import {Win32Error,integer,unsigned} from './core.js';
+import {RegionStore,installRegions} from './gdi-region.js';
 import {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo} from './gdi-bitmap.js';
 export function colorRef(value){const n=unsigned(value);return '#'+[n&255,n>>>8&255,n>>>16&255].map(v=>v.toString(16).padStart(2,'0')).join('');}
 export function installGDI(w){
-  const h=w.handles,m=w.memory,bitmaps=new BitmapStore(w);
+  const h=w.handles,m=w.memory,regions=new RegionStore(w.options),bitmaps=new BitmapStore(w,regions);
   const add=(name,arity,fn,options={})=>w.register('gdi32',name,fn,{arity,mode:'emulated',...options});
   const stocks=new Map(),stock=(index,type,value)=>stocks.set(index,h.add(type,{...value,stock:true}));
   stock(0,'brush',{color:0xffffff});stock(4,'brush',{color:0});stock(5,'brush',{null:true});stock(6,'pen',{color:0xffffff,width:1});stock(7,'pen',{color:0,width:1});stock(8,'pen',{null:true,width:1});
@@ -38,13 +39,13 @@ export function installGDI(w){
   add('CreateCompatibleDC',1,handle=>{if(handle)dc(handle);if(h.entries.size+2>h.limit)throw new Win32Error('Handle quota exceeded',8);const bitmap=bitmaps.create(1,1,1,{stock:true});try{const id=h.add('dc',{...newState(),memory:true,bitmap,defaultBitmap:bitmap});bitmaps.get(bitmap).defaultFor=id;return id;}catch(error){m.free(bitmaps.get(bitmap).ptr);h.close(bitmap,'bitmap');throw error;}});
   const deleteDC=handle=>{const state=dc(handle);if(!state.memory)throw new Win32Error('Use ReleaseDC for a window DC',6);m.free(bitmaps.get(state.defaultBitmap).ptr);h.close(state.defaultBitmap,'bitmap');h.close(handle,'dc');return 1;};
   add('DeleteDC',1,deleteDC);
-  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
+  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(entry?.type==='region')return regionAPI.select(state,object,5);if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
       if(!state.memory||entry.value.defaultFor&&entry.value.defaultFor!==Number(handle))throw new Win32Error('Bitmap cannot be selected into this DC',87);
       for(const [id,e]of h.entries)if(e.type==='dc'&&id!==Number(handle)&&[e.value,...e.value.saved].some(s=>s.bitmap===Number(object)))throw new Win32Error('Bitmap is selected into another DC',87);
     }const old=state[entry.type];state[entry.type]=Number(object);return old;});
-  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
+  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap','region'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
   add('GetCurrentObject',2,(handle,type)=>{const state=dc(handle),field={1:'pen',2:'brush',7:'bitmap'}[Number(type)];if(!field)throw new Win32Error('Object type is not implemented',50);return state[field]||0;});
-  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,bitmap:7})[e.type]||0;});
+  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,bitmap:7,region:8})[e.type]||0;});
   const bitmapInfo=(b,p)=>{const v=m.view(p,40);v.setUint32(0,40,true);v.setInt32(4,b.width,true);v.setInt32(8,b.topDown?-b.height:b.height,true);v.setUint16(12,1,true);v.setUint16(14,b.bpp,true);v.setUint32(16,0,true);v.setUint32(20,Math.ceil(b.width*b.bpp/32)*4*b.height,true);for(let o=24;o<40;o+=4)v.setUint32(o,0,true);};
   for(const suffix of ['A','W'])add('GetObject'+suffix,3,(object,count,out)=>{const e=h.entries.get(Number(object));if(!e||!['pen','brush','bitmap'].includes(e.type))throw new Win32Error('Unsupported GDI object',6);const b=e.value,size=e.type==='pen'?16:e.type==='brush'?12:24;if(!out)return size;count=integer(count,0,0x7fffffff);const n=e.type==='bitmap'&&b.dib&&count>=84?84:size;if(count<n||unsigned(out)%4)throw new Win32Error('Invalid GDI object buffer');const v=m.view(out,n);m.bytes(out,n).fill(0);
     if(e.type==='pen'){v.setUint32(0,b.null?5:0,true);v.setInt32(4,b.width||1,true);v.setUint32(12,b.color||0,true);}
@@ -98,7 +99,7 @@ export function installGDI(w){
   add('SetBkMode',2,(handle,mode)=>{integer(mode,1,2);const state=dc(handle),old=state.backgroundMode;state.backgroundMode=Number(mode);return old;});
   add('GetBkMode',1,handle=>dc(handle).backgroundMode);
   for(const wide of [false,true])add('TextOut'+(wide?'W':'A'),5,(handle,x,y,p,n)=>{n=integer(n,0,m.maxBytes/(wide?2:1));const text=typeof p==='string'?p.slice(0,n):m.decode(m.bytes(p,n*(wide?2:1)),wide);draw(dc(handle),'text',[coord(x),coord(y),text]);return 1;},{mode:'browser',notes:'Canvas/host font metrics; software memory DC text is not implemented.'});
-  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,...snapshot}=state;state.saved.push({...snapshot,clip:state.clip?.slice()||null});return state.saved.length;});
+  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,...snapshot}=state;state.saved.push(snapshot);return state.saved.length;});
   add('RestoreDC',2,(handle,level)=>{const state=dc(handle);level=coord(level);const index=level<0?state.saved.length+level:level-1;if(!level||index<0||index>=state.saved.length)throw new Win32Error('Invalid saved DC level');const snapshot=state.saved[index];state.saved.splice(index);Object.assign(state,snapshot);return 1;});
   add('SetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);x=coord(x);y=coord(y);if(old)pair(old,state.viewportX,state.viewportY);state.viewportX=x;state.viewportY=y;return 1;});
   add('OffsetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);return w.invoke('gdi32','SetViewportOrgEx',[handle,coord(state.viewportX+coord(x)),coord(state.viewportY+coord(y)),old]);});
@@ -107,8 +108,6 @@ export function installGDI(w){
   add('SetMapMode',2,(handle,mode)=>{dc(handle);if(Number(mode)!==1)throw new Win32Error('Only MM_TEXT is supported',50);return 1;});
   add('SetStretchBltMode',2,(handle,mode)=>{const state=dc(handle);if(Number(mode)!==3)throw new Win32Error('Only COLORONCOLOR scaling is supported',50);const old=state.stretchMode;state.stretchMode=3;return old;});
   add('GetStretchBltMode',1,handle=>dc(handle).stretchMode);
-  add('IntersectClipRect',5,(handle,l,t,r,b)=>{const s=dc(handle);const next=[coord(l)+s.viewportX,coord(t)+s.viewportY,coord(r)+s.viewportX,coord(b)+s.viewportY];s.clip=intersect(s.clip||[-0x80000000,-0x80000000,0x7fffffff,0x7fffffff],next);return s.clip[2]>s.clip[0]?2:1;});
-  add('GetClipBox',2,(handle,out)=>{const s=dc(handle),r=bitmaps.clip(s,bitmaps.bounds(s)),v=m.view(out,16);r.forEach((n,i)=>v.setInt32(i*4,n-(i%2?s.viewportY:s.viewportX),true));return r[2]>r[0]?2:1;});
-  add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);x=coord(x)+s.viewportX;y=coord(y)+s.viewportY;const r=bitmaps.clip(s,[x,y,x+1,y+1]);return r[2]>r[0]?1:0;});
+  const regionAPI=installRegions(w,{dc,bitmaps,regions,add});
   add('GetDeviceCaps',2,(handle,index)=>{const s=dc(handle),r=bitmaps.bounds(s);const values={2:1,8:r[2],10:r[3],12:32,14:1,88:96,90:96};if(!(index in values))throw new Win32Error('Device capability not implemented',50);return values[index];});
 }

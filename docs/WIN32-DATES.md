@@ -9,7 +9,12 @@ millisecond timestamp or a timezone-aware instant.
 ## Implemented
 
 Date globals, locals, statics, constants, literals, scalar `ByVal`/`ByRef` calls
-and function returns are lowered directly. Fixed and dynamic Date arrays use
+and function returns are lowered directly. Optional ByVal/ByRef Date defaults,
+early-bound named calls and explicitly grouped Date value copies are supported.
+Defaults bind in the declaring module; grouped copies use eight-byte caller-owned
+storage, never a four-byte pointer-sized value slot. Read-only literals and
+expressions become writable temporaries without copy-back. An ungrouped Double
+variable still cannot alias a Date reference. Fixed and dynamic Date arrays use
 `VT_DATE` (7), preserve their element type through copying and `ReDim Preserve`,
 and retain existing bounds, one-MiB backing limits, element locks and error
 cleanup. An array or reference of Double is not interchangeable with Date.
@@ -90,3 +95,12 @@ controls/GDI. The Electron target is the separate WebGPU-capable distribution.
 - Conversion: https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-vardatefromr8
 - Civil fields: https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-varianttimetosystemtime
 - NLS window: https://learn.microsoft.com/en-us/windows/win32/api/winnls/nf-winnls-getcalendarinfow
+
+## Date and call integration validation
+
+`AotDateCalls` adds 29 numbered native assertions for optional/defaulted Date
+arguments, negative serials, named mixed-width calls, reference/value distinction,
+array-element pins, failure unwinding and 2,000 repeated recursion/error cycles.
+The permanent Windows matrix runs basic storage, independent C ABI, Windows
+Script Host reference and call-lifetime suites independently; a failure in one
+does not prevent the others from writing their own diagnostics.

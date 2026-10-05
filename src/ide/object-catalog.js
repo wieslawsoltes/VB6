@@ -1,8 +1,7 @@
 import {EditorIntelligence} from '../editor/intelligence.js';
-import {TYPE_CATALOG,ENUM_TYPES,BUILTIN_SYMBOLS,runtimeType} from '../editor/type-catalog.js';
+import {TYPE_CATALOG,ENUM_TYPES,BUILTIN_SYMBOLS,runtimeType,builtinGroup} from '../editor/type-catalog.js';
 import {readProcedureAttributes} from './procedure-tools.js';
 import {compileModule} from '../language/compiler.js';
-import {BUILTIN_SIGNATURES} from '../runtime/signatures.js';
 import {BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,createControl,createForm} from '../project/model.js';
 import {procedures,defaultEventSignature} from '../editor/language-service.js';
 import {DEFAULT_EVENTS} from '../controls/controls.js';
@@ -21,10 +20,16 @@ export function buildObjectCatalog(project){
     for(const name of Object.keys(compiled.types))members.push({name,kind:'type',line:find(name),signature:'Type '+name});
     for(const c of input.form?.controls||[])members.push({name:c.name,kind:'control',scope:'public',line:1,signature:c.name+' As '+c.type+(c.properties.Index!==undefined?' ('+c.properties.Index+')':'')});
     for(const member of members){const attributes=readProcedureAttributes(input,member.name);member.description=attributes.description;member.hidden=attributes.hidden;member.helpContext=attributes.helpContext;}
+    const tolerant=new EditorIntelligence().index(input,project);
+    for(const symbol of tolerant.symbols.filter(s=>!s.owner)){
+      const current=members.find(m=>m.name.toLowerCase()===symbol.name.toLowerCase()&&(m.accessor||null)===(symbol.accessor||null));
+      if(current){if(symbol.type)current.type=symbol.type;if(symbol.params)current.params=symbol.params;}
+      else members.push({...symbol,kind:symbol.accessor?'property':symbol.kind,incomplete:!!compiled.diagnostics.length});
+    }
     add(project.name,input.name,input.kind+' in current project'+(compiled.diagnostics.length?' — source contains diagnostics':''),members,input.id);
   }
-  const groups={Strings:[],Conversion:[],DateTime:[],Math:[],Interaction:[],FileSystem:[],Information:[],Other:[]};
-  for(const [name,args]of Object.entries({...BUILTIN_SIGNATURES,CallByName:'object,procname,calltype,arguments...'})){const key=/^(left|right|mid|len|instr|replace|split|join|lcase|ucase|trim|ltrim|rtrim|space|string|str|asc|chr|format)/i.test(name)?'Strings':/^c(byte|int|lng|sng|dbl|cur|bool|date|str|var|verr)$/i.test(name)?'Conversion':/^(date|time|day|month|year|hour|minute|second|weekday|now)/i.test(name)?'DateTime':/^(abs|atn|cos|sin|tan|exp|log|sqr|sgn|fix|int|rnd|round)/i.test(name)?'Math':/^(msgbox|inputbox|beep|doevents|callbyname|createobject|shell|environ)/i.test(name)?'Interaction':/^(dir|file|freefile|getattr|setattr|eof|lof|loc|seek|curdir)/i.test(name)?'FileSystem':/^(is|vartype|typename|lbound|ubound)/i.test(name)?'Information':'Other';groups[key].push({name,kind:'function',signature:name+'('+args.split(',').filter(Boolean).map(p=>p.endsWith('?')?'['+p.slice(0,-1)+']':p).join(', ')+')',description:'Implemented browser runtime intrinsic. Optional arguments appear in brackets; full native coercion parity is not implied.'});}
+  const groups={};
+  for(const intrinsic of BUILTIN_SYMBOLS){const group=builtinGroup(intrinsic.name);(groups[group]||=[]).push({...intrinsic,description:'Implemented browser runtime intrinsic. Typed metadata is shared with IntelliSense; full native coercion parity is not implied.'});}
   for(const [group,members]of Object.entries(groups))if(members.length)add('VBA',group,'Implemented intrinsic functions',members);
   for(const name of ['Form','MDIForm',...BASIC_CONTROL_TYPES.filter(n=>!['Pointer','OLE'].includes(n)),...EXTENDED_CONTROL_TYPES]){
     const props=['Form','MDIForm'].includes(name)?createForm().form.properties:createControl(name).properties;

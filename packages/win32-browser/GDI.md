@@ -1,6 +1,6 @@
 # GDI bitmaps and memory device contexts
 
-Version 0.2.0 adds 41 named exports (211 total), including `msimg32` and its
+Version 0.2.0 added 41 named exports (211 at that release), including `msimg32` and its
 `gdi32` aliases. This is a tested browser subset, not a native GDI implementation
 or a promise that all flags and formats of an exported function work.
 
@@ -70,9 +70,10 @@ pixels, independent of VB twips/ScaleMode; device-pixel-ratio scaling occurs onl
 at browser presentation. Only destination clipping applies to a blit. This
 version requires the source rectangle to fit entirely within its source surface.
 
-Rectangular clipping, current position, selected objects, colors, background
-mode, viewport origin and stretch mode are saved/restored. Arbitrary regions,
-world transforms, font objects and font metrics are not part of this release.
+Complex region clipping, current position, selected objects, colors, background
+mode, viewport origin and stretch mode are saved/restored. Version 0.3.0 adds
+rectangle-band regions and Boolean clipping; see [REGIONS.md](REGIONS.md). Curved
+region constructors, world transforms, font objects and font metrics remain unsupported.
 Memory-DC lines/rectangles/ellipses use bounded integer software rasterization;
 native pen joins, pixel-exact ellipse edges and platform font rasterization are
 not claimed. Text in a memory DC or software-clipped DC reports unsupported.

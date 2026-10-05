@@ -20,7 +20,7 @@ See [data sources, examples and deployment](docs/DATA-SOURCES.md) for the compat
 
 Classic List Members, List Constants, Complete Word, Quick Info and Parameter Info now share typed resolution across source panes, Immediate, Watch and Evaluation fields. Nested `With`, arrays/default members, classes/UDTs/enums, runtime/data adapters and explicit portable reference metadata feed the same Object Browser. Automatic assistance never executes project code or opens a connection.
 
-See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
+See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). The [browser compatibility follow-up](docs/INTELLISENSE-COMPATIBILITY.md) adds WithEvents/interface handler dropdowns, labels, reference priority, strict metadata validation and DAO-specific typed chains. Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
 
 ## Run
 
@@ -216,15 +216,17 @@ Open `.vbp` projects and `.vbg` groups from complete selected files, folders or 
 
 Browser IDE runs, the runtime SDK and published single-file HTML apps now share
 [`@vb6/win32-browser`](packages/win32-browser/README.md), an independent,
-zero-dependency MIT package. Version 0.2.0 registers 211 export names for
+zero-dependency MIT package. Version 0.3.0 registers 231 export names for
 common kernel/memory/file/INI, registry, window/message/timer, clipboard, GDI and
 safe URL operations. `Declare`, `Alias`, typed ByRef buffers, aligned UDTs,
 `AddressOf` callbacks and runtime `hWnd` values are integrated without changing
 the classic IDE layout. Memory DCs, writable DIBs, 15 raster operations, bitmap
-blitting, alpha blending and rectangular clipping are supported; forms and picture
+blitting, alpha blending and complex region clipping are supported; forms and picture
 boxes expose read-only `hDC`. Bitmap surfaces use an explicit Canvas2D fallback.
-Try **Bitmap blitting** in **Win32 API Workbench**, and see the
-[GDI compatibility guide](packages/win32-browser/GDI.md).
+Try **Bitmap blitting** and **Region clipping** in **Win32 API Workbench**.
+The region layer adds Boolean geometry, RGNDATA interchange, copied clips and
+region painting. See the [GDI guide](packages/win32-browser/GDI.md) and
+[region compatibility guide](packages/win32-browser/REGIONS.md).
 
 This is a browser-compatible subset, not native DLL execution or full Win32
 parity. Private files/registry/clipboard stay application-local; unsupported
