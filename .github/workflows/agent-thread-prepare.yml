@@ -7,16 +7,16 @@ permissions:
 jobs:
   prepare:
     if: github.ref == 'refs/heads/feat/agent-conversation-thread-budgets'
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply verified source change
+      - name: Apply verified source change and align existing documentation
         shell: bash
         run: |
           python3 - <<'PY'
@@ -25,7 +25,10 @@ jobs:
           data = base64.b64decode(''.join(Path('tools/.agent-thread-update.part' + str(i)).read_text() for i in range(4)), validate=True)
           assert hashlib.sha256(data).hexdigest() == '9ca9ef114088fabee03aade59c0dbe674c38f59f5a580f9833aed8bd6ebc0158'
           change = json.loads(lzma.decompress(data))
-          assert subprocess.check_output(['git', 'rev-parse', 'HEAD~2'], text=True).strip() == change['base'] == '30febe16733be5d71eb4428d4888866947a088fe'
+          assert change['base'] == '30febe16733be5d71eb4428d4888866947a088fe'
+          subprocess.run(['git', 'merge-base', '--is-ancestor', change['base'], 'HEAD'], check=True)
+          scaffolding = {'.github/workflows/agent-thread-prepare.yml'} | {'tools/.agent-thread-update.part' + str(i) for i in range(4)}
+          assert set(subprocess.check_output(['git', 'diff', '--name-only', change['base'], 'HEAD'], text=True).splitlines()) == scaffolding
           allowed = {'docs/CODING-AGENT-THREADS.md', 'src/agents/agent.js', 'src/agents/agents.css', 'src/agents/conversations.js', 'src/agents/limits.js', 'src/agents/providers.js', 'src/agents/studio.js', 'src/agents/task-tools.js', 'src/agents/thread-view.js', 'src/agents/thread.js', 'tests/agent-relay.test.mjs', 'tests/coding-agents-tasks.test.mjs', 'tests/coding-agents-thread.test.mjs', 'tests/coding-agents.test.mjs', 'tools/agent-relay.mjs', 'tools/coding-agents-browser-tests.py'}
           assert {item['path'] for item in change['files']} == allowed
           assert len(change['files']) == len(allowed)
@@ -42,6 +45,29 @@ jobs:
           for item in change['files']:
               assert hashlib.sha256(Path(item['path']).read_bytes()).hexdigest() == item['sha256'], item['path']
               print(item['sha256'], item['path'])
+          def replace_once(text, old, new):
+              assert text.count(old) == 1, old
+              return text.replace(old, new, 1)
+          guide = Path('docs/coding-agents.md')
+          assert subprocess.check_output(['git', 'hash-object', str(guide)], text=True).strip() == 'b0e6c5f9ca7b4965129301c5453ae86218857087'
+          text = guide.read_text()
+          text = replace_once(text, 'Choose a connection and model. On Task, describe the change; **Run** or\n**Ctrl+Enter** opens a confirmation naming the project, provider, model and\npermission mode. Starting sends the task, tool schemas and project inventory.', 'Choose a connection and model. On Task, describe the change; **Send**, **Run**, or\n**Enter** opens a confirmation naming the project, provider, model, permission mode\nand session limits. Shift+Enter inserts a line; Ctrl+Enter also sends. IME\ncomposition does not send. Starting sends the task, tool schemas and project inventory.')
+          text = replace_once(text, 'continuations. Only public assistant text is displayed; private reasoning is not\nrendered or included in the downloadable activity transcript. Model-provided text\nis displayed as plain text, not executable HTML or automatically trusted Markdown.', 'continuations. The Task tab displays a live conversation: public replies, waiting\nstatus, collapsible tool operations, approvals, plans and questions. Private\nreasoning and native signatures are never rendered or included in exported\ntranscripts. Completed messages use a bounded text-only Markdown subset with\ncopyable code and safe HTTP(S) links; model HTML, images and embeds are not executed.\nThe composer remains available for drafting while a reply runs. Scrolling upward\npreserves the reading position; Jump to latest restores following. Interrupted\npartial replies remain visible and are labelled as incomplete. See\n[Conversation behavior and session budgets](CODING-AGENT-THREADS.md).')
+          text = replace_once(text, 'pre-response network failures/timeouts, allow a manual Continue.', 'pre-response connection failures and request timeouts (including timed-out\nstreaming responses), allow a manual Continue.')
+          text = replace_once(text, 'operations, partial/corrupt streams and uncertain tool batches remain blocked and', 'operations, malformed/incomplete native responses and uncertain tool batches remain blocked and')
+          text = replace_once(text, 'Default per-run limits are 16 provider requests, 128 tool calls, 8,192 output tokens\nper request and 200,000 **reported** tokens. All four limits are exposed on the\nPermissions tab. Continue requires a new user decision and starts new per-run\nlimits; cumulative task counters remain visible. Reported usage is **not a hard\nbilling cap**. Provider reporting may omit usage or include cached/reasoning tokens;\nuse provider-side spend controls where available. Stop does not undo edits,\nreverse external data-source actions, or guarantee immediate cessation of billing.', 'The new Extended default allows 128 provider requests and 1,024 tool calls per run,\n32,768 output tokens per request, and a cumulative **4,000,000-token task budget**.\nThe Large preset allows 20,000,000 tokens; the configurable application ceiling is\n100,000,000. All six limits, including context bytes and request timeout, are\nindependently editable on Permissions. Only validated numeric preferences can\npersist in browser storage; tasks, keys, connection settings and grants do not.\nContinue requires a new user decision and resets per-run request/tool allowances,\nnot the cumulative token budget. Raise an exhausted allowance explicitly or use\nNew Task. Unknown provider usage is separately labelled as a byte/public-text\nsafety estimate and counted against the allowance, not presented as billed tokens.\nThese limits are **not a hard billing cap or model capability guarantee**: one\nrequest can exceed the remaining allowance. Review provider billing and spend\ncontrols. Stop does not undo edits, reverse external data-source actions, or\nguarantee immediate cessation of billing.\n\nSee the [complete presets, ranges and accounting rules](CODING-AGENT-THREADS.md#limits).\nGeneration requests default to ten minutes and can be configured up to thirty;\nmodel discovery remains capped at two minutes. Longer generation timeouts do not\nextend the existing ten-minute scoped permission grant.')
+          text = replace_once(text, 'estimate. Requests are capped at 1.5 MB; provider responses at 8 MiB; retained\npublic activity at 500 entries/approximately 512 KB. Individual public text is', 'estimate. The request-context default is 6 MB, configurable up to 16 MB; provider\nresponses remain capped at 8 MiB. The public thread keeps at most 1,200 entries\nand four million accounted characters, while the separate activity audit keeps\n500 entries/approximately 512 KB. Thread previews are capped at 262,144 characters\nper public field. Omissions and truncation are explicit. Individual activity text is')
+          text = replace_once(text, '`studio.js` is the classic IDE adapter/UI; `agents.css` uses existing theme tokens.', '`thread.js` maintains bounded public presentation state independently of native\nprovider histories; `thread-view.js` renders keyed classic conversation entries,\nsafe formatting, copy actions and scroll anchoring. `limits.js` validates numeric\npreferences and presets. `studio.js` is the classic IDE adapter/UI; `agents.css`\nuses existing theme tokens.')
+          text = replace_once(text, 'manual retry and workspace lifecycle.', 'manual retry and workspace lifecycle, plus live tool-only/streaming threads,\nscroll/selection anchoring, formatting/copy, draft recovery, Enter/IME and budget\npreferences.')
+          guide.write_text(text)
+          readme = Path('README.md')
+          assert subprocess.check_output(['git', 'hash-object', str(readme)], text=True).strip() == 'ab4574589e08b00ced0b019be5cf990fd6e71dc2'
+          text = replace_once(readme.read_text(), 'The classic **Tasks** tab supports eight independent named conversations, drafts', 'The **Task** tab now renders a live conversation with streaming replies, collapsible\ntool steps, approval/interruption states, safe formatted text and copyable code.\nDraft while the agent runs; Enter sends, Shift+Enter adds a line, and Jump to latest\nresumes following after you scroll up. The new default is a cumulative **4 million\ntokens per task**, with a **20 million** Large preset and independent output,\nrequest, tool, context and timeout controls. Only numeric preferences can persist.\nSee [conversation rendering and session budgets](docs/CODING-AGENT-THREADS.md)\nfor limits, accounting and provider-capability caveats.\n\nThe classic **Tasks** tab supports eight independent named conversations, drafts')
+          readme.write_text(text)
+          subprocess.run(['git', 'add', '--', str(guide), str(readme)], check=True)
+          assert set(subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines()) == allowed | {str(guide), str(readme)}
+          for p in [guide, readme]:
+              print(hashlib.sha256(p.read_bytes()).hexdigest(), str(p))
           PY
       - name: Build standalone artifacts
         run: npm run build
