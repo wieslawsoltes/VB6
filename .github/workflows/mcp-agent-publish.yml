@@ -1,0 +1,83 @@
+name: Publish verified MCP agent sources
+on:
+  push:
+    branches: [feat/mcp-agent-access]
+    paths: ['.github/workflows/mcp-agent-publish.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: mcp-agent-clean-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: vb6-mcp-agent-integration-564fbfda37ab22e692c42f297ccb1a76c65f2555
+          run-id: 37271502657
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/mcp-reviewed-input
+      - name: Import only the reviewed tree, not the damaged staging ancestry
+        run: |
+          set -euo pipefail
+          recovery="$RUNNER_TEMP/mcp-reviewed-history"
+          git init -q "$recovery"
+          git -C "$recovery" fetch "$RUNNER_TEMP/mcp-reviewed-input/repository.bundle" HEAD
+          test "$(git -C "$recovery" rev-parse 'FETCH_HEAD^{tree}')" = '596c0d5d033bcb276d5c35a55f59e825a7abcf2e'
+          git -C "$recovery" ls-tree -r --name-only -z FETCH_HEAD > "$RUNNER_TEMP/mcp-reviewed-paths"
+          git -C "$recovery" archive FETCH_HEAD > "$RUNNER_TEMP/mcp-reviewed-tree.tar"
+          # This is the disposable checkout of the clean feature branch. Import
+          # exact tracked paths, including deletions and executable file modes.
+          git rm -r --quiet .
+          tar -xf "$RUNNER_TEMP/mcp-reviewed-tree.tar"
+          git add -f --pathspec-from-file="$RUNNER_TEMP/mcp-reviewed-paths" --pathspec-file-nul
+          test "$(git write-tree)" = '596c0d5d033bcb276d5c35a55f59e825a7abcf2e'
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: server-only MCP with 106 scoped IDE, compiler, designer and debugger tools'
+          test "$(git rev-parse HEAD^)" = "$GITHUB_SHA"
+          npm run build
+          npm test
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/mcp-agent-access
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Real external-agent deployment workflows
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+      - name: Preserve clean source history
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-agent-clean-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
+            src
+            tools
+            tests
+            docs
+            dist
+            examples
+            package.json
+            README.md
+            LICENSE
