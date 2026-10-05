@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   integrate:
-    runs-on: ubuntu-24.04-arm
+    runs-on: macos-14
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -36,13 +36,15 @@ jobs:
           PY
           npm run build
           node tools/win32-api-inventory.mjs
+          rm .github/workflows/gdi-merge-validation.yml
           git add -A
           test -z "$(git diff --name-only --diff-filter=U)"
+          test "$(git write-tree)" = dee82f35b13d88a2b6b367272d289a4ffaf08892
           npm test | tee /tmp/gdi-merge-tests.txt
           npm run pack:win32-browser | tee /tmp/gdi-merge-package-tests.txt
           git diff --exit-code
           git diff --cached --check a098f73921a624e30c26a3aad07c76a14e10073e
-          git commit -m 'fix(win32-browser): preserve native data-provider changes in rebuilt advanced GDI integration'
+          git commit -m 'fix(win32-browser): preserve data-provider main in independently reproduced advanced GDI release'
       - name: Publish exact tested feature source with branch lease
         shell: bash
         env:
