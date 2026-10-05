@@ -1,0 +1,90 @@
+name: Validate native interval corrections
+on:
+  push:
+    branches: [feat/native-compatibility-boundaries]
+    paths: [.github/workflows/native-interval-review.yml]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.publish.outputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          if ! git merge --no-commit --no-ff f4ee8d47bed69ae26b65d20637b8f5f8da13d815; then
+            python3 - <<'PY'
+          import subprocess
+          paths=subprocess.check_output(['git','diff','--name-only','--diff-filter=U','-z']).decode().split('\0')
+          paths=[p for p in paths if p]
+          if not paths: raise SystemExit('Merge failed without generated conflicts')
+          for p in paths:
+              if not (p.startswith('dist/') or p in ['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js']):
+                  raise SystemExit('Readable source conflict requires review: '+p)
+          for p in paths:
+              subprocess.run(['git','checkout','--ours','--',p],check=True)
+              subprocess.run(['git','add','--',p],check=True)
+          PY
+          fi
+          python3 tools/.interval-review-update.py
+          npm run build
+          npm test
+          git rm tools/.interval-review-update.py
+          git add src tests tools dist examples
+          git diff --cached --check
+          git commit -m 'test(native): align typed reference destinations and retain every measured interval result' -m 'Retain current RDO and coding-agent thread work. Rebuild generated conflicts from merged sources. No test expression is dropped; independent Long destination coercion and full result traces make remaining native mismatches observable.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-compatibility-boundaries
+          echo "source=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [intervals, arrays]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run build
+      - name: Execute all interval comparisons against installed Script Host
+        if: matrix.suite == 'intervals'
+        shell: pwsh
+        run: ./tools/test-win32-date-intervals.ps1
+      - name: Execute checked large arrays
+        if: matrix.suite == 'arrays'
+        shell: pwsh
+        run: |
+          node tools/win32-large-array-fixtures.mjs
+          if($LASTEXITCODE -ne 0){throw 'Large array build failed'}
+          ./tools/test-win32-dates.ps1 -Directory validation/large-arrays -Program AotLargeArrays -Manifest large-array-build.json -ReportName large-array-execution.json -LifetimeCycles 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-interval-review-${{ matrix.suite }}
+          path: |
+            validation/date-intervals/
+            validation/large-arrays/
+          retention-days: 14
