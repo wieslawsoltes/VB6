@@ -4,27 +4,49 @@ on:
     branches: [feature/win32-browser-compat]
     paths: [.github/workflows/win32-final-integration.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
   source:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Archive exact branch and upstream history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Integrate reviewed upstream revision
         run: |
-          git bundle create /tmp/win32-final-integration.bundle HEAD refs/remotes/origin/main
-          git config user.name 'Integration review'
-          git config user.email 'integration@users.noreply.github.com'
-          git merge --no-commit --no-ff 5f64aea7b9b54d90043096a90128439399da9615 > /tmp/merge-review.txt 2>&1 || true
-          git diff --name-only --diff-filter=U >> /tmp/merge-review.txt
-          cat /tmp/merge-review.txt
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git merge --no-commit --no-ff 5f64aea7b9b54d90043096a90128439399da9615 || true
+          python - <<'PY'
+          import subprocess
+          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          allowed={'dist/VB6-Studio-Web.html','dist/studio.js'}
+          if set(conflicts)-allowed:
+              raise SystemExit('Unreviewed conflict: '+repr(conflicts))
+          PY
+      - name: Regenerate and validate combined source
+        run: |
+          npm run build
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples packages/win32-browser/dist
+          test -z "$(git diff --name-only --diff-filter=U)"
+          npm test
+          npm run pack:win32-browser
+          git archive --format=tar HEAD > /tmp/previous-source.tar
+      - name: Commit integration only to feature branch
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/feature/win32-browser-compat | cut -f1)" = "$EXPECTED_SHA"
+          git commit -m 'fix(win32-browser): retain native Calculator improvements in regenerated IDE'
+          git push origin HEAD:refs/heads/feature/win32-browser-compat
+          git rev-parse HEAD HEAD^{tree} > /tmp/win32-integration-revision.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: win32-final-integration-source
-          path: |
-            /tmp/win32-final-integration.bundle
-            /tmp/merge-review.txt
+          name: win32-integration-revision
+          path: /tmp/win32-integration-revision.txt
           retention-days: 7
