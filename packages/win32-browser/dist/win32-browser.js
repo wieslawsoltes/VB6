@@ -185,7 +185,7 @@ function installRegions(w,{dc,bitmaps,regions,add}){
     mode=integer(mode,1,5);
     if(!object){if(mode!==5)throw new Win32Error('NULL clip requires RGN_COPY');s.clip=null;return effective(s).type;}
     const shape=get(object).shape;
-    const next=mode===5?shape:regions.combine(s.clip||deviceRegion(s),shape,mode);
+    const next=mode===5||mode===1&&!s.clip?shape:regions.combine(s.clip||deviceRegion(s),shape,mode);
     // Calculate before assigning, so failures preserve the previous clip.
     const type=regions.combine(next,deviceRegion(s),1).type;s.clip=next;return type;
   };
@@ -200,13 +200,13 @@ function installRegions(w,{dc,bitmaps,regions,add}){
   add('RectInRegion',2,(object,p)=>regions.intersects(get(object).shape,rect(p))?1:0);
   add('GetRegionData',3,(object,count,out)=>{
     const shape=get(object).shape,size=32+shape.count*16;count=integer(count,0,0xffffffff);if(!out)return size;
-    if(count<size)throw new Win32Error('Region data buffer is too small',122);
+    if(count<size)throw new Win32Error('Region data buffer is too small',87);
     const v=m.view(out,size);v.setUint32(0,32,true);v.setUint32(4,1,true);v.setUint32(8,shape.count,true);v.setUint32(12,shape.count*16,true);writeRect(out+16,shape.bounds);
     let offset=32;for(const r of regions.rectangles(shape)){writeRect(out+offset,r);offset+=16;}return size;
   });
   add('ExtCreateRegion',3,(transform,count,p)=>{
     count=integer(count,32,m.maxBytes);const v=m.view(p,count),n=v.getUint32(8,true),bytes=v.getUint32(12,true);
-    if(v.getUint32(0,true)!==32||v.getUint32(4,true)!==1||n>regions.limit||bytes<n*16||32+n*16>count)throw new Win32Error('Invalid or excessive RGNDATA');
+    if(v.getUint32(0,true)!==32||v.getUint32(4,true)!==1||n>regions.limit||bytes<n*16||bytes>count-32||32+n*16>count)throw new Win32Error('Invalid or excessive RGNDATA');
     let dx=0,dy=0;
     if(transform){const x=m.view(transform,24),a=[0,4,8,12,16,20].map(o=>x.getFloat32(o,true));if(a[0]!==1||a[1]!==0||a[2]!==0||a[3]!==1||!Number.isInteger(a[4])||!Number.isInteger(a[5]))throw new Win32Error('Region XFORM supports identity and integral translation only',50);[dx,dy]=a.slice(4);}
     let shape=regions.fromRectangles(Array.from({length:n},(_,i)=>rect(p+32+i*16)));
@@ -217,9 +217,16 @@ function installRegions(w,{dc,bitmaps,regions,add}){
   add('ExtSelectClipRgn',3,(handle,object,mode)=>select(dc(handle),object,mode));
   add('GetClipRgn',2,(handle,object)=>{const s=dc(handle);get(object);if(!s.clip)return 0;set(object,s.clip);return 1;},{failure:-1});
   for(const [name,mode]of [['IntersectClipRect',1],['ExcludeClipRect',4]])add(name,5,(handle,...r)=>{
-    const s=dc(handle),next=regions.combine(s.clip||deviceRegion(s),logicalRect(s,r),mode),type=regions.combine(next,deviceRegion(s),1).type;s.clip=next;return type;
+    const s=dc(handle),shape=logicalRect(s,r);
+    // Intersecting an absent application clip stores the complete rectangle,
+    // not only the currently visible bitmap portion. A later bitmap selection
+    // or offset must recover that off-screen geometry (Windows GDI contracts).
+    const next=mode===1&&!s.clip?shape:regions.combine(s.clip||deviceRegion(s),shape,mode);
+    // Rectangle clip calls use GDI's conservative COMPLEXREGION success status;
+    // GetClipBox reports the precise effective visible complexity separately.
+    s.clip=next;return mode===4&&!next.count?1:3;
   });
-  add('OffsetClipRgn',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!s.clip)return effective(s).type;const next=regions.offset(s.clip,x,y),type=regions.combine(next,deviceRegion(s),1).type;s.clip=next;return type;});
+  add('OffsetClipRgn',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!s.clip)return effective(s).type;const next=regions.offset(s.clip,x,y);s.clip=next;return next.type;});
   add('GetClipBox',2,(handle,out)=>{const s=dc(handle),shape=effective(s);writeRect(out,shape.count?shape.bounds.map((n,i)=>n-(i%2?s.viewportY:s.viewportX)):[0,0,0,0]);return shape.type;});
   add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff)+s.viewportX;y=integer(y,-0x80000000,0x7fffffff)+s.viewportY;return regions.contains(effective(s),x,y)?1:0;});
   add('RectVisible',2,(handle,p)=>{const s=dc(handle),r=rect(p);return regions.intersects(effective(s),[r[0]+s.viewportX,r[1]+s.viewportY,r[2]+s.viewportX,r[3]+s.viewportY])?1:0;});
@@ -692,7 +699,7 @@ return {colorRef,installGDI};
 
 /* index.js */
 __modules[8]=(()=>{
-const {REGION_CONSTANTS}=__modules[1];
+const {REGION_CONSTANTS,RegionStore}=__modules[1];
 const {GDI_CONSTANTS}=__modules[2];
 const {installClipboard}=__modules[3];
 const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
@@ -736,7 +743,7 @@ class Win32Browser {
 }
 function createWin32(options={}){return new Win32Browser(options);}
 
-return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
+return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
 globalThis["Win32Compat"]=__modules[8];
 })();

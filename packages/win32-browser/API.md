@@ -1,7 +1,7 @@
 # Win32 browser export inventory
 
-Version 0.2.0. 231 named exports, counting A/W variants and aliases.
-See README.md and GDI.md for per-family restrictions and the VB6 ABI boundary.
+Version 0.3.0. 231 named exports, counting A/W variants and aliases.
+See README.md, GDI.md and REGIONS.md for per-family restrictions and the VB6 ABI boundary.
 Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalars.
 
 | DLL | Export | Arity | Mode | Specific notes |

@@ -6,6 +6,10 @@ A browser-native classic Visual Basic development environment, source runtime an
 
 **Not a complete, native or pixel-identical Microsoft VB6 replacement.** Detailed supported behavior and limits are in [Compatibility](docs/COMPATIBILITY.md), with [release notes](docs/RELEASE-NOTES-0.6.0.md) and [validation](docs/TESTING.md).
 
+## Debugger and runtime execution control
+
+The classic debugger now includes statement-level stepping and source highlighting, all three Error Trapping modes, recoverable error breaks with retained live frames, scoped break watches, column-aware Run to Cursor and Set Next Statement, and improved caller-frame inspection and Immediate assignment. See the [debugger guide](docs/DEBUGGER.md) for shortcuts, runtime APIs, validation, and remaining compatibility limits.
+
 ## Data sources
 
 Classic Data Environment/Data View and Data Link Properties now share a provider-backed ADO-style layer with exported HTML/Electron apps. Use embedded offline **SQLite**, **REST CRUD**, **OData**, **GraphQL**, **JSON/CSV**, or an authenticated native gateway for PostgreSQL, MySQL, SQL Server and installed OLE DB/ODBC providers. Four runnable examples demonstrate SQLite editing and modern HTTP data sources.
@@ -212,15 +216,17 @@ Open `.vbp` projects and `.vbg` groups from complete selected files, folders or 
 
 Browser IDE runs, the runtime SDK and published single-file HTML apps now share
 [`@vb6/win32-browser`](packages/win32-browser/README.md), an independent,
-zero-dependency MIT package. Version 0.2.0 registers 211 export names for
+zero-dependency MIT package. Version 0.3.0 registers 231 export names for
 common kernel/memory/file/INI, registry, window/message/timer, clipboard, GDI and
 safe URL operations. `Declare`, `Alias`, typed ByRef buffers, aligned UDTs,
 `AddressOf` callbacks and runtime `hWnd` values are integrated without changing
 the classic IDE layout. Memory DCs, writable DIBs, 15 raster operations, bitmap
-blitting, alpha blending and rectangular clipping are supported; forms and picture
+blitting, alpha blending and complex region clipping are supported; forms and picture
 boxes expose read-only `hDC`. Bitmap surfaces use an explicit Canvas2D fallback.
-Try **Bitmap blitting** in **Win32 API Workbench**, and see the
-[GDI compatibility guide](packages/win32-browser/GDI.md).
+Try **Bitmap blitting** and **Region clipping** in **Win32 API Workbench**.
+The region layer adds Boolean geometry, RGNDATA interchange, copied clips and
+region painting. See the [GDI guide](packages/win32-browser/GDI.md) and
+[region compatibility guide](packages/win32-browser/REGIONS.md).
 
 This is a browser-compatible subset, not native DLL execution or full Win32
 parity. Private files/registry/clipboard stay application-local; unsupported

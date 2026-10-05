@@ -11,7 +11,7 @@ public static class RegionContractProbe {
  [DllImport("gdi32.dll")] static extern int SetRectRgn(IntPtr r,int l,int t,int right,int b);
  [DllImport("gdi32.dll")] static extern int CombineRgn(IntPtr d,IntPtr a,IntPtr b,int mode);
  [DllImport("gdi32.dll")] static extern int EqualRgn(IntPtr a,IntPtr b);
- [DllImport("gdi32.dll")] static extern uint GetRegionData(IntPtr r,uint count,IntPtr data);
+ [DllImport("gdi32.dll",SetLastError=true)] static extern uint GetRegionData(IntPtr r,uint count,IntPtr data);
  [DllImport("gdi32.dll")] static extern int GetRgnBox(IntPtr r,out Rect rect);
  [DllImport("gdi32.dll")] static extern int PtInRegion(IntPtr r,int x,int y);
  [DllImport("gdi32.dll")] static extern int RectInRegion(IntPtr r,ref Rect rect);
@@ -38,6 +38,7 @@ public static class RegionContractProbe {
  [DllImport("gdi32.dll")] static extern int InvertRgn(IntPtr dc,IntPtr r);
  [DllImport("gdi32.dll")] static extern int PatBlt(IntPtr dc,int x,int y,int w,int h,uint rop);
  [DllImport("gdi32.dll")] static extern int GdiFlush();
+ [DllImport("kernel32.dll")] static extern void SetLastError(uint error);
  static readonly List<IntPtr> objects=new List<IntPtr>(),buffers=new List<IntPtr>();
  static IntPtr Track(IntPtr p){if(p==IntPtr.Zero)throw new Exception("Native GDI allocation failed");objects.Add(p);return p;}
  static IntPtr Region(int l,int t,int r,int b){return Track(CreateRectRgn(l,t,r,b));}
@@ -64,6 +65,21 @@ public static class RegionContractProbe {
   var brush=Track(CreateSolidBrush(0x563412));var painted=new List<object>();foreach(var name in new[]{"FillRgn","PaintRgn","InvertRgn"}){GdiFlush();Marshal.Copy(new byte[256],0,bits,256);SelectObject(dc,brush);painted.Add((name=="FillRgn"?FillRgn(dc,a,brush):name=="PaintRgn"?PaintRgn(dc,a):InvertRgn(dc,a))!=0?1:0);painted.Add(Pixels(bits));}r["painted"]=painted;
   r["patBlt"]=PatBlt(dc,0,0,8,8,0xf00021)!=0?1:0;r["patPixels"]=Pixels(bits);
   SelectClipRgn(dc,IntPtr.Zero);SetViewportOrgEx(dc,1,1,IntPtr.Zero);GdiFlush();Marshal.Copy(new byte[256],0,bits,256);r["fillTranslated"]=FillRgn(dc,b,brush)!=0?1:0;r["fillTranslatedPixels"]=Pixels(bits);
+  SetViewportOrgEx(dc,0,0,IntPtr.Zero);var edges=new List<object>();
+  foreach(var rect in new int[][]{new[]{0,0,0,0},new[]{20,20,30,30},new[]{2,2,6,6},new[]{-2,-2,10,10}}){
+   var region=Region(rect[0],rect[1],rect[2],rect[3]);
+   foreach(var op in new[]{"select","intersect","exclude","offset","and","or","xor","diff","copy"}){
+    SelectClipRgn(dc,IntPtr.Zero);int value=0;
+    if(op=="select")value=SelectClipRgn(dc,region);
+    if(op=="intersect")value=IntersectClipRect(dc,rect[0],rect[1],rect[2],rect[3]);
+    if(op=="exclude")value=ExcludeClipRect(dc,rect[0],rect[1],rect[2],rect[3]);
+    if(op=="offset"){SelectClipRgn(dc,region);value=OffsetClipRgn(dc,20,20);}
+    int mode=Array.IndexOf(new[]{"and","or","xor","diff","copy"},op)+1;if(mode>0)value=ExtSelectClipRgn(dc,region,mode);
+    Rect cb;int type=GetClipBox(dc,out cb),has=GetClipRgn(dc,copy);
+    edges.Add(new {rect,op,value,boxType=type,box=new[]{cb.Left,cb.Top,cb.Right,cb.Bottom},has,data=has==1?Data(copy):new int[0]});
+   }
+  }
+  SetLastError(0);uint smallValue=GetRegionData(copy,16,buf);edges.Add(new {op="small-buffer",value=smallValue,error=Marshal.GetLastWin32Error()});r["edges"]=edges;
   return r;
  }finally{if(dc!=IntPtr.Zero)DeleteDC(dc);foreach(var p in objects)DeleteObject(p);foreach(var p in buffers)Marshal.FreeHGlobal(p);objects.Clear();buffers.Clear();}}
 }

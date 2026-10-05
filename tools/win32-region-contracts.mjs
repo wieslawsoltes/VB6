@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
+import {clippingEdges} from '../packages/win32-browser/test/region-edge-probe.mjs';
 import {createWin32} from '../packages/win32-browser/src/index.js';
 export function regionContracts(){
  const w=createWin32(),m=w.memory,g=(n,...a)=>w.invoke('gdi32',n,a),r={};
@@ -30,6 +31,7 @@ export function regionContracts(){
   r.patBlt=g('PatBlt',dc,0,0,8,8,0xf00021);r.patPixels=rgb();
   // FillRgn coordinates are logical even though SelectClipRgn uses device units.
   g('SelectClipRgn',dc,0);g('SetViewportOrgEx',dc,1,1,0);m.bytes(bits,256).fill(0);r.fillTranslated=g('FillRgn',dc,b,brush);r.fillTranslatedPixels=rgb();
+  r.edges=clippingEdges(createWin32);
   return r;
  }finally{w.dispose();}
 }
