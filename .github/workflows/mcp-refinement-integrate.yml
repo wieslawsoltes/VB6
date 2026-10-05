@@ -1,0 +1,73 @@
+name: Integrate MCP refinement with current main
+on:
+  push:
+    branches: [feat/mcp-lifecycle-and-data]
+    paths: ['.github/workflows/mcp-refinement-integrate.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-refinement-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge reviewed current main and rebuild generated conflicts
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          base='1ee598dba1a6ed781371535820b68480dbc36b9e'
+          main='f8c01b7c986b519e909fd7cc86f1a2014d6dbf74'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          assert changed=={'.github/workflows/mcp-refinement-integrate.yml'},changed
+          result=subprocess.run(['git','merge','--no-commit','--no-ff',main])
+          assert result.returncode in [0,1]
+          conflicts=set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts <= {'dist/VB6-Studio-Web.html','dist/studio.js'},conflicts
+          PY
+          npm run build
+          npm test
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git -c core.whitespace=-blank-at-eof diff --cached --check
+          git rm --cached .github/workflows/mcp-refinement-integrate.yml
+          test "$(git write-tree)" = '9155734b96ea282512a5dd167e0ed3312e8a19e4'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-refinement-integrate.yml
+          git commit -m 'merge: preserve DAO workspace and recordset updates in MCP-enabled IDE'
+          npm run build
+          git diff --exit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Combined real deployment-mode and coding-agent validation
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+          npm run test:agents:browser
+      - name: Publish tested integration without force or workflow edits
+        run: git push origin HEAD:refs/heads/feat/mcp-lifecycle-and-data
+      - name: Preserve exact source and reports
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-mcp-dao-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
