@@ -1,0 +1,25 @@
+name: Data access development
+on:
+  push:
+    branches: [feature/data-sources]
+permissions:
+  contents: read
+jobs:
+  sqlite-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch pinned redistributable SQLite engine
+        run: |
+          mkdir -p /tmp/vb6-sqlite
+          cd /tmp/vb6-sqlite
+          npm pack sql.js@1.14.2 --ignore-scripts
+          sha256sum *.tgz > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vb6-sqlite-engine
+          path: /tmp/vb6-sqlite
+          retention-days: 7
