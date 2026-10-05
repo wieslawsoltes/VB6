@@ -32,6 +32,24 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
     if (manifest.kind === 'studio') {
       await until(() => js('!!globalThis.vb6Studio?.project'), 'IDE');
       check('IDE loaded', true);
+      await js('vb6Studio.setWindowMode("hybrid");globalThis.paneBefore=vb6Studio.docking.panels.get("properties");void 0;');
+      check('desktop tool detach accepted',await js('vb6Studio.docking.detach("properties")'));
+      await until(()=>records.size===1&&[...records.values()][0].window.isVisible(),'detached native properties');
+      const tool=[...records.values()][0].window;
+      check('native tool keeps original live pane',await js('[...vb6Studio.browserWindows.windows.values()][0].node.ownerDocument!==document'));
+      check('native tool cannot invoke root IPC',await tool.webContents.executeJavaScript('(async()=>{if(typeof vb6Native==="undefined")return true;try{await vb6Native.info();return false;}catch{return true;}})()',true));
+      tool.close();
+      await until(()=>records.size===0,'OS close returns tool');
+      check('OS close returns pane without destroying IDE state',await js('vb6Studio.browserWindows.windows.size===0 && vb6Studio.docking.panels.get("properties")===paneBefore'));
+      await js('vb6Studio.command("viewCode");globalThis.documentKey=vb6Studio.documents.mdi.active;globalThis.editorBefore=vb6Studio.editor;void 0;');
+      check('desktop code document detach accepted',await js('vb6Studio.documents.mdi.detach(documentKey)'));
+      await until(()=>records.size===1&&[...records.values()][0].window.isVisible(),'native code editor');
+      check('detached editor preserves exact editor instance',await js('vb6Studio.editor===editorBefore && editorBefore.root.ownerDocument!==document'));
+      await js('vb6Studio.setWindowMode("mdi");void 0;');
+      await until(()=>records.size===0,'MDI mode returns native document');
+      check('MDI mode restores document without replacement',await js('editorBefore.root.ownerDocument===document && vb6Studio.editor===editorBefore'));
+      await js('vb6Studio.setWindowMode("hybrid");void 0;');
+
       await js('vb6Studio.run()');
       await until(() => js('vb6Studio.runtimeFrame?.src.startsWith("vb6://app/preview/")'), 'sandbox preview document');
       await until(() => root.webContents.mainFrame.frames.some(f => f.url.startsWith('vb6://app/preview/')), 'preview frame');

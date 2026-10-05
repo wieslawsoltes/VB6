@@ -449,17 +449,17 @@ class BrowserWindows(unittest.TestCase):
 
     def test_hide_reset_and_project_replacement(self):
         popup = self.tool()
-        self.js('vb6Studio.docking.show("properties",false)')
+        self.closing_action(popup, lambda: self.js('vb6Studio.docking.show("properties",false)'))
         self.count(0)
         self.assertTrue(popup.is_closed())
         self.js('vb6Studio.docking.show("properties",true)')
         popup = self.tool()
-        self.command('resetLayout')
+        self.closing_action(popup, lambda: self.command('resetLayout'))
         self.count(0)
         self.assertTrue(popup.is_closed())
         self.code()
         popup = self.document()
-        self.js('p => {vb6Studio.loadProject(p);}', PROJECT)
+        self.closing_action(popup, lambda: self.js('p => {vb6Studio.loadProject(p);}', PROJECT))
         self.count(0)
         self.assertTrue(popup.is_closed())
 

@@ -1,3 +1,4 @@
+import {RuntimeAgentControl} from './agent-control.js';
 import {RuntimeMDI} from './mdi.js';
 import {runtimeDialog,messageBoxOptions} from '../controls/dialog.js';
 import { applyTheme, themeId } from '../theme/theme.js';
@@ -23,8 +24,12 @@ export class ApplicationHost {
     try{await this.vm.start({breakOnEntry:!!this.options.breakOnEntry});this.layoutForms();this.send('ready',{name:this.project.name,backend:this.backend,instructions:this.vm.instructionCount});this.autosave=setInterval(()=>{if(this.fs.dirty){this.persist();this.fs.dirty=false;}},1000);return this.vm;}catch(error){this.send('error',{error:{message:error.message,number:error.number,source:error.source,line:error.line}});return this.vm;}
   }
   persist(){if(this.options.persist===false)return;try{localStorage.setItem(this.storageKey,JSON.stringify({vfs:this.fs.snapshot(),settings:this.settings}));}catch{this.send('storage',{message:'Persistent storage is unavailable. This session still works in memory.'});}}
-  async onBridgeMessage(event){const data=event.data;if(event.source!==window.parent||data?.channel!=='vb6-ide'||data.token!==this.options.bridgeToken)return;const vm=this.vm;if(!vm)return;try{switch(data.command){
-      case 'debugEvaluate':{const value=await vm.evaluateExplicit(String(data.expression),{frameIndex:data.frameIndex??null,pauseId:data.pauseId,instructionLimit:data.instructionLimit??100000,timeLimit:data.timeLimit??5000});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value),locals:this.vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:this.vm.debugPauseId}});break;}
+  async onBridgeMessage(event){const data=event.data;if(event.source!==window.parent||data?.channel!=='vb6-ide'||data.token!==this.options.bridgeToken)return;const vm=this.vm;if(!vm)return;try{if(data.agentGuard){if(data.agentGuard.state!==vm.state&&!(data.agentGuard.state==='running'&&vm.state==='idle'))throw new Error('Runtime state changed before the command.');if(data.agentGuard.state==='paused'&&data.agentGuard.pauseId!==vm.debugPauseId)throw new Error('Stale debugger pause.');}switch(data.command){
+      case 'agentInspect':this.agentControl ||= new RuntimeAgentControl(this);this.send('commandResult',{id:data.id,ok:true,result:this.agentControl.inspect(data)});break;
+      case 'agentInteract':this.agentControl ||= new RuntimeAgentControl(this);this.send('commandResult',{id:data.id,ok:true,result:this.agentControl.interact(data)});break;
+      case 'agentSnapshot':this.send('commandResult',{id:data.id,ok:true,result:{vfs:this.fs.snapshot(),settings:clone(this.settings)}});break;
+      case 'agentImmediate':{const value=await vm.immediate(String(data.text),{frameIndex:data.frameIndex??null,pauseId:data.pauseId});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value),locals:vm.debugLocals({frameIndex:data.frameIndex??null})}});break;}
+      case 'debugEvaluate':{const value=await vm.evaluateExplicit(String(data.expression),{frameIndex:data.frameIndex??null,pauseId:data.pauseId,instructionLimit:data.instructionLimit??100000,timeLimit:data.timeLimit??5000});this.send('commandResult',{id:data.id,ok:true,result:{value:describe(value),locals:vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:vm.debugPauseId}});break;}
       case 'cancelEvaluation':this.send('commandResult',{id:data.id,ok:true,result:vm.cancelEvaluation()});break;
       case 'debugInspect':this.send('commandResult',{id:data.id,ok:true,result:vm.inspectDebug(String(data.expression),{frameIndex:data.frameIndex??null,offset:data.offset,limit:data.limit})});break;
       case 'debugLocals':this.send('commandResult',{id:data.id,ok:true,result:{locals:vm.debugLocals({frameIndex:data.frameIndex??null}),pauseId:vm.debugPauseId}});break;

@@ -31,16 +31,16 @@ function validateForm(form,moduleName){
     if(items.some(item=>item.properties.Index===undefined||c.properties.Index===undefined||item.properties.Index===c.properties.Index||item.type!==c.type))throw new VBError('Duplicate or incompatible control array name/index: '+c.name,1002);
     items.push(c);controls.set(key,items);allNames.add(key);
   }
-  for(const m of form.menus){validateNode(m);const key=lower(m.name);if(allNames.has(key))throw new VBError('Duplicate menu or control name: '+m.name,1002);allNames.add(key);menus.set(key,m);}
-  for(const [nodes,lookup]of [[form.controls,controls],[form.menus,menus]])for(const node of nodes){const seen=new Set([lower(node.name)]);let current=node;
-    while(current.parent){const key=lower(current.parent);if(seen.has(key))throw new VBError('Cyclic parent relationship: '+node.name,1002);seen.add(key);const result=lookup.get(key);if(!result)throw new VBError('Missing parent '+current.parent+' for '+node.name,1002);const parent=Array.isArray(result)?result[0]:result;current.parent=parent.name;current=parent;}
+  for(const m of form.menus){validateNode(m);const key=lower(m.name),items=menus.get(key)||[];if(controls.has(key))throw new VBError('Duplicate menu or control name: '+m.name,1002);if(m.properties.Index!==undefined){const index=Number(m.properties.Index);if(!Number.isInteger(index)||index<0||index>32767)throw new VBError('Invalid menu array index: '+m.name,380);m.properties.Index=index;}if(items.some(item=>item.properties.Index===undefined||m.properties.Index===undefined||item.properties.Index===m.properties.Index))throw new VBError('Duplicate menu or control name/index: '+m.name,1002);items.push(m);menus.set(key,items);allNames.add(key);}
+  for(const [nodes,lookup]of [[form.controls,controls],[form.menus,menus]])for(const node of nodes){const seen=new Set([node.id]);let current=node;
+    while(current.parent){const key=lower(current.parent);const result=lookup.get(key);if(!result)throw new VBError('Missing parent '+current.parent+' for '+node.name,1002);const parent=Array.isArray(result)?result.find(p=>p.id===current.nativeParentId)||result[0]:result;if(seen.has(parent.id))throw new VBError('Cyclic parent relationship: '+node.name,1002);seen.add(parent.id);current.parent=parent.name;current=parent;}
   }
 }
 export function normalizeProject(value){
   if(!value||typeof value!=='object'||!Array.isArray(value.modules))throw new VBError('Not a VB6 Studio project',1002);
   if(value.schema!==PROJECT_SCHEMA)throw new VBError('Unsupported project schema: '+value.schema,1002);
-  if(!value.modules.length||value.modules.length>1000)throw new VBError('Project must contain 1–1,000 modules',7);
-  const project=clone(value);project.id ||= newId();project.name=safeName(project.name);project.settings={...newProject().settings,...project.settings};project.references ||= [];project.assets ||= {};project.vfs ||= {files:{}};project.appSettings ||= {};
+  if(!value.modules.length&&!value.nativeProject||value.modules.length>1000)throw new VBError('Project must contain 1–1,000 modules',7);
+  const project=clone(value);project.id ||= newId();project.name=project.nativeProject?.document?String(project.name).slice(0,100):safeName(project.name);project.settings={...newProject().settings,...project.settings};project.references ||= [];project.assets ||= {};project.vfs ||= {files:{}};project.appSettings ||= {};
   const names=new Set(),ids=new Set();for(const m of project.modules){
     if(!m||typeof m.name!=='string'||!/^[A-Za-z_]\w*$/.test(m.name))throw new VBError('Invalid module name: '+m?.name,1002);
     if(names.has(lower(m.name)))throw new VBError('Duplicate module: '+m.name,1002);names.add(lower(m.name));

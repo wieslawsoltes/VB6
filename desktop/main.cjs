@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const { ORIGIN, MAX_WINDOWS, CSP, integer, text, trustedURL, assetPath, clampBounds, windowOptions, menuTemplate } = require('./policy.cjs');
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
 const webRoot = path.join(__dirname, 'web');
-const records = new Map(), pending = new Map(), modalStack = [], runtimeDocuments = new Map();
+const records = new Map(), pending = new Map(), opening = new Map(), modalStack = [], runtimeDocuments = new Map();
 let root, quitting = false;
 const smoke = process.argv.includes('--native-smoke');
 const smokeReport = process.env.VB6_SMOKE_REPORT;
@@ -33,23 +33,23 @@ function updateModal() {
 }
 function secure(win) {
   const wc = win.webContents;
-  wc.on('will-navigate', (event, url) => { if (!trustedURL(url)) event.preventDefault(); });
+  wc.on('will-navigate', (event, url) => { if (win !== root || !trustedURL(url)) event.preventDefault(); });
   wc.on('will-frame-navigate', (event, details) => { const url = details?.url ?? event.url; if (url && !trustedURL(url) && !url.startsWith('blob:vb6://app/')) event.preventDefault(); });
   wc.on('will-attach-webview', event => event.preventDefault());
   wc.setWindowOpenHandler(({ url, frameName }) => {
     const reservation = pending.get(frameName);
     if (wc !== root?.webContents || url !== 'about:blank' || !reservation || reservation.expires < Date.now()) return { action: 'deny' };
-    pending.delete(frameName);
+    pending.delete(frameName); opening.set(frameName,reservation.kind);
     return { action: 'allow', outlivesOpener: false, overrideBrowserWindowOptions: { ...reservation.options, webPreferences: preferences } };
   });
-  wc.on('did-create-window', (child, details) => register(details.frameName, child));
+  wc.on('did-create-window', (child, details) => { const kind = opening.get(details.frameName); opening.delete(details.frameName); register(details.frameName,child,kind); });
   wc.on('render-process-gone', (_event, details) => {
     if (!quitting) { dialog.showErrorBox('VB6 renderer stopped', details.reason); if (win === root) app.quit(); }
   });
 }
-function register(id, win) {
+function register(id, win, kind = 'form') {
   if (!/^vb6-[a-f0-9]{32}$/.test(id) || records.has(id)) { win.destroy(); return; }
-  const r = { window: win, forceClose: false, closePending: false, eventQueued: false };
+  const r = { window: win, kind, forceClose: false, closePending: false, eventQueued: false };
   records.set(id, r); secure(win); win.setMenu(null);
   const changed = () => {
     if (r.eventQueued) return;
@@ -71,7 +71,9 @@ ipcMain.on('vb6:prepare-window', (event, value) => {
     for (const [id, r] of pending) if (r.expires < Date.now()) pending.delete(id);
     if (records.size + pending.size >= MAX_WINDOWS) throw new Error('Native window limit exceeded');
     const id = 'vb6-' + crypto.randomBytes(16).toString('hex');
-    pending.set(id, { options: windowOptions(value, screen.getAllDisplays()), expires: Date.now() + 10000 });
+    const kind = value?.kind || 'form';
+    if (!['form','tool'].includes(kind) || kind === 'tool' && manifest.kind !== 'studio') throw new Error('Invalid native window role');
+    pending.set(id, { kind, options: windowOptions(value, screen.getAllDisplays()), expires: Date.now() + 10000 });
     event.returnValue = { ok: true, id };
   } catch (error) { event.returnValue = { ok: false, error: error.message }; }
 });
@@ -97,6 +99,7 @@ ipcMain.handle('vb6:window-command', (event, id, command, value) => {
     if (command === 'quit') { app.quit(); return; }
     throw new Error('Unsupported controller command');
   }
+  if (command === 'cancel-reservation') { pending.delete(id); return; }
   const r = getRecord(id), win = r.window;
   switch (command) {
     case 'show': win.show(); break;

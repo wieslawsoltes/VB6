@@ -11,3 +11,6 @@ validation/
 
 # Generated top-level-window test screenshots; retained as CI artifacts.
 reports/browser-windows/
+
+# Generated native-project browser artifacts.
+reports/native-projects/

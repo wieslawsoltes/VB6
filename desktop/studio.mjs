@@ -1,6 +1,8 @@
+import {createNativeWindowTransport} from './window-transport.mjs';
 /** Keep the IDE's debugger preview sandboxed; only its document is served by the native host. */
 const studio = globalThis.vb6Studio;
 if (studio) {
+  studio.browserWindows.transport = createNativeWindowTransport(globalThis,globalThis.vb6Native,error=>studio.status('Native tool window: '+error.message));
   const run = studio.run.bind(studio);
   studio.run = (...args) => {
     const previous = studio.runtimeFrame;

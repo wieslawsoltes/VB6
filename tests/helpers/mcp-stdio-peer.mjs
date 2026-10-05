@@ -1,5 +1,6 @@
+// Test-only child process driver used to exercise the external desktop relay.
 import {spawn} from 'node:child_process';
-import {MCP_LIMIT, McpError, parseMessage, checkMessage, checkAbort} from '../src/mcp/protocol.js';
+import {MCP_LIMIT, McpError, parseMessage, checkMessage, checkAbort} from '../../src/mcp/protocol.js';
 
 /** One explicitly configured child process. Never accepts shell text from a browser. */
 export class NodeStdioTransport {

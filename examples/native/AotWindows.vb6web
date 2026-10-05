@@ -1,0 +1,409 @@
+{
+  "schema": 1,
+  "id": "AotWindows_1",
+  "name": "AotWindows",
+  "description": "",
+  "startup": "Form1",
+  "modules": [
+    {
+      "id": "AotWindows_2",
+      "name": "Form1",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate RejectClose As Boolean\nPrivate Counter As Long\nPrivate InitializeCount As Long\nPrivate LoadCount As Long\nPrivate Sub Form_Initialize()\n    InitializeCount = InitializeCount + 1\n    ' Self UI access must not recursively allocate the default form instance.\n    Caption = \"Initialized native window\"\nEnd Sub\nPrivate Sub Form_Load()\n    LoadCount = LoadCount + 1\n    RejectClose = True\n    Counter = 41\nEnd Sub\nPrivate Sub Command1_Click()\n    Counter = Counter + 1\n    If InitializeCount <> 1 Or LoadCount <> 1 Then End\n    Text1.Text = CStr(Counter)\n    Caption = \"Counter \" & CStr(Counter)\n    List1.AddItem \"item \" & CStr(Counter)\n    Combo1.ListIndex = 1\nEnd Sub\nPrivate Sub Command2_Click()\n    If Form2.InitialValue() <> 9 Then End\n    If Form2.Initialized <> 1 Then End\n    If Form2.Loads <> 0 Then End\n    Form2.Show vbModal, Me\n    Text1.Text = \"Modal returned\"\nEnd Sub\nPrivate Sub Command3_Click()\n    RejectClose = False\nEnd Sub\nPrivate Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)\n    If RejectClose Then Cancel = 1\nEnd Sub\nPrivate Sub MenuHello_Click()\n    Text1.Text = \"Native menu\"\nEnd Sub\nPrivate Sub NestedButton_Click()\n    Text1.Text = \"Nested native frame\"\nEnd Sub\n",
+      "form": {
+        "id": "AotWindows_3",
+        "name": "Form1",
+        "type": "Form",
+        "properties": {
+          "Name": "Form1",
+          "Caption": "AOT native window",
+          "ClientWidth": 9000,
+          "ClientHeight": 6000,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "AotWindows_4",
+            "name": "Command1",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "Command1",
+              "Left": 300,
+              "Top": 300,
+              "Width": 2100,
+              "Height": 450,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Increment",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "AotWindows_5",
+            "name": "Text1",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "Text1",
+              "Left": 2700,
+              "Top": 300,
+              "Width": 2100,
+              "Height": 450,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "0",
+              "MultiLine": 0,
+              "ScrollBars": 0,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "AotWindows_6",
+            "name": "Command2",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "Command2",
+              "Left": 300,
+              "Top": 900,
+              "Width": 2100,
+              "Height": 450,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Modal",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "AotWindows_7",
+            "name": "Command3",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "Command3",
+              "Left": 2700,
+              "Top": 900,
+              "Width": 2100,
+              "Height": 450,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Allow close",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "AotWindows_8",
+            "name": "List1",
+            "type": "ListBox",
+            "parent": null,
+            "properties": {
+              "Name": "List1",
+              "Left": 300,
+              "Top": 1500,
+              "Width": 2100,
+              "Height": 1200,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "List": [
+                "one",
+                "two"
+              ],
+              "ListIndex": -1,
+              "MultiSelect": 0,
+              "Sorted": 0
+            }
+          },
+          {
+            "id": "AotWindows_9",
+            "name": "Combo1",
+            "type": "ComboBox",
+            "parent": null,
+            "properties": {
+              "Name": "Combo1",
+              "Left": 2700,
+              "Top": 1500,
+              "Width": 2100,
+              "Height": 450,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "",
+              "List": [
+                "first",
+                "second"
+              ],
+              "Style": 0,
+              "ListIndex": -1
+            }
+          },
+          {
+            "id": "AotWindows_10",
+            "name": "Frame1",
+            "type": "Frame",
+            "parent": null,
+            "properties": {
+              "Name": "Frame1",
+              "Left": 300,
+              "Top": 3000,
+              "Width": 6600,
+              "Height": 2500,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Native parent"
+            }
+          },
+          {
+            "id": "AotWindows_11",
+            "name": "Frame2",
+            "type": "Frame",
+            "parent": "Frame1",
+            "properties": {
+              "Name": "Frame2",
+              "Left": 300,
+              "Top": 300,
+              "Width": 5000,
+              "Height": 1800,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Nested native parent"
+            }
+          },
+          {
+            "id": "AotWindows_12",
+            "name": "NestedButton",
+            "type": "CommandButton",
+            "parent": "Frame2",
+            "properties": {
+              "Name": "NestedButton",
+              "Left": 300,
+              "Top": 450,
+              "Width": 2100,
+              "Height": 450,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Nested event",
+              "Default": 0,
+              "Cancel": 0
+            }
+          }
+        ],
+        "menus": [
+          {
+            "id": "AotWindows_13",
+            "type": "Menu",
+            "name": "MenuFile",
+            "parent": null,
+            "properties": {
+              "Caption": "&File",
+              "Visible": -1,
+              "Enabled": -1
+            }
+          },
+          {
+            "id": "AotWindows_14",
+            "type": "Menu",
+            "name": "MenuHello",
+            "parent": "MenuFile",
+            "properties": {
+              "Caption": "&Hello",
+              "Visible": -1,
+              "Enabled": -1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "AotWindows_15",
+      "name": "Form2",
+      "kind": "form",
+      "code": "Option Explicit\nPublic Initialized As Long\nPublic Loads As Long\nPrivate Value As Long\nPrivate Sub Form_Initialize()\n    Initialized = Initialized + 1\n    Value = 9\nEnd Sub\nPrivate Sub Form_Load()\n    Loads = Loads + 1\n    If Initialized <> 1 Then End\nEnd Sub\nPublic Function InitialValue() As Long\n    InitialValue = Value\nEnd Function\nPrivate Sub CloseButton_Click()\n    Unload Me\nEnd Sub",
+      "form": {
+        "id": "AotWindows_16",
+        "name": "Form2",
+        "type": "Form",
+        "properties": {
+          "Name": "Form2",
+          "Caption": "AOT modal window",
+          "ClientWidth": 9000,
+          "ClientHeight": 6000,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 3,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "AotWindows_17",
+            "name": "CloseButton",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "CloseButton",
+              "Left": 300,
+              "Top": 300,
+              "Width": 1440,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Close",
+              "Default": 0,
+              "Cancel": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    }
+  ],
+  "settings": {
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

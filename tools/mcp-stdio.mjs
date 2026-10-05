@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /** Desktop MCP configuration entry: newline JSON on stdin/stdout, diagnostics on stderr only. */
 import {MCP_VERSION, MCP_META, MCP_LIMIT, parseMessage, checkMessage, errorResponse, McpError} from '../src/mcp/protocol.js';
-import {HttpTransport} from '../src/mcp/transports.js';
+import {IdeRelayTransport} from './mcp-http.mjs';
 
 const args = process.argv.slice(2);
 if (args.length && (args.length !== 2 || args[0] !== '--url')) throw new Error('Usage: node tools/mcp-stdio.mjs [--url http://127.0.0.1:8766/mcp]');
 if (!process.env.VB6_MCP_TOKEN) throw new Error('Set VB6_MCP_TOKEN to the companion client token.');
-const transport = new HttpTransport(args[1] || 'http://127.0.0.1:8766/mcp', {token: process.env.VB6_MCP_TOKEN});
+const transport = new IdeRelayTransport(args[1] || 'http://127.0.0.1:8766/mcp', {token: process.env.VB6_MCP_TOKEN});
 const active = new Map(), lifetime = new AbortController(); let version = '2025-11-25', buffer = '', listener, writes = Promise.resolve();
 function send(message) {
   if (!message) return;

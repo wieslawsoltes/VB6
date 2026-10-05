@@ -1,4 +1,6 @@
-import {MCP_VERSION, MCP_LIMIT, McpError, parseMessage, checkMessage, requestHeaders, httpURL, randomToken, checkAbort} from './protocol.js';
+// Node-side transport for the external agent's stdio relay. Never bundled into the IDE.
+import {companionURL} from '../src/mcp/companion-url.js';
+import {MCP_VERSION, MCP_LIMIT, McpError, parseMessage, checkMessage, requestHeaders, checkAbort} from '../src/mcp/protocol.js';
 
 /** Incremental SSE parser: UTF-8 is decoded by the reader; CR/LF may split across chunks. */
 export class SseParser {
@@ -55,9 +57,9 @@ async function responseError(response) {
 function pause(ms, signal) {
   return new Promise((resolve, reject) => { const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); resolve(); }, abort = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(new McpError(-32800, 'Request cancelled.')); }, timer = setTimeout(done, Math.min(ms, 2147483647)); signal?.addEventListener('abort', abort, {once: true}); if (signal?.aborted) abort(); });
 }
-export class HttpTransport {
-  constructor(url, {fetch: fetchFn = globalThis.fetch?.bind(globalThis), token = '', allowHTTP = false, maxBytes = MCP_LIMIT, headers = {}} = {}) {
-    this.url = httpURL(url, {allowHTTP}).href; this.fetch = fetchFn; this.token = token; this.maxBytes = maxBytes; this.sessionId = null; this.extraHeaders = headers;
+export class IdeRelayTransport {
+  constructor(url, {fetch: fetchFn = globalThis.fetch?.bind(globalThis), token = '', maxBytes = MCP_LIMIT, headers = {}} = {}) {
+    this.url = companionURL(url, {endpoint: true}).href; this.fetch = fetchFn; this.token = token; this.maxBytes = maxBytes; this.sessionId = null; this.extraHeaders = headers;
     if (!this.fetch) throw new Error('Fetch is not available.');
   }
   async headers(message, version, schema) {
@@ -69,7 +71,7 @@ export class HttpTransport {
   }
   async fetchSafe(url, options) {
     try { return await this.fetch(url, {...options, credentials: 'omit', redirect: 'error', mode: 'cors', cache: 'no-store', referrerPolicy: 'no-referrer'}); }
-    catch (error) { if (options.signal?.aborted) throw new McpError(-32800, 'Request cancelled.'); throw new McpError(-32000, 'MCP network request failed. Check endpoint, CORS, HTTPS, and browser local-network permission. Redirects are not followed.'); }
+    catch (error) { if (options.signal?.aborted) throw new McpError(-32800, 'Request cancelled.'); throw new McpError(-32000, 'MCP network request failed. Check that the local IDE companion is running and attached. Redirects are not followed.'); }
   }
   async exchange(message, {version, signal, onMessage = () => {}, schema} = {}) {
     checkAbort(signal);
@@ -133,78 +135,4 @@ export class HttpTransport {
     try { const signal = AbortSignal.timeout(2000); await this.fetchSafe(this.url, {method: 'DELETE', headers: await this.headers({}, version), signal}); }
     finally { this.sessionId = null; }
   }
-}
-/** Deprecated 2024 HTTP+SSE transport, enabled explicitly or by legacy fallback. */
-export class LegacySseTransport extends HttpTransport {
-  constructor(url, options) { super(url, options); this.pending = new Map(); this.endpoint = null; }
-  async open(onMessage, signal) {
-    if (this.opening) return this.opening;
-    this.lifetime = new AbortController(); const abort = () => this.lifetime.abort(); signal?.addEventListener('abort', abort, {once: true});
-    this.onMessage = onMessage;
-    this.opening = new Promise((resolve, reject) => {
-      this.stream = (async () => {
-        try {
-          const headers = await this.headers({}, '2024-11-05'); headers.set('Accept', 'text/event-stream');
-          const response = await this.fetchSafe(this.url, {method: 'GET', headers, signal: this.lifetime.signal}); if (!response.ok) throw await responseError(response);
-          if (!response.headers.get('Content-Type')?.startsWith('text/event-stream')) throw new McpError(-32600, 'Expected legacy SSE stream.');
-          await readSseResponse(response, async event => {
-            if (event.event === 'endpoint') {
-              if (this.endpoint) throw new McpError(-32600, 'Duplicate legacy endpoint event.');
-              const endpoint = httpURL(event.data, {base: this.url});
-              if (endpoint.origin !== new URL(this.url).origin) throw new McpError(-32600, 'Cross-origin legacy endpoint rejected to protect credentials.');
-              this.endpoint = endpoint.href; resolve(); return;
-            }
-            if (!event.data || event.event !== 'message') return;
-            const value = parseMessage(event.data, this.maxBytes);
-            if (checkMessage(value) === 'response') this.pending.get(value.id)?.resolve(value);
-            else { const answer = await this.onMessage(value); if (answer) await this.post(answer, this.lifetime.signal); }
-          }, this.lifetime.signal, this.maxBytes);
-          throw new McpError(-32000, 'Legacy SSE connection closed.');
-        } catch (error) { reject(error); for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); }
-        finally { signal?.removeEventListener('abort', abort); }
-      })();
-    });
-    return this.opening;
-  }
-  async post(message, signal) {
-    const response = await this.fetchSafe(this.endpoint, {method: 'POST', headers: await this.headers(message, '2024-11-05'), body: JSON.stringify(message), signal});
-    if (!response.ok) throw await responseError(response); await response.body?.cancel();
-  }
-  async exchange(message, {signal, onMessage = () => {}} = {}) {
-    await this.open(onMessage, signal); checkAbort(signal);
-    if (checkMessage(message) !== 'request') { await this.post(message, signal); return undefined; }
-        if (this.pending.size >= 128 || this.pending.has(message.id)) return Promise.reject(new McpError(-32600, 'Duplicate or excessive request.'));
-    return new Promise((resolve, reject) => {
-      const cleanup = () => { this.pending.delete(message.id); signal?.removeEventListener('abort', abort); }, abort = () => { cleanup(); reject(new McpError(-32800, 'Request cancelled.')); };
-      this.pending.set(message.id, {resolve: value => { cleanup(); resolve(value); }, reject: error => { cleanup(); reject(error); }});
-      signal?.addEventListener('abort', abort, {once: true}); if (signal?.aborted) { abort(); return; }
-      this.post(message, signal).catch(error => { cleanup(); reject(error); });
-    });
-  }
-  async close() { this.lifetime?.abort(); for (const pending of this.pending.values()) pending.reject(new McpError(-32800, 'Disconnected.')); this.pending.clear(); this.endpoint = null; this.opening = null; }
-}
-export class LocalTransport {
-  constructor(server) { this.server = server; this.sessionKey = 'local:' + randomToken(12); }
-  exchange(message, {signal, onMessage = () => {}} = {}) { this.onMessage = onMessage; return this.server.dispatch(structuredClone(message), {sessionKey: this.sessionKey, requestId: message.id, signal, emit: value => onMessage(structuredClone(value)), notify: value => this.onMessage?.(structuredClone(value))}); }
-  async close() { this.server.closeSession(this.sessionKey); }
-}
-export class PortTransport {
-  constructor(port) {
-    this.port = port; this.pending = new Map();
-    port.onmessage = async event => {
-      try { const kind = checkMessage(event.data); if (kind === 'response') this.pending.get(event.data.id)?.resolve(event.data); else { const reply = await this.onMessage?.(event.data); if (reply) port.postMessage(reply); } }
-      catch (error) { this.onError?.(error); }
-    }; port.start?.();
-  }
-  exchange(message, {signal, onMessage} = {}) {
-    this.onMessage = onMessage; checkAbort(signal);
-    if (checkMessage(message) !== 'request') { this.port.postMessage(message); return Promise.resolve(); }
-    if (this.pending.size >= 128 || this.pending.has(message.id)) return Promise.reject(new McpError(-32600, 'Duplicate or excessive request.'));
-    return new Promise((resolve, reject) => {
-      const cleanup = () => { this.pending.delete(message.id); signal?.removeEventListener('abort', abort); }, abort = () => { cleanup(); try { this.port?.postMessage({jsonrpc: '2.0', method: 'notifications/cancelled', params: {requestId: message.id}}); } catch {} reject(new McpError(-32800, 'Request cancelled.')); };
-      this.pending.set(message.id, {resolve: value => { cleanup(); resolve(value); }, reject: error => { cleanup(); reject(error); }}); signal?.addEventListener('abort', abort, {once: true});
-      try { this.port.postMessage(message); } catch (error) { cleanup(); reject(error); }
-    });
-  }
-  async close() { for (const pending of this.pending.values()) pending.reject(new McpError(-32800, 'Port closed.')); this.pending.clear(); this.port.onmessage = null; this.port.close(); }
 }

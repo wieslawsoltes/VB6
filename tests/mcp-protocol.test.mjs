@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MessageChannel} from 'node:worker_threads';
 import {MCP_VERSION, MCP_META, McpError, checkMessage, parseMessage, encodeHeader, decodeHeader, headerAnnotations, requestHeaders, validateHeaders, validateArguments, httpURL, pageItems, awaitAbort} from '../src/mcp/protocol.js';
-import {McpClient} from '../src/mcp/client.js';
+import {McpClient} from './helpers/mcp-client.mjs';
 import {McpServer, bindMcpPort} from '../src/mcp/server.js';
-import {LocalTransport, PortTransport, HttpTransport, LegacySseTransport, SseParser, readJsonResponse, readSseResponse} from '../src/mcp/transports.js';
+import {LocalTransport, PortTransport, SseParser, readJsonResponse, readSseResponse} from './helpers/mcp-transports.mjs';
 import {createIdeAdapter} from '../src/mcp/ide-adapter.js';
 import {newProject, normalizeProject} from '../src/project/model.js';
 import {History, Signal} from '../src/core/core.js';
@@ -72,7 +72,7 @@ test('MCP: JSON response reader bounds payload bytes and validates envelopes', a
 });
 for (const era of ['modern','legacy']) test('MCP: ' + era + ' discovery, tools, resources, prompts and completion', async t => {
   const {adapter, client} = setup(t, {era}); await client.connect(); assert.equal(adapter.enabled, false); await assert.rejects(client.listTools(), error => error.code === -32001); adapter.setEnabled(true);
-  assert.equal((await client.listTools()).length, 18); assert.equal((await client.listResources()).length, 6); assert.equal((await client.listResourceTemplates()).length, 2); assert.equal((await client.listPrompts()).length, 2);
+  assert.equal((await client.listTools()).length, adapter.tools.length); assert.equal((await client.listResources()).length, (await adapter.resources()).length); assert.equal((await client.listResourceTemplates()).length, 2); assert.equal((await client.listPrompts()).length, 2);
   assert.match((await client.readResource('vb6://module/Form1/source')).contents[0].text, /Option Explicit/);
   assert.ok((await client.getPrompt('explain-module', {module: 'Form1'})).messages[0].content.text.includes('Option Explicit'));
   assert.deepEqual((await client.complete({type: 'ref/prompt', name: 'explain-module'}, {name: 'module', value: 'Fo'})).completion.values, ['Form1']);
@@ -137,7 +137,7 @@ test('MCP: legacy resource subscriptions deliver notifications without an open r
 });
 test('MCP: private MessagePort transport supports requests and cancellation', async t => {
   const {adapter, server} = setup(t); adapter.setEnabled(true); const channel = new MessageChannel(), unbind = bindMcpPort(channel.port1, server, {sessionKey: 'private-test'}), client = new McpClient(new PortTransport(channel.port2)); t.after(async () => { unbind(); await client.close(); });
-  await client.connect(); assert.equal((await client.listTools()).length, 18); const controller = new AbortController(), pending = client.subscribe({}, {signal: controller.signal}); await tick(); controller.abort(); await assert.rejects(pending, error => error.code === -32800); await tick(); assert.equal(server.listeners.size, 0);
+  await client.connect(); assert.equal((await client.listTools()).length, adapter.tools.length); const controller = new AbortController(), pending = client.subscribe({}, {signal: controller.signal}); await tick(); controller.abort(); await assert.rejects(pending, error => error.code === -32800); await tick(); assert.equal(server.listeners.size, 0);
 });
 test('MCP: unsupported version and mismatched modern headers return prescribed errors', async t => {
   const {server} = setup(t); const message = modern(1, 'server/discover'); message.params._meta[MCP_META + 'protocolVersion'] = '2099-01-01'; assert.equal((await server.dispatch(message)).error.code, -32022);

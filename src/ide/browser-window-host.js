@@ -53,17 +53,18 @@ export class BrowserWindowHost {
       left: this.owner.screenX + rect.left + 30, top: this.owner.screenY + rect.top + 40,
       width: Math.max(300, rect.width), height: Math.max(220, rect.height + 62)
     });
-    let popup, setupRecord;
+    let popup, setupRecord, transport;
     try {
       // _blank never reuses another IDE tab's named window. No untrusted URL is loaded.
       const source = uiDocument();
       const requester = source === this.document || [...this.windows.values()].some(r => r.doc === source) ? source.defaultView : this.owner;
-      popup = requester.open('', '_blank', `popup=yes,resizable=yes,scrollbars=yes,left=${bounds.left},top=${bounds.top},width=${bounds.width},height=${bounds.height}`);
+      transport = this.transport?.open(bounds,typeof options.title === 'function' ? options.title() : options.title || key);
+      popup = transport ? transport.popup : requester.open('', '_blank', `popup=yes,resizable=yes,scrollbars=yes,left=${bounds.left},top=${bounds.top},width=${bounds.width},height=${bounds.height}`);
       if (!popup || popup.closed) throw new Error('The browser blocked the popup.');
       popup.opener = this.owner;
       const doc = popup.document;
-      doc.open(); doc.write('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>'); doc.close();
-      const base = doc.createElement('base'); base.href = this.document.baseURI; doc.head.append(base);
+      if (!transport?.native) { doc.open(); doc.write('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>'); doc.close(); }
+      if (!transport?.native) { const base = doc.createElement('base'); base.href = this.document.baseURI; doc.head.append(base); }
       const root = doc.createElement('div'); root.className = 'browser-window-root';
       const header = doc.createElement('header'); header.className = 'browser-window-caption';
       const label = doc.createElement('strong');
@@ -75,7 +76,7 @@ export class BrowserWindowHost {
       const content = doc.createElement('main'); content.className = 'browser-window-content';
       root.append(header, content); doc.body.append(root);
       const anchor = this.document.createComment('Detached browser window: ' + key);
-      const record = {key, node, popup, doc, root, label, content, anchor, options, bounds, cleanups: [], closing: false};
+      const record = {key, node, popup, doc, root, label, content, anchor, options, bounds, transport, cleanups: [], closing: false};
       setupRecord = record;
       this.copyStyles(record);
       this.copyTheme(record);
@@ -94,6 +95,7 @@ export class BrowserWindowHost {
       catch (error) { this.attach(key, 'failed'); throw error; }
       this.pending.delete(key);
       const returnPane = () => this.attach(key, 'closed');
+      if (transport) transport.onClose = returnPane;
       popup.addEventListener('pagehide', returnPane);
       record.cleanups.push(() => popup.removeEventListener('pagehide', returnPane));
       const changed = () => { this.measure(record); this.onChange(); };
@@ -108,6 +110,7 @@ export class BrowserWindowHost {
       this.updateTitle(record);
       record.stylesReady.then(() => {
         if (this.windows.get(key) !== record) return;
+        transport?.show();
         popup.requestAnimationFrame(() => {
           if (this.windows.get(key) !== record) return;
           content.inert = false;
@@ -122,7 +125,7 @@ export class BrowserWindowHost {
     } catch (error) {
       if (this.has(key)) this.attach(key, 'failed');
       else for (const cleanup of setupRecord?.cleanups || []) { try { cleanup(); } catch {} }
-      try { popup?.close(); } catch {}
+      try { if (transport) transport.close(); else popup?.close(); } catch {}
       this.onFailure(error);
       return false;
     }
@@ -130,7 +133,7 @@ export class BrowserWindowHost {
   updateTitle(record) {
     const title = String(typeof record.options.title === 'function' ? record.options.title() : record.options.title || record.key);
     if (record.label.textContent !== title) record.label.textContent = title;
-    if (record.doc.title !== title + ' — VB6 Studio') record.doc.title = title + ' — VB6 Studio';
+    if (record.doc.title !== title + ' — VB6 Studio') { record.doc.title = title + ' — VB6 Studio'; record.transport?.title(record.doc.title); }
   }
   copyStyles(record) {
     const ready = [];
@@ -209,7 +212,7 @@ export class BrowserWindowHost {
     const node = this.document.adoptNode(record.node);
     if (record.anchor.parentNode) record.anchor.replaceWith(node);
     else this.themeRoot.append(node);
-    try { record.popup.close(); } catch {}
+    try { if (record.transport) record.transport.close(); else record.popup.close(); } catch {}
     if (!this.windows.size && this.timer) { this.owner.clearInterval(this.timer); this.timer = null; }
     record.options.onReturn?.(reason);
     this.restoreView(record, viewState);
@@ -235,6 +238,6 @@ export class BrowserWindowHost {
     this.attachAll('owner-closed');
     this.pending.clear();
     this.themeObserver.disconnect(); this.rootThemeObserver.disconnect(); this.styleObserver.disconnect();
-    this.unregister(); this.owner.removeEventListener('pagehide', this.pagehide);
+    this.transport?.dispose(); this.unregister(); this.owner.removeEventListener('pagehide', this.pagehide);
   }
 }

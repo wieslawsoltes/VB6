@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "AotArithmetic_1",
+  "name": "AotArithmetic",
+  "description": "",
+  "startup": "Sub Main",
+  "modules": [
+    {
+      "id": "AotArithmetic_2",
+      "name": "MainModule",
+      "kind": "module",
+      "code": "Option Explicit\nPrivate Declare Sub ExitProcess Lib \"kernel32\" (ByVal code As Long)\nPrivate Declare Function GetCurrentProcessId Lib \"kernel32\" () As Long\nPrivate Sequence As Long\nPrivate Function NextValue() As Long\n    Sequence = Sequence + 1\n    NextValue = Sequence\nEnd Function\nPrivate Function Pair(ByVal a As Long, ByVal b As Long) As Long\n    Pair = a * 10 + b\nEnd Function\nPrivate Sub Increment(ByRef n As Long)\n    n = n + 1\nEnd Sub\nPrivate Function Factorial(ByVal n As Long) As Long\n    If n <= 1 Then\n        Factorial = 1\n    Else\n        Factorial = n * Factorial(n - 1)\n    End If\nEnd Function\nPublic Sub Main()\n    Dim n As Long, i As Long, b As Byte, small As Integer, flag As Boolean\n    n = 0\n    For i = 1 To 10\n        n = n + i\n    Next i\n    If n <> 55 Then ExitProcess 10\n    For i = 10 To 1 Step -2\n        n = n - i\n    Next i\n    If n <> 25 Then ExitProcess 11\n    Do While n < 30\n        Increment n\n    Loop\n    If n <> 30 Then ExitProcess 12\n    If Factorial(8) <> 40320 Then ExitProcess 13\n    If Pair(NextValue(), NextValue()) <> 12 Then ExitProcess 14\n    If -7 \\ 3 <> -2 Then ExitProcess 15\n    If -7 Mod 3 <> -1 Then ExitProcess 16\n    If (5 And 3) <> 1 Then ExitProcess 17\n    If (5 Or 3) <> 7 Then ExitProcess 18\n    If (5 Xor 3) <> 6 Then ExitProcess 19\n    If Not 0 <> -1 Then ExitProcess 20\n    b = 255\n    small = -32768\n    flag = CBool(2)\n    If b <> 255 Or small <> -32768 Or flag <> True Then ExitProcess 21\n    If CStr(-2147483648) <> \"-2147483648\" Then ExitProcess 22\n    If \"X\" & CStr(42) & \"Y\" <> \"X42Y\" Then ExitProcess 23\n    If CLng(\"1234\") <> 1234 Then ExitProcess 24\n    Select Case n\n        Case 1, 2\n            ExitProcess 25\n        Case 25 To 35\n            n = 90\n        Case Else\n            ExitProcess 26\n    End Select\n    If n <> 90 Then ExitProcess 27\n    If GetCurrentProcessId() <= 0 Then ExitProcess 28\n    ExitProcess 0\nEnd Sub\n"
+    }
+  ],
+  "settings": {
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

@@ -14,7 +14,7 @@ export function parseOptions(args) {
     if (arg === '--stage-only') options.stageOnly = true;
     else if (arg === '--dir') options.unpacked = true;
     else if (arg === '--help') options.help = true;
-    else if (arg === '--no-extract') throw new Error('The portable target is one distributable EXE but extracts its embedded runtime at launch. A no-extraction native compiler is not implemented.');
+    else if (arg === '--no-extract') throw new Error('The portable target is one distributable EXE but extracts its embedded runtime at launch. Use build:win32 for the separate no-extraction x86 native/GDI target.');
     else if (values[arg]) {
       if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error('Missing value for ' + arg);
       options[values[arg]] = args[++i];
@@ -48,7 +48,7 @@ export function externalizeScripts(html) {
   if (!/<\/head\s*>/i.test(result) || !scripts.length) throw new Error('Native entry must be a complete application document');
   return { html: result.replace(/<\/head\s*>/i, '<script type="module" src="boot.mjs"></script></head>'), files, scripts };
 }
-async function readProject(filename, sourceRoot) {
+export async function readProject(filename, sourceRoot) {
   const file = path.resolve(filename), bytes = await fs.readFile(file);
   if (bytes.length > 20 * 1024 * 1024) throw new Error('Project exceeds 20 MiB');
   const { normalizeProject } = await import('../src/project/model.js');
@@ -93,7 +93,7 @@ export async function stageWindows(options) {
   if (output === stage || output.startsWith(stage + path.sep)) throw new Error('Output directory must not be inside the staging directory');
   await fs.rm(stage, { recursive: true, force: true }); await fs.mkdir(path.join(stage, 'web'), { recursive: true });
   for (const file of ['main.cjs', 'preload.cjs', 'policy.cjs', 'smoke.cjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, file));
-  for (const file of ['boot.mjs', 'studio.mjs', 'gpu-probe.mjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, 'web', file));
+  for (const file of ['boot.mjs', 'studio.mjs', 'gpu-probe.mjs', 'window-transport.mjs']) await fs.copyFile(path.join(root, 'desktop', file), path.join(stage, 'web', file));
   await fs.copyFile(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
   let html;
   if (project) {

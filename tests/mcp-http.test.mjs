@@ -2,17 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import path from 'node:path';
-import {McpClient} from '../src/mcp/client.js';
-import {HttpTransport, LegacySseTransport} from '../src/mcp/transports.js';
+import {McpClient} from './helpers/mcp-client.mjs';
+import {HttpTransport} from './helpers/mcp-transports.mjs';
 import {MCP_VERSION, MCP_META, requestHeaders} from '../src/mcp/protocol.js';
 import {McpServer} from '../src/mcp/server.js';
 import {BrowserBridge} from '../src/mcp/bridge-client.js';
 import {createBridge} from '../tools/mcp-bridge.mjs';
-import {NodeStdioTransport} from '../tools/mcp-node.mjs';
+import {NodeStdioTransport} from './helpers/mcp-stdio-peer.mjs';
 
 async function fixture(t, handler) {
   const server = http.createServer((req, res) => { Promise.resolve(handler(req, res)).catch(error => { if (!res.headersSent) res.writeHead(500); res.end(JSON.stringify({error: error.message})); }); });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); }); return 'http://127.0.0.1:' + server.address().port;
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); }); return 'http://127.0.0.1:' + server.address().port + '/mcp';
 }
 const read = async req => { let text = ''; for await (const chunk of req) text += chunk; return JSON.parse(text); };
 const json = (res, value, status = 200, headers = {}) => { res.writeHead(status, {'Content-Type': 'application/json', ...headers}); res.end(JSON.stringify(value)); };
@@ -89,20 +89,6 @@ test('MCP HTTP: legacy resumable SSE uses GET Last-Event-ID, not another POST', 
   });
   const result = await new HttpTransport(url).exchange({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'x'}}, {version: '2025-11-25'}); assert.equal(result.id, 1); assert.deepEqual(methods, ['POST','GET']);
 });
-test('MCP HTTP: old SSE endpoint discovery and JSON-RPC request multiplexing', async t => {
-  let output;
-  const url = await fixture(t, async (req, res) => {
-    if (req.method === 'GET') { output = res; res.writeHead(200, {'Content-Type': 'text/event-stream'}); res.write('event: endpoint\ndata: /messages?session=old\n\n'); return; }
-    assert.equal(req.url, '/messages?session=old'); const message = await read(req); res.writeHead(202); res.end(); if (message.id === undefined) return;
-    const result = message.method === 'initialize' ? {protocolVersion: '2024-11-05', capabilities: {tools: {}}, serverInfo: info} : {tools}; sse(output, {jsonrpc: '2.0', id: message.id, result});
-  });
-  const client = new McpClient(new LegacySseTransport(url)); await client.connect(); assert.equal((await client.listTools()).length, 1); await client.close();
-});
-test('MCP HTTP: legacy SSE will not send credentials to a different origin', async () => {
-  let calls = 0;
-  const transport = new LegacySseTransport('https://safe.test/sse', {token: 'secret', fetch: async () => { calls++; return new Response('event: endpoint\ndata: https://evil.test/post\n\n', {headers: {'Content-Type': 'text/event-stream'}}); }});
-  await assert.rejects(transport.exchange({jsonrpc: '2.0', id: 1, method: 'initialize'}, {signal: AbortSignal.timeout(1000)}), /Cross-origin/); assert.equal(calls, 1); await transport.close();
-});
 test('MCP HTTP: redirects cannot forward authorization to another endpoint', async t => {
   let stolen = false;
   const target = await fixture(t, (req, res) => { stolen = true; res.end(); });
@@ -138,19 +124,9 @@ test('MCP bridge: subscription cancellation tears down browser work and detachin
   const pending = client.subscribe({resourceSubscriptions: ['vb6://project']}, {signal: controller.signal, onNotification: message => notifications.push(message)}); await tick(); await tick(); assert.equal(notifications[0].method, 'notifications/subscriptions/acknowledged');
   controller.abort(); await assert.rejects(pending); await tick(); assert.equal(server.listeners.size, 0); await browser.close(); await assert.rejects(client.listTools(), error => error.status === 503);
 });
-for (const modern of [false,true]) test('MCP stdio: independent child server interoperability ' + (modern ? 'modern' : 'legacy'), async t => {
-  const transport = new NodeStdioTransport({command: process.execPath, args: [path.resolve('tests/fixtures/mcp/stdio-server.mjs'), ...(modern ? ['--modern'] : [])]}), client = new McpClient(transport); t.after(() => client.close());
-  await client.connect(); assert.equal(client.version, modern ? '2026-07-28' : '2025-11-25'); assert.equal((await client.callTool('echo', {text: 'stdio'})).structuredContent.text, 'stdio');
-});
-for (const modern of [false,true]) test('MCP bridge: allowlisted stdio gateway ' + (modern ? 'modern' : 'legacy'), async t => {
-  const bridge = await createBridge({port: 0, stdioServers: {echo: {command: process.execPath, args: [path.resolve('tests/fixtures/mcp/stdio-server.mjs'), ...(modern ? ['--modern'] : [])]}}});
-  const client = new McpClient(new HttpTransport(bridge.url + '/stdio/echo', {token: bridge.ownerToken})); t.after(async () => { await client.close(); await bridge.close(); });
-  await client.connect(); assert.equal((await client.callTool('echo', {text: 'gateway'})).structuredContent.text, 'gateway');
-  assert.equal((await fetch(bridge.url + '/stdio/not-configured', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + bridge.ownerToken}, body: '{}'})).status, 404);
-});
-test('MCP bridge: desktop stdio relay reaches the live browser project server', async t => {
+for (const era of ['modern','legacy']) test('MCP bridge: desktop stdio relay reaches the live IDE ('+era+')', async t => {
   const bridge = await createBridge({port: 0}), server = new McpServer(tinyAdapter()), browser = new BrowserBridge(server, {url: bridge.url, token: bridge.ownerToken});
-  const transport = new NodeStdioTransport({command: process.execPath, args: [path.resolve('tools/mcp-stdio.mjs'), '--url', bridge.url + '/mcp'], env: {VB6_MCP_TOKEN: bridge.clientToken}}), client = new McpClient(transport);
+  const transport = new NodeStdioTransport({command: process.execPath, args: [path.resolve('tools/mcp-stdio.mjs'), '--url', bridge.url + '/mcp'], env: {VB6_MCP_TOKEN: bridge.clientToken}}), client = new McpClient(transport, {era});
   t.after(async () => { await client.close(); await browser.close(); server.close(); await bridge.close(); }); await browser.connect(); await client.connect(); assert.equal((await client.callTool('echo', {text: 'desktop'})).structuredContent.text, 'desktop');
 });
 test('MCP stdio: companion credentials are excluded from inherited process environments', async t => {

@@ -4,8 +4,7 @@ import {readFile, realpath, stat} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {timingSafeEqual} from 'node:crypto';
-import {MCP_VERSION, MCP_META, MCP_LIMIT, McpError, randomToken, parseMessage, checkMessage, errorResponse, validateHeaders} from '../src/mcp/protocol.js';
-import {NodeStdioTransport} from './mcp-node.mjs';
+import {MCP_META, MCP_LIMIT, McpError, randomToken, checkMessage, errorResponse, validateHeaders} from '../src/mcp/protocol.js';
 
 const sameSecret = (actual, expected) => typeof actual === 'string' && Buffer.byteLength(actual) === Buffer.byteLength(expected) && timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
 const tokenOK = token => typeof token === 'string' && /^[A-Za-z0-9._~-]{32,512}$/.test(token);
@@ -21,14 +20,16 @@ async function body(req) {
 }
 
 /** Loopback-only authenticated relay. The browser remains the owner of project state and consent. */
-export async function createBridge({port = 8766, origins = [], allowFile = false, serve = null, ownerToken = randomToken(), clientToken = randomToken(), stdioServers = {}, requestTimeout = 60000} = {}) {
+export async function createBridge({port = 8766, origins = [], allowFile = false, serve = null, ownerToken = randomToken(), clientToken = randomToken(), requestTimeout = 60000, ...unsupported} = {}) {
+  if (Object.keys(unsupported).length) throw new Error('Unsupported companion options: ' + Object.keys(unsupported).join(', ') + '. This is an IDE relay only.');
+  if (!Number.isInteger(port) || port < 0 || port > 65535 || !Number.isInteger(requestTimeout) || requestTimeout < 1 || requestTimeout > 120000 || !Array.isArray(origins) || origins.length > 100) throw new Error('Invalid port, request timeout or origins.');
   if (!tokenOK(ownerToken) || !tokenOK(clientToken) || ownerToken === clientToken) throw new Error('Use distinct random owner and client tokens of at least 32 characters.');
   const allowedOrigins = new Set(origins.map(origin => { const url = new URL(origin); if (!['http:','https:'].includes(url.protocol) || url.origin !== origin) throw new Error('--origin must be an exact HTTP(S) origin without a path or trailing slash.'); return origin; }));
   if (allowFile) allowedOrigins.add('null');
   const root = serve ? await realpath(serve) : null;
-  const requests = new Map(), sessions = new Map(), gateways = new Map(); let owner = null, actualPort;
+  const requests = new Map(), sessions = new Map(); let owner = null, actualPort;
   function enqueue(value) {
-    if (!owner) throw Object.assign(new Error('No browser is attached. Enable sharing and connect in Tools → MCP Connections.'), {status: 503});
+    if (!owner) throw Object.assign(new Error('No browser is attached. Enable sharing and connect in Tools → MCP Agent Access.'), {status: 503});
     const size = JSON.stringify(value).length;
     if (owner.queue.length >= 128 || owner.bytes + size > MCP_LIMIT * 4) throw Object.assign(new Error('Browser queue is full.'), {status: 503});
     owner.queue.push(value); owner.bytes += size;
@@ -43,45 +44,12 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
     if (owner?.poll) json(owner.poll, 410, {error: 'Detached.'}); clearTimeout(owner?.pollTimer); owner = null;
     for (const pending of requests.values()) { clearTimeout(pending.timer); if (!pending.res.headersSent) json(pending.res, 503, errorResponse(pending.id, new McpError(-32000, 'Browser disconnected.'))); else pending.res.destroy(); }
     requests.clear(); for (const session of sessions.values()) session.get?.end(); sessions.clear();
-    for (const gateway of gateways.values()) await gateway.transport.close(); gateways.clear();
   }
   function authorize(req, token) { if (!sameSecret(req.headers.authorization, 'Bearer ' + token)) throw Object.assign(new Error('Invalid companion token.'), {status: 401}); }
   function lease(req) { authorize(req, ownerToken); if (!owner || !sameSecret(req.headers['x-vb6-lease'], owner.lease)) throw Object.assign(new Error('Browser lease expired.'), {status: 409}); owner.seen = Date.now(); }
   function cleanup(key, cancelled = false) {
     const pending = requests.get(key); if (!pending) return; requests.delete(key); clearTimeout(pending.timer);
     if (cancelled && owner) { try { enqueue({type: 'cancel', key}); } catch {} }
-  }
-  async function gatewayRequest(req, res, alias, url) {
-    authorize(req, ownerToken);
-    const config = Object.hasOwn(stdioServers, alias) ? stdioServers[alias] : null;
-    if (!config) return json(res, 404, {error: 'No such explicitly configured stdio server.'});
-    const sessionId = req.headers['mcp-session-id']; let gateway;
-    if (req.method === 'DELETE') { gateway = gateways.get(sessionId); if (!gateway || gateway.alias !== alias) return json(res, 404, {}); await gateway.transport.close(); gateway.get?.end(); gateways.delete(sessionId); return json(res, 200, {}); }
-    if (req.method === 'GET') {
-      gateway = gateways.get(sessionId); if (!gateway || gateway.alias !== alias) return json(res, 404, {});
-      if (gateway.get) return json(res, 409, {error: 'A notification stream is already open.'}); stream(res); gateway.get = res; res.on('close', () => { if (gateway.get === res) gateway.get = null; }); return;
-    }
-    if (req.method !== 'POST') return json(res, 405, {});
-    const message = await body(req), kind = checkMessage(message), modern = message.params?._meta?.[MCP_META + 'protocolVersion'] !== undefined;
-    validateHeaders(message, req.headers);
-    if (modern && kind === 'response') return json(res, 400, errorResponse(message.id, new McpError(-32600, 'Modern HTTP clients cannot send JSON-RPC responses.')));
-    const key = modern ? 'modern:' + alias : sessionId || (message.method === 'initialize' ? randomToken() : null);
-    if (!key) return json(res, 400, errorResponse(message.id, new McpError(-32000, 'Initialize this stdio gateway first.')));
-    gateway = gateways.get(key);
-    if (!gateway) {
-      if (!modern && message.method !== 'initialize') return json(res, 404, {});
-      if (gateways.size >= 32) return json(res, 503, {error: 'Too many configured server sessions.'});
-      const transport = new NodeStdioTransport(config); gateway = {alias, transport, streams: new Set(), requestStreams: new Map(), seen: Date.now()}; gateways.set(key, gateway);
-      transport.onMessage = value => { const subscriptionId = value.params?._meta?.[MCP_META + 'subscriptionId']; const target = subscriptionId !== undefined ? gateway.requestStreams.get(subscriptionId) : gateway.get || gateway.streams.values().next().value; if (target) event(target, value); };
-    }
-    if (gateway.alias !== alias) return json(res, 404, {}); gateway.seen = Date.now();
-    if (message.method === 'initialize') res.setHeader('MCP-Session-Id', key);
-    if (kind !== 'request') { await gateway.transport.exchange(message); return json(res, 202); }
-    const controller = new AbortController(); res.on('close', () => controller.abort()); gateway.streams.add(res); gateway.requestStreams.set(message.id, res);
-    const timer = message.method === 'subscriptions/listen' ? null : setTimeout(() => controller.abort(), requestTimeout);
-    try { const reply = await gateway.transport.exchange(message, {signal: controller.signal}); event(res, reply); res.end(); if (modern && message.method === 'server/discover' && reply?.error) { await gateway.transport.close(); gateways.delete(key); } }
-    catch (error) { if (!res.destroyed) { if (res.headersSent) { event(res, errorResponse(message.id, error)); res.end(); } else json(res, 502, errorResponse(message.id, error)); } }
-    finally { clearTimeout(timer); gateway.streams.delete(res); gateway.requestStreams.delete(message.id); }
   }
   async function handle(req, res) {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'no-referrer');
@@ -98,7 +66,7 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
     }
     const url = new URL(req.url, 'http://127.0.0.1:' + actualPort), route = url.pathname;
     if ((route.startsWith('/bridge/') || route === '/mcp' || route.startsWith('/stdio/')) && url.search) return json(res, 400, {error: 'Protocol endpoints do not accept URL query parameters. Use authorization headers.'});
-    if (route.startsWith('/stdio/')) return gatewayRequest(req, res, decodeURIComponent(route.slice(7)), url);
+    if (route.startsWith('/stdio/')) return json(res, 404, {error: 'External MCP server gateways are not supported. This companion only exposes the IDE.'});
     if (route.startsWith('/bridge/')) {
       if (req.method !== 'POST') return json(res, 405, {});
       authorize(req, ownerToken);
@@ -137,7 +105,7 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
       return json(res, 404, {});
     }
     if (route === '/mcp') {
-      authorize(req, clientToken); if (!owner) return json(res, 503, {error: 'Attach a browser in Tools → MCP Connections first.'});
+      authorize(req, clientToken); if (!owner) return json(res, 503, {error: 'Attach a browser in Tools → MCP Agent Access first.'});
       const sid = req.headers['mcp-session-id']; let session = sid ? sessions.get(sid) : null;
       if (req.method === 'DELETE') { if (!session) return json(res, 404, {}); closeSession(sid); return json(res, 200, {}); }
       if (req.method === 'GET') {
@@ -172,7 +140,7 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
       const mime = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.png':'image/png','.svg':'image/svg+xml'}[path.extname(target)] || 'application/octet-stream';
       res.writeHead(200, {'Content-Type': mime}); res.end(await readFile(target)); return;
     }
-    json(res, 404, {error: 'Use /mcp for MCP clients, /stdio/<configured-name> for configured stdio servers.'});
+    json(res, 404, {error: 'Use /mcp for external coding agents.'});
   }
   const server = http.createServer((req, res) => { handle(req, res).catch(error => { if (!res.headersSent) json(res, error.status || 400, error instanceof McpError ? errorResponse(null, error) : {error: error.status ? error.message : 'Invalid request.'}); else res.destroy(); }); });
   server.requestTimeout = 15000; server.headersTimeout = 10000; server.maxHeadersCount = 100;
@@ -181,7 +149,6 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
   const maintenance = setInterval(() => {
     if (owner && Date.now() - owner.seen > 45000) detach().catch(() => {});
     for (const [id, session] of sessions) if (Date.now() - session.seen > 1800000) closeSession(id);
-    for (const [id, gateway] of gateways) if (!gateway.streams.size && !gateway.get && Date.now() - gateway.seen > 1800000) { gateway.transport.close(); gateways.delete(id); }
   }, 10000); maintenance.unref();
   return {server, port: actualPort, url: 'http://127.0.0.1:' + actualPort, ownerToken, clientToken, async close() { clearInterval(maintenance); await detach(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }};
 }
@@ -193,13 +160,12 @@ async function main() {
     else if (arg === '--origin') options.origins.push(args[++i]);
     else if (arg === '--port') options.port = Number(args[++i]);
     else if (arg === '--serve') options.serve = args[++i];
-    else if (arg === '--config') { const data = JSON.parse(await readFile(args[++i], 'utf8')); options.stdioServers = data.mcpServers || data; }
-    else throw new Error('Usage: node tools/mcp-bridge.mjs [--port 8766] [--serve dist] [--origin https://wieslawsoltes.github.io] [--allow-file] [--config mcp-servers.json]');
+    else throw new Error('Usage: node tools/mcp-bridge.mjs [--port 8766] [--serve dist] [--origin https://wieslawsoltes.github.io] [--allow-file]');
   }
   if (process.env.VB6_MCP_OWNER_TOKEN) options.ownerToken = process.env.VB6_MCP_OWNER_TOKEN;
   if (process.env.VB6_MCP_TOKEN) options.clientToken = process.env.VB6_MCP_TOKEN;
   const bridge = await createBridge(options);
-  console.error('VB6 MCP companion: ' + bridge.url + '\nOwner token (IDE only): ' + bridge.ownerToken + '\nClient token (MCP client only): ' + bridge.clientToken + '\nEnter the owner token in Tools → MCP Connections. Keep these local credentials private.');
+  console.error('VB6 MCP companion: ' + bridge.url + '\nOwner token (IDE only): ' + bridge.ownerToken + '\nClient token (MCP client only): ' + bridge.clientToken + '\nEnter the owner token in Tools → MCP Agent Access. Keep these local credentials private.');
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal, () => bridge.close().then(() => process.exit(0)));
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });

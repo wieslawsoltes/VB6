@@ -51,14 +51,14 @@ export class McpServer {
         if (context.headers) validateHeaders(message, context.headers, this.tools.get(params.name)?.inputSchema);
       } else if (message.method !== 'initialize' && message.method !== 'ping' && !session?.ready) throw new McpError(-32000, 'Initialize the MCP session first.');
       let result;
-      if (message.method === 'server/discover' && modern) result = {supportedVersions: MCP_VERSIONS, capabilities: this.capabilities(true), instructions: 'VB6 IDE tools. Sharing must be enabled in the IDE. Changes and execution require local user approval. Read the current revision before editing.'};
+      if (message.method === 'server/discover' && modern) result = {supportedVersions: MCP_VERSIONS, capabilities: this.capabilities(true), instructions: 'VB6 IDE tools. Sharing must be enabled in the IDE. Changes and execution require local approval or an unexpired locally authorized scope. Read the current revision before editing.'};
       else if (message.method === 'initialize' && !modern) {
         if (session) throw new McpError(-32600, 'This session is already initialized.');
         if (this.sessions.size >= 64) throw new McpError(-32000, 'Too many MCP sessions.');
         if (typeof params.protocolVersion !== 'string' || !isRecord(params.capabilities) || !isRecord(params.clientInfo)) throw new McpError(-32602, 'Invalid initialize parameters.');
         const selected = MCP_LEGACY_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_LEGACY_VERSIONS[0];
         this.sessions.set(sessionKey, {version: selected, ready: false, subscriptions: new Set(), clientInfo: params.clientInfo});
-        result = {protocolVersion: selected, capabilities: this.capabilities(), serverInfo: this.info, instructions: 'Enable MCP sharing in the IDE. Edits require expectedRevision and local user approval.'};
+        result = {protocolVersion: selected, capabilities: this.capabilities(), serverInfo: this.info, instructions: 'Enable MCP sharing in the IDE. Edits require expectedRevision and local approval or an unexpired locally authorized scope.'};
       } else if (message.method === 'ping') result = {};
       else {
         this.adapter.assertEnabled?.();
@@ -69,7 +69,7 @@ export class McpServer {
       if (JSON.stringify(result).length > MCP_LIMIT) throw new McpError(-32000, 'MCP result exceeds the 8 MiB message limit; read smaller source ranges.');
       return {jsonrpc: '2.0', id: message.id, result};
     } catch (error) { return errorResponse(message.id, error); }
-    finally { context.signal?.removeEventListener('abort', abort); this.active.delete(key); }
+    finally { context.signal?.removeEventListener('abort', abort); if (this.active.get(key)?.controller === controller) this.active.delete(key); }
   }
   async handle(method, params, context, modern, session) {
     const paginate = (items, field) => { const page = pageItems(items, params.cursor); return {[field]: page.items, ...(page.nextCursor ? {nextCursor: page.nextCursor} : {})}; };
@@ -137,7 +137,7 @@ export class McpServer {
 export function bindMcpPort(port, server, {sessionKey = 'port', onError = () => {}} = {}) {
   const lifetime = new AbortController();
   port.onmessage = async event => {
-    try { const reply = await server.dispatch(event.data, {sessionKey, signal: lifetime.signal, requestId: event.data?.id, emit: message => port.postMessage(message)}); if (reply && !lifetime.signal.aborted) port.postMessage(reply); }
+    try { const reply = await server.dispatch(event.data, {sessionKey, signal: lifetime.signal, requestId: event.data?.id, emit: message => port.postMessage(message), notify: message => { if (!lifetime.signal.aborted) port.postMessage(message); }}); if (reply && !lifetime.signal.aborted) port.postMessage(reply); }
     catch (error) { onError(error); }
   };
   port.start?.();

@@ -1,20 +1,21 @@
 # Windows executable targets
 
-There are two **different** Windows targets. Both build pipelines and the modern host are maintained in JavaScript. Neither target is a new JavaScript implementation of the Windows kernel, Microsoft compiler, Chromium, or Direct3D.
+There are three **different** Windows targets. The compiler/linker, build pipelines and modern host are maintained in JavaScript. The new [freestanding AOT target](WIN32-AOT.md) closes the no-extraction boundary for its supported typed subset; it is not full VB6 or a WebGPU renderer. Neither target is a new JavaScript implementation of the Windows kernel, Microsoft compiler, Chromium, or Direct3D.
 
 | Target | Output | Runtime | Graphics |
 | --- | --- | --- | --- |
+| Freestanding AOT | One PE32/x86 EXE; no extraction | Windows system DLLs; no bundled engine or VB6 runtime | Native controls and GDI; experimental typed subset |
 | Modern portable | One distributed Windows `.exe`, x64 or ARM64 | Embedded Electron/Chromium/Node; extracts private runtime files on launch | WebGPU primitives; DOM controls/text; explicit Canvas2D fallback option |
 | Classic VB6 | Genuine PE32/x86 `.exe` from a licensed local VB6 compiler | External `MSVBVM60.DLL` and the application's dependencies | Original VB6 controls and graphics, not WebGPU |
 
-**Not a no-extraction implementation:** Electron's portable target is a self-extracting executable, not a statically linked, entirely memory-resident single-image binary. It needs no separately installed browser, Node, WebView2, or Electron, but writes temporary runtime files and persistent user data. `--no-extract` is rejected instead of claiming this property. Windows UI/graphics binaries in the bundled platform are native code; the project-specific host, adapters and build tools are JavaScript.
+**Electron target is not a no-extraction implementation:** Electron's portable target is a self-extracting executable, not a statically linked, entirely memory-resident single-image binary. It needs no separately installed browser, Node, WebView2, or Electron, but writes temporary runtime files and persistent user data. `--no-extract` is rejected instead of claiming this property. Windows UI/graphics binaries in the bundled platform are native code; the project-specific host, adapters and build tools are JavaScript.
 
 ## Modern portable builds
 
 From the repository root, with Node.js 22 or later:
 
 ```sh
-npm --prefix desktop install
+npm --prefix desktop ci
 npm run build:windows
 npm run build:windows -- --project examples/calculator.vb6web --out release/calculator
 npm run build:windows -- --project MyApp.vbp --source-root . --graphics auto
@@ -31,7 +32,7 @@ Each portable build writes the EXE, SHA-256 sums and JSON build evidence. The NS
 
 Exported application top-level forms use real Electron `BrowserWindow` windows (Win32 HWNDs on Windows), retaining one JavaScript VM and the same live control DOM rather than copying form state to separate VMs. Implemented integration includes independent windows, caption changes, geometry in VB twips, show/hide, minimize/maximize/restore, focus events, resizing, modal disabling/restoration, native popup menus, native message/file dialogs, input dialogs, close cancellation through `QueryUnload`, and form reuse after unload. The host exposes validated window commands, including fullscreen and always-on-top, through a context-isolated preload. MDI children remain inside their native MDI parent; they are not native Win32 MDI child HWNDs. Arbitrary Win32 `Declare`, HWND control compatibility, OLE and ActiveX hosting are not provided by this modern target.
 
-The IDE itself is packaged as a native window. Its debugger preview retains the existing sandboxed iframe and uses a document-specific CSP with script hashes; that iframe cannot access the native bridge. Existing IDE docking behavior is not a claim of complete detached-tool-window parity. Application execution through exported EXEs uses the native form adapter described above.
+The IDE itself is packaged as a native window. Its debugger preview retains the existing sandboxed iframe and uses a document-specific CSP with script hashes; that iframe cannot access the native bridge. The existing live-DOM detachment host now uses reserved native desktop windows for tool groups, documents and modeless tools. Properties/code detachment, original editor identity, OS-close restoration, MDI-only restoration and direct child-IPC rejection are tested on x64 and ARM64. This is not a claim of pixel-exact native IDE parity. Application execution through exported EXEs uses the native form adapter described above.
 
 Only manifest-listed assets are served over the secure local `vb6://app` protocol, with integrity checks, blocked remote navigation/network requests, sandboxed renderers, no renderer Node integration, and a main-frame-only IPC bridge. Native file access occurs through explicit open/save dialogs. Project code must still be treated as untrusted input to the language runtime.
 
@@ -60,7 +61,7 @@ Microsoft lists the base 32-bit VB6 runtime, including `MSVBVM60.DLL`, as shippi
 
 `npm test` includes native policy, build staging, malformed PE, classic compiler-argument, source-preservation, timeout and **mocked** compiler-output tests. Mock fixtures are not evidence that Microsoft’s compiler ran.
 
-The `Native Windows` workflow builds actual x64 portable executables, copies each EXE alone to a new temporary directory, launches it, and exercises native windows, runtime events, modality, unload cancellation, graphics and the IDE sandbox preview. Reports distinguish WebGPU from explicit fallback; enabling a software GPU for smoke tests is test-only. ARM64 is a build target, not a claim of execution on ARM64 hardware.
+The `Native Windows` workflow builds actual x64 portable executables, copies each EXE alone to a new temporary directory, launches it, and exercises native windows, runtime events, modality, unload cancellation, graphics and the IDE sandbox preview. Reports distinguish WebGPU from explicit fallback; enabling a software GPU for smoke tests is test-only. The Win32 AOT and ARM64 workflow now additionally verifies native ARM64 process architecture and launches both staged desktop targets and the isolated ARM64 portable IDE. These hosted runs reported Canvas2D fallback, not hardware-WebGPU certification.
 
 The optional manual `classic` workflow input runs only on `main`, on a trusted self-hosted runner labelled `Windows` and `vb6`, with a separately installed licensed toolchain. It compiles and executes the included dependency-free sample in both modes. This job is intentionally never run for untrusted PR code. A skipped classic job is **not** a successful real-compiler test.
 
