@@ -35,6 +35,9 @@ def check(value, message):
 
 def verify_app(page):
     page.wait_for_function('globalThis.vb6Application?.vm?.state === "running"')
+    # VM state becomes running before asynchronous Form_Load has finished.
+    # Wait for its observable output, not a fixed delay or only the VM state.
+    page.wait_for_function('''vb6Application.vm.lastError || document.querySelector('[data-control="txtValue"] input')?.value === "Hello from kernel32 and user32!"''')
     check(page.evaluate('vb6Application.vm.lastError?.message || null') is None, 'Runtime error')
     check(page.locator('[data-control="txtValue"] input').input_value() == 'Hello from kernel32 and user32!', 'INI output buffer did not reach textbox')
     page.locator('[data-control="cmdText"]').click()
