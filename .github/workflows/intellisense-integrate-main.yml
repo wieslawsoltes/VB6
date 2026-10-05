@@ -1,0 +1,52 @@
+name: Integrate IntelliSense with current main
+on:
+  push:
+    branches: [feature/classic-vb6-intellisense]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/feature/classic-vb6-intellisense'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge reviewed main and rebuild generated files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin 57f454a87073ae93ff11b8cf6b37322ce0be567b
+          if ! git merge --no-commit --no-ff 57f454a87073ae93ff11b8cf6b37322ce0be567b; then
+            conflicts=$(git diff --name-only --diff-filter=U)
+            test -n "$conflicts" || exit 1
+            while IFS= read -r path; do
+              case "$path" in
+                dist/*|src/exporter/runtime-payload.js|src/editor/diagnostics-payload.js) git checkout --ours -- "$path"; git add "$path" ;;
+                *) echo "Handwritten conflict requires review: $path"; exit 1 ;;
+              esac
+            done <<< "$conflicts"
+          fi
+          mkdir -p reports/intellisense-integration
+          npm run build
+          set -o pipefail
+          npm test 2>&1 | tee reports/intellisense-integration/node.log
+          git rm .github/workflows/intellisense-integrate-main.yml
+          git add -u
+          git commit -m 'merge: integrate Win32 browser runtime and rebuild IntelliSense distributions'
+          git push origin HEAD:feature/classic-vb6-intellisense
+      - name: Source snapshot
+        if: always()
+        run: git archive --format=zip --output=intellisense-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intellisense-main-integration
+          path: |
+            intellisense-source.zip
+            reports/intellisense-integration/
+          retention-days: 7
