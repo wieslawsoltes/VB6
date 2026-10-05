@@ -27,7 +27,7 @@ jobs:
           import zlib from 'node:zlib';
           import crypto from 'node:crypto';
           for(const [name,decode,expected] of [
-            ['hardening',zlib.brotliDecompressSync,'e6b746579c854648effa2e3be4aa8aadfb30acb855d109eede47d1e5a5ecbaa8'],
+            ['hardening',zlib.inflateSync,'e6b746579c854648effa2e3be4aa8aadfb30acb855d109eede47d1e5a5ecbaa8'],
             ['final-edits',zlib.inflateSync,'745b00d7335d1aac629872b5d2ccd208b8714d704bf6c8089e86ce31ec2c9cd7']
           ]){
             const data=decode(Buffer.from(fs.readFileSync('.github/debugger-'+name+'.b64','utf8').trim(),'base64'));
