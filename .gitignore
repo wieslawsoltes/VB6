@@ -22,5 +22,7 @@ reports/data-sources/
 server-profiles.local.json
 *.sqlite
 
+# Generated debugger browser evidence; retained as CI artifacts.
+reports/debugger-runtime/
 # Coding-agent browser validation reports and screenshots (CI artifacts).
 reports/coding-agents/
