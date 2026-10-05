@@ -112,10 +112,10 @@ Gemini** using your API account. Refresh Models lists account-accessible models;
 manual model IDs are also supported. No cloud requests are made until you request
 model discovery or approve starting a task.
 
-The agent uses the same 114 typed IDE operations as external coding agents:
+The agent uses the same 125 typed IDE operations as external coding agents:
 project/source inspection, atomic multi-module edits, form/control/menu design,
-compiler diagnostics, debugger/runtime control, virtual files/resources, and
-workspace management. It is a real iterative tool-use loop, not just a chat box.
+compiler diagnostics, debugger/runtime control, public Data Environment definitions,
+virtual files/resources, and workspace management. It is a real iterative tool-use loop, not just a chat box.
 Streaming text, tool activity, before/after edit review, Stop, normal Undo,
 request/tool/token limits and downloadable in-memory transcripts are included.
 
@@ -146,7 +146,8 @@ Open **Tools → MCP Agent Access…** to expose this IDE to an external coding 
 The IDE is an **MCP server only**: it does not connect to external MCP servers,
 run their tools, perform OAuth sign-in, or launch configured stdio servers.
 
-Its **114 structured tools** cover projects and source interchange, code edits,
+Its **125 structured tools** cover projects and source interchange, public Data
+Environment definitions, bounded source reads, code edits,
 compiler diagnostics, forms/controls/menus, resources and virtual files,
 editor/workspace management, Object Browser, debugger/live edits and sandboxed
 application interaction. The same server is bundled into the static app and
@@ -167,6 +168,10 @@ or act as an outbound MCP gateway. Browser origin/local-network policy still app
 
 [MCP setup and migration](docs/MCP.md) ·
 [Coding-agent workflow and complete tool reference](docs/MCP-AGENTS.md)
+
+The classic MCP dialog also has an **Operations** tab for local task cancellation
+and build-download cleanup. Data definition edits have a separate, locally granted
+**data** scope and do not execute SQL or access a runtime credential cache.
 
 ### Compiler/runtime compatibility workstream
 
@@ -207,11 +212,15 @@ Open `.vbp` projects and `.vbg` groups from complete selected files, folders or 
 
 Browser IDE runs, the runtime SDK and published single-file HTML apps now share
 [`@vb6/win32-browser`](packages/win32-browser/README.md), an independent,
-zero-dependency MIT package. Its first release registers 170 export names for
+zero-dependency MIT package. Version 0.2.0 registers 211 export names for
 common kernel/memory/file/INI, registry, window/message/timer, clipboard, GDI and
 safe URL operations. `Declare`, `Alias`, typed ByRef buffers, aligned UDTs,
 `AddressOf` callbacks and runtime `hWnd` values are integrated without changing
-the classic IDE layout. Try **Win32 API Workbench** in the examples list.
+the classic IDE layout. Memory DCs, writable DIBs, 15 raster operations, bitmap
+blitting, alpha blending and rectangular clipping are supported; forms and picture
+boxes expose read-only `hDC`. Bitmap surfaces use an explicit Canvas2D fallback.
+Try **Bitmap blitting** in **Win32 API Workbench**, and see the
+[GDI compatibility guide](packages/win32-browser/GDI.md).
 
 This is a browser-compatible subset, not native DLL execution or full Win32
 parity. Private files/registry/clipboard stay application-local; unsupported

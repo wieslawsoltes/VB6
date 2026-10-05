@@ -198,9 +198,9 @@ def stopped(page,mode):
 
 
 def lifecycle(page,mode):
-    check(page.evaluate('vb6Studio.codingAgents.adapter.tools.length')==114)
+    check(page.evaluate('vb6Studio.codingAgents.adapter.tools.length')==125)
     check(page.evaluate("vb6Studio.menu('Tools').some(item=>item?.id==='codingAgents')"))
-    tab(page,'Tools');check(page.get_by_label('Coding agent tools',exact=True).locator('option').count()==116)
+    tab(page,'Tools');check(page.get_by_label('Coding agent tools',exact=True).locator('option').count()==127)
     # Native MDI sizing/chrome, not a new app shell or third-party chat component.
     check(page.locator('.agent-panel').evaluate("e=>getComputedStyle(e).backgroundColor")==page.locator('.ide-menubar').evaluate("e=>getComputedStyle(e).backgroundColor") if page.locator('.ide-menubar').count() else True)
     configure(page)
@@ -215,7 +215,7 @@ def lifecycle(page,mode):
     page.set_viewport_size({'width':600,'height':820})
     tab(page,'Connection');page.screenshot(path=str(REPORTS/f'{mode}-compact.png'))
     check(page.locator('.agent-panel').is_visible())
-    return {'catalog':114,'loadCancelsConsent':True,'classicMDI':True}
+    return {'catalog':125,'loadCancelsConsent':True,'classicMDI':True}
 
 
 def plan_question(page, mode, provider):

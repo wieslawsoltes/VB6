@@ -100,7 +100,7 @@ rendered or included in the downloadable activity transcript. Model-provided tex
 is displayed as plain text, not executable HTML or automatically trusted Markdown.
 
 The agent inspects, edits and validates the **actual IDE project**. It uses all
-114 existing typed tools, subject to the chosen permission mode:
+125 existing typed tools, subject to the chosen permission mode:
 
 | Area | Examples |
 | --- | --- |
@@ -109,6 +109,7 @@ The agent inspects, edits and validates the **actual IDE project**. It uses all
 | Designer | Forms, controls, control arrays, menus, properties, layout and selection. |
 | Compiler/builds | Compile the active project, inspect real diagnostics, and produce inert project JSON, HTML, source ZIP or supported Win32 artifacts with SHA-256 verification and bounded chunk reads. Builds do not execute generated code. |
 | Debugger/runtime | Inspect state, breakpoints, frames, watches, evaluate, step, continue, stop and use the supported runtime-control tools. |
+| Data definitions | Public providers, connections and commands; validation, atomic renames and undoable definition edits under the separate data scope. No SQL/network execution or runtime credentials. |
 | Files/workspace | Project virtual files, assets, resources, document/window layouts, editor views, normal Undo/Redo and the existing typed commands. |
 
 Tool descriptions and exact schemas are available on the **Tools** tab. These
@@ -132,7 +133,7 @@ model hallucinating a removed tool gets an error, not access. It may still inspe
 requested project/source/debugger data and run the non-executing compiler tool.
 
 **Agent mode** authorizes only checked scopes: code, project, designer, files,
-debugger, runtime or workspace. Start Task explicitly lists those scopes. Grants
+debugger, runtime, public data definitions or workspace. Start Task explicitly lists those scopes. Grants
 last for this run, at most ten minutes; non-granted effects still require review.
 They are revoked on completion, failure, Stop, project replacement/reload, expiry
 or page unload. Permissions are local UI decisions; no model tool grants them.
@@ -179,7 +180,7 @@ editing of a signed provider-native conversation.
 
 ### Task plans and local questions
 
-Two local tools supplement the **114 IDE operations** in the shipped agent UI;
+Two local tools supplement the **125 IDE operations** in the shipped agent UI;
 they do not change the independent external MCP tool catalog:
 
 - **`vb6.agent.plan`** maintains a revision-checked plan on the **Plan** tab, with

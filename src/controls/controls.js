@@ -32,7 +32,14 @@ export class BrowserControl {
     const props=new Set([...RICH_SELECTION_PROPERTIES,...Object.keys(this.props),'Text','Caption','Value','ListIndex','Enabled','Visible','Left','Top','Width','Height','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','ToolTipText','Tag','MaxLength','Locked','PasswordChar','Default','Cancel','Min','Max','Rows','Cols','FixedRows','FixedCols','Row','Col','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataSource','RecordSource','DatabaseName','Connect','ConnectionString','CommandType','CursorType','LockType','ReadOnly','RecordsetType','DataMember','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Picture','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','CancelError','FileName','Filter','FilterIndex','DialogTitle','Flags','FontStrikethru','TextRTF','MultiLine','ScrollBars']);
     for(const key of props)if(!['Nodes','Tabs','Panels','Buttons','ListItems','ColumnHeaders','ListImages'].includes(key)&&!(key in this))Object.defineProperty(this,key,{enumerable:true,configurable:true,get:()=>this.get(key),set:value=>this.set(key,value)});
     this.build();this.attachEvents();this.refresh();
-    if(!this.design&&this.vm?.win32)Object.defineProperty(this,'hWnd',{enumerable:true,value:this.vm.win32.registerControl(this)});
+    if(!this.design&&this.vm?.win32){
+      Object.defineProperty(this,'hWnd',{enumerable:true,value:this.vm.win32.registerControl(this)});
+      if(['Form','MDIForm','PictureBox'].includes(this.type))Object.defineProperty(this,'hDC',{enumerable:true,get:()=>{
+        const api=this.vm.win32.api;if(this.disposed||api.disposed)return 0;
+        if(!api.handles.has(this._gdiDC,'dc'))this._gdiDC=api.invoke('user32','GetDC',[this.hWnd]);
+        return this._gdiDC;
+      }});
+    }
   }
   get(key){
     if(key==='Text'){

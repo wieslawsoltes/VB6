@@ -34,9 +34,9 @@ def finished(page):
     page.wait_for_function("!vb6Studio.documents.tools.get('tool:mcp').operation")
 
 
-def delegate(page, scopes=('code','project','designer','files','debugger','runtime','workspace')):
+def delegate(page, scopes=('code','project','designer','files','debugger','runtime','workspace','data')):
     tab(page, 'Agent permissions')
-    for scope in ('code','project','designer','files','debugger','runtime','workspace'):
+    for scope in ('code','project','designer','files','debugger','runtime','workspace','data'):
         page.get_by_label('Agent scope '+scope, exact=True).set_checked(scope in scopes)
     page.get_by_role('button', name='Grant selected permissions', exact=True).click()
     page.get_by_role('dialog', name='Authorize coding agents?', exact=True).get_by_role('button', name='Authorize session', exact=True).click()
@@ -50,9 +50,7 @@ def wire(info, method, params, tasks=False):
     if method == 'tools/call': headers['MCP-Name'] = params['name']
     if method in ('tasks/get','tasks/update','tasks/cancel'): headers['MCP-Name']=params['taskId']
     request = urllib.request.Request(info['url']+'/mcp', data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(), headers=headers)
-    with urllib.request.urlopen(request,timeout=25) as response:
-        text = response.read().decode()
-        data = next(json.loads(line[6:]) for line in text.splitlines() if line.startswith('data: ') and json.loads(line[6:]).get('id') == 1) if response.headers.get_content_type() == 'text/event-stream' else json.loads(text)
+    data = harness.rpc_response(request, 1, timeout=25)
     if 'error' in data: raise AssertionError(str(data['error']))
     if data['result'].get('isError'): raise AssertionError(str(data['result']))
     return data['result'].get('structuredContent',data['result'])
@@ -83,7 +81,7 @@ def exercise(browser, mode, info):
                 check('result' in response,str(response));catalog.extend(response['result']['tools']);cursor=response['result'].get('nextCursor')
                 if not cursor:break
         else:catalog=page.evaluate('agentClient.listTools()')
-        check(len(catalog)==114,'Expected complete 114-tool catalog')
+        check(len(catalog)==125,'Expected complete 125-tool catalog')
         writes={t['name'] for t in catalog if not t['annotations']['readOnlyHint']}
         delegate(page)
         def call(name, values=None):
@@ -118,6 +116,65 @@ def exercise(browser, mode, info):
             cancelled=wire(info,'tools/call',{'name':'vb6.agent.wait','arguments':{'afterRevision':call('project.get')['revision'],'timeoutMs':10000}},tasks=True)
             wire(info,'tasks/cancel',{'taskId':cancelled['taskId']},tasks=True)
             check(wire(info,'tasks/get',{'taskId':cancelled['taskId']},tasks=True)['status']=='cancelled')
+        # Local owner operations are distinct from MCP: handles are visible, not
+        # task arguments, results, transport principals or paired credentials.
+        def task_request(method, values):
+            if network: return wire(info,method,values,tasks=True)
+            return page.evaluate("([method,params])=>agentClient.request(method,params,{'extensions':{'io.modelcontextprotocol/tasks':{}}})",[method,values])
+        local_task=task_request('tools/call',{'name':'vb6.agent.wait','arguments':{'afterRevision':call('project.get')['revision'],'timeoutMs':10000}})
+        retained=call('build.create',{'target':'project','expectedRevision':call('project.get')['revision']})['artifact']
+        tab(page,'Operations')
+        task_list=page.get_by_label('Retained MCP tasks',exact=True)
+        task_list.select_option(local_task['taskId'])
+        check(page.get_by_role('button',name='Cancel selected task',exact=True).is_enabled())
+        (ROOT/'reports/screenshots').mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(ROOT/('reports/screenshots/mcp-operations-active-'+mode+'.png')))
+        page.get_by_role('button',name='Cancel selected task',exact=True).click()
+        check(task_request('tasks/get',{'taskId':local_task['taskId']})['status']=='cancelled')
+        page.get_by_role('button',name='Clear finished tasks',exact=True).click()
+        page.wait_for_function("!vb6Studio.mcp.server.tasks.inspect().length")
+        artifact_list=page.get_by_label('Retained MCP build artifacts',exact=True)
+        artifact_list.select_option(retained['artifactId'])
+        detail=page.get_by_label('MCP artifact details',exact=True).inner_text()
+        check(retained['sha256'] in detail and 'principal' not in detail and 'bytes' not in json.loads(detail))
+        if network:check(info['ownerToken'] not in detail and info['clientToken'] not in detail)
+        page.get_by_role('button',name='Release selected artifact',exact=True).click()
+        page.wait_for_function("!vb6Studio.mcp.adapter.inspectArtifacts().length")
+        try:call('build.read',{'artifactId':retained['artifactId']})
+        except Exception as error:check('not found' in str(error).lower(),str(error))
+        else:raise AssertionError('Locally released build remains accessible to an agent')
+        # A closed/reopened modeless UI must unsubscribe its observers without
+        # destroying the long-lived MCP server or changing retained handles.
+        page.evaluate("vb6Studio.closeDocument('tool:mcp')")
+        tab(page,'Operations');check(page.get_by_label('Retained MCP tasks',exact=True).locator('option').count()==0)
+        check(page.get_by_role('button',name='Cancel selected task',exact=True).is_disabled())
+        check(page.get_by_role('button',name='Release all artifacts',exact=True).is_disabled())
+        (ROOT/'reports/screenshots').mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(ROOT/('reports/screenshots/mcp-operations-'+mode+'.png')))
+        # Public Data Environment definitions only. No backend is contacted.
+        check(len(call('data.providers')['providers'])==7)
+        call('data.connection.set',{'mode':'create','definition':{'name':'AgentData','provider':'sqlite','path':'agent.sqlite','credentialRef':'LOCAL_ONLY'}})
+        call('data.command.set',{'mode':'create','definition':{'name':'Customers','connection':'AgentData','type':1,'text':'SELECT * FROM customers','parameters':[]}})
+        check(call('data.connection.get',{'name':'agentdata'})['definition']['provider']=='sqlite')
+        call('data.rename',{'kind':'connection','name':'AgentData','newName':'LocalData'})
+        check(call('data.command.get',{'name':'customers'})['definition']['connection']=='LocalData')
+        check(call('data.list')['connections']==1 and call('data.list')['commands']==1)
+        check(call('data.validate')['valid'] and not call('data.validate')['liveConnectionTest'])
+        check(any(f['path'].endswith('.vb6data.json') for f in call('project.files')['items']))
+        call('data.command.remove',{'name':'Customers'});call('data.connection.remove',{'name':'LocalData'})
+        check(call('data.list')['commands']==0 and call('data.list')['connections']==0)
+        # Long single-line Unicode source can be fetched without an oversized
+        # line response. Offsets follow JS/.NET UTF-16, not Python code points.
+        long_code='Rem '+('漢🙂'*45000)
+        call('module.add',{'name':'LongSource','kind':'module','code':long_code})
+        offset=0;parts=[];source_revision=call('project.get')['revision']
+        while True:
+            part=call('code.read',{'module':'LongSource','offset':offset,'count':65537,'expectedRevision':source_revision})
+            check(part['offsetEncoding']=='utf-16');parts.append(part['code'].encode('utf-16-le',errors='surrogatepass'))
+            offset=part['nextOffset']
+            if not part['hasMore']:break
+        check(b''.join(parts).decode('utf-16-le')==long_code)
+        call('module.remove',{'module':'LongSource'})
         # Everything after local opt-in is controlled through MCP, not direct project edits.
         cap=call('agent.capabilities');check(cap['permissions']['active'])
         check(all(c['tool'] for c in call('commands.list')['commands']))
@@ -270,7 +327,7 @@ End Sub
         if mode!='opaque':
             page.reload();page.wait_for_function('!!globalThis.vb6Studio?.mcp')
             check(not page.evaluate('vb6Studio.mcp.adapter.enabled || vb6Studio.mcp.adapter.permissions.snapshot(vb6Studio.project.id).active'))
-        return {'catalog':len(catalog),'exercisedTools':sorted(touched),'externalHTTP':network,'delegation':'local-only / scoped / revoked','debugger':'inspect,assign,frame,run-to-cursor,live-edit,evaluate,immediate,step,continue','runtime':'controls,grid,menu,inputbox,virtual-files','errors':errors}
+        return {'catalog':len(catalog),'exercisedTools':sorted(touched),'externalHTTP':network,'operations':'local cancel/clear/release/reopen','data':'design-time CRUD, rename, validation and native sidecar','source':'bounded UTF-16 reassembly','delegation':'local-only / scoped / revoked','debugger':'inspect,assign,frame,run-to-cursor,live-edit,evaluate,immediate,step,continue','runtime':'controls,grid,menu,inputbox,virtual-files','errors':errors}
     except Exception:
         (ROOT/'reports/screenshots').mkdir(parents=True,exist_ok=True)
         page.screenshot(path=str(ROOT/('reports/screenshots/mcp-agent-failed-'+mode+'.png')))

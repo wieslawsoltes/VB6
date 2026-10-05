@@ -67,6 +67,18 @@ with sync_playwright() as pw:
             check('unchanged Calculator exports from File Make EXE', calculator_download.suggested_filename == 'Calculator.exe')
             calculator_download.save_as(OUT / 'Calculator.exe')
             check('Calculator IDE export matches Node native compiler', (OUT / 'Calculator.exe').read_bytes() == (numeric_dir / 'Calculator.exe').read_bytes())
+        currency_dir = ROOT / 'validation/currency'
+        if currency_dir.exists():
+            money = json.loads((currency_dir / 'AotCurrency.vb6web').read_text())
+            page.evaluate('p => vb6Studio.loadProject(p)', money)
+            before = page.evaluate('JSON.stringify(vb6Studio.project.modules)')
+            with page.expect_download() as pending:
+                page.evaluate('vb6Studio.command("exportWin32")')
+            downloaded = pending.value
+            downloaded.save_as(OUT / 'AotCurrency.exe')
+            check('Currency File Make EXE preserves original source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
+            check('Currency File Make EXE output equals Node', downloaded.suggested_filename == 'AotCurrency.exe' and (OUT / 'AotCurrency.exe').read_bytes() == (currency_dir / 'AotCurrency.exe').read_bytes())
+            check('Currency export has no network requests or page errors', not errors and not requests)
         page.close()
         page = browser.new_page()
         page.add_script_tag(content=SDK)
@@ -74,6 +86,10 @@ with sync_playwright() as pw:
         fixtures = [(ROOT / 'validation/win32', name) for name in ('AotWindows', 'AotDynamicArrays', 'AotStorage', 'AotErrors')]
         if numeric_dir.exists():
             fixtures.extend((numeric_dir, name) for name in ('Calculator', 'AotNumbers', 'AotIndexedControls'))
+        if currency_dir.exists():
+            fixtures.append((currency_dir, 'AotCurrency'))
+            if (currency_dir / 'AotCurrencyBindings.vb6web').exists():
+                fixtures.append((currency_dir, 'AotCurrencyBindings'))
         for fixture_dir, fixture_name in fixtures:
             fixture_project = json.loads((fixture_dir / f'{fixture_name}.vb6web').read_text())
             fixture_expected = (fixture_dir / f'{fixture_name}.exe').read_bytes()
