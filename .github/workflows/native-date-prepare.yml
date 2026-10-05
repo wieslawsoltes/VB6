@@ -1,0 +1,42 @@
+name: Prepare reviewed native Date sources
+on:
+  push:
+    branches: [feat/win32-date-export]
+    paths: [.github/workflows/native-date-prepare.yml]
+permissions:
+  contents: write
+concurrency:
+  group: native-date-prepare
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/win32-date-export
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply only fingerprint-checked Date source edits
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git merge-base --is-ancestor 16c8ef706c525de141e1d5d547b3cf14b45beeea HEAD
+          python tools/.native-date-prepare.py
+          npm run build
+          npm test
+          node tools/win32-date-fixtures.mjs
+          node tools/win32-date-abi-fixtures.mjs
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git add src/native tests/win32-aot.test.mjs tests/win32-bindings.test.mjs tools/build-win32.mjs tools/browser-native-build-tests.py dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git diff --cached --check
+          git commit -m 'feat(native): lower Date storage, scalar calls, arrays and Gregorian functions' -m 'Apply fingerprint-checked source changes, retain numeric precision and Currency behavior, regenerate standalone IDE/SDK bundles and run the complete regression suite. Actual Windows execution remains a required separate test.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/win32-date-export
