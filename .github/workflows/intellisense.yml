@@ -1,0 +1,51 @@
+name: IntelliSense
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'examples/type-libraries/**'
+      - '.github/workflows/intellisense.yml'
+permissions:
+  contents: read
+concurrency:
+  group: intellisense-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    name: IntelliSense (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and unit tests
+        run: npm run build && npm test
+      - name: Verify generated bundles are committed
+        run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Browser dependencies
+        run: pip install playwright==1.57.0 && python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: IntelliSense browser regression
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: python tools/browser-intellisense-tests.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intellisense-${{ matrix.browser }}
+          path: validation/intellisense*
+          retention-days: 7

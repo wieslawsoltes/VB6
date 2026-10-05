@@ -204,3 +204,61 @@ test('MCP tasks: local cancellation safely handles expiry before the timer fires
   assert.equal(tasks.inspect().length,0);
   tasks.clear();
 });
+
+// Absolute deadlines must still hold when the event loop has not delivered a timer.
+test('MCP tasks: elapsed deadline prevents queued adapter invocation',async()=>{
+  let now=0,called=0;
+  const tasks=new McpTasks({now:()=>now,ttlMs:100});
+  try {
+    const handle=tasks.create(()=>{called++;return {};},{principal:'A'});
+    now=101;
+    await tick();
+    assert.equal(called,0);
+    assert.equal(tasks.entries.has(handle.taskId),false);
+  } finally { tasks.clear(); }
+});
+test('MCP tasks: elapsed deadline cannot publish a late result or notification',async()=>{
+  let now=0,resolve;const changes=[];
+  const tasks=new McpTasks({now:()=>now,ttlMs:100,changed:task=>changes.push(task)});
+  try {
+    const handle=tasks.create(()=>new Promise(r=>{resolve=r;}),{principal:'A'});
+    await Promise.resolve();now=101;resolve({secret:'expired result'});
+    await tick();
+    assert.equal(changes.length,0);
+    assert.equal(tasks.entries.has(handle.taskId),false);
+  } finally { tasks.clear(); }
+});
+
+test('MCP sessions: authenticated identity cannot reuse another principal legacy session',async()=>{
+  const server=new McpServer({tools:[],resources:()=>[]});
+  const A={sessionKey:'shared',principal:'A'},B={sessionKey:'shared',principal:'B'};
+  try {
+    await server.dispatch({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'A',version:'1'}}},A);
+    await server.dispatch({jsonrpc:'2.0',method:'notifications/initialized'},B);
+    assert.equal(server.sessions.get('shared').ready,false);
+    await server.dispatch({jsonrpc:'2.0',method:'notifications/initialized'},A);
+    const denied=await server.dispatch({jsonrpc:'2.0',id:2,method:'tools/list'},B);
+    assert.equal(denied.error?.code,-32001);
+    assert.ok((await server.dispatch({jsonrpc:'2.0',id:3,method:'tools/list'},A)).result);
+  } finally { server.close(); }
+});
+test('MCP sessions: one principal cannot cancel another active request with a colliding key',async()=>{
+  let signal;
+  const server=new McpServer({tools:[{name:'wait',inputSchema:{type:'object'},execute:(_,ctx)=>{signal=ctx.signal;return awaitAbort(new Promise(()=>{}),ctx.signal);}}]});
+  const params={name:'wait',_meta:{[MCP_META+'protocolVersion']:MCP_VERSION,[MCP_META+'clientCapabilities']:{}}};
+  const pending=server.dispatch({jsonrpc:'2.0',id:1,method:'tools/call',params},{sessionKey:'shared',principal:'A'});
+  try {
+    await server.dispatch({jsonrpc:'2.0',method:'notifications/cancelled',params:{requestId:1}},{sessionKey:'shared',principal:'B'});
+    assert.equal(signal.aborted,false);
+  } finally { server.close();await pending; }
+});
+
+test('MCP tasks: cancelled initiating request cannot retain an unpublished task handle',async t=>{
+  const f=fixture(t),controller=new AbortController();
+  const pending=f.request('tools/call',{name:'vb6.agent.wait',arguments:{afterRevision:f.adapter.revision,timeoutMs:10000}},
+    {signal:controller.signal},true);
+  controller.abort();
+  assert.equal((await pending).error?.code,-32800);
+  await tick();
+  assert.equal(f.server.tasks.inspect().length,0,'A rejected request did not deliver authority to its task handle');
+});

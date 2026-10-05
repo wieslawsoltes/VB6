@@ -20,7 +20,7 @@ export class X86 {
   call(label) { this.emit(0xe8); this.s.reference(label, 'rel'); return this; }
   jump(label) { this.emit(0xe9); this.s.reference(label, 'rel'); return this; }
   branch(condition, label) {
-    const opcode = {e:0x84, ne:0x85, l:0x8c, le:0x8e, g:0x8f, ge:0x8d, b:0x82, ae:0x83, o:0x80, no:0x81, s:0x88, ns:0x89}[condition];
+    const opcode = {a:0x87, be:0x86, p:0x8a, np:0x8b, e:0x84, ne:0x85, l:0x8c, le:0x8e, g:0x8f, ge:0x8d, b:0x82, ae:0x83, o:0x80, no:0x81, s:0x88, ns:0x89}[condition];
     if (opcode === undefined) throw new Error('Unknown condition'); this.emit(0x0f, opcode); this.s.reference(label, 'rel'); return this;
   }
   api(dll, name, args = []) { for (const arg of [...args].reverse()) this.push(arg); return this.invoke(dll, name); }

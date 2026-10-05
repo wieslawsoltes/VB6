@@ -67,11 +67,19 @@ export class McpServer {
     // Modern calls do not require tools/list or an established subscription.
     this.tools = new Map(this.adapter.tools.map(tool => [tool.name, tool]));
     const sessionKey = context.sessionKey || 'local', session = this.sessions.get(sessionKey);
+    // Transport-authenticated identity, never clientInfo, owns a legacy session.
+    // Fail closed even when an embedder accidentally reuses a session key.
+    const principal = context.principal || sessionKey;
+    if (session && session.principal !== principal)
+      return kind === 'notification' ? undefined : errorResponse(message.id, new McpError(-32001, 'MCP session belongs to a different authenticated caller.'));
     const params = message.params || {}, version = params._meta?.[MCP_META + 'protocolVersion'];
     const modern = version !== undefined, emit = context.emit || (() => {});
     if (kind === 'notification') {
       if (message.method === 'notifications/initialized' && session) session.ready = true;
-      if (message.method === 'notifications/cancelled') this.active.get(sessionKey + ':' + typeof params.requestId + ':' + params.requestId)?.controller.abort();
+      if (message.method === 'notifications/cancelled') {
+        const pending = this.active.get(sessionKey + ':' + typeof params.requestId + ':' + params.requestId);
+        if (pending?.principal === principal) pending.controller.abort();
+      }
       return undefined;
     }
     const key = sessionKey + ':' + typeof message.id + ':' + message.id;
@@ -80,7 +88,7 @@ export class McpServer {
     const controller = new AbortController(), abort = () => controller.abort();
     context.signal?.addEventListener('abort', abort, {once: true}); if (context.signal?.aborted) controller.abort();
     this.active.set(key, {controller, sessionKey, principal:context.principal||sessionKey});
-    const ctx = {...context, requestId: message.id, sessionKey, signal: controller.signal, emit};
+    const ctx = {...context, requestId: message.id, sessionKey, signal: controller.signal, emit, createdTaskId: null};
     let progress = -1;
     ctx.reportProgress = (value, total, text) => {
       const token = params._meta?.progressToken;
@@ -130,6 +138,9 @@ export class McpServer {
       if (utf8Length(JSON.stringify({jsonrpc: '2.0', id: message.id, result})) > MCP_LIMIT) throw new McpError(-32000, 'MCP result exceeds the 8 MiB message limit; read smaller source ranges.');
       return {jsonrpc: '2.0', id: message.id, result};
     } catch (error) {
+      // A task owns its lifetime only once the initiating response can return.
+      // If dispatch was cancelled before delivering the handle, revoke it.
+      if (ctx.createdTaskId) this.tasks.remove(ctx.createdTaskId);
       // -32002 is reserved as legacy resource-not-found by modern MCP. Preserve
       // its diagnostic/data while translating stale arguments and missing URIs.
       if (modern && error instanceof McpError && error.code === -32002) error = new McpError(-32602, error.message, error.data);
@@ -158,8 +169,11 @@ export class McpServer {
             return {content: [{type: 'text', text: String(error.message || error).slice(0, 2000)}], isError: true};
           }
         };
-        if (modern && this.taskTools.has(tool.name) && isRecord(params._meta?.[MCP_META + 'clientCapabilities']?.extensions?.[TASK_EXTENSION]))
-          return this.tasks.create(run, context, this.adapter.authoritySignal, {toolName:tool.name});
+        if (modern && this.taskTools.has(tool.name) && isRecord(params._meta?.[MCP_META + 'clientCapabilities']?.extensions?.[TASK_EXTENSION])) {
+          const handle = this.tasks.create(run, context, this.adapter.authoritySignal, {toolName:tool.name});
+          context.createdTaskId = handle.taskId;
+          return handle;
+        }
         return run(context);
       }
       case 'tasks/get': case 'tasks/update': case 'tasks/cancel': {

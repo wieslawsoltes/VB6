@@ -108,6 +108,13 @@ export class SQLiteProvider {
         if(refreshed.values.length===1)result.columns.forEach((c,i)=>row[c.Name]=refreshed.values[0][i]);
       }
     };
+    // Read by the original primary key without replacing the whole cursor.
+    result.refresh=(row,before)=>{
+      this.requireAccess();assertData(keys.length,'A primary key is required for refresh',3251);
+      const record=this.execute('SELECT * FROM '+quoteIdentifier(name)+' WHERE '+keys.map(k=>quoteIdentifier(k)+' IS ?').join(' AND '),keys.map(k=>(before||row)[k]));
+      return record.values.length?Object.fromEntries(record.columns.map((c,i)=>[c.Name,record.values[0][i]])):null;
+    };
+    if(!keys.length)delete result.refresh;
     return result;
   }
   close(){

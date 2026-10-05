@@ -337,3 +337,19 @@ artifacts without affecting other principals. A canceled/expired task cannot
 start its queued adapter callback, canceled legacy resource subscriptions cannot
 recreate closed listeners, and a closed server rejects new dispatches. Stateless
 tool calls see current tool registrations even without a prior catalog read.
+
+
+Transport-authenticated principals own initialized sessions and cancellation
+notifications; reusing a session key does not grant access to another caller.
+Task deadlines are also checked before queued execution and before publishing a
+result, so a suspended tab or delayed timer cannot extend a task's authority.
+Cancelling an initiating request before its handle is returned removes that
+unpublished task; a successfully returned task remains independent of its HTTP
+response lifetime. These are cooperative cancellation rules: they do not
+preempt synchronous JavaScript already executing in the browser.
+
+The IDE's separate API-key coding agents consume the same 125-tool adapter.
+Their **data** grant authorizes public definition edits only; **code** or
+**workspace** grants do not imply it. Read-only runs expose definition reads,
+validation and bounded source reads, but not definition mutations. Built-in
+agent permissions remain separate from external MCP sharing.

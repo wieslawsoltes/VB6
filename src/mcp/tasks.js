@@ -45,6 +45,9 @@ export class McpTasks {
     this.entries.set(taskId, entry); authority?.addEventListener('abort', entry.revoke, {once: true}); this.notify();
     const settle = (status, value) => {
       if (this.entries.get(taskId) !== entry || entry.task.status !== 'working') return;
+      // A throttled/background tab may observe its absolute deadline before the
+      // expiry timer runs. Never publish a result after authority has expired.
+      if (this.now() >= entry.expiresAt) { this.remove(taskId); return; }
       entry.task = {...entry.task, status, lastUpdatedAt: new Date(this.now()).toISOString(), ...value};
       this.statusChanged(entry);
     };
@@ -53,6 +56,7 @@ export class McpTasks {
     Promise.resolve().then(() => {
       // Revocation can happen before the queued callback starts. Do not invoke an
       // adapter at all once its handle has been cancelled, expired or removed.
+      if (this.now() >= entry.expiresAt) this.remove(taskId);
       if (controller.signal.aborted || this.entries.get(taskId)!==entry || authority?.aborted) throw new McpError(-32800,'Task cancelled.');
       return run({...ctx, signal: controller.signal, emit: () => {}, notify: () => {}, reportProgress: () => {}, log: () => {}});
     }).then(result => {

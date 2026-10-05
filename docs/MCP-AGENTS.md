@@ -541,3 +541,18 @@ JSON schema. Mutations require `expectedRevision` except the safe, interrupt-onl
 | Tool | Access | Behavior |
 | --- | --- | --- |
 | `vb6.code.read` | Read | Bounded UTF-16 source chunks, optional revision guard, explicit EOF/progress. |
+
+
+### Cancellation and authenticated-session ownership
+
+A task handle is retained only when its initiating dispatch returns successfully.
+An aborted initiating call does not leave an undisclosed task behind. Absolute
+expiry is checked both before starting a queued wait and before publishing its
+result; delayed browser timers cannot extend that deadline. Cancellation is
+cooperative, not a mechanism for interrupting synchronous JavaScript.
+
+Legacy sessions and cancellation messages are bound to the transport's
+authenticated principal, not supplied `clientInfo`. Embedders must use stable,
+unique session keys. A colliding key cannot initialize, read through, or cancel
+work belonging to another principal. Callers deliberately sharing the same
+companion credential still share that authenticated principal.
