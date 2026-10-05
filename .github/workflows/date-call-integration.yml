@@ -1,0 +1,91 @@
+name: Reconcile native Date and call implementations
+on:
+  push:
+    branches: [feat/win32-date-export]
+    paths: [.github/workflows/date-call-integration.yml]
+permissions:
+  contents: write
+concurrency:
+  group: date-call-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/win32-date-export
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge pinned main and reconcile only reviewed source conflicts
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          target=29c77082c9bf854c7f6fbbf3ed63d5277036b761
+          git merge-base --is-ancestor bf84be4dd3f9f421c7942a75ff259cbe63c34e80 HEAD
+          git merge --no-commit --no-ff "$target" || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,re,subprocess
+          target='29c77082c9bf854c7f6fbbf3ed63d5277036b761'
+          conflicts=set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U']).decode().splitlines())
+          reviewed={'src/native/compiler.js','src/native/numeric.js','tools/browser-native-build-tests.py'}
+          generated={'dist/VB6-Studio-Web.html','dist/studio.js','dist/vb6-native.js'}
+          assert conflicts==reviewed|generated,'Unexpected merge conflicts: '+repr(conflicts)
+          p=Path('src/native/compiler.js');s=p.read_text();s,count=re.subn(r'<<<<<<< HEAD\n.*?>>>>>>> [^\n]+','Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods);',s,flags=re.S);assert count==1;p.write_text(s)
+          p=Path('src/native/numeric.js');s=p.read_text();s,count=re.subn(r'<<<<<<< HEAD\n.*?>>>>>>> [^\n]+', '''        const {pin,temporary}=this.nativeReferenceArgument(p,node,omitted);
+                  if(pin)callPins.push(pin);if(temporary&&key(temporary.type)==='string')callStrings.push(temporary);
+                }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots[i]=slot;return;}
+                else if(key(p.type)==='date'){slot.type=p.type;this.dateExpression(node);this.storeDate(slot);slots[i]=slot;return;}
+                else if(REAL_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}'''.replace('\n          ','\n'),s,flags=re.S);assert count==1;p.write_text(s)
+          show=lambda revision,path:subprocess.check_output(['git','show',revision+':'+path]).decode()
+          main=show(target,'tools/browser-native-build-tests.py');dates=show('bf84be4dd3f9f421c7942a75ff259cbe63c34e80','tools/browser-native-build-tests.py')
+          a=dates.index("        date_dir = ROOT / 'validation/dates'");b=dates.index('        page.close()',a)
+          main=main.replace("        calls_dir = ROOT / 'validation/calls'",dates[a:b]+"        calls_dir = ROOT / 'validation/calls'")
+          main=main.replace('        for fixture_dir, fixture_name in fixtures:',"        if date_dir.exists():\n            fixtures.extend((date_dir, name) for name in ('AotDates', 'AotDateABI', 'AotDateCalls') if (date_dir / f'{name}.vb6web').exists())\n        for fixture_dir, fixture_name in fixtures:")
+          Path('tools/browser-native-build-tests.py').write_text(main)
+          p=Path('src/native/calls.js');s=p.read_text().replace("'currency','string'","'currency','date','string'").replace("['double','currency']","['double','currency','date']");p.write_text(s)
+          p=Path('tests/win32-calls.test.mjs');s=p.read_text().replace("['Private Sub P(Optional x As Date)\\nEnd Sub','P',/supported scalar/]","['Private Sub P(Optional x As Object)\\nEnd Sub','P',/supported scalar/]");p.write_text(s)
+          p=Path('docs/WIN32-DATES.md');s=p.read_text().replace('and function returns are lowered directly.','and function returns are lowered directly. Optional ByVal/ByRef Date defaults,\nearly-bound named calls and explicitly grouped Date value copies are supported.\nDefaults bind in the declaring module; grouped copies use eight-byte caller-owned\nstorage, never a four-byte pointer-sized value slot. Read-only literals and\nexpressions become writable temporaries without copy-back. An ungrouped Double\nvariable still cannot alias a Date reference.');s+='\n## Date and call integration validation\n\n`AotDateCalls` adds 29 numbered native assertions for optional/defaulted Date\narguments, negative serials, named mixed-width calls, reference/value distinction,\narray-element pins, failure unwinding and 2,000 repeated recursion/error cycles.\nThe permanent Windows matrix runs basic storage, independent C ABI, Windows\nScript Host reference and call-lifetime suites independently; a failure in one\ndoes not prevent the others from writing their own diagnostics.\n';p.write_text(s)
+          p=Path('docs/WIN32-CALLS.md');s=p.read_text().replace('Currency or String','Currency, Date or String').replace('Optional Variant/Date/objects/arrays','Optional Variant/objects/arrays').replace('Date/Decimal storage','Decimal storage');p.write_text(s)
+          p=Path('docs/WIN32-AOT.md');s=p.read_text().replace('**Byte, Integer, Long, Boolean, Single, Double, Currency and String**','**Byte, Integer, Long, Boolean, Single, Double, Currency, Date and String**');p.write_text(s)
+          expected={
+            'src/native/compiler.js':'2bb0943ad390bd8f2be71ad3bf73400422dd4b00570dd4b1fdd8cf62dcddef59',
+            'src/native/numeric.js':'1eab8aad4acd4a414de0c4bc13a26a9b23fa29346b63238c72f9a66b2b091c56',
+            'src/native/calls.js':'23f4a333d980a6a811c534e2106fe728e1ab4e31fd2800bf32bc1d6a7894fea7',
+            'tools/browser-native-build-tests.py':'431c4af4aa757c4a0ef756e1ec998d30bbe422dfdac6b60365d2bfa1f447d5d7',
+            'tests/win32-calls.test.mjs':'c5ad901dccdf3ec1b6c0f58efd93234983358fc3b8c1a3537fa9e9039fc732b0',
+            'tests/win32-date-calls.test.mjs':'d09d5c6610a3b9fe576f3bcd620e2777ed6976dacf96b5292eaf1263cc981076',
+            'tools/win32-date-call-fixtures.mjs':'d9601658d9dfddf687f54d50def0184208684397846cdff54bcaebaecc5d4170',
+            '.github/workflows/win32-dates.yml':'b2bf3731de8ed201badd77dfc72d1dd15b2f56aea7b085baf85e36483734d183',
+            'docs/WIN32-DATES.md':'fd74e39335ba7012f5e71bc5159152e198201ec159ac4b772df106f103d88a16',
+            'docs/WIN32-CALLS.md':'3da1b74437df11e1cb26dab264d33c5e54a616655121b7ab6db76cff2ad79492',
+            'docs/WIN32-AOT.md':'085e080c4cb52f226057ad665ecd2ff4d4792651e48519b3cd0c0ff987294ad8'
+          }
+          for p,h in expected.items():assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==h,'Source fingerprint mismatch: '+p
+          for p in generated:subprocess.run(['git','checkout','--ours','--',p],check=True)
+          subprocess.run(['git','add','--',*conflicts],check=True)
+          PY
+          npm run build
+          npm test
+          node tools/win32-date-fixtures.mjs
+          node tools/win32-date-abi-fixtures.mjs
+          node tools/win32-date-call-fixtures.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          from hashlib import sha256
+          for p,h in {'dist/VB6-Studio-Web.html':'cd8e14a6b6c462f8b5b31fb04eff08bcb2fb31a434440deb0fe4a860f8c33ead','dist/vb6-native.js':'02dd9e29c1b010974db8d8cbc4910014df33190ad0aa1e12c18e5a3a8d1ba7ad'}.items():assert sha256(Path(p).read_bytes()).hexdigest()==h,p
+          PY
+          git add src/native docs tests/win32-calls.test.mjs tools/browser-native-build-tests.py dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git diff --cached --check
+          git commit -m 'feat(native): integrate Date values with optional and named calls on current main' -m 'Preserve merged input, IntelliSense, native-call and region work. Resolve reviewed source conflicts with exact fingerprints, allocate full eight-byte Date temporaries, extend independent execution coverage, and rebuild deterministic distributions. Windows results remain required separately.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/win32-date-export
