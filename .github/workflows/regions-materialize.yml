@@ -1,42 +1,30 @@
-name: Materialize tested region sources
+name: Region integration source
 on:
   push:
     branches: [feature/win32-gdi-regions]
-    paths: ['.transfer/**', '.github/workflows/regions-materialize.yml']
+    paths: [.github/workflows/regions-materialize.yml]
 permissions:
-  contents: write
+  contents: read
 jobs:
-  materialize:
-    if: github.ref == 'refs/heads/feature/win32-gdi-regions'
+  source:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feature/win32-gdi-regions
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - name: Capture exact source history and merge diagnostics
+        run: |
+          git bundle create /tmp/vb6-regions-review.bundle HEAD refs/remotes/origin/main
+          git config user.name 'Integration review'
+          git config user.email 'integration@users.noreply.github.com'
+          git merge --no-commit --no-ff origin/main > /tmp/regions-merge-review.txt 2>&1 || true
+          git diff --name-only --diff-filter=U >> /tmp/regions-merge-review.txt
+          cat /tmp/regions-merge-review.txt
+      - uses: actions/upload-artifact@v4
         with:
-          node-version: 22
-      - name: Apply checksum-verified source patch
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import base64, gzip, hashlib, subprocess
-          parts = sorted(Path('.transfer').glob('regions.*.b64'))
-          assert len(parts) == 3
-          patch = gzip.decompress(base64.b64decode(''.join(p.read_text() for p in parts), validate=True))
-          assert hashlib.sha256(patch).hexdigest() == 'd1bcdc0e45498b4aa2ea20944e29e10e828eeeb74802d3d3cf94dd126ab2b57f'
-          subprocess.run(['git','apply','--index','--exclude=.github/workflows/win32-gdi.yml','-'],input=patch,check=True)
-          for p in parts: p.unlink()
-          PY
-      - run: npm run build
-      - run: node tools/win32-api-inventory.mjs
-      - run: npm test
-      - name: Commit implementation and regenerated distributions
-        run: |
-          git config user.name 'Wiesław Šoltés'
-          git config user.email 'wieslawsoltes@users.noreply.github.com'
-          git add -A
-          git commit -m 'feat(win32-browser): immutable regions, complex clipping and native contracts'
-          git push origin HEAD:feature/win32-gdi-regions
+          name: win32-regions-source
+          path: |
+            /tmp/vb6-regions-review.bundle
+            /tmp/regions-merge-review.txt
+          retention-days: 7
