@@ -47,7 +47,8 @@
     "test:interop": "node --test tests/native-automation.test.mjs tests/native-control-adapters.test.mjs",
     "test:interop:windows": "node tools/interop/test-native.mjs",
     "verify:classic": "node tools/verify-classic-roundtrip.mjs",
-    "snapshot:native": "node tools/native-snapshot.mjs"
+    "snapshot:native": "node tools/native-snapshot.mjs",
+    "test:classic-html": "python tools/browser-classic-html.py"
   },
   "engines": {
     "node": ">=22"

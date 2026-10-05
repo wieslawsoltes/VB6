@@ -40,6 +40,7 @@ jobs:
             dist/
             package.json
             LICENSE
+            LICENSES/
             THIRD-PARTY-NOTICES.md
             README.md
             docs/
@@ -48,8 +49,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # Deliberately no checkout: verify what users actually download, including
-      # license files required by Windows application staging.
+      # Deliberately no checkout: test what users download, including the
+      # notices required by attributed CSS and Windows application staging.
       - uses: actions/download-artifact@v4
         with:
           name: project-compatibility-${{ github.sha }}
@@ -60,6 +61,8 @@ jobs:
         run: npm run build
       - name: Test the downloaded archive, including native export and staging
         run: npm test
+      - name: Verify nested notices survive all release and recovery ZIP formats
+        run: python tools/test-package-notices.py
   native-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 15
