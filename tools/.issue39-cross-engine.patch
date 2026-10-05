@@ -1,0 +1,143 @@
+diff --git a/docs/ISSUE-39-VISUAL-FIDELITY.md b/docs/ISSUE-39-VISUAL-FIDELITY.md
+index 22ad2e0..33085dc 100644
+--- a/docs/ISSUE-39-VISUAL-FIDELITY.md
++++ b/docs/ISSUE-39-VISUAL-FIDELITY.md
+@@ -92,3 +92,21 @@ the classic layout or introducing a different renderer. Integer-DPI exactness is
+ for the specified authored glyph/chrome pixels. Fractional scaling still uses the
+ browser rasterizer; native OS fonts, browser-owned select popups, OS window chrome,
+ and every native VB6/theme/DPI combination are not certified as pixel-identical.
++
++## Cross-engine follow-up
++
++Real-navigation artifacts for PR head `75e3bc9` exposed four desktop-toolbar
++height failures in Firefox 144.0.2 and WebKit 26.0, plus two missing selector-edge
++failures in WebKit. These were not dismissed as browser differences or counted as
++passes. The horizontal grip now has the same 6px preferred width as its flex
++basis, avoiding the inherited 4px intrinsic-size mismatch. The zoom selector also
++has matching preferred and flex widths.
++
++The IDE selectors still use real `select` elements and browser-owned popups.
++Only their engine-specific collapsed-control paint is replaced, with theme-color
++arrow/button backgrounds and the same four-edge bevel. Native keyboard selection,
++change events and tab order have a dedicated browser regression. Forced colors
++restore the native control appearance and real borders. Existing exact pixel and
++29px desktop-height assertions remain unchanged. Failed selector fixtures and
++per-page screenshots are saved separately so later failures cannot overwrite
++useful evidence from another page.
+diff --git a/src/theme/fidelity.css b/src/theme/fidelity.css
+index f3fc17e..a26b6d2 100644
+--- a/src/theme/fidelity.css
++++ b/src/theme/fidelity.css
+@@ -104,13 +104,26 @@ button[data-browser-detach] {--vb-caption-mask:var(--vb-caption-detach)}
+  /* The native select remains a select: preserve its popup, IME and keyboard
+     behavior while painting all four inset edges inside its authored bounds. */
+  .code-selectors select,.property-object,.toolbox-filter,.toolbar-select {
++  /* WebKit paints native menulist chrome over author shadows. Suppress only
++     that paint, not the select element, native popup, keyboard or change events.
++     The local four-row arrow and button use theme colors and integral pixels. */
++  appearance:none;-webkit-appearance:none;
+   border:0;box-shadow:var(--vb-bevel-sunken);padding-left:4px;padding-right:19px;
+-  background-clip:padding-box;
++  background-color:var(--vb-window);background-clip:padding-box;
++  background-image:linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-face),var(--vb-face));
++  background-size:7px 1px,5px 1px,3px 1px,1px 1px,1px calc(100% - 4px),15px 1px,1px calc(100% - 4px),15px 1px,15px calc(100% - 4px);
++  background-position:right 6px top 8px,right 7px top 9px,right 8px top 10px,right 9px top 11px,right 2px top 2px,right 2px bottom 2px,right 16px top 2px,right 2px top 2px,right 2px top 2px;
++  background-repeat:no-repeat;
+  }
+ }
+ /* 21px select + 1px top + 2px bottom + 1px separator = the existing 25px row.
+    Previously 2 + 21 + 2 + 1 overflowed the row and clipped the bottom bevel. */
+ .code-selectors {padding:1px 2px 2px;flex-shrink:0}
++/* Match the horizontal grip's preferred width to its 6px flex basis. Gecko
++   and WebKit otherwise size the wrapping bar using its inherited 4px width,
++   leaving the final zoom control two pixels short and forcing an extra row. */
++.ide-shell .command-bar:not(.command-bar-vertical):not(.command-bar-floating) > .toolbar-grip {width:6px}
++.command-bar .toolbar-select {width:76px;min-width:76px}
+ /* Classic toolbars wrap whole buttons when constrained, rather than acquiring
+    the report's horizontal scrollbar. No command becomes pointer-inaccessible.
+    Real vertical toolbars retain their vertical scrolling behavior. */
+diff --git a/tests/issue39-fidelity.test.mjs b/tests/issue39-fidelity.test.mjs
+index 8031c00..b3bfc0a 100644
+--- a/tests/issue39-fidelity.test.mjs
++++ b/tests/issue39-fidelity.test.mjs
+@@ -35,3 +35,14 @@ test('caption art is scoped, unscaled and respects native forced-color focus pat
+  assert.match(css,/disabled::before/);assert.doesNotMatch(css,/outline:none|outline:0!important/);
+  assert.match(css,/command-bar:not\(\.command-bar-vertical\):not\(\.command-bar-floating\)/);
+ });
++
++test('classic selectors retain native elements while replacing engine-specific chrome',()=>{
++ assert.match(css,/appearance:none;-webkit-appearance:none/);
++ assert.match(css,/background-image:linear-gradient\(var\(--vb-text\)/);
++ assert.match(css,/right 6px top 8px/);
++ assert.match(read('tools/browser-issue39.py'),/native selector keyboard and forced colors/);
++});
++test('horizontal toolbar grip width agrees with its flex basis',()=>{
++ assert.match(css,/command-bar:not\(\.command-bar-vertical\):not\(\.command-bar-floating\) > \.toolbar-grip \{width:6px\}/);
++ assert.match(read('src/ide/command-bars.css'),/flex:0 0 6px/);
++});
+diff --git a/tools/browser-issue39.py b/tools/browser-issue39.py
+index 8239e56..da6274c 100644
+--- a/tools/browser-issue39.py
++++ b/tools/browser-issue39.py
+@@ -38,10 +38,10 @@ def case(name,fn):
+         details=fn();RESULTS.append({'name':name,'passed':True,'details':details});print('PASS',name,flush=True)
+     except Exception as ex:
+         RESULTS.append({'name':name,'passed':False,'error':str(ex)});print('FAIL',name,str(ex),flush=True);traceback.print_exc(limit=2)
+-        for context in browser.contexts:
++        for ci,context in enumerate(browser.contexts):
+             if context not in contexts:
+-                for p in context.pages:
+-                    try:p.screenshot(path=OUT/f'failure-{len(RESULTS)}.png')
++                for pi,p in enumerate(context.pages):
++                    try:p.screenshot(path=OUT/f'failure-{len(RESULTS)}-{ci}-{pi}.png')
+                     except Exception:pass
+     finally:
+         RESULTS[-1]['milliseconds']=round((time.monotonic()-start)*1000)
+@@ -152,10 +152,30 @@ def chrome_pixels(dpr):
+     # Isolate the empty select so text/OS popup arrow pixels cannot mask edges.
+     p=fixture(dpr,html='<div class="code-selectors" style="position:absolute;left:20px;top:20px;width:120px"><select aria-label="Object"><option></option></select></div>')
+     shot=Image.open(io.BytesIO(p.locator('select').screenshot())).convert('RGB');w,h=shot.size
++    shot.save(OUT/f'selector-edge-{dpr}.png')
+     check(all(shot.getpixel((x,h-1))==COLORS['light'] for x in range(w)), 'Select is missing its outer bottom edge')
+     check(all(shot.getpixel((x,h-dpr-1))==COLORS['highlight'] for x in range(2*dpr,w-dpr)), 'Select is missing its inner bottom edge')
+     return {'dpr':dpr,'frames':3,'bottomSelectorEdges':2,'pixelDifferences':0}
+ 
++def native_selector_behavior():
++    p=fixture(html='<div class="code-selectors" style="width:240px"><select aria-label="Object"><option>First</option><option>Second</option><option>Third</option></select><select aria-label="Procedure"><option>One</option><option>Two</option></select></div>')
++    select=p.get_by_role('combobox',name='Object',exact=True)
++    info=select.evaluate("n=>({tag:n.tagName,appearance:getComputedStyle(n).appearance,arrow:getComputedStyle(n).backgroundImage})")
++    check(info['tag']=='SELECT' and info['appearance']=='none' and 'linear-gradient' in info['arrow'], f'Not a native select with authored chrome: {info}')
++    p.evaluate("window.selectorChanges=[];document.querySelector('select').addEventListener('change',e=>selectorChanges.push(e.target.value))")
++    select.focus();p.keyboard.press('End');p.keyboard.press('Enter')
++    check(select.input_value()=='Third','Native keyboard selection stopped working')
++    check(p.evaluate("selectorChanges.includes('Third')"),'Native change event was lost')
++    p.keyboard.press('Tab')
++    check(p.get_by_role('combobox',name='Procedure',exact=True).evaluate('n=>n===document.activeElement'),'Native tab navigation was lost')
++    p.emulate_media(forced_colors='active')
++    forced=p.evaluate('matchMedia("(forced-colors: active)").matches')
++    if forced:
++        check(select.evaluate("n=>getComputedStyle(n).appearance")!='none','Forced colors did not restore native appearance')
++        check(select.evaluate('n=>parseFloat(getComputedStyle(n).borderBottomWidth)>0'),'Forced colors lost a real selector border')
++    check(not p.errors,str(p.errors))
++    return {'nativeKeyboardAndChange':True,'nativeTabOrder':True,'forcedColorsSupported':forced}
++
+ def tab_seam_pixels(dpr):
+     p=fixture(dpr,html='<div style="position:absolute;left:20px;top:20px;width:240px"><div class="property-tabs"><button class="active">Alphabetic</button><button>Categorized</button></div><div class="property-grid" style="height:50px;flex:none"></div></div>')
+     info=p.locator('.property-tabs .active').evaluate('n=>{const r=n.getBoundingClientRect();return {x:r.x,right:r.right,bottom:r.bottom}}')
+@@ -181,7 +201,7 @@ def toolbar(dpr,width):
+     info=bar.evaluate('''n=>{const r=n.getBoundingClientRect();return {x:r.x,right:r.right,bottom:r.bottom,width:r.width,height:r.height,cw:n.clientWidth,ch:n.clientHeight,sw:n.scrollWidth,sh:n.scrollHeight,overflow:getComputedStyle(n).overflowX,children:[...n.children].filter(c=>c.getClientRects().length&&getComputedStyle(c).display!=='none').map(c=>{const q=c.getBoundingClientRect();return {left:q.left,right:q.right,bottom:q.bottom,top:q.top}})}}''')
+     check(info['overflow']=='clip' and info['sw']<=info['cw'] and info['sh']<=info['ch'],f'Scrollbar/overflow {info}')
+     check(all(c['left']>=info['x'] and c['right']<=info['right']+0.02 and c['bottom']<=info['bottom'] for c in info['children']),f'Wrapped command became inaccessible {info}')
+-    if width==1312:check(info['height']==29,'Fitting desktop toolbar height changed')
++    if width==1312:check(info['height']==29,f'Fitting desktop toolbar height changed: {info}')
+     else:check(info['height']>29,'Narrow toolbar did not wrap')
+     first=bar.locator('button:not([disabled])').first;first.focus();p.keyboard.press('End');check(p.evaluate('document.activeElement.closest("[data-command-bar=standard]")!==null'),'Toolbar keyboard navigation lost')
+     # Side and floating toolbar modes retain real scrolling when required.
+@@ -223,6 +243,7 @@ with sync_playwright() as pw:
+         case(f'actual editor and property tab DPR {dpr}',lambda dpr=dpr:editor_and_tabs(dpr))
+         for width in [1312,390]:case(f'actual toolbar {width}px DPR {dpr}',lambda dpr=dpr,width=width:toolbar(dpr,width))
+     case('caption themes, focus and forced colors',themes_and_disabled)
++    case('native selector keyboard and forced colors',native_selector_behavior)
+     for mode in (['inline'] if args.inline else ['http','file']):
+         case('actual IDE menu pointer/keyboard '+mode,lambda mode=mode:menu_navigation(mode))
+         case('actual MDI caption commands '+mode,lambda mode=mode:mdi_commands(mode))
