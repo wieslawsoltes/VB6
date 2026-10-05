@@ -1,0 +1,26 @@
+name: Scalar source snapshot
+on:
+  push:
+    branches: [feat/scalar-locale-runtime]
+    paths: ['.github/workflows/scalar-source-snapshot.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: |
+          mkdir snapshot
+          git bundle create snapshot/repository.bundle HEAD --all
+          git rev-parse HEAD > snapshot/head.txt
+          sha256sum snapshot/repository.bundle > snapshot/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scalar-source-snapshot
+          path: snapshot/
+          retention-days: 7
