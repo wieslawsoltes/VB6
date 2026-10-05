@@ -4,14 +4,14 @@ import {readFile, realpath, stat} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {timingSafeEqual} from 'node:crypto';
-import {MCP_META, MCP_LIMIT, McpError, randomToken, checkMessage, errorResponse, validateHeaders} from '../src/mcp/protocol.js';
+import {MCP_META, MCP_LIMIT, McpError, randomToken, checkMessage, errorResponse, validateHeaders, utf8Length} from '../src/mcp/protocol.js';
 
 const sameSecret = (actual, expected) => typeof actual === 'string' && Buffer.byteLength(actual) === Buffer.byteLength(expected) && timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
 const tokenOK = token => typeof token === 'string' && /^[A-Za-z0-9._~-]{32,512}$/.test(token);
 const allowedHeader = name => /^(authorization|content-type|accept|mcp-session-id|mcp-protocol-version|mcp-method|mcp-name|last-event-id|x-vb6-lease)$/i.test(name) || /^mcp-param-[!#$%&'*+.^_`|~0-9a-z-]+$/i.test(name);
 function json(res, status, value) { if (res.writableEnded || res.destroyed) return; res.writeHead(status, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}); res.end(value === undefined ? '' : JSON.stringify(value)); }
 function stream(res) { if (res.headersSent) return; res.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no'}); res.write(': connected\n\n'); }
-function event(res, value) { if (res.destroyed || res.writableEnded) return; const data = JSON.stringify(value); if (data.length > MCP_LIMIT || res.writableLength > MCP_LIMIT) { res.destroy(); return; } stream(res); res.write('event: message\ndata: ' + data + '\n\n'); }
+function event(res, value) { if (res.destroyed || res.writableEnded) return; const data = JSON.stringify(value); if (utf8Length(data) > MCP_LIMIT || res.writableLength > MCP_LIMIT) { res.destroy(); return; } stream(res); res.write('event: message\ndata: ' + data + '\n\n'); }
 async function body(req) {
   if (!req.headers['content-type']?.toLowerCase().startsWith('application/json')) throw Object.assign(new Error('Use application/json.'), {status: 415});
   const chunks = []; let size = 0;
@@ -73,7 +73,7 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
       if (route === '/bridge/attach') {
         const data = await body(req); if (owner) return json(res, 409, {error: 'Another browser owns this bridge. Detach it before attaching another.'});
         if (typeof data.id !== 'string' || data.id.length > 100) return json(res, 400, {});
-        owner = {id: data.id, lease: randomToken(), seen: Date.now(), queue: [], bytes: 0}; return json(res, 200, {lease: owner.lease});
+        owner = {id: data.id, principal: randomToken(24), lease: randomToken(), seen: Date.now(), queue: [], bytes: 0}; return json(res, 200, {lease: owner.lease, principal: owner.principal});
       }
       lease(req); const data = await body(req);
       if (route === '/bridge/poll') {
@@ -127,7 +127,7 @@ export async function createBridge({port = 8766, origins = [], allowFile = false
       const pending = {id: message.id, sessionKey, res, timer: null}; requests.set(key, pending);
       if (message.method !== 'subscriptions/listen') pending.timer = setTimeout(() => { if (!res.headersSent) json(res, 504, errorResponse(message.id, new McpError(-32000, 'Browser response timed out.'))); else res.destroy(); cleanup(key, true); }, requestTimeout);
       res.on('close', () => cleanup(key, true));
-      try { enqueue({type: 'message', key, sessionKey, ephemeral: modern, message, headers}); }
+      try { enqueue({type: 'message', key, sessionKey, ephemeral: modern, principal: owner.principal, message, headers}); }
       catch (error) { cleanup(key); throw error; }
       // Notifications get an immediate 202 once queued; their delivery is kept ordered by the browser poll.
       if (kind !== 'request') { json(res, 202); cleanup(key); }

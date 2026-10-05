@@ -6,6 +6,7 @@ Default uses real navigation and external HTTP MCP calls in four deployment mode
 """
 from __future__ import annotations
 import argparse, json, os, subprocess, time, traceback, urllib.request
+import hashlib, base64
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import importlib.util
@@ -43,10 +44,11 @@ def delegate(page, scopes=('code','project','designer','files','debugger','runti
     page.wait_for_function('vb6Studio.mcp.adapter.permissions.snapshot(vb6Studio.project.id).active')
 
 
-def wire(info, method, params):
-    params = {**params, '_meta': {'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': {'name':'agent-e2e','version':'1'}, 'io.modelcontextprotocol/clientCapabilities': {}}}
+def wire(info, method, params, tasks=False):
+    params = {**params, '_meta': {'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': {'name':'agent-e2e','version':'1'}, 'io.modelcontextprotocol/clientCapabilities': {'extensions':{'io.modelcontextprotocol/tasks':{}}} if tasks else {}}}
     headers = {'Content-Type':'application/json','Accept':'application/json, text/event-stream','Authorization':'Bearer '+info['clientToken'],'MCP-Protocol-Version':'2026-07-28','MCP-Method':method}
     if method == 'tools/call': headers['MCP-Name'] = params['name']
+    if method in ('tasks/get','tasks/update','tasks/cancel'): headers['MCP-Name']=params['taskId']
     request = urllib.request.Request(info['url']+'/mcp', data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(), headers=headers)
     with urllib.request.urlopen(request,timeout=25) as response:
         text = response.read().decode()
@@ -81,7 +83,7 @@ def exercise(browser, mode, info):
                 check('result' in response,str(response));catalog.extend(response['result']['tools']);cursor=response['result'].get('nextCursor')
                 if not cursor:break
         else:catalog=page.evaluate('agentClient.listTools()')
-        check(len(catalog)==106,'Expected complete 106-tool catalog')
+        check(len(catalog)==114,'Expected complete 114-tool catalog')
         writes={t['name'] for t in catalog if not t['annotations']['readOnlyHint']}
         delegate(page)
         def call(name, values=None):
@@ -90,6 +92,32 @@ def exercise(browser, mode, info):
             if network: return wire(info,'tools/call',{'name':full,'arguments':values})
             result=page.evaluate('async ([name,args])=>{const r=await agentClient.callTool(name,args);if(r.isError)throw new Error(JSON.stringify(r));return r.structuredContent}',[full,values])
             return result
+        # Immutable build outputs, actually fetched over the external HTTP relay.
+        check(len(call('build.targets')['targets'])==4)
+        before=call('project.get')
+        built=call('build.create',{'target':'project','expectedRevision':before['revision']})['artifact']
+        chunks=[];offset=0
+        while True:
+            chunk=call('build.read',{'artifactId':built['artifactId'],'offset':offset,'count':257})
+            chunks.append(base64.b64decode(chunk['data']));offset=chunk['nextOffset']
+            if not chunk['hasMore']:break
+        contents=b''.join(chunks);check(hashlib.sha256(contents).hexdigest()==built['sha256'])
+        check(json.loads(contents)['name']=='AgentWorkflow');call('build.release',{'artifactId':built['artifactId']})
+        check(len(call('project.group')['projects'])==1)
+        check(len(call('project.entries',{'files':[{'path':'Agent.vb6web','content':contents.decode()}]})['entries'])==1)
+        # Task polling crosses independent HTTP responses and does not need clientInfo.
+        if network:
+            task=wire(info,'tools/call',{'name':'vb6.agent.wait','arguments':{'afterRevision':call('project.get')['revision'],'timeoutMs':10000}},tasks=True)
+            check(task['resultType']=='task' and task['status']=='working',str(task))
+            call('project.update',{'description':'Wake an external task'})
+            for _ in range(30):
+                state=wire(info,'tasks/get',{'taskId':task['taskId']},tasks=True)
+                if state['status']=='completed':break
+                page.wait_for_timeout(50)
+            check(state['status']=='completed' and state['result']['structuredContent']['matched'],str(state))
+            cancelled=wire(info,'tools/call',{'name':'vb6.agent.wait','arguments':{'afterRevision':call('project.get')['revision'],'timeoutMs':10000}},tasks=True)
+            wire(info,'tasks/cancel',{'taskId':cancelled['taskId']},tasks=True)
+            check(wire(info,'tasks/get',{'taskId':cancelled['taskId']},tasks=True)['status']=='cancelled')
         # Everything after local opt-in is controlled through MCP, not direct project edits.
         cap=call('agent.capabilities');check(cap['permissions']['active'])
         check(all(c['tool'] for c in call('commands.list')['commands']))

@@ -83,7 +83,7 @@ test('MCP: approved edits use revision checks, real project model and undo', asy
   const revision = (await client.callTool('vb6.project.get')).structuredContent.revision, before = ide.project.modules[0].code;
   const result = await client.callTool('vb6.module.write', {module: 'Form1', code: 'Option Explicit\n\' updated', expectedRevision: revision});
   assert.ok(result.structuredContent.revision > revision); assert.notEqual(ide.project.modules[0].code, before); assert.equal(ide.history.undoStack.length, 1); assert.equal(JSON.parse(ide.history.undoStack[0].before).modules[0].code, before);
-  await assert.rejects(client.callTool('vb6.module.write', {module: 'Form1', code: '', expectedRevision: revision}), error => error.code === -32002);
+  await assert.rejects(client.callTool('vb6.module.write', {module: 'Form1', code: '', expectedRevision: revision}), error => error.code === -32602);
 });
 test('MCP: denial never edits or executes', async t => {
   const {ide, adapter, client} = setup(t, {approve: async () => false}); adapter.setEnabled(true); await client.connect(); const before = JSON.stringify(ide.project);
@@ -94,7 +94,7 @@ test('MCP: denial never edits or executes', async t => {
 test('MCP: project changes while approval is pending invalidate the operation', async t => {
   let approve; const {ide, adapter, client} = setup(t, {approve: () => new Promise(resolve => { approve = resolve; })}); adapter.setEnabled(true); await client.connect();
   const pending = client.callTool('vb6.module.write', {module: 'Form1', code: '', expectedRevision: adapter.revision}); await tick(); ide.markDirty(); approve(true);
-  await assert.rejects(pending, error => error.code === -32002); assert.notEqual(ide.project.modules[0].code, '');
+  await assert.rejects(pending, error => error.code === -32602); assert.notEqual(ide.project.modules[0].code, '');
 });
 test('MCP: cancellation releases an uncooperative approval and revocation aborts active work', async t => {
   const {adapter, client, server} = setup(t, {approve: () => new Promise(() => {})}); adapter.setEnabled(true); await client.connect();

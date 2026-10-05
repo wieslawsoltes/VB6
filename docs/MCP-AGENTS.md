@@ -1,6 +1,6 @@
 # Coding agents: structured control of VB6 Studio
 
-The MCP server exposes **106 tools** across the implemented IDE: project/native
+The MCP server exposes **114 tools** across the implemented IDE: project/native
 source interchange, code, editor views, forms/controls/menus, resources, virtual
 files, debugger, live application interaction, Object Browser, explorer,
 documents, docking, toolbars, appearance and undo. The same source is bundled into
@@ -138,7 +138,9 @@ is offered. This does not add unrestricted native function evaluation or OS auto
 ## Files, export and resources
 
 `project.import` accepts `files` entries (`path`, `content`, optional `encoding`:
-`utf8` or `base64`) **or** a base64 `zip`. Optional `add:true` imports modules/assets
+`utf8` or `base64`) **or** a base64 `zip`. Use `project.entries` to select an
+`entryPath`, and supply the native source `encoding` when it is not auto-detectable.
+`basenameFallback` explicitly enables the importer's compatible path lookup. Optional `add:true` imports modules/assets
 into the current project; it does not merge every setting of another workspace.
 `project.files`, `project.archive` and `project.export` return data; they do not
 open downloads or choose host paths. A desktop agent may save returned bytes using
@@ -154,6 +156,31 @@ images, not remote fetch URLs, SVG or HTML.
 Native project paths, references and attributes are validated against line/path
 injection and duplicate paths. They preserve declarations; they do not load COM/OCX,
 execute macros, or extend the format parity of the underlying importer/exporter.
+
+## Build artifact and task examples
+
+Read `build.targets`, then call `build.create` with, for example,
+`{"target":"sources","expectedRevision":42}`. On success, retain the returned
+`artifactId`; call `build.read` with `{ "artifactId":"…", "offset":0, "count":262144 }`.
+Decode each base64 `data` chunk, advance to `nextOffset` until `hasMore` is false,
+and verify the full SHA-256 before saving. `project.files` also accepts optional
+`byteOffset`/`byteCount` for bounded source-file reads, including encoded native
+text. Offset units are bytes, not JS string positions. Large downloads do not
+require a giant JSON-RPC result or execute project code.
+
+For a nonblocking modern wait, add this to each request's client capabilities:
+`{"extensions":{"io.modelcontextprotocol/tasks":{}}}`. `vb6.agent.wait` then returns
+`resultType:"task"`. `tasks/get` takes `taskId`; terminal `completed` includes the
+normal tool `result`, `failed` includes `error`, and `cancelled` has no successful
+result. `tasks/cancel` and `tasks/update` acknowledge with `resultType:"complete"`.
+For HTTP all three task methods require `Mcp-Name: <taskId>` in addition to the
+normal modern routing/version headers. Wait tasks are read-only, max 30 seconds
+of waiting, and max 120 seconds of retained task lifetime; they cannot approve
+IDE actions. Reread/recompute after a modern stale-revision `-32602` (legacy
+clients retain `-32002`), rather than replaying a mutation.
+
+See [MCP setup and limits](MCP.md) for expiry, identity binding and unsupported
+extensions. The old experimental legacy Tasks API is not exposed.
 
 ## Additional resources
 
@@ -203,6 +230,20 @@ JSON schema. Mutations require `expectedRevision` except the safe, interrupt-onl
 | `vb6.project.archive` | Read | Return a source/workspace ZIP as base64 data, never an automatic download. Native export has the same compatibility limits as the IDE. |
 | `vb6.project.explorer` | Read | Read the active project node, expanded module folders and toolbox category. |
 | `vb6.project.explorerSet` | Mutate | Control project explorer folders and toolbox categories without changing project code. |
+
+| `vb6.project.entries` | Read | Inspect supplied files/ZIP for selectable entry paths and supported encodings. |
+| `vb6.project.group` | Read | List all open native group members, active member and startup project. |
+| `vb6.project.select` | Mutate | Switch group members while preserving edited peers and per-project IDE state; revoke old authority. |
+| `vb6.project.startup` | Mutate | Set the native group startup path with undo and revision checks. |
+
+### build
+
+| Tool | Access | Behavior |
+| --- | --- | --- |
+| `vb6.build.targets` | Read | Describe inert export targets, artifact limits and local-only packaging operations. |
+| `vb6.build.create` | Read | Build immutable bytes for a supplied current revision; return handle/checksum or native diagnostics. |
+| `vb6.build.read` | Read | Read caller-owned base64 chunks with byte offsets, complete SHA-256 and snapshot revision. |
+| `vb6.build.release` | Read | Release a caller-owned temporary build artifact; does not delete project or host files. |
 
 ### module
 
