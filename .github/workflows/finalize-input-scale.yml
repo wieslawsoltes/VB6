@@ -1,0 +1,55 @@
+name: Finalize reviewed input scale
+on:
+  push:
+    branches: [fix/form-keyboard-mouse-input]
+    paths: [.github/workflows/finalize-input-scale.yml]
+permissions:
+  contents: write
+jobs:
+  finalize:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/form-keyboard-mouse-input'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply and verify reviewed source correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,subprocess
+          def git(*args):return subprocess.check_output(['git',*args],text=True).strip()
+          head=git('rev-parse','HEAD')
+          assert git('rev-parse','HEAD^')=='3f34f30f5470c075ed07abae21e2baba06d624a2', 'Unexpected branch parent'
+          assert git('ls-remote','origin','refs/heads/fix/form-keyboard-mouse-input').split()[0]==head, 'Branch changed'
+          before={'src/controls/input.js':'733cc7e395313ad6fb71c6f200ce2cbcc645fa7bad90ce7398f2d9366e9c07bf','src/controls/controls.js':'8401023c8c3fdf4eaa1d4103801c560494606b551f9b60bc16bb65960038c14b','tests/runtime-input.test.mjs':'64c6a2f0debe0a9eed432d3e71ad8c915cf6aea92d63fef1e0f8b64c526a18eb','tools/browser-form-input.py':'2685d9efe6430dc2991c0f1c14044a95da7a6e8f1829425c78e005908ab0e341'}
+          after={'src/controls/input.js':'42735e8e33522ee4cf3bc90d18e3702bb719d0c09d07e7da3d9f55bde9831860','src/controls/controls.js':'c410bcf28e53e104e1cd1b22cf07be0af8ee5f43e5947be7b3cc9e4cb94eeb1b','tests/runtime-input.test.mjs':'a229bada7b13bc10b9d9ab44ef2f095dfba41ac9349ca35d017153f3ffd68d41','tools/browser-form-input.py':'b0585bc04198b749cb1f7149d814303064f020b79426badf867dc95113a5409b'}
+          for path,digest in before.items():assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==digest,path
+          p=Path('src/controls/input.js');s=p.read_text().replace('const scaleUnits={1:15,2:.75,3:1,4:8,5:1/96,6:25.4/96,7:2.54/96};',"const scaleUnits={0:1,1:15,2:.75,3:1,4:1/8,5:1/96,6:25.4/96,7:2.54/96};\n// VB character units are 120 twips wide and 240 twips high (8x16 CSS pixels).\nexport const inputScaleFactor=(mode,vertical=false)=>Number(mode)===4&&vertical?1/16:scaleUnits[Number(mode)]??15;")
+          p.write_text(s.replace('let ux=scaleUnits[mode]??15,uy=ux;','let ux=inputScaleFactor(mode),uy=inputScaleFactor(mode,true);'))
+          p=Path('src/controls/controls.js');s=p.read_text().replace('ownsInputEvent,acceptsInput}', 'ownsInputEvent,acceptsInput,inputScaleFactor}').replace('clientWidth*units(this.props.ScaleMode??1)','clientWidth*inputScaleFactor(this.props.ScaleMode??1)').replace('clientHeight*units(this.props.ScaleMode??1)','clientHeight*inputScaleFactor(this.props.ScaleMode??1,true)');p.write_text(s)
+          p=Path('tests/runtime-input.test.mjs');s=p.read_text().replace('[[1,15],[2,.75],[3,1],[4,8],[5,1/96]','[[1,15],[2,.75],[3,1],[5,1/96]').replace("test('all standard mouse ScaleModes", "test('symmetric standard mouse ScaleModes")
+          s+="\ntest('character mouse scale uses 120-twip horizontal and 240-twip vertical units',()=>{const control={type:'Form',props:{ScaleMode:4},content:surface()};assert.deepEqual(mouseCoordinates(control,{clientX:34,clientY:64}),[1.25,1.25]);});\n";p.write_text(s)
+          p=Path('tools/browser-form-input.py');s=p.read_text();marker="    page.evaluate('host.dispose()')\nprint('PASS: real VB form mouse/keyboard"
+          extra="    # Character-mode client dimensions and pointer axes must use 8x16 pixels.\n    page.evaluate('form.ScaleMode=4')\n    assert page.evaluate('[form.ScaleWidth,form.ScaleHeight]') == [75,25]\n    page.mouse.move(box['x']+16,box['y']+32)\n    page.evaluate('drain()')\n    assert page.evaluate(\"[value('LastX'),value('LastY')]\") == [2,2]\n"
+          assert s.count(marker)==1;p.write_text(s.replace(marker,extra+marker))
+          for path,digest in after.items():assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==digest,path
+          Path('.github/workflows/finalize-input-scale.yml').unlink()
+          Path('/tmp/input-finalized-head').write_text(head)
+          PY
+          npm run build
+          npm test
+          git add -u
+          git diff --cached --check -- src/controls tests/runtime-input.test.mjs tools/browser-form-input.py
+          test "$(git ls-remote origin refs/heads/fix/form-keyboard-mouse-input | cut -f1)" = "$(cat /tmp/input-finalized-head)"
+          git commit -m 'fix(input): correct character-scale pointer axes and client dimensions'
+          git push origin HEAD:refs/heads/fix/form-keyboard-mouse-input
