@@ -1,0 +1,30 @@
+name: Win32 final integration
+on:
+  push:
+    branches: [feature/win32-browser-compat]
+    paths: [.github/workflows/win32-final-integration.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive exact branch and upstream history
+        run: |
+          git bundle create /tmp/win32-final-integration.bundle HEAD refs/remotes/origin/main
+          git config user.name 'Integration review'
+          git config user.email 'integration@users.noreply.github.com'
+          git merge --no-commit --no-ff 5f64aea7b9b54d90043096a90128439399da9615 > /tmp/merge-review.txt 2>&1 || true
+          git diff --name-only --diff-filter=U >> /tmp/merge-review.txt
+          cat /tmp/merge-review.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-final-integration-source
+          path: |
+            /tmp/win32-final-integration.bundle
+            /tmp/merge-review.txt
+          retention-days: 7
