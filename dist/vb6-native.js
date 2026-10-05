@@ -1406,6 +1406,7 @@ class ExpressionParser {
     if(this.peek().type==='id'&&this.tokens[this.i+1]?.value===':='){
       const name=this.take().value;this.take();return {kind:'named',name,expr:this.expression()};
     }
+    if(this.match('byval'))return {kind:'byval',expr:this.expression()};
     return this.expression();
   }
   qualifiedName() {
@@ -1419,6 +1420,7 @@ class ExpressionParser {
     else if(t.type==='date') node={kind:'date',value:t.value};
     else if(value==='('){node=this.expression();this.expect(')');node={kind:'group',expr:node};}
     else if(value==='+'||value==='-'||value==='not') node={kind:'unary',op:value,expr:this.expression(value==='not'?6:13)};
+    else if(value==='addressof')node={kind:'addressOf',name:this.qualifiedName()};
     else if(value==='new')node={kind:'new',name:this.qualifiedName()};
     else if(value==='typeof'){const expr=this.expression(8);this.expect('is');node={kind:'typeof',expr,name:this.qualifiedName()};}
     else if(value==='.') { const name=this.take();if(name.type!=='id')throw new VBError('Expected member name',1002);node={kind:'member',object:{kind:'with'},name:name.value}; }
@@ -1677,7 +1679,15 @@ function compileModule(input) {
       if((m=text.match(/^(?:Public\s+|Private\s+)?Type\s+(\w+)$/i))){typeState=m[1];module.types[typeState]=[];continue;}
       if((m=text.match(/^(?:Public\s+|Private\s+)?Event\s+(\w+)\s*\((.*)\)$/i))){if(module.kind==='module')throw new VBError('Events can be declared only in class and form modules',1002);module.events ||= new Map();const key=lower(m[1]);if(module.events.has(key))throw new VBError('Ambiguous event name: '+m[1],1002);module.events.set(key,{name:m[1],line,scope:/^Private\b/i.test(text)?'private':'public',params:parseParameters(m[2],module.defaultTypes)});continue;}
       if(/^Option\s+Private\s+Module$/i.test(text))continue;
-      if(/^(?:Public\s+|Private\s+)?Declare\b/i.test(text))throw new VBError('Native DLL declarations cannot execute in this browser runtime',453);
+      if(/^(?:Public\s+|Private\s+)?Declare\b/i.test(text)){
+        const d=text.match(/^(?:(Public|Private)\s+)?Declare\s+(Function|Sub)\s+([A-Za-z_]\w*[$%&!#@]?)\s+Lib\s+"([^"\r\n]+)"\s*(?:Alias\s+"([^"\r\n]+)"\s*)?\((.*)\)\s*(?:As\s+(\w+))?$/i);
+        if(!d)throw new VBError('Invalid Declare statement',1002);
+        const name=d[3],key=lower(name);if(module.procedures.has(key))throw new VBError('Ambiguous procedure name: '+name,1002);
+        const params=parseParameters(d[6],module.defaultTypes);
+        if(params.some(p=>p.optional||p.paramArray||p.autoNew))throw new VBError('Declare parameters cannot be Optional, ParamArray or As New',1002);
+        if(lower(d[2])==='sub'&&d[7])throw new VBError('Declare Sub cannot have a return type',1002);
+        module.procedures.set(key,{name,kind:lower(d[2]),scope:lower(d[1]||'public'),params,returnType:d[7]||suffixType(name,module.defaultTypes),line,source:module.name,code:[],external:{library:d[4],entry:d[5]||name}});continue;
+      }
       throw new VBError(`Invalid statement outside procedure: ${text}`,1002);
     }catch(error){if(error instanceof VBError){error.source ||= module.name;error.line ||= line;}throw error;}
   }

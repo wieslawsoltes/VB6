@@ -1,0 +1,29 @@
+{
+  "name": "@vb6/win32-browser",
+  "version": "0.1.0",
+  "description": "Isolated Win32 API compatibility for JavaScript browser applications",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md",
+    "API.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wieslawsoltes/VB6.git",
+    "directory": "packages/win32-browser"
+  }
+}
