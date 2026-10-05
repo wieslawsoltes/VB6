@@ -1,6 +1,15 @@
 """Real VB procedures receive form/control mouse and keyboard input in the shared host."""
 from input_designer_test_support import fixture
 
+
+def expect_trace(page, expected):
+    # Browser delivery and the interpreter queue are separate asynchronous stages.
+    # Retain the exact trace assertion while waiting for both to finish.
+    page.wait_for_function(
+        "expected => value('Trace') === expected && !host.vm.processing && !host.vm.eventQueue.length",
+        arg=expected, timeout=5000)
+    assert page.evaluate("value('Trace')") == expected
+
 with fixture() as page:
     page.evaluate('''async () => {
       const {newProject,createControl,ApplicationHost}=Fixture;
@@ -72,7 +81,7 @@ End Sub`;
     page.mouse.down(button='right')
     page.mouse.up(button='right')
     page.evaluate('drain()')
-    assert page.evaluate("value('Trace')") == 'D2U2', page.evaluate("value('Trace')")
+    expect_trace(page, 'D2U2')
     page.evaluate('clearTrace()')
     # Additional pressed/released buttons arrive as pointermove, not down/up.
     page.mouse.down(button='left')
@@ -80,16 +89,17 @@ End Sub`;
     page.mouse.up(button='left')
     page.mouse.up(button='middle')
     page.evaluate('drain()')
-    assert page.evaluate("value('Trace')") == 'D1D4U1U4', page.evaluate("value('Trace')")
+    expect_trace(page, 'D1D4U1U4')
     page.evaluate('clearTrace()')
     page.locator('[data-control="Paddle"]').focus()
     page.keyboard.press('ArrowRight')
     page.evaluate('drain()')
-    assert page.evaluate("value('Trace')") == 'F39:C39:U39:u39:'
+    expect_trace(page, 'F39:C39:U39:u39:')
     assert page.evaluate('form.controls[0].Left') == 1650
     page.evaluate('clearTrace()')
     page.keyboard.press('a')
     page.evaluate('drain()')
+    page.wait_for_function("value('Trace').endsWith('U65:u65:')", timeout=5000)
     trace = page.evaluate("value('Trace')")
     assert trace.startswith('F65:'), trace
     assert 'C65:' not in trace, 'KeyPreview cancellation must suppress control KeyDown'
@@ -100,7 +110,7 @@ End Sub`;
     paddle_box = paddle.bounding_box()
     page.mouse.move(paddle_box['x'] + 10, paddle_box['y'] + 10)
     page.evaluate('drain()')
-    assert page.evaluate("value('Trace')") == 'M:'
+    expect_trace(page, 'M:')
     assert page.evaluate("value('LastButton')") == 0
     before = page.evaluate("value('Moves')")
     page.evaluate('host.vm.setState("paused")')
@@ -117,7 +127,7 @@ End Sub`;
     }''')
     page.keyboard.press('z')
     page.evaluate('drain()')
-    assert page.evaluate("value('Trace')") == 'F90:P122:U90:'
+    expect_trace(page, 'F90:P122:U90:')
     page.evaluate('host.dispose()')
     # An MDI child owns its keyboard route; its parent must not dispatch it twice.
     page.evaluate('''async () => {
@@ -164,7 +174,7 @@ End Sub`;
     page.keyboard.press('ArrowRight')
     page.evaluate('drain()')
     assert page.evaluate('form.controls[0].Left') == 1650
-    assert page.evaluate("value('Trace')") == 'F39:C39:U39:u39:'
+    expect_trace(page, 'F39:C39:U39:u39:')
     box=page.locator('.vb-form-content').bounding_box()
     page.mouse.move(box['x']+40,box['y']+50)
     page.evaluate('drain()')
@@ -216,7 +226,7 @@ End Sub`;
     }''')
     page.keyboard.press('b')
     page.evaluate('drain()')
-    assert page.evaluate("value('Trace')") == 'F66;C1:77;P98;U66;u1:66;'
+    expect_trace(page, 'F66;C1:77;P98;U66;u1:66;')
     box=page.locator('[data-control="Pad"]').nth(1).bounding_box()
     page.mouse.move(box['x']+10,box['y']+10)
     page.evaluate('drain()')
