@@ -1,6 +1,6 @@
 # Win32 browser export inventory
 
-Version 0.2.0. 211 named exports, counting A/W variants and aliases.
+Version 0.2.0. 231 named exports, counting A/W variants and aliases.
 See README.md and GDI.md for per-family restrictions and the VB6 ABI boundary.
 Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalars.
 
@@ -22,15 +22,23 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | advapi32 | `RegSetValueExA` | 6 | emulated | Isolated application registry, not the operating-system registry. |
 | advapi32 | `RegSetValueExW` | 6 | emulated | Isolated application registry, not the operating-system registry. |
 | gdi32 | `BitBlt` | 9 | emulated |  |
+| gdi32 | `CombineRgn` | 4 | emulated |  |
 | gdi32 | `CreateBitmap` | 5 | emulated |  |
 | gdi32 | `CreateCompatibleBitmap` | 3 | emulated |  |
 | gdi32 | `CreateCompatibleDC` | 1 | emulated |  |
 | gdi32 | `CreateDIBSection` | 6 | emulated |  |
 | gdi32 | `CreatePen` | 3 | emulated |  |
+| gdi32 | `CreateRectRgn` | 4 | emulated |  |
+| gdi32 | `CreateRectRgnIndirect` | 1 | emulated |  |
 | gdi32 | `CreateSolidBrush` | 1 | emulated |  |
 | gdi32 | `DeleteDC` | 1 | emulated |  |
 | gdi32 | `DeleteObject` | 1 | emulated |  |
 | gdi32 | `Ellipse` | 5 | emulated |  |
+| gdi32 | `EqualRgn` | 2 | emulated |  |
+| gdi32 | `ExcludeClipRect` | 5 | emulated |  |
+| gdi32 | `ExtCreateRegion` | 3 | emulated |  |
+| gdi32 | `ExtSelectClipRgn` | 3 | emulated |  |
+| gdi32 | `FillRgn` | 3 | emulated |  |
 | gdi32 | `GdiAlphaBlend` | 11 | emulated |  |
 | gdi32 | `GdiFlush` | 0 | emulated | Memory operations and host pixel transfers are synchronous. Browser presentation is independently scheduled. |
 | gdi32 | `GdiTransparentBlt` | 11 | emulated |  |
@@ -39,6 +47,7 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | gdi32 | `GetBkColor` | 1 | emulated |  |
 | gdi32 | `GetBkMode` | 1 | emulated |  |
 | gdi32 | `GetClipBox` | 2 | emulated |  |
+| gdi32 | `GetClipRgn` | 2 | emulated |  |
 | gdi32 | `GetCurrentObject` | 2 | emulated |  |
 | gdi32 | `GetCurrentPositionEx` | 2 | emulated |  |
 | gdi32 | `GetDeviceCaps` | 2 | emulated |  |
@@ -48,19 +57,29 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | gdi32 | `GetObjectType` | 1 | emulated |  |
 | gdi32 | `GetObjectW` | 3 | emulated |  |
 | gdi32 | `GetPixel` | 3 | emulated |  |
+| gdi32 | `GetRegionData` | 3 | emulated |  |
+| gdi32 | `GetRgnBox` | 2 | emulated |  |
 | gdi32 | `GetStockObject` | 1 | emulated |  |
 | gdi32 | `GetStretchBltMode` | 1 | emulated |  |
 | gdi32 | `GetTextColor` | 1 | emulated |  |
 | gdi32 | `GetViewportOrgEx` | 2 | emulated |  |
 | gdi32 | `IntersectClipRect` | 5 | emulated |  |
+| gdi32 | `InvertRgn` | 2 | emulated |  |
 | gdi32 | `LineTo` | 3 | emulated |  |
 | gdi32 | `MoveToEx` | 4 | emulated |  |
+| gdi32 | `OffsetClipRgn` | 3 | emulated |  |
+| gdi32 | `OffsetRgn` | 3 | emulated |  |
 | gdi32 | `OffsetViewportOrgEx` | 4 | emulated |  |
+| gdi32 | `PaintRgn` | 2 | emulated |  |
 | gdi32 | `PatBlt` | 6 | emulated |  |
+| gdi32 | `PtInRegion` | 3 | emulated |  |
 | gdi32 | `PtVisible` | 3 | emulated |  |
 | gdi32 | `Rectangle` | 5 | emulated |  |
+| gdi32 | `RectInRegion` | 2 | emulated |  |
+| gdi32 | `RectVisible` | 2 | emulated |  |
 | gdi32 | `RestoreDC` | 2 | emulated |  |
 | gdi32 | `SaveDC` | 1 | emulated |  |
+| gdi32 | `SelectClipRgn` | 2 | emulated |  |
 | gdi32 | `SelectObject` | 2 | emulated |  |
 | gdi32 | `SetBitmapBits` | 3 | emulated |  |
 | gdi32 | `SetBitmapDimensionEx` | 4 | emulated |  |
@@ -70,6 +89,7 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | gdi32 | `SetMapMode` | 2 | emulated |  |
 | gdi32 | `SetPixel` | 4 | emulated |  |
 | gdi32 | `SetPixelV` | 4 | emulated |  |
+| gdi32 | `SetRectRgn` | 5 | emulated |  |
 | gdi32 | `SetStretchBltMode` | 2 | emulated |  |
 | gdi32 | `SetTextColor` | 2 | emulated |  |
 | gdi32 | `SetViewportOrgEx` | 4 | emulated |  |

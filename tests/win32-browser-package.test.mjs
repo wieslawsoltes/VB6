@@ -2,3 +2,5 @@
 import '../packages/win32-browser/test/compat.test.mjs';
 
 import '../packages/win32-browser/test/gdi.test.mjs';
+
+import '../packages/win32-browser/test/regions.test.mjs';
