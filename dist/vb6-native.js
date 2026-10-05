@@ -1926,7 +1926,7 @@ const {VBCurrency}=__modules[6];
 
 const key = value => String(value).toLowerCase();
 const declarations = new WeakMap();
-const supported = new Set(['byte','integer','long','boolean','single','double','currency','date','string']);
+const supported = new Set(['byte','integer','long','boolean','single','double','currency','string']);
 function scopeDeclarations(scope) {
   let result = declarations.get(scope);
   if (!result) {
@@ -1942,7 +1942,7 @@ function descriptor(c, scope, name) {
   const value = scope.constantBindings.get(name), d = scopeDeclarations(scope).get(name);
   let type = key(d?.storageType || d?.type || 'variant');
   if (type === 'variant') {
-    type = value instanceof Date ? 'date' : value instanceof VBCurrency ? 'currency' : typeof value === 'string' ? 'string' :
+    type = value instanceof VBCurrency ? 'currency' : typeof value === 'string' ? 'string' :
       typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ?
       Number.isInteger(value) && value >= -32768 && value <= 32767 ? 'integer' :
       Number.isInteger(value) && value >= -2147483648 && value <= 2147483647 ? 'long' : 'double' : 'unknown';
@@ -1986,8 +1986,7 @@ const nativeBindingMethods = {
   },
   emitNativeConstant(binding) {
     const {type,value} = binding;
-    if (type === 'date') this.x.value(this.dateLiteral(value));
-    else if (type === 'currency') this.x.value(this.currencyLiteral(value));
+    if (type === 'currency') this.x.value(this.currencyLiteral(value));
     else if (type === 'single' || type === 'double') this.x.value(this.floatLiteral(value));
     else if (type === 'string') this.x.value(this.string(value));
     else {
@@ -2014,14 +2013,13 @@ __modules[24]=(()=>{
  * snapshot address in EAX; only ABI returns use ST(0). No live FPU values span
  * a call, checkpoint, allocation or VB error transfer. */
 const FLOAT_TYPES = new Set(['single','double']);
-const REAL_TYPES = new Set([...FLOAT_TYPES,'date']);
 const key=value=>String(value).toLowerCase();
 const N='native:number:';
 const DLL='oleaut32.dll';
 const arg=argument=>({argument});
 const addr=address=>({address});
 const literal=value=>({kind:'literal',value});
-const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && ['double','currency','date'].includes(key(p.type))?8:4;
+const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && ['double','currency'].includes(key(p.type))?8:4;
 
 const nativeNumericMethods = {
   floatLiteral(value) {
@@ -2061,7 +2059,7 @@ const nativeNumericMethods = {
   floatExpression(node,single=false) {
     const type=this.type(node);this.expression(node);
     if(type==='currency'){this.currencyToFloat(single);return;}
-    if(REAL_TYPES.has(type))return;
+    if(FLOAT_TYPES.has(type))return;
     const out=this.floatWorkspace();this.x.push();this.rawStorageAddress(out);this.x.emit(0x59).push().emit(0x51).call(N+(type==='string'?'parse':'from-int'));
   },
   loadFloat(variable) {
@@ -2080,17 +2078,17 @@ const nativeNumericMethods = {
   },
   floatToInteger() {this.x.push().call(N+'integer');},
   floatToString(type) {this.x.emit(0x89,0xc3).push(key(type)==='single'?1:0).emit(0x53).call(N+'string');this.ownString();},
-  truth(node) {this.expression(node);if(this.type(node)==='currency')this.x.push().call('native:currency:boolean');else if(REAL_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
+  truth(node) {this.expression(node);if(this.type(node)==='currency')this.x.push().call('native:currency:boolean');else if(FLOAT_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
   numericExpression(node) {
     const x=this.x;
-    if(node.kind==='literal'&&REAL_TYPES.has(this.type(node))){x.value(this.floatLiteral(node.value));return true;}
-    if(node.kind==='unary'&&['+','-'].includes(node.op)&&REAL_TYPES.has(this.type(node))){
+    if(node.kind==='literal'&&FLOAT_TYPES.has(this.type(node))){x.value(this.floatLiteral(node.value));return true;}
+    if(node.kind==='unary'&&['+','-'].includes(node.op)&&FLOAT_TYPES.has(this.type(node))){
       this.floatExpression(node.expr);if(node.op==='-')this.floatUnary('negate');return true;
     }
     if(node.kind!=='binary')return false;
     const op=key(node.op),type=this.type(node),a=this.type(node.left),b=this.type(node.right);
-    const comparison=['=','<>','<','<=','>','>='].includes(op)&&(REAL_TYPES.has(a)||REAL_TYPES.has(b));
-    if(!comparison&&!REAL_TYPES.has(type))return false;
+    const comparison=['=','<>','<','<=','>','>='].includes(op)&&(FLOAT_TYPES.has(a)||FLOAT_TYPES.has(b));
+    if(!comparison&&!FLOAT_TYPES.has(type))return false;
     if(a==='string'||b==='string')this.fail('Use CDbl or Val explicitly in mixed native text/numeric operations');
     this.floatExpression(node.left);x.push();this.floatExpression(node.right);x.emit(0x59);
     if(comparison){x.push().emit(0x51).call(N+'compare').compare(0);this.boolean(op);return true;}
@@ -2112,19 +2110,19 @@ const nativeNumericMethods = {
       }else this.floatExpression(args[0]);
       if(name==='csng')this.roundSingle();return true;
     }
-    if(['clng','cint','cbyte','cbool'].includes(name)&&args.length===1&&REAL_TYPES.has(this.type(args[0]))){
+    if(['clng','cint','cbyte','cbool'].includes(name)&&args.length===1&&FLOAT_TYPES.has(this.type(args[0]))){
       this.expression(args[0]);x.push().call(N+(name==='cbool'?'boolean':'integer'));this.check({cint:'Integer',cbyte:'Byte',cbool:'Boolean',clng:'Long'}[name]);return true;
     }
     if(['fix','int','sqr','abs','sgn'].includes(name)){
       if(args.length!==1)this.fail(name+' expects one argument');
       const type=this.type(args[0]);
-      if(!REAL_TYPES.has(type)&&name!=='sqr'){
+      if(!FLOAT_TYPES.has(type)&&name!=='sqr'){
         if(name==='fix'||name==='int'){this.numeric(args[0]);return true;}
         return false;
       }
       this.floatExpression(args[0]);
       if(name==='sgn'){x.push().call(N+'sign');return true;}
-      this.floatUnary(name);if(type==='single'&&name!=='sqr')this.roundSingle();if(type==='date'&&name!=='sqr')x.call('native:date:validate');return true;
+      this.floatUnary(name);if(type==='single'&&name!=='sqr')this.roundSingle();return true;
     }
     if(name==='round'){
       if(args.length<1||args.length>2)this.fail('Round expects one or two arguments');
@@ -2156,8 +2154,7 @@ const nativeNumericMethods = {
         const {pin,temporary}=this.nativeReferenceArgument(p,node,omitted);
         if(pin)callPins.push(pin);if(temporary&&key(temporary.type)==='string')callStrings.push(temporary);
       }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots[i]=slot;return;}
-      else if(key(p.type)==='date'){slot.type=p.type;this.dateExpression(node);this.storeDate(slot);slots[i]=slot;return;}
-      else if(REAL_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
+      else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
       else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
       x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots[i]=slot;
     });
@@ -2165,11 +2162,10 @@ const nativeNumericMethods = {
     if(target.proc)x.call(target.label);else x.invoke(target.dll,target.symbol);
     if(signature.kind==='function'&&key(signature.returnType)==='currency'){
       this.captureCurrencyReturn();if(target.proc)this.checkNativeError();
-    }else if(signature.kind==='function'&&REAL_TYPES.has(key(signature.returnType))){
+    }else if(signature.kind==='function'&&FLOAT_TYPES.has(key(signature.returnType))){
       const out=this.floatWorkspace();this.rawStorageAddress(out);x.emit(0xdd,0x18); // Pop ABI result before any helper/error check.
       if(target.proc)this.checkNativeError();x.call(N+'finite');
       if(key(signature.returnType)==='single')this.roundSingle();
-      if(key(signature.returnType)==='date')x.call('native:date:validate');
     }else if(target.proc)this.checkNativeError();
     for(const pin of callPins)this.releaseArrayPin(pin);
     if(callStrings.length){x.push();for(const string of callStrings)this.clearStringStorage(string);x.emit(0x58);}
@@ -2278,7 +2274,7 @@ function emitValHelpers(c){
   x.label(finish).value(arg(12)).call(N+'finite').leave(8);
 }
 
-return {FLOAT_TYPES,REAL_TYPES,nativeParameterBytes,nativeNumericMethods,emitNativeNumericHelpers};
+return {FLOAT_TYPES,nativeParameterBytes,nativeNumericMethods,emitNativeNumericHelpers};
 })();
 
 /* calls.js */
@@ -2290,7 +2286,7 @@ const {nativeParameterBytes}=__modules[24];
 
 
 const key=value=>String(value).toLowerCase().replace(/[$%&!#@]$/, '');
-const scalarTypes=new Set(['byte','integer','long','boolean','single','double','currency','date','string']);
+const scalarTypes=new Set(['byte','integer','long','boolean','single','double','currency','string']);
 
 /** Pure binding; validates the complete list before emitting any argument code. */
 function planNativeArguments(signature,args,fail=message=>{throw new Error(message);}) {
@@ -2368,7 +2364,7 @@ const nativeCallMethods={
     // caller-owned typed temporary. Strings have a zeroed BSTR owner even when a
     // later argument fails or the callee changes the BSTR and raises an error.
     const temporary=key(parameter.type)==='string'?this.temporaryString():
-      this.arrayWorkspace(['double','currency','date'].includes(key(parameter.type))?8:4,'byref-value');
+      this.arrayWorkspace(['double','currency'].includes(key(parameter.type))?8:4,'byref-value');
     temporary.type=parameter.type;
     this.storageExpression(temporary,node);this.store(temporary);this.rawStorageAddress(temporary);
     return {temporary};
@@ -2388,7 +2384,7 @@ const {VBCurrency}=__modules[6];
 const C='native:currency:', DLL='oleaut32.dll';
 const key=value=>String(value).toLowerCase();
 const arg=argument=>({argument}), addr=address=>({address});
-const floats=new Set(['single','double','date']);
+const floats=new Set(['single','double']);
 const scalars=new Set(['byte','integer','long','boolean','single','double','currency']);
 
 const nativeCurrencyMethods = {
@@ -2494,7 +2490,7 @@ const nativeCurrencyMethods = {
       if(query.kind==='literal'&&typeof query.value==='number')this.fail('Native '+name+' needs an explicitly typed value; use a typed variable or conversion');
       const variable=this.variable(query),array=variable?.nativeArray&&!variable.elementOf;
       const type=array?key(variable.type):this.nativeQueryType(query);
-      const descriptor={byte:[17,'Byte'],integer:[2,'Integer'],long:[3,'Long'],boolean:[11,'Boolean'],single:[4,'Single'],double:[5,'Double'],date:[7,'Date'],currency:[6,'Currency'],string:[8,'String']}[type];
+      const descriptor={byte:[17,'Byte'],integer:[2,'Integer'],long:[3,'Long'],boolean:[11,'Boolean'],single:[4,'Single'],double:[5,'Double'],currency:[6,'Currency'],string:[8,'String']}[type];
       if(!descriptor)this.fail('Native '+name+' requires a supported typed value');
       if(!array)this.expression(args[0]);
       x.value(name==='vartype'?descriptor[0]+(array?8192:0):this.string(descriptor[1]+(array?'()':'')));return true;
@@ -2556,202 +2552,8 @@ function emitNativeCurrencyHelpers(c) {
 return {nativeCurrencyMethods,emitNativeCurrencyHelpers};
 })();
 
-/* dates.js */
-__modules[27]=(()=>{
-const {dateToSerial}=__modules[1];
-/** Native Automation DATE: civil date/time in eight bytes, not a JS timestamp.
- * Values use immutable Double snapshots; semantic Date type and range checking
- * stay distinct from their physical representation and the foreign ST(0) ABI. */
-
-const D='native:date:',N='native:number:',DLL='oleaut32.dll';
-const key=value=>String(value).toLowerCase();
-const arg=argument=>({argument}),addr=address=>({address});
-const literal=value=>({kind:'literal',value});
-const clock=new Set(['date','time','now','timer']);
-const dateFunctions=new Set(['cdate','datevalue','timevalue','dateserial','timeserial','now','date','time']);
-const parts={year:0,month:2,day:6,hour:8,minute:10,second:12};
-const numbers=new Set(['byte','integer','long','boolean','single','double','currency','date']);
-
-const nativeDateMethods={
-  dateLiteral(value) {
-    let serial;
-    try {serial=dateToSerial(value instanceof Date?value:new Date(value));}
-    catch {this.fail('Native Date literal is invalid or outside years 100 through 9999');}
-    return this.floatLiteral(serial);
-  },
-  dateType(node) {
-    if(node.kind==='date'||node.kind==='literal'&&node.value instanceof Date)return 'date';
-    if(node.kind==='id'&&clock.has(key(node.name))&&!this.variable(node)&&!this.resolveProcedure(node))return key(node.name)==='timer'?'single':'date';
-    if(node.kind==='call'&&node.callee.kind==='id'){
-      const name=key(node.callee.name);
-      if(!this.variable(node.callee)&&!this.resolveProcedure(node.callee)){
-        if(dateFunctions.has(name))return 'date';
-        if(Object.hasOwn(parts,name)||name==='weekday')return 'integer';
-        if(name==='isdate')return 'boolean';
-        if(name==='timer')return 'single';
-      }
-    }
-    if(node.kind==='unary'&&['+','-'].includes(node.op)&&this.type(node.expr)==='date')return 'date';
-    if(node.kind==='binary'){
-      const a=this.type(node.left),b=this.type(node.right);
-      if((a==='date'||b==='date')&&numbers.has(a)&&numbers.has(b)){
-        if(node.op==='+')return 'date';
-        if(node.op==='-')return a==='date'&&b==='date'?'double':'date';
-        if(['*','/','^'].includes(node.op))return 'double';
-      }
-    }
-    return null;
-  },
-  dateExpression(node) {
-    const type=this.type(node),x=this.x;
-    this.expression(node);
-    if(type==='date'){x.call(D+'validate');return;}
-    if(!numbers.has(type)&&type!=='string')this.fail('CDate requires a supported scalar value');
-    const out=this.floatWorkspace();
-    x.push();this.rawStorageAddress(out);x.emit(0x59).push().emit(0x51)
-      .call(D+(type==='string'?'parse':type==='currency'?'from-currency':['double','single'].includes(type)?'from-double':'from-int'));
-  },
-  storeDate(variable) {this.x.call(D+'validate');this.storeFloat(variable);},
-  dateToString() {this.x.push().call(D+'string');this.ownString();},
-  dateOperation(node) {
-    const x=this.x;
-    if(node.kind==='date'||node.kind==='literal'&&node.value instanceof Date){x.value(this.dateLiteral(node.value));return true;}
-    if(node.kind==='unary'&&['+','-'].includes(node.op)&&this.type(node.expr)==='date'){
-      this.dateExpression(node.expr);if(node.op==='-')this.floatUnary('negate');x.call(D+'validate');return true;
-    }
-    if(node.kind!=='binary')return false;
-    const a=this.type(node.left),b=this.type(node.right),op=key(node.op);
-    if(a!=='date'&&b!=='date')return false;
-    if(!['+','-','*','/','^','=','<>','<','<=','>','>='].includes(op))return false;
-    if(!numbers.has(a)||!numbers.has(b))this.fail('Use CDate explicitly in mixed native text/Date operations');
-    this.floatExpression(node.left);x.push();this.floatExpression(node.right);x.emit(0x59);
-    if(['=','<>','<','<=','>','>='].includes(op)){
-      x.push().emit(0x51).call(N+'compare').compare(0);this.boolean(op);return true;
-    }
-    x.emit(0x51,0x50);const out=this.floatWorkspace();this.rawStorageAddress(out);
-    x.emit(0x5a,0x59).push().emit(0x52,0x51).call(N+({'+':'add','-':'subtract','*':'multiply','/':'divide','^':'power'})[op]);
-    if(this.type(node)==='date')x.call(D+'validate');return true;
-  },
-  dateBuiltin(node,name) {
-    const x=this.x,args=node.args;
-    if(!dateFunctions.has(name)&&!clock.has(name)&&!Object.hasOwn(parts,name)&&!['weekday','isdate'].includes(name))return false;
-    if(this.variable(node.callee)||this.resolveProcedure(node.callee))return false;
-    const out=()=>{const v=this.floatWorkspace();this.rawStorageAddress(v);return v;};
-    if(clock.has(name)){
-      if(args.length)this.fail(name+' takes no arguments');out();x.push().call(D+name);return true;
-    }
-    if(['dateserial','timeserial'].includes(name)){
-      if(args.length!==3)this.fail(name+' expects three arguments');
-      // Preserve source evaluation order; each argument has VB Integer range.
-      for(const n of args){this.numeric(n);this.check('Integer');x.push();}
-      out();x.emit(0x5a,0x59,0x5b).push().emit(0x52,0x51,0x53).call(D+name);return true;
-    }
-    if(name==='weekday'){
-      if(args.length<1||args.length>2)this.fail('Weekday expects one or two arguments');
-      this.dateExpression(args[0]);x.push();this.numeric(args[1]||literal(1));x.emit(0x59).push().emit(0x51).call(D+'weekday');return true;
-    }
-    if(args.length!==1)this.fail(name+' expects one argument');
-    if(name==='isdate'){
-      const type=this.type(args[0]);
-      // IsDate inspects Date values or parseable strings, not every number that
-      // CDate could convert. Still evaluate non-Date arguments exactly once.
-      this.expression(args[0]);
-      if(type==='string'||type==='date')x.push().call(D+(type==='string'?'is-string':'is-number'));
-      else if(numbers.has(type))x.value(0);
-      else this.fail('IsDate requires a supported scalar expression');
-      return true;
-    }
-    if(name==='cdate'){this.dateExpression(args[0]);return true;}
-    if(Object.hasOwn(parts,name)){
-      this.dateExpression(args[0]);x.emit(0x89,0xc3).push(parts[name]).emit(0x53).call(D+'part');return true;
-    }
-    if(this.type(args[0])==='string'){
-      this.expression(args[0]);x.push();out();x.emit(0x59).push().emit(0x51).call(D+name+'-parse');
-    }else{
-      this.dateExpression(args[0]);x.push();out();x.emit(0x59).push().emit(0x51).call(D+name);
-    }
-    return true;
-  }
-};
-
-function emitNativeDateHelpers(c) {
-  const x=c.x,check=()=>x.call(N+'check');
-  const zero=(offset,bytes)=>{for(let p=offset;p<offset+bytes;p+=4)x.value(0).emit(0x89,0x85).imm(p);};
-  // Validate the finite eight-byte input in EAX without changing its representation.
-  x.label(D+'validate').enter(8).emit(0x89,0xc3).call(N+'finite').push(addr(-8)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarDateFromR8');check();x.emit(0x89,0xd8).leave();
-  for(const [name,symbol]of [['from-double','VarDateFromR8'],['from-currency','VarDateFromCy']]){
-    x.label(D+name).enter().value(arg(8));if(name==='from-double')x.call(N+'finite');
-    x.emit(0x89,0xc3).push(arg(12)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,symbol);check();x.value(arg(12)).call(D+'validate').leave(8);
-  }
-  x.label(D+'from-int').enter().api(DLL,'VarDateFromI4',[arg(8),arg(12)]);check();x.value(arg(12)).call(D+'validate').leave(8);
-  for(const [name,flags]of [['parse',0],['datevalue-parse',2],['timevalue-parse',1]]){
-    x.label(D+name).enter().push(arg(8)).call('native:string:numeric-text').api(DLL,'VarDateFromStr',[arg(8),0x400,0x100|flags,arg(12)]);check();x.value(arg(12)).call(D+'validate').leave(8);
-  }
-  x.label(D+'string').enter(4);zero(-4,4);x.value(arg(8)).call(D+'validate').emit(0x89,0xc3).push(addr(-4)).push(0x100).push(0x400).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarBstrFromDate');check();x.value(arg(-4)).leave(4);
-  x.label(D+'unpack').enter().value(arg(8)).call(D+'validate').emit(0x89,0xc3).push(arg(12)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VariantTimeToSystemTime').test().branch('e','error:5').value(arg(12)).leave(8);
-  x.label(D+'part').enter(16).push(addr(-16)).push(arg(8)).call(D+'unpack').value(arg(12)).emit(0x0f,0xb7,0x44,0x05,0xf0).leave(8);
-  // Numeric DateValue truncates the signed day; TimeValue uses the absolute fraction.
-  x.label(D+'datevalue').enter().push(arg(12)).push(arg(8)).call(N+'fix').call(D+'validate').leave(8);
-  x.label(D+'timevalue').enter(8).push(addr(-8)).push(arg(8)).call(N+'fix').push(arg(12)).push(addr(-8)).push(arg(8)).call(N+'subtract').push(arg(12)).push(arg(12)).call(N+'abs').leave(8);
-  // IsDate does not turn invalid data into a VB error; source evaluation errors still propagate.
-  const bad=x.unique(),done=x.unique();
-  x.label(D+'is-number').enter(8).value(arg(8)).emit(0x8b,0x50,4,0x81,0xe2).imm(0x7ff00000).emit(0x81,0xfa).imm(0x7ff00000).branch('e',bad);
-  x.emit(0x89,0xc3).push(addr(-8)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarDateFromR8').test().emit(0x0f,0x99,0xc0,0x0f,0xb6,0xc0,0xf7,0xd8).jump(done).label(bad).value(0).label(done).leave(4);
-  const invalid=x.unique(),stringDone=x.unique();
-  x.label(D+'is-string').enter(8).api(DLL,'SysStringLen',[arg(8)]).test().branch('e',invalid).emit(0x89,0xc3).api('kernel32.dll','lstrlenW',[arg(8)]).emit(0x39,0xd8).branch('ne',invalid);
-  x.api(DLL,'VarDateFromStr',[arg(8),0x400,0x100,addr(-8)]).test().emit(0x0f,0x99,0xc0,0x0f,0xb6,0xc0,0xf7,0xd8).jump(stringDone).label(invalid).value(0).label(stringDone).leave(4);
-  // System clock getters are read-only. They do not set the OS date or time.
-  for(const name of ['now','date','time','timer']){
-    x.label(D+name).enter(32).api('kernel32.dll','GetLocalTime',[addr(-16)]);
-    if(name==='timer'){
-      x.emit(0x0f,0xb7,0x45,0xf8,0x69,0xc0).imm(3600000).emit(0x89,0xc3,0x0f,0xb7,0x45,0xfa,0x69,0xc0).imm(60000).emit(0x01,0xc3,0x0f,0xb7,0x45,0xfc,0x69,0xc0).imm(1000).emit(0x01,0xc3,0x0f,0xb7,0x45,0xfe,0x01,0xd8);
-      x.emit(0x89,0xc3).push(arg(8)).emit(0x53).call(N+'from-int');
-      x.push(arg(8)).push(c.floatLiteral(1000)).push(arg(8)).call(N+'divide').push(arg(8)).push(arg(8)).call(N+'single').leave(4);
-    }else{
-      x.api(DLL,'SystemTimeToVariantTime',[addr(-16),arg(8)]).test().branch('e','error:5');
-      if(name!=='now')x.push(arg(8)).push(arg(8)).call(D+(name==='date'?'datevalue':'timevalue'));
-      x.value(arg(8)).call(D+'validate').leave(4);
-    }
-  }
-  const specified=x.unique(),weekdayDone=x.unique();
-  x.label(D+'weekday').enter(20).push(addr(-16)).push(arg(8)).call(D+'unpack').value(arg(12)).compare(0).branch('l','error:5').compare(7).branch('g','error:5').test().branch('ne',specified);
-  x.api('kernel32.dll','GetLocaleInfoW',[0x400,0x2000100c,addr(-20),2]).test().branch('e','error:5');
-  x.value(arg(-20)).compare(6).branch('a','error:5').emit(0x83,0xc0,1,0x31,0xd2,0xb9).imm(7).emit(0xf7,0xf1,0x8d,0x42,1);
-  x.label(specified).emit(0x89,0xc1,0x0f,0xb7,0x45,0xf4,0x83,0xc0,8,0x29,0xc8,0x31,0xd2,0xb9).imm(7).emit(0xf7,0xf1,0x8d,0x42,1).label(weekdayDone).leave(8);
-  emitDateSerial(c);emitTimeSerial(c);
-}
-
-function emitDateSerial(c) {
-  const x=c.x,fullYear=x.unique(),century=x.unique(),normalized=x.unique(),march=x.unique(),eraReady=x.unique();
-  // Month normalization precedes the short-year window. Expanding first would
-  // turn DateSerial(99,13,1) into 2000 rather than year 0100. The expanded year
-  // must be valid before the day offset: a negative day cannot rescue year 10000.
-  x.label(D+'dateserial').enter(24).value(arg(8)).emit(0x89,0xc3);
-  // floor((month-1)/12), with a positive remainder in 0..11.
-  x.value(arg(12)).emit(0x48,0x99,0xb9).imm(12).emit(0xf7,0xf9,0x85,0xd2).branch('ns',normalized).emit(0x48,0x83,0xc2,12).label(normalized).emit(0x01,0xc3,0x42,0x89,0x55,0xf8);
-  x.emit(0x89,0xd8).compare(100).branch('ge',fullYear);
-  x.api('kernel32.dll','GetCalendarInfoW',[0x400,1,0x20000030,0,0,addr(-4)]).test().branch('e','error:5');
-  x.value(arg(-4)).emit(0x31,0xd2,0xb9).imm(100).emit(0xf7,0xf1,0x6b,0xc0,100,0x39,0xd3).branch('le',century).emit(0x83,0xe8,100).label(century).emit(0x01,0xc3);
-  x.label(fullYear).emit(0x89,0xd8).compare(100).branch('l','error:5').compare(9999).branch('g','error:5').emit(0x8b,0x55,0xf8);
-  x.emit(0x83,0xfa,2).branch('g',march).emit(0x4b).label(march);
-  // era=floor(year/400); yoe=year-era*400. Intermediate years fit signed Long.
-  x.emit(0x89,0xd8,0x99,0xb9).imm(400).emit(0xf7,0xf9,0x85,0xd2).branch('ns',eraReady).emit(0x48,0x81,0xc2).imm(400);
-  x.label(eraReady).emit(0x69,0xc0).imm(146097).emit(0x89,0x45,0xf4,0x89,0x55,0xf0,0x69,0xda).imm(365);
-  x.emit(0x89,0xd0,0xc1,0xe8,2,0x01,0xc3).value(arg(-16)).emit(0x31,0xd2,0xb9).imm(100).emit(0xf7,0xf1,0x29,0xc3);
-  const pastFeb=x.unique(),monthReady=x.unique();x.value(arg(-8)).compare(2).branch('g',pastFeb).emit(0x83,0xc0,9).jump(monthReady).label(pastFeb).emit(0x83,0xe8,3).label(monthReady);
-  x.emit(0x69,0xc0).imm(153).emit(0x83,0xc0,2,0x31,0xd2,0xb9).imm(5).emit(0xf7,0xf1,0x01,0xd8,0x03,0x45,0xf4,0x03,0x45,16,0x2d).imm(693900);
-  x.compare(-657434).branch('l','error:5').compare(2958465).branch('g','error:5').emit(0x89,0xc3).push(arg(20)).emit(0x53).call(N+'from-int').leave(16);
-}
-function emitTimeSerial(c) {
-  const x=c.x;
-  x.label(D+'timeserial').enter(8).value(arg(8)).emit(0x69,0xc0).imm(3600).emit(0x89,0xc3).value(arg(12)).emit(0x6b,0xc0,60,0x01,0xc3).value(arg(16)).emit(0x01,0xc3).push(addr(-8)).emit(0x53).call(N+'from-int').push(arg(20)).push(c.floatLiteral(86400)).push(addr(-8)).call(N+'divide').call(D+'validate').leave(16);
-}
-
-return {nativeDateMethods,emitNativeDateHelpers};
-})();
-
 /* control-arrays.js */
-__modules[28]=(()=>{
+__modules[27]=(()=>{
 
 /** Statically designed control arrays, including Index event arguments. Each
  * element retains its own native HWND and ID; no flattened duplicate names. */
@@ -2829,11 +2631,11 @@ return {nativeControlArrayMethods};
 })();
 
 /* storage.js */
-__modules[29]=(()=>{
+__modules[28]=(()=>{
 
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
 const key = value => String(value).toLowerCase();
-const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency', 'date']);
+const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency']);
 const MAX_NATIVE_STRING = 1024 * 1024;
 
 function boundValue(compiler, node, module, proc) {
@@ -2861,9 +2663,9 @@ function boundValue(compiler, node, module, proc) {
 }
 
 function storageLayout(compiler, decl, module, proc) {
-  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency, Date or String: ' + decl.name, module);
+  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency or String: ' + decl.name, module);
   if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
-  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency','date'].includes(key(decl.type)) ? 8 : 4;
+  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency'].includes(key(decl.type)) ? 8 : 4;
   decl.nativeElementBytes = elementBytes;
   let count = 1;
   if (decl.bounds !== null && decl.bounds !== undefined) {
@@ -2913,7 +2715,7 @@ const nativeStorageMethods = {
   },
   storageExpression(variable, node) {
     if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
-    if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
+    if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
   },
   rawStorageAddress(variable) {
     if (variable.owner?.form) this.x.call(variable.owner.initialize);
@@ -2938,7 +2740,7 @@ const nativeStorageMethods = {
   stringBuiltin(node, name) {
     const x = this.x, args = node.args;
     if (['len','lenb','ascw','strptr'].includes(name)) {
-      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
+      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
       if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
       if(name==='strptr'){
         const variable=this.variable(args[0]);
@@ -3001,7 +2803,7 @@ return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHe
 })();
 
 /* arrays.js */
-__modules[30]=(()=>{
+__modules[29]=(()=>{
 
 /** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
  * passes a descriptor slot by reference; it is never exposed to browser code. */
@@ -3010,7 +2812,7 @@ const A = 'native:array:';
 const DLL = 'oleaut32.dll';
 const arg = argument => ({argument});
 const addr = address => ({address});
-const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
+const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6};
 const NATIVE_ARRAY_MAX_BYTES = 1024 * 1024;
 const NATIVE_ARRAY_MAX_RANK = 8;
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
@@ -3148,7 +2950,7 @@ function emitNativeArrayHelpers(compiler) {
   x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
     .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7');save(x,-16);
   x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
-  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
+  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit)
     .value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/4).branch('g','error:7').jump(limitDone);
   x.label(halfLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/2).branch('g','error:7').jump(limitDone);
   x.label(doubleLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/8).branch('g','error:7').jump(limitDone);
@@ -3205,7 +3007,7 @@ return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayMethods,emitNati
 })();
 
 /* errors.js */
-__modules[31]=(()=>{
+__modules[30]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -3340,7 +3142,7 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[32]=(()=>{
+__modules[31]=(()=>{
 const {normalizeProject}=__modules[13];
 const {compileProject, parseParameters}=__modules[20];
 const {PE32Image, BinarySection}=__modules[21];
@@ -3348,13 +3150,11 @@ const {X86}=__modules[22];
 const {nativeBindingMethods}=__modules[23];
 const {nativeCallMethods}=__modules[25];
 const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[26];
-const {nativeDateMethods,emitNativeDateHelpers}=__modules[27];
-const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[24];
-const {nativeControlArrayMethods}=__modules[28];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[29];
-const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[30];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[31];
-
+const {FLOAT_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[24];
+const {nativeControlArrayMethods}=__modules[27];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[28];
+const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[29];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[30];
 
 
 
@@ -3388,8 +3188,8 @@ function extractNativeDeclarations(module) {
     const dll = /\.dll$/i.test(m[4]) ? m[4] : m[4] + '.dll', name = key(m[3]);
     const params = parseParameters(m[6]);
     if (declarations.has(name)) throw new NativeCompileError('Duplicate native declaration: ' + m[3], module.name, index + 1);
-    if (params.some(p => !INT_TYPES.has(key(p.type)) && !REAL_TYPES.has(key(p.type)) && key(p.type)!=='currency' || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !REAL_TYPES.has(key(m[7])) && key(m[7])!=='currency')) {
-      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean/Single/Double/Currency/Date parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
+    if (params.some(p => !INT_TYPES.has(key(p.type)) && !FLOAT_TYPES.has(key(p.type)) && key(p.type)!=='currency' || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !FLOAT_TYPES.has(key(m[7])) && key(m[7])!=='currency')) {
+      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean/Single/Double/Currency parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
     }
     declarations.set(name, {name:m[3],kind:key(m[2]),scope:key(m[1] || 'public'),params,returnType:m[7] || 'Long',dll,symbol:/^#\d+$/.test(m[5] || '') ? Number(m[5].slice(1)) : m[5] || m[3],line:index + 1});
     return ''; // Keep line numbers stable.
@@ -3433,7 +3233,7 @@ class NativeCompiler {
     for (const proc of module.procedures.values()) {
       this.preparingProcedure=proc;
       if (!['sub','function'].includes(proc.kind)) this.fail('Native AOT does not lower property procedures', module);
-      if (proc.kind === 'function' && !INT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='string' && !REAL_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='currency') this.fail('Native functions must return a supported scalar: ' + proc.name, module);
+      if (proc.kind === 'function' && !INT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='string' && !FLOAT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='currency') this.fail('Native functions must return a supported scalar: ' + proc.name, module);
       const context = {module:result,proc,label:'proc:' + module.name + ':' + proc.name,locals:new Map(),temporaries:new Map(),loops:new Map(),size:NATIVE_ERROR_FRAME_BYTES};
       const local = (name, type = 'Long',decl={}) => { context.size += decl.nativeBytes || 4; if(context.size>512*1024)this.fail('Native procedure workspace exceeds 512 KiB',module); const variable = {...decl,name,type,offset:-context.size}; context.locals.set(key(name),variable); return variable; };
       this.prepareNativeParameters(context);
@@ -3503,9 +3303,8 @@ class NativeCompiler {
   address(variable) { if(!variable)this.fail('Expression is not addressable'); if(variable.elementOf)return this.elementAddress(variable); this.rawStorageAddress(variable);return null; }
   load(variable) {
     if(variable.nativeArray&&!variable.elementOf)this.fail('Array requires indices: '+variable.name);
-    if(key(variable.type)==='date'){this.loadFloat(variable);this.x.call('native:date:validate');return;}
     if(key(variable.type)==='currency')return this.loadCurrency(variable);
-    if(REAL_TYPES.has(key(variable.type)))return this.loadFloat(variable);
+    if(FLOAT_TYPES.has(key(variable.type)))return this.loadFloat(variable);
     const pin=this.address(variable); const type=key(variable.type);
     this.x.emit(...(type==='byte'?[0x0f,0xb6,0x00]:['integer','boolean'].includes(type)?[0x0f,0xbf,0x00]:[0x8b,0x00]));
     if(type==='string'){this.x.push().call('native:string:copy');this.ownString();}
@@ -3513,9 +3312,8 @@ class NativeCompiler {
   }
   check(type) { type = key(type); if (type === 'boolean') this.x.test().emit(0x0f,0x95,0xc0,0x0f,0xb6,0xc0,0xf7,0xd8); else if (type === 'integer') this.x.compare(-32768).branch('l','error:6').compare(32767).branch('g','error:6'); else if (type === 'byte') this.x.compare(255).branch('g','error:6').compare(0).branch('l','error:6'); }
   store(variable) {
-    if(key(variable.type)==='date')return this.storeDate(variable);
     if(key(variable.type)==='currency')return this.storeCurrency(variable);
-    if(REAL_TYPES.has(key(variable.type)))return this.storeFloat(variable);
+    if(FLOAT_TYPES.has(key(variable.type)))return this.storeFloat(variable);
     if(key(variable.type)==='string'){
       if(variable.fixedLength){this.x.emit(0x89,0xc3).push(variable.fixedLength).emit(0x53).call('native:string:fixed');this.ownString();}
       this.x.push();const pin=this.address(variable);this.x.push().call('native:string:assign');this.releaseArrayPin(pin);return;
@@ -3531,7 +3329,6 @@ class NativeCompiler {
   handle(object) { this.ensure(object); this.x.value(this.controlHandleRef(object)); }
   type(node) {
     const bound=this.nativeConstant(node);if(bound)return bound.type;
-    const dateType=this.dateType(node);if(dateType)return dateType;
     const currencyType=this.currencyType(node);if(currencyType)return currencyType;
     const numericType=this.numericType(node);if(numericType)return numericType;
     if (node.kind === 'group') return this.type(node.expr);
@@ -3551,12 +3348,11 @@ class NativeCompiler {
     if (node.kind === 'call' && node.callee.kind === 'id' && key(node.callee.name) === 'cstr') return 'string';
     return 'long';
   }
-  numeric(node) { if (this.type(node) === 'string') this.fail('Use CLng/CInt explicitly to convert native text to a number'); this.expression(node);if(this.type(node)==='currency')this.currencyToInteger();else if(REAL_TYPES.has(this.type(node)))this.floatToInteger(); }
-  textExpression(node) { this.expression(node); if(this.type(node)==='date'){this.dateToString();}else if(this.type(node)==='currency'){this.currencyToString();}else if(REAL_TYPES.has(this.type(node))){this.floatToString(this.type(node));}else if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); }
+  numeric(node) { if (this.type(node) === 'string') this.fail('Use CLng/CInt explicitly to convert native text to a number'); this.expression(node);if(this.type(node)==='currency')this.currencyToInteger();else if(FLOAT_TYPES.has(this.type(node)))this.floatToInteger(); }
+  textExpression(node) { this.expression(node); if(this.type(node)==='currency'){this.currencyToString();}else if(FLOAT_TYPES.has(this.type(node))){this.floatToString(this.type(node));}else if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); }
   expression(node) {
     if (!node) this.fail('Missing expression'); const x = this.x;
     const bound=this.nativeConstant(node);if(bound)return this.emitNativeConstant(bound);
-    if(this.dateOperation(node))return;
     if(this.currencyOperation(node))return;
     if(this.numericExpression(node))return;
     if (node.kind === 'group') return this.expression(node.expr);
@@ -3639,7 +3435,6 @@ class NativeCompiler {
   call(node) {
     const x = this.x, args = node.args, name = node.callee.kind === 'id' ? key(node.callee.name).replace(/\$$/,'') : null;
     if(this.errorCall(node))return;
-    if(this.dateBuiltin(node,name))return;
     if(this.currencyBuiltin(node,name))return;
     if(this.numericBuiltin(node,name))return;
     if(this.stringBuiltin(node,name))return;
@@ -3744,10 +3539,10 @@ class NativeCompiler {
       this.rawStorageAddress(context.returnValue);x.emit(0x8b,0x00);x.push();this.rawStorageAddress(context.returnValue);x.emit(0xc7,0x00,0,0,0,0,0x58);
     }else if(context.returnValue)this.load(context.returnValue);else x.value(0);
     const cleanup=context.label+':cleanup';x.jump(cleanup);
-    x.label(context.label+':error-return').value(context.returnValue&&key(context.returnValue.type)==='currency'?this.currencyLiteral('0'):context.returnValue&&REAL_TYPES.has(key(context.returnValue.type))?this.floatLiteral(0):0);
+    x.label(context.label+':error-return').value(context.returnValue&&key(context.returnValue.type)==='currency'?this.currencyLiteral('0'):context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type))?this.floatLiteral(0):0);
     x.label(cleanup).push().call(context.label+':clear-strings');
     for(const variable of context.locals.values())if(!variable.label&&!variable.parameter){if(variable.nativeArray)this.destroyArrayStorage(variable);else if(key(variable.type)==='string')this.clearStringStorage(variable);}
-    x.emit(0x58);this.leaveErrorFrame();if(context.returnValue&&key(context.returnValue.type)==='currency')x.emit(0x8b,0x50,4,0x8b,0x00);if(context.returnValue&&REAL_TYPES.has(key(context.returnValue.type)))x.emit(0xdd,0x00);x.leave(context.argumentBytes);
+    x.emit(0x58);this.leaveErrorFrame();if(context.returnValue&&key(context.returnValue.type)==='currency')x.emit(0x8b,0x50,4,0x8b,0x00);if(context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type)))x.emit(0xdd,0x00);x.leave(context.argumentBytes);
     this.emitErrorDispatch(context);
     x.label(context.label+':clear-strings');for(const pin of context.arrayPins)this.releaseArrayPin(pin);for(const variable of context.stringTemps)this.clearStringStorage(variable);x.emit(0xc3);
     this.instruction=null;this.x=outer;outer.sequence=x.sequence;outer.label(context.label).enter(context.size);
@@ -3966,7 +3761,7 @@ class NativeCompiler {
   }
   helpers() {
     const x = this.x;
-    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);emitNativeDateHelpers(this);
+    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);
     emitNativeStorageHelpers(this);
     emitNativeArrayHelpers(this);
     // int-to-string(value, buffer), including INT_MIN without signed negation overflow.
@@ -4004,10 +3799,10 @@ class NativeCompiler {
     x.label(dispatch).api('user32.dll','TranslateMessage',['msg']).api('user32.dll','DispatchMessageW',['msg']).jump(loop).label(quit).api('kernel32.dll','ExitProcess',[0]);
     this.image.manifest('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo><dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="x86" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency></assembly>');
     const linked = this.image.finish('entry');
-    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
+    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods);
+Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods);
 function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');
@@ -4019,8 +3814,8 @@ return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[33]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[32];
+__modules[32]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[31];
 const {PE32Image, BinarySection, PE32_BASE}=__modules[21];
 const {X86}=__modules[22];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
@@ -4030,5 +3825,5 @@ const {X86}=__modules[22];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[33];
+globalThis["VB6Native"]=__modules[32];
 })();

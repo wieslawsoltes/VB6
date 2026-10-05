@@ -18,7 +18,7 @@ function view(){
   };
 }
 function list(window){
-  const result=Object.create(ToolList.prototype);
+  const result=Object.create(ToolList.prototype);result.rows=new Map();
   Object.assign(result,{paintFrame:null,root:{ownerDocument:{defaultView:window}},paints:0,
     paint(){this.paints++;}});
   result.observeDocument();return result;

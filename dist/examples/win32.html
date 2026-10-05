@@ -547,6 +547,110 @@
 /* Runtime MDI client and sizable form chrome; content retains the chosen theme. */
 .vb-mdi-parent>.vb-form-content{overflow:hidden}.vb-mdi-client{position:absolute;overflow:hidden;background:var(--vb-workspace);border:1px solid var(--vb-shadow);box-shadow:inset 1px 1px var(--vb-dark)}.vb-mdi-child{transform:none!important}.vb-mdi-child.vb-minimized{width:160px!important}.vb-mdi-child .vb-form-title{cursor:default}.vb-form-title:focus-visible{outline:1px dotted var(--vb-title-text);outline-offset:-2px}
 .vb-form-grip{position:absolute;z-index:5000;touch-action:none}.vb-form-grip-n{left:6px;right:6px;top:0;height:4px;cursor:n-resize}.vb-form-grip-s{left:6px;right:6px;bottom:0;height:4px;cursor:s-resize}.vb-form-grip-e{top:6px;bottom:6px;right:0;width:4px;cursor:e-resize}.vb-form-grip-w{top:6px;bottom:6px;left:0;width:4px;cursor:w-resize}.vb-form-grip-ne,.vb-form-grip-nw,.vb-form-grip-se,.vb-form-grip-sw{width:7px;height:7px}.vb-form-grip-ne{right:0;top:0;cursor:ne-resize}.vb-form-grip-nw{left:0;top:0;cursor:nw-resize}.vb-form-grip-se{right:0;bottom:0;cursor:se-resize}.vb-form-grip-sw{left:0;bottom:0;cursor:sw-resize}.vb-fixed-window>.vb-form-grip{display:none}
+
+/*!
+ * Classic staircase bevels adapted from the inset box-shadow technique in
+ * 98.css by Jordan Scales. Source attribution requested in:
+ * https://news.ycombinator.com/item?id=49963404
+ * https://jdan.github.io/98.css/
+ * https://notes.jordanscales.com/98-css-reflections#when-buttons-were-good
+ * License source: https://github.com/jdan/98.css/blob/main/LICENSE
+ *
+ * 98.css — classic bevel technique
+ * Copyright 2020 Jordan Scales
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+/* Declare at every theme boundary: nested runtime forms must not inherit a
+   bevel whose colors were resolved in their parent IDE's theme. */
+:root, [data-vb-theme] {
+ --vb-bevel-raised: inset -1px -1px var(--vb-dark), inset 1px 1px var(--vb-light), inset -2px -2px var(--vb-shadow), inset 2px 2px var(--vb-highlight);
+ --vb-bevel-sunken: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-dark);
+ --vb-bevel-pressed: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-dark), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-shadow);
+ --vb-bevel-raised-thin: inset -1px -1px var(--vb-shadow), inset 1px 1px var(--vb-light);
+ /* Equivalent staircase paint for chrome whose original borders must remain
+    in layout. A fractional-DPI border may not equal its nominal CSS width;
+    replacing it with fixed padding shifted WebKit content. Border-box background
+    strips keep the original border metrics without adding nodes or JS reads. */
+ --vb-bevel-raised-image: linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-highlight),var(--vb-highlight)),linear-gradient(var(--vb-highlight),var(--vb-highlight));
+ --vb-bevel-sunken-thin: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow);
+}
+/* Removing a layout border requires compensating padding. These explicit
+   selectors preserve authored control bounds and content origins; flat menu
+   items, native radio circles, editor layers and user-drawn shapes are not
+   indiscriminately restyled. No runtime layout measurements or extra DOM are
+   needed. Forced-colors deliberately uses the existing real-border rules. */
+@media (forced-colors: none) {
+ .classic-bevel-raised { border:0;box-shadow:var(--vb-bevel-raised); }
+ .classic-bevel-sunken { border:0;box-shadow:var(--vb-bevel-sunken); }
+ .classic-bevel-raised:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed); }
+
+ .vb-command { border:0!important;box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+ .vb-command:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed);padding:5px 8px 3px 10px; }
+ .vb-command:disabled,.vb-command[aria-disabled=true] { box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+
+ /* Preserve these containers' original border widths and padding exactly.
+    Transparent border paint avoids diagonal joins; the equivalent border-box
+    staircase is independent of WebKit's fractional border-width rounding. */
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,.vb-popup-menu.classic-menu {
+   border-color:transparent;
+   background-image:var(--vb-bevel-raised-image);
+   background-origin:border-box;background-clip:border-box;background-repeat:no-repeat;
+   background-size:1px 100%,100% 1px,1px 100%,100% 1px,2px 100%,100% 2px,2px 100%,100% 2px;
+   background-position:right top,left bottom,left top,left top,right top,left bottom,left top,left top;
+   box-shadow:none;
+ }
+ .vb-popup-menu.classic-menu { border-color:transparent; }
+ .ide-dialog { box-shadow:1px 1px var(--vb-text); }
+ .ide-dialog-footer button,.vb-dialog-actions button { border:0;box-shadow:var(--vb-bevel-raised);padding:4px 10px;background:var(--vb-face);color:var(--vb-text); }
+ .ide-dialog-footer button:active:not(:disabled),.vb-dialog-actions button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .ide-dialog-footer button:disabled,.vb-dialog-actions button:disabled { color:var(--vb-gray);text-shadow:1px 1px var(--vb-light); }
+
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.vb-form-title .vb-window-button {
+   border:0;padding:1px;box-shadow:var(--vb-bevel-raised);flex-shrink:0;
+ }
+ .window-buttons button:active:not(:disabled),.caption-close:active:not(:disabled),.tool-caption button:active:not(:disabled),.vb-window-button:active:not(:disabled),.vb-form-title .vb-window-button:active:not(:disabled) {
+   box-shadow:var(--vb-bevel-pressed);padding:2px 0 0 2px;
+ }
+ .vb-combo-arrow,.vb-spin-button { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+ .vb-combo-arrow:active:not(:disabled),.vb-spin-button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .vb-scroll-arrow { border:0!important;padding:1px!important;box-shadow:var(--vb-bevel-raised)!important; }
+ .vb-scroll-arrow:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed)!important; }
+ .vb-scroll-thumb { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+
+ /* Text fields and list boxes keep the same inset (old 2px border + padding).
+    Custom combo fields and checkbox/radio controls have separate geometry. */
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field),.vb-control textarea,.vb-control select {
+   border:0;box-shadow:var(--vb-bevel-sunken);padding:4px 5px;
+ }
+ .vb-control .vb-list,.vb-control .vb-combo { padding:3px!important; }
+ .vb-classic-combo .vb-combo-field { border:0;padding:3px 3px 3px 5px;box-shadow:var(--vb-bevel-sunken); }
+ .vb-classic-combo.simple .vb-combo-field { border:0;padding-right:5px; }
+ .vb-dialog input:not([type=checkbox]):not([type=radio]) { border:0;padding:5px;box-shadow:var(--vb-bevel-sunken); }
+
+ /* Retain native layout/scrollbar mechanics; replace only the beveled paint. */
+ *::-webkit-scrollbar-thumb,*::-webkit-scrollbar-button:single-button { border:0;box-shadow:var(--vb-bevel-raised); }
+ *::-webkit-scrollbar-button:single-button:active { box-shadow:var(--vb-bevel-pressed); }
+ .vb-range::-webkit-slider-thumb { border:0;box-shadow:var(--vb-bevel-raised); }
+}
+
+/* Explicit high-contrast suppression also covers engines which expose the
+   forced-colors media query without suppressing computed author shadows.
+   Keep the original real borders, native colors and keyboard focus outlines. */
+@media (forced-colors: active) {
+ .classic-bevel-raised,.classic-bevel-sunken,.vb-command,
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,
+ .vb-popup-menu.classic-menu,.ide-dialog-footer button,.vb-dialog-actions button,
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,
+ .vb-combo-arrow,.vb-spin-button,.vb-scroll-arrow,.vb-scroll-thumb,
+ .vb-control input,.vb-control textarea,.vb-control select,.vb-dialog input {
+   box-shadow:none!important;text-shadow:none!important;
+ }
+}
 </style></head><body><div id="app"></div><script id="vb6-project" type="application/json">{"schema":1,"id":"example_win32_1","name":"Win32Workbench","description":"Browser Win32 Declare APIs: handles, INI files, GDI drawing, writable DIBs, memory DC bitmap blitting and complex region clipping.","startup":"frmWin32","modules":[{"id":"example_win32_2","name":"frmWin32","kind":"form","code":"Option Explicit\nPrivate Type BITMAPINFOHEADER\n    biSize As Long\n    biWidth As Long\n    biHeight As Long\n    biPlanes As Integer\n    biBitCount As Integer\n    biCompression As Long\n    biSizeImage As Long\n    biXPelsPerMeter As Long\n    biYPelsPerMeter As Long\n    biClrUsed As Long\n    biClrImportant As Long\nEnd Type\nPrivate Declare Function GetTickCount Lib \"kernel32\" () As Long\nPrivate Declare Function IsWindow Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function EnableWindow Lib \"user32\" (ByVal hwnd As Long, ByVal enabled As Long) As Long\nPrivate Declare Function IsWindowEnabled Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function SetWindowText Lib \"user32\" Alias \"SetWindowTextA\" (ByVal hwnd As Long, ByVal value As String) As Long\nPrivate Declare Function WriteIni Lib \"kernel32\" Alias \"WritePrivateProfileStringA\" (ByVal section As String, ByVal key As String, ByVal value As String, ByVal file As String) As Long\nPrivate Declare Function ReadIni Lib \"kernel32\" Alias \"GetPrivateProfileStringA\" (ByVal section As String, ByVal key As String, ByVal def As String, ByVal buffer As String, ByVal size As Long, ByVal file As String) As Long\nPrivate Declare Function GetDC Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function ReleaseDC Lib \"user32\" (ByVal hwnd As Long, ByVal dc As Long) As Long\nPrivate Declare Function CreateSolidBrush Lib \"gdi32\" (ByVal color As Long) As Long\nPrivate Declare Function SelectObject Lib \"gdi32\" (ByVal dc As Long, ByVal object As Long) As Long\nPrivate Declare Function DeleteObject Lib \"gdi32\" (ByVal object As Long) As Long\nPrivate Declare Function Rectangle Lib \"gdi32\" (ByVal dc As Long, ByVal left As Long, ByVal top As Long, ByVal right As Long, ByVal bottom As Long) As Long\nPrivate Declare Function CreateDIBSection Lib \"gdi32\" (ByVal dc As Long, info As BITMAPINFOHEADER, ByVal usage As Long, bits As Long, ByVal section As Long, ByVal offset As Long) As Long\nPrivate Declare Function CreateCompatibleDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Function DeleteDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Sub CopyMemory Lib \"kernel32\" Alias \"RtlMoveMemory\" (destination As Any, source As Any, ByVal count As Long)\nPrivate Declare Function StretchBlt Lib \"gdi32\" (ByVal dc As Long, ByVal x As Long, ByVal y As Long, ByVal width As Long, ByVal height As Long, ByVal source As Long, ByVal sx As Long, ByVal sy As Long, ByVal sw As Long, ByVal sh As Long, ByVal rop As Long) As Long\nPrivate Declare Function SetStretchBltMode Lib \"gdi32\" (ByVal dc As Long, ByVal mode As Long) As Long\nPrivate Declare Function SaveDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Function RestoreDC Lib \"gdi32\" (ByVal dc As Long, ByVal saved As Long) As Long\nPrivate Declare Function CreateRectRgn Lib \"gdi32\" (ByVal left As Long, ByVal top As Long, ByVal right As Long, ByVal bottom As Long) As Long\nPrivate Declare Function CombineRgn Lib \"gdi32\" (ByVal destination As Long, ByVal first As Long, ByVal second As Long, ByVal mode As Long) As Long\nPrivate Declare Function SelectClipRgn Lib \"gdi32\" (ByVal dc As Long, ByVal region As Long) As Long\nPrivate Declare Function GetRegionData Lib \"gdi32\" (ByVal region As Long, ByVal count As Long, ByVal buffer As Long) As Long\nPrivate Declare Function PatBlt Lib \"gdi32\" (ByVal dc As Long, ByVal x As Long, ByVal y As Long, ByVal width As Long, ByVal height As Long, ByVal rop As Long) As Long\nPrivate Sub Form_Load()\n    Dim buffer As String, count As Long\n    WriteIni \"Demo\", \"Message\", \"Hello from kernel32 and user32!\", \"win32-demo.ini\"\n    buffer = String$(128, 0)\n    count = ReadIni(\"Demo\", \"Message\", \"\", buffer, Len(buffer), \"win32-demo.ini\")\n    txtValue.Text = Left$(buffer, count)\n    lblStatus.Caption = \"Ready. hWnd=\" \u0026 CStr(Me.hWnd) \u0026 \" | Valid=\" \u0026 CStr(IsWindow(Me.hWnd)) \u0026 \" | Tick=\" \u0026 CStr(GetTickCount())\n    Debug.Print \"Win32 Workbench ready\"\nEnd Sub\nPrivate Sub cmdText_Click()\n    SetWindowText txtValue.hWnd, \"Text changed by user32.SetWindowTextA\"\nEnd Sub\nPrivate Sub cmdToggle_Click()\n    EnableWindow txtValue.hWnd, 1 - IsWindowEnabled(txtValue.hWnd)\nEnd Sub\nPrivate Sub cmdDraw_Click()\n    Dim dc As Long, brush As Long, oldBrush As Long\n    dc = GetDC(picCanvas.hWnd)\n    brush = CreateSolidBrush(RGB(70, 130, 180))\n    oldBrush = SelectObject(dc, brush)\n    Rectangle dc, 12, 12, 476, 92\n    SelectObject dc, oldBrush\n    DeleteObject brush\n    ReleaseDC picCanvas.hWnd, dc\n    lblStatus.Caption = \"GDI drawing uses the existing WebGPU / Canvas2D surface.\"\nEnd Sub\nPrivate Sub cmdBitmap_Click()\n    Dim info As BITMAPINFOHEADER, bits As Long, bitmap As Long, memoryDC As Long\n    Dim target As Long, oldBitmap As Long, saved As Long, pixels(0 To 3) As Long\n    On Error GoTo Failed\n    info.biSize = 40\n    info.biWidth = 2\n    info.biHeight = -2\n    info.biPlanes = 1\n    info.biBitCount = 32\n    bitmap = CreateDIBSection(0, info, 0, bits, 0, 0)\n    If bitmap = 0 Then Err.Raise 5, , \"CreateDIBSection failed\"\n    pixels(0) = \u0026HFF0000\n    pixels(1) = \u0026HFF00\n    pixels(2) = \u0026HFF\n    pixels(3) = \u0026HFFFFFF\n    CopyMemory ByVal bits, pixels(0), 16\n    memoryDC = CreateCompatibleDC(0)\n    oldBitmap = SelectObject(memoryDC, bitmap)\n    target = picCanvas.hDC\n    saved = SaveDC(target)\n    SetStretchBltMode target, 3\n    If StretchBlt(target, 8, 8, 464, 88, memoryDC, 0, 0, 2, 2, \u0026HCC0020) = 0 Then Err.Raise 5, , \"StretchBlt failed\"\n    lblStatus.Caption = \"Writable DIB + memory DC + StretchBlt. Canvas2D bitmap rendering.\"\n    GoTo Cleanup\nFailed:\n    lblStatus.Caption = \"Bitmap error: \" \u0026 Err.Description \u0026 \" / \" \u0026 CStr(Err.LastDLLError)\nCleanup:\n    If saved \u003c\u003e 0 Then RestoreDC target, saved\n    If target \u003c\u003e 0 Then ReleaseDC picCanvas.hWnd, target\n    If oldBitmap \u003c\u003e 0 Then SelectObject memoryDC, oldBitmap\n    If bitmap \u003c\u003e 0 Then DeleteObject bitmap\n    If memoryDC \u003c\u003e 0 Then DeleteDC memoryDC\nEnd Sub\nPrivate Sub cmdRegions_Click()\n    Dim target As Long, outer As Long, hole As Long, brush As Long, saved As Long, size As Long\n    On Error GoTo Failed\n    picCanvas.Cls\n    target = picCanvas.hDC\n    saved = SaveDC(target)\n    outer = CreateRectRgn(8, 8, 472, 96)\n    hole = CreateRectRgn(152, 24, 328, 80)\n    If outer = 0 Or hole = 0 Then Err.Raise 5, , \"Region allocation failed\"\n    If CombineRgn(outer, outer, hole, 4) = 0 Then Err.Raise 5, , \"CombineRgn failed\"\n    size = GetRegionData(outer, 0, 0)\n    If SelectClipRgn(target, outer) = 0 Then Err.Raise 5, , \"SelectClipRgn failed\"\n    DeleteObject outer\n    outer = 0\n    brush = CreateSolidBrush(RGB(32, 128, 192))\n    SelectObject target, brush\n    If PatBlt(target, 0, 0, 488, 104, \u0026HF00021) = 0 Then Err.Raise 5, , \"PatBlt failed\"\n    lblStatus.Caption = \"Complex region: copied clip survives DeleteObject. RGNDATA=\" \u0026 CStr(size) \u0026 \" bytes.\"\n    GoTo Cleanup\nFailed:\n    lblStatus.Caption = \"Region error: \" \u0026 Err.Description \u0026 \" / \" \u0026 CStr(Err.LastDLLError)\nCleanup:\n    If saved \u003c\u003e 0 Then RestoreDC target, saved\n    If brush \u003c\u003e 0 Then DeleteObject brush\n    If outer \u003c\u003e 0 Then DeleteObject outer\n    If hole \u003c\u003e 0 Then DeleteObject hole\n    If target \u003c\u003e 0 Then ReleaseDC picCanvas.hWnd, target\nEnd Sub\n","form":{"id":"example_win32_3","name":"frmWin32","type":"Form","properties":{"Name":"frmWin32","Caption":"Win32 API Workbench","ClientWidth":7800,"ClientHeight":5520,"Width":9120,"Height":6450,"Left":300,"Top":300,"StartUpPosition":2,"BorderStyle":2,"BackColor":-2147483633,"ForeColor":-2147483640,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ScaleMode":1,"KeyPreview":0,"Visible":-1,"Enabled":-1},"controls":[{"id":"example_win32_4","name":"lblTitle","type":"Label","parent":null,"properties":{"Name":"lblTitle","Left":240,"Top":240,"Width":7320,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":12,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Win32 APIs in a browser","BackStyle":0,"Alignment":0}},{"id":"example_win32_5","name":"txtValue","type":"TextBox","parent":null,"properties":{"Name":"txtValue","Left":240,"Top":840,"Width":7320,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","Text":"","MultiLine":0,"ScrollBars":0,"MaxLength":0,"PasswordChar":"","Locked":0,"Alignment":0}},{"id":"example_win32_6","name":"cmdText","type":"CommandButton","parent":null,"properties":{"Name":"cmdText","Left":240,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"SetWindowText","Default":0,"Cancel":0}},{"id":"example_win32_7","name":"cmdToggle","type":"CommandButton","parent":null,"properties":{"Name":"cmdToggle","Left":2760,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"EnableWindow","Default":0,"Cancel":0}},{"id":"example_win32_8","name":"cmdDraw","type":"CommandButton","parent":null,"properties":{"Name":"cmdDraw","Left":5280,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"GDI drawing","Default":0,"Cancel":0}},{"id":"example_win32_9","name":"picCanvas","type":"PictureBox","parent":null,"properties":{"Name":"picCanvas","Left":240,"Top":2160,"Width":7320,"Height":1560,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","ScaleMode":3,"AutoRedraw":-1,"BorderStyle":1}},{"id":"example_win32_10","name":"cmdBitmap","type":"CommandButton","parent":null,"properties":{"Name":"cmdBitmap","Left":240,"Top":3960,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Bitmap blitting","Default":0,"Cancel":0}},{"id":"example_win32_11","name":"cmdRegions","type":"CommandButton","parent":null,"properties":{"Name":"cmdRegions","Left":2760,"Top":3960,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Region clipping","Default":0,"Cancel":0}},{"id":"example_win32_12","name":"lblStatus","type":"Label","parent":null,"properties":{"Name":"lblStatus","Left":240,"Top":4560,"Width":7320,"Height":540,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Starting compatibility process...","BackStyle":0,"Alignment":0,"WordWrap":-1}}],"menus":[]}}],"settings":{"snapToGrid":true,"gridSize":120,"showGrid":true,"renderer":"auto","tabWidth":4,"requireVariableDeclaration":true},"references":[],"assets":{},"vfs":{"files":{},"directories":["/"]},"appSettings":{}}</script><script>/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */
 (()=>{'use strict';
 const __modules=[];

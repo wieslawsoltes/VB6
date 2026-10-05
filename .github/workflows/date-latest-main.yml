@@ -1,4 +1,4 @@
-name: Reconcile Date export with current classic IDE
+name: Rebuild reviewed integrated Date distributions
 on:
   push:
     branches: [feat/win32-date-export]
@@ -9,7 +9,7 @@ concurrency:
   group: date-latest-main
   cancel-in-progress: false
 jobs:
-  integrate:
+  rebuild:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -20,35 +20,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Preserve pinned main and regenerate only generated conflicts
+      - name: Rebuild the connector-integrated source without modifying any workflow
         env:
           EXPECTED_HEAD: ${{ github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          git config user.name 'Wiesław Šoltés'
-          git config user.email 'wieslawsoltes@users.noreply.github.com'
-          target=2b4f9dd50fc20c36f2a48d3c8586e4063277ff69
-          git merge-base --is-ancestor 29c77082c9bf854c7f6fbbf3ed63d5277036b761 "$target"
-          if ! git merge --no-commit --no-ff "$target"; then
-            python3 - <<'PY'
-          import subprocess
-          paths=subprocess.check_output(['git','diff','--name-only','--diff-filter=U']).decode().splitlines()
-          if not paths:raise SystemExit('Merge failed without generated conflicts')
-          for p in paths:
-              if not (p.startswith('dist/') or p in ['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js']):
-                  raise SystemExit('Source conflict requires review: '+p)
-          for p in paths:
-              subprocess.run(['git','checkout','--ours','--',p],check=True)
-              subprocess.run(['git','add','--',p],check=True)
-          PY
-          fi
+          git merge-base --is-ancestor 2b4f9dd50fc20c36f2a48d3c8586e4063277ff69 HEAD
           npm run build
           npm test
+          node tools/win32-date-fixtures.mjs
+          node tools/win32-date-call-fixtures.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          from hashlib import sha256
+          expected={'dist/VB6-Studio-Web.html':'6d81459636b3b0a563651dcb25e5a2f38d674f3da0430a401c2ddcf995dda303','dist/studio.js':'eee60090c33ab8dd4e522a94e3aa4c385f433ab69da46acd660cac5999fbf32d','dist/vb6-native.js':'9ecf704a5a8fdfb02931e5994c11f8d614b9bdd071e5712495d8b8aeb2c46c5a'}
+          for p,h in expected.items():assert sha256(Path(p).read_bytes()).hexdigest()==h,p
+          PY
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
           git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
-          git rm --ignore-unmatch .github/workflows/date-normalization-fix.yml
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           git diff --cached --check
-          git commit -m 'merge: preserve classic HTML rendering and notices with native Date fixes' -m 'Retain pinned main 2b4f9dd50fc20c36f2a48d3c8586e4063277ff69 and exact DateSerial corrections. Regenerate only generated conflicts, keep all original source changes and attribution, run the complete suite and remove the finished source-correction helper.'
+          git commit -m 'build: reproduce integrated native Date compiler and classic IDE distributions'
           npm run build
           git diff --exit-code
           git push origin HEAD:refs/heads/feat/win32-date-export
