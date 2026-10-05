@@ -207,11 +207,15 @@ Open `.vbp` projects and `.vbg` groups from complete selected files, folders or 
 
 Browser IDE runs, the runtime SDK and published single-file HTML apps now share
 [`@vb6/win32-browser`](packages/win32-browser/README.md), an independent,
-zero-dependency MIT package. Its first release registers 170 export names for
+zero-dependency MIT package. Version 0.2.0 registers 211 export names for
 common kernel/memory/file/INI, registry, window/message/timer, clipboard, GDI and
 safe URL operations. `Declare`, `Alias`, typed ByRef buffers, aligned UDTs,
 `AddressOf` callbacks and runtime `hWnd` values are integrated without changing
-the classic IDE layout. Try **Win32 API Workbench** in the examples list.
+the classic IDE layout. Memory DCs, writable DIBs, 15 raster operations, bitmap
+blitting, alpha blending and rectangular clipping are supported; forms and picture
+boxes expose read-only `hDC`. Bitmap surfaces use an explicit Canvas2D fallback.
+Try **Bitmap blitting** in **Win32 API Workbench**, and see the
+[GDI compatibility guide](packages/win32-browser/GDI.md).
 
 This is a browser-compatible subset, not native DLL execution or full Win32
 parity. Private files/registry/clipboard stay application-local; unsupported

@@ -157,7 +157,7 @@ export class VirtualMachine extends Signal {
     const isRecord=Object.getPrototypeOf(object)===Object.prototype&&!!object.__type;let obj=object,privateMatch=false;
     for(let depth=0;obj&&depth<5;depth++,obj=Object.getPrototypeOf(obj)){
       const candidates=Object.getOwnPropertyNames(obj).filter(k=>lower(k)===key&&!BLOCKED_MEMBERS.has(lower(k)));
-      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||key==='hwnd'&&object.__control);if(publicKey)return publicKey;
+      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||['hwnd','hdc'].includes(key)&&object.__control);if(publicKey)return publicKey;
       if(candidates.length)privateMatch=true;
     }
     if(privateMatch)throw new VBError('Implementation members are not exposed to Visual Basic: '+name,438);
