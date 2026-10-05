@@ -25,9 +25,12 @@ jobs:
           allowed={'.gdi-source/part'+str(i)+'.b64' for i in range(4)}|{'.github/workflows/prepare-gdi.yml'}
           changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
           if changed!=allowed: raise SystemExit('Unexpected preparation tree: '+repr(changed))
-          encoded=''.join(pathlib.Path('.gdi-source/part'+str(i)+'.b64').read_text() for i in range(4))
-          compressed=base64.b64decode(encoded,validate=True)
-          if hashlib.sha256(compressed).hexdigest()!='28c32cbb4ad780c1fed3756a792018a8387a61dd41917307f1b8c3e619583668': raise SystemExit('Source transfer hash mismatch')
+          parts=[pathlib.Path('.gdi-source/part'+str(i)+'.b64').read_bytes() for i in range(4)]
+          for i,part in enumerate(parts): print('Part',i,len(part),hashlib.sha1(b'blob '+str(len(part)).encode()+b'\0'+part).hexdigest(),flush=True)
+          compressed=base64.b64decode(b''.join(parts),validate=True)
+          actual=hashlib.sha256(compressed).hexdigest()
+          print('Compressed bytes',len(compressed),'SHA256',actual,flush=True)
+          if actual!='28c32cbb4ad780c1fed3756a792018a8387a61dd41917307f1b8c3e619583668': raise SystemExit('Source transfer hash mismatch')
           patch=lzma.decompress(compressed,memlimit=256*1024*1024)
           if len(patch)!=117548: raise SystemExit('Unexpected patch size')
           pathlib.Path('/tmp/gdi-source.patch').write_bytes(patch)
@@ -54,10 +57,13 @@ jobs:
           git rev-parse HEAD HEAD^{tree} > /tmp/gdi-revision.txt
           git archive --format=zip HEAD -o /tmp/gdi-reviewed-source.zip
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: gdi-reviewed-source
+          include-hidden-files: true
           path: |
             /tmp/gdi-revision.txt
             /tmp/gdi-reviewed-source.zip
             release/vb6-win32-browser-*.tgz
+            .gdi-source/
           retention-days: 7
