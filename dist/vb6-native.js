@@ -1564,10 +1564,18 @@ function parseParameters(text,defaultTypes={}) {
   return params;
 }
 
+const DEBUG_SOURCE_LINES=new WeakMap();
 class ProcedureCompiler {
-  constructor(proc,module) { this.proc=proc;this.module=module;this.code=[];this.blocks=[];this.labels=new Map();this.patches=[];this.temp=0; }
-  emit(op,data={},line=0){const index=this.code.length;this.code.push({op,...data,line,source:this.module.name,procedure:this.proc.name});return index;}
-  jump(target,line){return this.emit('jump',{target},line);}
+  constructor(proc,module) { this.proc=proc;this.module=module;this.code=[];this.blocks=[];this.labels=new Map();this.patches=[];this.temp=0;this.debugStatement=null;this.debugColumns=new Map();if(!DEBUG_SOURCE_LINES.has(module))DEBUG_SOURCE_LINES.set(module,module.source.replace(/\r\n?/g,'\n').split('\n'));this.sourceLines=DEBUG_SOURCE_LINES.get(module); }
+  emit(op,data={},line=0){
+    const index=this.code.length,statement=this.debugStatement;
+    // A VB statement may lower to several instructions. Only its first visible
+    // instruction is a sequence point; declarations and synthetic jumps are not.
+    const sequencePoint=!!statement&&!statement.emitted&&!data.implicit&&op!=='dim'&&data.sequencePoint!==false;
+    if(sequencePoint)statement.emitted=true;
+    this.code.push({op,...data,line,source:this.module.name,procedure:this.proc.name,sequencePoint,...(sequencePoint&&statement.column?{column:statement.column,endColumn:statement.endColumn}:{})});return index;
+  }
+  jump(target,line,hidden=false){return this.emit('jump',{target,...(hidden?{sequencePoint:false}:{})},line);}
   patch(index,target){this.code[index].target=target;}
   block(type,line){const b=this.blocks.at(-1);if(!b||b.type!==type)throw new VBError(`Expected matching ${type} block`,1002,this.module.name,line);return b;}
   compile(lines) {
@@ -1581,7 +1589,17 @@ class ProcedureCompiler {
     return this.code;
   }
   label(name,line){const key=/^\d+$/.test(name)?String(Number(name)):lower(name);if(this.labels.has(key))throw new VBError(`Duplicate label: ${name}`,1002,this.module.name,line);this.labels.set(key,this.code.length);if(/^\d+$/.test(name)){const number=Number(name);if(number>65535)throw new VBError('Line number must be between 0 and 65535',1002,this.module.name,line);this.emit('lineNumber',{number,implicit:true},line);}}
-  statement(original,line) {
+  statement(original,line,column=null) {
+    const previous=this.debugStatement,text=original.trim(),source=this.sourceLines[line-1]||'';
+    const offset=column===null?source.indexOf(text,this.debugColumns.get(line)||0):column-1;
+    // Continued statements keep their physical starting line; do not invent a
+    // single-line span when the logical statement is absent from that line.
+    const found=offset>=0&&source.slice(offset,offset+text.length)===text;
+    this.debugStatement={emitted:false,column:found?offset+1:null,endColumn:found?offset+text.length+1:null};
+    if(column===null&&found)this.debugColumns.set(line,offset+text.length);
+    try{return this.compileStatement(original,line);}finally{this.debugStatement=previous;}
+  }
+  compileStatement(original,line) {
     let text=original.trim(),m;
     if(!text||/^Rem\b/i.test(text))return;
     if(/^\d+$/.test(text)){const index=this.jump(null,line);this.patches.push({index,label:text});return;}
@@ -1592,13 +1610,16 @@ class ProcedureCompiler {
         // Use tokens to distinguish an Else keyword from string contents.
         const ts=tokenize(m[2]);const et=ts.find(t=>t.type==='id'&&lower(t.value)==='else');if(et)at=et.start;
         const yes=at<0?m[2]:m[2].slice(0,at), no=at<0?'':m[2].slice(at+4);
-        for(const s of splitTop(yes,':'))this.statement(s,line);
-        if(no){const end=this.jump(null,line);this.patch(index,this.code.length);for(const s of splitTop(no,':'))this.statement(s,line);this.patch(end,this.code.length);}else this.patch(index,this.code.length);
+        const origin=this.debugStatement.column,bodyOffset=text.length-m[2].length;
+        if(origin)this.code[index].endColumn=origin+bodyOffset;
+        const compileParts=(body,offset)=>{let cursor=0;for(const s of splitTop(body,':')){const at=body.indexOf(s,cursor);this.statement(s,line,origin===null?null:origin+offset+at);cursor=at+s.length;}};
+        compileParts(yes,bodyOffset);
+        if(no){const end=this.jump(null,line,true);this.patch(index,this.code.length);compileParts(no,bodyOffset+at+4);this.patch(end,this.code.length);}else this.patch(index,this.code.length);
       }else this.blocks.push({type:'If',pending:index,ends:[]});
       return;
     }
-    if((m=text.match(/^ElseIf\s+(.+?)\s+Then$/i))){const b=this.block('If',line);b.ends.push(this.jump(null,line));this.patch(b.pending,this.code.length);b.pending=this.emit('branch',{test:E(m[1]),target:null},line);return;}
-    if(/^Else$/i.test(text)){const b=this.block('If',line);b.ends.push(this.jump(null,line));this.patch(b.pending,this.code.length);b.pending=null;return;}
+    if((m=text.match(/^ElseIf\s+(.+?)\s+Then$/i))){const b=this.block('If',line);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=this.emit('branch',{test:E(m[1]),target:null},line);return;}
+    if(/^Else$/i.test(text)){const b=this.block('If',line);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=null;return;}
     if(/^End\s*If$/i.test(text)){const b=this.block('If',line);if(b.pending!=null)this.patch(b.pending,this.code.length);for(const i of b.ends)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^For\s+Each\s+(\w+)\s+In\s+(.+)$/i))){const id=`$each${this.temp++}`,index=this.emit('eachInit',{name:m[1],expr:E(m[2]),id,target:null},line);this.blocks.push({type:'For',kind:'each',id,index,start:this.code.length,name:m[1],exits:[]});return;}
     if((m=text.match(/^For\s+([\w.$%&!#@]+)\s*=\s*(.+?)\s+To\s+(.+?)(?:\s+Step\s+(.+))?$/i))){const id=`$for${this.temp++}`,index=this.emit('forInit',{name:m[1],start:E(m[2]),end:E(m[3]),step:E(m[4]||'1'),id,target:null},line);this.blocks.push({type:'For',kind:'numeric',id,index,start:this.code.length,name:m[1],exits:[]});return;}
@@ -1608,7 +1629,7 @@ class ProcedureCompiler {
     if((m=text.match(/^While\s+(.+)$/i))){const start=this.code.length,test=this.emit('branch',{test:E(m[1]),target:null},line);this.blocks.push({type:'While',start,test,exits:[]});return;}
     if(/^Wend$/i.test(text)){const b=this.block('While',line);this.jump(b.start,line);this.patch(b.test,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^Select\s+Case\s+(.+)$/i))){const id=`$select${this.temp++}`;this.emit('temp',{id,expr:E(m[1])},line);this.blocks.push({type:'Select',id,pending:null,ends:[],hasCase:false});return;}
-    if((m=text.match(/^Case\s+(.+)$/i))){const b=this.block('Select',line);if(b.hasCase)b.ends.push(this.jump(null,line));if(b.pending!=null)this.patch(b.pending,this.code.length);b.hasCase=true;if(/^Else$/i.test(m[1]))b.pending=null;else {const cases=splitTop(m[1]).map(s=>{const r=s.match(/^(.+)\s+To\s+(.+)$/i),c=s.match(/^Is\s*(<=|>=|<>|=|<|>)\s*(.+)$/i);return r?{kind:'range',low:E(r[1]),high:E(r[2])}:c?{kind:'compare',op:c[1],expr:E(c[2])}:{kind:'value',expr:E(s)};});b.pending=this.emit('case',{id:b.id,cases,target:null},line);}return;}
+    if((m=text.match(/^Case\s+(.+)$/i))){const b=this.block('Select',line);if(b.hasCase)b.ends.push(this.jump(null,line,true));if(b.pending!=null)this.patch(b.pending,this.code.length);b.hasCase=true;if(/^Else$/i.test(m[1]))b.pending=null;else {const cases=splitTop(m[1]).map(s=>{const r=s.match(/^(.+)\s+To\s+(.+)$/i),c=s.match(/^Is\s*(<=|>=|<>|=|<|>)\s*(.+)$/i);return r?{kind:'range',low:E(r[1]),high:E(r[2])}:c?{kind:'compare',op:c[1],expr:E(c[2])}:{kind:'value',expr:E(s)};});b.pending=this.emit('case',{id:b.id,cases,target:null},line);}return;}
     if(/^End\s+Select$/i.test(text)){const b=this.block('Select',line);if(b.pending!=null)this.patch(b.pending,this.code.length);for(const i of b.ends)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^With\s+(.+)$/i))){this.emit('withPush',{expr:E(m[1])},line);this.blocks.push({type:'With'});return;}
     if(/^End\s+With$/i.test(text)){this.block('With',line);this.emit('withPop',{},line);this.blocks.pop();return;}
@@ -1896,8 +1917,275 @@ class X86 {
 return {X86};
 })();
 
-/* numeric.js */
+/* bindings.js */
 __modules[23]=(()=>{
+const {VBCurrency}=__modules[6];
+/** Resolve compile-time values with their declaration types intact. The source
+ * binder has already evaluated these expressions without executing user code.
+ * Keep lexical visibility separate from the machine representation in EAX. */
+
+const key = value => String(value).toLowerCase();
+const declarations = new WeakMap();
+const supported = new Set(['byte','integer','long','boolean','single','double','currency','string']);
+function scopeDeclarations(scope) {
+  let result = declarations.get(scope);
+  if (!result) {
+    result = new Map();
+    for (const d of scope.declarations || []) result.set(key(d.name),d);
+    for (const ins of scope.code || []) if (ins.op === 'dim') for (const d of ins.decls) result.set(key(d.name),d);
+    declarations.set(scope,result);
+  }
+  return result;
+}
+function descriptor(c, scope, name) {
+  if (!scope?.constantBindings?.has(name)) return null;
+  const value = scope.constantBindings.get(name), d = scopeDeclarations(scope).get(name);
+  let type = key(d?.storageType || d?.type || 'variant');
+  if (type === 'variant') {
+    type = value instanceof VBCurrency ? 'currency' : typeof value === 'string' ? 'string' :
+      typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ?
+      Number.isInteger(value) && value >= -32768 && value <= 32767 ? 'integer' :
+      Number.isInteger(value) && value >= -2147483648 && value <= 2147483647 ? 'long' : 'double' : 'unknown';
+  }
+  if (!supported.has(type)) c.fail('Native constant type is not supported: '+(d?.name || name)+' As '+type);
+  return {value,type};
+}
+const nativeBindingMethods = {
+  nativeConstant(node) {
+    if (!node) return null;
+    while (node.kind === 'group') node = node.expr;
+    const context = this.context, owner = context?.module, module = owner?.module;
+    if (node.kind === 'id') {
+      const name = key(node.name);
+      const local = descriptor(this,context?.proc,name);
+      if (local) return local;
+      // A local/parameter/return slot or module variable shadows public constants.
+      if (context?.locals?.has(name) || owner?.globals?.has(name)) return null;
+      const own = descriptor(this,module,name);
+      if (own) return own;
+      const matches = [];
+      for (const m of this.modules.values()) if (m !== owner) {
+        const d = scopeDeclarations(m.module).get(name);
+        if (d?.constant && d.scope !== 'private' && (m.module.kind === 'module' || d.enumName)) matches.push(m.module);
+      }
+      if (matches.length > 1) this.fail('Ambiguous native constant: '+node.name);
+      return matches.length ? descriptor(this,matches[0],name) : null;
+    }
+    if (node.kind !== 'member' || node.object.kind !== 'id') return null;
+    const name = key(node.name), namespace = key(node.object.name), m = this.modules.get(namespace);
+    if (m) {
+      const d = scopeDeclarations(m.module).get(name);
+      if (!d?.constant) return null;
+      if (m !== owner && d.scope === 'private') this.fail('Private native constant is not accessible: '+node.object.name+'.'+node.name);
+      return descriptor(this,m.module,name);
+    }
+    const enumeration = module?.enumBindings?.get(namespace);
+    if (enumeration?.ambiguous) this.fail('Ambiguous native enum: '+node.object.name);
+    if (enumeration && Object.hasOwn(enumeration.values,name)) return {type:'long',value:enumeration.values[name]};
+    return null;
+  },
+  emitNativeConstant(binding) {
+    const {type,value} = binding;
+    if (type === 'currency') this.x.value(this.currencyLiteral(value));
+    else if (type === 'single' || type === 'double') this.x.value(this.floatLiteral(value));
+    else if (type === 'string') this.x.value(this.string(value));
+    else {
+      const n = typeof value === 'boolean' ? value ? -1 : 0 : value;
+      if (!Number.isInteger(n) || n < -2147483648 || n > 2147483647) this.fail('Invalid native integral constant');
+      this.x.value(n);
+    }
+  },
+  nativeFunctionType(node) {
+    if (node.kind === 'group') return this.nativeFunctionType(node.expr);
+    const target = this.resolveProcedure(node.kind === 'call' ? node.callee : node);
+    const signature = target?.proc || target;
+    return signature?.kind === 'function' ? key(signature.returnType) : null;
+  }
+};
+
+return {nativeBindingMethods};
+})();
+
+/* currency.js */
+__modules[24]=(()=>{
+const {VBCurrency}=__modules[6];
+/** Native CY values are signed 64-bit integers scaled by 10,000. Expressions
+ * return an immutable snapshot address in EAX; ABI returns use EDX:EAX. Never
+ * route Currency storage, literals or same-type arithmetic through Double. */
+
+const C='native:currency:', DLL='oleaut32.dll';
+const key=value=>String(value).toLowerCase();
+const arg=argument=>({argument}), addr=address=>({address});
+const floats=new Set(['single','double']);
+const scalars=new Set(['byte','integer','long','boolean','single','double','currency']);
+
+const nativeCurrencyMethods = {
+  currencyLiteral(value) {
+    let raw;
+    try { raw=new VBCurrency(value).raw; } catch { this.fail('Native Currency literal is invalid or exceeds its signed 64-bit range'); }
+    this.currencyLiterals ||= new Map();
+    if(!this.currencyLiterals.has(raw)) {
+      const name='currency:'+this.currencyLiterals.size;
+      const bytes=new Uint8Array(8);new DataView(bytes.buffer).setBigInt64(0,raw,true);
+      this.ro.align(8).label(name).emit(...bytes);this.currencyLiterals.set(raw,name);
+    }
+    return this.currencyLiterals.get(raw);
+  },
+  currencyWorkspace() {const v=this.arrayWorkspace(8,'currency-temp');v.type='Currency';return v;},
+  currencyType(node) {
+    if(node.kind==='currency'||node.kind==='literal'&&node.value instanceof VBCurrency)return 'currency';
+    if(node.kind==='id'&&this.constant(node) instanceof VBCurrency)return 'currency';
+    if(node.kind==='unary'&&['+','-'].includes(node.op)&&this.type(node.expr)==='currency')return 'currency';
+    if(node.kind==='binary'&&['+','-','*'].includes(node.op)) {
+      const a=this.type(node.left),b=this.type(node.right);
+      if((a==='currency'||b==='currency')&&scalars.has(a)&&scalars.has(b)) {
+        // VB's addition/subtraction precision order differs from multiplication.
+        return node.op==='*'&&(a==='double'||b==='double')?'double':'currency';
+      }
+    }
+    if(node.kind==='call'&&node.callee.kind==='id') {
+      const name=key(node.callee.name).replace(/\$$/,'');
+      if(name==='ccur')return 'currency';
+      if(['abs','fix','int','round'].includes(name)&&node.args.length&&this.type(node.args[0])==='currency')return 'currency';
+      if(name==='typename')return 'string';
+    }
+    return null;
+  },
+  currencyExpression(node) {
+    const type=this.type(node);this.expression(node);
+    if(type==='currency')return;
+    const x=this.x,out=this.currencyWorkspace();
+    x.push();this.rawStorageAddress(out);x.emit(0x59).push().emit(0x51).call(C+(type==='string'?'parse':floats.has(type)?'from-double':'from-int'));
+  },
+  loadCurrency(variable) {
+    const x=this.x,out=this.currencyWorkspace(),pin=this.address(variable);
+    x.push();this.rawStorageAddress(out);x.emit(0x59).push().emit(0x51).call(C+'copy');this.releaseArrayPin(pin);
+  },
+  storeCurrency(variable) {
+    const x=this.x;x.push();const pin=this.address(variable);
+    x.emit(0x5a,0x8b,0x0a,0x89,0x08,0x8b,0x4a,4,0x89,0x48,4,0x89,0xd0);
+    this.releaseArrayPin(pin);
+  },
+  currencyToFloat(single=false) {
+    const out=this.floatWorkspace(),x=this.x;
+    x.push();this.rawStorageAddress(out);x.emit(0x59).push().emit(0x51).call(C+(single?'to-single':'to-double'));
+  },
+  currencyToInteger() {this.x.push().call(C+'integer');},
+  currencyToString() {this.x.push().call(C+'string');this.ownString();},
+  /** Currency-aware lowering runs before the generic floating/int paths. */
+  currencyOperation(node) {
+    const x=this.x,type=this.type(node);
+    if(node.kind==='currency'||node.kind==='literal'&&node.value instanceof VBCurrency){x.value(this.currencyLiteral(node.value));return true;}
+    if(node.kind==='unary'&&['+','-'].includes(node.op)&&type==='currency') {
+      // The magnitude of the most-negative literal is outside positive CY range.
+      if(node.op==='-'&&node.expr.kind==='currency'){x.value(this.currencyLiteral('-'+node.expr.value));return true;}
+      this.currencyExpression(node.expr);if(node.op==='-')this.currencyUnary('negate');return true;
+    }
+    if(node.kind!=='binary')return false;
+    const a=this.type(node.left),b=this.type(node.right),op=node.op;
+    const compare=['=','<>','<','<=','>','>='].includes(op)&&(a==='currency'||b==='currency');
+    if(compare) {
+      if(!scalars.has(a)||!scalars.has(b))this.fail('Use CCur explicitly in mixed native text/Currency operations');
+      const leftFloat=floats.has(a),rightFloat=floats.has(b);
+      if(leftFloat)this.floatExpression(node.left);else this.currencyExpression(node.left);x.push();
+      if(rightFloat)this.floatExpression(node.right);else this.currencyExpression(node.right);x.emit(0x59);
+      if(leftFloat)x.emit(0x51).push().call(C+'compare-double').emit(0xf7,0xd8);
+      else x.push().emit(0x51).call(C+(rightFloat?'compare-double':'compare'));
+      x.compare(0);this.boolean(op);return true;
+    }
+    if(type!=='currency')return false;
+    this.currencyExpression(node.left);x.push();this.currencyExpression(node.right);x.emit(0x59,0x51,0x50);
+    const out=this.currencyWorkspace();this.rawStorageAddress(out);
+    x.emit(0x5a,0x59).push().emit(0x52,0x51).call(C+({'+':'add','-':'subtract','*':'multiply'})[op]);return true;
+  },
+  currencyUnary(name) {
+    const x=this.x,out=this.currencyWorkspace();x.push();this.rawStorageAddress(out);x.emit(0x59).push().emit(0x51).call(C+name);
+  },
+  nativeQueryType(node) {
+    while(node.kind==='group')node=node.expr;
+    if(node.kind==='literal'&&typeof node.value==='boolean')return 'boolean';
+    // Comparisons yield Boolean even though EAX carries their -1/0 value in a
+    // 32-bit register. Do not expose that physical register width as VarType.
+    if(node.kind==='binary'&&['=','<>','<','<=','>','>='].includes(key(node.op)))return 'boolean';
+    if(node.kind==='unary'&&key(node.op)==='not'&&this.nativeQueryType(node.expr)==='boolean')return 'boolean';
+    if(node.kind==='binary'&&['and','or','xor','eqv','imp'].includes(key(node.op))&&this.nativeQueryType(node.left)==='boolean'&&this.nativeQueryType(node.right)==='boolean')return 'boolean';
+    return this.type(node);
+  },
+  currencyBuiltin(node,name) {
+    const x=this.x,args=node.args;
+    if(name==='ccur'){if(args.length!==1)this.fail('CCur expects one argument');this.currencyExpression(args[0]);return true;}
+    if(['vartype','typename'].includes(name)) {
+      if(args.length!==1)this.fail(name+' expects one argument');
+      let query=args[0];while(query.kind==='group')query=query.expr;
+      // Unsuffixed numeric literal metadata is not retained by this frontend.
+      // Do not mistake the AOT's Long working representation for VB's subtype.
+      if(query.kind==='literal'&&typeof query.value==='number')this.fail('Native '+name+' needs an explicitly typed value; use a typed variable or conversion');
+      const variable=this.variable(query),array=variable?.nativeArray&&!variable.elementOf;
+      const type=array?key(variable.type):this.nativeQueryType(query);
+      const descriptor={byte:[17,'Byte'],integer:[2,'Integer'],long:[3,'Long'],boolean:[11,'Boolean'],single:[4,'Single'],double:[5,'Double'],currency:[6,'Currency'],string:[8,'String']}[type];
+      if(!descriptor)this.fail('Native '+name+' requires a supported typed value');
+      if(!array)this.expression(args[0]);
+      x.value(name==='vartype'?descriptor[0]+(array?8192:0):this.string(descriptor[1]+(array?'()':'')));return true;
+    }
+    if(!args.length||this.type(args[0])!=='currency')return false;
+    if(['clng','cint','cbyte','cbool'].includes(name)) {
+      if(args.length!==1)this.fail(name+' expects one argument');this.expression(args[0]);
+      if(name==='cbool')x.push().call(C+'boolean');else {this.currencyToInteger();this.check({clng:'Long',cint:'Integer',cbyte:'Byte'}[name]);}return true;
+    }
+    if(['abs','fix','int','sgn'].includes(name)) {
+      if(args.length!==1)this.fail(name+' expects one argument');this.expression(args[0]);
+      if(name==='sgn')x.push().call(C+'sign');else this.currencyUnary(name);return true;
+    }
+    if(name==='round') {
+      if(args.length>2)this.fail('Round expects one or two arguments');
+      this.expression(args[0]);x.push();this.numeric(args[1]||{kind:'literal',value:0});x.push();
+      const out=this.currencyWorkspace();this.rawStorageAddress(out);x.emit(0x5a,0x59).push().emit(0x52,0x51).call(C+'round');return true;
+    }
+    if(name==='csng'){if(args.length!==1)this.fail('CSng expects one argument');this.expression(args[0]);this.currencyToFloat(true);return true;}
+    return false;
+  },
+  captureCurrencyReturn() {
+    const x=this.x,out=this.currencyWorkspace();
+    // Preserve both ABI registers before address generation or error/lock helpers.
+    x.emit(0x52,0x50);this.rawStorageAddress(out);x.emit(0x59,0x5a,0x89,0x08,0x89,0x50,4);
+  }
+};
+
+/** All pointers/lengths here originate from emitted storage, not untrusted IPC. */
+function emitNativeCurrencyHelpers(c) {
+  const x=c.x,check=()=>x.call('native:number:check');
+  // copy(in*, out*) works on arbitrary bit patterns, not IEEE finite checks.
+  x.label(C+'copy').enter().value(arg(8)).emit(0x8b,0x08,0x8b,0x50,4).value(arg(12)).emit(0x89,0x08,0x89,0x50,4).leave(8);
+  x.label(C+'from-int').enter().api(DLL,'VarCyFromI4',[arg(8),arg(12)]);check();x.value(arg(12)).leave(8);
+  x.label(C+'parse').enter().push(arg(8)).call('native:string:numeric-text').api(DLL,'VarCyFromStr',[arg(8),0x400,0,arg(12)]);check();x.value(arg(12)).leave(8);
+  x.label(C+'from-double').enter().value(arg(8)).call('native:number:finite').emit(0x89,0xc3).push(arg(12)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarCyFromR8');check();x.value(arg(12)).leave(8);
+  x.label(C+'to-double').enter().value(arg(8)).emit(0x89,0xc3).push(arg(12)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarR8FromCy');check();x.value(arg(12)).call('native:number:finite').leave(8);
+  x.label(C+'to-single').enter(4).value(arg(8)).emit(0x89,0xc3).push(addr(-4)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarR4FromCy');check();x.emit(0xd9,0x45,0xfc).value(arg(12)).emit(0xdd,0x18).call('native:number:finite').leave(8);
+  x.label(C+'integer').enter(4).value(arg(8)).emit(0x89,0xc3).push(addr(-4)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarI4FromCy');check();x.value(arg(-4)).leave(4);
+  x.label(C+'string').enter(4).value(0).emit(0x89,0x45,0xfc).value(arg(8)).emit(0x89,0xc3).push(addr(-4)).push(0).push(0x400).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarBstrFromCy');check();x.value(arg(-4)).leave(4);
+  x.label(C+'boolean').enter().value(arg(8)).emit(0x8b,0x10,0x0b,0x50,4,0x0f,0x95,0xc0,0x0f,0xb6,0xc0,0xf7,0xd8).leave(4);
+  const negative=x.unique(),signDone=x.unique();
+  x.label(C+'sign').enter().value(arg(8)).emit(0x8b,0x50,4,0x85,0xd2).branch('s',negative).emit(0x0b,0x10,0x0f,0x95,0xc0,0x0f,0xb6,0xc0).jump(signDone).label(negative).value(-1).label(signDone).leave(4);
+  for(const [name,symbol]of [['add','VarCyAdd'],['subtract','VarCySub'],['multiply','VarCyMul']]) {
+    x.label(C+name).enter().value(arg(8)).emit(0x89,0xc3).value(arg(12)).emit(0x89,0xc6).push(arg(16)).emit(0xff,0x76,4,0xff,0x36,0xff,0x73,4,0xff,0x33).invoke(DLL,symbol);check();x.value(arg(16)).leave(12);
+  }
+  for(const [name,symbol]of [['negate','VarCyNeg'],['abs','VarCyAbs'],['fix','VarCyFix'],['int','VarCyInt']]) {
+    x.label(C+name).enter().value(arg(8)).emit(0x89,0xc3).push(arg(12)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,symbol);check();x.value(arg(12)).leave(8);
+  }
+  for(const [name,symbol]of [['compare','VarCyCmp'],['compare-double','VarCyCmpR8']]) {
+    x.label(C+name).enter().value(arg(8)).emit(0x89,0xc3).value(arg(12)).emit(0x89,0xc6,0xff,0x76,4,0xff,0x36,0xff,0x73,4,0xff,0x33).invoke(DLL,symbol);check();x.emit(0x48).leave(8); // VARCMP_LT/EQ/GT = 0/1/2
+  }
+  const unchanged=x.unique();
+  x.label(C+'round').enter().value(arg(12)).compare(0).branch('l','error:5').compare(28).branch('g','error:5').compare(4).branch('ge',unchanged);
+  x.value(arg(8)).emit(0x89,0xc3).push(arg(16)).push(arg(12)).emit(0xff,0x73,4,0xff,0x33).invoke(DLL,'VarCyRound');check();x.value(arg(16)).leave(12);
+  x.label(unchanged).push(arg(16)).push(arg(8)).call(C+'copy').leave(12);
+}
+
+return {nativeCurrencyMethods,emitNativeCurrencyHelpers};
+})();
+
+/* numeric.js */
+__modules[25]=(()=>{
 
 /** Native Single/Double lowering. Floating expressions return an immutable Double
  * snapshot address in EAX; only ABI returns use ST(0). No live FPU values span
@@ -1909,7 +2197,7 @@ const DLL='oleaut32.dll';
 const arg=argument=>({argument});
 const addr=address=>({address});
 const literal=value=>({kind:'literal',value});
-const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && key(p.type)==='double'?8:4;
+const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && ['double','currency'].includes(key(p.type))?8:4;
 
 const nativeNumericMethods = {
   floatLiteral(value) {
@@ -1946,8 +2234,9 @@ const nativeNumericMethods = {
     }
     return null;
   },
-  floatExpression(node) {
+  floatExpression(node,single=false) {
     const type=this.type(node);this.expression(node);
+    if(type==='currency'){this.currencyToFloat(single);return;}
     if(FLOAT_TYPES.has(type))return;
     const out=this.floatWorkspace();this.x.push();this.rawStorageAddress(out);this.x.emit(0x59).push().emit(0x51).call(N+(type==='string'?'parse':'from-int'));
   },
@@ -1967,7 +2256,7 @@ const nativeNumericMethods = {
   },
   floatToInteger() {this.x.push().call(N+'integer');},
   floatToString(type) {this.x.emit(0x89,0xc3).push(key(type)==='single'?1:0).emit(0x53).call(N+'string');this.ownString();},
-  truth(node) {this.expression(node);if(FLOAT_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
+  truth(node) {this.expression(node);if(this.type(node)==='currency')this.x.push().call('native:currency:boolean');else if(FLOAT_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
   numericExpression(node) {
     const x=this.x;
     if(node.kind==='literal'&&FLOAT_TYPES.has(this.type(node))){x.value(this.floatLiteral(node.value));return true;}
@@ -2041,13 +2330,16 @@ const nativeNumericMethods = {
         if(node.kind==='group')this.fail('Parenthesized ByRef temporaries are not yet lowered');
         const v=this.variable(node);if(!v||v.nativeArray&&!v.elementOf||key(v.type)!==key(p.type))this.fail('ByRef native argument must be a scalar of the exact declared type');
         if(v.fixedLength)this.fail('Fixed-length String ByRef copy-back is not yet lowered');const pin=this.address(v);if(pin)callPins.push(pin);
-      }else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node);this.storeFloat(slot);slots.push(slot);return;}
+      }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots.push(slot);return;}
+      else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots.push(slot);return;}
       else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
       x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots.push(slot);
     });
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}
     if(target.proc)x.call(target.label);else x.invoke(target.dll,target.symbol);
-    if(signature.kind==='function'&&FLOAT_TYPES.has(key(signature.returnType))){
+    if(signature.kind==='function'&&key(signature.returnType)==='currency'){
+      this.captureCurrencyReturn();if(target.proc)this.checkNativeError();
+    }else if(signature.kind==='function'&&FLOAT_TYPES.has(key(signature.returnType))){
       const out=this.floatWorkspace();this.rawStorageAddress(out);x.emit(0xdd,0x18); // Pop ABI result before any helper/error check.
       if(target.proc)this.checkNativeError();x.call(N+'finite');
       if(key(signature.returnType)==='single')this.roundSingle();
@@ -2162,7 +2454,7 @@ return {FLOAT_TYPES,nativeParameterBytes,nativeNumericMethods,emitNativeNumericH
 })();
 
 /* control-arrays.js */
-__modules[24]=(()=>{
+__modules[26]=(()=>{
 
 /** Statically designed control arrays, including Index event arguments. Each
  * element retains its own native HWND and ID; no flattened duplicate names. */
@@ -2240,11 +2532,11 @@ return {nativeControlArrayMethods};
 })();
 
 /* storage.js */
-__modules[25]=(()=>{
+__modules[27]=(()=>{
 
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
 const key = value => String(value).toLowerCase();
-const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double']);
+const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency']);
 const MAX_NATIVE_STRING = 1024 * 1024;
 
 function boundValue(compiler, node, module, proc) {
@@ -2272,9 +2564,9 @@ function boundValue(compiler, node, module, proc) {
 }
 
 function storageLayout(compiler, decl, module, proc) {
-  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double or String: ' + decl.name, module);
+  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency or String: ' + decl.name, module);
   if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
-  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : key(decl.type)==='double' ? 8 : 4;
+  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency'].includes(key(decl.type)) ? 8 : 4;
   decl.nativeElementBytes = elementBytes;
   let count = 1;
   if (decl.bounds !== null && decl.bounds !== undefined) {
@@ -2324,7 +2616,7 @@ const nativeStorageMethods = {
   },
   storageExpression(variable, node) {
     if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
-    if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type)))this.floatExpression(node);else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
+    if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
   },
   rawStorageAddress(variable) {
     if (variable.owner?.form) this.x.call(variable.owner.initialize);
@@ -2349,7 +2641,7 @@ const nativeStorageMethods = {
   stringBuiltin(node, name) {
     const x = this.x, args = node.args;
     if (['len','lenb','ascw','strptr'].includes(name)) {
-      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
+      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
       if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
       if(name==='strptr'){
         const variable=this.variable(args[0]);
@@ -2412,7 +2704,7 @@ return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHe
 })();
 
 /* arrays.js */
-__modules[26]=(()=>{
+__modules[28]=(()=>{
 
 /** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
  * passes a descriptor slot by reference; it is never exposed to browser code. */
@@ -2421,7 +2713,7 @@ const A = 'native:array:';
 const DLL = 'oleaut32.dll';
 const arg = argument => ({argument});
 const addr = address => ({address});
-const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5};
+const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6};
 const NATIVE_ARRAY_MAX_BYTES = 1024 * 1024;
 const NATIVE_ARRAY_MAX_RANK = 8;
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
@@ -2559,7 +2851,7 @@ function emitNativeArrayHelpers(compiler) {
   x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
     .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7');save(x,-16);
   x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
-  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit)
+  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit)
     .value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/4).branch('g','error:7').jump(limitDone);
   x.label(halfLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/2).branch('g','error:7').jump(limitDone);
   x.label(doubleLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/8).branch('g','error:7').jump(limitDone);
@@ -2616,7 +2908,7 @@ return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayMethods,emitNati
 })();
 
 /* errors.js */
-__modules[27]=(()=>{
+__modules[29]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -2751,16 +3043,20 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[28]=(()=>{
+__modules[30]=(()=>{
 const {normalizeProject}=__modules[13];
 const {compileProject, parseParameters}=__modules[20];
 const {PE32Image, BinarySection}=__modules[21];
 const {X86}=__modules[22];
-const {FLOAT_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[23];
-const {nativeControlArrayMethods}=__modules[24];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[25];
-const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[26];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[27];
+const {nativeBindingMethods}=__modules[23];
+const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[24];
+const {FLOAT_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[25];
+const {nativeControlArrayMethods}=__modules[26];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[27];
+const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[28];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[29];
+
+
 
 
 
@@ -2791,8 +3087,8 @@ function extractNativeDeclarations(module) {
     const dll = /\.dll$/i.test(m[4]) ? m[4] : m[4] + '.dll', name = key(m[3]);
     const params = parseParameters(m[6]);
     if (declarations.has(name)) throw new NativeCompileError('Duplicate native declaration: ' + m[3], module.name, index + 1);
-    if (params.some(p => !INT_TYPES.has(key(p.type)) && !FLOAT_TYPES.has(key(p.type)) || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !FLOAT_TYPES.has(key(m[7])))) {
-      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean/Single/Double parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
+    if (params.some(p => !INT_TYPES.has(key(p.type)) && !FLOAT_TYPES.has(key(p.type)) && key(p.type)!=='currency' || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !FLOAT_TYPES.has(key(m[7])) && key(m[7])!=='currency')) {
+      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean/Single/Double/Currency parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
     }
     declarations.set(name, {name:m[3],kind:key(m[2]),scope:key(m[1] || 'public'),params,returnType:m[7] || 'Long',dll,symbol:/^#\d+$/.test(m[5] || '') ? Number(m[5].slice(1)) : m[5] || m[3],line:index + 1});
     return ''; // Keep line numbers stable.
@@ -2836,7 +3132,7 @@ class NativeCompiler {
     for (const proc of module.procedures.values()) {
       this.preparingProcedure=proc;
       if (!['sub','function'].includes(proc.kind)) this.fail('Native AOT does not lower property procedures', module);
-      if (proc.kind === 'function' && !INT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='string' && !FLOAT_TYPES.has(key(proc.returnType))) this.fail('Native functions must return a supported scalar: ' + proc.name, module);
+      if (proc.kind === 'function' && !INT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='string' && !FLOAT_TYPES.has(key(proc.returnType)) && key(proc.returnType)!=='currency') this.fail('Native functions must return a supported scalar: ' + proc.name, module);
       const context = {module:result,proc,label:'proc:' + module.name + ':' + proc.name,locals:new Map(),temporaries:new Map(),loops:new Map(),size:NATIVE_ERROR_FRAME_BYTES};
       const local = (name, type = 'Long',decl={}) => { context.size += decl.nativeBytes || 4; if(context.size>512*1024)this.fail('Native procedure workspace exceeds 512 KiB',module); const variable = {...decl,name,type,offset:-context.size}; context.locals.set(key(name),variable); return variable; };
       let argumentOffset=8;
@@ -2899,13 +3195,13 @@ class NativeCompiler {
   }
   publicVariable(name) { const matches = [...this.modules.values()].flatMap(m => [...m.globals.values()].filter(v => key(v.name) === key(name) && v.scope === 'public')); if (matches.length > 1) this.fail('Ambiguous global: ' + name); return matches[0]; }
   constant(node) {
-    if (node.kind !== 'id') return undefined; const name = key(node.name), c = this.context;
-    for (const map of [c?.proc.constantBindings, c?.module.module.constantBindings, c?.module.module.importedConstantBindings, c?.module.module.globalEnumMembers]) if (map?.has(name)) return map.get(name);
-    return CONSTANTS[name];
+    const binding=this.nativeConstant(node);if(binding)return binding.value;
+    return node.kind==='id'&&!this.variable(node)?CONSTANTS[key(node.name)]:undefined;
   }
   address(variable) { if(!variable)this.fail('Expression is not addressable'); if(variable.elementOf)return this.elementAddress(variable); this.rawStorageAddress(variable);return null; }
   load(variable) {
     if(variable.nativeArray&&!variable.elementOf)this.fail('Array requires indices: '+variable.name);
+    if(key(variable.type)==='currency')return this.loadCurrency(variable);
     if(FLOAT_TYPES.has(key(variable.type)))return this.loadFloat(variable);
     const pin=this.address(variable); const type=key(variable.type);
     this.x.emit(...(type==='byte'?[0x0f,0xb6,0x00]:['integer','boolean'].includes(type)?[0x0f,0xbf,0x00]:[0x8b,0x00]));
@@ -2914,6 +3210,7 @@ class NativeCompiler {
   }
   check(type) { type = key(type); if (type === 'boolean') this.x.test().emit(0x0f,0x95,0xc0,0x0f,0xb6,0xc0,0xf7,0xd8); else if (type === 'integer') this.x.compare(-32768).branch('l','error:6').compare(32767).branch('g','error:6'); else if (type === 'byte') this.x.compare(255).branch('g','error:6').compare(0).branch('l','error:6'); }
   store(variable) {
+    if(key(variable.type)==='currency')return this.storeCurrency(variable);
     if(FLOAT_TYPES.has(key(variable.type)))return this.storeFloat(variable);
     if(key(variable.type)==='string'){
       if(variable.fixedLength){this.x.emit(0x89,0xc3).push(variable.fixedLength).emit(0x53).call('native:string:fixed');this.ownString();}
@@ -2929,6 +3226,8 @@ class NativeCompiler {
   ensure(object) { const form = object.form ? object : object.module; this.x.call(form.create); if(object.indexed)this.resolveControlHandle(object); }
   handle(object) { this.ensure(object); this.x.value(this.controlHandleRef(object)); }
   type(node) {
+    const bound=this.nativeConstant(node);if(bound)return bound.type;
+    const currencyType=this.currencyType(node);if(currencyType)return currencyType;
     const numericType=this.numericType(node);if(numericType)return numericType;
     if (node.kind === 'group') return this.type(node.expr);
     const errorProperty=this.errorProperty(node);if(errorProperty)return errorProperty==='number'?'long':'string';
@@ -2936,9 +3235,9 @@ class NativeCompiler {
     if(node.kind==='call'){
       const name=node.callee.kind==='id'?key(node.callee.name).replace(/\$$/,''):'';
       if(['cstr','left','right','mid','chrw'].includes(name))return 'string';
-      const proc=this.resolveProcedure(node.callee);if(proc?.proc?.kind==='function')return key(proc.proc.returnType);
+      const result=this.nativeFunctionType(node);if(result)return result;
     }
-    if(node.kind==='id'){const proc=this.resolveProcedure(node);if(proc?.proc?.kind==='function')return key(proc.proc.returnType);}
+    if(node.kind==='id'||node.kind==='member'){const result=this.nativeFunctionType(node);if(result)return result;}
     if (node.kind === 'id' && key(node.name)==='caption' && this.context?.module.form && !this.variable(node)) return 'string';
     if (node.kind === 'literal') return typeof node.value === 'string' ? 'string' : 'long';
     const constant = this.constant(node); if (constant !== undefined) return typeof constant === 'string' ? 'string' : 'long';
@@ -2947,10 +3246,12 @@ class NativeCompiler {
     if (node.kind === 'call' && node.callee.kind === 'id' && key(node.callee.name) === 'cstr') return 'string';
     return 'long';
   }
-  numeric(node) { if (this.type(node) === 'string') this.fail('Use CLng/CInt explicitly to convert native text to a number'); this.expression(node);if(FLOAT_TYPES.has(this.type(node)))this.floatToInteger(); }
-  textExpression(node) { this.expression(node); if(FLOAT_TYPES.has(this.type(node))){this.floatToString(this.type(node));}else if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); }
+  numeric(node) { if (this.type(node) === 'string') this.fail('Use CLng/CInt explicitly to convert native text to a number'); this.expression(node);if(this.type(node)==='currency')this.currencyToInteger();else if(FLOAT_TYPES.has(this.type(node)))this.floatToInteger(); }
+  textExpression(node) { this.expression(node); if(this.type(node)==='currency'){this.currencyToString();}else if(FLOAT_TYPES.has(this.type(node))){this.floatToString(this.type(node));}else if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); }
   expression(node) {
     if (!node) this.fail('Missing expression'); const x = this.x;
+    const bound=this.nativeConstant(node);if(bound)return this.emitNativeConstant(bound);
+    if(this.currencyOperation(node))return;
     if(this.numericExpression(node))return;
     if (node.kind === 'group') return this.expression(node.expr);
     if (node.kind === 'unary' && node.op === '-' && node.expr?.kind === 'literal' && node.expr.value === 2147483648) { x.value(-2147483648); return; }
@@ -3029,6 +3330,7 @@ class NativeCompiler {
   call(node) {
     const x = this.x, args = node.args, name = node.callee.kind === 'id' ? key(node.callee.name).replace(/\$$/,'') : null;
     if(this.errorCall(node))return;
+    if(this.currencyBuiltin(node,name))return;
     if(this.numericBuiltin(node,name))return;
     if(this.stringBuiltin(node,name))return;
     if(name==='lbound'||name==='ubound'){this.arrayBoundCall(node,name==='ubound');return;}
@@ -3133,10 +3435,10 @@ class NativeCompiler {
       this.rawStorageAddress(context.returnValue);x.emit(0x8b,0x00);x.push();this.rawStorageAddress(context.returnValue);x.emit(0xc7,0x00,0,0,0,0,0x58);
     }else if(context.returnValue)this.load(context.returnValue);else x.value(0);
     const cleanup=context.label+':cleanup';x.jump(cleanup);
-    x.label(context.label+':error-return').value(context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type))?this.floatLiteral(0):0);
+    x.label(context.label+':error-return').value(context.returnValue&&key(context.returnValue.type)==='currency'?this.currencyLiteral('0'):context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type))?this.floatLiteral(0):0);
     x.label(cleanup).push().call(context.label+':clear-strings');
     for(const variable of context.locals.values())if(!variable.label&&!variable.parameter){if(variable.nativeArray)this.destroyArrayStorage(variable);else if(key(variable.type)==='string')this.clearStringStorage(variable);}
-    x.emit(0x58);this.leaveErrorFrame();if(context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type)))x.emit(0xdd,0x00);x.leave(context.argumentBytes);
+    x.emit(0x58);this.leaveErrorFrame();if(context.returnValue&&key(context.returnValue.type)==='currency')x.emit(0x8b,0x50,4,0x8b,0x00);if(context.returnValue&&FLOAT_TYPES.has(key(context.returnValue.type)))x.emit(0xdd,0x00);x.leave(context.argumentBytes);
     this.emitErrorDispatch(context);
     x.label(context.label+':clear-strings');for(const pin of context.arrayPins)this.releaseArrayPin(pin);for(const variable of context.stringTemps)this.clearStringStorage(variable);x.emit(0xc3);
     this.instruction=null;this.x=outer;outer.sequence=x.sequence;outer.label(context.label).enter(context.size);
@@ -3354,7 +3656,7 @@ class NativeCompiler {
   }
   helpers() {
     const x = this.x;
-    emitNativeNumericHelpers(this);
+    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);
     emitNativeStorageHelpers(this);
     emitNativeArrayHelpers(this);
     // int-to-string(value, buffer), including INT_MIN without signed negation overflow.
@@ -3392,10 +3694,10 @@ class NativeCompiler {
     x.label(dispatch).api('user32.dll','TranslateMessage',['msg']).api('user32.dll','DispatchMessageW',['msg']).jump(loop).label(quit).api('kernel32.dll','ExitProcess',[0]);
     this.image.manifest('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo><dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="x86" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency></assembly>');
     const linked = this.image.finish('entry');
-    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
+    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods);
+Object.assign(NativeCompiler.prototype,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods);
 function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');
@@ -3407,8 +3709,8 @@ return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[29]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[28];
+__modules[31]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[30];
 const {PE32Image, BinarySection, PE32_BASE}=__modules[21];
 const {X86}=__modules[22];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
@@ -3418,5 +3720,5 @@ const {X86}=__modules[22];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[29];
+globalThis["VB6Native"]=__modules[31];
 })();

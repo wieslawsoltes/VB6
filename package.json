@@ -16,6 +16,8 @@
     "test:finalization": "python tools/browser-finalization-05.py",
     "probe:launch": "python tools/probe-launch.py",
     "package": "python tools/package-release.py",
+    "test:debugger": "node --test tests/debugger-runtime.test.mjs",
+    "test:debugger:browser": "python tools/browser-debugger-runtime.py",
     "test:boundaries": "python tools/browser-boundaries-06.py",
     "mcp:bridge": "node tools/mcp-bridge.mjs",
     "mcp:stdio": "node tools/mcp-stdio.mjs",
@@ -29,7 +31,7 @@
     "build:win32": "node tools/build-win32.mjs",
     "test:win32": "node --test tests/win32-*.test.mjs",
     "test:win32:browser": "python tools/browser-native-build-tests.py",
-    "test:project-files": "node --test tests/native-projects.test.mjs tests/native-directory.test.mjs tests/native-compatibility-review.test.mjs tests/native-zip.test.mjs",
+    "test:project-files": "node --test tests/native-projects.test.mjs tests/native-directory.test.mjs tests/native-compatibility-review.test.mjs tests/native-zip.test.mjs tests/native-workspace.test.mjs tests/native-save-recovery.test.mjs tests/native-zip-encoding.test.mjs tests/native-snapshot.test.mjs",
     "test:project-browser": "python tools/native-project-browser-tests.py",
     "test:mcp:agent": "python tools/mcp-agent-browser-tests.py",
     "agent:relay": "node tools/agent-relay.mjs",
@@ -41,7 +43,11 @@
     "data:gateway": "node tools/data-gateway.mjs",
     "test:win32-browser": "node --test tests/win32-browser*.test.mjs",
     "test:win32-browser:browser": "python tools/browser-win32-compat-tests.py",
-    "pack:win32-browser": "node tools/pack-win32-browser.mjs"
+    "pack:win32-browser": "node tools/pack-win32-browser.mjs",
+    "test:interop": "node --test tests/native-automation.test.mjs tests/native-control-adapters.test.mjs",
+    "test:interop:windows": "node tools/interop/test-native.mjs",
+    "verify:classic": "node tools/verify-classic-roundtrip.mjs",
+    "snapshot:native": "node tools/native-snapshot.mjs"
   },
   "engines": {
     "node": ">=22"

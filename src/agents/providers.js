@@ -65,6 +65,19 @@ export async function readEvents(response, receive, {signal, maxBytes = 8 * 1024
     else { buffer += decoder.decode() + (pendingCR ? '\n' : ''); if (buffer.trim()) event(buffer); }
   } finally { signal?.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
+/** Safe metadata for an explicit user retry; never includes upstream bodies or credentials. */
+export class ProviderTransportError extends Error {
+  constructor(message, {status = 0, retryable = false, retryAfterMs = 0} = {}) {
+    super(message); this.name = 'ProviderTransportError';
+    this.status = status; this.retryable = retryable; this.retryAfterMs = retryAfterMs;
+  }
+}
+export function retryAfter(value, now = Date.now()) {
+  if (typeof value !== 'string' || value.length > 100) return 0;
+  const seconds = /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - now;
+  return Number.isFinite(ms) ? Math.max(0, Math.min(300000, Math.ceil(ms))) : 0;
+}
 export function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch} = {}) {
   providerInfo(provider);
   const origin = relay ? relayURL(relay) : '';
@@ -79,13 +92,13 @@ export function createTransport({provider, apiKey = '', relay = '', relayToken =
       response = await fetchImpl(origin ? origin + '/agent' : native.url, {method: origin ? 'POST' : native.method, headers, credentials: 'omit', redirect: 'error', cache: 'no-store', signal: combined,
         body: origin ? JSON.stringify({provider, operation: models ? 'models' : 'generate', cursor, body: models ? undefined : body}) : native.body});
     } catch {
-      combined.throwIfAborted();
-      throw new Error('Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.');
+      signal?.throwIfAborted();
+      throw new ProviderTransportError(timer.aborted ? 'Provider request timed out. An explicit retry may incur additional charges.' : 'Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.', {retryable: true});
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       // Do not echo untrusted response bodies: they can contain credentials or prompt data.
-      throw new Error('Provider HTTP ' + response.status + '. ' + (response.status === 429 ? 'Rate limit or quota reached; retry later.' : response.status === 401 || response.status === 403 ? 'Check credentials and model access.' : 'Check the model ID and provider limits.'));
+      throw new ProviderTransportError('Provider HTTP ' + response.status + '. ' + (response.status === 429 ? 'Rate limit or quota reached; retry later.' : response.status === 401 || response.status === 403 ? 'Check credentials and model access.' : 'Check the model ID and provider limits.'), {status: response.status, retryable: [408, 429, 500, 502, 503, 504, 529].includes(response.status), retryAfterMs: retryAfter(response.headers.get('retry-after'))});
     }
     await readEvents(response, receive, {signal: combined});
   };
@@ -172,7 +185,8 @@ export function responseCollector(provider, onText = () => {}) {
     }
     const seen = new Set();
     for (const call of calls) { if (!call.id || !call.name || seen.has(call.id) || !call.arguments || typeof call.arguments !== 'object' || Array.isArray(call.arguments)) throw new Error('Invalid or duplicate provider tool call.'); seen.add(call.id); }
-    return {message, calls, text, tokens: Number(usage.total_tokens ?? usage.totalTokenCount ?? (Number(usage.input_tokens || 0) + Number(usage.output_tokens || 0) + Number(usage.cache_read_input_tokens || 0) + Number(usage.cache_creation_input_tokens || 0))) || 0};
+    const reported = Number(usage.total_tokens ?? usage.totalTokenCount ?? (Number(usage.input_tokens || 0) + Number(usage.output_tokens || 0) + Number(usage.cache_read_input_tokens || 0) + Number(usage.cache_creation_input_tokens || 0)));
+    return {message, calls, text, tokens: Number.isFinite(reported) && reported >= 0 ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(reported)) : 0};
   }
   return {receive, result};
 }

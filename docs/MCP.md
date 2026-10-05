@@ -5,9 +5,9 @@ external coding agents through MCP. It is **not an MCP client or model host**.
 There is no external-server connection manager, outbound tool runner, OAuth
 sign-in, model sampling provider, or configured-process gateway in the IDE.
 
-Open **Tools → MCP Agent Access…**. The panel has four local administration tabs:
+Open **Tools → MCP Agent Access…**. The panel has five local administration tabs:
 **Agent access**, **Agent permissions**, **Capabilities** (a read-only tool/schema
-reference), and **Activity**. Nothing is shared automatically on startup.
+reference), **Activity**, and **Operations** (retained task/build handles). Nothing is shared automatically on startup.
 
 ## Architecture and deployment
 
@@ -102,7 +102,7 @@ OAuth-protected MCP hosting service.
 
 ## Agent workflow and control surface
 
-The server exposes **114 structured tools**, resources, prompts, pagination,
+The server exposes **125 structured tools**, resources, prompts, pagination,
 subscriptions, cancellation and event-driven waiting. The complete tool reference
 and examples are in [MCP-AGENTS.md](MCP-AGENTS.md).
 
@@ -141,7 +141,7 @@ client-supplied name. No scope is selected by default; tokens, grants and sharin
 state remain memory-only. An indicator shows enabled access and active scopes.
 Editor text edits require the **code** scope, whole-project undo/redo requires
 **project**, and capturing runtime files into a project requires **files**.
-The workspace scope alone cannot authorize these data changes.
+The workspace scope alone cannot authorize these project changes. Public Data Environment definition edits have a separate **data** scope; they cannot execute SQL, open connections or request credentials.
 
 Pending consent is bound to the current workspace instance, even when another
 loaded project retains the same ID. Disabling/re-enabling sharing cannot revive
@@ -195,6 +195,15 @@ scope, browses resources/prompts, and exports the schema catalog. **Activity** h
 filterable table, errors-only view, follow toggle and JSON export. Arguments and
 credentials are not logged; error summaries can contain project identifiers, so
 review activity before sharing it.
+
+**Operations** lists retained tasks and build downloads using local metadata only.
+Cancel a selected task, clear finished tasks, or release selected/all build
+artifacts. Released/cleared handles immediately become unavailable to agents.
+Task arguments, results, client identities and runtime credential caches are not
+shown. Closing/reopening the modeless panel disposes only its UI listeners, not
+the server or retained operations. These owner controls are not MCP tools; there
+is no remote `tasks/list` endpoint or cross-client artifact inventory. Tabs wrap
+at narrow widths without overlapping their content.
 
 ## Pollable waits and immutable build downloads
 
@@ -293,3 +302,54 @@ Primary protocol references:
 - [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28)
 - [Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [Legacy tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+
+## Data Environment and large source reads
+
+The `vb6.data.*` tools inspect and edit the project's public connection and command
+definitions. `data.providers` describes the seven built-in provider IDs;
+`data.list` returns paginated summaries and `vb6://data` exposes that inventory as
+a resource. Connection/command `get`, `set`, and `remove` support explicit
+create/replace modes and case-insensitive names. `data.rename` updates dependent
+command-to-connection references atomically. Removing a connection with commands
+requires explicit `cascade:true`. Source identifiers and control bindings are not
+rewritten by these operations: use `code.edit`/`control.edit` explicitly.
+
+Mutations require design mode, the current revision and Allow once or the new
+**data** scope. Complete candidates are validated with the same model as the IDE,
+then committed through project undo. Individual definitions are bounded to
+512 KiB. Known credential fields, authorization headers, credential-bearing URLs
+and connection strings are rejected by the shared public-configuration validator;
+use a `credentialRef` instead. As with source files, arbitrary text is not a
+universal secret scanner. Runtime credentials are neither inspected nor changed.
+`data.validate` is structural validation, **not** a live connection/SQL test.
+There are no database-execution or network-access tools in this group.
+
+For very long source lines, `vb6.code.read` returns bounded UTF-16 ranges rather
+than the line-based `module.read` response. Supply `module`, optional `offset`
+(default 0), `count` (default 65,536; maximum 262,144 code units) and the optional
+`expectedRevision`. Reuse that revision for every chunk; stop and reread on a
+stale-revision error. `nextOffset`, `totalCodeUnits`, `hasMore` and
+`offsetEncoding:"utf-16"` describe progress. Concatenate as UTF-16 code units:
+a chunk boundary can split a surrogate pair without dropping either unit.
+
+Principal revocation cancels matching active calls, legacy sessions, tasks and
+artifacts without affecting other principals. A canceled/expired task cannot
+start its queued adapter callback, canceled legacy resource subscriptions cannot
+recreate closed listeners, and a closed server rejects new dispatches. Stateless
+tool calls see current tool registrations even without a prior catalog read.
+
+
+Transport-authenticated principals own initialized sessions and cancellation
+notifications; reusing a session key does not grant access to another caller.
+Task deadlines are also checked before queued execution and before publishing a
+result, so a suspended tab or delayed timer cannot extend a task's authority.
+Cancelling an initiating request before its handle is returned removes that
+unpublished task; a successfully returned task remains independent of its HTTP
+response lifetime. These are cooperative cancellation rules: they do not
+preempt synchronous JavaScript already executing in the browser.
+
+The IDE's separate API-key coding agents consume the same 125-tool adapter.
+Their **data** grant authorizes public definition edits only; **code** or
+**workspace** grants do not imply it. Read-only runs expose definition reads,
+validation and bounded source reads, but not definition mutations. Built-in
+agent permissions remain separate from external MCP sharing.

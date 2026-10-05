@@ -1,0 +1,44 @@
+name: Win32 GDI native contracts
+on:
+  pull_request:
+  push:
+    branches: [main, feature/win32-gdi-bitmaps]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: win32-gdi-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compare isolated JavaScript bitmaps with installed Windows GDI
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force reports/gdi | Out-Null
+          node tools/win32-gdi-contracts.mjs | Out-File -Encoding utf8 reports/gdi/javascript.json
+          ./tools/win32-gdi-oracle.ps1 | Out-File -Encoding utf8 reports/gdi/windows.json
+          node tools/win32-gdi-contracts.mjs --compare reports/gdi/windows.json | Tee-Object -FilePath reports/gdi/comparison.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-gdi-native-contracts
+          path: reports/gdi/
+          retention-days: 14
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/win32-api-inventory.mjs
+      - run: git diff --exit-code -- packages/win32-browser/API.md

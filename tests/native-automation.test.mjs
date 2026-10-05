@@ -1,0 +1,45 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {AutomationRegistry,automationInvoke,automationMember,isAutomationObject} from '../src/runtime/automation.js';
+import {encodeAutomationValue,decodeAutomationValue} from '../src/runtime/automation-wire.js';
+import {VirtualMachine} from '../src/runtime/vm.js';
+import {compileProject} from '../src/language/compiler.js';
+import {NOTHING,MISSING,VBArray,VBErrorValue,VBCurrency,VBDecimal} from '../src/runtime/values.js';
+import {NativeAutomationClient} from '../tools/interop/native-automation.mjs';
+const prop=(name,params=[],modes=[2,4])=>({name,params,modes}),arg=(name,optional=false,byRef=false)=>({name,optional,byRef});
+function adapter(){let count=0,released=0;const values=new Map();return {metadata:{defaultMember:'Item',members:[prop('Item',[arg('key')],[2,4,8]),prop('Count',[],[2]),prop('Add',[arg('key'),arg('value')],[1]),prop('Bump',[arg('value',false,true)],[1]),prop('Optional',[arg('first'),arg('second',true)],[1]),prop('Self',[],[2])]},values,get released(){return released;},async release(){released++;},async invoke(name,mode,args){if(name==='Add'){values.set(args[0],args[1]);count++;return {value:undefined,args};}if(name==='Count')return {value:count,args};if(name==='Bump')return {value:undefined,args:[args[0]+1]};if(name==='Optional')return {value:args[1]===MISSING?'missing':args[1],args};if(mode===2)return {value:values.get(args[0]),args};values.set(args[0],args.at(-1));return {value:undefined,args};}};}
+async function execute(body,a=adapter()){const registry=new AutomationRegistry().register('Test.Component',()=>a),program=compileProject({name:'Interop',startup:'Sub Main',modules:[{name:'M',kind:'module',code:'Option Explicit\nSub Main()\nDim d As Object\nSet d = CreateObject("Test.Component")\n'+body+'\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);const output=[],vm=new VirtualMachine(program,{automation:registry,print:s=>output.push(s)});await vm.start();return {vm,output,a};}
+test('registered Automation calls run from actual compiled VB code',async()=>assert.deepEqual((await execute('d.Add "k", 7\nDebug.Print d.Count, d.Item("k")')).output,['1 7']));
+test('native default indexed property get and let',async()=>assert.deepEqual((await execute('d("k") = 23\nDebug.Print d("k")')).output,['23']));
+test('native named method arguments bind metadata',async()=>assert.deepEqual((await execute('d.Add value:=9, key:="named"\nDebug.Print d.Item("named")')).output,['9']));
+test('native ByRef method copies back into original typed cell',async()=>assert.deepEqual((await execute('Dim n As Long\nn = 4\nd.Bump value:=n\nDebug.Print n')).output,['5']));
+test('native optional Missing differs from Empty',async()=>assert.deepEqual((await execute('Debug.Print d.Optional(1)\nDebug.Print IsEmpty(d.Optional(1, Empty))')).output,['missing','-1']));
+test('native property let and CallByName use dispatch metadata',async()=>assert.deepEqual((await execute('d.Item("a") = 8\nDebug.Print CallByName(d, "Item", vbGet, "a")')).output,['8']));
+test('VB stop releases each scoped Automation adapter',async()=>{const {vm,a}=await execute('d.Add "k", 1');vm.stop();await vm.automationClose;assert.equal(a.released,1);vm.stop();await vm.automationClose;assert.equal(a.released,1);});
+test('unregistered native project cannot activate host code',async()=>{const program=compileProject({name:'P',startup:'Sub Main',modules:[{name:'M',kind:'module',code:'Sub Main()\nDim x As Object\nSet x=CreateObject("Test.Unregistered")\nEnd Sub'}]});await assert.rejects(()=>new VirtualMachine(program).start(),e=>e.number===429);});
+for(const name of ['constructor','prototype','release','invoke','__proto__'])test('adapter internals not exposed via '+name,async()=>{await assert.rejects(()=>execute('Debug.Print d.'+name),e=>e.number===438);});
+test('adapter identity remains stable on repeated adoption',()=>{const s=new AutomationRegistry().createSession(),a=adapter();assert.equal(s.adopt(a),s.adopt(a));assert.ok(isAutomationObject(s.adopt(a)));assert.deepEqual(Object.keys(s.adopt(a)),[]);});
+test('closed native objects cannot be called',async()=>{const s=new AutomationRegistry().createSession(),o=s.adopt(adapter());await s.close();assert.throws(()=>automationMember(o,'Count'),e=>e.number===91);});
+test('invalid adapter schemas are rejected',()=>{const s=new AutomationRegistry().createSession();assert.throws(()=>s.adopt({metadata:{members:[]},invoke(){}}));const a=adapter();a.metadata.members.push(prop('constructor'));assert.throws(()=>s.adopt(a));});
+test('registration requires trusted function, not data loaded from a project',()=>{for(const x of [{},'module.js',null])assert.throws(()=>new AutomationRegistry().register('Test.Component',x));});
+for(const [label,value]of [['Empty',undefined],['Null',null],['Nothing',NOTHING],['Missing',MISSING],['Unicode','A\u0000Żółć日本語'],['Boolean',true],['Double',1.25],['Decimal',new VBDecimal('12345678901234567890.123')],['Currency',new VBCurrency('922337203685477.5807')],['Error',new VBErrorValue(13)]])test('bounded Automation wire roundtrip '+label,()=>{const r=decodeAutomationValue(encodeAutomationValue(value));if(value instanceof VBDecimal||value instanceof VBCurrency)assert.equal(r.toString(),value.toString());else assert.deepEqual(r,typeof value==='boolean'?(value?-1:0):value);});
+test('Automation multidimensional Variant arrays preserve nonzero bounds and coordinates',()=>{const a=new VBArray([[-3,-2],[2,4]]);a.data=[1,undefined,null,'x',new VBCurrency('4.1'),NOTHING];const b=decodeAutomationValue(encodeAutomationValue(a));assert.deepEqual(b.bounds,a.bounds);assert.deepEqual(b.data,a.data);assert.equal(b.get(-2,2),'x');});
+for(const value of [Infinity,NaN,()=>{},Symbol('x'),{},new Uint8Array(3)])test('unsupported wire value rejected '+String(value),()=>assert.throws(()=>encodeAutomationValue(value)));
+for(const wire of [{t:'wat'},{t:'object',id:'../../'},{t:'number',v:'1'},{t:'array',bounds:[[0,20000]],v:[]},{t:'currency',v:'NaN'},{t:'string',v:3},{t:'array',bounds:[[0,1]],v:[]}])test('malformed native response rejected '+JSON.stringify(wire),()=>assert.throws(()=>decodeAutomationValue(wire)));
+test('native client never starts without explicit full-user-authority opt-in',()=>assert.throws(()=>new NativeAutomationClient({allowed:['Scripting.Dictionary']}),/consent/));
+test('native control allowlist must be a subset of explicit ProgID allowlist',()=>assert.throws(()=>new NativeAutomationClient({allowNativeCode:true,allowed:['Scripting.Dictionary'],controls:['Shell.Explorer']}),/allowlists/));
+
+test('closed sessions do not copy late native ByRef results back into cells',async()=>{const a=adapter();let finish;a.invoke=()=>new Promise(r=>finish=r);const s=new AutomationRegistry().createSession(),o=s.adopt(a);let value=7;const call=automationInvoke(o,'Bump',1,[{ref:{get:()=>value,set:v=>value=v}}]);await new Promise(r=>setTimeout(r,0));await s.close();finish({value:undefined,args:[9]});await assert.rejects(()=>call,e=>e.number===91);assert.equal(value,7);});
+test('For Each uses bounded native enumeration rather than host prototype methods',async()=>{const a=adapter();a.enumerate=async()=>['first','second'];assert.deepEqual((await execute('Dim k As Variant\nFor Each k In d\nDebug.Print k\nNext k',a)).output,['first','second']);});
+
+async function executeChain(body){
+  let reads=0;const registry=new AutomationRegistry().register('Test.Tree',session=>{
+    let text='Unicode Żółć';const child=session.adopt({metadata:{members:[prop('Text',[],[2,4])]},release(){},invoke(name,mode,args){if(mode===4)text=args[0];return Promise.resolve({value:mode===2?text:undefined,args});}});
+    return {metadata:{members:[prop('Child',[],[2]),prop('Fetch',[],[1])]},release(){},invoke(name,mode,args){if(name==='Child')reads++;return Promise.resolve({value:child,args});}};
+  });
+  const program=compileProject({name:'Chains',startup:'Sub Main',modules:[{name:'M',kind:'module',code:'Option Explicit\nSub Main()\nDim d As Object, child As Object\nSet d = CreateObject("Test.Tree")\n'+body+'\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);
+  const output=[],vm=new VirtualMachine(program,{automation:registry,print:s=>output.push(s)});try{await vm.start();return {output,reads};}finally{vm.stop();await vm.automationClose;}
+}
+test('Automation object-valued property chains resolve the intermediate getter exactly once',async()=>assert.deepEqual(await executeChain('Debug.Print d.Child.Text'),{output:['Unicode Żółć'],reads:1}));
+test('Automation property chains support nested puts and With receivers',async()=>assert.deepEqual(await executeChain('d.Child.Text = "changed"\nWith d.Child\nDebug.Print .Text\nEnd With'),{output:['changed'],reads:2}));
+test('Automation object assignment and explicit method chains preserve object identity',async()=>assert.deepEqual(await executeChain('Set child = d.Child\nDebug.Print child Is d.Child\nDebug.Print d.Fetch().Text'),{output:['-1','Unicode Żółć'],reads:2}));

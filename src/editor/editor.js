@@ -1,8 +1,9 @@
+import {declarationTargets} from './event-completion.js';
 import {FindIndex,replaceMatches} from './find-index.js';
 import {VirtualTextInput} from './virtual-input.js';
 import {updateSourceIndex,replacementChange,inputChange,HighlightCache} from './incremental.js';
 import {EditorIntelligence,wordAt} from './intelligence.js';
-import {completionSpan,statementBefore} from './source-context.js';
+import {completionSpan,statementBefore,completionMatches} from './source-context.js';
 let completionSerial=0;
 import {tokenize} from '../language/lexer.js';
 import {DEFAULT_EVENTS,CONTROL_EVENTS} from '../controls/controls.js';
@@ -19,7 +20,22 @@ export class SourceEditor extends Signal {
     this.root=el('div',{class:'source-editor'});this.objects=el('select',{'aria-label':'Object'});this.procedures=el('select',{'aria-label':'Procedure'});this.selectors=el('div',{class:'code-selectors'},this.objects,this.procedures);this.findBar=this.buildFind();this.area=el('div',{class:'code-split-area'});this.root.append(this.selectors,this.findBar,this.area);container.append(this.root);
     this.primary=this.createPane();this.activePane=this.primary;this.area.append(this.primary.node);
     this.splitGrip=el('div',{class:'code-split-grip',role:'separator',tabindex:0,'aria-label':'Split code window','aria-orientation':'horizontal',title:'Split code window'});this.area.append(this.splitGrip);this.bindSplitter(this.splitGrip,true);this.splitGrip.addEventListener('dblclick',()=>this.toggleSplit());this.splitGrip.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();this.toggleSplit();}});
-    this.procedures.addEventListener('change',()=>{if(this.procedures.value.startsWith('event:')){this.emit('event',{object:this.objects.value,event:this.procedures.value.slice(6)});return;}if(!this.procedures.value&&this.activePane.mode==='procedure'){this.activePane.explicitDeclarations=true;this.syncPane(this.activePane,0);this.input.focus();this.cursorChanged();}else this.goToLine(Number(this.procedures.value)||1);});this.objects.addEventListener('change',()=>{this.selectedObject=this.objects.value;this.updateSelectors(false,true);});
+    this.procedures.addEventListener('change',()=>this.activateProcedure());this.procedures.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();this.activateProcedure();}});this.objects.addEventListener('change',()=>{this.selectedObject=this.objects.value;this.updateSelectors(false,true);});
+  }
+  activateProcedure(){
+    if(this.procedures.selectedIndex<0){
+      // A Timer has one event: Enter must work without a prior selection change.
+      if(this.objects.value==='(General)'||this.procedures.options.length!==1)return;
+      this.procedures.selectedIndex=0;
+    }
+    const value=this.procedures.value;
+    if(value.startsWith('event:')){
+      if(!this.readOnly)this.emit('event',{object:this.objects.value,event:value.slice(6)});
+      return;
+    }
+    if(!value&&this.activePane.mode==='procedure'){
+      this.activePane.explicitDeclarations=true;this.syncPane(this.activePane,0);this.input.focus();this.cursorChanged();
+    }else this.goToLine(Number(value)||1);
   }
   get input(){return this.activePane.input;} get viewport(){return this.activePane.viewport;} get syntax(){return this.activePane.syntax;} get gutter(){return this.activePane.gutter;}
   createPane(){
@@ -36,19 +52,45 @@ export class SourceEditor extends Signal {
     pane.procedureButton.setAttribute('aria-pressed',String(pane.mode==='procedure'));pane.moduleButton.setAttribute('aria-pressed',String(pane.mode==='module'));pane.node.dataset.viewMode=pane.mode;
   }
   assignSource(value,selection=null,hint=null){
-    const next=String(value),change=hint||textChange(this.text,next),states=this.panes.map(p=>({pane:p,start:mapOffset(change,this.selectionBounds(p).start),end:mapOffset(change,this.selectionBounds(p).end)}));const indexed=updateSourceIndex(this.index,next,change);this.metrics.indexedLines+=indexed.scannedLines;this.selectorDirty ||= indexed.changedProcedures;this.text=next;this.lastValue=next;this.index=indexed.index;this.lines=this.index.lines;this.lineStarts=this.index.starts;this.procedureIndex=this.index.procedures;
+    const next=String(value),change=hint||textChange(this.text,next),states=this.panes.map(p=>({pane:p,start:mapOffset(change,this.selectionBounds(p).start),end:mapOffset(change,this.selectionBounds(p).end)}));const indexed=updateSourceIndex(this.index,next,change);this.metrics.indexedLines+=indexed.scannedLines;this.selectorDirty ||= indexed.changedProcedures||/\b(?:WithEvents|Implements)\b/i.test(this.text.slice(this.text.lastIndexOf('\n',Math.max(0,change.start-1))+1,this.text.indexOf('\n',change.oldEnd)<0?this.text.length:this.text.indexOf('\n',change.oldEnd))+next.slice(next.lastIndexOf('\n',Math.max(0,change.start-1))+1,next.indexOf('\n',change.newEnd)<0?next.length:next.indexOf('\n',change.newEnd)));this.text=next;this.lastValue=next;this.index=indexed.index;this.lines=this.index.lines;this.lineStarts=this.index.starts;this.procedureIndex=this.index.procedures;
     for(const state of states){if(selection&&state.pane===this.activePane)Object.assign(state,selection);this.syncPane(state.pane,state.start,state.end);}
   }
-  setDocument(module,project){this.closeCompletion();this.closeInfo();const changed=this.module?.id!==module.id;this.module=module;this.project=project;this.root.style.setProperty('--editor-tab-width',String(project.settings.tabWidth||4));if(changed&&!this.appearance.fullModule)this.primary.mode='procedure';this.selectedObject='(General)';this.assignSource(module.code||'',changed?{start:0,end:0}:null);if(changed)for(const pane of this.panes){pane.input.scrollTop=pane.input.scrollLeft=0;}this.updateSelectors();this.paint();this.cursorChanged();}
+  setDocument(module,project){this.closeCompletion();this.closeInfo();const changed=this.module?.id!==module.id;this.module=module;this.project=project;this.root.style.setProperty('--editor-tab-width',String(project.settings.tabWidth||4));if(changed&&!this.appearance.fullModule)this.primary.mode='procedure';if(changed){this.selectedObject='(General)';this.objectEntries=null;this.objectSignature=null;}this.assignSource(module.code||'',changed?{start:0,end:0}:null);if(changed)for(const pane of this.panes){pane.input.scrollTop=pane.input.scrollLeft=0;}this.updateSelectors();this.paint();this.cursorChanged();}
+  // Keep current main's identity-preserving designer refresh; typed declarations
+  // add event/interface targets without resetting source, selection or split panes.
+  refreshObjects(refreshEvents=true){
+    if(!this.module)return false;
+    const live={...this.module,code:this.text},targets=declarationTargets(this.project,live,this.intelligence);
+    const entries=[{id:'$general',name:'(General)',type:''},...targets.map(t=>({id:t.id||t.kind+':'+t.name,name:t.name,type:t.type||t.kind,members:t.members}))];
+    this.declarationTargets=targets;
+    const signature=JSON.stringify(entries);if(signature===this.objectSignature){this.objects.value=this.selectedObject||'(General)';return false;}
+    const selected=this.selectedObject||'(General)',previous=this.objectEntries?.find(entry=>lower(entry.name)===lower(selected));
+    const current=entries.find(entry=>entry.id===previous?.id)||entries.find(entry=>lower(entry.name)===lower(selected));
+    this.selectedObject=current?.name||'(General)';this.objectEntries=entries;this.objectSignature=signature;
+    this.objects.replaceChildren(...entries.map(entry=>el('option',{value:entry.name},entry.name)));
+    this.objects.value=this.selectedObject;
+    if(refreshEvents)this.updateSelectors(false,true);
+    return true;
+  }
+  activateProcedureSelection(){return this.activateProcedure();}
   updateSelectors(includeObjects=true,force=false){
     if(!this.module)return;
-    if(includeObjects){const value=this.selectedObject||'(General)';this.objects.replaceChildren(el('option',{value:'(General)'},'(General)'),...(this.module.form?[el('option',{value:'Form'},'Form'),...this.module.form.controls.map(c=>el('option',{value:c.name},c.name))]:[]));this.objects.value=value;}
+    if(includeObjects||force||this.selectorDirty)this.refreshObjects(false);
     const selected=this.selectedObject||'(General)';
     if(selected!=='(General)'){
-      const control=this.module.form?.controls.find(c=>c.name===selected),type=control?.type||'Form';
-      const events=type==='Form'?['Initialize','Load','Activate','Deactivate','Resize','QueryUnload','Unload',...CONTROL_EVENTS]:[DEFAULT_EVENTS[type]||'Click',...(type==='Timer'?[]:CONTROL_EVENTS)];
-      const options=[...new Set(events)].sort().map(event=>{const existing=this.procedureIndex.find(p=>lower(p.name)===lower(selected+'_'+event));return el('option',{value:existing?existing.line:'event:'+event},event+(existing?'':' '));});
-      this.procedures.replaceChildren(...options);return;
+      if(!force&&!includeObjects&&!this.selectorDirty)return;
+      const target=this.declarationTargets?.find(t=>lower(t.name)===lower(selected)),previousEvent=this.eventObject===selected?this.procedures.selectedOptions[0]?.dataset.event:null;
+      const idx=this.intelligence.index({...this.module,code:this.text},this.project);
+      const options=(target?.members||[]).map(member=>{
+        const key=member.key||member.name;
+        const existing=idx.procedures.find(p=>lower(p.name)===lower(selected+'_'+member.name)&&p.accessor===(member.accessor||null));
+        return el('option',{value:existing?existing.line:'event:'+key,'data-event':key,...(existing?{'data-offset':existing.offset}:{})},member.label||member.name);
+      }).sort((a,b)=>a.textContent.localeCompare(b.textContent));
+      this.procedures.replaceChildren(...options);this.eventObject=selected;
+      // Missing sole events must remain unselected so both selection and Enter
+      // can explicitly create them; never create code while populating a list.
+      this.procedures.selectedIndex=previousEvent?options.findIndex(option=>option.dataset.event===previousEvent&&!option.value.startsWith('event:')):-1;
+      this.selectorDirty=false;return;
     }
     if(!force&&!includeObjects&&!this.selectorDirty)return;
     this.selectorDirty=false;const previous=this.procedures.value;this.procedures.replaceChildren(el('option',{value:''},'(Declarations)'),...[...this.procedureIndex].sort((a,b)=>a.name.localeCompare(b.name)).map(p=>el('option',{value:p.line},p.name+(p.kind==='Sub'?'':` [${p.kind}]`))));this.procedures.value=previous;
@@ -92,7 +134,7 @@ export class SourceEditor extends Signal {
   schedulePaint(){if(this.paintFrame||this.disposed)return;this.paintWindow=this.root.ownerDocument.defaultView;this.paintFrame=this.paintWindow.requestAnimationFrame(()=>{this.paintFrame=0;this.paint();});}
   paint(){if(!this.module||this.disposed)return;this.metrics.paints++;this.root.style.setProperty('--editor-gutter',this.appearance.margin===false?'0px':this.showLineNumbers?'32px':'18px');const breakpoints=new Set(this.breakpoints.filter(b=>lower(b.module)===lower(this.module.name)).map(b=>b.line)),separators=new Set(this.procedureIndex.map(p=>p.line)),bookmarks=new Set(this.module.bookmarks||[]);
     for(const pane of this.panes){const {input,viewport,syntax,gutter,lines,range}=pane,top=input.scrollTop,left=input.scrollLeft,first=Math.max(0,Math.floor((top-4)/this.lineHeight)),count=Math.ceil(viewport.clientHeight/this.lineHeight)+3,last=Math.min(lines.length,first+count),selection=this.selectionBounds(pane),select=this.root.ownerDocument.activeElement===input&&selection.start!==selection.end,selectionStart=selection.start-range.start,selectionEnd=selection.end-range.start;
-      syntax.style.transform=`translate(${-left}px,${first*this.lineHeight-top}px)`;const html=lines.slice(first,last).map((line,i)=>{const n=range.firstLine+i+first+1,bp=breakpoints.has(n),exec=this.execution?.module===this.module.name&&this.execution.line===n,separator=this.appearance.procedureSeparators&&separators.has(n)&&n>1,start=this.lineStarts[n-1]-range.start;return `<div class="syntax-line${bp?' breakpoint-line':''}${exec?' execution-line':''}${separator?' procedure-start':''}">${this.highlightCache.get(line+'\0'+(select?Math.max(-1,selectionStart-start):-1)+':'+(select?Math.min(line.length+1,selectionEnd-start):-1),()=>highlightLine(line,select?selectionStart-start:-1,select?selectionEnd-start:-1))}</div>`;}).join('');if(pane.lastHTML!==html){syntax.innerHTML=html;pane.lastHTML=html;this.metrics.domUpdates++;}const gutterKey=[first,last,this.showLineNumbers,[...breakpoints].join(','),[...bookmarks].join(','),this.execution?.line,this.execution?.module,this.diagnosticRevision].join('|');if(pane.gutterKey===gutterKey){for(const child of gutter.children)child.style.top=(4+(Number(child.dataset.line)-range.firstLine-1)*this.lineHeight-top)+'px';continue;}pane.gutterKey=gutterKey;gutter.replaceChildren();this.metrics.domUpdates++;for(let i=first;i<last;i++){const line=range.firstLine+i+1,bp=breakpoints.has(line),error=this.diagnosticMap?.get(lower(this.module.name)+':'+line),exec=this.execution?.module===this.module.name&&this.execution.line===line;gutter.append(el('div',{class:'gutter-line'+(bp?' has-breakpoint':'')+(error?' has-error':'')+(exec?' has-execution':'')+(bookmarks.has(line)?' has-bookmark':''),'data-line':line,title:error?.message||(bp?'Remove breakpoint':'Set breakpoint'),style:{top:(4+i*this.lineHeight-top)+'px'}},exec?icon('arrow-right',12):bp?el('span',{class:'breakpoint-dot'}):bookmarks.has(line)?el('span',{class:'bookmark-symbol',title:'Bookmark — Ctrl+click to remove'}):this.showLineNumbers?String(line):''));}}
+      syntax.style.transform=`translate(${-left}px,${first*this.lineHeight-top}px)`;const html=lines.slice(first,last).map((line,i)=>{const n=range.firstLine+i+first+1,bp=breakpoints.has(n),exec=this.execution?.module===this.module.name&&this.execution.line===n,execStart=exec&&this.execution.column?this.execution.column-1:-1,execEnd=exec&&this.execution.endColumn?this.execution.endColumn-1:-1,separator=this.appearance.procedureSeparators&&separators.has(n)&&n>1,start=this.lineStarts[n-1]-range.start;return `<div class="syntax-line${bp?' breakpoint-line':''}${exec?' execution-line'+(execStart>=0?' execution-range':''):''}${separator?' procedure-start':''}">${this.highlightCache.get(line+'\0'+(select?Math.max(-1,selectionStart-start):-1)+':'+(select?Math.min(line.length+1,selectionEnd-start):-1)+':'+execStart+':'+execEnd,()=>highlightLine(line,select?selectionStart-start:-1,select?selectionEnd-start:-1,execStart,execEnd))}</div>`;}).join('');if(pane.lastHTML!==html){syntax.innerHTML=html;pane.lastHTML=html;this.metrics.domUpdates++;}const gutterKey=[first,last,this.showLineNumbers,[...breakpoints].join(','),[...bookmarks].join(','),this.execution?.line,this.execution?.module,this.diagnosticRevision].join('|');if(pane.gutterKey===gutterKey){for(const child of gutter.children)child.style.top=(4+(Number(child.dataset.line)-range.firstLine-1)*this.lineHeight-top)+'px';continue;}pane.gutterKey=gutterKey;gutter.replaceChildren();this.metrics.domUpdates++;for(let i=first;i<last;i++){const line=range.firstLine+i+1,bp=breakpoints.has(line),error=this.diagnosticMap?.get(lower(this.module.name)+':'+line),exec=this.execution?.module===this.module.name&&this.execution.line===line;gutter.append(el('div',{class:'gutter-line'+(bp?' has-breakpoint':'')+(error?' has-error':'')+(exec?' has-execution':'')+(bookmarks.has(line)?' has-bookmark':''),'data-line':line,title:error?.message||(bp?'Remove breakpoint':'Set breakpoint'),style:{top:(4+i*this.lineHeight-top)+'px'}},exec?icon('arrow-right',12):bp?el('span',{class:'breakpoint-dot'}):bookmarks.has(line)?el('span',{class:'bookmark-symbol',title:'Bookmark — Ctrl+click to remove'}):this.showLineNumbers?String(line):''));}}
   }
   selectionBounds(pane=this.activePane){return pane.virtualizer?.selection()||{start:pane.range.start+pane.input.selectionStart,end:pane.range.start+pane.input.selectionEnd};}
   cursor(){return positionAt(this.index,this.selectionBounds().start);}
@@ -162,7 +204,7 @@ export class SourceEditor extends Signal {
     }
     this.completionStart=span.start;this.completionEnd=span.end;this.completionCaret=cursor.offset;this.completionMode=mode;
     const prefix=span.prefix.replace(/^\[/,'').toLowerCase();
-    this.completionDetails=this.completionCandidates.filter(s=>lower(s.name).startsWith(prefix));
+    this.completionDetails=this.completionCandidates.filter(s=>completionMatches(s.name,span.prefix));
     this.completionItems=this.completionDetails.map(s=>s.name);if(!this.completionItems.length){this.closeCompletion();return;}
     this.completionIndex=Math.max(0,reuse?this.completionItems.indexOf(previous):0);
     if(!this.completion){
@@ -186,7 +228,7 @@ export class SourceEditor extends Signal {
   renderCompletion(){if(!this.completion)return;const rowHeight=19,count=this.completionItems.length,start=Math.max(0,Math.floor(this.completion.scrollTop/rowHeight)-1),end=Math.min(count,start+13);const spacer=el('div',{'aria-hidden':'true',style:{height:count*rowHeight+'px',pointerEvents:'none'}}),rows=[];
     for(let i=start;i<end;i++){
       const item=this.completionDetails[i],name=item.name;
-      rows.push(el('div',{id:this.completion.id+'-'+i,class:'completion-item'+(i===this.completionIndex?' selected':''),role:'option','aria-selected':i===this.completionIndex,'aria-posinset':i+1,'aria-setsize':count,title:[item.signature||name,item.description].filter(Boolean).join(' — '),style:{position:'absolute',top:i*rowHeight+'px',height:rowHeight+'px',left:0,right:0},onpointerdown:e=>{e.preventDefault();this.completionIndex=i;this.acceptCompletion();}},el('span',{class:'completion-icon'},icon(['function','method','sub'].includes(item.kind)?'code':'properties',12)),name));
+      rows.push(el('div',{id:this.completion.id+'-'+i,class:'completion-item'+(i===this.completionIndex?' selected':''),role:'option','aria-selected':i===this.completionIndex,'aria-posinset':i+1,'aria-setsize':count,title:[item.signature||name,item.description].filter(Boolean).join(' — '),style:{position:'absolute',top:i*rowHeight+'px',height:rowHeight+'px',left:0,right:0},ondblclick:e=>{e.preventDefault();this.completionIndex=i;this.acceptCompletion();},onpointerdown:e=>{e.preventDefault();this.completionIndex=i;{for(const row of this.completion.querySelectorAll('[role=option]')){const active=row.id===this.completion.id+'-'+i;row.classList.toggle('selected',active);row.setAttribute('aria-selected',String(active));}this.input.setAttribute('aria-activedescendant',this.completion.id+'-'+i);}}},el('span',{class:'completion-icon'},icon(['function','method','sub'].includes(item.kind)?'code':'properties',12)),name));
     }
     this.completion.replaceChildren(spacer,...rows);this.input.setAttribute('aria-activedescendant',this.completion.id+'-'+this.completionIndex);
   }
@@ -224,7 +266,7 @@ export class SourceEditor extends Signal {
     this.infoOffset=cursor.offset;this.positionPopup(this.info);this.lastInfo=info;
   }
   closeInfo(){this.info?.remove();this.info=null;clearTimeout(this.infoTimer);}
-  definition(){const c=this.cursor(),text=this.input.value.slice(this.input.selectionStart,this.input.selectionEnd)||wordAt(this.text,c.offset).text;return this.intelligence.resolve(this.project,{...this.module,code:this.text},c.line,text);}
+  definition(){const c=this.cursor(),text=this.input.value.slice(this.input.selectionStart,this.input.selectionEnd)||wordAt(this.text,c.offset).text;return this.intelligence.definition(this.project,{...this.module,code:this.text},c.line,this.text,c.offset,text);}
   bindAdvancedInput(pane){
     const input=pane.input;
     input.addEventListener('beforeinput',e=>{pane.beforeInput={start:input.selectionStart,end:input.selectionEnd,type:e.inputType,composing:e.isComposing};if(this.overwrite&&!e.isComposing&&e.inputType==='insertText'&&e.data&&input.selectionStart===input.selectionEnd&&!input.readOnly){const start=input.selectionStart,lineEnd=input.value.indexOf('\n',start),limit=lineEnd<0?input.value.length:lineEnd;const end=Math.min(limit,start+[...e.data].reduce((n,c)=>n+(input.value.codePointAt(start+n)>65535?2:1),0));e.preventDefault();this.activatePane(pane);this.replaceSelection(e.data,start,end);}});

@@ -1,4 +1,4 @@
-import {mkdirSync,readFileSync,mkdtempSync,rmSync,cpSync,existsSync} from 'node:fs';
+import {mkdirSync,readdirSync,readFileSync,mkdtempSync,rmSync,cpSync,existsSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
@@ -11,7 +11,7 @@ const archive=join(root,'release',result.filename),temp=mkdtempSync(join(tmpdir(
 try{
   execFileSync('tar',['-xzf',archive,'-C',temp]);
   cpSync(join(pkg,'test'),join(temp,'package/test'),{recursive:true});
-  execFileSync(process.execPath,['--test','test/compat.test.mjs'],{cwd:join(temp,'package'),stdio:'inherit'});
+  execFileSync(process.execPath,['--test',...readdirSync(join(temp,'package/test')).filter(name=>name.endsWith('.test.mjs')).sort().map(name=>'test/'+name)],{cwd:join(temp,'package'),stdio:'inherit'});
   const metadata=JSON.parse(readFileSync(join(temp,'package/package.json'),'utf8'));
   if(metadata.dependencies||metadata.devDependencies)throw new Error('Standalone package acquired external dependencies');
   console.log('Packed and independently tested '+archive);

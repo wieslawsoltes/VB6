@@ -1,0 +1,80 @@
+name: Native workspace interoperability
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      licensed_vb6:
+        description: Run installed licensed VB6 on the owner's dedicated trusted Windows runner
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: native-interop-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build
+      - run: npm run test:interop
+      - run: npm run test:project-files
+      - name: Stage original and round-tripped projects without a licensed compiler
+        run: npm run verify:classic -- --project examples/classic/HelloRuntime.vbp --out reports/classic-stage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: classic-stage-only
+          path: reports/classic-stage
+          retention-days: 7
+  automation:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Real Windows Automation through the compiled VB runtime
+        run: npm run test:interop:windows
+      - name: Installed system ActiveX control preview and lifecycle
+        run: node tools/interop/test-activex.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-interop-${{ matrix.architecture }}
+          path: reports/native-interop
+          retention-days: 7
+  licensed-vb6:
+    # Never run untrusted pull-request code on a privileged/self-hosted runner.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.licensed_vb6
+    runs-on: [self-hosted, Windows, vb6]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Licensed native/p-code build and actual IDE run/reopen of the smoke fixture
+        run: node tools/verify-classic-roundtrip.mjs --project examples/classic/HelloRuntime.vbp --out reports/licensed-${{ github.run_id }} --compile --allow-native-code --ide-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: licensed-vb6-roundtrip-${{ github.run_id }}
+          path: reports/licensed-${{ github.run_id }}
+          retention-days: 7
