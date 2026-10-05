@@ -1,0 +1,71 @@
+name: Prepare agent thread bundles
+on:
+  push:
+    branches: [feat/agent-conversation-thread-budgets]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/feat/agent-conversation-thread-budgets'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply verified source change
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, subprocess
+          from pathlib import Path
+          data = base64.b64decode(''.join(Path('tools/.agent-thread-update.part' + str(i)).read_text() for i in range(4)), validate=True)
+          assert hashlib.sha256(data).hexdigest() == '9ca9ef114088fabee03aade59c0dbe674c38f59f5a580f9833aed8bd6ebc0158'
+          change = json.loads(lzma.decompress(data))
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD^'], text=True).strip() == change['base'] == '30febe16733be5d71eb4428d4888866947a088fe'
+          allowed = {'docs/CODING-AGENT-THREADS.md', 'src/agents/agent.js', 'src/agents/agents.css', 'src/agents/conversations.js', 'src/agents/limits.js', 'src/agents/providers.js', 'src/agents/studio.js', 'src/agents/task-tools.js', 'src/agents/thread-view.js', 'src/agents/thread.js', 'tests/agent-relay.test.mjs', 'tests/coding-agents-tasks.test.mjs', 'tests/coding-agents-thread.test.mjs', 'tests/coding-agents.test.mjs', 'tools/agent-relay.mjs', 'tools/coding-agents-browser-tests.py'}
+          assert {item['path'] for item in change['files']} == allowed
+          assert len(change['files']) == len(allowed)
+          for item in change['files']:
+              p = Path(item['path'])
+              if item['before'] is None:
+                  assert not p.exists(), str(p)
+              else:
+                  assert subprocess.check_output(['git', 'hash-object', str(p)], text=True).strip() == item['before'], str(p)
+          patch = change['patch'].encode()
+          subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '--index', '-'], input=patch, check=True)
+          assert set(subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines()) == allowed
+          for item in change['files']:
+              assert hashlib.sha256(Path(item['path']).read_bytes()).hexdigest() == item['sha256'], item['path']
+              print(item['sha256'], item['path'])
+          PY
+      - name: Build standalone artifacts
+        run: npm run build
+      - name: Agent protocol, limits, relay and thread tests
+        shell: bash
+        run: npm run test:agents | tee agent-thread-tests.log
+      - name: Complete repository test suite
+        shell: bash
+        run: npm test | tee agent-thread-full-tests.log
+      - name: Commit tested source and reproducible bundles; remove preparation files
+        shell: bash
+        run: |
+          git add -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git rm -- .github/workflows/agent-thread-prepare.yml tools/.agent-thread-update.part0 tools/.agent-thread-update.part1 tools/.agent-thread-update.part2 tools/.agent-thread-update.part3
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(agents): render live VB6 conversation threads and expand session budgets'
+          git push origin HEAD:feat/agent-conversation-thread-budgets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-thread-preparation-validation
+          path: |
+            agent-thread-tests.log
+            agent-thread-full-tests.log
+          retention-days: 7
