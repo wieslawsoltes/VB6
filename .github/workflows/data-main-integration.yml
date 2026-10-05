@@ -1,0 +1,58 @@
+name: Integrate latest main into data sources
+on:
+  push:
+    branches: [feature/data-sources]
+    paths: ['.github/workflows/data-main-integration.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge reviewed main revision without discarding source edits
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          target = 'f1fa6f511cda6a9fdf24d49c12c5674da257a355'
+          result = subprocess.run(['git', 'merge', '--no-commit', '--no-ff', target])
+          conflicts = subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=U'], text=True).splitlines()
+          generated = {'dist/VB6-Studio-Web.html', 'dist/studio.js', 'dist/studio.css'}
+          assert set(conflicts) <= generated, 'Source conflict requires review: ' + repr(conflicts)
+          assert result.returncode == 0 or conflicts, 'Merge failed without expected generated conflicts'
+          if conflicts:
+              subprocess.run(['git', 'restore', '--source=HEAD', '--staged', '--worktree', '--', *conflicts], check=True)
+          # npm run build below regenerates these files from both merged source trees.
+          PY
+      - name: Regenerate and test integrated application
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/data-main-result
+          npm run build
+          npm test | tee /tmp/data-main-result/node-tests.log
+          git diff --exit-code HEAD -- .github/workflows
+      - name: Publish validated merge
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/feature/data-sources | cut -f1)" = "$GITHUB_SHA"
+          git add -A
+          git commit -m 'Merge main MCP enhancements and rebuild data-source distributions'
+          git push origin HEAD:refs/heads/feature/data-sources
+          git rev-parse HEAD > /tmp/data-main-result/head.txt
+          git archive HEAD | gzip > /tmp/data-main-result/source.tar.gz
+          git bundle create /tmp/data-main-result/repository.bundle --all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-main-integration
+          path: /tmp/data-main-result
+          retention-days: 7
