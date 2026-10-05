@@ -434,3 +434,147 @@ coercion; a forged `__type` label does not expose arbitrary JavaScript objects.
 use its Value. GUID, Decimal and database date/time ADO fields now validate and
 coerce through the shared typed field implementation. Regression fixtures run
 compiled VB programs in the Node VM and exported Chromium/Firefox/WebKit runtimes.
+
+## RDO client object model
+
+The same data context also exposes `rdoEngine`, `rdoEnvironments`, `rdoErrors`,
+`RDO.rdoConnection` and `RDO.rdoQuery` (`New` or `CreateObject`). Connections,
+queries, resultsets, typed parameters and columns retain the classic RDO names,
+including case-insensitive collection/default/bang access. The lowercase `rdo*`
+public members are explicitly allowlisted by object identity; private JavaScript
+implementation members are not made accessible to VB.
+
+```vb
+Dim cn As rdoConnection, q As rdoQuery, rs As rdoResultset
+rdoEnvironments(0).CursorDriver = rdUseClientBatch
+Set cn = rdoEnvironments(0).OpenConnection("Local", _
+    Prompt:=rdDriverNoPrompt, Connect:="Provider=SQLite;Data Source=/customers.db")
+Set q = cn.CreateQuery("CustomersById", "SELECT id,name FROM Customers WHERE id >= ?")
+q.rdoParameters(0).Type = rdTypeINTEGER
+q(0) = 1
+Set rs = q.OpenResultset(rdOpenStatic, rdConcurBatch)
+rs.Edit
+rs!name = "Edited locally"
+rs.Update
+rs.BatchUpdate
+rs.Close
+cn.Close
+```
+
+RDO parameter types use the **ODBC numbers**, not ADO/DAO type numbers. Positional
+question-mark markers are recognized outside quoted text and comments. Parameter
+collections are obtained from the SQL, rather than accepting fabricated Append or
+Delete operations. Input values are bound and typed. Queries are temporary and
+close with their connection; `Requery` uses the current parameter values.
+
+Resultsets expose explicit edit buffers, movement, bookmarks, zero-based
+`AbsolutePosition`, `GetRows`, `LastModified`, real column types and text/binary
+chunks. `Update` posts the copy buffer; moving away discards an unposted buffer.
+With `rdUseClientBatch`/`rdConcurBatch`, writes remain in the shared client cursor
+until `BatchUpdate`. `CancelBatch True` affects the current row, while the default
+cancels all unsent rows. Partial update failures retain `BatchCollisionRows`,
+`BatchCollisionCount`, per-row `Status` and `rdoErrors`; previously successful
+rows are not resent. SQLite conflicts fetch the actual newer provider values for
+`BatchConflictValue`, including failed deletions addressable by bookmark. No
+server value is invented when a provider cannot refresh a keyed row.
+
+Connection transactions use the actual provider. Environment transactions process
+connections **sequentially**, matching RDO's non-distributed transaction scope:
+a partially failed commit is not an atomic distributed commit. A partial begin
+attempt rolls back the transactions it successfully started. Connection close
+rolls back outstanding transactions and discards unsent edits. `rdoTables.Refresh`
+reads the provider's actual table catalog; refreshed names can be opened directly.
+
+This is a portable, materialized **client** implementation. Forward-only cursors
+are read-only. `rdUseClientBatch` requests return `Type = rdOpenStatic`, even when
+a caller requested a native keyset/dynamic cursor; this is an explicit cursor
+fallback, not a claim to implement native server cursors. Portable static cursors
+also support explicit value-based optimistic writes where a keyed writer exists.
+`rdUseOdbc`/`rdUseServer`, pessimistic/row-version locking, forced overwrites,
+raw HDBC/HSTMT handles, native login dialogs, procedure output/return parameters,
+server-side cursors, asynchronous RDO events and native RemoteData OCX execution
+are not claimed. Native connection details belong in the authenticated gateway's
+named profile, not in an arbitrary browser-supplied DSN. `QueryTimeout` and
+`MaxRows` are validated; bounded client providers do not accept an infinite timeout.
+
+Contract references (Microsoft-authored archived Remote Data Objects help):
+- [Type and enum domains](https://techshelps.github.io/RDO98/html/rdprotype.htm)
+- [Environment and sequential transactions](https://techshelps.github.io/RDO98/html/rdobjrdoenvironment.htm)
+- [CancelBatch](https://techshelps.github.io/RDO98/html/rdmthcancelbatch.htm)
+- [Batch collisions](https://techshelps.github.io/RDO98/html/rdprobatchcollisioncount.htm)
+- [Actual conflicting provider values](https://techshelps.github.io/RDO98/html/rdprobatchconflictvalue.htm)
+
+`tests/data-rdo.test.mjs` and `tests/fixtures/rdo-compat.bas` validate this scope.
+The same VB fixture executes in exported HTML under Chromium, Firefox and WebKit;
+these are portable implementation tests, not a licensed native VB6/RDO oracle.
+
+DAO typed QueryDefs and RDO question-mark parameters travel over the gateway with
+an explicit positional dialect. The trusted server translates only markers outside
+strings, identifiers and comments to PostgreSQL `$1` or SQL Server `@p1` syntax;
+values remain separately bound. Ordinary ADO/native SQL is never rewritten (including
+PostgreSQL JSON `?` operators). A server-allowlisted positional command must declare
+`parameterStyle: "odbc"`; the client cannot override a named command's dialect.
+This translates parameter markers, not the rest of Access SQL or server dialects.
+
+## Installed native-provider conformance
+
+`tools/data-provider-tests.mjs odbc` runs through a genuine installed UnixODBC
+SQLite driver. `tools/data-provider-tests.mjs windows` creates disposable files
+using native ADOX and probes Jet 4.0 and ACE 12/16 in 32-bit and 64-bit workers.
+Only successfully created provider fixtures are exercised; unavailable providers
+are recorded explicitly, and 32-bit Jet plus the Access ODBC bridge are required
+by the Windows suite. Provider inventory is not a substitute for passed operations.
+The suites check parameter binding, binary/Null values, empty rowsets, transactions,
+close rollback, schema, recovery after errors, DAO QueryDefs and RDO queries.
+All databases are newly created in an isolated temporary directory and deleted.
+
+A trusted OLE DB gateway profile can set `architecture: "x86"` for Jet or a 32-bit
+ACE installation, or `architecture: "x64"` for a 64-bit provider. The worker reports
+its actual bitness and rejects a mismatch. `powershell` remains an explicit
+server-administrator override; neither option can be supplied by gateway clients.
+Command, parameter, field and recordset COM references are released on success and
+failure, and connection cleanup also runs when standard input closes.
+
+No proprietary provider is bundled or downloaded by these tests. Missing ACE,
+third-party ODBC drivers, passwords, linked servers and licensed native VB6 compiler
+execution still need the corresponding installation and authorized environment.
+The JSON reports identify which installed combinations actually passed.
+
+### Native schema field widths
+
+Native OLE DB schema rowsets retain `adTinyInt` (16), `adUnsignedSmallInt` (18), `adUnsignedInt` (19), and `adUnsignedBigInt` (21) metadata instead of failing or narrowing unsigned values to signed Long. Range violations raise VB overflow. Signed and unsigned 64-bit values (`adBigInt` 20 and `adUnsignedBigInt` 21) use the runtime's exact Decimal representation; supply Decimal, BigInt, or an invariant string for values outside JavaScript's safe integer range. Already-rounded JavaScript Numbers are rejected. The Windows worker serializes UInt64 without JSON precision loss. This does not assert that every installed provider supports binding or storing every ADO type.
+
+Native-provider CI retains regression and provider logs independently. Provider probes still execute after a regression failure, but that failure continues to fail the job. Provider availability, bitness, and actual executed checks remain separate from mock/unit coverage and native Microsoft VB6 compiler certification.
+
+
+### Provider validation and continuation fixes
+
+The validation runner inventories both Windows architectures before executing checks,
+attempts every installed provider even when another fails, and keeps an independent
+empty MDB for the Access ODBC bridge. A failed inventory, check, or cleanup fails
+the run. Missing ACE providers remain explicitly unavailable rather than counted
+as passes. Orchestration unit tests do not substitute for installed-provider tests.
+
+Native BLOB transport accepts ArrayBuffer values and bounded typed-array/DataView
+slices, including buffers from another browser realm. Only the selected bytes are
+encoded; adjacent bytes from a shared backing allocation are excluded.
+
+Native schema integer-width values retain provider metadata and enforce the
+corresponding signed/unsigned ranges. Exact 64-bit fields reject already-rounded
+unsafe JavaScript Numbers; use Decimal, BigInt, or invariant strings. Client field
+updates and provider-result loads validate before replacing the previous values.
+Cursor sorting, change detection, and integer criteria compare exact Decimal
+values without first rounding them through JavaScript Number.
+This is portable data compatibility, not an assertion of native VB6 Variant subtype
+or provider binding equivalence.
+
+Windows snapshot path checks canonicalize existing ancestors before testing whether
+an output is inside the source, including missing output directories, 8.3 paths,
+and junctions. This containment check is not a security boundary against concurrent
+hostile filesystem changes. The icon source inventory uses fileURLToPath rather
+than URL.pathname so drive letters and URL escaping are handled correctly.
+
+Reference specifications:
+- Microsoft ADO DataTypeEnum: https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/datatypeenum
+- PowerShell character encoding: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding
+- Node.js file URL conversion: https://nodejs.org/api/url.html#urlfileurltopathurl-options

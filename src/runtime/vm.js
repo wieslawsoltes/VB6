@@ -5,7 +5,7 @@ import {isAutomationObject,automationDefaultName,automationMember,automationRefe
 import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
-import {hasDataDefault,dataDefaultType} from '../data/defaults.js';
+import {hasDataDefault,hasDataMember,dataDefaultType} from '../data/defaults.js';
 import {defaultIdentifierType} from '../language/default-types.js';
 import {DebugInspector} from './debug-inspector.js';
 import {planLiveEdit,nextStatementIndex} from './live-edit.js';
@@ -269,7 +269,7 @@ export class VirtualMachine extends Signal {
     const isRecord=Object.getPrototypeOf(object)===Object.prototype&&!!object.__type;let obj=object,privateMatch=false;
     for(let depth=0;obj&&depth<5;depth++,obj=Object.getPrototypeOf(obj)){
       const candidates=Object.getOwnPropertyNames(obj).filter(k=>lower(k)===key&&!BLOCKED_MEMBERS.has(lower(k)));
-      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||['hwnd','hdc'].includes(key)&&object.__control);if(publicKey)return publicKey;
+      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||['hwnd','hdc'].includes(key)&&object.__control||hasDataMember(object,k));if(publicKey)return publicKey;
       if(candidates.length)privateMatch=true;
     }
     if(privateMatch)throw new VBError('Implementation members are not exposed to Visual Basic: '+name,438);
@@ -438,7 +438,7 @@ export class VirtualMachine extends Signal {
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable not set',91);
     if(typeof object!=='object'||object instanceof VBArray||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBErrorValue||object===MISSING||object.__fields)throw new VBError('Object required',424);
     if(callType===8){const value=args.at(-1);if(value!==NOTHING&&(!value||typeof value!=='object'||value instanceof VBArray||value instanceof Date||value instanceof VBCurrency||value instanceof VBDecimal||value instanceof VBErrorValue||value.__fields))throw new VBError('Object required',424);}
-    if(isAutomationObject(object))return this.debugAwait(automationInvoke(object,name,callType,args.map(unbox)));
+    if(isAutomationObject(object))return this.debugAwait(automationInvoke(object,name,callType,args));
     if(object.__vbInterface){const member=this.interfaceProcedure(object,name,({2:'get',4:'let',8:'set'})[callType]||null);return this.callProcedure(member.instance,member.__procedure,args,frame,true);}
     if(object.__vbInstance){
       // Automation dispatch is public even when invoked by code in the same class.

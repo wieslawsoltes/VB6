@@ -4,7 +4,7 @@
 import {VBCurrency} from '../runtime/values.js';
 const key = value => String(value).toLowerCase();
 const declarations = new WeakMap();
-const supported = new Set(['byte','integer','long','boolean','single','double','currency','string']);
+const supported = new Set(['byte','integer','long','boolean','single','double','currency','date','string']);
 function scopeDeclarations(scope) {
   let result = declarations.get(scope);
   if (!result) {
@@ -20,7 +20,7 @@ function descriptor(c, scope, name) {
   const value = scope.constantBindings.get(name), d = scopeDeclarations(scope).get(name);
   let type = key(d?.storageType || d?.type || 'variant');
   if (type === 'variant') {
-    type = value instanceof VBCurrency ? 'currency' : typeof value === 'string' ? 'string' :
+    type = value instanceof Date ? 'date' : value instanceof VBCurrency ? 'currency' : typeof value === 'string' ? 'string' :
       typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ?
       Number.isInteger(value) && value >= -32768 && value <= 32767 ? 'integer' :
       Number.isInteger(value) && value >= -2147483648 && value <= 2147483647 ? 'long' : 'double' : 'unknown';
@@ -64,7 +64,8 @@ export const nativeBindingMethods = {
   },
   emitNativeConstant(binding) {
     const {type,value} = binding;
-    if (type === 'currency') this.x.value(this.currencyLiteral(value));
+    if (type === 'date') this.x.value(this.dateLiteral(value));
+    else if (type === 'currency') this.x.value(this.currencyLiteral(value));
     else if (type === 'single' || type === 'double') this.x.value(this.floatLiteral(value));
     else if (type === 'string') this.x.value(this.string(value));
     else {

@@ -30,7 +30,8 @@ Debug.Print k
 Next k
 Set doc = CreateObject("Msxml2.DOMDocument.6.0")
 doc.async = False
-Debug.Print doc.loadXML("<root>Unicode Żółć</root>")
+n = doc.loadXML("<root>Unicode Żółć</root>")
+Debug.Print n, CInt(n), VarType(n)
 Debug.Print doc.documentElement.text
 Set same = Nothing
 Set other = Nothing
@@ -39,7 +40,28 @@ Set doc = Nothing
 End Sub`}]});
   check('VB compiler',()=>assert.deepEqual(program.diagnostics,[]));
   const vm=new VirtualMachine(program,{automation:client.registry(),print:s=>output.push(s)});
-  await vm.start();check('JavaScript VB runtime invokes real Windows components',()=>assert.deepEqual(output,['1 Zażółć 日本語','updated','True -1 11','1 key','key','object','-1','Unicode Żółć']));
+  await vm.start();check('JavaScript VB runtime invokes real Windows components',()=>assert.deepEqual(output,['1 Zażółć 日本語','updated','True -1 11','1 key','key','object','True -1 11','Unicode Żółć']));
+  // A real system Dictionary stores the native VARIANT exactly; inspect both
+  // the source VM type and the independent native wire descriptor on return.
+  const scalarProgram=compileProject({name:'NativeScalars',startup:'Sub Main',modules:[{name:'M',kind:'module',code:`Sub Main()
+Dim d As Object, v As Variant
+Set d = CreateObject("Scripting.Dictionary")
+d.Add "byte", CByte(255)
+d.Add "integer", CInt(-32768)
+d.Add "long", CLng(2147483647)
+d.Add "single", CSng(1.6)
+d.Add "double", CDbl(1.6)
+d.Add "boolean", CBool(True)
+d.Add "currency", CCur("922337203685477.5807")
+d.Add "decimal", CDec("1.0000000000000000000000000001")
+d.Add "date", CDate(2.75)
+Debug.Print VarType(d("byte")), VarType(d("integer")), VarType(d("long")), VarType(d("single")), VarType(d("double"))
+Debug.Print d("boolean"), VarType(d("boolean")), VarType(d("currency")), VarType(d("decimal")), VarType(d("date"))
+Debug.Print CStr(d("currency")), CStr(d("decimal"))
+End Sub`}]});
+  // The same native client deliberately cannot be shared between VM sessions.
+  // This program is exercised below using a fresh explicitly granted client.
+  check('scalar fixture compiler',()=>assert.deepEqual(scalarProgram.diagnostics,[]));
   check('objects allocated',()=>assert.ok(client.adapters.size>=4));vm.stop();await vm.automationClose;
   const status=await client.request({op:'info'});check('native objects released at stop',()=>assert.equal(status.objects,0));
   await assert.rejects(()=>client.request({op:'create',progId:'WScript.Shell'}),/not allowed/);checks.push('ungranted ProgID denied');
@@ -47,6 +69,25 @@ End Sub`}]});
   await client.request({op:'call',handle:d.id,member:'Add',mode:1,args:[{t:'string',v:'currency'},{t:'currency',v:'123.4567'}]});
   const r=await client.request({op:'call',handle:d.id,member:'Item',mode:2,args:[{t:'string',v:'currency'}]});check('exact native currency value',()=>assert.equal(String(r.value.v),'123.4567'));
   await client.request({op:'release',handle:d.id});await assert.rejects(()=>client.request({op:'call',handle:d.id,member:'Count',mode:2}),e=>e.number===91);checks.push('released handle rejected');
+  const scalarClient=new NativeAutomationClient({allowed:['Scripting.Dictionary'],allowNativeCode:true,architecture:client.architecture});
+  try{
+    const scalarOutput=[],scalarVM=new VirtualMachine(scalarProgram,{automation:scalarClient.registry(),print:s=>scalarOutput.push(s)});
+    try{await scalarVM.start();check('native VARIANT types survive compiled calls',()=>assert.deepEqual(scalarOutput,['17 2 3 4 5','True 11 6 14 7','922337203685477.5807 1.0000000000000000000000000001']));}
+    finally{scalarVM.stop();await scalarVM.automationClose;}
+    const scalarStatus=await scalarClient.request({op:'info'});check('typed session releases native objects',()=>assert.equal(scalarStatus.objects,0));
+    const handle=await scalarClient.request({op:'create',progId:'Scripting.Dictionary'});
+    for(const [vt,kind,values] of [[2,'number',[-32768,32767]],[3,'number',[-2147483648,2147483647]],[4,'number',[Math.fround(1.6),Math.fround(0.2)]],[5,'number',[1.6,0.2]],[6,'currency',['-922337203685477.5808','0.0001']],[14,'decimal',['79228162514264337593543950335','0.0000000000000000000000000001']],[11,'boolean',[true,false]],[17,'number',[0,255]],[8,'string',['Zażółć 日本語','x\u0000y']]]){
+      const array={t:'array',elementType:vt,bounds:[[-2,-1],[3,5]],v:Array.from({length:6},(_,i)=>({t:kind,...(kind==='number'?{vt}:{}),v:values[i%2]}))};
+      await scalarClient.request({op:'call',handle:handle.id,member:'Add',mode:1,args:[{t:'string',v:String(vt)},array]});
+      const got=await scalarClient.request({op:'call',handle:handle.id,member:'Item',mode:2,args:[{t:'string',v:String(vt)}]});
+      check('native multidimensional SAFEARRAY '+vt,()=>assert.deepEqual(got.value,array));
+    }
+    // Check an independently created native array's coordinates (not only a
+    // symmetric serializer round trip) using Dictionary.Keys.
+    const keys=await scalarClient.request({op:'call',handle:handle.id,member:'Keys',mode:1,args:[]});
+    check('native-created SAFEARRAY coordinates',()=>{assert.equal(keys.value.elementType,12);assert.deepEqual(keys.value.bounds,[[0,8]]);assert.deepEqual(keys.value.v.map(v=>v.v),['2','3','4','5','6','14','11','17','8']);});
+    await scalarClient.request({op:'release',handle:handle.id});
+  }finally{await scalarClient.close();}
   report.status='passed';
 }catch(error){
   report.error={message:error.message,code:error.code,hresult:error.hresult,operation:error.operation,timeoutMs:error.timeoutMs};
