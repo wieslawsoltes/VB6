@@ -11056,8 +11056,69 @@ const container=document.getElementById('studio');if(container){const studio=new
 return {VB6Studio,StudioAPI};
 })();
 
-/* protocol.js */
+/* operations-panel.js */
 __modules[112]=(()=>{
+const {el}=__modules[1];
+
+const button = (label, onclick) => el('button',{type:'button',onclick},label);
+/** Local owner controls only. No task/credential enumeration is exposed over MCP. */
+class McpOperationsView {
+  constructor(api) {
+    this.api=api; this.disposed=false; this.pending=false;
+    this.taskList=el('select',{size:6,'aria-label':'Retained MCP tasks'});
+    this.artifactList=el('select',{size:6,'aria-label':'Retained MCP build artifacts'});
+    this.taskDetails=el('pre',{class:'mcp-description',tabindex:0,'aria-label':'MCP task details'});
+    this.artifactDetails=el('pre',{class:'mcp-description',tabindex:0,'aria-label':'MCP artifact details'});
+    this.summary=el('span',{class:'tool-note',role:'status','aria-live':'polite'});
+    this.cancel=button('Cancel selected task',()=>this.api.server.tasks.cancelLocal(this.taskList.value));
+    this.clear=button('Clear finished tasks',()=>this.api.server.tasks.clearFinished());
+    this.release=button('Release selected artifact',()=>this.api.adapter.releaseArtifactLocal(this.artifactList.value));
+    this.releaseAll=button('Release all artifacts',()=>this.api.adapter.revokeArtifacts());
+    const section=(title,list,detail,actions)=>el('fieldset',{},el('legend',{},title),
+      el('div',{class:'mcp-operation-grid'},list,detail),el('div',{class:'mcp-actions'},...actions));
+    this.root=el('div',{class:'mcp-page mcp-operations-page'},this.summary,
+      section('Agent tasks',this.taskList,this.taskDetails,[this.cancel,this.clear]),
+      section('Build downloads',this.artifactList,this.artifactDetails,[this.release,this.releaseAll]),
+      el('p',{class:'tool-note'},'These controls belong to the local IDE owner. Task arguments, results, credentials and client identities are not displayed. Clearing a task or releasing an artifact makes its handle unavailable to agents. No generated program is run.'));
+    this.taskList.addEventListener('change',()=>this.details()); this.artifactList.addEventListener('change',()=>this.details());
+    this.offTasks=api.server.tasks.onChange(()=>this.schedule());
+    this.offArtifacts=api.adapter.onArtifactsChange(()=>this.schedule()); this.refresh();
+  }
+  schedule() {
+    if(this.disposed||this.pending)return;
+    this.pending=true;
+    queueMicrotask(()=>{this.pending=false;if(!this.disposed)this.refresh();});
+  }
+  renderList(list,items,key,label) {
+    const previous=list.value;
+    list.replaceChildren(...items.map(item=>el('option',{value:item[key]},label(item))));
+    list.value=items.some(item=>item[key]===previous)?previous:items[0]?.[key]||'';
+  }
+  refresh() {
+    if(this.disposed)return;
+    this.tasks=this.api.server.tasks.inspect();this.artifacts=this.api.adapter.inspectArtifacts();
+    const signature=JSON.stringify([this.tasks,this.artifacts]);if(signature===this.signature)return;this.signature=signature;
+    this.renderList(this.taskList,this.tasks,'taskId',t=>t.toolName+' — '+t.status);
+    this.renderList(this.artifactList,this.artifacts,'artifactId',a=>a.name+' — '+a.size.toLocaleString()+' bytes');
+    const working=this.tasks.filter(t=>['working','input_required'].includes(t.status)).length;
+    this.summary.textContent=this.tasks.length+' retained tasks ('+working+' active) · '+this.artifacts.length+' build artifacts';
+    this.clear.disabled=!this.tasks.some(t=>!['working','input_required'].includes(t.status));this.releaseAll.disabled=!this.artifacts.length;
+    this.details();
+  }
+  details() {
+    const task=this.tasks?.find(t=>t.taskId===this.taskList.value),artifact=this.artifacts?.find(a=>a.artifactId===this.artifactList.value);
+    this.taskDetails.textContent=task?JSON.stringify(task,null,2):'No retained task selected.';
+    this.artifactDetails.textContent=artifact?JSON.stringify(artifact,null,2):'No build artifact selected.';
+    this.cancel.disabled=!task||!['working','input_required'].includes(task.status);this.release.disabled=!artifact;
+  }
+  dispose() { this.disposed=true;this.offTasks?.();this.offArtifacts?.(); }
+}
+
+return {McpOperationsView};
+})();
+
+/* protocol.js */
+__modules[113]=(()=>{
 
 /** Transport-independent MCP primitives. No browser globals, dependencies, or dynamic code. */
 const MCP_VERSION = '2026-07-28';
@@ -11215,11 +11276,12 @@ return {MCP_VERSION,MCP_LEGACY_VERSIONS,MCP_VERSIONS,MCP_META,MCP_LIMIT,McpError
 })();
 
 /* agent-permissions.js */
-__modules[113]=(()=>{
-const {McpError}=__modules[112];
+__modules[114]=(()=>{
+const {McpError}=__modules[113];
 
 /** Local-only delegated authority. Never serialized into projects or reachable as an MCP tool. */
 const AGENT_SCOPES = Object.freeze({
+  data: 'Edit public data connections and commands (no SQL or network execution)',
   code: 'Edit code, declarations and bookmarks',
   project: 'Create/import/replace projects, change metadata and undo/redo project history',
   designer: 'Edit forms, controls, menus and designer selection',
@@ -11238,6 +11300,7 @@ function agentScope(name) {
   if (['form','control','menu','designer'].includes(part)) return 'designer';
   if (['files','assets','resources','appSettings'].includes(part)) return 'files';
   if (['debug','breakpoints','watches'].includes(part)) return 'debugger';
+  if (part === 'data') return 'data';
   if (part === 'runtime') return 'runtime';
   if (['project','references'].includes(part)) return 'project';
   return 'workspace';
@@ -11274,8 +11337,8 @@ return {AGENT_SCOPES,agentScope,AgentPermissions};
 })();
 
 /* tasks.js */
-__modules[114]=(()=>{
-const {McpError, MCP_META, MCP_LIMIT, isRecord, randomToken, utf8Length, errorResponse}=__modules[112];
+__modules[115]=(()=>{
+const {McpError, MCP_META, MCP_LIMIT, isRecord, randomToken, utf8Length, errorResponse}=__modules[113];
 
 const TASK_EXTENSION = MCP_META + 'tasks';
 function requireTasks(params) {
@@ -11285,38 +11348,54 @@ function requireTasks(params) {
 /** Bounded, ephemeral tasks. Auth identity is supplied by the transport, never clientInfo. */
 class McpTasks {
   constructor({now = () => Date.now(), ttlMs = 120000, limit = 32, changed = () => {}} = {}) {
-    this.now = now; this.ttlMs = ttlMs; this.limit = limit; this.changed = changed; this.entries = new Map();
+    this.now = now; this.ttlMs = ttlMs; this.limit = limit; this.changed = changed; this.entries = new Map(); this.observers = new Set();
   }
+  onChange(fn) { this.observers.add(fn); return () => this.observers.delete(fn); }
+  notify() { for (const fn of this.observers) { try { Promise.resolve(fn()).catch(() => {}); } catch {} } }
+  statusChanged(entry) { try { Promise.resolve(this.changed(structuredClone(entry.task), entry.principal)).catch(() => {}); } catch {} this.notify(); }
+  // Local owner tooling only: never advertise these methods as tasks/list or tools.
+  inspect() {
+    this.purge();
+    return [...this.entries.values()].map(e => ({taskId:e.task.taskId, toolName:e.toolName,
+      status:e.task.status, createdAt:e.task.createdAt, lastUpdatedAt:e.task.lastUpdatedAt, expiresAt:e.expiresAt}));
+  }
+  cancelLocal(id) { const entry=this.entries.get(id); if (!entry) return false; this.cancel(id,{principal:entry.principal}); return true; }
+  clearFinished() { for (const [id,e] of this.entries) if (['completed','failed','cancelled'].includes(e.task.status)) this.remove(id); }
   principal(ctx) { return ctx.principal || ctx.sessionKey; }
   purge() {
     for (const [id, entry] of this.entries) if (this.now() >= entry.expiresAt) this.remove(id);
   }
   remove(id) {
     const entry = this.entries.get(id); if (!entry) return;
-    this.entries.delete(id); clearTimeout(entry.timer); entry.authority?.removeEventListener('abort', entry.revoke); entry.controller.abort();
+    this.entries.delete(id); clearTimeout(entry.timer); entry.authority?.removeEventListener('abort', entry.revoke); entry.controller.abort(); this.notify();
   }
   clear(principal) {
     for (const [id, entry] of this.entries) if (principal === undefined || entry.principal === principal) this.remove(id);
   }
-  create(run, ctx, authority) {
+  create(run, ctx, authority, {toolName = 'Tool call'} = {}) {
     this.purge();
     if (this.entries.size >= this.limit) throw new McpError(-32000, 'Too many retained tasks; retry after task expiry.');
     const principal = this.principal(ctx); if (!principal) throw new McpError(-32602, 'A transport identity is required for tasks.');
     if (authority?.aborted || ctx.signal?.aborted) throw new McpError(-32800, 'Request cancelled.');
     const taskId = randomToken(24), createdAt = new Date(this.now()).toISOString(), controller = new AbortController();
-    const entry = {principal, controller, authority, expiresAt: this.now() + this.ttlMs,
+    const entry = {principal, controller, authority, toolName:String(toolName).slice(0,200), expiresAt: this.now() + this.ttlMs,
       task: {taskId, status: 'working', createdAt, lastUpdatedAt: createdAt, ttlMs: this.ttlMs, pollIntervalMs: 250}};
     entry.revoke = () => this.remove(taskId);
     entry.timer = setTimeout(entry.revoke, this.ttlMs); entry.timer.unref?.();
-    this.entries.set(taskId, entry); authority?.addEventListener('abort', entry.revoke, {once: true});
+    this.entries.set(taskId, entry); authority?.addEventListener('abort', entry.revoke, {once: true}); this.notify();
     const settle = (status, value) => {
       if (this.entries.get(taskId) !== entry || entry.task.status !== 'working') return;
       entry.task = {...entry.task, status, lastUpdatedAt: new Date(this.now()).toISOString(), ...value};
-      try { this.changed(entry.task, principal); } catch {}
+      this.statusChanged(entry);
     };
     // The task owns its lifetime after its handle is returned. Request HTTP close
     // must not cancel it; authority loss, TTL and tasks/cancel still do.
-    Promise.resolve().then(() => run({...ctx, signal: controller.signal, emit: () => {}, notify: () => {}, reportProgress: () => {}, log: () => {}})).then(result => {
+    Promise.resolve().then(() => {
+      // Revocation can happen before the queued callback starts. Do not invoke an
+      // adapter at all once its handle has been cancelled, expired or removed.
+      if (controller.signal.aborted || this.entries.get(taskId)!==entry || authority?.aborted) throw new McpError(-32800,'Task cancelled.');
+      return run({...ctx, signal: controller.signal, emit: () => {}, notify: () => {}, reportProgress: () => {}, log: () => {}});
+    }).then(result => {
       if (utf8Length(JSON.stringify(result)) > MCP_LIMIT / 2) throw new McpError(-32603, 'Task result is too large.');
       settle('completed', {result});
     }).catch(error => settle(controller.signal.aborted ? 'cancelled' : 'failed', controller.signal.aborted ? {} : {error: errorResponse(null, error instanceof McpError && error.code === -32002 ? new McpError(-32602, error.message, error.data) : error).error}));
@@ -11333,7 +11412,7 @@ class McpTasks {
     const entry = this.find(id, ctx);
     if (entry.task.status === 'working') {
       entry.task = {...entry.task, status: 'cancelled', lastUpdatedAt: new Date(this.now()).toISOString()};
-      entry.controller.abort(); this.changed(entry.task, entry.principal);
+      entry.controller.abort(); this.statusChanged(entry);
     }
     return {};
   }
@@ -11350,15 +11429,15 @@ return {TASK_EXTENSION,requireTasks,McpTasks};
 })();
 
 /* server.js */
-__modules[115]=(()=>{
-const {McpTasks, TASK_EXTENSION, requireTasks}=__modules[114];
-const {randomToken, MCP_VERSION, MCP_LIMIT, MCP_VERSIONS, MCP_LEGACY_VERSIONS, MCP_META, McpError, checkMessage, errorResponse, isRecord, checkAbort, validateArguments, validateHeaders, pageItems, awaitAbort, utf8Length}=__modules[112];
+__modules[116]=(()=>{
+const {McpTasks, TASK_EXTENSION, requireTasks}=__modules[115];
+const {randomToken, MCP_VERSION, MCP_LIMIT, MCP_VERSIONS, MCP_LEGACY_VERSIONS, MCP_META, McpError, checkMessage, errorResponse, isRecord, checkAbort, validateArguments, validateHeaders, pageItems, awaitAbort, utf8Length}=__modules[113];
 
 
 /** MCP server reusable with a browser IDE, a headless adapter, MessagePort, stdio or HTTP. */
 class McpServer {
   constructor(adapter, {name = 'vb6-studio', version = '0.6.0', taskTools = ['vb6.agent.wait']} = {}) {
-    this.adapter = adapter; this.info = {name, version}; this.sessions = new Map(); this.active = new Map(); this.listeners = new Set();
+    this.closed = false; this.adapter = adapter; this.info = {name, version}; this.sessions = new Map(); this.active = new Map(); this.listeners = new Set();
     this.tools = new Map(adapter.tools.map(tool => [tool.name, tool]));
     this.taskTools = new Set(taskTools);
     this.tasks = new McpTasks({changed: (task, principal) => {
@@ -11397,18 +11476,29 @@ class McpServer {
       }).catch(() => {});
     }
   }
-  revokePrincipal(principal) { if (!principal) return; this.tasks.clear(principal); this.adapter.revokePrincipal?.(principal); }
+  revokePrincipal(principal) {
+    if (!principal) return;
+    // One authenticated principal may have several concurrent HTTP requests.
+    // Revoke their active work as well as already-returned handles.
+    for (const [id,request] of this.active) if (request.principal===principal) { request.controller.abort(); this.active.delete(id); }
+    for (const [key,session] of this.sessions) if (session.principal===principal) this.closeSession(key);
+    for (const listener of this.listeners) if (listener.principal===principal) this.listeners.delete(listener);
+    this.tasks.clear(principal); this.adapter.revokePrincipal?.(principal);
+  }
   closeSession(key) {
     this.sessions.delete(key);
     for (const [id, request] of this.active) if (request.sessionKey === key) { request.controller.abort(); this.active.delete(id); }
     for (const listener of this.listeners) if (listener.sessionKey === key) this.listeners.delete(listener);
   }
   revoke() { this.tasks.clear(); this.adapter.revokeArtifacts?.(); for (const request of this.active.values()) request.controller.abort(); this.active.clear(); this.sessions.clear(); this.listeners.clear(); }
-  close() { this.revoke(); this.disposeChange?.(); }
+  close() { if(this.closed)return; this.closed=true; this.revoke(); this.disposeChange?.(); }
   async dispatch(message, context = {}) {
     let kind;
     try { kind = checkMessage(message); if (utf8Length(JSON.stringify(message)) > MCP_LIMIT) throw new McpError(-32600, 'MCP request exceeds the 8 MiB message limit.'); } catch (error) { return errorResponse(message?.id, error); }
     if (kind === 'response') return undefined;
+    if (this.closed) return kind==='notification'?undefined:errorResponse(message.id,new McpError(-32000,'MCP server is closed.'));
+    // Modern calls do not require tools/list or an established subscription.
+    this.tools = new Map(this.adapter.tools.map(tool => [tool.name, tool]));
     const sessionKey = context.sessionKey || 'local', session = this.sessions.get(sessionKey);
     const params = message.params || {}, version = params._meta?.[MCP_META + 'protocolVersion'];
     const modern = version !== undefined, emit = context.emit || (() => {});
@@ -11422,7 +11512,7 @@ class McpServer {
     if (this.active.size >= 128) return errorResponse(message.id, new McpError(-32000, 'Too many pending requests.'));
     const controller = new AbortController(), abort = () => controller.abort();
     context.signal?.addEventListener('abort', abort, {once: true}); if (context.signal?.aborted) controller.abort();
-    this.active.set(key, {controller, sessionKey});
+    this.active.set(key, {controller, sessionKey, principal:context.principal||sessionKey});
     const ctx = {...context, requestId: message.id, sessionKey, signal: controller.signal, emit};
     let progress = -1;
     ctx.reportProgress = (value, total, text) => {
@@ -11456,8 +11546,8 @@ class McpServer {
         const stamp = await awaitAbort(this.catalogStamp(), ctx.signal); checkAbort(ctx.signal);
         if (this.sessions.has(sessionKey)) throw new McpError(-32600, 'This session is already initialized.');
         if (this.sessions.size >= 64) throw new McpError(-32000, 'Too many MCP sessions.');
-        this.sessions.set(sessionKey, {version: selected, ready: false, subscriptions: new Set(), clientInfo: params.clientInfo});
-        this.listeners.add({sessionKey, legacy: true, emit: context.notify || emit, meta: {}, stamp,
+        this.sessions.set(sessionKey, {principal:ctx.principal||sessionKey, version: selected, ready: false, subscriptions: new Set(), clientInfo: params.clientInfo});
+        this.listeners.add({sessionKey, principal:ctx.principal||sessionKey, legacy: true, emit: context.notify || emit, meta: {}, stamp,
           filter: {toolsListChanged: true, promptsListChanged: true, resourcesListChanged: true, resourceSubscriptions: []}});
         result = {protocolVersion: selected, capabilities: this.capabilities(), serverInfo: this.info, instructions: 'Enable MCP sharing in the IDE. Edits require expectedRevision and local approval or an unexpired locally authorized scope.'};
       } else if (message.method === 'ping') result = {};
@@ -11502,7 +11592,7 @@ class McpServer {
           }
         };
         if (modern && this.taskTools.has(tool.name) && isRecord(params._meta?.[MCP_META + 'clientCapabilities']?.extensions?.[TASK_EXTENSION]))
-          return this.tasks.create(run, context, this.adapter.authoritySignal);
+          return this.tasks.create(run, context, this.adapter.authoritySignal, {toolName:tool.name});
         return run(context);
       }
       case 'tasks/get': case 'tasks/update': case 'tasks/cancel': {
@@ -11533,10 +11623,16 @@ class McpServer {
       case 'resources/subscribe': case 'resources/unsubscribe': {
         if (modern) throw new McpError(-32601, 'Use subscriptions/listen with modern MCP.');
         if (typeof params.uri !== 'string') throw new McpError(-32602, 'A resource URI is required.');
-        await this.adapter.readResource(params.uri, context);
+        await awaitAbort(this.adapter.readResource(params.uri, context), context.signal);
+        checkAbort(context.signal);
         if (method === 'resources/subscribe') session.subscriptions.add(params.uri); else session.subscriptions.delete(params.uri);
         let listener = [...this.listeners].find(l => l.sessionKey === context.sessionKey && l.legacy);
-        if (!listener) { listener = {stamp: await this.catalogStamp(), sessionKey: context.sessionKey, legacy: true, emit: context.notify || context.emit, meta: {}, filter: {resourceSubscriptions: []}}; this.listeners.add(listener); }
+        if (!listener) {
+          const stamp = await awaitAbort(this.catalogStamp(), context.signal); checkAbort(context.signal);
+          listener = {stamp, principal:context.principal||context.sessionKey, sessionKey:context.sessionKey,
+            legacy:true, emit:context.notify||context.emit, meta:{}, filter:{resourceSubscriptions:[]}};
+          this.listeners.add(listener);
+        }
         listener.filter.resourceSubscriptions = [...session.subscriptions]; return {};
       }
       case 'subscriptions/listen': {
@@ -11583,8 +11679,133 @@ function bindMcpPort(port, server, {sessionKey = 'port-' + randomToken(24), onEr
 return {McpServer,bindMcpPort};
 })();
 
+/* agent-schema.js */
+__modules[117]=(()=>{
+
+const S = {type:'string',maxLength:1000};
+const TEXT={type:'string',maxLength:4000000};
+const B={type:'boolean'};
+const N = (min=0,max=1000000)=>({type:'integer',minimum:min,maximum:max});
+const E = values=>({type:'string',enum:values});
+const A = (items,max=1000)=>({type:'array',items,maxItems:max});
+const O = (properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
+const OBJ={type:'object'};
+const REV=N(1,Number.MAX_SAFE_INTEGER);
+
+return {S,TEXT,B,N,E,A,O,OBJ,REV};
+})();
+
+/* agent-data.js */
+__modules[118]=(()=>{
+const {clone}=__modules[1];
+const {normalizeDataSources}=__modules[13];
+const {McpError, checkAbort, utf8Length}=__modules[113];
+const {S, B, N, E, OBJ, REV}=__modules[117];
+
+
+
+
+const PROVIDERS = Object.freeze([
+  {id:'sqlite',storage:'project virtual file',network:false},
+  {id:'json',storage:'project virtual file',network:false},
+  {id:'csv',storage:'project virtual file',network:false},
+  {id:'rest',storage:'HTTP service',network:true},
+  {id:'odata',storage:'HTTP service',network:true},
+  {id:'graphql',storage:'HTTP service',network:true},
+  {id:'gateway',storage:'operator-configured database gateway',network:true}
+]);
+const MAX_DEFINITION_BYTES = 512 * 1024;
+const equal = (a,b) => String(a).toLowerCase() === String(b).toLowerCase();
+const invalid = message => { throw new McpError(-32602, message); };
+function model(value) {
+  try { return normalizeDataSources(value); }
+  catch (error) { throw new McpError(-32602, error.message || 'Invalid data environment.'); }
+}
+function definition(value) {
+  if (utf8Length(JSON.stringify(value)) > MAX_DEFINITION_BYTES) invalid('A data definition may not exceed 512 KiB.');
+  return clone(value);
+}
+function find(data, kind, name) {
+  return data[kind].find(item => equal(item.name,name)) || invalid('Unknown data object: ' + name);
+}
+/** Design-time data definitions only. Never creates a DataContext, requests a
+ * credential, opens a database, fetches a URL or executes SQL/project code. */
+function installDataTools(ide, adapter, {add, output, consent, commit, checkRevision, page, resource}) {
+  const read = () => model(ide.project.dataSources);
+  const refresh = () => {
+    // The designer is a projection of the committed model, not a second source.
+    try { ide.documents?.tools?.get('tool:dataEnvironment')?.refresh?.(); } catch {}
+  };
+  const mutate = (name, description, properties, required, edit, destructive=false) => add(name, description,
+    {...properties,expectedRevision:REV}, [...required,'expectedRevision'], async (args,ctx) => {
+      checkRevision(args.expectedRevision);
+      const next=clone(ide.project), data=model(next.dataSources), detail=edit(data,args);
+      next.dataSources=model(data); // Validate a complete candidate before consent.
+      await consent('vb6.'+name,args,ctx);
+      checkAbort(ctx.signal); checkRevision(args.expectedRevision);
+      const result=commit(next,'MCP: '+name); refresh(); return {...result,...detail};
+    }, {write:true,destructive});
+  add('data.providers','Describe the built-in data providers and the design-only MCP boundary. Does not connect to any service.',{},[],()=>output({
+    providers:PROVIDERS.map(p=>({...p})),maxDefinitionBytes:MAX_DEFINITION_BYTES,
+    execution:'These tools edit public project definitions only. Execute through the normal IDE/runtime with its separate execution permission.',
+    credentials:'Use credentialRef. Stored passwords, bearer tokens, authorization headers and secret URL parameters are rejected. No runtime credential APIs are exposed.'
+  }));
+  const inventory = args => {
+    const data=read();
+    const items=[...data.connections.map(c=>({kind:'connection',name:c.name,provider:c.provider,commands:data.commands.filter(d=>equal(d.connection,c.name)).length})),
+      ...data.commands.map(c=>({kind:'command',name:c.name,connection:c.connection,type:c.type||1,parameters:(c.parameters||[]).length,textLength:String(c.text||'').length}))]
+      .filter(item=>!args.kind||item.kind===args.kind).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
+    return output({...page(items,args),version:data.version,connections:data.connections.length,commands:data.commands.length});
+  };
+  add('data.list','List data connections and commands without SQL text, file payloads, results or runtime credentials.',{kind:E(['connection','command']),offset:N(),limit:N(1,1000)},[],inventory);
+  for (const [kind,list] of [['connection','connections'],['command','commands']]) {
+    add('data.'+kind+'.get','Read one public data '+kind+' definition. Does not read a live connection, result set or credential cache.',{name:S},['name'],args=>output({definition:definition(find(read(),list,args.name))}));
+    mutate('data.'+kind+'.set','Create or replace one complete public data '+kind+' definition. Explicit mode prevents accidental replacement; names are case-insensitive. Use data.rename for identity changes.',
+      {definition:OBJ,mode:E(['create','replace'])},['definition','mode'],(data,args)=>{
+        const item=definition(args.definition),index=data[list].findIndex(c=>equal(c.name,item.name));
+        if (args.mode==='create'&&index!==-1) invalid('Data object already exists; use replace explicitly.');
+        if (args.mode==='replace'&&index===-1) invalid('Data object does not exist; use create explicitly.');
+        if (kind==='connection'&&!PROVIDERS.some(p=>p.id===item.provider)) invalid('Unknown data provider. Read data.providers.');
+        if (kind==='command'&&item.type!==undefined&&![1,2,4].includes(item.type)) invalid('Command type must be 1 (text), 2 (table) or 4 (stored procedure).');
+        if (kind==='command'&&item.text!==undefined&&typeof item.text!=='string') invalid('Command text must be a string.');
+        if (index===-1) data[list].push(item); else {
+          // Preserve spelling used by dependent definitions. Rename is explicit.
+          if (item.name!==data[list][index].name) invalid('Use data.rename to change the name or its casing.');
+          data[list][index]=item;
+        }
+        return {name:item.name,mode:args.mode};
+      });
+    mutate('data.'+kind+'.remove','Remove a data '+kind+' definition. Connection deletion with dependent commands requires cascade:true. Does not delete virtual database files or rewrite source/control references.',
+      {name:S,...(kind==='connection'?{cascade:B}:{})},['name'],(data,args)=>{
+        const item=find(data,list,args.name),dependents=kind==='connection'?data.commands.filter(c=>equal(c.connection,item.name)):[];
+        if (dependents.length&&!args.cascade) invalid('Connection has dependent commands; explicitly set cascade:true.');
+        data[list]=data[list].filter(c=>c!==item);
+        if (dependents.length) data.commands=data.commands.filter(c=>!dependents.includes(c));
+        return {removed:[item.name,...dependents.map(c=>c.name)],sourceAndBindingsUpdated:false};
+      },true);
+  }
+  mutate('data.rename','Rename a data connection or command. Updates command-to-connection references atomically. Does not perform semantic source renaming or rewrite designer bindings; update those explicitly with code.edit/control.edit.',
+    {kind:E(['connection','command']),name:S,newName:S},['kind','name','newName'],(data,args)=>{
+      const item=find(data,args.kind==='connection'?'connections':'commands',args.name),oldName=item.name;
+      item.name=args.newName;
+      const affected=args.kind==='connection'?data.commands.filter(c=>equal(c.connection,oldName)):[];
+      for (const command of affected) command.connection=args.newName;
+      return {name:args.newName,previousName:oldName,updatedCommands:affected.map(c=>c.name),sourceAndBindingsUpdated:false};
+    });
+  add('data.validate','Validate saved data definitions and report unsupported providers without network, credential prompts or SQL execution. This is not a live connection test.',{},[],()=>{
+    let data;
+    try { data=read(); } catch(error) { return output({valid:false,diagnostics:[{severity:'error',message:error.message}],liveConnectionTest:false}); }
+    const diagnostics=data.connections.filter(c=>!PROVIDERS.some(p=>p.id===c.provider)).map(c=>({severity:'error',name:c.name,message:'Unknown built-in provider.'}));
+    return output({valid:!diagnostics.length,connections:data.connections.length,commands:data.commands.length,diagnostics,liveConnectionTest:false});
+  });
+  resource('vb6://data','Data Environment inventory',()=>inventory({}));
+}
+
+return {installDataTools};
+})();
+
 /* ../core/sha256.js */
-__modules[116]=(()=>{
+__modules[119]=(()=>{
 
 /** SHA-256 for artifact integrity. WebCrypto when available; portable JS on plain HTTP.
  * This is not an authentication primitive and stores no keys. */
@@ -11623,25 +11844,9 @@ async function sha256(data, subtle = globalThis.crypto?.subtle) {
 return {sha256};
 })();
 
-/* agent-schema.js */
-__modules[117]=(()=>{
-
-const S = {type:'string',maxLength:1000};
-const TEXT={type:'string',maxLength:4000000};
-const B={type:'boolean'};
-const N = (min=0,max=1000000)=>({type:'integer',minimum:min,maximum:max});
-const E = values=>({type:'string',enum:values});
-const A = (items,max=1000)=>({type:'array',items,maxItems:max});
-const O = (properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
-const OBJ={type:'object'};
-const REV=N(1,Number.MAX_SAFE_INTEGER);
-
-return {S,TEXT,B,N,E,A,O,OBJ,REV};
-})();
-
 /* agent-build.js */
-__modules[118]=(()=>{
-const {sha256}=__modules[116];
+__modules[120]=(()=>{
+const {sha256}=__modules[119];
 const {clone}=__modules[1];
 const {sourceFiles, workspaceProjects, selectWorkspaceProject}=__modules[50];
 const {validateWorkspace}=__modules[49];
@@ -11649,7 +11854,7 @@ const {writeZip}=__modules[52];
 const {toBase64}=__modules[28];
 const {compileWin32, NativeCompileError}=__modules[43];
 const {exportApplication}=__modules[91];
-const {McpError, checkAbort, randomToken}=__modules[112];
+const {McpError, checkAbort, randomToken}=__modules[113];
 const {S, N, E, REV}=__modules[117];
 
 
@@ -11664,14 +11869,19 @@ const {S, N, E, REV}=__modules[117];
 /** Build outputs are inert bytes; this surface never executes an EXE or touches host files. */
 function installBuildTools(ide, adapter, {add, output, consent, commit, changed, checkRevision}) {
   const artifacts = new Map(), maxBytes = 32 * 1024 * 1024, ttlMs = 300000;
+  const observers=new Set();
+  const notify=()=>{for(const fn of observers){try{Promise.resolve(fn()).catch(()=>{});}catch{}}};
   const owner = ctx => ctx.principal || ctx.sessionKey || 'embedded';
-  const remove = id => { const item = artifacts.get(id); if (!item) return; clearTimeout(item.timer); item.authority.removeEventListener('abort', item.revoke); artifacts.delete(id); };
+  const remove = id => { const item = artifacts.get(id); if (!item) return; clearTimeout(item.timer); item.authority.removeEventListener('abort', item.revoke); artifacts.delete(id); notify(); };
   const purge = () => { for (const [id, item] of artifacts) if (item.epoch !== adapter.authorityEpoch || item.expiresAt <= Date.now()) remove(id); };
+  adapter.onArtifactsChange = fn => { observers.add(fn); return () => observers.delete(fn); };
+  adapter.inspectArtifacts = () => { purge(); return [...artifacts.values()].map(metadata); };
+  adapter.releaseArtifactLocal = id => { const found=artifacts.has(id); remove(id); return found; };
   adapter.revokeArtifacts = () => { for (const id of artifacts.keys()) remove(id); };
   const priorRevoke = adapter.revokePrincipal;
   adapter.revokePrincipal = principal => { for (const [id,item] of artifacts) if (item.owner === principal) remove(id); priorRevoke?.(principal); };
   const dispose = adapter.dispose.bind(adapter);
-  adapter.dispose = () => { for (const id of artifacts.keys()) remove(id); dispose(); };
+  adapter.dispose = () => { for (const id of artifacts.keys()) remove(id); observers.clear(); dispose(); };
   const find = (id, ctx) => { purge(); const item = artifacts.get(id); if (!item || item.owner !== owner(ctx)) throw new McpError(-32602, 'Build artifact not found or expired.'); return item; };
   const metadata = item => ({artifactId: item.id, name: item.name, mimeType: item.mimeType, size: item.bytes.length, sha256: item.sha256, sourceRevision: item.sourceRevision, expiresAt: item.expiresAt});
   add('build.targets', 'Describe build/export targets. Building returns inert bytes; desktop packaging and the licensed classic compiler require their local CLI.', {}, [], () => output({
@@ -11700,7 +11910,7 @@ function installBuildTools(ide, adapter, {add, output, consent, commit, changed,
     while (artifacts.size >= 8 || [...artifacts.values()].reduce((n, item) => n + item.bytes.length, 0) + bytes.length > maxBytes) remove(artifacts.keys().next().value);
     const id = randomToken(24), item = {id, bytes, owner: owner(ctx), epoch, sourceRevision, mimeType, name: project.name + extension,
       authority: adapter.authoritySignal, expiresAt: Date.now() + ttlMs, sha256: [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')};
-    item.revoke = () => remove(id); item.timer = setTimeout(item.revoke, ttlMs); item.timer.unref?.(); artifacts.set(id, item); item.authority.addEventListener('abort', item.revoke, {once: true});
+    item.revoke = () => remove(id); item.timer = setTimeout(item.revoke, ttlMs); item.timer.unref?.(); artifacts.set(id, item); item.authority.addEventListener('abort', item.revoke, {once: true}); notify();
     return output({valid: true, artifact: metadata(item), ...(report ? {report} : {})});
   });
   adapter.tools.at(-1).annotations.idempotentHint = false;
@@ -11734,7 +11944,7 @@ return {installBuildTools};
 })();
 
 /* agent-project.js */
-__modules[119]=(()=>{
+__modules[121]=(()=>{
 const {clone, lower}=__modules[1];
 const {findModule, createControl, newId, normalizeProject, BASIC_CONTROL_TYPES, EXTENDED_CONTROL_TYPES}=__modules[30];
 const {renameSymbol, formatCode, defaultEventSignature}=__modules[60];
@@ -11742,7 +11952,7 @@ const {addProcedureSource, updateProcedureAttributes, formatControls}=__modules[
 const {cleanProjectPath, fromBase64, toBase64}=__modules[28];
 const {setResource, removeResource, resourceKey, setResourceString, readRES}=__modules[29];
 const {VirtualFileSystem}=__modules[23];
-const {McpError, isRecord}=__modules[112];
+const {McpError, isRecord}=__modules[113];
 /** Pure project edits used by the MCP adapter. Every edit is staged before the live undo transaction. */
 
 
@@ -11934,15 +12144,15 @@ return {CONTROL_TYPES,fail,identifier,moduleOf,formOf,nodeOf,filePath,decodeFile
 })();
 
 /* agent-workbench.js */
-__modules[120]=(()=>{
+__modules[122]=(()=>{
 const {clone}=__modules[1];
 const {normalizeProject, createControl}=__modules[30];
 const {normalizeAppearance}=__modules[4];
 const {snapshotEditorView, restoreEditorView}=__modules[85];
 const {COMMANDS, CommandBarLayout}=__modules[6];
 const {normalizeWindowProfile}=__modules[86];
-const {McpError, checkAbort, awaitAbort}=__modules[112];
-const {moduleOf, formOf, nodeOf, CONTROL_TYPES, fail}=__modules[119];
+const {McpError, checkAbort, awaitAbort}=__modules[113];
+const {moduleOf, formOf, nodeOf, CONTROL_TYPES, fail}=__modules[121];
 const {S, TEXT, B, N, E, A, O, OBJ, REV}=__modules[117];
 const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[98];
 const {buildObjectCatalog, searchCatalog}=__modules[105];
@@ -11966,7 +12176,7 @@ const COMMAND_ROUTES = Object.freeze({
   undo:'vb6.history.apply',redo:'vb6.history.apply',cut:'vb6.editor.edit',copy:'vb6.editor.get',paste:'vb6.editor.edit',delete:'vb6.editor.edit',selectAll:'vb6.editor.set',find:'vb6.workspace.search',replace:'vb6.code.edit',indent:'vb6.editor.edit',outdent:'vb6.editor.edit',comment:'vb6.editor.edit',uncomment:'vb6.editor.edit',
   toggleBookmark:'vb6.bookmarks.set',nextBookmark:'vb6.editor.set',previousBookmark:'vb6.editor.set',goToDefinition:'vb6.code.complete',lastPosition:'vb6.editor.set',listMembers:'vb6.code.complete',listConstants:'vb6.code.complete',quickInfo:'vb6.code.complete',parameterInfo:'vb6.code.complete',completeWord:'vb6.code.complete',
   run:'vb6.runtime.start / vb6.debug.command',pause:'vb6.debug.command',stop:'vb6.runtime.stop',stepInto:'vb6.debug.command',stepOver:'vb6.debug.command',stepOut:'vb6.debug.command',runToCursor:'vb6.debug.runToCursor',showNextStatement:'vb6.debug.snapshot / vb6.document.open',breakpoint:'vb6.breakpoints.set',clearBreakpoints:'vb6.breakpoints.set',addWatch:'vb6.watches.set',quickWatch:'vb6.debug.inspect',checkSyntax:'vb6.project.compile',
-  showGrid:'vb6.project.update',lockControls:'vb6.designer.set',menuEditor:'vb6.menu.edit',tabOrder:'vb6.control.edit',printCode:'vb6.module.read',addProcedure:'vb6.procedure.add',procedureAttributes:'vb6.procedure.attributes',addForm:'vb6.module.add',addModule:'vb6.module.add',addClass:'vb6.module.add',components:'vb6.designer.catalog',references:'vb6.references.set',projectProperties:'vb6.project.update',options:'vb6.workspace.configure',help:'vb6.agent.capabilities',customizeToolbars:'vb6.toolbars.set'
+  showGrid:'vb6.project.update',lockControls:'vb6.designer.set',menuEditor:'vb6.menu.edit',tabOrder:'vb6.control.edit',printCode:'vb6.module.read',addProcedure:'vb6.procedure.add',procedureAttributes:'vb6.procedure.attributes',addForm:'vb6.module.add',addModule:'vb6.module.add',addClass:'vb6.module.add',components:'vb6.designer.catalog',references:'vb6.references.set',projectProperties:'vb6.project.update',options:'vb6.workspace.configure',help:'vb6.agent.capabilities',customizeToolbars:'vb6.toolbars.set',dataEnvironment:'vb6.data.list'
 });
 const EDIT_COMMANDS=['insert','delete','indent','outdent','comment','uncomment','format'];
 
@@ -12069,7 +12279,7 @@ function installWorkbenchTools(ide,adapter,{add,output,consent,commit,changed,de
     const walk=(items,path,depth)=>{if(depth>8)return;for(const item of items||[]){if(!item||++visited>500)continue;const location=[...path,String(item.label||'')];if(item.id){const id=item.id,tool=SAFE_COMMANDS.includes(id)?'vb6.commands.execute':id.startsWith('align:')?'vb6.designer.align':id.startsWith('format:')?'vb6.designer.format':COMMAND_ROUTES[id]||null;result.push({path:location,id,enabled:item.enabled!==false,checked:item.checked===true,tool,localOnly:!tool});}try{if(item.items)walk(typeof item.items==='function'?item.items():item.items,location,depth+1);}catch{}}};
     for(const name of ['File','Edit','View','Project','Format','Debug','Run','Tools','Window','Help'])walk(ide.menu?.(name)||[],[name],0);return result;
   }
-  add('commands.list','Map every catalog command to its structured MCP replacement or direct UI command. Native/security UI actions cannot be blindly clicked by agents.',{},[],()=>output({menus:menus(),commands:COMMANDS.map(c=>({...c,direct:SAFE_COMMANDS.includes(c.id),tool:SAFE_COMMANDS.includes(c.id)?'vb6.commands.execute':c.id.startsWith('align:')?'vb6.designer.align':COMMAND_ROUTES[c.id]||null})),directCommands:SAFE_COMMANDS,localOnly:['MCP sharing, consent, credentials and delegated permissions','Host filesystem chooser, OS clipboard, print and full screen','Opening a new detached browser window (user gesture)']}));
+  add('commands.list','Map every catalog command to its structured MCP replacement or direct UI command. Native/security UI actions cannot be blindly clicked by agents.',{},[],()=>output({menus:menus(),commands:[...COMMANDS,...(COMMANDS.some(c=>c.id==='dataEnvironment')?[]:[{id:'dataEnvironment',label:'Data Environment',category:'Project'}])].map(c=>({...c,direct:SAFE_COMMANDS.includes(c.id),tool:SAFE_COMMANDS.includes(c.id)?'vb6.commands.execute':c.id.startsWith('align:')?'vb6.designer.align':COMMAND_ROUTES[c.id]||null})),directCommands:SAFE_COMMANDS,localOnly:['MCP sharing, consent, credentials and delegated permissions','Host filesystem chooser, OS clipboard, print and full screen','Opening a new detached browser window (user gesture)']}));
   mutate('commands.execute','Execute a supported non-modal UI command from commands.list. Does not expose arbitrary command names or security dialogs.',{command:E(SAFE_COMMANDS)},['command'],async args=>{await ide.command(args.command);return documents();});
   // Upgrade the existing snapshot without breaking its name or legacy callers.
   const oldSnapshot=adapter.tools.find(t=>t.name==='vb6.debug.snapshot');if(oldSnapshot)oldSnapshot.execute=async()=>{adapter.assertEnabled();return debuggerState();};
@@ -12110,8 +12320,9 @@ return {installWorkbenchTools};
 })();
 
 /* agent-tools.js */
-__modules[121]=(()=>{
-const {installBuildTools}=__modules[118];
+__modules[123]=(()=>{
+const {installDataTools}=__modules[118];
+const {installBuildTools}=__modules[120];
 const {mergedProject}=__modules[45];
 const {normalizedEntries, listProjectEntries}=__modules[49];
 const {NATIVE_ENCODINGS}=__modules[27];
@@ -12124,11 +12335,12 @@ const {resourceKey, listResourceStrings, writeRES}=__modules[29];
 const {EditorIntelligence, scanDeclarations}=__modules[68];
 const {readProcedureAttributes}=__modules[78];
 const {VirtualFileSystem}=__modules[23];
-const {McpError, checkAbort, awaitAbort, validateArguments}=__modules[112];
-const {AGENT_SCOPES, agentScope}=__modules[113];
-const {editProject, sourceEdits, moduleOf, formOf, nodeOf, filePath, decodeFile, identifier, CONTROL_TYPES, fail}=__modules[119];
-const {installWorkbenchTools}=__modules[120];
+const {McpError, checkAbort, awaitAbort, validateArguments}=__modules[113];
+const {AGENT_SCOPES, agentScope}=__modules[114];
+const {editProject, sourceEdits, moduleOf, formOf, nodeOf, filePath, decodeFile, identifier, CONTROL_TYPES, fail}=__modules[121];
+const {installWorkbenchTools}=__modules[122];
 const {S, TEXT, B, N, E, A, O, OBJ, REV}=__modules[117];
+
 
 
 
@@ -12180,7 +12392,7 @@ function installAgentTools(ide, adapter, {tool, consent, commit, changed, checkR
   add('agent.capabilities','Discover the entire supported agent surface, scope categories, current authority, command routing, and explicit host-only boundaries.',{},[],()=>output({
     apiVersion:1,permissions:adapter.permissions?.snapshot(ide.project.id),scopes:AGENT_SCOPES,
     tools:adapter.tools.map(t=>({name:t.name,scope:agentScope(t.name),readOnly:t.annotations.readOnlyHint})),
-    limits:{sourceOffsets:'zero-based UTF-16, end-exclusive',toolMessageBytes:8*1024*1024,sourceReadLines:1000,defaultPage:100},
+    limits:{sourceOffsets:'zero-based UTF-16, end-exclusive',toolMessageBytes:8*1024*1024,sourceReadLines:1000,sourceReadCodeUnits:262144,defaultPage:100},
     boundaries:['No arbitrary JavaScript, shell, DOM or MCP permission/credential control.','Host file dialogs, clipboard, printing and popup creation require local browser interaction.','Native project formats and debugger live-edit semantics follow the existing IDE implementation.'],
     workflow:'Read project.get. Pass expectedRevision for every mutation. Read debug.snapshot for pauseId. Code edits while paused are staged until debug.applyEdits. Runtime input is queued; use agent.wait then inspect. Read commands.list for structured alternatives to native UI dialogs.'
   }));
@@ -12232,6 +12444,13 @@ function installAgentTools(ide, adapter, {tool, consent, commit, changed, checkR
     return commit(next,'MCP: atomic source edits');
   },{write:true});
   mutate('code.transform','Format source or lexically rename an identifier. Omitting module applies to all modules. Strings/comments are preserved by rename; it is not semantic rename.',{module:S,action:E(['format','rename']),from:S,to:S},['action'],{design:false});
+  add('code.read','Read a bounded UTF-16 source range, including very long single lines. Supply the same expectedRevision for every chunk to avoid mixing edits. Offset and nextOffset are zero-based and end-exclusive.',{module:S,offset:N(0,5000000),count:N(1,262144),expectedRevision:REV},['module'],args=>{
+    if(args.expectedRevision!==undefined)checkRevision(args.expectedRevision);
+    const m=moduleOf(ide.project,args.module),offset=args.offset??0;
+    if(offset>m.code.length)fail('Source offset is beyond the end of the module.');
+    const code=m.code.slice(offset,offset+(args.count??65536)),nextOffset=offset+code.length;
+    return output({module:m.name,moduleId:m.id,offset,nextOffset,totalCodeUnits:m.code.length,code,hasMore:nextOffset<m.code.length,offsetEncoding:'utf-16'});
+  });
   add('code.symbols','Read declaration symbols and procedure signatures, with module scoping, literal filtering and pagination.',{module:S,query:S,offset:N(),limit:N(1,1000)},[],args=>output(page((args.module?[moduleOf(ide.project,args.module)]:ide.project.modules).flatMap(m=>scanDeclarations(m).symbols.map(s=>({...s,module:m.name}))).filter(s=>!args.query||s.name.toLowerCase().includes(args.query.toLowerCase())),args)));
   add('code.complete','Return declaration-aware completion, quick info or parameter info at a UTF-16 source offset without changing editor selection.',{module:S,offset:N(0,5000000),kind:E(['completions','constants','resolve','parameters']),expression:S},['module','offset'],args=>{
     const m=moduleOf(ide.project,args.module);if(args.offset>m.code.length)fail('Offset outside module.');const line=m.code.slice(0,args.offset).split('\n').length;
@@ -12268,6 +12487,7 @@ function installAgentTools(ide, adapter, {tool, consent, commit, changed, checkR
   mutate('resources.import','Import an original Win32 RES file supplied as base64 data.',{data:TEXT,fileName:S},['data']);
   add('resources.export','Export original/current Win32 RES bytes as base64, without a browser download.',{},[],()=>{if(!ide.project.resources)fail('No resource file.');return output({fileName:ide.project.resources.fileName,data:toBase64(writeRES(ide.project.resources)),encoding:'base64'});});
 
+  installDataTools(ide,adapter,{add,output,consent,commit,checkRevision,page,resource});
   installBuildTools(ide,adapter,{add,output,consent,commit,changed,checkRevision});
   installWorkbenchTools(ide,adapter,{add,output,consent,commit,changed,debugSnapshot,page,resource});
   resource('vb6://agent/capabilities','Agent capabilities',()=>adapter.tools.find(t=>t.name==='vb6.agent.capabilities').execute({},{}));
@@ -12283,10 +12503,10 @@ return {installAgentTools};
 })();
 
 /* ide-adapter.js */
-__modules[122]=(()=>{
-const {installAgentTools}=__modules[121];
-const {AgentPermissions}=__modules[113];
-const {McpError, checkAbort, isRecord, awaitAbort, validateArguments}=__modules[112];
+__modules[124]=(()=>{
+const {installAgentTools}=__modules[123];
+const {AgentPermissions}=__modules[114];
+const {McpError, checkAbort, isRecord, awaitAbort, validateArguments}=__modules[113];
 const {clone}=__modules[1];
 const {normalizeProject, findModule, createForm, newId, projectStats}=__modules[30];
 const {compileProject}=__modules[37];
@@ -12466,8 +12686,8 @@ return {createIdeAdapter};
 })();
 
 /* companion-url.js */
-__modules[123]=(()=>{
-const {httpURL, McpError}=__modules[112];
+__modules[125]=(()=>{
+const {httpURL, McpError}=__modules[113];
 
 /** No arbitrary remote endpoint or query-string credentials for IDE pairing/relay. */
 function companionURL(value, {endpoint = false} = {}) {
@@ -12481,9 +12701,9 @@ return {companionURL};
 })();
 
 /* bridge-client.js */
-__modules[124]=(()=>{
-const {companionURL}=__modules[123];
-const {McpError, MCP_LIMIT, randomToken, checkAbort}=__modules[112];
+__modules[126]=(()=>{
+const {companionURL}=__modules[125];
+const {McpError, MCP_LIMIT, randomToken, checkAbort}=__modules[113];
 
 
 /** Opt-in outbound connection to the loopback companion. No open inbound browser listener. */
@@ -12554,15 +12774,17 @@ return {BrowserBridge};
 })();
 
 /* studio.js */
-__modules[125]=(()=>{
-const {AGENT_SCOPES, agentScope}=__modules[113];
+__modules[127]=(()=>{
+const {McpOperationsView}=__modules[112];
+const {AGENT_SCOPES, agentScope}=__modules[114];
 const {el, download}=__modules[1];
 const {modal, tabbedPages, icon}=__modules[7];
-const {MCP_VERSION, McpError, checkAbort}=__modules[112];
-const {McpServer, bindMcpPort}=__modules[115];
-const {createIdeAdapter}=__modules[122];
-const {BrowserBridge}=__modules[124];
-const {companionURL}=__modules[123];
+const {MCP_VERSION, McpError, checkAbort}=__modules[113];
+const {McpServer, bindMcpPort}=__modules[116];
+const {createIdeAdapter}=__modules[124];
+const {BrowserBridge}=__modules[126];
+const {companionURL}=__modules[125];
+
 
 
 
@@ -12669,7 +12891,8 @@ class McpPanel {
     this.status = el('div', {class: 'mcp-status', role: 'status', 'aria-live': 'polite'}, 'Ready');
     this.summary = el('span', {class: 'mcp-summary-state'}, 'Disabled');
     const access = this.sharingPage(), agent = this.agentPage(), catalog = this.catalogPage(), activity = this.activityPage();
-    this.tabs = tabbedPages([{id:'access',label:'Agent access',node:access},{id:'agent',label:'Agent permissions',node:agent},{id:'capabilities',label:'Capabilities',node:catalog},{id:'activity',label:'Activity',node:activity}], {label:'MCP settings'});
+    this.operationsView = new McpOperationsView(api);
+    this.tabs = tabbedPages([{id:'access',label:'Agent access',node:access},{id:'agent',label:'Agent permissions',node:agent},{id:'capabilities',label:'Capabilities',node:catalog},{id:'activity',label:'Activity',node:activity},{id:'operations',label:'Operations',node:this.operationsView.root}], {label:'MCP settings'});
     const close = button('Close', () => this.api.closePanel?.()); close.className = 'default-button';
     this.root.append(el('div', {class:'mcp-heading'}, icon('properties'), el('div', {}, el('strong', {}, 'MCP Agent Access'), el('div', {class:'tool-note'}, 'External agents → VB6 Studio')), this.summary), this.tabs,
       el('div', {class:'mcp-footer'}, this.status, button('Stop sharing', () => { this.operation?.abort(); this.api.setSharing(false).catch(e => this.showError(e)); }), close));
@@ -12683,7 +12906,7 @@ class McpPanel {
       }
     });
   }
-  dispose() { this.disposed = true; this.operation?.abort(); this.bridgeToken.value = ''; this.disposeChange?.(); this.disposeState?.(); }
+  dispose() { this.disposed = true; this.operationsView.dispose(); this.operation?.abort(); this.bridgeToken.value = ''; this.disposeChange?.(); this.disposeState?.(); }
   showError(error) { this.status.textContent = String(error.message || error); this.status.classList.add('tool-error'); }
   refresh() {
     if (this.disposed) return;
@@ -12821,14 +13044,14 @@ return {installMcp};
 })();
 
 /* studio-entry.js */
-__modules[126]=(()=>{
+__modules[128]=(()=>{
 const {VB6Studio, StudioAPI}=__modules[111];
-const {installMcp}=__modules[125];
+const {installMcp}=__modules[127];
 
 
 if (globalThis.vb6Studio) installMcp(globalThis.vb6Studio, StudioAPI);
 
 return {VB6Studio,StudioAPI,installMcp};
 })();
-globalThis["VB6Studio"]=__modules[126];
+globalThis["VB6Studio"]=__modules[128];
 })();

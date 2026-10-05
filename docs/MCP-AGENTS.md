@@ -1,9 +1,9 @@
 # Coding agents: structured control of VB6 Studio
 
-The MCP server exposes **114 tools** across the implemented IDE: project/native
+The MCP server exposes **125 tools** across the implemented IDE: project/native
 source interchange, code, editor views, forms/controls/menus, resources, virtual
 files, debugger, live application interaction, Object Browser, explorer,
-documents, docking, toolbars, appearance and undo. The same source is bundled into
+documents, docking, toolbars, appearance, public Data Environment definitions and undo. The same source is bundled into
 the linked static app and single-file HTML. External clients reach the live IDE
 through the authenticated loopback companion. There is no outbound MCP client in the IDE; see [MCP setup](MCP.md).
 
@@ -11,7 +11,7 @@ This is structured access to the browser IDE's **implemented features**, not a
 claim of complete Microsoft VB6 binary/COM/debugger compatibility. `tools/list`
 is the authoritative schema, including enums, required fields and bounds.
 `vb6.agent.capabilities` supplies the inventory, current permissions and limits.
-`vb6.commands.list` maps all 86 toolbar command definitions and reports live menu
+`vb6.commands.list` maps the toolbar catalog plus the structured Data Environment route and reports live menu
 entries. Menu actions without a structured route are explicitly marked local-only,
 not executed through an unrestricted command dispatcher.
 
@@ -31,6 +31,7 @@ scopes, choose 1–60 minutes, then confirm **Authorize session**. Scopes are:
 | debugger | Stack/frame control, typed inspection/assignment, evaluation, watches, breakpoints and live edits |
 | runtime | Start/stop, sandbox controls, menus, application dialogs and virtual runtime files |
 | workspace | Editor selection/views, documents, docking, toolbars, appearance |
+| data | Public connection/command definition edits, rename and removal; no SQL, live connections or credential cache |
 
 The grant applies to **all paired clients**, not one named client. Only pair
 trusted clients. No scope is selected by default. Authority is memory-only,
@@ -207,6 +208,47 @@ not disable CORS or local-network policy. `--opaque` is explicitly UI-only and i
 not substituted for real navigation in CI. Node tests additionally exercise
 metadata/path injection, atomic edits, races, scoped authority, expiry/revocation,
 protocol interoperability and runtime isolation.
+
+## Data Environment workflow
+
+Use `data.providers` and `data.list` first. Create a connection with
+`data.connection.set`, then a command using `data.command.set`; `mode` must be
+`create` or `replace`. Both require `expectedRevision` and either Allow once or
+local delegation of **data**. No grant in **workspace** or **runtime** implicitly
+grants data-definition edits. The standard **project** scope retains its existing
+whole-project replacement/import powers, including project-contained definitions.
+
+```json
+{
+  "name": "vb6.data.connection.set",
+  "arguments": {
+    "expectedRevision": 42,
+    "mode": "create",
+    "definition": {"name": "LocalData", "provider": "sqlite", "path": "customers.sqlite"}
+  }
+}
+```
+
+These are saved design-time definitions. `data.validate` checks structure, not
+server availability or SQL semantics; no backend is contacted or credential
+prompt approved. A connection rename updates commands pointing to it in the same
+undo record. Source code and control bindings need explicit separate edits.
+Removal never deletes the underlying project virtual database file. Exported
+project JSON and native data sidecars contain the committed definitions.
+
+## Large source and owner operations
+
+Use `vb6.code.read` for bounded chunks, including long single-line sources. Read
+at most 262,144 UTF-16 code units per call (default 65,536), advance using
+`nextOffset`, and supply the same `expectedRevision` throughout reconstruction.
+Offsets are not UTF-8 bytes or Unicode code-point indices. A surrogate split at
+a boundary must be rejoined without loss; EOF returns an empty final chunk.
+
+The local **Operations** tab lets the IDE owner cancel retained tasks, clear
+finished records and release build artifacts. Agents cannot enumerate other
+clients' operations through these controls. A cleared/released handle returns
+not-found; do not blindly repeat a mutation to recover a missing handle. Tasks
+remain limited to `agent.wait`; definitions and other mutations are not taskified.
 
 ## Tool reference
 
@@ -478,3 +520,24 @@ JSON schema. Mutations require `expectedRevision` except the safe, interrupt-onl
 | --- | --- | --- |
 | `vb6.output.read` | Read | Read bounded output, Immediate or diagnostics entries with offset/limit. |
 | `vb6.output.clear` | Mutate | Clear Output and/or Immediate display, not files or source. |
+
+### data
+
+| Tool | Access | Behavior |
+| --- | --- | --- |
+| `vb6.data.providers` | Read | Describe built-in providers and design-only/credential boundaries. |
+| `vb6.data.list` | Read | Paginated connection/command summaries; no SQL text or live results. |
+| `vb6.data.connection.get` | Read | Read one public saved connection definition. |
+| `vb6.data.connection.set` | Mutate | Explicitly create/replace a complete validated public connection. |
+| `vb6.data.connection.remove` | Mutate | Remove a connection; dependent commands require explicit cascade. |
+| `vb6.data.command.get` | Read | Read one saved command definition, including public parameters. |
+| `vb6.data.command.set` | Mutate | Explicitly create/replace a command referencing a saved connection. |
+| `vb6.data.command.remove` | Mutate | Remove only the command definition, with undo. |
+| `vb6.data.rename` | Mutate | Rename a connection/command; update command-to-connection links atomically. |
+| `vb6.data.validate` | Read | Structural diagnostics without SQL execution, credentials or networking. |
+
+### Additional bounded source access
+
+| Tool | Access | Behavior |
+| --- | --- | --- |
+| `vb6.code.read` | Read | Bounded UTF-16 source chunks, optional revision guard, explicit EOF/progress. |

@@ -103,7 +103,8 @@ Open **Tools → MCP Agent Access…** to expose this IDE to an external coding 
 The IDE is an **MCP server only**: it does not connect to external MCP servers,
 run their tools, perform OAuth sign-in, or launch configured stdio servers.
 
-Its **114 structured tools** cover projects and source interchange, code edits,
+Its **125 structured tools** cover projects and source interchange, public Data
+Environment definitions, bounded source reads, code edits,
 compiler diagnostics, forms/controls/menus, resources and virtual files,
 editor/workspace management, Object Browser, debugger/live edits and sandboxed
 application interaction. The same server is bundled into the static app and
@@ -124,6 +125,10 @@ or act as an outbound MCP gateway. Browser origin/local-network policy still app
 
 [MCP setup and migration](docs/MCP.md) ·
 [Coding-agent workflow and complete tool reference](docs/MCP-AGENTS.md)
+
+The classic MCP dialog also has an **Operations** tab for local task cancellation
+and build-download cleanup. Data definition edits have a separate, locally granted
+**data** scope and do not execute SQL or access a runtime credential cache.
 
 ### Compiler/runtime compatibility workstream
 
