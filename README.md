@@ -123,6 +123,15 @@ virtual files/resources, and workspace management. It is a real iterative tool-u
 Streaming text, tool activity, before/after edit review, Stop, normal Undo,
 request/tool/token limits and downloadable in-memory transcripts are included.
 
+The **Task** tab now renders a live conversation with streaming replies, collapsible
+tool steps, approval/interruption states, safe formatted text and copyable code.
+Draft while the agent runs; Enter sends, Shift+Enter adds a line, and Jump to latest
+resumes following after you scroll up. The new default is a cumulative **4 million
+tokens per task**, with a **20 million** Large preset and independent output,
+request, tool, context and timeout controls. Only numeric preferences can persist.
+See [conversation rendering and session budgets](docs/CODING-AGENT-THREADS.md)
+for limits, accounting and provider-capability caveats.
+
 The classic **Tasks** tab supports eight independent named conversations, drafts
 and cumulative usage. **Continue** explicitly resumes a limited task or retries
 a transient provider request without replaying completed IDE operations. Local

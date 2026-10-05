@@ -1,4 +1,5 @@
 import {CodingAgent} from './agent.js';
+import {normalizeAgentLimits} from './limits.js';
 
 let nextId = 0;
 const titleOf = value => {
@@ -7,8 +8,9 @@ const titleOf = value => {
 };
 /** Bounded, memory-only tasks. Native histories and grants never become project data. */
 export class AgentConversations {
-  constructor(adapter, {onEvent = () => {}, askUser, maxTasks = 8} = {}) {
+  constructor(adapter, {onEvent = () => {}, askUser, maxTasks = 8, defaultLimits} = {}) {
     if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 16) throw new Error('Invalid task limit.');
+    this.defaultLimits = normalizeAgentLimits(defaultLimits);
     this.adapter = adapter; this.onEvent = onEvent; this.askUser = askUser; this.maxTasks = maxTasks;
     this.tasks = new Map(); this.activeId = ''; this.create();
   }
@@ -21,10 +23,11 @@ export class AgentConversations {
     this.idle(); title = titleOf(title);
     if (this.tasks.size >= this.maxTasks) throw new Error('Task limit reached. Delete an old task before starting another.');
     const id = 'agent-task-' + (++nextId), created = new Date().toISOString();
-    const task = {id, title, created, updated: created, draft: '', agent: null};
+    const task = {id, title, created, updated: created, draft: '', limits: {...this.defaultLimits}, agent: null};
     task.agent = new CodingAgent(this.adapter, {askUser: this.askUser, sessionKey: id, onEvent: event => {
       task.updated = event.time; this.notifyEvent(event, id);
     }});
+    task.agent.limits = {...task.limits};
     this.tasks.set(id, task); this.activeId = id; this.notify('task', 'Selected ' + title + '.'); return task;
   }
   notifyEvent(event, taskId) { try { this.onEvent({...event, taskId}); } catch {} }

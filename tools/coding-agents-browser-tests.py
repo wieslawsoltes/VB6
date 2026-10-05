@@ -236,9 +236,9 @@ def plan_question(page, mode, provider):
     dialog.get_by_role('button',name='Send Answer',exact=True).click(); finish(page)
     check(len(requests)==5); check(page.evaluate('vb6Studio.codingAgents.agent.plan.revision')==2)
     conversation=page.get_by_label('Agent conversation',exact=True).text_content()
-    check('Agent question:\nWhich form should I inspect?' in conversation)
-    check('Your answer:\nCustomer' in conversation)
-    check(conversation.index('Agent question:') < conversation.index('Your answer:'))
+    check('Which form should I inspect?' in page.locator('.agent-question .agent-message-body').inner_text())
+    check('Customer' in page.locator('.agent-user').last.inner_text())
+    check(conversation.index('Agent question') < conversation.index('Your answer'))
     check(page.get_by_label('Agent conversation',exact=True).locator('img').count()==0)
     tab(page,'Tasks');page.get_by_role('button',name='New Task with Context…',exact=True).click()
     context_dialog=page.get_by_role('dialog',name='AI Coding Agent — Review Context',exact=True);context_dialog.wait_for()
@@ -336,6 +336,129 @@ def question_cancel(page,mode):
     check(page.locator('.agent-panel').get_by_role('button',name='Continue',exact=True).is_disabled())
     return {'cancelStopsTask':True,'noPermissionGranted':True}
 
+def live_thread(page, mode):
+    configure(page, mode='readonly')
+    page.evaluate("""() => {
+      const api = vb6Studio.codingAgents, panel = vb6Studio.documents.tools.get('tool:coding-agents');
+      window.threadRequests = [];
+      panel.transportFactory = () => async (body, {signal, receive}) => new Promise((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        signal.addEventListener('abort', abort, {once:true});
+        window.threadRequests.push({body, receive, done: () => {signal.removeEventListener('abort',abort);resolve();}});
+      });
+      api.adapter.tools.push({name:'vb6.test.slow',description:'Test read-only progress',annotations:{readOnlyHint:true},inputSchema:{type:'object'},execute:() => new Promise(resolve => {window.finishSlowTool = () => resolve({revision:api.adapter.revision,confirmed:true});})});
+    }""")
+    start(page); page.wait_for_function('threadRequests.length === 1')
+    page.locator('.agent-assistant[data-status=waiting]').wait_for(state='visible')
+    page.evaluate('(p) => {threadRequests[0].receive(p);threadRequests[0].done();}', packet('openai',[{'name':'vb6_test_slow'}],''))
+    tool = page.locator('.agent-tool[data-status=running]'); tool.wait_for(state='visible')
+    check('vb6.test.slow' in tool.inner_text()); check(page.locator('.agent-panel').get_by_role('tab',name='Task',exact=True).get_attribute('aria-selected')=='true')
+    page.screenshot(path=str(REPORTS/f'{mode}-thread-running.png'))
+    page.evaluate('finishSlowTool()'); page.wait_for_function('threadRequests.length === 2')
+    page.locator('.agent-tool[data-status=complete]').locator('summary').click()
+    page.evaluate("threadRequests[1].receive({type:'response.output_text.delta',delta:'Reading Form1. '})")
+    page.wait_for_function("document.querySelector('.agent-assistant[data-status=streaming]')?.textContent.includes('Reading Form1.')")
+    page.evaluate("window.fixedTool = document.querySelector('.agent-tool'); threadRequests[1].receive({type:'response.output_text.delta',delta:'Checking its event handlers.'})")
+    page.wait_for_function("document.querySelector('.agent-assistant[data-status=streaming]')?.textContent.includes('event handlers.')")
+    check(page.evaluate("fixedTool === document.querySelector('.agent-tool') && fixedTool.open"))
+    prompt=page.get_by_label('Agent task',exact=True); prompt.fill('Unsent follow-up while streaming')
+    check(not prompt.is_disabled()); page.screenshot(path=str(REPORTS/f'{mode}-thread-streaming.png'))
+    page.get_by_role('button',name='Stop generation',exact=True).click(); finish(page)
+    partial=page.locator('.agent-assistant[data-status=interrupted]'); check('Reading Form1. Checking its event handlers.' in partial.inner_text())
+    check(prompt.input_value()=='Unsent follow-up while streaming')
+    check(page.evaluate('vb6Studio.codingAgents.agent.unreportedRequests')==1)
+    with page.expect_download() as download: page.get_by_role('button',name='Save Transcript…',exact=True).click()
+    exported=json.loads(Path(download.value.path()).read_text()); check(exported['version']==2)
+    check(any(e['status']=='interrupted' and 'Reading Form1.' in e['text'] for e in exported['thread']['entries']))
+    page.evaluate("vb6Studio.documents.closeTool('tool:coding-agents');vb6Studio.command('codingAgents')")
+    check('Reading Form1. Checking its event handlers.' in page.get_by_label('Agent conversation',exact=True).inner_text())
+    check(page.get_by_label('Agent task',exact=True).input_value()=='Unsent follow-up while streaming')
+    return {'toolOnlyProgress':True,'streamedBeforeCompletion':True,'stableExpandedTool':True,'partialRetainedOnStopAndReopen':True,'draftWhileRunning':True,'exportedPartial':True}
+
+
+def thread_reading(page,mode):
+    page.evaluate("""() => {
+      const agent=vb6Studio.codingAgents.agent;
+      for(let i=0;i<100;i++) {
+        agent.emit('user','Message '+i);
+        agent.emit('status','Request '+i,{requestId:'test'+i});
+        agent.emit('assistant','Reply '+i+'\\nA completed response stays selectable.',{requestId:'test'+i});
+      }
+    }""")
+    page.wait_for_function("document.querySelectorAll('.agent-thread-entry').length===150")
+    log=page.get_by_label('Agent conversation',exact=True)
+    check(log.evaluate('e=>e.scrollHeight-e.scrollTop-e.clientHeight')<=2)
+    page.evaluate("""() => {
+      const panel=vb6Studio.documents.tools.get('tool:coding-agents'), log=panel.log;
+      window.unchangedReply=document.querySelectorAll('.agent-assistant')[10];
+      const range=document.createRange();range.selectNodeContents(unchangedReply.querySelector('.agent-message-body'));getSelection().removeAllRanges();getSelection().addRange(range);window.selectedReply=getSelection().toString();
+      log.scrollTop=0;log.dispatchEvent(new Event('scroll'));window.readingTop=log.scrollTop;
+      panel.api.agent.emit('status','Request new',{requestId:'new'});
+      for(let i=0;i<50;i++)panel.api.agent.emit('delta','New text '+i+' ',{requestId:'new'});
+    }""")
+    page.get_by_role('button',name='Jump to latest (1 new)',exact=True).wait_for(state='visible')
+    check(page.evaluate('unchangedReply.isConnected && getSelection().toString()===selectedReply'))
+    check(log.evaluate('e=>Math.abs(e.scrollTop-readingTop)')<2)
+    page.get_by_role('button',name='Show earlier messages',exact=True).click()
+    page.wait_for_function("document.querySelectorAll('.agent-thread-entry').length===200")
+    check(log.evaluate('e=>e.scrollTop')>0)
+    page.get_by_role('button',name='Jump to latest (1 new)',exact=True).click()
+    page.wait_for_function("document.querySelector('.agent-assistant[data-status=streaming]')?.textContent.includes('New text 49')")
+    check(log.evaluate('e=>e.scrollHeight-e.scrollTop-e.clientHeight')<=2)
+    page.evaluate("vb6Studio.codingAgents.agent.emit('assistant','New text completed',{requestId:'new'})")
+    page.wait_for_function("!document.querySelector('.agent-assistant[data-status=streaming]')")
+    check(page.locator('.agent-thread-entry').count()<=250)
+    page.screenshot(path=str(REPORTS/f'{mode}-thread-history.png'))
+    return {'keyedSelectionPreserved':True,'manualScrollPreserved':True,'loadEarlier':True,'jumpToLatest':True,'boundedDom':True}
+
+
+def thread_formatting(page,mode):
+    text='## Source review\n**Safe text** and `Form1`.\n\n```vb\nPrivate Sub Form_Load()\n    MsgBox "Hello"\nEnd Sub\n```\n\n<img src=x onerror="window.injected=true">\n[Unsafe](javascript:alert(1)) [Docs](https://example.com/docs)'
+    page.evaluate("t=>{const a=vb6Studio.codingAgents.agent;a.emit('status','Formatting',{requestId:'format'});a.emit('assistant',t,{requestId:'format'});Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async(text)=>{window.copiedText=text}}});}",text)
+    page.get_by_role('button',name='Copy code',exact=True).wait_for(state='visible')
+    check(page.locator('.agent-message-body img').count()==0);check(not page.evaluate('!!window.injected'))
+    check(page.locator('.agent-message-body a').count()==1);check(page.locator('.agent-message-body a').get_attribute('rel')=='noopener noreferrer')
+    page.get_by_role('button',name='Copy code',exact=True).click();page.wait_for_function('window.copiedText?.startsWith("Private Sub Form_Load()")')
+    page.get_by_role('button',name='Copy message',exact=True).click();page.wait_for_function('window.copiedText === '+json.dumps(text))
+    page.screenshot(path=str(REPORTS/f'{mode}-thread-formatted.png'))
+    # The thread inherits the IDE palette; it does not load a separate chat theme.
+    check(page.locator('.agent-panel').evaluate('e=>getComputedStyle(e).backgroundColor')==page.locator('.agent-user').evaluate('e=>getComputedStyle(e).backgroundColor') if page.locator('.agent-user').count() else True)
+    return {'safeMarkdown':True,'noModelHtml':True,'safeLinksOnly':True,'copyCodeAndMessage':True}
+
+
+def budget_preferences(page,mode):
+    tab(page,'Permissions');budget=page.get_by_label('Session token budget',exact=True)
+    check(budget.input_value()=='4000000');check(page.get_by_label('Maximum agent requests',exact=True).input_value()=='128')
+    page.get_by_label('Agent limit preset',exact=True).select_option('large')
+    check(budget.input_value()=='20000000');check(page.get_by_label('Maximum output tokens',exact=True).input_value()=='65536')
+    budget.fill('0');budget.dispatch_event('change');check('must be an integer' in page.locator('.agent-limit-error').inner_text())
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.limits.tokenBudget')==20000000)
+    budget.fill('9999999');budget.dispatch_event('change');check(page.get_by_label('Agent limit preset',exact=True).input_value()=='custom')
+    first=page.evaluate('vb6Studio.codingAgents.conversations.activeId')
+    page.get_by_role('button',name='New Task',exact=True).click();check(budget.input_value()=='9999999')
+    budget.fill('3000000');budget.dispatch_event('change');tab(page,'Tasks');page.get_by_label('Agent tasks',exact=True).select_option(first)
+    tab(page,'Permissions');check(budget.input_value()=='9999999')
+    if mode in ['http','standalone-http']:
+        stored=page.evaluate("JSON.parse(localStorage.getItem('vb6.codingAgents.limits.v1'))")
+        check(set(stored.keys())=={'version','limits'});check(all(isinstance(v,int) for v in stored['limits'].values()))
+        page.reload();page.wait_for_function('!!globalThis.vb6Studio?.codingAgents');page.evaluate("vb6Studio.command('codingAgents')")
+        tab(page,'Permissions');check(page.get_by_label('Session token budget',exact=True).input_value()=='3000000')
+        check(page.evaluate('vb6Studio.codingAgents.agent.usage.tokens')==0)
+    page.screenshot(path=str(REPORTS/f'{mode}-session-limits.png'))
+    return {'default20x':True,'presets':True,'invalidRejected':True,'independentTaskLimits':True,'numericOnlyPersistence':mode in ['http','standalone-http']}
+
+
+def composer_keyboard(page,mode):
+    requests=mock(page,'openai',lambda i,b:([],'Reply to keyboard send.'));configure(page)
+    prompt=page.get_by_label('Agent task',exact=True);prompt.fill('First line');prompt.press('Shift+Enter');prompt.press('a')
+    check(prompt.input_value()=='First line\na');check(page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True).count()==0)
+    prompt.dispatch_event('keydown',{'key':'Enter','isComposing':True});check(page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True).count()==0)
+    prompt.press('Enter');page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True).get_by_role('button',name='Start Task',exact=True).click();finish(page)
+    check(len(requests)==1);check('First line\na' in json.dumps(requests).replace('\\n','\n'))
+    check(prompt.input_value()=='');check(page.locator('.agent-assistant').count()==1)
+    return {'enterSends':True,'shiftEnterNewline':True,'imeDoesNotSend':True}
+
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -358,7 +481,7 @@ try:
             for provider in ['openai','anthropic','google']:
                 case(browser,mode,provider,lambda page,mode,provider=provider:provider_workflow(page,mode,provider))
                 case(browser,mode,provider+'-plan-question',lambda page,mode,provider=provider:plan_question(page,mode,provider))
-            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel)]:case(browser,mode,name,fn)
+            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()

@@ -4,6 +4,7 @@ import http from 'node:http';
 import {randomBytes, timingSafeEqual} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {nativeRequest, providerHeaders, providerInfo, retryAfter} from '../src/agents/providers.js';
+import {AGENT_LIMIT_FIELDS, normalizeAgentLimits} from '../src/agents/limits.js';
 const KEY_NAMES = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', google: 'GEMINI_API_KEY'};
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalThis.fetch} = {}) {
@@ -24,13 +25,15 @@ export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalT
     if (!equal(req.headers.authorization, 'Bearer ' + token)) { res.writeHead(401).end(); return; }
     if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) { res.writeHead(415).end(); return; }
     if (active >= 4) { res.writeHead(429).end(); return; }
-    active++; const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 120000);
+    active++; const controller = new AbortController(); let timeout = setTimeout(() => controller.abort(), 120000);
     const abort = () => controller.abort(); req.on('aborted', abort); res.on('close', abort);
     try {
       let size = 0; const chunks = [];
-      for await (const chunk of req) { size += chunk.length; if (size > 1600000) { res.writeHead(413).end(); return; } chunks.push(chunk); }
+      for await (const chunk of req) { size += chunk.length; if (size > AGENT_LIMIT_FIELDS.maxContextBytes.max + 4096) { res.writeHead(413).end(); return; } chunks.push(chunk); }
       const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       providerInfo(data.provider);
+      const {requestTimeoutMs} = normalizeAgentLimits({requestTimeoutMs: data.requestTimeoutMs});
+      clearTimeout(timeout); timeout = setTimeout(() => controller.abort(), data.operation === 'models' ? Math.min(requestTimeoutMs, 120000) : requestTimeoutMs);
       if (!['models', 'generate'].includes(data.operation)) throw new Error('Invalid operation.');
       if (data.operation === 'generate' && (!data.body || typeof data.body !== 'object' || Array.isArray(data.body))) throw new Error('Invalid request.');
       if (typeof (data.cursor ?? '') !== 'string' || (data.cursor || '').length > 2000) throw new Error('Invalid cursor.');
