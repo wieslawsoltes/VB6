@@ -5,21 +5,19 @@ on:
 permissions:
   contents: read
 jobs:
-  sqlite-engine:
+  integration-baseline:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: 22
-      - name: Fetch pinned redistributable SQLite engine
+          ref: 92a955acd6ad0c21b41d43a606c9adcc5e16ff49
+      - name: Archive verified integration baseline
         run: |
-          mkdir -p /tmp/vb6-sqlite
-          cd /tmp/vb6-sqlite
-          npm pack sql.js@1.14.2 --ignore-scripts
-          sha256sum *.tgz > SHA256SUMS.txt
+          mkdir -p /tmp/vb6-data-baseline
+          git archive HEAD > /tmp/vb6-data-baseline/main.tar
+          git rev-parse HEAD > /tmp/vb6-data-baseline/main-sha.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: vb6-sqlite-engine
-          path: /tmp/vb6-sqlite
+          name: data-integration-baseline
+          path: /tmp/vb6-data-baseline
           retention-days: 7
