@@ -19,7 +19,7 @@ test('bundled source labels produce identical bytes for Windows and POSIX separa
     path.relative=(from,to)=>relative(from,to).replace(/\//g,'\\');
     const windows=bundle(entry,'PortableBundle');
     assert.equal(windows,posix,'Host separators must not leak into source labels or nested payloads');
-    assert.ok(windows.includes('/* ../lib/value.js */'));
+    assert.ok(windows.includes('/* ..\\lib\\value.js */'));
   } finally {
     path.relative=relative;
     fs.rmSync(dir,{recursive:true,force:true});

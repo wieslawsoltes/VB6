@@ -20,6 +20,6 @@ export function bundle(entry,globalName='VB6'){
     if(!modules.get(imported.resolved).exports.includes(match[1]))throw new Error('Missing export '+match[1]+' from '+imported.resolved+' imported by '+file);
   }
   const ids=new Map([...modules.keys()].map((file,i)=>[file,i]));const code=[`/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */\n(()=>{'use strict';\nconst __modules=[];`];
-  for(const [file,m]of modules){const declarations=m.imports.map(i=>`const {${i.names.replace(/\bas\b/g,':')}}=__modules[${ids.get(i.resolved)}];`).join('\n');code.push(`\n/* ${path.relative(path.dirname(entry),file).replace(/\\/g,'/').replace(/\*\//g,'')} */\n__modules[${ids.get(file)}]=(()=>{\n${declarations}\n${m.source}\nreturn {${m.exports.join(',')}};\n})();`);}
+  for(const [file,m]of modules){const declarations=m.imports.map(i=>`const {${i.names.replace(/\bas\b/g,':')}}=__modules[${ids.get(i.resolved)}];`).join('\n');code.push(`\n/* ${path.relative(path.dirname(entry),file).replace(/\//g,'\\').replace(/\*\//g,'')} */\n__modules[${ids.get(file)}]=(()=>{\n${declarations}\n${m.source}\nreturn {${m.exports.join(',')}};\n})();`);}
   code.push(`globalThis[${JSON.stringify(globalName)}]=__modules[${ids.get(path.resolve(entry))}];\n})();`);return code.join('\n');
 }

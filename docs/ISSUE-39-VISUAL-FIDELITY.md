@@ -44,11 +44,12 @@ The staircase technique attribution and complete Jordan Scales / 98.css MIT
 notice remain in `src/theme/bevels.css` and `LICENSES/98.css.txt` (PR #36).
 Caption artwork and issue-specific CSS/JavaScript here are original project code.
 
-The bundler normalizes only source-label path separators to `/`. This prevents
-Windows versus POSIX labels from changing generated bundles and nested runtime
-payloads. Module resolution, emitted program semantics and the existing comment
-terminator guard are unchanged. A portable regression simulates both separator
-conventions and requires byte-identical bundled output.
+The bundler uses a fixed Windows-style separator convention for its source-label
+comments, preserving the validated Windows-produced distributions byte-for-byte
+while accepting either Windows or POSIX build hosts. These labels are comments,
+not module-resolution paths. Module resolution, emitted program semantics and
+the comment-terminator guard are unchanged. A portable regression simulates both
+host conventions and requires byte-identical bundled output.
 
 ## Reproduction and validation
 
