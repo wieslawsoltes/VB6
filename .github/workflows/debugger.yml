@@ -1,0 +1,37 @@
+name: Debugger runtime
+on:
+  push:
+    branches: [feat/vb6-debugger-runtime]
+  pull_request:
+    paths:
+      - 'src/runtime/**'
+      - 'src/language/**'
+      - 'src/ide/**'
+      - 'src/editor/**'
+      - 'tests/**'
+      - 'tools/**'
+      - '.github/workflows/debugger.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: debugger-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Source snapshot
+        run: git archive --format=tar.gz HEAD > debugger-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debugger-source
+          path: debugger-source.tar.gz
+          retention-days: 3
+      - run: npm test
+      - run: npm run build
