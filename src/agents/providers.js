@@ -1,3 +1,4 @@
+import {normalizeAgentLimits} from './limits.js';
 /** Native provider protocols. No SDK, remote script, credential persistence or arbitrary endpoints. */
 export const PROVIDERS = Object.freeze({
   openai: {label: 'OpenAI', origin: 'https://api.openai.com', path: '/v1/responses'},
@@ -78,19 +79,20 @@ export function retryAfter(value, now = Date.now()) {
   const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - now;
   return Number.isFinite(ms) ? Math.max(0, Math.min(300000, Math.ceil(ms))) : 0;
 }
-export function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch} = {}) {
+export function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch, requestTimeoutMs} = {}) {
   providerInfo(provider);
+  const timeoutMs = normalizeAgentLimits({requestTimeoutMs}).requestTimeoutMs;
   const origin = relay ? relayURL(relay) : '';
   if (origin && (!relayToken || /[\r\n]/.test(relayToken))) throw new Error('Enter the relay access token.');
   // Snapshot secrets in a closure; never expose them through the returned interface.
   const headers = origin ? {'Content-Type': 'application/json', Authorization: 'Bearer ' + relayToken} : providerHeaders(provider, apiKey);
   return async (body, {signal, receive = () => {}, models = false, cursor = ''} = {}) => {
-    const timer = AbortSignal.timeout(120000), combined = AbortSignal.any([signal, timer].filter(Boolean));
+    const timer = AbortSignal.timeout(models ? Math.min(timeoutMs, 120000) : timeoutMs), combined = AbortSignal.any([signal, timer].filter(Boolean));
     const native = nativeRequest(provider, body, {models, cursor});
     let response;
     try {
       response = await fetchImpl(origin ? origin + '/agent' : native.url, {method: origin ? 'POST' : native.method, headers, credentials: 'omit', redirect: 'error', cache: 'no-store', signal: combined,
-        body: origin ? JSON.stringify({provider, operation: models ? 'models' : 'generate', cursor, body: models ? undefined : body}) : native.body});
+        body: origin ? JSON.stringify({provider, operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
     } catch {
       signal?.throwIfAborted();
       throw new ProviderTransportError(timer.aborted ? 'Provider request timed out. An explicit retry may incur additional charges.' : 'Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.', {retryable: true});
@@ -100,7 +102,12 @@ export function createTransport({provider, apiKey = '', relay = '', relayToken =
       // Do not echo untrusted response bodies: they can contain credentials or prompt data.
       throw new ProviderTransportError('Provider HTTP ' + response.status + '. ' + (response.status === 429 ? 'Rate limit or quota reached; retry later.' : response.status === 401 || response.status === 403 ? 'Check credentials and model access.' : 'Check the model ID and provider limits.'), {status: response.status, retryable: [408, 429, 500, 502, 503, 504, 529].includes(response.status), retryAfterMs: retryAfter(response.headers.get('retry-after'))});
     }
-    await readEvents(response, receive, {signal: combined});
+    try { await readEvents(response, receive, {signal: combined}); }
+    catch (error) {
+      signal?.throwIfAborted();
+      if (timer.aborted) throw new ProviderTransportError('Provider response timed out. Partial public text is preserved; no partial tool call was executed. An explicit retry may incur additional charges.', {retryable: true});
+      throw error;
+    }
   };
 }
 export async function listModels(transport, provider, signal) {
@@ -135,20 +142,25 @@ export function requestBody(provider, model, history, definitions, instructions,
 export function userMessage(provider, text) { return provider === 'google' ? {role: 'user', parts: [{text}]} : {role: 'user', content: text}; }
 /** Preserve provider-native reasoning/signature blocks for tool continuations; display only public text. */
 export function responseCollector(provider, onText = () => {}) {
-  let raw, finished = false, stop = '', usage = {}, googleParts = [];
+  let raw, finished = false, stop = '', usage = {}, googleParts = [], publicCharacters = 0;
+  const publicText = text => { if (typeof text === 'string' && text) { publicCharacters += text.length; onText(text); } };
   const blocks = [], argumentsByIndex = new Map();
   function receive(data) {
+    // Capture billable usage even when the provider ends with an incomplete/failed turn.
+    if (data.response?.usage) usage = data.response.usage;
+    if (data.usage) usage = {...usage, ...data.usage};
+    if (data.usageMetadata) usage = data.usageMetadata;
     if (data.error || data.type === 'error' || data.type === 'response.failed' || data.type === 'response.incomplete') throw new Error('The provider could not complete this turn. No partial tools were executed.');
     if (provider === 'openai') {
-      if (data.type === 'response.output_text.delta') onText(data.delta || '');
+      if (data.type === 'response.output_text.delta') publicText(data.delta || '');
       if (data.type === 'response.completed' || Array.isArray(data.output)) { raw = data.response || data; finished = raw.status === 'completed'; usage = raw.usage || {}; }
     } else if (provider === 'anthropic') {
       if (data.type === 'message_start') usage = {...data.message?.usage};
-      if (data.type === 'content_block_start') blocks[data.index] = structuredClone(data.content_block);
+      if (data.type === 'content_block_start') { blocks[data.index] = structuredClone(data.content_block); if (data.content_block?.type === 'text') publicText(data.content_block.text); }
       if (data.type === 'content_block_delta') {
         const block = blocks[data.index], delta = data.delta;
         if (!block) throw new Error('Invalid provider stream order.');
-        if (delta.type === 'text_delta') { block.text = (block.text || '') + delta.text; onText(delta.text); }
+        if (delta.type === 'text_delta') { block.text = (block.text || '') + delta.text; publicText(delta.text); }
         if (delta.type === 'input_json_delta') argumentsByIndex.set(data.index, (argumentsByIndex.get(data.index) || '') + delta.partial_json);
         if (delta.type === 'thinking_delta') block.thinking = (block.thinking || '') + delta.thinking;
         if (delta.type === 'signature_delta') block.signature = (block.signature || '') + delta.signature;
@@ -159,7 +171,7 @@ export function responseCollector(provider, onText = () => {}) {
     } else {
       const candidate = data.candidates?.[0];
       if (data.promptFeedback?.blockReason) throw new Error('The provider blocked this prompt.');
-      for (const part of candidate?.content?.parts || []) { googleParts.push(structuredClone(part)); if (part.text && !part.thought) onText(part.text); }
+      for (const part of candidate?.content?.parts || []) { googleParts.push(structuredClone(part)); if (part.text && !part.thought) publicText(part.text); }
       if (candidate?.finishReason) { finished = true; stop = candidate.finishReason; }
       usage = data.usageMetadata || usage;
     }
@@ -185,10 +197,22 @@ export function responseCollector(provider, onText = () => {}) {
     }
     const seen = new Set();
     for (const call of calls) { if (!call.id || !call.name || seen.has(call.id) || !call.arguments || typeof call.arguments !== 'object' || Array.isArray(call.arguments)) throw new Error('Invalid or duplicate provider tool call.'); seen.add(call.id); }
-    const reported = Number(usage.total_tokens ?? usage.totalTokenCount ?? (Number(usage.input_tokens || 0) + Number(usage.output_tokens || 0) + Number(usage.cache_read_input_tokens || 0) + Number(usage.cache_creation_input_tokens || 0)));
-    return {message, calls, text, tokens: Number.isFinite(reported) && reported >= 0 ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(reported)) : 0};
+    return {message, calls, text, ...usageSummary()};
   }
-  return {receive, result};
+  function usageSummary() {
+    // Sources: OpenAI Responses streaming-events; Anthropic Streaming messages;
+    // Google GenerateContent UsageMetadata. Usage packets are cumulative per request.
+    // https://developers.openai.com/api/reference/resources/responses/streaming-events
+    // https://platform.claude.com/docs/en/build-with-claude/streaming
+    // https://ai.google.dev/api/generate-content#UsageMetadata
+    const valid = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    const total = usage.total_tokens ?? usage.totalTokenCount;
+    const parts = provider === 'google' ? ['promptTokenCount', 'candidatesTokenCount', 'thoughtsTokenCount', 'toolUsePromptTokenCount'] : ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
+    const reported = valid(total) || parts.some(key => valid(usage[key]));
+    const tokens = valid(total) ? total : parts.reduce((sum, key) => sum + (valid(usage[key]) ? usage[key] : 0), 0);
+    return {tokens: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(tokens)), usageReported: reported};
+  }
+  return {receive, result, usage: usageSummary, get publicCharacters() { return publicCharacters; }};
 }
 export function appendTurn(provider, history, result, outputs) {
   if (provider === 'openai') history.push(...result.message);
