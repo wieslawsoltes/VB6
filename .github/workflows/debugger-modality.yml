@@ -1,0 +1,52 @@
+name: Debugger modal isolation integration
+on:
+  push:
+    branches: [feat/vb6-debugger-runtime]
+    paths: ['.github/workflows/debugger-modality.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/vb6-debugger-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply independently hash-verified source changes
+        run: |
+          python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          updates={}
+          for item in json.loads(Path('.github/debugger-modality-edits.json').read_text()):
+              p=Path(item['path'])
+              assert not p.is_absolute() and '..' not in p.parts and not p.is_symlink()
+              s=p.read_text()
+              assert hashlib.sha256(s.encode()).hexdigest()==item['old'], 'Source changed: '+str(p)
+              for old,new in item['changes']:
+                  assert s.count(old)==1, 'Unexpected replacement count: '+str(p)
+                  s=s.replace(old,new)
+              assert hashlib.sha256(s.encode()).hexdigest()==item['new'], 'Integrity mismatch: '+str(p)
+              updates[p]=s
+          for p,s in updates.items():p.write_text(s)
+          PY
+      - run: npm test
+      - run: npm run build
+      - name: Commit sources and regenerated output
+        run: |
+          rm .github/debugger-modality-edits.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix: isolate debugger error dialog from sandbox focus with native modality'
+          git push origin HEAD:refs/heads/feat/vb6-debugger-runtime
+          git archive --format=tar.gz HEAD > /tmp/debugger-modal.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debugger-modal
+          path: /tmp/debugger-modal.tar.gz
+          retention-days: 3
