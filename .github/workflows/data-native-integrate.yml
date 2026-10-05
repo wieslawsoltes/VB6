@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply checksum-verified source corrections
+      - name: Apply checksum-verified provider corrections
         shell: bash
         run: |
           set -euo pipefail
@@ -33,10 +33,10 @@ jobs:
           encoded=m['gzipBase64'].replace('/JFVV2FpucShv','/JFV2FpucShv').replace('FyeSXX1nzyPC1','FyeSX1nzyPC1')
           patch=gzip.decompress(base64.b64decode(encoded,validate=True))
           assert hashlib.sha256(patch).hexdigest()=='0849222e3f2e0d64893160a91e6442e8ce12b3ed7a1a5f99938beca9367e78df'
-          subprocess.run(['git','apply','--check','--index','--exclude=.github/workflows/data-native-providers.yml','-'],input=patch,check=True)
-          subprocess.run(['git','apply','--index','--exclude=.github/workflows/data-native-providers.yml','-'],input=patch,check=True)
+          excluded=['--exclude=.github/workflows/data-native-providers.yml','--exclude=tools/native-snapshot.mjs','--exclude=tests/native-snapshot.test.mjs']
+          subprocess.run(['git','apply','--check','--index',*excluded,'-'],input=patch,check=True)
+          subprocess.run(['git','apply','--index',*excluded,'-'],input=patch,check=True)
           PY
-          git rm tools/data-native-reviewed.json
       - name: Rebuild and test corrected applications
         shell: bash
         run: |
@@ -51,7 +51,7 @@ jobs:
           git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
           git diff --exit-code HEAD -- .github/workflows
           git diff --check --cached
-          git commit -m 'fix(data): preserve native schema widths and canonical Windows snapshot boundaries'
+          git commit -m 'fix(data): preserve native schema integer widths and Windows file URL paths'
           test "$(git ls-remote origin refs/heads/feat/data-native-provider-validation | cut -f1)" = "$GITHUB_SHA"
           git push origin HEAD:refs/heads/feat/data-native-provider-validation
       - name: Preserve exact source and current ancestry
