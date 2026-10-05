@@ -57,7 +57,8 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm tools/intellisense-compatibility-part{1,2,3}.txt .github/workflows/intellisense-browser-integrate.yml
-          git add .github/workflows/intellisense.yml src docs/INTELLISENSE.md docs/INTELLISENSE-COMPATIBILITY.md tests/intellisense-compatibility.test.mjs tools/browser-intellisense-tests.py tools/browser-intellisense-compatibility.py dist
+          git add -u
+          git add src/editor/event-completion.js src/editor/reference-metadata.js docs/INTELLISENSE-COMPATIBILITY.md tests/intellisense-compatibility.test.mjs tools/browser-intellisense-compatibility.py
           git commit -m 'feat(intellisense): complete browser event, reference and expression compatibility workflows'
           git push origin HEAD:feature/intellisense-browser-compatibility
       - name: Reproducible source snapshot
