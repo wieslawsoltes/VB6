@@ -1,4 +1,4 @@
-name: Region integration validation
+name: Region browser test stabilization
 on:
   push:
     branches: [feature/win32-gdi-regions]
@@ -6,71 +6,38 @@ on:
 permissions:
   contents: write
 jobs:
-  integrate:
+  stabilize:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Verify transferred source and integrate tested baseline
+      - name: Apply the locally tested queue-drain assertions
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,hashlib
+          p=Path('tools/browser-win32-compat-tests.py');s=p.read_text()
+          assert 'def click_control' not in s
+          s=s.replace('def verify_app(page):', '''def click_control(page, name):
+              page.locator(f'[data-control="{name}"]').click()
+              # Declare buffers can be zero between awaited VB statements. Observe the
+              # entire input/procedure queue draining before checking retained resources.
+              page.wait_for_function("""()=>{const v=vb6Application.vm;return !v.processing && v.stack.length===0 && v.eventQueue.length===0;}""")
+          
+          def verify_app(page):''')
+          s=re.sub(r'page\.locator\(\'\[data-control="(cmd[^"]+)"\]\'\)\.click\(\)',lambda m:'click_control(page, '+repr(m[1])+')',s)
+          assert hashlib.sha256(s.encode()).hexdigest()=='2da71ce68884ab81e7ea55eba1d1169f38e906cac839f592590dca0d8aa5c731'
+          p.write_text(s)
+          PY
+          python3 -m py_compile tools/browser-win32-compat-tests.py
+          git diff --check
           git config user.name 'Wiesław Šoltés'
           git config user.email 'wieslawsoltes@users.noreply.github.com'
-          python3 - <<'PY'
-          import base64,gzip,hashlib
-          from pathlib import Path
-          parts=sorted(Path('.transfer').glob('regions-final.*.b64'))
-          assert len(parts)==2
-          encoded=''.join(p.read_text().strip() for p in parts)
-          encoded=encoded.replace('TANRpPaAD','TANPaAD')
-          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
-          assert hashlib.sha256(patch).hexdigest()=='da338cb8015d3683cf76ddbcbb2b86c834c313da48d6f1c1721df08e83ee724e'
-          Path('/tmp/regions-final.patch').write_bytes(patch)
-          PY
-          git merge --no-commit --no-ff 605fc10bcef483a52c9d50eddfd5ba5036eea04d || true
-          python3 - <<'PY'
-          import subprocess
-          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
-          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
-          PY
-          git apply --unidiff-zero /tmp/regions-final.patch
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('packages/win32-browser/src/index.js');s=p.read_text()
-          assert "export {RegionStore} from './gdi-region.js';" in s
-          s=s.replace("import {REGION_CONSTANTS} from './gdi-region.js';","import {REGION_CONSTANTS,RegionStore} from './gdi-region.js';").replace("export {RegionStore} from './gdi-region.js';\n",'').replace('export {ERROR,','export {RegionStore,ERROR,')
-          p.write_text(s)
-          p=Path('tests/win32-browser-package.test.mjs');p.write_text(p.read_text()+"\nimport '../packages/win32-browser/test/bundle.test.mjs';\n")
-          PY
-          rm .transfer/regions-final.*.b64
-          npm run build
-          node tools/win32-api-inventory.mjs
-          git add -A
-          test -z "$(git diff --name-only --diff-filter=U)"
-          git commit -m 'feat(win32-browser): finish regions, native clipping fixes, VB6 example and browser regressions'
-      - name: Preserve newly merged input and IntelliSense updates
-        run: |
-          set -euo pipefail
-          git merge --no-commit --no-ff a344a8fa8d667adbd934e595dd618836930b2120 || true
-          python3 - <<'PY'
-          import subprocess
-          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
-          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
-          PY
-          npm run build
-          node tools/win32-api-inventory.mjs
-          git add -A
-          test -z "$(git diff --name-only --diff-filter=U)"
-          npm test | tee /tmp/regions-integration-tests.txt
-          npm run pack:win32-browser | tee /tmp/regions-package-tests.txt
-          git diff --exit-code
-          git commit -m 'fix(win32-browser): retain concurrent input and IntelliSense changes in rebuilt distributions'
+          git add tools/browser-win32-compat-tests.py
+          git commit -m 'test(win32-browser): observe completed event lifetimes without timing sleeps'
       - name: Push only to the expected feature branch
         env:
           EXPECTED_SHA: ${{ github.sha }}
@@ -78,15 +45,3 @@ jobs:
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/win32-gdi-regions | cut -f1)" = "$EXPECTED_SHA"
           git push origin HEAD:refs/heads/feature/win32-gdi-regions
-          git bundle create /tmp/vb6-regions-integrated.bundle HEAD refs/remotes/origin/main
-          git rev-parse HEAD HEAD^{tree} > /tmp/regions-integration-revision.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win32-regions-integrated
-          path: |
-            /tmp/vb6-regions-integrated.bundle
-            /tmp/regions-integration-revision.txt
-            /tmp/regions-integration-tests.txt
-            /tmp/regions-package-tests.txt
-            release/vb6-win32-browser-*.tgz
-          retention-days: 7
