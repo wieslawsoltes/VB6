@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "id": "AotMDI_1",
+  "name": "AotMDI",
+  "description": "",
+  "startup": "Form1",
+  "modules": [
+    {
+      "id": "AotMDI_2",
+      "name": "Form1",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate Sub MDIForm_Load()\n Form2.Show\n Form3.Show\nEnd Sub",
+      "form": {
+        "id": "AotMDI_3",
+        "name": "Form1",
+        "type": "MDIForm",
+        "properties": {
+          "Name": "Form1",
+          "Caption": "AOT native MDI",
+          "ClientWidth": 9000,
+          "ClientHeight": 6000,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [],
+        "menus": []
+      }
+    },
+    {
+      "id": "AotMDI_4",
+      "name": "Form2",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate Sub Command1_Click()\n Caption = \"Native MDI event\"\nEnd Sub",
+      "form": {
+        "id": "AotMDI_5",
+        "name": "Form2",
+        "type": "Form",
+        "properties": {
+          "Name": "Form2",
+          "Caption": "First MDI child",
+          "ClientWidth": 3300,
+          "ClientHeight": 2400,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1,
+          "MDIChild": -1
+        },
+        "controls": [
+          {
+            "id": "AotMDI_6",
+            "name": "Command1",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "Command1",
+              "Left": 300,
+              "Top": 300,
+              "Width": 1440,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Update",
+              "Default": 0,
+              "Cancel": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    },
+    {
+      "id": "AotMDI_7",
+      "name": "Form3",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate Sub Command1_Click()\n Caption = \"Native MDI event\"\nEnd Sub",
+      "form": {
+        "id": "AotMDI_8",
+        "name": "Form3",
+        "type": "Form",
+        "properties": {
+          "Name": "Form3",
+          "Caption": "Second MDI child",
+          "ClientWidth": 3300,
+          "ClientHeight": 2400,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1,
+          "MDIChild": -1
+        },
+        "controls": [
+          {
+            "id": "AotMDI_9",
+            "name": "Command1",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "Command1",
+              "Left": 300,
+              "Top": 300,
+              "Width": 1440,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Update",
+              "Default": 0,
+              "Cancel": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    }
+  ],
+  "settings": {
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

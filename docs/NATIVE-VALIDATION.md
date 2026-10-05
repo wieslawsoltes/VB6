@@ -1,3 +1,5 @@
+> Historical validation for the original portable/classic target work. See [Win32 AOT and desktop windows](WIN32-AOT.md) and PR #9 for the later no-extraction target, real MDI/control HWNDs and ARM64 execution evidence.
+
 # Native executable validation and remaining boundaries
 
 The executable targets are documented in [Windows builds](WINDOWS-BUILDS.md). This implementation adds a modern portable Windows host and a separate classic-compiler integration; it does not claim complete Microsoft VB6 or Win32 API parity.

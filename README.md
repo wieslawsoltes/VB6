@@ -129,12 +129,26 @@ This is not a claim of complete native VB6 conformance.
 
 ## Windows executables
 
-Two JavaScript-driven build targets are available: **modern Windows portable EXEs** with a bundled Electron/WebGPU host and native form windows, and **classic VB6 runtime EXEs** built by a separately installed licensed `VB6.EXE` compiler. See [Windows builds](docs/WINDOWS-BUILDS.md) for commands, architecture, validation and compatibility boundaries.
+There are now three distinct build targets. **Direct Win32 AOT** emits a no-extraction x86 EXE using a JavaScript PE linker/code generator and real Windows controls. It is an experimental typed-integer subset, not a replacement for the complete browser VM. **Modern portable** embeds the Electron/WebGPU host and self-extracts. **Classic VB6** invokes a separately installed licensed compiler and uses the original runtime.
 
 ```sh
-npm --prefix desktop install
-npm run build:windows -- --project examples/calculator.vb6web
+# JavaScript-only direct PE build: no npm dependencies or external compiler
+npm run build:win32 -- --project examples/native/AotWindows.vb6web --out release/aot
+
+# Existing WebGPU/DOM runtime packaged as a portable desktop app
+npm --prefix desktop ci
+npm run build:windows -- --project examples/calculator.vb6web --graphics auto
+
+# Original licensed VB6 toolchain, on Windows
 npm run build:classic -- --project examples/classic/HelloRuntime.vbp --codegen native
 ```
 
-The modern portable EXE extracts its embedded runtime at launch. The classic EXE depends on the external 32-bit VB6 runtime and any project-specific OCX/COM components. Neither is advertised as a no-extraction, no-dependency implementation.
+The browser's **File → Make <project>.exe (Win32 AOT)…** runs the direct compiler locally, including in the standalone HTML. `dist/vb6-native.js` is its independently usable browser/worker SDK. The direct target includes scalar stdcall Declares, native control HWNDs, genuine MDICLIENT/MDI child windows, modal loops and cancellable unload. It uses **GDI/native controls, not WebGPU**; unsupported types/instructions/controls fail compilation.
+
+The desktop IDE now detaches and restores live tool/code panes through native windows, and its ARM64 portable build has been executed on a Windows ARM64 runner. This does not certify physical WebGPU: hosted x64/ARM64 tests explicitly exercised Canvas2D fallback. Classic compiler tests remain labelled mocks unless the separate licensed-toolchain job is run.
+
+See [Direct Win32/AOT contract, examples and SDK](docs/WIN32-AOT.md), [all Windows targets](docs/WINDOWS-BUILDS.md), and [earlier desktop validation](docs/NATIVE-VALIDATION.md). Full VB6 AOT parity, all-GPU rendering, COM/OCX/full Declare ABI and existing-binary browser emulation remain unfinished.
+
+## Original Visual Basic project files
+
+Open `.vbp` projects and `.vbg` groups from complete selected files, folders or ZIPs, alongside existing browser snapshots. Save native source/companion files as a ZIP or to an explicitly selected directory, or keep a `.vb6web` snapshot with native metadata. Unchanged bytes, source encodings, hidden attributes, duplicate project settings and unknown companions are retained; unsafe or unsupported native edits fail rather than silently discard data. Project-group switching keeps peer edits and detects shared-file conflicts. See [Native project files](docs/NATIVE-PROJECTS.md) for usage, filesystem safeguards, encoding choices and the distinction between file preservation and native COM/runtime compatibility.
