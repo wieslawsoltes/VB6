@@ -1447,7 +1447,7 @@ function fieldValue(column,value){
   if(type==='String'&&column.DefinedSize&&result.length>column.DefinedSize)fail('Field value exceeds DefinedSize',372);
   return result;
 }
-function compare(a,b){if(a===b)return 0;if(a==null)return -1;if(b==null)return 1;if(typeof a==='string'&&typeof b==='string'){a=fold(a);b=fold(b);}if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;return a<b?-1:a>b?1:0;}
+function compare(a,b){if(a===b)return 0;if(a==null)return -1;if(b==null)return 1;if(typeof a==='string'&&typeof b==='string'){a=fold(a);b=fold(b);}if(a instanceof VBDecimal||b instanceof VBDecimal)return coerce(a,'Decimal').compare(coerce(b,'Decimal'));if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;return a<b?-1:a>b?1:0;}
 
 /** Cached row view, typed fields, pending edits and stable row bookmarks. */
 class DisconnectedRecordset {
