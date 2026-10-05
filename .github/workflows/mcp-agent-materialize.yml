@@ -27,9 +27,11 @@ jobs:
           git fetch origin main:refs/remotes/origin/main
           test "$(git rev-parse origin/main)" = '954262de5ed2472a6e089d4b7ffa71b97ee6d33d'
           python - <<'PY'
-          import pathlib, subprocess, textwrap, re, json
+          import pathlib, subprocess, textwrap, re, json, os
           def git(*args): return subprocess.check_output(['git',*args],text=True).strip()
           def run(*args): subprocess.run(args,check=True)
+          start=os.environ['GITHUB_SHA']
+          assert git('rev-parse','HEAD')==start
           main='954262de5ed2472a6e089d4b7ffa71b97ee6d33d'
           workflow='.github/workflows/mcp-agent-materialize.yml'
           helper=pathlib.Path('tools/.mcp-agent-fixes.py').read_text()
@@ -62,8 +64,17 @@ jobs:
           tree=git('write-tree');print('Final integrated tree:',tree,flush=True)
           assert tree=='596c0d5d033bcb276d5c35a55f59e825a7abcf2e',tree
           run('git','commit','-m','merge: preserve current compiler and Windows targets; harden scoped agent authority')
+          # Publish exactly the verified tree, retaining the original branch head
+          # and the reconstructed implementation/main ancestry. Never force a ref.
+          implementation=git('rev-parse','HEAD')
+          published=git('commit-tree',tree,'-p',start,'-p',implementation,'-m','feat: publish verified server-only MCP agent access and preserve integration history')
+          run('git','reset','--hard',published)
+          run('git','merge-base','--is-ancestor',start,'HEAD')
+          run('git','merge-base','--is-ancestor',main,'HEAD')
+          assert git('rev-parse','HEAD^{tree}')==tree
+          print('Published source commit:',published,flush=True)
           PY
-          # A normal push rejects concurrent branch advances; never force this ref.
+          # A normal push rejects any concurrent branch advances.
           git push origin HEAD:refs/heads/feat/mcp-agent-control
       - uses: actions/setup-python@v5
         with:
