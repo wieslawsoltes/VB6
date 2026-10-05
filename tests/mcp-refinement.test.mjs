@@ -194,3 +194,13 @@ test('MCP lifecycle: cancelled legacy subscription cannot recreate a closed list
   resolve({contents:[]});await tick();await tick();
   assert.equal(server.listeners.size,0,'Do not register a subscription after cancellation');server.close();
 });
+
+test('MCP tasks: local cancellation safely handles expiry before the timer fires',()=>{
+  let now=0;
+  const tasks=new McpTasks({now:()=>now,ttlMs:100});
+  const handle=tasks.create(()=>new Promise(()=>{}),{principal:'A'});
+  now=101;
+  assert.equal(tasks.cancelLocal(handle.taskId),false);
+  assert.equal(tasks.inspect().length,0);
+  tasks.clear();
+});

@@ -19,7 +19,7 @@ export class McpTasks {
     return [...this.entries.values()].map(e => ({taskId:e.task.taskId, toolName:e.toolName,
       status:e.task.status, createdAt:e.task.createdAt, lastUpdatedAt:e.task.lastUpdatedAt, expiresAt:e.expiresAt}));
   }
-  cancelLocal(id) { const entry=this.entries.get(id); if (!entry) return false; this.cancel(id,{principal:entry.principal}); return true; }
+  cancelLocal(id) { this.purge(); const entry=this.entries.get(id); if (!entry) return false; this.cancelEntry(entry); return true; }
   clearFinished() { for (const [id,e] of this.entries) if (['completed','failed','cancelled'].includes(e.task.status)) this.remove(id); }
   principal(ctx) { return ctx.principal || ctx.sessionKey; }
   purge() {
@@ -68,13 +68,12 @@ export class McpTasks {
     return entry;
   }
   get(id, ctx) { return structuredClone(this.find(id, ctx).task); }
-  cancel(id, ctx) {
-    const entry = this.find(id, ctx);
+  cancel(id, ctx) { this.cancelEntry(this.find(id, ctx)); return {}; }
+  cancelEntry(entry) {
     if (entry.task.status === 'working') {
       entry.task = {...entry.task, status: 'cancelled', lastUpdatedAt: new Date(this.now()).toISOString()};
       entry.controller.abort(); this.statusChanged(entry);
     }
-    return {};
   }
   update(id, responses, ctx) {
     this.find(id, ctx);
