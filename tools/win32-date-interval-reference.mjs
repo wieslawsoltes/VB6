@@ -53,19 +53,71 @@ for(const number of [-1.999999,-1.000001,-0.000001,0.000001,0.999999,1.000001,45
 }
 export const DATE_INTERVAL_CONTRACTS=Object.freeze(cases.map(Object.freeze));
 export const CHUNK_SIZE=80;
+// MS-VBAL DateAdd specifies Double and nearest-integer rounding. Installed
+// VBScript instead truncates the count and can wrap large year/month additions.
+// Do not make the native compiler copy those engine differences. Retain both raw
+// and contract-adapted host runs and expose every changed expectation in reports.
+export const INTERVAL_REFERENCE_POLICY = String.raw`Function CheckedInterval(value)
+ If InStr(1, value, ChrW(0), 0) <> 0 Then Err.Raise 5
+ CheckedInterval = value
+End Function
+Function ContractAdd(interval, number, value)
+ Dim limit, unit
+ interval = CheckedInterval(interval)
+ number = Round(CDbl(number), 0)
+ unit = LCase(interval)
+ Select Case unit
+ Case "yyyy": limit = 10000
+ Case "q": limit = 40000
+ Case "m": limit = 120000
+ Case "y", "d", "w": limit = 4000000
+ Case "ww": limit = 600000
+ Case "h": limit = 100000000
+ Case "n": limit = 6000000000
+ Case "s": limit = 400000000000
+ Case Else: Err.Raise 5
+ End Select
+ If Abs(number) > limit Then Err.Raise 5
+ ContractAdd = DateAdd(interval, number, value)
+End Function
+Function ContractDiff(interval, date1, date2, OptionalFirstDay, OptionalFirstWeek)
+ ContractDiff = DateDiff(CheckedInterval(interval), date1, date2, OptionalFirstDay, OptionalFirstWeek)
+End Function
+Function ContractPart(interval, value, OptionalFirstDay, OptionalFirstWeek)
+ ContractPart = DatePart(CheckedInterval(interval), value, OptionalFirstDay, OptionalFirstWeek)
+End Function`;
+// These wrappers are only needed for tokens containing a NUL. Other optional
+// arguments are passed to the host unchanged (including ignored invalid flags).
+export function referenceExpression({expression,kind}, adapted=true) {
+ let value=expression;
+ if(adapted) {
+  if(value.startsWith('DateAdd('))value='ContractAdd('+value.slice(8);
+  else if(value.includes('ChrW(0)')) {
+   if(value.startsWith('DateDiff('))value='ContractDiff('+value.slice(9,-1)+', 1, 1)';
+   else if(value.startsWith('DatePart('))value='ContractPart('+value.slice(9,-1)+', 1, 1)';
+  }
+ }
+ return kind==='long'?`CLng(${value})`:value;
+}
 export function writeIntervalReference(directory='validation/date-intervals') {
  fs.mkdirSync(directory,{recursive:true});
- const lines=['Option Explicit','Dim result, savedError','Function Encode(value)',' Dim i, n, text',' text = ""',' For i = 1 To Len(value)','  n = AscW(Mid(value, i, 1))','  If n < 0 Then n = n + 65536','  text = text & Right("0000" & Hex(n), 4)',' Next',' Encode = text','End Function','On Error Resume Next'];
- cases.forEach(({expression,kind},i)=>{
-  // The native destination is typed Long. VBScript can return a wider Double
-  // for DateDiff; apply the same destination coercion, retaining overflow cases.
-  const assigned=kind==='long'?`CLng(${expression})`:expression;
-  lines.push('Err.Clear','result = '+assigned,'savedError = Err.Number','If savedError <> 0 Then',` WScript.Echo "${i}|error|" & savedError`,'Else');
-  if(kind==='string')lines.push(` WScript.Echo "${i}|string|" & Encode(CStr(result))`);
-  else lines.push(` WScript.Echo "${i}|${kind}|" & Replace(CStr(CDbl(result)), ",", ".")`);
-  lines.push('End If');
- });
- fs.writeFileSync(path.join(directory,'interval-reference.vbs'),lines.join('\r\n')+'\r\n');
+ for(const adapted of [false,true]) {
+  const lines=['Option Explicit','Dim result, savedError',INTERVAL_REFERENCE_POLICY,'Function Encode(value)',' Dim i, n, text',' text = ""',' For i = 1 To Len(value)','  n = AscW(Mid(value, i, 1))','  If n < 0 Then n = n + 65536','  text = text & Right("0000" & Hex(n), 4)',' Next',' Encode = text','End Function','On Error Resume Next'];
+  cases.forEach((record,i)=>{
+   const {kind}=record,assigned=referenceExpression(record,adapted);
+   lines.push('Err.Clear','result = '+assigned,'savedError = Err.Number','If savedError <> 0 Then',` WScript.Echo "${i}|error|" & savedError`,'Else');
+   if(kind==='string')lines.push(` WScript.Echo "${i}|string|" & Encode(CStr(result))`);
+   else lines.push(` WScript.Echo "${i}|${kind}|" & Replace(CStr(CDbl(result)), ",", ".")`);
+   lines.push('End If');
+  });
+  fs.writeFileSync(path.join(directory,adapted?'interval-reference.vbs':'interval-raw-reference.vbs'),lines.join('\r\n')+'\r\n');
+ }
+ // The retained valid year-100 cases expose Windows Script Host formatting
+ // restrictions. The contract uses Windows Automation formatting for the entire
+ // supported DATE range; a separately compiled test probe measures those calls.
+ const requests=cases.flatMap((r,index)=>r.expression.startsWith('FormatDateTime(DateSerial(100,1,1), ')?
+  [{index,serial:-657434,format:Number(r.expression.match(/, (\d+)\)$/)[1])}]:[]);
+ fs.writeFileSync(path.join(directory,'format-oracle-requests.json'),JSON.stringify(requests,null,2)+'\n');
 }
 export function readIntervalRecords(text) {
  const lines=String(text).replace(/^\uFEFF/,'').trim().split(/\r?\n/);
@@ -140,6 +192,26 @@ End Function
 }
 export function writeIntervalFixtures(directory='validation/date-intervals') {
  const records=readIntervalRecords(fs.readFileSync(path.join(directory,'interval-reference.txt'),'utf8')),programs=[];
+ const raw=readIntervalRecords(fs.readFileSync(path.join(directory,'interval-raw-reference.txt'),'utf8'));
+ const requests=JSON.parse(fs.readFileSync(path.join(directory,'format-oracle-requests.json'),'utf8'));
+ const measured=JSON.parse(fs.readFileSync(path.join(directory,'format-oracle-results.json'),'utf8').replace(/^\uFEFF/,''));
+ if(!Array.isArray(measured)||measured.length!==requests.length)throw Error('Incomplete independent format reference');
+ measured.forEach((result,i)=>{
+  const request=requests[i];
+  if(result.index!==request.index||result.serial!==request.serial||result.format!==request.format||
+    result.hresult!==0||typeof result.text!=='string'||result.text.length>1024)throw Error('Invalid independent format result');
+  records[request.index]={...records[request.index],outcome:'string',value:result.text,reference:'Windows Automation API probe'};
+ });
+ const differences=records.filter((r,i)=>r.outcome!==raw[i].outcome||r.value!==raw[i].value).map(r=>({
+  index:r.index,expression:r.expression,raw:{outcome:raw[r.index].outcome,value:raw[r.index].value},
+  contract:{outcome:r.outcome,value:r.value},reason:r.reference||
+   (r.expression.includes('ChrW(0)')?'MS-VBAL exact interval token (no NUL-prefix acceptance)':'MS-VBAL nearest Double count / checked supported-date range')
+ }));
+ fs.writeFileSync(path.join(directory,'interval-reference-differences.json'),JSON.stringify({
+  rawReference:'installed Windows Script Host with explicit Long destination conversions',
+  adaptedReference:'documented nearest count and checked range; independent Windows Automation formatting for year 100',
+  comparable:records.length-differences.length,total:records.length,differences
+ },null,2)+'\n');
  for(let offset=0;offset<records.length;offset+=CHUNK_SIZE){
   const subset=records.slice(offset,offset+CHUNK_SIZE),name='AotDateIntervals'+programs.length,p=intervalProject(subset,name),result=compileWin32(p);
   fs.writeFileSync(path.join(directory,name+'.vb6web'),JSON.stringify(p,null,2)+'\n');
@@ -147,7 +219,7 @@ export function writeIntervalFixtures(directory='validation/date-intervals') {
   fs.writeFileSync(path.join(directory,name+'.json'),JSON.stringify({...result.report,offset,checks:subset.map(r=>r.name),records:subset,sha256:createHash('sha256').update(result.bytes).digest('hex')},null,2)+'\n');
   programs.push(name);
  }
- fs.writeFileSync(path.join(directory,'interval-programs.json'),JSON.stringify({reference:'installed Windows VBScript (not licensed VB6)',dateToleranceDays:1e-9,count:records.length,programs},null,2)+'\n');
+ fs.writeFileSync(path.join(directory,'interval-programs.json'),JSON.stringify({reference:'installed VBScript plus explicit MS-VBAL count/range/token policy and independent Windows formatting; raw differences retained',dateToleranceDays:1e-9,count:records.length,programs},null,2)+'\n');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  if(process.argv[2]==='--prepare')writeIntervalReference();else if(process.argv[2]==='--compile')writeIntervalFixtures();else throw Error('Use --prepare or --compile');

@@ -1,0 +1,65 @@
+name: Check corrected native interval semantics
+on:
+  push:
+    branches: [feat/native-compatibility-boundaries]
+    paths: [.github/workflows/native-interval-semantics.yml]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.publish.outputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/win32-date-intervals.test.mjs')
+          s=p.read_text()
+          old='''source.includes('result = DateAdd("yyyy", -2.5, DateSerial(100,1,1))')'''
+          new='''source.includes('result = ContractAdd("yyyy", -2.5, DateSerial(100,1,1))')'''
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new))
+          PY
+          npm run build
+          npm test
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git add tests dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git commit -m 'build: regenerate native interval compiler and retain explicit reference policy tests'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-compatibility-boundaries
+          echo "source=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run build
+      - name: Run every calendar contract and retain raw engine differences
+        shell: pwsh
+        run: ./tools/test-win32-date-intervals.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-interval-semantics
+          path: validation/date-intervals/
+          retention-days: 14
