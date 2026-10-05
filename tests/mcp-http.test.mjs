@@ -148,3 +148,30 @@ test('MCP companion: invalid UTF-8 is rejected rather than silently rewritten', 
   const response = await fetch(bridge.url + '/bridge/attach', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + bridge.ownerToken}, body: bytes});
   assert.equal(response.status, 400); assert.equal((await response.json()).error.code, -32700);
 });
+
+test('MCP bridge: tasks survive distinct modern HTTP requests and relay stdio; detach revokes handles', async t => {
+  const authority=new AbortController(),adapter=tinyAdapter();adapter.authoritySignal=authority.signal;
+  adapter.tools.push({name:'vb6.agent.wait',inputSchema:{type:'object'},execute:async(_,ctx)=>{await new Promise(resolve=>setTimeout(resolve,30));return {matched:!ctx.signal.aborted};}});
+  const bridge=await createBridge({port:0}),server=new McpServer(adapter),browser=new BrowserBridge(server,{url:bridge.url,token:bridge.ownerToken});
+  const httpTransport=new HttpTransport(bridge.url+'/mcp',{token:bridge.clientToken});
+  const stdio=new NodeStdioTransport({command:process.execPath,args:[path.resolve('tools/mcp-stdio.mjs'),'--url',bridge.url+'/mcp'],env:{...process.env,VB6_MCP_TOKEN:bridge.clientToken}});
+  t.after(async()=>{await stdio.close();await httpTransport.close();await browser.close();server.close();await bridge.close();});
+  await browser.connect();let id=0;
+  const exchange=(transport,method,params={})=>transport.exchange({jsonrpc:'2.0',id:++id,method,params:{...params,_meta:{[MCP_META+'protocolVersion']:MCP_VERSION,[MCP_META+'clientCapabilities']:{extensions:{[MCP_META+'tasks']:{}}}}}}, {version:MCP_VERSION});
+  const task=await exchange(httpTransport,'tools/call',{name:'vb6.agent.wait',arguments:{}});assert.equal(task.result.resultType,'task');
+  const read=await exchange(httpTransport,'tasks/get',{taskId:task.result.taskId});assert.ok(['working','completed'].includes(read.result.status));
+  await new Promise(r=>setTimeout(r,60));const fromStdio=await exchange(stdio,'tasks/get',{taskId:task.result.taskId});assert.equal(fromStdio.result.status,'completed');assert.equal(fromStdio.result.result.structuredContent.matched,true);
+  const mismatch={jsonrpc:'2.0',id:++id,method:'tasks/get',params:{taskId:task.result.taskId,...modernParams}};
+  const bad=await fetch(bridge.url+'/mcp',{method:'POST',headers:{...requestHeaders(mismatch,MCP_VERSION),'Mcp-Name':'wrong',Authorization:'Bearer '+bridge.clientToken},body:JSON.stringify(mismatch)});
+  assert.equal((await bad.json()).error.code,-32020);
+  await browser.close();assert.equal(server.tasks.entries.size,0);
+});
+
+test('MCP stdio: invalid UTF-8 is rejected instead of silently replacing bytes', async () => {
+  const {spawn}=await import('node:child_process');
+  const child=spawn(process.execPath,[path.resolve('tools/mcp-stdio.mjs')],{env:{...process.env,VB6_MCP_TOKEN:'x'.repeat(40)},stdio:['pipe','pipe','pipe']});
+  let stdout='',stderr='';child.stdout.setEncoding('utf8');child.stderr.setEncoding('utf8');child.stdout.on('data',s=>stdout+=s);child.stderr.on('data',s=>stderr+=s);
+  child.stdin.on('error',()=>{});child.stdin.end(Buffer.from([0xc3,0x28,0x0a]));
+  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill();reject(Error('stdio fixture did not terminate'));},5000);child.once('exit',()=>{clearTimeout(timer);resolve();});child.once('error',reject);});
+  assert.equal(stderr,'');assert.equal(JSON.parse(stdout.trim()).error.code,-32700);
+});

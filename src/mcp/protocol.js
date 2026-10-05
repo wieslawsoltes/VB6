@@ -24,8 +24,9 @@ export function checkMessage(value) {
   }
   throw new McpError(-32600, 'Malformed JSON-RPC message.');
 }
+export const utf8Length = text => new TextEncoder().encode(text).byteLength;
 export function parseMessage(text, limit = MCP_LIMIT) {
-  if (typeof text !== 'string' || text.length > limit) throw new McpError(-32600, 'MCP message exceeds size limit.');
+  if (typeof text !== 'string' || text.length > limit || utf8Length(text) > limit) throw new McpError(-32600, 'MCP message exceeds size limit.');
   let value; try { value = JSON.parse(text); } catch { throw new McpError(-32700, 'Invalid JSON.'); }
   checkMessage(value); return value;
 }
@@ -85,7 +86,7 @@ export function requestHeaders(message, version, schema) {
   if (version !== MCP_VERSION || !message.method || !Object.hasOwn(message, 'id')) return headers;
   if (!/^[A-Za-z0-9_./-]+$/.test(message.method)) throw new McpError(-32600, 'Invalid method name.');
   headers['Mcp-Method'] = message.method;
-  const name = message.method === 'resources/read' ? message.params?.uri : ['tools/call','prompts/get'].includes(message.method) ? message.params?.name : undefined;
+  const name = ['tasks/get','tasks/update','tasks/cancel'].includes(message.method) ? message.params?.taskId : message.method === 'resources/read' ? message.params?.uri : ['tools/call','prompts/get'].includes(message.method) ? message.params?.name : undefined;
   if (name !== undefined) headers['Mcp-Name'] = encodeHeader(name);
   if (message.method === 'tools/call' && schema) for (const entry of headerAnnotations(schema)) {
     let value = message.params?.arguments;

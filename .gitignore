@@ -14,3 +14,8 @@ reports/browser-windows/
 
 # Generated native-project browser artifacts.
 reports/native-projects/
+
+# Data integration evidence and local gateway secrets.
+reports/data-sources/
+server-profiles.local.json
+*.sqlite

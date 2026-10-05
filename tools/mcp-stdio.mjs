@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Desktop MCP configuration entry: newline JSON on stdin/stdout, diagnostics on stderr only. */
-import {MCP_VERSION, MCP_META, MCP_LIMIT, parseMessage, checkMessage, errorResponse, McpError} from '../src/mcp/protocol.js';
+import {MCP_VERSION, MCP_META, MCP_LIMIT, utf8Length, parseMessage, checkMessage, errorResponse, McpError} from '../src/mcp/protocol.js';
 import {IdeRelayTransport} from './mcp-http.mjs';
 
 const args = process.argv.slice(2);
@@ -10,7 +10,7 @@ const transport = new IdeRelayTransport(args[1] || 'http://127.0.0.1:8766/mcp', 
 const active = new Map(), lifetime = new AbortController(); let version = '2025-11-25', buffer = '', listener, writes = Promise.resolve();
 function send(message) {
   if (!message) return;
-  const text = JSON.stringify(message); if (text.length > MCP_LIMIT) return send(errorResponse(message.id, new McpError(-32600, 'Response is too large.')));
+  const text = JSON.stringify(message); if (utf8Length(text) > MCP_LIMIT) { const failure=errorResponse(message.id,new McpError(-32600,'Response is too large.')); if(utf8Length(JSON.stringify(failure))>MCP_LIMIT)failure.id=null; return send(failure); }
   writes = writes.then(() => new Promise((resolve, reject) => process.stdout.write(text + '\n', error => error ? reject(error) : resolve()))); writes.catch(() => lifetime.abort());
 }
 async function receive(message) {
@@ -32,19 +32,20 @@ async function receive(message) {
   } catch (error) { send(errorResponse(message.id, error)); }
   finally { clearTimeout(timer); active.delete(message.id); }
 }
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', text => {
-  buffer += text;
-  if (buffer.length > MCP_LIMIT * 2) { send(errorResponse(null, new McpError(-32600, 'Input is too large.'))); process.stdin.destroy(); return; }
+const decoder = new TextDecoder('utf-8', {fatal:true});
+process.stdin.on('data', bytes => {
+  try { buffer += decoder.decode(bytes, {stream:true}); }
+  catch { send(errorResponse(null,new McpError(-32700,'Invalid UTF-8 input.'))); process.stdin.destroy(new Error('Invalid UTF-8 input.')); return; }
+  if (utf8Length(buffer) > MCP_LIMIT * 2) { send(errorResponse(null, new McpError(-32600, 'Input is too large.'))); process.stdin.destroy(); return; }
   let end;
   while ((end = buffer.indexOf('\n')) >= 0) {
     const line = buffer.slice(0, end).replace(/\r$/, ''); buffer = buffer.slice(end + 1); if (!line.trim()) continue;
     try { const message = parseMessage(line); receive(message).catch(error => { if (Object.hasOwn(message, 'id')) send(errorResponse(message.id, error)); }); }
     catch (error) { send(errorResponse(null, error)); }
   }
-  if (buffer.length > MCP_LIMIT) { send(errorResponse(null, new McpError(-32600, 'Input is too large.'))); process.stdin.destroy(); }
+  if (utf8Length(buffer) > MCP_LIMIT) { send(errorResponse(null, new McpError(-32600, 'Input is too large.'))); process.stdin.destroy(); }
 });
 async function close() { lifetime.abort(); listener?.abort(); for (const controller of active.values()) controller.abort(); await transport.close(version); await writes; }
-process.stdin.once('end', () => close().catch(() => {}));
+process.stdin.once('end', () => { try { decoder.decode(); if(buffer.trim())send(errorResponse(null,new McpError(-32700,'Incomplete newline-delimited input.'))); } catch { send(errorResponse(null,new McpError(-32700,'Invalid UTF-8 input.'))); } close().catch(() => {}); });
 process.stdin.once('error', () => close().catch(() => {}));
 for (const signal of ['SIGINT','SIGTERM']) process.once(signal, () => close().then(() => process.exit(0)));

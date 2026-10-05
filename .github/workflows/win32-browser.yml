@@ -1,27 +1,58 @@
 name: Win32 browser compatibility
 on:
   push:
-    branches: [feature/win32-browser-compat]
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: win32-browser-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 jobs:
-  compatibility:
+  package:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: 7d821e026b7c7cd34cfc07c452647260080e492e
-      - name: Archive exact source for integration testing
-        run: git archive --format=zip HEAD -o /tmp/vb6-win32-source.zip
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win32-browser-source
-          path: /tmp/vb6-win32-source.zip
-          retention-days: 7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm run build
       - run: npm test
+      - run: npm run pack:win32-browser
+      - name: Reproducible runtime and independent package bundle
+        run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples packages/win32-browser/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-browser-package
+          path: release/vb6-win32-browser-*.tgz
+          retention-days: 14
+  browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Exported HTTP/file apps, classic IDE, SDK, standalone package and worker
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:win32-browser:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-browser-${{ matrix.browser }}
+          path: reports/win32-browser
+          retention-days: 7

@@ -102,7 +102,7 @@ OAuth-protected MCP hosting service.
 
 ## Agent workflow and control surface
 
-The server exposes **106 structured tools**, resources, prompts, pagination,
+The server exposes **114 structured tools**, resources, prompts, pagination,
 subscriptions, cancellation and event-driven waiting. The complete tool reference
 and examples are in [MCP-AGENTS.md](MCP-AGENTS.md).
 
@@ -165,17 +165,74 @@ can be managed and detached windows can be returned through structured tools.
 
 | Area | Implemented behavior |
 | --- | --- |
-| Modern MCP `2026-07-28` | Server discovery, per-request metadata, routing/header validation, complete results, POST subscriptions |
+| Modern MCP `2026-07-28` | Server discovery, per-request metadata, optional clientInfo, routing/header validation, cache hints, sorted catalogs, complete results, POST subscriptions |
 | Legacy MCP | `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` session initialization/capabilities |
 | Agent transports | Streamable HTTP JSON/SSE through the companion; stdio via the external relay; explicitly paired private MessagePort |
-| Server features | Tools, resources/templates, two source-review prompts, module-name completion, pagination, notifications/subscriptions and cancellation |
-| Reliability | Bounded requests/results/queues, timeouts, strict UTF-8, duplicate-request checks, session cleanup and no automatic mutation replay |
+| Server features | Typed tools with output schemas, resources/templates, two source-review prompts, module-name completion, pagination, notifications/subscriptions and cancellation |
+| Tasks | Negotiated modern task handles for `vb6.agent.wait`, polling/update/cancel, opted-in notifications, expiry and authority-bound cleanup |
+| Reliability | UTF-8 byte-bounded requests/results/queues, timeouts, strict UTF-8, duplicate-request checks, session cleanup and no automatic mutation replay |
 | Companion boundary | Loopback binding, Host/Origin checks, separate owner/client tokens, browser lease, no arbitrary process or remote-URL proxy |
 
-The server does not solicit model sampling or act as a model host. Optional Tasks,
-MCP Apps, Skills and provider-specific extensions are not implemented. This is
+The server does not solicit model sampling or act as a model host. Tasks are
+implemented only for event-driven `vb6.agent.wait`, as described below. MCP Apps,
+Skills and provider-specific extensions are not implemented. This is
 not certification against every agent implementation. The local stdio entry is
 for an **external agent to reach this IDE**, not for the IDE to run another server.
+
+## Classic dialog
+
+The dialog uses the same font, colors, tab control, inset fields and buttons as
+other IDE tools, including Windows Standard and High Contrast Black. It retains
+docking, resizing and real browser-window detachment. Arrow/Home/End keys switch
+tabs; Ctrl+Tab cycles them and Escape closes the tool without disabling sharing.
+The footer's **Stop sharing** is the explicit revocation action.
+
+**Agent access** groups sharing, connection status and the local companion settings.
+Setup instructions and the credential-free agent configuration are expandable.
+**Agent permissions** exposes no preselected grants and disables authorization
+until sharing is enabled. **Capabilities** filters tools by name/description and
+scope, browses resources/prompts, and exports the schema catalog. **Activity** has a
+filterable table, errors-only view, follow toggle and JSON export. Arguments and
+credentials are not logged; error summaries can contain project identifiers, so
+review activity before sharing it.
+
+## Pollable waits and immutable build downloads
+
+Modern clients that advertise `extensions: {"io.modelcontextprotocol/tasks": {}}`
+in their per-request client capabilities receive a task handle for
+`vb6.agent.wait`. Poll `tasks/get`, optionally subscribe with `taskIds` through
+`subscriptions/listen`, or cancel with `tasks/cancel`. `tasks/update` accepts an
+input-response object but these wait tasks never elicit or authorize changes;
+unknown/stale input keys have no effect. Tasks last at most 120 seconds, with at
+most 32 retained. Ordinary clients still receive a synchronous wait result.
+No legacy experimental Tasks protocol or taskification of mutations is advertised.
+
+`vb6.build.create` produces inert project JSON, application HTML, native-source
+ZIP or an existing-compiler Win32 PE32. Supply the current `expectedRevision`,
+then use `vb6.build.read` with byte offsets and base64 chunks. Every chunk carries
+the full-file SHA-256, total byte size and snapshot revision. Unsupported native
+constructs return diagnostics, not a substitute executable. SHA-256 uses WebCrypto
+where available and a native-differential-tested JS fallback on plain HTTP.
+Read-only builds do not run the application, start a compiler process or write
+host files. Electron packaging and the licensed classic compiler remain local CLI
+operations; `vb6.build.targets` describes this boundary.
+
+Build artifacts expire after five minutes. At most eight / 32 MiB total are
+retained, evicting the oldest when necessary; reads are limited to 256 KiB per
+chunk. `vb6.build.release` frees a handle early. A build remains an immutable
+snapshot after ordinary edits, but switching/replacing the project, disabling
+sharing, detaching the relay or disposing the server invalidates its access.
+Handles are unguessable and bound to a transport-assigned identity, never
+`clientInfo`. Agents using the same companion client credential share that
+identity. They are not isolated merely by supplying different names.
+
+Use `vb6.project.entries` before imports with multiple possible entry files;
+`project.import` accepts `entryPath`, `encoding` and `basenameFallback` alongside
+supplied text/base64 files or ZIP bytes. `project.group` inventories all group
+members; `project.select` switches the active member with preserved IDE histories,
+and `project.startup` updates the startup project with undo. Project switches
+revoke old project grants. Adding an entire group as loose modules is rejected;
+source/asset collisions do not silently overwrite existing companion data.
 
 ## Trusted embedding API
 

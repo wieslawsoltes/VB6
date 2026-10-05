@@ -3,8 +3,10 @@ const { app, BrowserWindow, protocol, ipcMain, screen, Menu, dialog, session } =
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { ORIGIN, MAX_WINDOWS, CSP, integer, text, trustedURL, assetPath, clampBounds, windowOptions, menuTemplate } = require('./policy.cjs');
+const { ORIGIN, MAX_WINDOWS, dataOrigins, dataCSP, dataRequestAllowed, integer, text, trustedURL, assetPath, clampBounds, windowOptions, menuTemplate } = require('./policy.cjs');
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
+const allowedDataOrigins = dataOrigins(manifest.dataOrigins || []);
+const CSP = dataCSP(allowedDataOrigins);
 const webRoot = path.join(__dirname, 'web');
 const records = new Map(), pending = new Map(), opening = new Map(), modalStack = [], runtimeDocuments = new Map();
 let root, quitting = false;
@@ -172,7 +174,7 @@ app.whenReady().then(async () => {
   const ses = session.defaultSession;
   ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
-  ses.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !trustedURL(details.url) && !/^(data:|blob:|about:blank$)/.test(details.url) }));
+  ses.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !trustedURL(details.url) && !dataRequestAllowed(details, allowedDataOrigins) && !/^(data:|blob:|about:blank$)/.test(details.url) }));
   protocol.handle('vb6', async request => {
     try {
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });

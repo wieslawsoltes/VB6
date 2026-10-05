@@ -23,10 +23,10 @@ function fixture(t,{approve=async()=>true}={}) {
   return {ide,adapter,server,client,call,write};
 }
 
-test('agent: all 106 tools have unique deterministic names; pagination includes final tools',async t=>{
- const f=fixture(t);await f.client.connect();const tools=await f.client.listTools();assert.equal(tools.length,106);assert.equal(new Set(tools.map(t=>t.name)).size,106);
+test('agent: all 114 tools have unique deterministic names; pagination includes final tools',async t=>{
+ const f=fixture(t);await f.client.connect();const tools=await f.client.listTools();assert.equal(tools.length,114);assert.equal(new Set(tools.map(t=>t.name)).size,114);
  assert.ok(tools.some(t=>t.name==='vb6.runtime.capture'));assert.ok(tools.every(t=>t.inputSchema.additionalProperties===false));
- const capabilities=await f.call('agent.capabilities');assert.equal(capabilities.tools.length,106);assert.equal(capabilities.permissions.active,false);
+ const capabilities=await f.call('agent.capabilities');assert.equal(capabilities.tools.length,114);assert.equal(capabilities.permissions.active,false);
  const routes=await f.call('commands.list');assert.ok(routes.commands.every(c=>c.tool));assert.ok(!routes.directCommands.includes('mcpAgentAccess'));
 });
 test('agent: source edits across modules are atomic, use original UTF-16 offsets and one undo unit',async t=>{

@@ -10,7 +10,7 @@ harness=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(harness)
 
 ROOT=Path(__file__).resolve().parents[1]
 REPORT=ROOT/'reports/mcp-browser.json'
-parser=argparse.ArgumentParser();parser.add_argument('--opaque',action='store_true');args=parser.parse_args();results=[]
+parser=argparse.ArgumentParser();parser.add_argument('--opaque',action='store_true');parser.add_argument('--browser',choices=['chromium','firefox','webkit'],default='chromium');args=parser.parse_args();results=[]
 def check(value,message='Assertion failed'):
     if not value:raise AssertionError(message)
 def finished(page):page.wait_for_function("!vb6Studio.documents.tools.get('tool:mcp').operation")
@@ -40,6 +40,34 @@ def exercise(browser,mode,info):
         page.evaluate("vb6Studio.loadProject(VB6StudioAPI.newProject('McpBrowser'));vb6Studio.command('mcpAgentAccess')")
         check(page.locator('.mcp-panel').get_by_role('tab').all_text_contents()==['Agent access','Agent permissions','Capabilities','Activity'])
         check(page.get_by_role('button',name='Invoke selected',exact=True).count()==0)
+        # Shared classic styling, keyboard navigation and constrained window layout.
+        check(page.get_by_role('button',name='Attach companion',exact=True).is_disabled())
+        panel=page.locator('.mcp-panel')
+        palette=panel.evaluate("e=>({font:getComputedStyle(e).fontSize,bodyFont:getComputedStyle(document.querySelector('.ide-shell')).fontSize,face:getComputedStyle(e).backgroundColor,expected:getComputedStyle(e).getPropertyValue('--vb-face').trim()})")
+        check(palette['font']==palette['bodyFont'],str(palette))
+        panel.get_by_role('tab',name='Agent access',exact=True).focus()
+        page.keyboard.press('End');check(panel.get_by_role('tab',name='Activity',exact=True).get_attribute('aria-selected')=='true')
+        page.keyboard.press('Home');page.keyboard.press('Control+Tab');check(panel.get_by_role('tab',name='Agent permissions',exact=True).get_attribute('aria-selected')=='true')
+        check(page.get_by_role('button',name='Grant selected permissions',exact=True).is_disabled())
+        for label,slug in [('Agent access','access'),('Agent permissions','permissions'),('Capabilities','capabilities'),('Activity','activity')]:
+            tab(page,label)
+            check(panel.evaluate('e=>e.scrollWidth<=e.clientWidth+1'),'Panel overflow: '+label)
+            if mode=='opaque':
+                (ROOT/'reports/screenshots').mkdir(parents=True,exist_ok=True)
+                page.screenshot(path=str(ROOT/('reports/screenshots/mcp-classic-'+slug+'.png')))
+        window=page.locator('.mdi-active');style=window.get_attribute('style')
+        window.evaluate("e=>{e.style.width='420px';e.style.height='560px'}")
+        tab(page,'Capabilities');check(panel.evaluate('e=>e.scrollWidth<=e.clientWidth+1'),'Narrow panel overflow')
+        page.evaluate("vb6Studio.appearance.theme='contrast';vb6Studio.applyAppearance()")
+        check(panel.evaluate("e=>getComputedStyle(e).backgroundColor==='rgb(0, 0, 0)'"),'MCP does not follow the IDE theme')
+        if mode=='opaque':page.screenshot(path=str(ROOT/'reports/screenshots/mcp-contrast-narrow.png'))
+        page.evaluate("vb6Studio.appearance.theme='classic';vb6Studio.applyAppearance()")
+        window.evaluate('(e,style)=>style===null?e.removeAttribute("style"):e.setAttribute("style",style)',style)
+        tab(page,'Capabilities')
+        page.get_by_label('Capability type',exact=True).select_option('Resources');page.get_by_label('Exposed agent tools').locator('option').nth(2).wait_for(state='attached')
+        page.get_by_label('Capability type',exact=True).select_option('Prompts');check(page.get_by_label('Exposed agent tools').locator('option').count()==2)
+        page.get_by_label('Capability type',exact=True).select_option('Tools')
+        tab(page,'Agent access')
         page.get_by_label('Enable MCP sharing',exact=True).check()
         page.get_by_role('dialog').get_by_role('button',name='Enable sharing',exact=True).click();finished(page)
         harness.install_peer(page)
@@ -51,7 +79,7 @@ def exercise(browser,mode,info):
             check(page.get_by_label('Companion owner token',exact=True).input_value()=='')
         peer=info if network else None
         tab(page,'Capabilities')
-        check(page.get_by_label('Exposed agent tools').locator('option').count()==106)
+        check(page.get_by_label('Exposed agent tools').locator('option').count()==114)
         page.get_by_label('Filter exposed agent tools').fill('debug.assign')
         check(page.get_by_label('Exposed agent tools').locator('option').count()==1)
         check('pauseId' in page.get_by_label('Agent tool schema').inner_text())
@@ -121,7 +149,7 @@ def exercise(browser,mode,info):
             check(not page.evaluate('vb6Studio.mcp.adapter.enabled || vb6Studio.mcp.bridge'))
         # Only app static assets and explicitly paired loopback relay requests are allowed.
         if network:check(all(url.startswith((info['url'],info['hosted'].rsplit('/VB6/',1)[0],info['httpsHosted'].rsplit('/VB6/',1)[0])) for url in requests),str(requests))
-        return {'tools':106,'serverOnly':True,'approval':'deny/allow/revoke','runtime':'paused/evaluate/stop','network':network,'detachedWindow':detached,'reload':network}
+        return {'tools':114,'serverOnly':True,'approval':'deny/allow/revoke','runtime':'paused/evaluate/stop','network':network,'detachedWindow':detached,'reload':network}
     finally:context.close()
 
 fixture = None
@@ -131,10 +159,11 @@ try:
         fixture = subprocess.Popen(['node', str(ROOT / 'tools/mcp-browser-fixture.mjs')], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         info = json.loads(fixture.stdout.readline())
     with sync_playwright() as playwright:
-        options = {'headless': True, 'args': ['--no-sandbox']}
-        if os.environ.get('CHROMIUM_PATH'):
+        options = {'headless': True}
+        if args.browser=='chromium':options['args']=['--no-sandbox']
+        if args.browser=='chromium' and os.environ.get('CHROMIUM_PATH'):
             options['executable_path'] = os.environ['CHROMIUM_PATH']
-        browser = playwright.chromium.launch(**options)
+        browser = getattr(playwright,args.browser).launch(**options)
         version = browser.version
         for mode in (['opaque'] if args.opaque else ['file', 'hosted-subpath', 'https-hosted-subpath', 'localhost']):
             started = time.monotonic()

@@ -31,7 +31,11 @@
     "test:win32:browser": "python tools/browser-native-build-tests.py",
     "test:project-files": "node --test tests/native-projects.test.mjs tests/native-directory.test.mjs tests/native-compatibility-review.test.mjs tests/native-zip.test.mjs",
     "test:project-browser": "python tools/native-project-browser-tests.py",
-    "test:mcp:agent": "python tools/mcp-agent-browser-tests.py"
+    "test:mcp:agent": "python tools/mcp-agent-browser-tests.py",
+    "test:data": "node --test tests/data-*.test.mjs",
+    "test:data:browser": "python tools/browser-data-sources.py",
+    "data:examples": "node tools/data-example-server.mjs",
+    "data:gateway": "node tools/data-gateway.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,430 @@
+{
+  "schema": 1,
+  "id": "example_graphql-customers_1",
+  "name": "GraphQLCustomers",
+  "description": "Start the local example server. A typed Boolean parameter filters GraphQL customers. The Data Environment also contains an OData connection with next-link paging.",
+  "startup": "frmData",
+  "modules": [
+    {
+      "id": "example_graphql-customers_2",
+      "name": "frmData",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate cn As ADODB.Connection\nPrivate rs As ADODB.Recordset\nPrivate Sub Form_Load()\n    lblStatus.Caption = \"Click Reload to connect\"\nEnd Sub\nPrivate Sub cmdLoad_Click()\n    On Error GoTo Failed\n    DataEnvironment1.ActiveCustomers True\n    Set rs = DataEnvironment1.rsActiveCustomers\n    Set Data1.Recordset = rs\n    grdCustomers.ColWidth(0) = 900\n    grdCustomers.ColWidth(1) = 2850\n    grdCustomers.ColWidth(2) = 3450\n    If grdCustomers.Cols > 3 Then grdCustomers.ColWidth(3) = 1500\n    lblStatus.Caption = CStr(rs.RecordCount) & \" records loaded\"\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" & CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub cmdSave_Click()\n    On Error GoTo Failed\n    MsgBox \"This example is read-only.\", vbInformation\n    lblStatus.Caption = \"Ready\"\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" & CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub cmdNew_Click()\n    On Error GoTo Failed\n    MsgBox \"This example is read-only.\", vbInformation\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" & CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub cmdDelete_Click()\n    On Error GoTo Failed\n    MsgBox \"This example is read-only.\", vbInformation\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" & CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub Form_Unload(Cancel As Integer)\n    If Not cn Is Nothing Then cn.Close\nEnd Sub\n",
+      "form": {
+        "id": "example_graphql-customers_3",
+        "name": "frmData",
+        "type": "Form",
+        "properties": {
+          "Name": "frmData",
+          "Caption": "GraphQL / OData — Customer Queries",
+          "ClientWidth": 10200,
+          "ClientHeight": 6900,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "example_graphql-customers_4",
+            "name": "lblTitle",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblTitle",
+              "Left": 240,
+              "Top": 180,
+              "Width": 9600,
+              "Height": 360,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 12,
+              "FontBold": -1,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "GraphQL / OData — Customer Queries",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_5",
+            "name": "lblNote",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblNote",
+              "Left": 240,
+              "Top": 645,
+              "Width": 9600,
+              "Height": 600,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Start the local example server. A typed Boolean parameter filters GraphQL customers. The Data Environment also contains an OData connection with next-link paging.",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_6",
+            "name": "grdCustomers",
+            "type": "DataGrid",
+            "parent": null,
+            "properties": {
+              "Name": "grdCustomers",
+              "Left": 240,
+              "Top": 1350,
+              "Width": 9600,
+              "Height": 3540,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Rows": 5,
+              "Cols": 3,
+              "DataSource": "Data1"
+            }
+          },
+          {
+            "id": "example_graphql-customers_7",
+            "name": "Data1",
+            "type": "Adodc",
+            "parent": null,
+            "properties": {
+              "Name": "Data1",
+              "Left": 240,
+              "Top": 5040,
+              "Width": 9600,
+              "Height": 390,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Customers",
+              "ConnectionString": "",
+              "RecordSource": "",
+              "CommandType": 1,
+              "CursorType": 3,
+              "LockType": 3,
+              "ReadOnly": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_8",
+            "name": "lblName",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblName",
+              "Left": 240,
+              "Top": 5610,
+              "Width": 1050,
+              "Height": 330,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Name:",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_9",
+            "name": "txtName",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "txtName",
+              "Left": 1275,
+              "Top": 5550,
+              "Width": 3825,
+              "Height": 360,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "",
+              "MultiLine": 0,
+              "ScrollBars": 0,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": -1,
+              "Alignment": 0,
+              "DataSource": "Data1",
+              "DataField": "name"
+            }
+          },
+          {
+            "id": "example_graphql-customers_10",
+            "name": "cmdLoad",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdLoad",
+              "Left": 240,
+              "Top": 6180,
+              "Width": 1500,
+              "Height": 405,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Reload",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_11",
+            "name": "cmdSave",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdSave",
+              "Left": 1890,
+              "Top": 6180,
+              "Width": 1500,
+              "Height": 405,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Save",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_12",
+            "name": "cmdNew",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdNew",
+              "Left": 3540,
+              "Top": 6180,
+              "Width": 1500,
+              "Height": 405,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Add New",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_13",
+            "name": "cmdDelete",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdDelete",
+              "Left": 5190,
+              "Top": 6180,
+              "Width": 1500,
+              "Height": 405,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Delete",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_graphql-customers_14",
+            "name": "lblStatus",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblStatus",
+              "Left": 6900,
+              "Top": 6255,
+              "Width": 2940,
+              "Height": 300,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Ready",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    }
+  ],
+  "settings": {
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {},
+  "dataSources": {
+    "version": 1,
+    "connections": [
+      {
+        "name": "Graph",
+        "provider": "graphql",
+        "url": "http://127.0.0.1:4286/graphql",
+        "rowsPath": "data.customers",
+        "readOnly": true,
+        "fields": [
+          {
+            "name": "id",
+            "type": 3
+          },
+          {
+            "name": "name",
+            "type": 202
+          },
+          {
+            "name": "email",
+            "type": 202
+          },
+          {
+            "name": "active",
+            "type": 11
+          }
+        ]
+      },
+      {
+        "name": "OData",
+        "provider": "odata",
+        "url": "http://127.0.0.1:4286/odata/Customers",
+        "readOnly": true
+      }
+    ],
+    "commands": [
+      {
+        "name": "ActiveCustomers",
+        "connection": "Graph",
+        "text": "query($active: Boolean) { customers(active:$active) { id name email active } }",
+        "parameters": [
+          {
+            "name": "active",
+            "type": 11,
+            "value": -1
+          }
+        ]
+      }
+    ]
+  }
+}

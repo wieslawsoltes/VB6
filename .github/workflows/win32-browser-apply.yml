@@ -1,0 +1,61 @@
+name: Apply validated Win32 browser source
+on:
+  push:
+    branches: [feature/win32-browser-compat]
+    paths: ['.win32-transfer/**', '.github/workflows/win32-browser-apply.yml']
+permissions:
+  contents: read
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/feature/win32-browser-compat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply checksum-verified source patch
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python - <<'PY'
+          import base64, hashlib, lzma
+          from pathlib import Path
+          chunks = sorted(Path('.win32-transfer').glob('*.b64'))
+          assert len(chunks) == 7
+          data = lzma.decompress(base64.b64decode(''.join(p.read_text().strip() for p in chunks), validate=True))
+          assert hashlib.sha256(data).hexdigest() == '59642ff614296644185c199f80208b896f79a651106b4f3504c61ab8452e52af'
+          Path('/tmp/win32-source.patch').write_bytes(data)
+          PY
+          git apply --index --unidiff-zero --check /tmp/win32-source.patch
+          git apply --index --unidiff-zero /tmp/win32-source.patch
+          rm -r .win32-transfer
+      - run: npm run build
+      - run: npm test
+      - run: npm run pack:win32-browser
+      - name: Commit verified implementation and generated distributions
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          git fetch origin feature/win32-browser-compat
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD"
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(win32-browser): ship isolated API package and VB6 Declare integration' -m 'Add 170 named browser-compatible Win32 exports, bounded memory and handles, VB6 marshalling, private files/INI/registry/clipboard, common window APIs and GDI, callbacks and timers, exported-app integration, Workbench example and compatibility tests. Preserve current data-source and MCP integration; document unsupported native boundaries.'
+          git push origin HEAD:refs/heads/feature/win32-browser-compat
+          git archive --format=zip HEAD -o /tmp/win32-browser-implemented-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-browser-implemented
+          path: |
+            /tmp/win32-browser-implemented-source.zip
+            release/vb6-win32-browser-*.tgz
+          retention-days: 7

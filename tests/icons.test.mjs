@@ -13,8 +13,8 @@ test('all command catalog entries and saved default bars resolve real artwork',(
  for(const bar of DEFAULT_BARS)for(const id of bar.items)if(id!=='|')assert.ok(hasIcon(COMMAND_ICONS[id]),`${bar.id}: ${id}`);
  for(const [id,name] of Object.entries(COMMAND_ICONS))assert.ok(hasIcon(name),id);
 });
-test('all 39 toolbox icons exist and each has distinct artwork',()=>{
- assert.equal(CONTROL_ICON_TYPES.length,39);
+test('all 40 toolbox icons exist and each has distinct artwork',()=>{
+ assert.equal(CONTROL_ICON_TYPES.length,40);
  for(const t of [...BASIC_CONTROL_TYPES,...EXTENDED_CONTROL_TYPES])assert.ok(hasControlIcon(t),t);
  assert.equal(new Set(Object.values(CONTROL_ART)).size,CONTROL_ICON_TYPES.length);
 });

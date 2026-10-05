@@ -29,7 +29,7 @@ export class BrowserControl {
     this.props={Left:0,Top:0,Width:1800,Height:450,Visible:-1,Enabled:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,BackColor:-2147483633,ForeColor:-2147483640,TabIndex:0,TabStop:-1,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[model.type]||{}),...clone(model.properties||{}),Name:model.name};
     for(const [key,value]of Object.entries(this.props))if(value?.resource)this.props[key]=CONTROL_DEFAULTS[model.type]?.[key]??'';
     this.node=el('div',{class:'vb-control','data-control':model.name,'data-control-id':model.id,'data-type':model.type,tabindex:0});this.node.style.touchAction=design?'none':'auto';this.input=null;this.childHost=this.node;this.items=[...(this.props.List||[])];this.itemData=[];this.selectedIndices=new Set();this.gridData=clone(this.props.GridData||[]);this._colWidths=[];this.currentX=0;this.currentY=0;
-    const props=new Set([...RICH_SELECTION_PROPERTIES,...Object.keys(this.props),'Text','Caption','Value','ListIndex','Enabled','Visible','Left','Top','Width','Height','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','ToolTipText','Tag','MaxLength','Locked','PasswordChar','Default','Cancel','Min','Max','Rows','Cols','FixedRows','FixedCols','Row','Col','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataSource','RecordSource','DatabaseName','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Picture','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','CancelError','FileName','Filter','FilterIndex','DialogTitle','Flags','FontStrikethru','TextRTF','MultiLine','ScrollBars']);
+    const props=new Set([...RICH_SELECTION_PROPERTIES,...Object.keys(this.props),'Text','Caption','Value','ListIndex','Enabled','Visible','Left','Top','Width','Height','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','ToolTipText','Tag','MaxLength','Locked','PasswordChar','Default','Cancel','Min','Max','Rows','Cols','FixedRows','FixedCols','Row','Col','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataSource','RecordSource','DatabaseName','Connect','ConnectionString','CommandType','CursorType','LockType','ReadOnly','RecordsetType','DataMember','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Picture','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','CancelError','FileName','Filter','FilterIndex','DialogTitle','Flags','FontStrikethru','TextRTF','MultiLine','ScrollBars']);
     for(const key of props)if(!['Nodes','Tabs','Panels','Buttons','ListItems','ColumnHeaders','ListImages'].includes(key)&&!(key in this))Object.defineProperty(this,key,{enumerable:true,configurable:true,get:()=>this.get(key),set:value=>this.set(key,value)});
     this.build();this.attachEvents();this.refresh();
   }
@@ -51,6 +51,8 @@ export class BrowserControl {
   set(key,value,fromDOM=false){
     if(this.disposed)return;
     if(key==='DataSource'){this.bindRecordset(value);return;}
+    if(key==='DataField'||key==='DataMember'){this.props[key]=value;if(this._dataSource)this.bindRecordset(this._dataSource);return;}
+    if(this._boundRS&&this.props.DataField&&['Text','Value'].includes(key)&&!this.design){this._boundRS.Fields.Item(this.props.DataField).Value=value;}
     if(this._boundRS&&['Rows','Cols','FixedRows','FixedCols','FormatString'].includes(key))throw new VBError('Bound grid dimensions and headers belong to the Recordset',445);
     if(key==='Picture'){this.props.Picture=value;if(this.surface||value&&['Form','MDIForm'].includes(this.type))this.ensureSurface().setPicture(safeImage(value,this.assets));this.invalidate();return;}
     if(key==='TextRTF'&&this.rich){this.rich.setRTF(value);return;}
@@ -105,7 +107,7 @@ export class BrowserControl {
       case 'DTPicker':this.input=el('input',{type:'date',class:'vb-date-input','aria-label':this.model.name});n.append(this.input);this.input.addEventListener('change',()=>this.set('Value',this.input.value,true));break;
       case 'MonthView':addClass('vb-month');break;
       case 'MSChart':this.props.Column=1;break;
-      case 'Data':this.Recordset=new MemoryRecordset();this.dataLabel=el('span',{style:{flex:'1',textAlign:'center'}});n.classList.add('vb-toolbar');for(const [caption,action]of [['|◀','MoveFirst'],['◀','MovePrevious'],['▶','MoveNext'],['▶|','MoveLast']]){const button=el('button',{text:caption,onclick:()=>{this.Recordset[action]();this.event('Reposition');}});n.append(button);if(action==='MovePrevious')n.append(this.dataLabel);}break;
+      case 'Data':case 'Adodc':this.buildDataControl();break;
       default:addClass('vb-unsupported');n.textContent=this.type+' — native control not implemented';break;
     }
   }
@@ -139,7 +141,7 @@ export class BrowserControl {
       case 'DTPicker':{const value=this.get('Value');if(!isNaN(value))this.input.value=[value.getFullYear(),String(value.getMonth()+1).padStart(2,'0'),String(value.getDate()).padStart(2,'0')].join('-');break;}
       case 'MonthView':this.refreshMonth();break;
       case 'MSChart':this.refreshChart();break;
-      case 'Data':this.dataLabel.textContent=p.Caption||'Data';break;
+      case 'Data':case 'Adodc':this.dataLabel.textContent=p.Caption||'Data';break;
     }
   }
   defaultValue(){if(['TextBox','RichTextBox','ComboBox','ListBox','FileListBox','DirListBox','DriveListBox','MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type))return this.get('Text');if(['CheckBox','OptionButton','HScrollBar','VScrollBar','Slider','ProgressBar','UpDown','DTPicker'].includes(this.type))return this.get('Value');return this.get('Caption');}
@@ -166,7 +168,7 @@ export class BrowserControl {
   Find(text,start=0,end=-1,options=0){if(!this.rich)throw new VBError('Find requires RichTextBox',438);return this.rich.find(text,start,end,options);}
   GetLineFromChar(index){if(!this.rich)throw new VBError('GetLineFromChar requires RichTextBox',438);index=Number(index);this.rich.document.checkRange(index);return this.rich.text.slice(0,index).split('\r\n').length-1;}
   get RTFWarnings(){return this.rich?.document.warnings.join('\r\n')||'';}
-  SetFocus(){(this.input||this.node).focus();}Refresh(){this.refresh();this.surface?.render();}Move(left,top,width,height){this.props.Left=Number(left);if(top!==undefined)this.props.Top=Number(top);if(width!==undefined)this.props.Width=Number(width);if(height!==undefined)this.props.Height=Number(height);this.invalidate();}ZOrder(position=0){if(position===0)this.node.parentNode?.append(this.node);else this.node.parentNode?.prepend(this.node);}
+  SetFocus(){(this.input||this.node).focus();}Refresh(){if(['Data','Adodc'].includes(this.type)&&!this.design)return this.refreshDataControl();this.refresh();this.surface?.render();}Move(left,top,width,height){this.props.Left=Number(left);if(top!==undefined)this.props.Top=Number(top);if(width!==undefined)this.props.Width=Number(width);if(height!==undefined)this.props.Height=Number(height);this.invalidate();}ZOrder(position=0){if(position===0)this.node.parentNode?.append(this.node);else this.node.parentNode?.prepend(this.node);}
   Cls(){this.surface?.clear();this.currentX=0;this.currentY=0;}
   get CurrentX(){return this.currentX;}set CurrentX(v){this.currentX=Number(v);}get CurrentY(){return this.currentY;}set CurrentY(v){this.currentY=Number(v);}
   ensureSurface(){if(!this.surface){this.node.style.position='absolute';this.surface=new GraphicsSurface(this.node,{backend:this.backend,background:this.props.BackColor,onBackend:this.onBackend});this.surface.setPicture(safeImage(this.props.Picture,this.assets));}return this.surface;}
@@ -174,16 +176,47 @@ export class BrowserControl {
   Print(...values){const scale=units(this.props.ScaleMode||1);this.ensureSurface().text(values.map(v=>String(v??'')).join(' '),this.currentX/scale,this.currentY/scale,this.props.ForeColor,`${this.props.FontBold?'bold ':''}${Number(this.props.FontSize)*96/72}px Arial`);this.currentY+=Number(this.props.FontSize)*96/72*scale*1.3;}
   Scale(x1,y1,x2,y2){this.props.ScaleLeft=x1;this.props.ScaleTop=y1;this.props.ScaleWidth=x2-x1;this.props.ScaleHeight=y2-y1;this.props.ScaleMode=0;}
   updateTimer(){clearInterval(this.timerId);this.timerId=null;if(this.design||this.disposed||!this.form?.shown||!truth(this.props.Enabled)||!this.props.Interval)return;this.timerId=setInterval(()=>this.event('Timer',[],true),Math.max(10,Number(this.props.Interval)));}
+  buildDataControl(){
+    this._recordset=this.vm?.data?.createObject('ADODB.Recordset')||new MemoryRecordset();
+    Object.defineProperty(this,'Recordset',{configurable:true,get:()=>this._recordset,set:rs=>{
+      if(!(rs instanceof MemoryRecordset))throw new VBError('Expected a Recordset',13);
+      this._recordset=rs;
+      for(const control of this.form?.controls||[])if(control._dataSource===this)control.bindRecordset(this);
+    }});
+    this.dataLabel=el('span',{style:{flex:'1',textAlign:'center'}});this.node.classList.add('vb-toolbar');
+    for(const [caption,action]of [['|◀','MoveFirst'],['◀','MovePrevious'],['▶','MoveNext'],['▶|','MoveLast']]){
+      const button=el('button',{text:caption,'aria-label':action,onclick:async()=>{try{await this.Recordset[action]();await this.event('Reposition');}catch(error){this.LastDataError=error.message;this.node.title=error.message;}}});
+      this.node.append(button);if(action==='MovePrevious')this.node.append(this.dataLabel);
+    }
+  }
+  async refreshDataControl(){
+    if(!this.vm?.data)return;
+    const source=this.props.ConnectionString||this.props.Connect||this.props.DatabaseName;
+    if(!source)return;
+    const cn=this.vm.data.connection();
+    try{
+      cn.Mode=this.props.ReadOnly?1:3;
+      await cn.Open(this.props.ConnectionString||this.props.Connect||(/=/.test(source)?source:{provider:'sqlite',database:source}));
+      const rs=this.vm.data.createObject('ADODB.Recordset');
+      const type=this.type==='Data'?(/^\s*(SELECT|WITH)\b/i.test(this.props.RecordSource)?1:2):Number(this.props.CommandType||1);
+      await rs.Open(this.props.RecordSource,cn,3,this.props.ReadOnly?1:Number(this.props.LockType||(type===2?3:1)),type);
+      const previous=this._dataConnection;this._dataConnection=cn;this.Recordset=rs;await previous?.Close();await this.event('Reposition');return rs;
+    }catch(error){await cn.Close();throw error;}
+  }
+  UpdateRecord(){return this.Recordset?.Update();}
   bindRecordset(source){
-    const rs=source?.Recordset||source,unbinding=source===NOTHING||source===null;
-    if(!unbinding&&!(rs instanceof MemoryRecordset))throw new VBError('DataSource must be a browser in-memory Recordset',13);
-    if(!['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type))throw new VBError('Recordset binding is currently implemented for grid controls only',445);
+    const rs=source?.Recordset||(this.props.DataMember?source?.['rs'+this.props.DataMember]:null)||source,unbinding=source===NOTHING||source===null||source==='';
+    if(!unbinding&&!(rs instanceof MemoryRecordset))throw new VBError('DataSource must be a Recordset, data control or Data Environment member',13);
+    if(!['MSFlexGrid','MSHFlexGrid','DataGrid','TextBox','Label','CheckBox','ComboBox','DTPicker'].includes(this.type))throw new VBError('This control does not support field binding',445);
     this._unsubscribeData?.();this._unsubscribeData=null;this._boundRS=unbinding?null:rs;this._dataSource=source;this.gridEditor=null;
     if(unbinding){this.gridData=[];this.props.Rows=2;this.props.Cols=2;this._boundRows=null;this.invalidate();return;}
-    this._unsubscribeData=rs.subscribe(change=>this.refreshBinding(change.kind));this.refreshBinding('bind');
+    this._unsubscribeData=rs.subscribe(change=>this.refreshBinding(change.kind));
+    if(this.input&&!this._boundBlur){this._boundBlur=()=>Promise.resolve().then(()=>this._boundRS?.Update?.()).catch(error=>{this.LastDataError=error.message;this.node.title=error.message;});this.input.addEventListener('blur',this._boundBlur);}
+    this.refreshBinding('bind');
   }
   refreshBinding(kind){
     const rs=this._boundRS;if(!rs||this.disposed)return;
+    if(!['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)){const field=this.props.DataField;if(!field)return;const value=rs.State&&!rs.BOF&&!rs.EOF?rs.Fields.Item(field).Value:null;this.props[this.type==='Label'?'Caption':['CheckBox','DTPicker'].includes(this.type)?'Value':'Text']=value??(this.type==='CheckBox'?0:'');this.invalidate();return;}
     this._boundRows=rs.State?rs.view():[];this.props.Rows=this._boundRows.length+1;this.props.Cols=rs.columns.length;this.props.FixedRows=1;
     const previous=this.props.Row;this.props.Row=this.props.RowSel=rs.State&&!rs.BOF&&!rs.EOF?rs.position+1:0;this.props.Col=Math.max(0,Math.min(Number(this.props.Col)||0,rs.columns.length-1));
     if(kind!=='move'||previous!==this.props.Row)this.invalidate();
@@ -198,7 +231,7 @@ export class BrowserControl {
       const cancel=new Cell('Integer',0);await this.event('BeforeColUpdate',[col,old,{ref:cancel}]);if(!cancel.get())await this.event('Validate',[{ref:cancel}]);
       if(cancel.get()||this.disposed||this.vm?.state==='error')return;
       if(source!==this._boundRS)throw new VBError('DataSource changed during editing',3197);
-      if(source)source.setRowValue(record,col,input.value,old);else{this.gridData[row] ||= [];this.gridData[row][col]=input.value;}
+      if(source)await source.setRowValue(record,col,input.value,old);else{this.gridData[row] ||= [];this.gridData[row][col]=input.value;}
       this.LastDataError='';this.node.removeAttribute('data-error');this.node.title=String(this.props.ToolTipText||'');
       await this.event('AfterColUpdate',[col]);
     }catch(error){this.LastDataError=error.message;this.node.dataset.error=error.message;this.node.title='Edit rejected: '+error.message;}
@@ -247,6 +280,15 @@ export class BrowserControl {
 }
 
 export class BrowserForm extends BrowserControl {
+  async initializeDataBindings(){
+    for(const control of this.controls)if(['Data','Adodc'].includes(control.type)&&control.props.RecordSource)await control.Refresh();
+    for(const control of this.controls){
+      const source=control.props.DataSource;if(!source||!['TextBox','Label','CheckBox','ComboBox','DTPicker','DataGrid','MSFlexGrid','MSHFlexGrid'].includes(control.type))continue;
+      if(typeof source!=='string')continue;
+      const target=this.controlMap.get(source.toLowerCase())||this.vm.library.get(source.toLowerCase());
+      if(!target)throw new VBError('DataSource not found: '+source,3265);control.bindRecordset(target);
+    }
+  }
   static frontSequence=0;
   constructor(model,options={}){const p=model.properties||{},normalized={...model,properties:{...p,Width:p.ClientWidth??p.Width??9000,Height:p.ClientHeight??p.Height??6000}};super(normalized,options);this.originalModel=model;this.controls=[];this.controlMap=new Map();this.shown=false;this.form=this;this.mountControls(model.controls||[]);const form=this;this.Controls={get Count(){return form.controls.length;},Item:key=>{const control=typeof key==='number'?form.controls[key]:form.controlMap.get(lower(key));if(!control)throw new VBError('Control not found: '+key,35601);return control;},Add:(type,name,container)=>form.addControl(type,name,container),Remove:key=>form.removeControl(typeof key==='string'?form.controlMap.get(lower(key)):key),[Symbol.iterator]:()=>form.controls.values()};this.Controls.Add.vbRawArgs=true;this.Controls.Remove.vbRawArgs=true;this.attachWindowDragging();if(!this.design){this.node.addEventListener('pointerdown',()=>this.activateChrome(),true);this.node.addEventListener('focusin',()=>this.activateChrome());}if(this.props.Picture)this.ensureSurface().setPicture(safeImage(this.props.Picture,this.assets));}
   build(){this.node.className='vb-form';this.node.setAttribute('role','dialog');this.titleBar=el('div',{class:'vb-form-title'});this.captionNode=el('span',{class:'caption'});this.closeButton=el('button',{class:'vb-window-button',title:'Close','aria-label':'Close',onclick:()=>this.vm?.requestUnload(this.instance)});this.closeButton.append(icon('close'));this.minButton=el('button',{class:'vb-window-button',title:'Minimize','aria-label':'Minimize',onclick:()=>this.toggleMinimize()},icon('minimize'));this.maxButton=el('button',{class:'vb-window-button',title:'Maximize','aria-label':'Maximize',onclick:()=>this.toggleMaximize()},icon('maximize'));this.titleBar.append(el('span',{class:'vb-form-icon'},icon('form',16)),this.captionNode,this.minButton,this.maxButton,this.closeButton);this.menuBar=el('div',{class:'vb-form-menu'});this.content=el('div',{class:'vb-form-content'});this.childHost=this.content;this.node.append(this.titleBar,this.menuBar,this.content);this.form=this;}

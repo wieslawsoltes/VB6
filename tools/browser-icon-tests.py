@@ -73,7 +73,7 @@ def gallery(browser, theme, dpr=1, forced=False):
           }document.body.append(root);
           return {icons:ICON_NAMES.length,controls:CONTROL_ICON_TYPES.length,missing:root.querySelectorAll('[data-missing-icon]').length};
         }''')
-        check(counts == {'icons':111, 'controls':39, 'missing':0}, counts)
+        check(counts == {'icons':111, 'controls':40, 'missing':0}, counts)
         check(page.locator('.control-icon svg').first.evaluate('(n)=>n.getBoundingClientRect().width') == 16, 'Toolbox is not native 16px')
         check(page.locator('.icon-art').first.evaluate('(n)=>getComputedStyle(n).display') != 'none', 'Enabled artwork hidden')
         check(page.locator('button:disabled .icon-art').first.evaluate('(n)=>getComputedStyle(n).display') == 'none', 'Disabled artwork still colored')
