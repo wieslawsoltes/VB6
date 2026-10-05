@@ -47,6 +47,8 @@ export function sqlValue(value){
 }
 export function quoteIdentifier(value){return '"'+String(value).replace(/"/g,'""')+'"';}
 export function sameValue(a,b){
+  if(a instanceof VBDecimal&&b instanceof VBDecimal)return a.compare(b)===0;
+  if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw===b.raw;
   if(a instanceof Uint8Array&&b instanceof Uint8Array)return a.length===b.length&&a.every((v,i)=>v===b[i]);
   if(a instanceof Date&&b instanceof Date)return +a===+b;
   return Object.is(a,b);

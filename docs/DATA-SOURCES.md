@@ -542,6 +542,39 @@ The JSON reports identify which installed combinations actually passed.
 
 ### Native schema field widths
 
-Native OLE DB schema rowsets retain `adTinyInt` (16), `adUnsignedSmallInt` (18), `adUnsignedInt` (19), and `adUnsignedBigInt` (21) metadata instead of failing or narrowing unsigned values to signed Long. Range violations raise VB overflow. Unsigned 64-bit values use the runtime's exact Decimal representation; supply Decimal, BigInt, or an invariant string for values outside JavaScript's safe integer range. Already-rounded JavaScript Numbers are rejected. The Windows worker serializes UInt64 without JSON precision loss. This does not assert that every installed provider supports binding or storing every ADO type.
+Native OLE DB schema rowsets retain `adTinyInt` (16), `adUnsignedSmallInt` (18), `adUnsignedInt` (19), and `adUnsignedBigInt` (21) metadata instead of failing or narrowing unsigned values to signed Long. Range violations raise VB overflow. Signed and unsigned 64-bit values (`adBigInt` 20 and `adUnsignedBigInt` 21) use the runtime's exact Decimal representation; supply Decimal, BigInt, or an invariant string for values outside JavaScript's safe integer range. Already-rounded JavaScript Numbers are rejected. The Windows worker serializes UInt64 without JSON precision loss. This does not assert that every installed provider supports binding or storing every ADO type.
 
 Native-provider CI retains regression and provider logs independently. Provider probes still execute after a regression failure, but that failure continues to fail the job. Provider availability, bitness, and actual executed checks remain separate from mock/unit coverage and native Microsoft VB6 compiler certification.
+
+
+### Provider validation and continuation fixes
+
+The validation runner inventories both Windows architectures before executing checks,
+attempts every installed provider even when another fails, and keeps an independent
+empty MDB for the Access ODBC bridge. A failed inventory, check, or cleanup fails
+the run. Missing ACE providers remain explicitly unavailable rather than counted
+as passes. Orchestration unit tests do not substitute for installed-provider tests.
+
+Native BLOB transport accepts ArrayBuffer values and bounded typed-array/DataView
+slices, including buffers from another browser realm. Only the selected bytes are
+encoded; adjacent bytes from a shared backing allocation are excluded.
+
+Native schema integer-width values retain provider metadata and enforce the
+corresponding signed/unsigned ranges. Exact 64-bit fields reject already-rounded
+unsafe JavaScript Numbers; use Decimal, BigInt, or invariant strings. Client field
+updates and provider-result loads validate before replacing the previous values.
+Cursor sorting, change detection, and integer criteria compare exact Decimal
+values without first rounding them through JavaScript Number.
+This is portable data compatibility, not an assertion of native VB6 Variant subtype
+or provider binding equivalence.
+
+Windows snapshot path checks canonicalize existing ancestors before testing whether
+an output is inside the source, including missing output directories, 8.3 paths,
+and junctions. This containment check is not a security boundary against concurrent
+hostile filesystem changes. The icon source inventory uses fileURLToPath rather
+than URL.pathname so drive letters and URL escaping are handled correctly.
+
+Reference specifications:
+- Microsoft ADO DataTypeEnum: https://learn.microsoft.com/en-us/office/client-developer/access/desktop-database-reference/datatypeenum
+- PowerShell character encoding: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding
+- Node.js file URL conversion: https://nodejs.org/api/url.html#urlfileurltopathurl-options

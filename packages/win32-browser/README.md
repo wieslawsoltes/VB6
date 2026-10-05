@@ -5,7 +5,7 @@ Win32 APIs. Use the ES module in a browser, module worker, or Node.js, or the
 self-contained browser bundle. No VB6 compiler, IDE, DOM framework, native DLL,
 server, or installation on the user's machine is required.
 
-**Version 0.2.0 is a common-API foundation, not complete Win32 emulation.** Its 211
+**Version 0.3.0 is a common-API foundation, not complete Win32 emulation.** Its 231
 registered export names include ANSI/Unicode variants and aliases. An export's
 presence does not imply support for every flag, message, structure, or operating
 system behavior. See [the exact API inventory](API.md) and the boundaries below.
@@ -19,8 +19,8 @@ npm run build
 npm run pack:win32-browser
 ```
 
-This produces `release/vb6-win32-browser-0.2.0.tgz`. Install that archive in another
-project with `npm install /path/to/vb6-win32-browser-0.2.0.tgz`, or copy
+This produces `release/vb6-win32-browser-0.3.0.tgz`. Install that archive in another
+project with `npm install /path/to/vb6-win32-browser-0.3.0.tgz`, or copy
 `packages/win32-browser/src/` as an independent ES-module library. For a script tag,
 copy `packages/win32-browser/dist/win32-browser.js`; its global is `Win32Compat`.
 The archive includes the source, browser bundle, license, and API documentation.
@@ -54,6 +54,17 @@ Version 0.2.0 adds memory DCs, writable DIB sections, bitmap transfer and blitti
 15 raster operations, color-key/alpha blending, rectangular clipping and saved DC
 state. Forms and picture boxes expose read-only `hDC`. See [GDI.md](GDI.md) for
 formats, ownership, usage, quotas, Canvas2D fallback and explicit limitations.
+
+## Regions and complex clipping
+
+Version 0.3.0 adds 20 exports (231 total): rectangle-based region construction,
+all five Boolean combinations, point/rectangle queries, RGNDATA interchange,
+copied complex DC clips, and region painting. The immutable `RegionStore` is also
+exported for independent JavaScript use. See [REGIONS.md](REGIONS.md) for API
+contracts, coordinate semantics, resource quotas, native comparisons and limits.
+Click **Region clipping** in **Win32 API Workbench** to run ordinary VB6 calls
+in the IDE or exported HTML. The clip survives deletion of the original HRGN;
+its excluded center remains untouched by the subsequent full-surface PatBlt.
 
 ## Process infrastructure
 
@@ -127,7 +138,7 @@ signature validation before allocation or invocation.
 | Files and settings | Synchronous private files, read/write/seek/truncate, sharing checks, directories, environment variables, INI strings/integers/enumeration/update/delete | Not the host disk; no devices, overlapped I/O, ACLs or IniFileMapping |
 | Registry | Open/create/close/delete, set/query values, subkey enumeration, size probes, ANSI/Unicode text, binary/DWORD/QWORD | Per-app store; no OS registry, security, WOW64 views or notifications |
 | User32 | Registered window discovery, text/class, visibility/enabled/focus, geometry, positioning, control IDs/user data, selected edit/button messages, callbacks/timers, RECT helpers | No desktop enumeration, subclassing, arbitrary messages or global hooks |
-| GDI | Solid/null pens, brushes, selected stock objects, DCs, lines/rectangles/ellipses/pixels/text, selected device metrics | Memory DCs, 1-bit DDB/24-32-bit true-color bitmaps, DIBs, blits, alpha, saved state and rectangular clipping; see GDI.md for the exact format/flag subset |
+| GDI | Solid/null pens, brushes, selected stock objects, DCs, lines/rectangles/ellipses/pixels/text, selected device metrics | Memory DCs, 1-bit DDB/24-32-bit true-color bitmaps, DIBs, blits, alpha, saved state and complex region clipping; see GDI.md and REGIONS.md for the exact format/flag subset |
 | Clipboard | Text formats, open/close/owner, ownership transfer, ANSI/Unicode synthesis, sequence and format enumeration | Private by default; no delayed rendering or arbitrary formats |
 | Shell | Explicitly enabled URL opening | HTTP, HTTPS and mailto only; never executable launch |
 
@@ -209,6 +220,6 @@ against native VB6 on Windows. Reference specifications:
 - [Clipboard API restrictions](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API).
 
 The next compatibility layers are extended messages/control classes, richer
-GDI text/fonts/palettes/regions and additional bitmap formats, broader file enumeration and locale/code-page behavior,
+GDI text/fonts/palettes, curved/polygon region constructors and additional bitmap formats, broader file enumeration and locale/code-page behavior,
 more registry APIs, pointer pinning and more complete native structure marshalling.
 Extend the module table and shared tests instead of adding IDE-only shims.

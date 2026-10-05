@@ -79,6 +79,18 @@ with sync_playwright() as pw:
             check('Currency File Make EXE preserves original source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
             check('Currency File Make EXE output equals Node', downloaded.suggested_filename == 'AotCurrency.exe' and (OUT / 'AotCurrency.exe').read_bytes() == (currency_dir / 'AotCurrency.exe').read_bytes())
             check('Currency export has no network requests or page errors', not errors and not requests)
+        calls_dir = ROOT / 'validation/calls'
+        if calls_dir.exists():
+            original = json.loads((calls_dir / 'AotCalls.vb6web').read_text())
+            page.evaluate('p => vb6Studio.loadProject(p)', original)
+            before = page.evaluate('JSON.stringify(vb6Studio.project.modules)')
+            with page.expect_download() as pending:
+                page.evaluate('vb6Studio.command("exportWin32")')
+            downloaded = pending.value
+            downloaded.save_as(OUT / 'AotCalls.exe')
+            check('typed Optional and named calls export without rewriting source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
+            check('call-argument File Make EXE equals Node output', downloaded.suggested_filename == 'AotCalls.exe' and (OUT / 'AotCalls.exe').read_bytes() == (calls_dir / 'AotCalls.exe').read_bytes())
+            check('call export has no network or page errors', not errors and not requests)
         page.close()
         page = browser.new_page()
         page.add_script_tag(content=SDK)
@@ -90,6 +102,8 @@ with sync_playwright() as pw:
             fixtures.append((currency_dir, 'AotCurrency'))
             if (currency_dir / 'AotCurrencyBindings.vb6web').exists():
                 fixtures.append((currency_dir, 'AotCurrencyBindings'))
+        if calls_dir.exists():
+            fixtures.extend((calls_dir, name) for name in ('AotCalls', 'AotCallProperties'))
         for fixture_dir, fixture_name in fixtures:
             fixture_project = json.loads((fixture_dir / f'{fixture_name}.vb6web').read_text())
             fixture_expected = (fixture_dir / f'{fixture_name}.exe').read_bytes()

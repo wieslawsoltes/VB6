@@ -27,3 +27,14 @@ test('gateway results preserve native BLOBs, nulls and dates together',()=>{
  const decoded=decodeResult(JSON.parse(JSON.stringify(encodeResult(result))));
  assert.deepEqual(decoded,{...result,values:[[Uint8Array.of(0,128,255),null,date]]});
 });
+
+test('bare ArrayBuffers from another realm survive JSON transport',()=>{
+ for(const expression of ['new ArrayBuffer(0)','Uint8Array.of(0,127,128,255).buffer']){
+  const value=vm.runInNewContext(expression);
+  assert.deepEqual([...roundTrip(value)],[...new Uint8Array(value)]);
+ }
+});
+test('an ArrayBuffer-looking plain object is not treated as a native buffer',()=>{
+ const value={[Symbol.toStringTag]:'ArrayBuffer',byteLength:4,marker:'not a buffer'};
+ assert.equal(encodeCell(value),value);
+});

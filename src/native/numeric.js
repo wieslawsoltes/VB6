@@ -127,24 +127,25 @@ export const nativeNumericMethods = {
     }
     return false;
   },
-  nativeTypedCall(target,args) {
-    const x=this.x,signature=target.proc||target,callPins=[],slots=[];
+  nativeTypedCall(target,plan) {
+    const x=this.x,signature=target.proc||target,callPins=[],callStrings=[],slots=new Array(signature.params.length);
     // Stage in the caller's frame: arguments are evaluated exactly once in source
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
-    args.forEach((node,i)=>{
+    plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(p.bounds!==null&&p.bounds!==undefined){
+      if(node.kind==='byval'){this.numeric(node.expr);}
+      else if(p.bounds!==null&&p.bounds!==undefined){
+        if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
         const a=this.variable(node);
         if(!target.proc||!p.byRef||!a?.nativeArray||a.elementOf||key(a.type)!==key(p.type))this.fail('ByRef array argument must have the exact declared element type');
         if(a.fixedLength)this.fail('Fixed-length String whole-array arguments are not yet lowered');this.rawStorageAddress(a);
       }else if(p.byRef){
-        if(node.kind==='group')this.fail('Parenthesized ByRef temporaries are not yet lowered');
-        const v=this.variable(node);if(!v||v.nativeArray&&!v.elementOf||key(v.type)!==key(p.type))this.fail('ByRef native argument must be a scalar of the exact declared type');
-        if(v.fixedLength)this.fail('Fixed-length String ByRef copy-back is not yet lowered');const pin=this.address(v);if(pin)callPins.push(pin);
-      }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots.push(slot);return;}
-      else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots.push(slot);return;}
+        const {pin,temporary}=this.nativeReferenceArgument(p,node,omitted);
+        if(pin)callPins.push(pin);if(temporary&&key(temporary.type)==='string')callStrings.push(temporary);
+      }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots[i]=slot;return;}
+      else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
       else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
-      x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots.push(slot);
+      x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots[i]=slot;
     });
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}
     if(target.proc)x.call(target.label);else x.invoke(target.dll,target.symbol);
@@ -156,6 +157,7 @@ export const nativeNumericMethods = {
       if(key(signature.returnType)==='single')this.roundSingle();
     }else if(target.proc)this.checkNativeError();
     for(const pin of callPins)this.releaseArrayPin(pin);
+    if(callStrings.length){x.push();for(const string of callStrings)this.clearStringStorage(string);x.emit(0x58);}
     if(target.proc&&signature.kind==='function'&&key(signature.returnType)==='string')this.ownString();
     if(!target.proc){if(['integer','boolean'].includes(key(signature.returnType)))x.emit(0x0f,0xbf,0xc0);else if(key(signature.returnType)==='byte')x.emit(0x0f,0xb6,0xc0);}
   }

@@ -547,7 +547,7 @@
 /* Runtime MDI client and sizable form chrome; content retains the chosen theme. */
 .vb-mdi-parent>.vb-form-content{overflow:hidden}.vb-mdi-client{position:absolute;overflow:hidden;background:var(--vb-workspace);border:1px solid var(--vb-shadow);box-shadow:inset 1px 1px var(--vb-dark)}.vb-mdi-child{transform:none!important}.vb-mdi-child.vb-minimized{width:160px!important}.vb-mdi-child .vb-form-title{cursor:default}.vb-form-title:focus-visible{outline:1px dotted var(--vb-title-text);outline-offset:-2px}
 .vb-form-grip{position:absolute;z-index:5000;touch-action:none}.vb-form-grip-n{left:6px;right:6px;top:0;height:4px;cursor:n-resize}.vb-form-grip-s{left:6px;right:6px;bottom:0;height:4px;cursor:s-resize}.vb-form-grip-e{top:6px;bottom:6px;right:0;width:4px;cursor:e-resize}.vb-form-grip-w{top:6px;bottom:6px;left:0;width:4px;cursor:w-resize}.vb-form-grip-ne,.vb-form-grip-nw,.vb-form-grip-se,.vb-form-grip-sw{width:7px;height:7px}.vb-form-grip-ne{right:0;top:0;cursor:ne-resize}.vb-form-grip-nw{left:0;top:0;cursor:nw-resize}.vb-form-grip-se{right:0;bottom:0;cursor:se-resize}.vb-form-grip-sw{left:0;bottom:0;cursor:sw-resize}.vb-fixed-window>.vb-form-grip{display:none}
-</style></head><body><div id="app"></div><script id="vb6-project" type="application/json">{"schema":1,"id":"example_win32_1","name":"Win32Workbench","description":"Browser Win32 Declare APIs: handles, INI files, GDI drawing, writable DIBs and memory DC bitmap blitting.","startup":"frmWin32","modules":[{"id":"example_win32_2","name":"frmWin32","kind":"form","code":"Option Explicit\nPrivate Type BITMAPINFOHEADER\n    biSize As Long\n    biWidth As Long\n    biHeight As Long\n    biPlanes As Integer\n    biBitCount As Integer\n    biCompression As Long\n    biSizeImage As Long\n    biXPelsPerMeter As Long\n    biYPelsPerMeter As Long\n    biClrUsed As Long\n    biClrImportant As Long\nEnd Type\nPrivate Declare Function GetTickCount Lib \"kernel32\" () As Long\nPrivate Declare Function IsWindow Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function EnableWindow Lib \"user32\" (ByVal hwnd As Long, ByVal enabled As Long) As Long\nPrivate Declare Function IsWindowEnabled Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function SetWindowText Lib \"user32\" Alias \"SetWindowTextA\" (ByVal hwnd As Long, ByVal value As String) As Long\nPrivate Declare Function WriteIni Lib \"kernel32\" Alias \"WritePrivateProfileStringA\" (ByVal section As String, ByVal key As String, ByVal value As String, ByVal file As String) As Long\nPrivate Declare Function ReadIni Lib \"kernel32\" Alias \"GetPrivateProfileStringA\" (ByVal section As String, ByVal key As String, ByVal def As String, ByVal buffer As String, ByVal size As Long, ByVal file As String) As Long\nPrivate Declare Function GetDC Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function ReleaseDC Lib \"user32\" (ByVal hwnd As Long, ByVal dc As Long) As Long\nPrivate Declare Function CreateSolidBrush Lib \"gdi32\" (ByVal color As Long) As Long\nPrivate Declare Function SelectObject Lib \"gdi32\" (ByVal dc As Long, ByVal object As Long) As Long\nPrivate Declare Function DeleteObject Lib \"gdi32\" (ByVal object As Long) As Long\nPrivate Declare Function Rectangle Lib \"gdi32\" (ByVal dc As Long, ByVal left As Long, ByVal top As Long, ByVal right As Long, ByVal bottom As Long) As Long\nPrivate Declare Function CreateDIBSection Lib \"gdi32\" (ByVal dc As Long, info As BITMAPINFOHEADER, ByVal usage As Long, bits As Long, ByVal section As Long, ByVal offset As Long) As Long\nPrivate Declare Function CreateCompatibleDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Function DeleteDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Sub CopyMemory Lib \"kernel32\" Alias \"RtlMoveMemory\" (destination As Any, source As Any, ByVal count As Long)\nPrivate Declare Function StretchBlt Lib \"gdi32\" (ByVal dc As Long, ByVal x As Long, ByVal y As Long, ByVal width As Long, ByVal height As Long, ByVal source As Long, ByVal sx As Long, ByVal sy As Long, ByVal sw As Long, ByVal sh As Long, ByVal rop As Long) As Long\nPrivate Declare Function SetStretchBltMode Lib \"gdi32\" (ByVal dc As Long, ByVal mode As Long) As Long\nPrivate Declare Function SaveDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Function RestoreDC Lib \"gdi32\" (ByVal dc As Long, ByVal saved As Long) As Long\nPrivate Sub Form_Load()\n    Dim buffer As String, count As Long\n    WriteIni \"Demo\", \"Message\", \"Hello from kernel32 and user32!\", \"win32-demo.ini\"\n    buffer = String$(128, 0)\n    count = ReadIni(\"Demo\", \"Message\", \"\", buffer, Len(buffer), \"win32-demo.ini\")\n    txtValue.Text = Left$(buffer, count)\n    lblStatus.Caption = \"Ready. hWnd=\" \u0026 CStr(Me.hWnd) \u0026 \" | Valid=\" \u0026 CStr(IsWindow(Me.hWnd)) \u0026 \" | Tick=\" \u0026 CStr(GetTickCount())\n    Debug.Print \"Win32 Workbench ready\"\nEnd Sub\nPrivate Sub cmdText_Click()\n    SetWindowText txtValue.hWnd, \"Text changed by user32.SetWindowTextA\"\nEnd Sub\nPrivate Sub cmdToggle_Click()\n    EnableWindow txtValue.hWnd, 1 - IsWindowEnabled(txtValue.hWnd)\nEnd Sub\nPrivate Sub cmdDraw_Click()\n    Dim dc As Long, brush As Long, oldBrush As Long\n    dc = GetDC(picCanvas.hWnd)\n    brush = CreateSolidBrush(RGB(70, 130, 180))\n    oldBrush = SelectObject(dc, brush)\n    Rectangle dc, 12, 12, 476, 92\n    SelectObject dc, oldBrush\n    DeleteObject brush\n    ReleaseDC picCanvas.hWnd, dc\n    lblStatus.Caption = \"GDI drawing uses the existing WebGPU / Canvas2D surface.\"\nEnd Sub\nPrivate Sub cmdBitmap_Click()\n    Dim info As BITMAPINFOHEADER, bits As Long, bitmap As Long, memoryDC As Long\n    Dim target As Long, oldBitmap As Long, saved As Long, pixels(0 To 3) As Long\n    On Error GoTo Failed\n    info.biSize = 40\n    info.biWidth = 2\n    info.biHeight = -2\n    info.biPlanes = 1\n    info.biBitCount = 32\n    bitmap = CreateDIBSection(0, info, 0, bits, 0, 0)\n    If bitmap = 0 Then Err.Raise 5, , \"CreateDIBSection failed\"\n    pixels(0) = \u0026HFF0000\n    pixels(1) = \u0026HFF00\n    pixels(2) = \u0026HFF\n    pixels(3) = \u0026HFFFFFF\n    CopyMemory ByVal bits, pixels(0), 16\n    memoryDC = CreateCompatibleDC(0)\n    oldBitmap = SelectObject(memoryDC, bitmap)\n    target = picCanvas.hDC\n    saved = SaveDC(target)\n    SetStretchBltMode target, 3\n    If StretchBlt(target, 8, 8, 464, 88, memoryDC, 0, 0, 2, 2, \u0026HCC0020) = 0 Then Err.Raise 5, , \"StretchBlt failed\"\n    lblStatus.Caption = \"Writable DIB + memory DC + StretchBlt. Canvas2D bitmap rendering.\"\n    GoTo Cleanup\nFailed:\n    lblStatus.Caption = \"Bitmap error: \" \u0026 Err.Description \u0026 \" / \" \u0026 CStr(Err.LastDLLError)\nCleanup:\n    If saved \u003c\u003e 0 Then RestoreDC target, saved\n    If target \u003c\u003e 0 Then ReleaseDC picCanvas.hWnd, target\n    If oldBitmap \u003c\u003e 0 Then SelectObject memoryDC, oldBitmap\n    If bitmap \u003c\u003e 0 Then DeleteObject bitmap\n    If memoryDC \u003c\u003e 0 Then DeleteDC memoryDC\nEnd Sub\n","form":{"id":"example_win32_3","name":"frmWin32","type":"Form","properties":{"Name":"frmWin32","Caption":"Win32 API Workbench","ClientWidth":7800,"ClientHeight":4800,"Width":9120,"Height":6450,"Left":300,"Top":300,"StartUpPosition":2,"BorderStyle":2,"BackColor":-2147483633,"ForeColor":-2147483640,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ScaleMode":1,"KeyPreview":0,"Visible":-1,"Enabled":-1},"controls":[{"id":"example_win32_4","name":"lblTitle","type":"Label","parent":null,"properties":{"Name":"lblTitle","Left":240,"Top":240,"Width":7320,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":12,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Win32 APIs in a browser","BackStyle":0,"Alignment":0}},{"id":"example_win32_5","name":"txtValue","type":"TextBox","parent":null,"properties":{"Name":"txtValue","Left":240,"Top":840,"Width":7320,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","Text":"","MultiLine":0,"ScrollBars":0,"MaxLength":0,"PasswordChar":"","Locked":0,"Alignment":0}},{"id":"example_win32_6","name":"cmdText","type":"CommandButton","parent":null,"properties":{"Name":"cmdText","Left":240,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"SetWindowText","Default":0,"Cancel":0}},{"id":"example_win32_7","name":"cmdToggle","type":"CommandButton","parent":null,"properties":{"Name":"cmdToggle","Left":2760,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"EnableWindow","Default":0,"Cancel":0}},{"id":"example_win32_8","name":"cmdDraw","type":"CommandButton","parent":null,"properties":{"Name":"cmdDraw","Left":5280,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"GDI drawing","Default":0,"Cancel":0}},{"id":"example_win32_9","name":"picCanvas","type":"PictureBox","parent":null,"properties":{"Name":"picCanvas","Left":240,"Top":2160,"Width":7320,"Height":1560,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","ScaleMode":3,"AutoRedraw":-1,"BorderStyle":1}},{"id":"example_win32_10","name":"cmdBitmap","type":"CommandButton","parent":null,"properties":{"Name":"cmdBitmap","Left":240,"Top":3960,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Bitmap blitting","Default":0,"Cancel":0}},{"id":"example_win32_11","name":"lblStatus","type":"Label","parent":null,"properties":{"Name":"lblStatus","Left":2760,"Top":3960,"Width":4800,"Height":540,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Starting compatibility process...","BackStyle":0,"Alignment":0,"WordWrap":-1}}],"menus":[]}}],"settings":{"snapToGrid":true,"gridSize":120,"showGrid":true,"renderer":"auto","tabWidth":4,"requireVariableDeclaration":true},"references":[],"assets":{},"vfs":{"files":{},"directories":["/"]},"appSettings":{}}</script><script>/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */
+</style></head><body><div id="app"></div><script id="vb6-project" type="application/json">{"schema":1,"id":"example_win32_1","name":"Win32Workbench","description":"Browser Win32 Declare APIs: handles, INI files, GDI drawing, writable DIBs, memory DC bitmap blitting and complex region clipping.","startup":"frmWin32","modules":[{"id":"example_win32_2","name":"frmWin32","kind":"form","code":"Option Explicit\nPrivate Type BITMAPINFOHEADER\n    biSize As Long\n    biWidth As Long\n    biHeight As Long\n    biPlanes As Integer\n    biBitCount As Integer\n    biCompression As Long\n    biSizeImage As Long\n    biXPelsPerMeter As Long\n    biYPelsPerMeter As Long\n    biClrUsed As Long\n    biClrImportant As Long\nEnd Type\nPrivate Declare Function GetTickCount Lib \"kernel32\" () As Long\nPrivate Declare Function IsWindow Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function EnableWindow Lib \"user32\" (ByVal hwnd As Long, ByVal enabled As Long) As Long\nPrivate Declare Function IsWindowEnabled Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function SetWindowText Lib \"user32\" Alias \"SetWindowTextA\" (ByVal hwnd As Long, ByVal value As String) As Long\nPrivate Declare Function WriteIni Lib \"kernel32\" Alias \"WritePrivateProfileStringA\" (ByVal section As String, ByVal key As String, ByVal value As String, ByVal file As String) As Long\nPrivate Declare Function ReadIni Lib \"kernel32\" Alias \"GetPrivateProfileStringA\" (ByVal section As String, ByVal key As String, ByVal def As String, ByVal buffer As String, ByVal size As Long, ByVal file As String) As Long\nPrivate Declare Function GetDC Lib \"user32\" (ByVal hwnd As Long) As Long\nPrivate Declare Function ReleaseDC Lib \"user32\" (ByVal hwnd As Long, ByVal dc As Long) As Long\nPrivate Declare Function CreateSolidBrush Lib \"gdi32\" (ByVal color As Long) As Long\nPrivate Declare Function SelectObject Lib \"gdi32\" (ByVal dc As Long, ByVal object As Long) As Long\nPrivate Declare Function DeleteObject Lib \"gdi32\" (ByVal object As Long) As Long\nPrivate Declare Function Rectangle Lib \"gdi32\" (ByVal dc As Long, ByVal left As Long, ByVal top As Long, ByVal right As Long, ByVal bottom As Long) As Long\nPrivate Declare Function CreateDIBSection Lib \"gdi32\" (ByVal dc As Long, info As BITMAPINFOHEADER, ByVal usage As Long, bits As Long, ByVal section As Long, ByVal offset As Long) As Long\nPrivate Declare Function CreateCompatibleDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Function DeleteDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Sub CopyMemory Lib \"kernel32\" Alias \"RtlMoveMemory\" (destination As Any, source As Any, ByVal count As Long)\nPrivate Declare Function StretchBlt Lib \"gdi32\" (ByVal dc As Long, ByVal x As Long, ByVal y As Long, ByVal width As Long, ByVal height As Long, ByVal source As Long, ByVal sx As Long, ByVal sy As Long, ByVal sw As Long, ByVal sh As Long, ByVal rop As Long) As Long\nPrivate Declare Function SetStretchBltMode Lib \"gdi32\" (ByVal dc As Long, ByVal mode As Long) As Long\nPrivate Declare Function SaveDC Lib \"gdi32\" (ByVal dc As Long) As Long\nPrivate Declare Function RestoreDC Lib \"gdi32\" (ByVal dc As Long, ByVal saved As Long) As Long\nPrivate Declare Function CreateRectRgn Lib \"gdi32\" (ByVal left As Long, ByVal top As Long, ByVal right As Long, ByVal bottom As Long) As Long\nPrivate Declare Function CombineRgn Lib \"gdi32\" (ByVal destination As Long, ByVal first As Long, ByVal second As Long, ByVal mode As Long) As Long\nPrivate Declare Function SelectClipRgn Lib \"gdi32\" (ByVal dc As Long, ByVal region As Long) As Long\nPrivate Declare Function GetRegionData Lib \"gdi32\" (ByVal region As Long, ByVal count As Long, ByVal buffer As Long) As Long\nPrivate Declare Function PatBlt Lib \"gdi32\" (ByVal dc As Long, ByVal x As Long, ByVal y As Long, ByVal width As Long, ByVal height As Long, ByVal rop As Long) As Long\nPrivate Sub Form_Load()\n    Dim buffer As String, count As Long\n    WriteIni \"Demo\", \"Message\", \"Hello from kernel32 and user32!\", \"win32-demo.ini\"\n    buffer = String$(128, 0)\n    count = ReadIni(\"Demo\", \"Message\", \"\", buffer, Len(buffer), \"win32-demo.ini\")\n    txtValue.Text = Left$(buffer, count)\n    lblStatus.Caption = \"Ready. hWnd=\" \u0026 CStr(Me.hWnd) \u0026 \" | Valid=\" \u0026 CStr(IsWindow(Me.hWnd)) \u0026 \" | Tick=\" \u0026 CStr(GetTickCount())\n    Debug.Print \"Win32 Workbench ready\"\nEnd Sub\nPrivate Sub cmdText_Click()\n    SetWindowText txtValue.hWnd, \"Text changed by user32.SetWindowTextA\"\nEnd Sub\nPrivate Sub cmdToggle_Click()\n    EnableWindow txtValue.hWnd, 1 - IsWindowEnabled(txtValue.hWnd)\nEnd Sub\nPrivate Sub cmdDraw_Click()\n    Dim dc As Long, brush As Long, oldBrush As Long\n    dc = GetDC(picCanvas.hWnd)\n    brush = CreateSolidBrush(RGB(70, 130, 180))\n    oldBrush = SelectObject(dc, brush)\n    Rectangle dc, 12, 12, 476, 92\n    SelectObject dc, oldBrush\n    DeleteObject brush\n    ReleaseDC picCanvas.hWnd, dc\n    lblStatus.Caption = \"GDI drawing uses the existing WebGPU / Canvas2D surface.\"\nEnd Sub\nPrivate Sub cmdBitmap_Click()\n    Dim info As BITMAPINFOHEADER, bits As Long, bitmap As Long, memoryDC As Long\n    Dim target As Long, oldBitmap As Long, saved As Long, pixels(0 To 3) As Long\n    On Error GoTo Failed\n    info.biSize = 40\n    info.biWidth = 2\n    info.biHeight = -2\n    info.biPlanes = 1\n    info.biBitCount = 32\n    bitmap = CreateDIBSection(0, info, 0, bits, 0, 0)\n    If bitmap = 0 Then Err.Raise 5, , \"CreateDIBSection failed\"\n    pixels(0) = \u0026HFF0000\n    pixels(1) = \u0026HFF00\n    pixels(2) = \u0026HFF\n    pixels(3) = \u0026HFFFFFF\n    CopyMemory ByVal bits, pixels(0), 16\n    memoryDC = CreateCompatibleDC(0)\n    oldBitmap = SelectObject(memoryDC, bitmap)\n    target = picCanvas.hDC\n    saved = SaveDC(target)\n    SetStretchBltMode target, 3\n    If StretchBlt(target, 8, 8, 464, 88, memoryDC, 0, 0, 2, 2, \u0026HCC0020) = 0 Then Err.Raise 5, , \"StretchBlt failed\"\n    lblStatus.Caption = \"Writable DIB + memory DC + StretchBlt. Canvas2D bitmap rendering.\"\n    GoTo Cleanup\nFailed:\n    lblStatus.Caption = \"Bitmap error: \" \u0026 Err.Description \u0026 \" / \" \u0026 CStr(Err.LastDLLError)\nCleanup:\n    If saved \u003c\u003e 0 Then RestoreDC target, saved\n    If target \u003c\u003e 0 Then ReleaseDC picCanvas.hWnd, target\n    If oldBitmap \u003c\u003e 0 Then SelectObject memoryDC, oldBitmap\n    If bitmap \u003c\u003e 0 Then DeleteObject bitmap\n    If memoryDC \u003c\u003e 0 Then DeleteDC memoryDC\nEnd Sub\nPrivate Sub cmdRegions_Click()\n    Dim target As Long, outer As Long, hole As Long, brush As Long, saved As Long, size As Long\n    On Error GoTo Failed\n    picCanvas.Cls\n    target = picCanvas.hDC\n    saved = SaveDC(target)\n    outer = CreateRectRgn(8, 8, 472, 96)\n    hole = CreateRectRgn(152, 24, 328, 80)\n    If outer = 0 Or hole = 0 Then Err.Raise 5, , \"Region allocation failed\"\n    If CombineRgn(outer, outer, hole, 4) = 0 Then Err.Raise 5, , \"CombineRgn failed\"\n    size = GetRegionData(outer, 0, 0)\n    If SelectClipRgn(target, outer) = 0 Then Err.Raise 5, , \"SelectClipRgn failed\"\n    DeleteObject outer\n    outer = 0\n    brush = CreateSolidBrush(RGB(32, 128, 192))\n    SelectObject target, brush\n    If PatBlt(target, 0, 0, 488, 104, \u0026HF00021) = 0 Then Err.Raise 5, , \"PatBlt failed\"\n    lblStatus.Caption = \"Complex region: copied clip survives DeleteObject. RGNDATA=\" \u0026 CStr(size) \u0026 \" bytes.\"\n    GoTo Cleanup\nFailed:\n    lblStatus.Caption = \"Region error: \" \u0026 Err.Description \u0026 \" / \" \u0026 CStr(Err.LastDLLError)\nCleanup:\n    If saved \u003c\u003e 0 Then RestoreDC target, saved\n    If brush \u003c\u003e 0 Then DeleteObject brush\n    If outer \u003c\u003e 0 Then DeleteObject outer\n    If hole \u003c\u003e 0 Then DeleteObject hole\n    If target \u003c\u003e 0 Then ReleaseDC picCanvas.hWnd, target\nEnd Sub\n","form":{"id":"example_win32_3","name":"frmWin32","type":"Form","properties":{"Name":"frmWin32","Caption":"Win32 API Workbench","ClientWidth":7800,"ClientHeight":5520,"Width":9120,"Height":6450,"Left":300,"Top":300,"StartUpPosition":2,"BorderStyle":2,"BackColor":-2147483633,"ForeColor":-2147483640,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ScaleMode":1,"KeyPreview":0,"Visible":-1,"Enabled":-1},"controls":[{"id":"example_win32_4","name":"lblTitle","type":"Label","parent":null,"properties":{"Name":"lblTitle","Left":240,"Top":240,"Width":7320,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":12,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Win32 APIs in a browser","BackStyle":0,"Alignment":0}},{"id":"example_win32_5","name":"txtValue","type":"TextBox","parent":null,"properties":{"Name":"txtValue","Left":240,"Top":840,"Width":7320,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","Text":"","MultiLine":0,"ScrollBars":0,"MaxLength":0,"PasswordChar":"","Locked":0,"Alignment":0}},{"id":"example_win32_6","name":"cmdText","type":"CommandButton","parent":null,"properties":{"Name":"cmdText","Left":240,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"SetWindowText","Default":0,"Cancel":0}},{"id":"example_win32_7","name":"cmdToggle","type":"CommandButton","parent":null,"properties":{"Name":"cmdToggle","Left":2760,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"EnableWindow","Default":0,"Cancel":0}},{"id":"example_win32_8","name":"cmdDraw","type":"CommandButton","parent":null,"properties":{"Name":"cmdDraw","Left":5280,"Top":1440,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"GDI drawing","Default":0,"Cancel":0}},{"id":"example_win32_9","name":"picCanvas","type":"PictureBox","parent":null,"properties":{"Name":"picCanvas","Left":240,"Top":2160,"Width":7320,"Height":1560,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","ScaleMode":3,"AutoRedraw":-1,"BorderStyle":1}},{"id":"example_win32_10","name":"cmdBitmap","type":"CommandButton","parent":null,"properties":{"Name":"cmdBitmap","Left":240,"Top":3960,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Bitmap blitting","Default":0,"Cancel":0}},{"id":"example_win32_11","name":"cmdRegions","type":"CommandButton","parent":null,"properties":{"Name":"cmdRegions","Left":2760,"Top":3960,"Width":2280,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Region clipping","Default":0,"Cancel":0}},{"id":"example_win32_12","name":"lblStatus","type":"Label","parent":null,"properties":{"Name":"lblStatus","Left":240,"Top":4560,"Width":7320,"Height":540,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Starting compatibility process...","BackStyle":0,"Alignment":0,"WordWrap":-1}}],"menus":[]}}],"settings":{"snapToGrid":true,"gridSize":120,"showGrid":true,"renderer":"auto","tabWidth":4,"requireVariableDeclaration":true},"references":[],"assets":{},"vfs":{"files":{},"directories":["/"]},"appSettings":{}}</script><script>/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */
 (()=>{'use strict';
 const __modules=[];
 
@@ -616,8 +616,192 @@ class MemoryFileSystem {
 return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
 })();
 
-/* ../../packages/win32-browser/src/gdi-bitmap.js */
+/* ../../packages/win32-browser/src/gdi-region.js */
 __modules[1]=(()=>{
+const {Win32Error,integer}=__modules[0];
+
+const REGION_CONSTANTS=Object.freeze({RGN_AND:1,RGN_OR:2,RGN_XOR:3,RGN_DIFF:4,RGN_COPY:5,ERROR:0,NULLREGION:1,SIMPLEREGION:2,COMPLEXREGION:3,OBJ_REGION:8,RDH_RECTANGLES:1});
+const MIN=-0x4000000,MAX=0x3ffffff;
+const coordinate=n=>integer(n,MIN,MAX);
+const equalSpans=(a,b)=>a.length===b.length&&a.every((x,i)=>x===b[i]);
+const inside=(mode,a,b)=>mode===1?a&&b:mode===2?a||b:mode===3?a!==b:a&&!b;
+const EMPTY=Object.freeze({bands:Object.freeze([]),bounds:Object.freeze([0,0,0,0]),count:0,type:1});
+
+/** Immutable, canonical y-bands: sorted disjoint half-open x intervals per band.
+ * Boolean operations depend on edge count, never coordinate magnitude or area.
+ * Frozen geometry may safely be shared by handles, clips and saved DC states.
+ */
+class RegionStore {
+  constructor(options={}){
+    this.limit=integer(options.maxRegionRectangles??4096,1,65536);
+    this.workLimit=integer(options.maxRegionWork??1048576,16,16777216);
+  }
+  rectangle(left,top,right,bottom){
+    [left,top,right,bottom]=[left,top,right,bottom].map(coordinate);
+    if(left>right)[left,right]=[right,left];if(top>bottom)[top,bottom]=[bottom,top];
+    return left===right||top===bottom?EMPTY:this.finish([{top,bottom,spans:[left,right]}]);
+  }
+  finish(bands){
+    if(!bands.length)return EMPTY;
+    let count=0,left=MAX,right=MIN;
+    for(const b of bands){count+=b.spans.length/2;left=Math.min(left,b.spans[0]);right=Math.max(right,b.spans.at(-1));Object.freeze(b.spans);Object.freeze(b);}
+    if(count>this.limit)throw new Win32Error('Region rectangle quota exceeded',8);
+    return Object.freeze({bands:Object.freeze(bands),bounds:Object.freeze([left,bands[0].top,right,bands.at(-1).bottom]),count,type:count===1?2:3});
+  }
+  append(bands,top,bottom,spans,budget){
+    if(!spans.length||bottom<=top)return;
+    const last=bands.at(-1);
+    if(last&&last.bottom===top&&equalSpans(last.spans,spans)){last.bottom=bottom;return;}
+    budget.count+=spans.length/2;if(budget.count>this.limit)throw new Win32Error('Region rectangle quota exceeded',8);
+    bands.push({top,bottom,spans});
+  }
+  combine(a,b,mode){
+    mode=integer(mode,1,5);if(mode===5)return a;
+    if(a===b)return mode===3||mode===4?EMPTY:a;
+    if(!a.count)return mode===2||mode===3?b:EMPTY;
+    if(!b.count)return mode===1?EMPTY:a;
+    const ys=[...new Set([...a.bands,...b.bands].flatMap(x=>[x.top,x.bottom]))].sort((x,y)=>x-y);
+    const result=[],budget={count:0};let ai=0,bi=0,work=0;
+    for(let y=0;y+1<ys.length;y++){
+      const top=ys[y],bottom=ys[y+1];while(ai<a.bands.length&&a.bands[ai].bottom<=top)ai++;while(bi<b.bands.length&&b.bands[bi].bottom<=top)bi++;
+      const aa=a.bands[ai],bb=b.bands[bi],as=aa&&aa.top<=top?aa.spans:[],bs=bb&&bb.top<=top?bb.spans:[];
+      work+=as.length+bs.length;if(work>this.workLimit)throw new Win32Error('Region operation work quota exceeded',8);
+      let i=0,j=0,inA=false,inB=false,active=false;const spans=[];
+      while(i<as.length||j<bs.length){
+        const x=Math.min(as[i]??Infinity,bs[j]??Infinity);
+        if(as[i]===x){inA=!inA;i++;}if(bs[j]===x){inB=!inB;j++;}
+        const next=inside(mode,inA,inB);if(next!==active){spans.push(x);active=next;}
+      }
+      this.append(result,top,bottom,spans,budget);
+    }
+    return this.finish(result);
+  }
+  // RGNDATA already consists of sorted, non-overlapping rectangles. Validate
+  // this contract rather than accepting quadratic arbitrary rectangle soups.
+  fromRectangles(rectangles){
+    if(rectangles.length>this.limit)throw new Win32Error('Region rectangle quota exceeded',8);
+    const bands=[],budget={count:0};let current=null;
+    for(const input of rectangles){
+      const [left,top,right,bottom]=input.map(coordinate);
+      if(left>=right||top>=bottom)throw new Win32Error('RGNDATA contains an empty or inverted rectangle');
+      if(current&&top===current.top&&bottom===current.bottom){
+        const last=current.spans.at(-1);if(left<last)throw new Win32Error('RGNDATA rectangles overlap or are unsorted');
+        if(left===last)current.spans[current.spans.length-1]=right;else current.spans.push(left,right);
+      }else{
+        if(current){if(top<current.bottom)throw new Win32Error('RGNDATA bands overlap or are unsorted');this.append(bands,current.top,current.bottom,current.spans,budget);}
+        current={top,bottom,spans:[left,right]};
+      }
+    }
+    if(current)this.append(bands,current.top,current.bottom,current.spans,budget);
+    return this.finish(bands);
+  }
+  offset(region,x,y){
+    x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!region.count)return region;
+    // Check every new bound before constructing or publishing any new state.
+    [region.bounds[0]+x,region.bounds[1]+y,region.bounds[2]+x,region.bounds[3]+y].forEach(coordinate);
+    if(!x&&!y)return region;
+    return this.finish(region.bands.map(b=>({top:b.top+y,bottom:b.bottom+y,spans:b.spans.map(n=>n+x)})));
+  }
+  row(region,y){
+    let lo=0,hi=region.bands.length;
+    while(lo<hi){const mid=(lo+hi)>>>1;if(region.bands[mid].bottom<=y)lo=mid+1;else hi=mid;}
+    const band=region.bands[lo];return band&&band.top<=y?band.spans:[];
+  }
+  contains(region,x,y){
+    const spans=this.row(region,y);let lo=0,hi=spans.length;
+    while(lo<hi){const mid=(lo+hi)>>>1;if(spans[mid]<=x)lo=mid+1;else hi=mid;}
+    return (lo&1)!==0;
+  }
+  intersects(region,rect){
+    const [l,t,r,b]=rect;if(l>=r||t>=b)return false;
+    for(const band of region.bands){if(band.top>=b)break;if(band.bottom<=t)continue;for(let i=0;i<band.spans.length;i+=2){if(band.spans[i]>=r)break;if(band.spans[i+1]>l)return true;}}
+    return false;
+  }
+  equal(a,b){return a===b||(a.count===b.count&&a.bands.length===b.bands.length&&a.bands.every((x,i)=>x.top===b.bands[i].top&&x.bottom===b.bands[i].bottom&&equalSpans(x.spans,b.bands[i].spans)));}
+  rectangles(region){return region.bands.flatMap(b=>{const out=[];for(let i=0;i<b.spans.length;i+=2)out.push([b.spans[i],b.top,b.spans[i+1],b.bottom]);return out;});}
+}
+
+/** Register region, application clip and region-painting APIs on the shared DCs. */
+function installRegions(w,{dc,bitmaps,regions,add}){
+  const h=w.handles,m=w.memory,get=id=>h.get(id,'region'),set=(id,shape)=>{get(id).shape=shape;return shape.type;};
+  const rect=p=>{const v=m.view(p,16);return [0,4,8,12].map(o=>v.getInt32(o,true));};
+  const writeRect=(p,r)=>{const v=m.view(p,16);r.forEach((n,i)=>v.setInt32(i*4,n,true));};
+  const create=shape=>h.add('region',{shape});
+  const deviceRegion=s=>regions.rectangle(...bitmaps.bounds(s));
+  const effective=s=>s.clip?regions.combine(s.clip,deviceRegion(s),1):deviceRegion(s);
+  const logicalRect=(s,r)=>regions.offset(regions.rectangle(...r),s.viewportX,s.viewportY);
+  const select=(s,object,mode)=>{
+    mode=integer(mode,1,5);
+    if(!object){if(mode!==5)throw new Win32Error('NULL clip requires RGN_COPY');s.clip=null;return effective(s).type;}
+    const shape=get(object).shape;
+    const next=mode===5||mode===1&&!s.clip?shape:regions.combine(s.clip||deviceRegion(s),shape,mode);
+    // Calculate before assigning, so failures preserve the previous clip.
+    const type=regions.combine(next,deviceRegion(s),1).type;s.clip=next;return type;
+  };
+  add('CreateRectRgn',4,(...r)=>create(regions.rectangle(...r)));
+  add('CreateRectRgnIndirect',1,p=>create(regions.rectangle(...rect(p))));
+  add('SetRectRgn',5,(object,...r)=>{get(object);set(object,regions.rectangle(...r));return 1;});
+  add('CombineRgn',4,(dest,a,b,mode)=>{get(dest);const first=get(a).shape;mode=integer(mode,1,5);return set(dest,mode===5?first:regions.combine(first,get(b).shape,mode));});
+  add('EqualRgn',2,(a,b)=>regions.equal(get(a).shape,get(b).shape)?1:0);
+  add('OffsetRgn',3,(object,x,y)=>set(object,regions.offset(get(object).shape,x,y)));
+  add('GetRgnBox',2,(object,out)=>{const shape=get(object).shape;writeRect(out,shape.bounds);return shape.type;});
+  add('PtInRegion',3,(object,x,y)=>regions.contains(get(object).shape,integer(x,-0x80000000,0x7fffffff),integer(y,-0x80000000,0x7fffffff))?1:0);
+  add('RectInRegion',2,(object,p)=>regions.intersects(get(object).shape,rect(p))?1:0);
+  add('GetRegionData',3,(object,count,out)=>{
+    const shape=get(object).shape,size=32+shape.count*16;count=integer(count,0,0xffffffff);if(!out)return size;
+    if(count<size)throw new Win32Error('Region data buffer is too small',87);
+    const v=m.view(out,size);v.setUint32(0,32,true);v.setUint32(4,1,true);v.setUint32(8,shape.count,true);v.setUint32(12,shape.count*16,true);writeRect(out+16,shape.bounds);
+    let offset=32;for(const r of regions.rectangles(shape)){writeRect(out+offset,r);offset+=16;}return size;
+  });
+  add('ExtCreateRegion',3,(transform,count,p)=>{
+    count=integer(count,32,m.maxBytes);const v=m.view(p,count),n=v.getUint32(8,true),bytes=v.getUint32(12,true);
+    if(v.getUint32(0,true)!==32||v.getUint32(4,true)!==1||n>regions.limit||bytes<n*16||bytes>count-32||32+n*16>count)throw new Win32Error('Invalid or excessive RGNDATA');
+    let dx=0,dy=0;
+    if(transform){const x=m.view(transform,24),a=[0,4,8,12,16,20].map(o=>x.getFloat32(o,true));if(a[0]!==1||a[1]!==0||a[2]!==0||a[3]!==1||!Number.isInteger(a[4])||!Number.isInteger(a[5]))throw new Win32Error('Region XFORM supports identity and integral translation only',50);[dx,dy]=a.slice(4);}
+    let shape=regions.fromRectangles(Array.from({length:n},(_,i)=>rect(p+32+i*16)));
+    const bounds=rect(p+16);if(!bounds.every((x,i)=>x===shape.bounds[i]))throw new Win32Error('RGNDATA bounding rectangle is inconsistent');
+    shape=regions.offset(shape,dx,dy);return create(shape);
+  });
+  add('SelectClipRgn',2,(handle,object)=>select(dc(handle),object,5));
+  add('ExtSelectClipRgn',3,(handle,object,mode)=>select(dc(handle),object,mode));
+  add('GetClipRgn',2,(handle,object)=>{const s=dc(handle);get(object);if(!s.clip)return 0;set(object,s.clip);return 1;},{failure:-1});
+  for(const [name,mode]of [['IntersectClipRect',1],['ExcludeClipRect',4]])add(name,5,(handle,...r)=>{
+    const s=dc(handle),shape=logicalRect(s,r);
+    // Intersecting an absent application clip stores the complete rectangle,
+    // not only the currently visible bitmap portion. A later bitmap selection
+    // or offset must recover that off-screen geometry (Windows GDI contracts).
+    const next=mode===1&&!s.clip?shape:regions.combine(s.clip||deviceRegion(s),shape,mode);
+    // Rectangle clip calls use GDI's conservative COMPLEXREGION success status;
+    // GetClipBox reports the precise effective visible complexity separately.
+    s.clip=next;return mode===4&&!next.count?1:3;
+  });
+  add('OffsetClipRgn',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!s.clip)return effective(s).type;const next=regions.offset(s.clip,x,y);s.clip=next;return next.type;});
+  add('GetClipBox',2,(handle,out)=>{const s=dc(handle),shape=effective(s);writeRect(out,shape.count?shape.bounds.map((n,i)=>n-(i%2?s.viewportY:s.viewportX)):[0,0,0,0]);return shape.type;});
+  add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff)+s.viewportX;y=integer(y,-0x80000000,0x7fffffff)+s.viewportY;return regions.contains(effective(s),x,y)?1:0;});
+  add('RectVisible',2,(handle,p)=>{const s=dc(handle),r=rect(p);return regions.intersects(effective(s),[r[0]+s.viewportX,r[1]+s.viewportY,r[2]+s.viewportX,r[3]+s.viewportY])?1:0;});
+  const paint=(handle,object,brush,invert=false)=>{
+    const s=dc(handle),shape=logicalRectShape(s,get(object).shape),b=invert?null:h.get(brush,'brush');if(b?.null)return 1;
+    const clipped=regions.combine(shape,effective(s),1);if(!clipped.count)return 1;
+    const r=clipped.bounds,image=bitmaps.read(s,r),color=b?.color||0;
+    for(const band of clipped.bands)for(let y=band.top;y<band.bottom;y++)for(let j=0;j<band.spans.length;j+=2)for(let x=band.spans[j];x<band.spans[j+1];x++){
+      const i=((y-r[1])*image.width+x-r[0])*4;
+      if(invert){image.data[i]^=255;image.data[i+1]^=255;image.data[i+2]^=255;image.data[i+3]=0;}
+      else{image.data[i]=color&255;image.data[i+1]=color>>>8&255;image.data[i+2]=color>>>16&255;image.data[i+3]=0;}
+    }
+    bitmaps.write(s,r,image);return 1;
+  };
+  const logicalRectShape=(s,shape)=>regions.offset(shape,s.viewportX,s.viewportY);
+  add('FillRgn',3,(handle,object,brush)=>paint(handle,object,brush));
+  add('PaintRgn',2,(handle,object)=>paint(handle,object,dc(handle).brush));
+  add('InvertRgn',2,(handle,object)=>paint(handle,object,0,true));
+  return {select};
+}
+
+return {REGION_CONSTANTS,RegionStore,installRegions};
+})();
+
+/* ../../packages/win32-browser/src/gdi-bitmap.js */
+__modules[2]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 // All bitmap addresses are process-private. DIBs use Win32 BGR/BGRA scan lines,
@@ -639,7 +823,7 @@ function ropInfo(value){value=unsigned(value);if(!rops.has(value))throw new Win3
 function applyROP(code,p,s,d){let out=0;for(let i=0;i<8;i++)if(code>>i&1)out|=(i&4?p:~p)&(i&2?s:~s)&(i&1?d:~d);return out&255;}
 
 class BitmapStore {
-  constructor(w){this.w=w;this.m=w.memory;this.h=w.handles;this.maxPixels=integer(w.options.maxRasterPixels??Math.max(1,Math.min(4194304,Math.floor(w.memory.maxBytes/4))),1,16777216);}
+  constructor(w,regions){this.regions=regions;this.w=w;this.m=w.memory;this.h=w.handles;this.maxPixels=integer(w.options.maxRasterPixels??Math.max(1,Math.min(4194304,Math.floor(w.memory.maxBytes/4))),1,16777216);}
   geometry(width,height,bpp,dib=false){width=integer(width,1,32767);height=integer(height,1,32767);if(![1,24,32].includes(bpp)||dib&&bpp===1)throw new Win32Error('Only 1-bit DDB and 24/32-bit BI_RGB bitmaps are supported',50);const unit=dib?32:16,stride=Math.ceil(width*bpp/unit)*unit/8,size=stride*height;if(size>this.m.maxBytes)throw new Win32Error('Bitmap exceeds process memory quota',8);return {width,height,bpp,stride,size};}
   header(pointer,usage=0){if(unsigned(usage)!==0)throw new Win32Error('Logical palettes are not supported',50);const v=this.m.view(pointer,40);if(v.getUint32(0,true)!==40)throw new Win32Error('Only BITMAPINFOHEADER is supported',50);const width=v.getInt32(4,true),signedHeight=v.getInt32(8,true),bpp=v.getUint16(14,true);if(v.getUint16(12,true)!==1||!signedHeight)throw new Win32Error('Invalid bitmap planes or height');if(v.getUint32(16,true)!==0||v.getUint32(32,true)!==0)throw new Win32Error('Only uncompressed true-color BI_RGB without a color table is supported',50);return {...this.geometry(width,Math.abs(signedHeight),bpp,true),topDown:signedHeight<0,dib:true};}
   create(width,height,bpp,{dib=false,topDown=true,bits=0,stock=false}={}){const g=this.geometry(width,height,bpp,dib);const input=bits?this.m.bytes(bits,g.size).slice():null;const ptr=this.m.alloc(g.size);this.m.block(ptr).owner='gdi-bitmap';try{if(input)this.m.bytes(ptr,g.size).set(input);return this.h.add('bitmap',{...g,ptr,dib,topDown,stock,dimensionX:0,dimensionY:0});}catch(error){this.m.free(ptr);throw error;}}
@@ -647,7 +831,8 @@ class BitmapStore {
   data(bitmap){return this.m.bytes(bitmap.ptr,bitmap.size);}
   bytesFor(rect){const width=rect[2]-rect[0],height=rect[3]-rect[1];if(width<0||height<0||width*height>this.maxPixels)throw new Win32Error('Raster operation exceeds pixel quota',8);return {width,height,data:new Uint8ClampedArray(width*height*4)};}
   bounds(state){if(state.bitmap){const b=this.get(state.bitmap);return [0,0,b.width,b.height];}const d=state.window,r=d.getClientRect?.(),c=d.context?.canvas||d.node;return [0,0,integer(Math.ceil(r?.width??c?.width??c?.clientWidth??0),0,32767),integer(Math.ceil(r?.height??c?.height??c?.clientHeight??0),0,32767)];}
-  clip(state,rect){return intersect(intersect(rect,this.bounds(state)),state.clip||[-0x80000000,-0x80000000,0x7fffffff,0x7fffffff]);}
+  clip(state,rect){const r=intersect(rect,this.bounds(state));if(!state.clip)return r;return this.regions.combine(this.regions.rectangle(...r),state.clip,1).bounds;}
+  spans(state,y,left,right){return state.clip?this.regions.row(state.clip,y):[left,right];}
   context(state){const c=state.window.context||state.window.node?.getContext?.('2d');if(!c)throw new Win32Error('Drawing adapter does not support pixel readback/writeback',50);return c;}
   readBitmap(b,rect){const image=this.bytesFor(rect),bytes=this.data(b),[l,t]=rect;for(let y=0;y<image.height;y++){const row=(b.topDown?t+y:b.height-1-t-y)*b.stride;for(let x=0;x<image.width;x++){const i=(y*image.width+x)*4,px=l+x;if(b.bpp===1){const c=bytes[row+(px>>>3)]&(0x80>>(px&7))?255:0;image.data.set([c,c,c,255],i);}else{const p=row+px*b.bpp/8;image.data[i]=bytes[p+2];image.data[i+1]=bytes[p+1];image.data[i+2]=bytes[p];image.data[i+3]=b.bpp===32?bytes[p+3]:255;}}}return image;}
   writeBitmap(b,rect,image,background=0xffffff){const bytes=this.data(b),[l,t]=rect;for(let y=0;y<image.height;y++){const row=(b.topDown?t+y:b.height-1-t-y)*b.stride;for(let x=0;x<image.width;x++){const i=(y*image.width+x)*4,px=l+x;if(b.bpp===1){const p=row+(px>>>3),mask=0x80>>(px&7);bytes[p]=rgbValue(image.data,i)===(background&0xffffff)?bytes[p]|mask:bytes[p]&~mask;}else{const p=row+px*b.bpp/8;bytes[p]=image.data[i+2];bytes[p+1]=image.data[i+1];bytes[p+2]=image.data[i];if(b.bpp===32)bytes[p+3]=image.data[i+3];}}}}
@@ -668,7 +853,7 @@ class BitmapStore {
     // Snapshot before writes: aliased source/destination is safe for every ROP.
     const source=rop.source?this.read(src,rawSrc):null,image=this.read(dst,r),pattern=rgbBytes(brush.color||0),mono=src?.bitmap&&this.get(src.bitmap).bpp===1;
     const fg=rgbBytes(dst.textColor),bg=rgbBytes(dst.backgroundColor),constant=(extra>>>16&255)/255,perPixel=extra>>>24===1;
-    for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
+    for(let y=0;y<image.height;y++){const spans=this.spans(dst,r[1]+y,r[0],r[2]);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
       const i=(y*image.width+x)*4;
       const ix=source?Math.min(source.width-1,Math.max(0,Math.floor(sx+((r[0]+x+.5-dx)/dw)*sw)-rawSrc[0])):0;
       const iy=source?Math.min(source.height-1,Math.max(0,Math.floor(sy+((r[1]+y+.5-dy)/dh)*sh)-rawSrc[1])):0;
@@ -678,7 +863,7 @@ class BitmapStore {
       if(blend){const alpha=constant*(perPixel?s[offset+3]/255:1);for(let c=0;c<3;c++)image.data[i+c]=Math.min(255,Math.round(s[offset+c]*constant+image.data[i+c]*(1-alpha)));image.data[i+3]=Math.round(255*alpha+image.data[i+3]*(1-alpha));}
       else{for(let c=0;c<3;c++)image.data[i+c]=transparent?s[offset+c]:applyROP(rop.code,pattern[c],s?.[offset+c]||0,image.data[i+c]);image.data[i+3]=transparent||rop.code===0xcc?s[offset+3]:0;}
     }
-    this.write(dst,r,image);return 1;
+    }this.write(dst,r,image);return 1;
   }
   pixel(state,x,y,color){x=coord(x)+state.viewportX;y=coord(y)+state.viewportY;const r=this.clip(state,[x,y,x+1,y+1]);if(!r[2])return 0xffffffff;const image=this.read(state,r);if(color===undefined)return rgbValue(image.data);image.data.set(rgbBytes(color));this.write(state,r,image);return state.bitmap&&this.get(state.bitmap).bpp===1?rgbValue(this.read(state,r).data):color&0xffffff;}
   // Integer software primitives for memory DCs. Font rasterization remains a
@@ -690,14 +875,14 @@ class BitmapStore {
     const r=this.clip(state,[Math.min(x1,x2)-pad,Math.min(y1,y2)-pad,Math.max(x1,x2)+pad,Math.max(y1,y2)+pad]);if(!r[2])return;
     const image=this.read(state,r),pen=rgbBytes(style.pen.color||0),brush=rgbBytes(style.brush.color||0);
     const l=Math.min(x1,x2),t=Math.min(y1,y2),right=Math.max(x1,x2),bottom=Math.max(y1,y2),rx=(right-l)/2,ry=(bottom-t)/2;
-    for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
+    for(let y=0;y<image.height;y++){const spans=this.spans(state,r[1]+y,r[0],r[2]);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
       const px=r[0]+x,py=r[1]+y;let fill=false,stroke=false;
       if(operation==='rect'){fill=px>=l&&px<right&&py>=t&&py<bottom;stroke=fill&&(px<l+width||px>=right-width||py<t+width||py>=bottom-width);}
       else if(operation==='ellipse'){const nx=px+.5-l-rx,ny=py+.5-t-ry;fill=rx>0&&ry>0&&nx*nx/(rx*rx)+ny*ny/(ry*ry)<=1;stroke=fill&&(rx<=width||ry<=width||nx*nx/((rx-width)**2)+ny*ny/((ry-width)**2)>=1);}
       else {const dx=x2-x1,dy=y2-y1,len=dx*dx+dy*dy,u=len?((px-x1)*dx+(py-y1)*dy)/len:-1;stroke=u>=0&&u<1&&((px-x1-u*dx)**2+(py-y1-u*dy)**2)<=width*width/4;}
       if(stroke&&!style.pen.null)image.data.set(pen,(y*image.width+x)*4);else if(fill&&!style.brush.null)image.data.set(brush,(y*image.width+x)*4);
     }
-    this.write(state,r,image);
+    }this.write(state,r,image);
   }
 }
 
@@ -705,7 +890,7 @@ return {GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo,BitmapStore};
 })();
 
 /* ../../packages/win32-browser/src/clipboard.js */
-__modules[2]=(()=>{
+__modules[3]=(()=>{
 const {Win32Error,unsigned}=__modules[0];
 
 /** Synchronous, app-private clipboard. System clipboard synchronization is explicit. */
@@ -737,7 +922,7 @@ return {installClipboard};
 })();
 
 /* ../../packages/win32-browser/src/kernel32.js */
-__modules[3]=(()=>{
+__modules[4]=(()=>{
 const {ERROR,Win32Error,integer,unsigned}=__modules[0];
 
 function installKernel32(w){
@@ -828,7 +1013,7 @@ return {installKernel32};
 })();
 
 /* ../../packages/win32-browser/src/user32.js */
-__modules[4]=(()=>{
+__modules[5]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 /** Registered windows only: never queries or controls unrelated page DOM. */
@@ -912,7 +1097,7 @@ return {installUser32};
 })();
 
 /* ../../packages/win32-browser/src/advapi32.js */
-__modules[5]=(()=>{
+__modules[6]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 /** App-private registry: no machine registry is read or modified. */
@@ -940,14 +1125,16 @@ return {installRegistry};
 })();
 
 /* ../../packages/win32-browser/src/gdi32.js */
-__modules[6]=(()=>{
+__modules[7]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
-const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[1];
+const {RegionStore,installRegions}=__modules[1];
+const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[2];
+
 
 
 function colorRef(value){const n=unsigned(value);return '#'+[n&255,n>>>8&255,n>>>16&255].map(v=>v.toString(16).padStart(2,'0')).join('');}
 function installGDI(w){
-  const h=w.handles,m=w.memory,bitmaps=new BitmapStore(w);
+  const h=w.handles,m=w.memory,regions=new RegionStore(w.options),bitmaps=new BitmapStore(w,regions);
   const add=(name,arity,fn,options={})=>w.register('gdi32',name,fn,{arity,mode:'emulated',...options});
   const stocks=new Map(),stock=(index,type,value)=>stocks.set(index,h.add(type,{...value,stock:true}));
   stock(0,'brush',{color:0xffffff});stock(4,'brush',{color:0});stock(5,'brush',{null:true});stock(6,'pen',{color:0xffffff,width:1});stock(7,'pen',{color:0,width:1});stock(8,'pen',{null:true,width:1});
@@ -983,13 +1170,13 @@ function installGDI(w){
   add('CreateCompatibleDC',1,handle=>{if(handle)dc(handle);if(h.entries.size+2>h.limit)throw new Win32Error('Handle quota exceeded',8);const bitmap=bitmaps.create(1,1,1,{stock:true});try{const id=h.add('dc',{...newState(),memory:true,bitmap,defaultBitmap:bitmap});bitmaps.get(bitmap).defaultFor=id;return id;}catch(error){m.free(bitmaps.get(bitmap).ptr);h.close(bitmap,'bitmap');throw error;}});
   const deleteDC=handle=>{const state=dc(handle);if(!state.memory)throw new Win32Error('Use ReleaseDC for a window DC',6);m.free(bitmaps.get(state.defaultBitmap).ptr);h.close(state.defaultBitmap,'bitmap');h.close(handle,'dc');return 1;};
   add('DeleteDC',1,deleteDC);
-  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
+  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(entry?.type==='region')return regionAPI.select(state,object,5);if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
       if(!state.memory||entry.value.defaultFor&&entry.value.defaultFor!==Number(handle))throw new Win32Error('Bitmap cannot be selected into this DC',87);
       for(const [id,e]of h.entries)if(e.type==='dc'&&id!==Number(handle)&&[e.value,...e.value.saved].some(s=>s.bitmap===Number(object)))throw new Win32Error('Bitmap is selected into another DC',87);
     }const old=state[entry.type];state[entry.type]=Number(object);return old;});
-  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
+  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap','region'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
   add('GetCurrentObject',2,(handle,type)=>{const state=dc(handle),field={1:'pen',2:'brush',7:'bitmap'}[Number(type)];if(!field)throw new Win32Error('Object type is not implemented',50);return state[field]||0;});
-  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,bitmap:7})[e.type]||0;});
+  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,bitmap:7,region:8})[e.type]||0;});
   const bitmapInfo=(b,p)=>{const v=m.view(p,40);v.setUint32(0,40,true);v.setInt32(4,b.width,true);v.setInt32(8,b.topDown?-b.height:b.height,true);v.setUint16(12,1,true);v.setUint16(14,b.bpp,true);v.setUint32(16,0,true);v.setUint32(20,Math.ceil(b.width*b.bpp/32)*4*b.height,true);for(let o=24;o<40;o+=4)v.setUint32(o,0,true);};
   for(const suffix of ['A','W'])add('GetObject'+suffix,3,(object,count,out)=>{const e=h.entries.get(Number(object));if(!e||!['pen','brush','bitmap'].includes(e.type))throw new Win32Error('Unsupported GDI object',6);const b=e.value,size=e.type==='pen'?16:e.type==='brush'?12:24;if(!out)return size;count=integer(count,0,0x7fffffff);const n=e.type==='bitmap'&&b.dib&&count>=84?84:size;if(count<n||unsigned(out)%4)throw new Win32Error('Invalid GDI object buffer');const v=m.view(out,n);m.bytes(out,n).fill(0);
     if(e.type==='pen'){v.setUint32(0,b.null?5:0,true);v.setInt32(4,b.width||1,true);v.setUint32(12,b.color||0,true);}
@@ -1043,7 +1230,7 @@ function installGDI(w){
   add('SetBkMode',2,(handle,mode)=>{integer(mode,1,2);const state=dc(handle),old=state.backgroundMode;state.backgroundMode=Number(mode);return old;});
   add('GetBkMode',1,handle=>dc(handle).backgroundMode);
   for(const wide of [false,true])add('TextOut'+(wide?'W':'A'),5,(handle,x,y,p,n)=>{n=integer(n,0,m.maxBytes/(wide?2:1));const text=typeof p==='string'?p.slice(0,n):m.decode(m.bytes(p,n*(wide?2:1)),wide);draw(dc(handle),'text',[coord(x),coord(y),text]);return 1;},{mode:'browser',notes:'Canvas/host font metrics; software memory DC text is not implemented.'});
-  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,...snapshot}=state;state.saved.push({...snapshot,clip:state.clip?.slice()||null});return state.saved.length;});
+  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,...snapshot}=state;state.saved.push(snapshot);return state.saved.length;});
   add('RestoreDC',2,(handle,level)=>{const state=dc(handle);level=coord(level);const index=level<0?state.saved.length+level:level-1;if(!level||index<0||index>=state.saved.length)throw new Win32Error('Invalid saved DC level');const snapshot=state.saved[index];state.saved.splice(index);Object.assign(state,snapshot);return 1;});
   add('SetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);x=coord(x);y=coord(y);if(old)pair(old,state.viewportX,state.viewportY);state.viewportX=x;state.viewportY=y;return 1;});
   add('OffsetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);return w.invoke('gdi32','SetViewportOrgEx',[handle,coord(state.viewportX+coord(x)),coord(state.viewportY+coord(y)),old]);});
@@ -1052,9 +1239,7 @@ function installGDI(w){
   add('SetMapMode',2,(handle,mode)=>{dc(handle);if(Number(mode)!==1)throw new Win32Error('Only MM_TEXT is supported',50);return 1;});
   add('SetStretchBltMode',2,(handle,mode)=>{const state=dc(handle);if(Number(mode)!==3)throw new Win32Error('Only COLORONCOLOR scaling is supported',50);const old=state.stretchMode;state.stretchMode=3;return old;});
   add('GetStretchBltMode',1,handle=>dc(handle).stretchMode);
-  add('IntersectClipRect',5,(handle,l,t,r,b)=>{const s=dc(handle);const next=[coord(l)+s.viewportX,coord(t)+s.viewportY,coord(r)+s.viewportX,coord(b)+s.viewportY];s.clip=intersect(s.clip||[-0x80000000,-0x80000000,0x7fffffff,0x7fffffff],next);return s.clip[2]>s.clip[0]?2:1;});
-  add('GetClipBox',2,(handle,out)=>{const s=dc(handle),r=bitmaps.clip(s,bitmaps.bounds(s)),v=m.view(out,16);r.forEach((n,i)=>v.setInt32(i*4,n-(i%2?s.viewportY:s.viewportX),true));return r[2]>r[0]?2:1;});
-  add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);x=coord(x)+s.viewportX;y=coord(y)+s.viewportY;const r=bitmaps.clip(s,[x,y,x+1,y+1]);return r[2]>r[0]?1:0;});
+  const regionAPI=installRegions(w,{dc,bitmaps,regions,add});
   add('GetDeviceCaps',2,(handle,index)=>{const s=dc(handle),r=bitmaps.bounds(s);const values={2:1,8:r[2],10:r[3],12:32,14:1,88:96,90:96};if(!(index in values))throw new Win32Error('Device capability not implemented',50);return values[index];});
 }
 
@@ -1062,14 +1247,15 @@ return {colorRef,installGDI};
 })();
 
 /* ../../packages/win32-browser/src/index.js */
-__modules[7]=(()=>{
-const {GDI_CONSTANTS}=__modules[1];
-const {installClipboard}=__modules[2];
+__modules[8]=(()=>{
+const {REGION_CONSTANTS,RegionStore}=__modules[1];
+const {GDI_CONSTANTS}=__modules[2];
+const {installClipboard}=__modules[3];
 const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
-const {installKernel32}=__modules[3];
-const {installUser32}=__modules[4];
-const {installRegistry}=__modules[5];
-const {installGDI,colorRef}=__modules[6];
+const {installKernel32}=__modules[4];
+const {installUser32}=__modules[5];
+const {installRegistry}=__modules[6];
+const {installGDI,colorRef}=__modules[7];
 
 
 
@@ -1078,7 +1264,8 @@ const {installGDI,colorRef}=__modules[6];
 
 
 
-const WIN32_CONSTANTS=Object.freeze({...GDI_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
+
+const WIN32_CONSTANTS=Object.freeze({...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
 function normalizeDLL(name){const dll=String(name).replace(/\\/g,'/').split('/').at(-1).replace(/\.dll$/i,'').toLowerCase();if(!/^[a-z0-9_.-]+$/.test(dll))throw new Win32Error('Invalid DLL name',126);return dll;}
 /** Reusable browser/worker/Node compatibility process; never loads native code. */
 class Win32Browser {
@@ -1105,11 +1292,11 @@ class Win32Browser {
 }
 function createWin32(options={}){return new Win32Browser(options);}
 
-return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
+return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
 
 /* ../language/errors.js */
-__modules[8]=(()=>{
+__modules[9]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -1119,8 +1306,8 @@ return {VBError};
 })();
 
 /* calendar.js */
-__modules[9]=(()=>{
-const {VBError}=__modules[8];
+__modules[10]=(()=>{
+const {VBError}=__modules[9];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -1197,9 +1384,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ../language/lexer.js */
-__modules[10]=(()=>{
-const {asDate}=__modules[9];
-const {VBError}=__modules[8];
+__modules[11]=(()=>{
+const {asDate}=__modules[10];
+const {VBError}=__modules[9];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -1291,8 +1478,8 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* decimal.js */
-__modules[11]=(()=>{
-const {VBError}=__modules[8];
+__modules[12]=(()=>{
+const {VBError}=__modules[9];
 
 const MAX=(1n<<96n)-1n;
 const abs=n=>n<0n?-n:n;
@@ -1369,7 +1556,7 @@ return {VBDecimal};
 })();
 
 /* ../core/window-context.js */
-__modules[12]=(()=>{
+__modules[13]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -1401,8 +1588,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ../core/core.js */
-__modules[13]=(()=>{
-const {uiDocument}=__modules[12];
+__modules[14]=(()=>{
+const {uiDocument}=__modules[13];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -1464,11 +1651,11 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* values.js */
-__modules[14]=(()=>{
-const {VBDecimal}=__modules[11];
-const {asDate,dateToSerial}=__modules[9];
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
+__modules[15]=(()=>{
+const {VBDecimal}=__modules[12];
+const {asDate,dateToSerial}=__modules[10];
+const { VBError }=__modules[11];
+const { lower }=__modules[14];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -1661,9 +1848,9 @@ return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterface
 })();
 
 /* automation.js */
-__modules[15]=(()=>{
-const {VBError}=__modules[10];
-const {Ref,MISSING}=__modules[14];
+__modules[16]=(()=>{
+const {VBError}=__modules[11];
+const {Ref,MISSING}=__modules[15];
 /** Trusted host-installed Automation adapters. Projects never supply executable factories. */
 
 
@@ -1721,7 +1908,7 @@ return {isAutomationObject,automationDefaultName,automationInvoke,automationMemb
 })();
 
 /* ../controls/adapters.js */
-__modules[16]=(()=>{
+__modules[17]=(()=>{
 
 /** Host code only. Native project data cannot register code or fetch plug-ins. */
 class ControlAdapterRegistry {
@@ -1746,9 +1933,9 @@ return {ControlAdapterRegistry};
 })();
 
 /* ../data/common.js */
-__modules[17]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray, VBCurrency, VBDecimal}=__modules[14];
+__modules[18]=(()=>{
+const {VBError}=__modules[11];
+const {VBArray, VBCurrency, VBDecimal}=__modules[15];
 
 
 const DATA_LIMITS = Object.freeze({rows:100000, cells:1000000, bytes:20*1024*1024, pages:100});
@@ -1797,6 +1984,8 @@ function sqlValue(value){
 }
 function quoteIdentifier(value){return '"'+String(value).replace(/"/g,'""')+'"';}
 function sameValue(a,b){
+  if(a instanceof VBDecimal&&b instanceof VBDecimal)return a.compare(b)===0;
+  if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw===b.raw;
   if(a instanceof Uint8Array&&b instanceof Uint8Array)return a.length===b.length&&a.every((v,i)=>v===b[i]);
   if(a instanceof Date&&b instanceof Date)return +a===+b;
   return Object.is(a,b);
@@ -1924,7 +2113,7 @@ return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,
 })();
 
 /* ../data/defaults.js */
-__modules[18]=(()=>{
+__modules[19]=(()=>{
 
 // Registration is private to trusted library objects; a forged __type never grants a default property.
 const values = new WeakSet();
@@ -1940,8 +2129,8 @@ return {dataDefault,hasDataDefault,dataMembers,hasDataMember};
 })();
 
 /* ../data/collection.js */
-__modules[19]=(()=>{
-const {assertData}=__modules[17];
+__modules[20]=(()=>{
+const {assertData}=__modules[18];
 
 class DataCollection {
   constructor(items=[]){this.items=items;}
@@ -1963,17 +2152,17 @@ return {DataCollection,NamedCollection};
 })();
 
 /* ../data/recordset.js */
-__modules[20]=(()=>{
-const {dataDefault}=__modules[18];
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,VBDecimal,coerce,bankersRound,numeric,binary,truth}=__modules[14];
+__modules[21]=(()=>{
+const {dataDefault}=__modules[19];
+const {VBError}=__modules[11];
+const {VBArray,VBCurrency,VBDecimal,coerce,bankersRound,numeric,binary,truth}=__modules[15];
 
 
 
 // Disconnected client-side cursor. ConnectedRecordset adds explicit provider I/O.
-const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[16,'Integer'],[18,'Long'],[19,'Double'],[21,'Decimal'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Variant'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
+const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[16,'Integer'],[18,'Long'],[19,'Double'],[21,'Decimal'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Decimal'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
 // Additional integer widths returned by native OLE DB schema rowsets.
-const INTEGER_RANGES=new Map([[16,[-128n,127n]],[18,[0n,65535n]],[19,[0n,4294967295n]],[21,[0n,(1n<<64n)-1n]]]);
+const INTEGER_RANGES=new Map([[16,[-128n,127n]],[18,[0n,65535n]],[19,[0n,4294967295n]],[20,[-(1n<<63n),(1n<<63n)-1n]],[21,[0n,(1n<<64n)-1n]]]);
 const fold=value=>String(value).toLowerCase();
 const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
 const args=value=>value instanceof VBArray?[...value]:Array.isArray(value)?value:[value];
@@ -1985,10 +2174,10 @@ function fieldValue(column,value){
   const bounds=INTEGER_RANGES.get(column.Type);
   if(bounds){
     // Reject already-rounded JS 64-bit inputs; strings/Decimal/BigInt are exact.
-    if(column.Type===21&&typeof value==='number'&&Math.abs(value)>Number.MAX_SAFE_INTEGER)fail('Overflow',6);
+    if((column.Type===20||column.Type===21)&&typeof value==='number'&&Math.abs(value)>Number.MAX_SAFE_INTEGER)fail('Overflow',6);
     const n=Number.isSafeInteger(value)?BigInt(value):coerce(value,'Decimal').roundedInteger();
     if(n<bounds[0]||n>bounds[1])fail('Overflow',6);
-    return column.Type===21?VBDecimal.fromParts(n,0):Number(n);
+    return column.Type===20||column.Type===21?VBDecimal.fromParts(n,0):Number(n);
   }
   if(type==='Binary'){if(value instanceof VBArray&&[...value].some(v=>!Number.isInteger(v)||v<0||v>255))fail('Binary field requires byte values',13);const bytes=value instanceof VBArray?Uint8Array.from([...value]):value;if(!(bytes instanceof Uint8Array))fail('Binary field requires a byte array',13);if(column.DefinedSize&&bytes.length>column.DefinedSize)fail('Binary field exceeds DefinedSize',372);return bytes.slice();}
   if(type==='GUID'){const text=String(value).replace(/^\{(.*)\}$/,'$1');if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text))fail('Invalid GUID value',13);return '{'+text.toUpperCase()+'}';}
@@ -1996,7 +2185,7 @@ function fieldValue(column,value){
   if(type==='String'&&column.DefinedSize&&result.length>column.DefinedSize)fail('Field value exceeds DefinedSize',372);
   return result;
 }
-function compare(a,b){if(a===b)return 0;if(a==null)return -1;if(b==null)return 1;if(typeof a==='string'&&typeof b==='string'){a=fold(a);b=fold(b);}if(a instanceof VBDecimal||b instanceof VBDecimal)return coerce(a,'Decimal').compare(coerce(b,'Decimal'));if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;return a<b?-1:a>b?1:0;}
+function compare(a,b){if(a===b)return 0;if(a==null)return -1;if(b==null)return 1;if(typeof a==='string'&&typeof b==='string'){a=fold(a);b=fold(b);}if(a instanceof VBDecimal||b instanceof VBDecimal){const exact=v=>Number.isSafeInteger(v)?VBDecimal.fromParts(BigInt(v),0):coerce(v,'Decimal');return exact(a).compare(exact(b));}if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;return a<b?-1:a>b?1:0;}
 
 /** Cached row view, typed fields, pending edits and stable row bookmarks. */
 class DisconnectedRecordset {
@@ -2089,9 +2278,9 @@ return {fieldValue,DisconnectedRecordset};
 })();
 
 /* ../data/provider-recordset.js */
-__modules[21]=(()=>{
-const {DisconnectedRecordset,fieldValue}=__modules[20];
-const {assertData,after,DATA_LIMITS,sameValue}=__modules[17];
+__modules[22]=(()=>{
+const {DisconnectedRecordset,fieldValue}=__modules[21];
+const {assertData,after,DATA_LIMITS,sameValue}=__modules[18];
 
 
 /** The same observable cursor as the bound controls use, with awaited provider writes. */
@@ -2208,10 +2397,12 @@ return {ProviderRecordset};
 })();
 
 /* ../data/connected-recordset.js */
-__modules[22]=(()=>{
-const {ProviderRecordset}=__modules[21];
-const {DisconnectedRecordset,fieldValue}=__modules[20];
-const {assertData,after,dataList,sameValue}=__modules[17];
+__modules[23]=(()=>{
+const {VBDecimal,VBCurrency,coerce}=__modules[15];
+const {ProviderRecordset}=__modules[22];
+const {DisconnectedRecordset,fieldValue}=__modules[21];
+const {assertData,after,dataList,sameValue}=__modules[18];
+
 
 
 
@@ -2221,6 +2412,8 @@ const family = rs => ({members:new Set([rs]),batch:new Map(),affected:new Set(),
 const statusOf = entry => entry ? ({insert:1,update:2,delete:4}[entry.kind] | (entry.error ? entry.error.number===3197?2048:entry.error.number===-2147217873?4096:128 : 0)) : 0;
 function compare(a,b) {
   if(sameValue(a,b))return 0;
+  if(a!=null&&b!=null&&(a instanceof VBDecimal||b instanceof VBDecimal)){const exact=v=>Number.isSafeInteger(v)?VBDecimal.fromParts(BigInt(v),0):coerce(v,'Decimal');return exact(a).compare(exact(b));}
+  if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:1;
   if(a==null)return -1;if(b==null)return 1;
   if(typeof a==='string'&&typeof b==='string'){a=a.toLowerCase();b=b.toLowerCase();}
   return a<b?-1:a>b?1:0;
@@ -2238,7 +2431,7 @@ class ConnectedRecordset extends ProviderRecordset {
       Object.defineProperties(field,{
         OriginalValue:{get(){const row=rs.current();const entry=rs._family.batch.get(row);return copy(entry?entry.before?.[col.Name]??null:rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}},
         UnderlyingValue:{get(){const row=rs.current();assertData(rs._resync,'UnderlyingValue requires a provider with keyed refresh',3251);return after(rs._resync(row,rs._family.batch.get(row)?.before),values=>{assertData(values,'Record was deleted from the data source',3021);rs._underlying.set(row,copyRow(values));return copy(values[col.Name]);});}},
-        ActualSize:{get(){const value=field.Value;return value==null?0:typeof value==='string'?value.length*2:value instanceof Uint8Array?value.length:[2,11].includes(col.Type)?2:col.Type===17?1:[5,6,7,20].includes(col.Type)?8:4;}}
+        ActualSize:{get(){const value=field.Value;return value==null?0:typeof value==='string'?value.length*2:value instanceof Uint8Array?value.length:[2,11,18].includes(col.Type)?2:[16,17].includes(col.Type)?1:[5,6,7,20,21].includes(col.Type)?8:4;}}
       });
       let chunkPosition=0,chunkRow=null;
       field.GetChunk=length=>{length=Number(length);assertData(Number.isSafeInteger(length)&&length>=0,'Invalid chunk size',5);const row=rs.current();if(chunkRow!==row){chunkRow=row;chunkPosition=0;}const value=field.Value;if(value==null)return null;assertData(typeof value==='string'||value instanceof Uint8Array,'GetChunk requires a text or binary field',3251);const chunk=value.slice(chunkPosition,chunkPosition+length);chunkPosition+=chunk.length;return chunk;};
@@ -2437,8 +2630,8 @@ return {ConnectedRecordset};
 })();
 
 /* ../data/sql-parameters.js */
-__modules[23]=(()=>{
-const {assertData}=__modules[17];
+__modules[24]=(()=>{
+const {assertData}=__modules[18];
 
 /** Lossless SQL token positions. Parameter substitution never visits quoted strings or comments. */
 function sqlTokens(source) {
@@ -2515,13 +2708,21 @@ return {sqlTokens,DAO_TYPES,parameterPlan,simpleSelect};
 })();
 
 /* ../data/criteria.js */
-__modules[24]=(()=>{
-const {assertData}=__modules[17];
-const {sqlTokens}=__modules[23];
+__modules[25]=(()=>{
+const {VBDecimal,VBCurrency}=__modules[15];
+const {assertData}=__modules[18];
+const {sqlTokens}=__modules[24];
+
 
 
 function compareData(a,b){
   if(a==null||b==null)return null;
+  if(a instanceof VBDecimal||b instanceof VBDecimal){
+    // Integer criteria represented by safe Numbers must not take the fifteen-digit Double-to-Decimal conversion path.
+    const exact=value=>value instanceof VBCurrency?new VBDecimal(value.toString()):Number.isSafeInteger(value)?VBDecimal.fromParts(BigInt(value),0):new VBDecimal(value);
+    return exact(a).compare(exact(b));
+  }
+  if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:a.raw>b.raw?1:0;
   if(a instanceof Date)a=+a;if(b instanceof Date)b=+b;
   if(typeof a==='string'&&typeof b==='string'){a=a.toLocaleLowerCase('en-US');b=b.toLocaleLowerCase('en-US');}
   if(a instanceof Uint8Array||b instanceof Uint8Array){assertData(a instanceof Uint8Array&&b instanceof Uint8Array,'Incompatible binary comparison',13);for(let i=0;i<Math.min(a.length,b.length);i++)if(a[i]!==b[i])return a[i]<b[i]?-1:1;return Math.sign(a.length-b.length);}
@@ -2554,7 +2755,7 @@ function compileCriteria(text,columns){
   const is=value=>tokens[at]?.value.toUpperCase()===value,take=()=>tokens[at++],eat=value=>is(value)?(at++,true):false;
   const expect=value=>assertData(eat(value),'Expected '+value+' in criteria',3001);
   const value=()=>{let sign=1;if(eat('-'))sign=-1;else eat('+');const t=take();assertData(t,'Expected a criteria value');
-    if(t.kind==='number'){const n=Number(t.value)*sign;assertData(Number.isFinite(n),'Invalid numeric criterion',13);return()=>n;}
+    if(t.kind==='number'){const n=Number(t.value)*sign;assertData(Number.isFinite(n),'Invalid numeric criterion',13);const exact=!Number.isSafeInteger(n)&&/^\d+$/.test(t.value)?new VBDecimal((sign<0?'-':'')+t.value):n;return()=>exact;}
     assertData(sign===1,'A sign requires a numeric literal');if(t.kind==='string')return()=>t.value;
     if(t.kind==='word'&&/^(TRUE|FALSE|NULL)$/i.test(t.value))return()=>t.value.toUpperCase()==='NULL'?null:t.value.toUpperCase()==='TRUE'?-1:0;
     if(t.kind==='word'&&/^__DAO_DATE_\d+$/.test(t.value)){const d=dates[Number(t.value.slice(11))];assertData(d,'Invalid date reference');return()=>d;}
@@ -2577,12 +2778,12 @@ return {compareData,compileCriteria};
 })();
 
 /* ../data/dao-recordset.js */
-__modules[25]=(()=>{
-const {dataDefault}=__modules[18];
-const {assertData,after,dataList,sameValue}=__modules[17];
-const {fieldValue}=__modules[20];
-const {compileCriteria,compareData}=__modules[24];
-const {DAO_TYPES}=__modules[23];
+__modules[26]=(()=>{
+const {dataDefault}=__modules[19];
+const {assertData,after,dataList,sameValue}=__modules[18];
+const {fieldValue}=__modules[21];
+const {compileCriteria,compareData}=__modules[25];
+const {DAO_TYPES}=__modules[24];
 
 
 
@@ -2686,15 +2887,15 @@ return {DAORecordset};
 })();
 
 /* ../data/rdo.js */
-__modules[26]=(()=>{
-const {assertData,DATA_LIMITS,quoteIdentifier}=__modules[17];
-const {dataDefault,dataMembers}=__modules[18];
-const {DataCollection}=__modules[19];
-const {ConnectedRecordset}=__modules[22];
-const {DAORecordset}=__modules[25];
-const {fieldValue}=__modules[20];
-const {sqlTokens,simpleSelect}=__modules[23];
-const {VBArray}=__modules[14];
+__modules[27]=(()=>{
+const {assertData,DATA_LIMITS,quoteIdentifier}=__modules[18];
+const {dataDefault,dataMembers}=__modules[19];
+const {DataCollection}=__modules[20];
+const {ConnectedRecordset}=__modules[23];
+const {DAORecordset}=__modules[26];
+const {fieldValue}=__modules[21];
+const {sqlTokens,simpleSelect}=__modules[24];
+const {VBArray}=__modules[15];
 
 
 
@@ -2870,7 +3071,7 @@ return {RDO_TYPES,RDO_CONSTANTS,RDOParameter,RDOQuery,RDOResultset,RDOConnection
 })();
 
 /* ../data/vendor/sqlite.js */
-__modules[27]=(()=>{
+__modules[28]=(()=>{
 
 // Generated by tools/vendor-sqlite.mjs. sql.js 1.14.2 (MIT); SQLite public domain.
 // JavaScript SHA256 35e39a73b2e0bc1c2202a4cadb23bcf7a3a77071a39c270f014402968785b95f; WASM SHA256 38c14f6e379210bc942bdc4ebca44e7bfdb4318ecc1c72ca666a28fdce96670a.
@@ -3067,15 +3268,15 @@ return {initializeSQLite};
 })();
 
 /* ../data/dao.js */
-__modules[28]=(()=>{
-const {dataDefault}=__modules[18];
-const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[17];
-const {DataCollection,NamedCollection}=__modules[19];
-const {ConnectedRecordset}=__modules[22];
-const {DAORecordset}=__modules[25];
-const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[23];
-const {fieldValue}=__modules[20];
-const {initializeSQLite}=__modules[27];
+__modules[29]=(()=>{
+const {dataDefault}=__modules[19];
+const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[18];
+const {DataCollection,NamedCollection}=__modules[20];
+const {ConnectedRecordset}=__modules[23];
+const {DAORecordset}=__modules[26];
+const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[24];
+const {fieldValue}=__modules[21];
+const {initializeSQLite}=__modules[28];
 
 
 
@@ -3262,9 +3463,9 @@ return {DAOField,DAOIndex,DAOTableDef,DAOParameter,DAOQueryDef,DAODatabase,DAOWo
 })();
 
 /* ../data/sqlite.js */
-__modules[29]=(()=>{
-const {initializeSQLite}=__modules[27];
-const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[17];
+__modules[30]=(()=>{
+const {initializeSQLite}=__modules[28];
+const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[18];
 
 
 /** Real embedded SQLite. A context owns a disk; connections share its live database handles. */
@@ -3398,17 +3599,26 @@ return {SQLiteProvider};
 })();
 
 /* ../data/wire.js */
-__modules[30]=(()=>{
-const {VBCurrency,VBDecimal}=__modules[14];
-const {assertData}=__modules[17];
+__modules[31]=(()=>{
+const {VBCurrency,VBDecimal}=__modules[15];
+const {assertData}=__modules[18];
 
 
+const arrayBufferByteLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'byteLength').get;
+function binaryView(value){
+ if(ArrayBuffer.isView(value))return new Uint8Array(value.buffer,value.byteOffset,value.byteLength);
+ if(value&&typeof value==='object'){
+  // The intrinsic getter accepts cross-window buffers but rejects spoofed brands.
+  try{arrayBufferByteLength.call(value);return new Uint8Array(value);}catch{}
+ }
+ return null;
+}
 /** Explicit tagged cells: transport cannot silently round BigInt or turn BLOBs into objects. */
 function encodeCell(value){
  if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();
  if(typeof value==='bigint')return {$vb6:'integer',value:value.toString()};
  // Native ODBC can return ArrayBuffer; views must not expose bytes outside their slice.
- const bytes=ArrayBuffer.isView(value)?new Uint8Array(value.buffer,value.byteOffset,value.byteLength):value instanceof ArrayBuffer?new Uint8Array(value):null;
+ const bytes=binaryView(value);
  if(bytes){let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return {$vb6:'binary',value:btoa(binary)};}
  if(value instanceof Date)return {$vb6:'date',value:value.toISOString()};
  if(value!=null&&typeof value==='object'&&typeof value.toJSON!=='function'&&value.__type)throw new TypeError('Unsupported gateway parameter object');
@@ -3428,9 +3638,9 @@ return {encodeCell,decodeCell,encodeResult,decodeResult};
 })();
 
 /* ../data/http.js */
-__modules[31]=(()=>{
-const {encodeCell,decodeResult}=__modules[30];
-const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[17];
+__modules[32]=(()=>{
+const {encodeCell,decodeResult}=__modules[31];
+const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[18];
 
 
 async function boundedBody(response,limit){
@@ -3570,9 +3780,9 @@ return {HTTPProvider,GatewayProvider};
 })();
 
 /* ../data/files.js */
-__modules[32]=(()=>{
-const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[17];
-const {fieldValue}=__modules[20];
+__modules[33]=(()=>{
+const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[18];
+const {fieldValue}=__modules[21];
 
 
 function parseCSV(text){
@@ -3625,13 +3835,13 @@ return {parseCSV,writeCSV,FileDataProvider};
 })();
 
 /* ../data/connection.js */
-__modules[33]=(()=>{
-const {dataDefault}=__modules[18];
-const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[17];
-const {ConnectedRecordset}=__modules[22];
-const {fieldValue}=__modules[20];
-const {DataCollection}=__modules[19];
-const {DAOEngine,DAODatabase}=__modules[28];
+__modules[34]=(()=>{
+const {dataDefault}=__modules[19];
+const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[18];
+const {ConnectedRecordset}=__modules[23];
+const {fieldValue}=__modules[21];
+const {DataCollection}=__modules[20];
+const {DAOEngine,DAODatabase}=__modules[29];
 
 
 
@@ -3739,9 +3949,9 @@ return {ADOConnection,ADOCommand,DataCollection,DAOEngine,DAODatabase};
 })();
 
 /* binary-codec.js */
-__modules[34]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[14];
+__modules[35]=(()=>{
+const {VBError}=__modules[11];
+const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[15];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -3837,9 +4047,9 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* filesystem.js */
-__modules[35]=(()=>{
-const { VBError }=__modules[10];
-const {encodeANSI,decodeANSI}=__modules[34];
+__modules[36]=(()=>{
+const { VBError }=__modules[11];
+const {encodeANSI,decodeANSI}=__modules[35];
 
 
 const MAX_FILE=20*1024*1024;
@@ -3903,16 +4113,16 @@ return {VirtualFileSystem};
 })();
 
 /* ../data/context.js */
-__modules[36]=(()=>{
-const {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS}=__modules[26];
-const {DAOEngine}=__modules[28];
-const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[17];
-const {SQLiteProvider}=__modules[29];
-const {HTTPProvider,GatewayProvider}=__modules[31];
-const {FileDataProvider}=__modules[32];
-const {ADOConnection,ADOCommand,DataCollection}=__modules[33];
-const {ConnectedRecordset}=__modules[22];
-const {VirtualFileSystem}=__modules[35];
+__modules[37]=(()=>{
+const {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS}=__modules[27];
+const {DAOEngine}=__modules[29];
+const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[18];
+const {SQLiteProvider}=__modules[30];
+const {HTTPProvider,GatewayProvider}=__modules[32];
+const {FileDataProvider}=__modules[33];
+const {ADOConnection,ADOCommand,DataCollection}=__modules[34];
+const {ConnectedRecordset}=__modules[23];
+const {VirtualFileSystem}=__modules[36];
 
 
 
@@ -3985,8 +4195,8 @@ return {DataContext};
 })();
 
 /* financial.js */
-__modules[37]=(()=>{
-const {VBError}=__modules[8];
+__modules[38]=(()=>{
+const {VBError}=__modules[9];
 /**
  * Double-precision financial functions for the browser VB runtime.
  * Pure ES module: no DOM, network, filesystem or dynamic evaluation.
@@ -4175,7 +4385,7 @@ return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FI
 })();
 
 /* ../theme/theme.js */
-__modules[38]=(()=>{
+__modules[39]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
@@ -4232,8 +4442,8 @@ return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,color
 })();
 
 /* ../graphics/surface.js */
-__modules[39]=(()=>{
-const { colorValue, getTheme }=__modules[38];
+__modules[40]=(()=>{
+const { colorValue, getTheme }=__modules[39];
 
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
 const surfaces = new WeakMap();
@@ -4394,8 +4604,8 @@ return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
 })();
 
 /* native-windows.js */
-__modules[40]=(()=>{
-const {refreshGraphicsSurfaces}=__modules[39];
+__modules[41]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[40];
 
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -4587,8 +4797,8 @@ return {installNativeHost};
 })();
 
 /* ../project/binary-assets.js */
-__modules[41]=(()=>{
-const {VBError}=__modules[10];
+__modules[42]=(()=>{
+const {VBError}=__modules[11];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
 const fail=message=>{throw new VBError(message,1002);};
@@ -4599,10 +4809,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ../project/native-text.js */
-__modules[42]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[34];
-const {VBError}=__modules[10];
-const {fromBase64,toBase64}=__modules[41];
+__modules[43]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[35];
+const {VBError}=__modules[11];
+const {fromBase64,toBase64}=__modules[42];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -4666,9 +4876,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ../project/frx.js */
-__modules[43]=(()=>{
-const {VBError}=__modules[10];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[42];
+__modules[44]=(()=>{
+const {VBError}=__modules[11];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[43];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -4771,9 +4981,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[44]=(()=>{
-const {VBError}=__modules[10];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[43];
+__modules[45]=(()=>{
+const {VBError}=__modules[11];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[44];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -4865,11 +5075,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[45]=(()=>{
-const {VBError}=__modules[10];
-const {VBArray,bankersRound,numeric}=__modules[14];
-const {normalizeResources,decodeStringTable}=__modules[44];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[43];
+__modules[46]=(()=>{
+const {VBError}=__modules[11];
+const {VBArray,bankersRound,numeric}=__modules[15];
+const {normalizeResources,decodeStringTable}=__modules[45];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[44];
 
 
 
@@ -4900,8 +5110,8 @@ return {ResourceStore};
 })();
 
 /* error-messages.js */
-__modules[46]=(()=>{
-const {VBError}=__modules[8];
+__modules[47]=(()=>{
+const {VBError}=__modules[9];
 
 /** Invariant English descriptions for the errors produced by this runtime.
  * Localized Windows resource tables and arbitrary COM HRESULT messages are not
@@ -4935,9 +5145,9 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[47]=(()=>{
-const {VBError}=__modules[10];
-const {MISSING,VBArray,coerce,vbString}=__modules[14];
+__modules[48]=(()=>{
+const {VBError}=__modules[11];
+const {MISSING,VBArray,coerce,vbString}=__modules[15];
 
 
 const invalid=()=>{throw new VBError('Invalid procedure call or argument',5);};
@@ -5030,10 +5240,10 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[48]=(()=>{
-const {VBError}=__modules[8];
-const {MISSING,VBArray,numeric}=__modules[14];
-const {FINANCIAL_FUNCTIONS}=__modules[37];
+__modules[49]=(()=>{
+const {VBError}=__modules[9];
+const {MISSING,VBArray,numeric}=__modules[15];
+const {FINANCIAL_FUNCTIONS}=__modules[38];
 
 
 
@@ -5061,8 +5271,8 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[49]=(()=>{
-const {FINANCIAL_SIGNATURES}=__modules[37];
+__modules[50]=(()=>{
+const {FINANCIAL_SIGNATURES}=__modules[38];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
 const BUILTIN_SIGNATURES={
@@ -5084,7 +5294,7 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* constants.js */
-__modules[50]=(()=>{
+__modules[51]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -5111,19 +5321,19 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[51]=(()=>{
-const {errorDescription}=__modules[46];
-const {stringLibrary}=__modules[47];
-const {financialLibrary}=__modules[48];
-const {ResourceStore}=__modules[45];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[9];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[49];
-const {DisconnectedRecordset}=__modules[20];
-const {recordLength}=__modules[34];
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
-const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[14];
-const {VB_CONSTANTS}=__modules[50];
+__modules[52]=(()=>{
+const {errorDescription}=__modules[47];
+const {stringLibrary}=__modules[48];
+const {financialLibrary}=__modules[49];
+const {ResourceStore}=__modules[46];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[10];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[50];
+const {DisconnectedRecordset}=__modules[21];
+const {recordLength}=__modules[35];
+const { VBError }=__modules[11];
+const { lower }=__modules[14];
+const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[15];
+const {VB_CONSTANTS}=__modules[51];
 
 
 
@@ -5202,9 +5412,9 @@ return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ../controls/rtf.js */
-__modules[52]=(()=>{
-const {VBError}=__modules[10];
-const {decodeANSI}=__modules[34];
+__modules[53]=(()=>{
+const {VBError}=__modules[11];
+const {decodeANSI}=__modules[35];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -5313,9 +5523,9 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* ../controls/input.js */
-__modules[53]=(()=>{
-const {Cell,truth}=__modules[14];
-const {lower}=__modules[13];
+__modules[54]=(()=>{
+const {Cell,truth}=__modules[15];
+const {lower}=__modules[14];
 
 
 // Browser/Windows button bitmasks agree, but `button` is an ordinal and a
@@ -5429,8 +5639,8 @@ return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsI
 })();
 
 /* ../controls/form-window.js */
-__modules[54]=(()=>{
-const {el}=__modules[13];
+__modules[55]=(()=>{
+const {el}=__modules[14];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
 function installFormWindow(form){
@@ -5455,9 +5665,9 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[55]=(()=>{
-const {el}=__modules[13];
-const {getTheme}=__modules[38];
+__modules[56]=(()=>{
+const {el}=__modules[14];
+const {getTheme}=__modules[39];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -5531,8 +5741,8 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[56]=(()=>{
-const {el}=__modules[13];
+__modules[57]=(()=>{
+const {el}=__modules[14];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
 function scrollbarGeometry(min,max,value,length,page=1){
@@ -5572,7 +5782,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/icon-art.js */
-__modules[57]=(()=>{
+__modules[58]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -5731,8 +5941,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[58]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[57];
+__modules[59]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[58];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -5759,11 +5969,11 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../theme/menu.js */
-__modules[59]=(()=>{
-const {uiDocument}=__modules[12];
-const {el}=__modules[13];
-const {icon}=__modules[58];
-const {getTheme}=__modules[38];
+__modules[60]=(()=>{
+const {uiDocument}=__modules[13];
+const {el}=__modules[14];
+const {icon}=__modules[59];
+const {getTheme}=__modules[39];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -5848,10 +6058,10 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ../controls/richtext.js */
-__modules[60]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[52];
-const {VBError}=__modules[10];
-const {oleColor}=__modules[39];
+__modules[61]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[53];
+const {VBError}=__modules[11];
+const {oleColor}=__modules[40];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -5939,11 +6149,11 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[61]=(()=>{
-const {normalizeDataSources}=__modules[17];
-const { clone, lower, safeName }=__modules[13];
-const {normalizeResources}=__modules[44];
-const { VBError }=__modules[10];
+__modules[62]=(()=>{
+const {normalizeDataSources}=__modules[18];
+const { clone, lower, safeName }=__modules[14];
+const {normalizeResources}=__modules[45];
+const { VBError }=__modules[11];
 
 
 
@@ -6010,9 +6220,9 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[62]=(()=>{
-const { VBError }=__modules[10];
-const { lower }=__modules[13];
+__modules[63]=(()=>{
+const { VBError }=__modules[11];
+const { lower }=__modules[14];
 
 
 class ControlCollection {
@@ -6058,23 +6268,23 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[63]=(()=>{
-const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[53];
-const {installFormWindow}=__modules[54];
-const {ClassicCombo,ClassicUpDown}=__modules[55];
-const {ClassicScrollbar}=__modules[56];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[59];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[60];
-const {parseRTF}=__modules[52];
-const { el, lower, clone }=__modules[13];
-const { VBError }=__modules[10];
-const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[14];
-const { MemoryRecordset }=__modules[51];
-const { GraphicsSurface }=__modules[39];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[38];
-const { icon, controlIcon }=__modules[58];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[61];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[62];
+__modules[64]=(()=>{
+const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[54];
+const {installFormWindow}=__modules[55];
+const {ClassicCombo,ClassicUpDown}=__modules[56];
+const {ClassicScrollbar}=__modules[57];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[60];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[61];
+const {parseRTF}=__modules[53];
+const { el, lower, clone }=__modules[14];
+const { VBError }=__modules[11];
+const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[15];
+const { MemoryRecordset }=__modules[52];
+const { GraphicsSurface }=__modules[40];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[39];
+const { icon, controlIcon }=__modules[59];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[62];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[63];
 
 
 
@@ -6442,10 +6652,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[64]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[63];
-const {clone}=__modules[13];
-const {newId}=__modules[61];
+__modules[65]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[64];
+const {clone}=__modules[14];
+const {newId}=__modules[62];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -6524,10 +6734,10 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[65]=(()=>{
-const {VBError}=__modules[10];
-const {el}=__modules[13];
-const {NOTHING}=__modules[14];
+__modules[66]=(()=>{
+const {VBError}=__modules[11];
+const {el}=__modules[14];
+const {NOTHING}=__modules[15];
 
 
 
@@ -6584,9 +6794,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../controls/dialog.js */
-__modules[66]=(()=>{
-const {el}=__modules[13];
-const {icon}=__modules[58];
+__modules[67]=(()=>{
+const {el}=__modules[14];
+const {icon}=__modules[59];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -6621,11 +6831,11 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[67]=(()=>{
-const {VBError}=__modules[8];
-const {lower}=__modules[13];
-const {VB_CONSTANTS}=__modules[50];
-const {VBCurrency,coerce,unary,binary}=__modules[14];
+__modules[68]=(()=>{
+const {VBError}=__modules[9];
+const {lower}=__modules[14];
+const {VB_CONSTANTS}=__modules[51];
+const {VBCurrency,coerce,unary,binary}=__modules[15];
 
 
 
@@ -6737,8 +6947,8 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[68]=(()=>{
-const {VBError}=__modules[10];
+__modules[69]=(()=>{
+const {VBError}=__modules[11];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -6764,8 +6974,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[69]=(()=>{
-const {lower}=__modules[13];
+__modules[70]=(()=>{
+const {lower}=__modules[14];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -6808,8 +7018,8 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[70]=(()=>{
-const { tokenize, VBError }=__modules[10];
+__modules[71]=(()=>{
+const { tokenize, VBError }=__modules[11];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -6886,10 +7096,10 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[71]=(()=>{
-const { VBError }=__modules[10];
-const { parseExpression }=__modules[70];
-const { binary, unary, truth }=__modules[14];
+__modules[72]=(()=>{
+const { VBError }=__modules[11];
+const { parseExpression }=__modules[71];
+const { binary, unary, truth }=__modules[15];
 
 
 
@@ -6928,14 +7138,14 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[72]=(()=>{
-const {bindConstants}=__modules[67];
-const {defaultIdentifierType,addDefaultTypes}=__modules[68];
-const {validateInterfaces}=__modules[69];
-const { preprocess }=__modules[71];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[10];
-const { parseExpression, parseCall }=__modules[70];
-const { lower }=__modules[13];
+__modules[73]=(()=>{
+const {bindConstants}=__modules[68];
+const {defaultIdentifierType,addDefaultTypes}=__modules[69];
+const {validateInterfaces}=__modules[70];
+const { preprocess }=__modules[72];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[11];
+const { parseExpression, parseCall }=__modules[71];
+const { lower }=__modules[14];
 
 
 
@@ -7167,10 +7377,10 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* debug-control.js */
-__modules[73]=(()=>{
-const {VBError,tokenize}=__modules[10];
-const {lower}=__modules[13];
-const {truth}=__modules[14];
+__modules[74]=(()=>{
+const {VBError,tokenize}=__modules[11];
+const {lower}=__modules[14];
+const {truth}=__modules[15];
 
 
 
@@ -7311,10 +7521,10 @@ return {StopExecution,isSequencePoint,statementIndex,RuntimeDebugger,immediateSt
 })();
 
 /* win32.js */
-__modules[74]=(()=>{
-const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[7];
-const {VBError}=__modules[10];
-const {VBArray,VBCurrency,numeric,coerce}=__modules[14];
+__modules[75]=(()=>{
+const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[8];
+const {VBError}=__modules[11];
+const {VBArray,VBCurrency,numeric,coerce}=__modules[15];
 
 
 
@@ -7431,8 +7641,8 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[75]=(()=>{
-const {VBError}=__modules[10];
+__modules[76]=(()=>{
+const {VBError}=__modules[11];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
 class DebugEvaluationAbort extends VBError {
@@ -7460,11 +7670,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[76]=(()=>{
-const {VBError}=__modules[10];
-const {parseExpression}=__modules[70];
-const {lower}=__modules[13];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[14];
+__modules[77]=(()=>{
+const {VBError}=__modules[11];
+const {parseExpression}=__modules[71];
+const {lower}=__modules[14];
+const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[15];
 
 
 
@@ -7514,8 +7724,8 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[77]=(()=>{
-const {VBError}=__modules[10];
+__modules[78]=(()=>{
+const {VBError}=__modules[11];
 
 const instructionKey=ins=>{const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;return JSON.stringify(rest);};
 const key=instructionKey;
@@ -7541,10 +7751,10 @@ return {instructionKey,linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[78]=(()=>{
-const {statementIndex}=__modules[73];
-const {instructionMap,linearInstruction,instructionKey}=__modules[77];
-const {VBError}=__modules[10];
+__modules[79]=(()=>{
+const {statementIndex}=__modules[74];
+const {instructionMap,linearInstruction,instructionKey}=__modules[78];
+const {VBError}=__modules[11];
 
 
 
@@ -7606,25 +7816,25 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[79]=(()=>{
-const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[73];
-const {VBWin32Bridge}=__modules[74];
-const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[15];
-const {DataContext}=__modules[36];
-const {errorDescription}=__modules[46];
-const {DebugEvaluationSession}=__modules[75];
-const {hasDataDefault,hasDataMember}=__modules[18];
-const {defaultIdentifierType}=__modules[68];
-const {DebugInspector}=__modules[76];
-const {planLiveEdit,nextStatementIndex}=__modules[78];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[34];
-const { Signal, lower, VERSION }=__modules[13];
-const { VBError, splitTop, tokenize }=__modules[10];
-const { parseExpression, parseCall }=__modules[70];
-const { compileProject }=__modules[72];
-const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[14];
-const { VirtualFileSystem }=__modules[35];
-const { createLibrary, MemoryRecordset }=__modules[51];
+__modules[80]=(()=>{
+const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[74];
+const {VBWin32Bridge}=__modules[75];
+const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[16];
+const {DataContext}=__modules[37];
+const {errorDescription}=__modules[47];
+const {DebugEvaluationSession}=__modules[76];
+const {hasDataDefault,hasDataMember}=__modules[19];
+const {defaultIdentifierType}=__modules[69];
+const {DebugInspector}=__modules[77];
+const {planLiveEdit,nextStatementIndex}=__modules[79];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[35];
+const { Signal, lower, VERSION }=__modules[14];
+const { VBError, splitTop, tokenize }=__modules[11];
+const { parseExpression, parseCall }=__modules[71];
+const { compileProject }=__modules[73];
+const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[15];
+const { VirtualFileSystem }=__modules[36];
+const { createLibrary, MemoryRecordset }=__modules[52];
 
 
 
@@ -8217,19 +8427,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[80]=(()=>{
-const {RuntimeAgentControl}=__modules[64];
-const {RuntimeMDI}=__modules[65];
-const {runtimeDialog,messageBoxOptions}=__modules[66];
-const { applyTheme, themeId }=__modules[38];
-const { icon }=__modules[58];
-const {rasterDataURL}=__modules[43];
-const { el, download, lower, clone }=__modules[13];
-const { compileProject }=__modules[72];
-const { VirtualMachine }=__modules[79];
-const { VirtualFileSystem }=__modules[35];
-const { describe }=__modules[14];
-const { BrowserForm }=__modules[63];
+__modules[81]=(()=>{
+const {RuntimeAgentControl}=__modules[65];
+const {RuntimeMDI}=__modules[66];
+const {runtimeDialog,messageBoxOptions}=__modules[67];
+const { applyTheme, themeId }=__modules[39];
+const { icon }=__modules[59];
+const {rasterDataURL}=__modules[44];
+const { el, download, lower, clone }=__modules[14];
+const { compileProject }=__modules[73];
+const { VirtualMachine }=__modules[80];
+const { VirtualFileSystem }=__modules[36];
+const { describe }=__modules[15];
+const { BrowserForm }=__modules[64];
 
 
 
@@ -8287,30 +8497,30 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[81]=(()=>{
-const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[7];
-const {AutomationRegistry}=__modules[15];
-const {ControlAdapterRegistry}=__modules[16];
-const {DataContext}=__modules[36];
-const {ADOConnection,ADOCommand}=__modules[33];
-const {ConnectedRecordset}=__modules[22];
-const {DATA_CONSTANTS}=__modules[17];
-const {FINANCIAL_FUNCTIONS}=__modules[37];
-const {installNativeHost}=__modules[40];
-const {ResourceStore}=__modules[45];
-const {readRES,writeRES,setResource,setResourceString}=__modules[44];
-const {THEMES,applyTheme,colorValue}=__modules[38];
-const {MemoryRecordset}=__modules[51];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[52];
-const { ApplicationHost }=__modules[80];
-const { VirtualMachine }=__modules[79];
-const { compileProject, compileModule }=__modules[72];
-const { parseExpression }=__modules[70];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[14];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[9];
-const { VirtualFileSystem }=__modules[35];
-const { BrowserControl, BrowserForm }=__modules[63];
-const { GraphicsSurface }=__modules[39];
+__modules[82]=(()=>{
+const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[8];
+const {AutomationRegistry}=__modules[16];
+const {ControlAdapterRegistry}=__modules[17];
+const {DataContext}=__modules[37];
+const {ADOConnection,ADOCommand}=__modules[34];
+const {ConnectedRecordset}=__modules[23];
+const {DATA_CONSTANTS}=__modules[18];
+const {FINANCIAL_FUNCTIONS}=__modules[38];
+const {installNativeHost}=__modules[41];
+const {ResourceStore}=__modules[46];
+const {readRES,writeRES,setResource,setResourceString}=__modules[45];
+const {THEMES,applyTheme,colorValue}=__modules[39];
+const {MemoryRecordset}=__modules[52];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[53];
+const { ApplicationHost }=__modules[81];
+const { VirtualMachine }=__modules[80];
+const { compileProject, compileModule }=__modules[73];
+const { parseExpression }=__modules[71];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[15];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[10];
+const { VirtualFileSystem }=__modules[36];
+const { BrowserControl, BrowserForm }=__modules[64];
+const { GraphicsSurface }=__modules[40];
 
 
 
@@ -8339,6 +8549,6 @@ const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Bro
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[81];
+globalThis["VB6Runtime"]=__modules[82];
 })();
 VB6Runtime.mountApplication(JSON.parse(document.getElementById('vb6-project').textContent),document.getElementById('app'),{"persist":true}).then(host=>{globalThis.vb6Application=host;});</script></body></html>
