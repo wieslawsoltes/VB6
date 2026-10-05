@@ -11,7 +11,7 @@ function Encode-Cell($value) {
     if ($null -eq $value -or $value -is [DBNull]) { return $null }
     if ($value -is [byte[]]) { return @{ '$vb6'='binary'; value=[Convert]::ToBase64String($value) } }
     if ($value -is [DateTime]) { return @{ '$vb6'='date'; value=$value.ToUniversalTime().ToString('o') } }
-    if ($value -is [Int64] -or $value -is [Decimal]) { return $value.ToString([Globalization.CultureInfo]::InvariantCulture) }
+    if ($value -is [Int64] -or $value -is [UInt64] -or $value -is [Decimal]) { return $value.ToString([Globalization.CultureInfo]::InvariantCulture) }
     return $value
 }
 function Read-Result($recordset, $affected) {

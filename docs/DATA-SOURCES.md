@@ -539,3 +539,9 @@ No proprietary provider is bundled or downloaded by these tests. Missing ACE,
 third-party ODBC drivers, passwords, linked servers and licensed native VB6 compiler
 execution still need the corresponding installation and authorized environment.
 The JSON reports identify which installed combinations actually passed.
+
+### Native schema field widths
+
+Native OLE DB schema rowsets retain `adTinyInt` (16), `adUnsignedSmallInt` (18), `adUnsignedInt` (19), and `adUnsignedBigInt` (21) metadata instead of failing or narrowing unsigned values to signed Long. Range violations raise VB overflow. Unsigned 64-bit values use the runtime's exact Decimal representation; supply Decimal, BigInt, or an invariant string for values outside JavaScript's safe integer range. Already-rounded JavaScript Numbers are rejected. The Windows worker serializes UInt64 without JSON precision loss. This does not assert that every installed provider supports binding or storing every ADO type.
+
+Native-provider CI retains regression and provider logs independently. Provider probes still execute after a regression failure, but that failure continues to fail the job. Provider availability, bitness, and actual executed checks remain separate from mock/unit coverage and native Microsoft VB6 compiler certification.

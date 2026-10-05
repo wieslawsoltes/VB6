@@ -570,7 +570,7 @@ const DATA_CONSTANTS = Object.freeze({
   adParamReturnValue:4, adSchemaTables:20, adSchemaColumns:4,
   adModeRead:1, adModeWrite:2, adModeReadWrite:3,
   adSmallInt:2, adInteger:3, adSingle:4, adDouble:5, adCurrency:6,
-  adDate:7, adBoolean:11, adVariant:12, adDecimal:14, adGUID:72, adNumeric:131, adDBDate:133, adDBTime:134, adDBTimeStamp:135, adUnsignedTinyInt:17, adBigInt:20,
+  adDate:7, adBoolean:11, adVariant:12, adDecimal:14, adGUID:72, adNumeric:131, adDBDate:133, adDBTime:134, adDBTimeStamp:135, adTinyInt:16, adUnsignedTinyInt:17, adUnsignedSmallInt:18, adUnsignedInt:19, adUnsignedBigInt:21, adBigInt:20,
   adBinary:128, adChar:129, adWChar:130, adVarChar:200, adLongVarChar:201,
   adVarWChar:202, adLongVarWChar:203, adVarBinary:204, adLongVarBinary:205,
   adAffectCurrent:1, adAffectGroup:2, adAffectAll:3, adLockUnspecified:-1,
