@@ -1,0 +1,56 @@
+name: Integrate current main for issue 39
+on:
+  push:
+    branches: [fix/issue-39-visual-fidelity]
+    paths: [.github/workflows/issue39-arm-integration.yml]
+permissions:
+  contents: write
+concurrency:
+  group: issue39-current-source-integration
+  cancel-in-progress: true
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/issue-39-visual-fidelity'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Integrate pinned data-source main without discarding source conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-commit --no-ff a098f73921a624e30c26a3aad07c76a14e10073e || {
+            test -n "$(git diff --name-only --diff-filter=U)"
+            while IFS= read -r path; do
+              case "$path" in
+                dist/*|src/exporter/runtime-payload.js|src/editor/diagnostics-payload.js) git checkout --ours -- "$path"; git add -- "$path" ;;
+                *) echo "Handwritten conflict requires review: $path"; exit 1 ;;
+              esac
+            done < <(git diff --name-only --diff-filter=U)
+          }
+          npm run build
+          npm test
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git commit -m 'Integrate current RDO main with issue 39 visual fixes and rebuild combined distributions'
+          npm run build
+          git diff --exit-code
+          mkdir -p /tmp/issue39-source
+          git archive --format=tar.gz HEAD > /tmp/issue39-source/source.tar.gz
+          git rev-parse HEAD HEAD^{tree} > /tmp/issue39-source/revision.txt
+          sha256sum /tmp/issue39-source/source.tar.gz > /tmp/issue39-source/SHA256SUMS.txt
+          test "$(git ls-remote origin refs/heads/fix/issue-39-visual-fidelity | cut -f1)" = '${{ github.sha }}'
+          git push origin HEAD:fix/issue-39-visual-fidelity
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue39-current-source
+          path: /tmp/issue39-source/
+          retention-days: 3

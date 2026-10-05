@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   browser:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: npm run build && node --test tests/issue39-fidelity.test.mjs
+      - name: Build and full Node regression suite
+        run: npm run build && npm test
       - run: python -m pip install playwright==1.57.0 Pillow
       - run: python -m playwright install --with-deps ${{ matrix.engine }}
       - name: Select the Playwright-matched Chromium
@@ -43,6 +44,28 @@ jobs:
         run: python tools/browser-issue39-state.py --engine ${{ matrix.engine }}
       - name: Retain all existing classic HTML contracts
         run: python tools/browser-classic-html.py --engine ${{ matrix.engine }}
+      - name: Retain reported functional fixes
+        env:
+          VB6_BROWSER: ${{ matrix.engine }}
+        run: |
+          python tools/browser-designer-selection.py
+          python tools/browser-editor-control-list.py
+          python tools/browser-editor-event-selection.py
+          python tools/browser-form-input.py
+      - name: Existing IDE and runtime Chromium regressions
+        if: matrix.engine == 'chromium'
+        run: |
+          python tools/browser-tests.py
+          python tools/browser-parity-tests.py
+          python tools/browser-features-04.py
+          python tools/recovery-browser-tests.py
+          python tools/browser-finalization-05.py
+          python tools/browser-boundaries-06.py
+          python tools/browser-visual-tests.py
+      - name: Existing detached-window regression matrix
+        env:
+          VB6_BROWSER: ${{ matrix.engine }}
+        run: python tools/browser-windows-tests.py
       - name: Reproducible distribution guard
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
@@ -53,4 +76,7 @@ jobs:
             reports/issue39/
             reports/issue39-state/
             reports/classic-html/
+            reports/browser-windows/
+            reports/browser-tests/
+            reports/visual/
           retention-days: 14
