@@ -39,6 +39,8 @@ jobs:
           PY
       - name: Exact authored pixels and real IDE HTTP/file workflows
         run: python tools/browser-issue39.py --engine ${{ matrix.engine }}
+      - name: Real floating toolbar caption and disabled states
+        run: python tools/browser-issue39-state.py --engine ${{ matrix.engine }}
       - name: Retain all existing classic HTML contracts
         run: python tools/browser-classic-html.py --engine ${{ matrix.engine }}
       - name: Reproducible distribution guard
@@ -49,5 +51,6 @@ jobs:
           name: issue39-${{ matrix.engine }}
           path: |
             reports/issue39/
+            reports/issue39-state/
             reports/classic-html/
           retention-days: 14

@@ -42,6 +42,8 @@
 .icon[data-icon=restore] {--vb-caption-mask:var(--vb-caption-restore)}
 /* The floating-toolbar button is 15px: center on whole CSS pixels rather
    than putting its mask at 2.5px. Preserve its 15px outside dimensions. */
+/* Preserve the real toolbar caption position, outside its command flex flow. */
+.command-bar-floating .command-floating-close {position:absolute}
 .command-floating-close > .icon {position:absolute!important;left:2px;top:2px}
 @media (forced-colors:none) {
  .command-floating-close {border:0;box-shadow:var(--vb-bevel-raised)}

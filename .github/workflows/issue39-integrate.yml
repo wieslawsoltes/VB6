@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Merge pinned main, rejecting handwritten conflicts
+      - name: Prepare branch integration and generated bundles, not final merge validation
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
@@ -40,14 +40,14 @@ jobs:
             done < <(git diff --name-only --diff-filter=U)
           }
           npm run build
-          npm test
+          node --test tests/issue39-fidelity.test.mjs
           git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
-          git commit -m 'Merge current main into issue 39 visual fixes and regenerate combined distributions'
+          git commit -m 'Integrate current main and regenerate issue 39 distributions for full Linux and browser validation'
           npm run build
           git diff --exit-code
           test "$(git ls-remote origin refs/heads/fix/issue-39-visual-fidelity | cut -f1)" = '${{ github.sha }}'
           git push origin HEAD:fix/issue-39-visual-fidelity
-      - name: Archive integration sources
+      - name: Archive integration sources for independent full validation
         run: |
           mkdir -p issue39-artifact
           git archive --format=tar.gz HEAD > issue39-artifact/source.tar.gz
