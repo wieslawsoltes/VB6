@@ -12,6 +12,18 @@ REPORT.mkdir(parents=True, exist_ok=True)
 class QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
+    def do_GET(self):
+        # A real HTML origin for SDK/import/worker checks. Extensionless files
+        # such as LICENSE are application/octet-stream and start a download.
+        if self.path == '/__win32-test-host.html':
+            body = b'<!doctype html><html><head><meta charset="utf-8"><title>Win32 package host</title></head><body></body></html>'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
 server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(ROOT)))
 threading.Thread(target=server.serve_forever, daemon=True).start()
 base = f'http://127.0.0.1:{server.server_port}'
@@ -86,7 +98,7 @@ try:
             page.set_content('<html><body></body></html>')
             page.add_script_tag(content=(ROOT/'dist/win32-browser.js').read_text())
         else:
-            page.goto(base+'/LICENSE')
+            page.goto(base+'/__win32-test-host.html')
             page.add_script_tag(url=base+'/dist/win32-browser.js')
         state=page.evaluate('''async()=>{const w=Win32Compat.createWin32();const p=w.memory.alloc(16);w.memory.putString(p,'€',16);const result={exports:w.manifest().length,text:w.memory.string(p)};w.dispose();return result;}''')
         check(state['text']=='€' and state['exports']>=170,'Standalone global bundle failed')
