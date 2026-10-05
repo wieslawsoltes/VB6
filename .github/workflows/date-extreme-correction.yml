@@ -1,0 +1,80 @@
+name: Apply independently measured DateSerial edge rules
+on:
+  push:
+    branches: [feat/win32-date-export]
+    paths: [.github/workflows/date-extreme-correction.yml]
+permissions:
+  contents: write
+concurrency:
+  group: date-extreme-correction
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/win32-date-export
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply only reviewed source corrections with before and after fingerprints
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git merge-base --is-ancestor 53701aa3996ac20936a3310217f9d26c77c1e7c2 HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          hashes={
+            'src/native/dates.js':('c5eb3b2c064348babad699a6dff4b000fae01f5fbed044daa407f91f55827d31','e74e2adb589cffc301253a52377399abec76257c92f9ff35a8f76fbe42e7488b'),
+            'tools/win32-date-fixtures.mjs':('84393e1634a33ebc706e30195445ed33c1406f6aa28a62477d8c01a35e21c3ab','a46123014797b4cf849804986eae943697ca9a1dde52e26c0f735f949e91c065'),
+            'tools/win32-date-reference.mjs':('9e221c01d944c3bd4388b7aa076c247d67bdf6571574b4d39c4d0fc762788acf','4f5010f689c7e0fc82b47ec2a88b946157daa59e2b2e231cdb2c9b9edc1c3d5b'),
+            'tests/win32-date-reference.test.mjs':('96d240d98e847ec15bde9a1aa94d15ff41067583a4b384519411d1f18da2fd07','5f88a459f32a2270e973211c04a72349b8a181794b1e086d1ab477f795f6ffe0'),
+            'docs/WIN32-DATES.md':('409c616c1ec0ad9efa8d12ce793bc057fc4a03e3b5d098dacf371879ae42973f','135c26e33350139decdba66f517162a380e92b3ff6129430672395cc5bcf0eba')
+          }
+          digest=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+          for p,(before,after) in hashes.items():assert digest(p)==before,'Unexpected source: '+p
+          p=Path('src/native/dates.js');s=p.read_text()
+          s=s.replace('  // must be valid before the day offset: a negative day cannot rescue year 10000.','  // must not exceed 9999 before the day offset. A sub-100 intermediate year may\n  // still produce a valid final date after a large positive day offset.')
+          a='x.value(arg(12)).emit(0x48,0x99,0xb9).imm(12)';b='x.value(arg(12)).emit(0x48,0x0f,0xbf,0xc0,0x99,0xb9).imm(12)';assert s.count(a)==1;s=s.replace(a,b)
+          s=s.replace('  // floor((month-1)/12), with a positive remainder in 0..11.','  // Legacy month decrement wraps as signed Integer before floor division.\n  // In particular, month -32768 decrements to 32767, not a 32-bit -32769.\n  // floor((month-1)/12), with a positive remainder in 0..11.')
+          a="x.label(fullYear).emit(0x89,0xd8).compare(100).branch('l','error:5')";b="x.label(fullYear).emit(0x89,0xd8).compare(1).branch('l','error:5')";assert s.count(a)==1;s=s.replace(a,b);p.write_text(s)
+          p=Path('tools/win32-date-fixtures.mjs');s=p.read_text();needle="  check('DateSerial(10000,0,1) = #9999-12-01#','month normalization can first bring a large year back in range');";assert s.count(needle)==1;s=s.replace(needle,needle+"\n  check('DateSerial(2024,-32768,1) = DateSerial(2024,32767,32)','minimum Integer month retains legacy decrement wrapping');");p.write_text(s)
+          p=Path('tools/win32-date-reference.mjs');s=p.read_text().replace("const code=['Dim result As Long, n As Long, d As Date']","const code=['Dim result As Long, actualError As Long, n As Long, d As Date']")
+          a="  if(m[2]==='error')code.push('On Error Resume Next','Err.Clear','result = '+expression,'result = Err.Number','Err.Clear','On Error GoTo 0');\n  else code.push('result = '+expression);\n  code.push(`If result <> ${value} Then ExitProcess ${i+1}`);"
+          b="  // Trap every case so an unexpected native error reports its numbered probe\n  // instead of hanging on a modal runtime-error dialog. Never accept an error\n  // merely because a previous result happened to equal the expected value.\n  code.push('On Error Resume Next','Err.Clear','result = '+expression,'actualError = Err.Number','Err.Clear','On Error GoTo 0');\n  code.push(`If actualError <> ${m[2]==='error'?value:0} Then ExitProcess ${i+1}`);\n  if(m[2]==='value')code.push(`If result <> ${value} Then ExitProcess ${i+1}`);"
+          assert s.count(a)==1;s=s.replace(a,b);p.write_text(s)
+          p=Path('tests/win32-date-reference.test.mjs');s=p.read_text();s+='''
+
+          test('every differential probe checks its actual error before comparing values',async()=>{
+           const {DATE_CONTRACTS,compileReference}=await import('../tools/win32-date-reference.mjs');
+           const text=DATE_CONTRACTS.map((_,i)=>`${i}|${i%2?'error':'value'}|${i%2?5:0}`).join('\\n');
+           const code=compileReference(text).project.modules[0].code;
+           assert.equal((code.match(/actualError = Err.Number/g)||[]).length,DATE_CONTRACTS.length);
+           assert.equal((code.match(/If actualError <> /g)||[]).length,DATE_CONTRACTS.length);
+           assert.ok(code.indexOf('If actualError <> 0 Then ExitProcess 1') < code.indexOf('If result <> 0 Then ExitProcess 1'));
+           assert.match(code,/If actualError <> 5 Then ExitProcess 2/);
+          });
+          ''';p.write_text(s)
+          p=Path('docs/WIN32-DATES.md');s=p.read_text().replace('Gregorian calendar window. That expanded year must be within 100 through 9999\nbefore normalizing the day, and the final date must also remain in range.','Gregorian calendar window. That expanded year must not exceed 9999 before\nnormalizing the day. A sub-100 intermediate year can become valid after a large\npositive day offset, but the final date must be within years 100 through 9999.\nThe month decrement retains the legacy signed-Integer wrap: month -32768 is\nnormalized after decrementing to 32767. These boundary rules are measured by the\nindependent installed Script Host reference, not inferred from ordinary dates.')
+          s+="\nEvery reference probe captures the actual native error before comparing its value.\nAn unexpected error therefore exits with the probe number instead of displaying\na modal error until timeout. Neither expected errors nor successful results can\npass by accidentally reusing a preceding probe's value.\n";p.write_text(s)
+          for p,(before,after) in hashes.items():assert digest(p)==after,'Incorrect corrected source: '+p
+          PY
+          npm run build
+          npm test
+          node tools/win32-date-fixtures.mjs
+          node tools/win32-date-reference.mjs --prepare
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git add src/native/dates.js tools/win32-date-fixtures.mjs tools/win32-date-reference.mjs tests/win32-date-reference.test.mjs docs/WIN32-DATES.md dist
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
+          git diff --cached --check
+          git commit -m 'fix(native): preserve measured Integer month wrap and DateSerial day normalization' -m 'Retain all 372 installed Script Host probes, including 343 DateSerial cases. Normalize the minimum Integer month with its legacy decrement wrap; allow a large positive day to bring a sub-100 intermediate year into the supported final range. Check each reference probe actual error before value comparison, preventing modal timeouts or stale-value false positives. Windows execution remains mandatory.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/win32-date-export
