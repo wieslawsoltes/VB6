@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   integrate:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
