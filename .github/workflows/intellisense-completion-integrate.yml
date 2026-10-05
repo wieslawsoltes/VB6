@@ -1,0 +1,100 @@
+name: Recover and integrate browser IntelliSense
+on:
+  push:
+    branches: [feature/intellisense-browser-completion]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/feature/intellisense-browser-completion'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed recovery and hardening delta
+        run: |
+          git fetch origin 58ec110986c0c884d6e01f0f3c29d9d2a3c489c7
+          python - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, json, subprocess, zlib
+          old_ref='58ec110986c0c884d6e01f0f3c29d9d2a3c489c7'
+          def digest(value): return hashlib.sha256(value.encode()).hexdigest()
+          def old_file(name): return subprocess.check_output(['git','show',old_ref+':'+name]).decode()
+          def decode(chunks,sha):
+              raw=zlib.decompress(base64.b64decode(''.join(chunks),validate=True))
+              assert len(raw)<1024*1024 and hashlib.sha256(raw).hexdigest()==sha, 'Source transfer checksum mismatch'
+              return json.loads(raw)
+          old_chunks=[old_file(f'tools/intellisense-compatibility-part{i}.txt').strip() for i in range(1,4)]
+          old=decode(old_chunks,'501c556eccfb5a24add429f8819d56534804f9845f5f4df3672dcd643c27b0f4')
+          hashes=['64f763d85096963d0316b37a455428cbcbeddb119db3a8fddebb443b697715ec','990036e71483183be50219cf37342cb628f064cc620071f10d98ba2ae32293c2','1bbf1b72e9748565653e4c2985bdd620af7ec1b145182c35a7fdc872932df29c']
+          chunks=[Path(f'tools/intellisense-completion-part{i}.txt').read_text().strip() for i in range(1,4)]
+          assert all(digest(chunk)==sha for chunk,sha in zip(chunks,hashes)), 'Source transfer part mismatch'
+          changes=decode(chunks,'19275e703074197dba59cf681d86e397240475c096719668d638c2043b5b16db')
+          assert len(changes)==21
+          for name,change in changes.items():
+              path=Path(name)
+              assert not path.is_absolute() and '..' not in path.parts
+              current=path.read_text() if path.exists() else ''
+              if 'base_git' in change:
+                  blob=current.encode()
+                  assert hashlib.sha1(b'blob '+str(len(blob)).encode()+b'\0'+blob).hexdigest()==change['base_git'], 'Workflow changed since review'
+              elif change.get('main_base') is not None:
+                  assert path.is_file() and digest(current)==change['main_base'], 'Main source changed since review: '+name
+              else: assert not path.exists(), 'New source file already exists: '+name
+              if change.get('origin')=='recovered':
+                  previous=old.get(name)
+                  if previous and 'content' in previous: source=previous['content']
+                  else:
+                      source=old_file(name)
+                      if previous:
+                          assert digest(source)==previous['sha256'], 'Recovered source base mismatch: '+name
+                          for start,end,text in reversed(previous['edits']): source=source[:start]+text+source[end:]
+                  if previous: assert digest(source)==previous['result'], 'Recovered source result mismatch: '+name
+                  assert digest(source)==change['base'], 'Recovery snapshot mismatch: '+name
+              else: source=current
+              if 'content' in change: source=change['content']
+              else:
+                  for start,end,text in reversed(change['edits']): source=source[:start]+text+source[end:]
+              assert digest(source)==change['result'], 'Final source mismatch: '+name
+              path.parent.mkdir(parents=True,exist_ok=True);path.write_text(source)
+              subprocess.run(['git','add','--',name],check=True)
+              print('Verified',name)
+          PY
+      - name: Build and validate exact combined source
+        run: |
+          mkdir -p reports/intellisense-integration
+          npm run build
+          git diff --check
+          set -o pipefail
+          npm test 2>&1 | tee reports/intellisense-integration/node.log
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          expected={'dist/studio.js':'1158b30f561c2581850c14016ff96cb1f01f51553763c63f5728297c113b61a5','dist/VB6-Studio-Web.html':'942e7c8c0e83e2110850d493a2275587049b3d46302d2f45613e206bac40da48'}
+          for name,sha in expected.items():
+              assert hashlib.sha256(Path(name).read_bytes()).hexdigest()==sha, 'Generated distribution differs from reviewed local build: '+name
+          PY
+      - name: Commit readable sources and remove temporary transport files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm tools/intellisense-completion-part{1,2,3}.txt .github/workflows/intellisense-completion-integrate.yml
+          git add -u
+          git commit -m 'feat(intellisense): integrate browser event, reference, expression and DAO compatibility'
+          git push origin HEAD:feature/intellisense-browser-completion
+      - name: Reproducible source snapshot
+        if: always()
+        run: git archive --format=zip --output=intellisense-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intellisense-completion-source
+          path: |
+            intellisense-source.zip
+            reports/intellisense-integration/
+          retention-days: 7
