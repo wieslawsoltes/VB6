@@ -15,7 +15,7 @@ not a claim of native Windows font or complete VB6 golden-image certification.
 | --- | --- |
 | Maximize button missing an edge | A complete 10px rectangular mask replaces a clipped/scaled 16px general-purpose icon in caption contexts. |
 | Crooked close buttons in Toolbox, Project, Properties, Form Layout and Immediate | Original integer-cell close artwork at its native 10px size; no font glyph or fractional 16-to-12 scaling. |
-| Cramped document-caption icons | Caption-only masks fit within existing 14/16px buttons with the two-pixel bevel clear. Restore and detach artwork also use integer cells. The 15px floating-toolbar close button has an integer origin. |
+| Cramped document-caption icons | Caption-only masks fit within existing 14/16px buttons with the two-pixel bevel clear. Restore and detach artwork also use integer cells. The 15px floating-toolbar close button has an integer origin and retains absolute caption positioning. |
 | Weird Toolbox bevels and Motif-like window frames | The attributed PR #36 staircase bevel layer covers forms/buttons/menus; `fidelity.css` extends the same border-box paint to remaining MDI, dock and IDE frames. Border dimensions and resize hit targets are retained. |
 | Missing right toolbar bevel | Left/right edge strips complete the existing top/bottom paint without changing the fitting desktop toolbar's 29px height. |
 | Unnecessary toolbar horizontal scrollbar | Horizontal docked toolbars wrap whole commands under constraints. Buttons remain reachable by pointer and keyboard; vertical and floating toolbars retain scrolling. Existing small-screen zoom visibility is unchanged. |
@@ -44,16 +44,23 @@ The staircase technique attribution and complete Jordan Scales / 98.css MIT
 notice remain in `src/theme/bevels.css` and `LICENSES/98.css.txt` (PR #36).
 Caption artwork and issue-specific CSS/JavaScript here are original project code.
 
+The bundler normalizes only source-label path separators to `/`. This prevents
+Windows versus POSIX labels from changing generated bundles and nested runtime
+payloads. Module resolution, emitted program semantics and the existing comment
+terminator guard are unchanged. A portable regression simulates both separator
+conventions and requires byte-identical bundled output.
+
 ## Reproduction and validation
 
 ```sh
 npm run build
 npm test
 python tools/browser-issue39.py --engine chromium
+python tools/browser-issue39-state.py --engine chromium
 python tools/browser-classic-html.py --engine chromium
 ```
 
-The new suite checks exact authored mask and bevel pixels at DPR 1, 2, 3 and 4;
+The main suite checks exact authored mask and bevel pixels at DPR 1, 2, 3 and 4;
 actual editor/tab/toolbar geometry at DPR 1, 1.25, 1.5 and 2; wide and 390px
 layouts; disabled/pressed/theme/focus behavior; genuine pointer-to-keyboard menu
 handoff; MDI actions and detached-document style adoption. HTTP and standalone
@@ -61,13 +68,21 @@ file navigation run in CI. `--inline` explicitly selects a restricted local
 review transport, not a deployment-origin substitute. Screenshots, environment
 metadata and results are retained under `reports/issue39/<engine>`.
 
-`--baseline` is a diagnostic reversion of this change's final stylesheet and menu
-pointer-focus line; it intentionally fails the new visual contracts. It is never
-used as a passing release gate. The permanent CI runs unmodified production
-listeners, tests all three browser engines, and requires reproducible bundles.
+The supplemental state suite operates on the actual floating Standard toolbar,
+not an isolated caption fixture. It verifies 15px Close positioning, pointer hit
+testing, dragging, pointer/Enter hide, redisplay and redocking at DPR 1 and 1.25.
+Those position regressions fail against the preceding relative-position style.
+It also checks native-disabled and ARIA-disabled caption ink under forced colors;
+engines without forced-colors emulation explicitly report that case as skipped.
+Results are retained under `reports/issue39-state/<engine>`.
 
-Existing input/designer and compiler/runtime/visual suites remain enabled.
-Functional issue fixes are independently merged in #20, #22, #25 and #31.
+`--baseline` in the main suite is a diagnostic reversion of this change's final
+stylesheet and menu pointer-focus line; it intentionally fails the new visual
+contracts. It is never used as a passing release gate. Permanent CI runs
+unmodified production listeners, tests all three browser engines, and requires
+reproducible bundles. Existing input/designer and compiler/runtime/visual suites
+remain enabled. Functional issue fixes are independently merged in #20, #22,
+#25 and #31.
 
 ## Scope
 

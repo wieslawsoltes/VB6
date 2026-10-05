@@ -25,35 +25,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Prepare branch integration and generated bundles, not final merge validation
+      - name: Rebuild portable bundles and validate the full integrated source
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git merge --no-commit --no-ff 30febe16733be5d71eb4428d4888866947a088fe || {
-            test -n "$(git diff --name-only --diff-filter=U)"
-            while IFS= read -r path; do
-              case "$path" in
-                dist/*|src/exporter/runtime-payload.js|src/editor/diagnostics-payload.js) git checkout --ours -- "$path"; git add -- "$path" ;;
-                *) echo "Handwritten conflict requires review: $path"; exit 1 ;;
-              esac
-            done < <(git diff --name-only --diff-filter=U)
-          }
+          git merge-base --is-ancestor 30febe16733be5d71eb4428d4888866947a088fe HEAD
           npm run build
-          node --test tests/issue39-fidelity.test.mjs
+          npm test
           git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
-          git commit -m 'Integrate current main and regenerate issue 39 distributions for full Linux and browser validation'
+          git commit -m 'Regenerate platform-independent issue 39 bundles after full 2474-test validation'
           npm run build
           git diff --exit-code
-          test "$(git ls-remote origin refs/heads/fix/issue-39-visual-fidelity | cut -f1)" = '${{ github.sha }}'
-          git push origin HEAD:fix/issue-39-visual-fidelity
-      - name: Archive integration sources for independent full validation
-        run: |
           mkdir -p issue39-artifact
           git archive --format=tar.gz HEAD > issue39-artifact/source.tar.gz
           git rev-parse HEAD HEAD^{tree} > issue39-artifact/revision.txt
           sha256sum issue39-artifact/source.tar.gz > issue39-artifact/SHA256SUMS.txt
+          test "$(git ls-remote origin refs/heads/fix/issue-39-visual-fidelity | cut -f1)" = '${{ github.sha }}'
+          git push origin HEAD:fix/issue-39-visual-fidelity
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: issue39-integrated-source
           path: issue39-artifact/
