@@ -48,7 +48,7 @@ export class VirtualMachine extends Signal {
     this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);this.win32.api.setClipboardText(this.clipboard);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.win32.api.getClipboardText(),Clear:()=>{this.clipboard='';this.win32.api.setClipboardText(null);}});
   }
   output(text,newline=true){this.emit('output',{text:String(text),newline});this.host.print?.(String(text),newline);}
-  setState(state){this.state=state;this.emit('state',state);}
+  setState(state){this.state=state;if(['paused','stopped','error'].includes(state)){this.inputEpoch=(this.inputEpoch||0)+1;const pending=this.eventQueue.filter(e=>e.input);this.eventQueue=this.eventQueue.filter(e=>!e.input);for(const event of pending)event.resolve();}this.emit('state',state);}
   setBreakpoint(module,line,condition=''){const key=lower(module)+':'+line;this.breakpoints.set(key,{module,line,condition});this.emit('breakpoints',[...this.breakpoints.values()]);}
   removeBreakpoint(module,line){this.breakpoints.delete(lower(module)+':'+line);this.emit('breakpoints',[...this.breakpoints.values()]);}
   toggleBreakpoint(module,line){const key=lower(module)+':'+line;if(this.breakpoints.has(key))this.removeBreakpoint(module,line);else this.setBreakpoint(module,line);}
@@ -467,6 +467,18 @@ export class VirtualMachine extends Signal {
   }
   parseCSV(text){const values=[];let quoted=false,s='',wasString=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){wasString=true;if(quoted&&text[i+1]==='"'){s+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){values.push(wasString?s:Number(s));s='';wasString=false;}else s+=c;}values.push(wasString?s:Number(s));return values;}
   reportError(error){if(error instanceof StopExecution)return;this.lastError=error;this.emit('error',{message:error.message,number:error.number||5,source:error.source,line:error.line});this.host.error?.(error);this.setState('error');}
+  // Trusted host input uses the normal interpreter queue, including debugger
+  // stepping and DoEvents. Pending mouse motion is latest-value, per target and
+  // actual instance; timers retain their existing dispatch/coalescing contract.
+  enqueueInput(instance,key,action,{coalesce=false,valid=()=>true}={}){
+    if(!['running','idle'].includes(this.state)||!valid())return Promise.resolve();
+    const epoch=this.inputEpoch||0,guarded=()=>epoch===(this.inputEpoch||0)&&['running','idle'].includes(this.state)&&valid()?action():undefined;
+    const existing=coalesce&&this.eventQueue.find(e=>e.input&&e.instance===instance&&e.key===key);
+    if(existing){existing.action=guarded;return existing.promise;}
+    if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest input discarded.');return Promise.resolve();}
+    const event={input:true,instance,key,action:guarded};event.promise=new Promise(resolve=>event.resolve=resolve);
+    this.eventQueue.push(event);this.processEvents();return event.promise;
+  }
   dispatch(module,name,args=[],{coalesce=false}={}){
     if(this.state==='stopped'||this.state==='error')return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
     if(coalesce&&this.eventQueue.some(e=>e.key===key))return Promise.resolve();if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest event discarded.');return Promise.resolve();}
