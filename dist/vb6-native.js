@@ -1963,6 +1963,7 @@ const nativeBindingMethods = {
       if (context?.locals?.has(name) || owner?.globals?.has(name)) return null;
       const own = descriptor(this,module,name);
       if (own) return own;
+      if(owner?.nativeInternal)return null;
       const matches = [];
       for (const m of this.modules.values()) if (m !== owner) {
         const d = scopeDeclarations(m.module).get(name);
@@ -2158,7 +2159,7 @@ const nativeNumericMethods = {
       }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots[i]=slot;return;}
       else if(key(p.type)==='date'){slot.type=p.type;this.dateExpression(node);this.storeDate(slot);slots[i]=slot;return;}
       else if(REAL_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
-      else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
+      else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{if(p.nativeCoerce&&this.type(node)==='string')this.call({kind:'call',callee:{kind:'id',name:'CLng'},args:[node]});else this.numeric(node);this.check(p.type);}
       x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots[i]=slot;
     });
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}
@@ -2753,8 +2754,236 @@ function emitTimeSerial(c) {
 return {nativeDateMethods,emitNativeDateHelpers};
 })();
 
-/* control-arrays.js */
+/* date-intervals.js */
 __modules[28]=(()=>{
+const {compileProject}=__modules[20];
+/** Native calendar intervals. The arithmetic routines below are original private
+ * compiler support code, lowered by our JavaScript frontend and x86 emitter. They
+ * never invoke a VB compiler, Script Host, CLR, or an embedded JavaScript engine.
+ * Contracts: Microsoft's DateAdd/DateDiff/DatePart and FormatDateTime references:
+ * https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/dateadd-function
+ * https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/datediff-function
+ * https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/datepart-function
+ * https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-varformatdatetime
+ */
+
+const key = value => String(value).toLowerCase();
+const D = 'native:date:', DLL = 'oleaut32.dll';
+const arg = argument => ({argument}), addr = address => ({address});
+const store = (x, offset) => x.emit(0x89, 0x85).imm(offset);
+const intervals = ['yyyy', 'q', 'm', 'y', 'd', 'w', 'ww', 'h', 'n', 's'];
+const returns = {dateadd:'date', datediff:'long', datepart:'integer', formatdatetime:'string'};
+const NATIVE_DATE_CONSTANTS = Object.freeze({
+  vbusesystem:0, vbsunday:1, vbmonday:2, vbtuesday:3, vbwednesday:4,
+  vbthursday:5, vbfriday:6, vbsaturday:7, vbfirstjan1:1,
+  vbfirstfourdays:2, vbfirstfullweek:3, vbgeneraldate:0,
+  vblongdate:1, vbshortdate:2, vblongtime:3, vbshorttime:4
+});
+
+// All declarations are Private, and their compiler scope is isolated from the
+// application. A user's Public Year/CDate/IntervalIndex cannot redirect these.
+const source = String.raw`Option Explicit
+Private Function Ordinal(ByVal value As Date) As Double
+ Ordinal = CDbl(DateSerial(Year(value), Month(value), Day(value)))
+End Function
+Private Function Linear(ByVal value As Date) As Double
+ Dim number As Double
+ number = CDbl(value)
+ Linear = Fix(number) + Abs(number - Fix(number))
+End Function
+Private Function Serial(ByVal value As Double) As Date
+ Dim whole As Double
+ If value < -657434 Or value >= 2958466 Then Err.Raise 5
+ whole = Int(value)
+ If whole < 0 Then
+  Serial = CDate(whole - (value - whole))
+ Else
+  Serial = CDate(value)
+ End If
+End Function
+Private Function MonthDays(ByVal y As Long, ByVal m As Long) As Long
+ Select Case m
+ Case 4, 6, 9, 11
+  MonthDays = 30
+ Case 2
+  MonthDays = 28
+  If y Mod 4 = 0 And (y Mod 100 <> 0 Or y Mod 400 = 0) Then MonthDays = 29
+ Case Else
+  MonthDays = 31
+ End Select
+End Function
+Private Function DateAddCore(ByVal interval As String, ByVal number As Long, ByVal value As Date) As Date
+ Dim unit As Long, y As Long, m As Long, d As Long, limit As Long
+ Dim months As Double, result As Double, fraction As Double
+ unit = IntervalIndex(interval)
+ If unit <= 2 Then
+  months = CDbl(number)
+  If unit = 0 Then months = months * 12
+  If unit = 1 Then months = months * 3
+  months = months + CDbl(Year(value)) * 12 + Month(value) - 1
+  If months < 1200 Or months >= 120000 Then Err.Raise 5
+  y = CLng(Int(months / 12))
+  m = CLng(months - CDbl(y) * 12) + 1
+  d = Day(value)
+  limit = MonthDays(y, m)
+  If d > limit Then d = limit
+  fraction = CDbl(value) - Fix(CDbl(value))
+  result = CDbl(DateSerial(y, m, d)) + Abs(fraction)
+ Else
+  result = CDbl(number)
+  Select Case unit
+  Case 6
+   result = result * 7
+  Case 7
+   result = result / 24
+  Case 8
+   result = result / 1440
+  Case 9
+   result = result / 86400
+  End Select
+  result = Linear(value) + result
+ End If
+ DateAddCore = Serial(result)
+End Function
+Private Function DateDiffCore(ByVal interval As String, ByVal date1 As Date, ByVal date2 As Date, Optional ByVal firstdayofweek As Long = 1, Optional ByVal firstweekofyear As Long = 1) As Long
+ Dim unit As Long, first As Long
+ Dim a As Double, b As Double, result As Double
+ unit = IntervalIndex(interval)
+ first = FirstDay(firstdayofweek)
+ If firstweekofyear < 0 Or firstweekofyear > 3 Then Err.Raise 5
+ Select Case unit
+ Case 0
+  result = Year(date2) - Year(date1)
+ Case 1
+  result = CDbl(Year(date2) - Year(date1)) * 4 + (Month(date2) - 1) \ 3 - (Month(date1) - 1) \ 3
+ Case 2
+  result = CDbl(Year(date2) - Year(date1)) * 12 + Month(date2) - Month(date1)
+ Case Else
+  a = Ordinal(date1)
+  b = Ordinal(date2)
+  Select Case unit
+  Case 3, 4
+   result = b - a
+  Case 5
+   result = Fix((b - a) / 7)
+  Case 6
+   result = Int((b + 7 - first) / 7) - Int((a + 7 - first) / 7)
+  Case 7
+   result = (b - a) * 24 + Hour(date2) - Hour(date1)
+  Case 8
+   result = (b - a) * 1440 + (Hour(date2) - Hour(date1)) * 60 + Minute(date2) - Minute(date1)
+  Case 9
+   result = (b - a) * 86400 + CDbl(Hour(date2) - Hour(date1)) * 3600 + (Minute(date2) - Minute(date1)) * 60 + Second(date2) - Second(date1)
+  End Select
+ End Select
+ DateDiffCore = CLng(result)
+End Function`;
+
+const parameter = (name, type, optional = false) => ({name,type,byRef:false,bounds:null,optional,nativeCoerce:true});
+function signature(name, params, returnType, defaults = []) {
+  return {proc:{name,params,returnType,kind:'function'},label:D+name,nativeDefaults:new Map(defaults)};
+}
+const nativePart = signature('datepart', [parameter('interval','String'),parameter('date','Date'),parameter('firstdayofweek','Long',true),parameter('firstweekofyear','Long',true)], 'Integer', [['firstdayofweek',1],['firstweekofyear',1]]);
+const nativeFormat = signature('formatdatetime', [parameter('date','Date'),parameter('namedformat','Long',true)], 'String', [['namedformat',0]]);
+
+function ensureArithmeticModule(compiler) {
+  if (compiler.dateIntervalModule) return compiler.dateIntervalModule;
+  let name = 'VB6NativeCalendar', count = 0;
+  while (compiler.modules.has(key(name))) name = 'VB6NativeCalendar' + (++count);
+  const program = compileProject({name, startup:'Sub Main', modules:[{id:name,name,kind:'module',code:source}]});
+  if (!program.valid) throw new Error('Invalid internal native calendar: ' + JSON.stringify(program.diagnostics));
+  const module = program.modules.get(key(name)); module.nativeInternal = true;
+  compiler.externals.set(key(name), new Map());
+  const previousModule = compiler.preparingModule, previousProcedure = compiler.preparingProcedure;
+  compiler.prepareModule(module);
+  compiler.preparingModule = previousModule; compiler.preparingProcedure = previousProcedure;
+  compiler.dateIntervalModule = compiler.modules.get(key(name));
+  // Public intrinsic argument names need not expose internal implementation names.
+  for (const [name, args] of [['dateaddcore',['interval','number','date']], ['datediffcore',['interval','date1','date2','firstdayofweek','firstweekofyear']]]) {
+    const context = compiler.dateIntervalModule.procedures.get(name);
+    context.nativeIntrinsicParams = context.proc.params.map((p,i) => ({...p,name:args[i],nativeCoerce:true}));
+  }
+  return compiler.dateIntervalModule;
+}
+
+const nativeDateIntervalMethods = {
+  dateIntervalType(node) {
+    if (node.kind !== 'call' || node.callee.kind !== 'id') return null;
+    const name = key(node.callee.name);
+    return returns[name] && !this.variable(node.callee) && !this.resolveProcedure(node.callee) ? returns[name] : null;
+  },
+  dateIntervalBuiltin(node, name) {
+    const x = this.x;
+    if (this.context?.module.nativeInternal && ['intervalindex','firstday'].includes(name)) {
+      if (name === 'intervalindex') this.textExpression(node.args[0]); else this.numeric(node.args[0]);
+      x.push().call(D+name); return true;
+    }
+    if (!Object.hasOwn(returns,name) || this.variable(node.callee) || this.resolveProcedure(node.callee)) return false;
+    let target;
+    if (name === 'datepart') target = nativePart;
+    else if (name === 'formatdatetime') target = nativeFormat;
+    else {
+      const context = ensureArithmeticModule(this).procedures.get(name+'core');
+      target = {...context,proc:{...context.proc,name,params:context.nativeIntrinsicParams}};
+    }
+    this.nativeDateIntervalsUsed = true;
+    this.nativeTypedCall(target,this.nativeCallPlan(target,node.args));
+    return true;
+  }
+};
+
+function emitNativeDateIntervalHelpers(c) {
+  if (!c.nativeDateIntervalsUsed) return;
+  const x=c.x, check=()=>x.call('native:number:check');
+  // Exact BSTR length and ASCII case folding: no NUL-prefix acceptance or
+  // locale-dependent folding of non-ASCII characters into interval tokens.
+  x.label(D+'intervalindex').enter().api(DLL,'SysStringLen',[arg(8)]).emit(0x89,0xc3);
+  for (let i=0;i<intervals.length;i++) {
+    const token=intervals[i], next=x.unique();
+    x.emit(0x89,0xd8).compare(token.length).branch('ne',next).value(arg(8)).emit(0x89,0xc6);
+    for(let j=0;j<token.length;j++) x.emit(0x0f,0xb7,0x86).imm(j*2).emit(0x83,0xc8,32).compare(token.charCodeAt(j)).branch('ne',next);
+    x.value(i).leave(4).label(next);
+  }
+  x.jump('error:5');
+  const explicit=x.unique();
+  x.label(D+'firstday').enter(4).value(arg(8)).compare(0).branch('l','error:5').compare(7).branch('g','error:5').test().branch('ne',explicit);
+  x.api('kernel32.dll','GetLocaleInfoW',[0x400,0x2000100c,addr(-4),2]).test().branch('e','error:5');
+  x.value(arg(-4)).compare(6).branch('a','error:5').emit(0x83,0xc0,1,0x31,0xd2,0xb9).imm(7).emit(0xf7,0xf1,0x8d,0x42,1);
+  x.label(explicit).leave(4);
+
+  // A local, non-owning VT_DATE VARIANT points at no application memory. Only
+  // the returned BSTR is owned; cleanup occurs even if numeric conversion fails.
+  const variant = dateOffset => {
+    x.value(7);store(x,-16);x.value(0);store(x,-12);
+    x.value(arg(dateOffset));store(x,-8);x.value(arg(dateOffset+4));store(x,-4);
+  };
+  x.label(D+'formatdatetime').enter(20).value(arg(16)).compare(0).branch('l','error:5').compare(4).branch('g','error:5');
+  variant(8); x.value(0);store(x,-20);
+  x.api(DLL,'VarFormatDateTime',[addr(-16),arg(16),0,addr(-20)]);check();x.value(arg(-20)).leave(12);
+
+  x.label(D+'datepart').enter(32).push(arg(8)).call(D+'intervalindex');
+  // Index into a read-only table of canonical format strings, not user text.
+  x.emit(0x8b,0x04,0x85).addr(D+'interval-formats');store(x,-24);
+  x.push(arg(20)).call(D+'firstday');
+  // VarFormat's documented first-day enumeration is Monday=1, Sunday=7,
+  // unlike VB's Sunday=1. Normalize explicitly instead of relying on defaults.
+  const sunday=x.unique(), firstReady=x.unique();
+  x.compare(1).branch('e',sunday).emit(0x48).jump(firstReady).label(sunday).value(7).label(firstReady);store(x,-28);
+  x.value(arg(24)).compare(0).branch('l','error:5').compare(3).branch('g','error:5');
+  variant(12);x.value(0);store(x,-20);store(x,-32);
+  x.api(DLL,'VarFormat',[addr(-16),arg(-24),arg(-28),arg(24),0,addr(-20)]);check();
+  x.api(DLL,'VarI4FromStr',[arg(-20),0x400,0,addr(-32)]).push().api(DLL,'SysFreeString',[arg(-20)]).emit(0x58);check();x.value(arg(-32)).leave(20);
+  const formats=intervals.map(token=>c.string(token));
+  c.ro.align(4).label(D+'interval-formats');
+  // Materialize strings first: adding one inside this table would corrupt it.
+  for(const label of formats)c.ro.reference(label,'va');
+}
+
+return {NATIVE_DATE_CONSTANTS,nativeDateIntervalMethods,emitNativeDateIntervalHelpers};
+})();
+
+/* control-arrays.js */
+__modules[29]=(()=>{
 
 /** Statically designed control arrays, including Index event arguments. Each
  * element retains its own native HWND and ID; no flattened duplicate names. */
@@ -2831,178 +3060,6 @@ const nativeControlArrayMethods={
 return {nativeControlArrayMethods};
 })();
 
-/* storage.js */
-__modules[29]=(()=>{
-
-/** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
-const key = value => String(value).toLowerCase();
-const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency', 'date']);
-const MAX_NATIVE_STRING = 1024 * 1024;
-
-function boundValue(compiler, node, module, proc) {
-  if (node === null) return module.optionBase;
-  if (node.kind === 'group') return boundValue(compiler, node.expr, module, proc);
-  if (node.kind === 'literal' && Number.isInteger(node.value)) return node.value;
-  if (node.kind === 'id') {
-    for (const map of [proc?.constantBindings, module.constantBindings, module.importedConstantBindings, module.globalEnumMembers]) {
-      if (map?.has(key(node.name))) return Number(map.get(key(node.name)));
-    }
-  }
-  if (node.kind === 'unary') {
-    const n = boundValue(compiler, node.expr, module, proc);
-    if (node.op === '-') return -n;
-    if (node.op === '+') return n;
-  }
-  if (node.kind === 'binary') {
-    const a = boundValue(compiler, node.left, module, proc), b = boundValue(compiler, node.right, module, proc);
-    if (node.op === '+') return a + b;
-    if (node.op === '-') return a - b;
-    if (node.op === '*') return a * b;
-    if (node.op === '\\' && b) return Math.trunc(a / b);
-  }
-  compiler.fail('Native fixed-array bounds must be integral constant expressions', module);
-}
-
-function storageLayout(compiler, decl, module, proc) {
-  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency, Date or String: ' + decl.name, module);
-  if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
-  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency','date'].includes(key(decl.type)) ? 8 : 4;
-  decl.nativeElementBytes = elementBytes;
-  let count = 1;
-  if (decl.bounds !== null && decl.bounds !== undefined) {
-    decl.nativeArray = true;
-    decl.nativeDynamic = !decl.bounds.length;
-    if (decl.parameter && (!decl.byRef || decl.bounds.length)) compiler.fail('Native array parameters must be unsized and ByRef', module);
-    if (decl.bounds.length > 8) compiler.fail('Native fixed arrays support at most eight dimensions', module);
-    decl.nativeBounds = decl.bounds.map(([low, high]) => {
-      const lower = boundValue(compiler, low, module, proc), upper = boundValue(compiler, high, module, proc);
-      if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
-      const stride = count * elementBytes;
-      count *= upper - lower + 1;
-      if (!Number.isSafeInteger(count) || count * elementBytes > 1024 * 1024) compiler.fail('Native fixed array exceeds the one MiB storage limit', module);
-      return {lower, upper, stride};
-    });
-  }
-  decl.nativeCount = decl.nativeDynamic ? 0 : count;
-  decl.nativeDataBytes = decl.nativeDynamic ? 0 : count * elementBytes;
-  // Arrays own a SAFEARRAY pointer; backing storage is allocated by OleAut32.
-  decl.nativeBytes = decl.nativeArray ? 4 : Math.ceil(count * elementBytes / 4) * 4;
-  return decl;
-}
-
-const nativeStorageMethods = {
-  allocateStorage(variable) {
-    this.data.align(4).label(variable.label).zero(variable.nativeBytes || 4);
-  },
-  temporaryString() {
-    const c = this.context;
-    const variable = {name: this.x.unique('string-temp'), type: 'String', nativeCount: 1, nativeBytes: 4, temporary: true};
-    if (c?.proc?.name) {
-      c.size += 4;
-      if (c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
-      variable.offset = -c.size;
-      (c.stringTemps ||= []).push(variable);
-    } else { variable.label = variable.name; this.allocateStorage(variable); }
-    return variable;
-  },
-  /** Adopt a freshly allocated BSTR in EAX. Each source expression has its own slot. */
-  ownString() {
-    const variable = this.temporaryString(), x = this.x;
-    x.push(); this.address(variable); x.emit(0x89, 0xc3, 0x5f, 0xff, 0x33).invoke('oleaut32.dll', 'SysFreeString').emit(0x89, 0x3b, 0x89, 0xf8);
-    return variable;
-  },
-  stringPointer() {
-    const ready = this.x.unique(); this.x.test().branch('ne', ready).value(this.string('')).label(ready);
-  },
-  storageExpression(variable, node) {
-    if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
-    if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
-  },
-  rawStorageAddress(variable) {
-    if (variable.owner?.form) this.x.call(variable.owner.initialize);
-    if (variable.label) this.x.value(variable.label);
-    else if (variable.parameter && variable.byRef) this.x.value({argument: variable.offset});
-    else this.x.local(variable.offset);
-  },
-  zeroStorage(variable) {
-    this.rawStorageAddress(variable);
-    this.x.emit(0x89, 0xc7, 0xb9).imm((variable.nativeBytes || 4) / 4).emit(0x31, 0xc0, 0xfc, 0xf3, 0xab);
-  },
-  clearStringStorage(variable) {
-    if (variable.nativeArray) return this.destroyArrayStorage(variable);
-    this.x.push(variable.nativeCount || 1); this.rawStorageAddress(variable); this.x.push().call('native:string:clear');
-  },
-  initializeFixedString(variable) {
-    if (variable.nativeArray) return this.initializeArrayStorage(variable);
-    if (key(variable.type) !== 'string' || !variable.fixedLength || (variable.parameter||variable.ownedParameter)) return;
-    const x = this.x;
-    x.push(variable.fixedLength).push(variable.nativeCount || 1); this.rawStorageAddress(variable); x.push().call('native:string:initialize-fixed');
-  },
-  stringBuiltin(node, name) {
-    const x = this.x, args = node.args;
-    if (['len','lenb','ascw','strptr'].includes(name)) {
-      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
-      if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
-      if(name==='strptr'){
-        const variable=this.variable(args[0]);
-        if(variable){if(variable.nativeBounds&&!variable.elementOf)this.fail('StrPtr requires a String element, not an array');const pin=this.address(variable);x.emit(0x8b,0x00);this.releaseArrayPin(pin);}
-        else if(args[0].kind==='id'&&key(args[0].name)==='vbnullstring')x.value(0);
-        else this.expression(args[0]);
-        return true;
-      }
-      this.expression(args[0]);
-      if (name === 'ascw') { x.push().push().invoke('oleaut32.dll','SysStringLen').test().branch('e','error:5').emit(0x58,0x0f,0xbf,0x00); }
-      else { x.push().invoke('oleaut32.dll','SysStringLen'); if (name === 'lenb') x.emit(0xd1,0xe0); }
-      return true;
-    }
-    if (['left','right','mid','chrw'].includes(name)) {
-      if (name === 'chrw') {
-        if (args.length !== 1) this.fail('ChrW expects one argument'); this.numeric(args[0]); x.push().call('native:string:chrw');
-      } else {
-        if (args.length < 2 || args.length > (name === 'mid' ? 3 : 2)) this.fail(name + ' argument count mismatch');
-        this.textExpression(args[0]); x.push(); this.numeric(args[1]); x.push();
-        if (name === 'mid') { this.numeric(args[2] || {kind:'literal',value:MAX_NATIVE_STRING}); x.emit(0x5b,0x59).push().emit(0x53,0x51).call('native:string:mid'); }
-        else x.emit(0x5b,0x59,0x53,0x51).call('native:string:'+name);
-      }
-      this.ownString(); return true;
-    }
-    return false;
-  }
-};
-
-function emitNativeStorageHelpers(compiler) {
-  const x = compiler.x, api = 'oleaut32.dll';
-  x.label('native:string:numeric-text').enter().api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api('kernel32.dll','lstrlenW',[{argument:8}]).emit(0x39,0xd8).branch('ne','error:13').value({argument:8}).leave(4);
-  x.label('native:string:copy').enter().api(api,'SysStringLen',[{argument:8}]).compare(MAX_NATIVE_STRING).branch('g','error:7').push().push({argument:8}).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
-  x.label('native:string:assign').enter().push({argument:12}).call('native:string:copy').emit(0x89,0xc7).value({argument:8}).emit(0x89,0xc3,0xff,0x33).invoke(api,'SysFreeString').emit(0x89,0x3b,0x89,0xf8).leave(8);
-  x.label('native:string:from-int').enter(4).value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrFromI4',[{argument:8},0x400,0,{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(4);
-  x.label('native:string:concat').enter(4).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api(api,'SysStringLen',[{argument:12}]).emit(0x01,0xd8).compare(MAX_NATIVE_STRING).branch('g','error:7').value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrCat',[{argument:8},{argument:12},{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(8);
-  // Compare UTF-16 code units with explicit lengths, including embedded NULs.
-  const loop=x.unique(), equal=x.unique(), less=x.unique(), greater=x.unique(), compareLengths=x.unique(), done=x.unique();
-  x.label('native:string:compare').enter(8).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0x45,0xfc).api(api,'SysStringLen',[{argument:12}]).emit(0x89,0x45,0xf8).value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7,0x31,0xdb);
-  x.label(loop).emit(0x3b,0x5d,0xfc).branch('ge',compareLengths).emit(0x3b,0x5d,0xf8).branch('ge',compareLengths).emit(0x0f,0xb7,0x04,0x5e,0x0f,0xb7,0x14,0x5f,0x39,0xd0).branch('b',less).branch('ne',greater).emit(0x43).jump(loop);
-  x.label(compareLengths).value({argument:-4}).emit(0x3b,0x45,0xf8).branch('l',less).branch('g',greater).label(equal).value(0).jump(done).label(less).value(-1).jump(done).label(greater).value(1).label(done).leave(8);
-  const clearLoop=x.unique(), clearDone=x.unique();
-  x.label('native:string:clear').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(clearLoop).emit(0x85,0xff).branch('e',clearDone).emit(0xff,0x36).invoke(api,'SysFreeString').emit(0xc7,0x06,0,0,0,0,0x83,0xc6,4,0x4f).jump(clearLoop).label(clearDone).value(0).leave(8);
-  // Allocate exactly the requested fixed width; pad with spaces and copy a bounded prefix.
-  const widthOK=x.unique(), fill=x.unique(), copyDone=x.unique();
-  x.label('native:string:fixed').enter().value({argument:12}).compare(1).branch('l','error:5').compare(65535).branch('g','error:5').emit(0x89,0xc3).push().push(0).invoke(api,'SysAllocStringLen').test().branch('e','error:7').emit(0x89,0xc6,0x89,0xc7,0x89,0xd9,0xb8).imm(32).emit(0xfc,0xf3,0x66,0xab).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xd8).branch('le',widthOK).emit(0x89,0xd8).label(widthOK).emit(0x89,0xc1,0x89,0xf7).value({argument:8}).emit(0x56,0x89,0xc6,0xfc,0xf3,0x66,0xa5,0x58).leave(8);
-  const initLoop=x.unique(), initDone=x.unique();
-  x.label('native:string:initialize-fixed').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(initLoop).emit(0x85,0xff).branch('e',initDone).push({argument:16}).push(0).call('native:string:fixed').emit(0x89,0xc3,0xff,0x36).invoke(api,'SysFreeString').emit(0x89,0x1e,0x83,0xc6,4,0x4f).jump(initLoop).label(initDone).value(0).leave(12);
-  for (const side of ['left','right']) {
-    const countOK=x.unique();
-    x.label('native:string:'+side).enter().value({argument:12}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc3).branch('le',countOK).emit(0x89,0xc3).label(countOK);
-    if (side==='right') x.emit(0x29,0xd8,0x01,0xc0).emit(0x03,0x45,8); else x.value({argument:8});
-    x.emit(0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(8);
-  }
-  const startOK=x.unique(), lengthOK=x.unique(), sliceEmpty=x.unique(), sliceEnd=x.unique();
-  x.label('native:string:mid').enter().value({argument:12}).compare(1).branch('l','error:5').emit(0x48,0x89,0xc6).value({argument:16}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc6).branch('ge',sliceEmpty).emit(0x29,0xf0,0x39,0xc3).branch('le',lengthOK).emit(0x89,0xc3).label(lengthOK).value({argument:8}).emit(0x8d,0x04,0x70,0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').jump(sliceEnd).label(sliceEmpty).api(api,'SysAllocStringLen',[0,0]).test().branch('e','error:7').label(sliceEnd).leave(12);
-  x.label('native:string:chrw').enter().value({argument:8}).compare(-32768).branch('l','error:5').compare(65535).branch('g','error:5').push(1).local(8).push().invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
-}
-
-return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers};
-})();
-
 /* arrays.js */
 __modules[30]=(()=>{
 
@@ -3014,8 +3071,13 @@ const DLL = 'oleaut32.dll';
 const arg = argument => ({argument});
 const addr = address => ({address});
 const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
-const NATIVE_ARRAY_MAX_BYTES = 1024 * 1024;
-const NATIVE_ARRAY_MAX_RANK = 8;
+// The old one-MiB quota was a compiler policy, not a SAFEARRAY limit. Keep
+// signed x86 count/offset arithmetic checked; actual allocation is OS-limited.
+// Eight-byte alignment makes all typed element quotas exact integers.
+// https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraycreate
+// https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/too-many-dimensions
+const NATIVE_ARRAY_MAX_BYTES = 0x7ffffff8;
+const NATIVE_ARRAY_MAX_RANK = 60;
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
 
 const nativeArrayMethods = {
@@ -3043,7 +3105,7 @@ const nativeArrayMethods = {
   },
   elementAddress(variable) {
     const x=this.x, array=variable.elementOf, rank=variable.indices.length;
-    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..8');
+    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..60');
     const indices=this.arrayWorkspace(rank*4), out=this.arrayWorkspace(4), pin=this.arrayPin();
     // Evaluate every subscript exactly once, left-to-right, before dereferencing
     // the current descriptor. A subscript expression may itself resize the array.
@@ -3079,7 +3141,7 @@ const nativeArrayMethods = {
     if(decl.explicitType && key(decl.type)!==key(variable.type))this.fail('ReDim cannot change a typed array element type');
     if(decl.fixedLength && decl.fixedLength!==variable.fixedLength)this.fail('ReDim cannot change a fixed String element length');
     const rank=decl.bounds?.length;
-    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to eight dimensions');
+    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to 60 dimensions');
     const bounds=this.arrayWorkspace(rank*8);
     // Keep a stable slot address, not a stale SAFEARRAY pointer, across bound expressions.
     this.rawStorageAddress(variable);x.push();
@@ -3207,8 +3269,181 @@ function emitNativeArrayHelpers(compiler) {
 return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayMethods,emitNativeArrayHelpers};
 })();
 
-/* errors.js */
+/* storage.js */
 __modules[31]=(()=>{
+const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[30];
+/** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
+
+const key = value => String(value).toLowerCase();
+const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency', 'date']);
+const MAX_NATIVE_STRING = 1024 * 1024;
+
+function boundValue(compiler, node, module, proc) {
+  if (node === null) return module.optionBase;
+  if (node.kind === 'group') return boundValue(compiler, node.expr, module, proc);
+  if (node.kind === 'literal' && Number.isInteger(node.value)) return node.value;
+  if (node.kind === 'id') {
+    for (const map of [proc?.constantBindings, module.constantBindings, module.importedConstantBindings, module.globalEnumMembers]) {
+      if (map?.has(key(node.name))) return Number(map.get(key(node.name)));
+    }
+  }
+  if (node.kind === 'unary') {
+    const n = boundValue(compiler, node.expr, module, proc);
+    if (node.op === '-') return -n;
+    if (node.op === '+') return n;
+  }
+  if (node.kind === 'binary') {
+    const a = boundValue(compiler, node.left, module, proc), b = boundValue(compiler, node.right, module, proc);
+    if (node.op === '+') return a + b;
+    if (node.op === '-') return a - b;
+    if (node.op === '*') return a * b;
+    if (node.op === '\\' && b) return Math.trunc(a / b);
+  }
+  compiler.fail('Native fixed-array bounds must be integral constant expressions', module);
+}
+
+function storageLayout(compiler, decl, module, proc) {
+  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency, Date or String: ' + decl.name, module);
+  if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
+  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency','date'].includes(key(decl.type)) ? 8 : 4;
+  decl.nativeElementBytes = elementBytes;
+  let count = 1;
+  if (decl.bounds !== null && decl.bounds !== undefined) {
+    decl.nativeArray = true;
+    decl.nativeDynamic = !decl.bounds.length;
+    if (decl.parameter && (!decl.byRef || decl.bounds.length)) compiler.fail('Native array parameters must be unsized and ByRef', module);
+    if (decl.bounds.length > NATIVE_ARRAY_MAX_RANK) compiler.fail('Native fixed arrays support at most 60 dimensions', module);
+    decl.nativeBounds = decl.bounds.map(([low, high]) => {
+      const lower = boundValue(compiler, low, module, proc), upper = boundValue(compiler, high, module, proc);
+      if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
+      const stride = count * elementBytes;
+      count *= upper - lower + 1;
+      if (!Number.isSafeInteger(count) || count * elementBytes > NATIVE_ARRAY_MAX_BYTES) compiler.fail('Native fixed array exceeds checked x86 backing-address range', module);
+      return {lower, upper, stride};
+    });
+  }
+  decl.nativeCount = decl.nativeDynamic ? 0 : count;
+  decl.nativeDataBytes = decl.nativeDynamic ? 0 : count * elementBytes;
+  // Arrays own a SAFEARRAY pointer; backing storage is allocated by OleAut32.
+  decl.nativeBytes = decl.nativeArray ? 4 : Math.ceil(count * elementBytes / 4) * 4;
+  return decl;
+}
+
+const nativeStorageMethods = {
+  allocateStorage(variable) {
+    this.data.align(4).label(variable.label).zero(variable.nativeBytes || 4);
+  },
+  temporaryString() {
+    const c = this.context;
+    const variable = {name: this.x.unique('string-temp'), type: 'String', nativeCount: 1, nativeBytes: 4, temporary: true};
+    if (c?.proc?.name) {
+      c.size += 4;
+      if (c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
+      variable.offset = -c.size;
+      (c.stringTemps ||= []).push(variable);
+    } else { variable.label = variable.name; this.allocateStorage(variable); }
+    return variable;
+  },
+  /** Adopt a freshly allocated BSTR in EAX. Each source expression has its own slot. */
+  ownString() {
+    const variable = this.temporaryString(), x = this.x;
+    x.push(); this.address(variable); x.emit(0x89, 0xc3, 0x5f, 0xff, 0x33).invoke('oleaut32.dll', 'SysFreeString').emit(0x89, 0x3b, 0x89, 0xf8);
+    return variable;
+  },
+  stringPointer() {
+    const ready = this.x.unique(); this.x.test().branch('ne', ready).value(this.string('')).label(ready);
+  },
+  storageExpression(variable, node) {
+    if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
+    if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
+  },
+  rawStorageAddress(variable) {
+    if (variable.owner?.form) this.x.call(variable.owner.initialize);
+    if (variable.label) this.x.value(variable.label);
+    else if (variable.parameter && variable.byRef) this.x.value({argument: variable.offset});
+    else this.x.local(variable.offset);
+  },
+  zeroStorage(variable) {
+    this.rawStorageAddress(variable);
+    this.x.emit(0x89, 0xc7, 0xb9).imm((variable.nativeBytes || 4) / 4).emit(0x31, 0xc0, 0xfc, 0xf3, 0xab);
+  },
+  clearStringStorage(variable) {
+    if (variable.nativeArray) return this.destroyArrayStorage(variable);
+    this.x.push(variable.nativeCount || 1); this.rawStorageAddress(variable); this.x.push().call('native:string:clear');
+  },
+  initializeFixedString(variable) {
+    if (variable.nativeArray) return this.initializeArrayStorage(variable);
+    if (key(variable.type) !== 'string' || !variable.fixedLength || (variable.parameter||variable.ownedParameter)) return;
+    const x = this.x;
+    x.push(variable.fixedLength).push(variable.nativeCount || 1); this.rawStorageAddress(variable); x.push().call('native:string:initialize-fixed');
+  },
+  stringBuiltin(node, name) {
+    const x = this.x, args = node.args;
+    if (['len','lenb','ascw','strptr'].includes(name)) {
+      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
+      if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
+      if(name==='strptr'){
+        const variable=this.variable(args[0]);
+        if(variable){if(variable.nativeBounds&&!variable.elementOf)this.fail('StrPtr requires a String element, not an array');const pin=this.address(variable);x.emit(0x8b,0x00);this.releaseArrayPin(pin);}
+        else if(args[0].kind==='id'&&key(args[0].name)==='vbnullstring')x.value(0);
+        else this.expression(args[0]);
+        return true;
+      }
+      this.expression(args[0]);
+      if (name === 'ascw') { x.push().push().invoke('oleaut32.dll','SysStringLen').test().branch('e','error:5').emit(0x58,0x0f,0xbf,0x00); }
+      else { x.push().invoke('oleaut32.dll','SysStringLen'); if (name === 'lenb') x.emit(0xd1,0xe0); }
+      return true;
+    }
+    if (['left','right','mid','chrw'].includes(name)) {
+      if (name === 'chrw') {
+        if (args.length !== 1) this.fail('ChrW expects one argument'); this.numeric(args[0]); x.push().call('native:string:chrw');
+      } else {
+        if (args.length < 2 || args.length > (name === 'mid' ? 3 : 2)) this.fail(name + ' argument count mismatch');
+        this.textExpression(args[0]); x.push(); this.numeric(args[1]); x.push();
+        if (name === 'mid') { this.numeric(args[2] || {kind:'literal',value:MAX_NATIVE_STRING}); x.emit(0x5b,0x59).push().emit(0x53,0x51).call('native:string:mid'); }
+        else x.emit(0x5b,0x59,0x53,0x51).call('native:string:'+name);
+      }
+      this.ownString(); return true;
+    }
+    return false;
+  }
+};
+
+function emitNativeStorageHelpers(compiler) {
+  const x = compiler.x, api = 'oleaut32.dll';
+  x.label('native:string:numeric-text').enter().api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api('kernel32.dll','lstrlenW',[{argument:8}]).emit(0x39,0xd8).branch('ne','error:13').value({argument:8}).leave(4);
+  x.label('native:string:copy').enter().api(api,'SysStringLen',[{argument:8}]).compare(MAX_NATIVE_STRING).branch('g','error:7').push().push({argument:8}).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
+  x.label('native:string:assign').enter().push({argument:12}).call('native:string:copy').emit(0x89,0xc7).value({argument:8}).emit(0x89,0xc3,0xff,0x33).invoke(api,'SysFreeString').emit(0x89,0x3b,0x89,0xf8).leave(8);
+  x.label('native:string:from-int').enter(4).value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrFromI4',[{argument:8},0x400,0,{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(4);
+  x.label('native:string:concat').enter(4).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api(api,'SysStringLen',[{argument:12}]).emit(0x01,0xd8).compare(MAX_NATIVE_STRING).branch('g','error:7').value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrCat',[{argument:8},{argument:12},{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(8);
+  // Compare UTF-16 code units with explicit lengths, including embedded NULs.
+  const loop=x.unique(), equal=x.unique(), less=x.unique(), greater=x.unique(), compareLengths=x.unique(), done=x.unique();
+  x.label('native:string:compare').enter(8).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0x45,0xfc).api(api,'SysStringLen',[{argument:12}]).emit(0x89,0x45,0xf8).value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7,0x31,0xdb);
+  x.label(loop).emit(0x3b,0x5d,0xfc).branch('ge',compareLengths).emit(0x3b,0x5d,0xf8).branch('ge',compareLengths).emit(0x0f,0xb7,0x04,0x5e,0x0f,0xb7,0x14,0x5f,0x39,0xd0).branch('b',less).branch('ne',greater).emit(0x43).jump(loop);
+  x.label(compareLengths).value({argument:-4}).emit(0x3b,0x45,0xf8).branch('l',less).branch('g',greater).label(equal).value(0).jump(done).label(less).value(-1).jump(done).label(greater).value(1).label(done).leave(8);
+  const clearLoop=x.unique(), clearDone=x.unique();
+  x.label('native:string:clear').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(clearLoop).emit(0x85,0xff).branch('e',clearDone).emit(0xff,0x36).invoke(api,'SysFreeString').emit(0xc7,0x06,0,0,0,0,0x83,0xc6,4,0x4f).jump(clearLoop).label(clearDone).value(0).leave(8);
+  // Allocate exactly the requested fixed width; pad with spaces and copy a bounded prefix.
+  const widthOK=x.unique(), fill=x.unique(), copyDone=x.unique();
+  x.label('native:string:fixed').enter().value({argument:12}).compare(1).branch('l','error:5').compare(65535).branch('g','error:5').emit(0x89,0xc3).push().push(0).invoke(api,'SysAllocStringLen').test().branch('e','error:7').emit(0x89,0xc6,0x89,0xc7,0x89,0xd9,0xb8).imm(32).emit(0xfc,0xf3,0x66,0xab).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xd8).branch('le',widthOK).emit(0x89,0xd8).label(widthOK).emit(0x89,0xc1,0x89,0xf7).value({argument:8}).emit(0x56,0x89,0xc6,0xfc,0xf3,0x66,0xa5,0x58).leave(8);
+  const initLoop=x.unique(), initDone=x.unique();
+  x.label('native:string:initialize-fixed').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(initLoop).emit(0x85,0xff).branch('e',initDone).push({argument:16}).push(0).call('native:string:fixed').emit(0x89,0xc3,0xff,0x36).invoke(api,'SysFreeString').emit(0x89,0x1e,0x83,0xc6,4,0x4f).jump(initLoop).label(initDone).value(0).leave(12);
+  for (const side of ['left','right']) {
+    const countOK=x.unique();
+    x.label('native:string:'+side).enter().value({argument:12}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc3).branch('le',countOK).emit(0x89,0xc3).label(countOK);
+    if (side==='right') x.emit(0x29,0xd8,0x01,0xc0).emit(0x03,0x45,8); else x.value({argument:8});
+    x.emit(0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(8);
+  }
+  const startOK=x.unique(), lengthOK=x.unique(), sliceEmpty=x.unique(), sliceEnd=x.unique();
+  x.label('native:string:mid').enter().value({argument:12}).compare(1).branch('l','error:5').emit(0x48,0x89,0xc6).value({argument:16}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc6).branch('ge',sliceEmpty).emit(0x29,0xf0,0x39,0xc3).branch('le',lengthOK).emit(0x89,0xc3).label(lengthOK).value({argument:8}).emit(0x8d,0x04,0x70,0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').jump(sliceEnd).label(sliceEmpty).api(api,'SysAllocStringLen',[0,0]).test().branch('e','error:7').label(sliceEnd).leave(12);
+  x.label('native:string:chrw').enter().value({argument:8}).compare(-32768).branch('l','error:5').compare(65535).branch('g','error:5').push(1).local(8).push().invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
+}
+
+return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers};
+})();
+
+/* errors.js */
+__modules[32]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -3284,6 +3519,12 @@ const nativeErrorMethods = {
     localImmediate(x,F.dispatch,context.label+':error-dispatch');
     localImmediate(x,F.source,this.string(context.module.name));
     localImmediate(x,F.current,context.label+':0');localImmediate(x,F.next,context.label+':0');
+    if(context.module.nativeInternal){
+      // Intrinsics are not authored procedures: retain the caller's Erl/Source.
+      const noCaller=x.unique();x.value(arg(F.previous)).test().branch('e',noCaller).emit(0x89,0xc2);
+      x.emit(0x8b,0x42,F.erl&255);localStore(x,F.erl);
+      x.emit(0x8b,0x42,F.source&255);localStore(x,F.source);x.label(noCaller);
+    }
   },
   leaveErrorFrame() {
     // EAX is the return value; restoring the prior frame must not overwrite it.
@@ -3343,7 +3584,7 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[32]=(()=>{
+__modules[33]=(()=>{
 const {normalizeProject}=__modules[13];
 const {compileProject, parseParameters}=__modules[20];
 const {PE32Image, BinarySection}=__modules[21];
@@ -3352,11 +3593,13 @@ const {nativeBindingMethods}=__modules[23];
 const {nativeCallMethods}=__modules[25];
 const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[26];
 const {nativeDateMethods,emitNativeDateHelpers}=__modules[27];
+const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[28];
 const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[24];
-const {nativeControlArrayMethods}=__modules[28];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[29];
+const {nativeControlArrayMethods}=__modules[29];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[31];
 const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[30];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[31];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[32];
+
 
 
 
@@ -3376,7 +3619,7 @@ const mem = memory => ({memory});
 const INT_TYPES = new Set(['long', 'integer', 'byte', 'boolean']);
 const CLASSES = {CommandButton:'BUTTON', Label:'STATIC', TextBox:'EDIT', CheckBox:'BUTTON', OptionButton:'BUTTON', Frame:'BUTTON', ListBox:'LISTBOX', ComboBox:'COMBOBOX', Timer:null};
 const BOOL_CONDITIONS = {'=':0x94, '<>':0x95, '<':0x9c, '<=':0x9e, '>':0x9f, '>=':0x9d};
-const CONSTANTS = {vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullstring:''};
+const CONSTANTS = {...NATIVE_DATE_CONSTANTS,vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullstring:''};
 class NativeCompileError extends Error {
   constructor(message, source = '', line = 0) { super(`${source ? source + ':' + line + ': ' : ''}${message}`); this.name = 'NativeCompileError'; this.diagnostics = [{severity:'error',source,line,message}]; }
 }
@@ -3427,7 +3670,7 @@ class NativeCompiler {
   prepareModule(module) {
     this.preparingModule=module;this.preparingProcedure=null;
     if (!['form','module'].includes(module.kind) || module.interfaces.length || Object.keys(module.types).length) this.fail('Native AOT does not yet lower classes, interfaces or UDTs', module);
-    const result = {module,name:module.name,form:module.form,globals:new Map(),procedures:new Map(),controls:new Map(),controlArrays:new Map(),externals:this.externals.get(key(module.name))};
+    const result = {module,nativeInternal:!!module.nativeInternal,name:module.name,form:module.form,globals:new Map(),procedures:new Map(),controls:new Map(),controlArrays:new Map(),externals:this.externals.get(key(module.name))};
     this.modules.set(key(module.name), result);
     for (const decl of module.declarations) {
       if (decl.constant) continue; this.scalar(decl);
@@ -3498,7 +3741,7 @@ class NativeCompiler {
     if (node.kind === 'member' && node.object.kind === 'id') { const owner=this.modules.get(key(node.object.name)), variable=owner?.globals.get(key(node.name)); if(variable && owner!==context?.module && variable.scope!=='public') this.fail('Private native variable is not accessible: '+node.name); return variable; }
     return null;
   }
-  publicVariable(name) { const matches = [...this.modules.values()].flatMap(m => [...m.globals.values()].filter(v => key(v.name) === key(name) && v.scope === 'public')); if (matches.length > 1) this.fail('Ambiguous global: ' + name); return matches[0]; }
+  publicVariable(name) { if(this.context?.module.nativeInternal)return; const matches = [...this.modules.values()].flatMap(m => [...m.globals.values()].filter(v => key(v.name) === key(name) && v.scope === 'public')); if (matches.length > 1) this.fail('Ambiguous global: ' + name); return matches[0]; }
   constant(node) {
     const binding=this.nativeConstant(node);if(binding)return binding.value;
     return node.kind==='id'&&!this.variable(node)?CONSTANTS[key(node.name)]:undefined;
@@ -3534,6 +3777,7 @@ class NativeCompiler {
   handle(object) { this.ensure(object); this.x.value(this.controlHandleRef(object)); }
   type(node) {
     const bound=this.nativeConstant(node);if(bound)return bound.type;
+    const intervalType=this.dateIntervalType(node);if(intervalType)return intervalType;
     const dateType=this.dateType(node);if(dateType)return dateType;
     const currencyType=this.currencyType(node);if(currencyType)return currencyType;
     const numericType=this.numericType(node);if(numericType)return numericType;
@@ -3636,12 +3880,14 @@ class NativeCompiler {
     }
     if (callee.kind !== 'id') return null;
     const name = key(callee.name), own = current?.procedures.get(name) || current?.externals.get(name); if (own) return own;
+    if(current?.nativeInternal)return;
     const candidates = [...this.modules.values()].flatMap(m => [...m.procedures.values(),...m.externals.values()].filter(p => key((p.proc || p).name) === name && (p.proc || p).scope === 'public'));
     if (candidates.length > 1) this.fail('Ambiguous native procedure: ' + callee.name); return candidates[0];
   }
   call(node) {
     const x = this.x, args = node.args, name = node.callee.kind === 'id' ? key(node.callee.name).replace(/\$$/,'') : null;
     if(this.errorCall(node))return;
+    if(this.dateIntervalBuiltin(node,name))return;
     if(this.dateBuiltin(node,name))return;
     if(this.currencyBuiltin(node,name))return;
     if(this.numericBuiltin(node,name))return;
@@ -3693,7 +3939,7 @@ class NativeCompiler {
     x.sequence=outer.sequence;context.stringTemps=[];context.arrayPins=[];
     for (let i = 0; i < code.length; i++) {
       const ins = this.instruction = code[i]; x.label(context.label + ':' + i).call(context.label+':clear-strings');this.errorCheckpoint(context,i,ins);
-      this.sourceMap.push({symbol:context.label + ':' + i,source:ins.source,line:ins.line,procedure:ins.procedure});
+      if(!context.module.nativeInternal)this.sourceMap.push({symbol:context.label + ':' + i,source:ins.source,line:ins.line,procedure:ins.procedure});
       if(this.errorInstruction(ins,context))continue;
       if (ins.op === 'dim') { for (const decl of ins.decls) if (!decl.constant && decl.initial) { this.storageExpression(context.locals.get(key(decl.name)),decl.initial); this.store(context.locals.get(key(decl.name))); } }
       else if (ins.op === 'assign') {
@@ -3969,7 +4215,7 @@ class NativeCompiler {
   }
   helpers() {
     const x = this.x;
-    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);emitNativeDateHelpers(this);
+    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);emitNativeDateHelpers(this);emitNativeDateIntervalHelpers(this);
     emitNativeStorageHelpers(this);
     emitNativeArrayHelpers(this);
     // int-to-string(value, buffer), including INT_MIN without signed negation overflow.
@@ -4010,7 +4256,7 @@ class NativeCompiler {
     return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods);
+Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
 function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');
@@ -4022,8 +4268,8 @@ return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[33]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[32];
+__modules[34]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[33];
 const {PE32Image, BinarySection, PE32_BASE}=__modules[21];
 const {X86}=__modules[22];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
@@ -4033,5 +4279,5 @@ const {X86}=__modules[22];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[33];
+globalThis["VB6Native"]=__modules[34];
 })();

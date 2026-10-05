@@ -6,8 +6,13 @@ const DLL = 'oleaut32.dll';
 const arg = argument => ({argument});
 const addr = address => ({address});
 const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
-export const NATIVE_ARRAY_MAX_BYTES = 1024 * 1024;
-export const NATIVE_ARRAY_MAX_RANK = 8;
+// The old one-MiB quota was a compiler policy, not a SAFEARRAY limit. Keep
+// signed x86 count/offset arithmetic checked; actual allocation is OS-limited.
+// Eight-byte alignment makes all typed element quotas exact integers.
+// https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraycreate
+// https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/too-many-dimensions
+export const NATIVE_ARRAY_MAX_BYTES = 0x7ffffff8;
+export const NATIVE_ARRAY_MAX_RANK = 60;
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
 
 export const nativeArrayMethods = {
@@ -35,7 +40,7 @@ export const nativeArrayMethods = {
   },
   elementAddress(variable) {
     const x=this.x, array=variable.elementOf, rank=variable.indices.length;
-    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..8');
+    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..60');
     const indices=this.arrayWorkspace(rank*4), out=this.arrayWorkspace(4), pin=this.arrayPin();
     // Evaluate every subscript exactly once, left-to-right, before dereferencing
     // the current descriptor. A subscript expression may itself resize the array.
@@ -71,7 +76,7 @@ export const nativeArrayMethods = {
     if(decl.explicitType && key(decl.type)!==key(variable.type))this.fail('ReDim cannot change a typed array element type');
     if(decl.fixedLength && decl.fixedLength!==variable.fixedLength)this.fail('ReDim cannot change a fixed String element length');
     const rank=decl.bounds?.length;
-    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to eight dimensions');
+    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to 60 dimensions');
     const bounds=this.arrayWorkspace(rank*8);
     // Keep a stable slot address, not a stale SAFEARRAY pointer, across bound expressions.
     this.rawStorageAddress(variable);x.push();

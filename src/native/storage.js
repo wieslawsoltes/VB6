@@ -1,4 +1,5 @@
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
+import {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK} from './arrays.js';
 const key = value => String(value).toLowerCase();
 const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency', 'date']);
 export const MAX_NATIVE_STRING = 1024 * 1024;
@@ -37,13 +38,13 @@ export function storageLayout(compiler, decl, module, proc) {
     decl.nativeArray = true;
     decl.nativeDynamic = !decl.bounds.length;
     if (decl.parameter && (!decl.byRef || decl.bounds.length)) compiler.fail('Native array parameters must be unsized and ByRef', module);
-    if (decl.bounds.length > 8) compiler.fail('Native fixed arrays support at most eight dimensions', module);
+    if (decl.bounds.length > NATIVE_ARRAY_MAX_RANK) compiler.fail('Native fixed arrays support at most 60 dimensions', module);
     decl.nativeBounds = decl.bounds.map(([low, high]) => {
       const lower = boundValue(compiler, low, module, proc), upper = boundValue(compiler, high, module, proc);
       if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
       const stride = count * elementBytes;
       count *= upper - lower + 1;
-      if (!Number.isSafeInteger(count) || count * elementBytes > 1024 * 1024) compiler.fail('Native fixed array exceeds the one MiB storage limit', module);
+      if (!Number.isSafeInteger(count) || count * elementBytes > NATIVE_ARRAY_MAX_BYTES) compiler.fail('Native fixed array exceeds checked x86 backing-address range', module);
       return {lower, upper, stride};
     });
   }

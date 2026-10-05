@@ -1,9 +1,9 @@
 param([string]$Directory = 'validation/dates', [string]$Program = 'AotDates',
  [string]$Manifest = 'date-build.json', [string]$ReportName = 'date-execution.json',
- [string]$Dependency = '')
+ [string]$Dependency = '', [ValidateRange(0,2147483647)][int]$LifetimeCycles = 2000)
 $ErrorActionPreference = 'Stop'
 # Test-only Windows interop. The generated PE contains no CLR or script host.
-Add-Type @'
+if(-not ('DateWindowsProbe' -as [type])) { Add-Type @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -18,6 +18,7 @@ public static class DateWindowsProbe {
  public static string Diagnostics(int process) {var values=new List<string>();EnumWindows((h,p)=>{uint id;GetWindowThreadProcessId(h,out id);if(id==process){values.Add(Text(h));EnumChildWindows(h,(c,q)=>{values.Add(Text(c));return true;},IntPtr.Zero);}return true;},IntPtr.Zero);return string.Join(" | ",values);}
 }
 '@
+}
 $report = [ordered]@{ ok=$false; platform=[Environment]::OSVersion.VersionString; hostArchitecture=$env:PROCESSOR_ARCHITECTURE; culture=[Globalization.CultureInfo]::CurrentCulture.Name; executableArchitecture='x86'; checks=@() }
 foreach ($name in @($Program,$Manifest,$ReportName,$Dependency)) {
  if ($name -and $name -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Invalid test artifact name' }
@@ -54,7 +55,7 @@ try {
  }
  $report.embeddedAssertions=$plan.checks
  $report.checks += "$($plan.checks.Count) numbered native Date assertions returned success"
- $report.checks += '2,000 Date lifetime or ABI cycles completed'
+ if($LifetimeCycles -gt 0){$report.checks += "$LifetimeCycles Date lifetime or ABI cycles completed"}
  if(@(Get-ChildItem $clean -Force).Count -ne $expectedFiles){throw 'Execution extracted unexpected files beside the EXE'}
  if($Dependency){$report.checks += 'No extracted files or undeclared adjacent dependencies'}
  else{$report.checks += 'No adjacent runtime, DLL or extracted application file required'}
