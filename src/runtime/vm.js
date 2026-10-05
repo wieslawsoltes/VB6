@@ -1,3 +1,4 @@
+import {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex} from './debug-control.js';
 import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
@@ -6,7 +7,7 @@ import {DebugInspector} from './debug-inspector.js';
 import {planLiveEdit,nextStatementIndex} from './live-edit.js';
 import {encodeVariable,decodeVariable,makeRecord} from './binary-codec.js';
 import { Signal, lower, VERSION } from '../core/core.js';
-import { VBError } from '../language/lexer.js';
+import { VBError, splitTop, tokenize } from '../language/lexer.js';
 import { parseExpression, parseCall } from '../language/expression.js';
 import { compileProject } from '../language/compiler.js';
 import { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe } from './values.js';
@@ -14,13 +15,12 @@ import { VirtualFileSystem } from './filesystem.js';
 import { createLibrary, MemoryRecordset } from './library.js';
 
 const BLOCKED_MEMBERS=new Set(['constructor','__proto__','prototype','caller','callee','arguments','__definegetter__','__definesetter__','__lookupgetter__','__lookupsetter__']);
-class StopExecution extends Error {}
 export class VBInstance {
   constructor(module){this.staticCells=new Map();this.__vbInstance=true;this.__type=module.name;this.module=module;this.fields=new Map();this.formObject=null;this.loaded=false;this.initialized=false;}
 }
 export class VirtualMachine extends Signal {
   constructor(program,host={},options={}) {
-    super();this.program=program.modules instanceof Map?program:compileProject(program);this.host=host;this.options={instructionLimit:5000000,sliceMilliseconds:8,maxCallDepth:256,...options};
+    super();this.program=program.modules instanceof Map?program:compileProject(program);this.host=host;this.options={instructionLimit:5000000,sliceMilliseconds:8,maxCallDepth:256,debuggerEnabled:false,errorTrapping:'unhandled',...options};
     this.fs=host.fs||new VirtualFileSystem();this.settings=host.settings||{};this.instances=new Map();this.formInstances=new Set();this.stack=[];this.library=createLibrary(this);this.state='ready';this.instructionCount=0;this.lastYield=0;this.breakpoints=new Map();this.stepMode=null;this.pauseRequested=false;this.pauseResolver=null;this.currentFrame=null;this.eventQueue=[];this.processing=false;this.staticCells=new Map();this.eventSinks=new WeakMap();this.lastError=null;
     const vm=this;this.lastErrorErl=0;
     this.err={Number:0,Description:'',Source:'',HelpFile:'',HelpContext:0,LastDLLError:0,
@@ -41,14 +41,35 @@ export class VirtualMachine extends Signal {
     this.library.set('forms',{get Count(){return [...vm.formInstances].filter(i=>i.loaded).length;},Item(key){const forms=[...vm.formInstances].filter(i=>i.loaded),item=typeof key==='number'?forms[key]:forms.find(i=>lower(i.module.name)===lower(key));if(!item)throw new VBError('Form not found in Forms collection',9);return item;},[Symbol.iterator](){return [...vm.formInstances].filter(i=>i.loaded).values();}});
     this.library.set('debug',{Print:(...a)=>this.output(a.map(v=>v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v)).join(' '))});
     this.data=host.data||new DataContext(this.program.sourceProject,{fs:this.fs,persist:host.persist,fetch:host.dataFetch,credentialProvider:host.dataCredential});this.data.install(this);
-    this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
+    this.debugger=new RuntimeDebugger(this);this.debugger.configure();this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
     this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.clipboard||'',Clear:()=>{this.clipboard='';}});
   }
   output(text,newline=true){this.emit('output',{text:String(text),newline});this.host.print?.(String(text),newline);}
   setState(state){this.state=state;this.emit('state',state);}
-  setBreakpoint(module,line,condition=''){const key=lower(module)+':'+line;this.breakpoints.set(key,{module,line,condition});this.emit('breakpoints',[...this.breakpoints.values()]);}
+  breakpointLocation(module,line,column=null){
+    const source=this.program.modules.get(lower(module));
+    if(!Number.isInteger(line)||line<1||!source)throw new VBError('The selected line is not executable',5);
+    const proc=[...source.procedures.values()].find(p=>statementIndex(p.code,line,column)>=0);
+    if(!proc)throw new VBError('The selected line is not executable: comments and declarations cannot have breakpoints',5);
+    return {module:source.name,line,...(column===null?{}:{column:proc.code[statementIndex(proc.code,line,column)].column})};
+  }
+  setBreakpoint(module,line,condition='',enabled=true){
+    const location=this.breakpointLocation(module,line);condition=String(condition);
+    if(condition.length>4096)throw new VBError('Breakpoint condition is too long',5);
+    if(condition)this.debugInspector.parse(condition);
+    const value={...location,condition,enabled:enabled!==false};this.breakpoints.set(lower(location.module)+':'+line,value);
+    this.emit('breakpoints',[...this.breakpoints.values()]);return value;
+  }
+  replaceBreakpoints(breakpoints=[]){
+    if(!Array.isArray(breakpoints)||breakpoints.length>10000)throw new VBError('Invalid breakpoint list',5);
+    const next=new Map();for(const bp of breakpoints){const value={...this.breakpointLocation(bp.module,bp.line),condition:String(bp.condition||''),enabled:bp.enabled!==false};if(value.condition.length>4096)throw new VBError('Breakpoint condition is too long',5);if(value.condition)this.debugInspector.parse(value.condition);next.set(lower(value.module)+':'+value.line,value);}
+    this.breakpoints=next;this.emit('breakpoints',[...next.values()]);
+  }
   removeBreakpoint(module,line){this.breakpoints.delete(lower(module)+':'+line);this.emit('breakpoints',[...this.breakpoints.values()]);}
   toggleBreakpoint(module,line){const key=lower(module)+':'+line;if(this.breakpoints.has(key))this.removeBreakpoint(module,line);else this.setBreakpoint(module,line);}
+  configureDebugger(options){return this.debugger.configure(options);}
+  debugStack(){return this.debugger.stack();}
+  resumeError(action){return this.debugger.resumeError(action);}
   async initialize() {
     if(!this.program.valid)throw new VBError(this.program.diagnostics.map(d=>`${d.source}:${d.line}: ${d.message}`).join('\n'),1002);
     for(const module of this.program.modules.values())if(module.kind!=='class')this.instances.set(lower(module.name),new VBInstance(module));
@@ -57,7 +78,7 @@ export class VirtualMachine extends Signal {
     }
     for(const instance of this.instances.values())await this.initializeFields(instance);
   }
-  makeFrame(instance,proc={name:'(Declarations)',params:[],returnType:'Variant',code:[]}){return {instance,module:instance.module,proc,locals:new Map(),pc:0,temps:new Map(),withStack:[],gosubStack:[],errorMode:'off',errorTarget:null,errorActive:false,errorPc:null,lastLine:null,lastPc:-1,erl:0,result:new Cell(proc.storageReturnType||proc.returnType||'Variant'),depth:this.stack.length};}
+  makeFrame(instance,proc={name:'(Declarations)',params:[],returnType:'Variant',code:[]}){return {debugId:this.debugger.nextFrameId++,instance,module:instance.module,proc,locals:new Map(),pc:0,temps:new Map(),withStack:[],gosubStack:[],errorMode:'off',errorTarget:null,errorActive:false,errorPc:null,lastLine:null,lastPc:-1,erl:0,result:new Cell(proc.storageReturnType||proc.returnType||'Variant'),depth:this.stack.length};}
   async initializeFields(instance){const frame=this.makeFrame(instance);for(const decl of [...instance.module.declarations.filter(d=>d.constant),...instance.module.declarations.filter(d=>!d.constant)])await this.declare(decl,frame,instance.fields);instance.initialized=true;}
   async declare(decl,frame,target=frame.locals,staticFlag=false) {
     const key=lower(decl.name);if(target.has(key))return target.get(key);
@@ -91,8 +112,8 @@ export class VirtualMachine extends Signal {
     this.emit('event',{instance,name,args:args.map(a=>a?.ref?a.ref.get():a)});
   }
   async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluate(lo,frame)):frame.module.optionBase,numeric(await this.evaluate(hi,frame))]);return result;}
-  async start({breakOnEntry=false}={}) {
-    try { await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
+  async start({breakOnEntry=false,runToCursor=null}={}) {
+    try { if(runToCursor)this.runTarget=this.breakpointLocation(runToCursor.module,runToCursor.line,runToCursor.column??null);await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
       for(const instance of this.instances.values()){const init=this.formProcedure(instance,'initialize');if(init)await this.callProcedure(instance,init,[]);}
       const name=lower(this.program.startup||'');let instance=this.instances.get(name);
       if(instance?.module.kind==='form'){await this.showForm(instance);return;}
@@ -108,7 +129,7 @@ export class VirtualMachine extends Signal {
     if(instance.formObject?.mdiChild){const parent=instance.formObject.mdiController.parent?.instance;if(!parent)throw new VBError('MDI child requires an MDI Form',366);if(!parent.formObject.shown&&!parent.showing)await this.showForm(parent);}
     instance.showing=true;try{await this.loadForm(instance);}finally{instance.showing=false;}if(modal&&instance.formObject.shown)throw new VBError('Form already displayed; cannot show modally',400);
     const previous=this.library.get('screen').ActiveForm;this.library.get('screen').ActiveForm=instance;instance.formObject.Show?.(modal);if(instance.module.form?.type==='MDIForm'&&instance.formObject.mdiController?.active?.shown)this.library.get('screen').ActiveForm=instance.formObject.mdiController.active.instance;const activate=this.formProcedure(instance,'activate');if(activate)await this.callProcedure(instance,activate,[]);
-    if(modal){const evaluation=this.debugEvaluation,finish=this.host.beginModal?.(instance.formObject);try{while(instance.formObject.shown&&this.state!=='stopped'&&this.state!=='error'){evaluation?.check();if(this.eventQueue.length)await this.runQueuedEvent(this.eventQueue.shift());else await new Promise(resolve=>setTimeout(resolve,8));}}finally{if(evaluation?.reason)instance.formObject.Hide?.();finish?.();this.library.get('screen').ActiveForm=previous;}}
+    if(modal){const evaluation=this.debugEvaluation,finish=this.host.beginModal?.(instance.formObject);try{while(instance.formObject.shown&&this.state!=='stopped'&&this.state!=='error'){evaluation?.check();if(this.state!=='paused'&&this.eventQueue.length)await this.runQueuedEvent(this.eventQueue.shift());else await new Promise(resolve=>setTimeout(resolve,8));}}finally{if(evaluation?.reason)instance.formObject.Hide?.();finish?.();this.library.get('screen').ActiveForm=previous;}}
   }
   async unloadForm(instance,mode=1){
     if(!instance?.__vbInstance)throw new VBError('Object required',424);if(!instance.loaded)return true;
@@ -340,21 +361,13 @@ export class VirtualMachine extends Signal {
     }
     this.stack.push(frame);this.currentFrame=frame;
     try {await this.execute(frame);return frame.result.get();}
-    finally{for(const key of this.watchpointValues.keys())if(key.includes(':'+frame.depth+':'))this.watchpointValues.delete(key);this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
+    finally{this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&!this.debugEvaluation&&frame.proc.code.some(isSequencePoint))this.stepMode=null;if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
   }
   async checkpoint(ins,frame){
     if(this.state==='stopped')throw new StopExecution();
     if(this.debugEvaluation){await this.debugEvaluation.checkpoint();return;}
     this.instructionCount++;if(this.instructionCount>this.options.instructionLimit)throw new VBError(`Instruction budget exceeded (${this.options.instructionLimit.toLocaleString()}); execution stopped`,7);
-    const locationChanged=frame.lastLine!==ins.line||frame.pc<=frame.lastPc;const bp=!ins.implicit&&this.breakpoints.get(lower(ins.source)+':'+ins.line);
-    let pause=false,pauseReason=null;
-    if(locationChanged&&bp){pause=true;if(bp.condition){try{pause=truth(this.debugInspector.node(this.debugInspector.parse(bp.condition),frame,{count:0},0));}catch{pause=true;}}}
-    if(locationChanged&&this.stepMode){if(this.stepMode.mode==='into'||this.stepMode.mode==='over'&&frame.depth<=this.stepMode.depth||this.stepMode.mode==='out'&&frame.depth<this.stepMode.depth)pause=true;}
-    if(locationChanged&&this.runTarget&&lower(ins.source)===lower(this.runTarget.module)&&ins.line===this.runTarget.line){pause=true;pauseReason='run-to-cursor';this.runTarget=null;}
-    if(locationChanged&&this.watchpoints.length){for(const watch of this.watchpoints){if(watch.module&&lower(watch.module)!==lower(frame.module.name)||watch.procedure&&lower(watch.procedure)!==lower(frame.proc.name))continue;try{const value=this.debugInspector.node(watch.node,frame,{count:0},0),key=watch.id+':'+frame.depth+':'+lower(frame.module.name+'.'+frame.proc.name),prior=this.watchpointValues.get(key);if(watch.mode==='true'?truth(value):prior!==undefined&&!this.sameWatchValue(prior.value,value)){pause=true;pauseReason='watch:'+watch.expression;}this.watchpointValues.set(key,{value:this.watchSnapshot(value)});}catch{/* Out of scope or non-evaluable values do not run user code. */}}}
-    if(this.pauseRequested)pause=true;
-    frame.lastLine=ins.line;frame.lastPc=frame.pc;
-    if(pause){this.pauseRequested=false;this.stepMode=null;this.debugPauseId++;this.pauseReason=pauseReason||'breakpoint/step';const suspended=new Promise(resolve=>this.pauseResolver=resolve);this.setState('paused');this.currentFrame=frame;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:this.pauseReason,pauseId:this.debugPauseId});await suspended;this.pauseResolver=null;if(this.state==='stopped')throw new StopExecution();}
+    if(this.breakpoints.size||this.stepMode||this.runTarget||this.watchpoints.length||this.pauseRequested)await this.debugger.checkpoint(ins,frame);
     const now=performance.now();if(now-this.lastYield>=this.options.sliceMilliseconds){await new Promise(resolve=>setTimeout(resolve,0));this.lastYield=performance.now();if(this.state==='stopped')throw new StopExecution();}
   }
   applyEdits(project){
@@ -365,35 +378,36 @@ export class VirtualMachine extends Signal {
     // class instances and suspended caller frames all observe the committed code.
     for(const {oldProc,newProc}of plan.updates)Object.assign(oldProc,newProc);
     for(const {frame,...update}of plan.frameUpdates)Object.assign(frame,update);
+    for(const frame of this.stack.slice(0,-1)){frame.activePc=frame.pc-1;frame.activeInstruction=frame.proc.code[frame.activePc];}
     for(const [key,module]of this.program.modules){const replacement=next.modules.get(key);for(const [name,proc]of replacement.procedures)if(!module.procedures.has(name))module.procedures.set(name,proc);module.source=replacement.source;}
     const breakpoints=[];for(const bp of this.breakpoints.values()){const mapped=plan.lineMap.get(lower(bp.module)+':'+bp.line);if(mapped===undefined)invalidated.push(bp);else breakpoints.push({...bp,line:mapped});}
     this.breakpoints=new Map(breakpoints.map(bp=>[lower(bp.module)+':'+bp.line,bp]));
-    this.program.sourceProject=structuredClone(project);this.codeRevision=(this.codeRevision||0)+1;
+    this.program.settings=next.settings;this.program.sourceProject=structuredClone(project);this.codeRevision=(this.codeRevision||0)+1;
     this.emit('breakpoints',breakpoints);
-    if(this.state==='paused'){const frame=this.currentFrame,ins=frame.proc.code[frame.pc];frame.lastLine=ins?.line??null;frame.lastPc=frame.pc;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:'code-edit'});}
+    if(this.state==='paused'){this.debugPauseId++;const frame=this.currentFrame,ins=frame.proc.code[frame.pc];frame.lastLine=ins?.line??null;frame.lastPc=frame.pc;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:'code-edit',pauseId:this.debugPauseId});}
     const result={revision:this.codeRevision,breakpoints,invalidatedBreakpoints:invalidated,updatedProcedures:plan.updates.length};
     this.emit('codeChanged',result);return result;
   }
-  setNextStatement(module,line){
+  setNextStatement(module,line,column=null){
     if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before moving execution',5);
     const frame=this.currentFrame;if(this.state!=='paused'||!frame)throw new VBError('Set Next Statement is available only in break mode',5);
     if(lower(module)!==lower(frame.module.name))throw new VBError('The next statement must remain in the active procedure',5);
-    frame.pc=nextStatementIndex(frame,Number(line));frame.lastPc=frame.pc;frame.lastLine=frame.proc.code[frame.pc].line;
-    this.emit('pause',{instruction:frame.proc.code[frame.pc],frame,stack:[...this.stack],reason:'set-next'});
+    frame.pc=nextStatementIndex(frame,Number(line),column);frame.debugRedirect=true;frame.lastPc=frame.pc;frame.lastLine=frame.proc.code[frame.pc].line;
+    this.debugPauseId++;this.emit('pause',{instruction:frame.proc.code[frame.pc],frame,stack:[...this.stack],reason:'set-next',pauseId:this.debugPauseId});
     return {source:frame.module.name,line:frame.lastLine,procedure:frame.proc.name};
   }
   pause(){if(this.state==='running')this.pauseRequested=true;}
-  resume(mode='continue'){if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
-  stop(){this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
+  resume(mode='continue'){if(!['continue','into','over','out'].includes(mode))throw new VBError('Invalid stepping mode',5);if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
+  stop(){this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();for(const event of this.eventQueue)event.resolve?.();this.eventQueue=[];this.runTarget=null;this.stepMode=null;this.pauseRequested=false;this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
   async execute(frame){
-    while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.pc++;
+    while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.activePc=current;frame.activeInstruction=ins;frame.pc++;
       try{
         switch(ins.op){
           case 'dim':for(const decl of ins.decls)await this.declare(decl,frame,frame.locals,ins.static||frame.proc.static);break;
           case 'assign':{const ref=await this.reference(ins.target,frame,ins.objectSet);const value=await this.evaluate(ins.expr,frame);if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);await ref.set(ins.objectSet?value:await this.defaultValue(value));break;}
           case 'expr':await this.evaluate(ins.expr,frame);break;
           case 'print':{const values=[];for(const e of ins.exprs){const v=await this.defaultValue(await this.evaluate(e,frame));values.push(v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v));}this.output(values.join(' '),ins.newline);break;}
-          case 'assert':if(!truth(await this.evaluate(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);this.pauseRequested=true;}break;
+          case 'assert':if(this.options.debugStatements!==false&&!truth(await this.evaluate(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);await this.debugger.breakAfter(ins,frame,'assert');}break;
           case 'branch':{const test=truth(await this.evaluate(ins.test,frame));if(ins.invert?test:!test)frame.pc=ins.target;break;}
           case 'jump':frame.pc=ins.target;break;
           case 'computedJump':{
@@ -433,7 +447,7 @@ export class VirtualMachine extends Signal {
           case 'gosub':frame.gosubStack.push(frame.pc);frame.pc=ins.target;break;
           case 'gosubReturn':if(!frame.gosubStack.length)throw new VBError('Return without GoSub',3);frame.pc=frame.gosubStack.pop();break;
           case 'return':if(frame.errorActive)this.err.Clear();return;
-          case 'stop':if(!this.debugEvaluation)this.pauseRequested=true;break;
+          case 'stop':if(this.options.debugStatements===false){this.stop();throw new StopExecution();}await this.debugger.breakAfter(ins,frame,'stop');break;
           case 'end':this.stop();throw new StopExecution();
           case 'form':{if(ins.expr.kind==='call'){const array=await this.evaluate(ins.expr.callee,frame,{raw:true});if(array?.__type==='ControlArray'){if(ins.expr.args.length!==1)throw new VBError('Control arrays require one index',450);const index=await this.evaluate(ins.expr.args[0],frame);if(ins.action==='load')array.Load(index);else array.Unload(index);break;}}const object=await this.evaluate(ins.expr,frame,{raw:true});if(ins.action==='unload')await this.unloadForm(object);else await this.loadForm(object);break;}
           case 'fileOpen':this.fs.open(await this.evaluate(ins.path,frame),ins.mode,await this.evaluate(ins.handle,frame),ins.recordLength?await this.evaluate(ins.recordLength,frame):128,ins.access,ins.sharing);break;
@@ -453,7 +467,9 @@ export class VirtualMachine extends Signal {
         if(error instanceof StopExecution||error.debugEvaluationAbort)throw error;
         if(!(error instanceof VBError))error=new VBError(error.message||String(error),Number.isInteger(error.number)?error.number:5);
         error.source ||= ins.source;error.line ||= ins.line;if(error.erl===undefined)error.erl=frame.erl;this.lastErrorErl=error.erl;this.err.Number=error.number;this.err.Description=error.message;this.err.Source=error.source;this.err.HelpFile=error.helpFile||'';this.err.HelpContext=error.helpContext||0;this.lastError=error;
-        if(!frame.errorActive&&frame.errorMode!=='off'){frame.errorPc=current;if(frame.errorMode==='goto'){frame.errorActive=true;frame.pc=frame.errorTarget;}else frame.pc=current+1;}
+        const debugResult=await this.debugger.error(error,frame,current,ins);if(debugResult===true)continue;
+        const failedPc=typeof debugResult==='number'?debugResult:current;
+        if(!frame.errorActive&&frame.errorMode!=='off'){frame.errorPc=failedPc;if(frame.errorMode==='goto'){frame.errorActive=true;frame.pc=frame.errorTarget;}else frame.pc=failedPc+1;}
         else throw error;
       }
     }
@@ -466,9 +482,34 @@ export class VirtualMachine extends Signal {
     return new Promise((resolve,reject)=>{this.eventQueue.push({instance,proc,args,key,resolve,reject});this.processEvents();});
   }
   async runQueuedEvent(event){try{event.resolve(await(event.action?event.action():this.callProcedure(event.instance,event.proc,event.args)));}catch(error){if(!(error instanceof StopExecution))this.reportError(error);event.resolve(undefined);}}
-  async processEvents(){if(this.processing||this.stack.length)return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
+  async processEvents(){if(this.processing||this.stack.length||this.state==='paused')return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
   async immediate(text,options={}){if(this.state==='paused')return this.evaluateExplicit(text,{...options,immediate:true});return this.immediateAt(text);}
-  async immediateAt(text,selectedFrame=null){const instance=this.instances.values().next().value;if(!selectedFrame&&!this.currentFrame&&!instance)throw new VBError('Start the runtime before evaluating an expression',5);const frame=selectedFrame||this.currentFrame||this.makeFrame(instance);if(!frame.instance)throw new VBError('Start the runtime before evaluating an expression',5);if(/^\s*\?/.test(text)){const value=await this.evaluate(parseExpression(text.replace(/^\s*\?/,'')),frame);this.output(describe(value));return value;}const assignment=String(text).match(/^\s*(?:Let\s+|Set\s+)?([A-Za-z_][A-Za-z0-9_.$%&!#@]*(?:\([^)]*\))?)\s*=\s*([\s\S]+)$/i);if(assignment){const ref=await this.reference(parseExpression(assignment[1]),frame);const value=await this.evaluate(parseExpression(assignment[2]),frame,{raw:/^\s*Set\s/i.test(text)});await ref.set(value);return value;}const value=await this.evaluate(parseCall(text),frame);if(value!==undefined)this.output(describe(value));return value;}
+  async immediateAt(text,selectedFrame=null){
+    const instance=this.instances.values().next().value,frame=selectedFrame||this.currentFrame||(instance&&this.makeFrame(instance));
+    if(!frame?.instance)throw new VBError('Start the runtime before evaluating an expression',5);
+    if(this.state==='running'&&this.stack.length&&!selectedFrame)throw new VBError('Pause execution before using the Immediate window',5);
+    text=String(text);if(text.length>65536)throw new VBError('Enter at most 65,536 characters',5);
+    let value;
+    for(let statement of splitTop(text,':')){
+      this.debugEvaluation?.check();statement=statement.trim();if(!statement)continue;
+      if(/^\?/.test(statement)||/^Debug\.Print\b/i.test(statement)){
+        const expression=statement.replace(/^(?:\?|Debug\.Print\s*)/i,'');
+        value=await this.evaluate(parseExpression(expression),frame);this.output(describe(value));continue;
+      }
+      const objectSet=/^Set\s/i.test(statement),source=statement.replace(/^(?:Let|Set)\s+/i,'');
+      let depth=0,equal=null;for(const token of tokenize(source)){if(token.value==='(')depth++;else if(token.value===')')depth--;else if(token.value==='='&&depth===0){equal=token;break;}}
+      if(equal){
+        const target=parseExpression(source.slice(0,equal.start));if(!['id','member','call'].includes(target.kind))throw new VBError('Invalid assignment target',1002);
+        const ref=await this.reference(target,frame,objectSet);
+        value=await this.evaluate(parseExpression(source.slice(equal.end)),frame);
+        if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);
+        await ref.set(objectSet?value:await this.defaultValue(value));
+      }else{
+        value=await this.evaluate(parseCall(statement.replace(/^Call\s+/i,'')),frame);if(value!==undefined)this.output(describe(value));
+      }
+    }
+    return value;
+  }
   debugAwait(value){return this.debugEvaluation?this.debugEvaluation.wait(value):value;}
   cancelEvaluation(){this.debugEvaluation?.cancel();return {cancelled:!!this.debugEvaluation};}
   async evaluateExplicit(text,{frameIndex=null,pauseId,instructionLimit=100000,timeLimit=5000,immediate=false}={}){
@@ -489,7 +530,7 @@ export class VirtualMachine extends Signal {
   setWatchpoints(watches=[]){if(!Array.isArray(watches)||watches.length>100)throw new VBError('At most 100 break watches are supported',5);const next=watches.map((w,i)=>{if(!['true','change'].includes(w.mode))throw new VBError('Invalid watch type',5);return {id:String(w.id??i),expression:String(w.expression),mode:w.mode,module:String(w.module||''),procedure:String(w.procedure||''),node:this.debugInspector.parse(w.expression)};});this.watchpoints=next;this.watchpointValues.clear();}
   watchSnapshot(value){return value instanceof VBDecimal?{decimal:value}:value instanceof VBCurrency?{currency:value.raw}:value instanceof Date?{date:value.getTime()}:value instanceof VBErrorValue?{error:value.number}:value;}
   sameWatchValue(before,after){if(before&&typeof before==='object'){if(Object.hasOwn(before,'decimal'))return after instanceof VBDecimal&&before.decimal.compare(after)===0;if(Object.hasOwn(before,'currency'))return after instanceof VBCurrency&&before.currency===after.raw;if(Object.hasOwn(before,'date'))return after instanceof Date&&before.date===after.getTime();if(Object.hasOwn(before,'error'))return after instanceof VBErrorValue&&before.error===after.number;}return Object.is(before,after);}
-  runToCursor(module,line){if(this.state!=='paused')throw new VBError('Run to Cursor requires break mode',5);const source=this.program.modules.get(lower(module));if(!source||![...source.procedures.values()].some(p=>p.code.some(ins=>ins.line===line)))throw new VBError('The selected line is not executable',5);this.runTarget={module:source.name,line};this.resume('continue');return {module:source.name,line};}
+  runToCursor(module,line,column=null){if(this.state!=='paused')throw new VBError('Run to Cursor requires break mode',5);const target=this.breakpointLocation(module,line,column);this.runTarget=target;this.resume('continue');return target;}
   locals(){return this.debugInspector.locals({includeFields:false}).map(({name,type,value})=>({name,type,value}));}
   saveSetting(app,section,key,value){const k=[app,section,key].join('/');this.settings[k]=String(value);this.host.persist?.();}
   getSetting(app,section,key,def=''){return this.settings[[app,section,key].join('/')]??def;}

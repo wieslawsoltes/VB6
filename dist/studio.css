@@ -949,7 +949,8 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 .syn-string,.syn-number{color:var(--vb-window-text)}
 .breakpoint-line{background:var(--vb-breakpoint);color:white}
 .breakpoint-line span{color:inherit}
-.execution-line,.execution-line span{background:var(--vb-execution);color:#000}
+.execution-line:not(.execution-range),.execution-line:not(.execution-range) span,.code-execution{background:var(--vb-execution);color:#000}
+.execution-line.execution-range{background:transparent}
 .code-gutter{width:var(--editor-gutter);background:var(--vb-face);border-right:1px solid var(--vb-shadow)}
 .gutter-line{height:var(--editor-line-height);line-height:var(--editor-line-height);padding:0 3px;color:var(--vb-gray);font-size:10px}
 .gutter-line.has-breakpoint{color:var(--vb-breakpoint);font-size:13px}

@@ -19,3 +19,6 @@ reports/native-projects/
 reports/data-sources/
 server-profiles.local.json
 *.sqlite
+
+# Generated debugger browser evidence; retained as CI artifacts.
+reports/debugger-runtime/
