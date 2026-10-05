@@ -65,6 +65,9 @@ def output(page, value):
 def error_dialog(page):
     dialog = page.get_by_role('dialog', name='Microsoft Visual Basic', exact=True)
     dialog.wait_for()
+    # Give the compositor a completed frame after hiding the cross-origin iframe;
+    # DOM visibility alone does not synchronize headless Chromium's OOPIF hit test.
+    page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     return dialog
 
 
