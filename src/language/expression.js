@@ -23,7 +23,8 @@ export class ExpressionParser {
   expression(min=0) {
     let node; const t=this.take(); const value=String(t.value).toLowerCase();
     if(t.type==='number'&&t.raw.endsWith('@'))node={kind:'currency',value:t.raw.slice(0,-1)};
-    else if(t.type==='number'||t.type==='string') node={kind:'literal',value:t.value};
+    else if(t.type==='number') node={kind:'literal',value:numericLiteralValue(t),valueType:numericLiteralType(t),numberSuffix:/[%&!#]$/.test(t.raw)?t.raw.at(-1):null};
+    else if(t.type==='string') node={kind:'literal',value:t.value,valueType:'string'};
     else if(t.type==='date') node={kind:'date',value:t.value};
     else if(value==='('){node=this.expression();this.expect(')');node={kind:'group',expr:node};}
     else if(value==='+'||value==='-'||value==='not') node={kind:'unary',op:value,expr:this.expression(value==='not'?6:13)};
@@ -32,8 +33,8 @@ export class ExpressionParser {
     else if(value==='typeof'){const expr=this.expression(8);this.expect('is');node={kind:'typeof',expr,name:this.qualifiedName()};}
     else if(value==='.') { const name=this.take();if(name.type!=='id')throw new VBError('Expected member name',1002);node={kind:'member',object:{kind:'with'},name:name.value}; }
     else if(t.type==='id') {
-      if(value==='true')node={kind:'literal',value:-1};
-      else if(value==='false')node={kind:'literal',value:0};
+      if(value==='true')node={kind:'literal',value:-1,valueType:'boolean'};
+      else if(value==='false')node={kind:'literal',value:0,valueType:'boolean'};
       else if(value==='null')node={kind:'literal',value:null};
       else if(value==='nothing')node={kind:'nothing'};
       else if(value==='empty')node={kind:'empty'};
@@ -56,7 +57,7 @@ export class ExpressionParser {
   parse() { const node=this.expression();if(this.peek().type!=='eof')throw new VBError(`Unexpected '${this.peek().raw}' in expression`,1002,null,0,this.peek().start+1);return node; }
 }
 export const parseExpression = text => new ExpressionParser(text.trim()).parse();
-export function parseCall(text) {
+export function parseCall(text,{explicit=false}={}) {
   const p=new ExpressionParser(text); let callee=p.take(); let node;
   if(callee.value==='.') { const name=p.take();node={kind:'member',object:{kind:'with'},name:name.value}; }
   else if(callee.type==='id') node={kind:'id',name:callee.value};
@@ -64,8 +65,33 @@ export function parseCall(text) {
   while(p.match('.')){const name=p.take();node={kind:'member',object:node,name:name.value};}
   if(p.peek().type==='eof') return {kind:'call',callee:node,args:[]};
   const rest=text.slice(p.peek().start).trim();
-  if(rest.startsWith('(')) return parseExpression(text);
+  if(rest.startsWith('(')) {
+    let expression;try{expression=parseExpression(text);}catch(error){if(explicit)throw error;}
+    if(expression){
+      // Without Call the parentheses around a single argument are an
+      // expression grouping, forcing a temporary even for a ByRef formal.
+      if(!explicit&&expression.kind==='call'&&expression.args.length===1&&JSON.stringify(expression.callee)===JSON.stringify(node))expression.args[0]={kind:'group',expr:expression.args[0]};
+      return expression;
+    }
+  }
   const args=[];do{args.push(p.argument());}while(p.match(','));
   if(p.peek().type!=='eof')throw new VBError(`Unexpected '${p.peek().raw}' in argument list`,1002);
   return {kind:'call',callee:node,args};
+}
+
+function numericLiteralType(token){
+  const suffix=token.raw.at(-1),explicit={'%':'integer','&':'long','!':'single','#':'double'}[suffix];
+  if(explicit)return explicit;
+  if(/^[&][ho]/i.test(token.raw))return parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8)<=65535?'integer':'long';
+  if(/[.eEdD]/.test(token.raw))return 'double';
+  return token.value>=-32768&&token.value<=32767?'integer':token.value>=-2147483648&&token.value<=2147483647?'long':'double';
+}
+
+function numericLiteralValue(token){
+  if(/^&[ho]/i.test(token.raw)){
+    const n=parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8);
+    if(n>4294967295)throw new VBError('Overflow in numeric literal',6);
+    return n>2147483647?n-4294967296:n>=32768&&n<=65535&&!token.raw.endsWith('&')?n-65536:n;
+  }
+  return token.value;
 }

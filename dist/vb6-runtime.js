@@ -790,6 +790,7 @@ function asDate(value){
   if((match=text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/))){[,y,m,d,h=0,n=0,s=0,ms=0]=match;}
   else if((match=text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i))){[,m,d,y,h=0,n=0,s=0]=match;y=Number(y);if(y<100)y+=y<30?2000:1900;if(match[7]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[7])?12:0);}}
   else if((match=text.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?\s*(AM|PM)?$/i))){[,h,n,s=0,ms=0]=match;[y,m,d]=[1899,12,30];if(match[5]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[5])?12:0);}}
+  else if((match=text.match(/^(\d{1,2})[\/,](\d{1,2})$/))){[,m,d]=match;y=new Date().getFullYear();}
   else {const parsed=new Date(text);if(!Number.isFinite(parsed.getTime()))throw new VBError('Type mismatch',13);return validateDate(parsed);}
   [y,m,d,h,n,s]=[y,m,d,h,n,s].map(Number);ms=Number(String(ms).padEnd(3,'0'));
   if(m<1||m>12||d<1||d>daysInMonth(y,m-1)||h<0||h>23||n>59||s>59)throw new VBError('Type mismatch',13);
@@ -890,7 +891,7 @@ function splitTop(text, separator = ',') {
   for (let i=0;i<text.length;i++) {
     const c = text[i];
     if (c === '"' && !date) { if (quoted && text[i+1] === '"') i++; else quoted = !quoted; }
-    else if (!quoted && c === '#' && (date || text.indexOf('#',i+1) >= 0)) date = !date;
+    else if (!quoted && c === '#' && (date || !/[\w\u0080-\uffff\]]/.test(text[i-1]||'') && text.indexOf('#',i+1) >= 0)) date = !date;
     else if (!quoted && !date) {
       if (c === '(') depth++;
       else if (c === ')') depth--;
@@ -1117,7 +1118,187 @@ class VBErrorValue {
   constructor(number){number=bankersRound(numeric(number));if(number<0||number>65535)throw new VBError('Overflow',6);this.number=number;Object.freeze(this);}
   toString(){return 'Error '+this.number;}
 }
-const explicitErrorValue=value=>value instanceof VBErrorValue?value.number:value;
+const explicitErrorValue=value=>unbox(value) instanceof VBErrorValue?unbox(value).number:unbox(value);
+
+/** Execution-only scalar metadata. Public Cell.get()/Array.get() and host
+ * adapters still expose ordinary JS values; getScalar() retains VB subtype and
+ * whether an expression originated from Variant storage. Object identity is
+ * never wrapped. The tag is immutable and is not a native COM VARIANT layout. */
+class VBScalar {
+  constructor(value,type,variant=false) {
+    this.type=String(type).toLowerCase();this.variant=!!variant;
+    if(!Object.hasOwn(SCALAR_TYPES,this.type))throw new VBError('Invalid scalar type: '+type,13);
+    if(this.type==='empty'||this.type==='null'){if(value!==(this.type==='empty'?undefined:null))throw new VBError('Invalid null/empty scalar',13);this.value=value;}
+    else if(this.type==='error'){if(!(value instanceof VBErrorValue)&&value!==MISSING)throw new VBError('Invalid Error scalar',13);this.value=value;}
+    else this.value=coerce(value,this.type);
+    Object.freeze(this);
+  }
+  valueOf(){return this.type==='boolean'?(this.value?-1:0):this.value;}
+  toString(){return this.type==='boolean'?(this.value?'True':'False'):String(this.value);}
+}
+const SCALAR_TYPES=Object.freeze({empty:0,null:1,integer:2,long:3,single:4,double:5,currency:6,date:7,string:8,error:10,boolean:11,decimal:14,byte:17});
+const unbox=value=>value instanceof VBScalar?value.value:value;
+function scalarType(value){
+  if(value instanceof VBScalar)return value.type;
+  if(value===undefined)return 'empty';if(value===null)return 'null';
+  if(value instanceof VBCurrency)return 'currency';if(value instanceof VBDecimal)return 'decimal';
+  if(value instanceof Date)return 'date';if(value instanceof VBErrorValue||value===MISSING)return 'error';
+  return typeof value==='number'?'double':typeof value==='string'?'string':typeof value==='boolean'?'boolean':null;
+}
+function tagScalar(value,type=scalarType(value),variant=false){
+  if(!type)return value;
+  if(value instanceof VBScalar&&value.type===String(type).toLowerCase()&&value.variant===!!variant)return value;
+  return new VBScalar(unbox(value),type,variant);
+}
+function storageScalar(value,type='Variant',fixedLength=null){
+  const key=String(type).toLowerCase(),actual=scalarType(value);
+  if(key==='variant')return actual?tagScalar(cloneValue(unbox(value)),actual,true):cloneValue(value);
+  const result=coerce(value,key,fixedLength);
+  return Object.hasOwn(SCALAR_TYPES,key)?tagScalar(result,key,false):result;
+}
+function readScalar(cell){if(cell instanceof LazyCell)return cell.get();return typeof cell.getScalar==='function'?cell.getScalar():Promise.resolve(cell.get()).then(value=>storageScalar(value,cell.type));}
+function literalScalar(node){
+  if(node.kind==='currency')return tagScalar(new VBCurrency(node.value),'currency');
+  if(node.kind==='date')return tagScalar(new Date(node.value),'date');
+  const type=node.valueType||scalarType(node.value);return tagScalar(type==='null'?null:coerce(node.value,type),type,false);
+}
+function signedLiteralScalar(node){
+  if(node.op!=='-')return null;
+  const n=node.expr;
+  if(n.kind==='currency')return tagScalar(new VBCurrency('-'+n.value),'currency');
+  if(n.kind!=='literal'||typeof n.value!=='number'||n.valueType==='boolean')return null;
+  const value=-n.value;
+  const type=n.numberSuffix?n.valueType:n.valueType==='long'&&value>=-32768&&value<=32767?'integer':n.valueType==='double'&&Number.isInteger(value)&&value===-2147483648?'long':n.valueType;
+  return tagScalar(coerce(value,type),type);
+}
+const INTEGER_BOUNDS=Object.freeze({byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]});
+function scalarResult(value,type,variant){
+  if(value===null||value===undefined)return tagScalar(value,scalarType(value),true);
+  if(type==='boolean')return tagScalar(value?-1:0,type,variant);
+  if(INTEGER_BOUNDS[type]){
+    while(value<INTEGER_BOUNDS[type][0]||value>INTEGER_BOUNDS[type][1]){
+      if(!variant)throw new VBError('Overflow',6);
+      type=type==='byte'?'integer':type==='integer'?'long':'double';
+      if(type==='double')break;
+    }
+  }
+  if(type==='single'&&!Number.isFinite(Math.fround(value))){if(!variant)throw new VBError('Overflow',6);type='double';}
+  if(type==='double'&&!Number.isFinite(value))throw new VBError('Overflow',6);
+  return tagScalar(coerce(value,type),type,variant);
+}
+function arithmeticType(a,b,op){
+  let x=scalarType(a),y=scalarType(b);
+  const normal=t=>t==='empty'||t==='boolean'?'integer':t==='string'||t==='date'?'double':t;
+  if(op==='^')return 'double';
+  if(['and','or','xor','eqv','imp'].includes(op)&&x==='boolean'&&y==='boolean')return 'boolean';
+  if(['and','or','xor','eqv','imp','\\','mod'].includes(op)){
+    if(!['byte','integer','boolean','empty'].includes(x)||!['byte','integer','boolean','empty'].includes(y))return 'long';
+    return x==='byte'&&y==='byte'?'byte':'integer';
+  }
+  if((x==='decimal'||y==='decimal')&&['+','-','*','/'].includes(op))return 'decimal';
+  if((op==='+'||op==='-')&&(x==='date'||y==='date')&&!(op==='-'&&x==='date'&&y==='date'))return 'date';
+  if(op==='-'&&x==='date'&&y==='date')return 'double';
+  if(x==='empty')x=y==='empty'?'integer':y;if(y==='empty')y=x;
+  x=normal(x);y=normal(y);
+  if(op==='/'){
+    if(x==='decimal'||y==='decimal')return 'decimal';
+    return (x==='single'||y==='single')&&[x,y].every(t=>['byte','integer','single'].includes(t))?'single':'double';
+  }
+  if((x==='single'&&y==='long')||(x==='long'&&y==='single'))return 'double';
+  if(op==='*'&&[x,y].includes('currency')&&[x,y].some(t=>['single','double'].includes(t)))return 'double';
+  const order=op==='*'?['byte','integer','long','single','currency','double','decimal']:['byte','integer','long','single','double','currency','decimal'];
+  return order[Math.max(order.indexOf(x),order.indexOf(y))]||'double';
+}
+function compareScalar(a,b,compare){
+  let x=unbox(a),y=unbox(b),tx=scalarType(a),ty=scalarType(b);
+  if(tx==='empty'){x=ty==='string'?'':0;tx=ty==='string'?'string':'integer';}
+  if(ty==='empty'){y=tx==='string'?'':0;ty=tx==='string'?'string':'integer';}
+  const sx=tx==='string',sy=ty==='string';
+  if(sx!==sy){
+    if(a.variant&&b.variant)return sx?1:-1;
+    if(sx&&!a.variant&&b.variant||sy&&!b.variant&&a.variant){x=vbString(a);y=vbString(b);tx=ty='string';}
+    else {const target=sx?ty:tx;if(sx){x=coerce(a,target);tx=target;}else {y=coerce(b,target);ty=target;}}
+  }
+  if(tx==='string'&&ty==='string'){
+    if(compare==='text'){x=x.toLocaleLowerCase();y=y.toLocaleLowerCase();}
+    return x<y?-1:x>y?1:0;
+  }
+  if(tx==='decimal'||ty==='decimal')return decimal(tagScalar(x,tx)).compare(decimal(tagScalar(y,ty)));
+  if(tx==='date'||ty==='date'){x=numeric(x);y=numeric(y);return x<y?-1:x>y?1:0;}
+  if(tx==='currency'||ty==='currency'){x=new VBCurrency(x).raw;y=new VBCurrency(y).raw;}
+  else {x=numeric(x);y=numeric(y);if((tx==='single'||ty==='single')&&tx!=='long'&&ty!=='long'){x=Math.fround(x);y=Math.fround(y);}}
+  return x<y?-1:x>y?1:0;
+}
+/** Scalar expressions implement VB promotion without relying on JS coercion.
+ * Unboxed low-level SDK operators retain their established raw-value API. */
+function scalarBinary(op,left,right,compare='binary'){
+  const a=left instanceof VBScalar?left:tagScalar(left,scalarType(left),true),b=right instanceof VBScalar?right:tagScalar(right,scalarType(right),true);
+  let x=unbox(a),y=unbox(b);const tx=scalarType(a),ty=scalarType(b),variant=!!(a?.variant||b?.variant);
+  if(op==='is')return tagScalar(binary('is',x,y),'boolean');
+  if(x instanceof VBErrorValue||y instanceof VBErrorValue){
+    if(x instanceof VBErrorValue&&y instanceof VBErrorValue&&['=','<>','<','>','<=','>='].includes(op))return scalarBinary(op,tagScalar(x.number,'long',true),tagScalar(y.number,'long',true));
+    throw new VBError('Type mismatch',13);
+  }
+  if(x===MISSING||y===MISSING)throw new VBError('Argument not optional',449);
+  if(x===NOTHING||y===NOTHING)throw new VBError('Object variable not set',91);
+  if(op==='&')return x===null&&y===null?tagScalar(null,'null',true):tagScalar((x==null?'':vbString(a))+(y==null?'':vbString(b)),'string',variant);
+  if(x===null||y===null){
+    if(!['and','or','imp'].includes(op))return tagScalar(null,'null',true);
+    const other=x===null?b:a;
+    if(unbox(other)===null)return tagScalar(null,'null',true);
+    const n=coerce(other,'long'),t=scalarType(other),type=t==='boolean'?'boolean':t==='byte'?'byte':['integer','empty'].includes(t)?'integer':'long';
+    if(op==='and'&&n===0)return tagScalar(0,type==='boolean'?'boolean':type,true);
+    if(op==='or'&&n!==0)return tagScalar(n,type,true);
+    if(op==='imp'){
+      const result=x===null?n:type==='byte'?(~n)&255:~n;
+      if(result!==0)return tagScalar(result,type,true);
+    }
+    return tagScalar(null,'null',true);
+  }
+  if(['=','<>','<','>','<=','>='].includes(op)){
+    const c=compareScalar(a,b,compare),result={'=':c===0,'<>':c!==0,'<':c<0,'>':c>0,'<=':c<=0,'>=':c>=0}[op];
+    return tagScalar(result?-1:0,'boolean',variant);
+  }
+  if(op==='like')return tagScalar(binary(op,vbString(a),vbString(b),compare),'boolean',variant);
+  if(op==='+'){
+    if(tx==='empty'&&ty!=='empty')return tagScalar(y,ty==='boolean'?'integer':ty,variant);
+    if(ty==='empty'&&tx!=='empty')return tagScalar(x,tx==='boolean'?'integer':tx,variant);
+    const sx=tx==='string',sy=ty==='string';
+    if(sx&&sy||sx&&!a.variant&&b.variant||sy&&!b.variant&&a.variant)return tagScalar(vbString(a)+vbString(b),'string',variant);
+    if(sx!==sy&&!a.variant&&!b.variant)throw new VBError('Type mismatch',13);
+  }
+  const type=arithmeticType(a,b,op);
+  if(type==='decimal'&&['+','-','*','/'].includes(op)){
+    const da=decimal(a),db=decimal(b);return tagScalar(op==='+'?da.add(db):op==='-'?da.subtract(db):op==='*'?da.multiply(db):da.divide(db),'decimal',variant);
+  }
+  if(type==='currency'&&['+','-','*'].includes(op)){
+    const ca=new VBCurrency(x),cb=new VBCurrency(y);return tagScalar(new VBCurrency(op==='+'?ca.raw+cb.raw:op==='-'?ca.raw-cb.raw:roundRatio(ca.raw*cb.raw,10000n),true),'currency',variant);
+  }
+  if(['and','or','xor','eqv','imp','\\','mod'].includes(op)){x=coerce(x,'long');y=coerce(y,'long');}
+  else{x=numeric(x);y=numeric(y);}
+  if(op==='^'&&(x===0&&y<0||x<0&&!Number.isInteger(y)))throw new VBError('Invalid procedure call or argument',5);
+  if(op==='/'&&x===0&&y===0&&!(ty==='empty'&&['single','double','string','date'].includes(tx)))throw new VBError('Overflow',6);
+  let result=binary(op,x,y,compare);
+  if(type==='byte'&&['eqv','imp'].includes(op))result&=255;
+  if(type==='date'){
+    try{return tagScalar(asDate(result),'date',variant);}catch(e){if(!variant)throw e;return scalarResult(result,'double',true);}
+  }
+  return scalarResult(result,type,variant);
+}
+function scalarUnary(op,input){
+  const value=input instanceof VBScalar?input:tagScalar(input,scalarType(input),true),raw=unbox(value),type=scalarType(value),variant=!!value?.variant;
+  if(raw===null)return tagScalar(null,'null',true);
+  if(op==='not'){
+    const result=~coerce(raw,'long'),out=type==='boolean'?'boolean':type==='byte'?'byte':['integer','empty'].includes(type)?'integer':'long';
+    return tagScalar(out==='byte'?result&255:result,out,variant);
+  }
+  if(type==='currency')return tagScalar(op==='-'?new VBCurrency(-raw.raw,true):raw,type,variant);
+  if(type==='decimal')return tagScalar(op==='-'?raw.negate():raw,type,variant);
+  const out=type==='byte'||type==='boolean'||type==='empty'?'integer':type==='string'?'double':type;
+  if(out==='date')return tagScalar(asDate(op==='-'?-numeric(raw):numeric(raw)),'date',variant);
+  return scalarResult(op==='-'?-numeric(raw):numeric(raw),out,variant);
+}
+
 
 /** Stable typed view: interface-only dispatch without copying object identity. */
 class VBInterfaceView {
@@ -1127,9 +1308,12 @@ const objectIdentity=value=>value?.__vbInterface?value.target:value;
 function objectSupports(value,name){const target=objectIdentity(value),type=lower(name).replace(/^vb\./,'');return !!target?.__vbInstance&&(lower(target.module.name)===type||Object.hasOwn(target.module.interfaceBindings||{},type));}
 function interfaceView(value,type){const target=objectIdentity(value),key=lower(type);if(lower(target.module.name)===key)return target;if(!Object.hasOwn(target.module.interfaceBindings||{},key))throw new VBError('Type mismatch: object does not implement '+type,13);target.interfaceViews ||= new Map();if(!target.interfaceViews.has(key))target.interfaceViews.set(key,new VBInterfaceView(target,key));return target.interfaceViews.get(key);}
 const isNothing = value => value === NOTHING;
-function truth(value){if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);if(value===MISSING)throw new VBError('Argument not optional',449);if(value===NOTHING)throw new VBError('Object variable not set',91);return value != null && value !== undefined && (typeof value === 'string' ? value !== '' : Number(value) !== 0);}
-function numeric(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return 0;if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return dateToSerial(value);const n=Number(value);if(!Number.isFinite(n))throw new VBError('Type mismatch',13);return n; }
+function truth(value){if(value instanceof VBScalar&&value.type==='string')return coerce(value,'boolean')!==0;value=unbox(value);if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);if(value===MISSING)throw new VBError('Argument not optional',449);if(value===NOTHING)throw new VBError('Object variable not set',91);return value != null && value !== undefined && (typeof value === 'string' ? value !== '' : Number(value) !== 0);}
+function numeric(value) { value=unbox(value);if(typeof value==='boolean')return value?-1:0; if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return 0;if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return dateToSerial(value);if(typeof value==='string')value=normalizeNumericString(value);const n=Number(value);if(!Number.isFinite(n))throw new VBError(Number.isNaN(n)?'Type mismatch':'Overflow',Number.isNaN(n)?13:6);return n; }
 function decimal(value){
+  const type=scalarType(value);value=unbox(value);
+  if(type==='single')value=Number(value).toPrecision(7);
+  if(typeof value==='string')value=normalizeNumericString(value);
   if(value instanceof VBDecimal)return value;
   if(value instanceof VBCurrency)return VBDecimal.fromParts(value.raw,4);
   if(value===MISSING)throw new VBError('Argument not optional',449);
@@ -1137,7 +1321,59 @@ function decimal(value){
   if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   return new VBDecimal(value instanceof Date?numeric(value):value);
 }
-function vbString(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return value.toLocaleString();if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();return String(value); }
+/** Invariant numeric text. Locale-specific profiles can translate separators at
+ * the host boundary; parsing never accepts JavaScript-only 0x/Infinity/NaN. */
+function normalizeNumericString(value,target='double') {
+  const text=value.trim();if(text.length>4096)throw new VBError('Numeric input exceeds conversion limit',7);
+  const radix=text.match(/^([+-]?)&([hHoO])([0-9a-fA-F]+)$/);
+  if(radix){
+    if(radix[2].toLowerCase()==='o'&&/[^0-7]/.test(radix[3]))throw new VBError('Type mismatch',13);
+    let n=BigInt((radix[2].toLowerCase()==='h'?'0x':'0o')+radix[3]);
+    if(n>0xffffffffn)throw new VBError('Overflow',6);
+    n=BigInt.asIntN(target==='integer'?16:32,n);if(radix[1]==='-')n=-n;
+    return n.toString();
+  }
+  const normalized=text.replace(/,/g,'').replace(/[dD]/g,'e');
+  if(!text||!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(normalized)||/^[,+.-]*$/.test(text))throw new VBError('Type mismatch',13);
+  return normalized;
+}
+function scalarNumberString(value,type='double') {
+  const n=numeric(value);if(n===0)return '0';
+  if(type!=='single'&&type!=='double')return String(n);
+  const precision=type==='single'?7:15,rounded=Number(n.toPrecision(precision));
+  if(Math.abs(rounded)>=10**precision||Math.abs(rounded)<.0001){
+    const [m,e]=rounded.toExponential(precision-1).split('e');
+    return m.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'')+'E'+(Number(e)<0?'-':'+')+String(Math.abs(Number(e))).padStart(2,'0');
+  }
+  return String(rounded);
+}
+function vbString(value) {
+  if(value instanceof VBScalar){
+    if(value.type==='boolean')return value.value?'True':'False';
+    if(value.type==='single'||value.type==='double')return scalarNumberString(value.value,value.type);
+  }
+  value=unbox(value);
+  if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
+  if(value===MISSING)throw new VBError('Argument not optional',449);
+  if(isNothing(value))throw new VBError('Object variable or With block variable not set',91);
+  if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);
+  if(value instanceof Date){
+    const time=value.toLocaleTimeString('en-US'),base=value.getFullYear()===1899&&value.getMonth()===11&&value.getDate()===30;
+    return base?time:value.toLocaleDateString('en-US')+(value.getHours()||value.getMinutes()||value.getSeconds()?' '+time:'');
+  }
+  if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();
+  return typeof value==='boolean'?(value?'True':'False'):String(value);
+}
+/** Source Print/Write representations. Kept separate from debugger rendering. */
+function printScalar(value,csv=false){
+ const raw=unbox(value),type=scalarType(value);
+ if(type==='boolean')return csv?(raw?'#TRUE#':'#FALSE#'):(raw?'True':'False');
+ if(raw===null)return csv?'#NULL#':'Null';
+ if(raw===undefined)return '';
+ if(raw instanceof VBErrorValue)return csv?'#ERROR '+raw.number+'#':raw.toString();
+ if(raw instanceof Date&&csv){const pad=n=>String(n).padStart(2,'0');return '#'+String(raw.getFullYear()).padStart(4,'0')+'-'+pad(raw.getMonth()+1)+'-'+pad(raw.getDate())+' '+pad(raw.getHours())+':'+pad(raw.getMinutes())+':'+pad(raw.getSeconds())+'#';}
+ const text=vbString(value);return csv&&type==='string'? '"'+text.replace(/"/g,'""')+'"':text;
+}
 /** Round an exact rational to the nearest integer, ties to even. */
 function roundRatio(numerator, denominator) {
   if (denominator === 0n) throw new VBError('Division by zero',11);
@@ -1149,13 +1385,14 @@ function roundRatio(numerator, denominator) {
 }
 /** Parse invariant decimal Currency without passing through IEEE-754 first. */
 function currencyRaw(value) {
+  value=unbox(value);
   if(value instanceof VBCurrency)return value.raw;
   if(value===undefined)return 0n;
   if(value===null)throw new VBError('Invalid use of Null',94);
   if(isNothing(value))throw new VBError('Object variable not set',91);
   if(value instanceof Date)value=numeric(value);
   if(typeof value==='boolean')value=value?-1:0;
-  const text=String(value).trim();
+  const text=typeof value==='string'?normalizeNumericString(value):String(value).trim();
   const m=text.match(/^([+-]?)(\d+(?:\.\d*)?|\.\d+)(?:[eEdD]([+-]?\d+))?$/);
   if(!m)throw new VBError('Type mismatch',13);
   const exponent=Number(m[3]||0), parts=m[2].split('.'), digits=(parts.join('').replace(/^0+/,'')||'0');
@@ -1185,28 +1422,28 @@ function cloneValue(value,seen=new Map(),depth=0){
   if(value instanceof Date)return new Date(value);
   if(!value||typeof value!=='object'||value===NOTHING||value instanceof VBCurrency)return value;
   if(seen.has(value))return seen.get(value);
-  if(value instanceof VBArray){const copy=Object.create(VBArray.prototype);seen.set(value,copy);copy.type=value.type;copy.bounds=value.bounds.map(b=>[...b]);copy.dynamic=value.dynamic;copy.elementFactory=value.elementFactory;copy.fixedLength=value.fixedLength;copy.data=value.data.map(v=>cloneValue(v,seen,depth+1));return copy;}
-  if(value.__fields instanceof Map){const fields=new Map(),copy=makeRecord(value.__type,fields);seen.set(value,copy);for(const [name,cell] of value.__fields){const field=Object.create(Cell.prototype);Object.assign(field,{type:cell.type,constant:false,fixedLength:cell.fixedLength,isArray:cell.isArray,elementType:cell.elementType,_value:cloneValue(cell.get(),seen,depth+1)});fields.set(name,field);Object.defineProperty(copy,name,{enumerable:true,get:()=>field.get(),set:v=>field.set(v)});}return copy;}
+  if(value instanceof VBArray){const copy=Object.create(VBArray.prototype);seen.set(value,copy);copy.type=value.type;copy.bounds=value.bounds.map(b=>[...b]);copy.dynamic=value.dynamic;copy.elementFactory=value.elementFactory;copy.fixedLength=value.fixedLength;copy.scalarData=value.scalarData?.slice();copy.data=value.data.map(v=>cloneValue(v,seen,depth+1));return copy;}
+  if(value.__fields instanceof Map){const fields=new Map(),copy=makeRecord(value.__type,fields);seen.set(value,copy);for(const [name,cell] of value.__fields){const field=Object.create(Cell.prototype);Object.assign(field,{type:cell.type,constant:false,fixedLength:cell.fixedLength,isArray:cell.isArray,elementType:cell.elementType,_value:cloneValue(cell.get(),seen,depth+1),_scalar:cell.getScalar?.()});fields.set(name,field);Object.defineProperty(copy,name,{enumerable:true,get:()=>field.get(),set:v=>field.set(v)});}return copy;}
   return value;
 }
 function matchingRecord(target,source){
   if(lower(target.__type)!==lower(source.__type)||target.__fields.size!==source.__fields.size)return false;
   for(const [key,cell]of target.__fields){const next=source.__fields.get(key);if(!next||lower(cell.type)!==lower(next.type)||cell.fixedLength!==next.fixedLength||!!cell.isArray!==!!next.isArray)return false;if(cell.get()?.__fields&&(!next.get()?.__fields||!matchingRecord(cell.get(),next.get())))return false;}return true;
 }
-function commitRecord(target,source){for(const [key,cell]of target.__fields){const next=source.__fields.get(key).get();if(cell.get()?.__fields&&next?.__fields)commitRecord(cell.get(),next);else if(cell.get() instanceof VBArray&&next instanceof VBArray){const array=cell.get();array.bounds=next.bounds;array.data=next.data;array.elementFactory=next.elementFactory;array.fixedLength=next.fixedLength;array.dynamic=next.dynamic;}else cell._value=next;}return target;}
+function commitRecord(target,source){for(const [key,cell]of target.__fields){const next=source.__fields.get(key).get();if(cell.get()?.__fields&&next?.__fields)commitRecord(cell.get(),next);else if(cell.get() instanceof VBArray&&next instanceof VBArray){const array=cell.get();array.bounds=next.bounds;array.data=next.data;array.elementFactory=next.elementFactory;array.fixedLength=next.fixedLength;array.dynamic=next.dynamic;array.scalarData=next.scalarData;}else {cell._value=next;cell._scalar=source.__fields.get(key).getScalar();}}return target;}
 function defaultValue(type='Variant') { switch(lower(type)){case 'string':return '';case 'boolean':case 'byte':case 'integer':case 'long':case 'single':case 'double':return 0;case 'currency':return new VBCurrency();case 'date':return new Date(1899,11,30);case 'object':return NOTHING;default:return undefined;} }
 function coerce(value,type='Variant',fixedLength=null) {
-  type=lower(type);
+  const original=value;value=unbox(value);type=lower(type);
   if(type==='variant')return cloneValue(value);
   if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   if(value===MISSING)throw new VBError('Argument not optional',449);
   if(type==='object'){if(value===NOTHING || value&&typeof value==='object'&&!(value instanceof Date)&&!(value instanceof VBCurrency)&&!(value instanceof VBDecimal)&&!(value instanceof VBArray)&&!value.__fields)return value;throw new VBError(value===null?'Invalid use of Null':'Object required',value===null?94:424);}
-  if(type==='string'){const s=vbString(value);return fixedLength==null?s:s.padEnd(fixedLength,' ').slice(0,fixedLength);}
-  if(type==='date')return asDate(value);
-  if(type==='decimal')return decimal(value);
+  if(type==='string'){const s=vbString(original);return fixedLength==null?s:s.padEnd(fixedLength,' ').slice(0,fixedLength);}
+  if(type==='date')return asDate(scalarType(original)==='boolean'||value instanceof VBCurrency||value instanceof VBDecimal?numeric(value):value);
+  if(type==='decimal')return decimal(original);
   if(type==='currency')return value instanceof VBCurrency?value:new VBCurrency(value);
-  if(type==='boolean'){if(typeof value==='string'&&/^(true|false)$/i.test(value))return /^true$/i.test(value)?-1:0;return numeric(value)!==0?-1:0;}
-  if(['byte','integer','long'].includes(type)){const n=value instanceof VBDecimal?Number(value.roundedInteger()):bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
+  if(type==='boolean'){if(typeof value==='string'){if(value==='#TRUE#'||/^(true)$/i.test(value))return -1;if(value==='#FALSE#'||/^(false)$/i.test(value))return 0;}return numeric(value)!==0?-1:0;}
+  if(['byte','integer','long'].includes(type)){if(type==='byte'&&scalarType(original)==='boolean')return value?255:0;if(typeof value==='string')value=new VBDecimal(normalizeNumericString(value,type));const n=value instanceof VBDecimal?Number(value.roundedInteger()):bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
   if(type==='single'){const n=Math.fround(numeric(value));if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;}
   if(type==='double')return numeric(value);
   if(value?.__fields){if(lower(value.__type)!==type)throw new VBError('Type mismatch',13);return cloneValue(value);}
@@ -1214,9 +1451,10 @@ function coerce(value,type='Variant',fixedLength=null) {
   return value;
 }
 class Cell {
-  constructor(type='Variant',value=defaultValue(type),constant=false,fixedLength=null){this.type=type;this.constant=constant;this.fixedLength=fixedLength;this._value=coerce(value,type,fixedLength);}
+  constructor(type='Variant',value=defaultValue(type),constant=false,fixedLength=null){this.type=type;this.constant=constant;this.fixedLength=fixedLength;this._scalar=storageScalar(value,type,fixedLength);this._value=unbox(this._scalar);}
   get(){return this._value;}
-  set(value){if(this.constant)throw new VBError('Assignment to constant not permitted',500);const next=coerce(value,this.type,this.fixedLength);if(this.isArray){if(!(next instanceof VBArray)||lower(next.type)!==lower(this.elementType))throw new VBError('Array type mismatch',13);}if(this._value?.__fields){if(!next?.__fields||!matchingRecord(this._value,next))throw new VBError('User-defined type mismatch',13);return commitRecord(this._value,next);}this._value=next;return this._value;}
+  getScalar(){if(!scalarType(this._value))return this._value;return this._scalar instanceof VBScalar&&Object.is(this._scalar.value,this._value)?this._scalar:storageScalar(this._value,this.type,this.fixedLength);}
+  set(value){if(this.constant)throw new VBError('Assignment to constant not permitted',500);const tagged=storageScalar(value,this.type,this.fixedLength),next=unbox(tagged);if(this.isArray){if(!(next instanceof VBArray)||lower(next.type)!==lower(this.elementType))throw new VBError('Array type mismatch',13);}if(this._value?.__fields){if(!next?.__fields||!matchingRecord(this._value,next))throw new VBError('User-defined type mismatch',13);return commitRecord(this._value,next);}this._value=next;this._scalar=tagged;return this._value;}
 }
 /** Lazily creates As New variables; assigning Nothing resets the factory. */
 class LazyCell extends Cell {
@@ -1226,52 +1464,59 @@ class LazyCell extends Cell {
   peek(){return this._value;}
 }
 class Ref {
-  constructor(get,set,type='Variant',fixedLength=null){this.get=get;this.set=set;this.type=type;this.fixedLength=fixedLength;}
+  constructor(get,set,type='Variant',fixedLength=null,getScalar=null){this.get=get;this.set=set;this.type=type;this.fixedLength=fixedLength;if(getScalar)this.getScalar=getScalar;}
 }
 class VBArray {
   constructor(bounds=[],type='Variant',elementFactory=null,fixedLength=null){this.elementFactory=elementFactory;this.fixedLength=fixedLength;this.type=type;if(bounds.length>60)throw new VBError('An array cannot exceed 60 dimensions',9);this.bounds=bounds.map(([l,u])=>{const b=[bankersRound(numeric(l)),bankersRound(numeric(u))];if(b.some(n=>n< -2147483648||n>2147483647))throw new VBError('Array bound overflow',6);return b;});this.dynamic=!bounds.length;this.allocate();}
   allocate(){let n=this.bounds.length?1:0;for(const [l,u]of this.bounds){if(u<l)throw new VBError('Subscript out of range',9);n*=u-l+1;if(n>1000000)throw new VBError('Array allocation exceeds browser runtime limit (1,000,000 elements)',7);}this.data=Array.from({length:n},()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
   offset(indices){if(indices.length!==this.bounds.length||!indices.length)throw new VBError('Subscript out of range',9);let offset=0;for(let d=0;d<indices.length;d++){const [l,u]=this.bounds[d],i=bankersRound(numeric(indices[d]));if(i<l||i>u)throw new VBError('Subscript out of range',9);offset=offset*(u-l+1)+i-l;}return offset;}
   get(...indices){return this.data[this.offset(indices)];}
-  set(indices,value){const offset=this.offset(indices),next=coerce(value,this.type,this.fixedLength);if(this.data[offset]?.__fields&&next?.__fields){if(!matchingRecord(this.data[offset],next))throw new VBError('User-defined type mismatch',13);commitRecord(this.data[offset],next);}else this.data[offset]=next;return value;}
+  getScalar(...indices){const i=this.offset(indices),tag=this.scalarData?.[i];if(!scalarType(this.data[i]))return this.data[i];return tag instanceof VBScalar&&Object.is(tag.value,this.data[i])?tag:storageScalar(this.data[i],this.type,this.fixedLength);}
+  set(indices,value){const offset=this.offset(indices),tagged=storageScalar(value,this.type,this.fixedLength),next=unbox(tagged);if(this.data[offset]?.__fields&&next?.__fields){if(!matchingRecord(this.data[offset],next))throw new VBError('User-defined type mismatch',13);commitRecord(this.data[offset],next);}else {this.data[offset]=next;(this.scalarData||=[])[offset]=tagged;}return unbox(value);}
   redim(bounds,preserve=false){
     const normalized=bounds.map(([l,u])=>[bankersRound(numeric(l)),bankersRound(numeric(u))]),old=this.bounds;
     if(preserve&&old.length&&(old.length!==normalized.length||old.some(([l,u],i)=>l!==normalized[i][0]||(i<old.length-1&&u!==normalized[i][1]))))throw new VBError('ReDim Preserve can change only the upper bound of the last dimension',9);
     if(!this.dynamic)throw new VBError('This array is fixed or temporarily locked',10);
     const next=new VBArray(normalized,this.type,this.elementFactory,this.fixedLength);next.dynamic=true;
-    if(preserve&&old.length){for(const indices of this.indices()){if(indices.every((n,d)=>n<=normalized[d][1]))next.set(indices,this.get(...indices));}}
-    this.bounds=next.bounds;this.data=next.data;return this;
+    if(preserve&&old.length){for(const indices of this.indices()){if(indices.every((n,d)=>n<=normalized[d][1]))next.set(indices,this.getScalar(...indices));}}
+    this.bounds=next.bounds;this.data=next.data;this.scalarData=next.scalarData;return this;
   }
-  erase(){if(this.dynamic){this.bounds=[];this.data=[];}else this.data=this.data.map(()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
+  erase(){this.scalarData=[];if(this.dynamic){this.bounds=[];this.data=[];}else this.data=this.data.map(()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
   *indices(){if(!this.bounds.length||!this.data.length)return;const at=this.bounds.map(([l])=>l);for(;;){yield [...at];let d=0;for(;d<at.length;d++){if(++at[d]<=this.bounds[d][1])break;at[d]=this.bounds[d][0];}if(d===at.length)return;}}
   *[Symbol.iterator](){for(const at of this.indices())yield this.get(...at);}
-  static from(values,base=0){const a=Object.create(VBArray.prototype);a.type='Variant';a.bounds=[[base,base+values.length-1]];a.dynamic=true;a.data=[...values];return a;}
+  *scalarIterator(){for(const at of this.indices())yield this.getScalar(...at);}
+  static from(values,base=0){const a=Object.create(VBArray.prototype);a.type='Variant';a.bounds=[[base,base+values.length-1]];a.dynamic=true;a.scalarData=values.map(v=>storageScalar(v,'Variant'));a.data=a.scalarData.map(unbox);return a;}
 }
 class VBCollection {
   constructor(){this.items=[];this.keys=new Map();}
   get Count(){return this.items.length;}
-  Add(item,key,before,after){if(key!==undefined&&key!==''&&this.keys.has(String(key).toLowerCase()))throw new VBError('This key is already associated with an element of this collection',457);let index=this.items.length;if(before!==undefined)index=this.index(before);if(after!==undefined)index=this.index(after)+1;const entry={item,key:key===undefined?null:String(key).toLowerCase()};this.items.splice(index,0,entry);if(entry.key!==null)this.keys.set(entry.key,entry);return item;}
-  index(key){if(typeof key==='number'){if(key<1||key>this.items.length)throw new VBError('Subscript out of range',9);return Math.trunc(key)-1;}const entry=this.keys.get(String(key).toLowerCase());if(!entry)throw new VBError('Invalid procedure call or argument',5);return this.items.indexOf(entry);}
+  Add(item,key,before,after){key=unbox(key);before=unbox(before);after=unbox(after);if(key!==undefined&&key!==''&&this.keys.has(String(key).toLowerCase()))throw new VBError('This key is already associated with an element of this collection',457);let index=this.items.length;if(before!==undefined)index=this.index(before);if(after!==undefined)index=this.index(after)+1;const scalar=storageScalar(item,'Variant');const entry={item:unbox(scalar),scalar,key:key===undefined?null:String(key).toLowerCase()};this.items.splice(index,0,entry);if(entry.key!==null)this.keys.set(entry.key,entry);return item;}
+  index(key){key=unbox(key);if(typeof key==='number'){if(key<1||key>this.items.length)throw new VBError('Subscript out of range',9);return Math.trunc(key)-1;}const entry=this.keys.get(String(key).toLowerCase());if(!entry)throw new VBError('Invalid procedure call or argument',5);return this.items.indexOf(entry);}
   Item(key){return this.items[this.index(key)].item;}
+  itemScalar(key){const entry=this.items[this.index(key)];return entry.scalar??storageScalar(entry.item,'Variant');}
+  *scalarIterator(){for(const entry of this.items)yield entry.scalar??storageScalar(entry.item,'Variant');}
   Remove(key){const i=this.index(key),entry=this.items[i];this.items.splice(i,1);if(entry.key!==null)this.keys.delete(entry.key);}
   [Symbol.iterator](){return this.items.map(x=>x.item)[Symbol.iterator]();}
 }
 class VBDictionary {
   constructor(){this.map=new Map();this.CompareMode=0;}
-  normalize(k){return this.CompareMode===1&&typeof k==='string'?k.toLowerCase():k;}
+  normalize(k){k=unbox(k);return this.CompareMode===1&&typeof k==='string'?k.toLowerCase():k;}
   get Count(){return this.map.size;}
-  Add(k,v){const key=this.normalize(k);if(this.map.has(key))throw new VBError('Key already exists',457);this.map.set(key,{key:k,value:v});}
+  Add(k,v){const key=this.normalize(k);if(this.map.has(key))throw new VBError('Key already exists',457);const scalar=storageScalar(v,'Variant');this.map.set(key,{key:unbox(k),keyScalar:storageScalar(k,'Variant'),value:unbox(scalar),scalar});}
   Item(k){return this.map.get(this.normalize(k))?.value;}
-  setItem(k,v){this.map.set(this.normalize(k),{key:k,value:v});}
+  itemScalar(k){const entry=this.map.get(this.normalize(k));return entry?.scalar??storageScalar(entry?.value,'Variant');}
+  setItem(k,v){const scalar=storageScalar(v,'Variant'),key=this.normalize(k),entry=this.map.get(key);if(entry){entry.value=unbox(scalar);entry.scalar=scalar;}else this.map.set(key,{key:unbox(k),keyScalar:storageScalar(k,'Variant'),value:unbox(scalar),scalar});}
   Exists(k){return this.map.has(this.normalize(k))?-1:0;}
   Remove(k){if(!this.map.delete(this.normalize(k)))throw new VBError('Key not found',5);}
   RemoveAll(){this.map.clear();}
-  Keys(){return VBArray.from([...this.map.values()].map(v=>v.key));}
-  Items(){return VBArray.from([...this.map.values()].map(v=>v.value));}
+  Keys(){return VBArray.from([...this.map.values()].map(v=>v.keyScalar??v.key));}
+  Items(){return VBArray.from([...this.map.values()].map(v=>v.scalar??v.value));}
+  *scalarIterator(){for(const entry of this.map.values())yield entry.keyScalar??storageScalar(entry.key,'Variant');}
   [Symbol.iterator](){return this.Keys()[Symbol.iterator]();}
 }
-function unary(op,value){if(value===null)return null;if(value instanceof VBDecimal){if(op==='-')return value.negate();if(op==='+')return value;}if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
+function unary(op,value){if(value instanceof VBScalar)return scalarUnary(op,value);if(value===null)return null;if(value instanceof VBDecimal){if(op==='-')return value.negate();if(op==='+')return value;}if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
 function binary(op,a,b,compare='binary') {
+  if(a instanceof VBScalar||b instanceof VBScalar)return scalarBinary(op,a,b,compare);
   if(a instanceof VBErrorValue||b instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   if(op==='is'){const object=v=>v===NOTHING||v&&typeof v==='object'&&!(v instanceof Date)&&!(v instanceof VBCurrency)&&!(v instanceof VBDecimal)&&!(v instanceof VBArray)&&!v.__fields;if(!object(a)||!object(b))throw new VBError('Object required',424);return objectIdentity(a)===objectIdentity(b)?-1:0;}
   if(isNothing(a)||isNothing(b))throw new VBError('Object variable not set',91);
@@ -1293,15 +1538,15 @@ function binary(op,a,b,compare='binary') {
   switch(op){case '+':n=x+y;break;case '-':n=x-y;break;case '*':n=x*y;break;case '/':if(y===0)throw new VBError('Division by zero',11);n=x/y;break;case '\\':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=Math.trunc(bankersRound(x)/bankersRound(y));break;case 'mod':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=bankersRound(x)%bankersRound(y);break;case '^':n=x**y;break;case 'and':return bankersRound(x)&bankersRound(y);case 'or':return bankersRound(x)|bankersRound(y);case 'xor':return bankersRound(x)^bankersRound(y);case 'eqv':return ~(bankersRound(x)^bankersRound(y));case 'imp':return (~bankersRound(x))|bankersRound(y);default:throw new VBError(`Unknown operator ${op}`,1002);}
   if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;
 }
-function describe(value){if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}
+function describe(value){if(value instanceof VBScalar)return value.type==='boolean'?value.toString():describe(value.value);if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}
 
-return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,vbString,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
+return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBScalar,SCALAR_TYPES,unbox,scalarType,tagScalar,storageScalar,readScalar,literalScalar,signedLiteralScalar,scalarBinary,scalarUnary,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,normalizeNumericString,scalarNumberString,vbString,printScalar,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
 })();
 
 /* automation.js */
 __modules[16]=(()=>{
 const {VBError}=__modules[11];
-const {Ref,MISSING}=__modules[15];
+const {Ref,MISSING,unbox}=__modules[15];
 /** Trusted host-installed Automation adapters. Projects never supply executable factories. */
 
 
@@ -1314,7 +1559,7 @@ function automationDefaultName(o){return state(o).defaultMember;}
 async function automationInvoke(o,name,mode,args=[]){
   const {s,m}=member(o,name,mode);if(args.length>65)throw new VBError('Too many Automation arguments',450);
   const params=(mode===4||mode===8)?[...m.params,{name:'value'}]:m.params;if(args.length>params.length||params.some((p,i)=>!p.optional&&(i>=args.length||args[i]===MISSING)))throw new VBError('Wrong number of Automation arguments',450);
-  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(await arg.ref.get());}else values.push(arg);}
+  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(unbox(await arg.ref.get()));}else values.push(unbox(arg));}
   const result=await s.adapter.invoke(m.name,mode,values,refs.map(([i])=>i));
   // An adapter must return an explicit value and optional copyback array.
   if(s.closed||s.session.closed)throw new VBError('Automation session closed during invocation',91);
@@ -1388,10 +1633,13 @@ __modules[18]=(()=>{
 
 // Registration is private to trusted library objects; a forged __type never grants a default property.
 const values = new WeakSet();
-function dataDefault(object) { values.add(object); return object; }
+const types = new WeakMap();
+function dataDefault(object, scalarType) { values.add(object); if (typeof scalarType === 'function') types.set(object, scalarType); return object; }
+// Type resolvers are registered only by trusted field/parameter constructors.
+function dataDefaultType(object) { return types.get(object)?.(); }
 function hasDataDefault(object) { return object != null && (typeof object === 'object' || typeof object === 'function') && values.has(object); }
 
-return {dataDefault,hasDataDefault};
+return {dataDefault,dataDefaultType,hasDataDefault};
 })();
 
 /* ../data/common.js */
@@ -1605,6 +1853,7 @@ const {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth}=__modules[15
 
 // Disconnected client-side cursor. ConnectedRecordset adds explicit provider I/O.
 const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Variant'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
+const fieldScalarType=type=>TYPES.get(Number(type));
 const fold=value=>String(value).toLowerCase();
 const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
 const args=value=>value instanceof VBArray?[...value]:Array.isArray(value)?value:[value];
@@ -1638,7 +1887,7 @@ class DisconnectedRecordset {
       },
       get Count(){return rs.columns.length;},
       setItem(key,value){this.Item(key).Value=value;},
-      Item(key){const col=rs.column(key);return dataDefault({Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}});},
+      Item(key){const col=rs.column(key);return dataDefault({Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}},()=>fieldScalarType(col.Type));},
       [Symbol.iterator](){return rs.columns.map(c=>this.Item(c.Name)).values();}
     };
   }
@@ -1708,7 +1957,7 @@ class DisconnectedRecordset {
   setRowValue(row,key,value,expected){this.requireWrite();if(!this.rows.includes(row))fail('Bound row has been deleted',3021);const col=this.column(key),next=fieldValue(col,value);if(expected!==undefined&&(!Object.is(row[col.Name],expected)&&!(row[col.Name] instanceof Date&&expected instanceof Date&&row[col.Name].getTime()===expected.getTime())&&!(row[col.Name] instanceof VBCurrency&&expected instanceof VBCurrency&&row[col.Name].raw===expected.raw)))fail('Bound value changed while the editor was active',3197);this.Update();const index=this.view().indexOf(row);if(index<0)fail('Bound row no longer belongs to the current view',3021);this.position=index;this.edit(col,next);this.Update();}
 }
 
-return {fieldValue,DisconnectedRecordset};
+return {fieldScalarType,fieldValue,DisconnectedRecordset};
 })();
 
 /* ../data/provider-recordset.js */
@@ -2203,7 +2452,7 @@ return {compareData,compileCriteria};
 __modules[26]=(()=>{
 const {dataDefault}=__modules[18];
 const {assertData,after,dataList,sameValue}=__modules[19];
-const {fieldValue}=__modules[21];
+const {fieldValue,fieldScalarType}=__modules[21];
 const {compileCriteria,compareData}=__modules[25];
 const {DAO_TYPES}=__modules[24];
 
@@ -2247,7 +2496,7 @@ class DAORecordset {
       get FieldSize(){const value=field.Value;return value==null?0:typeof value==='string'?value.length*2:value.length??(field.Type===3?2:field.Type===2?1:4);},
       GetChunk(offset,length){offset=Number(offset);length=Number(length);assertData(Number.isSafeInteger(offset)&&offset>=0&&Number.isSafeInteger(length)&&length>=0,'Invalid chunk range',5);const value=field.Value;if(value==null)return null;assertData(typeof value==='string'||value instanceof Uint8Array,'Chunk requires text or binary',3251);return value.slice(offset,offset+length);},
       AppendChunk(value){const old=field.Value;assertData(old==null||typeof old===typeof value,'Chunk type mismatch',13);if(typeof value==='string')field.Value=(old||'')+value;else{assertData(value instanceof Uint8Array&&(old==null||old instanceof Uint8Array),'Binary chunk requires bytes',13);const result=new Uint8Array((old?.length||0)+value.length);if(old)result.set(old);result.set(value,old?.length||0);field.Value=result;}}
-    };return dataDefault(field);
+    };return dataDefault(field,()=>fieldScalarType(DAO_TYPES[field.Type]||c.Type));
   }
   Edit(){this.require();assertData(this.Updatable,'Recordset is read-only',3027);this.CancelUpdate();assertData(!this._deleted,'Record is deleted',3167);const row=this.cursor.current();this._row=row;this._buffer=rowCopy(row);this._original=rowCopy(row);this._mode=1;}
   AddNew(){this.require();assertData(this.Updatable,'Recordset is read-only',3027);this.CancelUpdate();this._mode=2;this._buffer=Object.fromEntries(this.cursor.columns.map(c=>[c.Name,null]));this._row=null;this._original=null;this._deleted=false;}
@@ -2513,7 +2762,7 @@ const {DataCollection,NamedCollection}=__modules[20];
 const {ConnectedRecordset}=__modules[23];
 const {DAORecordset}=__modules[26];
 const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[24];
-const {fieldValue}=__modules[21];
+const {fieldValue,fieldScalarType}=__modules[21];
 const {initializeSQLite}=__modules[27];
 
 
@@ -2560,7 +2809,7 @@ class DAOTableDef {
   RefreshLink(){assertData(false,'Linked Jet/ACE TableDefs require a native catalog provider',3251);}
 }
 class DAOParameter {
-  constructor(definition){this.__type='DAO.Parameter';Object.assign(this,definition);this._value=null;dataDefault(this);}
+  constructor(definition){this.__type='DAO.Parameter';Object.assign(this,definition);this._value=null;dataDefault(this,()=>fieldScalarType(DAO_TYPES[this.Type]||12));}
   get Value(){return copy(this._value);}
   set Value(value){this._value=fieldValue({Name:this.Name,Type:DAO_TYPES[this.Type]||12,DefinedSize:this.Size},value);}
 }
@@ -3065,7 +3314,7 @@ __modules[33]=(()=>{
 const {dataDefault}=__modules[18];
 const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[19];
 const {ConnectedRecordset}=__modules[23];
-const {fieldValue}=__modules[21];
+const {fieldValue,fieldScalarType}=__modules[21];
 const {DataCollection}=__modules[20];
 const {DAOEngine,DAODatabase}=__modules[28];
 
@@ -3146,7 +3395,7 @@ class ADOCommand {
   }
   get CommandTimeout(){return this._commandTimeout;}
   set CommandTimeout(value){value=Number(value);assertData(Number.isFinite(value)&&value>=1&&value<=600,'CommandTimeout must be 1–600 seconds',5);this._commandTimeout=value;this._timeoutExplicit=true;}
-  CreateParameter(name='',type=202,direction=1,size=0,value=null){return dataDefault({Name:String(name),Type:Number(type),Direction:Number(direction),Size:Number(size),Value:value});}
+  CreateParameter(name='',type=202,direction=1,size=0,value=null){const parameter={Name:String(name),Type:Number(type),Direction:Number(direction),Size:Number(size),Value:value};return dataDefault(parameter,()=>fieldScalarType(parameter.Type));}
   async execute(affected,parameters,options=this.CommandType,target){
     let cn=this.ActiveConnection,owned=false;
     if(typeof cn==='string'){const text=cn;cn=this.context.connection();await cn.Open(text);owned=true;}
@@ -3173,10 +3422,56 @@ class ADOCommand {
 return {ADOConnection,ADOCommand,DataCollection,DAOEngine,DAODatabase};
 })();
 
-/* binary-codec.js */
+/* sequential-codec.js */
 __modules[34]=(()=>{
 const {VBError}=__modules[11];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[15];
+const {VBErrorValue,tagScalar,coerce,defaultValue}=__modules[15];
+const {asDate}=__modules[10];
+
+
+
+/** Read one VB sequential Input field, not an entire physical line.
+ * Quoted fields end at the first closing quote (VB Input is not CSV).
+ * The returned cursor allows another Input statement to consume the same row.
+ */
+function readInputField(text,start=0,type='Variant'){
+  if(typeof text!=='string'||!Number.isInteger(start)||start<0||start>text.length)throw new VBError('Invalid file position',5);
+  let i=start;while(text[i]===' '||text[i]==='\t')i++;
+  if(i===text.length)throw new VBError('Input past end of file',62);
+  const quoted=text[i]==='"';let token='';
+  if(quoted){
+    const end=text.indexOf('"',i+1);if(end<0)throw new VBError('Input past end of file',62);
+    token=text.slice(i+1,end);i=end+1;
+  }else{
+    const begin=i;while(i<text.length&&text[i]!==','&&text[i]!=='\r'&&text[i]!=='\n')i++;
+    if(i===text.length)throw new VBError('Input past end of file',62);
+    token=text.slice(begin,i).trim();
+  }
+  while(text[i]===' '||text[i]==='\t')i++;
+  if(text[i]===',')i++;
+  else if(text[i]==='\r'){i++;if(text[i]==='\n')i++;}
+  else if(text[i]==='\n')i++;
+  const target=String(type).toLowerCase();let value;
+  if(target==='string')value=tagScalar(token,'string');
+  else if(quoted)value=target==='variant'?tagScalar(token,'string',true):defaultValue(type);
+  else if(token==='')value=tagScalar(undefined,'empty',true);
+  else if(token==='#NULL#')value=tagScalar(null,'null',true);
+  else if(token==='#TRUE#'||token==='#FALSE#')value=tagScalar(token==='#TRUE#'?-1:0,'boolean',true);
+  else if(/^#ERROR [-+]?\d+#$/.test(token))value=tagScalar(new VBErrorValue(Number(token.slice(7,-1))),'error',true);
+  else if(token.startsWith('#')&&token.endsWith('#'))value=tagScalar(asDate(token.slice(1,-1)),'date',true);
+  else if(target==='boolean'||target==='date')throw new VBError('Overflow',6);
+  else if(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/.test(token))value=tagScalar(coerce(token,'Double'),'double',true);
+  else value=target==='variant'?tagScalar(token,'string',true):defaultValue(type);
+  return {value,next:i};
+}
+
+return {readInputField};
+})();
+
+/* binary-codec.js */
+__modules[35]=(()=>{
+const {VBError}=__modules[11];
+const {VBScalar,SCALAR_TYPES,scalarType,tagScalar,unbox,VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[15];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -3209,7 +3504,7 @@ class Reader {
   read(length){if(!Number.isInteger(length)||length<0||this.position+length>this.bytes.length)throw new VBError('Input past end of file',62);const result=this.bytes.subarray(this.position,this.position+length);this.position+=length;return result;}
   number(type){const [size,method]=TYPES[type],b=this.read(size);return new DataView(b.buffer,b.byteOffset,b.byteLength)['get'+method](0,true);}
 }
-function variantType(value){if(value instanceof VBDecimal)return 14;if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
+function variantType(value){if(value instanceof VBScalar)return SCALAR_TYPES[value.type];if(value instanceof VBDecimal)return 14;if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
 function* arrayIndices(bounds){if(!bounds.length)return;const idx=bounds.map(([l])=>l);while(true){yield [...idx];let d=0;for(;d<bounds.length;d++){if(++idx[d]<=bounds[d][1])break;idx[d]=bounds[d][0];}if(d===bounds.length)break;}}
 function put(writer,value,schema,mode,inRecord=false,depth=0){
   if(depth>32)throw new VBError('Record nesting exceeds runtime limit',7);
@@ -3218,12 +3513,13 @@ function put(writer,value,schema,mode,inRecord=false,depth=0){
     if(!schema.isArray)throw new VBError('Scalar Variant containing an array is not supported by Put',458);
     if(!value.bounds.length)throw new VBError('Subscript out of range',9);
     if(value.dynamic&&(mode==='random'||inRecord)){writer.number('integer',value.bounds.length);for(const [lo,hi]of value.bounds){writer.number('long',hi-lo+1);writer.number('long',lo);}}
-    for(const indices of arrayIndices(value.bounds))put(writer,value.get(...indices),{type:value.type,fixedLength:value.fixedLength},mode,inRecord,depth+1);
+    for(const indices of arrayIndices(value.bounds))put(writer,value.getScalar(...indices),{type:value.type,fixedLength:value.fixedLength},mode,inRecord,depth+1);
     return;
   }
-  if(value?.__fields){for(const [,cell]of value.__fields)put(writer,cell.get(),cell,mode,true,depth+1);return;}
+  if(value?.__fields){for(const [,cell]of value.__fields)put(writer,cell.getScalar(),cell,mode,true,depth+1);return;}
   if(value===NOTHING||type==='object')throw new VBError('Objects cannot be written with Put',458);
   if(type==='variant'){const kind=variantType(value);writer.number('integer',kind);if(kind<2)return;put(writer,value,{type:VARTYPES[kind]},mode,kind===8||inRecord,depth+1);return;}
+  value=unbox(value);
   if(type==='decimal'){writer.write(coerce(value,'Decimal').toBytes());return;}
   if(type==='error'){writer.number('long',value.number);return;}
   if(type==='string'){
@@ -3254,7 +3550,7 @@ function get(reader,schema,current,mode,inRecord=false,depth=0){
   if(type==='object'||current===NOTHING)throw new VBError('Objects cannot be read with Get',458);
   if(type==='variant'){
     const kind=reader.number('integer');if(kind===0)return undefined;if(kind===1)return null;if(!VARTYPES[kind])throw new VBError('Unsupported Variant file descriptor: '+kind,458);
-    return get(reader,{type:VARTYPES[kind]},undefined,mode,kind===8||inRecord,depth+1);
+    return tagScalar(get(reader,{type:VARTYPES[kind]},undefined,mode,kind===8||inRecord,depth+1),VARTYPES[kind],true);
   }
   if(type==='decimal')return VBDecimal.fromBytes(reader.read(16));
   if(type==='error')return new VBErrorValue(reader.number('long'));
@@ -3266,15 +3562,17 @@ function get(reader,schema,current,mode,inRecord=false,depth=0){
   const value=reader.number(type);return type==='currency'?new VBCurrency(value,true):coerce(value,type);
 }
 function encodeVariable(value,schema={},mode='binary'){const writer=new Writer();put(writer,value,schema,mode);return writer.finish();}
-function decodeVariable(bytes,schema={},current,mode='binary'){const reader=new Reader(bytes),value=get(reader,schema,current,mode);return {value,bytesRead:reader.position};}
+function decodeVariable(bytes,schema={},current,mode='binary'){const reader=new Reader(bytes),value=get(reader,schema,current,mode);return {value:unbox(value),scalar:value,bytesRead:reader.position};}
 
 return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVariable};
 })();
 
 /* filesystem.js */
-__modules[35]=(()=>{
+__modules[36]=(()=>{
+const {readInputField}=__modules[34];
 const { VBError }=__modules[11];
-const {encodeANSI,decodeANSI}=__modules[34];
+const {encodeANSI,decodeANSI}=__modules[35];
+
 
 
 const MAX_FILE=20*1024*1024;
@@ -3320,6 +3618,12 @@ class VirtualFileSystem {
   refresh(h){h.content=['binary','random'].includes(h.mode)?this.readBytes(h.path):this.read(h.path);return h;}
   print(number,text,newline=true){const h=this.handle(number);this.requireAccess(h,'write');if(!['output','append'].includes(h.mode))throw new VBError('Bad file mode',54);const addition=String(text)+(newline?'\r\n':'');this.assertUnlocked(h,h.position,h.position+addition.length);h.content+=addition;h.position=h.content.length;this.write(h.path,h.content);}
   lineInput(number){const h=this.refresh(this.handle(number));this.requireAccess(h,'read');if(h.mode!=='input')throw new VBError('Bad file mode',54);if(h.position>=h.content.length)throw new VBError('Input past end of file',62);let end=h.content.indexOf('\n',h.position);if(end<0)end=h.content.length;this.assertUnlocked(h,h.position,end);const s=h.content.slice(h.position,end).replace(/\r$/,'');h.position=Math.min(end+1,h.content.length);return s;}
+  inputValue(number,type='Variant'){
+    const h=this.refresh(this.handle(number));this.requireAccess(h,'read');
+    if(!['input','binary'].includes(h.mode))throw new VBError('Bad file mode',54);
+    const text=h.content instanceof Uint8Array?decodeANSI(h.content):h.content;
+    const result=readInputField(text,h.position,type);this.assertUnlocked(h,h.position,result.next);h.position=result.next;return result.value;
+  }
   input(number,count){const h=this.refresh(this.handle(number));this.requireAccess(h,'read');if(!['input','binary'].includes(h.mode))throw new VBError('Bad file mode',54);count=integer(count,0,MAX_FILE);if(h.position+count>h.content.length)throw new VBError('Input past end of file',62);this.assertUnlocked(h,h.position,h.position+count);const s=h.content.slice(h.position,h.position+count);h.position+=count;return s instanceof Uint8Array?decodeANSI(s):s;}
   eof(number){const h=this.refresh(this.handle(number));return h.position>=h.content.length?-1:0;}
   lof(number){return this.refresh(this.handle(number)).content.length;}
@@ -3338,7 +3642,7 @@ return {VirtualFileSystem};
 })();
 
 /* ../data/context.js */
-__modules[36]=(()=>{
+__modules[37]=(()=>{
 const {DAOEngine}=__modules[28];
 const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[19];
 const {SQLiteProvider}=__modules[29];
@@ -3346,7 +3650,7 @@ const {HTTPProvider,GatewayProvider}=__modules[31];
 const {FileDataProvider}=__modules[32];
 const {ADOConnection,ADOCommand,DataCollection}=__modules[33];
 const {ConnectedRecordset}=__modules[23];
-const {VirtualFileSystem}=__modules[35];
+const {VirtualFileSystem}=__modules[36];
 
 
 
@@ -3414,7 +3718,7 @@ return {DataContext};
 })();
 
 /* financial.js */
-__modules[37]=(()=>{
+__modules[38]=(()=>{
 const {VBError}=__modules[9];
 /**
  * Double-precision financial functions for the browser VB runtime.
@@ -3604,7 +3908,7 @@ return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FI
 })();
 
 /* ../theme/theme.js */
-__modules[38]=(()=>{
+__modules[39]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
@@ -3661,8 +3965,8 @@ return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,color
 })();
 
 /* ../graphics/surface.js */
-__modules[39]=(()=>{
-const { colorValue, getTheme }=__modules[38];
+__modules[40]=(()=>{
+const { colorValue, getTheme }=__modules[39];
 
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
 const surfaces = new WeakMap();
@@ -3823,8 +4127,8 @@ return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
 })();
 
 /* native-windows.js */
-__modules[40]=(()=>{
-const {refreshGraphicsSurfaces}=__modules[39];
+__modules[41]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[40];
 
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -4016,7 +4320,7 @@ return {installNativeHost};
 })();
 
 /* ../project/binary-assets.js */
-__modules[41]=(()=>{
+__modules[42]=(()=>{
 const {VBError}=__modules[11];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
@@ -4028,10 +4332,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ../project/native-text.js */
-__modules[42]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[34];
+__modules[43]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[35];
 const {VBError}=__modules[11];
-const {fromBase64,toBase64}=__modules[41];
+const {fromBase64,toBase64}=__modules[42];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -4095,9 +4399,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ../project/frx.js */
-__modules[43]=(()=>{
+__modules[44]=(()=>{
 const {VBError}=__modules[11];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[42];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[43];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -4200,9 +4504,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ../project/res.js */
-__modules[44]=(()=>{
+__modules[45]=(()=>{
 const {VBError}=__modules[11];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[43];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[44];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -4294,11 +4598,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[45]=(()=>{
+__modules[46]=(()=>{
 const {VBError}=__modules[11];
 const {VBArray,bankersRound,numeric}=__modules[15];
-const {normalizeResources,decodeStringTable}=__modules[44];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[43];
+const {normalizeResources,decodeStringTable}=__modules[45];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[44];
 
 
 
@@ -4328,8 +4632,74 @@ class ResourceStore {
 return {ResourceStore};
 })();
 
+/* scalar-library.js */
+__modules[47]=(()=>{
+const {VBError}=__modules[9];
+const {VBScalar,VBArray,VBErrorValue,MISSING,unbox,scalarType,tagScalar,storageScalar,SCALAR_TYPES,scalarUnary,numeric,truth,vbString,bankersRound,coerce}=__modules[15];
+
+
+// These signatures describe VB expression results, not JavaScript implementation
+// return types. Host consumers may continue calling the original raw functions.
+const RESULTS=Object.freeze({
+ cbyte:'byte',cint:'integer',clng:'long',csng:'single',cdbl:'double',ccur:'currency',cdate:'date',cvdate:'date',cstr:'string',cbool:'boolean',cdec:'decimal',cverr:'error',
+ vartype:'integer',typename:'string',iserror:'boolean',isarray:'boolean',isempty:'boolean',isnull:'boolean',isnumeric:'boolean',isdate:'boolean',isobject:'boolean',ismissing:'boolean',
+ len:'long',lenb:'long',instr:'long',instrrev:'long',strcomp:'integer',asc:'integer',ascw:'integer',sgn:'integer',lbound:'long',ubound:'long',erl:'long',freefile:'integer',lof:'long',loc:'long',seek:'long',eof:'boolean',
+ year:'integer',month:'integer',day:'integer',hour:'integer',minute:'integer',second:'integer',weekday:'integer',datepart:'integer',datediff:'long',timer:'single',rnd:'single',
+ now:'date',date:'date',time:'date',dateserial:'date',timeserial:'date',datevalue:'date',timevalue:'date',dateadd:'date',
+ sqr:'double',exp:'double',log:'double',sin:'double',cos:'double',tan:'double',atn:'double',val:'double',
+ fv:'double',pv:'double',pmt:'double',ipmt:'double',ppmt:'double',nper:'double',rate:'double',npv:'double',irr:'double',mirr:'double',sln:'double',syd:'double',ddb:'double',
+ msgbox:'integer',doevents:'integer',rgb:'long',qbcolor:'long',filelen:'long',loadresstring:'string'
+});
+const LENGTHS=Object.freeze({byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8,decimal:16,error:16});
+const VARIANT_STRINGS=new Set(['left','right','mid','trim','ltrim','rtrim','ucase','lcase','space','string','chr','chrw','str','hex','oct','format','error']);
+const TITLE=Object.freeze({empty:'Empty',null:'Null',integer:'Integer',long:'Long',single:'Single',double:'Double',currency:'Currency',date:'Date',string:'String',boolean:'Boolean',decimal:'Decimal',error:'Error',byte:'Byte'});
+function installScalarLibrary(map,vm){
+ for(const [key,original] of map){
+  if(typeof original!=='function')continue;
+  // Shared implementation aliases (notably CDate/CVDate) have different VB
+  // declarations. Never attach per-alias/per-VM metadata to the shared function.
+  const fn=Object.assign(function(...args){return original.apply(this,args);},original);
+  map.set(key,fn);
+  fn.vbScalarInvoke=(args,frame)=>{
+   const raw=args.map(unbox),name=key.replace(/\$$/,''),input=args[0];
+   if(name==='vartype'&&scalarType(input))return tagScalar(SCALAR_TYPES[scalarType(input)],'integer');
+   if(name==='typename'&&scalarType(input))return tagScalar(TITLE[scalarType(input)],'string');
+   if(name==='callbyname')return vm.callByName(raw[0],vbString(args[1]),coerce(args[2],'long'),args.slice(3),frame,true).then(value=>storageScalar(value,'Variant'));
+   if(name==='cstr'&&unbox(input) instanceof VBErrorValue)return tagScalar(unbox(input).toString(),'string');
+   if(['cbyte','cint','clng','csng','cdbl','ccur','cdate','cvdate','cstr','cbool','cdec'].includes(name)){const type=RESULTS[name];if(type==='date'&&unbox(input) instanceof VBErrorValue)throw new VBError('Type mismatch',13);return tagScalar(coerce(name==='cstr'?input:unbox(input) instanceof VBErrorValue?unbox(input).number:input,type),type,name==='cdec'||name==='cvdate');}
+   if(name==='cvar')return storageScalar(input,'Variant');
+   if(name==='array')return fn(...args);
+   if(name==='iif')return storageScalar(truth(input)?args[1]:args[2],'Variant');
+   if(name==='choose'){const index=bankersRound(numeric(input));return storageScalar(index>0&&index<args.length?args[index]:null,'Variant');}
+   if(name==='switch'){for(let i=0;i<args.length;i+=2)if(truth(args[i]))return storageScalar(args[i+1],'Variant');return tagScalar(null,'null',true);}
+   if(name==='len'||name==='lenb'){if(raw[0]===null)return tagScalar(null,'null',true);if(input instanceof VBScalar&&input.variant)return tagScalar(vbString(input).length*(name==='lenb'?2:1),'long',true);if(LENGTHS[scalarType(input)])return tagScalar(LENGTHS[scalarType(input)],'long',true);}
+   if(['abs','int','fix','round'].includes(name)){
+    if(raw[0]===null)return tagScalar(null,'null',true);
+    let type=scalarType(input),variant=input instanceof VBScalar?input.variant:true;
+    if(name==='abs'&&numeric(input)<0)return scalarUnary('-',input);
+    if(type==='empty'||type==='boolean')type='integer';if(type==='string')type='double';
+    const result=fn(...raw);return tagScalar(result,type||scalarType(result),variant);
+   }
+   const result=fn.vbInvoke?fn.vbInvoke(raw,frame):fn(...raw);
+   const wrap=value=>{
+    if(value===null||value===undefined||value===MISSING)return value;
+    const type=RESULTS[name]||scalarType(value);
+    if(!type)return value;
+    if(typeof value==='number'&&!Number.isFinite(value))throw new VBError('Overflow',6);
+    if(['single','byte','integer','long','double','boolean'].includes(type))value=coerce(value,type);
+    return tagScalar(value,type,name==='cdec'||name==='cverr'||VARIANT_STRINGS.has(name)&&!key.endsWith('$'));
+   };
+   return result&&typeof result.then==='function'?result.then(wrap):wrap(result);
+  };
+ }
+ return map;
+}
+
+return {installScalarLibrary};
+})();
+
 /* error-messages.js */
-__modules[46]=(()=>{
+__modules[48]=(()=>{
 const {VBError}=__modules[9];
 
 /** Invariant English descriptions for the errors produced by this runtime.
@@ -4364,7 +4734,7 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[47]=(()=>{
+__modules[49]=(()=>{
 const {VBError}=__modules[11];
 const {MISSING,VBArray,coerce,vbString}=__modules[15];
 
@@ -4459,10 +4829,10 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[48]=(()=>{
+__modules[50]=(()=>{
 const {VBError}=__modules[9];
 const {MISSING,VBArray,numeric}=__modules[15];
-const {FINANCIAL_FUNCTIONS}=__modules[37];
+const {FINANCIAL_FUNCTIONS}=__modules[38];
 
 
 
@@ -4490,8 +4860,8 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[49]=(()=>{
-const {FINANCIAL_SIGNATURES}=__modules[37];
+__modules[51]=(()=>{
+const {FINANCIAL_SIGNATURES}=__modules[38];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
 const BUILTIN_SIGNATURES={
@@ -4513,7 +4883,7 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* constants.js */
-__modules[50]=(()=>{
+__modules[52]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -4540,19 +4910,21 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[51]=(()=>{
-const {errorDescription}=__modules[46];
-const {stringLibrary}=__modules[47];
-const {financialLibrary}=__modules[48];
-const {ResourceStore}=__modules[45];
+__modules[53]=(()=>{
+const {installScalarLibrary}=__modules[47];
+const {errorDescription}=__modules[48];
+const {stringLibrary}=__modules[49];
+const {financialLibrary}=__modules[50];
+const {ResourceStore}=__modules[46];
 const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[10];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[49];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[51];
 const {DisconnectedRecordset}=__modules[21];
-const {recordLength}=__modules[34];
+const {recordLength}=__modules[35];
 const { VBError }=__modules[11];
 const { lower }=__modules[14];
 const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[15];
-const {VB_CONSTANTS}=__modules[50];
+const {VB_CONSTANTS}=__modules[52];
+
 
 
 
@@ -4595,14 +4967,14 @@ function createLibrary(vm) {
     LoadResString:id=>resources.string(id),LoadResData:(id,format)=>resources.data(id,format),LoadResPicture:(id,format=0)=>resources.picture(id,format),
     Abs:x=>x instanceof VBDecimal?x.absolute():x instanceof VBCurrency?new VBCurrency(x.raw<0n?-x.raw:x.raw,true):Math.abs(numeric(x)),Sgn:x=>Math.sign(numeric(x)),Int:x=>x instanceof VBDecimal?x.integer(true):Math.floor(numeric(x)),Fix:x=>x instanceof VBDecimal?x.integer():Math.trunc(numeric(x)),Sqr:x=>{if(numeric(x)<0)throw new VBError('Invalid procedure call',5);return Math.sqrt(numeric(x));},Exp:x=>Math.exp(numeric(x)),Log:x=>{if(numeric(x)<=0)throw new VBError('Invalid procedure call',5);return Math.log(numeric(x));},Sin:x=>Math.sin(numeric(x)),Cos:x=>Math.cos(numeric(x)),Tan:x=>Math.tan(numeric(x)),Atn:x=>Math.atan(numeric(x)),Round:(x,n=0)=>{if(x instanceof VBCurrency||x instanceof VBDecimal)return x.round(bankersRound(numeric(n)));n=numeric(n);if(n<0||n>28)throw new VBError('Invalid procedure call',5);return bankersRound(numeric(x)*10**n)/10**n;},
     Rnd:(n=1)=>{n=numeric(n);if(n<0)rng=(-n*0x1000000)>>>0;if(n!==0){rng=(Math.imul(rng,1664525)+1013904223)>>>0;lastRandom=rng/4294967296;}return lastRandom;},Randomize:n=>{rng=(n===undefined?Date.now():numeric(n)*1000000)>>>0;},
-    CDec:x=>decimal(explicitErrorValue(x)),CByte:x=>coerce(explicitErrorValue(x),'Byte'),CInt:x=>coerce(explicitErrorValue(x),'Integer'),CLng:x=>coerce(explicitErrorValue(x),'Long'),CSng:x=>coerce(explicitErrorValue(x),'Single'),CDbl:x=>coerce(explicitErrorValue(x),'Double'),CCur:x=>coerce(explicitErrorValue(x),'Currency'),CStr:x=>x instanceof VBErrorValue?x.toString():vbString(x),CBool:x=>coerce(explicitErrorValue(x),'Boolean'),CDate:vbDate,CVar:x=>x,CVErr:number=>new VBErrorValue(number),IsError:x=>x instanceof VBErrorValue?-1:0,
+    CDec:x=>decimal(explicitErrorValue(x)),CByte:x=>coerce(explicitErrorValue(x),'Byte'),CInt:x=>coerce(explicitErrorValue(x),'Integer'),CLng:x=>coerce(explicitErrorValue(x),'Long'),CSng:x=>coerce(explicitErrorValue(x),'Single'),CDbl:x=>coerce(explicitErrorValue(x),'Double'),CCur:x=>coerce(explicitErrorValue(x),'Currency'),CStr:x=>x instanceof VBErrorValue?x.toString():vbString(x),CBool:x=>coerce(explicitErrorValue(x),'Boolean'),CDate:vbDate,CVDate:vbDate,CVar:x=>x,CVErr:number=>new VBErrorValue(number),IsError:x=>x instanceof VBErrorValue?-1:0,
     Val:x=>{const s=String(x).replace(/\s/g,'');if(/^&h/i.test(s))return parseInt(s.slice(2),16)||0;if(/^&o/i.test(s))return parseInt(s.slice(2),8)||0;return parseFloat(s)||0;},Str:x=>(numeric(x)>=0?' ':'')+String(numeric(x)),Hex:x=>(bankersRound(numeric(x))>>>0).toString(16).toUpperCase(),Oct:x=>(bankersRound(numeric(x))>>>0).toString(8),
     Len:x=>x?.__fields?recordLength(x):x==null?(x===null?null:0):x instanceof VBArray?x.data.length:String(x).length,LenB:x=>String(x??'').length*2,Left:(s,n)=>s===null?null:vbString(s).slice(0,requireLength(n)),Right:(s,n)=>s===null?null:(n=requireLength(n),n?vbString(s).slice(-n):''),Mid:(s,start,n)=>{if(s===null)return null;start=bankersRound(numeric(start));if(start<1)throw new VBError('Invalid procedure call',5);return n===undefined?vbString(s).slice(start-1):vbString(s).substr(start-1,requireLength(n));},
     Trim:s=>s===null?null:vbString(s).replace(/^ +| +$/g,''),LTrim:s=>s===null?null:vbString(s).replace(/^ +/,''),RTrim:s=>s===null?null:vbString(s).replace(/ +$/,''),UCase:s=>s===null?null:vbString(s).toUpperCase(),LCase:s=>s===null?null:vbString(s).toLowerCase(),Space:n=>' '.repeat(requireLength(n)),String:(n,c)=>{n=requireLength(n);return (typeof c==='number'?String.fromCharCode(c):vbString(c).charAt(0)).repeat(n);},Chr:n=>String.fromCharCode(coerce(n,'Byte')),ChrW:n=>String.fromCharCode(numeric(n)&65535),Asc:s=>{s=vbString(s);if(!s.length)throw new VBError('Invalid procedure call',5);return s.charCodeAt(0)&255;},AscW:s=>{s=vbString(s);if(!s.length)throw new VBError('Invalid procedure call',5);const n=s.charCodeAt(0);return n>32767?n-65536:n;},StrReverse:s=>vbString(s).split('').reverse().join(''),
     ...stringLibrary(vm),StrConv:(s,mode)=>mode===1?vbString(s).toUpperCase():mode===2?vbString(s).toLowerCase():mode===3?vbString(s).toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()):vbString(s),
     Format:vbFormat,FormatNumber:(n,d=2)=>numeric(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}),FormatCurrency:(n,d=2)=>'$'+numeric(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}),FormatPercent:(n,d=2)=>(numeric(n)*100).toFixed(d)+'%',FormatDateTime:(d,style=0)=>vbFormat(vbDate(d),['General Date','Long Date','Short Date','Long Time','Short Time'][style]),
     Array:(...a)=>VBArray.from(a,vm.currentFrame?.module.optionBase||0),LBound:(a,d=1)=>{if(!(a instanceof VBArray)||!a.bounds[d-1])throw new VBError('Subscript out of range',9);return a.bounds[d-1][0];},UBound:(a,d=1)=>{if(!(a instanceof VBArray)||!a.bounds[d-1])throw new VBError('Subscript out of range',9);return a.bounds[d-1][1];},
-    IsArray:x=>x instanceof VBArray?-1:0,IsEmpty:x=>x===undefined?-1:0,IsNull:x=>x===null?-1:0,IsNumeric:x=>x===null||x===NOTHING||x===MISSING||x instanceof VBErrorValue||x instanceof Date||x===''||typeof x==='object'&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal)?0:Number.isFinite(Number(x))?-1:0,IsDate:x=>{if(x===null||x===undefined||typeof x==='object'&&!(x instanceof Date))return 0;try{asDate(x);return -1;}catch{return 0;}},IsObject:x=>x!==null&&x!==MISSING&&!(x instanceof VBErrorValue)&&typeof x==='object'&&!(x instanceof Date)&&!(x instanceof VBArray)&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal)&&!x.__fields?-1:0,IsMissing:x=>x===MISSING?-1:0,
+    IsArray:x=>x instanceof VBArray?-1:0,IsEmpty:x=>x===undefined?-1:0,IsNull:x=>x===null?-1:0,IsNumeric:x=>{if(x===undefined||x===null||x===NOTHING||x===MISSING||x instanceof VBErrorValue||x instanceof Date||typeof x==='object'&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal))return 0;try{numeric(x);return -1;}catch{return 0;}},IsDate:x=>{if(x===null||x===undefined||typeof x==='object'&&!(x instanceof Date))return 0;try{asDate(x);return -1;}catch{return 0;}},IsObject:x=>x!==null&&x!==MISSING&&!(x instanceof VBErrorValue)&&typeof x==='object'&&!(x instanceof Date)&&!(x instanceof VBArray)&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal)&&!x.__fields?-1:0,IsMissing:x=>x===MISSING?-1:0,
     TypeName:x=>x instanceof VBErrorValue?'Error':x===MISSING?'Error':x instanceof VBCollection?'Collection':x instanceof VBDictionary?'Dictionary':x===NOTHING?'Nothing':x===undefined?'Empty':x===null?'Null':x instanceof VBArray?x.type+'()':x instanceof Date?'Date':x instanceof VBDecimal?'Decimal':x instanceof VBCurrency?'Currency':typeof x==='string'?'String':typeof x==='number'?'Double':x.__type||x.constructor?.name||'Object',VarType:x=>x instanceof VBErrorValue||x===MISSING?10:x===undefined?0:x===null?1:x instanceof VBArray?8192+({byte:17,integer:2,long:3,single:4,double:5,currency:6,date:7,string:8,object:9,boolean:11,variant:12}[String(x.type).toLowerCase()]||12):x instanceof Date?7:x instanceof VBDecimal?14:x instanceof VBCurrency?6:typeof x==='string'?8:typeof x==='number'?5:9,
     IIf:(test,a,b)=>truth(test)?a:b,Choose:(index,...a)=>a[Math.trunc(numeric(index))-1]??null,Switch:(...a)=>{for(let i=0;i<a.length;i+=2)if(truth(a[i]))return a[i+1];return null;},
     Now:()=>new Date(),Date:()=>{const d=new Date();d.setHours(0,0,0,0);return d;},Time:()=>{const d=new Date(),r=new Date(1899,11,30);r.setHours(d.getHours(),d.getMinutes(),d.getSeconds());return r;},Timer:()=>{const d=new Date();return d.getHours()*3600+d.getMinutes()*60+d.getSeconds()+d.getMilliseconds()/1000;},DateValue:d=>{d=vbDate(d);d.setHours(0,0,0,0);return d;},TimeValue:d=>{const v=vbDate(d),r=new Date(1899,11,30);r.setHours(v.getHours(),v.getMinutes(),v.getSeconds());return r;},Year:d=>vbDate(d).getFullYear(),Month:d=>vbDate(d).getMonth()+1,Day:d=>vbDate(d).getDate(),Hour:d=>vbDate(d).getHours(),Minute:d=>vbDate(d).getMinutes(),Second:d=>vbDate(d).getSeconds(),Weekday:weekday,MonthName:monthName,WeekdayName:weekdayName,
@@ -4624,16 +4996,16 @@ function createLibrary(vm) {
   for(const name of ['Error','Left','Right','Mid','Trim','LTrim','RTrim','UCase','LCase','Space','String','Chr','ChrW','Str','Hex','Oct','Format','Input','Dir','Environ','Command']){
     const base=functions[name],fn=(...args)=>{const result=base(...args);if(result===null)throw new VBError('Invalid use of Null',94);return result;};fn.vbParams=base.vbParams;map.set(lower(name)+'$',fn);
   }
-  return map;
+  return installScalarLibrary(map,vm);
 }
 
 return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ../controls/rtf.js */
-__modules[52]=(()=>{
+__modules[54]=(()=>{
 const {VBError}=__modules[11];
-const {decodeANSI}=__modules[34];
+const {decodeANSI}=__modules[35];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -4742,7 +5114,7 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* ../controls/input.js */
-__modules[53]=(()=>{
+__modules[55]=(()=>{
 const {Cell,truth}=__modules[15];
 const {lower}=__modules[14];
 
@@ -4858,7 +5230,7 @@ return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsI
 })();
 
 /* ../controls/form-window.js */
-__modules[54]=(()=>{
+__modules[56]=(()=>{
 const {el}=__modules[14];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
@@ -4884,9 +5256,9 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[55]=(()=>{
+__modules[57]=(()=>{
 const {el}=__modules[14];
-const {getTheme}=__modules[38];
+const {getTheme}=__modules[39];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -4960,7 +5332,7 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[56]=(()=>{
+__modules[58]=(()=>{
 const {el}=__modules[14];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
@@ -5001,7 +5373,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/icon-art.js */
-__modules[57]=(()=>{
+__modules[59]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -5160,8 +5532,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[58]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[57];
+__modules[60]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[59];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -5188,11 +5560,11 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../theme/menu.js */
-__modules[59]=(()=>{
+__modules[61]=(()=>{
 const {uiDocument}=__modules[13];
 const {el}=__modules[14];
-const {icon}=__modules[58];
-const {getTheme}=__modules[38];
+const {icon}=__modules[60];
+const {getTheme}=__modules[39];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -5277,10 +5649,10 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ../controls/richtext.js */
-__modules[60]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[52];
+__modules[62]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[54];
 const {VBError}=__modules[11];
-const {oleColor}=__modules[39];
+const {oleColor}=__modules[40];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -5368,10 +5740,10 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[61]=(()=>{
+__modules[63]=(()=>{
 const {normalizeDataSources}=__modules[19];
 const { clone, lower, safeName }=__modules[14];
-const {normalizeResources}=__modules[44];
+const {normalizeResources}=__modules[45];
 const { VBError }=__modules[11];
 
 
@@ -5439,7 +5811,7 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[62]=(()=>{
+__modules[64]=(()=>{
 const { VBError }=__modules[11];
 const { lower }=__modules[14];
 
@@ -5487,23 +5859,23 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[63]=(()=>{
-const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[53];
-const {installFormWindow}=__modules[54];
-const {ClassicCombo,ClassicUpDown}=__modules[55];
-const {ClassicScrollbar}=__modules[56];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[59];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[60];
-const {parseRTF}=__modules[52];
+__modules[65]=(()=>{
+const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[55];
+const {installFormWindow}=__modules[56];
+const {ClassicCombo,ClassicUpDown}=__modules[57];
+const {ClassicScrollbar}=__modules[58];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[61];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[62];
+const {parseRTF}=__modules[54];
 const { el, lower, clone }=__modules[14];
 const { VBError }=__modules[11];
 const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[15];
-const { MemoryRecordset }=__modules[51];
-const { GraphicsSurface }=__modules[39];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[38];
-const { icon, controlIcon }=__modules[58];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[61];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[62];
+const { MemoryRecordset }=__modules[53];
+const { GraphicsSurface }=__modules[40];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[39];
+const { icon, controlIcon }=__modules[60];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[63];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[64];
 
 
 
@@ -5871,10 +6243,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[64]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[63];
+__modules[66]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[65];
 const {clone}=__modules[14];
-const {newId}=__modules[61];
+const {newId}=__modules[63];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -5953,7 +6325,7 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[65]=(()=>{
+__modules[67]=(()=>{
 const {VBError}=__modules[11];
 const {el}=__modules[14];
 const {NOTHING}=__modules[15];
@@ -6013,9 +6385,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../controls/dialog.js */
-__modules[66]=(()=>{
+__modules[68]=(()=>{
 const {el}=__modules[14];
-const {icon}=__modules[58];
+const {icon}=__modules[60];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -6050,11 +6422,11 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[67]=(()=>{
+__modules[69]=(()=>{
 const {VBError}=__modules[9];
 const {lower}=__modules[14];
-const {VB_CONSTANTS}=__modules[50];
-const {VBCurrency,coerce,unary,binary}=__modules[15];
+const {VB_CONSTANTS}=__modules[52];
+const {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,storageScalar,signedLiteralScalar}=__modules[15];
 
 
 
@@ -6064,18 +6436,18 @@ const {VBCurrency,coerce,unary,binary}=__modules[15];
  * dependency cannot leave worker diagnostics or execution with old values. */
 function bindConstants(modules) {
   const diagnostics=[], scopes=new Map(), cache=new Map(), active=new Set();
-  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),v]));
+  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
   let steps=0;
   const report=(e,m,line)=>diagnostics.push({severity:'error',number:e.number||1002,message:e.message,source:e.source||m.name,line:e.line||line||1,column:1});
   const fail=message=>{throw new VBError(message,1002);};
   for(const m of modules.values()){
     const globals=new Map(),locals=new Map();scopes.set(m,{globals,locals});
-    m.constantBindings=new Map();m.enumBindings=new Map();m.globalEnumMembers=new Map();m.importedConstantBindings=new Map();
+    m.constantBindings=new Map();m.constantScalars=new Map();m.enumBindings=new Map();m.globalEnumMembers=new Map();m.importedConstantBindings=new Map();
     for(const d of m.declarations){const key=lower(d.name);if(globals.has(key))report(new VBError('Ambiguous name detected: '+d.name,1002),m,d.line);else globals.set(key,{m,d});
       if(d.constant&&!d.enumName&&d.scope!=='private'&&m.kind!=='module')report(new VBError('Public constants are not permitted in object modules',1002),m,d.line);
     }
     for(const p of m.procedures.values()){
-      const names=new Map(p.params.map(d=>[lower(d.name),{m,p,d}]));locals.set(p,names);p.constantBindings=new Map();p.defaultBindings=new Map();
+      const names=new Map(p.params.map(d=>[lower(d.name),{m,p,d}]));locals.set(p,names);p.constantBindings=new Map();p.defaultBindings=new Map();p.constantScalars=new Map();p.defaultScalars=new Map();
       for(const ins of p.code)if(ins.op==='dim')for(const d of ins.decls){const key=lower(d.name);if(names.has(key))report(new VBError('Duplicate declaration: '+d.name,1002),m,ins.line);else names.set(key,{m,p,d,line:ins.line});}
     }
   }
@@ -6099,13 +6471,13 @@ function bindConstants(modules) {
     if(!node||++steps>100000||depth>256)fail('Constant expression complexity limit exceeded');
     const ev=n=>evaluate(n,m,p,depth+1);
     switch(node.kind){
-      case 'literal':if(node.value===null)fail('Invalid use of Null in constant expression');return node.value;
-      case 'date':return new Date(node.value);
-      case 'currency':return new VBCurrency(node.value);
+      case 'literal':if(node.value===null)fail('Invalid use of Null in constant expression');return literalScalar(node);
+      case 'date':return literalScalar(node);
+      case 'currency':return literalScalar(node);
       case 'group':return ev(node.expr);
       case 'id':return resolve(node.name,m,p);
-      case 'unary':if(node.op==='-'&&node.expr.kind==='currency')return new VBCurrency('-'+node.expr.value);return unary(node.op,ev(node.expr));
-      case 'binary':if(node.op==='is')fail('Object identity is not a constant expression');{const value=binary(node.op,ev(node.left),ev(node.right),m.optionCompare);if(typeof value==='string'&&value.length>1048576)fail('Constant string exceeds 1 MiB compiler limit');return value;}
+      case 'unary':{const literal=signedLiteralScalar(node);if(literal)return literal;}return unary(node.op,ev(node.expr));
+      case 'binary':if(node.op==='is')fail('Object identity is not a constant expression');{const value=binary(node.op,ev(node.left),ev(node.right),m.optionCompare);if(typeof unbox(value)==='string'&&unbox(value).length>1048576)fail('Constant string exceeds 1 MiB compiler limit');return value;}
       case 'member':{
         if(node.object.kind!=='id')fail('Constant expression required');
         const owner=modules.get(lower(node.object.name));
@@ -6124,26 +6496,28 @@ function bindConstants(modules) {
     active.add(entry);
     try{
       const {m,p,d}=entry;let value=evaluate(d.initial,m,p);
-      const type=d.explicitType||lower(d.type)!=='variant'?d.type:value instanceof VBCurrency?'Currency':value instanceof Date?'Date':typeof value==='string'?'String':Number.isInteger(value)&&value>=-32768&&value<=32767?'Integer':Number.isInteger(value)&&value>=-2147483648&&value<=2147483647?'Long':'Double';
+      const type=d.explicitType||lower(d.type)!=='variant'?d.type:scalarType(value)||'Double';
       if(!['byte','integer','long','single','double','currency','date','string','boolean','variant'].includes(lower(type)))fail('Invalid constant type: '+type);
-      value=coerce(value,type);cache.set(entry,value);(p?p.constantBindings:m.constantBindings).set(lower(d.name),value);return value;
+      value=storageScalar(value,type);d.constantType=type;cache.set(entry,value);
+      (p?p.constantBindings:m.constantBindings).set(lower(d.name),unbox(value));
+      (p?p.constantScalars:m.constantScalars).set(lower(d.name),value);return value;
     }finally{active.delete(entry);}
   }
   for(const m of modules.values()){
     const scope=scopes.get(m);
     for(const entry of [...scope.globals.values(),...[...scope.locals.values()].flatMap(v=>[...v.values()])])if(entry.d.constant)try{bind(entry);}catch(e){report(e,m,entry.line||entry.d.line);}
-    for(const p of m.procedures.values())for(const param of p.params)if(param.initial)try{p.defaultBindings.set(lower(param.name),evaluate(param.initial,m,null));}catch(e){report(e,m,p.line);}
+    for(const p of m.procedures.values())for(const param of p.params)if(param.initial)try{const value=evaluate(param.initial,m,null);p.defaultBindings.set(lower(param.name),unbox(value));p.defaultScalars.set(lower(param.name),value);}catch(e){report(e,m,p.line);}
   }
   // Public constant values exist before runtime field initialization. Preserve
   // ambiguity rather than selecting whichever module happens to be first.
   for(const m of modules.values())for(const owner of modules.values())if(owner!==m)
     for(const d of owner.declarations)if(d.constant&&d.scope!=='private'&&(owner.kind==='module'||d.enumName)){
-      const key=lower(d.name);m.importedConstantBindings.set(key,m.importedConstantBindings.has(key)?{ambiguous:true}:{value:owner.constantBindings.get(key)});
+      const key=lower(d.name);m.importedConstantBindings.set(key,m.importedConstantBindings.has(key)?{ambiguous:true}:{value:owner.constantBindings.get(key),scalar:owner.constantScalars.get(key)});
     }
   // Resolved enum namespaces are immutable and never expose host reflection.
   for(const m of modules.values()){
     for(const owner of modules.values())for(const e of Object.values(owner.enums))if(owner===m||e.scope!=='private'){
-      if(owner!==m&&e.scope!=='private')for(const n of e.members){const k=lower(n);m.globalEnumMembers.set(k,m.globalEnumMembers.has(k)?{ambiguous:true}:{value:owner.constantBindings.get(k)});}
+      if(owner!==m&&e.scope!=='private')for(const n of e.members){const k=lower(n);m.globalEnumMembers.set(k,m.globalEnumMembers.has(k)?{ambiguous:true}:{value:owner.constantBindings.get(k),scalar:owner.constantScalars.get(k)});}
       const key=lower(e.name),existing=m.enumBindings.get(key);
       if(existing&&existing.owner!==m.name&&owner!==m){m.enumBindings.set(key,{ambiguous:true});continue;}
       if(existing&&existing.owner===m.name)continue;
@@ -6155,7 +6529,7 @@ function bindConstants(modules) {
     for(const fields of Object.values(m.types))for(const d of fields)storage(d);
     for(const p of m.procedures.values()){
       delete p.storageReturnType;try{if(enumDefinition(p.returnType,m))p.storageReturnType='Long';}catch(e){report(e,m,p.line);}
-      for(const d of p.params){storage(d);if(d.storageType&&p.defaultBindings.has(lower(d.name)))try{p.defaultBindings.set(lower(d.name),coerce(p.defaultBindings.get(lower(d.name)),d.storageType));}catch(e){report(e,m,p.line);}}
+      for(const d of p.params){storage(d);if(d.storageType&&p.defaultBindings.has(lower(d.name)))try{const value=storageScalar(p.defaultScalars.get(lower(d.name)),d.storageType);p.defaultBindings.set(lower(d.name),unbox(value));p.defaultScalars.set(lower(d.name),value);}catch(e){report(e,m,p.line);}}
       for(const ins of p.code)if(ins.op==='dim'||ins.op==='redim')for(const d of ins.decls)storage(d);
     }
   }
@@ -6166,7 +6540,7 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[68]=(()=>{
+__modules[70]=(()=>{
 const {VBError}=__modules[11];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
@@ -6193,7 +6567,7 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[69]=(()=>{
+__modules[71]=(()=>{
 const {lower}=__modules[14];
 
 const json=x=>JSON.stringify(x);
@@ -6237,7 +6611,7 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[70]=(()=>{
+__modules[72]=(()=>{
 const { tokenize, VBError }=__modules[11];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
@@ -6264,7 +6638,8 @@ class ExpressionParser {
   expression(min=0) {
     let node; const t=this.take(); const value=String(t.value).toLowerCase();
     if(t.type==='number'&&t.raw.endsWith('@'))node={kind:'currency',value:t.raw.slice(0,-1)};
-    else if(t.type==='number'||t.type==='string') node={kind:'literal',value:t.value};
+    else if(t.type==='number') node={kind:'literal',value:numericLiteralValue(t),valueType:numericLiteralType(t),numberSuffix:/[%&!#]$/.test(t.raw)?t.raw.at(-1):null};
+    else if(t.type==='string') node={kind:'literal',value:t.value,valueType:'string'};
     else if(t.type==='date') node={kind:'date',value:t.value};
     else if(value==='('){node=this.expression();this.expect(')');node={kind:'group',expr:node};}
     else if(value==='+'||value==='-'||value==='not') node={kind:'unary',op:value,expr:this.expression(value==='not'?6:13)};
@@ -6273,8 +6648,8 @@ class ExpressionParser {
     else if(value==='typeof'){const expr=this.expression(8);this.expect('is');node={kind:'typeof',expr,name:this.qualifiedName()};}
     else if(value==='.') { const name=this.take();if(name.type!=='id')throw new VBError('Expected member name',1002);node={kind:'member',object:{kind:'with'},name:name.value}; }
     else if(t.type==='id') {
-      if(value==='true')node={kind:'literal',value:-1};
-      else if(value==='false')node={kind:'literal',value:0};
+      if(value==='true')node={kind:'literal',value:-1,valueType:'boolean'};
+      else if(value==='false')node={kind:'literal',value:0,valueType:'boolean'};
       else if(value==='null')node={kind:'literal',value:null};
       else if(value==='nothing')node={kind:'nothing'};
       else if(value==='empty')node={kind:'empty'};
@@ -6297,7 +6672,7 @@ class ExpressionParser {
   parse() { const node=this.expression();if(this.peek().type!=='eof')throw new VBError(`Unexpected '${this.peek().raw}' in expression`,1002,null,0,this.peek().start+1);return node; }
 }
 const parseExpression = text => new ExpressionParser(text.trim()).parse();
-function parseCall(text) {
+function parseCall(text,{explicit=false}={}) {
   const p=new ExpressionParser(text); let callee=p.take(); let node;
   if(callee.value==='.') { const name=p.take();node={kind:'member',object:{kind:'with'},name:name.value}; }
   else if(callee.type==='id') node={kind:'id',name:callee.value};
@@ -6305,19 +6680,44 @@ function parseCall(text) {
   while(p.match('.')){const name=p.take();node={kind:'member',object:node,name:name.value};}
   if(p.peek().type==='eof') return {kind:'call',callee:node,args:[]};
   const rest=text.slice(p.peek().start).trim();
-  if(rest.startsWith('(')) return parseExpression(text);
+  if(rest.startsWith('(')) {
+    let expression;try{expression=parseExpression(text);}catch(error){if(explicit)throw error;}
+    if(expression){
+      // Without Call the parentheses around a single argument are an
+      // expression grouping, forcing a temporary even for a ByRef formal.
+      if(!explicit&&expression.kind==='call'&&expression.args.length===1&&JSON.stringify(expression.callee)===JSON.stringify(node))expression.args[0]={kind:'group',expr:expression.args[0]};
+      return expression;
+    }
+  }
   const args=[];do{args.push(p.argument());}while(p.match(','));
   if(p.peek().type!=='eof')throw new VBError(`Unexpected '${p.peek().raw}' in argument list`,1002);
   return {kind:'call',callee:node,args};
+}
+
+function numericLiteralType(token){
+  const suffix=token.raw.at(-1),explicit={'%':'integer','&':'long','!':'single','#':'double'}[suffix];
+  if(explicit)return explicit;
+  if(/^[&][ho]/i.test(token.raw))return parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8)<=65535?'integer':'long';
+  if(/[.eEdD]/.test(token.raw))return 'double';
+  return token.value>=-32768&&token.value<=32767?'integer':token.value>=-2147483648&&token.value<=2147483647?'long':'double';
+}
+
+function numericLiteralValue(token){
+  if(/^&[ho]/i.test(token.raw)){
+    const n=parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8);
+    if(n>4294967295)throw new VBError('Overflow in numeric literal',6);
+    return n>2147483647?n-4294967296:n>=32768&&n<=65535&&!token.raw.endsWith('&')?n-65536:n;
+  }
+  return token.value;
 }
 
 return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[71]=(()=>{
+__modules[73]=(()=>{
 const { VBError }=__modules[11];
-const { parseExpression }=__modules[70];
+const { parseExpression }=__modules[72];
 const { binary, unary, truth }=__modules[15];
 
 
@@ -6357,13 +6757,13 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[72]=(()=>{
-const {bindConstants}=__modules[67];
-const {defaultIdentifierType,addDefaultTypes}=__modules[68];
-const {validateInterfaces}=__modules[69];
-const { preprocess }=__modules[71];
+__modules[74]=(()=>{
+const {bindConstants}=__modules[69];
+const {defaultIdentifierType,addDefaultTypes}=__modules[70];
+const {validateInterfaces}=__modules[71];
+const { preprocess }=__modules[73];
 const { VBError, logicalLines, splitTop, tokenize }=__modules[11];
-const { parseExpression, parseCall }=__modules[70];
+const { parseExpression, parseCall }=__modules[72];
 const { lower }=__modules[14];
 
 
@@ -6512,7 +6912,7 @@ class ProcedureCompiler {
     if((m=text.match(/^(?:(.+)\.)?Line\s*\(([^,]+),([^\)]+)\)\s*-\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*([^,]+))?(?:\s*,\s*(B|BF))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:m[7]?'rect':'line',coords:[m[2],m[3],m[4],m[5]].map(E),color:E(m[6]||'0'),fill:/bf/i.test(m[7]||'')},line);return;}
     if((m=text.match(/^(?:(.+)\.)?PSet\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'pixel',coords:[E(m[2]),E(m[3])],color:E(m[4]||'0')},line);return;}
     if((m=text.match(/^(?:(.+)\.)?Circle\s*\(([^,]+),([^\)]+)\)\s*,\s*([^,]+)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'circle',coords:[E(m[2]),E(m[3]),E(m[4])],color:E(m[5]||'0')},line);return;}
-    if(/^RaiseEvent\b/i.test(text)){this.emit('raiseEvent',{expr:parseCall(text.replace(/^RaiseEvent\s+/i,''))},line);return;}
+    if(/^RaiseEvent\b/i.test(text)){this.emit('raiseEvent',{expr:parseCall(text.replace(/^RaiseEvent\s+/i,''),{explicit:true})},line);return;}
     if((m=text.match(/^(LSet|RSet)\s+(.+?)\s*=\s*(.+)$/i))){const target=E(m[2]);if(!['id','member','call'].includes(target.kind))throw new VBError('Expected assignable string variable',1002);this.emit('stringAlign',{target,expr:E(m[3]),right:/rset/i.test(m[1])},line);return;}
     if(/^Mid\$?\s*\(/i.test(text)){
       const tokens=tokenize(text);let level=0,equal;for(const t of tokens){if(t.value==='(')level++;else if(t.value===')')level--;else if(t.value==='='&&level===0){equal=t;break;}}
@@ -6523,7 +6923,7 @@ class ProcedureCompiler {
     const ts=tokenize(text);let depth=0,eq=null;
     for(const t of ts){if(t.value==='(')depth++;else if(t.value===')')depth--;else if(t.value==='='&&depth===0){eq=t;break;}}
     if(eq){const target=E(text.slice(0,eq.start));if(!['id','member','call'].includes(target.kind))throw new VBError('Invalid assignment target',1002);this.emit('assign',{target,expr:E(text.slice(eq.end)),objectSet:/^Set\s/i.test(original)},line);return;}
-    if(/^Call\s+/i.test(text)){this.emit('expr',{expr:parseCall(text.replace(/^Call\s+/i,''))},line);return;}
+    if(/^Call\s+/i.test(text)){this.emit('expr',{expr:parseCall(text.replace(/^Call\s+/i,''),{explicit:true})},line);return;}
     this.emit('expr',{expr:parseCall(text)},line);
   }
 }
@@ -6596,7 +6996,7 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* debug-control.js */
-__modules[73]=(()=>{
+__modules[75]=(()=>{
 const {VBError,tokenize}=__modules[11];
 const {lower}=__modules[14];
 const {truth}=__modules[15];
@@ -6740,7 +7140,7 @@ return {StopExecution,isSequencePoint,statementIndex,RuntimeDebugger,immediateSt
 })();
 
 /* win32.js */
-__modules[74]=(()=>{
+__modules[76]=(()=>{
 const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[8];
 const {VBError}=__modules[11];
 const {VBArray,VBCurrency,numeric,coerce}=__modules[15];
@@ -6860,7 +7260,7 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[75]=(()=>{
+__modules[77]=(()=>{
 const {VBError}=__modules[11];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
@@ -6889,11 +7289,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[76]=(()=>{
+__modules[78]=(()=>{
 const {VBError}=__modules[11];
-const {parseExpression}=__modules[70];
+const {parseExpression}=__modules[72];
 const {lower}=__modules[14];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[15];
+const {VBScalar,scalarType,tagScalar,literalScalar,signedLiteralScalar,unbox,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[15];
 
 
 
@@ -6902,9 +7302,9 @@ const BLOCKED=new Set(['constructor','prototype','__proto__','caller','callee','
 const PURE=new Set(('abs sgn int fix round sqr sin cos tan atn exp log cint clng cbyte csng cdbl ccur cdec cstr cbool cdate cvdate cvar cverr iserror val str hex oct len lenb left right mid trim ltrim rtrim ucase lcase chr chrw asc ascw strreverse instr instrrev strcomp lbound ubound isarray isempty isnull isnumeric isdate isobject ismissing typename vartype year month day hour minute second weekday dateserial timeserial dateadd datediff datepart rgb qbcolor').split(' '));
 const own=(object,key)=>Object.getOwnPropertyDescriptor(object,key);
 const field=(fields,key)=>fields?.get(key)||[...(fields||[])].find(([name])=>lower(name)===key)?.[1];
-function scalar(v){return v===null||v===undefined||v===NOTHING||v===MISSING||typeof v==='string'||typeof v==='number'||typeof v==='boolean'||v instanceof Date||v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue;}
-function type(v,fallback){if(fallback&&lower(fallback)!=='variant')return fallback;if(v===NOTHING)return 'Nothing';if(v===MISSING||v instanceof VBErrorValue)return 'Error';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(v instanceof VBArray)return v.type+'()';if(v instanceof VBDecimal)return 'Decimal';if(v instanceof VBCurrency)return 'Currency';if(v instanceof Date)return 'Date';if(typeof v==='string')return 'String';if(typeof v==='number')return 'Double';if(v instanceof VBCollection)return 'Collection';if(v instanceof VBDictionary)return 'Dictionary';return own(v||{},'__type')?.value||'Object';}
-function debugDescription(v){if(v===NOTHING)return 'Nothing';if(v===MISSING)return '<Missing>';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(typeof v==='string')return '"'+v.slice(0,4000)+(v.length>4000?'…':'')+'"';if(v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue)return v.toString();if(v instanceof Date)return '#'+(Number.isFinite(v.getTime())?v.toLocaleString():'Invalid date')+'#';if(v instanceof VBArray)return 'Array('+v.bounds.map(([lo,hi])=>lo+' To '+hi).join(', ')+')';if(typeof v==='object')return type(v);return String(v);}
+function scalar(v){return v instanceof VBScalar|| v===null||v===undefined||v===NOTHING||v===MISSING||typeof v==='string'||typeof v==='number'||typeof v==='boolean'||v instanceof Date||v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue;}
+function type(v,fallback){if(v instanceof VBScalar){const t=v.type;return t.charAt(0).toUpperCase()+t.slice(1);}if(fallback&&lower(fallback)!=='variant')return fallback;if(v===NOTHING)return 'Nothing';if(v===MISSING||v instanceof VBErrorValue)return 'Error';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(v instanceof VBArray)return v.type+'()';if(v instanceof VBDecimal)return 'Decimal';if(v instanceof VBCurrency)return 'Currency';if(v instanceof Date)return 'Date';if(typeof v==='string')return 'String';if(typeof v==='number')return 'Double';if(v instanceof VBCollection)return 'Collection';if(v instanceof VBDictionary)return 'Dictionary';return own(v||{},'__type')?.value||'Object';}
+function debugDescription(v){if(v instanceof VBScalar){if(v.type==='boolean')return v.value?'True':'False';v=unbox(v);}if(v===NOTHING)return 'Nothing';if(v===MISSING)return '<Missing>';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(typeof v==='string')return '"'+v.slice(0,4000)+(v.length>4000?'…':'')+'"';if(v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue)return v.toString();if(v instanceof Date)return '#'+(Number.isFinite(v.getTime())?v.toLocaleString():'Invalid date')+'#';if(v instanceof VBArray)return 'Array('+v.bounds.map(([lo,hi])=>lo+' To '+hi).join(', ')+')';if(typeof v==='object')return type(v);return String(v);}
 /** Automatic debugger evaluation reads storage, never executes project methods,
  * property accessors, lazy constructors, browser/COM functions or arbitrary JS
  * getters. Explicit Immediate execution remains a separately named operation. */
@@ -6912,30 +7312,30 @@ class DebugInspector {
  constructor(vm){this.vm=vm;this.cache=new Map();}
  parse(text){text=String(text).trim();if(!text||text.length>4096)throw new VBError('Debugger expression must contain 1–4096 characters',5);if(this.cache.has(text))return this.cache.get(text);const node=parseExpression(text);if(this.cache.size>=128)this.cache.delete(this.cache.keys().next().value);this.cache.set(text,node);return node;}
  frame(index=null){const vm=this.vm;if(index!==null&&index!==undefined){if(!Number.isInteger(index)||!vm.stack[index])throw new VBError('The selected stack frame is no longer available',5);return vm.stack[index];}return vm.currentFrame||([...vm.instances.values()][0]?vm.makeFrame([...vm.instances.values()][0]):null);}
- cell(cell){if(cell instanceof LazyCell)return cell.peek();if(cell instanceof Ref){if(typeof cell.debugGet==='function')return cell.debugGet();throw new VBError('Automatic evaluation of a computed ByRef value is disabled',5);}if(cell instanceof Cell)return cell._value;throw new VBError('Value cannot be inspected without executing code',5);}
- identifier(name,frame){const key=lower(name);if(BLOCKED.has(key)||key.startsWith('__'))throw new VBError('Member access is not permitted',438);if(!frame)throw new VBError('Runtime is not initialized',5);if(key==='me')return frame.instance;if(frame.locals.has(key))return this.cell(frame.locals.get(key));if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return this.cell(frame.result);if(frame.instance.fields.has(key))return this.cell(frame.instance.fields.get(key));if(frame.proc.constantBindings?.has(key))return frame.proc.constantBindings.get(key);if(frame.module.constantBindings?.has(key))return frame.module.constantBindings.get(key);if(frame.module.importedConstantBindings?.has(key)){const member=frame.module.importedConstantBindings.get(key);if(member.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return member.value;}if(frame.module.enumBindings?.has(key)){const value=frame.module.enumBindings.get(key);if(value.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return value;}if(this.vm.instances.has(key))return this.vm.instances.get(key);for(const instance of this.vm.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private'))return this.cell(instance.fields.get(key));if(frame.instance.formObject){try{return this.member(frame.instance.formObject,name,frame);}catch(error){if(error.number!==438)throw error;}}if(this.vm.library.has(key)){const value=this.vm.library.get(key);if(typeof value==='function')throw new VBError('Automatic procedure evaluation is disabled: '+name,5);return value;}if(frame.module.procedures.has(key)||frame.module.procedures.has(key+':get'))throw new VBError('Automatic procedure evaluation is disabled: '+name,5);throw new VBError('Variable not defined: '+name,500);}
+ cell(cell){if(cell instanceof LazyCell)return cell.peek();if(cell instanceof Ref){if(typeof cell.debugGetScalar==='function')return cell.debugGetScalar();if(typeof cell.debugGet==='function')return cell.debugGet();throw new VBError('Automatic evaluation of a computed ByRef value is disabled',5);}if(cell instanceof Cell)return cell.getScalar();throw new VBError('Value cannot be inspected without executing code',5);}
+ identifier(name,frame){const key=lower(name);if(BLOCKED.has(key)||key.startsWith('__'))throw new VBError('Member access is not permitted',438);if(!frame)throw new VBError('Runtime is not initialized',5);if(key==='me')return frame.instance;if(frame.locals.has(key))return this.cell(frame.locals.get(key));if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return this.cell(frame.result);if(frame.instance.fields.has(key))return this.cell(frame.instance.fields.get(key));if(frame.proc.constantBindings?.has(key))return frame.proc.constantScalars?.get(key)??frame.proc.constantBindings.get(key);if(frame.module.constantBindings?.has(key))return frame.module.constantScalars?.get(key)??frame.module.constantBindings.get(key);if(frame.module.importedConstantBindings?.has(key)){const member=frame.module.importedConstantBindings.get(key);if(member.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return member.scalar??member.value;}if(frame.module.enumBindings?.has(key)){const value=frame.module.enumBindings.get(key);if(value.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return value;}if(this.vm.instances.has(key))return this.vm.instances.get(key);for(const instance of this.vm.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private'))return this.cell(instance.fields.get(key));if(frame.instance.formObject){try{return this.member(frame.instance.formObject,name,frame);}catch(error){if(error.number!==438)throw error;}}if(this.vm.library.has(key)){const value=this.vm.library.get(key);if(typeof value==='function')throw new VBError('Automatic procedure evaluation is disabled: '+name,5);return value;}if(frame.module.procedures.has(key)||frame.module.procedures.has(key+':get'))throw new VBError('Automatic procedure evaluation is disabled: '+name,5);throw new VBError('Variable not defined: '+name,500);}
  member(object,name,frame){const key=lower(name);if(BLOCKED.has(key)||key.startsWith('_'))throw new VBError('Member access is not permitted',438);if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable not set',91);if(object.__vbEnum){if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return object.values[key];}if(object.__vbInstance){this.vm.assertVisible(object,name,frame);const cell=object.fields.get(key);if(cell)return this.cell(cell);if(object.module.procedures.has(key)||object.module.procedures.has(key+':get'))throw new VBError('Automatic property/procedure evaluation is disabled: '+name,5);if(object.formObject)return this.member(object.formObject,name,frame);throw new VBError('Member not found: '+name,438);}if(object.__fields){const cell=field(object.__fields,key);if(!cell)throw new VBError('Member not found: '+name,438);return this.cell(cell);}if(object.__control&&object.props){const actual=Object.keys(object.props).find(n=>lower(n)===key);if(actual)return object.props[actual];}
   if(key==='count'&&object instanceof VBCollection)return object.items.length;if(key==='count'&&object instanceof VBDictionary)return object.map.size;
   const actual=Object.getOwnPropertyNames(object).find(n=>lower(n)===key&&/^[A-Z]/.test(n)),descriptor=actual&&own(object,actual);if(!descriptor||!('value'in descriptor)||typeof descriptor.value==='function')throw new VBError('Automatic getter/method evaluation is disabled: '+name,438);return descriptor.value;
  }
- evaluate(text,frameIndex=null){return this.node(this.parse(text),this.frame(frameIndex),{count:0},0);}
- node(node,frame,budget,depth){if(++budget.count>512||depth>64)throw new VBError('Debugger expression is too complex',7);const evaluate=n=>this.node(n,frame,budget,depth+1);switch(node.kind){case 'literal':return node.value;case 'currency':return new VBCurrency(node.value);case 'date':return new Date(node.value);case 'empty':return undefined;case 'nothing':return NOTHING;case 'missing':return MISSING;case 'group':return evaluate(node.expr);case 'id':return this.identifier(node.name,frame);case 'with':if(!frame?.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);case 'member':return this.member(evaluate(node.object),node.name,frame);case 'unary':{const v=evaluate(node.expr);if(!scalar(v))throw new VBError('Automatic default-property evaluation is disabled',5);return unary(node.op,v);}case 'binary':{const a=evaluate(node.left),b=evaluate(node.right);if(node.op!=='is'&&(!scalar(a)||!scalar(b)))throw new VBError('Automatic default-property evaluation is disabled',5);if(node.op==='like'&&String(a).length+String(b).length>2048)throw new VBError('Debugger Like operands are too long',7);return binary(node.op,a,b,frame?.module.optionCompare);}case 'typeof':{const object=evaluate(node.expr),name=lower(node.name).replace(/^vb\./,'');if(object===NOTHING)return 0;if(scalar(object)||object instanceof VBArray||object?.__fields)throw new VBError('Object required',424);return (objectSupports(object,name)||name==='object'||name===lower(type(object))||name==='form'&&!!object.module?.form||name==='control'&&!!object.__control)?-1:0;}case 'call':{
+ evaluate(text,frameIndex=null){return unbox(this.node(this.parse(text),this.frame(frameIndex),{count:0},0));}
+ node(node,frame,budget,depth){if(++budget.count>512||depth>64)throw new VBError('Debugger expression is too complex',7);const evaluate=n=>this.node(n,frame,budget,depth+1);switch(node.kind){case 'literal':return literalScalar(node);case 'currency':return literalScalar(node);case 'date':return literalScalar(node);case 'empty':return undefined;case 'nothing':return NOTHING;case 'missing':return MISSING;case 'group':return evaluate(node.expr);case 'id':return this.identifier(node.name,frame);case 'with':if(!frame?.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);case 'member':return this.member(evaluate(node.object),node.name,frame);case 'unary':{const literal=signedLiteralScalar(node);if(literal)return literal;const v=evaluate(node.expr);if(!scalar(v))throw new VBError('Automatic default-property evaluation is disabled',5);return unary(node.op,v);}case 'binary':{const a=evaluate(node.left),b=evaluate(node.right);if(node.op!=='is'&&(!scalar(a)||!scalar(b)))throw new VBError('Automatic default-property evaluation is disabled',5);if(node.op==='like'&&String(a).length+String(b).length>2048)throw new VBError('Debugger Like operands are too long',7);return node.op==='is'?tagScalar(binary('is',a,b),'boolean'):binary(node.op,a,b,frame?.module.optionCompare);}case 'typeof':{const object=evaluate(node.expr),name=lower(node.name).replace(/^vb\./,'');if(object===NOTHING)return tagScalar(0,'boolean');if(scalar(object)||object instanceof VBArray||object?.__fields)throw new VBError('Object required',424);return tagScalar((objectSupports(object,name)||name==='object'||name===lower(type(object))||name==='form'&&!!object.module?.form||name==='control'&&!!object.__control)?-1:0,'boolean');}case 'call':{
     // Array and collection indexing are storage reads; intrinsic functions below
     // have a bounded, explicit allowlist and do not call into the user program.
     const pure=node.callee.kind==='id'&&PURE.has(lower(node.callee.name).replace(/\$$/,''));let target;
     if(pure){const key=lower(node.callee.name),local=frame&&(frame.locals.has(key)||frame.instance.fields.has(key)||frame.module.procedures.has(key)||frame.module.procedures.has(key+':get')||[...this.vm.instances.values()].some(i=>i.module.kind==='module'&&(i.fields.has(key)||i.module.procedures.has(key)||i.module.procedures.has(key+':get'))));if(local)target=evaluate(node.callee);else target=this.vm.library.get(key);}
     else target=evaluate(node.callee);
     if(node.args.some(n=>n.kind==='named'||n.kind==='missing'))throw new VBError('Use positional arguments in automatic debugger expressions',5);const args=node.args.map(evaluate);
-    if(target instanceof VBArray)return args.length?target.get(...args):target;if(target instanceof VBCollection){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.Item(args[0]);}if(target instanceof VBDictionary){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.Item(args[0]);}
+    if(target instanceof VBArray)return args.length?target.getScalar(...args):target;if(target instanceof VBCollection){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.itemScalar(args[0]);}if(target instanceof VBDictionary){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.itemScalar(args[0]);}
     if(!pure||typeof target!=='function')throw new VBError('Automatic procedure evaluation is disabled',5);
     const key=lower(node.callee.name).replace(/\$$/,'');if(args.some(v=>!scalar(v))&&!['isarray','isobject','typename','vartype','isempty','isnull','iserror','ismissing','lbound','ubound','len'].includes(key))throw new VBError('Automatic default-property evaluation is disabled',5);
     if(['lbound','ubound'].includes(key)&&!(args[0]instanceof VBArray))throw new VBError('Expected array',13);
-    return target.vbInvoke?target.vbInvoke(args,frame):target(...args);
+    return target.vbScalarInvoke?target.vbScalarInvoke(args,frame):target.vbInvoke?target.vbInvoke(args.map(unbox),frame):target(...args.map(unbox));
   }default:throw new VBError('Automatic debugger evaluation cannot execute '+node.kind,5);}}
  reference(node,frame){if(node.kind==='group')return this.reference(node.expr,frame);if(node.kind==='id'){const key=lower(node.name);let cell=frame.locals.get(key)||frame.instance.fields.get(key);if(!cell&&key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))cell=frame.result;if(!cell)for(const instance of this.vm.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private')){cell=instance.fields.get(key);break;}if(!(cell instanceof Cell)||cell.constant)throw new VBError('The expression is read-only or requires code execution',5);return cell;}if(node.kind==='member'){const object=this.node(node.object,frame,{count:0},0),key=lower(node.name);if(BLOCKED.has(key)||key.startsWith('_'))throw new VBError('Member access is not permitted',438);if(object?.__vbInstance)this.vm.assertVisible(object,node.name,frame);const cell=object?.__vbInstance?object.fields.get(key):field(object?.__fields,key);if(cell instanceof Cell&&!cell.constant)return cell;throw new VBError('Only stored fields can be edited here; use Immediate for property setters',5);}if(node.kind==='call'){const object=this.node(node.callee,frame,{count:0},0);if(!(object instanceof VBArray))throw new VBError('Only stored array elements can be edited here',5);const args=node.args.map(n=>this.node(n,frame,{count:0},0));object.offset(args);return {type:object.type,get:()=>object.get(...args),set:value=>object.set(args,value)};}throw new VBError('The expression is not an editable storage location',5);}
  assign(expression,text,{frameIndex=null,pauseId}={}){if(this.vm.state!=='paused')throw new VBError('Variable editing requires break mode',5);if(pauseId!==undefined&&pauseId!==this.vm.debugPauseId)throw new VBError('The debugger context changed; refresh before editing',5);const frame=this.frame(frameIndex),ref=this.reference(this.parse(expression),frame),value=this.node(this.parse(text),frame,{count:0},0);ref.set(value);return this.inspect(expression,{frameIndex});}
- entry(expression,name,value,cell,frame){let editable=false;try{this.reference(this.parse(expression),frame);editable=true;}catch{}const fields=value?.__vbInstance?value.fields:value?.__fields,total=fields?.size??(value instanceof VBArray?value.data.length:value instanceof VBCollection?value.items.length:value instanceof VBDictionary?value.map.size:0);const literal=typeof value==='string'?'"'+value.replace(/"/g,'""')+'"':debugDescription(value);if(literal.length>4096)editable=false;return {expression,name,value:debugDescription(value),literal:literal.length<=4096?literal:undefined,type:type(value,cell?.type),editable,expandable:total>0,total};}
- inspect(expression,{frameIndex=null,offset=0,limit=100}={}){const frame=this.frame(frameIndex);if(!frame)throw new VBError('Runtime is not initialized',5);const value=this.node(this.parse(expression),frame,{count:0},0);let ref;try{ref=this.reference(this.parse(expression),frame);}catch{}const result=this.entry(expression,expression,value,ref,frame);result.context={module:frame.module.name,procedure:frame.proc.name,frameIndex:this.vm.stack.indexOf(frame),pauseId:this.vm.debugPauseId||0};result.children=[];offset=Math.max(0,Math.trunc(Number(offset)||0));limit=Math.max(1,Math.min(200,Math.trunc(Number(limit)||100)));const fields=value?.__vbInstance?value.fields:value?.__fields;if(fields){let i=0;for(const [name,cell]of fields){if(i++<offset)continue;if(result.children.length>=limit)break;const child=expression+'.'+name;try{this.vm.assertVisible(value,name,frame);result.children.push(this.entry(child,name,this.cell(cell),cell,frame));}catch(error){result.children.push({expression:child,name,value:'<'+error.message+'>',type:cell.type||'Variant',editable:false,expandable:false});}}}else if(value instanceof VBArray){for(let i=offset;i<Math.min(value.data.length,offset+limit);i++){let rest=i;const at=new Array(value.bounds.length);for(let d=value.bounds.length-1;d>=0;d--){const [lo,hi]=value.bounds[d],length=hi-lo+1;at[d]=lo+rest%length;rest=Math.floor(rest/length);}const expr=expression+'('+at.join(', ')+')';result.children.push(this.entry(expr,'('+at.join(', ')+')',value.data[i],{type:value.type},frame));}}else if(value instanceof VBCollection){for(let i=offset;i<Math.min(value.items.length,offset+limit);i++){const expr=expression+'('+(i+1)+')';result.children.push(this.entry(expr,'('+(i+1)+')',value.items[i].item,null,frame));}}else if(value instanceof VBDictionary){let i=0;for(const {key,value:item}of value.map.values()){if(i++<offset)continue;if(result.children.length>=limit)break;if(typeof key!=='string'&&typeof key!=='number')continue;const expr=expression+'('+(typeof key==='string'?'"'+key.replace(/"/g,'""')+'"':key)+')';result.children.push(this.entry(expr,String(key),item,null,frame));}}result.offset=offset;result.nextOffset=offset+result.children.length;result.truncated=result.nextOffset<result.total;return result;}
+ entry(expression,name,value,cell,frame){let editable=false;try{this.reference(this.parse(expression),frame);editable=true;}catch{}const fields=value?.__vbInstance?value.fields:value?.__fields,total=fields?.size??(value instanceof VBArray?value.data.length:value instanceof VBCollection?value.items.length:value instanceof VBDictionary?value.map.size:0);const raw=unbox(value);const literal=typeof raw==='string'?'"'+raw.replace(/"/g,'""')+'"':debugDescription(value);if(literal.length>4096)editable=false;return {expression,name,value:debugDescription(value),literal:literal.length<=4096?literal:undefined,type:type(value,cell?.type),editable,expandable:total>0,total};}
+ inspect(expression,{frameIndex=null,offset=0,limit=100}={}){const frame=this.frame(frameIndex);if(!frame)throw new VBError('Runtime is not initialized',5);const value=this.node(this.parse(expression),frame,{count:0},0);let ref;try{ref=this.reference(this.parse(expression),frame);}catch{}const result=this.entry(expression,expression,value,ref,frame);result.context={module:frame.module.name,procedure:frame.proc.name,frameIndex:this.vm.stack.indexOf(frame),pauseId:this.vm.debugPauseId||0};result.children=[];offset=Math.max(0,Math.trunc(Number(offset)||0));limit=Math.max(1,Math.min(200,Math.trunc(Number(limit)||100)));const fields=value?.__vbInstance?value.fields:value?.__fields;if(fields){let i=0;for(const [name,cell]of fields){if(i++<offset)continue;if(result.children.length>=limit)break;const child=expression+'.'+name;try{this.vm.assertVisible(value,name,frame);result.children.push(this.entry(child,name,this.cell(cell),cell,frame));}catch(error){result.children.push({expression:child,name,value:'<'+error.message+'>',type:cell.type||'Variant',editable:false,expandable:false});}}}else if(value instanceof VBArray){for(let i=offset;i<Math.min(value.data.length,offset+limit);i++){let rest=i;const at=new Array(value.bounds.length);for(let d=value.bounds.length-1;d>=0;d--){const [lo,hi]=value.bounds[d],length=hi-lo+1;at[d]=lo+rest%length;rest=Math.floor(rest/length);}const expr=expression+'('+at.join(', ')+')';result.children.push(this.entry(expr,'('+at.join(', ')+')',value.getScalar(...at),{type:value.type},frame));}}else if(value instanceof VBCollection){for(let i=offset;i<Math.min(value.items.length,offset+limit);i++){const expr=expression+'('+(i+1)+')';result.children.push(this.entry(expr,'('+(i+1)+')',value.itemScalar(i+1),null,frame));}}else if(value instanceof VBDictionary){let i=0;for(const {key,value:item}of value.map.values()){if(i++<offset)continue;if(result.children.length>=limit)break;if(typeof key!=='string'&&typeof key!=='number')continue;const expr=expression+'('+(typeof key==='string'?'"'+key.replace(/"/g,'""')+'"':key)+')';result.children.push(this.entry(expr,String(key),value.itemScalar(key),null,frame));}}result.offset=offset;result.nextOffset=offset+result.children.length;result.truncated=result.nextOffset<result.total;return result;}
  locals({frameIndex=null,includeFields=true,offset=0,limit=500}={}){const frame=this.frame(frameIndex);if(!frame)return [];const result=[],seen=new Set();const sources=[[frame.locals,'Local'],...(includeFields?[[frame.instance.fields,'Module']]:[])];let index=0;for(const [cells,scope]of sources)for(const [name,cell]of cells){if(seen.has(name))continue;seen.add(name);if(index++<offset)continue;if(result.length>=Math.min(1000,limit))return result;try{result.push({...this.entry(name,name,this.cell(cell),cell,frame),scope});}catch(error){result.push({name,expression:name,value:'<'+error.message+'>',type:cell.type||'ByRef',scope,editable:false});}}return result;}
 }
 
@@ -6943,7 +7343,7 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[77]=(()=>{
+__modules[79]=(()=>{
 const {VBError}=__modules[11];
 
 const instructionKey=ins=>{const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;return JSON.stringify(rest);};
@@ -6970,9 +7370,9 @@ return {instructionKey,linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[78]=(()=>{
-const {statementIndex}=__modules[73];
-const {instructionMap,linearInstruction,instructionKey}=__modules[77];
+__modules[80]=(()=>{
+const {statementIndex}=__modules[75];
+const {instructionMap,linearInstruction,instructionKey}=__modules[79];
 const {VBError}=__modules[11];
 
 
@@ -7035,25 +7435,27 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[79]=(()=>{
-const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[73];
-const {VBWin32Bridge}=__modules[74];
+__modules[81]=(()=>{
+const {VBScalar,SCALAR_TYPES,printScalar,unbox,tagScalar,scalarType,storageScalar,readScalar,literalScalar,signedLiteralScalar}=__modules[15];
+const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[75];
+const {VBWin32Bridge}=__modules[76];
 const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[16];
-const {DataContext}=__modules[36];
-const {errorDescription}=__modules[46];
-const {DebugEvaluationSession}=__modules[75];
-const {hasDataDefault}=__modules[18];
-const {defaultIdentifierType}=__modules[68];
-const {DebugInspector}=__modules[76];
-const {planLiveEdit,nextStatementIndex}=__modules[78];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[34];
+const {DataContext}=__modules[37];
+const {errorDescription}=__modules[48];
+const {DebugEvaluationSession}=__modules[77];
+const {hasDataDefault,dataDefaultType}=__modules[18];
+const {defaultIdentifierType}=__modules[70];
+const {DebugInspector}=__modules[78];
+const {planLiveEdit,nextStatementIndex}=__modules[80];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[35];
 const { Signal, lower, VERSION }=__modules[14];
 const { VBError, splitTop, tokenize }=__modules[11];
-const { parseExpression, parseCall }=__modules[70];
-const { compileProject }=__modules[72];
+const { parseExpression, parseCall }=__modules[72];
+const { compileProject }=__modules[74];
 const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[15];
-const { VirtualFileSystem }=__modules[35];
-const { createLibrary, MemoryRecordset }=__modules[51];
+const { VirtualFileSystem }=__modules[36];
+const { createLibrary, MemoryRecordset }=__modules[53];
+
 
 
 
@@ -7154,16 +7556,16 @@ class VirtualMachine extends Signal {
     const key=lower(decl.name);if(target.has(key))return target.get(key);
     const staticKey=lower(frame.proc.name)+':'+(frame.proc.accessor||'')+'.'+key,staticCells=frame.instance.staticCells;
     if(staticFlag&&staticCells.has(staticKey)){target.set(key,staticCells.get(staticKey));return target.get(key);}
-    const type=decl.storageType||decl.type;let value;
+    const type=decl.storageType||decl.constantType||decl.type;let value;
     if(decl.bounds!==null&&decl.bounds!==undefined){const bounds=await this.evalBounds(decl.bounds,frame);value=await this.createArray(bounds,type,frame,decl.fixedLength);value.dynamic=!bounds.length;}
     else if(decl.autoNew){const cell=new LazyCell(decl.type,()=>this.createObject(decl.type,frame));cell.scope=decl.scope;target.set(key,cell);if(staticFlag)staticCells.set(staticKey,cell);return cell;}
     else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame);
-    else value=decl.constant?(frame.proc.constantBindings?.has(key)?frame.proc.constantBindings.get(key):frame.module.constantBindings.get(key)):decl.initial?await this.evaluate(decl.initial,frame):this.program.modules.has(lower(decl.type))||this.data.isObjectType(decl.type)?NOTHING:defaultValue(type);
+    else value=decl.constant?(frame.proc.constantScalars?.has(key)?frame.proc.constantScalars.get(key):frame.module.constantScalars?.get(key)??frame.module.constantBindings.get(key)):decl.initial?await this.evaluateScalar(decl.initial,frame):this.program.modules.has(lower(decl.type))||this.data.isObjectType(decl.type)?NOTHING:defaultValue(type);
     const cell=new Cell(decl.bounds!==null&&decl.bounds!==undefined?'Variant':type,value,decl.constant,decl.fixedLength);cell.scope=decl.scope;cell.isArray=decl.bounds!==null&&decl.bounds!==undefined;cell.elementType=type;target.set(key,cell);if(decl.withEvents)this.bindEventCell(cell,frame.instance,decl.name);if(staticFlag)staticCells.set(staticKey,cell);return cell;
   }
   recordSchema(name,module){const local=Object.entries(module.types).find(([key])=>lower(key)===lower(name));if(local)return local[1];for(const candidate of this.program.modules.values()){const match=Object.entries(candidate.types).find(([key])=>lower(key)===lower(name));if(match)return match[1];}return null;}
   async createArray(bounds,type,frame,fixedLength=null,depth=0){const record=this.recordSchema(type,frame.module)?await this.createRecord(type,frame,depth+1):null;return new VBArray(bounds,type,record?()=>cloneValue(record):null,fixedLength);}
-  async createRecord(name,frame,depth=0){if(depth>32)throw new VBError('Recursive user-defined type',1002);const fields=new Map();for(const member of this.recordSchema(name,frame.module)||[]){const type=member.storageType||member.type;let value;if(member.bounds!==null){value=await this.createArray(await this.evalBounds(member.bounds,frame),type,frame,member.fixedLength,depth+1);value.dynamic=!member.bounds.length;}else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame,depth+1);else value=member.initial?await this.evaluate(member.initial,frame):defaultValue(type);const cell=new Cell(member.bounds!==null?'Variant':type,value,false,member.fixedLength);cell.isArray=member.bounds!==null;cell.elementType=type;fields.set(member.name,cell);}return makeRecord(name,fields);}
+  async createRecord(name,frame,depth=0){if(depth>32)throw new VBError('Recursive user-defined type',1002);const fields=new Map();for(const member of this.recordSchema(name,frame.module)||[]){const type=member.storageType||member.type;let value;if(member.bounds!==null){value=await this.createArray(await this.evalBounds(member.bounds,frame),type,frame,member.fixedLength,depth+1);value.dynamic=!member.bounds.length;}else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame,depth+1);else value=member.initial?await this.evaluateScalar(member.initial,frame):defaultValue(type);const cell=new Cell(member.bounds!==null?'Variant':type,value,false,member.fixedLength);cell.isArray=member.bounds!==null;cell.elementType=type;fields.set(member.name,cell);}return makeRecord(name,fields);}
   // Event connections follow assignment order; replacing a reference detaches the old source.
   bindEventCell(cell,owner,prefix){
     const sink={owner,prefix},set=cell.set.bind(cell);let source=null;
@@ -7174,14 +7576,19 @@ class VirtualMachine extends Signal {
     const event=instance.module.events?.get(lower(name));if(!event)throw new VBError('Event not declared: '+name,1002);
     if(nodes.length!==event.params.length)throw new VBError('Wrong number of arguments to event '+name,450);
     const args=[];
-    for(let i=0;i<nodes.length;i++){const param=event.params[i],node=nodes[i];let ref;
-      if(param.byRef&&['id','member','call'].includes(node.kind)){try{ref=await this.reference(node,frame,true);}catch(error){if(!(error instanceof VBError))throw error;}}
-      if(param.byRef)args.push({ref:ref||new Cell(param.type,await this.evaluate(node,frame))});else args.push(coerce(await this.evaluate(node,frame),param.type));
+    for(let i=0;i<nodes.length;i++){
+      const param=event.params[i],type=param.storageType||param.type;
+      const actual=param.byRef?await this.sourceArgument(nodes[i],frame):await this.evaluateScalar(nodes[i],frame);
+      if(param.byRef&&actual?.ref){
+        if(Object.hasOwn(SCALAR_TYPES,lower(type))&&lower(actual.ref.type)!==lower(type))throw new VBError('ByRef argument type mismatch',13);
+        args.push(actual);
+      }else if(param.byRef)args.push({ref:new Cell(type,actual)});
+      else args.push(storageScalar(actual,type));
     }
     for(const sink of [...(this.eventSinks.get(instance)||[])]){if(!(this.eventSinks.get(instance)||[]).includes(sink))continue;const proc=sink.owner.module.procedures.get(lower(sink.prefix+'_'+name));if(proc)await this.callProcedure(sink.owner,proc,args,frame);}
     this.emit('event',{instance,name,args:args.map(a=>a?.ref?a.ref.get():a)});
   }
-  async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluate(lo,frame)):frame.module.optionBase,numeric(await this.evaluate(hi,frame))]);return result;}
+  async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluateScalar(lo,frame)):frame.module.optionBase,numeric(await this.evaluateScalar(hi,frame))]);return result;}
   async start({breakOnEntry=false,runToCursor=null}={}) {
     if(this.immediateContext)throw new VBError('Reset design-mode Immediate before starting the project',5);
     try { if(runToCursor)this.runTarget=this.breakpointLocation(runToCursor.module,runToCursor.line,runToCursor.column??null);await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
@@ -7216,27 +7623,100 @@ class VirtualMachine extends Signal {
   requestUnload(instance){if(this.state==='stopped')return Promise.resolve();return new Promise(resolve=>{this.eventQueue.push({action:()=>this.unloadForm(instance,0),resolve,key:'unload:'+instance.module.name});this.processEvents();});}
   async doEvents(){await new Promise(resolve=>setTimeout(resolve,0));for(let i=0;i<32&&this.eventQueue.length&&this.state==='running';i++)await this.runQueuedEvent(this.eventQueue.shift());return [...this.formInstances].filter(i=>i.loaded).length;}
   async createObject(name,frame=this.currentFrame){if(this.automation?.has(name))return this.automation.create(name);const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();const dataObject=this.data.createObject(name);if(dataObject)return dataObject;const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
+  /** Adapt one public JavaScript member back into a source value. Unknown
+   * numeric adapters are Double; only documented built-ins receive a subtype. */
+  nativeScalar(object,name,value){
+    if(value instanceof VBScalar||!scalarType(value))return value;
+    const key=lower(name||''),raw=unbox(value);let type=scalarType(value),variant=false;
+    if(hasDataDefault(object)&&['value','originalvalue'].includes(key)){const declared=lower(dataDefaultType(object)||'');return raw==null?storageScalar(raw,'Variant'):Object.hasOwn(SCALAR_TYPES,declared)?tagScalar(raw,declared,true):storageScalar(value,'Variant');}
+    if(object===this.err&&['number','helpcontext','lastdllerror'].includes(key))type='long';
+    else if(object instanceof VBCollection||object instanceof VBDictionary){if(key==='count')type='long';if(key==='exists')type='boolean';}
+    else if(object?.__control){
+      const control=object.type||object.model?.type;
+      if(['enabled','visible','tabstop','autoredraw','wordwrap','multiline','locked','sorted','cancel','default','mdichild'].includes(key))type='boolean';
+      else if(['left','top','width','height','scalewidth','scaleheight','scaleleft','scaletop','currentx','currenty'].includes(key))type='single';
+      else if(['hwnd','hdc','backcolor','forecolor','selstart','sellength','maxlength','interval','itemdata'].includes(key))type='long';
+      else if(['listindex','listcount','tabindex','index','mousepointer','borderstyle','appearance','windowstate','scalemode','alignment','style'].includes(key))type='integer';
+      else if(key==='selected')type='boolean';
+      else if(key==='value')type=control==='OptionButton'?'boolean':control==='DTPicker'?'date':['HScrollBar','VScrollBar','CheckBox'].includes(control)?'integer':type;
+    }
+    return tagScalar(raw,type,variant);
+  }
+  async invokeScalar(target,args,frame){
+    const fn=target?.__native||target,receiver=target?.receiver;
+    if(fn.vbScalarInvoke)return this.debugAwait(fn.vbScalarInvoke(args,frame));
+    const name=lower(target?.memberName||'');
+    if((receiver instanceof VBCollection||receiver instanceof VBDictionary)&&name==='item')return receiver.itemScalar(...args);
+    if(receiver===this.library.get('debug')&&name==='print'){this.output(args.map(v=>printScalar(v)).join(' '));return;}
+    const input=receiver instanceof VBCollection||receiver instanceof VBDictionary?args:args.map(unbox);
+    const result=await this.debugAwait(fn.vbInvoke?fn.vbInvoke(input,frame):fn.apply(receiver,input));
+    return this.nativeScalar(receiver,name,result);
+  }
+  async expressionValue(value,frame){
+    if(value?.__procedure)return this.callProcedure(value.instance,value.__procedure,[],frame,true);
+    if(value?.__native||typeof value==='function')return this.invokeScalar(value,[],frame);
+    return value;
+  }
+  /** Classify ByRef expressions without probing a getter and evaluating it a
+   * second time. Properties/functions bind temporaries, real storage aliases. */
+  async sourceOperand(node,frame){
+    if(node.kind==='id'){
+      const key=lower(node.name);
+      let ref=key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind)?frame.result:frame.locals.get(key)||frame.instance.fields.get(key);
+      if(!ref)for(const instance of this.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private')){ref=instance.fields.get(key);break;}
+      if(ref&&!ref.constant)return {ref};
+      const value=await this.getIdentifier(node.name,frame,{noInvoke:true});
+      // Implicit declaration performed by getIdentifier is genuine storage.
+      if(!ref&&frame.locals.has(key))return {ref:frame.locals.get(key)};
+      return {value};
+    }
+    if(node.kind==='member'){
+      const object=await this.evaluateScalar(node.object,frame,{raw:true});
+      this.assertVisible(object,node.name,frame);
+      const fields=object?.__vbInstance?object.fields:object?.__fields;
+      const ref=fields&&[...fields].find(([key])=>lower(key)===lower(node.name))?.[1];
+      return ref&&!ref.constant?{ref}:{value:await this.getMemberScalar(object,node.name,frame)};
+    }
+    if(node.kind==='call'){
+      const resolved=await this.sourceOperand(node.callee,frame),target=resolved.ref?await readScalar(resolved.ref):resolved.value;
+      if(target instanceof VBArray){
+        if(!node.args.length)return resolved.ref?{ref:resolved.ref}:{value:target};
+        const indices=[];for(const arg of node.args)indices.push(numeric(await this.evaluateScalar(arg,frame)));
+        target.offset(indices);
+        const ref=new Ref(()=>target.get(...indices),v=>target.set(indices,v),target.type,target.fixedLength,()=>target.getScalar(...indices));
+        ref.debugGet=ref.get;ref.debugGetScalar=ref.getScalar;ref.win32Array=target;ref.win32Offset=target.offset(indices);
+        return {ref};
+      }
+      return {value:await this.callResolvedExpression(node,target,frame)};
+    }
+    return {value:await this.evaluateScalar(node,frame)};
+  }
+  async sourceArgument(node,frame){
+    const resolved=await this.sourceOperand(node,frame);
+    if(resolved.ref)return resolved;
+    return this.expressionValue(resolved.value,frame);
+  }
   async getIdentifier(name,frame,{noInvoke=false}={}) {
     const key=lower(name);
     if(key==='me')return frame.instance;
-    if(frame.locals.has(key))return frame.locals.get(key).get();
-    if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return frame.result.get();
-    if(frame.instance.fields.has(key))return frame.instance.fields.get(key).get();
-    if(frame.proc.constantBindings?.has(key))return frame.proc.constantBindings.get(key);
-    if(frame.module.constantBindings?.has(key))return frame.module.constantBindings.get(key);
+    if(frame.locals.has(key))return readScalar(frame.locals.get(key));
+    if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return readScalar(frame.result);
+    if(frame.instance.fields.has(key))return readScalar(frame.instance.fields.get(key));
+    if(frame.proc.constantBindings?.has(key))return frame.proc.constantScalars?.get(key)??frame.proc.constantBindings.get(key);
+    if(frame.module.constantBindings?.has(key))return frame.module.constantScalars?.get(key)??frame.module.constantBindings.get(key);
     const enumeration=frame.module.enumBindings?.get(key);if(enumeration){if(enumeration.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return enumeration;}
     const localProc=frame.module.procedures.get(key);if(localProc)return {__procedure:localProc,instance:frame.instance};
-    const property=frame.module.procedures.get(key+':get');if(property)return await this.callProcedure(frame.instance,property,[]);
-    if(frame.instance.formObject&&!(String(name).endsWith('$')&&this.library.has(key+'$'))&&this.hasMember(frame.instance.formObject,name))return this.nativeMember(frame.instance.formObject,name);
-    const constant=frame.module.importedConstantBindings?.get(key);if(constant){if(constant.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return constant.value;}
+    const property=frame.module.procedures.get(key+':get');if(property)return await this.callProcedure(frame.instance,property,[],frame,true);
+    if(frame.instance.formObject&&!(String(name).endsWith('$')&&this.library.has(key+'$'))&&this.hasMember(frame.instance.formObject,name))return this.nativeMemberScalar(frame.instance.formObject,name);
+    const constant=frame.module.importedConstantBindings?.get(key);if(constant){if(constant.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return constant.scalar??constant.value;}
     if(this.instances.has(key))return this.instances.get(key);
     for(const instance of this.instances.values())if(instance.module.kind==='module'){
-      if(instance.fields.has(key)&&instance.fields.get(key).scope!=='private')return instance.fields.get(key).get();const proc=instance.module.procedures.get(key);if(proc&&proc.scope!=='private')return {__procedure:proc,instance};
+      if(instance.fields.has(key)&&instance.fields.get(key).scope!=='private')return readScalar(instance.fields.get(key));const proc=instance.module.procedures.get(key);if(proc&&proc.scope!=='private')return {__procedure:proc,instance};
     }
     const intrinsicKey=String(name).endsWith('$')&&this.library.has(key+'$')?key+'$':key;
-    if(this.library.has(intrinsicKey))return this.library.get(intrinsicKey);
+    if(this.library.has(intrinsicKey)){const value=this.library.get(intrinsicKey);return typeof value==='number'?tagScalar(value,value>=-32768&&value<=32767?'integer':'long'):tagScalar(value);}
     if(frame.module.optionExplicit)throw new VBError(`Variable not defined: ${name}`,500);
-    const cell=new Cell(defaultIdentifierType(name,frame.module.defaultTypes));frame.locals.set(key,cell);return cell.get();
+    const cell=new Cell(defaultIdentifierType(name,frame.module.defaultTypes));frame.locals.set(key,cell);return readScalar(cell);
   }
   nativeKey(object,name){
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable or With block variable not set',91);
@@ -7252,7 +7732,8 @@ class VirtualMachine extends Signal {
     return null;
   }
   hasMember(object,name){try{return this.nativeKey(object,name)!==null;}catch{return false;}}
-  nativeMember(object,name){const key=this.nativeKey(object,name);if(key===null)throw new VBError(`Object does not support property or method: ${name}`,438);const v=object[key];if(typeof v==='function')return {__native:v,receiver:object};return v;}
+  nativeMember(object,name){const value=this.nativeMemberScalar(object,name);return unbox(value);}
+  nativeMemberScalar(object,name){const key=this.nativeKey(object,name);if(key===null)throw new VBError(`Object does not support property or method: ${name}`,438);const v=object[key];if(typeof v==='function')return {__native:v,receiver:object,memberName:name};return this.nativeScalar(object,name,v);}
   assertVisible(object,name,frame){
     if(!object?.__vbInstance||frame?.module===object.module)return;
     const key=lower(name),field=object.fields.get(key),members=[object.module.procedures.get(key),object.module.procedures.get(key+':get'),object.module.procedures.get(key+':let'),object.module.procedures.get(key+':set')].filter(Boolean);
@@ -7263,52 +7744,55 @@ class VirtualMachine extends Signal {
     if(!member)throw new VBError('Member not found in '+object.interfaceName+': '+name,438);
     return {__procedure:object.target.module.procedures.get(member.procedure),__signature:member.signature,instance:object.target};
   }
-  async getMember(object,name,frame){
+  async getMember(object,name,frame){return unbox(await this.getMemberScalar(object,name,frame));}
+  async getMemberScalar(object,name,frame){
     if(isAutomationObject(object))return automationMember(object,name,true);
-    if(object?.__vbEnum){const key=lower(name);if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return object.values[key];}
-    if(object?.__vbInterface){const members=object.target.module.interfaceBindings[object.interfaceName].members,key=lower(name);const value=this.interfaceProcedure(object,name,members[key]?null:'get');return value.__signature.kind==='property'&&!value.__signature.params.length?this.callProcedure(value.instance,value.__procedure,[],frame):value;}
+    if(object?.__vbEnum){const key=lower(name);if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return tagScalar(object.values[key],'long');}
+    if(object?.__vbInterface){const members=object.target.module.interfaceBindings[object.interfaceName].members,key=lower(name);const value=this.interfaceProcedure(object,name,members[key]?null:'get');return value.__signature.kind==='property'&&!value.__signature.params.length?this.callProcedure(value.instance,value.__procedure,[],frame,true):value;}
     this.assertVisible(object,name,frame);
-    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key).get();const proc=object.module.procedures.get(key);if(proc)return {__procedure:proc,instance:object};const property=object.module.procedures.get(key+':get');if(property){if(property.scope==='private'&&object.module!==frame?.module)throw new VBError('Property get is not accessible',438);return property.params.length?{__procedure:property,instance:object}:this.callProcedure(object,property,[]);}if(object.formObject){if(key==='show')return {__native:(modal=0)=>this.showForm(object,truth(modal)),receiver:this};if(key==='hide')return {__native:()=>object.formObject.Hide(),receiver:this};return this.nativeMember(object.formObject,name);}throw new VBError(`Method or data member not found: ${name}`,438);}
-    return this.nativeMember(object,name);
+    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return readScalar(object.fields.get(key));const proc=object.module.procedures.get(key);if(proc)return {__procedure:proc,instance:object};const property=object.module.procedures.get(key+':get');if(property){if(property.scope==='private'&&object.module!==frame?.module)throw new VBError('Property get is not accessible',438);return property.params.length?{__procedure:property,instance:object}:this.callProcedure(object,property,[],frame,true);}if(object.formObject){if(key==='show')return {__native:(modal=0)=>this.showForm(object,truth(modal)),receiver:this};if(key==='hide')return {__native:()=>object.formObject.Hide(),receiver:this};return this.nativeMemberScalar(object.formObject,name);}throw new VBError(`Method or data member not found: ${name}`,438);}
+    if(object?.__fields){const field=[...object.__fields].find(([n])=>lower(n)===lower(name));if(field)return readScalar(field[1]);}
+    return this.nativeMemberScalar(object,name);
   }
   async defaultValue(value,depth=0){
-    if(value===this.err)return this.err.Number;
+    if(value===this.err)return tagScalar(this.err.Number,'long');
     if(depth>32)throw new VBError('Circular default-member evaluation',28);
-    if(value?.__control)return value.defaultValue();
-    if(hasDataDefault(value))return this.defaultValue(value.Value,depth+1);
+    if(value?.__control)return this.nativeScalar(value,['TextBox','RichTextBox','ComboBox','ListBox','FileListBox','DirListBox','DriveListBox','MSFlexGrid','MSHFlexGrid','DataGrid'].includes(value.type)?'Text':['CheckBox','OptionButton','HScrollBar','VScrollBar','Slider','ProgressBar','UpDown','DTPicker'].includes(value.type)?'Value':'Caption',value.defaultValue());
+    if(hasDataDefault(value))return this.defaultValue(this.nativeScalar(value,'Value',value.Value),depth+1);
     if(isAutomationObject(value)){const name=automationDefaultName(value);if(!name)throw new VBError('Automation object has no default value',438);return this.defaultValue(await automationInvoke(value,name,2,[]),depth+1);}
     const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;
-    if(instance?.__vbInstance&&name){const member=await this.getMember(value,name,this.currentFrame),result=member?.__procedure?await this.callProcedure(member.instance,member.__procedure,[],this.currentFrame):member;return this.defaultValue(result,depth+1);}
+    if(instance?.__vbInstance&&name){const member=await this.getMemberScalar(value,name,this.currentFrame),result=member?.__procedure?await this.callProcedure(member.instance,member.__procedure,[],this.currentFrame,true):member;return this.defaultValue(result,depth+1);}
     return value;
   }
-  async evaluate(node,frame=this.currentFrame,{raw=false}={}) {
+  async evaluate(node,frame=this.currentFrame,options={}) {return unbox(await this.evaluateScalar(node,frame,options));}
+  async evaluateScalar(node,frame=this.currentFrame,{raw=false}={}) {
     if(!frame){const instance=this.instances.values().next().value;if(!instance)throw new VBError('Runtime is not initialized',5);frame=this.makeFrame(instance);}
     let value;
     switch(node.kind){
-      case 'missing':return MISSING;case 'nothing':return NOTHING;case 'currency':return new VBCurrency(node.value);case 'literal':return node.value;case 'empty':return undefined;case 'date':return new Date(node.value);case 'group':return this.evaluate(node.expr,frame,{raw});
+      case 'missing':return MISSING;case 'nothing':return NOTHING;case 'currency':case 'literal':case 'date':return literalScalar(node);case 'empty':return tagScalar(undefined,'empty',true);case 'group':return this.evaluateScalar(node.expr,frame,{raw});
       case 'id':value=await this.getIdentifier(node.name,frame);break;
       case 'with':if(!frame.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);
-      case 'member':value=await this.getMember(await this.evaluate(node.object,frame,{raw:true}),node.name,frame);break;
-      case 'addressOf':return this.win32.callback(await this.evaluate(parseExpression(node.name),frame,{raw:true}));
+      case 'member':value=await this.getMemberScalar(await this.evaluateScalar(node.object,frame,{raw:true}),node.name,frame);break;
+      case 'addressOf':return tagScalar(this.win32.callback(await this.evaluateScalar(parseExpression(node.name),frame,{raw:true})),'long');
       case 'new':return this.createObject(node.name,frame);
       case 'typeof':{
-        const object=await this.evaluate(node.expr,frame,{raw:true}),type=lower(node.name).replace(/^vb\./,'');
-        if(object===NOTHING)return 0;
-        if(!object||typeof object!=='object'||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBArray||object instanceof VBErrorValue||object.__fields||object===MISSING)throw new VBError('Object required',424);
-        if(type==='object')return -1;
-        if(objectSupports(object,type))return -1;
+        const object=await this.evaluateScalar(node.expr,frame,{raw:true}),type=lower(node.name).replace(/^vb\./,'');
+        if(object===NOTHING)return tagScalar(0,'boolean');
+        if(!object||typeof object!=='object'||object instanceof VBScalar||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBArray||object instanceof VBErrorValue||object.__fields||object===MISSING)throw new VBError('Object required',424);
+        if(type==='object')return tagScalar(-1,'boolean');
+        if(objectSupports(object,type))return tagScalar(-1,'boolean');
         const actual=lower(object instanceof VBCollection?'Collection':object instanceof VBDictionary?'Dictionary':object.__type||object.model?.type||'');
-        return (actual===type||actual==='dictionary'&&type==='scripting.dictionary'||type==='form'&&!!object.module?.form||type==='control'&&!!object.__control)?-1:0;
+        return tagScalar((actual===type||actual==='dictionary'&&type==='scripting.dictionary'||type==='form'&&!!object.module?.form||type==='control'&&!!object.__control)?-1:0,'boolean');
       }
-      case 'unary':if(node.op==='-'&&node.expr.kind==='currency')return new VBCurrency('-'+node.expr.value);return unary(node.op,await this.defaultValue(await this.evaluate(node.expr,frame)));
-      case 'binary':if(node.op==='is')return binary('is',await this.evaluate(node.left,frame,{raw:true}),await this.evaluate(node.right,frame,{raw:true}));return binary(node.op,await this.defaultValue(await this.evaluate(node.left,frame)),await this.defaultValue(await this.evaluate(node.right,frame)),frame.module.optionCompare);
+      case 'unary':{const literal=signedLiteralScalar(node);if(literal)return literal;}return unary(node.op,await this.defaultValue(await this.evaluateScalar(node.expr,frame)));
+      case 'binary':if(node.op==='is')return tagScalar(binary('is',unbox(await this.evaluateScalar(node.left,frame,{raw:true})),unbox(await this.evaluateScalar(node.right,frame,{raw:true}))),'boolean');return binary(node.op,await this.defaultValue(await this.evaluateScalar(node.left,frame)),await this.defaultValue(await this.evaluateScalar(node.right,frame)),frame.module.optionCompare);
       case 'call':return this.callExpression(node,frame);
       default:throw new VBError(`Invalid expression kind: ${node.kind}`,1002);
     }
     if(raw)return value;
-    if(value?.__procedure)return this.callProcedure(value.instance,value.__procedure,[],frame);
-    if(value?.__native)return this.debugAwait(value.__native.call(value.receiver));
-    if(typeof value==='function')return this.debugAwait(value());
+    if(value?.__procedure)return this.callProcedure(value.instance,value.__procedure,[],frame,true);
+    if(value?.__native)return this.invokeScalar(value,[],frame);
+    if(typeof value==='function')return this.invokeScalar(value,[],frame);
     return value;
   }
   argumentSlots(nodes,params,allowExtra=false){
@@ -7327,35 +7811,39 @@ class VirtualMachine extends Signal {
     return slots;
   }
   async callExpression(node,frame){
-    let target=node.callee.kind==='id'&&lower(node.callee.name)===lower(frame.proc.name)?{__procedure:frame.proc,instance:frame.instance}:await this.evaluate(node.callee,frame,{raw:true});
+    let target=node.callee.kind==='id'&&lower(node.callee.name)===lower(frame.proc.name)?{__procedure:frame.proc,instance:frame.instance}:await this.evaluateScalar(node.callee,frame,{raw:true});
+    return this.callResolvedExpression(node,target,frame);
+  }
+  async callResolvedExpression(node,target,frame){
     if(isAutomationObject(target)){const name=automationDefaultName(target);if(!name)throw new VBError('Automation object has no default property',438);target=automationMember(target,name);}
     const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
-    if(instance?.__vbInstance&&defaultName)target=await this.getMember(target,defaultName,frame);
+    if(instance?.__vbInstance&&defaultName)target=await this.getMemberScalar(target,defaultName,frame);
     const proc=target?.__procedure,signature=target?.__signature||proc,fn=target?.__native||(typeof target==='function'?target:null),params=signature?.params||(fn?.vbShortParams&&node.args.length===2&&node.args.every(n=>n.kind!=='named')?fn.vbShortParams:fn?.vbParams);
     const slots=this.argumentSlots(node.args,params,!!proc?.params.at(-1)?.paramArray||!!fn?.vbVariadic);
     const actual=[];
     for(const {index,node:arg}of slots){
       const param=params?.[index];
       if(arg.kind==='missing'){actual[index]=proc||fn?.vbPreserveMissing?MISSING:undefined;continue;}
-      if(arg.kind==='byval'){if(!proc?.external)throw new VBError('ByVal call-site override is supported only for Declare calls',49);actual[index]={__win32ByVal:true,value:await this.evaluate(arg.expr,frame)};continue;}
-      if((param?.byRef||proc?.external&&param?.type.toLowerCase()==='string')&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
-        try{actual[index]={ref:await this.reference(arg,frame,true)};continue;}catch(error){if(!(error instanceof VBError))throw error;}
+      if(arg.kind==='byval'){if(!proc?.external)throw new VBError('ByVal call-site override is supported only for Declare calls',49);actual[index]={__win32ByVal:true,value:await this.evaluateScalar(arg.expr,frame)};continue;}
+      if(param?.byRef&&!param.paramArray&&!proc?.external){actual[index]=await this.sourceArgument(arg,frame);continue;}
+      if(proc?.external&&(param?.byRef||param?.type.toLowerCase()==='string')&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
+        actual[index]={ref:await this.reference(arg,frame,true)};continue;
       }
-      const value=await this.evaluate(arg,frame);
+      const value=await this.evaluateScalar(arg,frame);
       actual[index]=proc||fn?.vbRawArgs?value:await this.defaultValue(value);
     }
-    if(proc){for(let i=0;i<actual.length;i++)if(!(i in actual))actual[i]=MISSING;return this.callProcedure(target.instance,proc,actual,frame);}
+    if(proc){for(let i=0;i<actual.length;i++)if(!(i in actual))actual[i]=MISSING;return this.callProcedure(target.instance,proc,actual,frame,true);}
     if(fn&&params){for(let i=0;i<params.length;i++){if(!slots.some(s=>s.index===i&&s.node.kind!=='missing')&&!params[i].optional&&!params[i].paramArray)throw new VBError('Argument not optional: '+params[i].name,449);if(fn.vbPreserveMissing&&!(i in actual))actual[i]=MISSING;}}
-    if(target instanceof VBArray)return actual.length?target.get(...actual):target;
-    if(target instanceof VBCollection||target instanceof VBDictionary)return target.Item(...actual);
-    if(target?.__native)return this.debugAwait(target.__native.apply(target.receiver,actual));
-    if(typeof target==='function')return this.debugAwait(target.vbInvoke?target.vbInvoke(actual,frame):target(...actual));
-    if(target?.Item&&typeof target.Item==='function')return target.Item(...actual);
-    if(target?.__vbInstance){const getter=target.module.procedures.get('item:get');if(getter)return this.callProcedure(target,getter,actual,frame);}
+    if(target instanceof VBArray)return actual.length?target.getScalar(...actual):target;
+    if(target instanceof VBCollection||target instanceof VBDictionary)return target.itemScalar(...actual);
+    if(target?.__native)return this.invokeScalar(target,actual,frame);
+    if(typeof target==='function')return this.invokeScalar(target,actual,frame);
+    if(target?.Item&&typeof target.Item==='function')return tagScalar(await this.debugAwait(target.Item(...actual.map(unbox))),undefined,true);
+    if(target?.__vbInstance){const getter=target.module.procedures.get('item:get');if(getter)return this.callProcedure(target,getter,actual,frame,true);}
     throw new VBError('Expected array or callable procedure',13);
   }
   async reference(node,frame=this.currentFrame,objectSet=false) {
-    if(node.kind==='group')return new Cell('Variant',await this.evaluate(node.expr,frame));
+    if(node.kind==='group')return new Cell('Variant',await this.evaluateScalar(node.expr,frame));
     if(node.kind==='id'){
       const key=lower(node.name);if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return frame.result;
       let cell=frame.locals.get(key)||frame.instance.fields.get(key);
@@ -7367,57 +7855,60 @@ class VirtualMachine extends Signal {
       if(frame.module.optionExplicit)throw new VBError(`Variable not defined: ${node.name}`,500);
       cell=new Cell(defaultIdentifierType(node.name,frame.module.defaultTypes));frame.locals.set(key,cell);return cell;
     }
-    if(node.kind==='member')return this.memberReference(await this.evaluate(node.object,frame,{raw:true}),node.name,frame,objectSet);
+    if(node.kind==='member')return this.memberReference(await this.evaluateScalar(node.object,frame,{raw:true}),node.name,frame,objectSet);
     if(node.kind==='call'){
-      let target=await this.evaluate(node.callee,frame,{raw:true});const args=[];for(const a of node.args)args.push(await this.evaluate(a,frame));
+      let target=await this.evaluateScalar(node.callee,frame,{raw:true});const args=[];for(const a of node.args)args.push(await this.evaluateScalar(a,frame));
       if(isAutomationObject(target))return automationReference(target,automationDefaultName(target),args,objectSet);
       const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
       if(instance?.__vbInstance&&defaultName){const getter=()=>this.callExpression(node,frame);if(target.__vbInterface){const member=this.interfaceProcedure(target,defaultName,objectSet?'set':'let');return new Ref(getter,v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}const setter=instance.module.procedures.get(defaultName+':'+(objectSet?'set':'let'));if(!setter)throw new VBError('Default property is read-only',383);return new Ref(getter,v=>this.callProcedure(instance,setter,[...args,v],frame));}
       if(target instanceof VBArray&&!args.length&&node.callee.kind==='id')return this.reference(node.callee,frame,true);
-      if(target instanceof VBArray){const ref=new Ref(()=>target.get(...args),value=>target.set(args,value),target.type,target.fixedLength);ref.win32Array=target;ref.win32Offset=target.offset(args);return ref;}
-      if(target instanceof VBDictionary)return new Ref(()=>target.Item(...args),value=>target.setItem(...args,value));
-      if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args),v=>target.receiver.setItem(...args,v));
+      if(target instanceof VBArray){const ref=new Ref(()=>target.get(...args),value=>target.set(args,value),target.type,target.fixedLength,()=>target.getScalar(...args));ref.debugGetScalar=ref.getScalar;ref.win32Array=target;ref.win32Offset=target.offset(args);return ref;}
+      if(target instanceof VBDictionary)return new Ref(()=>target.Item(...args),value=>target.setItem(...args,value),'Variant',null,()=>target.itemScalar(...args));
+      if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args.map(unbox)),v=>target.receiver.setItem(...args.map(unbox),unbox(v)));
       if(node.callee.kind==='member'){
-        const object=await this.evaluate(node.callee.object,frame,{raw:true});const name=lower(node.callee.name);
+        const object=await this.evaluateScalar(node.callee.object,frame,{raw:true});const name=lower(node.callee.name);
         if(isAutomationObject(object))return automationReference(object,node.callee.name,args,objectSet);
         if(object?.__vbInterface){const member=this.interfaceProcedure(object,node.callee.name,objectSet?'set':'let');return new Ref(()=>this.callExpression(node,frame),v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}
-        if(object?.__vbInstance){const proc=object.module.procedures.get(name+':let')||object.module.procedures.get(name+':set');if(proc){if(proc.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,node.callee.name,frame),v=>this.callProcedure(object,proc,[...args,v],frame));}}
-        if(object?.setIndexed)return new Ref(()=>object[node.callee.name](...args),value=>object.setIndexed(node.callee.name,args,value));
+        if(object?.__vbInstance){const proc=object.module.procedures.get(name+':let')||object.module.procedures.get(name+':set');if(proc){if(proc.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMemberScalar(object,node.callee.name,frame),v=>this.callProcedure(object,proc,[...args,v],frame));}}
+        if(object?.setIndexed)return new Ref(()=>object[node.callee.name](...args.map(unbox)),value=>object.setIndexed(node.callee.name,args.map(unbox),unbox(value)));
       }
-      if(target&&typeof target.setItem==='function')return new Ref(()=>target.Item(...args),v=>target.setItem(...args,v));
+      if(target&&typeof target.setItem==='function')return new Ref(()=>target.Item(...args.map(unbox)),v=>target.setItem(...args.map(unbox),unbox(v)));
       throw new VBError('Invalid indexed assignment',13);
     }
     throw new VBError('Invalid assignment target',1002);
   }
   async memberReference(object,name,frame,objectSet=false){
     if(isAutomationObject(object))return automationReference(object,name,[],objectSet);
-    if(object?.__vbInterface){const member=this.interfaceProcedure(object,name,objectSet?'set':'let');return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(member.instance,member.__procedure,[v],frame));}
+    if(object?.__vbInterface){const member=this.interfaceProcedure(object,name,objectSet?'set':'let');return new Ref(()=>this.getMemberScalar(object,name,frame),v=>this.callProcedure(member.instance,member.__procedure,[v],frame));}
     this.assertVisible(object,name,frame);
-    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key);const setter=object.module.procedures.get(key+':let')||object.module.procedures.get(key+':set');if(setter){if(setter.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(object,setter,[v],frame));}if(object.formObject)return this.memberReference(object.formObject,name,frame);throw new VBError(`Method or data member not found: ${name}`,438);}
+    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key);const setter=object.module.procedures.get(key+':let')||object.module.procedures.get(key+':set');if(setter){if(setter.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMemberScalar(object,name,frame),v=>this.callProcedure(object,setter,[v],frame));}if(object.formObject)return this.memberReference(object.formObject,name,frame);throw new VBError(`Method or data member not found: ${name}`,438);}
     if(object?.__fields){const entry=[...object.__fields].find(([key])=>lower(key)===lower(name));if(entry)return entry[1];}
-    const key=this.nativeKey(object,name);if(key===null){if(Object.getPrototypeOf(object)===Object.prototype){object[name]=undefined;return new Ref(()=>object[name],v=>object[name]=v);}throw new VBError(`Property not found: ${name}`,438);}return new Ref(()=>object[key],v=>{object[key]=v;return v;});
+    const key=this.nativeKey(object,name);if(key===null){if(Object.getPrototypeOf(object)===Object.prototype){object[name]=undefined;return new Ref(()=>object[name],v=>object[name]=v);}throw new VBError(`Property not found: ${name}`,438);}return new Ref(()=>object[key],v=>{object[key]=unbox(v);return unbox(v);},'Variant',null,()=>this.nativeScalar(object,name,object[key]));
   }
-  async callByName(object,name,callType,args=[],frame=this.currentFrame){
+  async callByName(object,name,callType,args=[],frame=this.currentFrame,scalarReturn=false){
+    const result=await this.callByNameScalar(object,name,callType,args,frame);return scalarReturn?result:unbox(result);
+  }
+  async callByNameScalar(object,name,callType,args=[],frame=this.currentFrame){
     if(![1,2,4,8].includes(callType))throw new VBError('Invalid procedure call',5);
     const key=lower(name);if(BLOCKED_MEMBERS.has(key)||key.startsWith('_'))throw new VBError('Member access is not permitted',438);
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable not set',91);
     if(typeof object!=='object'||object instanceof VBArray||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBErrorValue||object===MISSING||object.__fields)throw new VBError('Object required',424);
     if(callType===8){const value=args.at(-1);if(value!==NOTHING&&(!value||typeof value!=='object'||value instanceof VBArray||value instanceof Date||value instanceof VBCurrency||value instanceof VBDecimal||value instanceof VBErrorValue||value.__fields))throw new VBError('Object required',424);}
-    if(isAutomationObject(object))return this.debugAwait(automationInvoke(object,name,callType,args));
-    if(object.__vbInterface){const member=this.interfaceProcedure(object,name,({2:'get',4:'let',8:'set'})[callType]||null);return this.callProcedure(member.instance,member.__procedure,args,frame);}
+    if(isAutomationObject(object))return this.debugAwait(automationInvoke(object,name,callType,args.map(unbox)));
+    if(object.__vbInterface){const member=this.interfaceProcedure(object,name,({2:'get',4:'let',8:'set'})[callType]||null);return this.callProcedure(member.instance,member.__procedure,args,frame,true);}
     if(object.__vbInstance){
       // Automation dispatch is public even when invoked by code in the same class.
       const proc=object.module.procedures.get(key+(callType===1?'':callType===2?':get':callType===4?':let':':set'));
-      if(proc){if(proc.scope==='private')throw new VBError('Member is not publicly accessible',438);return this.callProcedure(object,proc,args,frame);}
+      if(proc){if(proc.scope==='private')throw new VBError('Member is not publicly accessible',438);return this.callProcedure(object,proc,args,frame,true);}
       const field=object.fields.get(key);
-      if(field){if(field.scope==='private')throw new VBError('Member is not publicly accessible',438);if(callType===2){if(args.length)throw new VBError('Wrong number of arguments',450);return field.get();}if(callType===4||callType===8){if(args.length!==1)throw new VBError('Wrong number of arguments',450);if(callType===4&&lower(field.type)==='object')throw new VBError('Object assignment requires vbSet',13);return field.set(args[0]);}throw new VBError('Member is not a method',438);}
-      if(object.formObject)return this.callByName(object.formObject,name,callType,args,frame);
+      if(field){if(field.scope==='private')throw new VBError('Member is not publicly accessible',438);if(callType===2){if(args.length)throw new VBError('Wrong number of arguments',450);return readScalar(field);}if(callType===4||callType===8){if(args.length!==1)throw new VBError('Wrong number of arguments',450);if(callType===4&&lower(field.type)==='object')throw new VBError('Object assignment requires vbSet',13);return field.set(args[0]);}throw new VBError('Member is not a method',438);}
+      if(object.formObject)return this.callByNameScalar(object.formObject,name,callType,args,frame);
       throw new VBError('Method or data member not found: '+name,438);
     }
     const native=this.nativeKey(object,name);if(native===null)throw new VBError('Object does not support property or method: '+name,438);
     const value=object[native];
-    if(callType===1){if(typeof value!=='function')throw new VBError('Member is not a method',438);return this.debugAwait(value.apply(object,args));}
-    if(callType===2){if(typeof value==='function'){if(!['item','list','selected','itemdata','textmatrix','colwidth','rowheight'].includes(key))throw new VBError('Member is not a property',438);return this.debugAwait(value.apply(object,args));}if(args.length)throw new VBError('Wrong number of arguments',450);return value;}
+    if(callType===1){if(typeof value!=='function')throw new VBError('Member is not a method',438);return this.invokeScalar({__native:value,receiver:object,memberName:name},args,frame);}
+    if(callType===2){if(typeof value==='function'){if(!['item','list','selected','itemdata','textmatrix','colwidth','rowheight'].includes(key))throw new VBError('Member is not a property',438);return this.invokeScalar({__native:value,receiver:object,memberName:name},args,frame);}if(args.length)throw new VBError('Wrong number of arguments',450);return this.nativeScalar(object,name,value);}
     if(!args.length)throw new VBError('Argument not optional',449);
     if(typeof value==='function'){
       if(key==='item'&&typeof object.setItem==='function')return object.setItem(...args);
@@ -7427,23 +7918,33 @@ class VirtualMachine extends Signal {
     if(args.length!==1)throw new VBError('Wrong number of arguments',450);
     let owner=object,descriptor;for(let i=0;owner&&i<5;i++,owner=Object.getPrototypeOf(owner)){descriptor=Object.getOwnPropertyDescriptor(owner,native);if(descriptor)break;}
     if(descriptor&&(descriptor.get&&!descriptor.set||'writable'in descriptor&&!descriptor.writable))throw new VBError('Property is read-only',383);
-    object[native]=args[0];return args[0];
+    object[native]=unbox(args[0]);return args[0];
   }
-  async callProcedure(instance,proc,args=[],caller=null){
-    if(proc.external)return this.debugAwait(this.win32.invoke(proc,args));
+  async callProcedure(instance,proc,args=[],caller=null,scalarReturn=false){
+    if(proc.external){const value=await this.debugAwait(this.win32.invoke(proc,args.map(a=>a?.ref?a:a?.__win32ByVal?{...a,value:unbox(a.value)}:unbox(a))));return scalarReturn?storageScalar(value,proc.storageReturnType||proc.returnType||'Variant'):value;}
     if(this.stack.length>=this.options.maxCallDepth)throw new VBError('Out of stack space',28);
     const frame=this.makeFrame(instance,proc);frame.caller=caller;if(this.recordSchema(proc.returnType,frame.module))frame.result=new Cell(proc.returnType,await this.createRecord(proc.returnType,frame));
     if(args.length>proc.params.length&&!proc.params.at(-1)?.paramArray)throw new VBError(`Wrong number of arguments to ${proc.name}`,450);
     for(let i=0;i<proc.params.length;i++){
       const param=proc.params[i];let actual=i<args.length?args[i]:MISSING,cell;
-      if(param.paramArray){cell=new Cell('Variant',VBArray.from(args.slice(i).map(v=>v?.ref?v.ref.get():v)));frame.locals.set(lower(param.name),cell);break;}
-      if(actual===MISSING){if(param.initial)actual=proc.defaultBindings?.has(lower(param.name))?proc.defaultBindings.get(lower(param.name)):await this.evaluate(param.initial,frame);else if(!param.optional)throw new VBError(`Argument not optional: ${param.name}`,449);else actual=lower(param.type)==='variant'?MISSING:defaultValue(param.type);}
-      if(param.byRef&&actual?.ref){if(param.storageType&&param.bounds===null&&lower(actual.ref.type)!==lower(param.storageType))throw new VBError('ByRef argument type mismatch',13);if(this.recordSchema(param.type,frame.module)){const value=await actual.ref.get();if(!value?.__fields||lower(value.__type)!==lower(param.type))throw new VBError('ByRef user-defined type mismatch',13);}cell=objectSupports(await actual.ref.get(),param.type)&&lower(actual.ref.type)!==lower(param.type)?new Ref(async()=>coerce(await actual.ref.get(),param.type),v=>actual.ref.set(v),param.type):actual.ref;}
-      else cell=new Cell(param.bounds!==null?'Variant':param.storageType||param.type,actual?.ref?await actual.ref.get():actual);
+      if(param.paramArray){cell=new Cell('Variant',VBArray.from(await Promise.all(args.slice(i).map(v=>v?.ref?readScalar(v.ref):v))));frame.locals.set(lower(param.name),cell);break;}
+      if(unbox(actual)===MISSING){if(param.initial)actual=proc.defaultScalars?.has(lower(param.name))?proc.defaultScalars.get(lower(param.name)):await this.evaluateScalar(param.initial,frame);else if(!param.optional)throw new VBError(`Argument not optional: ${param.name}`,449);else actual=lower(param.type)==='variant'?MISSING:defaultValue(param.type);}
+      const declared=param.storageType||param.type;
+      if(param.byRef&&actual?.ref){
+        const ref=actual.ref,value=await ref.get();
+        if(param.bounds!==null){if(!(value instanceof VBArray)||lower(value.type)!==lower(declared))throw new VBError('ByRef array type mismatch',13);cell=ref;}
+        else if(this.recordSchema(param.type,frame.module)){if(!value?.__fields||lower(value.__type)!==lower(param.type))throw new VBError('ByRef user-defined type mismatch',13);cell=ref;}
+        else if(Object.hasOwn(SCALAR_TYPES,lower(declared))&&lower(ref.type)!==lower(declared))throw new VBError('ByRef argument type mismatch',13);
+        else if(lower(declared)==='variant'&&scalarType(value)){
+          cell=new Ref(()=>ref.get(),v=>ref.set(v),'Variant',ref.fixedLength,async()=>storageScalar(await readScalar(ref),'Variant'));
+          // Only storage-backed references may participate in automatic watches.
+          if(ref instanceof Cell||typeof ref.debugGetScalar==='function'){cell.debugGetScalar=()=>storageScalar(ref instanceof Cell?ref.getScalar():ref.debugGetScalar(),'Variant');cell.debugGet=()=>unbox(cell.debugGetScalar());}
+        }else cell=objectSupports(value,param.type)&&lower(ref.type)!==lower(param.type)?new Ref(async()=>coerce(await ref.get(),param.type),v=>ref.set(v),param.type):ref;
+      }else cell=new Cell(param.bounds!==null?'Variant':declared,actual?.ref?await readScalar(actual.ref):actual);
       frame.locals.set(lower(param.name),cell);
     }
     this.stack.push(frame);this.currentFrame=frame;
-    try {await this.execute(frame);return frame.result.get();}
+    try {await this.execute(frame);return scalarReturn?frame.result.getScalar():frame.result.get();}
     finally{this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&!this.debugEvaluation&&frame.proc.code.some(isSequencePoint))this.stepMode=null;if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
   }
   async checkpoint(ins,frame){
@@ -7487,42 +7988,51 @@ class VirtualMachine extends Signal {
       try{
         switch(ins.op){
           case 'dim':for(const decl of ins.decls)await this.declare(decl,frame,frame.locals,ins.static||frame.proc.static);break;
-          case 'assign':{const ref=await this.reference(ins.target,frame,ins.objectSet);const value=await this.evaluate(ins.expr,frame);if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);await ref.set(ins.objectSet?value:await this.defaultValue(value));break;}
-          case 'expr':await this.evaluate(ins.expr,frame);break;
-          case 'print':{const values=[];for(const e of ins.exprs){const v=await this.defaultValue(await this.evaluate(e,frame));values.push(v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v));}this.output(values.join(' '),ins.newline);break;}
-          case 'assert':if(this.options.debugStatements!==false&&!truth(await this.evaluate(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);await this.debugger.breakAfter(ins,frame,'assert');}break;
-          case 'branch':{const test=truth(await this.evaluate(ins.test,frame));if(ins.invert?test:!test)frame.pc=ins.target;break;}
+          case 'assign':{const ref=await this.reference(ins.target,frame,ins.objectSet);const value=await this.evaluateScalar(ins.expr,frame);if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);await ref.set(ins.objectSet?value:await this.defaultValue(value));break;}
+          case 'expr':await this.evaluateScalar(ins.expr,frame);break;
+          case 'print':{const values=[];for(const e of ins.exprs){const v=await this.defaultValue(await this.evaluateScalar(e,frame));values.push(printScalar(v));}this.output(values.join(' '),ins.newline);break;}
+          case 'assert':if(this.options.debugStatements!==false&&!truth(await this.evaluateScalar(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);await this.debugger.breakAfter(ins,frame,'assert');}break;
+          case 'branch':{const test=truth(await this.evaluateScalar(ins.test,frame));if(ins.invert?test:!test)frame.pc=ins.target;break;}
           case 'jump':frame.pc=ins.target;break;
           case 'computedJump':{
-            const index=coerce(await this.defaultValue(await this.evaluate(ins.expr,frame)),'Long');
+            const index=coerce(await this.defaultValue(await this.evaluateScalar(ins.expr,frame)),'Long');
             if(index<0||index>255)throw new VBError('Invalid procedure call or argument',5);
             if(index>0&&index<=ins.targets.length){if(ins.gosub)frame.gosubStack.push(frame.pc);frame.pc=ins.targets[index-1];}break;
           }
-          case 'raiseError':{const number=coerce(await this.defaultValue(await this.evaluate(ins.expr,frame)),'Long');if(number<1||number>65535)throw new VBError('Invalid procedure call or argument',5);throw new VBError(errorDescription(number),number);}
+          case 'raiseError':{const number=coerce(await this.defaultValue(await this.evaluateScalar(ins.expr,frame)),'Long');if(number<1||number>65535)throw new VBError('Invalid procedure call or argument',5);throw new VBError(errorDescription(number),number);}
 
-          case 'temp':frame.temps.set(ins.id,await this.evaluate(ins.expr,frame));break;
-          case 'case':{const value=frame.temps.get(ins.id);let matched=false;for(const c of ins.cases){if(c.kind==='range')matched=truth(binary('>=',value,await this.evaluate(c.low,frame),frame.module.optionCompare))&&truth(binary('<=',value,await this.evaluate(c.high,frame),frame.module.optionCompare));else matched=truth(binary(c.op||'=',value,await this.evaluate(c.expr,frame),frame.module.optionCompare));if(matched)break;}if(!matched)frame.pc=ins.target;break;}
-          case 'forInit':{const ref=await this.reference(parseExpression(ins.name),frame),start=numeric(await this.evaluate(ins.start,frame)),end=numeric(await this.evaluate(ins.end,frame)),step=numeric(await this.evaluate(ins.step,frame));if(step===0)throw new VBError('For Step cannot be zero in the browser runtime',5);await ref.set(start);frame.temps.set(ins.id,{ref,end,step});if(step>0?start>end:start<end)frame.pc=ins.target;break;}
-          case 'forNext':{const data=frame.temps.get(ins.id),next=numeric(await data.ref.get())+data.step;await data.ref.set(next);if(data.step>0?next<=data.end:next>=data.end)frame.pc=ins.target;break;}
-          case 'eachInit':{let value=await this.evaluate(ins.expr,frame);if(isAutomationObject(value))value=await this.debugAwait(automationEnumerate(value));if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
+          case 'temp':frame.temps.set(ins.id,await this.evaluateScalar(ins.expr,frame));break;
+          case 'case':{const value=frame.temps.get(ins.id);let matched=false;for(const c of ins.cases){if(c.kind==='range')matched=truth(binary('>=',value,await this.evaluateScalar(c.low,frame),frame.module.optionCompare))&&truth(binary('<=',value,await this.evaluateScalar(c.high,frame),frame.module.optionCompare));else matched=truth(binary(c.op||'=',value,await this.evaluateScalar(c.expr,frame),frame.module.optionCompare));if(matched)break;}if(!matched)frame.pc=ins.target;break;}
+          case 'forInit':{
+            const ref=await this.reference(parseExpression(ins.name),frame),start=await this.evaluateScalar(ins.start,frame),end=await this.evaluateScalar(ins.end,frame),step=await this.evaluateScalar(ins.step,frame);
+            numeric(start);numeric(end);const direction=numeric(step)>=0;
+            await ref.set(start);frame.temps.set(ins.id,{ref,end,step,direction});
+            if(truth(binary(direction?'>':'<',await readScalar(ref),end,frame.module.optionCompare)))frame.pc=ins.target;break;
+          }
+          case 'forNext':{
+            const data=frame.temps.get(ins.id);if(!data)throw new VBError('For loop not initialized',92);
+            await data.ref.set(binary('+',await readScalar(data.ref),data.step,frame.module.optionCompare));
+            if(truth(binary(data.direction?'<=':'>=',await readScalar(data.ref),data.end,frame.module.optionCompare)))frame.pc=ins.target;break;
+          }
+          case 'eachInit':{let value=await this.evaluateScalar(ins.expr,frame);if(isAutomationObject(value))value=await this.debugAwait(automationEnumerate(value));if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value.scalarIterator?value.scalarIterator():value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
           case 'eachNext':{const data=frame.temps.get(ins.id),next=data.iterator.next();if(!next.done){await data.ref.set(next.value);frame.pc=ins.target;}break;}
           case 'stringAlign':{
             const ref=await this.reference(ins.target,frame,true),current=await ref.get();
             if(typeof current!=='string')throw new VBError('String assignment requires a String variable',13);
-            const source=vbString(await this.evaluate(ins.expr,frame)).slice(0,current.length);
+            const source=vbString(await this.evaluateScalar(ins.expr,frame)).slice(0,current.length);
             await ref.set(ins.right?source.padStart(current.length,' '):source.padEnd(current.length,' '));break;
           }
           case 'stringMid':{
             const ref=await this.reference(ins.target,frame,true),current=await ref.get();
             if(typeof current!=='string')throw new VBError('Mid requires a String variable',13);
-            const start=coerce(await this.evaluate(ins.start,frame),'Long'),length=ins.length?coerce(await this.evaluate(ins.length,frame),'Long'):current.length;
+            const start=coerce(await this.evaluateScalar(ins.start,frame),'Long'),length=ins.length?coerce(await this.evaluateScalar(ins.length,frame),'Long'):current.length;
             if(start<1||length<0)throw new VBError('Invalid procedure call',5);
-            const source=vbString(await this.evaluate(ins.expr,frame)),count=Math.max(0,Math.min(length,source.length,current.length-start+1));
+            const source=vbString(await this.evaluateScalar(ins.expr,frame)),count=Math.max(0,Math.min(length,source.length,current.length-start+1));
             if(count)await ref.set(current.slice(0,start-1)+source.slice(0,count)+current.slice(start-1+count));break;
           }
           case 'redim':for(const decl of ins.decls){let ref;try{ref=await this.reference({kind:'id',name:decl.name},frame,true);}catch(e){if(e.number===500){frame.locals.set(lower(decl.name),new Cell());ref=frame.locals.get(lower(decl.name));}else throw e;}const bounds=await this.evalBounds(decl.bounds,frame),value=await ref.get();if(value instanceof VBArray)value.redim(bounds,ins.preserve);else{const a=await this.createArray(bounds,decl.storageType||decl.type,frame,decl.fixedLength);a.dynamic=true;await ref.set(a);}}break;
-          case 'erase':for(const expr of ins.exprs){const value=await this.evaluate(expr,frame);if(!(value instanceof VBArray))throw new VBError('Expected array',13);value.erase();}break;
-          case 'withPush':frame.withStack.push(await this.evaluate(ins.expr,frame,{raw:true}));break;
+          case 'erase':for(const expr of ins.exprs){const value=await this.evaluateScalar(expr,frame);if(!(value instanceof VBArray))throw new VBError('Expected array',13);value.erase();}break;
+          case 'withPush':frame.withStack.push(await this.evaluateScalar(ins.expr,frame,{raw:true}));break;
           case 'withPop':frame.withStack.pop();break;
           case 'withUnwind':frame.withStack.splice(-ins.count);break;
           case 'onError':frame.errorMode=ins.mode;frame.errorTarget=ins.target;frame.errorActive=false;frame.errorPc=null;break;
@@ -7532,17 +8042,17 @@ class VirtualMachine extends Signal {
           case 'return':if(frame.errorActive)this.err.Clear();return;
           case 'stop':if(this.options.debugStatements===false){this.stop();throw new StopExecution();}await this.debugger.breakAfter(ins,frame,'stop');break;
           case 'end':this.stop();throw new StopExecution();
-          case 'form':{if(ins.expr.kind==='call'){const array=await this.evaluate(ins.expr.callee,frame,{raw:true});if(array?.__type==='ControlArray'){if(ins.expr.args.length!==1)throw new VBError('Control arrays require one index',450);const index=await this.evaluate(ins.expr.args[0],frame);if(ins.action==='load')array.Load(index);else array.Unload(index);break;}}const object=await this.evaluate(ins.expr,frame,{raw:true});if(ins.action==='unload')await this.unloadForm(object);else await this.loadForm(object);break;}
-          case 'fileOpen':this.fs.open(await this.evaluate(ins.path,frame),ins.mode,await this.evaluate(ins.handle,frame),ins.recordLength?await this.evaluate(ins.recordLength,frame):128,ins.access,ins.sharing);break;
-          case 'fileRecord':{const n=await this.evaluate(ins.handle,frame),position=ins.position?await this.evaluate(ins.position,frame):undefined,ref=await this.reference(ins.target,frame,true),value=await ref.get(),mode=this.fs.handle(n).mode;if(ins.action==='put')this.fs.put(n,position,encodeVariable(value,ref,mode));else{const result=this.fs.get(n,position,bytes=>decodeVariable(bytes,ref,value,mode));await ref.set(result);}break;}
-          case 'fileSeek':this.fs.seek(await this.evaluate(ins.handle,frame),await this.evaluate(ins.position,frame));break;
-          case 'fileLock':this.fs.lock(await this.evaluate(ins.handle,frame),ins.start?await this.evaluate(ins.start,frame):undefined,ins.end?await this.evaluate(ins.end,frame):undefined,ins.unlock);break;
-          case 'fileCopy':this.fs.copy(await this.evaluate(ins.sourcePath,frame),await this.evaluate(ins.destination,frame));break;
-          case 'fileRename':this.fs.rename(await this.evaluate(ins.sourcePath,frame),await this.evaluate(ins.destination,frame));break;
-          case 'fileClose':if(!ins.handles.length)this.fs.close();else for(const h of ins.handles)this.fs.close(await this.evaluate(h,frame));break;
-          case 'filePrint':{const values=[];for(const e of ins.exprs)values.push(await this.defaultValue(await this.evaluate(e,frame)));const text=ins.csv?values.map(v=>typeof v==='string'?'"'+v.replace(/"/g,'""')+'"':String(v??'')).join(','):values.map(v=>String(v??'')).join('');this.fs.print(await this.evaluate(ins.handle,frame),text,ins.newline);break;}
-          case 'fileInput':{const text=this.fs.lineInput(await this.evaluate(ins.handle,frame));const values=ins.whole?[text]:this.parseCSV(text);for(let i=0;i<ins.targets.length;i++)await (await this.reference(ins.targets[i],frame)).set(values[i]??'');break;}
-          case 'graphics':{const obj=await this.evaluate(ins.object,frame,{raw:true}),control=obj?.__vbInstance?obj.formObject:obj;if(!control?.draw)throw new VBError('Object does not support graphics methods',438);const coords=[];for(const e of ins.coords)coords.push(numeric(await this.evaluate(e,frame)));control.draw(ins.kind,coords,numeric(await this.evaluate(ins.color,frame)),ins.fill);break;}
+          case 'form':{if(ins.expr.kind==='call'){const array=await this.evaluateScalar(ins.expr.callee,frame,{raw:true});if(array?.__type==='ControlArray'){if(ins.expr.args.length!==1)throw new VBError('Control arrays require one index',450);const index=await this.evaluateScalar(ins.expr.args[0],frame);if(ins.action==='load')array.Load(index);else array.Unload(index);break;}}const object=await this.evaluateScalar(ins.expr,frame,{raw:true});if(ins.action==='unload')await this.unloadForm(object);else await this.loadForm(object);break;}
+          case 'fileOpen':this.fs.open(await this.evaluateScalar(ins.path,frame),ins.mode,await this.evaluateScalar(ins.handle,frame),ins.recordLength?await this.evaluateScalar(ins.recordLength,frame):128,ins.access,ins.sharing);break;
+          case 'fileRecord':{const n=await this.evaluateScalar(ins.handle,frame),position=ins.position?await this.evaluateScalar(ins.position,frame):undefined,ref=await this.reference(ins.target,frame,true),value=await readScalar(ref),mode=this.fs.handle(n).mode;if(ins.action==='put')this.fs.put(n,position,encodeVariable(value,ref,mode));else{const result=this.fs.get(n,position,bytes=>{const decoded=decodeVariable(bytes,ref,unbox(value),mode);return {...decoded,value:decoded.scalar};});await ref.set(result);}break;}
+          case 'fileSeek':this.fs.seek(await this.evaluateScalar(ins.handle,frame),await this.evaluateScalar(ins.position,frame));break;
+          case 'fileLock':this.fs.lock(await this.evaluateScalar(ins.handle,frame),ins.start?await this.evaluateScalar(ins.start,frame):undefined,ins.end?await this.evaluateScalar(ins.end,frame):undefined,ins.unlock);break;
+          case 'fileCopy':this.fs.copy(await this.evaluateScalar(ins.sourcePath,frame),await this.evaluateScalar(ins.destination,frame));break;
+          case 'fileRename':this.fs.rename(await this.evaluateScalar(ins.sourcePath,frame),await this.evaluateScalar(ins.destination,frame));break;
+          case 'fileClose':if(!ins.handles.length)this.fs.close();else for(const h of ins.handles)this.fs.close(await this.evaluateScalar(h,frame));break;
+          case 'filePrint':{const values=[];for(const e of ins.exprs)values.push(await this.defaultValue(await this.evaluateScalar(e,frame)));const text=values.map(v=>printScalar(v,ins.csv)).join(ins.csv?',':'');this.fs.print(await this.evaluateScalar(ins.handle,frame),text,ins.newline);break;}
+          case 'fileInput':{const n=unbox(await this.evaluateScalar(ins.handle,frame));for(const target of ins.targets){const ref=await this.reference(target,frame,true);const value=ins.whole?this.fs.lineInput(n):this.fs.inputValue(n,ref.type);await ref.set(value);}break;}
+          case 'graphics':{const obj=await this.evaluateScalar(ins.object,frame,{raw:true}),control=obj?.__vbInstance?obj.formObject:obj;if(!control?.draw)throw new VBError('Object does not support graphics methods',438);const coords=[];for(const e of ins.coords)coords.push(numeric(await this.evaluateScalar(e,frame)));control.draw(ins.kind,coords,numeric(await this.evaluateScalar(ins.color,frame)),ins.fill);break;}
           case 'raiseEvent':await this.raiseEvent(frame.instance,ins.expr.callee.name,ins.expr.args,frame);break;
           default:throw new VBError('Invalid bytecode instruction '+ins.op,1002);
         }
@@ -7596,18 +8106,18 @@ class VirtualMachine extends Signal {
       this.debugEvaluation?.check();statement=statement.trim();if(!statement)continue;
       if(/^\?/.test(statement)||/^(?:Debug\.)?Print\b/i.test(statement)){
         const expression=statement.replace(/^(?:\?|(?:Debug\.)?Print\s*)/i,'');
-        value=await this.evaluate(parseExpression(expression),frame);this.output(describe(value));continue;
+        value=await this.evaluateScalar(parseExpression(expression),frame);this.output(describe(value));continue;
       }
       const objectSet=/^Set\s/i.test(statement),source=statement.replace(/^(?:Let|Set)\s+/i,'');
       let depth=0,equal=null;for(const token of tokenize(source)){if(token.value==='(')depth++;else if(token.value===')')depth--;else if(token.value==='='&&depth===0){equal=token;break;}}
       if(equal){
         const target=parseExpression(source.slice(0,equal.start));if(!['id','member','call'].includes(target.kind))throw new VBError('Invalid assignment target',1002);
         const ref=await this.reference(target,frame,objectSet);
-        value=await this.evaluate(parseExpression(source.slice(equal.end)),frame);
+        value=await this.evaluateScalar(parseExpression(source.slice(equal.end)),frame);
         if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);
         await ref.set(objectSet?value:await this.defaultValue(value));
       }else{
-        value=await this.evaluate(parseCall(statement.replace(/^Call\s+/i,'')),frame);if(value!==undefined)this.output(describe(value));
+        value=await this.evaluateScalar(parseCall(statement.replace(/^Call\s+/i,''),{explicit:/^Call\s+/i.test(statement)}),frame);if(value!==undefined)this.output(describe(value));
       }
     }
     return value;
@@ -7625,7 +8135,7 @@ class VirtualMachine extends Signal {
     if(this.state!=='paused'){this.immediateFrames ||= new WeakMap();const instance=frame.instance;if(!this.immediateFrames.has(instance))this.immediateFrames.set(instance,frame);frame=this.immediateFrames.get(instance);}
     const session=new DebugEvaluationSession(this,{instructionLimit,timeLimit}),saved={frame:this.currentFrame,err:{...this.err},lastError:this.lastError,erl:this.lastErrorErl,step:this.stepMode,pauseRequested:this.pauseRequested,runTarget:this.runTarget};
     this.debugEvaluation=session;this.currentFrame=frame;this.emit('evaluation',{active:true,frameIndex:this.stack.indexOf(frame)});
-    try {const value=immediate?await this.immediateAt(text,frame):await this.evaluate(parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return value;}
+    try {const value=immediate?await this.immediateAt(text,frame):await this.evaluateScalar(parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return unbox(value);}
     finally {session.dispose();this.debugEvaluation=null;this.currentFrame=saved.frame;if(this.state==='stopped')this.pauseResolver?.();Object.assign(this.err,saved.err);this.lastError=saved.lastError;this.lastErrorErl=saved.erl;this.stepMode=saved.step;this.pauseRequested=saved.pauseRequested;this.runTarget=saved.runTarget;this.emit('evaluation',{active:false,instructions:session.instructions,milliseconds:performance.now()-session.started});if(this.eventQueue.length&&!this.stack.length&&this.state!=='paused')queueMicrotask(()=>this.processEvents());}
   }
   async evaluateWatch(text,options={}){return this.debugInspector.evaluate(text,options.frameIndex??null);}
@@ -7646,19 +8156,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[80]=(()=>{
-const {RuntimeAgentControl}=__modules[64];
-const {RuntimeMDI}=__modules[65];
-const {runtimeDialog,messageBoxOptions}=__modules[66];
-const { applyTheme, themeId }=__modules[38];
-const { icon }=__modules[58];
-const {rasterDataURL}=__modules[43];
+__modules[82]=(()=>{
+const {RuntimeAgentControl}=__modules[66];
+const {RuntimeMDI}=__modules[67];
+const {runtimeDialog,messageBoxOptions}=__modules[68];
+const { applyTheme, themeId }=__modules[39];
+const { icon }=__modules[60];
+const {rasterDataURL}=__modules[44];
 const { el, download, lower, clone }=__modules[14];
-const { compileProject }=__modules[72];
-const { VirtualMachine }=__modules[79];
-const { VirtualFileSystem }=__modules[35];
+const { compileProject }=__modules[74];
+const { VirtualMachine }=__modules[81];
+const { VirtualFileSystem }=__modules[36];
 const { describe }=__modules[15];
-const { BrowserForm }=__modules[63];
+const { BrowserForm }=__modules[65];
 
 
 
@@ -7716,30 +8226,30 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[81]=(()=>{
+__modules[83]=(()=>{
 const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[8];
 const {AutomationRegistry}=__modules[16];
 const {ControlAdapterRegistry}=__modules[17];
-const {DataContext}=__modules[36];
+const {DataContext}=__modules[37];
 const {ADOConnection,ADOCommand}=__modules[33];
 const {ConnectedRecordset}=__modules[23];
 const {DATA_CONSTANTS}=__modules[19];
-const {FINANCIAL_FUNCTIONS}=__modules[37];
-const {installNativeHost}=__modules[40];
-const {ResourceStore}=__modules[45];
-const {readRES,writeRES,setResource,setResourceString}=__modules[44];
-const {THEMES,applyTheme,colorValue}=__modules[38];
-const {MemoryRecordset}=__modules[51];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[52];
-const { ApplicationHost }=__modules[80];
-const { VirtualMachine }=__modules[79];
-const { compileProject, compileModule }=__modules[72];
-const { parseExpression }=__modules[70];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[15];
+const {FINANCIAL_FUNCTIONS}=__modules[38];
+const {installNativeHost}=__modules[41];
+const {ResourceStore}=__modules[46];
+const {readRES,writeRES,setResource,setResourceString}=__modules[45];
+const {THEMES,applyTheme,colorValue}=__modules[39];
+const {MemoryRecordset}=__modules[53];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[54];
+const { ApplicationHost }=__modules[82];
+const { VirtualMachine }=__modules[81];
+const { compileProject, compileModule }=__modules[74];
+const { parseExpression }=__modules[72];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox }=__modules[15];
 const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[10];
-const { VirtualFileSystem }=__modules[35];
-const { BrowserControl, BrowserForm }=__modules[63];
-const { GraphicsSurface }=__modules[39];
+const { VirtualFileSystem }=__modules[36];
+const { BrowserControl, BrowserForm }=__modules[65];
+const { GraphicsSurface }=__modules[40];
 
 
 
@@ -7764,9 +8274,9 @@ const { GraphicsSurface }=__modules[39];
 
 
 async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);if(options.nativeWindows!==false)installNativeHost(host);await host.start();return host;}
-const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
+const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[81];
+globalThis["VB6Runtime"]=__modules[83];
 })();

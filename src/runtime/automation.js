@@ -1,6 +1,6 @@
 /** Trusted host-installed Automation adapters. Projects never supply executable factories. */
 import {VBError} from '../language/lexer.js';
-import {Ref,MISSING} from './values.js';
+import {Ref,MISSING,unbox} from './values.js';
 const objects=new WeakMap();
 const nameOK=n=>typeof n==='string'&&n.length<=255&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(n)&&!['constructor','prototype','caller','callee','arguments'].includes(n.toLowerCase());
 export const isAutomationObject=o=>!!o&&objects.has(o);
@@ -10,7 +10,7 @@ export function automationDefaultName(o){return state(o).defaultMember;}
 export async function automationInvoke(o,name,mode,args=[]){
   const {s,m}=member(o,name,mode);if(args.length>65)throw new VBError('Too many Automation arguments',450);
   const params=(mode===4||mode===8)?[...m.params,{name:'value'}]:m.params;if(args.length>params.length||params.some((p,i)=>!p.optional&&(i>=args.length||args[i]===MISSING)))throw new VBError('Wrong number of Automation arguments',450);
-  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(await arg.ref.get());}else values.push(arg);}
+  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(unbox(await arg.ref.get()));}else values.push(unbox(arg));}
   const result=await s.adapter.invoke(m.name,mode,values,refs.map(([i])=>i));
   // An adapter must return an explicit value and optional copyback array.
   if(s.closed||s.session.closed)throw new VBError('Automation session closed during invocation',91);

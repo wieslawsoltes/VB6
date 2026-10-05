@@ -4,6 +4,7 @@ import {VBArray,VBCurrency,coerce,bankersRound,numeric,binary,truth} from '../ru
 
 // Disconnected client-side cursor. ConnectedRecordset adds explicit provider I/O.
 const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Variant'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
+export const fieldScalarType=type=>TYPES.get(Number(type));
 const fold=value=>String(value).toLowerCase();
 const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
 const args=value=>value instanceof VBArray?[...value]:Array.isArray(value)?value:[value];
@@ -37,7 +38,7 @@ export class DisconnectedRecordset {
       },
       get Count(){return rs.columns.length;},
       setItem(key,value){this.Item(key).Value=value;},
-      Item(key){const col=rs.column(key);return dataDefault({Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}});},
+      Item(key){const col=rs.column(key);return dataDefault({Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}},()=>fieldScalarType(col.Type));},
       [Symbol.iterator](){return rs.columns.map(c=>this.Item(c.Name)).values();}
     };
   }

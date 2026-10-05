@@ -4,7 +4,7 @@ import {DataCollection,NamedCollection} from './collection.js';
 import {ConnectedRecordset} from './connected-recordset.js';
 import {DAORecordset} from './dao-recordset.js';
 import {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect} from './sql-parameters.js';
-import {fieldValue} from './recordset.js';
+import {fieldValue,fieldScalarType} from './recordset.js';
 import {initializeSQLite} from './vendor/sqlite.js';
 
 const folded=v=>String(v).toLowerCase();
@@ -44,7 +44,7 @@ export class DAOTableDef {
   RefreshLink(){assertData(false,'Linked Jet/ACE TableDefs require a native catalog provider',3251);}
 }
 export class DAOParameter {
-  constructor(definition){this.__type='DAO.Parameter';Object.assign(this,definition);this._value=null;dataDefault(this);}
+  constructor(definition){this.__type='DAO.Parameter';Object.assign(this,definition);this._value=null;dataDefault(this,()=>fieldScalarType(DAO_TYPES[this.Type]||12));}
   get Value(){return copy(this._value);}
   set Value(value){this._value=fieldValue({Name:this.Name,Type:DAO_TYPES[this.Type]||12,DefinedSize:this.Size},value);}
 }

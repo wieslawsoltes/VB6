@@ -29,6 +29,7 @@ export function asDate(value){
   if((match=text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/))){[,y,m,d,h=0,n=0,s=0,ms=0]=match;}
   else if((match=text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i))){[,m,d,y,h=0,n=0,s=0]=match;y=Number(y);if(y<100)y+=y<30?2000:1900;if(match[7]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[7])?12:0);}}
   else if((match=text.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?\s*(AM|PM)?$/i))){[,h,n,s=0,ms=0]=match;[y,m,d]=[1899,12,30];if(match[5]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[5])?12:0);}}
+  else if((match=text.match(/^(\d{1,2})[\/,](\d{1,2})$/))){[,m,d]=match;y=new Date().getFullYear();}
   else {const parsed=new Date(text);if(!Number.isFinite(parsed.getTime()))throw new VBError('Type mismatch',13);return validateDate(parsed);}
   [y,m,d,h,n,s]=[y,m,d,h,n,s].map(Number);ms=Number(String(ms).padEnd(3,'0'));
   if(m<1||m>12||d<1||d>daysInMonth(y,m-1)||h<0||h>23||n>59||s>59)throw new VBError('Type mismatch',13);

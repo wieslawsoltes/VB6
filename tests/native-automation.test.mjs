@@ -13,7 +13,7 @@ test('registered Automation calls run from actual compiled VB code',async()=>ass
 test('native default indexed property get and let',async()=>assert.deepEqual((await execute('d("k") = 23\nDebug.Print d("k")')).output,['23']));
 test('native named method arguments bind metadata',async()=>assert.deepEqual((await execute('d.Add value:=9, key:="named"\nDebug.Print d.Item("named")')).output,['9']));
 test('native ByRef method copies back into original typed cell',async()=>assert.deepEqual((await execute('Dim n As Long\nn = 4\nd.Bump value:=n\nDebug.Print n')).output,['5']));
-test('native optional Missing differs from Empty',async()=>assert.deepEqual((await execute('Debug.Print d.Optional(1)\nDebug.Print IsEmpty(d.Optional(1, Empty))')).output,['missing','-1']));
+test('native optional Missing differs from Empty',async()=>assert.deepEqual((await execute('Debug.Print d.Optional(1)\nDebug.Print IsEmpty(d.Optional(1, Empty))')).output,['missing','True']));
 test('native property let and CallByName use dispatch metadata',async()=>assert.deepEqual((await execute('d.Item("a") = 8\nDebug.Print CallByName(d, "Item", vbGet, "a")')).output,['8']));
 test('VB stop releases each scoped Automation adapter',async()=>{const {vm,a}=await execute('d.Add "k", 1');vm.stop();await vm.automationClose;assert.equal(a.released,1);vm.stop();await vm.automationClose;assert.equal(a.released,1);});
 test('unregistered native project cannot activate host code',async()=>{const program=compileProject({name:'P',startup:'Sub Main',modules:[{name:'M',kind:'module',code:'Sub Main()\nDim x As Object\nSet x=CreateObject("Test.Unregistered")\nEnd Sub'}]});await assert.rejects(()=>new VirtualMachine(program).start(),e=>e.number===429);});
@@ -42,4 +42,4 @@ async function executeChain(body){
 }
 test('Automation object-valued property chains resolve the intermediate getter exactly once',async()=>assert.deepEqual(await executeChain('Debug.Print d.Child.Text'),{output:['Unicode Żółć'],reads:1}));
 test('Automation property chains support nested puts and With receivers',async()=>assert.deepEqual(await executeChain('d.Child.Text = "changed"\nWith d.Child\nDebug.Print .Text\nEnd With'),{output:['changed'],reads:2}));
-test('Automation object assignment and explicit method chains preserve object identity',async()=>assert.deepEqual(await executeChain('Set child = d.Child\nDebug.Print child Is d.Child\nDebug.Print d.Fetch().Text'),{output:['-1','Unicode Żółć'],reads:2}));
+test('Automation object assignment and explicit method chains preserve object identity',async()=>assert.deepEqual(await executeChain('Set child = d.Child\nDebug.Print child Is d.Child\nDebug.Print d.Fetch().Text'),{output:['True','Unicode Żółć'],reads:2}));
