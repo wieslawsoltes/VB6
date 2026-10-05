@@ -19,8 +19,11 @@ export class ExpressionAssistance {
     this.input=input;this.ide=ide;this.service=ide.expressionIntelligence||(ide.expressionIntelligence=new EditorIntelligence());
     input.addEventListener('keydown',e=>this.keydown(e),true);
     input.addEventListener('input',()=>{if(this.composing)return;const caret=input.selectionStart;if(this.list)this.complete(this.mode);else if(ide.appearance.autoListMembers&&/[.=,( \t]$/.test(input.value.slice(0,caret)))this.complete('auto');if(ide.appearance.autoQuickInfo)this.info(false);});
-    input.addEventListener('blur',()=>this.close());input.addEventListener('compositionstart',()=>{this.composing=true;this.close();});input.addEventListener('compositionend',()=>this.composing=false);
-    for(const event of ['select','click','keyup'])input.addEventListener(event,()=>{if(this.caret!==undefined&&this.caret!==input.selectionStart)this.close();});
+    input.addEventListener('blur',()=>this.close());input.addEventListener('compositionstart',()=>{clearTimeout(this.compositionTimer);this.compositionMode=this.list?this.mode:null;this.composing=true;this.close();});input.addEventListener('compositionend',()=>{
+      this.composing=false;const mode=this.compositionMode||(ide.appearance.autoListMembers?'auto':null);this.compositionMode=null;
+      this.compositionTimer=setTimeout(()=>{if(this.composing||!input.isConnected||input.ownerDocument.activeElement!==input)return;if(mode)this.complete(mode);if(ide.appearance.autoQuickInfo)this.info(false);},0);
+    });
+    for(const event of ['select','click','keyup'])input.addEventListener(event,()=>{if(!this.composing&&(!this.list||this.seed===input.value)&&this.caret!==undefined&&this.caret!==input.selectionStart)this.close();});
   }
   node(tag,text='',attributes={}){const node=this.input.ownerDocument.createElement(tag);node.textContent=text;for(const [key,value]of Object.entries(attributes))node.setAttribute(key,String(value));return node;}
   context(){

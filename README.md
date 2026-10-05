@@ -12,6 +12,12 @@ Classic Data Environment/Data View and Data Link Properties now share a provider
 
 See [data sources, examples and deployment](docs/DATA-SOURCES.md) for the compatibility matrix, connection dialogs, binding, credentials and gateway setup. This is not exhaustive native VB6/ADO/DAO/RDO parity; installed native providers and the PE32 AOT compiler have separate deployment boundaries.
 
+## IntelliSense
+
+Classic List Members, List Constants, Complete Word, Quick Info and Parameter Info now share typed resolution across source panes, Immediate, Watch and Evaluation fields. Nested `With`, arrays/default members, classes/UDTs/enums, runtime/data adapters and explicit portable reference metadata feed the same Object Browser. Automatic assistance never executes project code or opens a connection.
+
+See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
+
 ## Run
 
 The complete IDE is `dist/VB6-Studio-Web.html`. It is designed to open directly in a browser. Browser origin policies can restrict local files, clipboard or persistent storage. A local static server is the alternative:

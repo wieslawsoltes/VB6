@@ -96,7 +96,7 @@ export class SourceEditor extends Signal {
   }
   selectionBounds(pane=this.activePane){return pane.virtualizer?.selection()||{start:pane.range.start+pane.input.selectionStart,end:pane.range.start+pane.input.selectionEnd};}
   cursor(){return positionAt(this.index,this.selectionBounds().start);}
-  cursorChanged(){if(!this.module)return;const cursor=this.cursor();if(!this.changingSource&&this.completion&&cursor.offset!==this.completionCaret)this.closeCompletion();if(!this.changingSource&&this.info&&cursor.offset!==this.infoOffset)this.closeInfo();this.emit('cursor',cursor);let p=null;for(const value of this.procedureIndex){if(value.line>cursor.line)break;p=value;}if(!this.selectedObject||this.selectedObject==='(General)')this.procedures.value=p&&!this.activePane.explicitDeclarations?String(p.line):'';else if(p&&lower(p.name).startsWith(lower(this.selectedObject)+'_'))this.procedures.value=String(p.line);this.paint();}
+  cursorChanged(){if(!this.module)return;const pendingInput=this.input.value!==this.text.slice(this.activePane.range.start,this.activePane.range.end),cursor=this.cursor();if(!pendingInput&&!this.changingSource&&this.completion&&cursor.offset!==this.completionCaret)this.closeCompletion();if(!pendingInput&&!this.changingSource&&this.info&&cursor.offset!==this.infoOffset)this.closeInfo();this.emit('cursor',cursor);let p=null;for(const value of this.procedureIndex){if(value.line>cursor.line)break;p=value;}if(!this.selectedObject||this.selectedObject==='(General)')this.procedures.value=p&&!this.activePane.explicitDeclarations?String(p.line):'';else if(p&&lower(p.name).startsWith(lower(this.selectedObject)+'_'))this.procedures.value=String(p.line);this.paint();}
   goToLine(line,column=1){const offset=offsetAt(this.index,line,column),pane=this.activePane;pane.explicitDeclarations=false;this.syncPane(pane,offset);this.input.focus();const y=(positionAt(this.index,offset).line-1-pane.range.firstLine)*this.lineHeight;if(y<this.input.scrollTop||y>this.input.scrollTop+this.viewport.clientHeight-50)this.input.scrollTop=Math.max(0,y-this.viewport.clientHeight*.35);this.cursorChanged();}
   setViewMode(mode){const cursor=this.cursor();this.activePane.mode=mode==='procedure'?'procedure':'module';this.syncPane(this.activePane,cursor.offset,cursor.offset,{scroll:false});this.goToLine(cursor.line,cursor.column);}
   setValue(value){if(this.readOnly||String(value)===this.text)return;this.closeCompletion();this.closeInfo();const oldText=this.text;this.assignSource(value);this.emit('change',{module:this.module,oldText,newText:this.text,kind:'command'});this.updateSelectors(false);this.cursorChanged();}
@@ -173,6 +173,9 @@ export class SourceEditor extends Signal {
   }
   completeWord(){this.complete();if(this.completion&&this.completionItems.length===1)this.acceptCompletion();}
   positionPopup(node){
+    node.style.maxWidth=Math.max(1,this.viewport.clientWidth-4)+'px';node.style.boxSizing='border-box';
+    if(node.classList.contains('source-info')){node.style.width='max-content';node.style.overflowWrap='anywhere';}
+    node.style.left='0px';
     const cursor=this.cursor(),height=node.offsetHeight||(node.classList.contains('completion-list')?180:50),width=node.offsetWidth||240;
     const y=(cursor.line-this.activePane.range.firstLine)*this.lineHeight+4-this.input.scrollTop;
     let top=y;if(node===this.info&&this.completion)top=y-height-this.lineHeight-2;
@@ -225,7 +228,12 @@ export class SourceEditor extends Signal {
   bindAdvancedInput(pane){
     const input=pane.input;
     input.addEventListener('beforeinput',e=>{pane.beforeInput={start:input.selectionStart,end:input.selectionEnd,type:e.inputType,composing:e.isComposing};if(this.overwrite&&!e.isComposing&&e.inputType==='insertText'&&e.data&&input.selectionStart===input.selectionEnd&&!input.readOnly){const start=input.selectionStart,lineEnd=input.value.indexOf('\n',start),limit=lineEnd<0?input.value.length:lineEnd;const end=Math.min(limit,start+[...e.data].reduce((n,c)=>n+(input.value.codePointAt(start+n)>65535?2:1),0));e.preventDefault();this.activatePane(pane);this.replaceSelection(e.data,start,end);}});
-    input.addEventListener('compositionstart',()=>{this.composing=true;this.closeCompletion();this.closeInfo();});input.addEventListener('compositionend',()=>{this.composing=false;this.cursorChanged();});
+    input.addEventListener('compositionstart',()=>{clearTimeout(this.compositionTimer);this.compositionMode=this.completion?this.completionMode:null;this.composing=true;this.closeCompletion();this.closeInfo();});input.addEventListener('compositionend',()=>{
+      this.composing=false;const mode=this.compositionMode||(this.appearance.autoListMembers?'auto':null);this.compositionMode=null;this.cursorChanged();
+      // Firefox text insertion and IMEs can end composition after the final
+      // input event. Resume the hidden list only after committed text settles.
+      this.compositionTimer=setTimeout(()=>{if(this.disposed||this.composing||this.input!==input||input.ownerDocument.activeElement!==input)return;if(mode)this.complete(mode);if(this.appearance.autoQuickInfo)this.showInfo('parameter',true);},0);
+    });
     input.addEventListener('keydown',e=>{
       if(e.defaultPrevented||e.isComposing)return;const ctrl=e.ctrlKey||e.metaKey;
       if(ctrl&&e.key.toLowerCase()==='j'){e.preventDefault();this.complete(e.shiftKey?'constants':'members');}

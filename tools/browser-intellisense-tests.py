@@ -55,7 +55,7 @@ def with_split(p):
 def constants(p):
     setup(p,'Private Sub Form_Load()\n    MsgBox "Choose",');put(p,' ')
     check('vbYesNo' in names(p),names(p));check('vbRed' not in names(p));p.keyboard.press('Control+Shift+i')
-    check(p.locator('.source-info strong').inner_text().startswith('[buttons'),p.locator('.source-info').inner_text());shot(p,'constants-parameters')
+    check(p.locator('.source-info strong').inner_text().startswith('[buttons'),p.locator('.source-info').inner_text());check(p.evaluate('()=>{const e=vb6Studio.editor,a=e.info.getBoundingClientRect(),b=e.viewport.getBoundingClientRect();return a.left>=b.left&&a.right<=b.right&&e.info.scrollWidth<=e.info.clientWidth+1;}'),'Parameter hint overflowed the code pane');shot(p,'constants-parameters')
 
 def nested_info(p):
     setup(p,'Private Sub Form_Load()\n    MsgBox Format(123, ')
@@ -130,7 +130,13 @@ def frame_expression(p):
     field=p.locator('.immediate-input');field.fill('? rs.Fields(0)');field.focus();put(p,'.');p.wait_for_selector('.completion-list');check('Value' in p.locator('.completion-list').inner_text());put(p,'Val');p.keyboard.press('Tab');check(field.input_value()=='? rs.Fields(0).Value',field.input_value());check(p.evaluate('intelliSenseInvocations.length')==0)
     p.evaluate('vb6Studio.command("stop")');p.wait_for_function('vb6Studio.runState==="design"')
 
-CASES=[automatic,enter_and_undo,punctuation,suffix,with_split,constants,nested_info,literals,types,escape_options,accessibility,stale,large,data_tip,immediate,reference_import,frame_expression]
+def composition_resume(p):
+    setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.');p.wait_for_selector('.completion-list')
+    p.evaluate("""()=>{const e=vb6Studio.editor,input=e.input;input.dispatchEvent(new CompositionEvent('compositionstart'));if(e.completion)throw Error('List remained visible during composition');input.setRangeText('SelSt',input.selectionStart,input.selectionEnd,'end');input.dispatchEvent(new InputEvent('input',{data:'SelSt',inputType:'insertCompositionText',isComposing:true,bubbles:true}));input.dispatchEvent(new CompositionEvent('compositionend',{data:'SelSt'}));}""")
+    p.wait_for_function('vb6Studio.editor.completionItems.length===1&&vb6Studio.editor.completionItems[0]==="SelStart"&&!!vb6Studio.editor.completion')
+    p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelStart")'))
+
+CASES=[automatic,enter_and_undo,punctuation,suffix,with_split,constants,nested_info,literals,types,escape_options,accessibility,stale,large,data_tip,immediate,reference_import,frame_expression,composition_resume]
 
 def main():
     kind=os.environ.get('VB6_BROWSER','chromium')
