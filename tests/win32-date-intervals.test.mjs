@@ -66,7 +66,7 @@ test('independent reference applies the same Long destination conversion without
   const diff='DateDiff("s", DateSerial(100,1,1), DateSerial(9999,12,31))';
   assert.ok(DATE_INTERVAL_CONTRACTS.some(c=>c.expression===diff));
   assert.ok(source.includes('result = CLng('+diff+')\r\nsavedError = Err.Number'));
-  assert.ok(source.includes('result = DateAdd("yyyy", -2.5, DateSerial(100,1,1))'));
+  assert.ok(source.includes('result = ContractAdd("yyyy", -2.5, DateSerial(100,1,1))'));
   assert.equal((source.match(/savedError = Err.Number/g)||[]).length,DATE_INTERVAL_CONTRACTS.length);
  } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });

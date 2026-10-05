@@ -5444,9 +5444,7 @@ Private Function Ordinal(ByVal value As Date) As Double
  Ordinal = CDbl(DateSerial(Year(value), Month(value), Day(value)))
 End Function
 Private Function Linear(ByVal value As Date) As Double
- Dim number As Double
- number = CDbl(value)
- Linear = Fix(number) + Abs(number - Fix(number))
+ Linear = Ordinal(value) + (CDbl(Hour(value)) * 3600 + Minute(value) * 60 + Second(value)) / 86400
 End Function
 Private Function Serial(ByVal value As Double) As Date
  Dim whole As Double
@@ -5469,10 +5467,22 @@ Private Function MonthDays(ByVal y As Long, ByVal m As Long) As Long
   MonthDays = 31
  End Select
 End Function
-Private Function DateAddCore(ByVal interval As String, ByVal number As Long, ByVal value As Date) As Date
+Private Function DateAddCore(ByVal interval As String, ByVal number As Double, ByVal value As Date) As Date
  Dim unit As Long, y As Long, m As Long, d As Long, limit As Long
- Dim months As Double, result As Double, fraction As Double
+ Dim months As Double, result As Double, fraction As Double, largest As Double
  unit = IntervalIndex(interval)
+ number = Round(number, 0)
+ Select Case unit
+ Case 0: largest = 10000
+ Case 1: largest = 40000
+ Case 2: largest = 120000
+ Case 3, 4, 5: largest = 4000000
+ Case 6: largest = 600000
+ Case 7: largest = 100000000
+ Case 8: largest = 6000000000#
+ Case 9: largest = 400000000000#
+ End Select
+ If Abs(number) > largest Then Err.Raise 5
  If unit <= 2 Then
   months = CDbl(number)
   If unit = 0 Then months = months * 12
@@ -5484,8 +5494,8 @@ Private Function DateAddCore(ByVal interval As String, ByVal number As Long, ByV
   d = Day(value)
   limit = MonthDays(y, m)
   If d > limit Then d = limit
-  fraction = CDbl(value) - Fix(CDbl(value))
-  result = CDbl(DateSerial(y, m, d)) + Abs(fraction)
+  fraction = (CDbl(Hour(value)) * 3600 + Minute(value) * 60 + Second(value)) / 86400
+  result = CDbl(DateSerial(y, m, d)) + fraction
  Else
   result = CDbl(number)
   Select Case unit
@@ -5506,8 +5516,10 @@ Private Function DateDiffCore(ByVal interval As String, ByVal date1 As Date, ByV
  Dim unit As Long, first As Long
  Dim a As Double, b As Double, result As Double
  unit = IntervalIndex(interval)
- first = FirstDay(firstdayofweek)
- If firstweekofyear < 0 Or firstweekofyear > 3 Then Err.Raise 5
+ If unit = 6 Then
+  first = FirstDay(firstdayofweek)
+  If firstweekofyear < 0 Or firstweekofyear > 3 Then Err.Raise 5
+ End If
  Select Case unit
  Case 0
   result = Year(date2) - Year(date1)
@@ -5618,17 +5630,21 @@ function emitNativeDateIntervalHelpers(c) {
   variant(8); x.value(0);store(x,-20);
   x.api(DLL,'VarFormatDateTime',[addr(-16),arg(16),0,addr(-20)]);check();x.value(arg(-20)).leave(12);
 
-  x.label(D+'datepart').enter(32).push(arg(8)).call(D+'intervalindex');
-  // Index into a read-only table of canonical format strings, not user text.
+  x.label(D+'datepart').enter(36).push(arg(8)).call(D+'intervalindex');
+  // Keep the interval index until irrelevant week arguments have been ignored.
+  // Installed OleAut32 VarFormat accepts VB's Sunday=1 convention despite the
+  // contradictory first-day table in its tokenization documentation. Native
+  // execution compares every weekday/week convention with the independent host.
+  const ordinary=x.unique(), conventionsReady=x.unique();
+  store(x,-36);
+  x.compare(5).branch('l',ordinary).compare(6).branch('g',ordinary);
+  x.push(arg(20)).call(D+'firstday');store(x,-28);
+  x.value(arg(24)).compare(0).branch('l','error:5').compare(3).branch('g','error:5');store(x,-32);
+  x.jump(conventionsReady).label(ordinary).value(1);store(x,-28);store(x,-32);
+  x.label(conventionsReady).value(arg(-36));
   x.emit(0x8b,0x04,0x85).addr(D+'interval-formats');store(x,-24);
-  x.push(arg(20)).call(D+'firstday');
-  // VarFormat's documented first-day enumeration is Monday=1, Sunday=7,
-  // unlike VB's Sunday=1. Normalize explicitly instead of relying on defaults.
-  const sunday=x.unique(), firstReady=x.unique();
-  x.compare(1).branch('e',sunday).emit(0x48).jump(firstReady).label(sunday).value(7).label(firstReady);store(x,-28);
-  x.value(arg(24)).compare(0).branch('l','error:5').compare(3).branch('g','error:5');
-  variant(12);x.value(0);store(x,-20);store(x,-32);
-  x.api(DLL,'VarFormat',[addr(-16),arg(-24),arg(-28),arg(24),0,addr(-20)]);check();
+  variant(12);x.value(0);store(x,-20);
+  x.api(DLL,'VarFormat',[addr(-16),arg(-24),arg(-28),arg(-32),0,addr(-20)]);check();
   x.api(DLL,'VarI4FromStr',[arg(-20),0x400,0,addr(-32)]).push().api(DLL,'SysFreeString',[arg(-20)]).emit(0x58);check();x.value(arg(-32)).leave(20);
   const formats=intervals.map(token=>c.string(token));
   c.ro.align(4).label(D+'interval-formats');
