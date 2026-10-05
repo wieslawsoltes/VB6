@@ -67,8 +67,192 @@ class MemoryFileSystem {
 return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
 })();
 
-/* gdi-bitmap.js */
+/* gdi-region.js */
 __modules[1]=(()=>{
+const {Win32Error,integer}=__modules[0];
+
+const REGION_CONSTANTS=Object.freeze({RGN_AND:1,RGN_OR:2,RGN_XOR:3,RGN_DIFF:4,RGN_COPY:5,ERROR:0,NULLREGION:1,SIMPLEREGION:2,COMPLEXREGION:3,OBJ_REGION:8,RDH_RECTANGLES:1});
+const MIN=-0x4000000,MAX=0x3ffffff;
+const coordinate=n=>integer(n,MIN,MAX);
+const equalSpans=(a,b)=>a.length===b.length&&a.every((x,i)=>x===b[i]);
+const inside=(mode,a,b)=>mode===1?a&&b:mode===2?a||b:mode===3?a!==b:a&&!b;
+const EMPTY=Object.freeze({bands:Object.freeze([]),bounds:Object.freeze([0,0,0,0]),count:0,type:1});
+
+/** Immutable, canonical y-bands: sorted disjoint half-open x intervals per band.
+ * Boolean operations depend on edge count, never coordinate magnitude or area.
+ * Frozen geometry may safely be shared by handles, clips and saved DC states.
+ */
+class RegionStore {
+  constructor(options={}){
+    this.limit=integer(options.maxRegionRectangles??4096,1,65536);
+    this.workLimit=integer(options.maxRegionWork??1048576,16,16777216);
+  }
+  rectangle(left,top,right,bottom){
+    [left,top,right,bottom]=[left,top,right,bottom].map(coordinate);
+    if(left>right)[left,right]=[right,left];if(top>bottom)[top,bottom]=[bottom,top];
+    return left===right||top===bottom?EMPTY:this.finish([{top,bottom,spans:[left,right]}]);
+  }
+  finish(bands){
+    if(!bands.length)return EMPTY;
+    let count=0,left=MAX,right=MIN;
+    for(const b of bands){count+=b.spans.length/2;left=Math.min(left,b.spans[0]);right=Math.max(right,b.spans.at(-1));Object.freeze(b.spans);Object.freeze(b);}
+    if(count>this.limit)throw new Win32Error('Region rectangle quota exceeded',8);
+    return Object.freeze({bands:Object.freeze(bands),bounds:Object.freeze([left,bands[0].top,right,bands.at(-1).bottom]),count,type:count===1?2:3});
+  }
+  append(bands,top,bottom,spans,budget){
+    if(!spans.length||bottom<=top)return;
+    const last=bands.at(-1);
+    if(last&&last.bottom===top&&equalSpans(last.spans,spans)){last.bottom=bottom;return;}
+    budget.count+=spans.length/2;if(budget.count>this.limit)throw new Win32Error('Region rectangle quota exceeded',8);
+    bands.push({top,bottom,spans});
+  }
+  combine(a,b,mode){
+    mode=integer(mode,1,5);if(mode===5)return a;
+    if(a===b)return mode===3||mode===4?EMPTY:a;
+    if(!a.count)return mode===2||mode===3?b:EMPTY;
+    if(!b.count)return mode===1?EMPTY:a;
+    const ys=[...new Set([...a.bands,...b.bands].flatMap(x=>[x.top,x.bottom]))].sort((x,y)=>x-y);
+    const result=[],budget={count:0};let ai=0,bi=0,work=0;
+    for(let y=0;y+1<ys.length;y++){
+      const top=ys[y],bottom=ys[y+1];while(ai<a.bands.length&&a.bands[ai].bottom<=top)ai++;while(bi<b.bands.length&&b.bands[bi].bottom<=top)bi++;
+      const aa=a.bands[ai],bb=b.bands[bi],as=aa&&aa.top<=top?aa.spans:[],bs=bb&&bb.top<=top?bb.spans:[];
+      work+=as.length+bs.length;if(work>this.workLimit)throw new Win32Error('Region operation work quota exceeded',8);
+      let i=0,j=0,inA=false,inB=false,active=false;const spans=[];
+      while(i<as.length||j<bs.length){
+        const x=Math.min(as[i]??Infinity,bs[j]??Infinity);
+        if(as[i]===x){inA=!inA;i++;}if(bs[j]===x){inB=!inB;j++;}
+        const next=inside(mode,inA,inB);if(next!==active){spans.push(x);active=next;}
+      }
+      this.append(result,top,bottom,spans,budget);
+    }
+    return this.finish(result);
+  }
+  // RGNDATA already consists of sorted, non-overlapping rectangles. Validate
+  // this contract rather than accepting quadratic arbitrary rectangle soups.
+  fromRectangles(rectangles){
+    if(rectangles.length>this.limit)throw new Win32Error('Region rectangle quota exceeded',8);
+    const bands=[],budget={count:0};let current=null;
+    for(const input of rectangles){
+      const [left,top,right,bottom]=input.map(coordinate);
+      if(left>=right||top>=bottom)throw new Win32Error('RGNDATA contains an empty or inverted rectangle');
+      if(current&&top===current.top&&bottom===current.bottom){
+        const last=current.spans.at(-1);if(left<last)throw new Win32Error('RGNDATA rectangles overlap or are unsorted');
+        if(left===last)current.spans[current.spans.length-1]=right;else current.spans.push(left,right);
+      }else{
+        if(current){if(top<current.bottom)throw new Win32Error('RGNDATA bands overlap or are unsorted');this.append(bands,current.top,current.bottom,current.spans,budget);}
+        current={top,bottom,spans:[left,right]};
+      }
+    }
+    if(current)this.append(bands,current.top,current.bottom,current.spans,budget);
+    return this.finish(bands);
+  }
+  offset(region,x,y){
+    x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!region.count)return region;
+    // Check every new bound before constructing or publishing any new state.
+    [region.bounds[0]+x,region.bounds[1]+y,region.bounds[2]+x,region.bounds[3]+y].forEach(coordinate);
+    if(!x&&!y)return region;
+    return this.finish(region.bands.map(b=>({top:b.top+y,bottom:b.bottom+y,spans:b.spans.map(n=>n+x)})));
+  }
+  row(region,y){
+    let lo=0,hi=region.bands.length;
+    while(lo<hi){const mid=(lo+hi)>>>1;if(region.bands[mid].bottom<=y)lo=mid+1;else hi=mid;}
+    const band=region.bands[lo];return band&&band.top<=y?band.spans:[];
+  }
+  contains(region,x,y){
+    const spans=this.row(region,y);let lo=0,hi=spans.length;
+    while(lo<hi){const mid=(lo+hi)>>>1;if(spans[mid]<=x)lo=mid+1;else hi=mid;}
+    return (lo&1)!==0;
+  }
+  intersects(region,rect){
+    const [l,t,r,b]=rect;if(l>=r||t>=b)return false;
+    for(const band of region.bands){if(band.top>=b)break;if(band.bottom<=t)continue;for(let i=0;i<band.spans.length;i+=2){if(band.spans[i]>=r)break;if(band.spans[i+1]>l)return true;}}
+    return false;
+  }
+  equal(a,b){return a===b||(a.count===b.count&&a.bands.length===b.bands.length&&a.bands.every((x,i)=>x.top===b.bands[i].top&&x.bottom===b.bands[i].bottom&&equalSpans(x.spans,b.bands[i].spans)));}
+  rectangles(region){return region.bands.flatMap(b=>{const out=[];for(let i=0;i<b.spans.length;i+=2)out.push([b.spans[i],b.top,b.spans[i+1],b.bottom]);return out;});}
+}
+
+/** Register region, application clip and region-painting APIs on the shared DCs. */
+function installRegions(w,{dc,bitmaps,regions,add}){
+  const h=w.handles,m=w.memory,get=id=>h.get(id,'region'),set=(id,shape)=>{get(id).shape=shape;return shape.type;};
+  const rect=p=>{const v=m.view(p,16);return [0,4,8,12].map(o=>v.getInt32(o,true));};
+  const writeRect=(p,r)=>{const v=m.view(p,16);r.forEach((n,i)=>v.setInt32(i*4,n,true));};
+  const create=shape=>h.add('region',{shape});
+  const deviceRegion=s=>regions.rectangle(...bitmaps.bounds(s));
+  const effective=s=>s.clip?regions.combine(s.clip,deviceRegion(s),1):deviceRegion(s);
+  const logicalRect=(s,r)=>regions.offset(regions.rectangle(...r),s.viewportX,s.viewportY);
+  const select=(s,object,mode)=>{
+    mode=integer(mode,1,5);
+    if(!object){if(mode!==5)throw new Win32Error('NULL clip requires RGN_COPY');s.clip=null;return effective(s).type;}
+    const shape=get(object).shape;
+    const next=mode===5||mode===1&&!s.clip?shape:regions.combine(s.clip||deviceRegion(s),shape,mode);
+    // Calculate before assigning, so failures preserve the previous clip.
+    const type=regions.combine(next,deviceRegion(s),1).type;s.clip=next;return type;
+  };
+  add('CreateRectRgn',4,(...r)=>create(regions.rectangle(...r)));
+  add('CreateRectRgnIndirect',1,p=>create(regions.rectangle(...rect(p))));
+  add('SetRectRgn',5,(object,...r)=>{get(object);set(object,regions.rectangle(...r));return 1;});
+  add('CombineRgn',4,(dest,a,b,mode)=>{get(dest);const first=get(a).shape;mode=integer(mode,1,5);return set(dest,mode===5?first:regions.combine(first,get(b).shape,mode));});
+  add('EqualRgn',2,(a,b)=>regions.equal(get(a).shape,get(b).shape)?1:0);
+  add('OffsetRgn',3,(object,x,y)=>set(object,regions.offset(get(object).shape,x,y)));
+  add('GetRgnBox',2,(object,out)=>{const shape=get(object).shape;writeRect(out,shape.bounds);return shape.type;});
+  add('PtInRegion',3,(object,x,y)=>regions.contains(get(object).shape,integer(x,-0x80000000,0x7fffffff),integer(y,-0x80000000,0x7fffffff))?1:0);
+  add('RectInRegion',2,(object,p)=>regions.intersects(get(object).shape,rect(p))?1:0);
+  add('GetRegionData',3,(object,count,out)=>{
+    const shape=get(object).shape,size=32+shape.count*16;count=integer(count,0,0xffffffff);if(!out)return size;
+    if(count<size)throw new Win32Error('Region data buffer is too small',87);
+    const v=m.view(out,size);v.setUint32(0,32,true);v.setUint32(4,1,true);v.setUint32(8,shape.count,true);v.setUint32(12,shape.count*16,true);writeRect(out+16,shape.bounds);
+    let offset=32;for(const r of regions.rectangles(shape)){writeRect(out+offset,r);offset+=16;}return size;
+  });
+  add('ExtCreateRegion',3,(transform,count,p)=>{
+    count=integer(count,32,m.maxBytes);const v=m.view(p,count),n=v.getUint32(8,true),bytes=v.getUint32(12,true);
+    if(v.getUint32(0,true)!==32||v.getUint32(4,true)!==1||n>regions.limit||bytes<n*16||bytes>count-32||32+n*16>count)throw new Win32Error('Invalid or excessive RGNDATA');
+    let dx=0,dy=0;
+    if(transform){const x=m.view(transform,24),a=[0,4,8,12,16,20].map(o=>x.getFloat32(o,true));if(a[0]!==1||a[1]!==0||a[2]!==0||a[3]!==1||!Number.isInteger(a[4])||!Number.isInteger(a[5]))throw new Win32Error('Region XFORM supports identity and integral translation only',50);[dx,dy]=a.slice(4);}
+    let shape=regions.fromRectangles(Array.from({length:n},(_,i)=>rect(p+32+i*16)));
+    const bounds=rect(p+16);if(!bounds.every((x,i)=>x===shape.bounds[i]))throw new Win32Error('RGNDATA bounding rectangle is inconsistent');
+    shape=regions.offset(shape,dx,dy);return create(shape);
+  });
+  add('SelectClipRgn',2,(handle,object)=>select(dc(handle),object,5));
+  add('ExtSelectClipRgn',3,(handle,object,mode)=>select(dc(handle),object,mode));
+  add('GetClipRgn',2,(handle,object)=>{const s=dc(handle);get(object);if(!s.clip)return 0;set(object,s.clip);return 1;},{failure:-1});
+  for(const [name,mode]of [['IntersectClipRect',1],['ExcludeClipRect',4]])add(name,5,(handle,...r)=>{
+    const s=dc(handle),shape=logicalRect(s,r);
+    // Intersecting an absent application clip stores the complete rectangle,
+    // not only the currently visible bitmap portion. A later bitmap selection
+    // or offset must recover that off-screen geometry (Windows GDI contracts).
+    const next=mode===1&&!s.clip?shape:regions.combine(s.clip||deviceRegion(s),shape,mode);
+    // Rectangle clip calls use GDI's conservative COMPLEXREGION success status;
+    // GetClipBox reports the precise effective visible complexity separately.
+    s.clip=next;return mode===4&&!next.count?1:3;
+  });
+  add('OffsetClipRgn',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!s.clip)return effective(s).type;const next=regions.offset(s.clip,x,y);s.clip=next;return next.type;});
+  add('GetClipBox',2,(handle,out)=>{const s=dc(handle),shape=effective(s);writeRect(out,shape.count?shape.bounds.map((n,i)=>n-(i%2?s.viewportY:s.viewportX)):[0,0,0,0]);return shape.type;});
+  add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff)+s.viewportX;y=integer(y,-0x80000000,0x7fffffff)+s.viewportY;return regions.contains(effective(s),x,y)?1:0;});
+  add('RectVisible',2,(handle,p)=>{const s=dc(handle),r=rect(p);return regions.intersects(effective(s),[r[0]+s.viewportX,r[1]+s.viewportY,r[2]+s.viewportX,r[3]+s.viewportY])?1:0;});
+  const paint=(handle,object,brush,invert=false)=>{
+    const s=dc(handle),shape=logicalRectShape(s,get(object).shape),b=invert?null:h.get(brush,'brush');if(b?.null)return 1;
+    const clipped=regions.combine(shape,effective(s),1);if(!clipped.count)return 1;
+    const r=clipped.bounds,image=bitmaps.read(s,r),color=b?.color||0;
+    for(const band of clipped.bands)for(let y=band.top;y<band.bottom;y++)for(let j=0;j<band.spans.length;j+=2)for(let x=band.spans[j];x<band.spans[j+1];x++){
+      const i=((y-r[1])*image.width+x-r[0])*4;
+      if(invert){image.data[i]^=255;image.data[i+1]^=255;image.data[i+2]^=255;image.data[i+3]=0;}
+      else{image.data[i]=color&255;image.data[i+1]=color>>>8&255;image.data[i+2]=color>>>16&255;image.data[i+3]=0;}
+    }
+    bitmaps.write(s,r,image);return 1;
+  };
+  const logicalRectShape=(s,shape)=>regions.offset(shape,s.viewportX,s.viewportY);
+  add('FillRgn',3,(handle,object,brush)=>paint(handle,object,brush));
+  add('PaintRgn',2,(handle,object)=>paint(handle,object,dc(handle).brush));
+  add('InvertRgn',2,(handle,object)=>paint(handle,object,0,true));
+  return {select};
+}
+
+return {REGION_CONSTANTS,RegionStore,installRegions};
+})();
+
+/* gdi-bitmap.js */
+__modules[2]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 // All bitmap addresses are process-private. DIBs use Win32 BGR/BGRA scan lines,
@@ -90,7 +274,7 @@ function ropInfo(value){value=unsigned(value);if(!rops.has(value))throw new Win3
 function applyROP(code,p,s,d){let out=0;for(let i=0;i<8;i++)if(code>>i&1)out|=(i&4?p:~p)&(i&2?s:~s)&(i&1?d:~d);return out&255;}
 
 class BitmapStore {
-  constructor(w){this.w=w;this.m=w.memory;this.h=w.handles;this.maxPixels=integer(w.options.maxRasterPixels??Math.max(1,Math.min(4194304,Math.floor(w.memory.maxBytes/4))),1,16777216);}
+  constructor(w,regions){this.regions=regions;this.w=w;this.m=w.memory;this.h=w.handles;this.maxPixels=integer(w.options.maxRasterPixels??Math.max(1,Math.min(4194304,Math.floor(w.memory.maxBytes/4))),1,16777216);}
   geometry(width,height,bpp,dib=false){width=integer(width,1,32767);height=integer(height,1,32767);if(![1,24,32].includes(bpp)||dib&&bpp===1)throw new Win32Error('Only 1-bit DDB and 24/32-bit BI_RGB bitmaps are supported',50);const unit=dib?32:16,stride=Math.ceil(width*bpp/unit)*unit/8,size=stride*height;if(size>this.m.maxBytes)throw new Win32Error('Bitmap exceeds process memory quota',8);return {width,height,bpp,stride,size};}
   header(pointer,usage=0){if(unsigned(usage)!==0)throw new Win32Error('Logical palettes are not supported',50);const v=this.m.view(pointer,40);if(v.getUint32(0,true)!==40)throw new Win32Error('Only BITMAPINFOHEADER is supported',50);const width=v.getInt32(4,true),signedHeight=v.getInt32(8,true),bpp=v.getUint16(14,true);if(v.getUint16(12,true)!==1||!signedHeight)throw new Win32Error('Invalid bitmap planes or height');if(v.getUint32(16,true)!==0||v.getUint32(32,true)!==0)throw new Win32Error('Only uncompressed true-color BI_RGB without a color table is supported',50);return {...this.geometry(width,Math.abs(signedHeight),bpp,true),topDown:signedHeight<0,dib:true};}
   create(width,height,bpp,{dib=false,topDown=true,bits=0,stock=false}={}){const g=this.geometry(width,height,bpp,dib);const input=bits?this.m.bytes(bits,g.size).slice():null;const ptr=this.m.alloc(g.size);this.m.block(ptr).owner='gdi-bitmap';try{if(input)this.m.bytes(ptr,g.size).set(input);return this.h.add('bitmap',{...g,ptr,dib,topDown,stock,dimensionX:0,dimensionY:0});}catch(error){this.m.free(ptr);throw error;}}
@@ -98,7 +282,8 @@ class BitmapStore {
   data(bitmap){return this.m.bytes(bitmap.ptr,bitmap.size);}
   bytesFor(rect){const width=rect[2]-rect[0],height=rect[3]-rect[1];if(width<0||height<0||width*height>this.maxPixels)throw new Win32Error('Raster operation exceeds pixel quota',8);return {width,height,data:new Uint8ClampedArray(width*height*4)};}
   bounds(state){if(state.bitmap){const b=this.get(state.bitmap);return [0,0,b.width,b.height];}const d=state.window,r=d.getClientRect?.(),c=d.context?.canvas||d.node;return [0,0,integer(Math.ceil(r?.width??c?.width??c?.clientWidth??0),0,32767),integer(Math.ceil(r?.height??c?.height??c?.clientHeight??0),0,32767)];}
-  clip(state,rect){return intersect(intersect(rect,this.bounds(state)),state.clip||[-0x80000000,-0x80000000,0x7fffffff,0x7fffffff]);}
+  clip(state,rect){const r=intersect(rect,this.bounds(state));if(!state.clip)return r;return this.regions.combine(this.regions.rectangle(...r),state.clip,1).bounds;}
+  spans(state,y,left,right){return state.clip?this.regions.row(state.clip,y):[left,right];}
   context(state){const c=state.window.context||state.window.node?.getContext?.('2d');if(!c)throw new Win32Error('Drawing adapter does not support pixel readback/writeback',50);return c;}
   readBitmap(b,rect){const image=this.bytesFor(rect),bytes=this.data(b),[l,t]=rect;for(let y=0;y<image.height;y++){const row=(b.topDown?t+y:b.height-1-t-y)*b.stride;for(let x=0;x<image.width;x++){const i=(y*image.width+x)*4,px=l+x;if(b.bpp===1){const c=bytes[row+(px>>>3)]&(0x80>>(px&7))?255:0;image.data.set([c,c,c,255],i);}else{const p=row+px*b.bpp/8;image.data[i]=bytes[p+2];image.data[i+1]=bytes[p+1];image.data[i+2]=bytes[p];image.data[i+3]=b.bpp===32?bytes[p+3]:255;}}}return image;}
   writeBitmap(b,rect,image,background=0xffffff){const bytes=this.data(b),[l,t]=rect;for(let y=0;y<image.height;y++){const row=(b.topDown?t+y:b.height-1-t-y)*b.stride;for(let x=0;x<image.width;x++){const i=(y*image.width+x)*4,px=l+x;if(b.bpp===1){const p=row+(px>>>3),mask=0x80>>(px&7);bytes[p]=rgbValue(image.data,i)===(background&0xffffff)?bytes[p]|mask:bytes[p]&~mask;}else{const p=row+px*b.bpp/8;bytes[p]=image.data[i+2];bytes[p+1]=image.data[i+1];bytes[p+2]=image.data[i];if(b.bpp===32)bytes[p+3]=image.data[i+3];}}}}
@@ -119,7 +304,7 @@ class BitmapStore {
     // Snapshot before writes: aliased source/destination is safe for every ROP.
     const source=rop.source?this.read(src,rawSrc):null,image=this.read(dst,r),pattern=rgbBytes(brush.color||0),mono=src?.bitmap&&this.get(src.bitmap).bpp===1;
     const fg=rgbBytes(dst.textColor),bg=rgbBytes(dst.backgroundColor),constant=(extra>>>16&255)/255,perPixel=extra>>>24===1;
-    for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
+    for(let y=0;y<image.height;y++){const spans=this.spans(dst,r[1]+y,r[0],r[2]);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
       const i=(y*image.width+x)*4;
       const ix=source?Math.min(source.width-1,Math.max(0,Math.floor(sx+((r[0]+x+.5-dx)/dw)*sw)-rawSrc[0])):0;
       const iy=source?Math.min(source.height-1,Math.max(0,Math.floor(sy+((r[1]+y+.5-dy)/dh)*sh)-rawSrc[1])):0;
@@ -129,7 +314,7 @@ class BitmapStore {
       if(blend){const alpha=constant*(perPixel?s[offset+3]/255:1);for(let c=0;c<3;c++)image.data[i+c]=Math.min(255,Math.round(s[offset+c]*constant+image.data[i+c]*(1-alpha)));image.data[i+3]=Math.round(255*alpha+image.data[i+3]*(1-alpha));}
       else{for(let c=0;c<3;c++)image.data[i+c]=transparent?s[offset+c]:applyROP(rop.code,pattern[c],s?.[offset+c]||0,image.data[i+c]);image.data[i+3]=transparent||rop.code===0xcc?s[offset+3]:0;}
     }
-    this.write(dst,r,image);return 1;
+    }this.write(dst,r,image);return 1;
   }
   pixel(state,x,y,color){x=coord(x)+state.viewportX;y=coord(y)+state.viewportY;const r=this.clip(state,[x,y,x+1,y+1]);if(!r[2])return 0xffffffff;const image=this.read(state,r);if(color===undefined)return rgbValue(image.data);image.data.set(rgbBytes(color));this.write(state,r,image);return state.bitmap&&this.get(state.bitmap).bpp===1?rgbValue(this.read(state,r).data):color&0xffffff;}
   // Integer software primitives for memory DCs. Font rasterization remains a
@@ -141,14 +326,14 @@ class BitmapStore {
     const r=this.clip(state,[Math.min(x1,x2)-pad,Math.min(y1,y2)-pad,Math.max(x1,x2)+pad,Math.max(y1,y2)+pad]);if(!r[2])return;
     const image=this.read(state,r),pen=rgbBytes(style.pen.color||0),brush=rgbBytes(style.brush.color||0);
     const l=Math.min(x1,x2),t=Math.min(y1,y2),right=Math.max(x1,x2),bottom=Math.max(y1,y2),rx=(right-l)/2,ry=(bottom-t)/2;
-    for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
+    for(let y=0;y<image.height;y++){const spans=this.spans(state,r[1]+y,r[0],r[2]);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
       const px=r[0]+x,py=r[1]+y;let fill=false,stroke=false;
       if(operation==='rect'){fill=px>=l&&px<right&&py>=t&&py<bottom;stroke=fill&&(px<l+width||px>=right-width||py<t+width||py>=bottom-width);}
       else if(operation==='ellipse'){const nx=px+.5-l-rx,ny=py+.5-t-ry;fill=rx>0&&ry>0&&nx*nx/(rx*rx)+ny*ny/(ry*ry)<=1;stroke=fill&&(rx<=width||ry<=width||nx*nx/((rx-width)**2)+ny*ny/((ry-width)**2)>=1);}
       else {const dx=x2-x1,dy=y2-y1,len=dx*dx+dy*dy,u=len?((px-x1)*dx+(py-y1)*dy)/len:-1;stroke=u>=0&&u<1&&((px-x1-u*dx)**2+(py-y1-u*dy)**2)<=width*width/4;}
       if(stroke&&!style.pen.null)image.data.set(pen,(y*image.width+x)*4);else if(fill&&!style.brush.null)image.data.set(brush,(y*image.width+x)*4);
     }
-    this.write(state,r,image);
+    }this.write(state,r,image);
   }
 }
 
@@ -156,7 +341,7 @@ return {GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo,BitmapStore};
 })();
 
 /* clipboard.js */
-__modules[2]=(()=>{
+__modules[3]=(()=>{
 const {Win32Error,unsigned}=__modules[0];
 
 /** Synchronous, app-private clipboard. System clipboard synchronization is explicit. */
@@ -188,7 +373,7 @@ return {installClipboard};
 })();
 
 /* kernel32.js */
-__modules[3]=(()=>{
+__modules[4]=(()=>{
 const {ERROR,Win32Error,integer,unsigned}=__modules[0];
 
 function installKernel32(w){
@@ -279,7 +464,7 @@ return {installKernel32};
 })();
 
 /* user32.js */
-__modules[4]=(()=>{
+__modules[5]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 /** Registered windows only: never queries or controls unrelated page DOM. */
@@ -363,7 +548,7 @@ return {installUser32};
 })();
 
 /* advapi32.js */
-__modules[5]=(()=>{
+__modules[6]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 /** App-private registry: no machine registry is read or modified. */
@@ -391,14 +576,16 @@ return {installRegistry};
 })();
 
 /* gdi32.js */
-__modules[6]=(()=>{
+__modules[7]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
-const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[1];
+const {RegionStore,installRegions}=__modules[1];
+const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[2];
+
 
 
 function colorRef(value){const n=unsigned(value);return '#'+[n&255,n>>>8&255,n>>>16&255].map(v=>v.toString(16).padStart(2,'0')).join('');}
 function installGDI(w){
-  const h=w.handles,m=w.memory,bitmaps=new BitmapStore(w);
+  const h=w.handles,m=w.memory,regions=new RegionStore(w.options),bitmaps=new BitmapStore(w,regions);
   const add=(name,arity,fn,options={})=>w.register('gdi32',name,fn,{arity,mode:'emulated',...options});
   const stocks=new Map(),stock=(index,type,value)=>stocks.set(index,h.add(type,{...value,stock:true}));
   stock(0,'brush',{color:0xffffff});stock(4,'brush',{color:0});stock(5,'brush',{null:true});stock(6,'pen',{color:0xffffff,width:1});stock(7,'pen',{color:0,width:1});stock(8,'pen',{null:true,width:1});
@@ -434,13 +621,13 @@ function installGDI(w){
   add('CreateCompatibleDC',1,handle=>{if(handle)dc(handle);if(h.entries.size+2>h.limit)throw new Win32Error('Handle quota exceeded',8);const bitmap=bitmaps.create(1,1,1,{stock:true});try{const id=h.add('dc',{...newState(),memory:true,bitmap,defaultBitmap:bitmap});bitmaps.get(bitmap).defaultFor=id;return id;}catch(error){m.free(bitmaps.get(bitmap).ptr);h.close(bitmap,'bitmap');throw error;}});
   const deleteDC=handle=>{const state=dc(handle);if(!state.memory)throw new Win32Error('Use ReleaseDC for a window DC',6);m.free(bitmaps.get(state.defaultBitmap).ptr);h.close(state.defaultBitmap,'bitmap');h.close(handle,'dc');return 1;};
   add('DeleteDC',1,deleteDC);
-  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
+  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(entry?.type==='region')return regionAPI.select(state,object,5);if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
       if(!state.memory||entry.value.defaultFor&&entry.value.defaultFor!==Number(handle))throw new Win32Error('Bitmap cannot be selected into this DC',87);
       for(const [id,e]of h.entries)if(e.type==='dc'&&id!==Number(handle)&&[e.value,...e.value.saved].some(s=>s.bitmap===Number(object)))throw new Win32Error('Bitmap is selected into another DC',87);
     }const old=state[entry.type];state[entry.type]=Number(object);return old;});
-  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
+  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap','region'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
   add('GetCurrentObject',2,(handle,type)=>{const state=dc(handle),field={1:'pen',2:'brush',7:'bitmap'}[Number(type)];if(!field)throw new Win32Error('Object type is not implemented',50);return state[field]||0;});
-  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,bitmap:7})[e.type]||0;});
+  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,bitmap:7,region:8})[e.type]||0;});
   const bitmapInfo=(b,p)=>{const v=m.view(p,40);v.setUint32(0,40,true);v.setInt32(4,b.width,true);v.setInt32(8,b.topDown?-b.height:b.height,true);v.setUint16(12,1,true);v.setUint16(14,b.bpp,true);v.setUint32(16,0,true);v.setUint32(20,Math.ceil(b.width*b.bpp/32)*4*b.height,true);for(let o=24;o<40;o+=4)v.setUint32(o,0,true);};
   for(const suffix of ['A','W'])add('GetObject'+suffix,3,(object,count,out)=>{const e=h.entries.get(Number(object));if(!e||!['pen','brush','bitmap'].includes(e.type))throw new Win32Error('Unsupported GDI object',6);const b=e.value,size=e.type==='pen'?16:e.type==='brush'?12:24;if(!out)return size;count=integer(count,0,0x7fffffff);const n=e.type==='bitmap'&&b.dib&&count>=84?84:size;if(count<n||unsigned(out)%4)throw new Win32Error('Invalid GDI object buffer');const v=m.view(out,n);m.bytes(out,n).fill(0);
     if(e.type==='pen'){v.setUint32(0,b.null?5:0,true);v.setInt32(4,b.width||1,true);v.setUint32(12,b.color||0,true);}
@@ -494,7 +681,7 @@ function installGDI(w){
   add('SetBkMode',2,(handle,mode)=>{integer(mode,1,2);const state=dc(handle),old=state.backgroundMode;state.backgroundMode=Number(mode);return old;});
   add('GetBkMode',1,handle=>dc(handle).backgroundMode);
   for(const wide of [false,true])add('TextOut'+(wide?'W':'A'),5,(handle,x,y,p,n)=>{n=integer(n,0,m.maxBytes/(wide?2:1));const text=typeof p==='string'?p.slice(0,n):m.decode(m.bytes(p,n*(wide?2:1)),wide);draw(dc(handle),'text',[coord(x),coord(y),text]);return 1;},{mode:'browser',notes:'Canvas/host font metrics; software memory DC text is not implemented.'});
-  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,...snapshot}=state;state.saved.push({...snapshot,clip:state.clip?.slice()||null});return state.saved.length;});
+  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,...snapshot}=state;state.saved.push(snapshot);return state.saved.length;});
   add('RestoreDC',2,(handle,level)=>{const state=dc(handle);level=coord(level);const index=level<0?state.saved.length+level:level-1;if(!level||index<0||index>=state.saved.length)throw new Win32Error('Invalid saved DC level');const snapshot=state.saved[index];state.saved.splice(index);Object.assign(state,snapshot);return 1;});
   add('SetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);x=coord(x);y=coord(y);if(old)pair(old,state.viewportX,state.viewportY);state.viewportX=x;state.viewportY=y;return 1;});
   add('OffsetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);return w.invoke('gdi32','SetViewportOrgEx',[handle,coord(state.viewportX+coord(x)),coord(state.viewportY+coord(y)),old]);});
@@ -503,9 +690,7 @@ function installGDI(w){
   add('SetMapMode',2,(handle,mode)=>{dc(handle);if(Number(mode)!==1)throw new Win32Error('Only MM_TEXT is supported',50);return 1;});
   add('SetStretchBltMode',2,(handle,mode)=>{const state=dc(handle);if(Number(mode)!==3)throw new Win32Error('Only COLORONCOLOR scaling is supported',50);const old=state.stretchMode;state.stretchMode=3;return old;});
   add('GetStretchBltMode',1,handle=>dc(handle).stretchMode);
-  add('IntersectClipRect',5,(handle,l,t,r,b)=>{const s=dc(handle);const next=[coord(l)+s.viewportX,coord(t)+s.viewportY,coord(r)+s.viewportX,coord(b)+s.viewportY];s.clip=intersect(s.clip||[-0x80000000,-0x80000000,0x7fffffff,0x7fffffff],next);return s.clip[2]>s.clip[0]?2:1;});
-  add('GetClipBox',2,(handle,out)=>{const s=dc(handle),r=bitmaps.clip(s,bitmaps.bounds(s)),v=m.view(out,16);r.forEach((n,i)=>v.setInt32(i*4,n-(i%2?s.viewportY:s.viewportX),true));return r[2]>r[0]?2:1;});
-  add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);x=coord(x)+s.viewportX;y=coord(y)+s.viewportY;const r=bitmaps.clip(s,[x,y,x+1,y+1]);return r[2]>r[0]?1:0;});
+  const regionAPI=installRegions(w,{dc,bitmaps,regions,add});
   add('GetDeviceCaps',2,(handle,index)=>{const s=dc(handle),r=bitmaps.bounds(s);const values={2:1,8:r[2],10:r[3],12:32,14:1,88:96,90:96};if(!(index in values))throw new Win32Error('Device capability not implemented',50);return values[index];});
 }
 
@@ -513,14 +698,15 @@ return {colorRef,installGDI};
 })();
 
 /* index.js */
-__modules[7]=(()=>{
-const {GDI_CONSTANTS}=__modules[1];
-const {installClipboard}=__modules[2];
+__modules[8]=(()=>{
+const {REGION_CONSTANTS,RegionStore}=__modules[1];
+const {GDI_CONSTANTS}=__modules[2];
+const {installClipboard}=__modules[3];
 const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
-const {installKernel32}=__modules[3];
-const {installUser32}=__modules[4];
-const {installRegistry}=__modules[5];
-const {installGDI,colorRef}=__modules[6];
+const {installKernel32}=__modules[4];
+const {installUser32}=__modules[5];
+const {installRegistry}=__modules[6];
+const {installGDI,colorRef}=__modules[7];
 
 
 
@@ -529,7 +715,8 @@ const {installGDI,colorRef}=__modules[6];
 
 
 
-const WIN32_CONSTANTS=Object.freeze({...GDI_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
+
+const WIN32_CONSTANTS=Object.freeze({...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
 function normalizeDLL(name){const dll=String(name).replace(/\\/g,'/').split('/').at(-1).replace(/\.dll$/i,'').toLowerCase();if(!/^[a-z0-9_.-]+$/.test(dll))throw new Win32Error('Invalid DLL name',126);return dll;}
 /** Reusable browser/worker/Node compatibility process; never loads native code. */
 class Win32Browser {
@@ -556,7 +743,7 @@ class Win32Browser {
 }
 function createWin32(options={}){return new Win32Browser(options);}
 
-return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
+return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
-globalThis["Win32Compat"]=__modules[7];
+globalThis["Win32Compat"]=__modules[8];
 })();

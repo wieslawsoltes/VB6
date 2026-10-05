@@ -69,6 +69,7 @@ export class CdbSession extends EventEmitter {
       this.child.on('error', error => this.fail(error));
       this.child.on('exit', (code, signal) => { this.settlePending(new NativeDebugError('Debugger exited', 'DEBUGGER_EXITED')); this.setState('closed'); this.emit('closed', {code, signal}); this.cleanup(); });
       await this.waitPaused();
+      if (debugChildren) await this.command('.childdbg 1');
       const processes = parseProcesses(await this.command('|'));
       if (!this.pid) this.pid = (processes.find(p => p.current) || processes[0])?.pid;
       this.emit('ready', this.snapshot()); return this.snapshot();

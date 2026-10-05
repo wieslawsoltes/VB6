@@ -32,7 +32,7 @@ export class RuntimeDebugger {
     const instruction=top?frame.proc.code[frame.pc]:frame.activeInstruction;
     return instruction||frame.activeInstruction||frame.proc.code.at(-1)||{source:frame.module.name,procedure:frame.proc.name,line:frame.proc.line};
   }
-  stack(){return this.vm.stack.map((frame,index)=>{const ins=this.location(frame,index===this.vm.stack.length-1);return {index,id:frame.debugId,module:frame.module.name,procedure:frame.proc.name,line:ins.line,column:ins.column,endColumn:ins.endColumn,depth:frame.depth};});}
+  stack(){return this.vm.stack.map((frame,index)=>{const ins=this.location(frame,index===this.vm.stack.length-1);return {index,id:frame.debugId,module:frame.module.name,procedure:frame.proc.name,line:ins.line,column:ins.column,endColumn:ins.endColumn,depth:frame.depth,...(frame.pinnedSource===undefined?{}:{sourceText:frame.pinnedSource,revision:frame.pinnedRevision,retained:true})};});}
   async suspend(instruction,frame,reason,details={}){
     const vm=this.vm;
     if(vm.debugEvaluation)return;
@@ -49,14 +49,14 @@ export class RuntimeDebugger {
   async checkpoint(ins,frame){
     const visible=isSequencePoint(ins);if(!visible&&!(ins?.op==='return'&&ins.implicit))return;
     const vm=this.vm,lineChanged=frame.lastLine!==ins.line||frame.pc<=frame.lastPc;
-    const bp=vm.breakpoints.get(lower(ins.source)+':'+ins.line);
+    const bp=frame.pinnedSource===undefined?vm.breakpoints.get(lower(ins.source)+':'+ins.line):null;
     let reason=null,details={};
     if(visible&&lineChanged&&bp&&bp.enabled!==false){
       try{if(!bp.condition||truth(vm.debugInspector.node(vm.debugInspector.parse(bp.condition),frame,{count:0},0)))reason='breakpoint';}
       catch(error){reason='breakpoint-condition';details.conditionError=error.message;}
     }
     if(visible&&vm.stepMode&&(vm.stepMode.mode==='into'||vm.stepMode.mode==='over'&&frame.depth<=vm.stepMode.depth||vm.stepMode.mode==='out'&&frame.depth<vm.stepMode.depth))reason ||= 'step';
-    if(visible&&vm.runTarget&&lower(ins.source)===lower(vm.runTarget.module)&&ins.line===vm.runTarget.line&&(!vm.runTarget.column||ins.column===vm.runTarget.column))reason ||= 'run-to-cursor';
+    if(visible&&frame.pinnedSource===undefined&&vm.runTarget&&lower(ins.source)===lower(vm.runTarget.module)&&ins.line===vm.runTarget.line&&(!vm.runTarget.column||ins.column===vm.runTarget.column))reason ||= 'run-to-cursor';
     for(const watch of vm.watchpoints){
       // Procedure watches observe each live invocation, including a suspended
       // caller modified ByRef by a callee. Module watches retain one baseline
