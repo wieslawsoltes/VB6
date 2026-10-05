@@ -104,3 +104,11 @@ Debug.Print Err.Number
 End Sub`,'class');
  assert.deepEqual((await run(main('Dim e As Emitter\nSet e = New Emitter\ne.Fire'),[emitter])).output,['13']);
 });
+
+test('shipped Win32 bitmap sample uses positive Long green rather than signed Integer',async()=>{
+ const {win32Example}=await import('../src/project/win32-example.js');
+ const assignments=win32Example().modules[0].code.split('\n').filter(line=>/^\s*pixels\(\d\)\s*=/.test(line));
+ assert.equal(assignments.length,4);
+ const {output}=await run(main('Dim pixels(0 To 3) As Long\n'+assignments.join('\n')+'\nDebug.Print pixels(0), pixels(1), pixels(2), pixels(3)'));
+ assert.deepEqual(output,['16711680 65280 255 16777215']);
+});

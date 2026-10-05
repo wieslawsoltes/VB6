@@ -83,7 +83,7 @@ Private Sub cmdBitmap_Click()
     bitmap = CreateDIBSection(0, info, 0, bits, 0, 0)
     If bitmap = 0 Then Err.Raise 5, , "CreateDIBSection failed"
     pixels(0) = &HFF0000
-    pixels(1) = &HFF00
+    pixels(1) = &HFF00&  ' Positive Long; &HFF00 alone is Integer -256.
     pixels(2) = &HFF
     pixels(3) = &HFFFFFF
     CopyMemory ByVal bits, pixels(0), 16
