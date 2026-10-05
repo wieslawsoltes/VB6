@@ -1,4 +1,4 @@
-name: Integrate MCP audit with native project fixes
+name: Finalize verified MCP audit
 on:
   push:
     branches: [feat/mcp-audit-classic-dialog]
@@ -20,29 +20,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Merge pinned current main and rebuild generated conflicts
+      - name: Verify input tree and isolate default private ports
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          python - <<'PY'
-          import subprocess
-          changed = set(subprocess.check_output(['git','diff','--name-only','fe107c602f38184103cb912b7ffd5c8053cc3f76','HEAD'],text=True).splitlines())
-          assert changed == {'.github/workflows/mcp-audit-integrate.yml'}, changed
-          result = subprocess.run(['git','merge','--no-commit','--no-ff','e6c9dfc6732b9e99b8eb9756f9562784048fa114'])
-          assert result.returncode in [0,1]
-          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
-          assert conflicts <= {'dist/VB6-Studio-Web.html','dist/studio.js'}, conflicts
-          PY
-          npm run build
-          npm test
-          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
-          test -z "$(git diff --name-only --diff-filter=U)"
-          git diff --cached --check
           git rm --cached .github/workflows/mcp-audit-integrate.yml
           test "$(git write-tree)" = 'b0594fdc24609c668611981836316bcb08bf8662'
           git restore --staged --source=HEAD -- .github/workflows/mcp-audit-integrate.yml
-          git commit -m 'merge: preserve native-project audit alongside MCP task, build and classic dialog work'
+          python - <<'PY'
+          import base64, gzip, hashlib, pathlib
+          p = pathlib.Path('src/mcp/server.js')
+          s = p.read_text()
+          for old,new in [("import {MCP_VERSION,", "import {randomToken, MCP_VERSION,"), ("{sessionKey = 'port', onError", "{sessionKey = 'port-' + randomToken(24), onError")]:
+              assert s.count(old) == 1, old
+              s = s.replace(old, new)
+          p.write_text(s)
+          encoded = 'H4sIAAAAAAAC/61W3U/jOBB/56/wPSXRhrT0tPtQxEkI9YG7WxZd0eokVCE3mRRDamdtp9CN8r/fjO2UlK/jpOOB1OP5nt+MR6xrpS2zYCwrtVqzSKoCpnSOjg+Ev+XGgN6795SRsVrkA8b2KxjDV3B2y6WEqhuKPCh9D/rG3mrghRnK5PUc9AZ0ypZCFni8RHovm2Ujo/PROq9HxnFld3vCZ5c332d/zc+/XaSMDl9nV6evyNZaWZWral/66nT+x83s76vZBSl4Rcxyc2+8zEHZyNwKJVkpHm2jIbYJaw8Yy5XE5PHG3iot7JadMAkP7HSJFs6UtFpVFeg4Od6x+jgC3y76uLVKVWbKrlvJ1zBl0Wb5JcNkSps9cGGjlAlZN3ae38KaT1lrtzVxqeUdYA26FPUzBo+QNxbp8Q3XK5OSSQuP6OrJb87eJYYoDMQajKo2QOTAkhmxkrzKeFHMNmj1T2EsSHQs4hQL2o+dliAZtzmXOWBwxZRZ3UCXpKxVSOqPSbfwTpFEo3PA4LjZyjwoul6kT2mbO+PTJ0JwpxskDv9LcDUwmL3rccqOFtma17HX1zpjnrWlAh+ljD6Trs/1Hjp9SXqBRhL4kHGAwTgo8QUL7BVQBX80gJEi+3ioJOdVhbR4DRhEgda55mvyte1eFKCvQIrpoQoOQujVCfLn06fe2vHepRVrByID9gp/qsb2afBBZ6os42jtQ47ISg5iA8lxsBeTMzOtFRYYGwepdbV1WguGyqIEObuUTcbjcdJb3rVAUBYH9cnOccZEyXpyhgH8cnKCcSQogT0jj3dseQVc9467WNDevzrukddb7bV14RvE5evS/rZWxgYcxO2dUVLXOXbRJBtTg2HN9mvXBSP914fBWqp0GkDjUTYNWCM+z20zXlrsn74spdIsDpW1sGaqHCIac+jImVeK6PRH0prllULIUEUCGAcUZ6v3y4RJOlCMHnUHBzTRfaFrLTbcgnPXsFuOQwDtQQ34T1pWQMmbyiLOVzzfojljSAtmx/eu7XEaGu0VizjDOA7zBfXd07AkNwcpqAHhiynwrMle93osnjBOg89xZpTwOBJSWMEr8ZNK2/ZD/Tto8pHKOJ58Pjw6Opx8xvuc13wpKpSgydMimPNKYIjnslR4DlPWPXUp2+x0HEVdX23/zGXqPnYeZQhATE3Kfp9/u8jo8ZMrUW79ZRJknLeuaO9CzcNsSo+jFaXIucvc6CnAInrmRQFQz340vIrjF3lxT8eowomNfRvczBzRzUf6RWWjb0Zx46i+fv6+LJw56qVgEJyxgLceBziWf+LMmjhm/gTWj4kdDRkxrSGS5TthoAQl4k0A4yuEKWS0VTBEl4aNugfGkXaLAOvR7LccfM3/Hxx7mRssIqfpft1vHuwTi56hMlpM2d6WssfsEXk2QCrxt/gcgzTeh/Z6f02h+w7/Bu8iBm+h2DUM30sn/aZueWurwD2hWeM59IgLqntZ0GCkB5f/XOEOkmIPUWIHiaHzOfnzTMjTX6h+jgJaukYrIOdaL7JzK8mAnqwsx5UyZYe/Tr6MJ8nHFPp15b/oXL4N7/hZpt91OURvLLcNrmQRrcI4OqIP9pBfQrFCGuERGmkc2uIfGspgycALAAA='
+          data = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(data).hexdigest() == '138c4164709083bc7614120ce3ab25a613025b4165960b750c2137c0e87cd200'
+          p = pathlib.Path('tests/mcp-port-isolation.test.mjs')
+          assert not p.exists()
+          p.write_bytes(data)
+          PY
+          npm run build
+          npm test
+          git add src/mcp/server.js tests/mcp-port-isolation.test.mjs dist
+          git diff --cached --check
+          git rm --cached .github/workflows/mcp-audit-integrate.yml
+          test "$(git write-tree)" = '76cbb0065a5d4f9cd252171859ee95d2d952696b'
+          git restore --staged --source=HEAD -- .github/workflows/mcp-audit-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(mcp): isolate default private-port sessions and retained task identities'
           npm run build
           git diff --exit-code
       - uses: actions/setup-python@v5
@@ -50,7 +58,7 @@ jobs:
           python-version: '3.12'
       - run: pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium
-      - name: Integrated real MCP and external-agent deployment workflows
+      - name: Final real MCP and external-agent deployment workflows
         run: |
           export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
           npm run test:mcp:browser
@@ -63,7 +71,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vb6-mcp-audit-integration-${{ github.sha }}
+          name: vb6-mcp-audit-final-${{ github.sha }}
           retention-days: 7
           path: |
             repository.bundle
