@@ -16,6 +16,7 @@ jobs:
       - run: |
           git bundle create /tmp/debugger-review.bundle --all
           git rev-parse HEAD origin/main > /tmp/debugger-review.refs
+          git log -15 --oneline > /tmp/debugger-review.history
       - uses: actions/upload-artifact@v4
         with:
           name: debugger-review
