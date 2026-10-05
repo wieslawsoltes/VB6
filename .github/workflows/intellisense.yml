@@ -1,75 +1,51 @@
 name: IntelliSense
 on:
   push:
-    branches: [feature/classic-vb6-intellisense]
+    branches: [main]
   pull_request:
     paths:
       - 'src/**'
       - 'tests/**'
       - 'tools/**'
+      - 'examples/type-libraries/**'
       - '.github/workflows/intellisense.yml'
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: intellisense-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   validate:
+    name: IntelliSense (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Integrate reviewed editor changes
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/classic-vb6-intellisense'
-        run: |
-          if test -f tools/apply-intellisense-integration.py; then
-            python tools/apply-intellisense-integration.py
-            rm tools/apply-intellisense-integration.py
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add -u
-            git commit -m 'feat(editor): share IntelliSense across expressions, references and Object Browser'
-            if ! git merge --no-commit --no-ff 6d587b674f9116312661d3d474ff8833e3ebecbf; then
-              while IFS= read -r path; do
-                case "$path" in
-                  dist/*|src/exporter/runtime-payload.js) git checkout --ours -- "$path"; git add "$path" ;;
-                  *) echo "Unexpected source conflict: $path"; exit 1 ;;
-                esac
-              done < <(git diff --name-only --diff-filter=U)
-            fi
-            npm run build
-            npm test
-            git add -u
-            git commit -m 'merge: integrate current data runtime and rebuild IntelliSense standalone bundles'
-            git push origin HEAD:feature/classic-vb6-intellisense
-          fi
       - name: Build and unit tests
         run: npm run build && npm test
+      - name: Verify generated bundles are committed
+        run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Browser dependencies
-        run: pip install playwright==1.57.0 && python -m playwright install --with-deps chromium firefox webkit
+        run: pip install playwright==1.57.0 && python -m playwright install --with-deps ${{ matrix.browser }}
       - name: IntelliSense browser regression
-        run: |
-          result=0
-          for browser in chromium firefox webkit; do
-            VB6_BROWSER=$browser python tools/browser-intellisense-tests.py || result=1
-          done
-          exit $result
-      - name: Reproducible source snapshot
-        if: always()
-        run: git archive --format=zip --output=intellisense-source.zip HEAD
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: python tools/browser-intellisense-tests.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: intellisense-validation
-          path: |
-            intellisense-source.zip
-            validation/intellisense*
+          name: intellisense-${{ matrix.browser }}
+          path: validation/intellisense*
           retention-days: 7
