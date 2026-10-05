@@ -48,6 +48,16 @@ jobs:
           def replace_once(text, old, new):
               assert text.count(old) == 1, old
               return text.replace(old, new, 1)
+          thread = Path('src/agents/thread.js')
+          thread.write_text(replace_once(thread.read_text(), "for (const item of this.entries) if (['waiting', 'streaming', 'running', 'approval'].includes(item.status))", "for (const item of [...this.entries]) if (this.index.has(item.id) && ['waiting', 'streaming', 'running', 'approval'].includes(item.status))"))
+          assert hashlib.sha256(thread.read_bytes()).hexdigest() == 'fea4e5aed82e18a218f7bef4356e4b1310a5ecb0fe85e319df93fdc3c146b807'
+          regression = "test('thread: stopping at the history bound marks every retained operation interrupted', () => {\n  const thread = new AgentThread({maxCharacters: 920});\n  event(thread, 'user', 'old'.repeat(40)); event(thread, 'status', 'waiting');\n  event(thread, 'delta', 'stream text'); event(thread, 'tool', 'some.tool', {callId: 'c', arguments: {}});\n  event(thread, 'idle');\n  assert.ok(thread.omitted > 0); assert.equal(thread.entries.length, 2);\n  assert.ok(thread.entries.every(item => item.status === 'interrupted'));\n  assert.equal(thread.characters, thread.entries.reduce((sum, item) => sum + item.size, 0));\n});\n"
+          thread_test = Path('tests/coding-agents-thread.test.mjs')
+          thread_test.write_text(thread_test.read_text() + regression)
+          assert hashlib.sha256(thread_test.read_bytes()).hexdigest() == 'a9844cf238468fbf277ec58f150b2db729f8c7add686b6e4b8786aa1de8580b3'
+          subprocess.run(['git', 'add', '--', str(thread), str(thread_test)], check=True)
+          for p in [thread, thread_test]:
+              print(hashlib.sha256(p.read_bytes()).hexdigest(), str(p))
           guide = Path('docs/coding-agents.md')
           assert subprocess.check_output(['git', 'hash-object', str(guide)], text=True).strip() == 'b0e6c5f9ca7b4965129301c5453ae86218857087'
           text = guide.read_text()
