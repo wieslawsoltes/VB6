@@ -199,6 +199,12 @@ End Sub`;
     page.mouse.move(box['x']+40,box['y']+50)
     page.evaluate('drain()')
     assert page.evaluate("[value('LastX'),value('LastY'),value('LastButton')]") == [40,50,0]
+    # Character-mode client dimensions and pointer axes must use 8x16 pixels.
+    page.evaluate('form.ScaleMode=4')
+    assert page.evaluate('[form.ScaleWidth,form.ScaleHeight]') == [75,25]
+    page.mouse.move(box['x']+16,box['y']+32)
+    page.evaluate('drain()')
+    assert page.evaluate("[value('LastX'),value('LastY')]") == [2,2]
     page.evaluate('host.dispose()')
 print('PASS: real VB form mouse/keyboard, KeyPreview ordering and cancellation, control input, no duplicate bubbling, pixel coordinates, paused input, bare-form focus, MDI route isolation, independent exported HTML')
 

@@ -4607,7 +4607,9 @@ function eventName(control,event){return (control.type==='Form'?'Form':control.t
 function procedure(control,event){return control.instance?.module?.procedures.get(lower(eventName(control,event)));}
 function argumentsFor(control,args){return control.props.Index===undefined?args:[Number(control.props.Index),...args];}
 async function invoke(control,event,args){const proc=procedure(control,event);if(proc&&acceptsInput(control))return control.vm.callProcedure(control.instance,proc,argumentsFor(control,args));}
-const scaleUnits={1:15,2:.75,3:1,4:8,5:1/96,6:25.4/96,7:2.54/96};
+const scaleUnits={0:1,1:15,2:.75,3:1,4:1/8,5:1/96,6:25.4/96,7:2.54/96};
+// VB character units are 120 twips wide and 240 twips high (8x16 CSS pixels).
+const inputScaleFactor=(mode,vertical=false)=>Number(mode)===4&&vertical?1/16:scaleUnits[Number(mode)]??15;
 function mouseCoordinates(control,event){
   const selfScale=['Form','MDIForm','PictureBox'].includes(control.type),surface=control.content||control.node;
   const rect=surface.getBoundingClientRect(),sx=surface.offsetWidth?rect.width/surface.offsetWidth:1,sy=surface.offsetHeight?rect.height/surface.offsetHeight:1;
@@ -4616,7 +4618,7 @@ function mouseCoordinates(control,event){
   let scale=control;
   if(!selfScale){scale=ownerOf(control.node.parentElement)||control.form;while(scale&&scale!==scale.form&&!['PictureBox','Form','MDIForm'].includes(scale.type))scale=ownerOf(scale.node.parentElement)||scale.form;}
   const props=scale?.props||{},mode=Number(props.ScaleMode??1),area=scale?.content||scale?.node;
-  let ux=scaleUnits[mode]??15,uy=ux;
+  let ux=inputScaleFactor(mode),uy=inputScaleFactor(mode,true);
   if(mode===0){ux=Number(props.ScaleWidth??area?.clientWidth??1)/(area?.clientWidth||1);uy=Number(props.ScaleHeight??area?.clientHeight??1)/(area?.clientHeight||1);}
   return [x*ux+(selfScale?Number(props.ScaleLeft)||0:0),y*uy+(selfScale?Number(props.ScaleTop)||0:0)];
 }
@@ -4665,7 +4667,7 @@ function bindKeyboardInput(control){
 
 function ownsInputEvent(control,event){return ownerOf(event.target)===control&&acceptsInput(control);}
 
-return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsInput,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
+return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsInput,inputScaleFactor,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
 })();
 
 /* ../controls/form-window.js */
@@ -5299,7 +5301,7 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 
 /* ../controls/controls.js */
 __modules[62]=(()=>{
-const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput}=__modules[52];
+const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[52];
 const {installFormWindow}=__modules[53];
 const {ClassicCombo,ClassicUpDown}=__modules[54];
 const {ClassicScrollbar}=__modules[55];
@@ -5367,8 +5369,8 @@ class BrowserControl {
     if(key==='Value'&&['DTPicker','MonthView'].includes(this.type)){const value=this.props.Value;if(value instanceof Date)return value;return new Date(String(value)+'T00:00:00');}
     if(key==='DataSource')return this._dataSource;
     if(key==='Data'&&this.type==='MSChart')return this.gridData[(this.props.Row||1)-1]?.[(this.props.Column||1)-1]||0;
-    if(key==='ScaleWidth')return this.props.ScaleWidth??(this.content||this.node).clientWidth*units(this.props.ScaleMode??1);
-    if(key==='ScaleHeight')return this.props.ScaleHeight??(this.content||this.node).clientHeight*units(this.props.ScaleMode??1);
+    if(key==='ScaleWidth')return this.props.ScaleWidth??(this.content||this.node).clientWidth*inputScaleFactor(this.props.ScaleMode??1);
+    if(key==='ScaleHeight')return this.props.ScaleHeight??(this.content||this.node).clientHeight*inputScaleFactor(this.props.ScaleMode??1,true);
     if(key==='TextRTF')return this.rich?.rtf||'';
     if(this.type==='RichTextBox'&&RICH_SELECTION_PROPERTIES.includes(key)){const value=this.rich.style(key);return value===null?null:['SelIndent','SelHangingIndent','SelRightIndent'].includes(key)?value/15*units(this.form?.props.ScaleMode||1):value;}
     return this.props[key]??(['Text','Caption','ToolTipText','Tag','Path','Pattern','SimpleText','FileName','DialogTitle'].includes(key)?'':0);

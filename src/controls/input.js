@@ -48,7 +48,9 @@ function eventName(control,event){return (control.type==='Form'?'Form':control.t
 function procedure(control,event){return control.instance?.module?.procedures.get(lower(eventName(control,event)));}
 function argumentsFor(control,args){return control.props.Index===undefined?args:[Number(control.props.Index),...args];}
 async function invoke(control,event,args){const proc=procedure(control,event);if(proc&&acceptsInput(control))return control.vm.callProcedure(control.instance,proc,argumentsFor(control,args));}
-const scaleUnits={1:15,2:.75,3:1,4:8,5:1/96,6:25.4/96,7:2.54/96};
+const scaleUnits={0:1,1:15,2:.75,3:1,4:1/8,5:1/96,6:25.4/96,7:2.54/96};
+// VB character units are 120 twips wide and 240 twips high (8x16 CSS pixels).
+export const inputScaleFactor=(mode,vertical=false)=>Number(mode)===4&&vertical?1/16:scaleUnits[Number(mode)]??15;
 export function mouseCoordinates(control,event){
   const selfScale=['Form','MDIForm','PictureBox'].includes(control.type),surface=control.content||control.node;
   const rect=surface.getBoundingClientRect(),sx=surface.offsetWidth?rect.width/surface.offsetWidth:1,sy=surface.offsetHeight?rect.height/surface.offsetHeight:1;
@@ -57,7 +59,7 @@ export function mouseCoordinates(control,event){
   let scale=control;
   if(!selfScale){scale=ownerOf(control.node.parentElement)||control.form;while(scale&&scale!==scale.form&&!['PictureBox','Form','MDIForm'].includes(scale.type))scale=ownerOf(scale.node.parentElement)||scale.form;}
   const props=scale?.props||{},mode=Number(props.ScaleMode??1),area=scale?.content||scale?.node;
-  let ux=scaleUnits[mode]??15,uy=ux;
+  let ux=inputScaleFactor(mode),uy=inputScaleFactor(mode,true);
   if(mode===0){ux=Number(props.ScaleWidth??area?.clientWidth??1)/(area?.clientWidth||1);uy=Number(props.ScaleHeight??area?.clientHeight??1)/(area?.clientHeight||1);}
   return [x*ux+(selfScale?Number(props.ScaleLeft)||0:0),y*uy+(selfScale?Number(props.ScaleTop)||0:0)];
 }

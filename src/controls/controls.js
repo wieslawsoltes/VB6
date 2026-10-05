@@ -1,4 +1,4 @@
-import {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput} from './input.js';
+import {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor} from './input.js';
 import {installFormWindow} from './form-window.js';
 import {ClassicCombo,ClassicUpDown} from './native-widgets.js';
 import {ClassicScrollbar} from './scrollbar.js';
@@ -51,8 +51,8 @@ export class BrowserControl {
     if(key==='Value'&&['DTPicker','MonthView'].includes(this.type)){const value=this.props.Value;if(value instanceof Date)return value;return new Date(String(value)+'T00:00:00');}
     if(key==='DataSource')return this._dataSource;
     if(key==='Data'&&this.type==='MSChart')return this.gridData[(this.props.Row||1)-1]?.[(this.props.Column||1)-1]||0;
-    if(key==='ScaleWidth')return this.props.ScaleWidth??(this.content||this.node).clientWidth*units(this.props.ScaleMode??1);
-    if(key==='ScaleHeight')return this.props.ScaleHeight??(this.content||this.node).clientHeight*units(this.props.ScaleMode??1);
+    if(key==='ScaleWidth')return this.props.ScaleWidth??(this.content||this.node).clientWidth*inputScaleFactor(this.props.ScaleMode??1);
+    if(key==='ScaleHeight')return this.props.ScaleHeight??(this.content||this.node).clientHeight*inputScaleFactor(this.props.ScaleMode??1,true);
     if(key==='TextRTF')return this.rich?.rtf||'';
     if(this.type==='RichTextBox'&&RICH_SELECTION_PROPERTIES.includes(key)){const value=this.rich.style(key);return value===null?null:['SelIndent','SelHangingIndent','SelRightIndent'].includes(key)?value/15*units(this.form?.props.ScaleMode||1):value;}
     return this.props[key]??(['Text','Caption','ToolTipText','Tag','Path','Pattern','SimpleText','FileName','DialogTitle'].includes(key)?'':0);
