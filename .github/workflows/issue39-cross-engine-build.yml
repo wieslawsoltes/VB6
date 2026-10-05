@@ -11,21 +11,25 @@ concurrency:
 jobs:
   prepare:
     if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/issue-39-visual-fidelity'
-    runs-on: ubuntu-24.04-arm
+    runs-on: windows-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Apply reviewed patches to exact source and rebuild distributions
-        shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = 75e3bc9c122ed255ed1401a7ae08b3021a000eac
+          git merge-base --is-ancestor 75e3bc9c122ed255ed1401a7ae08b3021a000eac HEAD
+          git diff --exit-code 75e3bc9c122ed255ed1401a7ae08b3021a000eac HEAD -- . ':!.github/workflows/issue39-cross-engine-build.yml' ':!tools/.issue39-cross-engine.patch' ':!tools/.issue39-native-select.patch'
           echo '01e8a1bd81293d921ae399059525f95ec8c4b73b2363bb2bde6f0f382156ad57  tools/.issue39-cross-engine.patch' | sha256sum --check
           echo '788a26fcf5ee56b5be66f427682e42207cf2394034e0219a5e85a8dcbf5a31be  tools/.issue39-native-select.patch' | sha256sum --check
           git apply --check tools/.issue39-cross-engine.patch
@@ -34,7 +38,7 @@ jobs:
           git apply --index tools/.issue39-native-select.patch
           npm run build
           npm test
-          python3 -m py_compile tools/browser-issue39.py
+          python -m py_compile tools/browser-issue39.py
           git rm tools/.issue39-cross-engine.patch tools/.issue39-native-select.patch
           git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
           git config user.name 'github-actions[bot]'
@@ -42,15 +46,15 @@ jobs:
           git commit -m 'fix(ui): correct cross-engine toolbar sizing and selector bevel paint'
           npm run build
           git diff --exit-code
-          mkdir -p /tmp/issue39-chrome
-          git archive --format=tar.gz HEAD > /tmp/issue39-chrome/source.tar.gz
-          git rev-parse HEAD HEAD^{tree} > /tmp/issue39-chrome/revision.txt
-          sha256sum /tmp/issue39-chrome/source.tar.gz > /tmp/issue39-chrome/SHA256SUMS.txt
+          mkdir -p issue39-chrome-artifact
+          git archive --format=tar.gz HEAD > issue39-chrome-artifact/source.tar.gz
+          git rev-parse HEAD HEAD^{tree} > issue39-chrome-artifact/revision.txt
+          sha256sum issue39-chrome-artifact/source.tar.gz > issue39-chrome-artifact/SHA256SUMS.txt
           test "$(git ls-remote origin refs/heads/fix/issue-39-visual-fidelity | cut -f1)" = '${{ github.sha }}'
           git push origin HEAD:fix/issue-39-visual-fidelity
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: issue39-cross-engine-source
-          path: /tmp/issue39-chrome/
+          path: issue39-chrome-artifact/
           retention-days: 3
