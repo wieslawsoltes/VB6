@@ -41,8 +41,7 @@ jobs:
               assert not path.is_absolute() and '..' not in path.parts
               current=path.read_text() if path.exists() else ''
               if 'base_git' in change:
-                  blob=current.encode()
-                  assert hashlib.sha1(b'blob '+str(len(blob)).encode()+b'\0'+blob).hexdigest()==change['base_git'], 'Workflow changed since review'
+                  assert digest(current)==change['result'], 'Workflow must be published separately before source integration'
               elif change.get('main_base') is not None:
                   assert path.is_file() and digest(current)==change['main_base'], 'Main source changed since review: '+name
               else: assert not path.exists(), 'New source file already exists: '+name
@@ -83,8 +82,9 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm tools/intellisense-completion-part{1,2,3}.txt .github/workflows/intellisense-completion-integrate.yml
+          git rm tools/intellisense-completion-part{1,2,3}.txt
           git add -u
+          test -z "$(git diff --cached --name-only -- .github/workflows)" || exit 1
           git commit -m 'feat(intellisense): integrate browser event, reference, expression and DAO compatibility'
           git push origin HEAD:feature/intellisense-browser-completion
       - name: Reproducible source snapshot
