@@ -1,0 +1,26 @@
+name: Agent conversations source snapshot
+on:
+  push:
+    branches: [feat/agent-conversations]
+    paths: [.github/workflows/agent-conversations-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Snapshot exact repository
+        run: |
+          mkdir -p /tmp/agent-source
+          git rev-parse HEAD > /tmp/agent-source/head.txt
+          git bundle create /tmp/agent-source/repository.bundle HEAD
+          cd /tmp/agent-source
+          sha256sum repository.bundle > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-conversations-source
+          path: /tmp/agent-source/
+          retention-days: 3
