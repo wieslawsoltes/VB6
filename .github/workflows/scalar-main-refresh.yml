@@ -8,7 +8,7 @@ permissions:
 jobs:
   integrate:
     if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: write
@@ -42,13 +42,11 @@ jobs:
               subprocess.run(['git','checkout','--ours','--',*conflicts],check=True)
               subprocess.run(['git','add','--',*conflicts],check=True)
           assert not git('diff','--name-only','--diff-filter=U')
-          # These feature and native compiler subtrees must survive unchanged.
           for path in ('src/native','tests/fixtures/native/date-abi.c','tests/fixtures/native/date-abi.def'):
-              assert git('write-tree')
               assert git('diff','--cached','--name-only',main,'--',path)=='', path
           for path in ('src/runtime','src/language','tests/scalar-runtime.test.mjs','tools/interop/test-native.mjs'):
               assert git('diff','--cached','--name-only',feature,'--',path)=='', path
-          print('Both handwritten implementations preserved; only generated bundle conflicts will be rebuilt.')
+          print('Both handwritten implementations preserved; generated conflicts will be rebuilt.')
           PY
       - name: Build and test combined source
         run: |
@@ -60,6 +58,12 @@ jobs:
           git commit -m 'Merge native Date support and regenerate combined scalar compiler bundles'
           npm run build
           git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Verify independently reproduced x64 product tree on ARM64
+        run: |
+          export GIT_INDEX_FILE="$RUNNER_TEMP/scalar-product-index"
+          git read-tree HEAD
+          git rm --cached -- .github/workflows/scalar-main-refresh.yml
+          test "$(git write-tree)" = 286a0ddd57a19bcefbcf4de43844e14b55fe720c
       - name: Publish only reviewed feature branch
         env:
           GH_TOKEN: ${{ github.token }}
