@@ -3,15 +3,19 @@ on:
   push:
     branches: [feat/agent-conversation-thread-budgets]
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: agent-thread-preparation
   cancel-in-progress: true
 jobs:
   prepare:
     if: github.ref == 'refs/heads/feat/agent-conversation-thread-budgets'
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 35
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      head: ${{ steps.publish.outputs.head }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +29,8 @@ jobs:
       - name: Apply immutable hash-checked source and documentation update
         shell: bash
         run: |
+          git fetch origin feat/agent-conversation-thread-budgets
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
           python3 - <<'PY'
           import subprocess, textwrap
           source = subprocess.check_output(['git', 'show', '12be991febdba59ffad5f431fdb39934e8b7e88a:.github/workflows/agent-thread-prepare.yml'], text=True)
@@ -34,7 +40,7 @@ jobs:
           block = source.split(marker, 1)[1].split('          PY\n', 1)[0]
           exec(compile(textwrap.dedent(block), 'verified-agent-thread-update.py', 'exec'))
           PY
-      - name: Preserve source changes and integrate reviewed current main
+      - name: Preserve source changes and integrate reviewed main
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
@@ -43,20 +49,70 @@ jobs:
           git commit -m 'feat(agents): add live VB6 conversation threads and cumulative session budgets'
           test "$(git rev-parse a098f73921a624e30c26a3aad07c76a14e10073e^{tree})" = a3ae6fdecbb63424aea1dedeb3eaefefd308ac4b
           git merge --no-commit --no-ff a098f73921a624e30c26a3aad07c76a14e10073e
-      - name: Build standalone artifacts from combined source
+      - name: Build and test the combined source
         shell: bash
-        run: npm run build | tee agent-thread-build.log
-      - name: Agent protocol, limits, relay and thread tests
-        shell: bash
-        run: npm run test:agents | tee agent-thread-tests.log
-      - name: Complete repository test suite
-        shell: bash
-        run: npm test | tee agent-thread-full-tests.log
-      - name: Install the pinned cross-browser validation environment
         run: |
-          python -m pip install playwright==1.57.0
-          python -m playwright install --with-deps chromium firefox webkit
+          set -o pipefail
+          npm run build 2>&1 | tee agent-thread-build.log
+          npm run test:agents 2>&1 | tee agent-thread-tests.log
+          npm test 2>&1 | tee agent-thread-full-tests.log
+      - name: Publish normal source and reproducible bundles; remove all preparation files
+        id: publish
+        shell: bash
+        run: |
+          git add -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git rm -- .github/workflows/agent-thread-prepare.yml tools/.agent-thread-update.part0 tools/.agent-thread-update.part1 tools/.agent-thread-update.part2 tools/.agent-thread-update.part3
+          git diff --cached --check
+          test "$(git write-tree)" = eb7c6a8647c6a3e8ca84afb7d73f3cc83b439fdf
+          npm run build
+          git diff --exit-code
+          git commit -m 'build(agents): publish verified source and preserve current main in standalone bundles'
+          git push origin HEAD:feat/agent-conversation-thread-budgets
+          git rev-parse HEAD > head.txt
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-thread-source-publication
+          path: |
+            agent-thread-build.log
+            agent-thread-tests.log
+            agent-thread-full-tests.log
+            head.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
+  browsers:
+    needs: prepare
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.head }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify source tree and build
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^{tree})" = eb7c6a8647c6a3e8ca84afb7d73f3cc83b439fdf
+          npm run build
+          git diff --exit-code
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Resolve Chromium executable
+        if: matrix.browser == 'chromium'
         shell: bash
         run: |
           python - <<'PY' >> "$GITHUB_ENV"
@@ -64,33 +120,11 @@ jobs:
           with sync_playwright() as p:
               print('CHROMIUM_PATH=' + p.chromium.executable_path)
           PY
-      - name: Chromium real HTTP, standalone HTTP and standalone file conversations
-        run: python tools/coding-agents-browser-tests.py --browser chromium
-      - name: Firefox real HTTP, standalone HTTP and standalone file conversations
-        run: python tools/coding-agents-browser-tests.py --browser firefox
-      - name: WebKit real HTTP, standalone HTTP and standalone file conversations
-        run: python tools/coding-agents-browser-tests.py --browser webkit
-      - name: Commit tested merge and reproducible bundles; remove all preparation files
-        shell: bash
-        run: |
-          git add -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
-          git rm -- .github/workflows/agent-thread-prepare.yml tools/.agent-thread-update.part0 tools/.agent-thread-update.part1 tools/.agent-thread-update.part2 tools/.agent-thread-update.part3
-          git diff --cached --check
-          git commit -m 'build(agents): validate all browser origins and preserve current main in standalone bundles'
-          git push origin HEAD:feat/agent-conversation-thread-budgets
-          git rev-parse HEAD > head.txt
-          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
-          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - name: Conversation suite on HTTP modules, HTTP standalone and file standalone
+        run: python tools/coding-agents-browser-tests.py --browser ${{ matrix.browser }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: agent-thread-preparation-validation
-          path: |
-            agent-thread-build.log
-            agent-thread-tests.log
-            agent-thread-full-tests.log
-            reports/coding-agents/
-            head.txt
-            tracked-SHA256SUMS.txt
-            source.tar.gz
+          name: agent-thread-final-browser-${{ matrix.browser }}
+          path: reports/coding-agents/${{ matrix.browser }}/
           retention-days: 7
