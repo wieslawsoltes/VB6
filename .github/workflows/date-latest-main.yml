@@ -46,7 +46,7 @@ jobs:
           npm run build
           npm test
           git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
-          git rm .github/workflows/date-normalization-fix.yml
+          git rm --ignore-unmatch .github/workflows/date-normalization-fix.yml
           git diff --cached --check
           git commit -m 'merge: preserve classic HTML rendering and notices with native Date fixes' -m 'Retain pinned main 2b4f9dd50fc20c36f2a48d3c8586e4063277ff69 and exact DateSerial corrections. Regenerate only generated conflicts, keep all original source changes and attribution, run the complete suite and remove the finished source-correction helper.'
           npm run build
