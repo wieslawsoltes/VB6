@@ -41,8 +41,19 @@ def click_control(page, name):
     # entire input/procedure queue draining before checking retained resources.
     page.wait_for_function("""()=>{const v=vb6Application.vm;return !v.processing && v.stack.length===0 && v.eventQueue.length===0;}""")
 
+DISPLAYED_PIXELS="""async(s,points)=>{
+  if(s.rasterPending)await s.rasterPending;s.render();
+  const dpr=devicePixelRatio||1;
+  if(s.renderingBackend!=='WebGPU · GDI texture'){
+    const ctx=s.canvas.getContext('2d');return points.map(([x,y])=>Array.from(ctx.getImageData(Math.floor(x*dpr),Math.floor(y*dpr),1,1).data));
+  }
+  const device=s.device,row=Math.ceil(s.gpuCanvas.width*4/256)*256,buffer=device.createBuffer({size:row*s.gpuCanvas.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+  try{const e=device.createCommandEncoder();e.copyTextureToBuffer({texture:s.gpuContext.getCurrentTexture()},{buffer,bytesPerRow:row},[s.gpuCanvas.width,s.gpuCanvas.height]);device.queue.submit([e.finish()]);await buffer.mapAsync(GPUMapMode.READ);const bytes=new Uint8Array(buffer.getMappedRange());return points.map(([x,y])=>{const i=Math.floor(y*dpr)*row+Math.floor(x*dpr)*4,pixel=Array.from(bytes.slice(i,i+4));if(s.gpuFormat.startsWith('bgra'))[pixel[0],pixel[2]]=[pixel[2],pixel[0]];return pixel;});}finally{buffer.destroy();}
+}"""
+
 def verify_app(page):
     page.wait_for_function('globalThis.vb6Application?.vm?.state === "running"')
+    page.evaluate('source=>globalThis.win32DisplayedPixels=eval("("+source+")")',DISPLAYED_PIXELS)
     # VM state becomes running before asynchronous Form_Load has finished.
     # Wait for its observable output, not a fixed delay or only the VM state.
     page.wait_for_function('''vb6Application.vm.lastError || document.querySelector('[data-control="txtValue"] input')?.value === "Hello from kernel32 and user32!"''')
@@ -65,15 +76,14 @@ def verify_app(page):
     click_control(page, 'cmdBitmap')
     page.wait_for_function('vb6Application.forms[0].controlMap.get("lblstatus").Caption.startsWith("Writable DIB")')
     page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
-    raster=page.evaluate("""()=>{
+    raster=page.evaluate("""async()=>{
       const c=vb6Application.forms[0].controlMap.get('piccanvas'),s=c.surface,w=vb6Application.vm.win32.api;
       s.render();const points=[[20,20],[300,20],[20,70],[300,70]];
       const pixels=points.map(([x,y])=>Array.from(s.readPixels(x,y,1,1).data));
       const first=c.hDC,second=c.hDC,readOnly=!Reflect.set(c,'hDC',7);
       w.invoke('user32','ReleaseDC',[c.hWnd,first]);const replacement=c.hDC;
       w.invoke('user32','ReleaseDC',[c.hWnd,replacement]);
-      const dpr=devicePixelRatio||1,shown=s.canvas.getContext('2d');
-      const displayed=points.map(([x,y])=>Array.from(shown.getImageData(Math.floor(x*dpr),Math.floor(y*dpr),1,1).data));
+      const displayed=await win32DisplayedPixels(s,points);
       return {pixels,displayed,readOnly,stable:first===second,recreated:first!==replacement,
         memory:w.memory.used,bitmapCount:[...w.handles.entries.values()].filter(e=>e.type==='bitmap').length,
         commandCount:s.commands.length,backend:vb6Application.backend};
@@ -93,11 +103,11 @@ def verify_app(page):
     page.wait_for_function('vb6Application.forms[0].controlMap.get("lblstatus").Caption.startsWith("Complex region:")')
     page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
     def region_pixels():
-        return page.evaluate("""()=>{
+        return page.evaluate("""async()=>{
           const s=vb6Application.forms[0].controlMap.get('piccanvas').surface,w=vb6Application.vm.win32.api;s.render();
           const points=[[20,20],[200,40],[480,20]],d=devicePixelRatio||1,ctx=s.canvas.getContext('2d');
           return {logical:points.map(([x,y])=>Array.from(s.readPixels(x,y,1,1).data)),
-            displayed:points.map(([x,y])=>Array.from(ctx.getImageData(Math.floor(x*d),Math.floor(y*d),1,1).data)),
+            displayed:await win32DisplayedPixels(s,points),
             regions:[...w.handles.entries.values()].filter(e=>e.type==='region').length,memory:w.memory.used,
             commands:s.commands.length,caption:vb6Application.forms[0].controlMap.get('lblstatus').Caption};
         }""")
