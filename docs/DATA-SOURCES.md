@@ -515,3 +515,33 @@ values remain separately bound. Ordinary ADO/native SQL is never rewritten (incl
 PostgreSQL JSON `?` operators). A server-allowlisted positional command must declare
 `parameterStyle: "odbc"`; the client cannot override a named command's dialect.
 This translates parameter markers, not the rest of Access SQL or server dialects.
+
+## Installed native-provider conformance
+
+`tools/data-provider-tests.mjs odbc` runs through a genuine installed UnixODBC
+SQLite driver. `tools/data-provider-tests.mjs windows` creates disposable files
+using native ADOX and probes Jet 4.0 and ACE 12/16 in 32-bit and 64-bit workers.
+Only successfully created provider fixtures are exercised; unavailable providers
+are recorded explicitly, and 32-bit Jet plus the Access ODBC bridge are required
+by the Windows suite. Provider inventory is not a substitute for passed operations.
+The suites check parameter binding, binary/Null values, empty rowsets, transactions,
+close rollback, schema, recovery after errors, DAO QueryDefs and RDO queries.
+All databases are newly created in an isolated temporary directory and deleted.
+
+A trusted OLE DB gateway profile can set `architecture: "x86"` for Jet or a 32-bit
+ACE installation, or `architecture: "x64"` for a 64-bit provider. The worker reports
+its actual bitness and rejects a mismatch. `powershell` remains an explicit
+server-administrator override; neither option can be supplied by gateway clients.
+Command, parameter, field and recordset COM references are released on success and
+failure, and connection cleanup also runs when standard input closes.
+
+No proprietary provider is bundled or downloaded by these tests. Missing ACE,
+third-party ODBC drivers, passwords, linked servers and licensed native VB6 compiler
+execution still need the corresponding installation and authorized environment.
+The JSON reports identify which installed combinations actually passed.
+
+### Native schema field widths
+
+Native OLE DB schema rowsets retain `adTinyInt` (16), `adUnsignedSmallInt` (18), `adUnsignedInt` (19), and `adUnsignedBigInt` (21) metadata instead of failing or narrowing unsigned values to signed Long. Range violations raise VB overflow. Unsigned 64-bit values use the runtime's exact Decimal representation; supply Decimal, BigInt, or an invariant string for values outside JavaScript's safe integer range. Already-rounded JavaScript Numbers are rejected. The Windows worker serializes UInt64 without JSON precision loss. This does not assert that every installed provider supports binding or storing every ADO type.
+
+Native-provider CI retains regression and provider logs independently. Provider probes still execute after a regression failure, but that failure continues to fail the job. Provider availability, bitness, and actual executed checks remain separate from mock/unit coverage and native Microsoft VB6 compiler certification.

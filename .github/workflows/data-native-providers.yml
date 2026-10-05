@@ -1,0 +1,91 @@
+name: Native data providers
+on:
+  push:
+    branches: [main, feat/data-native-provider-validation]
+    paths: ['src/data/**', 'tools/data/**', 'tools/data-*.mjs', 'tests/data-*.mjs', '.github/workflows/data-native-providers.yml']
+  pull_request:
+    paths: ['src/data/**', 'tools/data/**', 'tools/data-*.mjs', 'tests/data-*.mjs', '.github/workflows/data-native-providers.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-data-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-review:
+    if: github.ref == 'refs/heads/feat/data-native-provider-validation' || github.head_ref == 'feat/data-native-provider-validation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Preserve exact source and branch ancestry for integration review
+        run: |
+          mkdir -p reports/source-review
+          git rev-parse HEAD > reports/source-review/head.txt
+          git bundle create reports/source-review/repository.bundle --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-data-source-review
+          path: reports/source-review
+          retention-days: 7
+  odbc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install real UnixODBC and SQLite ODBC driver
+        run: sudo apt-get update && sudo apt-get install -y unixodbc unixodbc-dev libsqliteodbc
+      - name: Install optional trusted native ODBC adapter
+        run: npm install --no-save --package-lock=false odbc@2.6.0
+      - name: Full regression suite
+        shell: bash
+        run: |
+          mkdir -p reports/data-providers
+          set -o pipefail
+          npm test 2>&1 | tee reports/data-providers/regression.log
+      - name: Test actual ODBC through the authenticated gateway
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          mkdir -p reports/data-providers
+          set -o pipefail
+          node tools/data-provider-tests.mjs odbc 2>&1 | tee reports/data-providers/provider.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-odbc-evidence
+          path: reports/data-providers
+          retention-days: 14
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Full regression suite
+        shell: bash
+        run: |
+          mkdir -p reports/data-providers
+          set -o pipefail
+          npm test 2>&1 | tee reports/data-providers/regression.log
+      - name: Probe actual provider bitness and test genuine MDB and ACCDB files
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          mkdir -p reports/data-providers
+          set -o pipefail
+          node tools/data-provider-tests.mjs windows 2>&1 | tee reports/data-providers/provider.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-windows-provider-evidence
+          path: reports/data-providers
+          retention-days: 14

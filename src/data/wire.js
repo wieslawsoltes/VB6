@@ -4,7 +4,9 @@ import {assertData} from './common.js';
 export function encodeCell(value){
  if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();
  if(typeof value==='bigint')return {$vb6:'integer',value:value.toString()};
- if(value instanceof Uint8Array){let binary='';for(let i=0;i<value.length;i+=8192)binary+=String.fromCharCode(...value.subarray(i,i+8192));return {$vb6:'binary',value:btoa(binary)};}
+ // Native ODBC can return ArrayBuffer; views must not expose bytes outside their slice.
+ const bytes=ArrayBuffer.isView(value)?new Uint8Array(value.buffer,value.byteOffset,value.byteLength):value instanceof ArrayBuffer?new Uint8Array(value):null;
+ if(bytes){let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return {$vb6:'binary',value:btoa(binary)};}
  if(value instanceof Date)return {$vb6:'date',value:value.toISOString()};
  if(value!=null&&typeof value==='object'&&typeof value.toJSON!=='function'&&value.__type)throw new TypeError('Unsupported gateway parameter object');
  return value;
