@@ -41,8 +41,12 @@ serial representation; do not assume it is a linear UTC timestamp.
 Calendar operations are Gregorian. `DateSerial` uses signed Integer arguments,
 nearest-even numeric conversion and Gregorian normalization. The month is
 normalized first; the resulting short year is expanded with the Windows user's
-Gregorian calendar window. That expanded year must be within 100 through 9999
-before normalizing the day, and the final date must also remain in range.
+Gregorian calendar window. That expanded year must not exceed 9999 before
+normalizing the day. A sub-100 intermediate year can become valid after a large
+positive day offset, but the final date must be within years 100 through 9999.
+The month decrement retains the legacy signed-Integer wrap: month -32768 is
+normalized after decrementing to 32767. These boundary rules are measured by the
+independent installed Script Host reference, not inferred from ordinary dates.
 `DateSerial(99,13,1)` therefore denotes year 0100, while
 `DateSerial(9999,13,-30)` fails: a negative day cannot rescue normalized year
 10000. The separate installed Script Host suite measures these edge cases;
@@ -117,3 +121,8 @@ Expected values and errors are obtained from the installed host on each run,
 not recomputed using the native compiler's arithmetic. The ordinary Date fixture
 also checks both intermediate-year and final-date rejection without overwriting
 the assignment target. This reference is not licensed Microsoft VB6 certification.
+
+Every reference probe captures the actual native error before comparing its value.
+An unexpected error therefore exits with the probe number instead of displaying
+a modal error until timeout. Neither expected errors nor successful results can
+pass by accidentally reusing a preceding probe's value.

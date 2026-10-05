@@ -63,6 +63,7 @@ export function dateFixture(){
   check('DateSerial(2024,0,1) = #2023-12-01# And DateSerial(2024,-12,1) = #2022-12-01#','DateSerial negative month floor division');
   check('DateSerial(99,13,1) = #0100-01-01# And DateSerial(101,0,1) = #0100-12-01#','DateSerial normalizes months before expanding a short year');
   check('DateSerial(10000,0,1) = #9999-12-01#','month normalization can first bring a large year back in range');
+  check('DateSerial(2024,-32768,1) = DateSerial(2024,32767,32)','minimum Integer month retains legacy decrement wrapping');
   check('DateSerial(100,0,32) = DateSerial(99,12,32)','month-derived short years use the same current NLS window');
   check('DateSerial(2000,2,29) = #2000-02-29# And DateSerial(1900,2,29) = #1900-03-01#','Gregorian century exceptions');
   check('DateSerial(2024.5,2,29) = #2024-02-29#','DateSerial arguments use nearest-even Integer conversion');

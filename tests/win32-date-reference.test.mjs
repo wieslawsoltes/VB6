@@ -20,3 +20,14 @@ test('Date differential coverage retains the original boundary probes and adds n
   assert.ok(DATE_CONTRACTS.some(([,source])=>source===`CLng(CDbl(${expression}))`));
  assert.equal(new Set(DATE_CONTRACTS.map(([name])=>name)).size,DATE_CONTRACTS.length);
 });
+
+
+test('every differential probe checks its actual error before comparing values',async()=>{
+ const {DATE_CONTRACTS,compileReference}=await import('../tools/win32-date-reference.mjs');
+ const text=DATE_CONTRACTS.map((_,i)=>`${i}|${i%2?'error':'value'}|${i%2?5:0}`).join('\n');
+ const code=compileReference(text).project.modules[0].code;
+ assert.equal((code.match(/actualError = Err.Number/g)||[]).length,DATE_CONTRACTS.length);
+ assert.equal((code.match(/If actualError <> /g)||[]).length,DATE_CONTRACTS.length);
+ assert.ok(code.indexOf('If actualError <> 0 Then ExitProcess 1') < code.indexOf('If result <> 0 Then ExitProcess 1'));
+ assert.match(code,/If actualError <> 5 Then ExitProcess 2/);
+});

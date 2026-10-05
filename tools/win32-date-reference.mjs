@@ -35,15 +35,18 @@ export function writeReference(directory='validation/dates') {
 export function compileReference(text) {
  const lines=String(text).replace(/^\uFEFF/,'').trim().split(/\r?\n/);
  if(lines.length!==DATE_CONTRACTS.length)throw Error('Windows Script Host did not produce the complete Date reference');
- const p=newProject('AotDateReference');p.startup='Sub Main';const code=['Dim result As Long, n As Long, d As Date'],checks=[],records=[];
+ const p=newProject('AotDateReference');p.startup='Sub Main';const code=['Dim result As Long, actualError As Long, n As Long, d As Date'],checks=[],records=[];
  lines.forEach((line,i)=>{
   const m=/^(\d+)\|(error|value)\|(-?\d+)$/.exec(line.trim());
   if(!m||Number(m[1])!==i||!Number.isSafeInteger(Number(m[3]))||Number(m[3])< -2147483648||Number(m[3])>2147483647)throw Error('Invalid or out-of-order native reference record');
   const [,expression]=DATE_CONTRACTS[i],value=Number(m[3]);
   records.push({name:DATE_CONTRACTS[i][0],expression,kind:m[2],value});checks.push(DATE_CONTRACTS[i][0]);
-  if(m[2]==='error')code.push('On Error Resume Next','Err.Clear','result = '+expression,'result = Err.Number','Err.Clear','On Error GoTo 0');
-  else code.push('result = '+expression);
-  code.push(`If result <> ${value} Then ExitProcess ${i+1}`);
+  // Trap every case so an unexpected native error reports its numbered probe
+  // instead of hanging on a modal runtime-error dialog. Never accept an error
+  // merely because a previous result happened to equal the expected value.
+  code.push('On Error Resume Next','Err.Clear','result = '+expression,'actualError = Err.Number','Err.Clear','On Error GoTo 0');
+  code.push(`If actualError <> ${m[2]==='error'?value:0} Then ExitProcess ${i+1}`);
+  if(m[2]==='value')code.push(`If result <> ${value} Then ExitProcess ${i+1}`);
  });
  code.push('For n = 1 To 2000',' d = CDate(0.25)','Next','ExitProcess 0');
  p.modules=[{id:'main',name:'Main',kind:'module',code:'Option Explicit\nPrivate Declare Sub ExitProcess Lib "kernel32" (ByVal code As Long)\nSub Main()\n'+code.join('\n')+'\nEnd Sub'}];

@@ -164,14 +164,17 @@ function emitDateSerial(c) {
   const x=c.x,fullYear=x.unique(),century=x.unique(),normalized=x.unique(),march=x.unique(),eraReady=x.unique();
   // Month normalization precedes the short-year window. Expanding first would
   // turn DateSerial(99,13,1) into 2000 rather than year 0100. The expanded year
-  // must be valid before the day offset: a negative day cannot rescue year 10000.
+  // must not exceed 9999 before the day offset. A sub-100 intermediate year may
+  // still produce a valid final date after a large positive day offset.
   x.label(D+'dateserial').enter(24).value(arg(8)).emit(0x89,0xc3);
+  // Legacy month decrement wraps as signed Integer before floor division.
+  // In particular, month -32768 decrements to 32767, not a 32-bit -32769.
   // floor((month-1)/12), with a positive remainder in 0..11.
-  x.value(arg(12)).emit(0x48,0x99,0xb9).imm(12).emit(0xf7,0xf9,0x85,0xd2).branch('ns',normalized).emit(0x48,0x83,0xc2,12).label(normalized).emit(0x01,0xc3,0x42,0x89,0x55,0xf8);
+  x.value(arg(12)).emit(0x48,0x0f,0xbf,0xc0,0x99,0xb9).imm(12).emit(0xf7,0xf9,0x85,0xd2).branch('ns',normalized).emit(0x48,0x83,0xc2,12).label(normalized).emit(0x01,0xc3,0x42,0x89,0x55,0xf8);
   x.emit(0x89,0xd8).compare(100).branch('ge',fullYear);
   x.api('kernel32.dll','GetCalendarInfoW',[0x400,1,0x20000030,0,0,addr(-4)]).test().branch('e','error:5');
   x.value(arg(-4)).emit(0x31,0xd2,0xb9).imm(100).emit(0xf7,0xf1,0x6b,0xc0,100,0x39,0xd3).branch('le',century).emit(0x83,0xe8,100).label(century).emit(0x01,0xc3);
-  x.label(fullYear).emit(0x89,0xd8).compare(100).branch('l','error:5').compare(9999).branch('g','error:5').emit(0x8b,0x55,0xf8);
+  x.label(fullYear).emit(0x89,0xd8).compare(1).branch('l','error:5').compare(9999).branch('g','error:5').emit(0x8b,0x55,0xf8);
   x.emit(0x83,0xfa,2).branch('g',march).emit(0x4b).label(march);
   // era=floor(year/400); yoe=year-era*400. Intermediate years fit signed Long.
   x.emit(0x89,0xd8,0x99,0xb9).imm(400).emit(0xf7,0xf9,0x85,0xd2).branch('ns',eraReady).emit(0x48,0x81,0xc2).imm(400);
