@@ -100,7 +100,7 @@ rendered or included in the downloadable activity transcript. Model-provided tex
 is displayed as plain text, not executable HTML or automatically trusted Markdown.
 
 The agent inspects, edits and validates the **actual IDE project**. It uses all
-114 existing typed tools, subject to the chosen permission mode:
+125 existing typed tools, subject to the chosen permission mode:
 
 | Area | Examples |
 | --- | --- |
@@ -109,6 +109,7 @@ The agent inspects, edits and validates the **actual IDE project**. It uses all
 | Designer | Forms, controls, control arrays, menus, properties, layout and selection. |
 | Compiler/builds | Compile the active project, inspect real diagnostics, and produce inert project JSON, HTML, source ZIP or supported Win32 artifacts with SHA-256 verification and bounded chunk reads. Builds do not execute generated code. |
 | Debugger/runtime | Inspect state, breakpoints, frames, watches, evaluate, step, continue, stop and use the supported runtime-control tools. |
+| Data definitions | Public providers, connections and commands; validation, atomic renames and undoable definition edits under the separate data scope. No SQL/network execution or runtime credentials. |
 | Files/workspace | Project virtual files, assets, resources, document/window layouts, editor views, normal Undo/Redo and the existing typed commands. |
 
 Tool descriptions and exact schemas are available on the **Tools** tab. These
@@ -132,7 +133,7 @@ model hallucinating a removed tool gets an error, not access. It may still inspe
 requested project/source/debugger data and run the non-executing compiler tool.
 
 **Agent mode** authorizes only checked scopes: code, project, designer, files,
-debugger, runtime or workspace. Start Task explicitly lists those scopes. Grants
+debugger, runtime, public data definitions or workspace. Start Task explicitly lists those scopes. Grants
 last for this run, at most ten minutes; non-granted effects still require review.
 They are revoked on completion, failure, Stop, project replacement/reload, expiry
 or page unload. Permissions are local UI decisions; no model tool grants them.
@@ -145,35 +146,101 @@ form one normal Undo entry. Earlier successful edits remain when a later operati
 fails; Undo/Redo works through the normal IDE, and source undo labels identify
 **AI Agent** rather than pretending the work came from an external MCP peer.
 
-### Stop, continue and limits
+### Named tasks and follow-up conversations
 
-One task runs at a time per IDE. Stop aborts provider I/O and pending tool consent.
-Cancelling a review also stops the task. Closing a detached window dismisses its
-modal through the shared window host. A project reload invalidates old authority,
-even when the replacement project reuses the same ID. A cancelled or failed run
-requires **New Task**, avoiding replay of a half-finished provider conversation.
-Changing provider/model or reloading the project also requires New Task.
+The **Tasks** tab keeps up to **eight named tasks in memory**. Each has its own
+provider/model, draft, native conversation, public activity, plan and cumulative
+reported usage. Rename, select or delete tasks using the classic list and buttons.
+Selecting a task sends no network request and preserves unsent drafts. All tasks
+share the **live project**, not separate project copies or Git worktrees. Source
+can change between turns; agents must re-read current revisions before editing.
+No permission grant carries over from one task or run to another.
 
-Run again continues a completed or request/token-limited conversation. New Task
-clears in-memory context and activity, not project edits. Closing/reopening the
-tool in the same page retains conversation history but clears credentials. Saved
-window layouts retain only tool identity and geometry; a page reload restores an
-empty connection/task with no grants.
+After a completed response, type a follow-up and select **Run**. The earlier
+provider-native context is retained. **New Task** creates an independent blank
+conversation; it does not clear older tasks or undo project edits. Changing a
+used task's provider or model requires a new task. Switching between tasks with
+different providers clears the direct API key. Closing/reopening the tool keeps
+memory-only tasks and drafts, but clears credentials. Saved layouts contain only
+window identity/geometry. Reloading the page loses all tasks and credentials.
 
-Default run limits are 16 provider requests, 128 tool calls, 8,192 output tokens
-per request and 200,000 **reported** tokens per run. The UI exposes request/output/
-reported-token limits; the reusable engine also accepts a tool-call limit. There
-are additional request, response, context and transcript size caps. Oversized or
-incomplete responses do not execute partial tool calls. OpenAI and Anthropic are
-asked for serial tool calls; any returned batch is validated then executed
-sequentially against the real revision checks.
+**Delete Task…** asks for confirmation, discards that task's conversation and
+plan, and leaves project edits in normal Undo history. Deleting the last task
+creates a blank one. New Task refuses to exceed the eight-task bound.
 
-The reported-token limit is not a hard billing cap. Usage arrives after a request,
-input context also costs tokens, and provider reporting can differ. Use provider
-account spending limits. Requests are not automatically retried after a transport
-error or rate limit, avoiding hidden charges or replayed writes. Stop does not
-undo completed edits, reverse external data-source actions, or guarantee that a
-provider stopped billing immediately.
+**New Task with Context…** opens an editable, bounded excerpt of recent public
+user messages, answers and assistant text. It is **not an automatic summary**.
+Review/remove confidential content before copying it into the new task's draft,
+then add the new instructions and select Run. No request is made while copying.
+Connection credentials, tool results, native signatures and permission grants
+are not copied. Public text may still contain source, personal data or secrets
+entered by a user or echoed by a model; review is essential. The excerpt does not
+prove the current project state. This is an explicit context handoff, not lossy
+editing of a signed provider-native conversation.
+
+### Task plans and local questions
+
+Two local tools supplement the **125 IDE operations** in the shipped agent UI;
+they do not change the independent external MCP tool catalog:
+
+- **`vb6.agent.plan`** maintains a revision-checked plan on the **Plan** tab, with
+  1–12 uniquely identified steps and at most one in-progress step. Pending,
+  In progress and Completed are **model-reported progress**, not proof that a
+  compile/test passed and not authorization to execute anything.
+- **`vb6.agent.question`** opens a classic question dialog. Suggested answers are
+  optional; a free-text answer is always possible. No default answer is sent.
+  **Cancel** stops the task; Stop or project replacement dismisses the pending
+  question and late answers are ignored. Never enter credentials. An answer is
+  task information and **cannot authorize** project changes or execution.
+
+Plans/answers stay in their own task. The question tool is exposed by the reusable
+engine only when the embedding host supplies an `askUser` callback; headless
+engines otherwise expose the IDE operations plus the plan tool.
+
+### Stop, Continue and limits
+
+One task runs at a time per IDE adapter. Task management and connection controls
+are disabled during a run or pending local confirmation. Stop aborts provider I/O,
+questions and tool approvals. Cancelling a review also stops the task. Closing a
+detached window dismisses its modal through the shared window host. A project
+replacement/reload invalidates all old tasks, even when it reuses the same ID;
+the task list marks these as previous-project sessions. Start a new task rather
+than reusing an old task's authority. In-place edits use current revision checks.
+
+**Continue** is enabled when a run reaches its request/reported-token limit or a
+provider request fails with a recognized transient connection/HTTP error. It opens
+a fresh confirmation for the same provider/model, limits and permission scopes,
+then sends the pending request with completed native tool results. It **does not
+append the task prompt again or replay completed IDE tool operations**. The model
+may still propose another operation in its next response; normal approval and
+revision safeguards remain in force. Historical results are not assumed current.
+
+There are **no automatic retries**. HTTP 408, 429, 500, 502, 503, 504 and 529, and
+pre-response network failures/timeouts, allow a manual Continue. A bounded
+provider `Retry-After` suggestion is shown (at most five minutes); it schedules
+nothing. The local relay forwards only this sanitized retry metadata, not error
+bodies or arbitrary provider headers. An earlier request may already have been
+processed/billed. Authentication/validation failures, cancellation, denied
+operations, partial/corrupt streams and uncertain tool batches remain blocked and
+require a new task. The engine never retries a possibly half-applied batch.
+
+Default per-run limits are 16 provider requests, 128 tool calls, 8,192 output tokens
+per request and 200,000 **reported** tokens. All four limits are exposed on the
+Permissions tab. Continue requires a new user decision and starts new per-run
+limits; cumulative task counters remain visible. Reported usage is **not a hard
+billing cap**. Provider reporting may omit usage or include cached/reasoning tokens;
+use provider-side spend controls where available. Stop does not undo edits,
+reverse external data-source actions, or guarantee immediate cessation of billing.
+
+The task status displays native context size in KiB, not a model-specific token
+estimate. Requests are capped at 1.5 MB; provider responses at 8 MiB; retained
+public activity at 500 entries/approximately 512 KB. Individual public text is
+clipped with an explicit marker. Before executing a tool batch the engine reserves
+space for bounded, explicitly marked tool results. Large results require smaller
+ranges/pages. **Native reasoning/signatures are never truncated or rewritten.**
+When that native context cannot fit, start a task with reviewed public context.
+An oversized response/call batch or malformed stream never executes partial calls.
+Returned tool batches are executed sequentially against the real revision checks.
 
 ## Example tasks
 
@@ -200,7 +267,9 @@ execution to an unreviewed project with sensitive data-source access.
 
 `src/agents/providers.js` implements native request/response mappings, authenticated
 transport, bounded SSE/JSON parsing and model discovery. `agent.js` implements
-provider-independent orchestration. `review.js` builds pure before/after data.
+provider-independent orchestration and `resume()`. `conversations.js` exports the
+memory-only `AgentConversations` manager; `task-tools.js` implements local plans
+and questions. `review.js` builds pure before/after data.
 `studio.js` is the classic IDE adapter/UI; `agents.css` uses existing theme tokens.
 `tools/agent-relay.mjs` exports `createAgentRelay` and provides the optional CLI.
 No provider SDK, CDN script or new npm dependency is required.
@@ -226,10 +295,12 @@ same-ID reload, independent permissions, concurrency, cancellation, size/budget
 limits, credentials and a real localhost relay with mocked upstream providers.
 
 The browser suite uses real classic controls and native wire-protocol test doubles
-for all three providers. CI runs it against modular HTTP, standalone HTTP and
-standalone file origins. It checks consent, Before/After, edits, compilation,
+for all three providers. CI runs a **Chromium, Firefox and WebKit** matrix against
+modular HTTP, standalone HTTP and standalone file origins. It checks consent, Before/After, edits, compilation,
 Undo, scoped/read-only permissions, Stop, model discovery, inert model text,
-credential clearing/export exclusion, tool catalog and workspace lifecycle.
+credential clearing/export exclusion, tool catalog, task/draft switching, plans,
+questions, reviewed context handoff, exact-once edit preservation across Continue,
+manual retry and workspace lifecycle.
 Screenshots/results are retained as CI artifacts. Its explicit `--opaque` option
 is UI-only fallback validation for locally managed browsers; it is not used by CI
 and is not evidence of file/HTTP deployment coverage.
@@ -251,3 +322,13 @@ Implementation references, checked 2026-10-05:
 - [Anthropic tool-result handling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
 - [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling)
 - [Gemini FunctionDeclaration schema](https://ai.google.dev/api/caching#FunctionDeclaration)
+
+Continuation-specific references:
+
+- [OpenAI conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
+- [Anthropic extended thinking and signatures](https://platform.claude.com/docs/en/docs/build-with-claude/extended-thinking)
+- [Gemini thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures)
+
+### Questions in task context
+
+The public conversation and reviewed context handoff keep each validated agent question before its answer, so short answers such as “Yes” do not lose their meaning when switching tasks. Cancelling a question records the question but does not invent an answer or permit continuation. Questions remain inert text; the handoff is an editable excerpt, not authorization or proof of the current project state. Native provider signatures, raw tool results and permission grants remain excluded.

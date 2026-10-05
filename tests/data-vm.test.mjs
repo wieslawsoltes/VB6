@@ -41,6 +41,7 @@ DataEnvironment1.ById 1
 Debug.Print DataEnvironment1.rsById.Fields("name").Value
 Set db = OpenDatabase("Local")
 Set rs = db.OpenRecordset("customers")
+rs.Edit
 rs.Fields("name").Value = "Updated"
 rs.Update
 rs.Requery

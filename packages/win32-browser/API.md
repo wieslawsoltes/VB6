@@ -1,7 +1,7 @@
 # Win32 browser export inventory
 
-Version 0.1.0. 170 named exports, counting A/W variants and aliases.
-See README.md for per-family restrictions and the VB6 ABI boundary.
+Version 0.2.0. 211 named exports, counting A/W variants and aliases.
+See README.md and GDI.md for per-family restrictions and the VB6 ABI boundary.
 Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalars.
 
 | DLL | Export | Arity | Mode | Specific notes |
@@ -21,22 +21,61 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | advapi32 | `RegQueryValueExW` | 6 | emulated | Isolated application registry, not the operating-system registry. |
 | advapi32 | `RegSetValueExA` | 6 | emulated | Isolated application registry, not the operating-system registry. |
 | advapi32 | `RegSetValueExW` | 6 | emulated | Isolated application registry, not the operating-system registry. |
-| gdi32 | `CreatePen` | 3 | browser |  |
-| gdi32 | `CreateSolidBrush` | 1 | browser |  |
-| gdi32 | `DeleteObject` | 1 | browser |  |
-| gdi32 | `Ellipse` | 5 | browser |  |
-| gdi32 | `GetDeviceCaps` | 2 | browser |  |
-| gdi32 | `GetStockObject` | 1 | browser |  |
-| gdi32 | `LineTo` | 3 | browser |  |
-| gdi32 | `MoveToEx` | 4 | browser |  |
-| gdi32 | `Rectangle` | 5 | browser |  |
-| gdi32 | `SelectObject` | 2 | browser |  |
-| gdi32 | `SetBkColor` | 2 | browser |  |
-| gdi32 | `SetBkMode` | 2 | browser |  |
-| gdi32 | `SetPixel` | 4 | browser |  |
-| gdi32 | `SetTextColor` | 2 | browser |  |
-| gdi32 | `TextOutA` | 5 | browser | Browser font metrics and rasterization, not pixel-identical GDI. |
-| gdi32 | `TextOutW` | 5 | browser | Browser font metrics and rasterization, not pixel-identical GDI. |
+| gdi32 | `BitBlt` | 9 | emulated |  |
+| gdi32 | `CreateBitmap` | 5 | emulated |  |
+| gdi32 | `CreateCompatibleBitmap` | 3 | emulated |  |
+| gdi32 | `CreateCompatibleDC` | 1 | emulated |  |
+| gdi32 | `CreateDIBSection` | 6 | emulated |  |
+| gdi32 | `CreatePen` | 3 | emulated |  |
+| gdi32 | `CreateSolidBrush` | 1 | emulated |  |
+| gdi32 | `DeleteDC` | 1 | emulated |  |
+| gdi32 | `DeleteObject` | 1 | emulated |  |
+| gdi32 | `Ellipse` | 5 | emulated |  |
+| gdi32 | `GdiAlphaBlend` | 11 | emulated |  |
+| gdi32 | `GdiFlush` | 0 | emulated | Memory operations and host pixel transfers are synchronous. Browser presentation is independently scheduled. |
+| gdi32 | `GdiTransparentBlt` | 11 | emulated |  |
+| gdi32 | `GetBitmapBits` | 3 | emulated |  |
+| gdi32 | `GetBitmapDimensionEx` | 2 | emulated |  |
+| gdi32 | `GetBkColor` | 1 | emulated |  |
+| gdi32 | `GetBkMode` | 1 | emulated |  |
+| gdi32 | `GetClipBox` | 2 | emulated |  |
+| gdi32 | `GetCurrentObject` | 2 | emulated |  |
+| gdi32 | `GetCurrentPositionEx` | 2 | emulated |  |
+| gdi32 | `GetDeviceCaps` | 2 | emulated |  |
+| gdi32 | `GetDIBits` | 7 | emulated |  |
+| gdi32 | `GetMapMode` | 1 | emulated |  |
+| gdi32 | `GetObjectA` | 3 | emulated |  |
+| gdi32 | `GetObjectType` | 1 | emulated |  |
+| gdi32 | `GetObjectW` | 3 | emulated |  |
+| gdi32 | `GetPixel` | 3 | emulated |  |
+| gdi32 | `GetStockObject` | 1 | emulated |  |
+| gdi32 | `GetStretchBltMode` | 1 | emulated |  |
+| gdi32 | `GetTextColor` | 1 | emulated |  |
+| gdi32 | `GetViewportOrgEx` | 2 | emulated |  |
+| gdi32 | `IntersectClipRect` | 5 | emulated |  |
+| gdi32 | `LineTo` | 3 | emulated |  |
+| gdi32 | `MoveToEx` | 4 | emulated |  |
+| gdi32 | `OffsetViewportOrgEx` | 4 | emulated |  |
+| gdi32 | `PatBlt` | 6 | emulated |  |
+| gdi32 | `PtVisible` | 3 | emulated |  |
+| gdi32 | `Rectangle` | 5 | emulated |  |
+| gdi32 | `RestoreDC` | 2 | emulated |  |
+| gdi32 | `SaveDC` | 1 | emulated |  |
+| gdi32 | `SelectObject` | 2 | emulated |  |
+| gdi32 | `SetBitmapBits` | 3 | emulated |  |
+| gdi32 | `SetBitmapDimensionEx` | 4 | emulated |  |
+| gdi32 | `SetBkColor` | 2 | emulated |  |
+| gdi32 | `SetBkMode` | 2 | emulated |  |
+| gdi32 | `SetDIBits` | 7 | emulated |  |
+| gdi32 | `SetMapMode` | 2 | emulated |  |
+| gdi32 | `SetPixel` | 4 | emulated |  |
+| gdi32 | `SetPixelV` | 4 | emulated |  |
+| gdi32 | `SetStretchBltMode` | 2 | emulated |  |
+| gdi32 | `SetTextColor` | 2 | emulated |  |
+| gdi32 | `SetViewportOrgEx` | 4 | emulated |  |
+| gdi32 | `StretchBlt` | 11 | emulated |  |
+| gdi32 | `TextOutA` | 5 | browser | Canvas/host font metrics; software memory DC text is not implemented. |
+| gdi32 | `TextOutW` | 5 | browser | Canvas/host font metrics; software memory DC text is not implemented. |
 | kernel32 | `CloseHandle` | 1 | emulated |  |
 | kernel32 | `CopyFileA` | 3 | emulated |  |
 | kernel32 | `CopyFileW` | 3 | emulated |  |
@@ -107,6 +146,8 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | kernel32 | `WritePrivateProfileStringA` | 4 | emulated | Project-private INI files. Preserves unrelated lines; does not implement Windows registry IniFileMapping. |
 | kernel32 | `WritePrivateProfileStringW` | 4 | emulated | Project-private INI files. Preserves unrelated lines; does not implement Windows registry IniFileMapping. |
 | kernel32 | `ZeroMemory` | 2 | emulated |  |
+| msimg32 | `AlphaBlend` | 11 | emulated | Packed BLENDFUNCTION; premultiplied 32-bit source alpha. |
+| msimg32 | `TransparentBlt` | 11 | emulated | Color-key transfer; positive extents only. |
 | shell32 | `ShellExecuteA` | 6 | browser | Only explicitly enabled http/https/mailto navigation; no executable launch. |
 | shell32 | `ShellExecuteW` | 6 | browser | Only explicitly enabled http/https/mailto navigation; no executable launch. |
 | user32 | `ClientToScreen` | 2 | browser |  |

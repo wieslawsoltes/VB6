@@ -29,6 +29,7 @@ threading.Thread(target=server.serve_forever, daemon=True).start()
 base = f'http://127.0.0.1:{server.server_port}'
 OFFLINE=os.environ.get("VB6_OFFLINE")=="1"
 results=[]
+GDI_PROBE="(library)=>{const w=library.createWin32(),m=w.memory,call=(name,...a)=>w.invoke('gdi32',name,a);\nconst header=m.alloc(40),out=m.alloc(4),v=m.view(header,40);v.setUint32(0,40,true);v.setInt32(4,2,true);v.setInt32(8,-1,true);v.setUint16(12,1,true);v.setUint16(14,32,true);\nconst bitmap=call('CreateDIBSection',0,header,0,out,0,0),bits=m.readU32(out);m.bytes(bits,8).set([0,0,128,128,200,0,0,255]);\nconst dc=call('CreateCompatibleDC',0),old=call('SelectObject',dc,bitmap);\nconst alpha=w.invoke('msimg32','AlphaBlend',[dc,1,0,1,1,dc,0,0,1,1,0x01ff0000]);\nconst result={alpha,pixel:call('GetPixel',dc,1,0),bytes:Array.from(m.bytes(bits+4,4)),exports:w.manifest().length};\ncall('SelectObject',dc,old);call('DeleteObject',bitmap);call('DeleteDC',dc);m.free(header);m.free(out);result.remaining=m.used;w.dispose();return result;}"
 def check(value, message):
     if not value:
         raise AssertionError(message)
@@ -53,6 +54,33 @@ def verify_app(page):
     check(page.evaluate('vb6Application.vm.lastError?.message || null') is None, 'GDI or window operation failed')
     # Drawn surface pixel in Canvas2D fallback or GPU screenshot: preserve commands.
     check(page.evaluate('vb6Application.forms[0].controlMap.get("piccanvas").surface.commands[0].color') == 11829830, 'COLORREF changed')
+
+    page.locator('[data-control="cmdBitmap"]').click()
+    page.wait_for_function('vb6Application.forms[0].controlMap.get("lblstatus").Caption.startsWith("Writable DIB")')
+    page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
+    raster=page.evaluate("""()=>{
+      const c=vb6Application.forms[0].controlMap.get('piccanvas'),s=c.surface,w=vb6Application.vm.win32.api;
+      s.render();const points=[[20,20],[300,20],[20,70],[300,70]];
+      const pixels=points.map(([x,y])=>Array.from(s.readPixels(x,y,1,1).data));
+      const first=c.hDC,second=c.hDC,readOnly=!Reflect.set(c,'hDC',7);
+      w.invoke('user32','ReleaseDC',[c.hWnd,first]);const replacement=c.hDC;
+      w.invoke('user32','ReleaseDC',[c.hWnd,replacement]);
+      const dpr=devicePixelRatio||1,shown=s.canvas.getContext('2d');
+      const displayed=points.map(([x,y])=>Array.from(shown.getImageData(Math.floor(x*dpr),Math.floor(y*dpr),1,1).data));
+      return {pixels,displayed,readOnly,stable:first===second,recreated:first!==replacement,
+        memory:w.memory.used,bitmapCount:[...w.handles.entries.values()].filter(e=>e.type==='bitmap').length,
+        commandCount:s.commands.length,backend:vb6Application.backend};
+    }""")
+    colors=[[255,0,0,255],[0,255,0,255],[0,0,255,255],[255,255,255,255]]
+    check(raster['pixels']==colors and raster['displayed']==colors,'DIB/window pixel mismatch: '+str(raster))
+    check(raster['readOnly'] and raster['stable'] and raster['recreated'],'hDC lifetime/read-only failure: '+str(raster))
+    check(raster['memory']==0 and raster['bitmapCount']==0,'Bitmap resources leaked: '+str(raster))
+    # Repeated same-region writes must coalesce instead of retaining frames forever.
+    for _ in range(3):
+        page.locator('[data-control="cmdBitmap"]').click()
+        page.wait_for_function('vb6Application.vm.win32.api.memory.used === 0')
+    check(page.evaluate('vb6Application.forms[0].controlMap.get("piccanvas").surface.commands.length')==raster['commandCount'],'Bitmap repaint command growth')
+    check(page.evaluate('vb6Application.vm.lastError?.message || null') is None,'Bitmap declarations failed')
 
 try:
     with sync_playwright() as p:
@@ -104,14 +132,20 @@ try:
             page.goto(base+'/__win32-test-host.html')
             page.add_script_tag(url=base+'/dist/win32-browser.js')
         state=page.evaluate('''async()=>{const w=Win32Compat.createWin32();const p=w.memory.alloc(16);w.memory.putString(p,'€',16);const result={exports:w.manifest().length,text:w.memory.string(p)};w.dispose();return result;}''')
-        check(state['text']=='€' and state['exports']>=170,'Standalone global bundle failed')
+        check(state['text']=='€' and state['exports']>=211,'Standalone global bundle failed')
         results.append({'case':'independent-global-bundle','passed':True,**state})
+        raster=page.evaluate('('+GDI_PROBE+')(Win32Compat)')
+        check(raster['alpha']==1 and raster['bytes']==[100,0,128,255] and raster['remaining']==0,'Global bitmap probe failed: '+str(raster))
+        results.append({'case':'global-dib-alpha-blend','passed':True,**raster})
         if not OFFLINE:
-            state=page.evaluate('''async()=>{const api=await import('/src/runtime/entry.js');const project=await (await fetch('/examples/win32.vb6web')).json();document.body.replaceChildren();const host=await api.mountApplication(project,document.body,{persist:false});const result={state:host.vm.state,handle:host.forms[0].hWnd,error:host.vm.lastError?.message||null};host.dispose();return result;}''')
-            check(state['state']=='running' and state['handle']>0 and state['error'] is None,'ESM SDK integration failed: '+str(state))
+            state=page.evaluate('''async()=>{const api=await import('/src/runtime/entry.js');const project=await (await fetch('/examples/win32.vb6web')).json();document.body.replaceChildren();const host=await api.mountApplication(project,document.body,{persist:false});await host.vm.dispatch(host.forms[0].instance,'cmdBitmap_Click',[]);const c=host.forms[0].controlMap.get('piccanvas');const result={state:host.vm.state,handle:host.forms[0].hWnd,pixel:Array.from(c.surface.readPixels(20,20,1,1).data),error:host.vm.lastError?.message||null};host.dispose();return result;}''')
+            check(state['state']=='running' and state['handle']>0 and state['error'] is None and state['pixel']==[255,0,0,255],'ESM SDK integration failed: '+str(state))
             results.append({'case':'modular-runtime-sdk','passed':True})
             state=page.evaluate('''()=>new Promise((resolve,reject)=>{const source="import {createWin32} from '"+location.origin+"/packages/win32-browser/src/index.js';const w=createWin32();postMessage(w.invoke('kernel32','MulDiv',[7,3,2]));w.dispose();";const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));const worker=new Worker(url,{type:'module'});worker.onmessage=e=>{worker.terminate();URL.revokeObjectURL(url);resolve(e.data);};worker.onerror=e=>{worker.terminate();URL.revokeObjectURL(url);reject(new Error(e.message));};})''')
             check(state==11,'Worker-compatible package failed')
+            raster=page.evaluate('''probe=>new Promise((resolve,reject)=>{const source="import {createWin32} from '"+location.origin+"/packages/win32-browser/src/index.js';postMessage(("+probe+")({createWin32}));";const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'})),worker=new Worker(url,{type:'module'});worker.onmessage=e=>{worker.terminate();URL.revokeObjectURL(url);resolve(e.data);};worker.onerror=e=>{worker.terminate();URL.revokeObjectURL(url);reject(new Error(e.message));};})''',GDI_PROBE)
+            check(raster['alpha']==1 and raster['bytes']==[100,0,128,255] and raster['remaining']==0,'Worker bitmap probe failed: '+str(raster))
+            results.append({'case':'worker-dib-alpha-blend','passed':True,**raster})
             results.append({'case':'module-worker','passed':True})
         else:
             results.append({'case':'modular-runtime-sdk-and-module-worker','skipped':True,'reason':'Local HTTP navigation is disabled by browser policy; tested in CI.'})

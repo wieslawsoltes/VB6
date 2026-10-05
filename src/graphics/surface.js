@@ -99,20 +99,57 @@ export class GraphicsSurface {
   resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){const width=Math.max(1,Math.min(8192,Math.round(this.width*dpr))),height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;}this.dpr=dpr;this.invalidate();}
   add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
   text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}
-  clear(){this.commands=[];this.invalidate();}
+  clear(){this.commands=[];this.rasterBytes=0;this.gdiCanvas=null;this.invalidate();}
+  // Raster transfers are recorded in command order and use the Canvas fallback.
+  // No synchronous GPU readback or CSS/device-pixel coordinate mixing is needed.
+  writePixels(x,y,image){
+    const {width,height,data}=image,bytes=width*height*4;
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<=0||height<=0||bytes>16*1024*1024||data?.length!==bytes)throw new RangeError('Invalid or oversized GDI raster');
+    const last=this.commands.at(-1),replace=last?.kind==='bitmap'&&last.coords[0]===x&&last.coords[1]===y&&last.canvas.width===width&&last.canvas.height===height;
+    const full=x===0&&y===0&&width===this.width&&height===this.height;
+    const retained=full?0:(this.rasterBytes||0)-(replace?last.canvas.width*last.canvas.height*4:0);
+    if(retained+bytes>32*1024*1024||!replace&&!full&&this.commands.length>=50000)throw new RangeError('GDI raster command quota exceeded; use Cls');
+    const canvas=this.container.ownerDocument.createElement('canvas');canvas.width=width;canvas.height=height;
+    const context=canvas.getContext('2d'),pixels=context.createImageData(width,height);pixels.data.set(data);
+    // Ordinary GDI COLORREF drawing has no per-window alpha channel.
+    for(let i=3;i<bytes;i+=4)pixels.data[i]=255;
+    context.putImageData(pixels,0,0);
+    if(full)this.commands=[];else if(replace)this.commands.pop();
+    this.commands.push({kind:'bitmap',coords:[x,y],canvas});this.rasterBytes=retained+bytes;this.invalidate();
+  }
+  rasterize(){
+    if(this.width*this.height>4194304)throw new RangeError('GDI readback surface exceeds four million pixels');
+    if(this.gdiCanvas&&this.gdiPaintRevision===this.paintRevision)return this.gdiCanvas;
+    const canvas=this.gdiCanvas||this.container.ownerDocument.createElement('canvas');
+    canvas.width=this.width;canvas.height=this.height;const ctx=canvas.getContext('2d');
+    ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);
+    if(this.picture)ctx.drawImage(this.picture,0,0);
+    if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}
+    for(const cmd of this.commands){const a=cmd.coords;
+      if(cmd.kind==='bitmap'){ctx.drawImage(cmd.canvas,...a);continue;}
+      ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();
+      if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);
+      else if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}
+      else if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}
+      else if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}
+      else if(cmd.kind==='text'){ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...a);}
+    }
+    this.gdiCanvas=canvas;this.gdiPaintRevision=this.paintRevision;return canvas;
+  }
+  readPixels(x,y,width,height){return this.rasterize().getContext('2d').getImageData(x,y,width,height);}
   setPicture(source){
     if((source||'')===(this.pictureSource||''))return;this.pictureSource=source||'';this.picture=null;this.pictureError=null;
     if(source){const image=new Image();image.onload=()=>{if(!this.disposed&&this.pictureSource===source){this.picture=image;this.invalidate();}};image.onerror=()=>{if(!this.disposed&&this.pictureSource===source){this.pictureError='Image decoding failed';this.invalidate();}};image.src=source;}
     this.invalidate();
   }
   setGrid(spacing=8){this.grid=spacing;this.invalidate();}
-  invalidate(){if(this.dirty||this.disposed)return;this.dirty=true;this.frameWindow=this.container.ownerDocument.defaultView;this.raf=this.frameWindow.requestAnimationFrame(()=>{this.dirty=false;this.render();});}
+  invalidate(){this.paintRevision=(this.paintRevision||0)+1;if(this.dirty||this.disposed)return;this.dirty=true;this.frameWindow=this.container.ownerDocument.defaultView;this.raf=this.frameWindow.requestAnimationFrame(()=>{this.dirty=false;this.render();});}
   vertices(){const out=[];const triangle=(p1,p2,p3,c)=>{for(const p of [p1,p2,p3])out.push(p[0],p[1],...c);};const rect=(x,y,w,h,c)=>{triangle([x,y],[x+w,y],[x,y+h],c);triangle([x+w,y],[x+w,y+h],[x,y+h],c);};const line=(x1,y1,x2,y2,width,c)=>{const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy)||1,ox=-dy/length*width/2,oy=dx/length*width/2;triangle([x1+ox,y1+oy],[x2+ox,y2+oy],[x1-ox,y1-oy],c);triangle([x1-ox,y1-oy],[x2+ox,y2+oy],[x2-ox,y2-oy],c);};
     if(this.grid){const c=rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
     for(const cmd of this.commands){const c=rgba(cmd.color,this.theme),a=cmd.coords;if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else if(cmd.kind==='line')line(...a,cmd.width,c);else if(cmd.kind==='rect'){const x=Math.min(a[0],a[2]),y=Math.min(a[1],a[3]),w=Math.abs(a[2]-a[0]),h=Math.abs(a[3]-a[1]);if(cmd.fill)rect(x,y,w,h,c);else{rect(x,y,w,cmd.width,c);rect(x,y+h-cmd.width,w,cmd.width,c);rect(x,y,cmd.width,h,c);rect(x+w-cmd.width,y,cmd.width,h,c);}}else if(cmd.kind==='circle'){const n=Math.min(180,Math.max(16,Math.round(a[2]*2))),[cx,cy,r]=a;for(let i=0;i<n;i++){const a1=i/n*Math.PI*2,a2=(i+1)/n*Math.PI*2,p1=[cx+Math.cos(a1)*r,cy+Math.sin(a1)*r],p2=[cx+Math.cos(a2)*r,cy+Math.sin(a2)*r];if(cmd.fill)triangle([cx,cy],p1,p2,c);else line(...p1,...p2,cmd.width,c);}}}return new Float32Array(out);}
-  render(){if(this.disposed)return;const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
+  render(){if(this.disposed)return;if(this.rasterBytes){const actual='Canvas2D · GDI bitmap';if(this.renderingBackend!==actual){this.renderingBackend=actual;this.onBackend(actual);}if(this.gpuCanvas)this.gpuCanvas.hidden=true;const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);ctx.save();try{ctx.imageSmoothingEnabled=false;ctx.drawImage(this.rasterize(),0,0);}finally{ctx.restore();}return;}const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
     if(this.backend==='canvas2d'||this.picture){ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);if(this.picture)ctx.drawImage(this.picture,0,0);if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}for(const cmd of this.commands){const a=cmd.coords;ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}}}
     for(const cmd of this.commands)if(cmd.kind==='text'){ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...cmd.coords);}
   }
-  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.releaseGPU();this.canvas.remove();}
+  dispose(){this.disposed=true;this.resizeWindow?.cancelAnimationFrame(this.resizeFrame);this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);(this.frameWindow||this.container.ownerDocument.defaultView).cancelAnimationFrame(this.raf);this.resizeObserver.disconnect();this.releaseGPU();this.commands=[];this.rasterBytes=0;this.gdiCanvas=null;this.canvas.remove();}
 }

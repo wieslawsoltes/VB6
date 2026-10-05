@@ -3,7 +3,7 @@
 import http from 'node:http';
 import {randomBytes, timingSafeEqual} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import {nativeRequest, providerHeaders, providerInfo} from '../src/agents/providers.js';
+import {nativeRequest, providerHeaders, providerInfo, retryAfter} from '../src/agents/providers.js';
 const KEY_NAMES = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', google: 'GEMINI_API_KEY'};
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalThis.fetch} = {}) {
@@ -14,7 +14,7 @@ export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalT
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
     const host = req.headers.host, origin = req.headers.origin;
     if (!host || !/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(host) || !allowed.has(origin)) { res.writeHead(403).end(); return; }
-    res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Expose-Headers', 'Retry-After'); res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin');
     if (req.url !== '/agent') { res.writeHead(404).end(); return; }
     if (req.method === 'OPTIONS') {
       res.setHeader('Access-Control-Allow-Methods', 'POST'); res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization');
@@ -38,7 +38,7 @@ export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalT
       // The browser cannot select another destination or supply authorization headers.
       const request = nativeRequest(data.provider, data.body, {models: data.operation === 'models', cursor: data.cursor});
       const upstream = await fetchImpl(request.url, {method: request.method, body: request.body, headers: providerHeaders(data.provider, keys[data.provider], false), redirect: 'error', signal: controller.signal});
-      if (!upstream.ok) { await upstream.body?.cancel(); res.writeHead(upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502).end(); return; }
+      if (!upstream.ok) { const delay = retryAfter(upstream.headers.get('retry-after')); if (delay) res.setHeader('Retry-After', String(Math.ceil(delay / 1000))); await upstream.body?.cancel(); res.writeHead(upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502).end(); return; }
       res.setHeader('Content-Type', upstream.headers.get('content-type')?.includes('text/event-stream') ? 'text/event-stream' : 'application/json');
       res.writeHead(200); let bytes = 0;
       for await (const chunk of upstream.body) {

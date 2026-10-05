@@ -8,7 +8,7 @@ const DLL='oleaut32.dll';
 const arg=argument=>({argument});
 const addr=address=>({address});
 const literal=value=>({kind:'literal',value});
-export const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && key(p.type)==='double'?8:4;
+export const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && ['double','currency'].includes(key(p.type))?8:4;
 
 export const nativeNumericMethods = {
   floatLiteral(value) {
@@ -45,8 +45,9 @@ export const nativeNumericMethods = {
     }
     return null;
   },
-  floatExpression(node) {
+  floatExpression(node,single=false) {
     const type=this.type(node);this.expression(node);
+    if(type==='currency'){this.currencyToFloat(single);return;}
     if(FLOAT_TYPES.has(type))return;
     const out=this.floatWorkspace();this.x.push();this.rawStorageAddress(out);this.x.emit(0x59).push().emit(0x51).call(N+(type==='string'?'parse':'from-int'));
   },
@@ -66,7 +67,7 @@ export const nativeNumericMethods = {
   },
   floatToInteger() {this.x.push().call(N+'integer');},
   floatToString(type) {this.x.emit(0x89,0xc3).push(key(type)==='single'?1:0).emit(0x53).call(N+'string');this.ownString();},
-  truth(node) {this.expression(node);if(FLOAT_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
+  truth(node) {this.expression(node);if(this.type(node)==='currency')this.x.push().call('native:currency:boolean');else if(FLOAT_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
   numericExpression(node) {
     const x=this.x;
     if(node.kind==='literal'&&FLOAT_TYPES.has(this.type(node))){x.value(this.floatLiteral(node.value));return true;}
@@ -140,13 +141,16 @@ export const nativeNumericMethods = {
         if(node.kind==='group')this.fail('Parenthesized ByRef temporaries are not yet lowered');
         const v=this.variable(node);if(!v||v.nativeArray&&!v.elementOf||key(v.type)!==key(p.type))this.fail('ByRef native argument must be a scalar of the exact declared type');
         if(v.fixedLength)this.fail('Fixed-length String ByRef copy-back is not yet lowered');const pin=this.address(v);if(pin)callPins.push(pin);
-      }else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node);this.storeFloat(slot);slots.push(slot);return;}
+      }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots.push(slot);return;}
+      else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots.push(slot);return;}
       else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
       x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots.push(slot);
     });
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}
     if(target.proc)x.call(target.label);else x.invoke(target.dll,target.symbol);
-    if(signature.kind==='function'&&FLOAT_TYPES.has(key(signature.returnType))){
+    if(signature.kind==='function'&&key(signature.returnType)==='currency'){
+      this.captureCurrencyReturn();if(target.proc)this.checkNativeError();
+    }else if(signature.kind==='function'&&FLOAT_TYPES.has(key(signature.returnType))){
       const out=this.floatWorkspace();this.rawStorageAddress(out);x.emit(0xdd,0x18); // Pop ABI result before any helper/error check.
       if(target.proc)this.checkNativeError();x.call(N+'finite');
       if(key(signature.returnType)==='single')this.roundSingle();
