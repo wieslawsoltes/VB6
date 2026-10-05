@@ -1,0 +1,30 @@
+name: Win32 integration review
+on:
+  push:
+    branches: [feature/win32-browser-compat]
+    paths: [.github/workflows/win32-integration-review.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Capture source history and merge diagnostics
+        run: |
+          git bundle create /tmp/vb6-win32-review.bundle HEAD refs/remotes/origin/main
+          git config user.name 'Integration review'
+          git config user.email 'integration@users.noreply.github.com'
+          git merge --no-commit --no-ff origin/main > /tmp/merge-review.txt 2>&1 || true
+          git diff --name-only --diff-filter=U >> /tmp/merge-review.txt
+          cat /tmp/merge-review.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-integration-source
+          path: |
+            /tmp/vb6-win32-review.bundle
+            /tmp/merge-review.txt
+          retention-days: 7
