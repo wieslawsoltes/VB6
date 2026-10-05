@@ -12,7 +12,8 @@ PUBLISHER={'id':'Publisher','name':'Publisher','kind':'class','code':'Public Eve
 def with_events_dropdown(p):
     setup(p,'Private WithEvents source As Publisher',others=[PUBLISHER])
     objects=p.get_by_role('combobox',name='Object',exact=True)
-    check('source' in objects.inner_text(),objects.inner_text());objects.select_option('source')
+    choices=objects.locator('option').all_text_contents()
+    check('source' in choices,choices);objects.select_option('source')
     selector=p.get_by_role('combobox',name='Procedure',exact=True)
     check(selector.input_value()=='');selector.select_option('event:Changed')
     p.wait_for_function('vb6Studio.editor.text.includes("Private Sub source_Changed(ByVal Value As Long)")')
@@ -31,10 +32,10 @@ def single_timer_event(p):
 def live_event_declarations(p):
     setup(p,'Private WithEvents source As Publisher',others=[PUBLISHER])
     p.evaluate('()=>{const e=vb6Studio.editor;const at=e.text.indexOf("source");e.replaceGlobal("updated",at,at+6);}')
-    choices=p.get_by_role('combobox',name='Object',exact=True).inner_text()
+    choices=p.get_by_role('combobox',name='Object',exact=True).locator('option').all_text_contents()
     check('updated' in choices and 'source' not in choices,choices)
     p.evaluate('()=>{const e=vb6Studio.editor;const at=e.text.indexOf("WithEvents ");e.replaceGlobal("",at,at+11);}')
-    check('updated' not in p.get_by_role('combobox',name='Object',exact=True).inner_text())
+    check('updated' not in p.get_by_role('combobox',name='Object',exact=True).locator('option').all_text_contents())
 
 def interface_dropdown(p):
     contract={'id':'IThing','name':'IThing','kind':'class','code':'Public Function Read(ByRef Key As Long) As String\nEnd Function\nPublic Property Get Value() As Long\nEnd Property\nPublic Property Let Value(ByVal Value As Long)\nEnd Property'}
