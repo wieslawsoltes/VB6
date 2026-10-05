@@ -1,0 +1,83 @@
+name: Integrate reviewed input fix
+on:
+  push:
+    branches: [fix/form-keyboard-mouse-input]
+    paths: [.github/workflows/integrate-input-fix.yml]
+permissions:
+  contents: write
+concurrency:
+  group: integrate-reviewed-input-fix
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/form-keyboard-mouse-input'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Integrate only the reviewed source combination
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          import hashlib, subprocess
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          base='16c8ef706c525de141e1d5d547b3cf14b45beeea'
+          expected_parent='76ee43aa9dcff47047bf6427c9a95ba19732e668'
+          head=git('rev-parse','HEAD')
+          assert git('rev-parse','HEAD^')==expected_parent, 'Unexpected branch parent'
+          assert git('ls-remote','origin','refs/heads/fix/form-keyboard-mouse-input').split()[0]==head, 'Branch changed'
+          assert git('ls-remote','origin','refs/heads/main').split()[0]==base, 'Main changed; review new source before integration'
+          def read(ref,path):
+              return subprocess.check_output(['git','show',ref+':'+path],text=True)
+          p='src/controls/controls.js';s=read(base,p);f=read(head,p)
+          s="import {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput} from './input.js';\n"+s
+          for prop,dim in [('ScaleWidth','Width'),('ScaleHeight','Height')]:
+              old=f"if(key==='{prop}')return this.props.{prop}??this.node.client{dim}*units(this.props.ScaleMode||1);"
+              new=f"if(key==='{prop}')return this.props.{prop}??(this.content||this.node).client{dim}*units(this.props.ScaleMode??1);"
+              assert s.count(old)==1;s=s.replace(old,new)
+          for begin,end in [('  attachEvents(){','  build(){const n='),('  attachEvents(){if(this.design)return;this.content','  refresh(){if(!this.content)'),('  Show(){','  Hide(){')]:
+              a=s.index(begin);b=s.index(end,a)
+              fb='  attachEvents(){if(this.design)return;bindMouseInput' if 'this.content' in begin else begin
+              fa=f.index(fb);fe=f.index(end,fa);s=s[:a]+f[fa:fe]+s[b:]
+          combined={p:s}
+          p='src/runtime/vm.js';s=read(base,p);f=read(head,p)
+          a=s.index('  setState(');b=s.index('\n',a);fa=f.index('  setState(');fb=f.index('\n',fa);s=s[:a]+f[fa:fb]+s[b:]
+          a=f.index('  // Trusted host input');b=f.index('  dispatch(',a);idx=s.index('  dispatch(');s=s[:idx]+f[a:b]+s[idx:];combined[p]=s
+          expected={'src/controls/controls.js':'8401023c8c3fdf4eaa1d4103801c560494606b551f9b60bc16bb65960038c14b','src/runtime/vm.js':'b1f3919f570be2647991f6e3e4511ba54b0d2653209e9f76c80eee928c8235f2'}
+          for path,text in combined.items():
+              assert hashlib.sha256(text.encode()).hexdigest()==expected[path], 'Source differs from locally tested integration: '+path
+          result=subprocess.run(['git','merge','--no-commit','--no-ff',base])
+          assert result.returncode in (0,1)
+          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
+          for path in conflicts:
+              if path in combined:continue
+              if path=='.github/workflows/input-designer.yml':
+                  subprocess.run(['git','checkout','--ours','--',path],check=True)
+              elif path.startswith('dist/') or path=='src/exporter/runtime-payload.js':
+                  subprocess.run(['git','checkout',base,'--',path],check=True)
+              else:raise RuntimeError('Unreviewed source conflict: '+path)
+              subprocess.run(['git','add','--',path],check=True)
+          for path,text in combined.items():
+              Path(path).write_text(text);subprocess.run(['git','add','--',path],check=True)
+          assert not git('diff','--name-only','--diff-filter=U'), 'Unresolved source conflict'
+          Path('.github/workflows/integrate-input-fix.yml').unlink()
+          Path('/tmp/input-reviewed-head').write_text(head)
+          PY
+          npm run build
+          npm test
+          git add -u
+          git diff --cached --check -- src/controls src/runtime/vm.js tests/runtime-input.test.mjs tests/runtime-input-order.test.mjs tests/runtime-input-buttons.test.mjs
+          test "$(git ls-remote origin refs/heads/fix/form-keyboard-mouse-input | cut -f1)" = "$(cat /tmp/input-reviewed-head)"
+          git commit -m 'fix(input): integrate current main and rebuild tested runtime distributions'
+          git push origin HEAD:refs/heads/fix/form-keyboard-mouse-input
