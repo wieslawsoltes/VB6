@@ -1,23 +1,72 @@
-name: Data access development
+name: Data source integration
 on:
   push:
     branches: [feature/data-sources]
+    paths: ['.data-transfer/READY.json']
 permissions:
-  contents: read
+  contents: write
 jobs:
-  integration-baseline:
+  integrate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 92a955acd6ad0c21b41d43a606c9adcc5e16ff49
-      - name: Archive verified integration baseline
-        run: |
-          mkdir -p /tmp/vb6-data-baseline
-          git archive HEAD > /tmp/vb6-data-baseline/main.tar
-          git rev-parse HEAD > /tmp/vb6-data-baseline/main-sha.txt
-      - uses: actions/upload-artifact@v4
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
-          name: data-integration-baseline
-          path: /tmp/vb6-data-baseline
+          node-version: 22
+      - name: Verify and apply reviewed source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/feature/data-sources | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          python - <<'PY'
+          import base64, hashlib, json, pathlib, subprocess
+          root = pathlib.Path('.data-transfer')
+          spec = json.loads((root/'READY.json').read_text())
+          assert spec['base'] == '92a955acd6ad0c21b41d43a606c9adcc5e16ff49'
+          dictionary = b''
+          for path in spec['paths']:
+              assert not path.startswith('/') and '..' not in path.split('/')
+              result = subprocess.run(['git','show',spec['base']+':'+path], capture_output=True)
+              if result.returncode == 0: dictionary += result.stdout
+          assert hashlib.sha256(dictionary).hexdigest() == spec['dictionary_sha256']
+          pathlib.Path('/tmp/data-dictionary').write_bytes(dictionary)
+          packed = base64.b64decode(''.join((root/f'part{i}.txt').read_text() for i in range(1,spec['parts']+1)), validate=True)
+          pathlib.Path('/tmp/data-source.zst').write_bytes(packed)
+          subprocess.run(['zstd','-d','--patch-from=/tmp/data-dictionary','/tmp/data-source.zst','-o','/tmp/data-source.patch'],check=True)
+          patch = pathlib.Path('/tmp/data-source.patch').read_bytes()
+          assert hashlib.sha256(patch).hexdigest() == spec['patch_sha256']
+          PY
+          git merge --no-edit 6e6162cbad5edcad474a2121e65e586eb53a687a
+          git apply --3way --index /tmp/data-source.patch
+      - name: Reproduce pinned engine and all distributions
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vb6-data-engine
+          (cd /tmp/vb6-data-engine && npm pack sql.js@1.14.2 --ignore-scripts && tar xf sql.js-1.14.2.tgz)
+          node tools/vendor-sqlite.mjs /tmp/vb6-data-engine/package
+          npm run build
+          npm test | tee /tmp/data-node-tests.log
+      - name: Publish validated feature commit and remove integration transport
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/feature/data-sources | cut -f1)" = "$GITHUB_SHA"
+          git rm -r .data-transfer .github/workflows/data-access-work.yml
+          git add -A
+          git commit -m 'feat(data): classic Data Environment, SQLite, REST and native gateway in shipped apps'
+          git push origin HEAD:refs/heads/feature/data-sources
+          mkdir -p /tmp/data-integration-result
+          git rev-parse HEAD > /tmp/data-integration-result/head.txt
+          git archive HEAD | gzip > /tmp/data-integration-result/source.tar.gz
+          cp /tmp/data-node-tests.log /tmp/data-integration-result/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-integration-result
+          path: /tmp/data-integration-result
+          if-no-files-found: ignore
           retention-days: 7
