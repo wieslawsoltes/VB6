@@ -1,0 +1,52 @@
+name: IntelliSense keyboard test migration
+on:
+  push:
+    branches: [feature/classic-vb6-intellisense]
+permissions:
+  contents: write
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/feature/classic-vb6-intellisense'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply reviewed keyboard regression
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('tools/browser-windows-tests.py');s=p.read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='7c0f68c2c81a683031626079bed623bfa291e3418a2e18a104dff2f30c0d2f60', 'Source changed; review before applying'
+          old="""        popup.keyboard.press('Enter')
+                  self.assertIn('    localNumber\\nEnd Sub', self.js('vb6Studio.activeModule.code'))
+                  popup.keyboard.press('Alt+t')"""
+          # The Python multiline literal above inherits eight extra spaces
+          # from its presentation indentation; normalize only those two lines.
+          old=old.replace('\n                  ','\n        ')
+          new="""        # Tab commits in place; classic source-editor Enter also starts a
+                  # new indented line. Keep both contracts explicit in a detached view.
+                  popup.keyboard.press('Tab')
+                  self.assertEqual('Public Sub Main()\\n    Dim localNumber As Long\\n    localNumber\\nEnd Sub', self.js('vb6Studio.activeModule.code'))
+                  popup.keyboard.press('Control+z')
+                  self.assertIn('    localN\\nEnd Sub', self.js('vb6Studio.activeModule.code'))
+                  self.js('vb6Studio.editor.goToLine(3,11)')
+                  popup.keyboard.press('Control+j')
+                  popup.keyboard.press('Enter')
+                  self.assertEqual('Public Sub Main()\\n    Dim localNumber As Long\\n    localNumber\\n    \\nEnd Sub', self.js('vb6Studio.activeModule.code'))
+                  self.assertEqual(4, self.js('vb6Studio.editor.cursor().line'))
+                  self.assertEqual(5, self.js('vb6Studio.editor.cursor().column'))
+                  popup.keyboard.press('Alt+t')"""
+          new=new.replace('\n                  ','\n        ')
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          assert hashlib.sha256(s.encode()).hexdigest()=='663072abe9283fcdb666607dea17be6d8d123295b2bbd53fd1670bedede5c0df'
+          p.write_text(s)
+          PY
+          python -m py_compile tools/browser-windows-tests.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/intellisense-test-migration.yml
+          git add tools/browser-windows-tests.py
+          git commit -m 'test(editor): verify Tab commit, undo and Enter indentation in detached windows'
+          git push origin HEAD:feature/classic-vb6-intellisense
