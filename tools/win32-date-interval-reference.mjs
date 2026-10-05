@@ -57,7 +57,10 @@ export function writeIntervalReference(directory='validation/date-intervals') {
  fs.mkdirSync(directory,{recursive:true});
  const lines=['Option Explicit','Dim result, savedError','Function Encode(value)',' Dim i, n, text',' text = ""',' For i = 1 To Len(value)','  n = AscW(Mid(value, i, 1))','  If n < 0 Then n = n + 65536','  text = text & Right("0000" & Hex(n), 4)',' Next',' Encode = text','End Function','On Error Resume Next'];
  cases.forEach(({expression,kind},i)=>{
-  lines.push('Err.Clear','result = '+expression,'savedError = Err.Number','If savedError <> 0 Then',` WScript.Echo "${i}|error|" & savedError`,'Else');
+  // The native destination is typed Long. VBScript can return a wider Double
+  // for DateDiff; apply the same destination coercion, retaining overflow cases.
+  const assigned=kind==='long'?`CLng(${expression})`:expression;
+  lines.push('Err.Clear','result = '+assigned,'savedError = Err.Number','If savedError <> 0 Then',` WScript.Echo "${i}|error|" & savedError`,'Else');
   if(kind==='string')lines.push(` WScript.Echo "${i}|string|" & Encode(CStr(result))`);
   else lines.push(` WScript.Echo "${i}|${kind}|" & Replace(CStr(CDbl(result)), ",", ".")`);
   lines.push('End If');
@@ -78,24 +81,61 @@ export function readIntervalRecords(text) {
   }else{
    if(!/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:E[+-]?\d+)?$/i.test(m[3]))throw Error('Invalid numeric reference');
    value=Number(m[3]);
-   if(!Number.isFinite(value)||m[2]==='error'&&(!Number.isInteger(value)||value<=0||value>65535)||m[2]==='long'&&(!Number.isInteger(value)||value< -2147483648||value>2147483647))throw Error('Out-of-range reference');
+   if(!Number.isFinite(value)||m[2]==='error'&&(!Number.isInteger(value)||value<=0||value>65535)||m[2]==='long'&&(!Number.isInteger(value)||value< -2147483648||value>2147483647))throw Error('Out-of-range reference at '+i+': '+line);
   }
   return {...cases[i],outcome:m[2],value,index:i};
  });
 }
 export function intervalProject(records,name='AotDateIntervals') {
- const code=['Dim numberResult As Long, dateResult As Date, textResult As String, actualError As Long'];
+ const code=['Dim numberResult As Long, dateResult As Date, textResult As String, actualError As Long, firstFailure As Long'];
+ // Test-only result file: every expression is measured, even when an earlier one
+ // fails. This prevents one failing case from hiding the rest of a batch.
+ code.push('output = CreateFileW(StrPtr("interval-actual.txt"), &H40000000&, 0, 0, 2, 128, 0)',
+  'If output = -1 Then ExitProcess 250');
  const variable={long:'numberResult',date:'dateResult',string:'textResult'};
  records.forEach((r,i)=>{
-  const v=variable[r.kind];
-  code.push('On Error Resume Next','Err.Clear',v+' = '+r.expression,'actualError = Err.Number','Err.Clear','On Error GoTo 0',`If actualError <> ${r.outcome==='error'?r.value:0} Then ExitProcess ${i+1}`);
-  if(r.outcome==='error')return;
-  if(r.kind==='date')code.push(`If Abs(CDbl(${v}) - (${r.value})) > 0.000000001 Then ExitProcess ${i+1}`);
-  else if(r.kind==='long')code.push(`If ${v} <> ${r.value} Then ExitProcess ${i+1}`);
-  else code.push(`If ${v} <> "${r.value.replaceAll('"','""')}" Then ExitProcess ${i+1}`);
+  const v=variable[r.kind],id=r.index??i;
+  code.push('On Error Resume Next','Err.Clear',v+' = '+r.expression,'actualError = Err.Number','Err.Clear','On Error GoTo 0',
+   'If actualError <> 0 Then',` Record "${id}|error|" & CStr(actualError)`, 'Else',
+   ` Record "${id}|${r.kind}|" & ${r.kind==='date'?`CStr(CDbl(${v}))`:r.kind==='string'?`Encode(${v})`:`CStr(${v})`}`, 'End If',
+   `If actualError <> ${r.outcome==='error'?r.value:0} Then`, ` If firstFailure = 0 Then firstFailure = ${i+1}`,'Else');
+  if(r.outcome!=='error'){
+   const comparison=r.kind==='date'?`Abs(CDbl(${v}) - (${r.value})) > 0.000000001`:
+    r.kind==='long'?`${v} <> ${r.value}`:`${v} <> "${r.value.replaceAll('"','""')}"`;
+   code.push(` If ${comparison} Then`, `  If firstFailure = 0 Then firstFailure = ${i+1}`, ' End If');
+  }
+  code.push('End If');
  });
- code.push('ExitProcess 0');
- const p=newProject(name);p.startup='Sub Main';p.modules=[{id:'main',name:'Main',kind:'module',code:'Option Explicit\nPrivate Declare Sub ExitProcess Lib "kernel32" (ByVal code As Long)\nSub Main()\n'+code.join('\n')+'\nEnd Sub'}];
+ code.push('If CloseHandle(output) = 0 Then ExitProcess 252','ExitProcess firstFailure');
+ const prelude=`Option Explicit
+Private output As Long
+Private Declare Sub ExitProcess Lib "kernel32" (ByVal code As Long)
+Private Declare Function CreateFileW Lib "kernel32" (ByVal filename As Long, ByVal access As Long, ByVal sharing As Long, ByVal security As Long, ByVal creation As Long, ByVal flags As Long, ByVal template As Long) As Long
+Private Declare Function WriteFile Lib "kernel32" (ByVal handle As Long, ByVal buffer As Long, ByVal count As Long, ByRef written As Long, ByVal overlapped As Long) As Long
+Private Declare Function CloseHandle Lib "kernel32" (ByVal handle As Long) As Long
+Private Sub Record(ByVal text As String)
+ Dim written As Long
+ text = text & ChrW(13) & ChrW(10)
+ If WriteFile(output, StrPtr(text), Len(text) * 2, written, 0) = 0 Then ExitProcess 251
+ If written <> Len(text) * 2 Then ExitProcess 251
+End Sub
+Private Function Encode(ByVal text As String) As String
+ Dim i As Long, value As Long, result As String, digits As String, part As Long, j As Long
+ For i = 1 To Len(text)
+  value = AscW(Mid$(text, i, 1))
+  If value < 0 Then value = value + 65536
+  digits = ""
+  For j = 1 To 4
+   part = value Mod 16
+   digits = Mid$("0123456789ABCDEF", part + 1, 1) & digits
+   value = value \\ 16
+  Next
+  result = result & digits
+ Next
+ Encode = result
+End Function
+`;
+ const p=newProject(name);p.startup='Sub Main';p.modules=[{id:'main',name:'Main',kind:'module',code:prelude+'Sub Main()\n'+code.join('\n')+'\nEnd Sub'}];
  return p;
 }
 export function writeIntervalFixtures(directory='validation/date-intervals') {

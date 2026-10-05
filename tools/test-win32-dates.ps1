@@ -1,6 +1,6 @@
 param([string]$Directory = 'validation/dates', [string]$Program = 'AotDates',
  [string]$Manifest = 'date-build.json', [string]$ReportName = 'date-execution.json',
- [string]$Dependency = '', [ValidateRange(0,2147483647)][int]$LifetimeCycles = 2000)
+ [string]$Dependency = '', [string]$ResultFile = '', [ValidateRange(0,2147483647)][int]$LifetimeCycles = 2000)
 $ErrorActionPreference = 'Stop'
 # Test-only Windows interop. The generated PE contains no CLR or script host.
 if(-not ('DateWindowsProbe' -as [type])) { Add-Type @'
@@ -20,7 +20,7 @@ public static class DateWindowsProbe {
 '@
 }
 $report = [ordered]@{ ok=$false; platform=[Environment]::OSVersion.VersionString; hostArchitecture=$env:PROCESSOR_ARCHITECTURE; culture=[Globalization.CultureInfo]::CurrentCulture.Name; executableArchitecture='x86'; checks=@() }
-foreach ($name in @($Program,$Manifest,$ReportName,$Dependency)) {
+foreach ($name in @($Program,$Manifest,$ReportName,$Dependency,$ResultFile)) {
  if ($name -and $name -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Invalid test artifact name' }
 }
 $path = (Resolve-Path $Directory).Path
@@ -48,6 +48,10 @@ try {
  $null=$process.Handle
  if(-not $process.WaitForExit(30000)){throw ('Date execution timed out: '+[DateWindowsProbe]::Diagnostics($process.Id))}
  $report.exitCode=$process.ExitCode
+ if($ResultFile){
+  if(-not (Test-Path -LiteralPath (Join-Path $clean $ResultFile) -PathType Leaf)){throw 'Missing native result file'}
+  $expectedFiles++
+ }
  if($process.ExitCode -ne 0){
   $index=$process.ExitCode
   $meaning=if($index -gt 0 -and $index -le $plan.checks.Count){$plan.checks[$index-1]}elseif($index -eq 240){'Expected array lock error 10 in nested ByRef call'}else{'Native failure or unhandled runtime error'}
@@ -58,6 +62,7 @@ try {
  if($LifetimeCycles -gt 0){$report.checks += "$LifetimeCycles Date lifetime or ABI cycles completed"}
  if(@(Get-ChildItem $clean -Force).Count -ne $expectedFiles){throw 'Execution extracted unexpected files beside the EXE'}
  if($Dependency){$report.checks += 'No extracted files or undeclared adjacent dependencies'}
+ elseif($ResultFile){$report.checks += 'Only the EXE and its explicitly requested result file; no extracted runtime'}
  else{$report.checks += 'No adjacent runtime, DLL or extracted application file required'}
  $report.ok=$true
 } catch {
@@ -66,6 +71,9 @@ try {
 } finally {
  try {if($process.Id -and -not $process.HasExited){$process.Kill();$process.WaitForExit(5000)|Out-Null}}catch{}
  $process.Dispose()
+ if($ResultFile -and (Test-Path -LiteralPath (Join-Path $clean $ResultFile) -PathType Leaf)){
+  Copy-Item -LiteralPath (Join-Path $clean $ResultFile) -Destination (Join-Path $path ($Program+'.actual.txt'))
+ }
  $report | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $path $ReportName)
  Remove-Item -Path $clean -Recurse -Force -ErrorAction SilentlyContinue
  $report | ConvertTo-Json -Depth 8 | Write-Host

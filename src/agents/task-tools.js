@@ -23,7 +23,7 @@ export function taskTools(agent, askUser) {
       if (!args.steps.length || args.steps.some(step => !/^[A-Za-z0-9_-]{1,32}$/.test(step.id)) || new Set(args.steps.map(step => step.id)).size !== args.steps.length || args.steps.filter(step => step.status === 'in_progress').length > 1 || args.steps.some(step => !step.title.trim()))
         throw new McpError(-32602, 'Use unique step IDs, nonempty titles and at most one in-progress step.');
       agent.plan = {revision: agent.plan.revision + 1, explanation: args.explanation || '', steps: structuredClone(args.steps)};
-      agent.emit('plan', 'Task plan updated (' + agent.plan.steps.filter(step => step.status === 'completed').length + '/' + agent.plan.steps.length + ' complete).');
+      agent.emit('plan', 'Task plan updated (' + agent.plan.steps.filter(step => step.status === 'completed').length + '/' + agent.plan.steps.length + ' complete).', {plan: structuredClone(agent.plan)});
       return structuredClone(agent.plan);
     }
   }];

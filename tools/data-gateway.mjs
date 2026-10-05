@@ -1,6 +1,7 @@
 /** Authenticated, server-owned named profiles. Never accepts connection strings or credentials from clients. */
 import http from 'node:http';import fs from 'node:fs/promises';import path from 'node:path';import {pathToFileURL} from 'node:url';import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {createNativeDriver} from './data/drivers.mjs';
+import {positionalSQL} from './data/positional.mjs';
 import {assertData,DATA_LIMITS} from '../src/data/common.js';
 import {encodeResult,decodeCell} from '../src/data/wire.js';
 function matches(a,b){const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);}
@@ -29,10 +30,12 @@ export function createDataGateway({profiles,token,origins=[],ttlMs=60000,maxSess
   try{
    const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;assertData(bytes<=1024*1024,'Request exceeds limit',7);chunks.push(chunk);}
    const input=JSON.parse(Buffer.concat(chunks).toString('utf8'));assertData(input&&typeof input==='object'&&!Array.isArray(input),'Invalid request');
-   assertData(Object.keys(input).every(key=>['operation','profile','session','text','parameters','kind'].includes(key)),'Unknown request property');
+   assertData(Object.keys(input).every(key=>['operation','profile','session','text','parameters','kind','parameterStyle'].includes(key)),'Unknown request property');
    const name=input.profile;assertData(typeof name==='string'&&Object.hasOwn(profiles,name),'Unknown profile',70);const profile=profiles[name],operation=input.operation;
    assertData(['execute','schema','begin','commit','rollback'].includes(operation),'Unknown operation');assertData(input.session==null||typeof input.session==='string','Invalid session');
    assertData(input.kind==null||[4,20].includes(Number(input.kind)),'Unsupported schema kind',3251);
+   assertData(input.parameterStyle==null||['native','odbc'].includes(input.parameterStyle),'Unknown parameter style',5);
+   assertData(input.parameterStyle==null||operation==='execute','Parameter style applies only to execution',5);
    if(input.session){session=sessions.get(input.session);assertData(session&&session.profile===name&&session.origin===(origin||''),'Unknown session',70);assertData(!session.busy,'Session is busy',3197);session.busy=true;session.used=Date.now();driver=session.driver;}
    else{
     assertData(!['commit','rollback'].includes(operation),'A transaction session is required',3246);
@@ -47,7 +50,12 @@ export function createDataGateway({profiles,token,origins=[],ttlMs=60000,maxSess
     assertData(named||profile.allowAdHoc===true,'Only server-allowlisted commands may be executed on this profile',70);
     const text=typeof named==='string'?named:named?.text||input.text;
     if(named?.parameterCount!=null)assertData((input.parameters||[]).length===named.parameterCount,'Parameter count does not match server command');
-    const raw=await driver.execute(text,(input.parameters||[]).map(decodeCell));
+    // A named command's dialect is server-owned; clients cannot reinterpret it.
+    const style=named?(typeof named==='object'?named.parameterStyle||'native':'native'):input.parameterStyle||'native';
+    assertData(!named||input.parameterStyle==null||input.parameterStyle===style,'Parameter style differs from the server-owned command',5);
+    assertData(['native','odbc'].includes(style),'Invalid server command parameter style',5);
+    const sql=style==='odbc'?positionalSQL(text,profile.driver,(input.parameters||[]).length):text;
+    const raw=await driver.execute(sql,(input.parameters||[]).map(decodeCell));
     assertData(Array.isArray(raw.columns)&&Array.isArray(raw.values)&&raw.columns.length<=1024&&raw.values.length<=DATA_LIMITS.rows&&raw.columns.length*raw.values.length<=DATA_LIMITS.cells,'Result exceeds limits',7);result=encodeResult(raw);
    }else if(operation==='schema')result=encodeResult(await driver.schema(Number(input.kind||20)));
    else if(operation==='begin'){

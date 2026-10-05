@@ -56,3 +56,30 @@ test('every independent reference expression is accepted by native code generati
   const result=compileWin32(intervalProject(records));assert.equal(result.bytes[0],77);
  }
 });
+
+test('independent reference applies the same Long destination conversion without dropping wide DateDiff cases',async()=>{
+ const fs=await import('node:fs');const os=await import('node:os');const path=await import('node:path');
+ const {writeIntervalReference}=await import('../tools/win32-date-interval-reference.mjs');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'native-interval-reference-'));
+ try {
+  writeIntervalReference(dir);const source=fs.readFileSync(path.join(dir,'interval-reference.vbs'),'utf8');
+  const diff='DateDiff("s", DateSerial(100,1,1), DateSerial(9999,12,31))';
+  assert.ok(DATE_INTERVAL_CONTRACTS.some(c=>c.expression===diff));
+  assert.ok(source.includes('result = CLng('+diff+')\r\nsavedError = Err.Number'));
+  assert.ok(source.includes('result = DateAdd("yyyy", -2.5, DateSerial(100,1,1))'));
+  assert.equal((source.match(/savedError = Err.Number/g)||[]).length,DATE_INTERVAL_CONTRACTS.length);
+ } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('malformed out-of-range records remain errors and name the failed reference index',()=>{
+ const records=DATE_INTERVAL_CONTRACTS.map((c,i)=>`${i}|${c.kind}|${c.kind==='string'?'':c.kind==='date'?'1.25':'1'}`);
+ const index=DATE_INTERVAL_CONTRACTS.findIndex(c=>c.kind==='long');records[index]=`${index}|long|3913228800`;
+ assert.throws(()=>readIntervalRecords(records.join('\n')),new RegExp('Out-of-range reference at '+index));
+});
+test('native differential batches record every actual result, not only the first failed expression',()=>{
+ const records=DATE_INTERVAL_CONTRACTS.slice(0,3).map((r,index)=>({...r,index:100+index,outcome:'date',value:1}));
+ const p=intervalProject(records),source=p.modules[0].code;
+ assert.equal((source.match(/actualError = Err.Number/g)||[]).length,3);
+ assert.ok(source.includes('Record "100|error|"'));assert.ok(source.includes('Record "102|date|"'));
+ assert.ok(source.includes('ExitProcess firstFailure'));assert.ok(!source.includes('Then ExitProcess 1'));
+ assert.ok(compileWin32(p).report.imports.some(i=>i.symbol==='WriteFile'));
+});

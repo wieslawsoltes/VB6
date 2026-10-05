@@ -26,7 +26,7 @@ $plan=Get-Content (Join-Path $directory 'interval-programs.json') -Raw | Convert
 $failures=@()
 foreach($program in $plan.programs){
  try {
-  ./tools/test-win32-dates.ps1 -Directory $directory -Program $program -Manifest ($program+'.json') -ReportName ($program+'-execution.json') -LifetimeCycles 0
+  ./tools/test-win32-dates.ps1 -Directory $directory -Program $program -Manifest ($program+'.json') -ReportName ($program+'-execution.json') -ResultFile 'interval-actual.txt' -LifetimeCycles 0
  } catch {$failures+=($_.Exception.Message);Write-Host $_.Exception.Message}
 }
 @{ok=($failures.Count -eq 0);count=$plan.count;failures=$failures;programs=$plan.programs;reference=$plan.reference;dateToleranceDays=$plan.dateToleranceDays} | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $directory 'interval-validation.json')
