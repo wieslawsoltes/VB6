@@ -32,7 +32,7 @@ for (const provider of providers) test(`agents integration: ${provider} exposes 
   assert.equal(adapter.tools.length, 114);
   await agent.run({provider, model: 'test-model', prompt: 'Inspect the available tools.', transport: async (body, {receive}) => {
     const definitions = provider === 'google' ? body.tools[0].functionDeclarations : body.tools;
-    assert.deepEqual(definitions.map(tool => tool.name).sort(), adapter.tools.map(tool => tool.name.replaceAll('.', '_')).sort());
+    assert.deepEqual(definitions.map(tool => tool.name).sort(), agent.tools.map(tool => tool.name.replaceAll('.', '_')).sort());
     for (const name of ['vb6_project_entries', 'vb6_project_group', 'vb6_project_select', 'vb6_project_startup', 'vb6_build_targets', 'vb6_build_create', 'vb6_build_read', 'vb6_build_release'])
       assert.ok(definitions.some(tool => tool.name === name), name);
     receive(reply(provider));

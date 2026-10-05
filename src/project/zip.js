@@ -1,3 +1,4 @@
+import {decodeNativeBytes} from './native-text.js';
 /** ZIP interoperability without a runtime dependency. Writes STORE; reads STORE/DEFLATE. */
 const encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true});
 const cp437='ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\xa0';
@@ -41,7 +42,15 @@ function extendedValues(values, fields) {
     return result;
   });
 }
-function fileName(raw, flags, fields) {
+export const ZIP_FILENAME_ENCODINGS=['cp437','windows-1252','windows-1250','windows-1251','windows-1253','windows-1254','windows-1255','windows-1256','windows-1257','windows-1258','windows-874','shift_jis','gbk','big5','euc-kr','utf-8'];
+export function zipFilenameEncoding(value='cp437'){
+  if(typeof value!=='string')throw new Error('Invalid ZIP filename encoding');
+  if(['cp437','ibm437'].includes(value.toLowerCase()))return 'cp437';
+  const label=new TextDecoder(value).encoding;
+  if(!ZIP_FILENAME_ENCODINGS.includes(label))throw new Error('Unsupported ZIP filename encoding: '+value);
+  return label;
+}
+function fileName(raw, flags, fields, encoding) {
   if (flags & 0x800) return decoder.decode(raw);
   const unicode = fields.get(0x7075);
   // A stale CRC or unknown version means the optional Unicode name is ignored.
@@ -49,6 +58,7 @@ function fileName(raw, flags, fields) {
       new DataView(unicode.buffer, unicode.byteOffset, unicode.byteLength).getUint32(1, true) === crc32(raw)) {
     return decoder.decode(unicode.subarray(5));
   }
+  if(encoding!=='cp437')return decodeNativeBytes(raw,encoding);
   return Array.from(raw, b => b < 128 ? String.fromCharCode(b) : cp437[b - 128]).join('');
 }
 
@@ -56,7 +66,8 @@ function fileName(raw, flags, fields) {
  * Central/local metadata is checked before inflation; nothing is written to disk.
  * Format references: PKWARE APPNOTE 4.3, 4.5.3, 4.6.9 and Appendix D.
  */
-export async function readZip(input, {maxExpandedBytes = 50 * 1024 * 1024, maxFiles = 2000} = {}) {
+export async function readZip(input, {maxExpandedBytes = 50 * 1024 * 1024, maxFiles = 2000, filenameEncoding = 'cp437'} = {}) {
+  filenameEncoding=zipFilenameEncoding(filenameEncoding);
   const bytes = asBytes(input), v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let end = -1;
   for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
@@ -102,7 +113,7 @@ export async function readZip(input, {maxExpandedBytes = 50 * 1024 * 1024, maxFi
     if (disk) throw new Error('Multi-disk ZIP is not supported');
     if (flags & 0x2041) throw new Error('Encrypted ZIP is not supported');
     if (![0, 8].includes(method)) throw new Error('Unsupported ZIP compression: ' + method);
-    const name = fileName(raw, flags, fields), normalized = name.replace(/\\/g, '/').split('/').filter(p => p && p !== '.').join('/');
+    const name = fileName(raw, flags, fields, filenameEncoding), normalized = name.replace(/\\/g, '/').split('/').filter(p => p && p !== '.').join('/');
     if (unsafePath(name) || /[\x00-\x1f]/.test(name) || (!normalized && !/[\\/]$/.test(name))) throw new Error('Unsafe path in ZIP');
     if (names.has(normalized.toLowerCase())) throw new Error('Duplicate ZIP entry: ' + name);
     names.add(normalized.toLowerCase());

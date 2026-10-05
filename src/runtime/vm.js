@@ -1,4 +1,5 @@
 import {VBWin32Bridge} from './win32.js';
+import {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate} from './automation.js';
 import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
@@ -42,6 +43,7 @@ export class VirtualMachine extends Signal {
     this.library.set('screen',{TwipsPerPixelX:15,TwipsPerPixelY:15,Width:14400,Height:10800,MousePointer:0,ActiveForm:null});
     this.library.set('forms',{get Count(){return [...vm.formInstances].filter(i=>i.loaded).length;},Item(key){const forms=[...vm.formInstances].filter(i=>i.loaded),item=typeof key==='number'?forms[key]:forms.find(i=>lower(i.module.name)===lower(key));if(!item)throw new VBError('Form not found in Forms collection',9);return item;},[Symbol.iterator](){return [...vm.formInstances].filter(i=>i.loaded).values();}});
     this.library.set('debug',{Print:(...a)=>this.output(a.map(v=>v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v)).join(' '))});
+    this.automation=host.automation?.createSession();
     this.data=host.data||new DataContext(this.program.sourceProject,{fs:this.fs,persist:host.persist,fetch:host.dataFetch,credentialProvider:host.dataCredential});this.data.install(this);
     this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
     this.win32=new VBWin32Bridge(this);
@@ -125,7 +127,7 @@ export class VirtualMachine extends Signal {
   }
   requestUnload(instance){if(this.state==='stopped')return Promise.resolve();return new Promise(resolve=>{this.eventQueue.push({action:()=>this.unloadForm(instance,0),resolve,key:'unload:'+instance.module.name});this.processEvents();});}
   async doEvents(){await new Promise(resolve=>setTimeout(resolve,0));for(let i=0;i<32&&this.eventQueue.length&&this.state==='running';i++)await this.runQueuedEvent(this.eventQueue.shift());return [...this.formInstances].filter(i=>i.loaded).length;}
-  async createObject(name,frame=this.currentFrame){const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();const dataObject=this.data.createObject(name);if(dataObject)return dataObject;const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
+  async createObject(name,frame=this.currentFrame){if(this.automation?.has(name))return this.automation.create(name);const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();const dataObject=this.data.createObject(name);if(dataObject)return dataObject;const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
   async getIdentifier(name,frame,{noInvoke=false}={}) {
     const key=lower(name);
     if(key==='me')return frame.instance;
@@ -174,6 +176,7 @@ export class VirtualMachine extends Signal {
     return {__procedure:object.target.module.procedures.get(member.procedure),__signature:member.signature,instance:object.target};
   }
   async getMember(object,name,frame){
+    if(isAutomationObject(object))return automationMember(object,name,true);
     if(object?.__vbEnum){const key=lower(name);if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return object.values[key];}
     if(object?.__vbInterface){const members=object.target.module.interfaceBindings[object.interfaceName].members,key=lower(name);const value=this.interfaceProcedure(object,name,members[key]?null:'get');return value.__signature.kind==='property'&&!value.__signature.params.length?this.callProcedure(value.instance,value.__procedure,[],frame):value;}
     this.assertVisible(object,name,frame);
@@ -185,6 +188,7 @@ export class VirtualMachine extends Signal {
     if(depth>32)throw new VBError('Circular default-member evaluation',28);
     if(value?.__control)return value.defaultValue();
     if(hasDataDefault(value))return this.defaultValue(value.Value,depth+1);
+    if(isAutomationObject(value)){const name=automationDefaultName(value);if(!name)throw new VBError('Automation object has no default value',438);return this.defaultValue(await automationInvoke(value,name,2,[]),depth+1);}
     const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;
     if(instance?.__vbInstance&&name){const member=await this.getMember(value,name,this.currentFrame),result=member?.__procedure?await this.callProcedure(member.instance,member.__procedure,[],this.currentFrame):member;return this.defaultValue(result,depth+1);}
     return value;
@@ -236,6 +240,7 @@ export class VirtualMachine extends Signal {
   }
   async callExpression(node,frame){
     let target=node.callee.kind==='id'&&lower(node.callee.name)===lower(frame.proc.name)?{__procedure:frame.proc,instance:frame.instance}:await this.evaluate(node.callee,frame,{raw:true});
+    if(isAutomationObject(target)){const name=automationDefaultName(target);if(!name)throw new VBError('Automation object has no default property',438);target=automationMember(target,name);}
     const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
     if(instance?.__vbInstance&&defaultName)target=await this.getMember(target,defaultName,frame);
     const proc=target?.__procedure,signature=target?.__signature||proc,fn=target?.__native||(typeof target==='function'?target:null),params=signature?.params||(fn?.vbShortParams&&node.args.length===2&&node.args.every(n=>n.kind!=='named')?fn.vbShortParams:fn?.vbParams);
@@ -267,7 +272,7 @@ export class VirtualMachine extends Signal {
       const key=lower(node.name);if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return frame.result;
       let cell=frame.locals.get(key)||frame.instance.fields.get(key);
       if(!cell){for(const instance of this.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private')){cell=instance.fields.get(key);break;}}
-      if(cell){if(!objectSet){const value=await cell.get();if(value?.__control)return value.defaultRef();if(hasDataDefault(value))return new Ref(()=>value.Value,v=>{value.Value=v;});const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;if(instance?.__vbInstance&&name)return this.memberReference(value,name,frame);}return cell;}
+      if(cell){if(!objectSet){const value=await cell.get();if(value?.__control)return value.defaultRef();if(hasDataDefault(value))return new Ref(()=>value.Value,v=>{value.Value=v;});if(isAutomationObject(value))return automationReference(value,automationDefaultName(value));const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;if(instance?.__vbInstance&&name)return this.memberReference(value,name,frame);}return cell;}
       if(frame.proc.constantBindings?.has(key)||frame.module.constantBindings?.has(key)||frame.module.globalEnumMembers?.has(key))throw new VBError('Assignment to constant not permitted',500);
       const setter=frame.module.procedures.get(key+':let')||frame.module.procedures.get(key+':set');if(setter)return new Ref(()=>this.getIdentifier(node.name,frame),v=>this.callProcedure(frame.instance,setter,[v],frame));
       if(frame.instance.formObject&&this.hasMember(frame.instance.formObject,node.name))return this.memberReference(frame.instance.formObject,node.name,frame);
@@ -277,6 +282,7 @@ export class VirtualMachine extends Signal {
     if(node.kind==='member')return this.memberReference(await this.evaluate(node.object,frame,{raw:true}),node.name,frame,objectSet);
     if(node.kind==='call'){
       let target=await this.evaluate(node.callee,frame,{raw:true});const args=[];for(const a of node.args)args.push(await this.evaluate(a,frame));
+      if(isAutomationObject(target))return automationReference(target,automationDefaultName(target),args,objectSet);
       const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
       if(instance?.__vbInstance&&defaultName){const getter=()=>this.callExpression(node,frame);if(target.__vbInterface){const member=this.interfaceProcedure(target,defaultName,objectSet?'set':'let');return new Ref(getter,v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}const setter=instance.module.procedures.get(defaultName+':'+(objectSet?'set':'let'));if(!setter)throw new VBError('Default property is read-only',383);return new Ref(getter,v=>this.callProcedure(instance,setter,[...args,v],frame));}
       if(target instanceof VBArray&&!args.length&&node.callee.kind==='id')return this.reference(node.callee,frame,true);
@@ -285,6 +291,7 @@ export class VirtualMachine extends Signal {
       if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args),v=>target.receiver.setItem(...args,v));
       if(node.callee.kind==='member'){
         const object=await this.evaluate(node.callee.object,frame,{raw:true});const name=lower(node.callee.name);
+        if(isAutomationObject(object))return automationReference(object,node.callee.name,args,objectSet);
         if(object?.__vbInterface){const member=this.interfaceProcedure(object,node.callee.name,objectSet?'set':'let');return new Ref(()=>this.callExpression(node,frame),v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}
         if(object?.__vbInstance){const proc=object.module.procedures.get(name+':let')||object.module.procedures.get(name+':set');if(proc){if(proc.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,node.callee.name,frame),v=>this.callProcedure(object,proc,[...args,v],frame));}}
         if(object?.setIndexed)return new Ref(()=>object[node.callee.name](...args),value=>object.setIndexed(node.callee.name,args,value));
@@ -295,6 +302,7 @@ export class VirtualMachine extends Signal {
     throw new VBError('Invalid assignment target',1002);
   }
   async memberReference(object,name,frame,objectSet=false){
+    if(isAutomationObject(object))return automationReference(object,name,[],objectSet);
     if(object?.__vbInterface){const member=this.interfaceProcedure(object,name,objectSet?'set':'let');return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(member.instance,member.__procedure,[v],frame));}
     this.assertVisible(object,name,frame);
     if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key);const setter=object.module.procedures.get(key+':let')||object.module.procedures.get(key+':set');if(setter){if(setter.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(object,setter,[v],frame));}if(object.formObject)return this.memberReference(object.formObject,name,frame);throw new VBError(`Method or data member not found: ${name}`,438);}
@@ -307,6 +315,7 @@ export class VirtualMachine extends Signal {
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable not set',91);
     if(typeof object!=='object'||object instanceof VBArray||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBErrorValue||object===MISSING||object.__fields)throw new VBError('Object required',424);
     if(callType===8){const value=args.at(-1);if(value!==NOTHING&&(!value||typeof value!=='object'||value instanceof VBArray||value instanceof Date||value instanceof VBCurrency||value instanceof VBDecimal||value instanceof VBErrorValue||value.__fields))throw new VBError('Object required',424);}
+    if(isAutomationObject(object))return this.debugAwait(automationInvoke(object,name,callType,args));
     if(object.__vbInterface){const member=this.interfaceProcedure(object,name,({2:'get',4:'let',8:'set'})[callType]||null);return this.callProcedure(member.instance,member.__procedure,args,frame);}
     if(object.__vbInstance){
       // Automation dispatch is public even when invoked by code in the same class.
@@ -391,7 +400,7 @@ export class VirtualMachine extends Signal {
   }
   pause(){if(this.state==='running')this.pauseRequested=true;}
   resume(mode='continue'){if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
-  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
+  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();this.eventQueue=[];this.automationClose=this.automation?.close();this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
   async execute(frame){
     while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.pc++;
       try{
@@ -414,7 +423,7 @@ export class VirtualMachine extends Signal {
           case 'case':{const value=frame.temps.get(ins.id);let matched=false;for(const c of ins.cases){if(c.kind==='range')matched=truth(binary('>=',value,await this.evaluate(c.low,frame),frame.module.optionCompare))&&truth(binary('<=',value,await this.evaluate(c.high,frame),frame.module.optionCompare));else matched=truth(binary(c.op||'=',value,await this.evaluate(c.expr,frame),frame.module.optionCompare));if(matched)break;}if(!matched)frame.pc=ins.target;break;}
           case 'forInit':{const ref=await this.reference(parseExpression(ins.name),frame),start=numeric(await this.evaluate(ins.start,frame)),end=numeric(await this.evaluate(ins.end,frame)),step=numeric(await this.evaluate(ins.step,frame));if(step===0)throw new VBError('For Step cannot be zero in the browser runtime',5);await ref.set(start);frame.temps.set(ins.id,{ref,end,step});if(step>0?start>end:start<end)frame.pc=ins.target;break;}
           case 'forNext':{const data=frame.temps.get(ins.id),next=numeric(await data.ref.get())+data.step;await data.ref.set(next);if(data.step>0?next<=data.end:next>=data.end)frame.pc=ins.target;break;}
-          case 'eachInit':{const value=await this.evaluate(ins.expr,frame);if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
+          case 'eachInit':{let value=await this.evaluate(ins.expr,frame);if(isAutomationObject(value))value=await this.debugAwait(automationEnumerate(value));if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
           case 'eachNext':{const data=frame.temps.get(ins.id),next=data.iterator.next();if(!next.done){await data.ref.set(next.value);frame.pc=ins.target;}break;}
           case 'stringAlign':{
             const ref=await this.reference(ins.target,frame,true),current=await ref.get();

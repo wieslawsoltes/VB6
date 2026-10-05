@@ -117,7 +117,15 @@ project/source inspection, atomic multi-module edits, form/control/menu design,
 compiler diagnostics, debugger/runtime control, virtual files/resources, and
 workspace management. It is a real iterative tool-use loop, not just a chat box.
 Streaming text, tool activity, before/after edit review, Stop, normal Undo,
-request/token limits and downloadable in-memory transcripts are included.
+request/tool/token limits and downloadable in-memory transcripts are included.
+
+The classic **Tasks** tab supports eight independent named conversations, drafts
+and cumulative usage. **Continue** explicitly resumes a limited task or retries
+a transient provider request without replaying completed IDE operations. Local
+plan and question tools provide structured progress and clarification; neither
+grants permission. **New Task with Context…** lets you review/edit a public-message
+excerpt before creating a fresh draft, without copying signatures, tools or grants.
+Tasks stay memory-only and all operate on the same live project.
 
 Review each change is the default. Read-only mode excludes mutators/execution;
 Agent mode can authorize selected scopes for one run, up to ten minutes. These
@@ -211,3 +219,6 @@ APIs, flags, messages and ABI shapes fail explicitly. See the package's
 [compatibility boundaries](packages/win32-browser/README.md#vb6-adapter) and
 [API inventory](packages/win32-browser/API.md). `npm run pack:win32-browser`
 builds and tests a standalone `.tgz` after `npm run build`; it does not publish to npm.
+### Native workspace and interoperability
+
+Native project support also includes explicit ZIP filename-codepage selection, preserved/restored VBW document windows, recoverable folder-save journals, exclusive immutable ZIP snapshots, trusted custom-control/Automation adapter registries, an opt-in x86/x64 Windows stdio host, and a separately licensed compiler round-trip harness. Native activation is never granted by opening a project. See [native workspace and interoperability](docs/NATIVE-WORKSPACE-INTEROP.md) for commands, deployment contracts, tests, and remaining boundaries.

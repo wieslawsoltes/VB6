@@ -13,7 +13,10 @@ REPORTS = ROOT / 'reports/coding-agents'
 REPORTS.mkdir(parents=True, exist_ok=True)
 parser = argparse.ArgumentParser()
 parser.add_argument('--opaque', action='store_true')
+parser.add_argument('--browser', choices=['chromium','firefox','webkit'], default='chromium')
 args = parser.parse_args()
+REPORTS = REPORTS / args.browser
+REPORTS.mkdir(parents=True, exist_ok=True)
 results = []
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -100,7 +103,10 @@ def mock(page, provider, strategy):
             data = {'models':[{'name':'models/test-model','supportedGenerationMethods':['generateContent']}]} if provider=='google' else {'data':[{'id':'test-model'}]}
             route.fulfill(status=200,content_type='application/json',headers={'Access-Control-Allow-Origin':'*'},body=json.dumps(data)); return
         body = request.post_data_json; requests.append(body)
-        calls, text = strategy(len(requests),body)
+        result = strategy(len(requests),body)
+        if isinstance(result, dict):
+            route.fulfill(status=result['http_status'],headers={'Access-Control-Allow-Origin':'*','Access-Control-Expose-Headers':'Retry-After','Retry-After':str(result.get('retry_after',0))},body=''); return
+        calls, text = result
         route.fulfill(status=200,content_type='text/event-stream',headers={'Access-Control-Allow-Origin':'*'},body=sse(provider,packet(provider,calls,text)))
     for pattern in ['https://api.openai.com/**','https://api.anthropic.com/**','https://generativelanguage.googleapis.com/**']:
         page.route(pattern,route_handler)
@@ -194,7 +200,7 @@ def stopped(page,mode):
 def lifecycle(page,mode):
     check(page.evaluate('vb6Studio.codingAgents.adapter.tools.length')==114)
     check(page.evaluate("vb6Studio.menu('Tools').some(item=>item?.id==='codingAgents')"))
-    tab(page,'Tools');check(page.get_by_label('Coding agent tools',exact=True).locator('option').count()==114)
+    tab(page,'Tools');check(page.get_by_label('Coding agent tools',exact=True).locator('option').count()==116)
     # Native MDI sizing/chrome, not a new app shell or third-party chat component.
     check(page.locator('.agent-panel').evaluate("e=>getComputedStyle(e).backgroundColor")==page.locator('.ide-menubar').evaluate("e=>getComputedStyle(e).backgroundColor") if page.locator('.ide-menubar').count() else True)
     configure(page)
@@ -212,6 +218,124 @@ def lifecycle(page,mode):
     return {'catalog':114,'loadCancelsConsent':True,'classicMDI':True}
 
 
+def plan_question(page, mode, provider):
+    def strategy(index, body):
+        if index==1: return [{'name':'vb6_agent_plan','arguments':{'expectedPlanRevision':0,'steps':[{'id':'inspect','title':'Inspect the project','status':'in_progress'},{'id':'compile','title':'Compile and report','status':'pending'}]}}], 'I will inspect and compile.'
+        if index==2: return [{'name':'vb6_agent_question','arguments':{'question':'Which form should I inspect? <img src=x onerror="window.injected=true">','options':['Customer','Invoice']}}], 'One question.'
+        if index==3:
+            check('Customer' in json.dumps(body)); return [{'name':'vb6_project_compile'}], 'Checking diagnostics.'
+        if index==4: return [{'name':'vb6_agent_plan','arguments':{'expectedPlanRevision':1,'steps':[{'id':'inspect','title':'Inspect the project','status':'completed'},{'id':'compile','title':'Compile and report','status':'completed'}]}}], 'Compiler checked.'
+        return [],'Done.'
+    requests=mock(page,provider,strategy); configure(page,provider,mode='readonly'); start(page)
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Question',exact=True)
+    dialog.wait_for(); check(dialog.get_by_role('button',name='Send Answer').is_disabled())
+    check(dialog.locator('img').count()==0); check(not page.evaluate('!!window.injected'))
+    page.get_by_label('Suggested answers',exact=True).select_option('Customer')
+    check(page.get_by_label('Answer to agent',exact=True).input_value()=='Customer')
+    if provider=='openai': page.screenshot(path=str(REPORTS/f'{mode}-question.png'))
+    dialog.get_by_role('button',name='Send Answer',exact=True).click(); finish(page)
+    check(len(requests)==5); check(page.evaluate('vb6Studio.codingAgents.agent.plan.revision')==2)
+    conversation=page.get_by_label('Agent conversation',exact=True).text_content()
+    check('Agent question:\nWhich form should I inspect?' in conversation)
+    check('Your answer:\nCustomer' in conversation)
+    check(conversation.index('Agent question:') < conversation.index('Your answer:'))
+    check(page.get_by_label('Agent conversation',exact=True).locator('img').count()==0)
+    tab(page,'Tasks');page.get_by_role('button',name='New Task with Context…',exact=True).click()
+    context_dialog=page.get_by_role('dialog',name='AI Coding Agent — Review Context',exact=True);context_dialog.wait_for()
+    context=page.get_by_label('Reviewed task context',exact=True).input_value()
+    check('Agent question:\nWhich form should I inspect?' in context)
+    check('User answer:\nCustomer' in context)
+    check(context.index('Agent question:') < context.index('User answer:'))
+    context_dialog.get_by_role('button',name='Cancel',exact=True).click()
+    check(len(requests)==5)
+    tab(page,'Plan'); check(page.get_by_label('Agent task plan',exact=True).locator('li[data-status=completed]').count()==2)
+    check(page.evaluate('vb6Studio.history.undoStack.length')==0)
+    check(not page.evaluate('vb6Studio.codingAgents.adapter.permissions.snapshot(vb6Studio.project.id).active'))
+    if provider=='openai': page.screenshot(path=str(REPORTS/f'{mode}-plan.png'))
+    return {'provider':provider,'planRevision':2,'questionAnswered':True,'readOnly':True}
+
+
+def task_switching(page, mode):
+    requests=mock(page,'openai',lambda i,b:([], 'First task answer.' if i==1 else 'Second task answer.'))
+    configure(page);start(page);finish(page)
+    first=page.evaluate('vb6Studio.codingAgents.conversations.activeId')
+    check(page.get_by_label('Agent task',exact=True).input_value()=='')
+    page.get_by_label('Agent task',exact=True).fill('Unsent first draft')
+    page.locator('.agent-panel').get_by_role('button',name='New Task',exact=True).click()
+    second=page.evaluate('vb6Studio.codingAgents.conversations.activeId'); check(first!=second)
+    page.get_by_label('Agent task',exact=True).fill('Second independent task.');start(page);finish(page)
+    check(len(requests)==2);check('First task answer.' not in json.dumps(requests[1]))
+    tab(page,'Tasks');page.get_by_label('Agent tasks',exact=True).select_option(first)
+    page.get_by_label('Task name',exact=True).fill('First task renamed');page.get_by_role('button',name='Rename',exact=True).click()
+    tab(page,'Task');check(page.get_by_label('Agent task',exact=True).input_value()=='Unsent first draft')
+    check('First task answer.' in page.get_by_label('Agent conversation',exact=True).inner_text())
+    check('Second task answer.' not in page.get_by_label('Agent conversation',exact=True).inner_text())
+    tab(page,'Tasks');page.get_by_role('button',name='New Task with Context…',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Review Context',exact=True);dialog.wait_for()
+    check('First task answer.' in page.get_by_label('Reviewed task context',exact=True).input_value())
+    check('not-a-real-key-private' not in page.get_by_label('Reviewed task context',exact=True).input_value())
+    page.get_by_label('Reviewed task context',exact=True).fill('Reviewed public background only.')
+    dialog.get_by_role('button',name='Create Task',exact=True).click()
+    check(len(requests)==2);check(page.get_by_label('Agent tasks',exact=True).locator('option').count()==3)
+    tab(page,'Task');check('Reviewed public background only.' in page.get_by_label('Agent task',exact=True).input_value())
+    check(page.evaluate('vb6Studio.codingAgents.agent.history.length')==0)
+    tab(page,'Tasks');page.screenshot(path=str(REPORTS/f'{mode}-tasks.png'))
+    page.get_by_role('button',name='Delete Task…',exact=True).click()
+    page.get_by_role('dialog',name='AI Coding Agent — Delete Task',exact=True).get_by_role('button',name='Delete Task',exact=True).click()
+    check(page.get_by_label('Agent tasks',exact=True).locator('option').count()==2)
+    check(len(requests)==2)
+    return {'independentTasks':2,'draftRestored':True,'reviewedContext':True,'noImplicitRequests':True}
+
+
+def limited_resume(page, mode):
+    original=page.evaluate('vb6Studio.project.modules[0].code')
+    def strategy(index,body):
+        if index==1:return [{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',body),'edits':[{'module':'Form1','start':0,'end':0,'text':"' once\n",'expectedText':''}]}}], 'Edit once.'
+        check(sum(1 for item in body['input'] if item.get('role')=='user')==1)
+        check(any(item.get('type')=='function_call_output' for item in body['input']))
+        return [],'Continued without replay.'
+    requests=mock(page,'openai',strategy);configure(page)
+    tab(page,'Permissions');page.get_by_label('Maximum agent requests',exact=True).fill('1');tab(page,'Task');start(page)
+    page.get_by_role('dialog',name='AI Coding Agent — Review Operation',exact=True).get_by_role('button',name='Allow once',exact=True).click();finish(page)
+    check(page.evaluate('vb6Studio.codingAgents.agent.state')=='limit');check(len(requests)==1)
+    check(page.get_by_label('Agent task',exact=True).input_value()=='')
+    page.locator('.agent-panel').get_by_role('button',name='Continue',exact=True).click()
+    page.get_by_role('dialog',name='AI Coding Agent — Continue Task',exact=True).get_by_role('button',name='Continue Task',exact=True).click();finish(page)
+    check(len(requests)==2);check(page.evaluate('vb6Studio.project.modules[0].code')=="' once\n"+original)
+    check(page.evaluate('vb6Studio.history.undoStack.length')==1)
+    check(page.locator('.agent-panel').get_by_role('button',name='Continue',exact=True).is_disabled())
+    return {'oneUndoEntry':True,'noDuplicatePrompt':True,'continued':True}
+
+
+def request_retry(page,mode):
+    original=page.evaluate('vb6Studio.project.modules[0].code')
+    def strategy(index,body):
+        if index==1:return [{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',body),'edits':[{'module':'Form1','start':0,'end':0,'text':"' retry once\n",'expectedText':''}]}}], 'Edit once.'
+        if index==2:return {'http_status':429,'retry_after':2}
+        check(any(item.get('type')=='function_call_output' for item in body['input']))
+        return [],'Recovered.'
+    requests=mock(page,'openai',strategy);configure(page);start(page)
+    page.get_by_role('dialog',name='AI Coding Agent — Review Operation',exact=True).get_by_role('button',name='Allow once',exact=True).click();finish(page)
+    check(page.evaluate('vb6Studio.codingAgents.agent.state')=='retry');check(len(requests)==2)
+    check(not page.evaluate('vb6Studio.codingAgents.adapter.enabled'))
+    page.wait_for_timeout(100);check(len(requests)==2)
+    page.locator('.agent-panel').get_by_role('button',name='Continue',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Continue Task',exact=True)
+    check('2 seconds' in dialog.inner_text());dialog.get_by_role('button',name='Continue Task',exact=True).click();finish(page)
+    check(len(requests)==3);check(page.evaluate('vb6Studio.project.modules[0].code')=="' retry once\n"+original)
+    check(page.evaluate('vb6Studio.history.undoStack.length')==1)
+    return {'manualRetry':True,'automaticRetries':0,'editAppliedOnce':True}
+
+
+def question_cancel(page,mode):
+    requests=mock(page,'openai',lambda i,b:([{'name':'vb6_agent_question','arguments':{'question':'What should I do next?'}}], 'Please clarify.'))
+    configure(page);start(page)
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Question',exact=True);dialog.wait_for()
+    dialog.get_by_role('button',name='Cancel',exact=True).click();finish(page)
+    check(len(requests)==1);check(page.evaluate('vb6Studio.codingAgents.agent.blocked'))
+    check(page.locator('.agent-panel').get_by_role('button',name='Continue',exact=True).is_disabled())
+    return {'cancelStopsTask':True,'noPermissionGranted':True}
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -227,13 +351,16 @@ def case(browser,mode,name,fn):
 
 try:
     with sync_playwright() as p:
-        browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or shutil.which('chromium') or p.chromium.executable_path,args=['--no-sandbox'])
+        engine=getattr(p,args.browser)
+        options={'executable_path':os.environ.get('CHROMIUM_PATH') or shutil.which('chromium') or engine.executable_path,'args':['--no-sandbox']} if args.browser=='chromium' else {}
+        browser=engine.launch(**options)
         for mode in (['opaque'] if args.opaque else ['http','standalone-http','file']):
             for provider in ['openai','anthropic','google']:
                 case(browser,mode,provider,lambda page,mode,provider=provider:provider_workflow(page,mode,provider))
-            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle)]:case(browser,mode,name,fn)
+                case(browser,mode,provider+'-plan-question',lambda page,mode,provider=provider:plan_question(page,mode,provider))
+            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()
-    (REPORTS/('opaque-results.json' if args.opaque else 'results.json')).write_text(json.dumps({'opaqueFallback':args.opaque,'paidProviderRequests':0,'tests':results},indent=2))
+    (REPORTS/('opaque-results.json' if args.opaque else 'results.json')).write_text(json.dumps({'browser':args.browser,'opaqueFallback':args.opaque,'paidProviderRequests':0,'tests':results},indent=2))
 raise SystemExit(0 if results and all(item['passed'] for item in results) else 1)
