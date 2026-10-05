@@ -1,0 +1,144 @@
+name: Integrate typed native compatibility
+on:
+  push:
+    branches: [feat/variant-scalar-compatibility]
+    paths: ['.github/workflows/compat-native-integrate.yml']
+permissions:
+  contents: read
+concurrency:
+  group: compatibility-source-publish
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Combine reviewed main and complete source patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import base64,hashlib,json,lzma,subprocess
+          from pathlib import Path,PurePosixPath
+          git=lambda *a: subprocess.check_output(['git',*a],text=True).strip()
+          feature='f1c9434ed40a778003acaf2d8a0e9820be13ab16'
+          main='a098f73921a624e30c26a3aad07c76a14e10073e'
+          assert git('diff','--name-only',feature,'HEAD')=='.github/workflows/compat-native-integrate.yml'
+          assert not git('status','--porcelain')
+          parts=[]
+          for sha in ['da1c5ee80b22f3c2f7db6c15a7ee81c956d68a0b','cc67b6d609a22a40ebef98b0e79c70965bcc2210']:
+              obj=json.loads(subprocess.check_output(['gh','api',f'repos/wieslawsoltes/VB6/git/blobs/{sha}']))
+              data=base64.b64decode(obj['content']);assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==sha;parts.append(data)
+          decoder=lzma.LZMADecompressor(memlimit=256*1024*1024)
+          raw=decoder.decompress(b''.join(parts),max_length=1024*1024)
+          assert decoder.eof and not decoder.unused_data
+          assert hashlib.sha256(raw).hexdigest()=='1dd9c3a75bb3315d83eb9763f8fe64f8cc6bc195d2fd79b515629baa197a8c75'
+          transaction=json.loads(raw)
+          result=subprocess.run(['git','merge','--no-ff','--no-commit',main]);assert result.returncode in (0,1)
+          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
+          resolved={'src/runtime/vm.js','src/data/recordset.js'}
+          generated=lambda p:p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js')
+          assert all(generated(p) or p in resolved for p in conflicts), f'Unreviewed conflicts: {conflicts}'
+          for name in conflicts:
+              subprocess.run(['git','checkout','--ours','--',name],check=True);subprocess.run(['git','add','--',name],check=True)
+          # These two full resolutions are represented in the checked patch,
+          # including RDO and exact integer-field behavior from current main.
+          subprocess.run(['git','checkout',feature,'--',*sorted(resolved)],check=True)
+          for record in transaction['files']:
+              name=record['path'];path=PurePosixPath(name)
+              assert not path.is_absolute() and '..' not in path.parts and path.parts[0] in ('src','tests','tools')
+              target=Path(name);assert not target.is_symlink() and not any(p.is_symlink() for p in target.parents)
+              before=hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
+              assert before==record['before'], f'Unexpected source revision: {name}'
+          subprocess.run(['git','apply','--index','--unidiff-zero','-'],input=transaction['patch'].encode(),check=True)
+          for record in transaction['files']:assert hashlib.sha256(Path(record['path']).read_bytes()).hexdigest()==record['after'],record['path']
+          assert not git('diff','--name-only','--diff-filter=U')
+          Path('/tmp/compat-transaction.json').write_bytes(raw)
+          print('Verified complete transaction:',len(transaction['files']),'files')
+          PY
+      - name: Build and test all combined source
+        run: |
+          set -o pipefail
+          mkdir -p compatibility-evidence
+          node --check tools/interop/test-native.mjs
+          npm run build 2>&1 | tee compatibility-evidence/build.log
+          npm test 2>&1 | tee compatibility-evidence/node.log
+          git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git rm -- .github/workflows/scalar-main-refresh.yml
+          git diff --cached --check
+          git commit -m 'feat(interop): preserve native VARIANT and SAFEARRAY types; integrate current Date and RDO source'
+          npm run build
+          git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Publish only the feature branch
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/compat-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in *Username*) printf '%s\n' x-access-token ;; *) printf '%s\n' "$GH_TOKEN" ;; esac
+          SH
+          chmod 700 "$RUNNER_TEMP/compat-askpass"
+          trap 'rm -f "$RUNNER_TEMP/compat-askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/compat-askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/variant-scalar-compatibility
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Preserve readable source and actual outcomes
+        if: always()
+        run: |
+          mkdir -p compatibility-evidence
+          git rev-parse HEAD > compatibility-evidence/head.txt
+          git status --porcelain > compatibility-evidence/status.txt
+          git diff --cached > compatibility-evidence/staged.diff
+          git archive --format=zip --prefix=VB6/ HEAD -o compatibility-evidence/source.zip
+          sha256sum compatibility-evidence/source.zip > compatibility-evidence/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-compat-integration
+          path: compatibility-evidence/
+          retention-days: 14
+  windows:
+    needs: integrate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.head }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Execute typed compiled VB through genuine system COM
+        env:
+          VB6_COM_ARCH: ${{ matrix.arch }}
+        run: node tools/interop/test-native.mjs
+      - name: Installed ActiveX control and cleanup
+        env:
+          VB6_COM_ARCH: ${{ matrix.arch }}
+        run: node tools/interop/test-activex.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-typed-${{ matrix.arch }}
+          path: reports/native-interop/
+          retention-days: 14
