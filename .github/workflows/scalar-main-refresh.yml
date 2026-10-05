@@ -1,0 +1,96 @@
+name: Refresh scalar integration with native Date support
+on:
+  push:
+    branches: [feat/variant-scalar-compatibility]
+    paths: ['.github/workflows/scalar-main-refresh.yml']
+permissions:
+  contents: read
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge pinned main and reject any unexpected source conflict
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          git=lambda *a: subprocess.check_output(['git',*a],text=True).strip()
+          feature='af74521e0a6af6f0f9ee7b0a4abb917811416c11'
+          main='30febe16733be5d71eb4428d4888866947a088fe'
+          base='bd7716067f0a30dc49e4d621c892a8475100363d'
+          assert git('diff','--name-only',feature,'HEAD')=='.github/workflows/scalar-main-refresh.yml'
+          assert git('merge-base',feature,main)==base
+          assert not git('status','--porcelain')
+          result=subprocess.run(['git','merge','--no-ff','--no-commit',main])
+          assert result.returncode in (0,1)
+          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
+          allowed={'dist/VB6-Studio-Web.html','dist/studio.js','dist/vb6-native.js'}
+          assert set(conflicts)<=allowed, f'Unexpected conflict: {conflicts}'
+          if conflicts:
+              subprocess.run(['git','checkout','--ours','--',*conflicts],check=True)
+              subprocess.run(['git','add','--',*conflicts],check=True)
+          assert not git('diff','--name-only','--diff-filter=U')
+          # These feature and native compiler subtrees must survive unchanged.
+          for path in ('src/native','tests/fixtures/native/date-abi.c','tests/fixtures/native/date-abi.def'):
+              assert git('write-tree')
+              assert git('diff','--cached','--name-only',main,'--',path)=='', path
+          for path in ('src/runtime','src/language','tests/scalar-runtime.test.mjs','tools/interop/test-native.mjs'):
+              assert git('diff','--cached','--name-only',feature,'--',path)=='', path
+          print('Both handwritten implementations preserved; only generated bundle conflicts will be rebuilt.')
+          PY
+      - name: Build and test combined source
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/scalar-refresh-build.log"
+          npm test 2>&1 | tee "$RUNNER_TEMP/scalar-refresh-node.log"
+          git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git diff --cached --check
+          git commit -m 'Merge native Date support and regenerate combined scalar compiler bundles'
+          npm run build
+          git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Publish only reviewed feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/scalar-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *) printf '%s\n' "$GH_TOKEN" ;;
+          esac
+          SH
+          chmod 700 "$RUNNER_TEMP/scalar-askpass"
+          trap 'rm -f "$RUNNER_TEMP/scalar-askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/scalar-askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/variant-scalar-compatibility
+      - name: Preserve combined history and validation evidence
+        if: always()
+        run: |
+          mkdir scalar-refresh
+          cp "$RUNNER_TEMP/scalar-refresh-"*.log scalar-refresh/ 2>/dev/null || true
+          git rev-parse HEAD > scalar-refresh/head.txt
+          git status --porcelain > scalar-refresh/status.txt
+          git diff > scalar-refresh/unstaged.diff
+          git diff --cached > scalar-refresh/staged.diff
+          git bundle create scalar-refresh/repository.bundle --all HEAD
+          git bundle verify scalar-refresh/repository.bundle
+          git archive --format=zip --prefix=VB6/ HEAD -o scalar-refresh/source.zip
+          sha256sum scalar-refresh/repository.bundle scalar-refresh/source.zip > scalar-refresh/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scalar-date-integration
+          path: scalar-refresh/
+          retention-days: 14
