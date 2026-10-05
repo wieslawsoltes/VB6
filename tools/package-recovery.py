@@ -7,7 +7,7 @@ import argparse, hashlib, json, shutil, subprocess, zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 PREFIX='VB6-Recovered-IDE-Development'
-ALLOWED={'src','tools','tests','docs','examples','dist','reports','recovery'}
+ALLOWED={'LICENSES','src','tools','tests','docs','examples','dist','reports','recovery'}
 ROOT_FILES={'.gitignore','LICENSE','README.md','RECOVERY.md','RELEASE-NOTES.md','THIRD-PARTY-NOTICES.md','package.json'}
 EXCLUDE={'reports/saved-project.vb6web','reports/exported-app.html','reports/features-04/runtime-export.html'}
 FONT_EXT={'.ttf','.otf','.woff','.woff2','.eot','.fon','.fnt'}
@@ -34,14 +34,17 @@ def main():
         if '__pycache__' in rel.parts or p.suffix=='.pyc' or rel.as_posix() in EXCLUDE:continue
         if p.suffix.lower() in FONT_EXT:raise RuntimeError('Unexpected font file: '+str(rel))
         entries[rel.as_posix()]=p.read_bytes()
+    notices={name:data for name,data in entries.items() if name.startswith('LICENSES/')}
     manifest=''.join(f'{sha(data)}  {name}\n' for name,data in sorted(entries.items()))
     source={PREFIX+'/'+name:data for name,data in entries.items()};source[PREFIX+'/SOURCE-SHA256SUMS.txt']=manifest.encode()
     archive(out/(PREFIX+'-Source.zip'),source)
-    archive(out/(PREFIX+'-Browser.zip'),{p.relative_to(ROOT/'dist').as_posix():p.read_bytes() for p in sorted((ROOT/'dist').rglob('*')) if p.is_file()})
+    archive(out/(PREFIX+'-Browser.zip'),{p.relative_to(ROOT/'dist').as_posix():p.read_bytes() for p in sorted((ROOT/'dist').rglob('*')) if p.is_file()} | notices)
     apps={'apps/'+p.name:p.read_bytes() for p in sorted((ROOT/'dist/examples').glob('*.html'))}
     apps.update({'projects/'+p.name:p.read_bytes() for p in sorted((ROOT/'examples').glob('*.vb6web'))});apps['RECOVERY.md']=(ROOT/'RECOVERY.md').read_bytes()
+    apps.update(notices)
     archive(out/(PREFIX+'-Examples.zip'),apps)
     sdk={name:data for name,data in entries.items() if name.startswith('src/') and name.split('/')[1] not in {'ide','designer','editor','exporter'}}
+    sdk.update(notices)
     for name in ['LICENSE','THIRD-PARTY-NOTICES.md','RECOVERY.md']:sdk[name]=(ROOT/name).read_bytes()
     for name in ['vb6-runtime.js','vb6-controls.css']:sdk[name]=(ROOT/'dist'/name).read_bytes()
     sdk['demo.html']=(ROOT/'dist/examples/richtext.html').read_bytes()

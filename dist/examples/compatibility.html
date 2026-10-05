@@ -547,6 +547,110 @@
 /* Runtime MDI client and sizable form chrome; content retains the chosen theme. */
 .vb-mdi-parent>.vb-form-content{overflow:hidden}.vb-mdi-client{position:absolute;overflow:hidden;background:var(--vb-workspace);border:1px solid var(--vb-shadow);box-shadow:inset 1px 1px var(--vb-dark)}.vb-mdi-child{transform:none!important}.vb-mdi-child.vb-minimized{width:160px!important}.vb-mdi-child .vb-form-title{cursor:default}.vb-form-title:focus-visible{outline:1px dotted var(--vb-title-text);outline-offset:-2px}
 .vb-form-grip{position:absolute;z-index:5000;touch-action:none}.vb-form-grip-n{left:6px;right:6px;top:0;height:4px;cursor:n-resize}.vb-form-grip-s{left:6px;right:6px;bottom:0;height:4px;cursor:s-resize}.vb-form-grip-e{top:6px;bottom:6px;right:0;width:4px;cursor:e-resize}.vb-form-grip-w{top:6px;bottom:6px;left:0;width:4px;cursor:w-resize}.vb-form-grip-ne,.vb-form-grip-nw,.vb-form-grip-se,.vb-form-grip-sw{width:7px;height:7px}.vb-form-grip-ne{right:0;top:0;cursor:ne-resize}.vb-form-grip-nw{left:0;top:0;cursor:nw-resize}.vb-form-grip-se{right:0;bottom:0;cursor:se-resize}.vb-form-grip-sw{left:0;bottom:0;cursor:sw-resize}.vb-fixed-window>.vb-form-grip{display:none}
+
+/*!
+ * Classic staircase bevels adapted from the inset box-shadow technique in
+ * 98.css by Jordan Scales. Source attribution requested in:
+ * https://news.ycombinator.com/item?id=49963404
+ * https://jdan.github.io/98.css/
+ * https://notes.jordanscales.com/98-css-reflections#when-buttons-were-good
+ * License source: https://github.com/jdan/98.css/blob/main/LICENSE
+ *
+ * 98.css — classic bevel technique
+ * Copyright 2020 Jordan Scales
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+/* Declare at every theme boundary: nested runtime forms must not inherit a
+   bevel whose colors were resolved in their parent IDE's theme. */
+:root, [data-vb-theme] {
+ --vb-bevel-raised: inset -1px -1px var(--vb-dark), inset 1px 1px var(--vb-light), inset -2px -2px var(--vb-shadow), inset 2px 2px var(--vb-highlight);
+ --vb-bevel-sunken: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-dark);
+ --vb-bevel-pressed: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-dark), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-shadow);
+ --vb-bevel-raised-thin: inset -1px -1px var(--vb-shadow), inset 1px 1px var(--vb-light);
+ /* Equivalent staircase paint for chrome whose original borders must remain
+    in layout. A fractional-DPI border may not equal its nominal CSS width;
+    replacing it with fixed padding shifted WebKit content. Border-box background
+    strips keep the original border metrics without adding nodes or JS reads. */
+ --vb-bevel-raised-image: linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-highlight),var(--vb-highlight)),linear-gradient(var(--vb-highlight),var(--vb-highlight));
+ --vb-bevel-sunken-thin: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow);
+}
+/* Removing a layout border requires compensating padding. These explicit
+   selectors preserve authored control bounds and content origins; flat menu
+   items, native radio circles, editor layers and user-drawn shapes are not
+   indiscriminately restyled. No runtime layout measurements or extra DOM are
+   needed. Forced-colors deliberately uses the existing real-border rules. */
+@media (forced-colors: none) {
+ .classic-bevel-raised { border:0;box-shadow:var(--vb-bevel-raised); }
+ .classic-bevel-sunken { border:0;box-shadow:var(--vb-bevel-sunken); }
+ .classic-bevel-raised:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed); }
+
+ .vb-command { border:0!important;box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+ .vb-command:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed);padding:5px 8px 3px 10px; }
+ .vb-command:disabled,.vb-command[aria-disabled=true] { box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+
+ /* Preserve these containers' original border widths and padding exactly.
+    Transparent border paint avoids diagonal joins; the equivalent border-box
+    staircase is independent of WebKit's fractional border-width rounding. */
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,.vb-popup-menu.classic-menu {
+   border-color:transparent;
+   background-image:var(--vb-bevel-raised-image);
+   background-origin:border-box;background-clip:border-box;background-repeat:no-repeat;
+   background-size:1px 100%,100% 1px,1px 100%,100% 1px,2px 100%,100% 2px,2px 100%,100% 2px;
+   background-position:right top,left bottom,left top,left top,right top,left bottom,left top,left top;
+   box-shadow:none;
+ }
+ .vb-popup-menu.classic-menu { border-color:transparent; }
+ .ide-dialog { box-shadow:1px 1px var(--vb-text); }
+ .ide-dialog-footer button,.vb-dialog-actions button { border:0;box-shadow:var(--vb-bevel-raised);padding:4px 10px;background:var(--vb-face);color:var(--vb-text); }
+ .ide-dialog-footer button:active:not(:disabled),.vb-dialog-actions button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .ide-dialog-footer button:disabled,.vb-dialog-actions button:disabled { color:var(--vb-gray);text-shadow:1px 1px var(--vb-light); }
+
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.vb-form-title .vb-window-button {
+   border:0;padding:1px;box-shadow:var(--vb-bevel-raised);flex-shrink:0;
+ }
+ .window-buttons button:active:not(:disabled),.caption-close:active:not(:disabled),.tool-caption button:active:not(:disabled),.vb-window-button:active:not(:disabled),.vb-form-title .vb-window-button:active:not(:disabled) {
+   box-shadow:var(--vb-bevel-pressed);padding:2px 0 0 2px;
+ }
+ .vb-combo-arrow,.vb-spin-button { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+ .vb-combo-arrow:active:not(:disabled),.vb-spin-button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .vb-scroll-arrow { border:0!important;padding:1px!important;box-shadow:var(--vb-bevel-raised)!important; }
+ .vb-scroll-arrow:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed)!important; }
+ .vb-scroll-thumb { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+
+ /* Text fields and list boxes keep the same inset (old 2px border + padding).
+    Custom combo fields and checkbox/radio controls have separate geometry. */
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field),.vb-control textarea,.vb-control select {
+   border:0;box-shadow:var(--vb-bevel-sunken);padding:4px 5px;
+ }
+ .vb-control .vb-list,.vb-control .vb-combo { padding:3px!important; }
+ .vb-classic-combo .vb-combo-field { border:0;padding:3px 3px 3px 5px;box-shadow:var(--vb-bevel-sunken); }
+ .vb-classic-combo.simple .vb-combo-field { border:0;padding-right:5px; }
+ .vb-dialog input:not([type=checkbox]):not([type=radio]) { border:0;padding:5px;box-shadow:var(--vb-bevel-sunken); }
+
+ /* Retain native layout/scrollbar mechanics; replace only the beveled paint. */
+ *::-webkit-scrollbar-thumb,*::-webkit-scrollbar-button:single-button { border:0;box-shadow:var(--vb-bevel-raised); }
+ *::-webkit-scrollbar-button:single-button:active { box-shadow:var(--vb-bevel-pressed); }
+ .vb-range::-webkit-slider-thumb { border:0;box-shadow:var(--vb-bevel-raised); }
+}
+
+/* Explicit high-contrast suppression also covers engines which expose the
+   forced-colors media query without suppressing computed author shadows.
+   Keep the original real borders, native colors and keyboard focus outlines. */
+@media (forced-colors: active) {
+ .classic-bevel-raised,.classic-bevel-sunken,.vb-command,
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,
+ .vb-popup-menu.classic-menu,.ide-dialog-footer button,.vb-dialog-actions button,
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,
+ .vb-combo-arrow,.vb-spin-button,.vb-scroll-arrow,.vb-scroll-thumb,
+ .vb-control input,.vb-control textarea,.vb-control select,.vb-dialog input {
+   box-shadow:none!important;text-shadow:none!important;
+ }
+}
 </style></head><body><div id="app"></div><script id="vb6-project" type="application/json">{"schema":1,"id":"example_compatibility_1","name":"CompatibilityLab","description":"Interactive checks for named arguments, Missing/Empty, per-instance static locals, civil dates, string assignments and late binding.","startup":"frmCompatibility","modules":[{"id":"example_compatibility_2","name":"frmCompatibility","kind":"form","code":"Option Explicit\nPrivate counterA As New Counter\nPrivate counterB As New Counter\nPrivate valueA As Long\nPrivate valueB As Long\n\nPrivate Sub Form_Load()\n    cmdCalendar_Click\n    cmdArguments_Click\n    cmdStrings_Click\n    cmdError_Click\nEnd Sub\nPrivate Sub AppendLine(ByVal text As String)\n    txtOutput.Text = txtOutput.Text \u0026 text \u0026 vbCrLf\nEnd Sub\nPrivate Sub cmdCalendar_Click()\n    On Error GoTo Failed\n    Dim result As Date\n    result = DateAdd(interval:=\"yyyy\", number:=CInt(txtYears.Text), date:=CDate(txtDate.Text))\n    CallByName lblCalendar, \"Caption\", vbLet, Format(result, \"yyyy-mm-dd\")\n    Exit Sub\nFailed:\n    lblCalendar.Caption = Err.Description\nEnd Sub\nPrivate Sub cmdA_Click()\n    valueA = CallByName(counterA, \"NextValue\", vbMethod)\n    ShowCounters\nEnd Sub\nPrivate Sub cmdB_Click()\n    valueB = counterB.NextValue()\n    ShowCounters\nEnd Sub\nPrivate Sub ShowCounters()\n    lblCounters.Caption = \"A = \" \u0026 valueA \u0026 \"     B = \" \u0026 valueB\nEnd Sub\nPrivate Function DescribeOptional(Optional value As Variant) As String\n    If IsMissing(value) Then\n        DescribeOptional = \"Missing\"\n    ElseIf IsEmpty(value) Then\n        DescribeOptional = \"Empty\"\n    Else\n        DescribeOptional = CStr(value)\n    End If\nEnd Function\nPrivate Function Combine(ByVal left As String, ByVal right As String, Optional separator As String = \" / \") As String\n    Combine = left \u0026 separator \u0026 right\nEnd Function\nPrivate Sub cmdArguments_Click()\n    AppendLine \"Named: \" \u0026 Combine(right:=\"right\", left:=\"left\")\n    AppendLine \"Optional: \" \u0026 DescribeOptional() \u0026 \" versus \" \u0026 DescribeOptional(Empty)\n    AppendLine \"TypeOf Counter: \" \u0026 CStr(TypeOf counterA Is Counter)\nEnd Sub\nPrivate Sub cmdStrings_Click()\n    Dim text As String, padded As String\n    text = \"abcdef\"\n    Mid$(text, 2, 2) = \"XY\"\n    AppendLine \"Mid$: \" \u0026 text\n    padded = Space(10)\n    LSet padded = text\n    AppendLine \"LSet: [\" \u0026 padded \u0026 \"]\"\n    RSet padded = text\n    AppendLine \"RSet: [\" \u0026 padded \u0026 \"]\"\nEnd Sub\nPrivate Sub cmdError_Click()\n    Dim value As Variant\n    value = CVErr(2001)\n    AppendLine \"CVErr: \" \u0026 CStr(value) \u0026 \" / type \" \u0026 VarType(value)\n    AppendLine \"Negative DATE round trip: \" \u0026 CStr(CDbl(CDate(-1.25)))\nEnd Sub\nPrivate Sub cmdClear_Click()\n    txtOutput.Text = \"\"\nEnd Sub\n","form":{"id":"example_compatibility_3","name":"frmCompatibility","type":"Form","properties":{"Name":"frmCompatibility","Caption":"Language and Runtime Workbench","ClientWidth":9750,"ClientHeight":6930,"Width":9120,"Height":6450,"Left":300,"Top":300,"StartUpPosition":2,"BorderStyle":2,"BackColor":-2147483633,"ForeColor":-2147483640,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ScaleMode":1,"KeyPreview":0,"Visible":-1,"Enabled":-1},"controls":[{"id":"example_compatibility_4","name":"lblTitle","type":"Label","parent":null,"properties":{"Name":"lblTitle","Left":270,"Top":210,"Width":9150,"Height":390,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":14,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Language and Runtime Workbench","BackStyle":0,"Alignment":0}},{"id":"example_compatibility_5","name":"lblIntro","type":"Label","parent":null,"properties":{"Name":"lblIntro","Left":270,"Top":675,"Width":9150,"Height":480,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Source-driven examples of the 0.4 runtime. Open the form code or Counter class to explore.","BackStyle":0,"Alignment":0}},{"id":"example_compatibility_6","name":"lblDatePrompt","type":"Label","parent":null,"properties":{"Name":"lblDatePrompt","Left":270,"Top":1260,"Width":1350,"Height":300,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Starting date:","BackStyle":0,"Alignment":0}},{"id":"example_compatibility_7","name":"txtDate","type":"TextBox","parent":null,"properties":{"Name":"txtDate","Left":1650,"Top":1215,"Width":1875,"Height":345,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483643,"ToolTipText":"","Tag":"","Text":"2024-02-29","MultiLine":0,"ScrollBars":0,"MaxLength":0,"PasswordChar":"","Locked":0,"Alignment":0}},{"id":"example_compatibility_8","name":"lblYearsPrompt","type":"Label","parent":null,"properties":{"Name":"lblYearsPrompt","Left":3720,"Top":1260,"Width":600,"Height":300,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Years:","BackStyle":0,"Alignment":0}},{"id":"example_compatibility_9","name":"txtYears","type":"TextBox","parent":null,"properties":{"Name":"txtYears","Left":4380,"Top":1215,"Width":600,"Height":345,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483643,"ToolTipText":"","Tag":"","Text":"1","MultiLine":0,"ScrollBars":0,"MaxLength":0,"PasswordChar":"","Locked":0,"Alignment":0}},{"id":"example_compatibility_10","name":"cmdCalendar","type":"CommandButton","parent":null,"properties":{"Name":"cmdCalendar","Left":5175,"Top":1185,"Width":1800,"Height":405,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Add years","Default":0,"Cancel":0}},{"id":"example_compatibility_11","name":"lblCalendar","type":"Label","parent":null,"properties":{"Name":"lblCalendar","Left":7200,"Top":1260,"Width":2175,"Height":300,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"","BackStyle":0,"Alignment":0}},{"id":"example_compatibility_12","name":"cmdA","type":"CommandButton","parent":null,"properties":{"Name":"cmdA","Left":270,"Top":1770,"Width":1800,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Increment A","Default":0,"Cancel":0}},{"id":"example_compatibility_13","name":"cmdB","type":"CommandButton","parent":null,"properties":{"Name":"cmdB","Left":2175,"Top":1770,"Width":1800,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Increment B","Default":0,"Cancel":0}},{"id":"example_compatibility_14","name":"lblCounters","type":"Label","parent":null,"properties":{"Name":"lblCounters","Left":4230,"Top":1875,"Width":5130,"Height":300,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"A = 0     B = 0","BackStyle":0,"Alignment":0}},{"id":"example_compatibility_15","name":"cmdArguments","type":"CommandButton","parent":null,"properties":{"Name":"cmdArguments","Left":270,"Top":2370,"Width":2190,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Named / Optional","Default":0,"Cancel":0}},{"id":"example_compatibility_16","name":"cmdStrings","type":"CommandButton","parent":null,"properties":{"Name":"cmdStrings","Left":2565,"Top":2370,"Width":2190,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"String statements","Default":0,"Cancel":0}},{"id":"example_compatibility_17","name":"cmdError","type":"CommandButton","parent":null,"properties":{"Name":"cmdError","Left":4860,"Top":2370,"Width":2190,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Variant Error","Default":0,"Cancel":0}},{"id":"example_compatibility_18","name":"cmdClear","type":"CommandButton","parent":null,"properties":{"Name":"cmdClear","Left":7155,"Top":2370,"Width":2190,"Height":420,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Clear output","Default":0,"Cancel":0}},{"id":"example_compatibility_19","name":"txtOutput","type":"TextBox","parent":null,"properties":{"Name":"txtOutput","Left":270,"Top":3030,"Width":9075,"Height":3360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"Courier New","FontSize":9,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483643,"ToolTipText":"","Tag":"","Text":"","MultiLine":-1,"ScrollBars":3,"MaxLength":0,"PasswordChar":"","Locked":-1,"Alignment":0}},{"id":"example_compatibility_20","name":"lblFooter","type":"Label","parent":null,"properties":{"Name":"lblFooter","Left":270,"Top":6525,"Width":9150,"Height":270,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Independent browser runtime; native COM/OCX and full VB6 conformance remain outside this release.","BackStyle":0,"Alignment":0}}],"menus":[]}},{"id":"example_compatibility_21","name":"Counter","kind":"class","code":"Option Explicit\nPublic Function NextValue() As Long\n    Static count As Long\n    count = count + 1\n    NextValue = count\nEnd Function\n"}],"settings":{"snapToGrid":true,"gridSize":120,"showGrid":true,"renderer":"auto","tabWidth":4,"requireVariableDeclaration":true},"references":[],"assets":{},"vfs":{"files":{},"directories":["/"]},"appSettings":{}}</script><script>/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */
 (()=>{'use strict';
 const __modules=[];

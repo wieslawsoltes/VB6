@@ -68,7 +68,7 @@ for(const code of [
 ])test('unsupported native Declare fails without producing a plausible executable: '+code,()=>assert.throws(()=>extractNativeDeclarations({name:'M',code})));
 for(const [name,code] of [
   ['unsupported record storage','Private Type Point\n x As Long\nEnd Type\nDim n As Point'],['ByVal array parameters','Private Sub F(ByVal n() As Long)\nEnd Sub'],
-  ['unsupported date storage','Private Sub Form_Load()\n Dim n As Date\nEnd Sub'],
+  ['unsupported Decimal storage','Private Sub Form_Load()\n Dim n As Decimal\nEnd Sub'],
 
   ['unsupported event','Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)\nEnd Sub'],
   ['ambiguous default variant','Private Sub F(n)\nEnd Sub']
