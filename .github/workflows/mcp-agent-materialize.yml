@@ -37,7 +37,7 @@ jobs:
           original=git('show','c44aa8466367cda25f038fb6e0751d71a65e6daf:'+workflow)
           decoder=textwrap.dedent(original.split("python - <<'PY'\n",1)[1].split('          PY\n',1)[0])
           decoder=decoder.replace('set(pieces+[workflow])',"set(pieces+[workflow,'tools/.mcp-agent-review.b64','tools/.mcp-agent-fixes.py'])")
-          exec(compile(decoder,'verified-source-reconstruction','exec'))
+          exec(compile(decoder,'verified-source-reconstruction','exec'),{})
           # The superseded encoded review transfer is never decoded or executed.
           pathlib.Path('tools/.mcp-agent-review.b64').unlink()
           pathlib.Path('tools/.mcp-agent-fixes.py').unlink()
@@ -54,7 +54,7 @@ jobs:
           p=pathlib.Path('README.md');s=p.read_text();s=re.sub(pattern,lambda m:m[1]+'\n'+m[2][m[2].index('### Compiler/runtime compatibility workstream'):],s,flags=re.S);p.write_text(s)
           p=pathlib.Path('package.json');s=p.read_text();s=re.sub(pattern,lambda m:m[1].rstrip()+',\n'+m[2],s,flags=re.S);p.write_text(json.dumps(json.loads(s),indent=2)+'\n')
           p=pathlib.Path('src/runtime/host.js');p.write_text(re.sub(pattern,lambda m:m[1],p.read_text(),flags=re.S))
-          exec(compile(helper,'reviewed-agent-lifecycle-fixes','exec'))
+          exec(compile(helper,'reviewed-agent-lifecycle-fixes','exec'),{})
           run('npm','run','build')
           run('npm','test')
           run('git','add','-A','--','.github','README.md','docs','package.json','src','tools','tests','dist','examples')
