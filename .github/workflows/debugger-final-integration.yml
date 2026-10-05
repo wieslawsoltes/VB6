@@ -73,6 +73,13 @@ jobs:
                   subprocess.run(['git','checkout','--ours','--',path],check=True)
                   subprocess.run(['git','add','--',path],check=True)
           apply('final-edits')
+          path=Path('tools/browser-debugger-boundaries.py');text=path.read_text()
+          assert hashlib.sha256(text.encode()).hexdigest()=='08937375ecc73a06954bbe6a5cab95b2384ce102c073d6c301a1fc6e63e2487e'
+          old="    urls={'modular':prefix+'/index.html','standalone':prefix+'/dist/VB6-Studio-Web.html','file':(base.ROOT/'dist/VB6-Studio-Web.html').as_uri()}"
+          new="    urls={'modular':prefix+'/dist/index.html','standalone':prefix+'/dist/VB6-Studio-Web.html','file':(base.ROOT/'dist/VB6-Studio-Web.html').as_uri()}\n    for origin,relative in [('modular','dist/index.html'),('modular','dist/studio.js'),('modular','dist/studio.css'),('standalone','dist/VB6-Studio-Web.html'),('file','dist/VB6-Studio-Web.html')]:\n        if origin in origins and not (base.ROOT/relative).is_file():\n            server.shutdown();server.server_close();thread.join(timeout=5)\n            raise FileNotFoundError('Debugger test entry point is missing: '+relative)"
+          assert text.count(old)==1;text=text.replace(old,new)
+          assert hashlib.sha256(text.encode()).hexdigest()=='4785674d04eb9abf51f44ef3dfbc15eb6b0dc2188b670e93ca85c4f7dfbd6483'
+          path.write_text(text)
           for path in ['.github/debugger-hardening.b64','.github/debugger-final-edits.b64','.github/workflows/debugger-main-sync.yml','.github/workflows/debugger-review-snapshot.yml','.github/workflows/debugger-final-integration.yml']:
               Path(path).unlink()
           PY
