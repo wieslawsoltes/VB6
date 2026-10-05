@@ -1,0 +1,34 @@
+name: IntelliSense signature test migration
+on:
+  push:
+    branches: [feature/classic-vb6-intellisense]
+permissions:
+  contents: write
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/feature/classic-vb6-intellisense'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply reviewed typed-signature assertion
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('tools/browser-features-04.py');s=p.read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='a1b4322b4c04598d9622ec1b51d918c34945f310e00432e4e5832fda09e946cd', 'Source changed; review before applying'
+          old='DateDiff(interval, date1, date2, [firstdayofweek], [firstweekofyear])'
+          new='DateDiff(interval As Variant, date1 As Variant, date2 As Variant, Optional firstdayofweek As VbDayOfWeek, Optional firstweekofyear As VbFirstWeekOfYear) As Long'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          assert hashlib.sha256(s.encode()).hexdigest()=='f5428661705ac65e874f0c7cb09fa599abd56d9ad408b931866a6a874aadd5a7'
+          p.write_text(s)
+          PY
+          python -m py_compile tools/browser-features-04.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/intellisense-test-migration.yml
+          git add tools/browser-features-04.py
+          git commit -m 'test(editor): assert typed DateDiff parameters and return value in Object Browser'
+          git push origin HEAD:feature/classic-vb6-intellisense
