@@ -7,12 +7,12 @@ permissions:
 jobs:
   prepare:
     if: github.ref == 'refs/heads/feat/agent-conversation-thread-budgets'
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -25,7 +25,7 @@ jobs:
           data = base64.b64decode(''.join(Path('tools/.agent-thread-update.part' + str(i)).read_text() for i in range(4)), validate=True)
           assert hashlib.sha256(data).hexdigest() == '9ca9ef114088fabee03aade59c0dbe674c38f59f5a580f9833aed8bd6ebc0158'
           change = json.loads(lzma.decompress(data))
-          assert subprocess.check_output(['git', 'rev-parse', 'HEAD^'], text=True).strip() == change['base'] == '30febe16733be5d71eb4428d4888866947a088fe'
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD~2'], text=True).strip() == change['base'] == '30febe16733be5d71eb4428d4888866947a088fe'
           allowed = {'docs/CODING-AGENT-THREADS.md', 'src/agents/agent.js', 'src/agents/agents.css', 'src/agents/conversations.js', 'src/agents/limits.js', 'src/agents/providers.js', 'src/agents/studio.js', 'src/agents/task-tools.js', 'src/agents/thread-view.js', 'src/agents/thread.js', 'tests/agent-relay.test.mjs', 'tests/coding-agents-tasks.test.mjs', 'tests/coding-agents-thread.test.mjs', 'tests/coding-agents.test.mjs', 'tools/agent-relay.mjs', 'tools/coding-agents-browser-tests.py'}
           assert {item['path'] for item in change['files']} == allowed
           assert len(change['files']) == len(allowed)
