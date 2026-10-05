@@ -1,0 +1,73 @@
+name: Integrate reviewed debugger extensions
+on:
+  push:
+    branches: [feat/debugger-compatibility-boundaries]
+    paths: ['.github/workflows/debugger-integrate.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/debugger-compatibility-boundaries'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Integrate current main without replacing existing feature sources
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          git merge --no-commit --no-ff origin/main
+          node tools/integrate-debugger-extensions.mjs
+          rm tools/integrate-debugger-extensions.mjs .github/workflows/debugger-integrate.yml
+      - name: Complete unit suite and generated distributions
+        run: |
+          npm test | tee /tmp/debugger-extension-unit.log
+          npm run build
+          git add -u
+          git diff --cached --check
+          npm run build
+          git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples packages/win32-browser/dist
+      - name: Install matched browser engines
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium firefox webkit
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH='+p.chromium.executable_path)
+          PY
+      - name: Existing and new debugger browser regressions
+        run: |
+          for browser in chromium firefox webkit; do
+            VB6_BROWSER="$browser" python tools/browser-debugger-runtime.py
+            cp "reports/debugger-runtime/$browser.json" "/tmp/debugger-existing-$browser.json"
+            VB6_BROWSER="$browser" python tools/browser-debugger-boundaries.py
+            cp "reports/debugger-boundaries/$browser.json" "/tmp/debugger-extension-$browser.json"
+          done
+      - name: Commit only validated integration and regenerated bundles
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/feat/debugger-compatibility-boundaries | cut -f1)" = "$EXPECTED_HEAD"
+          git commit -m 'feat(debugger): integrate event-driven Immediate, versioned edits and classic native windows'
+          git push origin HEAD:refs/heads/feat/debugger-compatibility-boundaries
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debugger-extension-validation
+          path: |
+            /tmp/debugger-extension-unit.log
+            /tmp/debugger-existing-*.json
+            /tmp/debugger-extension-*.json
+            reports/debugger-boundaries
+            reports/debugger-runtime
+          retention-days: 7
