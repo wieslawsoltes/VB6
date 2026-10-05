@@ -1,3 +1,4 @@
+import {mergedProject} from '../project/import-merge.js';
 /** Native projects coexist with web snapshots; browser permissions stay explicit. */
 import {el,clone,download,safeName} from '../core/core.js';
 import {modal,alertDialog} from './ui.js';
@@ -34,13 +35,6 @@ async function importOptions(entries,provided={}){
   if(!await modal('Open Native / Web Project',{width:580,content,buttons:[{label:'Open',value:true,primary:true},{label:'Cancel',value:false}]}))return null;
   return {...provided,entryPath:pick.value||undefined,encoding:encoding.value};
 }
-function mergedProject(current,incoming){
-  if(incoming.nativeWorkspace)throw new Error('Open a project group as a workspace rather than adding it as source files.');
-  const next=clone(current);next.assets=Object.assign(Object.create(null),next.assets);const names=new Set(next.modules.map(m=>m.name.toLowerCase())),paths=new Set(next.modules.map(m=>fileName(m).toLowerCase()));
-  for(const m of incoming.modules){if(names.has(m.name.toLowerCase()))throw new Error('A module named '+m.name+' already exists.');if(paths.has(fileName(m).toLowerCase())||Object.keys(next.assets).some(p=>p.toLowerCase()===fileName(m).toLowerCase()))throw new Error('A source file already uses '+fileName(m));names.add(m.name.toLowerCase());paths.add(fileName(m).toLowerCase());next.modules.push(m);}
-  for(const [path,asset]of Object.entries(incoming.assets||{})){const existing=Object.keys(next.assets).find(p=>p.toLowerCase()===path.toLowerCase());if(paths.has(path.toLowerCase())||existing&&JSON.stringify(next.assets[existing])!==JSON.stringify(asset))throw new Error('Conflicting companion file: '+path);next.assets[existing||path]=asset;}
-  return normalizeProject(next);
-}
 export function installNativeProjects(ide){
   const menu=ide.menu.bind(ide),command=ide.command.bind(ide),renderTree=ide.renderProjectTree.bind(ide),loadProject=ide.loadProject.bind(ide);
   let importing=false,saving=false,groupSwitch=false,importGeneration=0;const sessions=new Map();
@@ -57,7 +51,7 @@ export function installNativeProjects(ide){
   };
   ide.inspectNativeFile=async file=>{const path=file.resolved||file.path,asset=ide.project.assets?.[path]||ide.project.nativeWorkspace?.files?.[path];if(!asset){await alertDialog('This referenced file was not supplied: '+file.path,'Native File');return;}const bytes=fromBase64(asset.data);let text;try{text=decodeNativeText(bytes.subarray(0,262144),{encoding:ide.project.nativeProject?.document?.encoding||'auto'}).text;}catch{text=[...bytes.subarray(0,4096)].map(b=>b.toString(16).padStart(2,'0')).join(' ');}await modal('Native File — '+path,{width:720,content:el('div',{},el('p',{},file.opaqueReason||'Preserved companion file. This viewer does not execute or change the file.'),el('textarea',{'aria-label':'Read-only native file',readonly:true,value:'',style:{width:'100%',height:'300px'}},text),el('p',{},bytes.length+' original bytes; preview is bounded.')),buttons:[{label:'Download Original',value:'download',action:()=>download(path.split('/').at(-1),bytes)},{label:'Close',value:false}]});};
   ide.loadProject=(project,...args)=>{if(!groupSwitch){sessions.clear();importGeneration++;}return loadProject(project,...args);};
-  ide.switchNativeProject=path=>{
+  ide.switchNativeProject=(path,{interactive=true}={})=>{
     try{
       if(ide.runState!=='design')throw new Error('Stop execution before switching projects.');
       if(path.toLowerCase()===projectFile(ide.project).toLowerCase())return;
@@ -67,7 +61,7 @@ export function installNativeProjects(ide){
       const state=sessions.get(projectFile(next));if(state){ide.history.undoStack=state.undo;ide.history.redoStack=state.redo;ide.breakpoints=state.breakpoints;ide.watches=state.watches;for(const doc of state.docs)ide.openDocument(doc.id,doc.view);const active=state.docs.find(d=>d.key===state.active);if(active)ide.openDocument(active.id,active.view);}
       // Old whole-project undo snapshots cannot replace freshly edited peers.
       ide.savedJSON=saved;ide.dirty=dirty||JSON.stringify(ide.project)!==saved;ide.updateTitle();ide.persist();ide.status('Active project: '+next.name+'; all projects remain in the workspace.');
-    }catch(error){ide.nativeGroupSelect.value=projectFile(ide.project);alertDialog(error.message,'Project Group');}
+    }catch(error){if(!interactive)throw error;ide.nativeGroupSelect.value=projectFile(ide.project);alertDialog(error.message,'Project Group');}
   };
   // Preserve the current workspace peers when applying a cached project's undo snapshot.
   for(const method of ['undo','redo']){const original=ide.history[method].bind(ide.history);ide.history[method]=(...args)=>{const current=ide.project.nativeWorkspace,result=original(...args);if(current&&result?.nativeWorkspace)result.nativeWorkspace.peers=clone(current.peers);return result;};}
