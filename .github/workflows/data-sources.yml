@@ -32,7 +32,9 @@ jobs:
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium
       - name: Test IDE and exported applications
-        run: python tools/browser-data-sources.py
+        run: |
+          python tools/browser-data-sources.py
+          python tools/browser-data-layout.py
       - name: Verify reproducible application bundles
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js examples
       - uses: actions/upload-artifact@v4
@@ -41,3 +43,19 @@ jobs:
           name: data-source-browser-evidence
           path: reports/data-sources
           retention-days: 7
+  native-drivers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: [pg, mysql, mssql]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install optional gateway-only drivers
+        run: npm install --no-save --package-lock=false --ignore-scripts pg@8.23.1 mysql2@3.24.5 mssql@12.7.3
+      - name: Test disposable loopback database through the authenticated gateway
+        run: node tools/data-container-tests.mjs '${{ matrix.driver }}'
