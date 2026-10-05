@@ -1,0 +1,29 @@
+name: Win32 browser compatibility
+on:
+  push:
+    branches: [main, feature/win32-browser-compat]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: win32-browser-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive exact source for reproducibility
+        run: git archive --format=zip HEAD -o /tmp/vb6-win32-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-browser-source
+          path: /tmp/vb6-win32-source.zip
+          retention-days: 7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build
+      - run: npm test
