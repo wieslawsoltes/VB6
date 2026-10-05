@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['src/**', 'tools/**', 'tests/**', 'package.json', '.github/workflows/mcp.yml']
   push:
-    branches: [main, feat/mcp-browser-and-local]
+    branches: [main, feat/mcp-agent-access]
     paths: ['src/**', 'tools/**', 'tests/**', 'package.json', '.github/workflows/mcp.yml']
   workflow_dispatch:
 permissions:
@@ -39,6 +39,8 @@ jobs:
               print('CHROMIUM_PATH=' + p.chromium.executable_path)
           PY
       - run: npm run test:mcp:browser
+      - name: External coding-agent workflows in all deployment modes
+        run: npm run test:mcp:agent
       - name: Existing core browser regressions
         if: success() || failure()
         run: python tools/browser-tests.py
