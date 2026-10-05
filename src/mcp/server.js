@@ -1,5 +1,5 @@
 import {McpTasks, TASK_EXTENSION, requireTasks} from './tasks.js';
-import {MCP_VERSION, MCP_LIMIT, MCP_VERSIONS, MCP_LEGACY_VERSIONS, MCP_META, McpError, checkMessage, errorResponse, isRecord, checkAbort, validateArguments, validateHeaders, pageItems, awaitAbort, utf8Length} from './protocol.js';
+import {randomToken, MCP_VERSION, MCP_LIMIT, MCP_VERSIONS, MCP_LEGACY_VERSIONS, MCP_META, McpError, checkMessage, errorResponse, isRecord, checkAbort, validateArguments, validateHeaders, pageItems, awaitAbort, utf8Length} from './protocol.js';
 
 /** MCP server reusable with a browser IDE, a headless adapter, MessagePort, stdio or HTTP. */
 export class McpServer {
@@ -216,7 +216,7 @@ export class McpServer {
   }
 }
 /** Explicitly attach a private MessagePort; no global window-message listener or wildcard trust. */
-export function bindMcpPort(port, server, {sessionKey = 'port', onError = () => {}} = {}) {
+export function bindMcpPort(port, server, {sessionKey = 'port-' + randomToken(24), onError = () => {}} = {}) {
   const lifetime = new AbortController();
   port.onmessage = async event => {
     try { const reply = await server.dispatch(event.data, {sessionKey, signal: lifetime.signal, requestId: event.data?.id, emit: message => port.postMessage(message), notify: message => { if (!lifetime.signal.aborted) port.postMessage(message); }}); if (reply && !lifetime.signal.aborted) port.postMessage(reply); }
