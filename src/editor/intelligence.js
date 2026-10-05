@@ -2,7 +2,7 @@ import {parseExpression} from '../language/expression.js';
 import {KEYWORDS} from './language-service.js';
 import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt} from './source-context.js';
 import {scanDeclarations,parameterSymbol} from './declaration-index.js';
-import {PRIMITIVE_TYPES,CONSTANT_SYMBOLS,BUILTIN_SYMBOLS,GLOBAL_OBJECTS,TYPE_CATALOG,ENUM_TYPES,builtinType,member} from './type-catalog.js';
+import {PRIMITIVE_TYPES,CONSTANT_SYMBOLS,BUILTIN_SYMBOLS,GLOBAL_OBJECTS,TYPE_CATALOG,ENUM_TYPES,builtinType,member,runtimeType} from './type-catalog.js';
 export {maskSource,splitArguments,wordAt,scanDeclarations};
 
 const eq=(a,b)=>symbolKey(a)===symbolKey(b);
@@ -72,7 +72,7 @@ export class EditorIntelligence {
   referenceTypes(project){
     // Projects can persist the same JSON descriptor beside their native
     // reference identity. Check serialized contents to observe in-place edits.
-    const descriptors=(project.references||[]).filter(r=>r&&typeof r==='object'&&r.typeLibrary&&!r.missing).map(r=>r.typeLibrary);
+    const descriptors=(project.references||[]).filter(r=>r&&typeof r==='object'&&r.typeLibrary&&!r.missing).map(r=>r.typeLibrary).concat(project.typeLibraries||[]);
     const key=JSON.stringify(descriptors);
     if(key!==this.referenceKey){const service=new EditorIntelligence();for(const d of descriptors)try{service.registerTypeLibrary(d.name,d.types);}catch{}this.referenceCache=[...service.libraries.values()].flat();this.referenceKey=key;}
     return [...this.libraries.values()].flat().concat(this.referenceCache||[]);
@@ -89,7 +89,7 @@ export class EditorIntelligence {
       if(record)return record;
     }
     const references=this.referenceTypes(project),ref=references.find(t=>eq(t.name,type))||references.find(t=>eq(t.name.split('.').at(-1),type));
-    return ref||builtinType(type);
+    return ref||runtimeType(project,type)||builtinType(type);
   }
   members(project,module,type){return (this.type(project,module,type)?.members||[]).filter(visible);}
   objectMembers(project,module,symbol){
@@ -140,8 +140,8 @@ export class EditorIntelligence {
       if(node.kind==='member')return find(this.objectMembers(project,module,visit(node.object,depth+1)),node.name)||null;
       if(node.kind==='call'){
         const target=visit(node.callee,depth+1);if(!target)return null;
-        if(target.array||target.controlArray)return {...target,array:false,controlArray:false};
         if(target.params)return {...target,kind:'value',params:undefined,instance:true};
+        if(target.array||target.controlArray)return {...target,array:false,controlArray:false};
         const type=this.type(project,module,target.type||target.name),defaultMember=type?.defaultMember||type?.members?.find(s=>s.defaultMember)?.name;
         const item=defaultMember?find(this.objectMembers(project,module,target),defaultMember):null;
         return item?{...item,kind:'value',params:undefined,instance:true}:null;

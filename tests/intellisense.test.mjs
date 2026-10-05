@@ -125,3 +125,47 @@ test('cache invalidates source, metadata, removed modules and live unsaved snaps
 test('bounded syntax tree cache does not invoke user callbacks, getters or native constructors',()=>{
  const f=make('Dim x As Customer',[klass]);let invoked=0;f.project.runtime={get Customer(){invoked++;throw Error('executed');}};for(let i=0;i<300;i++)f.service.resolve(f.project,f.module,1,'x.Create('+i+').Name');assert.equal(invoked,0);assert.ok(f.service.expressionCache.size<=128);
 });
+test('VFS and configured data-environment completions match their runtime adapters',()=>{
+ const f=make('Dim fs As Scripting.FileSystemObject\nDim rows As DAO.Recordset');
+ assert.ok(names(list(f,'fs.OpenTextFile("/test.txt").')).includes('ReadAll'));
+ assert.ok(!names(list(f,'fs.')).includes('Drives'));
+ assert.ok(names(list(f,'rows.Fields(0).')).includes('Value'));
+ f.project.dataSources={connections:[{name:'LocalDB'}],commands:[{name:'GetOrders',parameters:[{name:'CustomerId',type:3}]}]};
+ assert.ok(names(list(f,'DataEnvironment1.')).includes('LocalDB'));
+ assert.ok(names(list(f,'DataEnvironment1.rsGetOrders.')).includes('Fields'));
+ assert.ok(names(list(f,'DataEnvironment1.GetOrders(1).')).includes('MoveNext'));
+ const text='DataEnvironment1.GetOrders ';
+ assert.equal(f.service.parameterInfo(f.project,f.module,1,text,text.length).parameters[0].type,'Long');
+ f.project.dataSources.connections[0].name='Renamed';assert.ok(names(list(f,'DataEnvironment1.')).includes('Renamed'));
+});
+test('portable project libraries are isolated from native reference identities',()=>{
+ const f=make('Dim value As Custom.Type');f.project.references=[{kind:'Reference',value:'native identity'}];
+ f.project.typeLibraries=[{name:'Custom',types:[{name:'Type',members:[{name:'Caption',type:'String'}]}]}];
+ assert.deepEqual(names(list(f,'value.')),['Caption']);assert.equal(f.project.references[0].value,'native identity');
+ f.project.typeLibraries=[];assert.deepEqual(list(f,'value.'),[]);
+});
+test('Object Browser shares runtime, UDT and reference signatures with IntelliSense',async()=>{
+ const {buildObjectCatalog}=await import('../src/ide/object-catalog.js');
+ const f=make('Public Type Point\nX As Long\nEnd Type');f.project.typeLibraries=[{name:'Custom',types:[{name:'Thing',members:[{name:'Ready',type:'Boolean'}]}]}];
+ const catalog=buildObjectCatalog(f.project),fields=catalog.find(c=>c.library==='ADODB'&&c.name==='Fields');
+ assert.match(fields.members.find(m=>m.name==='Item').signature,/ADODB.Field/);
+ assert.ok(catalog.find(c=>c.name==='Main.Point').members.some(m=>m.name==='X'));
+ assert.match(catalog.find(c=>c.library==='Custom').members[0].signature,/Boolean/);
+});
+test('expression assistance follows the selected paused frame rather than the visible module',async()=>{
+ const {expressionScope}=await import('../src/editor/expression-assistance.js');
+ const f=make('Sub Visible()\nEnd Sub',[{id:'other',name:'Worker',kind:'module',code:'Sub Work()\nDim local As Long\nEnd Sub'}]);
+ const ide={project:f.project,activeModule:f.module,editor:{cursor:()=>({line:1})},runState:'paused',stack:[{module:'Worker',procedure:'Work',line:2}],debuggerWindows:{frameIndex:0}};
+ assert.equal(expressionScope(ide).module.id,'other');assert.equal(expressionScope(ide).line,2);
+ ide.runState='design';assert.equal(expressionScope(ide).module.id,'main');
+});
+
+test('function array return types preserve parameters and require an element access',()=>{
+ const f=make('Public Function Customers(ByVal Limit As Long) As Customer()\nEnd Function',[klass]);
+ const info=f.service.resolve(f.project,f.module,1,'Customers');assert.equal(info.type,'Customer');assert.equal(info.array,true);assert.equal(info.params.length,1);
+ assert.deepEqual(list(f,'Customers(2).'),[]);assert.ok(names(list(f,'Customers(2)(0).')).includes('Name'));
+});
+test('data cursor and field metadata expose supported batch operations without executing them',()=>{
+ const f=make('Dim rs As ADODB.Recordset');assert.ok(names(list(f,'rs.Clone().')).includes('UpdateBatch'));
+ assert.ok(names(list(f,'rs.Fields(0).')).includes('GetChunk'));assert.equal(f.service.resolve(f.project,f.module,1,'rs.Filter').type,'Variant');
+});

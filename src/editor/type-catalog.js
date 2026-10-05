@@ -116,7 +116,7 @@ controlExtra.ComboBox=controlExtra.ListBox;
 controlExtra.RichTextBox.push(...controlExtra.TextBox);
 controlExtra.MSHFlexGrid=controlExtra.MSFlexGrid;
 const drawing=['Form','PictureBox'];
-for (const type of ['Form',...Object.keys(CONTROL_DEFAULTS)]) {
+for (const type of ['Form',...Object.keys(CONTROL_DEFAULTS).filter(name=>name!=='OLE')]) {
   const model = type==='Form'?createForm().form.properties:createControl(type).properties;
   const members = Object.entries(model).filter(([name])=>!['Items','Columns'].includes(name)).map(([name,value])=>member(name,propertyTypes[name.toLowerCase()]||(name==='Value'&&type==='CheckBox'?'CheckBoxConstants':booleanProps.has(name.toLowerCase())?'Boolean':geometryProps.has(name.toLowerCase())?'Single':typeof value==='number'?'Long':typeof value==='string'?'String':'Variant')));
   members.push(method('Move','Left As Single, Optional Top As Single, Optional Width As Single, Optional Height As Single'),method('SetFocus'),method('Refresh'),method('ZOrder','Optional Position As Long'));
@@ -149,3 +149,49 @@ export function builtinType(name) {
   const key=symbolKey(name);
   return catalog.get(key)||[...catalog.values()].find(t=>(t.aliases||[]).some(a=>symbolKey(a)===key))||ENUM_TYPES.get(key)||[...ENUM_TYPES.values()].find(t=>symbolKey(t.name.split('.').at(-1))===key)||null;
 }
+
+// The VFS adapter exposes only the operations actually implemented by
+// VirtualFileSystem; native filesystem access is never implied by this list.
+add('Scripting.FileSystemObject',[
+  method('FileExists','FileSpec As String','Boolean'),method('FolderExists','FolderSpec As String','Boolean'),
+  method('CreateTextFile','FileName As String, Optional Overwrite As Boolean = True','Scripting.TextStream'),
+  method('OpenTextFile','FileName As String, Optional IOMode As Long = 1, Optional Create As Boolean = False','Scripting.TextStream'),
+  method('DeleteFile','FileSpec As String'),method('CopyFile','Source As String, Destination As String'),method('GetFile','FileSpec As String','Scripting.File'),
+  ...['GetAbsolutePathName','GetFileName','GetBaseName'].map(name=>method(name,'Path As String','String')),
+  method('BuildPath','Path As String, Name As String','String'),method('CreateFolder','Path As String'),
+]);
+add('Scripting.TextStream',[member('AtEndOfStream','Boolean'),method('ReadLine','','String'),method('Read','Characters As Long','String'),method('ReadAll','','String'),method('Write','Text As String'),method('WriteLine','Text As String'),method('Close')]);
+add('Scripting.File',[member('Name','String'),member('Path','String'),member('Size','Long')]);
+add('DataEnvironment',[
+  member('Connections','DataEnvironment.Connections'),member('Commands','DataEnvironment.Commands'),
+  method('SetCredential','Name As String, Value As String'),method('ClearCredentials'),
+],{kind:'type'});
+add('DataEnvironment.Connections',[member('Count','Long'),method('Item','Index As Variant','ADODB.Connection')],{defaultMember:'Item'});
+add('DataEnvironment.Commands',[member('Count','Long'),method('Item','Index As Variant','ADODB.Command')],{defaultMember:'Item'});
+GLOBAL_OBJECTS.push({name:'DataEnvironment1',type:'DataEnvironment',kind:'object'},{name:'DataEnvironment',type:'DataEnvironment',kind:'object'});
+BUILTIN_SYMBOLS.push(method('OpenDatabase','Name As String, Optional Options As Variant, Optional ReadOnly As Boolean, Optional Connect As String','DAO.Database',{kind:'function'}));
+
+/** Configured data-environment names are design-time metadata, not live
+ * connection/credential values. This never opens a database or an HTTP client. */
+export function runtimeType(project,name){
+  const key=symbolKey(name),alias={'dao.recordset':'ADODB.Recordset','vb6.data.connection':'ADODB.Connection','vb6.data.command':'ADODB.Command'}[key];
+  if(alias)return builtinType(alias);
+  if(key!=='dataenvironment')return null;
+  const members=[...builtinType('DataEnvironment').members],data=project.dataSources||{};
+  for(const c of data.connections||[])if(c.name)members.push(member(c.name,'ADODB.Connection'));
+  const types={2:'Integer',3:'Long',4:'Single',5:'Double',6:'Currency',7:'Date',11:'Boolean',17:'Byte',200:'String',201:'String',202:'String',203:'String'};
+  for(const c of data.commands||[])if(c.name){
+    members.push(method(c.name,(c.parameters||[]).map(p=>'Optional '+p.name+' As '+(types[p.type]||'Variant')),'ADODB.Recordset'),member('rs'+c.name,'ADODB.Recordset'));
+  }
+  return {...builtinType('DataEnvironment'),members};
+}
+
+// Client-cursor operations supported by the connected/batch data runtime.
+const rsType=builtinType('ADODB.Recordset');
+rsType.members=rsType.members.filter(m=>m.name!=='Filter').concat(member('Filter','Variant'),
+  ...props('Long','PageSize PageCount AbsolutePage Status'),
+  method('Clone','Optional LockType As ADODB.LockTypeEnum = -1','ADODB.Recordset'),
+  method('UpdateBatch','Optional AffectRecords As Long = 3'),method('CancelBatch','Optional AffectRecords As Long = 3'),
+  method('Resync','Optional AffectRecords As Long = 3, Optional ResyncValues As Long = 2'),
+  method('Requery'),method('Supports','CursorOptions As Long','Boolean'));
+builtinType('ADODB.Field').members.push(member('UnderlyingValue'),member('ActualSize','Long'),method('GetChunk','Length As Long','Variant'),method('AppendChunk','Data As Variant'));

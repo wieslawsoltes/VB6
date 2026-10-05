@@ -105,7 +105,32 @@ def data_tip(p):
     check(result is not None,result);check('Long' in result.get('type',''),result);shot(p,'debug-data-tip')
     p.evaluate('vb6Studio.command("stop")');p.wait_for_function('vb6Studio.runState==="design"');check(not p.locator('.source-data-tip').count())
 
-CASES=[automatic,enter_and_undo,punctuation,suffix,with_split,constants,nested_info,literals,types,escape_options,accessibility,stale,large,data_tip]
+def immediate(p):
+    setup(p,'Private Sub Form_Load()\nEnd Sub',[{'name':'Text1','type':'TextBox'}])
+    p.evaluate('vb6Studio.command("immediate")');field=p.locator('.immediate-input');field.fill('? Text1');field.focus();put(p,'.')
+    p.wait_for_selector('.completion-list');put(p,'SelSt');p.keyboard.press('Enter')
+    check(field.input_value()=='? Text1.SelStart',field.input_value());check(p.evaluate('vb6Studio.immediateOutput.length')==0,'Completion executed an Immediate command')
+    check(not p.locator('.completion-list').count());shot(p,'immediate')
+
+def reference_import(p):
+    setup(p,'Private Sub Form_Load()\nDim client As Custom.Client\nclient.')
+    p.evaluate('void vb6Studio.command("references")')
+    metadata={'name':'Custom','types':[{'name':'Client','members':[{'name':'Title','type':'String'},{'name':'Ready','type':'Boolean'}]}]}
+    p.locator('input[aria-label="Import type-library metadata"]').set_input_files({'name':'custom.json','mimeType':'application/json','buffer':json.dumps(metadata).encode()})
+    p.wait_for_function('document.querySelector(".ide-dialog [role=status]")?.textContent.includes("Loaded Custom")');shot(p,'references')
+    p.get_by_role('button',name='OK',exact=True).click()
+    check(p.evaluate('vb6Studio.project.references.length')==0);check(p.evaluate('vb6Studio.project.typeLibraries[0].name')=='Custom')
+    p.evaluate('()=>{const e=vb6Studio.editor;e.selectGlobal(e.text.length);e.input.focus();e.complete();}');check(set(names(p))=={'Ready','Title'},names(p));escaped(p)
+    p.evaluate('vb6Studio.command("objectBrowser")');check(p.evaluate('vb6Studio.documents.tools.get("tool:object-browser").catalog.some(c=>c.library==="Custom"&&c.members.some(m=>m.name==="Title"))'))
+
+def frame_expression(p):
+    source='Private Sub Form_Load()\nDim rs As ADODB.Recordset\nSet rs = New ADODB.Recordset\nStop\nEnd Sub'
+    setup(p,source);p.evaluate('vb6Studio.run()');p.wait_for_function('vb6Studio.runState==="paused"',timeout=15000)
+    p.evaluate('''()=>{const original=vb6Studio.sendRuntime.bind(vb6Studio);window.intelliSenseInvocations=[];vb6Studio.sendRuntime=(command,...args)=>{if(['debugInspect','debugEvaluate','immediate'].includes(command))intelliSenseInvocations.push(command);return original(command,...args);};vb6Studio.command('immediate');}''')
+    field=p.locator('.immediate-input');field.fill('? rs.Fields(0)');field.focus();put(p,'.');p.wait_for_selector('.completion-list');check('Value' in p.locator('.completion-list').inner_text());put(p,'Val');p.keyboard.press('Tab');check(field.input_value()=='? rs.Fields(0).Value',field.input_value());check(p.evaluate('intelliSenseInvocations.length')==0)
+    p.evaluate('vb6Studio.command("stop")');p.wait_for_function('vb6Studio.runState==="design"')
+
+CASES=[automatic,enter_and_undo,punctuation,suffix,with_split,constants,nested_info,literals,types,escape_options,accessibility,stale,large,data_tip,immediate,reference_import,frame_expression]
 
 def main():
     kind=os.environ.get('VB6_BROWSER','chromium')

@@ -12,6 +12,11 @@ export function parameterSymbol(text, defaults={}) {
 
 /** Recovers declarations from incomplete procedure bodies without compiling
  * or running them. Retains physical offsets for projected/split code panes. */
+function closingParen(text,open){
+  if(open<0)return -1;let depth=0,bracket=false;
+  for(let i=open;i<text.length;i++){const c=text[i];if(c==='[')bracket=true;else if(c===']')bracket=false;if(bracket)continue;if(c==='(')depth++;else if(c===')'&&!--depth)return i;}
+  return -1;
+}
 export function scanDeclarations(module) {
   const original=String(module.code||'');let source=original,conditionalError=null;
   if (/^\s*#(?:If|Const)\b/im.test(source)) {
@@ -41,11 +46,11 @@ export function scanDeclarations(module) {
     if(head) {
       endOwner(Math.max(1,line-1),start);
       const scope=/\bPrivate\b/i.test(head[1])?'private':/\bFriend\b/i.test(head[1])?'friend':'public';
-      const kind=head[3].toLowerCase(),name=head[4].replace(/^\[|\]$/g,''),open=clean.indexOf('(',head[0].length),close=clean.lastIndexOf(')');
+      const kind=head[3].toLowerCase(),name=head[4].replace(/^\[|\]$/g,''),open=clean.indexOf('(',head[0].length),close=closingParen(clean,open);
       const params=open<0?[]:splitArguments(text.slice(open+1,close>open?close:undefined));
       const tail=close>open&&open>=0?clean.slice(close+1):clean.slice(head[0].length);
       const type=tail.match(new RegExp('^\\s*As\\s+('+TYPE_NAME+')','i'))?.[1]?.replace(/\s+/g,'')||(kind==='sub'||kind==='event'?'Void':defaultIdentifierType(name,defaults));
-      const proc={name,insertText:head[4],kind,line,end:lineCount,offset:start,endOffset:source.length,id:line+':'+kind,owner:null,moduleId:module.id,scope,type,signature:text.trim(),params,parameters:params.map(p=>parameterSymbol(p,defaults)).filter(Boolean),external:!!head[2],accessor:kind.startsWith('property ')?kind.split(' ')[1]:null};
+      const proc={name,insertText:head[4],kind,line,end:lineCount,offset:start,endOffset:source.length,id:line+':'+kind,owner:null,moduleId:module.id,scope,type,array:/\)\s*$/.test(tail)&&/As\s+/i.test(tail),signature:text.trim(),params,parameters:params.map(p=>parameterSymbol(p,defaults)).filter(Boolean),external:!!head[2],accessor:kind.startsWith('property ')?kind.split(' ')[1]:null};
       if(proc.accessor&&proc.accessor!=='get')proc.type=proc.parameters.at(-1)?.type||'Variant';
       symbols.push(proc);
       if(kind==='event'||head[2]){proc.end=line;proc.endOffset=end;continue;}

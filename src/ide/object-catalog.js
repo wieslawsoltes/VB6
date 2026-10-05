@@ -1,3 +1,5 @@
+import {EditorIntelligence} from '../editor/intelligence.js';
+import {TYPE_CATALOG,ENUM_TYPES,BUILTIN_SYMBOLS,runtimeType} from '../editor/type-catalog.js';
 import {readProcedureAttributes} from './procedure-tools.js';
 import {compileModule} from '../language/compiler.js';
 import {BUILTIN_SIGNATURES} from '../runtime/signatures.js';
@@ -33,6 +35,18 @@ export function buildObjectCatalog(project){
   add('Scripting','Dictionary','Browser dictionary adapter',[
     ['Add','Sub Add(Key, Item)'],['Item','Property Item(Key) As Variant'],['Exists','Function Exists(Key) As Boolean'],['Keys','Function Keys()'],['Items','Function Items()'],['Remove','Sub Remove(Key)'],['RemoveAll','Sub RemoveAll()'],['Count','Property Count As Long'],['CompareMode','Property CompareMode As Long']
   ].map(([name,signature])=>({name,kind:signature.startsWith('Property')?'property':'function',signature})));
+  // Share the same declarative signatures and types as the source editor.
+  // Keep legacy default-event descriptors, but replace guessed property types.
+  const intelligence=new EditorIntelligence();
+  for(const type of [...TYPE_CATALOG.values(),...ENUM_TYPES.values(),...intelligence.referenceTypes(project)]){
+    const library=type.library||(type.name.includes('.')?type.name.split('.')[0]:'VB'),name=type.name.split('.').slice(type.name.includes('.')?1:0).join('.');
+    const current=classes.find(c=>c.library===library&&c.name===name),members=(runtimeType(project,type.name)||type).members;
+    const typed=new Set(members.map(m=>m.name.toLowerCase())),extra=current?.members.filter(m=>!typed.has(m.name.toLowerCase()))||[];
+    if(current)classes.splice(classes.indexOf(current),1);
+    add(library,name,type.library?'Explicit portable type-library metadata; native execution is not implied.':'Browser adapter metadata shared with IntelliSense; not complete native OCX type information.',[...extra,...members]);
+  }
+  for(const group of classes.filter(c=>c.library==='VBA'))for(const m of group.members){const declared=BUILTIN_SYMBOLS.find(s=>s.name===m.name);if(declared)m.signature=declared.signature;}
+  for(const module of project.modules)for(const type of intelligence.index(module,project).records)add(project.name,module.name+'.'+type.name,'Project '+type.kind+' declaration',type.members);
   return classes.sort((a,b)=>a.name.localeCompare(b.name));
 }
 export function searchCatalog(classes,query,library='*',showPrivate=true){const q=String(query).toLowerCase();return classes.filter(c=>library==='*'||c.library===library).flatMap(c=>c.members.filter(m=>(showPrivate||m.scope!=='private'&&!m.hidden)&&(m.name.toLowerCase().includes(q)||c.name.toLowerCase().includes(q))).map(m=>({...m,label:c.library+' · '+c.name+' · '+m.label})));}
