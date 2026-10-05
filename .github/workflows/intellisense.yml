@@ -18,7 +18,7 @@ jobs:
   validate:
     name: IntelliSense (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -39,10 +39,15 @@ jobs:
           python-version: '3.12'
       - name: Browser dependencies
         run: pip install playwright==1.57.0 && python -m playwright install --with-deps ${{ matrix.browser }}
-      - name: IntelliSense browser regression
+      - name: Actual modular HTTP, standalone HTTP and file-origin regressions
         env:
           VB6_BROWSER: ${{ matrix.browser }}
-        run: python tools/browser-intellisense-tests.py
+        run: |
+          result=0
+          for mode in modular http file; do
+            VB6_INTELLISENSE_ORIGIN=$mode python tools/browser-intellisense-compatibility.py || result=1
+          done
+          exit $result
       - uses: actions/upload-artifact@v4
         if: always()
         with:
