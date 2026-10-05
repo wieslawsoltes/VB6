@@ -1,6 +1,6 @@
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
 const key = value => String(value).toLowerCase();
-const types = new Set(['byte', 'integer', 'long', 'boolean', 'string']);
+const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double']);
 export const MAX_NATIVE_STRING = 1024 * 1024;
 
 function boundValue(compiler, node, module, proc) {
@@ -28,9 +28,9 @@ function boundValue(compiler, node, module, proc) {
 }
 
 export function storageLayout(compiler, decl, module, proc) {
-  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean or String: ' + decl.name, module);
+  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double or String: ' + decl.name, module);
   if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
-  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : 4;
+  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : key(decl.type)==='double' ? 8 : 4;
   decl.nativeElementBytes = elementBytes;
   let count = 1;
   if (decl.bounds !== null && decl.bounds !== undefined) {
@@ -80,7 +80,7 @@ export const nativeStorageMethods = {
   },
   storageExpression(variable, node) {
     if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
-    if (key(variable.type) === 'string') this.textExpression(node); else this.numeric(node);
+    if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type)))this.floatExpression(node);else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
   },
   rawStorageAddress(variable) {
     if (variable.owner?.form) this.x.call(variable.owner.initialize);
@@ -105,6 +105,7 @@ export const nativeStorageMethods = {
   stringBuiltin(node, name) {
     const x = this.x, args = node.args;
     if (['len','lenb','ascw','strptr'].includes(name)) {
+      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
       if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
       if(name==='strptr'){
         const variable=this.variable(args[0]);

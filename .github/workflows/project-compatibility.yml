@@ -40,8 +40,26 @@ jobs:
             dist/
             package.json
             LICENSE
+            THIRD-PARTY-NOTICES.md
             README.md
             docs/
+  source-archive:
+    needs: compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Deliberately no checkout: verify what users actually download, including
+      # license files required by Windows application staging.
+      - uses: actions/download-artifact@v4
+        with:
+          name: project-compatibility-${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rebuild freshly downloaded source without installed dependencies
+        run: npm run build
+      - name: Test the downloaded archive, including native export and staging
+        run: npm test
   native-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 15
