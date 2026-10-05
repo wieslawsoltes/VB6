@@ -9,7 +9,9 @@ The implementation was integrated with main revision `5f64aea7b9b54d90043096a901
 - `npm run build` succeeded and the generated distributions were committed.
 - The full combined Node suite passed **1,617 tests**, with zero failures or skipped tests, both in CI and locally from the uploaded source snapshot.
 - [Integrated browser run 37301331303](https://github.com/wieslawsoltes/VB6/actions/runs/37301331303) passed **54 scenarios**: 18 in each of Chromium 143.0.7499.4, Firefox 144.0.2 and WebKit 26.0.
-- The final read-only [IntelliSense matrix run 37301864385](https://github.com/wieslawsoltes/VB6/actions/runs/37301864385), at head `776ffe894ebddecf5dd1fa86786a9b8111202883`, repeated those browser checks and verified generated-bundle reproducibility in each browser job.
+- The read-only [IntelliSense matrix run 37301864385](https://github.com/wieslawsoltes/VB6/actions/runs/37301864385), at head `776ffe894ebddecf5dd1fa86786a9b8111202883`, repeated those browser checks and verified generated-bundle reproducibility in each browser job.
+
+The newly landed Win32 browser package was subsequently integrated from main `57f454a87073ae93ff11b8cf6b37322ce0be567b`. [Integration run 37302641126](https://github.com/wieslawsoltes/VB6/actions/runs/37302641126) rebuilt the combined distributions and passed **1,668/1,668 Node tests**, zero skipped. The resulting feature commit is `51ea16b0ecbe41ae5df4b17336b276d8e80fd063`. Final-head browser and repository-wide results are available through the PR checks below.
 
 The 18 scenarios cover member completion; Enter/indent/undo; punctuation chaining; identifier suffix replacement; nested With in split/procedure views; constant lists and parameter hints; nested-call hints; comments/literals; qualified types; options/read-only guards; accessible virtual lists; stale candidates; a 50,000-line source; guarded break-mode data tips; Immediate completion without execution; reference import/Object Browser integration; selected-frame expression completion without runtime calls; and IME completion resumption.
 
