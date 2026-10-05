@@ -10,7 +10,7 @@ export async function readNativeDirectory(handle){
     if(depth>16)fail('Folder nesting exceeds 16 levels');
     for await(const item of dir.values()){
       const path=prefix+item.name;
-      if(item.kind==='directory'){if(['.git','node_modules'].includes(item.name)){skipped.push(path);continue;}await walk(item,path+'/',depth+1);}
+      if(item.kind==='directory'){if(['.git','node_modules','.vb6-save-journal'].includes(item.name.toLowerCase())){skipped.push(path);continue;}await walk(item,path+'/',depth+1);}
       else if(item.kind==='file'){if(files.length>=MAX_NATIVE_FILES)fail('Folder contains more than 2,000 files');const f=await item.getFile();total+=f.size;if(f.size>20*1024*1024||total>MAX_NATIVE_BYTES)fail('Folder exceeds the 20 MiB/file or 50 MiB total limit');files.push([path,new Uint8Array(await f.arrayBuffer())]);}
     }
   };
