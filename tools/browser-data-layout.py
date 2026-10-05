@@ -16,6 +16,7 @@ with sync_playwright() as pw:
     try:
         for width in (1440, 580):
             page = browser.new_page(viewport={'width': width, 'height': 960})
+            page.set_default_timeout(8000)
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
             page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text())
@@ -32,7 +33,8 @@ with sync_playwright() as pw:
             checkbox.press('Space')
             assert checkbox.is_checked()
             page.get_by_role('tab', name='All', exact=True).click()
-            config = json.loads(page.get_by_label('All connection properties', exact=True).input_value())
+            # tabbedPages gives this textarea the tabpanel's accessible name.
+            config = json.loads(page.locator('textarea[aria-label="All connection properties"]').input_value())
             assert config['readOnly'] is True
             page.get_by_role('button', name='OK', exact=True).last.click()
             page.wait_for_function('vb6Studio.project.dataSources.connections.some(c => c.name === "LayoutCheck" && c.readOnly)')
