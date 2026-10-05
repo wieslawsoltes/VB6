@@ -28,7 +28,7 @@ export class CodeAssistance {
     this.hide();const editor=this.editor,ide=this.ide,workbench=ide.debuggerWindows;
     if(editor.disposed||!editor.appearance.autoDataTips||ide.runState!=='paused'||!workbench)return null;
     const position=positionAt(editor.index,offset),word=wordAt(editor.text,offset),line=editor.index.lines[position.line-1],local=word.start-editor.index.starts[position.line-1];
-    if(!/^[A-Za-z_]\w*[$%&!#@]?(?:\.[A-Za-z_]\w*[$%&!#@]?)*$/.test(word.text)||!maskSource(line).slice(Math.max(0,local),Math.max(0,local)+word.text.length).trim())return null;
+    if(!word.text||word.text.length>4096||!maskSource(line).slice(Math.max(0,local),Math.max(0,local)+word.text.length).trim())return null;
     const frame=ide.stack[workbench.frameIndex??ide.stack.length-1],procedure=editor.procedureIndex.filter(p=>p.line<=position.line).at(-1);
     if(!frame||lower(frame.module)!==lower(editor.module?.name)||procedure&&lower(procedure.name)!==lower(frame.procedure))return null;
     const serial=++this.serial,text=editor.text,pauseId=workbench.pauseId,frameIndex=workbench.frameIndex;

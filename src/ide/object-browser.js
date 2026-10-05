@@ -28,9 +28,10 @@ export class ObjectBrowser {
     this.root.addEventListener('keydown',e=>{if(e.altKey&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();e.stopPropagation();this.travel(e.key==='ArrowLeft'?-1:1);}if(e.key==='F5'){e.preventDefault();e.stopPropagation();this.refresh(true);}});
   }
   refresh(force=false){
+    const references=JSON.stringify([this.ide.project.references,this.ide.project.typeLibraries,this.ide.project.dataSources]);
     const source=this.ide.project.modules.map(m=>[m.id,m.name,m.code,JSON.stringify(m.form?.controls.map(c=>[c.name,c.type,c.properties.Index])||[])]);
-    if(!force&&this.source&&this.projectName===this.ide.project.name&&source.length===this.source.length&&source.every((a,i)=>a.every((v,j)=>v===this.source[i][j])))return;
-    this.source=source;this.projectName=this.ide.project.name;this.catalog=buildObjectCatalog(this.ide.project);
+    if(!force&&this.references===references&&this.source&&this.projectName===this.ide.project.name&&source.length===this.source.length&&source.every((a,i)=>a.every((v,j)=>v===this.source[i][j])))return;
+    this.references=references;this.source=source;this.projectName=this.ide.project.name;this.catalog=buildObjectCatalog(this.ide.project);
     const selected=this.state(),libraries=[...new Set(this.catalog.map(c=>c.library))];this.library.replaceChildren(el('option',{value:'*'},'<All Libraries>'),...libraries.map(name=>el('option',{value:name},name)));this.library.value=libraries.includes(selected.library)?selected.library:'*';
     this.suppress=true;this.renderClasses(selected.classKey,selected.memberKey);this.suppress=false;this.remember();this.status.textContent=this.catalog.length+' classes/modules · Browser adapters and project source; native COM libraries are not loaded.';
   }

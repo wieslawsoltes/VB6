@@ -302,12 +302,84 @@ def release_semantics(page):
     check(page.evaluate('vb6Application.vm.options.debuggerEnabled') is False)
 
 
+def design_immediate(page):
+    project(page, 'Private n As Long\nSub Main()\nn = 999\nDebug.Print "startup"\nEnd Sub\nFunction NextValue() As Long\nn = n + 1\nNextValue = n\nEnd Function')
+    command(page, 'immediate')
+    box = page.get_by_label('Immediate expression', exact=True)
+    box.fill('? NextValue()'); box.press('Enter')
+    page.wait_for_function('vb6Studio.immediateOutput.includes("1") && !vb6Studio.designImmediate.busy')
+    check(page.evaluate('vb6Studio.runState') == 'design')
+    check(page.evaluate('!vb6Studio.runtimeFrame'))
+    check(page.evaluate('!vb6Studio.immediateOutput.includes("startup")'))
+    check('allow-same-origin' not in page.get_by_title('Design-mode Immediate runtime', exact=True).get_attribute('sandbox'))
+    check(page.locator('.design-immediate-window').evaluate('(e)=>e.classList.contains("minimized")'))
+    page.evaluate('vb6Studio.executeImmediate("? NextValue()")')
+    check(page.evaluate('vb6Studio.immediateOutput.includes("2")'))
+    screenshot(page, 'design-immediate')
+
+
+def design_context_and_reset(page):
+    project(page, 'Private n As Long', [{'id':'other','name':'Other','kind':'module','code':'Private n As Long'}])
+    page.evaluate('vb6Studio.executeImmediate("n = 3")')
+    page.evaluate('vb6Studio.openDocument("other", "code")')
+    page.evaluate('vb6Studio.executeImmediate("n = 8")')
+    check(page.evaluate('vb6Studio.designImmediate.execute("? n")').get('value') == '8')
+    page.evaluate('vb6Studio.openDocument("main", "code")')
+    check(page.evaluate('vb6Studio.designImmediate.execute("? n")').get('value') == '3')
+    page.evaluate('vb6Studio.project.modules[0].code += "\\n\' changed"; vb6Studio.markDirty()')
+    check(page.locator('.design-immediate-window').count() == 0)
+    check(page.evaluate('vb6Studio.designImmediate.execute("? n")').get('value') == '0')
+    command(page, 'stop')
+    check(page.locator('.design-immediate-window').count() == 0)
+    check(page.evaluate('vb6Studio.runState') == 'design')
+
+
+def design_startup_transition(page):
+    project(page, 'Public n As Long\nSub Main()\nDebug.Print n\nEnd Sub')
+    page.evaluate('vb6Studio.executeImmediate("n = 55")')
+    command(page, 'run')
+    output(page, '0')
+    check(page.locator('.design-immediate-window').count() == 0)
+    check(page.evaluate('vb6Studio.runState') == 'running')
+    command(page, 'stop')
+    project(page, 'Public n As Long')
+    page.evaluate('vb6Studio.executeImmediate("n = 7")')
+    project(page, 'Public n As Long')
+    check(page.locator('.design-immediate-window').count() == 0)
+    check(page.evaluate('vb6Studio.designImmediate.execute("? n")').get('value') == '0')
+
+
+def design_cancel(page):
+    project(page, 'Function Spin() As Long\nOn Error Resume Next\nDo\nLoop\nEnd Function')
+    page.evaluate("""()=>{globalThis.designResult=null;vb6Studio.designImmediate.execute('? Spin()',{
+      timeLimit:60000,instructionLimit:10000000}).then(v=>designResult=v,e=>designResult={error:e.message});}""")
+    page.wait_for_function('vb6Studio.designImmediate.busy')
+    frame = page.locator('iframe[title="Design-mode Immediate runtime"]').element_handle().content_frame()
+    # The session is intentionally minimized. Wait for actual evaluation state,
+    # not visibility or a guessed scheduling delay before sending cancellation.
+    frame.wait_for_function('!!globalThis.vb6Application?.vm?.debugEvaluation')
+    command(page, 'cancelEvaluation')
+    page.wait_for_function('designResult !== null')
+    check('cancel' in page.evaluate('designResult.error').lower())
+    check(page.evaluate('vb6Studio.runState') == 'design')
+    check(page.evaluate('vb6Studio.designImmediate.execute("? 6 * 7")').get('value') == '42')
+    # Another process cannot forge a command response or output by knowing a token.
+    before=page.evaluate('vb6Studio.immediateOutput.length')
+    page.evaluate("""()=>window.dispatchEvent(new MessageEvent('message',{source:window,
+      data:{channel:'vb6-runtime',token:vb6Studio.designImmediate.token,type:'output',text:'forged'}}))""")
+    check(page.evaluate('vb6Studio.immediateOutput.length') == before)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--filter', default='')
     args = parser.parse_args()
     REPORT.mkdir(parents=True, exist_ok=True)
-    cases = [('Classic Error Trapping options', options),
+    cases = [('Design-mode Immediate preserves the classic input and skips startup', design_immediate),
+             ('Design Immediate module scope and edit reset', design_context_and_reset),
+             ('Design Immediate resets on F5 and project replacement', design_startup_transition),
+             ('Design Immediate cancellation and sandbox isolation', design_cancel),
+             ('Classic Error Trapping options', options),
              ('Retained unhandled error and Immediate repair', recover_fault),
              ('Break on All Errors delivers Resume Next once', handled_error),
              ('Break in Class Module retains callers and End resets', class_error),

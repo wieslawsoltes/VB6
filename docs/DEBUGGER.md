@@ -122,6 +122,39 @@ paused debugger state remain in force. Evaluation cannot be used to evade a Rese
 through `On Error Resume Next`. Values and other side effects intentionally caused
 by explicit evaluation remain application changes; cancelling is not rollback.
 
+### Immediate before pressing F5
+
+The classic Immediate input now works in design mode. The IDE lazily compiles an
+isolated, opaque-origin runtime that initializes module/form storage **without
+running Sub Main, Form_Initialize or Form_Load**. Expressions and explicit calls
+use the active module's context, including its private fields and procedures.
+For example, in a standard module containing `Private count As Long`:
+
+```vb
+count = 7
+? count + 1
+```
+
+The second command prints `8`. Module storage and implicit Immediate temporaries
+persist between commands. Switching code modules selects a different context;
+class instances still require explicit construction. The session does not expose
+the IDE document, its API keys, or agent permissions to user source.
+
+Commands use the same instruction/time limits and cancellation as paused
+explicit evaluation. Debug → Cancel Evaluation cancels a busy command; Reset,
+source/project changes, project replacement, and normal F5 discard the session.
+A normal run starts with fresh values. Virtual files and settings changed in this
+design-only sandbox are not copied back to the project or normal application.
+Background form/control events are not dispatched in this session; use F5 for a
+running event-driven application. Explicit InputBox/MsgBox interactions use the
+existing classic application-window chrome.
+
+Immediate also recognizes `Print`, physical newline-separated commands, and
+apostrophe/Rem comments without executing a comment's colon-separated tail.
+Token boundaries preserve string/date literals, type suffixes and named arguments.
+Idle runtime Immediate calls are now bounded and serialized as well as break-mode
+calls; active source frames must still be paused first.
+
 ## Live editing and state safety
 
 Supported code edits are validated atomically before live frames or procedures
@@ -167,6 +200,7 @@ network service is required.
 
 | API | Contract |
 | --- | --- |
+| `prepareImmediateContext()` | Initializes a fresh debugger-enabled VM without project startup, for isolated design-mode commands. |
 | `configureDebugger({enabled, errorTrapping})` | Validates options before updating them. |
 | `setBreakpoint(module, line, condition, enabled)` | Validates an executable location and parses a bounded condition. |
 | `replaceBreakpoints(array)` | Validates the complete batch before replacing any existing breakpoint. |
@@ -195,8 +229,10 @@ Debug-object removal.
 ## Validation and compatibility limits
 
 `tests/debugger-runtime.test.mjs` adds 50 focused regression tests. The full unit
-suite at implementation time passes 1,600 tests. The generated-application browser
-suite `tools/browser-debugger-runtime.py` covers 13 end-to-end workflows, including
+suite after integration with main passes 1,738 tests. Twenty additional focused
+regressions in `tests/debugger-immediate-context.test.mjs` cover design-context
+preparation, scope, comments, cancellation, and idle evaluation. The generated-application browser
+suite `tools/browser-debugger-runtime.py` covers 17 end-to-end workflows, including
 actual shortcuts, source highlights, the error dialog, Immediate repair, caller
 locals, startup watches, live settings, and exported-app behavior. It records
 JSON and screenshots under `reports/debugger-runtime/`; CI retains these as
@@ -212,8 +248,8 @@ python tools/browser-debugger-runtime.py
 
 Remaining boundaries include native machine-code/P-code debugging, attaching to
 arbitrary Windows EXE/DLL/COM processes, native cross-process stacks, unrestricted
-Edit and Continue, design-mode Immediate without a started runtime, and exact
-native VB6 pixel/font behavior. Automatic watch/getter restrictions are deliberate
+Edit and Continue, full event-driven design-mode execution, and exact native VB6
+pixel/font behavior. Automatic watch/getter restrictions are deliberate
 safety differences. No licensed native VB6 debugger oracle was available for
 this validation, so full original-runtime equivalence is not asserted.
 
@@ -226,3 +262,5 @@ mode semantics, not as evidence of a native VB6 certification:
 - [Options / General / Error Trapping](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/options-dialog-box)
 - [Stop statement](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/stop-statement)
 - [Assert method](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/assert-method)
+
+- [Immediate window context and commands](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/use-the-immediate-window)

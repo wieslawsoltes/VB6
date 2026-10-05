@@ -1,4 +1,5 @@
-import {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex} from './debug-control.js';
+import {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements} from './debug-control.js';
+import {VBWin32Bridge} from './win32.js';
 import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
@@ -42,7 +43,8 @@ export class VirtualMachine extends Signal {
     this.library.set('debug',{Print:(...a)=>this.output(a.map(v=>v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v)).join(' '))});
     this.data=host.data||new DataContext(this.program.sourceProject,{fs:this.fs,persist:host.persist,fetch:host.dataFetch,credentialProvider:host.dataCredential});this.data.install(this);
     this.debugger=new RuntimeDebugger(this);this.debugger.configure();this.debugInspector=new DebugInspector(this);this.debugPauseId=0;this.watchpoints=[];this.watchpointValues=new Map();this.runTarget=null;
-    this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.clipboard||'',Clear:()=>{this.clipboard='';}});
+    this.win32=new VBWin32Bridge(this);
+    this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);this.win32.api.setClipboardText(this.clipboard);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.win32.api.getClipboardText(),Clear:()=>{this.clipboard='';this.win32.api.setClipboardText(null);}});
   }
   output(text,newline=true){this.emit('output',{text:String(text),newline});this.host.print?.(String(text),newline);}
   setState(state){this.state=state;this.emit('state',state);}
@@ -70,6 +72,16 @@ export class VirtualMachine extends Signal {
   configureDebugger(options){return this.debugger.configure(options);}
   debugStack(){return this.debugger.stack();}
   resumeError(action){return this.debugger.resumeError(action);}
+  /** Prepare module storage without running Sub Main or form startup events.
+   * This is an opt-in debugger session, never a shipping application's startup. */
+  async prepareImmediateContext(){
+    if(this.state==='stopped')throw new VBError('The Immediate runtime was reset',5);
+    if(this.immediatePreparation)return this.immediatePreparation;
+    if(!this.options.debuggerEnabled||this.state!=='ready'||this.instances.size)throw new VBError('A fresh debugger runtime is required for design-mode Immediate',5);
+    this.immediateContext=true;
+    this.immediatePreparation=(async()=>{try{await this.initialize();if(this.state==='stopped')throw new StopExecution();this.setState('idle');return this;}catch(error){this.stop();throw error;}})();
+    return this.immediatePreparation;
+  }
   async initialize() {
     if(!this.program.valid)throw new VBError(this.program.diagnostics.map(d=>`${d.source}:${d.line}: ${d.message}`).join('\n'),1002);
     for(const module of this.program.modules.values())if(module.kind!=='class')this.instances.set(lower(module.name),new VBInstance(module));
@@ -113,6 +125,7 @@ export class VirtualMachine extends Signal {
   }
   async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluate(lo,frame)):frame.module.optionBase,numeric(await this.evaluate(hi,frame))]);return result;}
   async start({breakOnEntry=false,runToCursor=null}={}) {
+    if(this.immediateContext)throw new VBError('Reset design-mode Immediate before starting the project',5);
     try { if(runToCursor)this.runTarget=this.breakpointLocation(runToCursor.module,runToCursor.line,runToCursor.column??null);await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
       for(const instance of this.instances.values()){const init=this.formProcedure(instance,'initialize');if(init)await this.callProcedure(instance,init,[]);}
       const name=lower(this.program.startup||'');let instance=this.instances.get(name);
@@ -125,6 +138,7 @@ export class VirtualMachine extends Signal {
   formProcedure(instance,event){return instance.module.procedures.get((instance.module.form?.type==='MDIForm'?'mdiform_':'form_')+event);}
   async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){instance.loaded=true;await instance.formObject.initializeDataBindings?.();const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
   async showForm(instance,modal=false){
+    if(this.immediateContext)this.host.debugInteraction?.();
     if(modal&&(instance.module.form?.type==='MDIForm'||Number(instance.module.form?.properties?.MDIChild)))throw new VBError('MDI forms and child forms cannot be shown modally',401);
     if(instance.formObject?.mdiChild){const parent=instance.formObject.mdiController.parent?.instance;if(!parent)throw new VBError('MDI child requires an MDI Form',366);if(!parent.formObject.shown&&!parent.showing)await this.showForm(parent);}
     instance.showing=true;try{await this.loadForm(instance);}finally{instance.showing=false;}if(modal&&instance.formObject.shown)throw new VBError('Form already displayed; cannot show modally',400);
@@ -155,7 +169,7 @@ export class VirtualMachine extends Signal {
     const enumeration=frame.module.enumBindings?.get(key);if(enumeration){if(enumeration.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return enumeration;}
     const localProc=frame.module.procedures.get(key);if(localProc)return {__procedure:localProc,instance:frame.instance};
     const property=frame.module.procedures.get(key+':get');if(property)return await this.callProcedure(frame.instance,property,[]);
-    if(frame.instance.formObject&&this.hasMember(frame.instance.formObject,name))return this.nativeMember(frame.instance.formObject,name);
+    if(frame.instance.formObject&&!(String(name).endsWith('$')&&this.library.has(key+'$'))&&this.hasMember(frame.instance.formObject,name))return this.nativeMember(frame.instance.formObject,name);
     const constant=frame.module.importedConstantBindings?.get(key);if(constant){if(constant.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return constant.value;}
     if(this.instances.has(key))return this.instances.get(key);
     for(const instance of this.instances.values())if(instance.module.kind==='module'){
@@ -173,7 +187,7 @@ export class VirtualMachine extends Signal {
     const isRecord=Object.getPrototypeOf(object)===Object.prototype&&!!object.__type;let obj=object,privateMatch=false;
     for(let depth=0;obj&&depth<5;depth++,obj=Object.getPrototypeOf(obj)){
       const candidates=Object.getOwnPropertyNames(obj).filter(k=>lower(k)===key&&!BLOCKED_MEMBERS.has(lower(k)));
-      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord);if(publicKey)return publicKey;
+      const publicKey=candidates.find(k=>/^[A-Z]/.test(k)||isRecord||key==='hwnd'&&object.__control);if(publicKey)return publicKey;
       if(candidates.length)privateMatch=true;
     }
     if(privateMatch)throw new VBError('Implementation members are not exposed to Visual Basic: '+name,438);
@@ -214,6 +228,7 @@ export class VirtualMachine extends Signal {
       case 'id':value=await this.getIdentifier(node.name,frame);break;
       case 'with':if(!frame.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);
       case 'member':value=await this.getMember(await this.evaluate(node.object,frame,{raw:true}),node.name,frame);break;
+      case 'addressOf':return this.win32.callback(await this.evaluate(parseExpression(node.name),frame,{raw:true}));
       case 'new':return this.createObject(node.name,frame);
       case 'typeof':{
         const object=await this.evaluate(node.expr,frame,{raw:true}),type=lower(node.name).replace(/^vb\./,'');
@@ -260,7 +275,8 @@ export class VirtualMachine extends Signal {
     for(const {index,node:arg}of slots){
       const param=params?.[index];
       if(arg.kind==='missing'){actual[index]=proc||fn?.vbPreserveMissing?MISSING:undefined;continue;}
-      if(param?.byRef&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
+      if(arg.kind==='byval'){if(!proc?.external)throw new VBError('ByVal call-site override is supported only for Declare calls',49);actual[index]={__win32ByVal:true,value:await this.evaluate(arg.expr,frame)};continue;}
+      if((param?.byRef||proc?.external&&param?.type.toLowerCase()==='string')&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
         try{actual[index]={ref:await this.reference(arg,frame,true)};continue;}catch(error){if(!(error instanceof VBError))throw error;}
       }
       const value=await this.evaluate(arg,frame);
@@ -295,7 +311,7 @@ export class VirtualMachine extends Signal {
       const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
       if(instance?.__vbInstance&&defaultName){const getter=()=>this.callExpression(node,frame);if(target.__vbInterface){const member=this.interfaceProcedure(target,defaultName,objectSet?'set':'let');return new Ref(getter,v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}const setter=instance.module.procedures.get(defaultName+':'+(objectSet?'set':'let'));if(!setter)throw new VBError('Default property is read-only',383);return new Ref(getter,v=>this.callProcedure(instance,setter,[...args,v],frame));}
       if(target instanceof VBArray&&!args.length&&node.callee.kind==='id')return this.reference(node.callee,frame,true);
-      if(target instanceof VBArray)return new Ref(()=>target.get(...args),value=>target.set(args,value),target.type);
+      if(target instanceof VBArray){const ref=new Ref(()=>target.get(...args),value=>target.set(args,value),target.type,target.fixedLength);ref.win32Array=target;ref.win32Offset=target.offset(args);return ref;}
       if(target instanceof VBDictionary)return new Ref(()=>target.Item(...args),value=>target.setItem(...args,value));
       if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args),v=>target.receiver.setItem(...args,v));
       if(node.callee.kind==='member'){
@@ -348,6 +364,7 @@ export class VirtualMachine extends Signal {
     object[native]=args[0];return args[0];
   }
   async callProcedure(instance,proc,args=[],caller=null){
+    if(proc.external)return this.debugAwait(this.win32.invoke(proc,args));
     if(this.stack.length>=this.options.maxCallDepth)throw new VBError('Out of stack space',28);
     const frame=this.makeFrame(instance,proc);frame.caller=caller;if(this.recordSchema(proc.returnType,frame.module))frame.result=new Cell(proc.returnType,await this.createRecord(proc.returnType,frame));
     if(args.length>proc.params.length&&!proc.params.at(-1)?.paramArray)throw new VBError(`Wrong number of arguments to ${proc.name}`,450);
@@ -398,7 +415,7 @@ export class VirtualMachine extends Signal {
   }
   pause(){if(this.state==='running')this.pauseRequested=true;}
   resume(mode='continue'){if(!['continue','into','over','out'].includes(mode))throw new VBError('Invalid stepping mode',5);if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before continuing',5);if(this.state!=='paused')return;this.stepMode=mode==='continue'?null:{mode,depth:this.currentFrame?.depth||0};this.setState('running');this.pauseResolver?.();}
-  stop(){this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();for(const event of this.eventQueue)event.resolve?.();this.eventQueue=[];this.runTarget=null;this.stepMode=null;this.pauseRequested=false;this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
+  stop(){this.win32.dispose();this.debugEvaluation?.cancel();this.setState('stopped');if(!this.debugEvaluation)this.pauseResolver?.();for(const event of this.eventQueue)event.resolve?.();this.eventQueue=[];this.runTarget=null;this.stepMode=null;this.pauseRequested=false;this.dataClose=this.data?.close();try{this.fs.close();}catch{}this.host.stop?.();this.emit('stop');}
   async execute(frame){
     while(frame.pc<frame.proc.code.length){if(frame.proc.code[frame.pc].op==='lineNumber'){frame.erl=frame.proc.code[frame.pc++].number;continue;}await this.checkpoint(frame.proc.code[frame.pc],frame);const current=frame.pc,ins=frame.proc.code[current];if(!ins)return;frame.activePc=current;frame.activeInstruction=ins;frame.pc++;
       try{
@@ -477,23 +494,28 @@ export class VirtualMachine extends Signal {
   parseCSV(text){const values=[];let quoted=false,s='',wasString=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){wasString=true;if(quoted&&text[i+1]==='"'){s+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){values.push(wasString?s:Number(s));s='';wasString=false;}else s+=c;}values.push(wasString?s:Number(s));return values;}
   reportError(error){if(error instanceof StopExecution)return;this.lastError=error;this.emit('error',{message:error.message,number:error.number||5,source:error.source,line:error.line});this.host.error?.(error);this.setState('error');}
   dispatch(module,name,args=[],{coalesce=false}={}){
-    if(this.state==='stopped'||this.state==='error')return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
+    if(this.state==='stopped'||this.state==='error'||this.immediateContext)return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
     if(coalesce&&this.eventQueue.some(e=>e.key===key))return Promise.resolve();if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest event discarded.');return Promise.resolve();}
     return new Promise((resolve,reject)=>{this.eventQueue.push({instance,proc,args,key,resolve,reject});this.processEvents();});
   }
   async runQueuedEvent(event){try{event.resolve(await(event.action?event.action():this.callProcedure(event.instance,event.proc,event.args)));}catch(error){if(!(error instanceof StopExecution))this.reportError(error);event.resolve(undefined);}}
-  async processEvents(){if(this.processing||this.stack.length||this.state==='paused')return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
-  async immediate(text,options={}){if(this.state==='paused')return this.evaluateExplicit(text,{...options,immediate:true});return this.immediateAt(text);}
+  async processEvents(){if(this.processing||this.stack.length||this.state==='paused'||this.debugEvaluation||this.immediateContext)return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
+  async immediate(text,options={}){
+    if(this.state==='paused')return this.evaluateExplicit(text,{...options,immediate:true});
+    if(!['ready','idle','running'].includes(this.state)||this.stack.length)throw new VBError('Pause execution before using the Immediate window',5);
+    if(!this.instances.size)throw new VBError('Start or prepare the runtime before evaluating an expression',5);
+    return this.evaluateExplicit(text,{...options,immediate:true,allowIdle:true});
+  }
   async immediateAt(text,selectedFrame=null){
     const instance=this.instances.values().next().value,frame=selectedFrame||this.currentFrame||(instance&&this.makeFrame(instance));
     if(!frame?.instance)throw new VBError('Start the runtime before evaluating an expression',5);
     if(this.state==='running'&&this.stack.length&&!selectedFrame)throw new VBError('Pause execution before using the Immediate window',5);
     text=String(text);if(text.length>65536)throw new VBError('Enter at most 65,536 characters',5);
     let value;
-    for(let statement of splitTop(text,':')){
+    for(let statement of immediateStatements(text)){
       this.debugEvaluation?.check();statement=statement.trim();if(!statement)continue;
-      if(/^\?/.test(statement)||/^Debug\.Print\b/i.test(statement)){
-        const expression=statement.replace(/^(?:\?|Debug\.Print\s*)/i,'');
+      if(/^\?/.test(statement)||/^(?:Debug\.)?Print\b/i.test(statement)){
+        const expression=statement.replace(/^(?:\?|(?:Debug\.)?Print\s*)/i,'');
         value=await this.evaluate(parseExpression(expression),frame);this.output(describe(value));continue;
       }
       const objectSet=/^Set\s/i.test(statement),source=statement.replace(/^(?:Let|Set)\s+/i,'');
@@ -512,16 +534,19 @@ export class VirtualMachine extends Signal {
   }
   debugAwait(value){return this.debugEvaluation?this.debugEvaluation.wait(value):value;}
   cancelEvaluation(){this.debugEvaluation?.cancel();return {cancelled:!!this.debugEvaluation};}
-  async evaluateExplicit(text,{frameIndex=null,pauseId,instructionLimit=100000,timeLimit=5000,immediate=false}={}){
-    if(this.state!=='paused')throw new VBError('Explicit debugger evaluation requires break mode',5);
+  async evaluateExplicit(text,{frameIndex=null,pauseId,instructionLimit=100000,timeLimit=5000,immediate=false,allowIdle=false,module=null}={}){
+    if(this.state!=='paused'&&!(allowIdle&&immediate&&!this.stack.length&&['ready','idle','running'].includes(this.state)))throw new VBError('Explicit debugger evaluation requires break mode',5);
     if(this.debugEvaluation)throw new VBError('Another debugger evaluation is in progress',5);
     if(pauseId!==undefined&&pauseId!==this.debugPauseId)throw new VBError('The debugger context changed; refresh before evaluating',5);
     text=String(text);if(!text.trim()||text.length>65536)throw new VBError('Enter an expression of at most 65,536 characters',5);
-    const frame=this.debugInspector.frame(frameIndex);if(!frame)throw new VBError('No selected stack frame',5);
+    let frame=this.debugInspector.frame(frameIndex);
+    if(this.state!=='paused'&&module!==null){const instance=this.instances.get(lower(module));if(!instance)throw new VBError('No initialized module context: '+module,5);frame=this.makeFrame(instance);}
+    if(!frame)throw new VBError('No selected stack frame',5);
+    if(this.state!=='paused'){this.immediateFrames ||= new WeakMap();const instance=frame.instance;if(!this.immediateFrames.has(instance))this.immediateFrames.set(instance,frame);frame=this.immediateFrames.get(instance);}
     const session=new DebugEvaluationSession(this,{instructionLimit,timeLimit}),saved={frame:this.currentFrame,err:{...this.err},lastError:this.lastError,erl:this.lastErrorErl,step:this.stepMode,pauseRequested:this.pauseRequested,runTarget:this.runTarget};
     this.debugEvaluation=session;this.currentFrame=frame;this.emit('evaluation',{active:true,frameIndex:this.stack.indexOf(frame)});
     try {const value=immediate?await this.immediateAt(text,frame):await this.evaluate(parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return value;}
-    finally {session.dispose();this.debugEvaluation=null;this.currentFrame=saved.frame;if(this.state==='stopped')this.pauseResolver?.();Object.assign(this.err,saved.err);this.lastError=saved.lastError;this.lastErrorErl=saved.erl;this.stepMode=saved.step;this.pauseRequested=saved.pauseRequested;this.runTarget=saved.runTarget;this.emit('evaluation',{active:false,instructions:session.instructions,milliseconds:performance.now()-session.started});}
+    finally {session.dispose();this.debugEvaluation=null;this.currentFrame=saved.frame;if(this.state==='stopped')this.pauseResolver?.();Object.assign(this.err,saved.err);this.lastError=saved.lastError;this.lastErrorErl=saved.erl;this.stepMode=saved.step;this.pauseRequested=saved.pauseRequested;this.runTarget=saved.runTarget;this.emit('evaluation',{active:false,instructions:session.instructions,milliseconds:performance.now()-session.started});if(this.eventQueue.length&&!this.stack.length&&this.state!=='paused')queueMicrotask(()=>this.processEvents());}
   }
   async evaluateWatch(text,options={}){return this.debugInspector.evaluate(text,options.frameIndex??null);}
   inspectDebug(expression,options={}){return this.debugInspector.inspect(expression,options);}

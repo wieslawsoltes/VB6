@@ -1,3 +1,5 @@
+import {attachExpressionAssistance} from './expression-assistance.js';
+import {installReferenceIntelliSense} from './reference-intellisense.js';
 import {hasUIDialog} from '../core/window-context.js';
 import {CodeAssistance,SourceDragManager} from './assistance.js';
 import {el} from '../core/core.js';
@@ -6,6 +8,8 @@ import {positionAt,mapOffset} from './projection.js';
 
 /** Editor commands and navigation share the IDE undo and active-document model. */
 export function installEditorFeatures(ide){
+  installReferenceIntelliSense(ide);
+  ide.attachExpressionIntelliSense=input=>attachExpressionAssistance(input,ide);
   ide.definitionHistory=[];ide.sourceClipboard={text:''};ide.sourceDrag=new SourceDragManager(ide);
   const originalEditor=ide.documents.editor.bind(ide.documents);
   ide.documents.editor=module=>{const editor=originalEditor(module);if(editor.ideFeatures)return editor;editor.ideFeatures=true;editor.clipboardStore=ide.sourceClipboard;editor.assistance=new CodeAssistance(editor,ide,ide.sourceDrag);

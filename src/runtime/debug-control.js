@@ -1,4 +1,4 @@
-import {VBError} from '../language/lexer.js';
+import {VBError,tokenize} from '../language/lexer.js';
 import {lower} from '../core/core.js';
 import {truth} from './values.js';
 
@@ -113,4 +113,24 @@ export class RuntimeDebugger {
     this.pendingError.action=action;this.vm.resume();
     return {action};
   }
+}
+
+/** Token offsets distinguish statement separators from strings, dates, named
+ * arguments, type suffixes and comments. Comments consume only their own line. */
+export function immediateStatements(text){
+  const statements=[];
+  for(const line of String(text).replace(/\r\n?/g,'\n').split('\n')){
+    let start=0,depth=0;
+    for(const token of tokenize(line.replace(/\?/g,' '))){
+      if(token.type==='op'&&token.value==='(')depth++;
+      else if(token.type==='op'&&token.value===')')depth--;
+      if(token.type==='eof'||token.type==='op'&&token.value===':'&&depth===0){
+        const statement=line.slice(start,token.start).trim();
+        // A Rem comment's EOF includes the scanned keyword; it is not a call.
+        if(statement&&!/^Rem(?:\s|$)/i.test(statement))statements.push(statement);
+        start=token.end;
+      }
+    }
+  }
+  return statements;
 }

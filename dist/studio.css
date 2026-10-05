@@ -1049,7 +1049,7 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 @media(max-width:620px){.object-columns{grid-template-columns:minmax(80px,35%) 4px minmax(90px,1fr)}.object-toolbar button{font-size:10px;padding:1px 3px}.object-search{flex-wrap:wrap}.object-search label{font-size:10px}.object-definition{height:80px}.project-search-fields{flex-wrap:wrap}.project-search-fields label:first-child{flex-basis:55%}.project-replace-row label{flex-direction:column;align-items:stretch}.project-search-options{font-size:10px;gap:3px}}
 
 .source-info{position:absolute;z-index:30;max-width:min(620px,100%);max-height:90px;overflow:auto;padding:4px 6px;border:1px solid var(--vb-dark);box-shadow:1px 1px var(--vb-shadow);background:var(--vb-info);color:var(--vb-info-text);font:12px/17px Tahoma,Arial,sans-serif;white-space:pre-wrap;user-select:text}
-.source-info strong{font-weight:700;text-decoration:underline}
+.source-info strong{font-weight:700}
 .source-editor .completion-list{width:240px;max-height:190px;padding:0;overflow:auto;box-sizing:border-box}
 .source-editor .completion-item{white-space:nowrap;overflow:hidden;min-height:19px;box-sizing:border-box}
 .source-editor.overwrite-mode .source-input{caret-shape:block}
@@ -1064,6 +1064,8 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 .source-data-tip{position:absolute;z-index:90;max-width:min(540px,95%);max-height:120px;overflow:auto;padding:3px 6px;background:var(--vb-info,#ffffe1);color:var(--vb-info-text,#000);border:1px solid var(--vb-window-frame,#000);box-shadow:1px 1px var(--vb-shadow);font:12px/17px var(--ui-font,Arial,sans-serif);white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none}
 .data-tip-type{opacity:.8}.source-drag-ghost{position:fixed;z-index:30000;max-width:min(300px,80vw);padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--vb-window-text);background:var(--vb-window);color:var(--vb-window-text);pointer-events:none;font:12px/17px monospace}.source-drag-ghost[data-valid="false"]{opacity:.5}.source-drag-ghost[data-copy="true"]::before{content:"+ ";font-weight:bold}.source-drop-caret{position:absolute;z-index:91;width:2px;background:var(--vb-window-text);pointer-events:none}
 @media (forced-colors:active){.source-data-tip,.source-drag-ghost{color:CanvasText;background:Canvas;border-color:CanvasText}.source-drop-caret{background:Highlight}}
+
+.source-info-description{margin-top:3px;border-top:1px solid var(--vb-shadow);padding-top:2px}
 
 /* Explicit grid tracks allow genuine docking on every document edge. */
 .ide-shell .workspace.dock-workspace{display:grid!important;position:relative;min-width:0;min-height:0;overflow:hidden;gap:0;grid-template-columns:var(--dock-left,74px) var(--dock-gap-left,4px) minmax(0,1fr) var(--dock-gap-right,4px) var(--dock-right,250px)!important;grid-template-rows:var(--dock-top,0px) var(--dock-gap-top,0px) minmax(0,1fr) var(--dock-gap-bottom,0px) var(--dock-bottom,0px)!important}

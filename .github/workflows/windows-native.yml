@@ -42,6 +42,7 @@ jobs:
             package.json
             README.md
             LICENSE
+            THIRD-PARTY-NOTICES.md
           retention-days: 7
   windows-package:
     needs: runtime-tests
