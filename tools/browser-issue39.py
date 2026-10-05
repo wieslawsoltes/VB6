@@ -38,10 +38,10 @@ def case(name,fn):
         details=fn();RESULTS.append({'name':name,'passed':True,'details':details});print('PASS',name,flush=True)
     except Exception as ex:
         RESULTS.append({'name':name,'passed':False,'error':str(ex)});print('FAIL',name,str(ex),flush=True);traceback.print_exc(limit=2)
-        for context in browser.contexts:
+        for ci,context in enumerate(browser.contexts):
             if context not in contexts:
-                for p in context.pages:
-                    try:p.screenshot(path=OUT/f'failure-{len(RESULTS)}.png')
+                for pi,p in enumerate(context.pages):
+                    try:p.screenshot(path=OUT/f'failure-{len(RESULTS)}-{ci}-{pi}.png')
                     except Exception:pass
     finally:
         RESULTS[-1]['milliseconds']=round((time.monotonic()-start)*1000)
@@ -152,9 +152,31 @@ def chrome_pixels(dpr):
     # Isolate the empty select so text/OS popup arrow pixels cannot mask edges.
     p=fixture(dpr,html='<div class="code-selectors" style="position:absolute;left:20px;top:20px;width:120px"><select aria-label="Object"><option></option></select></div>')
     shot=Image.open(io.BytesIO(p.locator('select').screenshot())).convert('RGB');w,h=shot.size
+    shot.save(OUT/f'selector-edge-{dpr}.png')
     check(all(shot.getpixel((x,h-1))==COLORS['light'] for x in range(w)), 'Select is missing its outer bottom edge')
     check(all(shot.getpixel((x,h-dpr-1))==COLORS['highlight'] for x in range(2*dpr,w-dpr)), 'Select is missing its inner bottom edge')
     return {'dpr':dpr,'frames':3,'bottomSelectorEdges':2,'pixelDifferences':0}
+
+def native_selector_behavior():
+    p=fixture(html='<div class="code-selectors" style="width:240px"><select aria-label="Object"><option>First</option><option>Second</option><option>Third</option></select><select aria-label="Procedure"><option>One</option><option>Two</option></select></div>')
+    select=p.get_by_role('combobox',name='Object',exact=True)
+    info=select.evaluate("n=>({tag:n.tagName,appearance:getComputedStyle(n).appearance,arrow:getComputedStyle(n).backgroundImage})")
+    check(info['tag']=='SELECT' and info['appearance']=='none' and 'linear-gradient' in info['arrow'], f'Not a native select with authored chrome: {info}')
+    p.evaluate("window.selectorChanges=[];document.querySelector('select').addEventListener('change',e=>selectorChanges.push(e.target.value))")
+    select.focus();p.keyboard.press('End');p.keyboard.press('Enter')
+    check(select.input_value()=='Third','Native keyboard selection stopped working')
+    check(p.evaluate("selectorChanges.includes('Third')"),'Native change event was lost')
+    # Enter may open or confirm a native popup, depending on the engine. Close
+    # that popup before asserting document-level Tab navigation.
+    p.keyboard.press('Escape');p.keyboard.press('Tab')
+    check(p.get_by_role('combobox',name='Procedure',exact=True).evaluate('n=>n===document.activeElement'),'Native tab navigation was lost')
+    p.emulate_media(forced_colors='active')
+    forced=p.evaluate('matchMedia("(forced-colors: active)").matches')
+    if forced:
+        check(select.evaluate("n=>getComputedStyle(n).appearance")!='none','Forced colors did not restore native appearance')
+        check(select.evaluate('n=>parseFloat(getComputedStyle(n).borderBottomWidth)>0'),'Forced colors lost a real selector border')
+    check(not p.errors,str(p.errors))
+    return {'nativeKeyboardAndChange':True,'nativeTabOrder':True,'forcedColorsSupported':forced}
 
 def tab_seam_pixels(dpr):
     p=fixture(dpr,html='<div style="position:absolute;left:20px;top:20px;width:240px"><div class="property-tabs"><button class="active">Alphabetic</button><button>Categorized</button></div><div class="property-grid" style="height:50px;flex:none"></div></div>')
@@ -181,7 +203,7 @@ def toolbar(dpr,width):
     info=bar.evaluate('''n=>{const r=n.getBoundingClientRect();return {x:r.x,right:r.right,bottom:r.bottom,width:r.width,height:r.height,cw:n.clientWidth,ch:n.clientHeight,sw:n.scrollWidth,sh:n.scrollHeight,overflow:getComputedStyle(n).overflowX,children:[...n.children].filter(c=>c.getClientRects().length&&getComputedStyle(c).display!=='none').map(c=>{const q=c.getBoundingClientRect();return {left:q.left,right:q.right,bottom:q.bottom,top:q.top}})}}''')
     check(info['overflow']=='clip' and info['sw']<=info['cw'] and info['sh']<=info['ch'],f'Scrollbar/overflow {info}')
     check(all(c['left']>=info['x'] and c['right']<=info['right']+0.02 and c['bottom']<=info['bottom'] for c in info['children']),f'Wrapped command became inaccessible {info}')
-    if width==1312:check(info['height']==29,'Fitting desktop toolbar height changed')
+    if width==1312:check(info['height']==29,f'Fitting desktop toolbar height changed: {info}')
     else:check(info['height']>29,'Narrow toolbar did not wrap')
     first=bar.locator('button:not([disabled])').first;first.focus();p.keyboard.press('End');check(p.evaluate('document.activeElement.closest("[data-command-bar=standard]")!==null'),'Toolbar keyboard navigation lost')
     # Side and floating toolbar modes retain real scrolling when required.
@@ -223,6 +245,7 @@ with sync_playwright() as pw:
         case(f'actual editor and property tab DPR {dpr}',lambda dpr=dpr:editor_and_tabs(dpr))
         for width in [1312,390]:case(f'actual toolbar {width}px DPR {dpr}',lambda dpr=dpr,width=width:toolbar(dpr,width))
     case('caption themes, focus and forced colors',themes_and_disabled)
+    case('native selector keyboard and forced colors',native_selector_behavior)
     for mode in (['inline'] if args.inline else ['http','file']):
         case('actual IDE menu pointer/keyboard '+mode,lambda mode=mode:menu_navigation(mode))
         case('actual MDI caption commands '+mode,lambda mode=mode:mdi_commands(mode))

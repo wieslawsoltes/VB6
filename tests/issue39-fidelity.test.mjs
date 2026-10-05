@@ -35,3 +35,14 @@ test('caption art is scoped, unscaled and respects native forced-color focus pat
  assert.match(css,/disabled::before/);assert.doesNotMatch(css,/outline:none|outline:0!important/);
  assert.match(css,/command-bar:not\(\.command-bar-vertical\):not\(\.command-bar-floating\)/);
 });
+
+test('classic selectors retain native elements while replacing engine-specific chrome',()=>{
+ assert.match(css,/appearance:none;-webkit-appearance:none/);
+ assert.match(css,/background-image:linear-gradient\(var\(--vb-text\)/);
+ assert.match(css,/right 6px top 8px/);
+ assert.match(read('tools/browser-issue39.py'),/native selector keyboard and forced colors/);
+});
+test('horizontal toolbar grip width agrees with its flex basis',()=>{
+ assert.match(css,/command-bar:not\(\.command-bar-vertical\):not\(\.command-bar-floating\) > \.toolbar-grip \{width:6px\}/);
+ assert.match(read('src/ide/command-bars.css'),/flex:0 0 6px/);
+});

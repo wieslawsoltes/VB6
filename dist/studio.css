@@ -1441,13 +1441,26 @@ button[data-browser-detach] {--vb-caption-mask:var(--vb-caption-detach)}
  /* The native select remains a select: preserve its popup, IME and keyboard
     behavior while painting all four inset edges inside its authored bounds. */
  .code-selectors select,.property-object,.toolbox-filter,.toolbar-select {
+  /* WebKit paints native menulist chrome over author shadows. Suppress only
+     that paint, not the select element, native popup, keyboard or change events.
+     The local four-row arrow and button use theme colors and integral pixels. */
+  appearance:none;-webkit-appearance:none;
   border:0;box-shadow:var(--vb-bevel-sunken);padding-left:4px;padding-right:19px;
-  background-clip:padding-box;
+  background-color:var(--vb-window);background-clip:padding-box;
+  background-image:linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-face),var(--vb-face));
+  background-size:7px 1px,5px 1px,3px 1px,1px 1px,1px calc(100% - 4px),15px 1px,1px calc(100% - 4px),15px 1px,15px calc(100% - 4px);
+  background-position:right 6px top 8px,right 7px top 9px,right 8px top 10px,right 9px top 11px,right 2px top 2px,right 2px bottom 2px,right 16px top 2px,right 2px top 2px,right 2px top 2px;
+  background-repeat:no-repeat;
  }
 }
 /* 21px select + 1px top + 2px bottom + 1px separator = the existing 25px row.
    Previously 2 + 21 + 2 + 1 overflowed the row and clipped the bottom bevel. */
 .code-selectors {padding:1px 2px 2px;flex-shrink:0}
+/* Match the horizontal grip's preferred width to its 6px flex basis. Gecko
+   and WebKit otherwise size the wrapping bar using its inherited 4px width,
+   leaving the final zoom control two pixels short and forcing an extra row. */
+.ide-shell .command-bar:not(.command-bar-vertical):not(.command-bar-floating) > .toolbar-grip {width:6px}
+.command-bar .toolbar-select {width:76px;min-width:76px}
 /* Classic toolbars wrap whole buttons when constrained, rather than acquiring
    the report's horizontal scrollbar. No command becomes pointer-inaccessible.
    Real vertical toolbars retain their vertical scrolling behavior. */

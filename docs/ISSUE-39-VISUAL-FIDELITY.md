@@ -92,3 +92,21 @@ the classic layout or introducing a different renderer. Integer-DPI exactness is
 for the specified authored glyph/chrome pixels. Fractional scaling still uses the
 browser rasterizer; native OS fonts, browser-owned select popups, OS window chrome,
 and every native VB6/theme/DPI combination are not certified as pixel-identical.
+
+## Cross-engine follow-up
+
+Real-navigation artifacts for PR head `75e3bc9` exposed four desktop-toolbar
+height failures in Firefox 144.0.2 and WebKit 26.0, plus two missing selector-edge
+failures in WebKit. These were not dismissed as browser differences or counted as
+passes. The horizontal grip now has the same 6px preferred width as its flex
+basis, avoiding the inherited 4px intrinsic-size mismatch. The zoom selector also
+has matching preferred and flex widths.
+
+The IDE selectors still use real `select` elements and browser-owned popups.
+Only their engine-specific collapsed-control paint is replaced, with theme-color
+arrow/button backgrounds and the same four-edge bevel. Native keyboard selection,
+change events and tab order have a dedicated browser regression. Forced colors
+restore the native control appearance and real borders. Existing exact pixel and
+29px desktop-height assertions remain unchanged. Failed selector fixtures and
+per-page screenshots are saved separately so later failures cannot overwrite
+useful evidence from another page.
