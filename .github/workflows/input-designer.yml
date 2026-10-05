@@ -1,0 +1,36 @@
+name: Input and designer regressions
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: input-designer-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Reported input and designer regressions
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: |
+          for test in tools/browser-designer-selection.py tools/browser-editor-control-list.py tools/browser-editor-event-selection.py tools/browser-form-input.py; do
+            if test -f "$test"; then python "$test"; fi
+          done
