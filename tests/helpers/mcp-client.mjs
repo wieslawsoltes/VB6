@@ -1,5 +1,6 @@
-import {MCP_VERSION, MCP_LEGACY_VERSIONS, MCP_META, McpError, errorResponse, checkAbort, checkMessage, isRecord, headerAnnotations, randomToken, awaitAbort} from './protocol.js';
-import {HttpTransport, LegacySseTransport, McpHttpError} from './transports.js';
+// External test driver only. Not an IDE capability.
+import {MCP_VERSION, MCP_LEGACY_VERSIONS, MCP_META, McpError, errorResponse, checkAbort, checkMessage, isRecord, headerAnnotations, randomToken, awaitAbort} from '../../src/mcp/protocol.js';
+import {HttpTransport, McpHttpError} from './mcp-transports.mjs';
 
 /** Dual-era MCP client. Optional capabilities are advertised only with explicit handlers. */
 export class McpClient {
@@ -33,7 +34,7 @@ export class McpClient {
     try { return await this.connecting; } finally { this.connecting = null; }
   }
   async establish() {
-    if (this.era !== 'legacy' && !(this.transport instanceof LegacySseTransport)) {
+    if (this.era !== 'legacy') {
       this.version = MCP_VERSION;
       try {
         const discovery = await this.request('server/discover', {}, {duringConnect: true, signal: this.connectSignal});
@@ -49,18 +50,12 @@ export class McpClient {
     await this.initializeLegacy(); return this.serverInfo;
   }
   async initializeLegacy() {
-    this.version = this.transport instanceof LegacySseTransport ? '2024-11-05' : MCP_LEGACY_VERSIONS[0];
-    let result;
-    try { result = await this.request('initialize', {protocolVersion: this.version, capabilities: this.capabilities(), clientInfo: this.info}, {duringConnect: true, signal: this.connectSignal}); }
-    catch (error) {
-      if (!(this.transport instanceof HttpTransport) || this.transport instanceof LegacySseTransport || ![400,404,405].includes(error.status) || [-32020,-32021,-32022].includes(error.code)) throw error;
-      const old = this.transport; this.transport = new LegacySseTransport(old.url, {fetch: old.fetch, token: old.token, maxBytes: old.maxBytes, headers: old.extraHeaders}); this.version = '2024-11-05';
-      result = await this.request('initialize', {protocolVersion: this.version, capabilities: this.capabilities(), clientInfo: this.info}, {duringConnect: true, signal: this.connectSignal});
-    }
+    this.version = MCP_LEGACY_VERSIONS[0];
+    const result = await this.request('initialize', {protocolVersion: this.version, capabilities: this.capabilities(), clientInfo: this.info}, {duringConnect: true, signal: this.connectSignal});
     if (!MCP_LEGACY_VERSIONS.includes(result.protocolVersion)) throw new McpError(-32022, 'Unsupported negotiated protocol version.');
     this.version = result.protocolVersion; this.serverInfo = result.serverInfo; this.serverCapabilities = result.capabilities || {};
     await awaitAbort(this.notify('notifications/initialized'), this.lifetime.signal); checkAbort(this.lifetime.signal); checkAbort(this.connectSignal); this.connected = true;
-    if (this.transport instanceof HttpTransport && !(this.transport instanceof LegacySseTransport)) {
+    if (this.transport instanceof HttpTransport) {
       this.listener?.abort(); this.listener = new AbortController();
       this.transport.listen(message => this.receive(message), {version: this.version, signal: this.listener.signal, onError: error => this.activity({direction: 'event', method: 'notifications', error: error.message})});
     }

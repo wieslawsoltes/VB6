@@ -91,26 +91,33 @@ IDE tool groups, code/form documents, modeless tools and toolbars can now detach
 
 MIT-licensed original implementation. Visual Basic is a Microsoft trademark; this project is not Microsoft software or endorsed by Microsoft. Historical reconstruction evidence remains in `RECOVERY.md`; its old test failures and version marker describe the recovery snapshot, not this release.
 
-## Model Context Protocol
+## MCP access for coding agents
 
-Open **Tools → MCP Connections…** to connect to MCP servers or explicitly share
-the live IDE with MCP clients. The client and permission-gated server are bundled
-into both the hosted app and the single-file HTML. Support includes modern and
-legacy HTTP/SSE, tools/resources/prompts, OAuth with PKCE, cancellation,
-subscriptions, revision-checked editing with undo, and debugger integration.
+Open **Tools → MCP Agent Access…** to expose this IDE to an external coding agent.
+The IDE is an **MCP server only**: it does not connect to external MCP servers,
+run their tools, perform OAuth sign-in, or launch configured stdio servers.
 
-An optional dependency-free Node.js companion supplies desktop stdio access and
-configured local stdio servers; a static page cannot itself bind a TCP port or
-launch processes. Browser origin/CORS and local-network permissions still apply.
+Its **106 structured tools** cover projects and source interchange, code edits,
+compiler diagnostics, forms/controls/menus, resources and virtual files,
+editor/workspace management, Object Browser, debugger/live edits and sandboxed
+application interaction. The same server is bundled into the static app and
+single-file HTML. Sharing is off by default. Changes require local approval or
+explicitly authorized, scoped, project-bound permissions lasting 1–60 minutes.
+Revisions, runtime guards, expiry, revocation and undo remain enforced.
+
+For external HTTP or stdio agents, start the dependency-free Node.js relay:
 
 ```sh
 npm run mcp:bridge -- --serve dist --allow-file --origin https://wieslawsoltes.github.io
 ```
 
-Sharing is off by default. Edits and execution need local allow-once approval;
-credentials stay in memory and are not included in project exports. See the
-[MCP setup, security, protocol matrix and API guide](docs/MCP.md) for direct-server
-connections, desktop client configuration, OAuth, deployment choices and tests.
+Pair the browser using its **owner token**. Give the external agent only the
+separate **client token**, with the `/mcp` endpoint or `tools/mcp-stdio.mjs` relay.
+The companion only connects agents to this IDE; it cannot spawn arbitrary programs
+or act as an outbound MCP gateway. Browser origin/local-network policy still applies.
+
+[MCP setup and migration](docs/MCP.md) ·
+[Coding-agent workflow and complete tool reference](docs/MCP-AGENTS.md)
 
 ### Compiler/runtime compatibility workstream
 

@@ -1,308 +1,238 @@
-# Model Context Protocol (MCP)
+# MCP Agent Access — the IDE as a server
 
-VB6 Studio includes an MCP client, a permission-gated MCP server for its live IDE,
-and an optional JavaScript/Node.js companion for desktop clients and local stdio
-servers. Open **Tools → MCP Connections…**. The same module is bundled into
-`dist/index.html` and the self-contained `dist/VB6-Studio-Web.html`; it does not
-require a CDN, backend, service worker, browser extension, or installation merely
-to open the IDE and use its in-process inspector.
+VB6 Studio exposes its **implemented IDE, compiler, debugger and runtime** to
+external coding agents through MCP. It is **not an MCP client or model host**.
+There is no external-server connection manager, outbound tool runner, OAuth
+sign-in, model sampling provider, or configured-process gateway in the IDE.
 
-## Deployment choices
+Open **Tools → MCP Agent Access…**. The panel has four local administration tabs:
+**Agent access**, **Agent permissions**, **Capabilities** (a read-only tool/schema
+reference), and **Activity**. Nothing is shared automatically on startup.
 
-| App location | Remote HTTP MCP client | Live IDE available to desktop MCP clients |
-| --- | --- | --- |
-| Single HTML opened with `file://` | Yes, when the server explicitly permits the browser's `null` origin | Optional loopback companion with `--allow-file` |
-| GitHub Pages or another static host | Yes, when the MCP server permits the exact page origin | Optional companion with `--origin https://your-host.example` |
-| Localhost | Yes, subject to ordinary CORS for other origins | Companion can also serve `dist` from its own origin |
-| Offline | In-process inspector and explicitly paired `MessagePort` | Local companion needs no internet |
+## Architecture and deployment
 
-A static HTML page cannot listen on a TCP port or launch an OS process. GitHub
-Pages cannot run an MCP HTTP server by itself. The companion supplies those
-capabilities without changing the single-file/static-host deployment. Browser
-CORS, mixed-content rules, enterprise policies, and local-network permissions
-still apply. There is no disabled-browser-security workaround or public proxy.
-For browsers that prohibit hosted-page-to-loopback connections, open the same
-app from the companion's localhost origin instead.
+```text
+External coding agent (MCP client)
+    ├─ Streamable HTTP ──────────────────────┐
+    └─ stdio → tools/mcp-stdio.mjs ──────────┤
+                                            ↓
+                      Node loopback companion /mcp
+                                            ↕ authenticated relay
+                 Browser IDE's live MCP server and approval UI
+                                            ↓
+                Project / editor / designer / compiler / debugger
+                                            ↓
+                      Existing isolated application runtime
+```
 
-## Connect to a remote MCP server
+The HTML contains the actual server/IDE adapter and operates on the same live
+project, undo history, compiler and debugger that the user sees. The companion
+does not hold a second workspace. It provides the listening HTTP endpoint that
+an ordinary web page cannot provide. Browser polling of this **loopback relay**
+is transport for inbound agent requests, not access to external MCP servers.
 
-In **Connect**, enter a name and the server's complete MCP endpoint. Leave
-transport on **Auto** for modern or legacy Streamable HTTP; select **Legacy SSE**
-for an old SSE endpoint. Supply a bearer token only when the server requires one,
-or use the OAuth tab. Nothing connects automatically on page load.
+| App deployment | External-agent connection |
+| --- | --- |
+| `dist/VB6-Studio-Web.html` opened directly with `file://` | Start the companion with `--allow-file`, then pair the IDE |
+| GitHub Pages or another static HTTP(S) host | Allow the exact page origin with `--origin`, then pair the IDE |
+| Localhost | The companion can serve `dist`, giving the IDE a same-origin relay |
+| Trusted embedding | Explicitly transfer a private MessagePort to the server adapter |
 
-In **Browse & invoke**, select a connection and browse **Tools**, **Resources**,
-**Templates**, or **Prompts**. The displayed definition includes the input schema.
-Enter a JSON object, select an item, and invoke it. Remote tool calls require an
-allow-once confirmation. Tool results and prompt content are untrusted text, not
-HTML and not instructions to automatically execute another tool. Results can be
-saved with an explicit download action. Cancellation and resource subscriptions
-are available in the same window.
+The app needs no backend or CDN merely to open. A standalone/static page cannot
+listen for TCP connections or spawn processes. The external-agent relay is
+therefore an optional, separately started Node.js process. Browser local-network,
+CORS, mixed-content and enterprise policies are not bypassed. When a browser
+blocks hosted-page-to-loopback requests, open the same app from localhost.
 
-The configuration importer accepts `mcpServers` or `servers` maps with HTTP/SSE
-URLs. It does not import tokens, custom authentication headers, or environment
-variables and never executes imported commands. The configuration exporter omits
-credentials and common secret query parameters. Keep arbitrary secrets out of
-endpoint URLs as well. Connections, approval grants, OAuth state, tokens, and
-sharing permissions are **memory-only** and end on reload. The IDE's existing
-project persistence does not persist these MCP credentials.
+## Setup
 
-### CORS checklist for a remote server
-
-Allow only the intended origins, handle `OPTIONS`, and permit `POST` plus the
-legacy `GET` and `DELETE` methods where applicable. Allow the request headers
-`Content-Type`, `Authorization`, `MCP-Protocol-Version`, `MCP-Method`, `MCP-Name`,
-`MCP-Session-Id`, `Last-Event-ID`, and the particular `MCP-Param-*`
-headers defined by the server's tool schemas. Expose `MCP-Session-Id`,
-`MCP-Protocol-Version`, and `WWW-Authenticate` to browser JavaScript. Modern MCP
-routing headers must agree with the JSON body.
-
-OAuth resource metadata, authorization-server metadata, registration (when
-used), and token endpoints also need appropriate CORS. A downloaded HTML file
-usually sends `Origin: null`; permitting that opaque origin is a broader trust
-decision, not authentication. Use authenticated endpoints and trusted local
-files, or serve the app from localhost instead. The companion never uses a
-wildcard allowed origin and never enables credentialed cookies.
-
-## Expose the live IDE
-
-Open **Expose IDE** and enable sharing. This allows clients to read the current
-workspace, including source, designer data, virtual project files, diagnostics,
-and debugger information. Do not share a project containing data that the client
-should not see. Discovery does not silently grant project access.
-
-Every write, document-navigation request, breakpoint change, runtime start/stop,
-and debugger operation requires **the current `expectedRevision`** and a local
-**Allow once** approval. Deny is the default. A change of project, revision,
-runtime state, or selected paused frame while approval is pending invalidates
-the operation. Edits use the existing project validator and undo history. There
-is no unrestricted JavaScript evaluator, shell tool, or host-filesystem tool.
-Debugger evaluation uses the existing paused VB6 runtime, with instruction and
-time limits; its possible side effects are explicitly acknowledged in approval.
-
-Disabling sharing revokes pending requests and detaches the companion. Sharing
-is never enabled by opening a project, importing configuration, or reopening the
-page. Closing the MCP window does not silently disconnect explicitly established
-connections: use **Disconnect**, **Detach companion**, or disable sharing.
-
-### Start the companion
-
-From a source checkout, using Node.js 22 or newer:
+From the source checkout, using Node.js 22 or newer:
 
 ```sh
 npm run build
 npm run mcp:bridge -- --serve dist --allow-file --origin https://wieslawsoltes.github.io
 ```
 
-The companion binds **127.0.0.1**, port **8766** by default. `--port` changes it.
-`--serve dist` is optional. Open `http://127.0.0.1:8766/` for same-origin use, or
-keep using the downloaded HTML or your static-hosted IDE. An origin consists
-of scheme, hostname and port, **not** the repository path (`/VB6/`). Repeat
-`--origin` for additional trusted origins. Omit `--allow-file` when not needed.
+The default origin is `http://127.0.0.1:8766`. `--port` changes the port;
+`--serve dist` is optional. Open that URL to use the localhost-served IDE, or keep
+using the downloaded HTML/static-hosted app. `--origin` takes scheme, hostname
+and optional port, **not** the `/VB6/` path. Repeat it for additional trusted
+origins. Omit `--allow-file` when direct-file use is not needed.
 
-The terminal prints two independently generated credentials. Enter the **owner
-token** in the IDE's Expose IDE tab with the companion URL and choose **Attach
-companion**. Configure desktop MCP clients with the **client token**, never the
-owner token. Only one browser owns a companion at a time, protected by a separate
-lease. Changing the attached project changes the live workspace seen by clients.
-Tokens are sent in authorization headers, never query strings.
+The terminal prints two independent random credentials:
 
-The private MCP endpoint is `http://127.0.0.1:8766/mcp`. For desktop clients that
-support Streamable HTTP and custom bearer authentication, use that URL directly.
-For clients that accept a stdio server configuration:
+1. **Owner token:** enter it only in the IDE's **Agent access** tab. Enable
+   sharing, enter the companion origin and owner token, and click **Attach companion**.
+2. **Client token:** give this token to the external agent. Never give the agent
+   the owner token. The IDE clears the owner-token input after attachment and does
+   not persist it in project storage or downloads.
+
+Only one browser can own a companion at once; a separate lease protects its
+connection. The HTTP endpoint for agents is `http://127.0.0.1:8766/mcp` with
+`Authorization: Bearer <client-token>`. HTTP-capable agents may use it directly.
+For agents accepting a stdio MCP entry:
 
 ```json
 {
   "mcpServers": {
     "vb6-studio": {
       "command": "node",
-      "args": ["/absolute/path/to/VB6/tools/mcp-stdio.mjs", "--url", "http://127.0.0.1:8766/mcp"],
-      "env": {"VB6_MCP_TOKEN": "PASTE_THE_CLIENT_TOKEN_FROM_THE_LOCAL_TERMINAL"}
+      "args": [
+        "/absolute/path/to/VB6/tools/mcp-stdio.mjs",
+        "--url", "http://127.0.0.1:8766/mcp"
+      ],
+      "env": {"VB6_MCP_TOKEN": "PASTE_CLIENT_TOKEN_FROM_TERMINAL"}
     }
   }
 }
 ```
 
-The adapter writes only MCP JSON-RPC to stdout. Diagnostics go to stderr. The
-IDE must stay open and attached. An absent browser produces a clear HTTP 503,
-not a stale project snapshot. `VB6_MCP_OWNER_TOKEN` and `VB6_MCP_TOKEN` may be set
-in the companion's environment for a fixed local configuration; use distinct,
-cryptographically random values of at least 32 characters and protect the
-configuration file. Restarting with generated credentials invalidates the old
-ones. This companion is a private paired service, not a public OAuth-protected
-hosting solution.
+The IDE offers **Download agent configuration template** with placeholders,
+never live credentials. Set the absolute path and client token in the agent's
+own configuration. The stdio relay writes only MCP JSON-RPC to stdout; diagnostics
+go to stderr. It accepts only a loopback `/mcp` endpoint, not arbitrary remote
+URLs. Neither the relay nor the companion launches external MCP servers.
 
-### Use existing local stdio MCP servers from the browser
+Keep the IDE open and attached. An absent/disconnected browser produces an error,
+not an old project snapshot. Companion tokens can alternatively be supplied through
+`VB6_MCP_OWNER_TOKEN` and `VB6_MCP_TOKEN`; use distinct cryptographically random
+values of at least 32 characters and protect the local configuration. Generated
+tokens change on restart. This is a private paired local service, not a public
+OAuth-protected MCP hosting service.
 
-Create a local, trusted `mcp-servers.json`:
+## Agent workflow and control surface
 
-```json
-{
-  "mcpServers": {
-    "my-local-server": {
-      "command": "node",
-      "args": ["/absolute/path/to/my-server.mjs"],
-      "cwd": "/absolute/path/to/workspace",
-      "env": {"SERVER_SETTING": "value"}
-    }
-  }
-}
-```
+The server exposes **106 structured tools**, resources, prompts, pagination,
+subscriptions, cancellation and event-driven waiting. The complete tool reference
+and examples are in [MCP-AGENTS.md](MCP-AGENTS.md).
 
-Start the companion with `--config mcp-servers.json`. In the IDE's Connect tab,
-use `http://127.0.0.1:8766/stdio/my-local-server` and the **owner token**. Modern
-and legacy stdio servers are translated to browser-compatible HTTP. Only aliases
-configured by the person starting the companion can be launched. HTTP requests
-cannot specify executable paths, arguments, environments, or arbitrary proxy
-URLs. Processes are spawned with `shell: false`. These configured programs still
-run with the local user's OS privileges: configure only programs you trust.
+An agent should discover `tools/list`, read `vb6.agent.capabilities`, then read
+`vb6.project.get`. Every mutation except interrupt-only
+`vb6.debug.cancelEvaluation` requires the current `expectedRevision`.
+After a mutation or a stale-revision error, read state again. For paused debugger
+operations, also use the current `pauseId` and an existing stack-frame identity.
+Use `vb6.agent.wait` for state/event changes instead of repeatedly fetching source.
 
-## OAuth
+Code edits use zero-based UTF-16 offsets, end-exclusive, with optional
+`expectedText` checks. Multi-module `vb6.code.edit` changes are atomic and undoable.
+Source edited while paused remains staged until `vb6.debug.applyEdits`. The
+existing live-edit engine rejects unsupported signature/control-flow changes.
+Compiler tools compile source and report diagnostics; they do not execute it.
+Runtime tools address controls, menus and application dialogs with opaque IDs,
+never owner-document selectors or arbitrary JavaScript.
 
-The **OAuth** tab supports protected-resource metadata discovery,
-authorization-server/OIDC discovery, authorization code with **S256 PKCE**, exact
-issuer/state/redirect checks, resource indicators, in-memory bearer tokens and
-refresh tokens, and scope challenges. Use a pre-registered public client ID, a
-server-supported HTTPS Client ID Metadata Document, or optional dynamic client
-registration when the authorization server supports it. No client secret is
-embedded in the HTML.
+Project/native imports accept supplied text, base64 files or ZIP data. Exports
+return bytes/text for the agent to save using its own authorized filesystem.
+Project `files.*` tools refer to the **virtual disk**, not the host machine.
+Native project/reference/control support remains bounded by the underlying IDE;
+MCP access does not add native VB6/COM/OCX compatibility that the IDE lacks.
 
-Discovery displays the issuer and scopes for review before authorization.
-Choose a redirect URL registered with that authorization server. **Do not use
-`file://` as an OAuth redirect.** The downloaded IDE can initiate sign-in in a
-separate tab using a registered localhost or HTTPS callback. After authorization,
-paste the resulting complete callback URL into the original IDE tab and complete
-sign-in there. The original tab holds the one-time state and PKCE verifier. This
-explicit callback flow works without deploying a special callback route or
-persisting credentials across navigation. Use a callback page you control and
-avoid sharing or logging the URL's short-lived authorization code.
+## Local consent and delegated permissions
 
-Resource/issuer validation, PKCE and metadata are tested against deterministic
-fixtures. Authorization-server-specific registration policy and CORS are not
-under the IDE's control. An expired/insufficient token requires renewed consent
-or reauthentication; mutation requests are not automatically replayed.
+Enabling sharing permits paired clients to read the current project, source,
+designer data, resources, virtual files, diagnostics and debugger data. Share only
+projects the external agent is authorized to see. Discovery never enables sharing.
 
-## Protocol and feature matrix
+By default, mutations require **Allow once** with **Deny** preselected. The local
+user may instead authorize selected scopes in **Agent permissions** for 1–60
+minutes. Scopes cover code, project, designer, virtual files/resources, debugger,
+runtime interaction and workspace. They apply to **all paired clients**, not a
+client-supplied name. No scope is selected by default; tokens, grants and sharing
+state remain memory-only. An indicator shows enabled access and active scopes.
+Editor text edits require the **code** scope, whole-project undo/redo requires
+**project**, and capturing runtime files into a project requires **files**.
+The workspace scope alone cannot authorize these data changes.
+
+Pending consent is bound to the current workspace instance, even when another
+loaded project retains the same ID. Disabling/re-enabling sharing cannot revive
+old requests. Explicit evaluations reserve their edit revision before awaiting
+the sandbox, so concurrent same-revision mutations cannot both take effect.
+
+Grants expire and clear on local revocation, project replacement, companion
+attachment/detachment, sharing disable or reload. Current revision, argument,
+project and debugger checks remain mandatory even with a grant. Revocation aborts
+pending authorized work; it does not undo effects already completed or stop a
+previously started application. Stop that application explicitly when needed.
+
+No remote tool can change local permissions, read pairing credentials, click
+IDE security dialogs or access an arbitrary JavaScript/shell/DOM method.
+Application-dialog replies operate only inside the existing runtime sandbox.
+OS file pickers, clipboard, printing, fullscreen and creation of a new detached
+browser window still require local browser interaction. Existing in-page windows
+can be managed and detached windows can be returned through structured tools.
+
+## Protocol and transport
 
 | Area | Implemented behavior |
 | --- | --- |
-| MCP 2026-07-28 | `server/discover`, per-request metadata, version/routing headers, annotated tool argument headers, complete/input-required results, MRTR, POST subscriptions |
-| MCP legacy | 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05 initialization/capabilities; initialized notifications; HTTP sessions; legacy SSE |
-| Transports | Streamable HTTP JSON/SSE, old endpoint-event SSE, newline-delimited stdio via companion, private MessagePort, in-process |
-| Client operations | Tools, resources, templates, prompts, completion, pagination, notifications, subscriptions, progress and cancellation |
-| Client callbacks | UI form/URL elicitation; optional host-provided roots and sampling callbacks, advertised only when installed |
-| HTTP reliability | Response bounds, timeout/abort, redirect rejection for credential safety, legacy GET event resumption, session-expiry detection without replaying the failed operation |
-| Live server | Eighteen IDE tools, workspace/module/designer/debug resources, two prompts, module-name completion, change subscriptions |
-| Permissions | Opt-in reads; allow-once writes/execution; revision and paused-context checks; undo integration; revocation |
+| Modern MCP `2026-07-28` | Server discovery, per-request metadata, routing/header validation, complete results, POST subscriptions |
+| Legacy MCP | `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` session initialization/capabilities |
+| Agent transports | Streamable HTTP JSON/SSE through the companion; stdio via the external relay; explicitly paired private MessagePort |
+| Server features | Tools, resources/templates, two source-review prompts, module-name completion, pagination, notifications/subscriptions and cancellation |
+| Reliability | Bounded requests/results/queues, timeouts, strict UTF-8, duplicate-request checks, session cleanup and no automatic mutation replay |
+| Companion boundary | Loopback binding, Host/Origin checks, separate owner/client tokens, browser lease, no arbitrary process or remote-URL proxy |
 
-Modern streams are not silently treated as resumable legacy streams. Legacy GET
-reconnection is bounded; a disconnected old SSE transport can be reconnected
-explicitly. Optional protocol extensions such as Tasks, MCP Apps, Skills,
-provider-specific APIs, and an embedded language model are not claimed or
-advertised. Sampling requires an application-supplied model provider. The
-server's own tools do not request sampling. Its catalogs are static except for
-project resources. Raw SDK requests are available to trusted embedding code;
-they are not exposed as an unrestricted remote IDE tool.
+The server does not solicit model sampling or act as a model host. Optional Tasks,
+MCP Apps, Skills and provider-specific extensions are not implemented. This is
+not certification against every agent implementation. The local stdio entry is
+for an **external agent to reach this IDE**, not for the IDE to run another server.
 
-### IDE tools
+## Trusted embedding API
 
-`vb6.project.get`, `vb6.module.read`, `vb6.module.write`, `vb6.module.add`,
-`vb6.module.remove`, `vb6.form.get`, `vb6.form.update`, `vb6.project.compile`,
-`vb6.workspace.search`, `vb6.project.export`, `vb6.project.replace`,
-`vb6.document.open`, `vb6.runtime.start`, `vb6.runtime.stop`,
-`vb6.debug.snapshot`, `vb6.debug.command`, `vb6.debug.evaluate`,
-`vb6.breakpoints.set`.
-
-Read `vb6.project.get` immediately before a mutation and pass the returned
-revision as `expectedRevision`. Compilation does not run the project. Export
-returns project JSON or standalone **application** HTML as data and never starts
-a download or executes it without a local action. Application exports do not
-silently inherit IDE MCP credentials or expose an MCP server.
-
-Resources: `vb6://project`, `vb6://diagnostics`, `vb6://output`, `vb6://debug`,
-`vb6://module/{name}/source`, and `vb6://module/{name}/form`. Prompt names:
-`explain-module` and `review-project`. Results are bounded; use source ranges for
-large modules rather than requesting an oversized entire workspace.
-
-## Reuse from JavaScript
-
-The modules under `src/mcp/` are ordinary JavaScript ES modules with no npm
-runtime dependencies. Node-only process/HTTP adapters live in `tools/`. In the
-bundled IDE the classes are exposed as `VB6StudioAPI.MCP` and the installed
-instance as `vb6Studio.mcp`.
+The browser bundle exports only the server-related MCP APIs:
 
 ```js
-const {McpClient, HttpTransport} = VB6StudioAPI.MCP;
-const client = new McpClient(new HttpTransport('https://your-server.example/mcp'), {
-  approveTool: async request => {
-    // Replace with an explicit application-owned consent UI; deny by default.
-    return false;
-  }
-});
-await client.connect();
-try {
-  const tools = await client.listTools();
-  console.log(tools.map(tool => tool.name));
-} finally {
-  await client.close();
-}
+const {McpServer, createIdeAdapter, bindMcpPort} = VB6StudioAPI.MCP;
+// `authenticatedPort` must already be authenticated and explicitly transferred
+// by the trusted embedder. The IDE's sharing/approval gates still apply.
+const disconnect = vb6Studio.mcp.bindPort(authenticatedPort);
+// Later: disconnect();
 ```
 
-For an already trusted same-process embedder, `bindMcpPort`/`PortTransport` accept
-an explicitly transferred `MessagePort`. There is intentionally no unauthenticated
-`window.message` listener. The embedder is responsible for authenticating the
-peer before transferring a port. The live IDE's sharing and approval gates still
-apply to requests through that port.
+The installed adapter/server are `vb6Studio.mcp.adapter` and
+`vb6Studio.mcp.server`. Local administration is available through `setSharing`,
+`attachBridge`, `detachBridge` and `openMcp`; none is exposed as a remote tool.
+There is no unauthenticated global `window.message` MCP listener.
 
-## Validation and reference
+## Migration from the initial bidirectional implementation
+
+The former **MCP Connections** UI and its **Connect**, **Browse & invoke** and
+**OAuth** tabs have been removed. `McpClient`, `McpOAuth`, outbound browser
+transports, external connection import/export, elicitation/sampling client UI,
+`/stdio/<alias>`, `--config` and the configured-child-process runner are removed
+from the production implementation. Obsolete options fail explicitly. Existing
+external agents using the companion's `/mcp` or `tools/mcp-stdio.mjs` retain the
+same direction of access. Re-pair locally after reload.
+
+Test-only external peers live under `tests/helpers` to exercise the server.
+They are not imported into the IDE or exposed through its public API.
+
+## Validation
 
 ```sh
 npm run build
 npm test
 npm run test:mcp:browser
+npm run test:mcp:agent
 ```
 
-Browser tests require Python Playwright and its Chromium (`pip install
-playwright==1.57.0`, then `python -m playwright install chromium`). They navigate
-real file, hosted-subpath and localhost builds, test actual browser CORS to a
-loopback companion, stdio gateways, a live externally accessed IDE, local
-approvals/revocation, undo, project replacement, and real sandbox debugger
-execution. `CHROMIUM_PATH` optionally selects a local executable.
-`--opaque` runs only the UI portion with `set_content` in environments that
-prohibit navigation; it is explicitly reported as UI-only and is not used by CI.
-Wire tests include independent JSON-RPC fixtures rather than testing only the
-client against its own server. OAuth fixtures do not contact or authorize any
-real account.
+Browser suites require Python Playwright 1.57.0 and its Chromium. The default
+suites navigate real standalone `file://`, HTTP/HTTPS hosted subpaths and
+companion localhost, and use an **external HTTP agent** for operations after
+local consent. They verify server-only UI/API, secret-free configuration,
+read/write approval and revocation, detached approval windows, code/designer/
+workspace operations, undo, real compilation and sandbox debugging, live edits,
+control/grid/menu interaction and InputBox replies. Test reports enumerate the
+tools actually exercised; not every tool is claimed to have a browser scenario.
 
-Primary references:
-- [MCP 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
+The HTTPS fixture uses a temporary self-signed certificate trusted only by its
+own test context. CORS and local-network policy stay enabled. `--opaque` is an
+explicitly UI-only fallback for environments that prohibit navigation; it is
+never used as deployment validation in CI. Node tests cover the structured tool
+surface, malformed/stale input, concurrent writes, authority boundaries and
+HTTP/stdio/MessagePort protocol behavior.
+
+Primary protocol references:
+- [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28)
 - [Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
-- [Authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
-- [Subscriptions](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/subscriptions)
-- [Legacy transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-
-## Lifecycle and integration guarantees
-
-OAuth code grants never inherit another sign-in's refresh token. Only an active
-refresh grant can retain its own token when the issuer does not rotate it. Clearing
-credentials or starting a newer sign-in invalidates pending discovery, registration,
-PKCE and token results. Invalid refresh-token, scope and expiry metadata is rejected.
-
-Disconnect cancels pending requests and tool approvals, even when a custom transport
-or approval handler ignores its abort signal. A closed `McpClient` is terminal;
-create a new client/transport to reconnect (the Connections UI does this). Cancelled
-mutations are not automatically replayed. The companion validates modern mirrored
-headers, rejects unsupported legacy HTTP versions and malformed UTF-8, and handles
-child-process pipe failure without an unhandled exception. Its owner/client tokens
-are not inherited by unrelated stdio servers; explicit per-server `env` remains
-available for the trusted desktop relay configuration above.
-
-The MCP modeless window can be detached using the normal **Float in Browser Window**
-caption command. Clients and project state remain in the owner IDE; approval dialogs
-follow the active window. Closing the detached window returns the tool to the IDE.
-
-`npm run test:mcp:browser` navigates the standalone file, linked HTTP and HTTPS hosted
-subpaths, and the localhost companion-served app. The HTTPS fixture uses an ephemeral
-self-signed certificate trusted only by its test context; it does not disable CORS,
-mixed-content checks or local-network policy. The `--opaque` mode is UI-only and is
-never substituted for deployment validation in CI.
+- [Legacy tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)

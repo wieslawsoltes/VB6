@@ -22,7 +22,6 @@ await new Promise(resolve => tlsHost.listen(0, '127.0.0.1', resolve));
 const tlsOrigin = 'https://127.0.0.1:' + tlsHost.address().port;
 await new Promise(resolve => host.listen(0, '127.0.0.1', resolve));
 const origin = 'http://127.0.0.1:' + host.address().port;
-const fixture = path.join(root, 'tests/fixtures/mcp/stdio-server.mjs');
-const bridge = await createBridge({port: 0, origins: [origin, tlsOrigin], allowFile: true, serve: path.join(root, 'dist'), stdioServers: {modern: {command: process.execPath, args: [fixture, '--modern']}, legacy: {command: process.execPath, args: [fixture]}}});
+const bridge = await createBridge({port: 0, origins: [origin, tlsOrigin], allowFile: true, serve: path.join(root, 'dist')});
 console.log(JSON.stringify({hosted: origin + '/VB6/', httpsHosted: tlsOrigin + '/VB6/', url: bridge.url, ownerToken: bridge.ownerToken, clientToken: bridge.clientToken}));
 for (const signal of ['SIGINT','SIGTERM']) process.once(signal, async () => { await bridge.close(); tlsHost.closeAllConnections(); tlsHost.close(); await rm(certificates, {recursive: true, force: true}); host.closeAllConnections(); host.close(() => process.exit(0)); });
