@@ -1,0 +1,9 @@
+{
+  "base": "92a955acd6ad0c21b41d43a606c9adcc5e16ff49",
+  "parts": 13,
+  "patch_sha256": "7478da737f0dd23935479dfb55e9af4a2fa626c54b3c516db9e31a005a6dacd5",
+  "dictionary_sha256": "301cc0fb962b9c313fe1342bcef499e1c588b28fa1e9116edf1937c88d266c0f",
+  "paths": [
+    ".github/workflows/data-sources.yml", ".gitignore", "README.md", "THIRD-PARTY-NOTICES.md", "desktop/main.cjs", "desktop/policy.cjs", "desktop/smoke.cjs", "docs/DATA-SOURCES.md", "examples/data/server-profiles.example.json", "package.json", "src/controls/controls.js", "src/controls/dialog.js", "src/data/common.js", "src/data/connected-recordset.js", "src/data/connection.js", "src/data/context.js", "src/data/files.js", "src/data/http.js", "src/data/project-sidecar.js", "src/data/recordset.js", "src/data/sqlite.js", "src/data/vendor/LICENSE.sql.js", "src/data/wire.js", "src/editor/language-service.js", "src/exporter/exporter.js", "src/ide/data-environment.css", "src/ide/data-environment.js", "src/ide/main.js", "src/ide/properties.js", "src/native/compiler.js", "src/project/data-examples.js", "src/project/examples.js", "src/project/formats.js", "src/project/model.js", "src/project/native-project.js", "src/runtime/entry.js", "src/runtime/host.js", "src/runtime/vm.js", "src/theme/icon-art.js", "tests/data-gateway.test.mjs", "tests/data-http.test.mjs", "tests/data-sources.test.mjs", "tests/data-vm.test.mjs", "tests/icons.test.mjs", "tests/native-build.test.mjs", "tests/win32-aot.test.mjs", "tools/browser-data-sources.py", "tools/browser-tests.py", "tools/build-windows.mjs", "tools/build.mjs", "tools/data-example-server.mjs", "tools/data-gateway.mjs", "tools/data-live-drivers.mjs", "tools/data/drivers.mjs", "tools/data/oledb-worker.ps1", "tools/data/oledb.mjs", "tools/native-fixtures.mjs", "tools/vendor-sqlite.mjs"
+  ]
+}
