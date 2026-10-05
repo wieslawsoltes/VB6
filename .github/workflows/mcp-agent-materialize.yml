@@ -33,7 +33,6 @@ jobs:
           main='954262de5ed2472a6e089d4b7ffa71b97ee6d33d'
           workflow='.github/workflows/mcp-agent-materialize.yml'
           helper=pathlib.Path('tools/.mcp-agent-fixes.py').read_text()
-          # Reuse the original audited decoder with its per-input and per-output hashes.
           original=git('show','c44aa8466367cda25f038fb6e0751d71a65e6daf:'+workflow)
           decoder=textwrap.dedent(original.split("python - <<'PY'\n",1)[1].split('          PY\n',1)[0])
           decoder=decoder.replace('set(pieces+[workflow])',"set(pieces+[workflow,'tools/.mcp-agent-review.b64','tools/.mcp-agent-fixes.py'])")
@@ -64,8 +63,8 @@ jobs:
           assert tree=='596c0d5d033bcb276d5c35a55f59e825a7abcf2e',tree
           run('git','commit','-m','merge: preserve current compiler and Windows targets; harden scoped agent authority')
           PY
-          test "$(git ls-remote origin refs/heads/feat/mcp-agent-control | cut -f1)" = "$GITHUB_SHA"
-          git push origin HEAD:feat/mcp-agent-control
+          # A normal push rejects concurrent branch advances; never force this ref.
+          git push origin HEAD:refs/heads/feat/mcp-agent-control
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
