@@ -140,7 +140,7 @@ export const BUILTIN_SYMBOLS = Object.entries({...BUILTIN_SIGNATURES,...builtinE
   const type=returnTypes[name]||(/^Is/.test(name)?'Boolean':'Variant');
   return member(name,type,params,{kind:'function',array:['Array','Split','Filter','LoadResData'].includes(name)});
 });
-for (const name of 'Error Left Right Mid Trim LTrim RTrim UCase UCase LCase Space String Chr ChrW Str Hex Oct Format Input Dir Environ Command'.split(' ')) {
+for (const name of 'Error Left Right Mid Trim LTrim RTrim UCase LCase Space String Chr ChrW Str Hex Oct Format Input Dir Environ Command'.split(' ')) {
   const base=BUILTIN_SYMBOLS.find(s=>s.name===name);if(base)BUILTIN_SYMBOLS.push({...base,name:name+'$',type:'String',signature:base.signature.replace(name,name+'$').replace(/ As \w+$/,' As String')});
 }
 export const GLOBAL_OBJECTS = ['App','Screen','Clipboard','Debug'].map(name=>({name,type:name,kind:'object',signature:name+' As '+name})).concat({name:'Err',type:'ErrObject',kind:'object',signature:'Err As ErrObject'},{name:'DBEngine',type:'DAO.DBEngine',kind:'object'});
