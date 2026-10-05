@@ -1,3 +1,5 @@
+import {installNativeWorkspace} from './native-workspace.js';
+import {writeRecoverableNativeDirectory} from '../project/native-save-recovery.js';
 import {mergedProject} from '../project/import-merge.js';
 /** Native projects coexist with web snapshots; browser permissions stay explicit. */
 import {el,clone,download,safeName} from '../core/core.js';
@@ -6,19 +8,19 @@ import {importFiles,sourceFiles,listProjectEntries,selectWorkspaceProject,worksp
 import {normalizeProject} from '../project/model.js';
 import {normalizedEntries,MAX_NATIVE_BYTES,MAX_NATIVE_FILES} from '../project/native-project.js';
 import {NATIVE_ENCODINGS,bytesOf,decodeNativeText,unquote} from '../project/native-text.js';
-import {readNativeDirectory,planNativeDirectoryWrite,writeNativeDirectory} from '../project/native-directory.js';
+import {readNativeDirectory,planNativeDirectoryWrite} from '../project/native-directory.js';
 import {fromBase64} from '../project/frx.js';
-import {readZip,writeZip} from '../project/zip.js';
+import {readZip,writeZip,ZIP_FILENAME_ENCODINGS,zipFilenameEncoding} from '../project/zip.js';
 const option=(value,label=value)=>el('option',{value},label);
 const projectFile=p=>p.nativeProject?.path||p.name+'.vbp';
 const fileName=p=>p.sourcePath||p.name+(p.kind==='form'?'.frm':p.kind==='class'?'.cls':'.bas');
 const nativeExtensions=/\.(vbp|vbg|frm|bas|cls|ctl|pag|dob|dsr)$/i;
 const readme='VB6 Studio Web native source export\r\n\r\nOpen the VBP or VBG with its complete companion files. Imported source, designer\r\nmetadata and opaque resources are preserved; edited known resources are appended.\r\nOpening a native project does not install or run its COM/OCX dependencies.\r\nRead docs/NATIVE-PROJECTS.md in the application source for compatibility details.\r\n';
-export async function browserFileEntries(files){
+export async function browserFileEntries(files,options={}){
   const entries=[];let total=0;
   for(const file of files){
     if(file.size>MAX_NATIVE_BYTES)throw new Error('File exceeds the 50 MiB import limit');
-    const bytes=new Uint8Array(await file.arrayBuffer()),parts=/\.zip$/i.test(file.name)?await readZip(bytes):[[file.webkitRelativePath||file.name,bytes]];
+    const bytes=new Uint8Array(await file.arrayBuffer()),parts=/\.zip$/i.test(file.name)?await readZip(bytes,{filenameEncoding:options.filenameEncoding}):[[file.webkitRelativePath||file.name,bytes]];
     for(const [path,value]of parts){total+=bytesOf(value).length;if(total>MAX_NATIVE_BYTES||entries.length>=MAX_NATIVE_FILES)throw new Error('Import exceeds 50 MiB or 2,000 files');entries.push([path,value]);}
   }
   return normalizedEntries(entries);
@@ -88,7 +90,7 @@ export function installNativeProjects(ide){
       ide.status('Opened '+ide.project.name+(ide.diagnostics.length?' — review import diagnostics.':'.'));return true;
     }catch(error){await alertDialog(error.message,'Open Project');return false;}finally{importing=false;}
   };
-  ide.importBrowserFiles=async(files,options={})=>{if(!files.length)return false;const generation=++importGeneration,expectedProject=JSON.stringify(ide.project);try{const entries=await browserFileEntries(files);if(generation!==importGeneration)return false;return await ide.importProjectEntries(entries,{...options,expectedProject});}catch(error){await alertDialog(error.message,'Open Project');return false;}};
+  ide.importBrowserFiles=async(files,options={})=>{if(!files.length)return false;const generation=++importGeneration,expectedProject=JSON.stringify(ide.project);try{const entries=await browserFileEntries(files,{filenameEncoding:options.filenameEncoding||ide.zipFilenameEncoding});if(generation!==importGeneration)return false;return await ide.importProjectEntries(entries,{...options,expectedProject});}catch(error){await alertDialog(error.message,'Open Project');return false;}};
   ide.openFolder=async()=>{
     const host=ide.root.ownerDocument.defaultView,expectedProject=JSON.stringify(ide.project);
     if(typeof host.showDirectoryPicker==='function')try{const handle=await host.showDirectoryPicker({mode:'read'}),{entries,skipped}=await readNativeDirectory(handle),opened=await ide.importProjectEntries(entries,{expectedProject});if(opened&&skipped.length)ide.status('Opened '+ide.project.name+'; skipped '+skipped.join(', '));return opened;}catch(error){if(error.name!=='AbortError')await alertDialog(error.message,'Open Project Folder');return false;}
@@ -98,7 +100,7 @@ export function installNativeProjects(ide){
     if(saving)return false;saving=true;
     try{
       if(!['web','native','folder'].includes(format))throw new Error('Unknown project save format: '+format);
-      const token=JSON.stringify(ide.project),project=clone(ide.project);project.storageFormat=format==='web'?'web':'native';
+      let recoveryCleanupPending=false;const token=JSON.stringify(ide.project),project=clone(ide.project);project.storageFormat=format==='web'?'web':'native';
       const filename=safeName(name||project.nativeWorkspace?.path.split('/').at(-1).replace(/\.vbg$/i,'')||project.name);
       if(format==='web')download(filename+'.vb6web',JSON.stringify(project,null,2),'application/json');
       else{
@@ -107,14 +109,14 @@ export function installNativeProjects(ide){
           const host=ide.root.ownerDocument.defaultView;if(!directoryHandle&&typeof host.showDirectoryPicker!=='function')throw new Error('This browser does not support writing a directory. Choose Native VB6 ZIP and extract it.');
           const handle=directoryHandle||await host.showDirectoryPicker({mode:'readwrite'}),plan=await planNativeDirectoryWrite(handle,files);
           const overwrite=plan.entries.filter(e=>e.before!==null);
-          if(overwrite.length&&!await modal('Replace Native Project Files',{content:el('div',{},el('p',{},'Replace '+overwrite.length+' existing files and create '+(plan.entries.length-overwrite.length)+' new files?'),el('p',{},'Unrelated files are not deleted. File changes are checked again before writing. A folder save is not an atomic transaction.')),buttons:[{label:'Save Files',value:true,primary:true},{label:'Cancel',value:false}]}))return false;
+          if(overwrite.length&&!await modal('Replace Native Project Files',{content:el('div',{},el('p',{},'Replace '+overwrite.length+' existing files and create '+(plan.entries.length-overwrite.length)+' new files?'),el('p',{},'Unrelated files are not deleted. File changes are checked again before writing. Original and intended files are staged for conflict-aware recovery. This is not an atomic transaction.')),buttons:[{label:'Save Files',value:true,primary:true},{label:'Cancel',value:false}]}))return false;
           if(JSON.stringify(ide.project)!==token)throw new Error('Project changed during save confirmation. Save again.');
-          await writeNativeDirectory(plan);
+          recoveryCleanupPending=!!(await writeRecoverableNativeDirectory(plan)).recoveryCleanupPending;
         }else download(filename+'-native.zip',writeZip(files),'application/zip');
       }
       if(JSON.stringify(ide.project)!==token){ide.status('Snapshot saved; newer edits remain unsaved.');return false;}
       ide.project.storageFormat=project.storageFormat;ide.savedJSON=JSON.stringify(ide.project);ide.dirty=false;ide.rememberProject();ide.persist();ide.updateTitle();
-      ide.status('Saved '+(format==='web'?filename+'.vb6web':format==='folder'?'native project folder':filename+'-native.zip'));return true;
+      ide.status('Saved '+(format==='web'?filename+'.vb6web':format==='folder'?'native project folder':filename+'-native.zip')+(recoveryCleanupPending?'; saved bytes verified, but recovery journal cleanup needs attention.':''));return true;
     }catch(error){if(error.name!=='AbortError')await alertDialog(error.message,'Save Project');return false;}finally{saving=false;}
   };
   ide.confirmDiscard=async()=>{
@@ -147,13 +149,14 @@ export function installNativeProjects(ide){
     if(Object.keys(companions).length===1)download(path.split('/').at(-1),all[path],'application/octet-stream');else download(module.name+'-native.zip',writeZip(companions),'application/zip');
     ide.status('Exported '+path+' with its available companion resources.');
   };
-  ide.menu=name=>{const items=menu(name);if(name==='File'){const at=items.findIndex(i=>i?.id==='saveAs');items.splice(at+1,0,{id:'saveNative',label:'Save Native VB6 Project (.zip)…',icon:'save'},{id:'saveNativeFolder',label:'Save Native VB6 Folder…'},{id:'saveWebProject',label:'Save Browser Project (.vb6web)…'});}if(name==='Project')items.unshift({id:'nativeSettings',label:'Native Project Settings…',enabled:!!ide.project.nativeProject&&ide.runState==='design'},{id:'nativeGroup',label:'Project Group…',enabled:!!ide.project.nativeWorkspace&&ide.runState==='design'},null);return items;};
+  ide.menu=name=>{const items=menu(name);if(name==='File'){const at=items.findIndex(i=>i?.id==='saveAs');items.splice(at+1,0,{id:'zipEncoding',label:'Open ZIP with Filename Encoding…',icon:'open'},{id:'saveNative',label:'Save Native VB6 Project (.zip)…',icon:'save'},{id:'saveNativeFolder',label:'Save Native VB6 Folder…'},{id:'saveWebProject',label:'Save Browser Project (.vb6web)…'});}if(name==='Project')items.unshift({id:'nativeSettings',label:'Native Project Settings…',enabled:!!ide.project.nativeProject&&ide.runState==='design'},{id:'nativeGroup',label:'Project Group…',enabled:!!ide.project.nativeWorkspace&&ide.runState==='design'},null);return items;};
   ide.command=async(id,...args)=>{
     try{
-      if(id==='open'){ide.addingFiles=false;ide.fileInput.click();return true;}if(id==='nativeSettings')return await ide.openNativeSettings();
+      if(id==='zipEncoding'){const pick=el('select',{'aria-label':'ZIP filename encoding',class:'dialog-input'},...ZIP_FILENAME_ENCODINGS.map(e=>option(e)));pick.value=ide.zipFilenameEncoding||'cp437';if(!await modal('ZIP Filename Encoding',{content:el('div',{},el('p',{},'For unmarked legacy ZIP filenames only. UTF-8 flags and valid Unicode Path metadata take precedence. This does not change source text encoding. Selection lasts until changed or the IDE reloads.'),el('label',{},'Filename code page:',pick))}))return false;ide.zipFilenameEncoding=zipFilenameEncoding(pick.value);ide.addingFiles=false;ide.fileInput.click();return true;}if(id==='open'){ide.addingFiles=false;ide.fileInput.click();return true;}if(id==='nativeSettings')return await ide.openNativeSettings();
       if(id==='saveAs')return ide.saveNativeAs();if(id==='saveNative')return ide.saveProject({format:'native'});if(id==='saveNativeFolder')return ide.saveProject({format:'folder'});if(id==='saveWebProject')return ide.saveProject({format:'web'});if(id==='nativeGroup')return ide.openNativeGroupDialog();if(id==='saveModule')return ide.saveNativeModule();
       if(id==='exportSources'){const files=sourceFiles(ide.project);let path=ide.project.name+'.vb6web';while(Object.keys(files).some(p=>p.toLowerCase()===path.toLowerCase()))path='snapshot-'+path;files[path]=JSON.stringify(ide.project,null,2);if(!Object.keys(files).some(p=>p.toLowerCase()==='vb6-studio-readme.txt'))files['VB6-Studio-README.txt']=readme;download(safeName(ide.project.name)+'-sources.zip',writeZip(files),'application/zip');ide.status('Exported native sources and browser snapshot.');return true;}
       return await command(id,...args);
     }catch(error){await alertDialog(error.message,'Native Project');return false;}
   };
+  installNativeWorkspace(ide);
 }

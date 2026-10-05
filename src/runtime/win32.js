@@ -100,6 +100,11 @@ export class VBWin32Bridge {
       else if(operation==='text'){if(state.backgroundMode===2)throw new Win32Error('Opaque GDI text backgrounds require a Canvas adapter',50);surface.text(args[2],args[0],args[1],state.textColor);}
       else throw new Win32Error('Drawing operation not available on this surface',50);
     };
+    if(['Form','MDIForm','PictureBox'].includes(c.type)){
+      const raster=fn=>(...args)=>{try{return fn(...args);}catch(error){if(error instanceof RangeError)throw new Win32Error(error.message,8);throw error;}};
+      descriptor.readPixels=raster((...args)=>c.ensureSurface().readPixels(...args));
+      descriptor.writePixels=raster((...args)=>c.ensureSurface().writePixels(...args));
+    }
     return this.api.registerWindow(descriptor);
   }
   unregisterControl(handle){if(handle&&!this.api.disposed)this.api.unregisterWindow(handle);}

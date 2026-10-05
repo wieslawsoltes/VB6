@@ -26,10 +26,10 @@ Public Sub Main()
 End Sub
 ```
 
-Element types are Byte, Integer, Boolean, Long, Single, Double and String. Single
+Element types are Byte, Integer, Boolean, Long, Single, Double, Currency and String. Single
 and Double elements occupy four and eight bytes respectively. Floating element
 reads produce value snapshots and Single stores round to Single precision; see
-[Native numeric storage](WIN32-NUMERIC.md). Dynamic arrays begin unallocated.
+[Native numeric storage](WIN32-NUMERIC.md). Currency uses eight-byte VT_CY elements and exact scaled-bit snapshots; see [Native Currency](WIN32-CURRENCY.md). Dynamic arrays begin unallocated.
 `ReDim` accepts one through eight dimensions with runtime signed 32-bit bounds and
 Option Base for omitted lower bounds. ReDim without Preserve creates
 zero/empty-initialized storage and can change rank. ReDim Preserve retains existing

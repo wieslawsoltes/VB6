@@ -2,6 +2,7 @@ import {McpError} from './protocol.js';
 
 /** Local-only delegated authority. Never serialized into projects or reachable as an MCP tool. */
 export const AGENT_SCOPES = Object.freeze({
+  data: 'Edit public data connections and commands (no SQL or network execution)',
   code: 'Edit code, declarations and bookmarks',
   project: 'Create/import/replace projects, change metadata and undo/redo project history',
   designer: 'Edit forms, controls, menus and designer selection',
@@ -20,6 +21,7 @@ export function agentScope(name) {
   if (['form','control','menu','designer'].includes(part)) return 'designer';
   if (['files','assets','resources','appSettings'].includes(part)) return 'files';
   if (['debug','breakpoints','watches'].includes(part)) return 'debugger';
+  if (part === 'data') return 'data';
   if (part === 'runtime') return 'runtime';
   if (['project','references'].includes(part)) return 'project';
   return 'workspace';

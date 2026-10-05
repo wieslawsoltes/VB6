@@ -38,7 +38,7 @@ def exercise(browser,mode,info):
         check(not page.evaluate('vb6Studio.mcp.adapter.enabled'))
         check(page.evaluate("!('clients' in vb6Studio.mcp) && !('connect' in vb6Studio.mcp) && !('McpClient' in VB6StudioAPI.MCP) && !('McpOAuth' in VB6StudioAPI.MCP)"),'Outbound MCP API remains')
         page.evaluate("vb6Studio.loadProject(VB6StudioAPI.newProject('McpBrowser'));vb6Studio.command('mcpAgentAccess')")
-        check(page.locator('.mcp-panel').get_by_role('tab').all_text_contents()==['Agent access','Agent permissions','Capabilities','Activity'])
+        check(page.locator('.mcp-panel').get_by_role('tab').all_text_contents()==['Agent access','Agent permissions','Capabilities','Activity','Operations'])
         check(page.get_by_role('button',name='Invoke selected',exact=True).count()==0)
         # Shared classic styling, keyboard navigation and constrained window layout.
         check(page.get_by_role('button',name='Attach companion',exact=True).is_disabled())
@@ -46,10 +46,10 @@ def exercise(browser,mode,info):
         palette=panel.evaluate("e=>({font:getComputedStyle(e).fontSize,bodyFont:getComputedStyle(document.querySelector('.ide-shell')).fontSize,face:getComputedStyle(e).backgroundColor,expected:getComputedStyle(e).getPropertyValue('--vb-face').trim()})")
         check(palette['font']==palette['bodyFont'],str(palette))
         panel.get_by_role('tab',name='Agent access',exact=True).focus()
-        page.keyboard.press('End');check(panel.get_by_role('tab',name='Activity',exact=True).get_attribute('aria-selected')=='true')
+        page.keyboard.press('End');check(panel.get_by_role('tab',name='Operations',exact=True).get_attribute('aria-selected')=='true')
         page.keyboard.press('Home');page.keyboard.press('Control+Tab');check(panel.get_by_role('tab',name='Agent permissions',exact=True).get_attribute('aria-selected')=='true')
         check(page.get_by_role('button',name='Grant selected permissions',exact=True).is_disabled())
-        for label,slug in [('Agent access','access'),('Agent permissions','permissions'),('Capabilities','capabilities'),('Activity','activity')]:
+        for label,slug in [('Agent access','access'),('Agent permissions','permissions'),('Capabilities','capabilities'),('Activity','activity'),('Operations','operations')]:
             tab(page,label)
             check(panel.evaluate('e=>e.scrollWidth<=e.clientWidth+1'),'Panel overflow: '+label)
             if mode=='opaque':
@@ -57,7 +57,8 @@ def exercise(browser,mode,info):
                 page.screenshot(path=str(ROOT/('reports/screenshots/mcp-classic-'+slug+'.png')))
         window=page.locator('.mdi-active');style=window.get_attribute('style')
         window.evaluate("e=>{e.style.width='420px';e.style.height='560px'}")
-        tab(page,'Capabilities');check(panel.evaluate('e=>e.scrollWidth<=e.clientWidth+1'),'Narrow panel overflow')
+        for label in ['Capabilities','Operations']:
+            tab(page,label);check(panel.evaluate('e=>e.scrollWidth<=e.clientWidth+1'),'Narrow panel overflow: '+label)
         page.evaluate("vb6Studio.appearance.theme='contrast';vb6Studio.applyAppearance()")
         check(panel.evaluate("e=>getComputedStyle(e).backgroundColor==='rgb(0, 0, 0)'"),'MCP does not follow the IDE theme')
         if mode=='opaque':page.screenshot(path=str(ROOT/'reports/screenshots/mcp-contrast-narrow.png'))
@@ -79,7 +80,7 @@ def exercise(browser,mode,info):
             check(page.get_by_label('Companion owner token',exact=True).input_value()=='')
         peer=info if network else None
         tab(page,'Capabilities')
-        check(page.get_by_label('Exposed agent tools').locator('option').count()==114)
+        check(page.get_by_label('Exposed agent tools').locator('option').count()==125)
         page.get_by_label('Filter exposed agent tools').fill('debug.assign')
         check(page.get_by_label('Exposed agent tools').locator('option').count()==1)
         check('pauseId' in page.get_by_label('Agent tool schema').inner_text())
@@ -149,7 +150,7 @@ def exercise(browser,mode,info):
             check(not page.evaluate('vb6Studio.mcp.adapter.enabled || vb6Studio.mcp.bridge'))
         # Only app static assets and explicitly paired loopback relay requests are allowed.
         if network:check(all(url.startswith((info['url'],info['hosted'].rsplit('/VB6/',1)[0],info['httpsHosted'].rsplit('/VB6/',1)[0])) for url in requests),str(requests))
-        return {'tools':114,'serverOnly':True,'approval':'deny/allow/revoke','runtime':'paused/evaluate/stop','network':network,'detachedWindow':detached,'reload':network}
+        return {'tools':125,'serverOnly':True,'approval':'deny/allow/revoke','runtime':'paused/evaluate/stop','network':network,'detachedWindow':detached,'reload':network}
     finally:context.close()
 
 fixture = None

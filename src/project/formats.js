@@ -1,3 +1,4 @@
+import {serializeVBW,nativeWindowStatePath} from './native-window-state.js';
 import {dataSidecarPath,encodeDataSidecar} from '../data/project-sidecar.js';
 import {importNativeFiles,parseNativeProject,patchNativeProject,workspaceFiles,normalizedEntries,listProjectEntries,parseVBG,workspaceProjects,selectWorkspaceProject} from './native-project.js';
 import {encodeNativeText,nativePathValue} from './native-text.js';
@@ -60,6 +61,7 @@ function singleSourceFiles(project,options={}){
   if(project.resources)put(project.resources.fileName,writeRES(project.resources));
   put(owner,encodeNativeText(serializeVBP({...project,modules:prepared.modules}),project.nativeProject?.document,options.encoding));
   for(const m of prepared.modules){for(const node of m.form?[m.form,...m.form.controls,...m.form.menus]:[])for(const [key,value]of Object.entries(node.properties||{}))if(value&&typeof value==='object'&&!value.resource&&Object.keys(value).length)throw new VBError('Native export cannot encode structured property '+node.name+'.'+key+'. Save as a browser project to retain this data.',1002);const source=patchNativeSource(m,canonicalSource(m,!m.nativeSource),parseVBValue);put(modulePath(m),encodeNativeText(source,m.nativeSource||{encoding:m.sourceEncoding||'windows-1252',bom:false},options.encoding));}
+  if(project.nativeWindowState){const path=nativeWindowStatePath(project);if(!/\.vbw$/i.test(path))throw new Error('Invalid VBW companion path');const existing=Object.keys(files).find(p=>p.toLowerCase()===path.toLowerCase());files[existing||path]=serializeVBW(project);}
   return files;
 }
 export function sourceFiles(project,options={}){const files=project.nativeWorkspace?workspaceFiles(project,options,singleSourceFiles):singleSourceFiles(project,options);normalizedEntries(Object.entries(files));return files;}

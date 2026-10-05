@@ -315,6 +315,72 @@ class NativeProjects(unittest.TestCase):
         actual = self.js('async () => await(await(await nativeRoot.getDirectoryHandle("app")).getFileHandle("App.vbp")).getFile().then(f=>f.text())')
         self.assertEqual(actual, 'external edit'); self.assertTrue(self.js('vb6Studio.dirty'))
 
+    def case_recovery_journal_cleanup_and_visible_rollback(self):
+        if self.mode != 'http': self.skipTest('Persistent journal UI uses real HTTP origin-private filesystem handles.')
+        self.load()
+        available=self.js("async () => {try{globalThis.recoveryRoot=await navigator.storage.getDirectory();const f=await recoveryRoot.getFileHandle('probe',{create:true});const ok=typeof f.createWritable==='function';await recoveryRoot.removeEntry('probe');return ok;}catch{return false;}}")
+        if not available: self.skipTest('Writable OPFS handles are not available on this browser.')
+        self.assertTrue(self.js('async () => await vb6Studio.saveProject({format:"folder",directoryHandle:recoveryRoot})'))
+        self.edit('vb6Studio.project.description="Recover this change"')
+        self.js("globalThis.cleanupBlocked=new Proxy(recoveryRoot,{get(t,k){if(k==='removeEntry')return async(name,o)=>{if(name==='.vb6-save-journal')throw Error('Simulated cleanup interruption');return t.removeEntry(name,o);};const v=Reflect.get(t,k,t);return typeof v==='function'?v.bind(t):v;}})")
+        self.start('vb6Studio.saveProject({format:"folder",directoryHandle:cleanupBlocked})');self.button('Save Files');self.result(True)
+        self.assertFalse(self.js('vb6Studio.dirty'))
+        self.assertTrue(self.js("async () => !!await recoveryRoot.getDirectoryHandle('.vb6-save-journal')"))
+        self.js("Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:async()=>recoveryRoot})")
+        self.start('vb6Studio.command("recoverNativeSave")');self.button('Restore Original');self.result(True)
+        actual=self.js("async () => Array.from(new Uint8Array(await(await(await(await recoveryRoot.getDirectoryHandle('app')).getFileHandle('App.vbp')).getFile()).arrayBuffer()))")
+        self.assertEqual(bytes(actual),FIXTURE['app/App.vbp']);self.assertTrue(self.js('vb6Studio.dirty'))
+        # A subsequent no-op dirty recalculation must not revalidate the old disk snapshot.
+        self.js('vb6Studio.markDirty()');self.assertTrue(self.js('vb6Studio.dirty'))
+        self.assertTrue(self.js("async () => {try{await recoveryRoot.getDirectoryHandle('.vb6-save-journal');return false;}catch(e){return e.name==='NotFoundError';}}"))
+
+    def case_vbw_document_restore_and_capture(self):
+        entries={**FIXTURE,'app/App.vbw':b'Main = 20, 30, 620, 430, , 60, 70, 560, 370, C\r\nUtils = 100, 120, 700, 520, Z\r\nVendor = opaque extension\r\n'}
+        self.load(entries)
+        self.assertEqual(sorted(self.js('vb6Studio.docs.map(d=>vb6Studio.project.modules.find(m=>m.id===d.id).name+":"+d.view)')),['Main:code','Utils:code'])
+        self.assertEqual(self.export(),entries)
+        self.js('''() => {const utils=vb6Studio.project.modules.find(m=>m.name==='Utils');vb6Studio.closeDocument(utils.id+':code');const form=vb6Studio.project.modules.find(m=>m.name==='Main');vb6Studio.openDocument(form.id,'form');}''')
+        self.start('vb6Studio.command("captureNativeWindows")');self.result(True)
+        files=self.native_download();self.assertIn(b'Vendor = opaque extension',files['app/App.vbw'])
+        self.load(files)
+        self.assertEqual(sorted(self.js('vb6Studio.docs.map(d=>vb6Studio.project.modules.find(m=>m.id===d.id).name+":"+d.view)')),['Main:code','Main:form'])
+        self.assertIn(b', C',files['app/App.vbw'])
+
+    def case_explicit_zip_filename_encoding_ui(self):
+        class LegacyName(zipfile.ZipInfo):
+            def _encodeFilenameFlags(self): return self.filename.encode('cp1250'),self.flag_bits & ~0x800
+        files={'Żółć/P.vbp':b'Type=Exe\r\nModule=M; M.bas\r\nStartup="Sub Main"\r\nName="LegacyEncoding"\r\n','Żółć/M.bas':b'Attribute VB_Name = "M"\r\nSub Main()\r\nEnd Sub\r\n'}
+        output=io.BytesIO()
+        with zipfile.ZipFile(output,'w') as z:
+            for name,data in files.items():z.writestr(LegacyName(name),data)
+        self.start('vb6Studio.command("zipEncoding")')
+        self.page.get_by_label('ZIP filename encoding',exact=True).select_option('windows-1250')
+        with self.page.expect_file_chooser() as chosen:self.button('OK')
+        chosen.value.set_files({'name':'Legacy.zip','mimeType':'application/zip','buffer':output.getvalue()})
+        self.page.get_by_label('Project entry',exact=True).select_option('Żółć/P.vbp')
+        self.page.get_by_label('Native text encoding',exact=True).select_option('windows-1250');self.button('Open')
+        self.page.wait_for_function('vb6Studio.project.name==="LegacyEncoding"')
+        self.assertEqual(self.native_download(),files)
+
+    def case_trusted_custom_designer_lifecycle(self):
+        self.load()
+        value=self.js('''() => {const {ControlAdapterRegistry,BrowserControl}=VB6Studio.StudioAPI;globalThis.adapterDisposed=0;class Adapter extends BrowserControl {constructor(m,o){super(m,o);this.node.dataset.trustedAdapter='yes';}dispose(){if(!this.disposed)globalThis.adapterDisposed++;super.dispose();}}const registry=new ControlAdapterRegistry().register('CommandButton',{designer:(m,o)=>new Adapter(m,o)});vb6Studio.installControlAdapters(registry);return [...vb6Studio.documents.designers.values()].length;}''')
+        self.assertGreater(value,0)
+        self.assertGreater(self.page.locator('[data-trusted-adapter=yes]').count(),0)
+        self.assertEqual(self.export(),FIXTURE)
+        self.load()
+        self.assertGreater(self.js('adapterDisposed'),0)
+        self.assertNotIn('controlRegistry',self.js('JSON.stringify(vb6Studio.project)'))
+
+    def case_trusted_custom_runtime_and_dynamic_controls(self):
+        self.load()
+        self.page.add_script_tag(content=(ROOT/'dist/vb6-runtime.js').read_text())
+        self.js('''async () => {const API=VB6Runtime.RuntimeAPI;globalThis.adapterDisposed=0;class Custom extends API.BrowserControl {build(){this.input=document.createElement('button');this.input.textContent='Trusted counter';this.node.append(this.input);}refresh(){super.refresh();}dispose(){if(!this.disposed)adapterDisposed++;super.dispose();}}const registry=new API.ControlAdapterRegistry().register('Vendor.Counter',{runtime:(m,o)=>new Custom(m,o)});const p=structuredClone(vb6Studio.project);p.modules=p.modules.filter(m=>m.kind==='form');const m=p.modules[0];m.form.controls[0].type='Vendor.Counter';m.code='Private Sub Button1_Click()\\nMe.Caption = "Adapter event"\\nEnd Sub';p.startup=m.name;const root=document.createElement('div');root.id='adapter-runtime';document.body.replaceChildren(root);globalThis.customApp=new API.ApplicationHost(p,root,{persist:false,controlRegistry:registry});await customApp.start();}''')
+        self.page.locator('#adapter-runtime button').filter(has_text='Trusted counter').click()
+        self.page.wait_for_function('customApp.forms[0].Caption==="Adapter event"')
+        self.assertTrue(self.js('''() => {const f=customApp.forms[0],c=f.addControl('Vendor.Counter','Extra');const ok=c.node.querySelector('button').textContent==='Trusted counter';f.removeControl(c);return ok;}'''))
+        self.js('customApp.dispose()');self.assertGreaterEqual(self.js('adapterDisposed'),2)
+
 for name in [n for n in vars(NativeProjects) if n.startswith('case_')]:
     for transport in (['memory'] if os.environ.get('VB6_TEST_TRANSPORT') == 'memory' else ['http', 'file']):
         setattr(NativeProjects, 'test_' + name[5:] + '_' + transport, getattr(NativeProjects, name))
