@@ -27,9 +27,8 @@ jobs:
           assert len(parts) == 3
           patch = gzip.decompress(base64.b64decode(''.join(p.read_text() for p in parts), validate=True))
           assert hashlib.sha256(patch).hexdigest() == 'd1bcdc0e45498b4aa2ea20944e29e10e828eeeb74802d3d3cf94dd126ab2b57f'
-          subprocess.run(['git','apply','--index','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--index','--exclude=.github/workflows/win32-gdi.yml','-'],input=patch,check=True)
           for p in parts: p.unlink()
-          Path('.github/workflows/regions-materialize.yml').unlink()
           PY
       - run: npm run build
       - run: node tools/win32-api-inventory.mjs

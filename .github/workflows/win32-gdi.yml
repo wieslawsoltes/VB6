@@ -2,7 +2,7 @@ name: Win32 GDI native contracts
 on:
   pull_request:
   push:
-    branches: [main, feature/win32-gdi-bitmaps]
+    branches: [main, feature/win32-gdi-bitmaps, feature/win32-gdi-regions]
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +25,13 @@ jobs:
           node tools/win32-gdi-contracts.mjs | Out-File -Encoding utf8 reports/gdi/javascript.json
           ./tools/win32-gdi-oracle.ps1 | Out-File -Encoding utf8 reports/gdi/windows.json
           node tools/win32-gdi-contracts.mjs --compare reports/gdi/windows.json | Tee-Object -FilePath reports/gdi/comparison.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compare regions, copied clipping and painting with Windows GDI
+        shell: pwsh
+        run: |
+          node tools/win32-region-contracts.mjs | Out-File -Encoding utf8 reports/gdi/regions-javascript.json
+          ./tools/win32-region-oracle.ps1 | Out-File -Encoding utf8 reports/gdi/regions-windows.json
+          node tools/win32-region-contracts.mjs --compare reports/gdi/regions-windows.json | Tee-Object -FilePath reports/gdi/regions-comparison.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
