@@ -1,77 +1,92 @@
-# Data compatibility continuation validation — 2026-10-05
+# Data compatibility continuation — 2026-10-05
 
-## Source and integration
+## Published source and integration
 
-This continuation preserves the original classic IDE design and the existing
-Data Environment. It integrates main through
-`a344a8fa8d667adbd934e595dd618836930b2120` with the RDO branch at
-`33808fb0a53fea0906347079fae9e20a67dd1ba0`, then integrates those sources with
-the native-provider branch at `2fd0fad63e1df36b57321ace49472af03a3c3d11`.
-Only generated files conflicted in the initial main integration; they were
-rebuilt from the combined source. A final refresh incorporates remote RDO
-`2d7591ca10067ea39699f98ff07ace4f86b1399d` and native-provider
-`0a0b6448718e4836074b2acf1912fa1dab3c9563`. Overlapping schema-width edits
-retain both signed/unsigned extensions, and all three new remote numeric sorting
-tests are preserved alongside the additional mixed-Variant regression. Finished, one-time integration/transport workflows were removed.
-The permanent native-provider regression and real-provider jobs remain enabled.
+The saved local continuation `352ebd6f961c4f199d2db07af7f831f615cc7fbd`
+is now published in the RDO feature branch. Publication commit
+`110d7e3b53e26604b63c83fae84d480dd6b4c049` preserves installed-provider
+PR #29 (merged as `676a68eb154106363559728d9382eb03dc403d21`) and main
+through `29c77082c9bf854c7f6fbbf3ed63d5277036b761`.
 
-The previously staged native-type and Windows-path correction was recovered
-against its recorded SHA-256:
-`0849222e3f2e0d64893160a91e6442e8ce12b3ed7a1a5f99938beca9367e78df`.
+The restored source delta was verified against SHA-256
+`98e324b928b6ca151f7ae5a67c3c031980956d621bee302e2aa46c52d9f83ba6`.
+Only generated application files conflicted with main; they were rebuilt from
+the combined source. The updated Win32 calls and GDI region validation workflows
+were retained without dropping debugger, IntelliSense, coding-agent or runtime
+changes. No force-push was used.
 
-## Corrections
+All 733 tracked files in the locally validated combined tree matched the
+publication artifact's Git blob and mode inventory. The artifact additionally
+contained the one-time publication workflow, which was subsequently removed by
+`4e7c3614c604a6d1f76c2b13420ed44dc1b6c3cd`. This document replaces the older
+pre-publication report; implementation and application bundles are unchanged.
 
-- Preserve native signed/unsigned ADO schema widths and range checks. Represent
-  signed and unsigned 64-bit fields with exact Decimal values, including cursor
-  sorting, change detection and integer criteria. Reject already-rounded unsafe
-  Number values and keep the old field/rowset unchanged when validation fails.
-- Retain binary ArrayBuffer and bounded view transport, including buffers from
-  another browser realm. Do not include adjacent backing-buffer bytes.
-- Inventory both Windows process architectures before provider tests and execute
-  every installed-provider case despite earlier failures. Keep Access ODBC's
-  disposable database independent of Jet's test; report cleanup failures.
-- Keep legacy Windows PowerShell fixture source ASCII-safe. Unicode test data
-  remains present through explicit character construction and UTF-8 transport.
-- Canonicalize native snapshot destination ancestors and use fileURLToPath for
-  source inventory on Windows. Snapshot containment is not a security boundary
-  against concurrently hostile filesystem changes.
-- Wait for the deferred REST error-label repaint without weakening either the
-  required error 3197 assertion or the server-side lost-update check.
+The source transport, completed diagnostic workflow, temporary publisher and
+source-recovery capture job are removed. Permanent native-provider and browser
+checks remain enabled. The classic IDE design and Data Environment styling are
+unchanged.
 
-## Local results
+## Compatibility corrections
 
-Environment: Linux, Node.js 22.16.0, Python 3.13.5, Chromium 144.0.7559.96.
+- Preserve signed/unsigned ADO field widths and exact 64-bit values during
+  assignment, sorting, change detection and integer criteria. Reject unsafe
+  already-rounded Number inputs. Failed validation preserves the previous
+  field and rowset state.
+- Preserve ArrayBuffers from other browser realms and bounded binary views
+  without including bytes outside their selected range.
+- Inventory both Windows host architectures before testing installed providers;
+  collect all provider outcomes instead of stopping at the first failure.
+  Access ODBC uses its own disposable fixture. Cleanup failures are reported.
+- Retain ASCII-safe legacy PowerShell source while testing genuine Unicode
+  values over UTF-8 transport.
+- Retain canonical Windows snapshot paths and fileURLToPath-based source
+  inventories. Filesystem containment is not a security boundary against a
+  concurrently hostile filesystem.
+- Wait for the deferred REST conflict-label repaint while retaining the error
+  3197 assertion and the server-side lost-update protection assertion.
+
+## Combined validation
+
+The publication workflow rebuilt the integrated apps and passed the complete
+Node suite before pushing source:
+https://github.com/wieslawsoltes/VB6/actions/runs/37354027515
 
 | Check | Result |
 |---|---|
-| Full Node suite | 2,303 passed, 0 failed, 0 skipped |
-| Data-specific Node suite | 173 passed; included in the full count |
-| Exported application / Data Environment scenarios | 6 passed in Chromium |
-| Data Link Properties geometry, keyboard, persistence and Cancel | 2 passed, 1440px and 580px |
-| Compiled ADO / DAO / RDO exported programs | All three programs passed in the Chromium harness |
-| Core IDE/browser regression scenarios | 36 passed |
-| Repeat build | 51 tracked generated/example files byte-identical |
+| Full Node suite, local and publication runner | 2,400 passed; zero failures or skips |
+| Data-specific Node suite, included above | 173 passed |
+| Exported applications and Data Environment, Chromium | 6 scenarios passed |
+| Data Link Properties keyboard, persistence, Cancel and geometry | 2 cases passed, 1440px and 580px |
+| Compiled ADO, DAO and RDO exported programs | All passed in the Chromium harness |
+| Core IDE/browser scenarios, Chromium | 36 passed |
+| Repeat build | Tracked generated apps remained byte-identical |
+| Published source inventory | All 733 local tracked files matched before this report update |
 
-The RDO-only integration also passed 2,272 Node tests and its exported
-ADO/DAO/RDO Chromium harness before native-provider changes were added.
+Local environment: Linux, Node.js 22.16.0 and Chromium. The previous report's
+2,303-test total described the saved pre-publication snapshot; the 2,400-test
+result includes newer main changes.
 
-## External validation still required
+## Native validation provenance and boundaries
 
-Remote native-provider run 37329393271 on `2fd0fad...` passed its actual Linux
-SQLite ODBC job. Its Windows job failed on unsupported schema field types and
-Windows path regressions. Those results precede the changes above; they are not
-validation of this continuation.
+Before its integration, PR #29 head
+`d7a987f6a915cdad011319e1a0672607853bdb9b` passed all 18 workflows,
+including native providers and live database gateways:
 
-The corrected Windows Jet/ACE/OLE DB/MSDASQL jobs, current Linux ODBC job, current
-PostgreSQL/MySQL/SQL Server jobs, Firefox/WebKit matrix, Windows/ARM64 packaging
-and optional licensed Microsoft VB6 compiler have not been executed for these
-local commits. The portable tests and provider-orchestration unit tests do not
-certify those native integrations.
+- https://github.com/wieslawsoltes/VB6/actions/runs/37346951503
+- https://github.com/wieslawsoltes/VB6/actions/runs/37346951367
 
-The additional local commits still require publication and successful exact-head
-CI before merge. PR #27 and PR #29 remain open. The latest retrieved remote PR
-#29 checks on `0a0b644...` report `action_required`, not a passing validation.
-The RDO source tree at `2d7591c...` is byte-identical to the separately validated
-local RDO integration; it does not need an additional code-only update. No complete ADO/DAO/RDO/native VB6 or standalone Win32 AOT data parity is
-claimed. Installed proprietary providers still require matching architecture,
-installation and applicable licenses; they are not redistributed here.
+Those runs precede the additional saved continuation and are not certification
+of the combined head. Exact final-head checks and their installed-provider
+reports are recorded in PR #27 before its main merge:
+https://github.com/wieslawsoltes/VB6/pull/27
+
+Portable and Chromium results do not substitute for installed Jet, ACE, OLE DB,
+MSDASQL, ODBC, other browser engines or Windows/ARM64 execution. Provider reports
+must distinguish unavailable architecture/provider combinations from tested
+passing combinations. Proprietary providers and the Microsoft VB6 compiler
+require their own installations and applicable licenses; they are not
+redistributed or universally certified here.
+
+This work does not assert complete ADO/DAO/RDO/native VB6 parity, native server
+cursor or pessimistic-lock equivalence, output/return parameter support, or
+arbitrary data-object execution in the separate standalone Win32 AOT compiler.
