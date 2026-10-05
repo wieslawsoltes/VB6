@@ -1,0 +1,117 @@
+name: Publish verified scalar integration
+on:
+  push:
+    branches: [feat/variant-scalar-compatibility]
+    paths: ['.github/workflows/scalar-publish.yml']
+permissions:
+  contents: read
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge reviewed concurrent main without discarding source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-ff --no-edit bd7716067f0a30dc49e4d621c892a8475100363d
+      - name: Verify and apply complete scalar source transaction
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, lzma, os, subprocess
+          from pathlib import Path, PurePosixPath
+          digest=lambda b: hashlib.sha256(b).hexdigest()
+          parts=[]
+          for sha in ['074e25329c351c588c438d4b6cfb54c74f0ebaf5','e1a871babe372561a0c850aacfc210349da5f366','f2a661073d494625f307d8e1b6a710a768305819','6eed5db2ec6356fc23e747f52a3ce4cab3660c1f','aa1de74e309e5ca750e6632506a798861d088540']:
+              obj=json.loads(subprocess.check_output(['gh','api',f'repos/wieslawsoltes/VB6/git/blobs/{sha}']))
+              raw=base64.b64decode(obj['content'])
+              assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==sha
+              parts.append(raw)
+          packed=b''.join(parts)
+          assert len(packed)==72080 and digest(packed)=='9520ee4cbd6bbb4c23923a9501f8d6517947140fc2e4c000a423f40492249073'
+          dec=lzma.LZMADecompressor(memlimit=256*1024*1024)
+          raw=dec.decompress(packed,max_length=16*1024*1024)
+          assert dec.eof and not dec.unused_data and len(raw)==1185291
+          assert digest(raw)=='0a018192b9ab044bf1f666ca4d38eee23bec042d43d68363531777c259768530'
+          data=json.loads(raw)
+          assert data['base']=='29c77082c9bf854c7f6fbbf3ed63d5277036b761'
+          assert data['integrationBase']=='bd7716067f0a30dc49e4d621c892a8475100363d'
+          assert len(data['files'])==45
+          names=[]
+          for rec in data['files']:
+              name=rec['path']; p=PurePosixPath(name); target=Path(name)
+              assert not p.is_absolute() and '..' not in p.parts and str(p)==name
+              assert name=='README.md' or p.parts[0] in ('src','docs','tests','tools')
+              assert not target.is_symlink() and not any(parent.is_symlink() for parent in target.parents)
+              assert (digest(target.read_bytes()) if target.exists() else None)==rec['before'], f'Concurrent edit: {name}'
+              names.append(name)
+          assert len(set(names))==len(names)
+          assert not subprocess.check_output(['git','status','--porcelain'],text=True).strip()
+          subprocess.run(['git','apply','--index','--unidiff-zero','-'],input=data['patch'].encode(),check=True)
+          staged=subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines()
+          assert set(staged)==set(names)
+          for rec in data['files']:
+              assert digest(Path(rec['path']).read_bytes())==rec['after'], rec['path']
+          Path(os.environ['RUNNER_TEMP'],'scalar-source-verification.json').write_text(json.dumps({'base':data['base'],'integrationBase':data['integrationBase'],'files':data['files'],'packedSha256':digest(packed)},indent=2))
+          print('All 45 source preimages and resulting files verified; current main preserved.')
+          PY
+      - name: Rebuild combined application and run all Node tests
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/scalar-build.log"
+          npm test 2>&1 | tee "$RUNNER_TEMP/scalar-node.log"
+      - name: Remove one-use workflows and commit reproducible source
+        run: |
+          git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git rm -- .github/workflows/scalar-recover-source.yml .github/workflows/variant-boundary-oracle.yml .github/workflows/variant-source-snapshot.yml .github/workflows/scalar-publish.yml
+          git diff --cached --check
+          git commit -m 'feat(runtime): preserve scalar Variant types, checked coercion and trusted adapter boundaries'
+          npm run build
+          git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Publish only the feature branch with fast-forward protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/scalar-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *) printf '%s\n' "$GH_TOKEN" ;;
+          esac
+          SH
+          chmod 700 "$RUNNER_TEMP/scalar-askpass"
+          trap 'rm -f "$RUNNER_TEMP/scalar-askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/scalar-askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/variant-scalar-compatibility
+      - name: Preserve exact source and validation evidence
+        if: always()
+        run: |
+          mkdir scalar-integration
+          cp "$RUNNER_TEMP/scalar-"*.log scalar-integration/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/scalar-source-verification.json" scalar-integration/ 2>/dev/null || true
+          git rev-parse HEAD > scalar-integration/head.txt
+          git status --porcelain > scalar-integration/status.txt
+          git diff > scalar-integration/unstaged.diff
+          git diff --cached > scalar-integration/staged.diff
+          git bundle create scalar-integration/repository.bundle --all HEAD
+          git bundle verify scalar-integration/repository.bundle
+          git archive --format=zip --prefix=VB6/ HEAD -o scalar-integration/source.zip
+          sha256sum scalar-integration/repository.bundle scalar-integration/source.zip > scalar-integration/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scalar-source-integrated
+          path: scalar-integration/
+          retention-days: 14
