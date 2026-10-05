@@ -1,0 +1,72 @@
+name: Coding agents ADO integration
+on:
+  push:
+    branches: [feat/coding-agents]
+    paths: [.github/workflows/agents-data-refresh.yml]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/coding-agents'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge pinned main without resolving source conflicts automatically
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = cb66ed1a019774d4df0fc081b26e6fc679dc4540
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = 6d587b674f9116312661d3d474ff8833e3ebecbf
+          git merge --no-ff --no-commit 6d587b674f9116312661d3d474ff8833e3ebecbf || {
+            python - <<'PY'
+          import subprocess
+          conflicts=set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts and conflicts <= {'dist/studio.js','dist/VB6-Studio-Web.html'}, 'Unexpected source conflict: '+str(conflicts)
+          PY
+          }
+          git checkout --ours -- dist/studio.js dist/VB6-Studio-Web.html
+          git add dist
+          git diff --exit-code cb66ed1a019774d4df0fc081b26e6fc679dc4540 -- src/agents tests/coding-agents.test.mjs tests/coding-agents-integration.test.mjs tests/agent-relay.test.mjs tools/agent-relay.mjs tools/coding-agents-browser-tests.py docs/coding-agents.md README.md package.json tools/build.mjs
+      - name: Rebuild and validate complete combined runtime and agent sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/agents-ado-integration
+          npm run build
+          node --check dist/studio.js
+          npm test | tee /tmp/agents-ado-integration/node-tests.txt
+          npm run test:agents | tee /tmp/agents-ado-integration/agent-tests.txt
+          git add -A
+          npm run build
+          git diff --exit-code -- dist src/exporter/runtime-payload.js
+          git diff --cached --check
+      - name: Record product tree and publish with non-force branch protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          index=$(mktemp)
+          cp .git/index "$index"
+          GIT_INDEX_FILE="$index" git update-index --force-remove .github/workflows/agents-data-refresh.yml
+          GIT_INDEX_FILE="$index" git write-tree > /tmp/agents-ado-integration/product-tree.txt
+          rm "$index"
+          git commit -m 'feat(agents): preserve merged ADO batch runtime and regenerate combined IDE'
+          git push origin HEAD:refs/heads/feat/coding-agents
+          git rev-parse HEAD > /tmp/agents-ado-integration/head.txt
+          git bundle create /tmp/agents-ado-integration/repository.bundle HEAD
+          cd /tmp/agents-ado-integration
+          sha256sum repository.bundle > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agents-ado-integration
+          path: /tmp/agents-ado-integration/
+          retention-days: 3
