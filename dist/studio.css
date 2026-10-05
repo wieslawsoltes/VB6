@@ -1224,3 +1224,6 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 @media(max-width:680px){.agent-field{flex-direction:column;align-items:stretch;gap:3px}.agent-field>span{flex-basis:auto}.agent-tool-catalog{grid-template-columns:1fr;overflow:auto}.agent-tool-catalog select{min-height:100px}.agent-page{padding:5px}}
 
 .agent-diff{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}.agent-diff>div{min-width:0}.agent-review fieldset{margin:6px 0}.agent-diff pre{max-height:180px;white-space:pre;overflow:auto}@media(max-width:680px){.agent-diff{grid-template-columns:1fr}}
+.agent-context{padding:3px 5px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);overflow-wrap:anywhere;font-size:var(--vb-size)}
+.agent-plan{padding-left:25px;margin:0;overflow:auto}.agent-plan li{padding:5px 2px;border-bottom:1px solid var(--vb-shadow)}.agent-plan li[data-status=in_progress]{background:var(--vb-window);color:var(--vb-window-text)}
+.agent-handoff{display:block;width:100%;box-sizing:border-box;min-height:220px;resize:vertical;font:12px/1.4 Consolas,'Courier New',monospace}.agent-page>select[aria-label="Agent tasks"]{width:100%;min-height:120px}
