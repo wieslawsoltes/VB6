@@ -8,9 +8,9 @@ export class NativeDebuggerClient {
     const url=new URL(endpoint);
     if(url.protocol!=='http:'||url.hostname!=='127.0.0.1'||url.username||url.password||url.search||url.hash||url.pathname!=='/debugger')throw new Error('Use the local bridge URL http://127.0.0.1:PORT/debugger.');
     if(typeof token!=='string'||token.length<32||token.length>512)throw new Error('Paste the random token printed by your local debugger bridge.');
-    this.disconnect();this.#url=url.href;this.#token=token;
+    this.disconnect();this.#url=url.href;this.#token=token;const generation=this.#generation;
     try{const capabilities=await this.request('capabilities');if(capabilities.version!==1||capabilities.engine!=='CDB')throw new Error('Unsupported native debugger bridge.');return capabilities;}
-    catch(error){this.disconnect();throw error;}
+    catch(error){if(generation===this.#generation)this.disconnect();throw error;}
   }
   disconnect(){this.#generation++;for(const controller of this.#pending)controller.abort();this.#pending.clear();this.#token='';this.#url='';}
   async request(method,params={}){
