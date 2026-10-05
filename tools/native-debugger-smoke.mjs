@@ -23,7 +23,26 @@ async function hit(session,symbol,max=30){
 try{
   const launched=await make({executable:target,args:['--children'],debugChildren:true});assert.ok(launched.pid>0);record('launch attaches before application startup',{pid:launched.pid});
   const bp=await hit(launched,'DebugTarget!DebugTick');
-  const processes=await launched.request('processes');assert.ok(processes.processes.length>=2,JSON.stringify(processes));for(const p of processes.processes)owned.add(p.pid);
+  // Windows may deliver the child's CREATE_PROCESS event after an already
+  // pending breakpoint in the parent. Drive the debug event loop, not wall-clock
+  // sleeps, until CDB has observed both. Never treat a missing child as a pass.
+  const childAddress=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugChildPid'});
+  const childMemory=await launched.request('readMemory',{address:childAddress.address,count:4});
+  assert.equal(childMemory.unreadableBytes,0);
+  const childPid=Buffer.from(childMemory.bytes).readUInt32LE();
+  if(childPid)owned.add(childPid);
+  let processes=await launched.request('processes');
+  for(let n=0;processes.processes.length<2&&n<30;n++){
+    await launched.request('continue',{pauseId:launched.pauseId});await launched.waitPaused();
+    processes=await launched.request('processes');
+  }
+  assert.ok(childPid>0,'Fixture did not create its requested child');
+  assert.ok(processes.processes.some(p=>p.pid===childPid),JSON.stringify({childPid,processes}));
+  assert.ok(processes.processes.length>=2,JSON.stringify(processes));for(const p of processes.processes)owned.add(p.pid);
+  // Inspect the requested parent even when the last event arrived in its child.
+  const parent=processes.processes.find(p=>p.pid===launched.pid);
+  assert.ok(parent,'Parent remains attached');
+  await launched.request('selectProcess',{index:parent.index,pauseId:launched.pauseId});
   record('native child process tracking',{processes:processes.processes});
   const threads=await launched.request('threads');assert.ok(threads.threads.length>=2);record('native thread enumeration',{threads:threads.threads.length});
   const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);record('cross-process native stack snapshots restore current context');

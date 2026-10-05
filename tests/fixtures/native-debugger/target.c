@@ -4,6 +4,8 @@
 #include <string.h>
 
 __declspec(dllexport) volatile LONG DebugCounter = 7;
+__declspec(dllexport) volatile DWORD DebugChildPid = 0;
+__declspec(dllexport) volatile LONG DebugArgumentCount = 0;
 typedef int (__cdecl *LibraryFunction)(int);
 static LibraryFunction libraryTick;
 static DWORD WINAPI Worker(LPVOID data) {
@@ -22,6 +24,7 @@ int main(int argc, char **argv) {
     HANDLE worker; HMODULE library; HRESULT com;
     BOOL child = argc > 1 && strcmp(argv[1], "--child") == 0;
     BOOL children = argc > 1 && strcmp(argv[1], "--children") == 0;
+    DebugArgumentCount = argc;
     com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     library = LoadLibraryW(L"DebugLibrary.dll");
     if (library) libraryTick = (LibraryFunction)GetProcAddress(library, "LibraryTick");
@@ -32,6 +35,7 @@ int main(int argc, char **argv) {
         GetModuleFileNameW(NULL, executable, MAX_PATH);
         swprintf_s(command, MAX_PATH + 32, L"\"%s\" --child", executable);
         if (CreateProcessW(executable, command, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &startup, &process)) {
+            DebugChildPid = process.dwProcessId;
             CloseHandle(process.hThread); CloseHandle(process.hProcess);
         } else return 4;
     }
