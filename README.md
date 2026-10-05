@@ -20,7 +20,7 @@ See [data sources, examples and deployment](docs/DATA-SOURCES.md) for the compat
 
 Classic List Members, List Constants, Complete Word, Quick Info and Parameter Info now share typed resolution across source panes, Immediate, Watch and Evaluation fields. Nested `With`, arrays/default members, classes/UDTs/enums, runtime/data adapters and explicit portable reference metadata feed the same Object Browser. Automatic assistance never executes project code or opens a connection.
 
-See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
+See [IntelliSense commands, reference descriptors, safety and validation](docs/INTELLISENSE.md). The [browser compatibility follow-up](docs/INTELLISENSE-COMPATIBILITY.md) adds WithEvents/interface handler dropdowns, labels, reference priority, strict metadata validation and DAO-specific typed chains. Native COM/OCX binary loading and Windows type-library registry discovery are not implied by code assistance.
 
 ## Run
 

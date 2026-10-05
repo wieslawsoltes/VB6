@@ -13,7 +13,7 @@ The source editor, Immediate window, Watch/Quick Watch expression fields and exp
 | Parameter Info | Ctrl+Shift+I | Shows the outer call when calls are nested. |
 | Definition | Shift+F2 | Uses the typed source resolver to navigate to a project declaration. |
 
-Tab commits a completion. In a source pane, Enter commits it and inserts a newline with the current indentation. In Immediate, Watch and Evaluation fields, Enter commits the open suggestion **without evaluating the expression**; another explicit Enter or the host's command is needed to evaluate. A period, opening parenthesis, comma or space commits a selected completion and continues typing. Escape dismisses the list and information. Arrow keys, Home/End and Page Up/Down navigate the list. Clicking a row also commits it.
+Tab commits a completion. In a source pane, Enter commits it and inserts a newline with the current indentation. In Immediate, Watch and Evaluation fields, Enter commits the open suggestion **without evaluating the expression**; another explicit Enter or the host's command is needed to evaluate. A period, opening parenthesis, comma or space commits a selected completion and continues typing. Escape dismisses the list and information. Arrow keys, Home/End and Page Up/Down navigate the list. A single click selects a row; double-clicking commits it.
 
 **Tools → Options → Editor** controls Auto List Members, Auto Quick Info and Auto Data Tips. Disabling automatic assistance does not disable the manual commands. Automatic suggestions are suppressed in comments, strings, date literals, composition input and read-only source. Data tips remain break-mode-only and use the existing guarded debugger inspector.
 
@@ -120,3 +120,5 @@ The dedicated browser suite records JSON reports and screenshots under `validati
 This is a browser implementation of the classic IntelliSense workflows, not certification of every native VB6 type library, add-in, OCX binary, Windows locale, physical device/IME or Microsoft screenshot. The tolerant index is not a replacement for compiler diagnostics. Supplying metadata does not remove the runtime's documented compatibility boundaries.
 
 Behavioral references: Microsoft's retained classic Visual Basic editor documentation for the [Edit menu](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/edit-menu) and [Options dialog](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/options-dialog-box). These describe the classic editor interaction model; the automated screenshots here are of this implementation, not native VB6 reference captures.
+
+For WithEvents/interface dropdowns, reference priority, strict descriptor validation, labels, DAO chains and the real-navigation regression matrix, see [Browser IDE compatibility](INTELLISENSE-COMPATIBILITY.md).
