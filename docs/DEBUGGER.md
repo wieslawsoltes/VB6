@@ -59,7 +59,9 @@ runtime without requiring a restart.
 
 An error break preserves the live frames that have not already unwound, their
 local storage, ByRef references, `Err`, and `Erl`. The classic **End / Debug / Help**
-dialog appears. Debug dismisses the dialog without resuming. End resets the
+dialog appears. Its classic chrome uses browser-native modal isolation when
+available, preventing the sandboxed application from capturing its input.
+Debug dismisses the dialog without resuming. End resets the
 project. Help explains the available recovery actions without opening a network
 page.
 
@@ -193,8 +195,8 @@ Debug-object removal.
 ## Validation and compatibility limits
 
 `tests/debugger-runtime.test.mjs` adds 50 focused regression tests. The full unit
-suite at implementation time passes 1,502 tests. The generated-application browser
-suite `tools/browser-debugger-runtime.py` covers 12 end-to-end workflows, including
+suite at implementation time passes 1,600 tests. The generated-application browser
+suite `tools/browser-debugger-runtime.py` covers 13 end-to-end workflows, including
 actual shortcuts, source highlights, the error dialog, Immediate repair, caller
 locals, startup watches, live settings, and exported-app behavior. It records
 JSON and screenshots under `reports/debugger-runtime/`; CI retains these as

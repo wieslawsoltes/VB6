@@ -12,17 +12,18 @@ export function showMenu(items,...args){
 
 
 let dialogSequence=0;
-export function modal(title,{width=480,content,buttons=[{label:'OK',value:true,primary:true},{label:'Cancel',value:false}],onReady}={}) {
+export function modal(title,{width=480,content,buttons=[{label:'OK',value:true,primary:true},{label:'Cancel',value:false}],onReady,nativeModal=false}={}) {
   return new Promise(resolve=>{
     closeMenu(false);
     const document=uiDocument();
     const previous=document.activeElement,cover=el('div',{class:'ide-modal-cover'}),id='ide-dialog-'+(++dialogSequence);
-    const dialog=el('div',{class:'ide-dialog',role:'dialog','aria-modal':'true','aria-labelledby':id,style:{width:width+'px'},tabindex:-1});
+    const useNativeModal=nativeModal&&typeof document.defaultView.HTMLDialogElement?.prototype.showModal==='function';
+    const dialog=el(useNativeModal?'dialog':'div',{class:'ide-dialog'+(useNativeModal?' ide-native-dialog':''),role:'dialog','aria-modal':'true','aria-labelledby':id,style:{width:width+'px'},tabindex:-1});
     const body=el('div',{class:'ide-dialog-body'}),footer=el('div',{class:'ide-dialog-footer'});
     const disabled=uiDocuments().flatMap(doc=>[...doc.body.children]).filter(n=>!n.inert&&n.tagName!=='SCRIPT'&&n.tagName!=='STYLE');disabled.forEach(n=>n.inert=true);
     let closed=false,pending=false;
     const release=()=>finish(false);
-    const finish=value=>{if(closed)return;closed=true;document.defaultView.removeEventListener('pagehide',release);document.removeEventListener('vb-window-release',release);cover.remove();disabled.forEach(n=>n.inert=false);if(previous?.isConnected)previous.focus({preventScroll:true});resolve(value);};
+    const finish=value=>{if(closed)return;closed=true;document.defaultView.removeEventListener('pagehide',release);document.removeEventListener('vb-window-release',release);if(useNativeModal&&dialog.open)dialog.close();cover.remove();disabled.forEach(n=>n.inert=false);if(previous?.isConnected)previous.focus({preventScroll:true});resolve(value);};
     const titlebar=el('div',{class:'tool-caption dialog-caption'},el('strong',{id},title),el('button',{class:'caption-close',title:'Close dialog','aria-label':'Close dialog',onclick:()=>finish(false)},icon('close')));
     dialog.append(titlebar,body,footer);if(content)body.append(content);
     for(const button of buttons){const node=el('button',{type:'button',class:button.primary?'default-button':'',onclick:async()=>{
@@ -32,6 +33,9 @@ export function modal(title,{width=480,content,buttons=[{label:'OK',value:true,p
       finally{pending=false;}
     }},button.label);footer.append(node);}
     cover.append(dialog);document.body.append(cover);
+    // Native top-layer modality prevents cross-origin application frames from
+    // retaining input during rapid run/break transitions. Keep classic chrome.
+    if(useNativeModal){dialog.addEventListener('cancel',e=>{e.preventDefault();finish(false);});dialog.showModal();}
     document.defaultView.addEventListener('pagehide',release);document.addEventListener('vb-window-release',release);
     cover.addEventListener('keydown',e=>{
       if(e.defaultPrevented)return;
@@ -45,7 +49,7 @@ export function modal(title,{width=480,content,buttons=[{label:'OK',value:true,p
       }
     });
     makeDraggable(titlebar,dialog);onReady?.({dialog,body,finish});
-    queueMicrotask(()=>{if(closed)return;(body.querySelector('input:not([type=hidden]),select,textarea,[role=tab][aria-selected=true]')||footer.querySelector('button')||dialog).focus();});
+    queueMicrotask(()=>{if(closed)return;(body.querySelector('input:not([type=hidden]),select,textarea,[role=tab][aria-selected=true]')||(useNativeModal&&footer.querySelector('.default-button'))||footer.querySelector('button')||dialog).focus();});
   });
 }
 export function alertDialog(text,title='Visual Basic'){return modal(title,{content:el('div',{class:'dialog-message'},text),buttons:[{label:'OK',value:true,primary:true}]});}

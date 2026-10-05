@@ -60,7 +60,7 @@ export class DebugWorkbench {
   const token=this.ide.bridgeToken,pauseId=data.pauseId,error=data.error;let closeDialog;
   const message=el('div',{class:'dialog-message'},"Run-time error '"+error.number+"':\n\n"+error.message);
   const current=()=>this.ide.bridgeToken===token&&this.ide.runState==='paused'&&this.pauseId===pauseId;
-  await modal('Microsoft Visual Basic',{width:440,content:message,onReady:({finish})=>{closeDialog=finish;this.errorDialogClose=finish;},buttons:[
+  await modal('Microsoft Visual Basic',{width:440,nativeModal:true,content:message,onReady:({finish})=>{closeDialog=finish;this.errorDialogClose=finish;},buttons:[
    {label:'End',value:'end',action:()=>{if(current())this.ide.stop(false);}},
    {label:'Debug',value:'debug',primary:true},
    {label:'Help',action:()=>{message.textContent="Run-time error '"+error.number+"':\n\n"+error.message+'\n\n'+(error.handled?'Continue delivers the error to the enabled On Error handler.':'Correct values or code, then Continue to retry the statement.')+' Set Next Statement can redirect execution within a safe region. End resets the project.';return false;}}

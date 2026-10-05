@@ -237,6 +237,39 @@ def live_error_settings(page):
     output(page, '5')
 
 
+def error_modal_isolation(page):
+    project(page, 'Sub Main()\nOn Error Resume Next\nErr.Raise 5\nDebug.Print Err.Number\nEnd Sub', trapping='all')
+    command(page, 'run')
+    paused(page)
+    dialog = error_dialog(page)
+    check(dialog.evaluate('(d)=>d.tagName==="DIALOG"&&d.matches(":modal")'))
+    page.wait_for_function('document.activeElement?.textContent==="Debug"')
+    # Even an explicit attempt to focus the sandbox cannot escape browser modality.
+    command(page, 'showRuntime')
+    check(page.evaluate('''()=>{
+      vb6Studio.runtimeFrame.focus();
+      return !!document.activeElement.closest('dialog:modal');
+    }'''))
+    dialog.get_by_role('button', name='Help', exact=True).click()
+    check(dialog.evaluate('(d)=>d.matches(":modal")'))
+    dismiss_error_for_debugging(page)
+    page.keyboard.press('F5')
+    output(page, '5')
+    check(page.locator('dialog:modal').count() == 0)
+    check(page.evaluate('!vb6Studio.root.closest("[inert]")'))
+    command(page, 'stop')
+    page.wait_for_function('vb6Studio.runState==="design"')
+    command(page, 'run')
+    paused(page, 2)
+    error_dialog(page)
+    page.keyboard.press('Escape')
+    page.get_by_role('dialog').wait_for(state='hidden')
+    check(page.evaluate('vb6Studio.runState') == 'paused')
+    page.wait_for_function('document.activeElement===vb6Studio.editor.input')
+    page.keyboard.press('F5')
+    output(page, '5')
+
+
 def caller_frame(page):
     project(page, 'Sub Main()\nDim n As Long\nn = 10\nWorker n\nDebug.Print n\nEnd Sub\nSub Worker(ByRef value As Long)\nStop\nvalue = value + 1\nEnd Sub')
     command(page, 'run')
@@ -281,6 +314,7 @@ def main():
              ('F9 rejects declarations and comments', breakpoint_lines),
              ('Break on Change watch is installed before startup', startup_watch),
              ('Error Trapping can change during a live pause', live_error_settings),
+             ('Error dialog isolates sandbox input and releases on Escape', error_modal_isolation),
              ('Caller locals, ByRef edits, and Step Out', caller_frame),
              ('Shipped apps omit Assert evaluation and reset at Stop', release_semantics)]
     with sync_playwright() as playwright:

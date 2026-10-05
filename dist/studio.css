@@ -736,6 +736,8 @@ input:focus,select:focus,textarea:focus{outline:none}
 .ide-dialog-body{padding:14px;overflow:auto;min-height:0;line-height:1.5}
 .ide-dialog-footer{display:flex;justify-content:flex-end;gap:8px;padding:2px 12px 12px}
 .ide-dialog-footer button{min-width:76px}
+.ide-native-dialog{position:fixed;inset:0;margin:auto;height:fit-content}
+.ide-native-dialog::backdrop{background:transparent}
 .default-button{outline:1px solid var(--vb-text);outline-offset:0}
 .dialog-message{white-space:pre-wrap;max-height:60vh;overflow:auto}
 .dialog-input{width:100%;margin-top:8px}
