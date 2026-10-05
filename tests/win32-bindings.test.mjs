@@ -61,8 +61,9 @@ test('private and ambiguous constants fail rather than reading arbitrary module 
   assert.throws(()=>c.nativeConstant(parseExpression('Rates.Secret')),/Private/);
   assert.throws(()=>c.nativeConstant(parseExpression('Modes.First')),/Ambiguous/);
 });
-test('native constant use rejects unsupported Date values without lowering a pointer as an integer',()=>{
-  assert.throws(()=>compileWin32(project('Dim s As String\ns = CStr(Day)','Private Const Day As Date = #2020-01-01#')),/constant type.*date/i);
+test('native Date constants use DATE storage and formatting rather than pointer integers',()=>{
+  const result=compileWin32(project('Dim s As String\ns = CStr(Day)','Private Const Day As Date = #2020-01-01#'));
+  assert.ok(result.report.imports.some(i=>i.symbol==='VarBstrFromDate'));
 });
 for(const type of ['Single','Double','Currency','Byte','Integer','Boolean','Long'])test('DLL and project function '+type+' return type resolves from the actual signature',()=>{
   const n=parseExpression('F(1)'),signature={kind:'function',returnType:type};

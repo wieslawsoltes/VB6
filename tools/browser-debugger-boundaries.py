@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Real DOM/runtime workflows. Native UI uses a labelled transport fixture;
+"""Deployed modular HTTP, standalone HTTP/file DOM/runtime workflows.
+Explicit VB6_DEBUGGER_ORIGINS=inline is a restricted local mode, not origin coverage.
+Native UI uses a labelled transport fixture;
 real CDB/Windows behavior is tested independently by native-debugger-smoke.mjs.
 """
 from pathlib import Path
@@ -8,6 +10,9 @@ import json
 import os
 import shutil
 import traceback
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from playwright.sync_api import sync_playwright, expect
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -85,11 +90,11 @@ def event_replace(page):
 
 class NativeTransportFixture:
     def __init__(self,page):
-        self.calls=[];self.state={'id':'test-session','state':'paused','pid':1234,'pauseId':1,'breakpoints':[],'stepMode':'assembly'}
+        self.calls=[];self.delay_step=False;self.step_reply=None;self.step_polled=False;self.state={'id':'test-session','state':'paused','stateRevision':2,'pid':1234,'pauseId':1,'breakpoints':[],'stepMode':'assembly'}
         page.route('http://127.0.0.1:8767/debugger',self.handle)
     def handle(self,route):
         req=route.request
-        headers={'Content-Type':'application/json','Access-Control-Allow-Origin':'null','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'POST','Access-Control-Allow-Private-Network':'true'}
+        headers={'Content-Type':'application/json','Access-Control-Allow-Origin':req.headers.get('origin','null'),'Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'POST','Access-Control-Allow-Private-Network':'true'}
         if req.method=='OPTIONS':route.fulfill(status=204,headers=headers,body='');return
         base.check(req.headers.get('authorization')=='Bearer '+TOKEN,req.headers)
         value=json.loads(req.post_data);method=value['method'];args=value['params'];self.calls.append(value)
@@ -97,10 +102,18 @@ class NativeTransportFixture:
         if method=='capabilities':result={'version':1,'engine':'CDB','interpreterFrames':False}
         elif method=='listProcesses':result={'processes':[{'pid':1234,'name':'NativeFixture'}]}
         elif method in ('attach','status'):result=dict(self.state)
-        elif method=='events':result={'events':[],'cursor':0,'dropped':False,'status':dict(self.state)}
-        elif method=='stack':result={'frames':[{'index':0,'returnAddress':'0x1001','symbol':'NativeFixture!Tick'}],'text':'NativeFixture!Tick'}
+        elif method=='events':
+            if self.step_polled and self.delay_step:return  # deliberately hold later polls
+            if self.step_reply:self.step_polled=True
+            result={'events':[],'cursor':0,'dropped':False,'status':dict(self.state)}
+        elif method=='stack':
+            symbol='NativeFixture!AfterStep' if self.step_polled else 'NativeFixture!Tick'
+            result={'frames':[{'index':0,'returnAddress':'0x1001','symbol':symbol}],'text':symbol}
         elif method=='registers':result={'registers':{'rip':'0x1000','rax':'0x5'}}
-        elif method in ('stepInto','stepOver','stepOut'):self.state['pauseId']+=1;result={**self.state,'state':'running'}
+        elif method in ('stepInto','stepOver','stepOut'):
+            result={**self.state,'state':'running','stateRevision':self.state['stateRevision']+1}
+            self.state['pauseId']+=1;self.state['stateRevision']+=2
+            if self.delay_step:self.step_reply=(route,headers,result);return
         elif method=='setRegister':self.state['pauseId']+=1;result={'registers':{'rip':'0x1000','rax':args['value']}}
         elif method=='threads':result={'threads':[{'index':0,'pid':1234,'tid':99,'current':True,'details':'Unfrozen'}]}
         elif method=='processes':result={'processes':[{'index':0,'pid':1234,'name':'NativeFixture','current':True}]}
@@ -197,6 +210,21 @@ def native_data_breakpoint(page):
     pane.get_by_role('button',name='Detach',exact=True).click()
 
 
+def native_poll_race(page):
+    fixture,pane=native_connect(page);fixture.delay_step=True
+    pane.get_by_role('button',name='Step Into',exact=True).click()
+    for _ in range(100):
+        if fixture.step_polled:break
+        page.wait_for_timeout(25)
+    base.check(fixture.step_polled,'A real poll must observe the new stop while the command is pending')
+    route,headers,result=fixture.step_reply
+    route.fulfill(status=200,headers=headers,body=json.dumps({'result':result}))
+    expect(pane.get_by_role('button',name='Step Into',exact=True)).to_be_enabled()
+    expect(pane.get_by_label('Native debugger state',exact=True)).to_contain_text('paused — pause 2')
+    expect(pane.get_by_label('Native debugger result',exact=True)).to_contain_text('NativeFixture!AfterStep')
+    base.check(any(x['method']=='stack' and x['params']['pauseId']==2 for x in fixture.calls))
+
+
 def native_bad_endpoint(page):
     fixture=NativeTransportFixture(page);base.command(page,'nativeDebugger');pane=page.get_by_label('Native Debugger Window',exact=True)
     pane.get_by_role('button',name='Connect…',exact=True).click()
@@ -208,22 +236,42 @@ def native_bad_endpoint(page):
 
 
 def main():
-    cases=[('Versioned Edit and Continue exposes retained source without replay',versioned),('Event-driven Immediate debugs actual timer and button callbacks',events),('Replacing a promoted Immediate project disposes the runtime',event_replace),('Native debugger classic controls and private connection token (transport fixture)',native_steps),('Native breakpoint and explicit memory UI (transport fixture)',native_memory),('Native hardware data-breakpoint dialog and removal (transport fixture)',native_data_breakpoint),('Native connection refuses non-loopback destinations',native_bad_endpoint)]
+    cases=[('Versioned Edit and Continue exposes retained source without replay',versioned),('Event-driven Immediate debugs actual timer and button callbacks',events),('Replacing a promoted Immediate project disposes the runtime',event_replace),('Native debugger classic controls and private connection token (transport fixture)',native_steps),('Native breakpoint and explicit memory UI (transport fixture)',native_memory),('Native hardware data-breakpoint dialog and removal (transport fixture)',native_data_breakpoint),('Native poll wins over delayed command reply and refreshes retained stop',native_poll_race),('Native connection refuses non-loopback destinations',native_bad_endpoint)]
+    origins=os.environ.get('VB6_DEBUGGER_ORIGINS','modular,standalone,file').split(',')
+    if any(origin not in ('modular','standalone','file','inline') for origin in origins):raise ValueError('Invalid debugger test origin')
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def log_message(self,*args):pass
+    server=ThreadingHTTPServer(('127.0.0.1',0),partial(QuietHandler,directory=str(base.ROOT)))
+    thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+    prefix='http://127.0.0.1:'+str(server.server_port)
+    urls={'modular':prefix+'/dist/index.html','standalone':prefix+'/dist/VB6-Studio-Web.html','file':(base.ROOT/'dist/VB6-Studio-Web.html').as_uri()}
+    for origin,relative in [('modular','dist/index.html'),('modular','dist/studio.js'),('modular','dist/studio.css'),('standalone','dist/VB6-Studio-Web.html'),('file','dist/VB6-Studio-Web.html')]:
+        if origin in origins and not (base.ROOT/relative).is_file():
+            server.shutdown();server.server_close();thread.join(timeout=5)
+            raise FileNotFoundError('Debugger test entry point is missing: '+relative)
     results=[]
-    with sync_playwright() as pw:
-        engine=os.environ.get('VB6_BROWSER','chromium');launch={'headless':True}
-        if engine=='chromium':launch.update(executable_path=os.environ.get('CHROMIUM_PATH') or shutil.which('chromium'),args=['--no-sandbox'])
-        browser=getattr(pw,engine).launch(**launch)
-        for name,case in cases:
-            page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(10000);errors=[]
-            page.on('pageerror',lambda e:errors.append(str(e)))
-            try:
-                page.set_content(base.HTML);page.wait_for_function('!!globalThis.vb6Studio?.debuggerWindows');case(page);base.check(not errors,errors);results.append({'name':name,'passed':True});print('PASS',name,flush=True)
-            except Exception as e:
-                results.append({'name':name,'passed':False,'error':str(e),'pageErrors':errors});print('FAIL',name,str(e),flush=True);traceback.print_exc(limit=5)
-                page.screenshot(path=str(REPORT/('failure-'+str(len(results))+'.png')))
-            finally:page.close()
-        report={'browser':engine,'version':browser.version,'passed':sum(r['passed'] for r in results),'failed':sum(not r['passed'] for r in results),'tests':results};browser.close()
-    (REPORT/(engine+'.json')).write_text(json.dumps(report,indent=2)+'\n');print(json.dumps({k:v for k,v in report.items() if k!='tests'}));raise SystemExit(1 if report['failed'] else 0)
+    try:
+        with sync_playwright() as pw:
+            engine=os.environ.get('VB6_BROWSER','chromium');launch={'headless':True}
+            if engine=='chromium':launch.update(executable_path=os.environ.get('CHROMIUM_PATH') or shutil.which('chromium'),args=['--no-sandbox'])
+            browser=getattr(pw,engine).launch(**launch)
+            for origin in origins:
+                for name,case in cases:
+                    page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(10000);errors=[]
+                    page.on('pageerror',lambda e:errors.append(str(e)))
+                    try:
+                        if origin=='inline':page.set_content(base.HTML)
+                        else:page.goto(urls[origin],wait_until='load')
+                        page.wait_for_function('!!globalThis.vb6Studio?.debuggerWindows')
+                        case(page);base.check(not errors,errors)
+                        results.append({'origin':origin,'name':name,'passed':True});print('PASS',origin,name,flush=True)
+                    except Exception as e:
+                        results.append({'origin':origin,'name':name,'passed':False,'error':str(e),'pageErrors':errors});print('FAIL',origin,name,str(e),flush=True);traceback.print_exc(limit=5)
+                        try:page.screenshot(path=str(REPORT/('failure-'+origin+'-'+str(len(results))+'.png')))
+                        except Exception as capture_error:results[-1]['screenshotError']=str(capture_error)
+                    finally:page.close()
+            report={'browser':engine,'version':browser.version,'origins':origins,'passed':sum(r['passed'] for r in results),'failed':sum(not r['passed'] for r in results),'tests':results};browser.close()
+        (REPORT/(engine+'.json')).write_text(json.dumps(report,indent=2)+'\n');print(json.dumps({k:v for k,v in report.items() if k!='tests'}));raise SystemExit(1 if report['failed'] else 0)
+    finally:server.shutdown();server.server_close();thread.join(timeout=5)
 
 if __name__=='__main__':main()

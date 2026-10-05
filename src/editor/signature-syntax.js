@@ -37,3 +37,14 @@ export function validParameterList(params){
   }
   return true;
 }
+
+/** Display an inferred formal type without changing stored source signatures.
+ * The full parameter grammar isolates defaults, including strings with As/=.
+ * Incomplete/unrecognized signatures remain verbatim rather than being guessed. */
+export function displayParameter(text, parameter) {
+  const match = declaration.exec(text);
+  if (!match || match[6] || !parameter?.type) return text;
+  const initial = match[7];
+  const head = initial === undefined ? text : text.slice(0, text.length - initial.length).replace(/\s*=\s*$/, '');
+  return head.trimEnd() + ' As ' + parameter.type + (initial === undefined ? '' : ' = ' + initial);
+}

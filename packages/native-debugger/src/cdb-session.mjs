@@ -35,10 +35,10 @@ export class CdbSession extends EventEmitter {
   constructor({cdbPath, spawnProcess = spawn, breakProcess = breakWindowsProcess, timeout = 15000, platform = process.platform} = {}) {
     super(); this.cdbPath = cdbPath; this.spawnProcess = spawnProcess; this.breakProcess = breakProcess;
     this.timeout = integer(timeout, 'command timeout', 100, 120000); this.platform = platform;
-    this.generation = 0; this.processIds = new Map(); this.operations = Promise.resolve(); this.state = 'new'; this.pauseId = 0; this.queue = Promise.resolve(); this.buffer = ''; this.pending = null; this.breakpoints = new Map(); this.sequence = 0;
+    this.stateRevision = 0; this.generation = 0; this.processIds = new Map(); this.operations = Promise.resolve(); this.state = 'new'; this.pauseId = 0; this.queue = Promise.resolve(); this.buffer = ''; this.pending = null; this.breakpoints = new Map(); this.sequence = 0;
   }
-  snapshot() { return {state: this.state, stepMode:this.stepMode||'assembly', pauseId: this.pauseId, pid: this.pid ?? null, targetPid: this.targetPid ?? null, processIndex: this.processIndex ?? 0, threadIndex: this.threadIndex ?? 0, breakpoints: [...this.breakpoints.values()].map(value=>({...value}))}; }
-  setState(state) { this.state = state; this.emit('state', this.snapshot()); }
+  snapshot() { return {state: this.state, stateRevision: this.stateRevision, stepMode:this.stepMode||'assembly', pauseId: this.pauseId, pid: this.pid ?? null, targetPid: this.targetPid ?? null, processIndex: this.processIndex ?? 0, threadIndex: this.threadIndex ?? 0, breakpoints: [...this.breakpoints.values()].map(value=>({...value}))}; }
+  setState(state) { this.state = state; this.stateRevision++; this.emit('state', this.snapshot()); }
   async start({pid, executable, args = [], debugChildren = false} = {}) {
     if (this.state !== 'new') throw new NativeDebugError('Debugger session already started', 'INVALID_STATE');
     if (this.platform !== 'win32') throw new NativeDebugError('A Windows host is required', 'WINDOWS_REQUIRED');

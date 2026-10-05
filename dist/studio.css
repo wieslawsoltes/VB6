@@ -1230,3 +1230,120 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 .agent-context{padding:3px 5px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);overflow-wrap:anywhere;font-size:var(--vb-size)}
 .agent-plan{padding-left:25px;margin:0;overflow:auto}.agent-plan li{padding:5px 2px;border-bottom:1px solid var(--vb-shadow)}.agent-plan li[data-status=in_progress]{background:var(--vb-window);color:var(--vb-window-text)}
 .agent-handoff{display:block;width:100%;box-sizing:border-box;min-height:220px;resize:vertical;font:12px/1.4 Consolas,'Courier New',monospace}.agent-page>select[aria-label="Agent tasks"]{width:100%;min-height:120px}
+
+/* Conversation behavior, expressed entirely in the existing classic VB6 theme. */
+.agent-task{overflow:hidden;gap:5px}.agent-task>.agent-field{flex:none}.agent-thread-view{display:flex;flex-direction:column;flex:1;min-height:90px;gap:4px;overflow:hidden}.agent-thread-view [hidden]{display:none!important}
+.agent-thread-view>.agent-conversation{position:relative;flex:1;min-height:60px;overflow:auto;overscroll-behavior:contain;overflow-anchor:none;scroll-behavior:auto;padding:8px;background:var(--vb-window);color:var(--vb-window-text);border:2px solid;border-color:var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow);font:var(--vb-size)/1.45 var(--vb-font)}
+.agent-thread-messages{display:flex;flex-direction:column;gap:10px;min-width:0}.agent-thread-entry{min-width:0;overflow-wrap:anywhere;flex:none}.agent-thread-entry.agent-user{align-self:flex-end;width:calc(100% - 28px);box-sizing:border-box;padding:6px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text)}
+.agent-thread-entry.agent-assistant{border-bottom:1px solid var(--vb-highlight);padding:4px 1px 8px}.agent-message-heading{display:flex;align-items:center;gap:8px;min-height:23px;color:var(--vb-text)}.agent-message-heading>strong{flex:1;min-width:0}.agent-message-state{font-size:var(--vb-size);font-weight:normal}.agent-message-copy{flex:none;padding:1px 6px!important;font:inherit}.agent-message-body{min-width:0;white-space:pre-wrap}.agent-message-body p{margin:5px 0;line-height:1.5}.agent-message-body h4{font-size:inherit;margin:9px 0 4px}.agent-message-body ul,.agent-message-body ol{margin:4px 0;padding-left:23px}.agent-message-body a{color:var(--vb-link);text-decoration:underline}.agent-message-body code{font:12px/1.5 Consolas,'Courier New',monospace}.agent-message-note{padding-top:4px;font-size:var(--vb-size)}
+.agent-thread-entry.agent-tool{border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);padding:4px 6px}.agent-tool>summary{display:list-item;cursor:pointer;list-style-position:inside;min-height:20px}.agent-tool>summary>strong{margin-right:8px}.agent-tool>summary>.agent-message-state{float:right;margin-left:8px}.agent-tool>.agent-message-note{padding-left:12px}.agent-tool .agent-message-body{padding-top:6px}.agent-tool pre{font:12px/1.4 Consolas,'Courier New',monospace;background:var(--vb-window);color:var(--vb-window-text);border:1px solid var(--vb-shadow);padding:6px;margin:3px 0 8px;max-height:230px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.agent-tool[data-status=approval]>summary,.agent-question>.agent-message-heading{background:var(--vb-title);color:var(--vb-title-text)}
+.agent-thread-entry.agent-question{padding:6px;border:1px solid var(--vb-shadow)}.agent-question>.agent-message-heading{padding:2px 5px}.agent-thread-entry.agent-notice,.agent-thread-entry.agent-plan,.agent-thread-notice{border-left:3px solid var(--vb-shadow);background:var(--vb-info);color:var(--vb-text);padding:4px 7px}.agent-notice>.agent-message-heading,.agent-plan>.agent-message-heading{min-height:18px}.agent-thread-entry[data-status=error],.agent-thread-entry[data-status=interrupted],.agent-thread-entry[data-status=denied]{border-left:3px solid var(--vb-dark)}
+.agent-code-block{margin:7px 0;border:1px solid var(--vb-shadow);background:var(--vb-window);color:var(--vb-window-text);white-space:normal}.agent-code-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 5px;background:var(--vb-face);color:var(--vb-text);border-bottom:1px solid var(--vb-shadow)}.agent-code-heading button{font:inherit;padding:1px 6px!important}.agent-code-block pre{margin:0;padding:7px;overflow:auto;white-space:pre;max-height:380px}.agent-thread-empty{padding:12px 6px;max-width:550px}.agent-thread-notice{margin-bottom:6px}.agent-jump-latest{align-self:center;flex:none;font:inherit;padding:3px 12px!important}.agent-conversation>button{margin-bottom:8px}
+.agent-composer{flex:none;background:var(--vb-face);color:var(--vb-text)}.agent-composer>.agent-field{align-items:stretch;gap:6px}.agent-composer>.agent-field>span{flex-basis:55px;padding-top:3px}.agent-composer textarea{min-height:45px!important;max-height:140px;resize:vertical;box-sizing:border-box;font:var(--vb-size)/1.4 var(--vb-font)}.agent-composer .agent-actions{padding:4px 0 0;justify-content:flex-end}.agent-composer .agent-actions>span{flex:1;font-size:var(--vb-size)}.agent-composer-help{font-size:var(--vb-size);flex:none}.agent-budget-meter{appearance:none;-webkit-appearance:none;box-sizing:border-box;display:block;width:100%;height:8px;flex:none;border:1px solid var(--vb-shadow);background:var(--vb-window);color:var(--vb-selection)}.agent-budget-meter::-webkit-progress-bar{background:var(--vb-window)}.agent-budget-meter::-webkit-progress-value{background:var(--vb-selection)}.agent-budget-meter::-moz-progress-bar{background:var(--vb-selection)}.agent-limit-error:empty{display:none}.agent-limit-error{padding:4px;border:1px solid var(--vb-shadow);background:var(--vb-info)}.agent-copy-buffer{position:fixed;left:0;top:0;width:1px;height:1px;opacity:0}
+@media(max-width:680px){.agent-task>.agent-field{flex-direction:row;align-items:center}.agent-task>.agent-field>span{flex:0 0 auto}.agent-thread-view>.agent-conversation{padding:5px}.agent-composer>.agent-field{flex-direction:row}.agent-composer>.agent-field>span{flex-basis:48px}.agent-message-heading{gap:5px;flex-wrap:wrap}.agent-tool>summary>.agent-message-state{float:none}.agent-thread-entry.agent-user{width:calc(100% - 12px)}}
+
+.agent-plain-tail{white-space:pre-wrap;overflow-wrap:anywhere;max-height:380px;overflow:auto;font:inherit}
+
+/*!
+ * Classic staircase bevels adapted from the inset box-shadow technique in
+ * 98.css by Jordan Scales. Source attribution requested in:
+ * https://news.ycombinator.com/item?id=49963404
+ * https://jdan.github.io/98.css/
+ * https://notes.jordanscales.com/98-css-reflections#when-buttons-were-good
+ * License source: https://github.com/jdan/98.css/blob/main/LICENSE
+ *
+ * 98.css — classic bevel technique
+ * Copyright 2020 Jordan Scales
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+/* Declare at every theme boundary: nested runtime forms must not inherit a
+   bevel whose colors were resolved in their parent IDE's theme. */
+:root, [data-vb-theme] {
+ --vb-bevel-raised: inset -1px -1px var(--vb-dark), inset 1px 1px var(--vb-light), inset -2px -2px var(--vb-shadow), inset 2px 2px var(--vb-highlight);
+ --vb-bevel-sunken: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-dark);
+ --vb-bevel-pressed: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-dark), inset -2px -2px var(--vb-highlight), inset 2px 2px var(--vb-shadow);
+ --vb-bevel-raised-thin: inset -1px -1px var(--vb-shadow), inset 1px 1px var(--vb-light);
+ /* Equivalent staircase paint for chrome whose original borders must remain
+    in layout. A fractional-DPI border may not equal its nominal CSS width;
+    replacing it with fixed padding shifted WebKit content. Border-box background
+    strips keep the original border metrics without adding nodes or JS reads. */
+ --vb-bevel-raised-image: linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-highlight),var(--vb-highlight)),linear-gradient(var(--vb-highlight),var(--vb-highlight));
+ --vb-bevel-sunken-thin: inset -1px -1px var(--vb-light), inset 1px 1px var(--vb-shadow);
+}
+/* Removing a layout border requires compensating padding. These explicit
+   selectors preserve authored control bounds and content origins; flat menu
+   items, native radio circles, editor layers and user-drawn shapes are not
+   indiscriminately restyled. No runtime layout measurements or extra DOM are
+   needed. Forced-colors deliberately uses the existing real-border rules. */
+@media (forced-colors: none) {
+ .classic-bevel-raised { border:0;box-shadow:var(--vb-bevel-raised); }
+ .classic-bevel-sunken { border:0;box-shadow:var(--vb-bevel-sunken); }
+ .classic-bevel-raised:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed); }
+
+ .vb-command { border:0!important;box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+ .vb-command:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed);padding:5px 8px 3px 10px; }
+ .vb-command:disabled,.vb-command[aria-disabled=true] { box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+
+ /* Preserve these containers' original border widths and padding exactly.
+    Transparent border paint avoids diagonal joins; the equivalent border-box
+    staircase is independent of WebKit's fractional border-width rounding. */
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,.vb-popup-menu.classic-menu {
+   border-color:transparent;
+   background-image:var(--vb-bevel-raised-image);
+   background-origin:border-box;background-clip:border-box;background-repeat:no-repeat;
+   background-size:1px 100%,100% 1px,1px 100%,100% 1px,2px 100%,100% 2px,2px 100%,100% 2px;
+   background-position:right top,left bottom,left top,left top,right top,left bottom,left top,left top;
+   box-shadow:none;
+ }
+ .vb-popup-menu.classic-menu { border-color:transparent; }
+ .ide-dialog { box-shadow:1px 1px var(--vb-text); }
+ .ide-dialog-footer button,.vb-dialog-actions button { border:0;box-shadow:var(--vb-bevel-raised);padding:4px 10px;background:var(--vb-face);color:var(--vb-text); }
+ .ide-dialog-footer button:active:not(:disabled),.vb-dialog-actions button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .ide-dialog-footer button:disabled,.vb-dialog-actions button:disabled { color:var(--vb-gray);text-shadow:1px 1px var(--vb-light); }
+
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.vb-form-title .vb-window-button {
+   border:0;padding:1px;box-shadow:var(--vb-bevel-raised);flex-shrink:0;
+ }
+ .window-buttons button:active:not(:disabled),.caption-close:active:not(:disabled),.tool-caption button:active:not(:disabled),.vb-window-button:active:not(:disabled),.vb-form-title .vb-window-button:active:not(:disabled) {
+   box-shadow:var(--vb-bevel-pressed);padding:2px 0 0 2px;
+ }
+ .vb-combo-arrow,.vb-spin-button { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+ .vb-combo-arrow:active:not(:disabled),.vb-spin-button:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed); }
+ .vb-scroll-arrow { border:0!important;padding:1px!important;box-shadow:var(--vb-bevel-raised)!important; }
+ .vb-scroll-arrow:active:not(:disabled) { box-shadow:var(--vb-bevel-pressed)!important; }
+ .vb-scroll-thumb { border:0;padding:1px;box-shadow:var(--vb-bevel-raised); }
+
+ /* Text fields and list boxes keep the same inset (old 2px border + padding).
+    Custom combo fields and checkbox/radio controls have separate geometry. */
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field),.vb-control textarea,.vb-control select {
+   border:0;box-shadow:var(--vb-bevel-sunken);padding:4px 5px;
+ }
+ .vb-control .vb-list,.vb-control .vb-combo { padding:3px!important; }
+ .vb-classic-combo .vb-combo-field { border:0;padding:3px 3px 3px 5px;box-shadow:var(--vb-bevel-sunken); }
+ .vb-classic-combo.simple .vb-combo-field { border:0;padding-right:5px; }
+ .vb-dialog input:not([type=checkbox]):not([type=radio]) { border:0;padding:5px;box-shadow:var(--vb-bevel-sunken); }
+
+ /* Retain native layout/scrollbar mechanics; replace only the beveled paint. */
+ *::-webkit-scrollbar-thumb,*::-webkit-scrollbar-button:single-button { border:0;box-shadow:var(--vb-bevel-raised); }
+ *::-webkit-scrollbar-button:single-button:active { box-shadow:var(--vb-bevel-pressed); }
+ .vb-range::-webkit-slider-thumb { border:0;box-shadow:var(--vb-bevel-raised); }
+}
+
+/* Explicit high-contrast suppression also covers engines which expose the
+   forced-colors media query without suppressing computed author shadows.
+   Keep the original real borders, native colors and keyboard focus outlines. */
+@media (forced-colors: active) {
+ .classic-bevel-raised,.classic-bevel-sunken,.vb-command,
+ .vb-form:not(.vb-borderless),.vb-dialog,.ide-dialog,.classic-menu,
+ .vb-popup-menu.classic-menu,.ide-dialog-footer button,.vb-dialog-actions button,
+ .window-buttons button,.caption-close,.tool-caption button,.vb-window-button,
+ .vb-combo-arrow,.vb-spin-button,.vb-scroll-arrow,.vb-scroll-thumb,
+ .vb-control input,.vb-control textarea,.vb-control select,.vb-dialog input {
+   box-shadow:none!important;text-shadow:none!important;
+ }
+}

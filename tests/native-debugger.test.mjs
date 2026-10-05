@@ -216,3 +216,15 @@ test('native bridge requires a pause identity for hardware watchpoints',async t=
   assert.equal((await post(bridge,{method:'setDataBreakpoint',params:{...args,pauseId:7}})).status,200);
   assert.deepEqual(created[0].calls.at(-1),{method:'setDataBreakpoint',params:{address:'1000',size:4,access:'write',pauseId:7}});
 });
+
+// Network consumers use this monotonic ticket alongside pause IDs to reject a
+// delayed running response after observing the next native breakpoint event.
+test('native state revisions order running and paused replies across independent transports',async t=>{
+  const {session}=await started(t);const initial=session.snapshot();
+  const running=await session.request('continue',{pauseId:initial.pauseId});
+  const stopped=await session.request('pause');
+  assert.equal(running.state,'running');assert.equal(stopped.state,'paused');
+  assert.equal(running.pauseId,initial.pauseId);assert.ok(stopped.pauseId>running.pauseId);
+  assert.ok(initial.stateRevision<running.stateRevision);assert.ok(running.stateRevision<stopped.stateRevision);
+  assert.equal(initial.state,'paused'); // snapshots never change in place
+});

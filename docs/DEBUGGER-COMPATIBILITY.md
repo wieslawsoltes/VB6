@@ -25,7 +25,7 @@ vm.applyEdits(project); // Strict, in-place migration only.
 vm.applyEdits(project, {policy: 'versioned'});
 ```
 
-Invalid source and incompatible changes remain atomic. Changing module membership, global/object storage, form layouts, interfaces or project execution settings still requires a restart. Versioned code retention is not arbitrary storage-layout migration, native binary hot patching, or unrestricted Edit and Continue.
+Invalid source and incompatible changes remain atomic. Existing Static local declarations (including inactive procedures and Static Subs) cannot change type, shape or disappear: their live storage survives invocations. New compatible slots are allowed. Unique instruction matching is indexed once instead of rescanning the entire new body for every old statement. Changing module membership, global/object storage, form layouts, interfaces or project execution settings still requires a restart. Versioned code retention is not arbitrary storage-layout migration, native binary hot patching, or unrestricted Edit and Continue.
 
 ## Native Windows process debugging
 
@@ -41,7 +41,7 @@ For a deliberately trusted standalone file-origin IDE, add `--allow-file-origin`
 
 Open **Debug > Native Debugger**, choose **Connect**, and enter the loopback URL and temporary token printed by the bridge. Use **Attach** for an existing process or **Launch** for an absolute Windows EXE path and JSON argument array. The terminal requests `YES` approval for each target; child-process debugging must also be requested explicitly.
 
-The native window provides break/continue, instruction or symbol-backed source stepping, native stacks, process/thread selection, all-process stack snapshots, registers, memory, disassembly, modules, symbol paths, expression inspection, breakpoints and exception policy. Memory/register changes are explicit operations, not undoable source edits. Detach leaves the target running. Windows permissions still control which targets can be debugged; the bridge does not elevate privileges.
+The native window provides break/continue, instruction or symbol-backed source stepping, native stacks, process/thread selection, all-process stack snapshots, registers, memory, disassembly, modules, symbol paths, expression inspection, breakpoints and exception policy. The **Data Breakpoint** dialog installs actual hardware read/write, write or execute watches. Addresses must be aligned to 1/2/4/8-byte widths; execute watches require one byte. CDB reports unavailable target widths or exhausted hardware slots instead of silently changing the watched range. Run to Address owns a temporary one-shot breakpoint and cancels it on an intervening stop. Memory/register changes are explicit operations, not undoable source edits. Memory writes are read back, and their pause ticket is invalidated even on partial failure. Detach leaves the target running. Windows permissions still control which targets can be debugged; the bridge does not elevate privileges.
 
 DLLs and COM components are inspected in their hosting processes. Matching symbols/source are required for useful native source lines and local variable names. An optimized binary can legitimately omit values or frames. Unreadable memory is shown as `??`, not fabricated zeroes. A P-code executable can be inspected as a native process, but this does not reconstruct its VB6 logical interpreter frames, local variables or P-code instructions.
 
@@ -49,11 +49,11 @@ DLLs and COM components are inspected in their hosting processes. Matching symbo
 
 The reusable package is `packages/native-debugger` (`@vb6/native-debugger`). It has no npm runtime dependencies. The HTTP service binds only `127.0.0.1`, checks exact Host/origin values, uses a private in-memory bearer token, defaults to denying target control, and bounds requests, output, session count and event history. Browser disconnects expire a short session lease and trigger detach.
 
-No raw CDB command, extension-loading interface or shell command is exposed over HTTP. Typed mutations require a current pause identity. Command serialization and connection generations reject stale work. Credentials are not saved in projects, layout state, exported applications, or MCP capabilities. The CLI requires local human consent; embedding hosts must provide their own explicit authorization callback.
+No raw CDB command, extension-loading interface or shell command is exposed over HTTP. Typed mutations require a current pause identity. Command serialization and connection generations reject stale work. The native operation queue is limited to 256 pending requests and captures argument values at enqueue time. Monotonic state revisions prevent delayed command replies from overwriting newer polled stops; stops seen during a busy UI operation are inspected when it finishes. A new session lease begins after startup, not before engine initialization. Credentials are not saved in projects, layout state, exported applications, or MCP capabilities. The CLI requires local human consent; embedding hosts must provide their own explicit authorization callback.
 
 ## Validation and equivalence
 
-`tests/debugger-boundaries.test.mjs` tests source event delivery and versioned state preservation. `tests/native-debugger*.test.mjs` covers native protocol/transport and browser client contracts. `tools/browser-debugger-boundaries.py` tests actual source-runtime DOM workflows; its native UI cases explicitly use a transport fixture and are not evidence of native-engine execution.
+`tests/debugger-boundaries.test.mjs` tests source event delivery and versioned state preservation. `tests/native-debugger*.test.mjs` covers native protocol/transport and browser client contracts. `tools/browser-debugger-boundaries.py` runs eight cases on modular HTTP, standalone HTTP and standalone file origins in each CI browser (24 per engine); its native UI cases explicitly use a transport fixture and are not evidence of native-engine execution.
 
 `tools/native-debugger-smoke.mjs` runs separately on Windows with compiled x86/x64 EXE and DLL fixtures and matching symbols. It verifies actual CDB behavior and fails rather than skipping when a required engine, target or operation is unavailable. Its fixture initializes COM but is not a licensed Microsoft VB6 compiler/debugger oracle.
 
@@ -65,3 +65,18 @@ Native VB6 P-code interpreter debugging, arbitrary live storage migration, exact
 - [Debugging a user-mode process using CDB](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/debugging-a-user-mode-process-using-cdb)
 - [Child-process debugging](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/-childdbg--debug-child-processes-)
 - [Ending a debugging session in CDB](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/ending-a-debugging-session-in-cdb)
+
+## Reproducible validation commands
+
+```sh
+npm run build
+npm test
+node --test tests/native-debugger*.test.mjs tests/debugger-boundaries.test.mjs
+VB6_BROWSER=chromium python tools/browser-debugger-boundaries.py
+VB6_BROWSER=firefox python tools/browser-debugger-boundaries.py
+VB6_BROWSER=webkit python tools/browser-debugger-boundaries.py
+```
+
+`VB6_DEBUGGER_ORIGINS=inline` runs the eight cases with `set_content` only and must not be reported as deployment-origin validation. The native UI transport fixture deliberately reorders a command response and a newer stop event, while the Windows matrix independently runs the real authenticated HTTP bridge against CDB and compiled x86/x64 targets. Reports identify the target architecture from the PE header separately from the Node host architecture. A failure to take an evidence screenshot does not suppress the original failing case or the JSON report.
+
+Additional native command reference: [ba — Break on Access](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/ba--break-on-access-).

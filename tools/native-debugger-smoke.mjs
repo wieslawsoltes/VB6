@@ -9,7 +9,11 @@ import {CdbSession,findCdb,breakWindowsProcess} from '../packages/native-debugge
 
 if(process.platform!=='win32')throw new Error('Run this test on Windows with Microsoft Debugging Tools installed.');
 const target=await fs.realpath(process.argv[2]||'reports/native-debugger/x64/DebugTarget.exe'),directory=path.dirname(target),cdbPath=await findCdb();
-const report={platform:process.platform,architecture:process.arch,target,cdbPath,checks:[]},owned=new Set(),sessions=[];
+const image=await fs.readFile(target),pe=image.readUInt32LE(0x3c);
+assert.equal(image.subarray(pe,pe+4).toString('hex'),'50450000','Target must be a PE executable');
+const architecture=({0x14c:'x86',0x8664:'x64',0xaa64:'arm64'})[image.readUInt16LE(pe+4)];
+assert.ok(architecture,'Recognized target architecture');
+const report={platform:process.platform,architecture,hostArchitecture:process.arch,target,cdbPath,checks:[]},owned=new Set(),sessions=[];
 const record=(name,details={})=>{report.checks.push({name,passed:true,...details});console.log('PASS '+name);};
 const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
 async function make(options){const session=new CdbSession({cdbPath,timeout:30000,breakProcess:async pid=>{report.breakRequests=(report.breakRequests||0)+1;await breakWindowsProcess(pid);}});sessions.push(session);session.on('output',e=>{report.output=((report.output||'')+e.text).slice(-200000);});await session.start(options);if(options.executable)owned.add(session.pid);return session;}
@@ -24,6 +28,10 @@ async function hit(session,symbol,max=30){
 try{
   const launched=await make({executable:target,args:['--children'],debugChildren:true});assert.ok(launched.pid>0);record('launch attaches before application startup',{pid:launched.pid});
   const parentPid=launched.pid,bp=await hit(launched,'DebugTarget!DebugTick');
+  const argcAddress=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugArgumentCount'});
+  const argcBytes=await launched.request('readMemory',{address:argcAddress.address,count:4});
+  assert.equal(argcBytes.unreadableBytes,0);assert.equal(Buffer.from(argcBytes.bytes).readUInt32LE(),2);
+  record('native launch preserves the approved argument vector',{architecture});
   // Windows may deliver the child's CREATE_PROCESS event after an already
   // pending breakpoint in the parent. Drive the debug event loop, not wall-clock
   // sleeps, until CDB has observed both. Never treat a missing child as a pass.

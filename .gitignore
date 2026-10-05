@@ -26,3 +26,10 @@ server-profiles.local.json
 reports/debugger-runtime/
 # Coding-agent browser validation reports and screenshots (CI artifacts).
 reports/coding-agents/
+
+# Classic HTML pixel fixtures and benchmark evidence
+reports/classic-html/
+
+# Debugger compatibility browser evidence
+reports/debugger-boundaries/
+reports/native-debugger/

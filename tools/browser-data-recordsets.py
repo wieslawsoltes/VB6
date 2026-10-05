@@ -66,10 +66,17 @@ with sync_playwright() as pw:
           try{await vm.start();return output;}finally{await vm.data.close();}
         }''', (ROOT/'tests/fixtures/dao-compat.bas').read_text())
         assert dao_output == ['2','Original','Changed','Changed','Changed'], dao_output
+        rdo_output = page.evaluate('''async code => {
+          const api=VB6Runtime.RuntimeAPI,project={schema:1,name:'RdoBrowser',startup:'Sub Main',modules:[{id:'module',name:'MainModule',kind:'module',code}]};
+          const program=api.compileProject(project);if(program.diagnostics.length)throw new Error(JSON.stringify(program.diagnostics));
+          const output=[],vm=new api.VirtualMachine(program,{print:value=>output.push(value)});
+          try{await vm.start();return output;}finally{await vm.data.close();}
+        }''', (ROOT/'tests/fixtures/rdo-compat.bas').read_text())
+        assert rdo_output == ['2','Original','1','0','Changed','Second'], rdo_output
         assert not errors, errors
         assert not requests, requests
-        result={'browser':args.browser,'passed':True,'output':output,'daoOutput':dao_output,'networkRequests':len(requests)}
+        result={'browser':args.browser,'passed':True,'output':output,'daoOutput':dao_output,'rdoOutput':rdo_output,'networkRequests':len(requests)}
         (OUT/f'recordsets-{args.browser}.json').write_text(json.dumps(result,indent=2))
-        print('PASS exported ADO/DAO runtime, batch/clones, explicit Edit, QueryDefs, default/bang syntax:', args.browser)
+        print('PASS exported ADO/DAO/RDO runtime, batch/clones, explicit Edit, QueryDefs, default/bang syntax:', args.browser)
     finally:
         browser.close()

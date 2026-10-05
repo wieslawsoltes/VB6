@@ -37,7 +37,7 @@ export class NativeDebuggerWindow{
   }
   show(){this.ide.root.classList.remove('hidden-debug');if(!this.opened){this.opened=true;this.ide.docking.model.sizes.bottom=Math.max(this.ide.docking.model.sizes.bottom,330);}this.ide.docking.show('nativeDebugger',true);this.ide.docking.focus('nativeDebugger');}
   active(){return this.sessions.get(this.selected);}
-  async guard(action){if(this.busy)return;this.busy=true;this.renderState();let succeeded=false;try{const result=await action();succeeded=true;return result;}catch(error){this.state.textContent=error.message;this.text(error.message);}finally{this.busy=false;this.renderState(succeeded);}}
+  async guard(action){if(this.busy)return;this.busy=true;this.renderState();let succeeded=false;try{const result=await action();succeeded=true;return result;}catch(error){this.state.textContent=error.message;this.text(error.message);}finally{this.busy=false;this.renderState(succeeded);if(succeeded&&this.refreshPending&&this.active()?.state==='paused'){this.refreshPending=false;queueMicrotask(()=>{if(!this.busy)void this.guard(()=>this.refresh());});}}}
   renderState(message=true){
     const session=this.active(),paused=session?.state==='paused';
     for(const button of this.buttons)button.disabled=this.busy||({always:false,connected:!this.client.connected,session:!session,paused:!paused,running:session?.state!=='running'}[button.dataset.nativeMode]??true);
@@ -75,15 +75,23 @@ export class NativeDebuggerWindow{
   }
   async adopt(value){this.sessions.set(value.id,{...value,cursor:0});this.selected=value.id;this.updateSelector();this.renderState();await this.refresh();}
   async detach(){const id=this.selected;if(!id)return;await this.client.request('detach',{session:id});this.sessions.delete(id);this.selected=this.sessions.keys().next().value??null;this.updateSelector();this.text('Detached. The target process remains running.');}
+  // Polls and command replies travel on independent HTTP requests. A delayed
+  // Continue reply must never replace the newer stop already seen by a poll.
+  acceptSnapshot(session,value){
+    if(value.pauseId<session.pauseId)return false;
+    if(Number.isSafeInteger(value.stateRevision)&&Number.isSafeInteger(session.stateRevision)&&value.stateRevision<session.stateRevision)return false;
+    Object.assign(session,value);return true;
+  }
   async execute(method,params={}){
     const session=this.active();if(!session)throw new Error('Select a native session first.');
     const id=this.selected,result=await this.client.request(method,{session:id,pauseId:session.pauseId,...params});
     if(method==='stepMode'&&result?.mode)session.stepMode=result.mode;
-    if(result&&typeof result.state==='string')Object.assign(session,result);else if(result?.pauseId!==undefined)session.pauseId=result.pauseId;
+    if(result&&typeof result.state==='string')this.acceptSnapshot(session,result);else if(Number.isSafeInteger(result?.pauseId))session.pauseId=Math.max(session.pauseId,result.pauseId);
     this.updateSelector();this.renderState();return result;
   }
   async inspect(method,params={}){const ticket=this.refreshTicket=(this.refreshTicket||0)+1,id=this.selected;const result=await this.execute(method,params);if(ticket===this.refreshTicket&&id===this.selected)this.text(result.text??JSON.stringify(result,null,2));return result;}
   async refresh(){
+    this.refreshPending=false;
     const ticket=this.refreshTicket=(this.refreshTicket||0)+1,id=this.selected,view=this.view.value,generation=this.generation;
     const current=()=>ticket===this.refreshTicket&&id===this.selected&&view===this.view.value&&generation===this.generation;
     if(!this.active())return;
@@ -133,10 +141,10 @@ export class NativeDebuggerWindow{
   poll(){
     clearTimeout(this.timer);if(!this.client.connected)return;const generation=this.generation;
     this.timer=setTimeout(async()=>{
-      try{for(const [id,session]of this.sessions){const result=await this.client.request('events',{session:id,after:session.cursor});if(generation!==this.generation)return;session.cursor=result.cursor;const oldPause=session.pauseId,oldState=session.state;Object.assign(session,result.status);if(oldState!==session.state)this.updateSelector();
+      try{for(const [id,session]of this.sessions){const result=await this.client.request('events',{session:id,after:session.cursor});if(generation!==this.generation)return;session.cursor=result.cursor;const oldPause=session.pauseId,oldState=session.state;this.acceptSnapshot(session,result.status);if(oldState!==session.state)this.updateSelector();
         for(const event of result.events)if(event.type==='output')this.output=(this.output+event.data.text).slice(-131072);
         if(result.dropped)this.output+='\n[Some native output was discarded by the bounded bridge history.]\n';
-        if(id===this.selected){this.renderState(!this.busy);if(!this.busy&&((oldPause!==session.pauseId||oldState!==session.state)&&session.state==='paused'||this.view.value==='Output'))await this.refresh();}
+        if(id===this.selected){this.renderState(!this.busy);if((oldPause!==session.pauseId||oldState!==session.state)&&session.state==='paused')this.refreshPending=true;if(!this.busy&&(this.refreshPending||this.view.value==='Output'))await this.refresh();}
       }}catch(error){if(generation===this.generation)this.state.textContent=error.message;}
       finally{if(generation===this.generation)this.poll();}
     },600);

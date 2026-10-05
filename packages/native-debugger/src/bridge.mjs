@@ -44,7 +44,7 @@ export async function createNativeDebuggerBridge({port=8767,token=randomBytes(32
         if(closing||signal?.aborted)throw new NativeDebugError('Debugging request was cancelled','CANCELLED');
         session=createSession();starting.add(session);const id=randomBytes(16).toString('hex'),entry={session,events:[],sequence:0,lastAccess:Date.now()};
         for(const type of ['state','paused','output','failure','closed'])session.on(type,data=>{entry.events.push({sequence:++entry.sequence,type,data:type==='output'?{text:String(data.text).slice(0,8192)}:data});if(entry.events.length>256)entry.events.shift();});
-        await session.start(options);if(closing||signal?.aborted)throw new NativeDebugError('Debugging request was cancelled','CANCELLED');sessions.set(id,entry);return {id,...session.snapshot()};
+        await session.start(options);if(closing||signal?.aborted)throw new NativeDebugError('Debugging request was cancelled','CANCELLED');entry.lastAccess=Date.now();sessions.set(id,entry);return {id,...session.snapshot()};
       }catch(error){await session?.abort();throw error;}finally{starting.delete(session);opening--;}
     }
     const entry=record(params.session);

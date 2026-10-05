@@ -180,3 +180,65 @@ export function completionSpan(text, offset) {
   if (prefix.startsWith('[') && text[end] === ']') end++;
   return {start:offset - prefix.length, end, prefix};
 }
+
+/** Rewrite only the explicit As type of a parameter declaration. Bounds,
+ * bracketed identifier text and string/date defaults are never searched as code. */
+export function mapParameterType(text, qualify) {
+  const masked = maskSource(text);
+  const head = masked.match(new RegExp('^\\s*(?:(?:Optional|ByVal|ByRef|ParamArray|WithEvents|Static)\\s+)*' + IDENTIFIER, 'i'));
+  if (!head) return text;
+  let at = head[0].length;
+  while (/\s/.test(masked[at] || '!')) at++;
+  if (masked[at] === '(') {
+    let depth = 1, bracket = false; at++;
+    for (; at < masked.length && depth; at++) {
+      const c = masked[at];
+      if (c === '[') bracket = true;
+      else if (c === ']') bracket = false;
+      if (bracket) continue;
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+    }
+    if (depth) return text;
+  }
+  const type = masked.slice(at).match(new RegExp('^\\s*As\\s+(?:New\\s+)?(' + TYPE_NAME + ')', 'i'));
+  if (!type) return text;
+  const start = at + type[0].length - type[1].length, end = at + type[0].length;
+  return text.slice(0, start) + qualify(text.slice(start, end)) + text.slice(end);
+}
+
+/** Keep source spans while exposing bodies of single-line If statements to
+ * the declaration index. Strings/comments and bracketed names are masked or
+ * skipped; only top-level Then/Else tokens are branch boundaries. */
+export function conditionalStatementBodies(statement, source, masked) {
+  let {text, clean} = statement;
+  if (!/^\s*(?:\d+\s+)?If\b/i.test(clean)) return [statement];
+  if (source !== undefined) {
+    text = source.slice(statement.start, statement.end);
+    clean = masked.slice(statement.start, statement.end);
+    // Blank the continuation marker without collapsing physical positions.
+    const chars = text.split('');
+    for (const match of clean.matchAll(/_([ \t]*\r?\n)/g)) chars[match.index] = ' ';
+    text = chars.join(''); clean = clean.replace(/_([ \t]*\r?\n)/g, ' $1');
+  }
+  const cuts = [], boundary = /(?:Then|Else)\b/iy; let depth = 0, bracket = false;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (c === '[') bracket = true;
+    else if (c === ']') bracket = false;
+    if (bracket) continue;
+    if (c === '(') depth++;
+    else if (c === ')') depth = Math.max(0, depth - 1);
+    else if (!depth && (i === 0 || /\s/.test(clean[i - 1]))) {
+      boundary.lastIndex = i; const token = boundary.exec(clean);
+      if (token) { cuts.push({start:i, end:i + token[0].length}); i += token[0].length - 1; }
+    }
+  }
+  return cuts.map((cut, i) => {
+    const end = cuts[i + 1]?.start ?? clean.length;
+    const start = cut.end + (clean.slice(cut.end, end).match(/^\s*/)?.[0].length || 0);
+    return {...statement, text:text.slice(start, end), clean:clean.slice(start, end),
+      line:statement.line + (clean.slice(0, start).match(/\n/g)||[]).length,
+      start:statement.start + start, end:statement.start + end};
+  });
+}

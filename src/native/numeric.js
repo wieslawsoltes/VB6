@@ -2,13 +2,14 @@
  * snapshot address in EAX; only ABI returns use ST(0). No live FPU values span
  * a call, checkpoint, allocation or VB error transfer. */
 export const FLOAT_TYPES = new Set(['single','double']);
+export const REAL_TYPES = new Set([...FLOAT_TYPES,'date']);
 const key=value=>String(value).toLowerCase();
 const N='native:number:';
 const DLL='oleaut32.dll';
 const arg=argument=>({argument});
 const addr=address=>({address});
 const literal=value=>({kind:'literal',value});
-export const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && ['double','currency'].includes(key(p.type))?8:4;
+export const nativeParameterBytes=p=>!p.byRef && (p.bounds===null||p.bounds===undefined) && ['double','currency','date'].includes(key(p.type))?8:4;
 
 export const nativeNumericMethods = {
   floatLiteral(value) {
@@ -48,7 +49,7 @@ export const nativeNumericMethods = {
   floatExpression(node,single=false) {
     const type=this.type(node);this.expression(node);
     if(type==='currency'){this.currencyToFloat(single);return;}
-    if(FLOAT_TYPES.has(type))return;
+    if(REAL_TYPES.has(type))return;
     const out=this.floatWorkspace();this.x.push();this.rawStorageAddress(out);this.x.emit(0x59).push().emit(0x51).call(N+(type==='string'?'parse':'from-int'));
   },
   loadFloat(variable) {
@@ -67,17 +68,17 @@ export const nativeNumericMethods = {
   },
   floatToInteger() {this.x.push().call(N+'integer');},
   floatToString(type) {this.x.emit(0x89,0xc3).push(key(type)==='single'?1:0).emit(0x53).call(N+'string');this.ownString();},
-  truth(node) {this.expression(node);if(this.type(node)==='currency')this.x.push().call('native:currency:boolean');else if(FLOAT_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
+  truth(node) {this.expression(node);if(this.type(node)==='currency')this.x.push().call('native:currency:boolean');else if(REAL_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
   numericExpression(node) {
     const x=this.x;
-    if(node.kind==='literal'&&FLOAT_TYPES.has(this.type(node))){x.value(this.floatLiteral(node.value));return true;}
-    if(node.kind==='unary'&&['+','-'].includes(node.op)&&FLOAT_TYPES.has(this.type(node))){
+    if(node.kind==='literal'&&REAL_TYPES.has(this.type(node))){x.value(this.floatLiteral(node.value));return true;}
+    if(node.kind==='unary'&&['+','-'].includes(node.op)&&REAL_TYPES.has(this.type(node))){
       this.floatExpression(node.expr);if(node.op==='-')this.floatUnary('negate');return true;
     }
     if(node.kind!=='binary')return false;
     const op=key(node.op),type=this.type(node),a=this.type(node.left),b=this.type(node.right);
-    const comparison=['=','<>','<','<=','>','>='].includes(op)&&(FLOAT_TYPES.has(a)||FLOAT_TYPES.has(b));
-    if(!comparison&&!FLOAT_TYPES.has(type))return false;
+    const comparison=['=','<>','<','<=','>','>='].includes(op)&&(REAL_TYPES.has(a)||REAL_TYPES.has(b));
+    if(!comparison&&!REAL_TYPES.has(type))return false;
     if(a==='string'||b==='string')this.fail('Use CDbl or Val explicitly in mixed native text/numeric operations');
     this.floatExpression(node.left);x.push();this.floatExpression(node.right);x.emit(0x59);
     if(comparison){x.push().emit(0x51).call(N+'compare').compare(0);this.boolean(op);return true;}
@@ -99,19 +100,19 @@ export const nativeNumericMethods = {
       }else this.floatExpression(args[0]);
       if(name==='csng')this.roundSingle();return true;
     }
-    if(['clng','cint','cbyte','cbool'].includes(name)&&args.length===1&&FLOAT_TYPES.has(this.type(args[0]))){
+    if(['clng','cint','cbyte','cbool'].includes(name)&&args.length===1&&REAL_TYPES.has(this.type(args[0]))){
       this.expression(args[0]);x.push().call(N+(name==='cbool'?'boolean':'integer'));this.check({cint:'Integer',cbyte:'Byte',cbool:'Boolean',clng:'Long'}[name]);return true;
     }
     if(['fix','int','sqr','abs','sgn'].includes(name)){
       if(args.length!==1)this.fail(name+' expects one argument');
       const type=this.type(args[0]);
-      if(!FLOAT_TYPES.has(type)&&name!=='sqr'){
+      if(!REAL_TYPES.has(type)&&name!=='sqr'){
         if(name==='fix'||name==='int'){this.numeric(args[0]);return true;}
         return false;
       }
       this.floatExpression(args[0]);
       if(name==='sgn'){x.push().call(N+'sign');return true;}
-      this.floatUnary(name);if(type==='single'&&name!=='sqr')this.roundSingle();return true;
+      this.floatUnary(name);if(type==='single'&&name!=='sqr')this.roundSingle();if(type==='date'&&name!=='sqr')x.call('native:date:validate');return true;
     }
     if(name==='round'){
       if(args.length<1||args.length>2)this.fail('Round expects one or two arguments');
@@ -143,7 +144,8 @@ export const nativeNumericMethods = {
         const {pin,temporary}=this.nativeReferenceArgument(p,node,omitted);
         if(pin)callPins.push(pin);if(temporary&&key(temporary.type)==='string')callStrings.push(temporary);
       }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots[i]=slot;return;}
-      else if(FLOAT_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
+      else if(key(p.type)==='date'){slot.type=p.type;this.dateExpression(node);this.storeDate(slot);slots[i]=slot;return;}
+      else if(REAL_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
       else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
       x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots[i]=slot;
     });
@@ -151,10 +153,11 @@ export const nativeNumericMethods = {
     if(target.proc)x.call(target.label);else x.invoke(target.dll,target.symbol);
     if(signature.kind==='function'&&key(signature.returnType)==='currency'){
       this.captureCurrencyReturn();if(target.proc)this.checkNativeError();
-    }else if(signature.kind==='function'&&FLOAT_TYPES.has(key(signature.returnType))){
+    }else if(signature.kind==='function'&&REAL_TYPES.has(key(signature.returnType))){
       const out=this.floatWorkspace();this.rawStorageAddress(out);x.emit(0xdd,0x18); // Pop ABI result before any helper/error check.
       if(target.proc)this.checkNativeError();x.call(N+'finite');
       if(key(signature.returnType)==='single')this.roundSingle();
+      if(key(signature.returnType)==='date')x.call('native:date:validate');
     }else if(target.proc)this.checkNativeError();
     for(const pin of callPins)this.releaseArrayPin(pin);
     if(callStrings.length){x.push();for(const string of callStrings)this.clearStringStorage(string);x.emit(0x58);}

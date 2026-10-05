@@ -5,7 +5,7 @@ const A = 'native:array:';
 const DLL = 'oleaut32.dll';
 const arg = argument => ({argument});
 const addr = address => ({address});
-const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6};
+const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
 export const NATIVE_ARRAY_MAX_BYTES = 1024 * 1024;
 export const NATIVE_ARRAY_MAX_RANK = 8;
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
@@ -143,7 +143,7 @@ export function emitNativeArrayHelpers(compiler) {
   x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
     .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7');save(x,-16);
   x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
-  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit)
+  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
     .value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/4).branch('g','error:7').jump(limitDone);
   x.label(halfLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/2).branch('g','error:7').jump(limitDone);
   x.label(doubleLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/8).branch('g','error:7').jump(limitDone);

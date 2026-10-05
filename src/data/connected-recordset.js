@@ -1,3 +1,4 @@
+import {VBDecimal,VBCurrency,coerce} from '../runtime/values.js';
 import {ProviderRecordset} from './provider-recordset.js';
 import {DisconnectedRecordset,fieldValue} from './recordset.js';
 import {assertData,after,dataList,sameValue} from './common.js';
@@ -8,6 +9,8 @@ const family = rs => ({members:new Set([rs]),batch:new Map(),affected:new Set(),
 const statusOf = entry => entry ? ({insert:1,update:2,delete:4}[entry.kind] | (entry.error ? entry.error.number===3197?2048:entry.error.number===-2147217873?4096:128 : 0)) : 0;
 function compare(a,b) {
   if(sameValue(a,b))return 0;
+  if(a!=null&&b!=null&&(a instanceof VBDecimal||b instanceof VBDecimal)){const exact=v=>Number.isSafeInteger(v)?VBDecimal.fromParts(BigInt(v),0):coerce(v,'Decimal');return exact(a).compare(exact(b));}
+  if(a instanceof VBCurrency&&b instanceof VBCurrency)return a.raw<b.raw?-1:1;
   if(a==null)return -1;if(b==null)return 1;
   if(typeof a==='string'&&typeof b==='string'){a=a.toLowerCase();b=b.toLowerCase();}
   return a<b?-1:a>b?1:0;
@@ -25,7 +28,7 @@ export class ConnectedRecordset extends ProviderRecordset {
       Object.defineProperties(field,{
         OriginalValue:{get(){const row=rs.current();const entry=rs._family.batch.get(row);return copy(entry?entry.before?.[col.Name]??null:rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}},
         UnderlyingValue:{get(){const row=rs.current();assertData(rs._resync,'UnderlyingValue requires a provider with keyed refresh',3251);return after(rs._resync(row,rs._family.batch.get(row)?.before),values=>{assertData(values,'Record was deleted from the data source',3021);rs._underlying.set(row,copyRow(values));return copy(values[col.Name]);});}},
-        ActualSize:{get(){const value=field.Value;return value==null?0:typeof value==='string'?value.length*2:value instanceof Uint8Array?value.length:[2,11].includes(col.Type)?2:col.Type===17?1:[5,6,7,20].includes(col.Type)?8:4;}}
+        ActualSize:{get(){const value=field.Value;return value==null?0:typeof value==='string'?value.length*2:value instanceof Uint8Array?value.length:[2,11,18].includes(col.Type)?2:[16,17].includes(col.Type)?1:[5,6,7,20,21].includes(col.Type)?8:4;}}
       });
       let chunkPosition=0,chunkRow=null;
       field.GetChunk=length=>{length=Number(length);assertData(Number.isSafeInteger(length)&&length>=0,'Invalid chunk size',5);const row=rs.current();if(chunkRow!==row){chunkRow=row;chunkPosition=0;}const value=field.Value;if(value==null)return null;assertData(typeof value==='string'||value instanceof Uint8Array,'GetChunk requires a text or binary field',3251);const chunk=value.slice(chunkPosition,chunkPosition+length);chunkPosition+=chunk.length;return chunk;};

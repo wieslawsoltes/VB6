@@ -1,0 +1,14 @@
+LIBRARY vb6-date-probe
+EXPORTS
+ EchoDate=_EchoDate@8
+ BumpDate=_BumpDate@4
+ MixedDate=_MixedDate@20
+ InvalidDate=_InvalidDate@0
+ NonfiniteDate=_NonfiniteDate@0
+ Calls=_Calls@0
+ ResetCalls=_ResetCalls@0
+ SystemDate=_SystemDate@24
+ SystemPart=_SystemPart@12
+ ExpandedYear=_ExpandedYear@4
+ FirstDay=_FirstDay@0
+ ParseDate=_ParseDate@8

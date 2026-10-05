@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import {AGENT_LIMIT_FIELDS} from '../src/agents/limits.js';
 import {createAgentRelay} from '../tools/agent-relay.mjs';
 const token = 'local-token-'.repeat(4), origin = 'http://127.0.0.1:8080';
 async function fixture(t, fetchImpl = async () => new Response('{"ok":true}'), keys = {openai: 'cloud-openai', anthropic: 'cloud-anthropic', google: 'cloud-google'}) {
@@ -36,7 +37,7 @@ for (const [name, options, status] of [
   ['unknown operation', {body: {provider: 'openai', operation: 'delete'}}, 400],
   ['array body', {body: {provider: 'openai', operation: 'generate', body: []}}, 400],
   ['invalid cursor', {body: {provider: 'openai', operation: 'models', cursor: {url: 'https://evil'}}}, 400],
-  ['request size cap', {body: 'x'.repeat(1600001)}, 413]
+  ['request size cap', {body: 'x'.repeat(AGENT_LIMIT_FIELDS.maxContextBytes.max + 4097)}, 413]
 ]) test('relay: rejects ' + name, async t => {
   let called = false; const f = await fixture(t, async () => { called = true; return new Response('{}'); });
   const response = await f.request(options); assert.equal(response.status, status); assert.equal(called, false);

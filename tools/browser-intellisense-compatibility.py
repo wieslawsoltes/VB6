@@ -159,4 +159,118 @@ def source_literal_signatures(p):
     check(p.evaluate('vb6Studio.editor.lastInfo.kind')=='array');check('Index2 As Long' in p.locator('.source-info').inner_text())
 
 base.CASES += [with_events_dropdown,single_timer_event,live_event_declarations,interface_dropdown,classic_mouse_selection,menu_routes_to_immediate,manual_list_does_not_reopen_after_commit,expression_readonly_guard,label_completion_navigation,namespace_and_suffix_lists,select_case_constants,priority_and_disable_references,inline_call_hints,indexed_call_hints,bracket_replacement,interface_fields,malformed_metadata,rejected_handler,labelled_call,dao_chains,source_literal_signatures]
+
+# Qualified type paths, implicit ReDim declarations and inert project metadata.
+MODELS={'id':'models','name':'Models','kind':'module','code':'Public Type Point\nX As Long\nEnd Type\nPrivate Type Secret\nHidden As Long\nEnd Type'}
+
+def qualified_module_path(p):
+    setup(p,'Private Sub Form_Load()\nDim location As ',others=[MODELS])
+    p.keyboard.press('Control+j');put(p,'Models');check(names(p)==['Models'],names(p));p.keyboard.press('.')
+    check(names(p)==['Point'],names(p));put(p,'Poi');p.keyboard.press('Tab')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("As Models.Point")'))
+    setup(p,'Private Sub Form_Load()\nDim location As Models.Point\nlocation',others=[MODELS]);put(p,'.')
+    check(names(p)==['X'],names(p));base.shot(p,'qualified-udt')
+
+def project_type_path(p):
+    setup(p,'Private Sub Form_Load()\nDim location As IntelliSenseLab.',others=[MODELS,base.CUSTOMER])
+    p.keyboard.press('Control+j');check('Models' in names(p),names(p));check('Customer' in names(p));check('Point' not in names(p))
+    put(p,'Models');p.keyboard.press('.');check(names(p)==['Point'],names(p));p.keyboard.press('Tab')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("As IntelliSenseLab.Models.Point")'))
+
+def unicode_type_path(p):
+    setup(p,'Private Sub Form_Load()\nDim location As DaneŁ.')
+    p.evaluate('''()=>{vb6Studio.project.typeLibraries=[{name:'DaneŁ',types:[{name:'Point',kind:'type',members:[{name:'X',type:'Long'}]}]}];}''')
+    p.keyboard.press('Control+j')
+    check(names(p)==['Point'],names(p));p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endsWith("As DaneŁ.Point")'))
+
+def nested_reference_path(p):
+    setup(p,'Private Sub Form_Load()\nDim client As Vendor.')
+    p.evaluate('''()=>{vb6Studio.project.typeLibraries=[{name:'Vendor.Api',types:[{name:'Client',members:[]},{name:'Nested.Record',kind:'type',members:[]}]}];}''')
+    p.keyboard.press('Control+j');check(names(p)==['Api'],names(p));p.keyboard.press('.')
+    check(names(p)==['Client','Nested'],names(p));put(p,'Nested');p.keyboard.press('.');check(names(p)==['Record'],names(p))
+    p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endsWith("As Vendor.Api.Nested.Record")'))
+
+def redim_array_members(p):
+    setup(p,'Private Sub Form_Load()\nReDim customers(0 To 2, 0 To 1) As Customer\ncustomers(0,0)',others=[base.CUSTOMER])
+    put(p,'.');check('Name' in names(p),names(p));check('Secret' not in names(p));put(p,'Nam');p.keyboard.press('Tab')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("customers(0,0).Name")'));base.shot(p,'redim-members')
+
+def redim_array_hints(p):
+    setup(p,'Private Sub Form_Load()\nReDim customers(0 To 2, 0 To 1) As Customer\ncustomers(0, ',others=[base.CUSTOMER])
+    p.keyboard.press('Control+Shift+i');check(p.evaluate('vb6Studio.editor.lastInfo.kind')=='array')
+    check('Index2 As Long' in p.locator('.source-info strong').inner_text());base.shot(p,'redim-parameter-info')
+
+def redim_shared_declaration(p):
+    shared={'id':'shared','name':'Shared','kind':'module','code':'Public customers() As Long'}
+    setup(p,'Private Sub Form_Load()\nReDim customers(0 To 2) As Customer\ncustomers(0).',others=[base.CUSTOMER,shared])
+    p.keyboard.press('Control+j');check(names(p)==[],names(p))
+    p.evaluate('vb6Studio.project.modules.find(m=>m.id==="shared").code="Private customers() As Long"')
+    p.keyboard.press('Control+j');check('Name' in names(p),names(p))
+
+def inert_project_references(p):
+    setup(p,'Dim client As Safe.Client\nPrivate Sub Form_Load()\nclient.')
+    result=p.evaluate('''()=>{
+      globalThis.metadataCalls=0;const bad={name:'Bad',types:[],toJSON(){metadataCalls++;return {name:'Bad',types:[]};}};
+      const getter={name:'Getter'};Object.defineProperty(getter,'types',{enumerable:true,get(){metadataCalls++;return [];}});
+      const cycle={name:'Cycle',types:[]};cycle.self=cycle;
+      vb6Studio.project.typeLibraries=[bad,getter,cycle,{name:'Safe',types:[{name:'Client',members:[{name:'Ready',type:'Boolean'}]}]}];
+      vb6Studio.editor.complete();return {calls:metadataCalls,names:vb6Studio.editor.completionItems};
+    }''')
+    check(result=={'calls':0,'names':['Ready']},result);p.keyboard.press('Tab')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("client.Ready")'));check(p.evaluate('metadataCalls')==0)
+
+def inert_immediate_references(p):
+    setup(p,'Dim client As Safe.Client\nPrivate Sub Form_Load()\nEnd Sub')
+    p.evaluate('''()=>{globalThis.metadataCalls=0;vb6Studio.project.typeLibraries=[{name:'Bad',types:[],toJSON(){metadataCalls++;return {name:'Bad',types:[]};}},{name:'Safe',types:[{name:'Client',members:[{name:'Ready',type:'Boolean'}]}]}];}''')
+    p.evaluate('vb6Studio.command("immediate")');field=p.locator('.immediate-input');field.fill('? client.');field.focus()
+    p.keyboard.press('Control+j');check(p.get_by_role('option',name='Ready',exact=True).count()==1);p.keyboard.press('Enter')
+    check(field.input_value()=='? client.Ready');check(p.evaluate('metadataCalls')==0);check(p.evaluate('vb6Studio.immediateOutput.length')==0)
+
+def mutated_reference_rejects_stale_commit(p):
+    setup(p,'Private Sub Form_Load()\nDim client As Safe.Client\nclient.')
+    p.evaluate('''()=>{vb6Studio.project.typeLibraries=[{name:'Safe',types:[{name:'Client',members:[{name:'Ready',type:'Boolean'}]}]}];vb6Studio.editor.complete();}''')
+    check(names(p)==['Ready']);p.evaluate('vb6Studio.project.typeLibraries[0].types[0].members[0].name="Updated"');p.keyboard.press('Tab')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("client.")'));p.keyboard.press('Control+j');check(names(p)==['Updated'])
+
+base.CASES += [qualified_module_path,project_type_path,unicode_type_path,nested_reference_path,redim_array_members,redim_array_hints,redim_shared_declaration,inert_project_references,inert_immediate_references,mutated_reference_rejects_stale_commit]
+
+# Preserve the declaration's lexical context, not the active caller's defaults.
+def default_type_arguments(p):
+    library={'id':'library','name':'Library','kind':'module','code':'DefInt A-Z\nPublic Sub Read(value)\nEnd Sub'}
+    setup(p,'DefStr A-Z\nPrivate Sub Form_Load()\nLibrary.Read ',others=[library])
+    p.keyboard.press('Control+Shift+i')
+    check(p.evaluate('vb6Studio.editor.lastInfo.parameters[0].type')=='Integer')
+    check('value As Integer' in p.locator('.source-info strong').inner_text())
+    base.shot(p,'default-type-argument')
+
+def unchanged_literal_defaults(p):
+    library={'id':'library','name':'Library','kind':'module','code':'Public Type Point\nX As Long\nEnd Type\nPublic Sub Read(Optional value = "As Point")\nEnd Sub'}
+    setup(p,'Private Sub Form_Load()\nLibrary.Read ',others=[library]);p.keyboard.press('Control+Shift+i')
+    check(p.evaluate('vb6Studio.editor.lastInfo.params[0]')=='Optional value = "As Point"')
+    check('"As Point"' in p.locator('.source-info').inner_text());check('As Library.Point' not in p.locator('.source-info').inner_text())
+
+def same_line_with_scope(p):
+    one={'id':'one','name':'One','kind':'class','code':'Public First As String'}
+    two={'id':'two','name':'Two','kind':'class','code':'Public Second As String\nPublic Parent As Two'}
+    setup(p,'Sub A(): Dim obj As One: End Sub: Sub B(): Dim obj As Two: With obj: With .Parent: .',others=[one,two])
+    p.keyboard.press('Control+j');check('Second' in names(p) and 'First' not in names(p),names(p))
+    put(p,'Sec');p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endsWith(".Second")'))
+
+def same_line_select_scope(p):
+    setup(p,'Public Enum A\nFirstOnly=1\nEnd Enum\nPublic Enum B\nSecondOnly=2\nEnd Enum\nSub One(): Dim choice As A: End Sub: Sub Two(): Dim choice As B: Select Case choice: Case ')
+    p.keyboard.press('Control+j');check(names(p)==['SecondOnly'],names(p))
+
+def inline_conditional_redim(p):
+    setup(p,'Private Sub Form_Load()\nIf True Then ReDim items(1) As Customer Else ReDim others(1) As Customer\nothers(0)',others=[base.CUSTOMER])
+    put(p,'.');check('Name' in names(p),names(p));put(p,'Nam');p.keyboard.press('Tab')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("others(0).Name")'));p.evaluate('vb6Studio.command("undo")')
+    check(p.evaluate('vb6Studio.editor.text.endsWith("others(0).Nam")'))
+
+def reference_literal_signature(p):
+    setup(p,'Private Sub Form_Load()\nLibrary.Api.Read ')
+    p.evaluate('''()=>{vb6Studio.project.typeLibraries=[{name:'Library',types:[{name:'Point',kind:'type',members:[]},{name:'Api',kind:'module',members:[{name:'Read',kind:'sub',type:'Void',params:['Optional value = "As Point"']}]}]}];}''')
+    p.keyboard.press('Control+Shift+i');check(p.evaluate('vb6Studio.editor.lastInfo.params[0]')=='Optional value = "As Point"')
+    check('"As Point"' in p.locator('.source-info').inner_text())
+
+base.CASES += [default_type_arguments,unchanged_literal_defaults,same_line_with_scope,same_line_select_scope,inline_conditional_redim,reference_literal_signature]
 if __name__=='__main__':sys.exit(base.main())
