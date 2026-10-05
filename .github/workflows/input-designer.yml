@@ -18,6 +18,8 @@ jobs:
         browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,12 +27,25 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm run build
+      - run: git diff --exit-code -- dist src/exporter/runtime-payload.js
+      - run: node --test tests/runtime-input*.test.mjs
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Reported input and designer regressions
         env:
           VB6_BROWSER: ${{ matrix.browser }}
+        shell: bash
         run: |
-          for test in tools/browser-designer-selection.py tools/browser-editor-control-list.py tools/browser-editor-event-selection.py tools/browser-form-input.py; do
-            if test -f "$test"; then python "$test"; fi
-          done
+          set -o pipefail
+          mkdir -p artifacts/input
+          python tools/browser-designer-selection.py 2>&1 | tee artifacts/input/designer.log
+          python tools/browser-editor-control-list.py 2>&1 | tee artifacts/input/control-list.log
+          python tools/browser-editor-event-selection.py 2>&1 | tee artifacts/input/event-selection.log
+          python tools/browser-input-diagnostics.py 2>&1 | tee artifacts/input/runtime-input.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: input-designer-${{ matrix.browser }}
+          path: artifacts/input/
+          if-no-files-found: ignore
+          retention-days: 7
