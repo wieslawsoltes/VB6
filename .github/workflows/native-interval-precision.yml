@@ -1,0 +1,76 @@
+name: Validate native interval precision and range
+on:
+  push:
+    branches: [feat/native-compatibility-boundaries]
+    paths: [.github/workflows/native-interval-precision.yml]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.publish.outputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - id: publish
+        run: |
+          set -euo pipefail
+          python3 tools/.interval-precision-update.py
+          npm run build
+          npm test
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git rm tools/.interval-precision-update.py
+          git add tools dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git commit -m 'test(native): retain low-order date precision and independently avoid reference count wrap'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-compatibility-boundaries
+          echo "source=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [intervals, invariants, arrays]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run build
+      - if: matrix.suite == 'intervals'
+        shell: pwsh
+        run: ./tools/test-win32-date-intervals.ps1
+      - if: matrix.suite == 'invariants'
+        shell: pwsh
+        run: |
+          node tools/win32-interval-contract-fixture.mjs
+          if($LASTEXITCODE -ne 0){throw 'Interval contract build failed'}
+          ./tools/test-win32-dates.ps1 -Directory validation/interval-contract -Program AotIntervalContract -Manifest interval-contract-build.json -ReportName interval-contract-execution.json
+      - if: matrix.suite == 'arrays'
+        shell: pwsh
+        run: |
+          node tools/win32-large-array-fixtures.mjs
+          if($LASTEXITCODE -ne 0){throw 'Large array build failed'}
+          ./tools/test-win32-dates.ps1 -Directory validation/large-arrays -Program AotLargeArrays -Manifest large-array-build.json -ReportName large-array-execution.json -LifetimeCycles 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-interval-precision-${{ matrix.suite }}
+          path: |
+            validation/date-intervals/
+            validation/interval-contract/
+            validation/large-arrays/
+          retention-days: 14
