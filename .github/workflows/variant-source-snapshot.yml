@@ -1,4 +1,5 @@
 name: Variant source snapshot
+# Refresh includes main 57f454a87073ae93ff11b8cf6b37322ce0be567b.
 on:
   push:
     branches: [feat/variant-scalar-compatibility]
