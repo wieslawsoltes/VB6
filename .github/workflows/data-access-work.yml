@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/data-sources | cut -f1)" = "$GITHUB_SHA"
-          git rm -r .data-transfer .github/workflows/data-access-work.yml
+          git rm -rf .data-transfer .github/workflows/data-access-work.yml
           git add -A
           git commit -m 'feat(data): classic Data Environment, SQLite, REST and native gateway in shipped apps'
           git push origin HEAD:refs/heads/feature/data-sources
