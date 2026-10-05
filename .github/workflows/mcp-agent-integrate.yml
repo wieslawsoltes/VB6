@@ -1,0 +1,81 @@
+name: Integrate verified MCP and current main
+on:
+  push:
+    branches: [feat/mcp-agent-access]
+    paths: ['.github/workflows/mcp-agent-integrate.yml']
+permissions:
+  contents: write
+concurrency:
+  group: mcp-agent-main-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge reviewed main without losing either feature set
+        run: |
+          set -euo pipefail
+          main=693485b52593855645229f8902b24cc26b393306
+          test "$(git rev-parse refs/remotes/origin/main)" = "$main"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-commit --no-ff "$main" || true
+          test -f .git/MERGE_HEAD
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          assert all(p.startswith('dist/') or p in ('package.json','src/exporter/runtime-payload.js') for p in conflicts), conflicts
+          old=json.loads(subprocess.check_output(['git','show','HEAD:package.json']))
+          new=json.loads(subprocess.check_output(['git','show','693485b52593855645229f8902b24cc26b393306:package.json']))
+          for key,value in old['scripts'].items():
+              if key not in new['scripts']:new['scripts'][key]=value
+          if 'test:mcp:agent' not in new['scripts']['validate']:new['scripts']['validate']+=' && npm run test:mcp:agent'
+          Path('package.json').write_text(json.dumps(new,indent=2)+'\n')
+          PY
+          git checkout --ours -- dist src/exporter/runtime-payload.js
+          npm run build
+          git add -A
+          # Compare every tracked path against the locally reviewed integration,
+          # excluding this temporary transport workflow only.
+          git update-index --force-remove .github/workflows/mcp-agent-integrate.yml
+          test "$(git write-tree)" = 'e1122c6ab5441bcbf55ba1b1271db34758dbb292'
+          git add -f .github/workflows/mcp-agent-integrate.yml
+          git diff --cached --exit-code HEAD -- .github/workflows
+          git diff --cached --check
+          git commit -m 'merge(main): preserve native Win32 and project-format work alongside MCP agents'
+          npm test
+          git diff --exit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Integrated external-agent and browser workflows
+        run: |
+          export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          npm run test:mcp:browser
+          npm run test:mcp:agent
+      - name: Publish integrated source without force or workflow mutations
+        run: |
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/mcp-agent-access
+      - name: Preserve reviewed source and reports
+        if: always()
+        run: git bundle create repository.bundle --all HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vb6-agent-main-integration-${{ github.sha }}
+          retention-days: 7
+          path: |
+            repository.bundle
+            reports
