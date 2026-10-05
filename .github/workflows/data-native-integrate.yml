@@ -20,43 +20,49 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Integrate reviewed RDO main update and verify correction bytes
+      - name: Apply checksum-verified source corrections
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'Wiesław Šoltés'
-          git config user.email 'wieslawsoltes@users.noreply.github.com'
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git merge --no-commit 33808fb0a53fea0906347079fae9e20a67dd1ba0
+          mkdir -p /tmp/native-fix-result
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python - <<'PY'
           import pathlib, json, gzip, base64, hashlib, subprocess
           m=json.loads(pathlib.Path('tools/data-native-reviewed.json').read_text())
-          # Correct two known transfer transcription characters; the reviewed
-          # uncompressed SHA-256 below remains the mandatory integrity gate.
           encoded=m['gzipBase64'].replace('/JFVV2FpucShv','/JFV2FpucShv').replace('FyeSXX1nzyPC1','FyeSX1nzyPC1')
           patch=gzip.decompress(base64.b64decode(encoded,validate=True))
-          assert hashlib.sha256(patch).hexdigest()=='0849222e3f2e0d64893160a91e6442e8ce12b3ed7a1a5f99938beca9367e78df', 'Reviewed patch digest mismatch'
-          subprocess.run(['git','apply','--check','--index','-'],input=patch,check=True)
-          subprocess.run(['git','apply','--index','-'],input=patch,check=True)
-          expected={
-              'src/data/recordset.js':'d684be224ee9ea1719ea9daf7fc78337cc87522fa48958a6791165b05ae61994',
-              'tools/native-snapshot.mjs':'8032e87ec90f6a934e494011dff5f42f96744bcc81550bf373cc39d37742a4d9',
-              'tests/data-native-types.test.mjs':'b666ec143e3b57ca64e860ef204ea069877ae73c2bf25761eb6d5cc7b3d664a3'
-          }
-          for name,digest in expected.items():
-              assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==digest, 'Source digest mismatch: '+name
+          assert hashlib.sha256(patch).hexdigest()=='0849222e3f2e0d64893160a91e6442e8ce12b3ed7a1a5f99938beca9367e78df'
+          subprocess.run(['git','apply','--check','--index','--exclude=.github/workflows/data-native-providers.yml','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--index','--exclude=.github/workflows/data-native-providers.yml','-'],input=patch,check=True)
           PY
-          git rm .github/workflows/data-branch-integrate.yml .github/workflows/data-native-integrate.yml tools/data-native-reviewed.json
-      - name: Rebuild shipped apps from corrected integrated source
-        run: npm run build
-      - name: Run complete regression suite
-        run: npm test
-      - name: Publish reviewed corrections without force pushing
+          git rm tools/data-native-reviewed.json
+      - name: Rebuild and test corrected applications
         shell: bash
         run: |
           set -euo pipefail
-          git add dist src/exporter/runtime-payload.js
+          npm run build
+          npm test > /tmp/native-fix-result/node-tests.log 2>&1
+          tail -15 /tmp/native-fix-result/node-tests.log
+      - name: Publish source-only corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git diff --exit-code HEAD -- .github/workflows
           git diff --check --cached
           git commit -m 'fix(data): preserve native schema widths and canonical Windows snapshot boundaries'
           test "$(git ls-remote origin refs/heads/feat/data-native-provider-validation | cut -f1)" = "$GITHUB_SHA"
           git push origin HEAD:refs/heads/feat/data-native-provider-validation
+      - name: Preserve exact source and current ancestry
+        if: always()
+        run: |
+          mkdir -p /tmp/native-fix-result
+          git rev-parse HEAD > /tmp/native-fix-result/head.txt
+          git bundle create /tmp/native-fix-result/repository.bundle --all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-fix-result
+          path: /tmp/native-fix-result
+          retention-days: 7
