@@ -1,4 +1,4 @@
-name: Advanced GDI integration
+name: Final advanced GDI integration
 on:
   push:
     branches: [feature/win32-gdi-boundaries]
@@ -18,86 +18,73 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Verify and apply all source changes atomically
+      - name: Apply verified native text and reentrant paint fixes
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import base64,hashlib,json,lzma
           from pathlib import Path
-          parts=sorted(Path('.transfer').glob('gdi-boundaries.*.b64'))
-          assert len(parts)==6
-          raw=lzma.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True))
-          assert hashlib.sha256(raw).hexdigest()=='6a80ffa209c98199100b061c586431d3b2caced7ac4af7b562b8eebfa15397e8'
-          changes=json.loads(raw);assert len(changes)==30
-          verified=[]
-          for op in changes:
-              p=Path(op['path'])
-              assert not p.is_absolute() and '..' not in p.parts
-              assert p.as_posix()=='README.md' or p.parts[0] in ('packages','src','tests','tools')
-              old=p.read_bytes() if p.exists() else b''
-              assert hashlib.sha256(old).hexdigest()==op['old_sha256'],str(p)+' baseline mismatch'
+          p=Path('.transfer/gdi-final-fix.b64')
+          raw=lzma.decompress(base64.b64decode(p.read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()=='47674755bbef824f47b725a355d9e8fa145ff5720f40a5a8e66eac62c03e5a17'
+          ops=json.loads(raw);assert len(ops)==5;verified=[]
+          for op in ops:
+              path=Path(op['path']);assert not path.is_absolute() and '..' not in path.parts and path.parts[0] in ('packages','tests')
+              old=path.read_bytes();assert hashlib.sha256(old).hexdigest()==op['old']
               lines=old.splitlines(keepends=True)
               for start,end,text in reversed(op['changes']):
                   assert 0<=start<=end<=len(lines)
                   lines[start:end]=text.encode().splitlines(keepends=True)
-              new=b''.join(lines)
-              assert hashlib.sha256(new).hexdigest()==op['new_sha256'],str(p)+' result mismatch'
-              verified.append((p,new))
-          for p,new in verified:
-              p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(new)
-          for p in parts:p.unlink()
-          Path('/tmp/gdi-source-paths.txt').write_text('\n'.join(str(p) for p,_ in verified))
-          print('Verified and applied',len(verified),'source files')
+              new=b''.join(lines);assert hashlib.sha256(new).hexdigest()==op['new'];verified.append((path,new))
+          for path,new in verified:path.write_bytes(new)
+          p.unlink()
           PY
           git config user.name 'Wiesław Šoltés'
           git config user.email 'wieslawsoltes@users.noreply.github.com'
           npm run build
           node tools/win32-api-inventory.mjs
-          npm test > /tmp/gdi-feature-tests.txt
-          tail -10 /tmp/gdi-feature-tests.txt
           git add -A
           git diff --cached --check
-          git commit -m 'feat(win32-browser): curved regions, transforms, paths, fonts, paint lifecycle and GPU presentation'
-      - name: Integrate reviewed main without discarding generated changes
+          git commit -m 'fix(win32-browser): native text counts, spacing, vertical layout and reentrant erase ownership'
+      - name: Integrate exact reviewed upstream and rebuild all generated outputs
         run: |
           set -euo pipefail
-          git merge --no-commit --no-ff 2b4f9dd50fc20c36f2a48d3c8586e4063277ff69 || true
+          git merge --no-commit --no-ff bd7716067f0a30dc49e4d621c892a8475100363d || true
           python3 - <<'PY'
           import subprocess
           conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
-          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
+          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts),conflicts
           PY
           npm run build
           node tools/win32-api-inventory.mjs
           git add -A
           test -z "$(git diff --name-only --diff-filter=U)"
-          npm test > /tmp/gdi-integrated-tests.txt
-          npm run pack:win32-browser > /tmp/gdi-package-tests.txt
-          tail -10 /tmp/gdi-integrated-tests.txt
-          tail -12 /tmp/gdi-package-tests.txt
+          npm test > /tmp/gdi-final-tests.txt
+          npm run pack:win32-browser > /tmp/gdi-final-package-tests.txt
+          tail -10 /tmp/gdi-final-tests.txt
+          tail -11 /tmp/gdi-final-package-tests.txt
           git diff --exit-code
-          git diff --cached --check 2b4f9dd50fc20c36f2a48d3c8586e4063277ff69
-          git commit -m 'fix(win32-browser): retain classic HTML styling and package notices in combined builds'
-      - name: Push only to unchanged feature branch and retain exact evidence
+          git diff --cached --check bd7716067f0a30dc49e4d621c892a8475100363d
+          git commit -m 'fix(win32-browser): preserve qualified IntelliSense and declaration updates in combined build'
+      - name: Push only to the unchanged feature branch
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/win32-gdi-boundaries | cut -f1)" = "$EXPECTED_SHA"
           git push origin HEAD:refs/heads/feature/win32-gdi-boundaries
-          git bundle create /tmp/vb6-gdi-boundaries.bundle HEAD refs/remotes/origin/main
-          git archive --format=zip HEAD -o /tmp/vb6-gdi-boundaries-source.zip
-          git rev-parse HEAD HEAD^{tree} > /tmp/gdi-revision.txt
+          git bundle create /tmp/vb6-gdi-final.bundle HEAD refs/remotes/origin/main
+          git archive --format=zip HEAD -o /tmp/vb6-gdi-final-source.zip
+          git rev-parse HEAD HEAD^{tree} > /tmp/gdi-final-revision.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gdi-boundaries-integration
+          name: gdi-boundaries-final-integration
           path: |
-            /tmp/vb6-gdi-boundaries.bundle
-            /tmp/vb6-gdi-boundaries-source.zip
-            /tmp/gdi-revision.txt
-            /tmp/gdi-feature-tests.txt
-            /tmp/gdi-integrated-tests.txt
-            /tmp/gdi-package-tests.txt
+            /tmp/vb6-gdi-final.bundle
+            /tmp/vb6-gdi-final-source.zip
+            /tmp/gdi-final-revision.txt
+            /tmp/gdi-final-tests.txt
+            /tmp/gdi-final-package-tests.txt
             release/vb6-win32-browser-*.tgz
           retention-days: 7
