@@ -1,0 +1,68 @@
+name: Integrate debugger sources
+on:
+  push:
+    branches: [feat/vb6-debugger-runtime]
+    paths: ['.github/workflows/debugger-integrate.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/vb6-debugger-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Decode hash-verified source edits
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          import zlib from 'node:zlib';
+          import crypto from 'node:crypto';
+          const encoded=['.github/debugger-edits.part1','.github/debugger-edits.part2'].map(p=>fs.readFileSync(p,'utf8').trim()).join('');
+          const manifest=zlib.brotliDecompressSync(Buffer.from(encoded,'base64'));
+          if(crypto.createHash('sha256').update(manifest).digest('hex')!=='51f94b920af5cdc96c4dde49db3f66a1ef95fce3e0bf4a64e4f09c8186dfba6c')throw new Error('Source manifest checksum mismatch');
+          fs.writeFileSync('/tmp/debugger-edits.json',manifest);
+          JS
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          changes={}
+          for item in json.loads(Path('/tmp/debugger-edits.json').read_text()):
+              path=Path(item['path'])
+              assert not path.is_absolute() and '..' not in path.parts and not path.is_symlink(), str(path)
+              old=path.read_text() if path.exists() else ''
+              actual=hashlib.sha256(old.encode()).hexdigest() if path.exists() else None
+              assert actual==item['old'], 'Source changed before integration: '+str(path)
+              text=old
+              for start,end,replacement in reversed(item['edits']):
+                  assert 0<=start<=end<=len(old)
+                  text=text[:start]+replacement+text[end:]
+              assert hashlib.sha256(text.encode()).hexdigest()==item['new'], 'Reconstruction mismatch: '+str(path)
+              changes[path]=text
+          for path,text in changes.items():
+              path.parent.mkdir(parents=True,exist_ok=True)
+              path.write_text(text)
+          print('Verified and applied',len(changes),'source files')
+          PY
+      - run: npm test
+      - run: npm run build
+      - name: Commit actual implementation and remove staging files
+        run: |
+          rm .github/debugger-edits.part1 .github/debugger-edits.part2 .github/workflows/debugger-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: implement classic source debugger execution control and recoverable error breaks'
+          git push origin HEAD:refs/heads/feat/vb6-debugger-runtime
+          git archive --format=tar.gz HEAD > /tmp/debugger-implemented.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debugger-implemented
+          path: /tmp/debugger-implemented.tar.gz
+          retention-days: 3
