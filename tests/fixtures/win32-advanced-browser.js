@@ -39,6 +39,11 @@ globalThis.runWin32BoundaryProbe=async function(library){
     await run('drawtext-layout-and-rejected-glyph-indices',()=>{
       clear();const rect=m.alloc(16);[2,2,48,80].forEach((n,i)=>m.writeI32(rect+i*4,n));const text='Hello world wrap';m.putString(p,text,100,true);
       const height=u('DrawTextW',dc,p,text.length,rect,16|1024);check(height>20&&m.readI32(rect+12)>22,'DrawText wrapping CALCRECT');check(u('DrawTextW',dc,p,text.length,rect,16)>0&&dark()>20,'DrawText glyph pixels');
+      const metric=m.alloc(60),face=m.alloc(64);check(g('GetTextMetricsW',dc,metric)===1,'line metric');const lineHeight=m.readI32(metric);
+      for(const [n,expected] of [[0,0],[1,1],[2,2],[32,g('GetTextFaceW',dc,0,0)]])check(g('GetTextFaceW',dc,n,face)===expected,'face count includes NUL');
+      for(const text of ['', 'A', 'AB', 'ABC']){m.putString(p,text,64,true);g('SetTextCharacterExtra',dc,0);g('GetTextExtentPoint32W',dc,p,text.length,out);const normal=m.readI32(out);if(!text)check(m.readI32(out+4)===0,'empty extent height');g('SetTextCharacterExtra',dc,3);g('GetTextExtentPoint32W',dc,p,text.length,out);check(m.readI32(out)-normal===text.length*3,'spacing includes final character');}g('SetTextCharacterExtra',dc,0);
+      for(const [flags,expected] of [[32,lineHeight],[36,Math.floor((200-lineHeight)/2)+lineHeight],[40,200]]){[10,20,210,220].forEach((n,i)=>m.writeI32(rect+i*4,n));check(u('DrawTextW',dc,'A',1,rect,flags)===expected,'vertical return offset');}
+      [10,20,210,220].forEach((n,i)=>m.writeI32(rect+i*4,n));check(u('DrawTextW',dc,'',0,rect,1024)===1&&m.readI32(rect+8)===10&&m.readI32(rect+12)===20,'empty CALCRECT contract');m.free(metric);m.free(face);
       const before=Array.from(pixels());check(g('ExtTextOutW',dc,0,0,16,0,p,2,0)===0&&w.lastError===50,'glyph-index unsupported explicit');check(JSON.stringify(before)===JSON.stringify(Array.from(pixels())),'failed draw untouched');m.free(rect);
     });
     await run('dom-window-region-presentation-and-hit-test',()=>{

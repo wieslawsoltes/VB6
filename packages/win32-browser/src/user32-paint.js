@@ -36,7 +36,7 @@ export function installPainting(w,{dc,bitmaps,regions}){
     s.notifying=true;
     try{
       if(s.nonclient){if(e.requestNonClientPaint)await e.requestNonClientPaint();else if(e.message)await e.message(133,1,0,false);else throw new Win32Error('No nonclient repaint adapter',50);s.nonclient=false;}
-      if(eraseOnly){if(s.erase){const handle=getDC(id);try{dc(handle).paintClip=s.update;if(eraseBackground(e,handle))s.erase=false;}finally{release(id,handle);}}return 1;}
+      if(eraseOnly){if(s.erase){const handle=getDC(id);try{dc(handle).paintClip=s.update;s.erase=false;try{if(!eraseBackground(e,handle))s.erase=true;}catch(error){s.erase=true;throw error;}}finally{release(id,handle);}}return 1;}
       if(force||s.update.count||s.internal){s.internal=false;if(e.requestPaint)await e.requestPaint();else if(e.message)await e.message(15,0,0,false);else throw new Win32Error('No WM_PAINT adapter for this window',50);}
       return 1;
     }finally{s.notifying=false;}
@@ -46,7 +46,7 @@ export function installPainting(w,{dc,bitmaps,regions}){
   add('ValidateRect',2,(id,p)=>change(id,p?regions.rectangle(...rect(p)):null,false,false));
   add('InvalidateRgn',3,(id,r,erase)=>change(id,r?region(r).shape:null,true,erase));
   add('ValidateRgn',2,(id,r)=>change(id,r?region(r).shape:null,false,false));
-  const erasePending=e=>{const s=state(e);if(!s.erase)return;const id=e.gdiWindowHandle;if(!id)return;const handle=getDC(id);try{dc(handle).paintClip=s.update;if(eraseBackground(e,handle))s.erase=false;}finally{release(id,handle);}};
+  const erasePending=e=>{const s=state(e);if(!s.erase)return;const id=e.gdiWindowHandle;if(!id)return;const handle=getDC(id);try{dc(handle).paintClip=s.update;s.erase=false;try{if(!eraseBackground(e,handle))s.erase=true;}catch(error){s.erase=true;throw error;}}finally{release(id,handle);}};
   add('GetUpdateRect',3,(id,p,erase)=>{const e=win(id),s=state(e);if(p)writeRect(p,s.update.bounds);if(erase&&s.erase){e.gdiWindowHandle=Number(id);erasePending(e);}return s.update.count?1:0;});
   add('GetUpdateRgn',3,(id,r,erase)=>{const e=win(id),s=state(e),dest=region(r);if(erase&&s.erase){e.gdiWindowHandle=Number(id);erasePending(e);}dest.shape=s.update;return dest.shape.type;});
   add('SetWindowRgn',3,(id,r,redraw)=>{

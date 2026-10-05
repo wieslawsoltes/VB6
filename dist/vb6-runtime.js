@@ -303,7 +303,7 @@ function installText(w,{dc,bitmaps,regions,add,stock,stocks}){
     return {ctx,font:f,size,ascent,descent,height:ascent+descent,xscale:f.width&&average?Math.abs(f.width)/average:1};
   };
   const read=(p,n,wide)=>{n=integer(n,0,limit);if(typeof p==='string')return p.slice(0,n);if(!n)return '';return m.decode(m.bytes(p,n*(wide?2:1)),wide);};
-  const extent=(s,text,c=setup(s))=>({width:c.ctx.measureText(text).width*c.xscale+Math.max(0,text.length-1)*(s.charExtra||0),height:c.height,context:c});
+  const extent=(s,text,c=null)=>{if(!text.length)return {width:0,height:0,context:c};c=c||setup(s);return {width:c.ctx.measureText(text).width*c.xscale+text.length*(s.charExtra||0),height:c.height,context:c};};
   const draw=(s,x,y,text,flags=0,rectangle=null,advances=null)=>{
     flags=unsigned(flags);if(flags&~(2|4|128|8192))throw new Win32Error('Unsupported ExtTextOut options (glyph-index input requires a font-specific adapter)',50);
     if(flags&6&&!rectangle)throw new Win32Error('ExtTextOut rectangle required');
@@ -345,18 +345,19 @@ function installText(w,{dc,bitmaps,regions,add,stock,stocks}){
     add('TextOut'+suffix,5,(id,x,y,p,n)=>draw(dc(id),x,y,read(p,n,wide)),{replace:true,mode:'browser',notes:'Canvas font shaping/rasterization on window and memory DCs, with complex clipping and affine transforms.'});
     add('ExtTextOut'+suffix,8,(id,x,y,flags,r,p,n,dx)=>{const text=read(p,n,wide),advance=[];if(dx){const stride=flags&8192?8:4,v=m.view(dx,text.length*stride);for(let i=0;i<text.length;i++)advance.push([v.getInt32(i*stride,true),stride===8?v.getInt32(i*stride+4,true):0]);}return draw(dc(id),x,y,text,flags,r?rect(r):null,dx?advance:null);},{mode:'browser'});
     for(const name of ['GetTextExtentPoint32','GetTextExtentPoint'])add(name+suffix,4,(id,p,n,out)=>{const e=extent(dc(id),read(p,n,wide));pair(out,e.width,e.height);return 1;},{mode:'browser'});
-    add('GetTextFace'+suffix,3,(id,n,out)=>{const f=get(dc(id));if(!out)return f.faceName.length+1;return m.putString(out,f.faceName,n,wide);});
+    add('GetTextFace'+suffix,3,(id,n,out)=>{const f=get(dc(id));if(!out)return f.faceName.length+1;n=integer(n,0,Math.floor(m.maxBytes/(wide?2:1)));return n?m.putString(out,f.faceName,n,wide)+1:0;});
     add('GetTextMetrics'+suffix,2,(id,out)=>{const c=setup(dc(id)),size=wide?60:56,v=m.view(out,size),values=[c.height,c.ascent,c.descent,Math.max(0,c.height-c.size),0,c.ctx.measureText('x').width*c.xscale,c.ctx.measureText('W').width*c.xscale,c.font.weight,0,96,96];m.bytes(out,size).fill(0);values.forEach((n,i)=>v.setInt32(i*4,Math.round(n),true));let o=44;for(const ch of [32,wide?65535:255,63,32]){if(wide){v.setUint16(o,ch,true);o+=2;}else v.setUint8(o++,ch);}for(const value of [c.font.italic,c.font.underline,c.font.strikeOut,6,c.font.charSet])v.setUint8(o++,value);return 1;},{mode:'browser',notes:'Metrics come from the selected Canvas font; native GDI hinting/font mapper values are not guaranteed identical.'});
-    add('GetTextExtentExPoint'+suffix,7,(id,p,n,maxExtent,fit,dx,out)=>{const s=dc(id),text=read(p,n,wide);if(text.length>4096)throw new Win32Error('Cumulative text extent work quota exceeded',8);const c=setup(s),widths=Array.from({length:text.length},(_,i)=>Math.round(extent(s,text.slice(0,i+1),c).width)),fv=fit?m.view(fit,4):null,dv=dx?m.view(dx,widths.length*4):null,ov=m.view(out,8);let count=0;for(const value of widths){if(value<=Number(maxExtent))count++;else break;}if(fv)fv.setInt32(0,count,true);widths.forEach((n,i)=>dv?.setInt32(i*4,n,true));ov.setInt32(0,widths.at(-1)||0,true);ov.setInt32(4,Math.round(c.height),true);return 1;},{mode:'browser'});
+    add('GetTextExtentExPoint'+suffix,7,(id,p,n,maxExtent,fit,dx,out)=>{const s=dc(id),text=read(p,n,wide);if(text.length>4096)throw new Win32Error('Cumulative text extent work quota exceeded',8);const c=setup(s),widths=Array.from({length:text.length},(_,i)=>Math.round(extent(s,text.slice(0,i+1),c).width)),fv=fit?m.view(fit,4):null,dv=dx?m.view(dx,widths.length*4):null,ov=m.view(out,8);let count=0;for(const value of widths){if(value<=Number(maxExtent))count++;else break;}if(fv)fv.setInt32(0,count,true);widths.forEach((n,i)=>dv?.setInt32(i*4,n,true));ov.setInt32(0,widths.at(-1)||0,true);ov.setInt32(4,text.length?Math.round(c.height):0,true);return 1;},{mode:'browser'});
     w.register('user32','DrawText'+suffix,(id,p,n,r,flags)=>{
       const s=dc(id),rectangle=rect(r),c=setup(s);flags=unsigned(flags);if(flags&~(1|2|4|8|16|32|64|1024|2048))throw new Win32Error('DrawText option is not supported',50);
       let text=Number(n)===-1?m.string(p,wide):read(p,n,wide);if(text.length>limit)throw new Win32Error('Text length quota exceeded',8);
       if(!(flags&2048))text=text.replace(/&&/g,'\u0001').replace(/&/g,'').replace(/\u0001/g,'&');if(flags&64)text=text.replace(/\t/g,'        ');if(flags&32)text=text.replace(/[\r\n]+/g,' ');
       const lines=[];for(const paragraph of text.split(/\r?\n/)){if(!(flags&16)||flags&32){lines.push(paragraph);continue;}let line='';for(const word of paragraph.split(/(\s+)/)){const next=line+word;if(line&&extent(s,next,c).width>rectangle[2]-rectangle[0]){lines.push(line.trimEnd());line=word.trimStart();}else line=next;}lines.push(line);}
-      const height=Math.round(lines.length*c.height),width=Math.ceil(Math.max(0,...lines.map(t=>extent(s,t,c).width)));
+      const lineHeight=Math.round(c.height),height=lines.length*lineHeight,width=Math.ceil(Math.max(0,...lines.map(t=>extent(s,t,c).width)));
+      if(!text.length&&(flags&1024)&&!(flags&32)){const v=m.view(r,16);v.setInt32(8,rectangle[0],true);v.setInt32(12,rectangle[1],true);return 1;}
       if(flags&1024){const v=m.view(r,16);v.setInt32(8,rectangle[0]+width,true);v.setInt32(12,rectangle[1]+height,true);return height;}
-      let y=rectangle[1];if(flags&32&&flags&4)y+=(rectangle[3]-rectangle[1]-height)/2;else if(flags&32&&flags&8)y=rectangle[3]-height;
-      const old=s.textAlign;try{s.textAlign=0;for(const line of lines){const width=extent(s,line,c).width,x=flags&1?(rectangle[0]+rectangle[2]-width)/2:flags&2?rectangle[2]-width:rectangle[0];draw(s,x,y,line,4,rectangle);y+=c.height;}}finally{s.textAlign=old;}return height;
+      let y=rectangle[1];if(flags&32&&flags&4)y+=Math.floor((rectangle[3]-rectangle[1]-height)/2);else if(flags&32&&flags&8)y=rectangle[3]-height;
+      const old=s.textAlign;try{s.textAlign=0;for(const line of lines){const width=extent(s,line,c).width,x=flags&1?(rectangle[0]+rectangle[2]-width)/2:flags&2?rectangle[2]-width:rectangle[0];draw(s,x,y,line,4,rectangle);y+=lineHeight;}}finally{s.textAlign=old;}return Math.round(y-rectangle[1]);
     },{arity:5,mode:'browser'});
   }
 }
@@ -404,7 +405,7 @@ function installPainting(w,{dc,bitmaps,regions}){
     s.notifying=true;
     try{
       if(s.nonclient){if(e.requestNonClientPaint)await e.requestNonClientPaint();else if(e.message)await e.message(133,1,0,false);else throw new Win32Error('No nonclient repaint adapter',50);s.nonclient=false;}
-      if(eraseOnly){if(s.erase){const handle=getDC(id);try{dc(handle).paintClip=s.update;if(eraseBackground(e,handle))s.erase=false;}finally{release(id,handle);}}return 1;}
+      if(eraseOnly){if(s.erase){const handle=getDC(id);try{dc(handle).paintClip=s.update;s.erase=false;try{if(!eraseBackground(e,handle))s.erase=true;}catch(error){s.erase=true;throw error;}}finally{release(id,handle);}}return 1;}
       if(force||s.update.count||s.internal){s.internal=false;if(e.requestPaint)await e.requestPaint();else if(e.message)await e.message(15,0,0,false);else throw new Win32Error('No WM_PAINT adapter for this window',50);}
       return 1;
     }finally{s.notifying=false;}
@@ -414,7 +415,7 @@ function installPainting(w,{dc,bitmaps,regions}){
   add('ValidateRect',2,(id,p)=>change(id,p?regions.rectangle(...rect(p)):null,false,false));
   add('InvalidateRgn',3,(id,r,erase)=>change(id,r?region(r).shape:null,true,erase));
   add('ValidateRgn',2,(id,r)=>change(id,r?region(r).shape:null,false,false));
-  const erasePending=e=>{const s=state(e);if(!s.erase)return;const id=e.gdiWindowHandle;if(!id)return;const handle=getDC(id);try{dc(handle).paintClip=s.update;if(eraseBackground(e,handle))s.erase=false;}finally{release(id,handle);}};
+  const erasePending=e=>{const s=state(e);if(!s.erase)return;const id=e.gdiWindowHandle;if(!id)return;const handle=getDC(id);try{dc(handle).paintClip=s.update;s.erase=false;try{if(!eraseBackground(e,handle))s.erase=true;}catch(error){s.erase=true;throw error;}}finally{release(id,handle);}};
   add('GetUpdateRect',3,(id,p,erase)=>{const e=win(id),s=state(e);if(p)writeRect(p,s.update.bounds);if(erase&&s.erase){e.gdiWindowHandle=Number(id);erasePending(e);}return s.update.count?1:0;});
   add('GetUpdateRgn',3,(id,r,erase)=>{const e=win(id),s=state(e),dest=region(r);if(erase&&s.erase){e.gdiWindowHandle=Number(id);erasePending(e);}dest.shape=s.update;return dest.shape.type;});
   add('SetWindowRgn',3,(id,r,redraw)=>{
