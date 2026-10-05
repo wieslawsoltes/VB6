@@ -50,3 +50,24 @@ test('native file-count bounds apply before unbounded allocation',()=>assert.thr
 test('directory depth bound rejects excessive nesting',async()=>{const dir=new MemoryDirectory({['a/'.repeat(18)+'M.bas']:'x'});await assert.rejects(()=>readNativeDirectory(dir),/16 levels/);});
 test('ZIP rejects normalized case-insensitive aliases',()=>assert.throws(()=>writeZip({'a/./M.bas':'a','A/m.BAS':'b'}),/Duplicate/));
 test('ZIP export/reopen keeps binary companion bytes and Unicode file paths',async()=>{const data={'Folder/Żółć.ctx':Uint8Array.of(0,128,255),'Group.vbg':'VBGROUP 5.0\r\n'};const files=await readZip(writeZip(data));assert.deepEqual(files.get('Folder/Żółć.ctx'),data['Folder/Żółć.ctx']);assert.equal(text(files.get('Group.vbg')),data['Group.vbg']);});
+
+test('unchanged output edited after confirmation invalidates the entire save',async()=>{
+  const dir=new MemoryDirectory({'M.bas':'same','P.vbp':'old'}),plan=await planNativeDirectoryWrite(dir,{'M.bas':'same','P.vbp':'new'});
+  dir.files.set('M.bas',bytesOf('external'));
+  await assert.rejects(()=>writeNativeDirectory(plan),/nothing was written/);assert.equal(dir.writes.length,0);
+});
+test('unchanged source edited while resources write prevents manifest publication',async()=>{
+  const dir=new MemoryDirectory({'M.bas':'same','P.vbp':'old','M.frx':'old'}),plan=await planNativeDirectoryWrite(dir,{'M.bas':'same','M.frx':'new','P.vbp':'new'});
+  dir.afterWrite=path=>{if(path==='M.frx')dir.files.set('M.bas',bytesOf('external'));};
+  await assert.rejects(()=>writeNativeDirectory(plan),/1 files completed/);assert.equal(text(dir.files.get('P.vbp')),'old');
+});
+test('post-write verification catches changes to an already written source',async()=>{
+  const dir=new MemoryDirectory({'M.bas':'old','P.vbp':'old'}),plan=await planNativeDirectoryWrite(dir,{'M.bas':'new','P.vbp':'new'});
+  dir.afterWrite=path=>{if(path==='P.vbp')dir.files.set('M.bas',bytesOf('external'));};
+  await assert.rejects(()=>writeNativeDirectory(plan),/2 files completed/);assert.equal(text(dir.files.get('M.bas')),'external');
+});
+test('all-unchanged saves still validate every observed file',async()=>{
+  const dir=new MemoryDirectory({'M.bas':'same'}),plan=await planNativeDirectoryWrite(dir,{'M.bas':'same'});
+  assert.equal(plan.entries.length,0);dir.files.delete('M.bas');
+  await assert.rejects(()=>writeNativeDirectory(plan),/nothing was written/);assert.equal(dir.writes.length,0);
+});

@@ -15,8 +15,9 @@ export function preferredEOL(text){return text.match(/\r\n|\r|\n/)?.[0]||'\r\n';
 export function unquote(value){const s=String(value).trim();return /^"(?:[^"]|"")*"$/.test(s)?s.slice(1,-1).replace(/""/g,'"'):s;}
 export function nativePathValue(value){return /[\s"';]/.test(value)?quote(value):value;}
 export function quote(value){return '"'+String(value).replace(/"/g,'""')+'"';}
-export function commentAt(value){let quoted=false;for(let i=0;i<value.length;i++){if(value[i]==='"'){if(quoted&&value[i+1]==='"'){i++;continue;}quoted=!quoted;}else if(value[i]==="'"&&!quoted)return i;}return -1;}
-export function replaceLineValue(line,value){const body=lineBody(line),match=body.match(/^(\s*[^=]+?\s*=\s*)(.*)$/);if(!match)return line;const at=commentAt(match[2]),tail=at<0?'':match[2].slice(at),space=at<0?'':match[2].slice(0,at).match(/\s*$/)[0];return match[1]+value+space+tail+lineEnding(line);}
+/** Manifest paths may contain literal apostrophes; only whitespace-delimited ones start comments there. */
+export function commentAt(value,manifest=false){let quoted=false;for(let i=0;i<value.length;i++){if(value[i]==='"'){if(quoted&&value[i+1]==='"'){i++;continue;}quoted=!quoted;}else if(value[i]==="'"&&!quoted&&(!manifest||i>0&&/[ \t]/.test(value[i-1])))return i;}return -1;}
+export function replaceLineValue(line,value,manifest=false){const body=lineBody(line),match=body.match(/^(\s*[^=]+?\s*=\s*)(.*)$/);if(!match)return line;const at=commentAt(match[2],manifest),tail=at<0?'':match[2].slice(at),space=at<0?'':match[2].slice(0,at).match(/\s*$/)[0];return match[1]+value+space+tail+lineEnding(line);}
 
 export function decodeNativeBytes(bytes,encoding){return new TextDecoder(encoding).encoding==='windows-1252'?decodeANSI(bytes):new TextDecoder(encoding,{fatal:true,ignoreBOM:true}).decode(bytes);}
 export function decodeNativeText(input,{encoding='auto'}={}){
