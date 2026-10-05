@@ -5103,8 +5103,124 @@ class RichTextDocument {
 return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
-/* ../controls/form-window.js */
+/* ../controls/input.js */
 __modules[52]=(()=>{
+const {Cell,truth}=__modules[14];
+const {lower}=__modules[13];
+
+
+// Browser/Windows button bitmasks agree, but `button` is an ordinal and a
+// released button is no longer in `buttons`. Never infer a hover button.
+const shiftMask=event=>(event.shiftKey?1:0)|(event.ctrlKey?2:0)|(event.altKey?4:0);
+const mouseButton=(event,kind)=>kind==='MouseMove'?(Number(event.buttons)||0)&7:([1,4,2][event.button]||0);
+// A chorded press/release is a pointermove, not another pointerdown/up.
+function pointerMouseEvent(event){
+  if(event.type==='pointerdown')return 'MouseDown';
+  if(event.type==='pointerup')return 'MouseUp';
+  const button=[1,4,2][event.button]||0;
+  return button?(event.buttons&button?'MouseDown':'MouseUp'):'MouseMove';
+}
+const namedKeys={Backspace:8,Tab:9,Enter:13,Shift:16,Control:17,Alt:18,Pause:19,CapsLock:20,Escape:27,' ':32,PageUp:33,PageDown:34,End:35,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,PrintScreen:44,Insert:45,Delete:46,Meta:91,ContextMenu:93,NumLock:144,ScrollLock:145};
+const punctuation={';':186,'=':187,',':188,'-':189,'.':190,'/':191,'`':192,'[':219,'\\':220,']':221,"'":222};
+function virtualKey(event){
+  const code=String(event.code||''),key=String(event.key||'');
+  if(/^Numpad[0-9]$/.test(code))return 96+Number(code.at(-1));
+  const numpad={NumpadMultiply:106,NumpadAdd:107,NumpadSubtract:109,NumpadDecimal:110,NumpadDivide:111};
+  if(numpad[code])return numpad[code];
+  if(namedKeys[key])return namedKeys[key];
+  if(/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(key))return 111+Number(key.slice(1));
+  if(/^[a-z0-9]$/i.test(key))return key.toUpperCase().charCodeAt(0);
+  // Preserve browser layout-specific OEM keys when available.
+  if(Number(event.keyCode)>0&&Number(event.keyCode)<256)return Number(event.keyCode);
+  if(punctuation[key])return punctuation[key];
+  if(/^Key[A-Z]$/.test(code))return code.charCodeAt(3);
+  if(/^Digit[0-9]$/.test(code))return code.charCodeAt(5);
+  return 0;
+}
+function characterKey(event){
+  if(event.key==='Enter')return 13;if(event.key==='Backspace')return 8;if(event.key==='Tab')return 9;if(event.key==='Escape')return 27;
+  const key=String(event.key||'');
+  if(key.length!==1)return 0;
+  // This runtime uses UTF-16 text; retain the signed Integer event ABI.
+  const value=key.charCodeAt(0);return value>32767?value-65536:value;
+}
+const owners=new WeakMap();
+function ownerOf(node){for(let current=node?.nodeType===1?node:node?.parentElement;current;current=current.parentElement){const owner=owners.get(current);if(owner)return owner;}return null;}
+function acceptsInput(control){
+  if(!control||control.design||control.disposed||!control.vm||['ready','paused','stopped','error'].includes(control.vm.state))return false;
+  if(!control.node.isConnected||control.node.closest('[inert],[hidden]'))return false;
+  for(let node=control.node;node;node=node.parentElement){const owner=owners.get(node);if(owner&&(owner.disposed||!truth(owner.props.Enabled)||!truth(owner.props.Visible)))return false;}
+  return true;
+}
+function eventName(control,event){return (control.type==='Form'?'Form':control.type==='MDIForm'?'MDIForm':control.model.name)+'_'+event;}
+function procedure(control,event){return control.instance?.module?.procedures.get(lower(eventName(control,event)));}
+function argumentsFor(control,args){return control.props.Index===undefined?args:[Number(control.props.Index),...args];}
+async function invoke(control,event,args){const proc=procedure(control,event);if(proc&&acceptsInput(control))return control.vm.callProcedure(control.instance,proc,argumentsFor(control,args));}
+const scaleUnits={0:1,1:15,2:.75,3:1,4:1/8,5:1/96,6:25.4/96,7:2.54/96};
+// VB character units are 120 twips wide and 240 twips high (8x16 CSS pixels).
+const inputScaleFactor=(mode,vertical=false)=>Number(mode)===4&&vertical?1/16:scaleUnits[Number(mode)]??15;
+function mouseCoordinates(control,event){
+  const selfScale=['Form','MDIForm','PictureBox'].includes(control.type),surface=control.content||control.node;
+  const rect=surface.getBoundingClientRect(),sx=surface.offsetWidth?rect.width/surface.offsetWidth:1,sy=surface.offsetHeight?rect.height/surface.offsetHeight:1;
+  const x=(event.clientX-rect.left)/(sx||1)-(surface.clientLeft||0)+(surface.scrollLeft||0);
+  const y=(event.clientY-rect.top)/(sy||1)-(surface.clientTop||0)+(surface.scrollTop||0);
+  let scale=control;
+  if(!selfScale){scale=ownerOf(control.node.parentElement)||control.form;while(scale&&scale!==scale.form&&!['PictureBox','Form','MDIForm'].includes(scale.type))scale=ownerOf(scale.node.parentElement)||scale.form;}
+  const props=scale?.props||{},mode=Number(props.ScaleMode??1),area=scale?.content||scale?.node;
+  let ux=inputScaleFactor(mode),uy=inputScaleFactor(mode,true);
+  if(mode===0){ux=Number(props.ScaleWidth??area?.clientWidth??1)/(area?.clientWidth||1);uy=Number(props.ScaleHeight??area?.clientHeight??1)/(area?.clientHeight||1);}
+  return [x*ux+(selfScale?Number(props.ScaleLeft)||0:0),y*uy+(selfScale?Number(props.ScaleTop)||0:0)];
+}
+
+function bindMouseInput(control){
+  owners.set(control.node,control);
+  const root=control.content||control.node,moveKey={};
+  root.addEventListener('contextmenu',e=>{
+    // WebKit's native context menu consumes the subsequent pointerup. When VB
+    // handles the right button, keep its complete down/up stream in the app.
+    // Unhandled targets and keyboard-invoked native menus remain unchanged.
+    if(e.button===2&&ownerOf(e.target)===control&&acceptsInput(control)&&
+      (procedure(control,'MouseDown')||procedure(control,'MouseUp')))e.preventDefault();
+  });
+  for(const dom of ['pointerdown','pointermove','pointerup'])root.addEventListener(dom,e=>{
+    if(ownerOf(e.target)!==control||!acceptsInput(control))return;
+    const event=pointerMouseEvent(e);
+    if(event==='MouseDown'&&control.content&&!(control.controls||[]).some(c=>c.TabStop&&acceptsInput(c)))control.SetFocus();
+    if(!procedure(control,event))return;
+    const args=[mouseButton(e,event),shiftMask(e),...mouseCoordinates(control,e)];
+    control.vm.enqueueInput(control.instance,event==='MouseMove'?moveKey:null,()=>invoke(control,event,args),{coalesce:event==='MouseMove',valid:()=>acceptsInput(control)});
+  });
+}
+
+function bindKeyboardInput(control){
+  owners.set(control.node,control);
+  for(const [dom,event]of [['keydown','KeyDown'],['keypress','KeyPress'],['keyup','KeyUp']])control.node.addEventListener(dom,e=>{
+    if(e.isComposing||e.keyCode===229)return;
+    const owner=ownerOf(e.target);
+    if(!owner||!acceptsInput(owner))return;
+    if(control.content?owner.form!==control:owner!==control)return;
+    // Menus and window chrome retain their own keyboard implementation.
+    if(control.content&&e.target!==control.node&&!control.content.contains(e.target))return;
+    const form=owner.form,preview=owner!==form&&form&&truth(form.props.KeyPreview);
+    if(!procedure(owner,event)&&!(preview&&procedure(form,event)))return;
+    const value=event==='KeyPress'?characterKey(e):virtualKey(e);if(!value)return;
+    const key=new Cell('Integer',value),args=event==='KeyPress'?[{ref:key}]:[{ref:key},shiftMask(e)];
+    // Capture once at the form, but serialize preview and target as a single VB
+    // event action. Both see the SAME ByRef cell, never two independent copies.
+    owner.vm.enqueueInput(owner.instance,null,async()=>{
+      if(preview)await invoke(form,event,args);
+      if(key.get()!==0&&acceptsInput(owner))await invoke(owner,event,args);
+    },{valid:()=>acceptsInput(owner)});
+  },true);
+}
+
+function ownsInputEvent(control,event){return ownerOf(event.target)===control&&acceptsInput(control);}
+
+return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsInput,inputScaleFactor,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
+})();
+
+/* ../controls/form-window.js */
+__modules[53]=(()=>{
 const {el}=__modules[13];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
@@ -5130,7 +5246,7 @@ return {installFormWindow};
 })();
 
 /* ../controls/native-widgets.js */
-__modules[53]=(()=>{
+__modules[54]=(()=>{
 const {el}=__modules[13];
 const {getTheme}=__modules[37];
 
@@ -5206,7 +5322,7 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ../controls/scrollbar.js */
-__modules[54]=(()=>{
+__modules[55]=(()=>{
 const {el}=__modules[13];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
@@ -5247,7 +5363,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ../theme/icon-art.js */
-__modules[55]=(()=>{
+__modules[56]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -5406,8 +5522,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ../theme/icons.js */
-__modules[56]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[55];
+__modules[57]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[56];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -5434,10 +5550,10 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ../theme/menu.js */
-__modules[57]=(()=>{
+__modules[58]=(()=>{
 const {uiDocument}=__modules[12];
 const {el}=__modules[13];
-const {icon}=__modules[56];
+const {icon}=__modules[57];
 const {getTheme}=__modules[37];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
@@ -5523,7 +5639,7 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ../controls/richtext.js */
-__modules[58]=(()=>{
+__modules[59]=(()=>{
 const {parseRTF,RichTextDocument,richText}=__modules[51];
 const {VBError}=__modules[10];
 const {oleColor}=__modules[38];
@@ -5614,7 +5730,7 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ../project/model.js */
-__modules[59]=(()=>{
+__modules[60]=(()=>{
 const {normalizeDataSources}=__modules[18];
 const { clone, lower, safeName }=__modules[13];
 const {normalizeResources}=__modules[43];
@@ -5685,7 +5801,7 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ../controls/collections.js */
-__modules[60]=(()=>{
+__modules[61]=(()=>{
 const { VBError }=__modules[10];
 const { lower }=__modules[13];
 
@@ -5733,12 +5849,13 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ../controls/controls.js */
-__modules[61]=(()=>{
-const {installFormWindow}=__modules[52];
-const {ClassicCombo,ClassicUpDown}=__modules[53];
-const {ClassicScrollbar}=__modules[54];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[57];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[58];
+__modules[62]=(()=>{
+const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[52];
+const {installFormWindow}=__modules[53];
+const {ClassicCombo,ClassicUpDown}=__modules[54];
+const {ClassicScrollbar}=__modules[55];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[58];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[59];
 const {parseRTF}=__modules[51];
 const { el, lower, clone }=__modules[13];
 const { VBError }=__modules[10];
@@ -5746,9 +5863,10 @@ const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[14];
 const { MemoryRecordset }=__modules[50];
 const { GraphicsSurface }=__modules[38];
 const { cssColor : oleColor, fontFamily, getTheme }=__modules[37];
-const { icon, controlIcon }=__modules[56];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[59];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[60];
+const { icon, controlIcon }=__modules[57];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[60];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[61];
+
 
 
 
@@ -5800,8 +5918,8 @@ class BrowserControl {
     if(key==='Value'&&['DTPicker','MonthView'].includes(this.type)){const value=this.props.Value;if(value instanceof Date)return value;return new Date(String(value)+'T00:00:00');}
     if(key==='DataSource')return this._dataSource;
     if(key==='Data'&&this.type==='MSChart')return this.gridData[(this.props.Row||1)-1]?.[(this.props.Column||1)-1]||0;
-    if(key==='ScaleWidth')return this.props.ScaleWidth??this.node.clientWidth*units(this.props.ScaleMode||1);
-    if(key==='ScaleHeight')return this.props.ScaleHeight??this.node.clientHeight*units(this.props.ScaleMode||1);
+    if(key==='ScaleWidth')return this.props.ScaleWidth??(this.content||this.node).clientWidth*inputScaleFactor(this.props.ScaleMode??1);
+    if(key==='ScaleHeight')return this.props.ScaleHeight??(this.content||this.node).clientHeight*inputScaleFactor(this.props.ScaleMode??1,true);
     if(key==='TextRTF')return this.rich?.rtf||'';
     if(this.type==='RichTextBox'&&RICH_SELECTION_PROPERTIES.includes(key)){const value=this.rich.style(key);return value===null?null:['SelIndent','SelHangingIndent','SelRightIndent'].includes(key)?value/15*units(this.form?.props.ScaleMode||1):value;}
     return this.props[key]??(['Text','Caption','ToolTipText','Tag','Path','Pattern','SimpleText','FileName','DialogTitle'].includes(key)?'':0);
@@ -5833,9 +5951,13 @@ class BrowserControl {
   }
   invalidate(){if(this.pending||this.disposed)return;this.pending=true;this.raf=requestAnimationFrame(()=>{this.pending=false;if(!this.disposed)this.refresh();});}
   event(name,args=[],coalesce=false){if(this.design||!this.vm||this.disposed)return Promise.resolve();const allArgs=this.props.Index!==undefined?[Number(this.props.Index),...args]:args;return this.vm.dispatch(this.instance,this.model.name+'_'+name,allArgs,{coalesce});}
-  attachEvents(){if(this.design)return;this.node.addEventListener('click',e=>{if(!this.props.Enabled||e.vbHandled)return;if(!['TreeView','ListView','Toolbar','TabStrip','SSTab','MonthView','ListBox','ComboBox','FileListBox','DirListBox','DriveListBox'].includes(this.type))this.event('Click');});this.node.addEventListener('dblclick',()=>this.event('DblClick'));this.node.addEventListener('focusin',()=>this.event('GotFocus'));this.node.addEventListener('focusout',()=>this.event('LostFocus'));
-    for(const [dom,event]of [['pointerdown','MouseDown'],['pointermove','MouseMove'],['pointerup','MouseUp']])this.node.addEventListener(dom,e=>{if(!this.vm?.program.modules.get(lower(this.instance.module.name))?.procedures.has(lower(this.model.name+'_'+event)))return;const r=this.node.getBoundingClientRect();this.event(event,[e.buttons||[1,4,2][e.button]||0,(e.shiftKey?1:0)+(e.ctrlKey?2:0)+(e.altKey?4:0),Math.round((e.clientX-r.left)*15),Math.round((e.clientY-r.top)*15)],event==='MouseMove');});
-    for(const [dom,event]of [['keydown','KeyDown'],['keyup','KeyUp']])this.node.addEventListener(dom,e=>{const key=new Cell('Integer',e.keyCode||0);this.event(event,[{ref:key},(e.shiftKey?1:0)+(e.ctrlKey?2:0)+(e.altKey?4:0)]);});this.node.addEventListener('keypress',e=>this.event('KeyPress',[{ref:new Cell('Integer',e.key.charCodeAt(0)||0)}]));
+  attachEvents(){
+    if(this.design)return;
+    bindMouseInput(this);if(!this.form)bindKeyboardInput(this);
+    this.node.addEventListener('click',e=>{if(!ownsInputEvent(this,e)||e.vbHandled)return;if(!['TreeView','ListView','Toolbar','TabStrip','SSTab','MonthView','ListBox','ComboBox','FileListBox','DirListBox','DriveListBox'].includes(this.type))this.event('Click');});
+    this.node.addEventListener('dblclick',e=>{if(ownsInputEvent(this,e))this.event('DblClick');});
+    this.node.addEventListener('focusin',e=>{if(ownsInputEvent(this,e))this.event('GotFocus');});
+    this.node.addEventListener('focusout',e=>{if(ownsInputEvent(this,e))this.event('LostFocus');});
   }
   build(){const n=this.node,p=this.props;const addClass=c=>n.classList.add(c);
     switch(this.type){
@@ -6050,8 +6172,8 @@ class BrowserForm extends BrowserControl {
   static frontSequence=0;
   constructor(model,options={}){const p=model.properties||{},normalized={...model,properties:{...p,Width:p.ClientWidth??p.Width??9000,Height:p.ClientHeight??p.Height??6000}};super(normalized,options);this.originalModel=model;this.controls=[];this.controlMap=new Map();this.shown=false;this.form=this;this.mountControls(model.controls||[]);const form=this;this.Controls={get Count(){return form.controls.length;},Item:key=>{const control=typeof key==='number'?form.controls[key]:form.controlMap.get(lower(key));if(!control)throw new VBError('Control not found: '+key,35601);return control;},Add:(type,name,container)=>form.addControl(type,name,container),Remove:key=>form.removeControl(typeof key==='string'?form.controlMap.get(lower(key)):key),[Symbol.iterator]:()=>form.controls.values()};this.Controls.Add.vbRawArgs=true;this.Controls.Remove.vbRawArgs=true;this.attachWindowDragging();if(!this.design){this.node.addEventListener('pointerdown',()=>this.activateChrome(),true);this.node.addEventListener('focusin',()=>this.activateChrome());}if(this.props.Picture)this.ensureSurface().setPicture(safeImage(this.props.Picture,this.assets));}
   build(){this.node.className='vb-form';this.node.setAttribute('role','dialog');this.titleBar=el('div',{class:'vb-form-title'});this.captionNode=el('span',{class:'caption'});this.closeButton=el('button',{class:'vb-window-button',title:'Close','aria-label':'Close',onclick:()=>this.vm?.requestUnload(this.instance)});this.closeButton.append(icon('close'));this.minButton=el('button',{class:'vb-window-button',title:'Minimize','aria-label':'Minimize',onclick:()=>this.toggleMinimize()},icon('minimize'));this.maxButton=el('button',{class:'vb-window-button',title:'Maximize','aria-label':'Maximize',onclick:()=>this.toggleMaximize()},icon('maximize'));this.titleBar.append(el('span',{class:'vb-form-icon'},icon('form',16)),this.captionNode,this.minButton,this.maxButton,this.closeButton);this.menuBar=el('div',{class:'vb-form-menu'});this.content=el('div',{class:'vb-form-content'});this.childHost=this.content;this.node.append(this.titleBar,this.menuBar,this.content);this.form=this;}
-  attachEvents(){if(this.design)return;this.content.addEventListener('click',e=>{if(e.target===this.content)this.event('Click');});this.node.addEventListener('keydown',e=>{if(e.defaultPrevented)return;if(e.key==='F10'){e.preventDefault();this.menuBar.querySelector('button:not(:disabled)')?.click();return;}if(e.key==='Enter'&&!e.target.matches('textarea,[contenteditable]')){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.node.contains(e.target)&&c.Enabled&&c.Visible)||this.controls?.find(c=>c.type==='CommandButton'&&c.Default&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.key==='Escape'){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.Cancel&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.altKey&&e.key.length===1){const key=e.key.toLowerCase(),match=text=>{const value=String(text||'').replace(/&&/g,'');return /&./.test(value)&&value.match(/&./)[0][1].toLowerCase()===key;};const control=this.controls?.find(c=>c.Enabled&&c.Visible&&match(c.props.Caption));if(control){e.preventDefault();if(control.type==='Label'){this.controls.filter(c=>c.TabStop&&c.Enabled&&c.Visible&&c.TabIndex>control.TabIndex).sort((a,b)=>a.TabIndex-b.TabIndex)[0]?.SetFocus();}else{control.SetFocus();control.node.click();}}else{const menus=(this.originalModel?.menus||[]).filter(m=>!m.parent&&m.properties.Visible!==0);const i=menus.findIndex(m=>match(m.properties.Caption));if(i>=0){e.preventDefault();this.menuBar.children[i]?.click();}}}if(this.props.KeyPreview)this.event('KeyDown',[{ref:new Cell('Integer',e.keyCode||0)},(e.shiftKey?1:0)+(e.ctrlKey?2:0)+(e.altKey?4:0)]);});}
-  event(name,args=[],coalesce=false){if(this.design||!this.vm)return Promise.resolve();return this.vm.dispatch(this.instance,(this.type==='MDIForm'?'MDIForm_':'Form_')+name,args,{coalesce});}
+  attachEvents(){if(this.design)return;bindMouseInput(this);bindKeyboardInput(this);this.content.addEventListener('click',e=>{if(ownsInputEvent(this,e))this.event('Click');});this.content.addEventListener('dblclick',e=>{if(ownsInputEvent(this,e))this.event('DblClick');});this.node.addEventListener('keydown',e=>{if(e.defaultPrevented)return;if(e.key==='F10'){e.preventDefault();this.menuBar.querySelector('button:not(:disabled)')?.click();return;}if(e.key==='Enter'&&!e.target.matches('textarea,[contenteditable]')){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.node.contains(e.target)&&c.Enabled&&c.Visible)||this.controls?.find(c=>c.type==='CommandButton'&&c.Default&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.key==='Escape'){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.Cancel&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.altKey&&e.key.length===1){const key=e.key.toLowerCase(),match=text=>{const value=String(text||'').replace(/&&/g,'');return /&./.test(value)&&value.match(/&./)[0][1].toLowerCase()===key;};const control=this.controls?.find(c=>c.Enabled&&c.Visible&&match(c.props.Caption));if(control){e.preventDefault();if(control.type==='Label'){this.controls.filter(c=>c.TabStop&&c.Enabled&&c.Visible&&c.TabIndex>control.TabIndex).sort((a,b)=>a.TabIndex-b.TabIndex)[0]?.SetFocus();}else{control.SetFocus();control.node.click();}}else{const menus=(this.originalModel?.menus||[]).filter(m=>!m.parent&&m.properties.Visible!==0);const i=menus.findIndex(m=>match(m.properties.Caption));if(i>=0){e.preventDefault();this.menuBar.children[i]?.click();}}}});}
+  event(name,args=[],coalesce=false){if(this.design||!this.vm||this.disposed)return Promise.resolve();return this.vm.dispatch(this.instance,(this.type==='MDIForm'?'MDIForm_':'Form_')+name,args,{coalesce});}
   refresh(){if(!this.content)return;const p=this.props,w=Number(p.ClientWidth??p.Width??9000)/15,h=Number(p.ClientHeight??p.Height??6000)/15;this.captionNode.textContent=p.Caption||this.model.name;this.node.setAttribute('aria-label',this.captionNode.textContent);this.node.style.fontFamily=fontFamily(p.FontName);this.node.style.fontSize=Number(p.FontSize||8.25)*96/72+'px';this.node.style.width=w+8+'px';this.node.style.height='auto';this.content.style.width=w+'px';this.content.style.height=h+'px';this.content.style.background=oleColor(p.BackColor);this.node.hidden=!this.design&&!this.shown;this.node.style.left=Number(p.Left||0)/15+'px';this.node.style.top=Number(p.Top||0)/15+'px';const border=Number(p.BorderStyle??2);this.titleBar.hidden=border===0;this.node.classList.toggle('vb-borderless',border===0);this.node.classList.toggle('vb-tool-window',border===4||border===5);this.node.style.width=w+(border===0?0:8)+'px';this.minButton.hidden=p.ControlBox===0||border===3||border>=4;this.maxButton.hidden=p.ControlBox===0||border===3||border>=4;this.closeButton.hidden=p.ControlBox===0;this.minButton.disabled=p.MinButton===0;this.maxButton.disabled=p.MaxButton===0;this.node.classList.toggle('vb-fixed-window',![2,5].includes(border)||this.minimized||!!this.savedBounds);this.renderMenus();if(this.surface){this.surface.background=p.BackColor;this.surface.invalidate();}}
   renderMenus(){const menus=this.originalModel?.menus||this.model.menus||[],signature=JSON.stringify(menus);if(this.menuSnapshot===signature)return;this.menuSnapshot=signature;const roots=menus.filter(m=>!m.parent&&m.properties.Visible!==0);this.menuBar.hidden=!roots.length;this.menuBar.setAttribute('role','menubar');this.menuBar.replaceChildren(...roots.map((menu,index)=>{const button=el('button',{role:'menuitem','aria-haspopup':menus.some(m=>m.parent===menu.name)||menu.properties.WindowList?'menu':null,'aria-expanded':'false',disabled:menu.properties.Enabled===0});updateMnemonic(button,menu.properties.Caption||menu.name);button.addEventListener('click',()=>{const children=menus.filter(m=>m.parent===menu.name&&m.properties.Visible!==0);if(!children.length&&!menu.properties.WindowList){this.vm?.dispatch(this.instance,menu.name+'_Click',[]);return;}this.showMenu(children,button,menus,index);});button.addEventListener('pointerenter',()=>{if(menuIsOpen()&&!button.disabled)button.click();});button.addEventListener('keydown',e=>{if(['ArrowDown','Enter',' '].includes(e.key)){e.preventDefault();e.stopPropagation();button.click();}});return button;}));}
   showMenu(items,anchor,all,index=0){const map=values=>values.filter(m=>m.properties.Visible!==0).map(item=>item.properties.Caption==='-'?null:{label:item.properties.Caption||item.name,enabled:item.properties.Enabled!==0,checked:item.properties.Checked?true:undefined,items:all.some(m=>m.parent===item.name&&m.properties.Visible!==0)?()=>map(all.filter(m=>m.parent===item.name)):undefined,action:()=>this.vm?.dispatch(this.instance,item.name+'_Click',[])});const rect=anchor.getBoundingClientRect();const values=map(items),root=all.filter(m=>!m.parent&&m.properties.Visible!==0)[index];if(root?.properties.WindowList&&this.mdiController){const windows=this.mdiController.windowItems();if(values.length&&windows.length)values.push(null);values.push(...windows);}openClassicMenu(values,rect.left,rect.bottom,null,{opener:anchor,runtime:true,theme:getTheme(this.node).id,focusFirst:true,onSwitch:direction=>{const list=[...this.menuBar.children];for(let n=1;n<=list.length;n++){const next=list[(index+direction*n+list.length*2)%list.length];if(!next.disabled){next.click();break;}}}});}
@@ -6090,7 +6212,7 @@ class BrowserForm extends BrowserControl {
     control.dispose();
   }
   activateChrome(){if(this.design)return;if(!this.node.inert)this.node.style.zIndex=String((this.node.getAttribute('aria-modal')==='true'?200000:0)+ ++BrowserForm.frontSequence);for(const node of this.node.parentElement?.querySelectorAll(':scope > .vb-form')||[])node.classList.toggle('vb-inactive',node!==this.node);}
-  Show(){this.activateChrome(false);this.shown=true;this.node.hidden=false;this.refresh();if(!this.windowStateApplied){this.windowStateApplied=true;this.WindowState=Number(this.props.WindowState)||0;}for(const c of this.controls)c.updateTimer();this.node.style.zIndex=String(++BrowserForm.frontSequence);this.event('Paint');const first=this.controls.filter(c=>c.TabStop&&c.Visible&&c.Enabled).sort((a,b)=>a.TabIndex-b.TabIndex)[0];first?.SetFocus();}
+  Show(){this.activateChrome(false);this.shown=true;this.node.hidden=false;this.refresh();if(!this.windowStateApplied){this.windowStateApplied=true;this.WindowState=Number(this.props.WindowState)||0;}for(const c of this.controls)c.updateTimer();this.node.style.zIndex=String(++BrowserForm.frontSequence);this.event('Paint');const first=this.controls.filter(c=>c.TabStop&&acceptsInput(c)&&!NONVISUAL_TYPES.has(c.type)).sort((a,b)=>a.TabIndex-b.TabIndex)[0];(first||this).SetFocus();}
   Hide(){this.shown=false;this.node.hidden=true;this.suspendTimers();const siblings=[...(this.node.parentElement?.querySelectorAll(':scope > .vb-form:not([hidden])')||[])].sort((a,b)=>Number(b.style.zIndex)-Number(a.style.zIndex));siblings.forEach((node,index)=>node.classList.toggle('vb-inactive',index!==0));}
   suspendTimers(){for(const c of this.controls){clearInterval(c.timerId);c.timerId=null;}}
   chromeHeight(){return (this.titleBar.hidden?0:20)+(this.menuBar.hidden?0:19)+(Number(this.props.BorderStyle)===0?0:8);}
@@ -6111,10 +6233,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[62]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[61];
+__modules[63]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[62];
 const {clone}=__modules[13];
-const {newId}=__modules[59];
+const {newId}=__modules[60];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -6193,7 +6315,7 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[63]=(()=>{
+__modules[64]=(()=>{
 const {VBError}=__modules[10];
 const {el}=__modules[13];
 const {NOTHING}=__modules[14];
@@ -6253,9 +6375,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ../controls/dialog.js */
-__modules[64]=(()=>{
+__modules[65]=(()=>{
 const {el}=__modules[13];
-const {icon}=__modules[56];
+const {icon}=__modules[57];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -6290,7 +6412,7 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ../language/binding.js */
-__modules[65]=(()=>{
+__modules[66]=(()=>{
 const {VBError}=__modules[8];
 const {lower}=__modules[13];
 const {VB_CONSTANTS}=__modules[49];
@@ -6406,7 +6528,7 @@ return {bindConstants};
 })();
 
 /* ../language/default-types.js */
-__modules[66]=(()=>{
+__modules[67]=(()=>{
 const {VBError}=__modules[10];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
@@ -6433,7 +6555,7 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ../language/interfaces.js */
-__modules[67]=(()=>{
+__modules[68]=(()=>{
 const {lower}=__modules[13];
 
 const json=x=>JSON.stringify(x);
@@ -6477,7 +6599,7 @@ return {validateInterfaces};
 })();
 
 /* ../language/expression.js */
-__modules[68]=(()=>{
+__modules[69]=(()=>{
 const { tokenize, VBError }=__modules[10];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
@@ -6555,9 +6677,9 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ../language/conditional.js */
-__modules[69]=(()=>{
+__modules[70]=(()=>{
 const { VBError }=__modules[10];
-const { parseExpression }=__modules[68];
+const { parseExpression }=__modules[69];
 const { binary, unary, truth }=__modules[14];
 
 
@@ -6597,13 +6719,13 @@ return {preprocess};
 })();
 
 /* ../language/compiler.js */
-__modules[70]=(()=>{
-const {bindConstants}=__modules[65];
-const {defaultIdentifierType,addDefaultTypes}=__modules[66];
-const {validateInterfaces}=__modules[67];
-const { preprocess }=__modules[69];
+__modules[71]=(()=>{
+const {bindConstants}=__modules[66];
+const {defaultIdentifierType,addDefaultTypes}=__modules[67];
+const {validateInterfaces}=__modules[68];
+const { preprocess }=__modules[70];
 const { VBError, logicalLines, splitTop, tokenize }=__modules[10];
-const { parseExpression, parseCall }=__modules[68];
+const { parseExpression, parseCall }=__modules[69];
 const { lower }=__modules[13];
 
 
@@ -6836,7 +6958,7 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* debug-control.js */
-__modules[71]=(()=>{
+__modules[72]=(()=>{
 const {VBError,tokenize}=__modules[10];
 const {lower}=__modules[13];
 const {truth}=__modules[14];
@@ -6980,7 +7102,7 @@ return {StopExecution,isSequencePoint,statementIndex,RuntimeDebugger,immediateSt
 })();
 
 /* win32.js */
-__modules[72]=(()=>{
+__modules[73]=(()=>{
 const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[7];
 const {VBError}=__modules[10];
 const {VBArray,VBCurrency,numeric,coerce}=__modules[14];
@@ -7100,7 +7222,7 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[73]=(()=>{
+__modules[74]=(()=>{
 const {VBError}=__modules[10];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
@@ -7129,9 +7251,9 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[74]=(()=>{
+__modules[75]=(()=>{
 const {VBError}=__modules[10];
-const {parseExpression}=__modules[68];
+const {parseExpression}=__modules[69];
 const {lower}=__modules[13];
 const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[14];
 
@@ -7183,7 +7305,7 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[75]=(()=>{
+__modules[76]=(()=>{
 const {VBError}=__modules[10];
 
 const instructionKey=ins=>{const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;return JSON.stringify(rest);};
@@ -7210,9 +7332,9 @@ return {instructionKey,linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[76]=(()=>{
-const {statementIndex}=__modules[71];
-const {instructionMap,linearInstruction,instructionKey}=__modules[75];
+__modules[77]=(()=>{
+const {statementIndex}=__modules[72];
+const {instructionMap,linearInstruction,instructionKey}=__modules[76];
 const {VBError}=__modules[10];
 
 
@@ -7275,22 +7397,22 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[77]=(()=>{
-const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[71];
-const {VBWin32Bridge}=__modules[72];
+__modules[78]=(()=>{
+const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[72];
+const {VBWin32Bridge}=__modules[73];
 const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[15];
 const {DataContext}=__modules[35];
 const {errorDescription}=__modules[45];
-const {DebugEvaluationSession}=__modules[73];
+const {DebugEvaluationSession}=__modules[74];
 const {hasDataDefault}=__modules[17];
-const {defaultIdentifierType}=__modules[66];
-const {DebugInspector}=__modules[74];
-const {planLiveEdit,nextStatementIndex}=__modules[76];
+const {defaultIdentifierType}=__modules[67];
+const {DebugInspector}=__modules[75];
+const {planLiveEdit,nextStatementIndex}=__modules[77];
 const {encodeVariable,decodeVariable,makeRecord}=__modules[33];
 const { Signal, lower, VERSION }=__modules[13];
 const { VBError, splitTop, tokenize }=__modules[10];
-const { parseExpression, parseCall }=__modules[68];
-const { compileProject }=__modules[70];
+const { parseExpression, parseCall }=__modules[69];
+const { compileProject }=__modules[71];
 const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[14];
 const { VirtualFileSystem }=__modules[34];
 const { createLibrary, MemoryRecordset }=__modules[50];
@@ -7345,7 +7467,7 @@ class VirtualMachine extends Signal {
     this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);this.win32.api.setClipboardText(this.clipboard);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.win32.api.getClipboardText(),Clear:()=>{this.clipboard='';this.win32.api.setClipboardText(null);}});
   }
   output(text,newline=true){this.emit('output',{text:String(text),newline});this.host.print?.(String(text),newline);}
-  setState(state){this.state=state;this.emit('state',state);}
+  setState(state){this.state=state;if(['paused','stopped','error'].includes(state)){this.inputEpoch=(this.inputEpoch||0)+1;const pending=this.eventQueue.filter(e=>e.input);this.eventQueue=this.eventQueue.filter(e=>!e.input);for(const event of pending)event.resolve();}this.emit('state',state);}
   breakpointLocation(module,line,column=null){
     const source=this.program.modules.get(lower(module));
     if(!Number.isInteger(line)||line<1||!source)throw new VBError('The selected line is not executable',5);
@@ -7799,6 +7921,20 @@ class VirtualMachine extends Signal {
   }
   parseCSV(text){const values=[];let quoted=false,s='',wasString=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){wasString=true;if(quoted&&text[i+1]==='"'){s+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){values.push(wasString?s:Number(s));s='';wasString=false;}else s+=c;}values.push(wasString?s:Number(s));return values;}
   reportError(error){if(error instanceof StopExecution)return;this.lastError=error;this.emit('error',{message:error.message,number:error.number||5,source:error.source,line:error.line});this.host.error?.(error);this.setState('error');}
+  // Trusted host input uses the normal interpreter queue, including debugger
+  // stepping and DoEvents. Pending mouse motion is latest-value, per target and
+  // actual instance; timers retain their existing dispatch/coalescing contract.
+  enqueueInput(instance,key,action,{coalesce=false,valid=()=>true}={}){
+    if(!['running','idle'].includes(this.state)||!valid())return Promise.resolve();
+    const epoch=this.inputEpoch||0,guarded=()=>epoch===(this.inputEpoch||0)&&['running','idle'].includes(this.state)&&valid()?action():undefined;
+    // Never move later pointer state ahead of a key/button/timer boundary.
+    let existing;
+    if(coalesce)for(let i=this.eventQueue.length-1;i>=0;i--){const pending=this.eventQueue[i];if(!pending.input||!pending.coalesce)break;if(pending.instance===instance&&pending.key===key){existing=pending;break;}}
+    if(existing){existing.action=guarded;return existing.promise;}
+    if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest input discarded.');return Promise.resolve();}
+    const event={input:true,coalesce,instance,key,action:guarded};event.promise=new Promise(resolve=>event.resolve=resolve);
+    this.eventQueue.push(event);this.processEvents();return event.promise;
+  }
   dispatch(module,name,args=[],{coalesce=false}={}){
     if(this.state==='stopped'||this.state==='error'||this.immediateContext)return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
     if(coalesce&&this.eventQueue.some(e=>e.key===key))return Promise.resolve();if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest event discarded.');return Promise.resolve();}
@@ -7872,19 +8008,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[78]=(()=>{
-const {RuntimeAgentControl}=__modules[62];
-const {RuntimeMDI}=__modules[63];
-const {runtimeDialog,messageBoxOptions}=__modules[64];
+__modules[79]=(()=>{
+const {RuntimeAgentControl}=__modules[63];
+const {RuntimeMDI}=__modules[64];
+const {runtimeDialog,messageBoxOptions}=__modules[65];
 const { applyTheme, themeId }=__modules[37];
-const { icon }=__modules[56];
+const { icon }=__modules[57];
 const {rasterDataURL}=__modules[42];
 const { el, download, lower, clone }=__modules[13];
-const { compileProject }=__modules[70];
-const { VirtualMachine }=__modules[77];
+const { compileProject }=__modules[71];
+const { VirtualMachine }=__modules[78];
 const { VirtualFileSystem }=__modules[34];
 const { describe }=__modules[14];
-const { BrowserForm }=__modules[61];
+const { BrowserForm }=__modules[62];
 
 
 
@@ -7942,7 +8078,7 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[79]=(()=>{
+__modules[80]=(()=>{
 const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[7];
 const {AutomationRegistry}=__modules[15];
 const {ControlAdapterRegistry}=__modules[16];
@@ -7957,14 +8093,14 @@ const {readRES,writeRES,setResource,setResourceString}=__modules[43];
 const {THEMES,applyTheme,colorValue}=__modules[37];
 const {MemoryRecordset}=__modules[50];
 const {RichTextDocument,parseRTF,writeRTF}=__modules[51];
-const { ApplicationHost }=__modules[78];
-const { VirtualMachine }=__modules[77];
-const { compileProject, compileModule }=__modules[70];
-const { parseExpression }=__modules[68];
+const { ApplicationHost }=__modules[79];
+const { VirtualMachine }=__modules[78];
+const { compileProject, compileModule }=__modules[71];
+const { parseExpression }=__modules[69];
 const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[14];
 const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[9];
 const { VirtualFileSystem }=__modules[34];
-const { BrowserControl, BrowserForm }=__modules[61];
+const { BrowserControl, BrowserForm }=__modules[62];
 const { GraphicsSurface }=__modules[38];
 
 
@@ -7994,6 +8130,6 @@ const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Bro
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[79];
+globalThis["VB6Runtime"]=__modules[80];
 })();
 VB6Runtime.mountApplication(JSON.parse(document.getElementById('vb6-project').textContent),document.getElementById('app'),{"persist":true}).then(host=>{globalThis.vb6Application=host;});</script></body></html>

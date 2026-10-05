@@ -50,7 +50,7 @@ export class VirtualMachine extends Signal {
     this.library.set('clipboard',{SetText:async text=>{this.clipboard=vbString(text);this.win32.api.setClipboardText(this.clipboard);await this.host.clipboardWrite?.(this.clipboard);},GetText:()=>this.win32.api.getClipboardText(),Clear:()=>{this.clipboard='';this.win32.api.setClipboardText(null);}});
   }
   output(text,newline=true){this.emit('output',{text:String(text),newline});this.host.print?.(String(text),newline);}
-  setState(state){this.state=state;this.emit('state',state);}
+  setState(state){this.state=state;if(['paused','stopped','error'].includes(state)){this.inputEpoch=(this.inputEpoch||0)+1;const pending=this.eventQueue.filter(e=>e.input);this.eventQueue=this.eventQueue.filter(e=>!e.input);for(const event of pending)event.resolve();}this.emit('state',state);}
   breakpointLocation(module,line,column=null){
     const source=this.program.modules.get(lower(module));
     if(!Number.isInteger(line)||line<1||!source)throw new VBError('The selected line is not executable',5);
@@ -504,6 +504,20 @@ export class VirtualMachine extends Signal {
   }
   parseCSV(text){const values=[];let quoted=false,s='',wasString=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){wasString=true;if(quoted&&text[i+1]==='"'){s+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){values.push(wasString?s:Number(s));s='';wasString=false;}else s+=c;}values.push(wasString?s:Number(s));return values;}
   reportError(error){if(error instanceof StopExecution)return;this.lastError=error;this.emit('error',{message:error.message,number:error.number||5,source:error.source,line:error.line});this.host.error?.(error);this.setState('error');}
+  // Trusted host input uses the normal interpreter queue, including debugger
+  // stepping and DoEvents. Pending mouse motion is latest-value, per target and
+  // actual instance; timers retain their existing dispatch/coalescing contract.
+  enqueueInput(instance,key,action,{coalesce=false,valid=()=>true}={}){
+    if(!['running','idle'].includes(this.state)||!valid())return Promise.resolve();
+    const epoch=this.inputEpoch||0,guarded=()=>epoch===(this.inputEpoch||0)&&['running','idle'].includes(this.state)&&valid()?action():undefined;
+    // Never move later pointer state ahead of a key/button/timer boundary.
+    let existing;
+    if(coalesce)for(let i=this.eventQueue.length-1;i>=0;i--){const pending=this.eventQueue[i];if(!pending.input||!pending.coalesce)break;if(pending.instance===instance&&pending.key===key){existing=pending;break;}}
+    if(existing){existing.action=guarded;return existing.promise;}
+    if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest input discarded.');return Promise.resolve();}
+    const event={input:true,coalesce,instance,key,action:guarded};event.promise=new Promise(resolve=>event.resolve=resolve);
+    this.eventQueue.push(event);this.processEvents();return event.promise;
+  }
   dispatch(module,name,args=[],{coalesce=false}={}){
     if(this.state==='stopped'||this.state==='error'||this.immediateContext)return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
     if(coalesce&&this.eventQueue.some(e=>e.key===key))return Promise.resolve();if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest event discarded.');return Promise.resolve();}
