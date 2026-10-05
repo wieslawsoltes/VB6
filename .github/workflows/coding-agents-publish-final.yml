@@ -1,0 +1,104 @@
+name: Coding agents verified final integration
+on:
+  push:
+    branches: [feat/coding-agents]
+    paths: [.github/workflows/coding-agents-publish-final.yml]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/coding-agents'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Integrate pinned main and apply reviewed resolutions
+        run: |
+          set -eu
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = 7d821e026b7c7cd34cfc07c452647260080e492e
+          git merge --no-ff --no-commit 7d821e026b7c7cd34cfc07c452647260080e492e || {
+            python - <<'PY'
+          import subprocess
+          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          expected = {'.gitignore','package.json','tools/build.mjs','dist/studio.js','dist/studio.css','dist/VB6-Studio-Web.html'}
+          assert conflicts and conflicts <= expected, 'Unexpected source conflicts: '+str(conflicts)
+          PY
+          }
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          main='7d821e026b7c7cd34cfc07c452647260080e492e'
+          get=lambda ref,path: subprocess.check_output(['git','show',ref+':'+path],text=True)
+          ours=json.loads(get('HEAD','package.json')); theirs=json.loads(get(main,'package.json'))
+          ours['scripts'].update({k:v for k,v in theirs['scripts'].items() if k not in ours['scripts']})
+          ours['scripts']['test:agents']='node --test tests/coding-agents*.test.mjs tests/agent-relay.test.mjs'
+          Path('package.json').write_text(json.dumps(ours,indent=2)+'\n')
+          source=get('HEAD','tools/build.mjs')
+          assert "'src/agents/agents.css'" in source
+          source=source.replace("'src/ide/ide-tools.css',", "'src/ide/ide-tools.css','src/ide/data-environment.css',")
+          Path('tools/build.mjs').write_text(source)
+          Path('.gitignore').write_text(get(main,'.gitignore')+'\n# Coding-agent browser validation reports and screenshots (CI artifacts).\nreports/coding-agents/\n')
+          for file in ['README.md','docs/coding-agents.md']:
+              p=Path(file); p.write_text(p.read_text().replace('106 typed','114 typed').replace('106 existing typed','114 existing typed'))
+          p=Path('docs/coding-agents.md')
+          source=p.read_text().replace('| Compiler | Compile the active project and inspect real diagnostics. |','| Compiler/builds | Compile the active project, inspect real diagnostics, and produce inert project JSON, HTML, source ZIP or supported Win32 artifacts with SHA-256 verification and bounded chunk reads. Builds do not execute generated code. |').replace('original project files, archives and source formats supported by this IDE.','native project groups, active/startup project selection, original project files, archives and source formats supported by this IDE.')
+          p.write_text(source)
+          p=Path('tools/coding-agents-browser-tests.py'); p.write_text(p.read_text().replace('==106','==114').replace("{'catalog':106", "{'catalog':114"))
+          p=Path('src/agents/providers.js'); p.write_text(p.read_text().replace('const decoder = new TextDecoder(), sse =', "const decoder = new TextDecoder('utf-8', {fatal: true}), sse ="))
+          p=Path('tests/coding-agents.test.mjs')
+          p.write_text(p.read_text()+r'''
+          // Corrupt UTF-8 must not silently replace source characters and then run a tool.
+          test('agents: invalid UTF-8 in JSON or SSE fails before a corrupted tool can run', async () => {
+            for (const sse of [false, true]) {
+              const prefix = sse ? 'data: {"text":"' : '{"text":"';
+              const suffix = sse ? '"}\n\n' : '"}';
+              const bytes = new Uint8Array([...new TextEncoder().encode(prefix), 0xc3, 0x28, ...new TextEncoder().encode(suffix)]);
+              let received = false;
+              await assert.rejects(readEvents(new Response(bytes, {headers: {'content-type': sse ? 'text/event-stream' : 'application/json'}}), () => { received = true; }));
+              assert.equal(received, false);
+            }
+          });
+          ''')
+          PY
+          git checkout --ours -- dist/studio.js dist/studio.css dist/VB6-Studio-Web.html
+          git add .gitignore package.json tools/build.mjs dist
+      - name: Rebuild and run complete integrated Node tests
+        run: |
+          set -eu
+          mkdir -p /tmp/coding-agents-verified
+          npm run build
+          node --check dist/studio.js
+          npm test | tee /tmp/coding-agents-verified/node-tests.txt
+          npm run test:agents | tee /tmp/coding-agents-verified/agent-tests.txt
+      - name: Verify exact locally tested tree and publish without force
+        run: |
+          set -eu
+          git add -A
+          git diff --cached --check
+          index=$(mktemp)
+          cp .git/index "$index"
+          GIT_INDEX_FILE="$index" git update-index --force-remove .github/workflows/coding-agents-publish-final.yml
+          actual=$(GIT_INDEX_FILE="$index" git write-tree)
+          rm "$index"
+          echo "$actual" > /tmp/coding-agents-verified/product-tree.txt
+          test "$actual" = 4c3dc0a6505499855ac6196cc64510e76dc85cfb
+          git commit -m 'feat(agents): integrate current MCP/data features and validate all providers'
+          git push origin HEAD:refs/heads/feat/coding-agents
+          git rev-parse HEAD > /tmp/coding-agents-verified/head.txt
+          git bundle create /tmp/coding-agents-verified/repository.bundle HEAD
+          cd /tmp/coding-agents-verified
+          sha256sum repository.bundle > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coding-agents-verified-final-source
+          path: /tmp/coding-agents-verified/
+          retention-days: 3
