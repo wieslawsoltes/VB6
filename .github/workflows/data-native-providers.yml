@@ -12,25 +12,6 @@ concurrency:
   group: native-data-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 jobs:
-  source-review:
-    if: github.ref == 'refs/heads/feat/data-native-provider-validation' || github.head_ref == 'feat/data-native-provider-validation'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Preserve exact source and branch ancestry for integration review
-        run: |
-          mkdir -p reports/source-review
-          git rev-parse HEAD > reports/source-review/head.txt
-          git bundle create reports/source-review/repository.bundle --all
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-data-source-review
-          path: reports/source-review
-          retention-days: 7
   odbc:
     runs-on: ubuntu-latest
     timeout-minutes: 10
