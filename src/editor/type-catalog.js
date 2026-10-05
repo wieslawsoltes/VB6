@@ -1,3 +1,4 @@
+import {installDataTypeCatalog} from './data-type-catalog.js';
 import {BUILTIN_SIGNATURES} from '../runtime/signatures.js';
 import {VB_CONSTANTS} from '../runtime/constants.js';
 import {DATA_CONSTANTS} from '../data/common.js';
@@ -174,7 +175,7 @@ BUILTIN_SYMBOLS.push(method('OpenDatabase','Name As String, Optional Options As 
 /** Configured data-environment names are design-time metadata, not live
  * connection/credential values. This never opens a database or an HTTP client. */
 export function runtimeType(project,name){
-  const key=symbolKey(name),alias={'dao.recordset':'ADODB.Recordset','vb6.data.connection':'ADODB.Connection','vb6.data.command':'ADODB.Command'}[key];
+  const key=symbolKey(name),alias={'vb6.data.connection':'ADODB.Connection','vb6.data.command':'ADODB.Command'}[key];
   if(alias)return builtinType(alias);
   if(key!=='dataenvironment')return null;
   const members=[...builtinType('DataEnvironment').members],data=project.dataSources||{};
@@ -195,3 +196,43 @@ rsType.members=rsType.members.filter(m=>m.name!=='Filter').concat(member('Filter
   method('Resync','Optional AffectRecords As Long = 3, Optional ResyncValues As Long = 2'),
   method('Requery'),method('Supports','CursorOptions As Long','Boolean'));
 builtinType('ADODB.Field').members.push(member('UnderlyingValue'),member('ActualSize','Long'),method('GetChunk','Length As Long','Variant'),method('AppendChunk','Data As Variant'));
+
+/** Namespace categories shared with the Object Browser. Keep them declarative:
+ * categorizing intrinsics must not create a runtime or read any project value. */
+export function builtinGroup(name){
+  const n=name.replace(/\$$/,'');
+  if(/^(CDec|CBool|CByte|CCur|CDate|CDbl|CInt|CLng|CSng|CStr|CVar|CVErr|Val|Str|Hex|Oct)$/i.test(n))return 'Conversion';
+  if(/^(Date|Time|Day|Month|Year|Hour|Minute|Second|Weekday|Now)/i.test(n))return 'DateTime';
+  if(/^(Abs|Atn|Cos|Sin|Tan|Exp|Log|Sqr|Sgn|Fix|Int|Rnd|Round|Randomize)$/i.test(n))return 'Math';
+  if(/^(DDB|FV|IPmt|IRR|MIRR|NPer|NPV|Pmt|PPmt|PV|Rate|SLN|SYD)$/i.test(n))return 'Financial';
+  if(/^(Left|Right|Mid|Len|InStr|Replace|Split|Join|Filter|LCase|UCase|Trim|LTrim|RTrim|Space|String|Asc|Chr|Format|StrComp|StrConv|StrReverse)/i.test(n))return 'Strings';
+  if(/^(Dir|File|FreeFile|EOF|LOF|Loc|Seek|CurDir|ChDir|MkDir|RmDir|Kill|Reset|Input$)/i.test(n))return 'FileSystem';
+  if(/^(Is|VarType|TypeName|LBound|UBound|Error|Erl)/i.test(n))return 'Information';
+  return 'Interaction';
+}
+const typedReturns={Atn:'Double',Cos:'Double',Exp:'Double',Log:'Double',Sin:'Double',Sqr:'Double',Tan:'Double',Sgn:'Integer',Rnd:'Single',Val:'Double',Year:'Integer',Month:'Integer',Day:'Integer',Hour:'Integer',Minute:'Integer',Second:'Integer',Weekday:'VbDayOfWeek',MonthName:'String',WeekdayName:'String',StrReverse:'String',Join:'String',Replace:'String',Split:'String',Filter:'String',FormatNumber:'String',FormatCurrency:'String',FormatPercent:'String',FormatDateTime:'String',EOF:'Boolean',LOF:'Long',Loc:'Long',Seek:'Long',FileLen:'Long',FreeFile:'Integer',CurDir:'String',Dir:'String',Environ:'String',Command:'String',GetSetting:'String',DoEvents:'Integer',Erl:'Long',DDB:'Double',FV:'Double',IPmt:'Double',IRR:'Double',MIRR:'Double',NPer:'Double',NPV:'Double',Pmt:'Double',PPmt:'Double',PV:'Double',Rate:'Double',SLN:'Double',SYD:'Double'};
+const voidFunctions=new Set('Randomize Beep Kill Reset ChDir MkDir RmDir SaveSetting DeleteSetting'.split(' '));
+for(const intrinsic of BUILTIN_SYMBOLS){
+  const type=voidFunctions.has(intrinsic.name)?'Void':Object.entries(typedReturns).find(([name])=>symbolKey(name)===symbolKey(intrinsic.name))?.[1];
+  intrinsic.libraryNamespace='VBA.'+builtinGroup(intrinsic.name);
+  if(type){intrinsic.type=type;intrinsic.signature=member(intrinsic.name,type,intrinsic.params).signature;}
+}
+// Collection members actually present on BrowserForm and handles provided by
+// VBWin32Bridge. The generic Control return does not guess its concrete type.
+add('Control',[...props('String','Name Tag ToolTipText'),...props('Boolean','Enabled Visible'),...props('Single','Left Top Width Height'),member('hWnd','Long'),method('SetFocus'),method('Move','Left As Single, Optional Top As Single, Optional Width As Single, Optional Height As Single')],{creatable:false});
+add('Controls',[member('Count','Long'),method('Item','Index As Variant','Control'),method('Add','ProgID As String, Name As String, Optional Container As Object','Control'),method('Remove','Control As Variant')],{defaultMember:'Item',creatable:false});
+for(const type of TYPE_CATALOG.values())if(type.name==='Form'||type.name==='MDIForm'||(type.aliases||[]).some(n=>n.startsWith('VB.'))){
+  if(!type.members.some(m=>m.name==='hWnd'))type.members.push(member('hWnd','Long'));
+  if(['Form','MDIForm'].includes(type.name))type.members.push(member('Controls','Controls'));
+}
+builtinType('MDIForm').creatable=false;
+
+installDataTypeCatalog({add,member,method,props,enumType:(name,pattern)=>ENUM_TYPES.set(symbolKey(name),{name,kind:'enum',members:CONSTANT_SYMBOLS.filter(s=>pattern.test(s.name)).map(s=>({...s,type:name,parentType:name}))})});
+// Only the actual browser factories and project form/class constructors are
+// New candidates. Child collection objects and singleton globals are types,
+// not constructors; metadata does not imply native activation capability.
+const browserConstructors=new Set(['collection','scripting.dictionary','scripting.filesystemobject','adodb.connection','adodb.command','adodb.recordset','dao.dbengine']);
+for(const type of TYPE_CATALOG.values())type.creatable=browserConstructors.has(symbolKey(type.name));
+
+// GDI surface handles are lazy at runtime; this metadata never acquires a DC.
+for(const name of ['Form','MDIForm','PictureBox'])builtinType(name).members.push(member('hDC','Long'));
