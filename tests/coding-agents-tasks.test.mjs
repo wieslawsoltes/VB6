@@ -206,7 +206,7 @@ test('tasks: oversized native context is rejected before any tool in its batch e
   await assert.rejects(run(f.agent, async (_, {receive}) => {
     const result = packet('openai', [{name: 'vb6_module_write', args: {module: 'Form1', code: 'bad', expectedRevision: f.adapter.revision}}]);
     result.output[1].encrypted_content = 'x'.repeat(1500000); receive(result);
-  }), /context limit before applying/);
+  }, 'openai', {maxContextBytes: 1500000}), /context limit before applying/);
   assert.equal(f.approvals(), 0); assert.equal(JSON.stringify(f.ide.project), project);
   assert.ok(f.agent.historyBytes < 1500000); assert.equal(f.agent.canResume, false);
 });
@@ -265,4 +265,43 @@ test('tasks: rejected question arguments do not enter the public conversation', 
   const question = f.agent.tools.find(tool => tool.name === 'vb6.agent.question');
   await assert.rejects(question.execute({question: 'Should this be trusted?', options: ['duplicate', 'duplicate']}));
   assert.equal(f.agent.transcript.length, 0);
+});
+
+for (const provider of providers) test(`session budget: ${provider} follow-ups retain cumulative usage and do not replenish limits`, async t => {
+  const f = fixture(t); let requests = 0;
+  const transport = async (_, {receive}) => { requests++; const p = packet(provider); if (provider === 'openai') p.usage.total_tokens = 800; else if (provider === 'anthropic') p.usage = {input_tokens: 600, output_tokens: 200}; else p.usageMetadata.totalTokenCount = 800; receive(p); };
+  await run(f.agent, transport, provider, {tokenBudget: 1024}); const history = structuredClone(f.agent.history);
+  await assert.rejects(run(f.agent, transport, provider), /Session token budget reached/);
+  assert.equal(requests, 1); assert.deepEqual(f.agent.history, history); assert.equal(f.agent.usage.tokens, 800);
+  await run(f.agent, transport, provider, {tokenBudget: 2048}); assert.equal(f.agent.usage.tokens, 1600); assert.equal(requests, 2);
+});
+test('session budget: Continue requires an explicit increase and never replays completed tools', async t => {
+  const f = fixture(t); let requests = 0;
+  await run(f.agent, async (_, {receive}) => { requests++; const p = packet('openai', [{name: 'vb6_project_get'}]); p.usage.total_tokens = 800; receive(p); }, 'openai', {tokenBudget: 1024, maxTurns: 1});
+  assert.equal(f.agent.canResume, true); const history = structuredClone(f.agent.history);
+  await assert.rejects(f.agent.resume({transport: reply('openai')}), /Session token budget reached/); assert.deepEqual(f.agent.history, history);
+  await f.agent.resume({tokenBudget: 4096, transport: async (body, {receive}) => { requests++; assert.deepEqual(body.input, history); assert.equal(body.max_output_tokens, 3296); receive(packet('openai')); }});
+  assert.equal(requests, 2); assert.equal(f.agent.usage.calls, 1); assert.equal(f.agent.usage.tokens, 810);
+});
+test('session budget: unreported failures consume a labelled estimate and preserve their partial public reply', async t => {
+  const f = fixture(t);
+  await assert.rejects(run(f.agent, async (_, {receive}) => { receive({type: 'response.output_text.delta', delta: 'Partial work'}); throw new ProviderTransportError('Network failed', {retryable: true}); }), /Network failed/);
+  assert.equal(f.agent.usage.tokens, 0); assert.equal(f.agent.unreportedRequests, 1); assert.ok(f.agent.estimatedTokens > 0); assert.equal(f.agent.budgetUsed, f.agent.estimatedTokens);
+  const partial = f.agent.thread.entries.find(e => e.kind === 'assistant'); assert.equal(partial.text, 'Partial work'); assert.equal(partial.status, 'interrupted');
+  const estimate = f.agent.estimatedTokens; await f.agent.resume({transport: reply('openai')}); assert.equal(f.agent.budgetUsed, estimate + 10); assert.equal(partial.text, 'Partial work');
+  assert.equal(f.agent.transcript.filter(e => e.type === 'usage-warning').length, 1);
+});
+test('session budget: task limits are independent; new tasks inherit numeric preferences but no usage or native context', async t => {
+  const f = fixture(t, {defaultLimits: {tokenBudget: 9876543}}), first = f.conversations.active;
+  assert.equal(first.limits.tokenBudget, 9876543); assert.equal(first.agent.limits.tokenBudget, 9876543);
+  await run(first.agent, reply('openai')); f.conversations.defaultLimits.tokenBudget = 20000000;
+  const second = f.conversations.create(); assert.equal(second.limits.tokenBudget, 20000000); assert.equal(second.agent.budgetUsed, 0); assert.equal(second.agent.thread.entries.length, 0);
+  f.conversations.select(first.id); assert.equal(first.limits.tokenBudget, 9876543); assert.equal(first.agent.usage.tokens, 10);
+});
+test('thread integration: real adapter tool progress appears before a delayed tool resolves', async t => {
+  const f = fixture(t); let resolve, entered = false;
+  f.adapter.tools.push({name: 'vb6.test.delay', description: 'Read-only delay', annotations: {readOnlyHint: true}, inputSchema: {type: 'object'}, execute() { entered = true; return new Promise(done => { resolve = done; }); }});
+  const pending = run(f.agent, async (_, {receive}) => receive(packet('openai', [{name: 'vb6_test_delay'}], '')), 'openai', {maxTurns: 1});
+  while (!entered) await tick(); const tool = f.agent.thread.entries.find(e => e.kind === 'tool'); assert.equal(tool.text, 'vb6.test.delay'); assert.equal(tool.status, 'running');
+  resolve({revision: f.adapter.revision}); await pending; assert.equal(tool.status, 'complete'); assert.ok(JSON.parse(tool.result).revision >= 0);
 });

@@ -86,18 +86,25 @@ the local relay rather than an untrusted public CORS proxy.
 
 ## Run a task
 
-Choose a connection and model. On Task, describe the change; **Run** or
-**Ctrl+Enter** opens a confirmation naming the project, provider, model and
-permission mode. Starting sends the task, tool schemas and project inventory.
+Choose a connection and model. On Task, describe the change; **Send**, **Run**, or
+**Enter** opens a confirmation naming the project, provider, model, permission mode
+and session limits. Shift+Enter inserts a line; Ctrl+Enter also sends. IME
+composition does not send. Starting sends the task, tool schemas and project inventory.
 The model can then request additional source, project, designer or debugger data.
 Review the project for secrets before granting read access. Model discovery sends
 no project source, but does send the relevant credential to the selected endpoint.
 
 The native provider loop preserves tool-call IDs, OpenAI encrypted reasoning
 items, Anthropic signed thinking blocks, and Gemini thought signatures across
-continuations. Only public assistant text is displayed; private reasoning is not
-rendered or included in the downloadable activity transcript. Model-provided text
-is displayed as plain text, not executable HTML or automatically trusted Markdown.
+continuations. The Task tab displays a live conversation: public replies, waiting
+status, collapsible tool operations, approvals, plans and questions. Private
+reasoning and native signatures are never rendered or included in exported
+transcripts. Completed messages use a bounded text-only Markdown subset with
+copyable code and safe HTTP(S) links; model HTML, images and embeds are not executed.
+The composer remains available for drafting while a reply runs. Scrolling upward
+preserves the reading position; Jump to latest restores following. Interrupted
+partial replies remain visible and are labelled as incomplete. See
+[Conversation behavior and session budgets](CODING-AGENT-THREADS.md).
 
 The agent inspects, edits and validates the **actual IDE project**. It uses all
 125 existing typed tools, subject to the chosen permission mode:
@@ -216,25 +223,41 @@ may still propose another operation in its next response; normal approval and
 revision safeguards remain in force. Historical results are not assumed current.
 
 There are **no automatic retries**. HTTP 408, 429, 500, 502, 503, 504 and 529, and
-pre-response network failures/timeouts, allow a manual Continue. A bounded
+pre-response connection failures and request timeouts (including timed-out
+streaming responses), allow a manual Continue. A bounded
 provider `Retry-After` suggestion is shown (at most five minutes); it schedules
 nothing. The local relay forwards only this sanitized retry metadata, not error
 bodies or arbitrary provider headers. An earlier request may already have been
 processed/billed. Authentication/validation failures, cancellation, denied
-operations, partial/corrupt streams and uncertain tool batches remain blocked and
+operations, malformed/incomplete native responses and uncertain tool batches remain blocked and
 require a new task. The engine never retries a possibly half-applied batch.
 
-Default per-run limits are 16 provider requests, 128 tool calls, 8,192 output tokens
-per request and 200,000 **reported** tokens. All four limits are exposed on the
-Permissions tab. Continue requires a new user decision and starts new per-run
-limits; cumulative task counters remain visible. Reported usage is **not a hard
-billing cap**. Provider reporting may omit usage or include cached/reasoning tokens;
-use provider-side spend controls where available. Stop does not undo edits,
-reverse external data-source actions, or guarantee immediate cessation of billing.
+The new Extended default allows 128 provider requests and 1,024 tool calls per run,
+32,768 output tokens per request, and a cumulative **4,000,000-token task budget**.
+The Large preset allows 20,000,000 tokens; the configurable application ceiling is
+100,000,000. All six limits, including context bytes and request timeout, are
+independently editable on Permissions. Only validated numeric preferences can
+persist in browser storage; tasks, keys, connection settings and grants do not.
+Continue requires a new user decision and resets per-run request/tool allowances,
+not the cumulative token budget. Raise an exhausted allowance explicitly or use
+New Task. Unknown provider usage is separately labelled as a byte/public-text
+safety estimate and counted against the allowance, not presented as billed tokens.
+These limits are **not a hard billing cap or model capability guarantee**: one
+request can exceed the remaining allowance. Review provider billing and spend
+controls. Stop does not undo edits, reverse external data-source actions, or
+guarantee immediate cessation of billing.
+
+See the [complete presets, ranges and accounting rules](CODING-AGENT-THREADS.md#limits).
+Generation requests default to ten minutes and can be configured up to thirty;
+model discovery remains capped at two minutes. Longer generation timeouts do not
+extend the existing ten-minute scoped permission grant.
 
 The task status displays native context size in KiB, not a model-specific token
-estimate. Requests are capped at 1.5 MB; provider responses at 8 MiB; retained
-public activity at 500 entries/approximately 512 KB. Individual public text is
+estimate. The request-context default is 6 MB, configurable up to 16 MB; provider
+responses remain capped at 8 MiB. The public thread keeps at most 1,200 entries
+and four million accounted characters, while the separate activity audit keeps
+500 entries/approximately 512 KB. Thread previews are capped at 262,144 characters
+per public field. Omissions and truncation are explicit. Individual activity text is
 clipped with an explicit marker. Before executing a tool batch the engine reserves
 space for bounded, explicitly marked tool results. Large results require smaller
 ranges/pages. **Native reasoning/signatures are never truncated or rewritten.**
@@ -270,7 +293,11 @@ transport, bounded SSE/JSON parsing and model discovery. `agent.js` implements
 provider-independent orchestration and `resume()`. `conversations.js` exports the
 memory-only `AgentConversations` manager; `task-tools.js` implements local plans
 and questions. `review.js` builds pure before/after data.
-`studio.js` is the classic IDE adapter/UI; `agents.css` uses existing theme tokens.
+`thread.js` maintains bounded public presentation state independently of native
+provider histories; `thread-view.js` renders keyed classic conversation entries,
+safe formatting, copy actions and scroll anchoring. `limits.js` validates numeric
+preferences and presets. `studio.js` is the classic IDE adapter/UI; `agents.css`
+uses existing theme tokens.
 `tools/agent-relay.mjs` exports `createAgentRelay` and provides the optional CLI.
 No provider SDK, CDN script or new npm dependency is required.
 
@@ -300,7 +327,9 @@ modular HTTP, standalone HTTP and standalone file origins. It checks consent, Be
 Undo, scoped/read-only permissions, Stop, model discovery, inert model text,
 credential clearing/export exclusion, tool catalog, task/draft switching, plans,
 questions, reviewed context handoff, exact-once edit preservation across Continue,
-manual retry and workspace lifecycle.
+manual retry and workspace lifecycle, plus live tool-only/streaming threads,
+scroll/selection anchoring, formatting/copy, draft recovery, Enter/IME and budget
+preferences.
 Screenshots/results are retained as CI artifacts. Its explicit `--opaque` option
 is UI-only fallback validation for locally managed browsers; it is not used by CI
 and is not evidence of file/HTTP deployment coverage.
