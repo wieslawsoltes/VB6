@@ -52,7 +52,8 @@ export function dateFixture(){
   check('other = d','date formatting round-trips through the Windows user locale');
   check('IsDate(text) And Not IsDate("not a date") And Not IsDate("") And Not IsDate(vbNullString)','IsDate handles valid and invalid text without raising');
   check('Not IsDate("2024-02-29" & ChrW(0) & "bad")','embedded NUL date text is not silently truncated');
-  check('IsDate(-657434) And IsDate(2958465.75) And Not IsDate(-657435) And Not IsDate(2958466)','IsDate tests actual date bounds');
+  check('IsDate(CDate(-657434)) And IsDate(CDate(2958465.75)) And Not IsDate(-657435) And Not IsDate(2958466)','IsDate recognizes typed Dates but does not coerce numeric inputs');
+  check('Not IsDate(True) And Not IsDate(False) And Not IsDate(1) And Not IsDate(1@) And Not IsDate(CDbl(1))','IsDate rejects Boolean and numeric types independently of value');
   check('DateValue(CDate(-1.25)) = CDate(-1) And TimeValue(CDate(-1.25)) = CDate(0.25)','DateValue/TimeValue strip negative serial parts correctly');
   check('DateValue("2024-02-29 06:00:00") = #2024-02-29# And TimeValue("2024-02-29 06:00:00") = CDate(0.25)','text date/time projection through Automation');
   check('Weekday(#2024-02-29#) = 5 And Weekday(#2024-02-29#,2) = 4','Weekday honors explicit first day');

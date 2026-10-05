@@ -77,3 +77,13 @@ test('independent Date ABI/calendar fixture builds without invoking a foreign co
  assert.deepEqual(result.bytes,compileWin32(p).bytes);
  assert.ok(result.report.imports.some(i=>i.symbol==='EchoDate'));
 });
+
+test('IsDate evaluates non-Date scalar arguments once without numeric date coercion',()=>{
+ for(const type of ['boolean','long','double','single','currency']){
+  const seen=[],x={value:n=>seen.push(n)};
+  const c={x,type:()=>type,expression:n=>seen.push(n),variable:()=>null,resolveProcedure:()=>null,fail:compiler.fail};
+  const input={kind:'id',name:'value'},call={kind:'call',callee:{kind:'id',name:'IsDate'},args:[input]};
+  assert.equal(nativeDateMethods.dateBuiltin.call(c,call,'isdate'),true);
+  assert.deepEqual(seen,[input,0]);
+ }
+});

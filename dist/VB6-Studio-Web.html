@@ -5940,8 +5940,13 @@ const nativeDateMethods={
     if(args.length!==1)this.fail(name+' expects one argument');
     if(name==='isdate'){
       const type=this.type(args[0]);
-      if(type==='string')this.expression(args[0]);else this.floatExpression(args[0]);
-      x.push().call(D+(type==='string'?'is-string':'is-number'));return true;
+      // IsDate inspects Date values or parseable strings, not every number that
+      // CDate could convert. Still evaluate non-Date arguments exactly once.
+      this.expression(args[0]);
+      if(type==='string'||type==='date')x.push().call(D+(type==='string'?'is-string':'is-number'));
+      else if(numbers.has(type))x.value(0);
+      else this.fail('IsDate requires a supported scalar expression');
+      return true;
     }
     if(name==='cdate'){this.dateExpression(args[0]);return true;}
     if(Object.hasOwn(parts,name)){

@@ -14,7 +14,12 @@ export const DATE_CONTRACTS = [
  ['Date Int type','VarType(Int(CDate(-1.25)))'],['Date Fix type','VarType(Fix(CDate(-1.25)))'],['Date Abs type','VarType(Abs(CDate(-1.25)))'],
  ['Negative date ordering','CLng(CDate(-1.5) < CDate(-1.25))'],
  ['Normalized minimum','CLng(CDbl(DateSerial(100,0,32)))'],['Normalized maximum','CLng(CDbl(DateSerial(9999,13,-30)))'],
- ['Leap normalization','CLng(CDbl(DateSerial(1900,2,29)))'],['Negative month normalization','CLng(CDbl(DateSerial(2024,-12,1)))']
+ ['Leap normalization','CLng(CDbl(DateSerial(1900,2,29)))'],['Negative month normalization','CLng(CDbl(DateSerial(2024,-12,1)))'],
+ // Probe boundary normalization separately from the 4,800 ordinary dates. The
+ // results stay independent input data; no native result is treated as its oracle.
+ ...[-1,0,29,30,99,100,101,9999,10000].flatMap(y=>[-13,0,1,13].flatMap(m=>[-31,0,1,32].map(d=>[
+   `DateSerial boundary (${y},${m},${d})`, `CLng(CDbl(DateSerial(${y},${m},${d})))`
+ ])))
 ];
 export function writeReference(directory='validation/dates') {
  fs.mkdirSync(directory,{recursive:true});
