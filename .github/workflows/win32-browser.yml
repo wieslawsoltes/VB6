@@ -1,21 +1,19 @@
 name: Win32 browser compatibility
 on:
   push:
-    branches: [main, feature/win32-browser-compat]
-  pull_request:
+    branches: [feature/win32-browser-compat]
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: win32-browser-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
 jobs:
   compatibility:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Archive exact source for reproducibility
+        with:
+          ref: 7d821e026b7c7cd34cfc07c452647260080e492e
+      - name: Archive exact source for integration testing
         run: git archive --format=zip HEAD -o /tmp/vb6-win32-source.zip
       - uses: actions/upload-artifact@v4
         with:
