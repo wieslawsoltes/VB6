@@ -4,7 +4,7 @@ const key = value => String(value).toLowerCase();
 const mem = memory => ({memory});
 const arg = argument => ({argument});
 const E = 'native:error:';
-const DESCRIPTIONS = new Map([[5,'Invalid procedure call or argument'],[6,'Overflow'],[7,'Out of memory'],[9,'Subscript out of range'],[10,'This array is fixed or temporarily locked'],[11,'Division by zero'],[13,'Type mismatch'],[20,'Resume without error']]);
+const DESCRIPTIONS = new Map([[5,'Invalid procedure call or argument'],[6,'Overflow'],[7,'Out of memory'],[9,'Subscript out of range'],[10,'This array is fixed or temporarily locked'],[11,'Division by zero'],[13,'Type mismatch'],[20,'Resume without error'],[340,'Control array element does not exist']]);
 // Metadata is relative to the native VB procedure's EBP, before its user locals.
 const F = {previous:-4,stack:-8,dispatch:-12,handler:-16,active:-20,current:-24,next:-28,fault:-32,resumeNext:-36,line:-40,erl:-44,source:-48};
 const localStore = (x, offset) => x.emit(0x89,0x85).imm(offset);

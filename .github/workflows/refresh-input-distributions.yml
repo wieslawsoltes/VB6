@@ -1,0 +1,40 @@
+name: Refresh input-fix distributions
+on:
+  push:
+    branches: [fix/live-editor-control-list, fix/editor-event-selection, fix/form-keyboard-mouse-input]
+    paths: [src/**, tools/**, tests/**, .github/workflows/refresh-input-distributions.yml]
+permissions:
+  contents: write
+concurrency:
+  group: refresh-input-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'wieslawsoltes/VB6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/integrate-input-fix.mjs
+      - run: npm run build && npm test
+      - name: Commit verified integration and generated bundles
+        env:
+          BRANCH: ${{ github.ref_name }}
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          case "$BRANCH" in
+            fix/live-editor-control-list|fix/editor-event-selection|fix/form-keyboard-mouse-input) ;;
+            *) exit 1 ;;
+          esac
+          git add src/editor/editor.js src/ide/documents.js src/controls/controls.js src/runtime/vm.js dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: integrate verified input-fix source and regenerated bundles'
+          git push origin "HEAD:refs/heads/$BRANCH"

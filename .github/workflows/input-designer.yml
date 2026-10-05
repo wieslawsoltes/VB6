@@ -25,12 +25,14 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm run build
+      - run: node --test tests/runtime-input.test.mjs
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Reported input and designer regressions
         env:
           VB6_BROWSER: ${{ matrix.browser }}
         run: |
-          for test in tools/browser-designer-selection.py tools/browser-editor-control-list.py tools/browser-editor-event-selection.py tools/browser-form-input.py; do
-            if test -f "$test"; then python "$test"; fi
-          done
+          python tools/browser-designer-selection.py
+          python tools/browser-editor-control-list.py
+          python tools/browser-editor-event-selection.py
+          python tools/browser-form-input.py

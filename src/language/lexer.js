@@ -34,7 +34,7 @@ export function tokenize(text) {
     if (/[a-z_\u0080-\uffff]/i.test(c) || c === '[') {
       let name;
       if (c === '[') { const end = text.indexOf(']', i); if (end < 0) throw new VBError('Expected ]', 1002); name = text.slice(i+1, end); i = end+1; }
-      else { i++; while (i < text.length && /[\w\u0080-\uffff]/.test(text[i])) i++; if (/[$%&!#@]/.test(text[i] || '\0')) i++; name = text.slice(start,i); }
+      else { i++; while (i < text.length && /[\w\u0080-\uffff]/.test(text[i])) i++; if (/[$%&!#@]/.test(text[i] || '\0') && !(text[i] === '!' && /[a-z_\u0080-\uffff\[]/i.test(text[i+1] || ''))) i++; name = text.slice(start,i); }
       if (name.toLowerCase() === 'rem' && (!out.length || out.at(-1).value === ':')) break;
       push('id', name, start); continue;
     }

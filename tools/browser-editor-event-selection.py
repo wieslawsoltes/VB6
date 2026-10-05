@@ -29,6 +29,13 @@ with fixture() as page:
     }''')
     assert page.evaluate('requests') == []
     assert page.evaluate("editor.procedures.selectedOptions[0].dataset.event") == 'Timer'
+    page.evaluate('''() => {
+        requests=[];module.code=module.code.slice(0,module.code.indexOf('Private Sub Timer1_Timer'));
+        editor.setDocument(module,project);
+    }''')
+    assert page.evaluate('editor.procedures.selectedIndex') == -1
+    page.get_by_label('Procedure', exact=True).select_option('event:Timer')
+    assert page.evaluate('requests') == [{'object': 'Timer1', 'event': 'Timer'}]
     page.evaluate('editor.dispose()')
     page.evaluate('''() => {
         const {IdeDocuments,VB6Studio,newProject,createControl}=Fixture;
@@ -52,4 +59,4 @@ with fixture() as page:
     assert page.evaluate("(ide.project.modules[0].code.match(/Private Sub Timer1_Timer/g)||[]).length") == 1
     assert page.evaluate('ide.activeModule.id===editor.module.id')
     page.evaluate('ide.documents.reset();ide.documents.fallbackDesigner.dispose();ide.documents.fallbackEditor.dispose()')
-print('PASS: sole-event keyboard/selection, no automatic creation, read-only guard, existing navigation, IDE handler wiring and deduplication')
+print('PASS: sole-event keyboard/selection, no automatic creation, read-only guard, existing navigation, deleted-handler reselection, IDE handler wiring and deduplication')

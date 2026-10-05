@@ -13,6 +13,7 @@ export class ExpressionParser {
     if(this.peek().type==='id'&&this.tokens[this.i+1]?.value===':='){
       const name=this.take().value;this.take();return {kind:'named',name,expr:this.expression()};
     }
+    if(this.match('byval'))return {kind:'byval',expr:this.expression()};
     return this.expression();
   }
   qualifiedName() {
@@ -26,6 +27,7 @@ export class ExpressionParser {
     else if(t.type==='date') node={kind:'date',value:t.value};
     else if(value==='('){node=this.expression();this.expect(')');node={kind:'group',expr:node};}
     else if(value==='+'||value==='-'||value==='not') node={kind:'unary',op:value,expr:this.expression(value==='not'?6:13)};
+    else if(value==='addressof')node={kind:'addressOf',name:this.qualifiedName()};
     else if(value==='new')node={kind:'new',name:this.qualifiedName()};
     else if(value==='typeof'){const expr=this.expression(8);this.expect('is');node={kind:'typeof',expr,name:this.qualifiedName()};}
     else if(value==='.') { const name=this.take();if(name.type!=='id')throw new VBError('Expected member name',1002);node={kind:'member',object:{kind:'with'},name:name.value}; }
