@@ -18,3 +18,13 @@ export function instructionMap(oldCode,newCode,shape){
  for(let k=0;k<anchors.length-1;k++){const [x,y]=anchors[k],[nextX,nextY]=anchors[k+1],length=nextX-x-1;if(length!==nextY-y-1)continue;for(let q=1;q<=length;q++)if(shape(oldCode[x+q])===shape(newCode[y+q]))map.set(x+q,y+q);}
  return map;
 }
+
+/** Index each new instruction once. Ambiguous duplicates deliberately remain
+ * unmapped; a large inactive/retained procedure must not require an O(n*m) scan.
+ */
+export function uniqueInstructionLines(oldCode,newCode){
+  const unique=new Map(),lines=new Map();
+  for(const instruction of newCode){const key=instructionKey(instruction);unique.set(key,unique.has(key)?null:instruction);}
+  for(const instruction of oldCode){if(instruction.implicit)continue;const match=unique.get(instructionKey(instruction));if(match)lines.set(instruction.line,match.line);}
+  return lines;
+}

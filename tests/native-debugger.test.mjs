@@ -22,7 +22,7 @@ function engine({respond,timeout=2000,initial='0:000> '}={}){
       else if(command==='~')result=' . 0 Id: 4d2.3c0 Suspend: 0 Teb: 00000000 Unfrozen';
       else if(command==='r')result='rax=0000000000000001 rip=00007ff6`12345678 rsp=00000000`12340000';
       else if(command.startsWith('kn'))result='00 00000000`12340000 00007ff6`12345600 fixture!Tick+0x2';
-      else if(/^b[pu]\d+ /.test(command)){pendingBreakpoints.add(Number(/^b[pu](\d+)/.exec(command)[1]));result='';}
+      else if(/^b[pua]\d+ /.test(command)){pendingBreakpoints.add(Number(/^b[pua](\d+)/.exec(command)[1]));result='';}
       else if(command==='bl')result=[...pendingBreakpoints].map(id=>`${id} e Disable Clear 00007ff6\`12345678 fixture!Tick`).join('\n');
       else result='';
     }
@@ -157,4 +157,62 @@ test('native bridge detach and server closure leave no retained session token ca
 });
 test('native bridge idle lease detaches a disconnected browser session',async t=>{
   const {bridge,created}=await service(t,{authorize:async()=>true,leaseMilliseconds:1000});await post(bridge,{method:'attach',params:{pid:1}});await new Promise(r=>setTimeout(r,2100));assert.equal(created[0].aborted,true);assert.equal(created[0].calls.filter(c=>c.method==='detach').length,1);
+});
+
+
+test('native hardware data breakpoints share the verified lifecycle and enforce alignment',async t=>{
+  const {session,writes}=await started(t);
+  const bp=await session.request('setDataBreakpoint',{address:'1000',access:'write',size:4,pauseId:session.pauseId});
+  assert.equal(bp.kind,'data');assert.equal(bp.access,'write');assert.equal(bp.size,4);
+  assert.ok(writes.some(s=>s.startsWith('ba1 w 4 0x1000;')));
+  await session.request('enableBreakpoint',{id:bp.id,enabled:false});
+  assert.equal(session.snapshot().breakpoints[0].enabled,false);
+  await session.request('removeBreakpoint',{id:bp.id});assert.equal(session.snapshot().breakpoints.length,0);
+  for(const params of [{address:'1001',size:4,access:'write'},{address:'1000',size:3,access:'readWrite'},{address:'1000',size:4,access:'io'},{address:'1000',size:2,access:'execute'}]){
+    const count=writes.length;await assert.rejects(session.request('setDataBreakpoint',params),{code:'INVALID_ARGUMENT'});assert.equal(writes.length,count);
+  }
+});
+test('native breakpoint metadata and queued request arguments cannot be changed by the caller',async t=>{
+  const {session,writes}=await started(t),params={location:'fixture!Tick'};
+  const pending=session.request('setBreakpoint',params);params.location='fixture!Changed';
+  const bp=await pending;bp.location='forged';session.snapshot().breakpoints[0].enabled=false;
+  assert.equal(session.snapshot().breakpoints[0].location,'fixture!Tick');assert.equal(session.snapshot().breakpoints[0].enabled,true);
+  assert.ok(writes.some(s=>s.startsWith('bu1 fixture!Tick;')));
+});
+test('native partial memory writes invalidate the old mutation ticket',async t=>{
+  const {session}=await started(t,{respond:c=>c.startsWith('db ')?'00000000`00001000  01 00  ..':undefined}),pause=session.pauseId;
+  await assert.rejects(session.request('writeMemory',{address:'1000',bytes:[1,2],pauseId:pause}),{code:'PARTIAL_WRITE'});
+  assert.ok(session.pauseId>pause);await assert.rejects(session.request('continue',{pauseId:pause}),{code:'STALE_PAUSE'});
+});
+test('native write command failure also invalidates the old pause without reporting success',async t=>{
+  const {session}=await started(t,{respond:c=>c.startsWith('eb ')?'Memory access error at 00001001':undefined}),pause=session.pauseId;
+  await assert.rejects(session.request('writeMemory',{address:'1000',bytes:[1,2],pauseId:pause}),{code:'COMMAND_FAILED'});
+  assert.ok(session.pauseId>pause);assert.equal(session.state,'paused');
+});
+
+test('native Run to Address reserves its own ID and cancels after an unrelated stop',async t=>{
+  const {session,child,writes}=await started(t);
+  await session.request('runToAddress',{address:'2000',pauseId:session.pauseId});
+  assert.equal(session.snapshot().breakpoints[0].temporary,true);
+  assert.ok(writes.some(s=>s.startsWith('bp1 /1 0x2000;')));
+  child.stdout.write('Unrelated breakpoint\r\n0:000> ');await session.waitPaused();
+  const normal=await session.request('setBreakpoint',{location:'fixture!Tick',pauseId:session.pauseId});
+  assert.equal(normal.id,2);assert.ok(writes.some(s=>s.startsWith('bc 1;')));
+  assert.deepEqual(session.snapshot().breakpoints.map(b=>b.id),[2]);
+});
+test('native pending-operation limit does not grow an unbounded command queue',async t=>{
+  const {session}=await started(t),pending=Array.from({length:256},()=>session.request('status'));
+  await assert.rejects(session.request('status'),{code:'QUEUE_LIMIT'});await Promise.all(pending);
+  assert.equal(session.pendingOperations,0);assert.equal((await session.request('status')).state,'paused');
+  await assert.rejects(session.request('status',{callback(){}}),{code:'INVALID_ARGUMENT'});
+});
+
+
+test('native bridge requires a pause identity for hardware watchpoints',async t=>{
+  const {bridge,created}=await service(t,{authorize:async()=>true}),s=(await post(bridge,{method:'attach',params:{pid:1}})).body.result;
+  const args={session:s.id,address:'1000',size:4,access:'write'};
+  assert.equal((await post(bridge,{method:'setDataBreakpoint',params:args})).body.error.code,'INVALID_ARGUMENT');
+  assert.equal(created[0].calls.length,0);
+  assert.equal((await post(bridge,{method:'setDataBreakpoint',params:{...args,pauseId:7}})).status,200);
+  assert.deepEqual(created[0].calls.at(-1),{method:'setDataBreakpoint',params:{address:'1000',size:4,access:'write',pauseId:7}});
 });

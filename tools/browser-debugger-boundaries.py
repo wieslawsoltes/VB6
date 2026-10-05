@@ -104,12 +104,18 @@ class NativeTransportFixture:
         elif method=='setRegister':self.state['pauseId']+=1;result={'registers':{'rip':'0x1000','rax':args['value']}}
         elif method=='threads':result={'threads':[{'index':0,'pid':1234,'tid':99,'current':True,'details':'Unfrozen'}]}
         elif method=='processes':result={'processes':[{'index':0,'pid':1234,'name':'NativeFixture','current':True}]}
-        elif method=='setBreakpoint':
-            self.state['breakpoints'].append({'id':1,'location':args['location'],'enabled':True});result=self.state['breakpoints'][-1]
+        elif method in ('setBreakpoint','setDataBreakpoint'):
+            item={'id':len(self.state['breakpoints'])+1,'location':args.get('location',args.get('address')),'enabled':True}
+            if method=='setDataBreakpoint':item.update(kind='data',access=args['access'],size=args['size'])
+            self.state['breakpoints'].append(item);result=item
+        elif method=='enableBreakpoint':
+            next(bp for bp in self.state['breakpoints'] if bp['id']==args['id'])['enabled']=args['enabled'];result=dict(self.state)
+        elif method=='removeBreakpoint':
+            self.state['breakpoints']=[bp for bp in self.state['breakpoints'] if bp['id']!=args['id']];result=dict(self.state)
         elif method=='detach':result={**self.state,'state':'closed'}
         elif method=='evaluate':result={'text':'Evaluate expression: 42 = 00000000`0000002a'}
         elif method=='readMemory':result={'address':args['address'],'bytes':[1,None,3,4],'unreadableBytes':1}
-        elif method=='writeMemory':result={'address':args['address'],'bytes':args['bytes'],'unreadableBytes':0}
+        elif method=='writeMemory':self.state['pauseId']+=1;result={'address':args['address'],'bytes':args['bytes'],'unreadableBytes':0,'pauseId':self.state['pauseId']}
         elif method=='stepMode':self.state['stepMode']=args['mode'];result={'mode':args['mode']}
         elif method=='allProcessStacks':self.state['pauseId']+=1;result={'pauseId':self.state['pauseId'],'processes':[{'process':{'pid':1234,'name':'NativeFixture'},'text':'NativeFixture!Tick'}]}
         else:result={'text':method}
@@ -167,6 +173,27 @@ def native_memory(page):
     page.wait_for_function('document.querySelector(".ide-dialog pre")?.textContent.includes("2a 00")')
     base.check(next(x for x in fixture.calls if x['method']=='writeMemory')['params']['bytes']==[42,0])
     dialog.get_by_role('button',name='Close',exact=True).click()
+    expect(pane.get_by_label('Native debugger state',exact=True)).to_contain_text('pause 2')
+    pane.get_by_role('button',name='Step Into',exact=True).click()
+    expect(pane.get_by_label('Native debugger state',exact=True)).to_contain_text('pause 3')
+    base.check(next(x for x in fixture.calls if x['method']=='stepInto')['params']['pauseId']==2)
+    pane.get_by_role('button',name='Detach',exact=True).click()
+
+
+def native_data_breakpoint(page):
+    fixture,pane=native_connect(page)
+    pane.get_by_role('button',name='Data Breakpoint…',exact=True).click()
+    dialog=page.get_by_role('dialog',name='Native Data Breakpoint',exact=True)
+    dialog.get_by_label('Data breakpoint address',exact=True).fill('0x2000')
+    dialog.get_by_label('Data breakpoint size',exact=True).select_option('4')
+    dialog.get_by_label('Data breakpoint access',exact=True).select_option('readWrite')
+    dialog.get_by_role('button',name='Add',exact=True).click()
+    expect(pane.get_by_label('Native debugger result',exact=True)).to_contain_text('readWrite (4 bytes)')
+    request=next(x for x in fixture.calls if x['method']=='setDataBreakpoint')
+    base.check(request['params']=={'session':'test-session','pauseId':1,'address':'0x2000','access':'readWrite','size':4},request)
+    pane.get_by_role('button',name='Remove',exact=True).click()
+    expect(pane.get_by_label('Native debugger result',exact=True)).not_to_contain_text('readWrite')
+    base.check(not fixture.state['breakpoints'])
     pane.get_by_role('button',name='Detach',exact=True).click()
 
 
@@ -181,7 +208,7 @@ def native_bad_endpoint(page):
 
 
 def main():
-    cases=[('Versioned Edit and Continue exposes retained source without replay',versioned),('Event-driven Immediate debugs actual timer and button callbacks',events),('Replacing a promoted Immediate project disposes the runtime',event_replace),('Native debugger classic controls and private connection token (transport fixture)',native_steps),('Native breakpoint and explicit memory UI (transport fixture)',native_memory),('Native connection refuses non-loopback destinations',native_bad_endpoint)]
+    cases=[('Versioned Edit and Continue exposes retained source without replay',versioned),('Event-driven Immediate debugs actual timer and button callbacks',events),('Replacing a promoted Immediate project disposes the runtime',event_replace),('Native debugger classic controls and private connection token (transport fixture)',native_steps),('Native breakpoint and explicit memory UI (transport fixture)',native_memory),('Native hardware data-breakpoint dialog and removal (transport fixture)',native_data_breakpoint),('Native connection refuses non-loopback destinations',native_bad_endpoint)]
     results=[]
     with sync_playwright() as pw:
         engine=os.environ.get('VB6_BROWSER','chromium');launch={'headless':True}

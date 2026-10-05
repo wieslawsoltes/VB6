@@ -1,3 +1,4 @@
+import {uniqueInstructionLines} from '../src/runtime/instruction-map.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {VirtualMachine} from '../src/runtime/vm.js';
@@ -21,3 +22,36 @@ test('repeated versioned edits never relabel retained source as the latest revis
 test('versioned removal of an active procedure keeps that invocation alive',async t=>{const code='Sub Main()\nWorker\nEnd Sub\nSub Worker()\nDebug.Print 4\nEnd Sub';const {vm,p,running,out}=await paused(t,code,5);p.modules[0].code='Sub Main()\nDebug.Print 9\nEnd Sub';vm.applyEdits(p,{policy:'versioned'});assert.equal(vm.program.modules.get('m').procedures.has('worker'),false);vm.breakpoints.clear();vm.resume();await running;assert.deepEqual(out,['4']);});
 test('versioned invalid source and incompatible storage changes remain atomic',async t=>{const code='Public count As Long\nSub Main()\nDebug.Print count\nEnd Sub';const {vm,p,running}=await paused(t,code,3),old=vm.currentFrame.proc;p.modules[0].code='Sub Broken(';assert.throws(()=>vm.applyEdits(p,{policy:'versioned'}));assert.equal(vm.currentFrame.proc,old);p.modules[0].code=code.replace('count As Long','count As String');assert.throws(()=>vm.applyEdits(p,{policy:'versioned'}),/storage changed/);assert.equal(vm.currentFrame.proc,old);assert.equal(vm.codeRevision,undefined);vm.resume();await running;});
 test('safe versioned edits still update the pending statement immediately',async t=>{const {vm,p,running,out}=await paused(t,'Sub Main()\nDebug.Print 1\nEnd Sub',2);p.modules[0].code='Sub Main()\nDebug.Print 2\nEnd Sub';const result=vm.applyEdits(p,{policy:'versioned'});assert.deepEqual(result.retainedFrames,[]);assert.equal(vm.debugStack()[0].retained,undefined);vm.resume();await running;assert.deepEqual(out,['2']);});
+
+
+test('versioned edits never alias a changed Static local type to an old live cell',async t=>{
+  const code='Sub Main()\nWork\nWork\nEnd Sub\nSub Work()\nStatic value As Long\nvalue = value + 1\nDebug.Print value\nEnd Sub';
+  const {vm,p,running,out}=await paused(t,code,7),cell=vm.currentFrame.locals.get('value');
+  p.modules[0].code=code.replace('Static value As Long','Static value As String').replace('value = value + 1','value = "new"');
+  assert.throws(()=>vm.applyEdits(p,{policy:'versioned'}),/static local storage/i);
+  assert.equal(vm.currentFrame.locals.get('value'),cell);assert.equal(cell.get(),0);assert.equal(vm.codeRevision,undefined);
+  vm.breakpoints.clear();vm.resume();await running;assert.deepEqual(out,['1','2']);
+});
+test('inactive static layouts are protected by both live-edit policies',async t=>{
+  const code='Sub Main()\nWork\nDebug.Print "pause"\nWork\nEnd Sub\nSub Work()\nStatic value As Long\nvalue = value + 1\nDebug.Print value\nEnd Sub';
+  const {vm,p,running,out}=await paused(t,code,3);
+  p.modules[0].code=code.replace('Static value As Long','Static value As String');
+  for(const policy of ['strict','versioned'])assert.throws(()=>vm.applyEdits(p,{policy}),/static local storage/i);
+  vm.breakpoints.clear();vm.resume();await running;assert.deepEqual(out,['1','pause','2']);
+});
+test('adding a new Static local preserves an existing compatible static value',async t=>{
+  const code='Sub Main()\nWork\nDebug.Print "pause"\nWork\nEnd Sub\nSub Work()\nStatic value As Long\nvalue = value + 1\nDebug.Print value\nEnd Sub';
+  const {vm,p,running,out}=await paused(t,code,3);
+  p.modules[0].code=code.replace('Static value As Long','Static value As Long\nStatic added As Long');
+  vm.applyEdits(p,{policy:'versioned'});vm.breakpoints.clear();vm.resume();await running;
+  assert.deepEqual(out,['1','pause','2']);
+});
+
+
+test('large retained instruction mapping indexes each new instruction only once',()=>{
+  let reads=0;const make=(line,n)=>({line,get op(){reads++;return 'print';},value:n});
+  const old=Array.from({length:5000},(_,i)=>make(i+1,i)),next=Array.from({length:5000},(_,i)=>make(i+2,i));
+  const mapping=uniqueInstructionLines(old,next);assert.equal(mapping.size,5000);assert.equal(mapping.get(5000),5001);
+  assert.equal(reads,10000,'Each old/new instruction is serialized once, without a quadratic candidate scan');
+  assert.equal(uniqueInstructionLines([{op:'print',line:1,value:1}],[{op:'print',line:2,value:1},{op:'print',line:3,value:1}]).size,0,'Duplicate destinations remain ambiguous');
+});

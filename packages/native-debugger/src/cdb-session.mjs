@@ -37,7 +37,7 @@ export class CdbSession extends EventEmitter {
     this.timeout = integer(timeout, 'command timeout', 100, 120000); this.platform = platform;
     this.generation = 0; this.processIds = new Map(); this.operations = Promise.resolve(); this.state = 'new'; this.pauseId = 0; this.queue = Promise.resolve(); this.buffer = ''; this.pending = null; this.breakpoints = new Map(); this.sequence = 0;
   }
-  snapshot() { return {state: this.state, stepMode:this.stepMode||'assembly', pauseId: this.pauseId, pid: this.pid ?? null, targetPid: this.targetPid ?? null, processIndex: this.processIndex ?? 0, threadIndex: this.threadIndex ?? 0, breakpoints: [...this.breakpoints.values()]}; }
+  snapshot() { return {state: this.state, stepMode:this.stepMode||'assembly', pauseId: this.pauseId, pid: this.pid ?? null, targetPid: this.targetPid ?? null, processIndex: this.processIndex ?? 0, threadIndex: this.threadIndex ?? 0, breakpoints: [...this.breakpoints.values()].map(value=>({...value}))}; }
   setState(state) { this.state = state; this.emit('state', this.snapshot()); }
   async start({pid, executable, args = [], debugChildren = false} = {}) {
     if (this.state !== 'new') throw new NativeDebugError('Debugger session already started', 'INVALID_STATE');
@@ -125,18 +125,34 @@ export class CdbSession extends EventEmitter {
     const result = this.queue.then(perform); this.queue = result.catch(() => {}); return result;
   }
   request(operation, params = {}) {
-    const result = this.operations.then(() => this.perform(operation, params));
+    if((this.pendingOperations||0)>=256)return Promise.reject(new NativeDebugError('Native command queue is full','QUEUE_LIMIT'));
+    let snapshot;try{snapshot=structuredClone(params);}catch{return Promise.reject(new NativeDebugError('Native arguments must be data values','INVALID_ARGUMENT'));}
+    this.pendingOperations=(this.pendingOperations||0)+1;
+    const result = this.operations.then(() => this.perform(operation, snapshot)).finally(()=>{this.pendingOperations--;});
     this.operations = result.catch(() => {}); return result;
+  }
+  async resumeCommand(command,pause){
+    await this.queue;this.assertPaused(pause);this.buffer='';this.setState('running');
+    try{await new Promise((resolve,reject)=>this.child.stdin.write(command+'\n',error=>error?reject(error):resolve()));}
+    catch(error){this.fail(error);await this.abort();throw error;}
+    return this.snapshot();
   }
   async perform(operation, params = {}) {
     if (!params || typeof params !== 'object' || Array.isArray(params)) throw new NativeDebugError('Invalid command arguments', 'INVALID_ARGUMENT');
     const pause = params.pauseId;
+    // A Run to Address stop at any other breakpoint cancels that temporary
+    // request. A one-shot already consumed by CDB must not be cleared twice.
+    if(this.state==='paused'&&this.temporaryBreakpoint!==undefined&&operation!=='status'){
+      this.assertPaused(pause);
+      const id=this.temporaryBreakpoint,text=await this.command('bl',pause);
+      if(new RegExp('(?:^|\\n)\\s*'+id+'\\s+[ed]\\s').test(text))await this.command('bc '+id,pause);
+      this.breakpoints.delete(id);this.temporaryBreakpoint=undefined;
+    }
     switch (operation) {
       case 'status': return this.snapshot();
       case 'pause': { if (this.state === 'paused') return this.snapshot(); if (this.state !== 'running') throw new NativeDebugError('Process is not running'); const pid = this.pid || this.targetPid; if (!pid) throw new NativeDebugError('Target PID is unavailable'); const stopped = this.waitPaused(); this.setState('breaking'); try { await this.breakProcess(pid); return await stopped; } catch (error) { stopped.catch(() => {}); if (this.state === 'breaking') this.setState('running'); throw error; } }
       case 'continue': case 'stepInto': case 'stepOver': case 'stepOut': {
-        await this.queue; this.assertPaused(pause); const command = {continue: 'g', stepInto: 't', stepOver: 'p', stepOut: 'gu'}[operation];
-        this.buffer = ''; this.setState('running'); this.child.stdin.write(command + '\n'); return this.snapshot();
+        return this.resumeCommand({continue:'g',stepInto:'t',stepOver:'p',stepOut:'gu'}[operation],pause);
       }
       case 'processes': return {processes: this.rememberProcesses(parseProcesses(await this.command('|', pause)), true)};
       case 'threads': return {threads: parseThreads(await this.command('~', pause))};
@@ -159,7 +175,7 @@ export class CdbSession extends EventEmitter {
         await this.command('.sympath '+directory+'; .reload',pause);return {path:directory};
       }
       case 'continueHandled': case 'continueUnhandled': {
-        await this.queue;this.assertPaused(pause);this.buffer='';this.setState('running');this.child.stdin.write((operation==='continueHandled'?'gh':'gn')+'\n');return this.snapshot();
+        return this.resumeCommand(operation==='continueHandled'?'gh':'gn',pause);
       }
       case 'registers': return {registers: parseRegisters(await this.command('r', pause))};
       case 'modules': return {text: await this.command('lm', pause)};
@@ -170,28 +186,45 @@ export class CdbSession extends EventEmitter {
       case 'readMemory': { const where = address(params.address), count = integer(params.count ?? 128, 'byte count', 1, 4096); return parseMemory(await this.command('db ' + where + ' L0x' + count.toString(16), pause), where, count); }
       case 'writeMemory': {
         const where = address(params.address), bytes = params.bytes; if (!Array.isArray(bytes) || !bytes.length || bytes.length > 256) throw new NativeDebugError('Write between 1 and 256 bytes'); bytes.forEach(b => integer(b, 'byte', 0, 255));
-        await this.command('eb ' + where + ' ' + bytes.map(b => b.toString(16).padStart(2, '0')).join(' '), pause);
-        const result = await this.perform('readMemory', {address: where, count: bytes.length, pauseId: pause});
-        if (JSON.stringify(result.bytes) !== JSON.stringify(bytes)) throw new NativeDebugError('Memory verification failed; the write may be partial', 'PARTIAL_WRITE'); return result;
+        this.assertPaused(pause);
+        try{
+          await this.command('eb ' + where + ' ' + bytes.map(b => b.toString(16).padStart(2, '0')).join(' '), pause);
+          const result = await this.perform('readMemory', {address: where, count: bytes.length, pauseId: pause});
+          if (JSON.stringify(result.bytes) !== JSON.stringify(bytes)) throw new NativeDebugError('Memory verification failed; the write may be partial', 'PARTIAL_WRITE');
+          return {...result,pauseId:this.pauseId+1};
+        }finally{this.pauseId++;} // A failed command may still have written some bytes.
       }
       case 'setRegister': {
         const register = params.register; if (typeof register !== 'string' || !/^(?:[re]?(?:ax|bx|cx|dx|si|di|bp|sp)|r(?:[89]|1[0-5])|eip|rip|efl)$/i.test(register)) throw new NativeDebugError('Invalid register');
         await this.command('r ' + register + '=' + address(params.value), pause); this.pauseId++; return {...await this.perform('registers'),pauseId:this.pauseId};
       }
       case 'setBreakpoint': {
-        if (this.breakpoints.size >= 128) throw new NativeDebugError('At most 128 breakpoints are supported');
-        const id = ++this.sequence, where = location(params.location), command = where.startsWith('0x') ? 'bp' : 'bu';
-        await this.command(command + id + ' ' + where, pause); const text = await this.command('bl', pause);
-        if (!new RegExp('(?:^|\n)\\s*' + id + '\\s+[ed]\\s').test(text)) throw new NativeDebugError('The debugger did not install the breakpoint');
-        const value = {id, location: where, enabled: true}; this.breakpoints.set(id, value); return value;
+        const where = location(params.location);
+        return this.installBreakpoint(where.startsWith('0x')?'bp':'bu',where,where,pause);
+      }
+      case 'setDataBreakpoint': {
+        const where=address(params.address),size=integer(params.size??1,'watch size',1,8),access=params.access??'write';
+        if(!['write','readWrite','execute'].includes(access)||![1,2,4,8].includes(size)||(access==='execute'&&size!==1)||BigInt(where)%BigInt(size)!==0n)throw new NativeDebugError('Choose an aligned watch address, 1/2/4/8 bytes, and write/readWrite/execute access','INVALID_ARGUMENT');
+        const mode={write:'w',readWrite:'r',execute:'e'}[access];
+        // CDB rejects unsupported target widths and exhausted hardware slots.
+        // Never silently downgrade an 8-byte watch to a shorter range.
+        return this.installBreakpoint('ba',mode+' '+size+' '+where,where,pause,{kind:'data',access,size});
       }
       case 'removeBreakpoint': { const id = integer(params.id, 'breakpoint ID', 1); if (!this.breakpoints.has(id)) throw new NativeDebugError('Unknown breakpoint'); await this.command('bc ' + id, pause); this.breakpoints.delete(id); return this.snapshot(); }
       case 'enableBreakpoint': { const id = integer(params.id, 'breakpoint ID', 1); if (!this.breakpoints.has(id) || typeof params.enabled !== 'boolean') throw new NativeDebugError('Unknown breakpoint or invalid enabled value'); await this.command((params.enabled ? 'be ' : 'bd ') + id, pause); this.breakpoints.get(id).enabled = params.enabled; return this.snapshot(); }
-      case 'runToAddress': { const where = address(params.address); await this.command('bp /1 ' + where, pause); return this.perform('continue', {pauseId: pause}); }
+      case 'runToAddress': {const where=address(params.address),bp=await this.installBreakpoint('bp','/1 '+where,where,pause,{temporary:true});this.temporaryBreakpoint=bp.id;return this.resumeCommand('g',pause);}
       case 'exceptionPolicy': { const code = address(params.code); if (!['firstChance', 'secondChance'].includes(params.mode)) throw new NativeDebugError('Invalid exception policy'); await this.command((params.mode === 'firstChance' ? 'sxe ' : 'sxd ') + code, pause); return {code, mode: params.mode}; }
       case 'detach': return this.detach();
       default: throw new NativeDebugError('Unsupported native debugger operation: ' + operation, 'UNKNOWN_OPERATION');
     }
+  }
+  async installBreakpoint(command,argumentsText,where,pause,metadata={}){
+    if(this.breakpoints.size>=128)throw new NativeDebugError('At most 128 breakpoints are supported');
+    const id=++this.sequence;
+    await this.command(command+id+' '+argumentsText,pause);
+    const text=await this.command('bl',pause);
+    if(!new RegExp('(?:^|\\n)\\s*'+id+'\\s+[ed]\\s').test(text))throw new NativeDebugError('The debugger did not install the breakpoint');
+    const value={id,location:where,enabled:true,...metadata};this.breakpoints.set(id,value);return {...value};
   }
   async detach() {
     if (['new', 'closed'].includes(this.state)) { this.cleanup(); return this.snapshot(); }

@@ -53,7 +53,7 @@ export async function createNativeDebuggerBridge({port=8767,token=randomBytes(32
       return {events,cursor:events.at(-1)?.sequence??after,dropped:entry.events.length>0&&after<entry.events[0].sequence-1,status:entry.session.snapshot()};
     }
     if(method==='detach')return detach(params.session);
-    if(['continue','continueHandled','continueUnhandled','stepInto','stepOver','stepOut','selectThread','selectProcess','allProcessStacks','stepMode','symbolPath','writeMemory','setRegister','setBreakpoint','removeBreakpoint','enableBreakpoint','runToAddress','exceptionPolicy'].includes(method))integer(params.pauseId,'pause ID',1);
+    if(['continue','continueHandled','continueUnhandled','stepInto','stepOver','stepOut','selectThread','selectProcess','allProcessStacks','stepMode','symbolPath','writeMemory','setRegister','setBreakpoint','setDataBreakpoint','removeBreakpoint','enableBreakpoint','runToAddress','exceptionPolicy'].includes(method))integer(params.pauseId,'pause ID',1);
     const {session:_,...args}=params;
     return entry.session.request(method,args);
   }

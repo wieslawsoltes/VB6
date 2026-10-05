@@ -18,7 +18,7 @@ export class NativeDebuggerWindow{
     this.body.append(el('div',{class:'watch-entry',style:{flexWrap:'wrap'}},this.connection,button('Disconnect',()=>this.disconnect()),button('Attach…',()=>this.attach()),button('Launch…',()=>this.launch()),this.selector,this.state));
     this.body.append(el('div',{class:'watch-entry',style:{flexWrap:'wrap'}},
       button('Continue',()=>this.execute('continue'),'paused'),button('Break',()=>this.execute('pause'),'running'),button('Step Into',()=>this.execute('stepInto'),'paused'),button('Step Over',()=>this.execute('stepOver'),'paused'),button('Step Out',()=>this.execute('stepOut'),'paused'),button('Detach',()=>this.detach(),'session'),
-      button('Breakpoint…',()=>this.breakpoint(),'paused'),button('Run to Address…',()=>this.runTo(),'paused'),button('Symbols…',()=>this.symbols(),'paused')));
+      button('Breakpoint…',()=>this.breakpoint(),'paused'),button('Data Breakpoint…',()=>this.dataBreakpoint(),'paused'),button('Run to Address…',()=>this.runTo(),'paused'),button('Symbols…',()=>this.symbols(),'paused')));
     this.mode=el('select',{'aria-label':'Native step mode',onchange:()=>this.guard(()=>this.execute('stepMode',{mode:this.mode.value}))},el('option',{value:'assembly'},'Machine instructions'),el('option',{value:'source'},'Source lines (matching symbols)'));
     this.view=el('select',{'aria-label':'Native debugger view',onchange:()=>this.guard(()=>this.refresh())},...['Call Stack','All Process Stacks','Threads','Processes','Registers','Disassembly','Modules','Locals','Breakpoints','Output'].map(text=>el('option',{value:text},text)));
     this.body.append(el('div',{class:'watch-entry',style:{flexWrap:'wrap'}},this.mode,this.view,button('Refresh',()=>this.refresh(),'session'),button('Memory…',()=>this.memory(),'paused'),button('Edit Register…',()=>this.register(),'paused'),button('Exceptions…',()=>this.exceptions(),'paused')));
@@ -101,12 +101,18 @@ export class NativeDebuggerWindow{
     }
     if(view==='Registers'){const {registers}=await this.execute('registers');if(!current())return;this.table(['Register','Hexadecimal Value'],Object.entries(registers).map(([key,value])=>({values:[key,value],action:()=>this.guard(()=>this.register(key,value))})));return;}
     if(view==='Breakpoints'){
-      const state=await this.execute('status');if(!current())return;this.table(['ID','Location','Enabled',''],(state.breakpoints||[]).map(bp=>({values:[bp.id,bp.location,String(bp.enabled),el('button',{onclick:()=>this.guard(async()=>{await this.execute('removeBreakpoint',{id:bp.id});await this.refresh();})},'Remove')],action:()=>this.guard(async()=>{await this.execute('enableBreakpoint',{id:bp.id,enabled:!bp.enabled});await this.refresh();})})));return;
+      const state=await this.execute('status');if(!current())return;this.table(['ID','Location','Access','Enabled',''],(state.breakpoints||[]).map(bp=>({values:[bp.id,bp.location,bp.kind==='data'?bp.access+' ('+bp.size+' bytes)':'Execute',String(bp.enabled),el('button',{onclick:()=>this.guard(async()=>{await this.execute('removeBreakpoint',{id:bp.id});await this.refresh();})},'Remove')],action:()=>this.guard(async()=>{await this.execute('enableBreakpoint',{id:bp.id,enabled:!bp.enabled});await this.refresh();})})));return;
     }
     if(view==='All Process Stacks'){const result=await this.execute('allProcessStacks');if(!current())return;this.text(result.processes.map(p=>'PROCESS '+p.process.pid+' — '+p.process.name+'\n'+p.text).join('\n\n'));return;}
     const result=await this.execute({Disassembly:'disassemble',Modules:'modules',Locals:'locals'}[view]||'stack');if(current())this.text(result.text??JSON.stringify(result,null,2));
   }
   async breakpoint(){const location=await promptDialog('Native Breakpoint','Hexadecimal address or module!symbol:','');if(location!==null){await this.execute('setBreakpoint',{location});this.view.value='Breakpoints';await this.refresh();}}
+  async dataBreakpoint(){
+    const address=el('input',{'aria-label':'Data breakpoint address',placeholder:'0x1000',style:{width:'100%'}}),size=el('select',{'aria-label':'Data breakpoint size'},...[1,2,4,8].map(n=>el('option',{value:n},n+' byte'+(n===1?'':'s')))),access=el('select',{'aria-label':'Data breakpoint access'},el('option',{value:'write'},'Write'),el('option',{value:'readWrite'},'Read or write'),el('option',{value:'execute'},'Execute (1 byte)'));
+    const content=el('div',{class:'watch-dialog'},el('label',{},'Aligned hexadecimal address',address),el('label',{},'Access',access),el('label',{},'Size',size),el('p',{},'Hardware slots and supported widths depend on the target processor. An unavailable watch reports an error; it is not emulated.'));
+    if(!await modal('Native Data Breakpoint',{width:500,content,buttons:[{label:'Add',primary:true,value:true},{label:'Cancel',value:false}]}))return;
+    await this.execute('setDataBreakpoint',{address:address.value.trim(),access:access.value,size:Number(size.value)});this.view.value='Breakpoints';await this.refresh();
+  }
   async runTo(){const address=await promptDialog('Run to Address','Hexadecimal machine address:','');if(address!==null)await this.execute('runToAddress',{address});}
   async symbols(){const path=await promptDialog('Native Symbols','Local Windows directory containing matching symbol files:','');if(path!==null)await this.inspect('symbolPath',{path});}
   async register(name='',value=''){

@@ -1,6 +1,6 @@
 import {VBError} from '../language/lexer.js';
-import {instructionKey} from './instruction-map.js';
-import {planLiveEdit} from './live-edit.js';
+import {uniqueInstructionLines} from './instruction-map.js';
+import {planLiveEdit,validateStaticStorage} from './live-edit.js';
 
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
 const shape=m=>({kind:m.kind,interfaces:m.interfaces,defaultTypes:m.defaultTypes,defaultMember:m.defaultMember,declarations:m.declarations,types:m.types,events:m.events,enums:m.enums,form:m.form,optionExplicit:m.optionExplicit,optionBase:m.optionBase,optionCompare:m.optionCompare});
@@ -23,16 +23,13 @@ export function planVersionedEdit(current,next,stack,revision=0){
   // Finish every validation and snapshot before returning a commit plan.
   for(const [key,oldModule]of current.modules){
     const newModule=next.modules.get(key);
+    validateStaticStorage(oldModule,newModule);
     if(json(shape(oldModule))!==json(shape(newModule)))throw new VBError('Restart required: live module/object storage changed in '+oldModule.name,5);
     for(const [name,oldProc]of oldModule.procedures){
       const newProc=newModule.procedures.get(name);
       if(!newProc){removedProcedures.push({module:oldModule,name});continue;}
       updates.push({oldProc,newProc});
-      for(const instruction of oldProc.code||[]){
-        if(instruction.implicit)continue;
-        const matches=(newProc.code||[]).filter(i=>instructionKey(i)===instructionKey(instruction));
-        if(matches.length===1)lineMap.set(key+':'+instruction.line,matches[0].line);
-      }
+      for(const [line,mapped]of uniqueInstructionLines(oldProc.code||[],newProc.code||[]))lineMap.set(key+':'+line,mapped);
     }
   }
   for(const frame of stack){

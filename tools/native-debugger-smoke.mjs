@@ -57,7 +57,11 @@ try{
   const registers=await launched.request('registers');assert.ok(registers.registers.rip||registers.registers.eip);record('native x86 or x64 register context',{registers:registers.registers});
   const disassembly=await launched.request('disassemble');assert.match(disassembly.text,/DebugTick|[0-9a-f]{8}/i);record('native machine disassembly');
   const counter=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugCounter'});const memory=await launched.request('readMemory',{address:counter.address,count:4});assert.equal(memory.unreadableBytes,0);record('resolve exported data address and read native memory',{address:counter.address});
-  await launched.request('writeMemory',{address:counter.address,bytes:[37,0,0,0],pauseId:launched.pauseId});assert.deepEqual((await launched.request('readMemory',{address:counter.address,count:4})).bytes,[37,0,0,0]);record('native memory write and independent readback');
+  const writePause=launched.pauseId;
+  const written=await launched.request('writeMemory',{address:counter.address,bytes:[37,0,0,0],pauseId:writePause});
+  assert.equal(written.pauseId,launched.pauseId);assert.ok(written.pauseId>writePause);
+  await assert.rejects(launched.request('continue',{pauseId:writePause}),{code:'STALE_PAUSE'});
+  assert.deepEqual((await launched.request('readMemory',{address:counter.address,count:4})).bytes,[37,0,0,0]);record('native memory write readback and mutation-ticket invalidation');
   await launched.request('stepMode',{mode:'source',pauseId:launched.pauseId});const lineBefore=/target\.c @ (\d+)/i.exec((await launched.request('stack')).text)?.[1];assert.ok(lineBefore,'Source breakpoint requires line symbols');const at=launched.pauseId;await launched.request('stepOver',{pauseId:at});await launched.waitPaused();assert.ok(launched.pauseId>at);const lineAfter=/target\.c @ (\d+)/i.exec((await launched.request('stack')).text)?.[1];assert.ok(lineAfter,'Source step retains line symbols');assert.notEqual(lineAfter,lineBefore);record('source-line step using matching fixture symbols',{lineBefore,lineAfter});
   await assert.rejects(launched.request('setRegister',{register:registers.registers.rip?'rax':'eax',value:'1',pauseId:at}),{code:'STALE_PAUSE'});record('stale native mutation rejected');
   await launched.request('stepMode',{mode:'assembly',pauseId:launched.pauseId});await launched.request('removeBreakpoint',{id:bp.id,pauseId:launched.pauseId});
@@ -66,7 +70,26 @@ try{
 
   const outside=spawn(target,[],{cwd:directory,stdio:'ignore',windowsHide:true});owned.add(outside.pid);await new Promise((resolve,reject)=>{outside.once('spawn',resolve);outside.once('error',reject);});
   const attached=await make({pid:outside.pid});assert.equal(attached.pid,outside.pid);record('attach to an independently launched process',{pid:outside.pid});
-  const attachedBreakpoint=await hit(attached,'DebugTarget!DebugTick');await attached.request('removeBreakpoint',{id:attachedBreakpoint.id,pauseId:attached.pauseId});await attached.request('continue',{pauseId:attached.pauseId});await attached.request('pause');assert.equal(attached.state,'paused');assert.ok(report.breakRequests>=1);record('break running native process through DebugBreakProcess');
+  const attachedBreakpoint=await hit(attached,'DebugTarget!DebugTick');
+  await attached.request('removeBreakpoint',{id:attachedBreakpoint.id,pauseId:attached.pauseId});
+  const watched=await attached.request('resolveSymbol',{symbol:'DebugTarget!DebugCounter'});
+  const watchBefore=await attached.request('readMemory',{address:watched.address,count:4});
+  assert.equal(watchBefore.unreadableBytes,0);
+  const dataBreakpoint=await attached.request('setDataBreakpoint',{address:watched.address,access:'write',size:4,pauseId:attached.pauseId});
+  assert.equal(dataBreakpoint.kind,'data');
+  await attached.request('enableBreakpoint',{id:dataBreakpoint.id,enabled:false,pauseId:attached.pauseId});
+  assert.equal(attached.snapshot().breakpoints.find(b=>b.id===dataBreakpoint.id).enabled,false);
+  await attached.request('enableBreakpoint',{id:dataBreakpoint.id,enabled:true,pauseId:attached.pauseId});
+  await attached.request('continue',{pauseId:attached.pauseId});await attached.waitPaused();
+  assert.match(attached.lastStop,new RegExp('Breakpoint '+dataBreakpoint.id+' hit','i'));
+  const watchAfter=await attached.request('readMemory',{address:watched.address,count:4});
+  assert.equal(watchAfter.unreadableBytes,0);
+  assert.equal(Buffer.from(watchAfter.bytes).readInt32LE(),Buffer.from(watchBefore.bytes).readInt32LE()+1);
+  assert.match((await attached.request('stack')).text,/DebugTarget!DebugTick/);
+  record('real hardware write watchpoint stops on a native data change',{id:dataBreakpoint.id,address:watched.address,reason:attached.lastStop});
+  await attached.request('removeBreakpoint',{id:dataBreakpoint.id,pauseId:attached.pauseId});
+  assert.equal(attached.snapshot().breakpoints.length,0);
+  await attached.request('continue',{pauseId:attached.pauseId});await attached.request('pause');assert.equal(attached.state,'paused');assert.ok(report.breakRequests>=1);record('break running native process through DebugBreakProcess');
   await attached.request('detach');assert.equal(alive(outside.pid),true);record('attached process survives debugger shutdown');
   // Exercise the same authenticated HTTP surface used by the browser, with a
   // real CDB session and real target. The test authorizes only its own fixture.
@@ -87,6 +110,13 @@ try{
     assert.equal((await rpc('continue',{session:id,pauseId})).result.state,'running');
     const stopped=await rpc('pause',{session:id});assert.equal(stopped.status,200,JSON.stringify(stopped));assert.equal(stopped.result.state,'paused');
     assert.ok((await rpc('stack',{session:id})).result.frames.length>0);
+    const data=await rpc('resolveSymbol',{session:id,symbol:'DebugTarget!DebugCounter'});
+    assert.equal(data.status,200,JSON.stringify(data));
+    assert.equal((await rpc('setDataBreakpoint',{session:id,address:data.result.address,access:'write',size:4})).error.code,'INVALID_ARGUMENT');
+    const hw=await rpc('setDataBreakpoint',{session:id,address:data.result.address,access:'write',size:4,pauseId:stopped.result.pauseId});
+    assert.equal(hw.status,200,JSON.stringify(hw));assert.equal(hw.result.kind,'data');
+    assert.equal((await rpc('removeBreakpoint',{session:id,id:hw.result.id,pauseId:stopped.result.pauseId})).status,200);
+    record('authenticated native bridge installs hardware watches only with a pause identity');
     assert.equal((await rpc('command',{session:id,command:'.shell forbidden'})).error.code,'UNKNOWN_OPERATION');
     assert.ok((await rpc('events',{session:id,after:0})).result.events.length>0);
     assert.equal((await rpc('detach',{session:id})).status,200);
