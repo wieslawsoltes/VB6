@@ -51,6 +51,7 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js('vb6Studio.setWindowMode("hybrid");void 0;');
 
       await js('vb6Studio.run()');
+      check('native preview never starts an intermediate srcdoc document',await js('!!vb6Studio.runtimeFrame && !vb6Studio.runtimeFrame.hasAttribute("srcdoc")'));
       await until(() => js('vb6Studio.runtimeFrame?.src.startsWith("vb6://app/preview/")'), 'sandbox preview document');
       await until(() => root.webContents.mainFrame.frames.some(f => f.url.startsWith('vb6://app/preview/')), 'preview frame');
       const frame = root.webContents.mainFrame.frames.find(f => f.url.startsWith('vb6://app/preview/'));
@@ -181,6 +182,10 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
     app.quit();
   } catch (error) {
     report.error = error.stack || error.message;
+    if (manifest.kind === 'studio') {
+      try { report.previewFrames = root.webContents.mainFrame.framesInSubtree.map(frame => ({ url: frame.url, name: frame.name })); } catch {}
+      try { report.previewState = await js('({state:vb6Studio.runState,src:vb6Studio.runtimeFrame?.src,srcdoc:vb6Studio.runtimeFrame?.hasAttribute("srcdoc"),connected:vb6Studio.runtimeFrame?.isConnected})'); } catch {}
+    }
     if (reportPath) fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
     app.exit(1);
   }

@@ -224,3 +224,14 @@ system control, rather than testing cancellation only from JavaScript.
 
 Type contracts: [TYPEDESC](https://learn.microsoft.com/en-us/windows/win32/api/oaidl/ns-oaidl-typedesc)
 and [VARENUM](https://learn.microsoft.com/en-us/windows/win32/api/wtypes/ne-wtypes-varenum).
+
+### Desktop preview transport
+
+The native IDE selects its preview-document transport before assigning iframe
+content. It prepares the hash-authorized `vb6://app/preview/...` document and then
+navigates once, rather than starting and cancelling a competing `srcdoc` load.
+Browser-only IDEs still use `srcdoc`. Late successful or failed native responses
+cannot navigate a detached/stopped frame or interfere with a newer run. Invalid
+preview URLs fail closed; the existing sandbox, document CSP, and native IPC
+sender checks are unchanged. Node transport regressions and the native IDE smoke
+assert this distinction; timeout reports include bounded frame/state diagnostics.
