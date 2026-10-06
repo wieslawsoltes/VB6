@@ -45,7 +45,7 @@ namespace VB6Interop {
     public object Value; public long Identity; public Form Window; public ControlHost Control;
     public Dictionary<string,object> Metadata;
   }
-  public static class AutomationHost {
+  public static partial class AutomationHost {
     const int Limit=1024*1024, MaxObjects=128;
     static readonly JavaScriptSerializer Json=new JavaScriptSerializer { MaxJsonLength=Limit, RecursionLimit=32 };
     static readonly Dictionary<string,Entry> Objects=new Dictionary<string,Entry>();
@@ -87,7 +87,7 @@ namespace VB6Interop {
               var element=(ELEMDESC)Marshal.PtrToStructure(IntPtr.Add(fn.lprgelemdescParam,p*size),typeof(ELEMDESC));var flags=element.desc.paramdesc.wParamFlags;
               if((flags&PARAMFLAG.PARAMFLAG_FRETVAL)!=0)continue;
               string pname=p+1<namesCount?names[p+1]:null;if(pname==null||!Name(pname))pname="arg"+p;
-              parameters.Add(D("name",pname,"byRef",(flags&PARAMFLAG.PARAMFLAG_FOUT)!=0,"optional",(flags&PARAMFLAG.PARAMFLAG_FOPT)!=0));
+              parameters.Add(D("name",pname,"byRef",(flags&PARAMFLAG.PARAMFLAG_FOUT)!=0||element.tdesc.vt==26,"vartype",ParameterType(element.tdesc),"optional",(flags&PARAMFLAG.PARAMFLAG_FOPT)!=0));
             }
             // Property put signatures have a final value parameter; VM metadata describes indexes.
             if((mode==4||mode==8)&&parameters.Count>0)parameters.RemoveAt(parameters.Count-1);
@@ -118,7 +118,7 @@ namespace VB6Interop {
       if(value is decimal)return D("t","decimal","v",((decimal)value).ToString(CultureInfo.InvariantCulture));
       if(value is CurrencyWrapper)return D("t","currency","v",((CurrencyWrapper)value).WrappedObject.ToString(CultureInfo.InvariantCulture));
       if(value is ErrorWrapper)return D("t","error","v",((ErrorWrapper)value).ErrorCode);
-      if(value is byte||value is short||value is int||value is ushort||value is uint||value is float||value is double){double n=Convert.ToDouble(value,CultureInfo.InvariantCulture);if(double.IsNaN(n)||double.IsInfinity(n))throw new NotSupportedException("Nonfinite Automation number");return D("t","number","v",value);}
+      if(value is byte||value is short||value is int||value is ushort||value is uint||value is float||value is double){double n=Convert.ToDouble(value,CultureInfo.InvariantCulture);if(double.IsNaN(n)||double.IsInfinity(n))throw new NotSupportedException("Nonfinite Automation number");return D("t","number","vt",value is byte?17:value is short?2:value is int?3:value is float?4:5,"v",value);}
       throw new NotSupportedException("Unsupported native Automation result: "+value.GetType().FullName);
     }
     static object Import(object wire,int depth=0) {
@@ -126,14 +126,25 @@ namespace VB6Interop {
       switch(t){
         case "empty":return null;case "null":return DBNull.Value;case "missing":return Type.Missing;case "nothing":return new DispatchWrapper(null);
         case "string":return S(d,"v");case "boolean":return Convert.ToBoolean(v,CultureInfo.InvariantCulture);
-        case "number":return v is int?(object)(int)v:Convert.ToDouble(v,CultureInfo.InvariantCulture);
+        case "number":{
+          double n=Convert.ToDouble(v,CultureInfo.InvariantCulture);if(double.IsNaN(n)||double.IsInfinity(n))throw new ArgumentException("Invalid numeric payload");
+          switch(N(d,"vt",5)){
+            case 17:if(n!=Math.Truncate(n)||n<0||n>255)throw new ArgumentException("Invalid Byte payload");return (byte)n;
+            case 2:if(n!=Math.Truncate(n)||n<short.MinValue||n>short.MaxValue)throw new ArgumentException("Invalid Integer payload");return (short)n;
+            case 3:if(n!=Math.Truncate(n)||n<int.MinValue||n>int.MaxValue)throw new ArgumentException("Invalid Long payload");return (int)n;
+            case 4:if(float.IsInfinity((float)n)||(double)(float)n!=n)throw new ArgumentException("Invalid Single payload");return (float)n;
+            case 5:return n;default:throw new ArgumentException("Unsupported numeric VARTYPE");
+          }
+        }
         case "date":return DateTime.FromOADate(Convert.ToDouble(v,CultureInfo.InvariantCulture));
         case "decimal":return decimal.Parse(S(d,"v"),CultureInfo.InvariantCulture);case "currency":return new CurrencyWrapper(decimal.Parse(S(d,"v"),CultureInfo.InvariantCulture));
         case "error":return new ErrorWrapper(Convert.ToInt32(v,CultureInfo.InvariantCulture));case "object":return ObjectAt(S(d,"id")).Value;
         case "array":{
           var bounds=A(V(d,"bounds"));if(bounds.Length==0||bounds.Length>8)throw new ArgumentException("Invalid Automation array rank");var lengths=new int[bounds.Length];var lower=new int[bounds.Length];long total=1;
           for(int i=0;i<bounds.Length;i++){var pair=A(bounds[i]);if(pair.Length!=2)throw new ArgumentException("Invalid Automation array bound");lower[i]=Convert.ToInt32(pair[0]);long length=(long)Convert.ToInt32(pair[1])-lower[i]+1;if(length<0||length>10000)throw new ArgumentException("Invalid Automation array length");lengths[i]=(int)length;total*=length;if(total>10000)throw new ArgumentException("Automation array too large");}
-          var source=A(v);if(source.Length!=total)throw new ArgumentException("Automation array data mismatch");var target=Array.CreateInstance(typeof(object),lengths,lower);var index=(int[])lower.Clone();
+          var source=A(v);if(source.Length!=total)throw new ArgumentException("Automation array data mismatch");int et=N(d,"elementType",12);Type element=et==17?typeof(byte):et==2?typeof(short):et==3?typeof(int):et==4?typeof(float):et==5?typeof(double):et==7?typeof(DateTime):et==8?typeof(string):et==11?typeof(bool):et==14?typeof(decimal):typeof(object);
+          if(!new[]{2,3,4,5,6,7,8,11,12,14,17}.Contains(et))throw new ArgumentException("Unsupported array element VARTYPE");
+          var target=Array.CreateInstance(element,lengths,lower);var index=(int[])lower.Clone();
           foreach(var item in source){target.SetValue(Import(item,depth+1),index);for(int i=index.Length-1;i>=0;i--){index[i]++;if((long)index[i]<(long)lower[i]+lengths[i])break;index[i]=lower[i];}}return target;
         }
         default:throw new NotSupportedException("Unsupported Automation wire type: "+t);
@@ -173,18 +184,16 @@ namespace VB6Interop {
       var target=ObjectAt(S(request,"handle"));
       if(op=="release"){Release(S(request,"handle"));return D("released",true);}
       if(op=="loadState"||op=="saveState")return Persistence(target,request);
-      if(op=="enumerate"){var sequence=target.Value as IEnumerable;if(sequence==null)throw new NotSupportedException("Component is not enumerable");var values=new List<object>();var enumerator=sequence.GetEnumerator();try{while(enumerator.MoveNext()){if(values.Count>=10000)throw new NotSupportedException("Enumeration exceeds 10,000 entries");values.Add(Export(enumerator.Current));}}finally{var disposable=enumerator as IDisposable;if(disposable!=null)disposable.Dispose();else if(Marshal.IsComObject(enumerator))Marshal.ReleaseComObject(enumerator);}return values;}
+      if(op=="enumerate")return EnumerateNative(target,N(request,"lcid",1033));
       if(op!="call")throw new ArgumentException("Unknown Automation operation");
       string member=S(request,"member");int mode=N(request,"mode"),lcid=N(request,"lcid",1033);if(!Name(member)||!new[]{1,2,4,8}.Contains(mode))throw new ArgumentException("Invalid Automation invocation");
       var schema=((Dictionary<string,object>[])target.Metadata["members"]).FirstOrDefault(m=>string.Equals((string)m["name"],member,StringComparison.OrdinalIgnoreCase));
       if(schema==null||!((List<int>)schema["modes"]).Contains(mode))throw new UnauthorizedAccessException("Member/mode not present in exposed Automation metadata");
-      var encoded=A(V(request,"args",new object[0]));if(encoded.Length>65)throw new ArgumentException("Too many Automation arguments");var args=encoded.Select(v=>Import(v)).ToArray();
-      var byref=A(V(request,"byRef",new object[0]));var modifiers=args.Length==0?null:new[]{new ParameterModifier(args.Length)};foreach(var v in byref){int i=Convert.ToInt32(v);if(i<0||i>=args.Length)throw new ArgumentException("Invalid ByRef index");modifiers[0][i]=true;}
-      BindingFlags flags=BindingFlags.Public|BindingFlags.Instance|BindingFlags.IgnoreCase|BindingFlags.OptionalParamBinding;
-      flags|=mode==1?BindingFlags.InvokeMethod:mode==2?BindingFlags.GetProperty:mode==4?BindingFlags.PutDispProperty:BindingFlags.PutRefDispProperty;
-      var culture=lcid==0?CultureInfo.InvariantCulture:CultureInfo.GetCultureInfo(lcid);
-      object resultValue=target.Value.GetType().InvokeMember(member,flags,null,target.Value,args,modifiers,culture,null);
-      Application.DoEvents();return D("value",Export(resultValue),"args",args.Select(v=>Export(v)).ToArray());
+      var encoded=A(V(request,"args",new object[0]));if(encoded.Length>65)throw new ArgumentException("Too many Automation arguments");
+      var byref=A(V(request,"byRef",new object[0]));
+      if(lcid<0||lcid>0xfffff)throw new ArgumentException("Invalid LCID");
+      var invocationResult=InvokeDirect(target,member,mode,lcid,encoded,byref,schema);
+      Application.DoEvents();return invocationResult;
     }
     public static void Run() {
       if(System.Threading.Thread.CurrentThread.GetApartmentState()!=System.Threading.ApartmentState.STA)throw new InvalidOperationException("Automation host requires STA");
@@ -197,7 +206,7 @@ namespace VB6Interop {
         reader.IsBackground=true;reader.Start();
         while(!Quitting){string line;if(!requests.TryTake(out line,25)){Application.DoEvents();if(requests.IsCompleted)break;continue;}int id=0;object response;
           try{if(line.Length>Limit)throw new ArgumentException("Request too large");var request=Map(Json.DeserializeObject(line));id=N(request,"id");if(id<=0)throw new ArgumentException("Invalid request id");response=D("id",id,"result",Handle(request));}
-          catch(Exception error){while(error is TargetInvocationException&&error.InnerException!=null)error=error.InnerException;int hr=Marshal.GetHRForException(error);int number=(hr&unchecked((int)0xFFFF0000))==unchecked((int)0x800A0000)?hr&65535:hr==unchecked((int)0x80020003)?438:hr==unchecked((int)0x80020005)?13:440;response=D("id",id,"error",D("message",error.Message,"hresult",hr,"number",number));}
+          catch(Exception error){while(error is TargetInvocationException&&error.InnerException!=null)error=error.InnerException;int hr=Marshal.GetHRForException(error);int number=(hr&unchecked((int)0xFFFF0000))==unchecked((int)0x800A0000)?hr&65535:hr==unchecked((int)0x80020003)?438:hr==unchecked((int)0x80020005)?13:440;var native=error as NativeDispatchException;response=D("id",id,"error",D("message",error.Message,"hresult",hr,"number",number,"source",native==null?null:native.Source,"helpFile",native==null?null:native.NativeHelpFile,"helpContext",native==null?0:native.NativeHelpContext));}
           string json=Json.Serialize(response);if(json.Length>Limit)json=Json.Serialize(D("id",id,"error",D("message","Automation response exceeds 1 MiB","number",7)));Console.WriteLine(json);Console.Out.Flush();
         }
       } finally {foreach(var id in Objects.Keys.ToArray())try{Release(id);}catch{} }

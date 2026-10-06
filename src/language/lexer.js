@@ -50,7 +50,7 @@ export function splitTop(text, separator = ',') {
   for (let i=0;i<text.length;i++) {
     const c = text[i];
     if (c === '"' && !date) { if (quoted && text[i+1] === '"') i++; else quoted = !quoted; }
-    else if (!quoted && c === '#' && (date || text.indexOf('#',i+1) >= 0)) date = !date;
+    else if (!quoted && c === '#' && (date || !/[\w\u0080-\uffff\]]/.test(text[i-1]||'') && text.indexOf('#',i+1) >= 0)) date = !date;
     else if (!quoted && !date) {
       if (c === '(') depth++;
       else if (c === ')') depth--;

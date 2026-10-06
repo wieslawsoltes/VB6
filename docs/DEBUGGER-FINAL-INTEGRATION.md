@@ -84,3 +84,22 @@ configuration; it is not counted as a passing native VB6 oracle.
 See [DEBUGGER-COMPATIBILITY.md](DEBUGGER-COMPATIBILITY.md) and the reusable
 [native debugger package](../packages/native-debugger/README.md) for commands,
 capabilities, permission boundaries and reproducible test instructions.
+
+## Scalar-runtime reconciliation
+
+Main advanced to `72dae4fa89e165f6f0dc0ba0aad5cb7615508ea3` during final publication.
+The follow-up retains that complete tagged-scalar/native-Automation implementation
+and all recovered debugger changes. Source files merge normally; only generated
+IDE/runtime bundles and the runtime payload require regeneration.
+
+Tagged Empty values exposed an Immediate output bug: void source or host calls
+printed an extra Empty line. Ordinary command results now check the unboxed value
+without discarding scalar metadata; explicit `? Empty` and Print remain visible.
+Five new integration regressions cover void source/host calls, explicit Empty/Null,
+zero/False results, event-mode Variant promotion, retained ByRef Variant identity
+and subtype across code revisions, and atomic strict-policy rejection. The
+complete combined suite passes **3,007 tests**, with zero failed/skipped/cancelled.
+
+The final PR merge-gate comment identifies the tested source revision and real
+browser/Windows workflow outcomes after this reconciliation. Earlier source
+identifiers and 2,808-test counts above describe the preceding publication stage.

@@ -183,7 +183,7 @@ total = 32768
 Debug.Print Err.Number
 End Sub'''
     project={'id':'interface-export','name':'InterfaceExport','startup':'Sub Main','modules':[{'id':'main','name':'MainModule','kind':'module','code':text},{'id':'contract','name':'IValue','kind':'class','code':'Public Property Get Value() As Long\nEnd Property\nPublic Property Let Value(ByVal value As Long)\nEnd Property'},{'id':'item','name':'Item','kind':'class','code':'Implements IValue\nPrivate stored As Long\nPrivate Property Get IValue_Value() As Long\nIValue_Value = stored\nEnd Property\nPrivate Property Let IValue_Value(ByVal value As Long)\nstored = value\nEnd Property'}]}
-    exported=p.evaluate('project=>VB6StudioAPI.exportApplication(project)',project);p.set_content(exported);p.wait_for_function('!!globalThis.vb6Application');out=p.locator('.vb-runtime-console').inner_text();check(out.strip()=='17 -1 -1\n6',out);return out
+    exported=p.evaluate('project=>VB6StudioAPI.exportApplication(project)',project);p.set_content(exported);p.wait_for_function('!!globalThis.vb6Application');out=p.locator('.vb-runtime-console').inner_text();check(out.strip()=='17 True True\n6',out);return out
 
 def mdi_ready(p):
     info=p.evaluate('({shown:vb6Application.forms.filter(f=>f.shown).length,active:vb6Application.mdi.parent.ActiveForm.formObject.props.Caption,screen:vb6Application.vm.library.get("screen").ActiveForm.formObject.props.Caption,children:vb6Application.mdi.children.filter(c=>c.shown).map(c=>({text:c.controlMap.get("txtdocument").Text,parent:c.node.parentElement.className}))})')

@@ -125,7 +125,65 @@ def sdk(p):
     value=q.evaluate('''async()=>{const A=VB6Runtime.RuntimeAPI;const compiled=A.compileProject({name:'SDK',startup:'Sub Main',modules:[{id:'m',name:'M',kind:'module',code:'Sub Main()\\nDebug.Print CDec("0.1") + CDec("0.2"), PMT(0,10,1000)\\nEnd Sub'}]});if(!compiled.valid)throw Error(JSON.stringify(compiled.diagnostics));const output=[];const vm=new A.VirtualMachine(compiled,{print:s=>output.push(s)});await vm.start();return {output,ide:typeof globalThis.vb6Studio};}''')
     q.close();check(value=={'output':['0.3 -100'],'ide':'undefined'},value);return value
 
+def scalar_values(p):
+    value=exported(p,program('Dim b As Byte, i As Integer, f As Single, v\nb=255: i=32767: f=1.25\nv=b\nResult=TypeName(v) & "|" & TypeName(i + CVar(1)) & "|" & TypeName(f + CLng(1)) & "|" & CStr(True) & "|" & CStr(CByte(True))'))
+    check(value=='Byte|Long|Double|True|255',value);return {'result':value}
+
+def scalar_files(p):
+    value=exported(p,program('Dim values(0 To 2), restored(0 To 2), a, b, c\nvalues(0)=CByte(1): values(1)=CSng(2): values(2)=True\nOpen "tagged.bin" For Binary As #1\nPut #1, , values()\nGet #1, 1, restored()\nClose #1\nOpen "input.txt" For Output As #1\nWrite #1, True, Null, CVErr(5)\nClose #1\nOpen "input.txt" For Input As #1\nInput #1, a\nInput #1, b\nInput #1, c\nClose #1\nResult=TypeName(restored(0)) & "|" & TypeName(restored(1)) & "|" & TypeName(restored(2)) & "|" & VarType(a) & "|" & VarType(b) & "|" & VarType(c)'))
+    check(value=='Byte|Single|Boolean|11|1|10',value);return {'result':value}
+
+def scalar_byref(p):
+    code=program('Dim n As Long, count As Byte\nn=5\nCall Change(n)\nResult=n & "|"\nChange (n)\nFor count=1 To 2\nResult=Result & TypeName(count) & ":" & count & ";"\nNext\nResult=Result & n')+'\nSub Change(ByRef value As Long)\nvalue=value+1\nEnd Sub'
+    value=exported(p,code);check(value=='6|Byte:1;Byte:2;6',value);return {'result':value}
+
+def scalar_data(p):
+    code=program('Dim rs As Object\nSet rs=CreateObject("ADODB.Recordset")\nrs.Fields.Append "B",17\nrs.Fields.Append "Flag",11\nrs.Open\nrs.AddNew\nrs.Fields("B").Value=4\nrs.Fields("Flag").Value=True\nrs.Update\nResult=TypeName(rs.Fields("B").Value) & "|" & TypeName(rs.Fields("Flag").Value) & "|" & rs.Fields("Flag").Value\nrs.Close')
+    value=exported(p,code);check(value=='Byte|Boolean|True',value);return {'result':value}
+
+def scalar_worker(p):
+    source(p,'Public Const N = Other.K\nSub Main()\nEnd Sub','Public Const K = 1%')
+    idle(p);check(p.evaluate('vb6Studio.syntaxDiagnostics.mode')=='worker')
+    check(p.evaluate('VB6StudioAPI.compileProject(vb6Studio.project).modules.get("mainmodule").constantScalars.get("n").type')=='integer')
+    p.evaluate('''()=>{vb6Studio.project.modules[1].code='Public Const K = 1!';vb6Studio.markDirty();}''')
+    idle(p);check(p.evaluate('vb6Studio.diagnostics.length')==0)
+    check(p.evaluate('VB6StudioAPI.compileProject(vb6Studio.project).modules.get("mainmodule").constantScalars.get("n").type')=='single')
+    check(p.evaluate('vb6Studio.syntaxDiagnostics.metrics.cacheHits')>0)
+
+def scalar_controls(p):
+    p.evaluate('''()=>{const A=VB6StudioAPI,project=A.newProject('ScalarControls');project.settings.renderer='canvas2d';const form=project.modules[0];form.form.controls=[A.createControl('Label','Result',300,300),A.createControl('CheckBox','Flag',300,750)];form.code='Private Sub Form_Load()\\nResult.Caption=TypeName(Me.hWnd) & "|" & TypeName(Result.Visible) & "|" & TypeName(Result.Width) & "|" & TypeName(Flag.Value)\\nEnd Sub';vb6Studio.loadProject(project);}''')
+    text=p.evaluate('VB6StudioAPI.exportApplication(vb6Studio.project,{persist:false})')
+    q=p.context.new_page();q.set_default_timeout(10000);errors=[];q.on('pageerror',lambda e:errors.append(str(e)))
+    if OPTIONS.http:
+        (REPORT/'scalar-controls.html').write_text(text);q.goto(URL+'/reports/compiler-runtime/scalar-controls.html')
+    else:q.set_content(text)
+    q.wait_for_function('globalThis.vb6Application?.forms[0]?.controlMap.get("result")?.Caption.includes("|")')
+    result=q.locator('[data-control="Result"]').inner_text();check(result=='Long|Boolean|Single|Integer',result);check(not errors,errors);q.close();return {'result':result}
+
+def scalar_sdk_debug(p):
+    q=p.context.new_page();q.set_default_timeout(10000)
+    text=(ROOT/'dist/vb6-runtime.js').read_text()
+    q.set_content('<!doctype html><script>'+text.replace('</script','<\\/script')+'</script>')
+    result=q.evaluate('''async()=>{
+      const A=VB6Runtime.RuntimeAPI, code='Sub Main()\\nDim b As Byte, v\\nb=5\\nv=b\\nb=b+1\\nEnd Sub\\nSub Change(ByRef value As Byte)\\nvalue=8\\nEnd Sub';
+      const compiled=A.compileProject({name:'ScalarDebugger',startup:'Sub Main',modules:[{id:'m',name:'M',kind:'module',code}]});
+      if(!compiled.valid)throw Error(JSON.stringify(compiled.diagnostics));
+      const vm=new A.VirtualMachine(compiled,{});vm.setBreakpoint('M',5);
+      let ready;const stopped=new Promise(resolve=>ready=resolve);vm.on('pause',ready);const running=vm.start();
+      try{await Promise.race([stopped,running.then(()=>{throw Error('Breakpoint missed');})]);
+        const frame=vm.currentFrame;
+        const raw=await vm.evaluate(A.parseExpression('b'),frame);
+        const before=(await vm.evaluateScalar(A.parseExpression('v'),frame)).type;
+        await vm.evaluateExplicit('Call Change(b)',{immediate:true});
+        const after=await vm.evaluate(A.parseExpression('b'),frame);
+        const scalar=await vm.evaluateScalar(A.parseExpression('b'),frame);
+        return {raw,before,after,type:scalar.type,rawType:typeof raw,ide:typeof globalThis.vb6Studio};
+      }finally{vm.breakpoints.clear();vm.resume();await running;}
+    }''')
+    q.close();check(result=={'raw':5,'before':'byte','after':8,'type':'byte','rawType':'number','ide':'undefined'},result);return result
+
 TESTS=[('Exported Decimal magnitude and exact arithmetic',decimal),('Exported financial functions, named calls and whole arrays',financial),('Exported constant/enum binding and computed branches',constants),('Exported numbered errors and Resume state',errors),('Exported corrected string intrinsics',strings),('Exported Decimal binary file round trip',binary),('Real worker invalidates cross-module constant dependencies',worker),('IDE blocks invalid constants without executing source',reject),('F5 runs new compiler runtime inside isolated preview',preview),('Independent SDK runs without IDE globals',sdk)]
+TESTS.extend([('Exported numeric tags, promotion and Boolean formatting',scalar_values),('Exported tagged binary arrays and sequential fields',scalar_files),('Exported ByRef Call and typed For loop state',scalar_byref),('Exported typed ADO field reads',scalar_data),('Worker rebinds changed constant subtypes',scalar_worker),('Standalone SDK debugger keeps internal tags and raw API',scalar_sdk_debug),('Exported control properties use declared subtypes',scalar_controls)])
 try:
     if OPTIONS.http:
         SERVER=ThreadingHTTPServer(('127.0.0.1',0),partial(QuietHandler,directory=str(ROOT)))
