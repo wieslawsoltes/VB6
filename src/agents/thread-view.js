@@ -1,4 +1,6 @@
 import {el} from '../core/core.js';
+// Weak keys release view preferences with the in-memory task; never serialize them.
+const readingStates = new WeakMap();
 const STATES = {waiting: 'Waiting for response…', streaming: 'Responding…', running: 'Running…', approval: 'Waiting for your approval', complete: 'Completed', error: 'Failed', denied: 'Denied', interrupted: 'Interrupted'};
 const write = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 async function copyText(root, text, announce) {
@@ -64,11 +66,11 @@ function markdown(node, text, root, announce) {
 /** Keyed updates preserve old replies, selection, expanded tool details and the reader's position. */
 export class AgentThreadView {
   constructor({announce = () => {}} = {}) {
-    this.announce = announce; this.nodes = new Map(); this.follow = true; this.windowSize = 150; this.version = -1;
+    this.announce = announce; this.nodes = new Map(); this.follow = true; this.windowSize = 150; this.version = -1; this.savedTop = 0; this.expanded = new Set();
     this.root = el('div', {class: 'agent-thread-view'});
     this.scroller = el('div', {class: 'agent-conversation', tabindex: 0, role: 'log', 'aria-label': 'Agent conversation', 'aria-live': 'off'});
     this.omission = el('div', {class: 'agent-thread-notice'});
-    this.older = el('button', {type: 'button', onclick: () => { this.follow = false; this.visibleEnd = this.lastEnd; this.windowSize += 100; this.version = -1; this.update(this.thread, this.options); }}, 'Show earlier messages');
+    this.older = el('button', {type: 'button', onclick: () => { this.follow = false; this.visibleEnd = this.lastEnd; this.windowSize = Math.min(this.thread.maxEntries, this.windowSize + 100); this.version = -1; this.update(this.thread, this.options); }}, 'Show earlier messages');
     this.list = el('div', {class: 'agent-thread-messages'});
     this.empty = el('div', {class: 'agent-thread-empty'}, el('strong', {}, 'Start a coding conversation'), el('p', {}, 'Ask about your code, describe an edit, or investigate a debugger issue. Replies and tool progress appear here. Changes still require the permissions you choose.'));
     this.jump = el('button', {type: 'button', class: 'agent-jump-latest', hidden: true, onclick: () => { this.follow = true; this.visibleEnd = null; this.version = -1; this.update(this.thread, this.options); }}, 'Jump to latest');
@@ -76,11 +78,27 @@ export class AgentThreadView {
     this.scroller.addEventListener('scroll', () => {
       // Hidden tabs have no geometry; they must not change the reader's follow preference.
       if (!this.scroller.clientHeight) return;
+      const following = this.follow;
+      this.savedTop = this.scroller.scrollTop;
       this.follow = this.scroller.scrollHeight - this.scroller.scrollTop - this.scroller.clientHeight <= 32;
       this.visibleEnd = this.follow ? null : this.lastEnd;
+      // Reaching the end of an older frozen window must display newer entries
+      // NOW, even if generation has finished and no further event will arrive.
+      if (this.follow && !following) { this.version = -1; this.update(this.thread, this.options); }
       this.jump.hidden = this.follow;
+      this.remember();
     });
-    if (globalThis.ResizeObserver) { this.resize = new ResizeObserver(() => { if (this.follow && this.scroller.clientHeight) this.scroller.scrollTop = this.scroller.scrollHeight; }); this.resize.observe(this.scroller); }
+    if (globalThis.ResizeObserver) { this.resize = new ResizeObserver(() => {
+      if (this.scroller.clientHeight) this.scroller.scrollTop = this.follow ? this.scroller.scrollHeight : this.savedTop;
+    }); this.resize.observe(this.scroller); }
+  }
+  remember() {
+    if (!this.thread) return;
+    for (const [id, record] of this.nodes) if (record.node.tagName === 'DETAILS') {
+      if (record.node.open) this.expanded.add(id); else this.expanded.delete(id);
+    }
+    readingStates.set(this.thread, {follow: this.follow, visibleEnd: this.visibleEnd, windowSize: this.windowSize,
+      top: this.savedTop, expanded: [...this.expanded]});
   }
   create(item) {
     const node = el(item.kind === 'tool' ? 'details' : 'article', {class: 'agent-thread-entry agent-' + item.kind, 'data-entry-id': item.id});
@@ -92,7 +110,12 @@ export class AgentThreadView {
       const copy = el('button', {type: 'button', class: 'agent-message-copy', 'aria-label': 'Copy message', onclick: () => copyText(this.root, record.text, this.announce)}, 'Copy');
       heading.append(copy); record.copy = copy;
     }
-    node.append(heading, body, note); this.nodes.set(item.id, record); return record;
+    node.append(heading, body, note); this.nodes.set(item.id, record);
+    if (item.kind === 'tool') {
+      node.open = this.expanded.has(item.id);
+      node.addEventListener('toggle', () => { if (this.nodes.get(item.id) === record) this.remember(); });
+    }
+    return record;
   }
   renderItem(item) {
     const record = this.nodes.get(item.id) || this.create(item);
@@ -126,22 +149,35 @@ export class AgentThreadView {
   }
   update(thread, options = {}) {
     if (!thread) return;
-    this.thread = thread; this.options = options;
-    if (this.taskId !== options.taskId) {
-      this.taskId = options.taskId; this.nodes.clear(); this.list.replaceChildren(); this.follow = true; this.visibleEnd = null; this.windowSize = 150; this.version = -1;
+    const switched = this.thread !== thread || this.taskId !== options.taskId;
+    if (switched) {
+      this.remember();
+      const saved = readingStates.get(thread);
+      this.taskId = options.taskId; this.nodes.clear(); this.list.replaceChildren();
+      this.follow = saved?.follow ?? true; this.visibleEnd = saved?.visibleEnd ?? null;
+      this.savedTop = saved?.top || 0; this.windowSize = saved?.windowSize || 150;
+      this.expanded = new Set(saved?.expanded || []); this.version = -1;
     }
+    this.thread = thread; this.options = options;
     this.scroller.setAttribute('aria-busy', String(!!options.busy));
     if (this.version === thread.revision) return;
     this.version = thread.revision;
     let end = this.follow || !this.visibleEnd ? thread.entries.length : thread.entries.findIndex(item => item.id === this.visibleEnd) + 1;
     if (end < 1) end = thread.entries.length;
     const start = Math.max(0, end - this.windowSize), items = thread.entries.slice(start, end);
-    const top = this.scroller.scrollTop, anchor = [...this.list.children].find(node => node.offsetTop + node.offsetHeight > top);
+    const visible = this.scroller.clientHeight > 0;
+    const top = switched || !visible ? this.savedTop : this.scroller.scrollTop;
+    const topEdge = this.scroller.getBoundingClientRect().top + this.scroller.clientTop;
+    const anchor = !switched && visible ? [...this.list.children].find(node => node.getBoundingClientRect().bottom > topEdge) : null;
     const offset = anchor ? anchor.getBoundingClientRect().top : 0;
     write(this.omission, thread.omitted ? `${thread.omitted} earlier entries were omitted from this bounded public thread. Native context and project edits are unaffected.` : '');
     this.omission.hidden = !thread.omitted; this.older.hidden = start === 0; this.empty.hidden = !!thread.entries.length;
-    const retained = new Set(items.map(item => item.id));
-    for (const [id, record] of this.nodes) if (!retained.has(id)) { record.node.remove(); this.nodes.delete(id); }
+    const retained = new Set(items.map(item => item.id)), existing = new Set(thread.entries.map(item => item.id));
+    for (const id of this.expanded) if (!existing.has(id)) this.expanded.delete(id);
+    for (const [id, record] of this.nodes) if (!retained.has(id)) {
+      if (existing.has(id) && record.node.open) this.expanded.add(id);
+      record.node.remove(); this.nodes.delete(id);
+    }
     let previous = null;
     for (const item of items) {
       const record = this.renderItem(item), expected = previous ? previous.nextSibling : this.list.firstChild;
@@ -150,9 +186,13 @@ export class AgentThreadView {
     }
     this.lastEnd = items.at(-1)?.id; this.jump.hidden = this.follow;
     write(this.jump, 'Jump to latest' + (thread.entries.length > end ? ' (' + (thread.entries.length - end) + ' new)' : ''));
-    if (this.follow) this.scroller.scrollTop = this.scroller.scrollHeight;
-    else if (anchor?.isConnected) this.scroller.scrollTop = top + anchor.getBoundingClientRect().top - offset;
-    else this.scroller.scrollTop = top;
+    if (visible) {
+      if (this.follow) this.scroller.scrollTop = this.scroller.scrollHeight;
+      else if (anchor?.isConnected) this.scroller.scrollTop = top + anchor.getBoundingClientRect().top - offset;
+      else this.scroller.scrollTop = top;
+      this.savedTop = this.scroller.scrollTop;
+    }
+    this.remember();
   }
-  dispose() { this.resize?.disconnect(); this.nodes.clear(); }
+  dispose() { this.remember(); this.resize?.disconnect(); this.nodes.clear(); }
 }

@@ -222,6 +222,8 @@ append the task prompt again or replay completed IDE tool operations**. The mode
 may still propose another operation in its next response; normal approval and
 revision safeguards remain in force. Historical results are not assumed current.
 
+Confirmed output-token stops, request-context limits and fully validated but unexecuted oversized tool batches now pause without losing the task. The Task tab provides **Review limits…** and **Resume task**. See [limit recovery](CODING-AGENT-THREADS.md#limit-recovery) for exact no-replay, stale-revision and provider-specific rules.
+
 There are **no automatic retries**. HTTP 408, 429, 500, 502, 503, 504 and 529, and
 pre-response connection failures and request timeouts (including timed-out
 streaming responses), allow a manual Continue. A bounded
@@ -229,7 +231,7 @@ provider `Retry-After` suggestion is shown (at most five minutes); it schedules
 nothing. The local relay forwards only this sanitized retry metadata, not error
 bodies or arbitrary provider headers. An earlier request may already have been
 processed/billed. Authentication/validation failures, cancellation, denied
-operations, malformed/incomplete native responses and uncertain tool batches remain blocked and
+operations, malformed native responses, unspecified incomplete responses and uncertain tool batches remain blocked and
 require a new task. The engine never retries a possibly half-applied batch.
 
 The new Extended default allows 128 provider requests and 1,024 tool calls per run,

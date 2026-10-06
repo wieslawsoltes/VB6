@@ -24,3 +24,7 @@
 @media(max-width:680px){.agent-task>.agent-field{flex-direction:row;align-items:center}.agent-task>.agent-field>span{flex:0 0 auto}.agent-thread-view>.agent-conversation{padding:5px}.agent-composer>.agent-field{flex-direction:row}.agent-composer>.agent-field>span{flex-basis:48px}.agent-message-heading{gap:5px;flex-wrap:wrap}.agent-tool>summary>.agent-message-state{float:none}.agent-thread-entry.agent-user{width:calc(100% - 12px)}}
 
 .agent-plain-tail{white-space:pre-wrap;overflow-wrap:anywhere;max-height:380px;overflow:auto;font:inherit}
+
+.agent-limit-recovery{flex:0 0 auto;padding:6px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);font:inherit}
+.agent-limit-recovery p{margin:0 0 5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.agent-limit-recovery[hidden]{display:none}

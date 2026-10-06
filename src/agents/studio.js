@@ -102,9 +102,9 @@ class AgentPanel {
     this.newButton = button('New Task', () => this.newTask(), 'new');
     this.exportButton = button('Save Transcript…', () => download('coding-agent-transcript.json', JSON.stringify({version: 2, thread: api.agent.thread.snapshot(), activity: api.agent.transcript, usage: api.agent.usage, estimatedTokens: api.agent.estimatedTokens}, null, 2), 'application/json'), 'save');
     this.root.append(el('div', {class: 'agent-toolbar'}, this.runButton, this.continueButton, this.stopButton, this.newButton, this.exportButton),
-      tabbedPages([{id: 'task', label: 'Task', node: this.taskPage()}, {id: 'connection', label: 'Connection', node: this.connectionPage()},
+      (this.pages = tabbedPages([{id: 'task', label: 'Task', node: this.taskPage()}, {id: 'connection', label: 'Connection', node: this.connectionPage()},
         {id: 'permissions', label: 'Permissions', node: this.permissionsPage()}, {id: 'tools', label: 'Tools', node: this.toolsPage()},
-        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages'}), this.status);
+        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages'})), this.status);
     this.unlisten = api.onChange(event => this.event(event)); this.syncTask();
   }
   taskPage() {
@@ -128,8 +128,13 @@ class AgentPanel {
     });
     this.exampleSelect = examples;
     this.contextStatus = el('div', {class: 'agent-context', 'aria-label': 'Task context usage'});
+    this.recoveryText = el('p');
+    this.recoverySettings = button('Review limits…', () => { this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
+    this.recoveryContinue = button('Resume task', () => this.start(true), 'run');
+    this.recovery = el('div', {class: 'agent-limit-recovery', hidden: true, role: 'status'}, this.recoveryText,
+      el('div', {class: 'agent-actions'}, this.recoverySettings, this.recoveryContinue));
     this.budgetMeter = el('progress', {class: 'agent-budget-meter', max: 1, value: 0, 'aria-label': 'Session token budget used'});
-    return el('div', {class: 'agent-page agent-task'}, field('Task example:', examples), this.contextStatus, this.budgetMeter, this.threadView.root,
+    return el('div', {class: 'agent-page agent-task'}, field('Task example:', examples), this.contextStatus, this.budgetMeter, this.recovery, this.threadView.root,
       el('div', {class: 'agent-composer'}, field('Message:', this.prompt), el('div', {class: 'agent-actions'}, this.sendButton, this.composerStop,
         el('span', {}, 'Enter sends • Shift+Enter adds a line'))),
       el('div', {class: 'agent-composer-help'}, 'Continue resumes a limited task without repeating completed operations. Tasks are memory-only.'));
@@ -275,7 +280,7 @@ class AgentPanel {
         el('p', {}, 'Send this task and requested project context from ' + project.name + ' to ' + PROVIDERS[provider].label + ' (' + model + ')?'),
         el('p', {}, 'This may incur API charges. Review source for secrets before continuing. Read access includes project files and debugger data.'),
         el('p', {}, 'Session allowance: ' + limits.tokenBudget.toLocaleString('en-US') + ' tokens; ' + this.api.agent.budgetUsed.toLocaleString('en-US') + ' already accounted. Output cap: ' + limits.maxTokens.toLocaleString('en-US') + ' per request. This run allows ' + limits.maxTurns + ' requests and ' + limits.maxCalls + ' tool calls. Larger limits may substantially increase costs.'),
-        ...(continuation ? [el('p', {}, 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. No automatic retry is scheduled.' : '')] : []),
+        ...(continuation ? [el('p', {}, this.api.agent.pendingTurn ? 'Continue first processes the validated deferred batch without requesting it again. No operation in that batch has executed. Original arguments are retained; stale revisions are rejected, never automatically rewritten. Current permission choices still apply.' : 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed or truncated request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. No automatic retry is scheduled.' : '')] : []),
         el('p', {}, mode === 'scoped' ? 'Authorize for this run, up to 10 minutes: ' + scopes.join(', ') + '. Selected operations will not ask again. Other changes still require review.' : mode === 'readonly' ? 'Read-only mode: the agent cannot change or execute the project.' : 'Each change or execution requires your approval.')), signal, continuation ? 'Continue Task' : 'Start Task');
       if (!allowed) return; signal.throwIfAborted();
       if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');
@@ -307,6 +312,9 @@ class AgentPanel {
       + ' | ' + Math.max(0, budget - used).toLocaleString('en-US') + ' remaining | ' + agent.usage.requests + ' requests, ' + agent.usage.calls + ' tools | ' + Math.ceil(agent.historyBytes / 1024) + ' KiB context';
     this.budgetMeter.max = budget; this.budgetMeter.value = Math.min(budget, used); this.budgetMeter.setAttribute('aria-valuetext', Math.min(100, Math.round(used / budget * 100)) + '% of session budget accounted');
     this.threadView.update(agent.thread, {taskId: task.id, busy: agent.busy});
+    this.recovery.hidden = !agent.canResume;
+    this.recoveryText.textContent = agent.limit?.message || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
+    if (agent.limit?.required) this.recoveryText.textContent += ' Required for this batch/request: ' + agent.limit.required.toLocaleString('en-US') + (agent.limit.kind === 'context' ? ' bytes.' : ' tool calls.');
     const planStamp = task.id + ':' + agent.plan.revision;
     if (this.planStamp !== planStamp) {
       this.planStamp = planStamp; this.planSummary.textContent = agent.plan.explanation || 'No task plan yet.';
@@ -323,8 +331,9 @@ class AgentPanel {
   }
   refresh(render = true) {
     const busy = !!this.pending || this.api.agent.busy;
-    this.sendButton.disabled = busy; this.composerStop.disabled = !busy;
-    this.runButton.disabled = busy; this.continueButton.disabled = busy || !this.api.agent.canResume; this.stopButton.disabled = !busy; this.newButton.disabled = busy;
+    this.sendButton.disabled = busy || !!this.api.agent.pendingTurn; this.composerStop.disabled = !busy;
+    this.recoveryContinue.disabled = busy || !this.api.agent.canResume; this.recoverySettings.disabled = busy;
+    this.runButton.disabled = busy || !!this.api.agent.pendingTurn; this.continueButton.disabled = busy || !this.api.agent.canResume; this.stopButton.disabled = !busy; this.newButton.disabled = busy;
     for (const control of [this.provider, this.connection, this.model, this.models, this.keyInput, this.relay, this.token, this.browserConsent, this.refreshModels, this.clearKey, this.mode, this.turns, this.outputTokens, this.budget, this.callLimit, this.contextLimit, this.requestTimeout, this.limitPreset, this.exampleSelect, this.taskList, this.taskName, this.renameButton, this.deleteButton, this.handoffButton, ...this.scopeInputs.map(item => item.node)]) control.disabled = busy;
     if (render) this.render();
   }
