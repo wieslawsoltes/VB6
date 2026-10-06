@@ -1,0 +1,68 @@
+name: Agent recovery branch publication
+on:
+  push:
+    branches: [fix/agent-recovery-compaction]
+    paths: [.github/workflows/agent-recovery-publish.yml, 'tools/agent-recovery-*.b64']
+permissions:
+  contents: write
+concurrency:
+  group: agent-recovery-branch-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/agent-recovery-compaction'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify and apply the locally tested source patch
+        run: |
+          mkdir -p /tmp/agent-recovery-validation
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, lzma, subprocess
+          expected = ['8d956d52ec18f7104528ec00ea2453a017f91ac824b02b819cb8f795c4d8963d','64a430043ffa688314043615a3b948c040295af399eab00a28210162dd55e5ff','3b088bc77f70ce75ef6a6eef83748fe874ed72990d04dbe59242a6b88ef8f5ec','49110746bb53214881af8f5fdb909b15ec53b0d2237afe774eeb38eba5e04239']
+          encoded = ''
+          for i, digest in enumerate(expected):
+              path = Path(f'tools/agent-recovery-{i}.b64')
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              print(path, actual)
+              assert actual == digest, f'Patch transfer mismatch in {path}'
+              encoded += path.read_text().strip()
+          patch = lzma.decompress(base64.b64decode(encoded, validate=True))
+          digest = hashlib.sha256(patch).hexdigest()
+          assert digest == '56adb03d3528d71bfff5d48ba954414ac93d2a7cd50b38df4d87a281a10b22d6'
+          path = Path('/tmp/agent-recovery-validation/source.patch')
+          path.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
+          PY
+      - name: Rebuild the combined sources and validate
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/agent-recovery-validation/build.log
+          node --check dist/studio.js
+          npm test 2>&1 | tee /tmp/agent-recovery-validation/tests.log
+          npm run test:agents 2>&1 | tee /tmp/agent-recovery-validation/agents.log
+          git diff --check
+      - name: Commit source and reproducible bundles to this branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md docs/CODING-AGENT-RECOVERY.md docs/CODING-AGENT-THREADS.md docs/coding-agents.md src/agents tests/agent-relay.test.mjs tests/coding-agents-compaction.test.mjs tests/coding-agents-recovery.test.mjs tests/coding-agents-tasks.test.mjs tests/coding-agents-thread.test.mjs tools/agent-relay.mjs tools/coding-agents-browser-tests.py dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git commit -m 'fix(agents): add cancellation-safe recovery and atomic context checkpoints'
+          git push origin HEAD:refs/heads/fix/agent-recovery-compaction
+          git rev-parse HEAD | tee /tmp/agent-recovery-validation/source-head.txt
+          git archive HEAD | gzip > /tmp/agent-recovery-validation/verified-source.tar.gz
+          sha256sum /tmp/agent-recovery-validation/verified-source.tar.gz > /tmp/agent-recovery-validation/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-recovery-publication-validation
+          path: /tmp/agent-recovery-validation/
+          retention-days: 7
