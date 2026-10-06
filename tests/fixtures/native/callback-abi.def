@@ -1,0 +1,12 @@
+LIBRARY vb6-callback-probe
+EXPORTS
+ InvokeLong=_InvokeLong@8
+ InvokeDouble=_InvokeDouble@12
+ InvokeSingle=_InvokeSingle@8
+ InvokeCurrency=_InvokeCurrency@12
+ InvokeRefs=_InvokeRefs@4
+ InvokeVoid=_InvokeVoid@8
+ InvokeZero=_InvokeZero@4
+ PointerValue=_PointerValue@4
+ PreserveRegisters=_PreserveRegisters@4
+ InvokeOtherThread=_InvokeOtherThread@4

@@ -62,6 +62,8 @@ jobs:
           python tools/browser-finalization-05.py
           python tools/browser-boundaries-06.py
           python tools/browser-visual-tests.py
+      - name: Popup-close event ordering contract
+        run: python tools/test-browser-window-close.py
       - name: Existing detached-window regression matrix
         env:
           VB6_BROWSER: ${{ matrix.engine }}

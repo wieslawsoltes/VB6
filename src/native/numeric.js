@@ -134,7 +134,8 @@ export const nativeNumericMethods = {
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
     plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(node.kind==='byval'){this.numeric(node.expr);}
+      if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
+      else if(node.kind==='byval'){this.numeric(node.expr);}
       else if(p.bounds!==null&&p.bounds!==undefined){
         if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
         const a=this.variable(node);
@@ -146,7 +147,7 @@ export const nativeNumericMethods = {
       }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots[i]=slot;return;}
       else if(key(p.type)==='date'){slot.type=p.type;this.dateExpression(node);this.storeDate(slot);slots[i]=slot;return;}
       else if(REAL_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
-      else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
+      else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{if(p.nativeCoerce&&this.type(node)==='string')this.call({kind:'call',callee:{kind:'id',name:'CLng'},args:[node]});else this.numeric(node);this.check(p.type);}
       x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots[i]=slot;
     });
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}

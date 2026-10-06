@@ -78,13 +78,17 @@ class BrowserWindows(unittest.TestCase):
         self.assertEqual(errors, [], 'Uncaught page errors')
 
     def closing_action(self, popup, action):
-        # Firefox may acknowledge the page close before acknowledging its click.
+        # WebKit/Firefox can reject an input command before delivering the page's
+        # close event. Wait for that event instead of racing is_closed() against it.
+        # Only a closed-target error is tolerated; missing close events still time
+        # out and every unrelated input failure still fails the test.
         with popup.expect_event('close'):
             try:
                 action()
             except Error as error:
-                if not popup.is_closed() or 'closed' not in str(error):
+                if 'closed' not in str(error).lower():
                     raise
+        self.assertTrue(popup.is_closed())
 
     def ready_popup(self, popup):
         popup.wait_for_selector('.browser-window-root[data-ready="true"]')
@@ -347,11 +351,7 @@ class BrowserWindows(unittest.TestCase):
         self.assertTrue(self.js('''() => {const tool=vb6Studio.documents.tools.get('tool:object-browser');
           return tool.classList.observerWindow === tool.root.ownerDocument.defaultView;}'''))
         popup.get_by_label('Object Browser search', exact=True).focus()
-        try:
-            popup.keyboard.press('Control+F4')
-        except Exception:
-            if not popup.is_closed():
-                raise
+        self.closing_action(popup, lambda: popup.keyboard.press('Control+F4'))
         self.count(0)
         self.assertFalse(self.js('vb6Studio.documents.tools.has("tool:object-browser")'))
         self.assertTrue(popup.is_closed())
@@ -408,7 +408,10 @@ class BrowserWindows(unittest.TestCase):
         self.count(2)
         self.js('window.savedProfile=vb6Studio.captureWindowLayout()')
         self.assertEqual(self.js('savedProfile.browserWindows.length'), 2)
-        self.js('vb6Studio.applyWindowLayout(savedProfile)')
+        # Registry removal precedes the browser's asynchronous close events.
+        # Arm both listeners before returning the live nodes to the owner.
+        with popup.expect_event('close'), props.expect_event('close'):
+            self.js('vb6Studio.applyWindowLayout(savedProfile)')
         self.count(0)
         self.assertTrue(popup.is_closed() and props.is_closed())
         self.assertEqual(self.js('vb6Studio.browserWindows.pending.size'), 2)

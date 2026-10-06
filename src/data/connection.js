@@ -1,7 +1,7 @@
 import {dataDefault} from './defaults.js';
 import {assertData,dataError,connectionConfiguration,dataList,after} from './common.js';
 import {ConnectedRecordset} from './connected-recordset.js';
-import {fieldValue} from './recordset.js';
+import {fieldValue,fieldScalarType} from './recordset.js';
 
 import {DataCollection} from './collection.js';
 export {DataCollection};
@@ -79,7 +79,7 @@ export class ADOCommand {
   }
   get CommandTimeout(){return this._commandTimeout;}
   set CommandTimeout(value){value=Number(value);assertData(Number.isFinite(value)&&value>=1&&value<=600,'CommandTimeout must be 1–600 seconds',5);this._commandTimeout=value;this._timeoutExplicit=true;}
-  CreateParameter(name='',type=202,direction=1,size=0,value=null){return dataDefault({Name:String(name),Type:Number(type),Direction:Number(direction),Size:Number(size),Value:value});}
+  CreateParameter(name='',type=202,direction=1,size=0,value=null){const parameter={Name:String(name),Type:Number(type),Direction:Number(direction),Size:Number(size),Value:value};return dataDefault(parameter,()=>fieldScalarType(parameter.Type));}
   async execute(affected,parameters,options=this.CommandType,target){
     let cn=this.ActiveConnection,owned=false;
     if(typeof cn==='string'){const text=cn;cn=this.context.connection();await cn.Open(text);owned=true;}

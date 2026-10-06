@@ -41,6 +41,7 @@ export const nativeBindingMethods = {
       if (context?.locals?.has(name) || owner?.globals?.has(name)) return null;
       const own = descriptor(this,module,name);
       if (own) return own;
+      if(owner?.nativeInternal)return null;
       const matches = [];
       for (const m of this.modules.values()) if (m !== owner) {
         const d = scopeDeclarations(m.module).get(name);

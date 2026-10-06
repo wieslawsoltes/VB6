@@ -203,12 +203,13 @@ test('tasks: retry delay parsing is bounded and transport errors do not echo arb
 
 test('tasks: oversized native context is rejected before any tool in its batch executes', async t => {
   const f = fixture(t), project = JSON.stringify(f.ide.project);
-  await assert.rejects(run(f.agent, async (_, {receive}) => {
+  const outcome = await run(f.agent, async (_, {receive}) => {
     const result = packet('openai', [{name: 'vb6_module_write', args: {module: 'Form1', code: 'bad', expectedRevision: f.adapter.revision}}]);
     result.output[1].encrypted_content = 'x'.repeat(1500000); receive(result);
-  }, 'openai', {maxContextBytes: 1500000}), /context limit before applying/);
+  }, 'openai', {maxContextBytes: 1500000});
+  assert.equal(outcome.status, 'limit'); assert.match(f.agent.limit.message, /context limit before applying/);
   assert.equal(f.approvals(), 0); assert.equal(JSON.stringify(f.ide.project), project);
-  assert.ok(f.agent.historyBytes < 1500000); assert.equal(f.agent.canResume, false);
+  assert.ok(f.agent.historyBytes < 1500000); assert.equal(f.agent.canResume, true); assert.ok(f.agent.pendingTurn);
 });
 test('tasks: aggregate tool results stay bounded without corrupting native continuations', async t => {
   const f = fixture(t); let executed = 0;

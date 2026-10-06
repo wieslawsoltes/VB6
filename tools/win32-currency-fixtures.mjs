@@ -99,7 +99,7 @@ Dim text As String`);
   errorCheck('amount = CCur("not-money")',13,'malformed runtime text');
   errorCheck('n = CLng(Limit)',6,'large Currency integer narrowing overflow');
   errorCheck('amount = Round(1@, -1)',5,'invalid Round precision');
-  errorCheck('ReDim pinned(131072)',7,'dynamic Currency backing limit uses eight-byte size');
+  errorCheck('ReDim pinned(268435455)',7,'dynamic Currency x86 backing range uses eight-byte size');
   check('UBound(pinned) = 2','failed resize leaves existing descriptor intact');
   add('Err.Clear\nOn Error GoTo 0\nn = 0\nFor amount = 0.0001@ To 0.0003@ Step 0.0001@\n n = n + 1\nNext');
   check('n = 3 And amount = 0.0004@','fractional Currency For loop');

@@ -46,6 +46,7 @@ function asDate(value){
   if((match=text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/))){[,y,m,d,h=0,n=0,s=0,ms=0]=match;}
   else if((match=text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i))){[,m,d,y,h=0,n=0,s=0]=match;y=Number(y);if(y<100)y+=y<30?2000:1900;if(match[7]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[7])?12:0);}}
   else if((match=text.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?\s*(AM|PM)?$/i))){[,h,n,s=0,ms=0]=match;[y,m,d]=[1899,12,30];if(match[5]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[5])?12:0);}}
+  else if((match=text.match(/^(\d{1,2})[\/,](\d{1,2})$/))){[,m,d]=match;y=new Date().getFullYear();}
   else {const parsed=new Date(text);if(!Number.isFinite(parsed.getTime()))throw new VBError('Type mismatch',13);return validateDate(parsed);}
   [y,m,d,h,n,s]=[y,m,d,h,n,s].map(Number);ms=Number(String(ms).padEnd(3,'0'));
   if(m<1||m>12||d<1||d>daysInMonth(y,m-1)||h<0||h>23||n>59||s>59)throw new VBError('Type mismatch',13);
@@ -146,7 +147,7 @@ function splitTop(text, separator = ',') {
   for (let i=0;i<text.length;i++) {
     const c = text[i];
     if (c === '"' && !date) { if (quoted && text[i+1] === '"') i++; else quoted = !quoted; }
-    else if (!quoted && c === '#' && (date || text.indexOf('#',i+1) >= 0)) date = !date;
+    else if (!quoted && c === '#' && (date || !/[\w\u0080-\uffff\]]/.test(text[i-1]||'') && text.indexOf('#',i+1) >= 0)) date = !date;
     else if (!quoted && !date) {
       if (c === '(') depth++;
       else if (c === ')') depth--;
@@ -373,7 +374,187 @@ class VBErrorValue {
   constructor(number){number=bankersRound(numeric(number));if(number<0||number>65535)throw new VBError('Overflow',6);this.number=number;Object.freeze(this);}
   toString(){return 'Error '+this.number;}
 }
-const explicitErrorValue=value=>value instanceof VBErrorValue?value.number:value;
+const explicitErrorValue=value=>unbox(value) instanceof VBErrorValue?unbox(value).number:unbox(value);
+
+/** Execution-only scalar metadata. Public Cell.get()/Array.get() and host
+ * adapters still expose ordinary JS values; getScalar() retains VB subtype and
+ * whether an expression originated from Variant storage. Object identity is
+ * never wrapped. The tag is immutable and is not a native COM VARIANT layout. */
+class VBScalar {
+  constructor(value,type,variant=false) {
+    this.type=String(type).toLowerCase();this.variant=!!variant;
+    if(!Object.hasOwn(SCALAR_TYPES,this.type))throw new VBError('Invalid scalar type: '+type,13);
+    if(this.type==='empty'||this.type==='null'){if(value!==(this.type==='empty'?undefined:null))throw new VBError('Invalid null/empty scalar',13);this.value=value;}
+    else if(this.type==='error'){if(!(value instanceof VBErrorValue)&&value!==MISSING)throw new VBError('Invalid Error scalar',13);this.value=value;}
+    else this.value=coerce(value,this.type);
+    Object.freeze(this);
+  }
+  valueOf(){return this.type==='boolean'?(this.value?-1:0):this.value;}
+  toString(){return this.type==='boolean'?(this.value?'True':'False'):String(this.value);}
+}
+const SCALAR_TYPES=Object.freeze({empty:0,null:1,integer:2,long:3,single:4,double:5,currency:6,date:7,string:8,error:10,boolean:11,decimal:14,byte:17});
+const unbox=value=>value instanceof VBScalar?value.value:value;
+function scalarType(value){
+  if(value instanceof VBScalar)return value.type;
+  if(value===undefined)return 'empty';if(value===null)return 'null';
+  if(value instanceof VBCurrency)return 'currency';if(value instanceof VBDecimal)return 'decimal';
+  if(value instanceof Date)return 'date';if(value instanceof VBErrorValue||value===MISSING)return 'error';
+  return typeof value==='number'?'double':typeof value==='string'?'string':typeof value==='boolean'?'boolean':null;
+}
+function tagScalar(value,type=scalarType(value),variant=false){
+  if(!type)return value;
+  if(value instanceof VBScalar&&value.type===String(type).toLowerCase()&&value.variant===!!variant)return value;
+  return new VBScalar(unbox(value),type,variant);
+}
+function storageScalar(value,type='Variant',fixedLength=null){
+  const key=String(type).toLowerCase(),actual=scalarType(value);
+  if(key==='variant')return actual?tagScalar(cloneValue(unbox(value)),actual,true):cloneValue(value);
+  const result=coerce(value,key,fixedLength);
+  return Object.hasOwn(SCALAR_TYPES,key)?tagScalar(result,key,false):result;
+}
+function readScalar(cell){if(cell instanceof LazyCell)return cell.get();return typeof cell.getScalar==='function'?cell.getScalar():Promise.resolve(cell.get()).then(value=>storageScalar(value,cell.type));}
+function literalScalar(node){
+  if(node.kind==='currency')return tagScalar(new VBCurrency(node.value),'currency');
+  if(node.kind==='date')return tagScalar(new Date(node.value),'date');
+  const type=node.valueType||scalarType(node.value);return tagScalar(type==='null'?null:coerce(node.value,type),type,false);
+}
+function signedLiteralScalar(node){
+  if(node.op!=='-')return null;
+  const n=node.expr;
+  if(n.kind==='currency')return tagScalar(new VBCurrency('-'+n.value),'currency');
+  if(n.kind!=='literal'||typeof n.value!=='number'||n.valueType==='boolean')return null;
+  const value=-n.value;
+  const type=n.numberSuffix?n.valueType:n.valueType==='long'&&value>=-32768&&value<=32767?'integer':n.valueType==='double'&&Number.isInteger(value)&&value===-2147483648?'long':n.valueType;
+  return tagScalar(coerce(value,type),type);
+}
+const INTEGER_BOUNDS=Object.freeze({byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]});
+function scalarResult(value,type,variant){
+  if(value===null||value===undefined)return tagScalar(value,scalarType(value),true);
+  if(type==='boolean')return tagScalar(value?-1:0,type,variant);
+  if(INTEGER_BOUNDS[type]){
+    while(value<INTEGER_BOUNDS[type][0]||value>INTEGER_BOUNDS[type][1]){
+      if(!variant)throw new VBError('Overflow',6);
+      type=type==='byte'?'integer':type==='integer'?'long':'double';
+      if(type==='double')break;
+    }
+  }
+  if(type==='single'&&!Number.isFinite(Math.fround(value))){if(!variant)throw new VBError('Overflow',6);type='double';}
+  if(type==='double'&&!Number.isFinite(value))throw new VBError('Overflow',6);
+  return tagScalar(coerce(value,type),type,variant);
+}
+function arithmeticType(a,b,op){
+  let x=scalarType(a),y=scalarType(b);
+  const normal=t=>t==='empty'||t==='boolean'?'integer':t==='string'||t==='date'?'double':t;
+  if(op==='^')return 'double';
+  if(['and','or','xor','eqv','imp'].includes(op)&&x==='boolean'&&y==='boolean')return 'boolean';
+  if(['and','or','xor','eqv','imp','\\','mod'].includes(op)){
+    if(!['byte','integer','boolean','empty'].includes(x)||!['byte','integer','boolean','empty'].includes(y))return 'long';
+    return x==='byte'&&y==='byte'?'byte':'integer';
+  }
+  if((x==='decimal'||y==='decimal')&&['+','-','*','/'].includes(op))return 'decimal';
+  if((op==='+'||op==='-')&&(x==='date'||y==='date')&&!(op==='-'&&x==='date'&&y==='date'))return 'date';
+  if(op==='-'&&x==='date'&&y==='date')return 'double';
+  if(x==='empty')x=y==='empty'?'integer':y;if(y==='empty')y=x;
+  x=normal(x);y=normal(y);
+  if(op==='/'){
+    if(x==='decimal'||y==='decimal')return 'decimal';
+    return (x==='single'||y==='single')&&[x,y].every(t=>['byte','integer','single'].includes(t))?'single':'double';
+  }
+  if((x==='single'&&y==='long')||(x==='long'&&y==='single'))return 'double';
+  if(op==='*'&&[x,y].includes('currency')&&[x,y].some(t=>['single','double'].includes(t)))return 'double';
+  const order=op==='*'?['byte','integer','long','single','currency','double','decimal']:['byte','integer','long','single','double','currency','decimal'];
+  return order[Math.max(order.indexOf(x),order.indexOf(y))]||'double';
+}
+function compareScalar(a,b,compare){
+  let x=unbox(a),y=unbox(b),tx=scalarType(a),ty=scalarType(b);
+  if(tx==='empty'){x=ty==='string'?'':0;tx=ty==='string'?'string':'integer';}
+  if(ty==='empty'){y=tx==='string'?'':0;ty=tx==='string'?'string':'integer';}
+  const sx=tx==='string',sy=ty==='string';
+  if(sx!==sy){
+    if(a.variant&&b.variant)return sx?1:-1;
+    if(sx&&!a.variant&&b.variant||sy&&!b.variant&&a.variant){x=vbString(a);y=vbString(b);tx=ty='string';}
+    else {const target=sx?ty:tx;if(sx){x=coerce(a,target);tx=target;}else {y=coerce(b,target);ty=target;}}
+  }
+  if(tx==='string'&&ty==='string'){
+    if(compare==='text'){x=x.toLocaleLowerCase();y=y.toLocaleLowerCase();}
+    return x<y?-1:x>y?1:0;
+  }
+  if(tx==='decimal'||ty==='decimal')return decimal(tagScalar(x,tx)).compare(decimal(tagScalar(y,ty)));
+  if(tx==='date'||ty==='date'){x=numeric(x);y=numeric(y);return x<y?-1:x>y?1:0;}
+  if(tx==='currency'||ty==='currency'){x=new VBCurrency(x).raw;y=new VBCurrency(y).raw;}
+  else {x=numeric(x);y=numeric(y);if((tx==='single'||ty==='single')&&tx!=='long'&&ty!=='long'){x=Math.fround(x);y=Math.fround(y);}}
+  return x<y?-1:x>y?1:0;
+}
+/** Scalar expressions implement VB promotion without relying on JS coercion.
+ * Unboxed low-level SDK operators retain their established raw-value API. */
+function scalarBinary(op,left,right,compare='binary'){
+  const a=left instanceof VBScalar?left:tagScalar(left,scalarType(left),true),b=right instanceof VBScalar?right:tagScalar(right,scalarType(right),true);
+  let x=unbox(a),y=unbox(b);const tx=scalarType(a),ty=scalarType(b),variant=!!(a?.variant||b?.variant);
+  if(op==='is')return tagScalar(binary('is',x,y),'boolean');
+  if(x instanceof VBErrorValue||y instanceof VBErrorValue){
+    if(x instanceof VBErrorValue&&y instanceof VBErrorValue&&['=','<>','<','>','<=','>='].includes(op))return scalarBinary(op,tagScalar(x.number,'long',true),tagScalar(y.number,'long',true));
+    throw new VBError('Type mismatch',13);
+  }
+  if(x===MISSING||y===MISSING)throw new VBError('Argument not optional',449);
+  if(x===NOTHING||y===NOTHING)throw new VBError('Object variable not set',91);
+  if(op==='&')return x===null&&y===null?tagScalar(null,'null',true):tagScalar((x==null?'':vbString(a))+(y==null?'':vbString(b)),'string',variant);
+  if(x===null||y===null){
+    if(!['and','or','imp'].includes(op))return tagScalar(null,'null',true);
+    const other=x===null?b:a;
+    if(unbox(other)===null)return tagScalar(null,'null',true);
+    const n=coerce(other,'long'),t=scalarType(other),type=t==='boolean'?'boolean':t==='byte'?'byte':['integer','empty'].includes(t)?'integer':'long';
+    if(op==='and'&&n===0)return tagScalar(0,type==='boolean'?'boolean':type,true);
+    if(op==='or'&&n!==0)return tagScalar(n,type,true);
+    if(op==='imp'){
+      const result=x===null?n:type==='byte'?(~n)&255:~n;
+      if(result!==0)return tagScalar(result,type,true);
+    }
+    return tagScalar(null,'null',true);
+  }
+  if(['=','<>','<','>','<=','>='].includes(op)){
+    const c=compareScalar(a,b,compare),result={'=':c===0,'<>':c!==0,'<':c<0,'>':c>0,'<=':c<=0,'>=':c>=0}[op];
+    return tagScalar(result?-1:0,'boolean',variant);
+  }
+  if(op==='like')return tagScalar(binary(op,vbString(a),vbString(b),compare),'boolean',variant);
+  if(op==='+'){
+    if(tx==='empty'&&ty!=='empty')return tagScalar(y,ty==='boolean'?'integer':ty,variant);
+    if(ty==='empty'&&tx!=='empty')return tagScalar(x,tx==='boolean'?'integer':tx,variant);
+    const sx=tx==='string',sy=ty==='string';
+    if(sx&&sy||sx&&!a.variant&&b.variant||sy&&!b.variant&&a.variant)return tagScalar(vbString(a)+vbString(b),'string',variant);
+    if(sx!==sy&&!a.variant&&!b.variant)throw new VBError('Type mismatch',13);
+  }
+  const type=arithmeticType(a,b,op);
+  if(type==='decimal'&&['+','-','*','/'].includes(op)){
+    const da=decimal(a),db=decimal(b);return tagScalar(op==='+'?da.add(db):op==='-'?da.subtract(db):op==='*'?da.multiply(db):da.divide(db),'decimal',variant);
+  }
+  if(type==='currency'&&['+','-','*'].includes(op)){
+    const ca=new VBCurrency(x),cb=new VBCurrency(y);return tagScalar(new VBCurrency(op==='+'?ca.raw+cb.raw:op==='-'?ca.raw-cb.raw:roundRatio(ca.raw*cb.raw,10000n),true),'currency',variant);
+  }
+  if(['and','or','xor','eqv','imp','\\','mod'].includes(op)){x=coerce(x,'long');y=coerce(y,'long');}
+  else{x=numeric(x);y=numeric(y);}
+  if(op==='^'&&(x===0&&y<0||x<0&&!Number.isInteger(y)))throw new VBError('Invalid procedure call or argument',5);
+  if(op==='/'&&x===0&&y===0&&!(ty==='empty'&&['single','double','string','date'].includes(tx)))throw new VBError('Overflow',6);
+  let result=binary(op,x,y,compare);
+  if(type==='byte'&&['eqv','imp'].includes(op))result&=255;
+  if(type==='date'){
+    try{return tagScalar(asDate(result),'date',variant);}catch(e){if(!variant)throw e;return scalarResult(result,'double',true);}
+  }
+  return scalarResult(result,type,variant);
+}
+function scalarUnary(op,input){
+  const value=input instanceof VBScalar?input:tagScalar(input,scalarType(input),true),raw=unbox(value),type=scalarType(value),variant=!!value?.variant;
+  if(raw===null)return tagScalar(null,'null',true);
+  if(op==='not'){
+    const result=~coerce(raw,'long'),out=type==='boolean'?'boolean':type==='byte'?'byte':['integer','empty'].includes(type)?'integer':'long';
+    return tagScalar(out==='byte'?result&255:result,out,variant);
+  }
+  if(type==='currency')return tagScalar(op==='-'?new VBCurrency(-raw.raw,true):raw,type,variant);
+  if(type==='decimal')return tagScalar(op==='-'?raw.negate():raw,type,variant);
+  const out=type==='byte'||type==='boolean'||type==='empty'?'integer':type==='string'?'double':type;
+  if(out==='date')return tagScalar(asDate(op==='-'?-numeric(raw):numeric(raw)),'date',variant);
+  return scalarResult(op==='-'?-numeric(raw):numeric(raw),out,variant);
+}
+
 
 /** Stable typed view: interface-only dispatch without copying object identity. */
 class VBInterfaceView {
@@ -383,9 +564,12 @@ const objectIdentity=value=>value?.__vbInterface?value.target:value;
 function objectSupports(value,name){const target=objectIdentity(value),type=lower(name).replace(/^vb\./,'');return !!target?.__vbInstance&&(lower(target.module.name)===type||Object.hasOwn(target.module.interfaceBindings||{},type));}
 function interfaceView(value,type){const target=objectIdentity(value),key=lower(type);if(lower(target.module.name)===key)return target;if(!Object.hasOwn(target.module.interfaceBindings||{},key))throw new VBError('Type mismatch: object does not implement '+type,13);target.interfaceViews ||= new Map();if(!target.interfaceViews.has(key))target.interfaceViews.set(key,new VBInterfaceView(target,key));return target.interfaceViews.get(key);}
 const isNothing = value => value === NOTHING;
-function truth(value){if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);if(value===MISSING)throw new VBError('Argument not optional',449);if(value===NOTHING)throw new VBError('Object variable not set',91);return value != null && value !== undefined && (typeof value === 'string' ? value !== '' : Number(value) !== 0);}
-function numeric(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return 0;if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return dateToSerial(value);const n=Number(value);if(!Number.isFinite(n))throw new VBError('Type mismatch',13);return n; }
+function truth(value){if(value instanceof VBScalar&&value.type==='string')return coerce(value,'boolean')!==0;value=unbox(value);if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);if(value===MISSING)throw new VBError('Argument not optional',449);if(value===NOTHING)throw new VBError('Object variable not set',91);return value != null && value !== undefined && (typeof value === 'string' ? value !== '' : Number(value) !== 0);}
+function numeric(value) { value=unbox(value);if(typeof value==='boolean')return value?-1:0; if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return 0;if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return dateToSerial(value);if(typeof value==='string')value=normalizeNumericString(value);const n=Number(value);if(!Number.isFinite(n))throw new VBError(Number.isNaN(n)?'Type mismatch':'Overflow',Number.isNaN(n)?13:6);return n; }
 function decimal(value){
+  const type=scalarType(value);value=unbox(value);
+  if(type==='single')value=Number(value).toPrecision(7);
+  if(typeof value==='string')value=normalizeNumericString(value);
   if(value instanceof VBDecimal)return value;
   if(value instanceof VBCurrency)return VBDecimal.fromParts(value.raw,4);
   if(value===MISSING)throw new VBError('Argument not optional',449);
@@ -393,7 +577,59 @@ function decimal(value){
   if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   return new VBDecimal(value instanceof Date?numeric(value):value);
 }
-function vbString(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return value.toLocaleString();if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();return String(value); }
+/** Invariant numeric text. Locale-specific profiles can translate separators at
+ * the host boundary; parsing never accepts JavaScript-only 0x/Infinity/NaN. */
+function normalizeNumericString(value,target='double') {
+  const text=value.trim();if(text.length>4096)throw new VBError('Numeric input exceeds conversion limit',7);
+  const radix=text.match(/^([+-]?)&([hHoO])([0-9a-fA-F]+)$/);
+  if(radix){
+    if(radix[2].toLowerCase()==='o'&&/[^0-7]/.test(radix[3]))throw new VBError('Type mismatch',13);
+    let n=BigInt((radix[2].toLowerCase()==='h'?'0x':'0o')+radix[3]);
+    if(n>0xffffffffn)throw new VBError('Overflow',6);
+    n=BigInt.asIntN(target==='integer'?16:32,n);if(radix[1]==='-')n=-n;
+    return n.toString();
+  }
+  const normalized=text.replace(/,/g,'').replace(/[dD]/g,'e');
+  if(!text||!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(normalized)||/^[,+.-]*$/.test(text))throw new VBError('Type mismatch',13);
+  return normalized;
+}
+function scalarNumberString(value,type='double') {
+  const n=numeric(value);if(n===0)return '0';
+  if(type!=='single'&&type!=='double')return String(n);
+  const precision=type==='single'?7:15,rounded=Number(n.toPrecision(precision));
+  if(Math.abs(rounded)>=10**precision||Math.abs(rounded)<.0001){
+    const [m,e]=rounded.toExponential(precision-1).split('e');
+    return m.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'')+'E'+(Number(e)<0?'-':'+')+String(Math.abs(Number(e))).padStart(2,'0');
+  }
+  return String(rounded);
+}
+function vbString(value) {
+  if(value instanceof VBScalar){
+    if(value.type==='boolean')return value.value?'True':'False';
+    if(value.type==='single'||value.type==='double')return scalarNumberString(value.value,value.type);
+  }
+  value=unbox(value);
+  if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
+  if(value===MISSING)throw new VBError('Argument not optional',449);
+  if(isNothing(value))throw new VBError('Object variable or With block variable not set',91);
+  if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);
+  if(value instanceof Date){
+    const time=value.toLocaleTimeString('en-US'),base=value.getFullYear()===1899&&value.getMonth()===11&&value.getDate()===30;
+    return base?time:value.toLocaleDateString('en-US')+(value.getHours()||value.getMinutes()||value.getSeconds()?' '+time:'');
+  }
+  if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();
+  return typeof value==='boolean'?(value?'True':'False'):String(value);
+}
+/** Source Print/Write representations. Kept separate from debugger rendering. */
+function printScalar(value,csv=false){
+ const raw=unbox(value),type=scalarType(value);
+ if(type==='boolean')return csv?(raw?'#TRUE#':'#FALSE#'):(raw?'True':'False');
+ if(raw===null)return csv?'#NULL#':'Null';
+ if(raw===undefined)return '';
+ if(raw instanceof VBErrorValue)return csv?'#ERROR '+raw.number+'#':raw.toString();
+ if(raw instanceof Date&&csv){const pad=n=>String(n).padStart(2,'0');return '#'+String(raw.getFullYear()).padStart(4,'0')+'-'+pad(raw.getMonth()+1)+'-'+pad(raw.getDate())+' '+pad(raw.getHours())+':'+pad(raw.getMinutes())+':'+pad(raw.getSeconds())+'#';}
+ const text=vbString(value);return csv&&type==='string'? '"'+text.replace(/"/g,'""')+'"':text;
+}
 /** Round an exact rational to the nearest integer, ties to even. */
 function roundRatio(numerator, denominator) {
   if (denominator === 0n) throw new VBError('Division by zero',11);
@@ -405,13 +641,14 @@ function roundRatio(numerator, denominator) {
 }
 /** Parse invariant decimal Currency without passing through IEEE-754 first. */
 function currencyRaw(value) {
+  value=unbox(value);
   if(value instanceof VBCurrency)return value.raw;
   if(value===undefined)return 0n;
   if(value===null)throw new VBError('Invalid use of Null',94);
   if(isNothing(value))throw new VBError('Object variable not set',91);
   if(value instanceof Date)value=numeric(value);
   if(typeof value==='boolean')value=value?-1:0;
-  const text=String(value).trim();
+  const text=typeof value==='string'?normalizeNumericString(value):String(value).trim();
   const m=text.match(/^([+-]?)(\d+(?:\.\d*)?|\.\d+)(?:[eEdD]([+-]?\d+))?$/);
   if(!m)throw new VBError('Type mismatch',13);
   const exponent=Number(m[3]||0), parts=m[2].split('.'), digits=(parts.join('').replace(/^0+/,'')||'0');
@@ -441,28 +678,28 @@ function cloneValue(value,seen=new Map(),depth=0){
   if(value instanceof Date)return new Date(value);
   if(!value||typeof value!=='object'||value===NOTHING||value instanceof VBCurrency)return value;
   if(seen.has(value))return seen.get(value);
-  if(value instanceof VBArray){const copy=Object.create(VBArray.prototype);seen.set(value,copy);copy.type=value.type;copy.bounds=value.bounds.map(b=>[...b]);copy.dynamic=value.dynamic;copy.elementFactory=value.elementFactory;copy.fixedLength=value.fixedLength;copy.data=value.data.map(v=>cloneValue(v,seen,depth+1));return copy;}
-  if(value.__fields instanceof Map){const fields=new Map(),copy=makeRecord(value.__type,fields);seen.set(value,copy);for(const [name,cell] of value.__fields){const field=Object.create(Cell.prototype);Object.assign(field,{type:cell.type,constant:false,fixedLength:cell.fixedLength,isArray:cell.isArray,elementType:cell.elementType,_value:cloneValue(cell.get(),seen,depth+1)});fields.set(name,field);Object.defineProperty(copy,name,{enumerable:true,get:()=>field.get(),set:v=>field.set(v)});}return copy;}
+  if(value instanceof VBArray){const copy=Object.create(VBArray.prototype);seen.set(value,copy);copy.type=value.type;copy.bounds=value.bounds.map(b=>[...b]);copy.dynamic=value.dynamic;copy.elementFactory=value.elementFactory;copy.fixedLength=value.fixedLength;copy.scalarData=value.scalarData?.slice();copy.data=value.data.map(v=>cloneValue(v,seen,depth+1));return copy;}
+  if(value.__fields instanceof Map){const fields=new Map(),copy=makeRecord(value.__type,fields);seen.set(value,copy);for(const [name,cell] of value.__fields){const field=Object.create(Cell.prototype);Object.assign(field,{type:cell.type,constant:false,fixedLength:cell.fixedLength,isArray:cell.isArray,elementType:cell.elementType,_value:cloneValue(cell.get(),seen,depth+1),_scalar:cell.getScalar?.()});fields.set(name,field);Object.defineProperty(copy,name,{enumerable:true,get:()=>field.get(),set:v=>field.set(v)});}return copy;}
   return value;
 }
 function matchingRecord(target,source){
   if(lower(target.__type)!==lower(source.__type)||target.__fields.size!==source.__fields.size)return false;
   for(const [key,cell]of target.__fields){const next=source.__fields.get(key);if(!next||lower(cell.type)!==lower(next.type)||cell.fixedLength!==next.fixedLength||!!cell.isArray!==!!next.isArray)return false;if(cell.get()?.__fields&&(!next.get()?.__fields||!matchingRecord(cell.get(),next.get())))return false;}return true;
 }
-function commitRecord(target,source){for(const [key,cell]of target.__fields){const next=source.__fields.get(key).get();if(cell.get()?.__fields&&next?.__fields)commitRecord(cell.get(),next);else if(cell.get() instanceof VBArray&&next instanceof VBArray){const array=cell.get();array.bounds=next.bounds;array.data=next.data;array.elementFactory=next.elementFactory;array.fixedLength=next.fixedLength;array.dynamic=next.dynamic;}else cell._value=next;}return target;}
+function commitRecord(target,source){for(const [key,cell]of target.__fields){const next=source.__fields.get(key).get();if(cell.get()?.__fields&&next?.__fields)commitRecord(cell.get(),next);else if(cell.get() instanceof VBArray&&next instanceof VBArray){const array=cell.get();array.bounds=next.bounds;array.data=next.data;array.elementFactory=next.elementFactory;array.fixedLength=next.fixedLength;array.dynamic=next.dynamic;array.scalarData=next.scalarData;}else {cell._value=next;cell._scalar=source.__fields.get(key).getScalar();}}return target;}
 function defaultValue(type='Variant') { switch(lower(type)){case 'string':return '';case 'boolean':case 'byte':case 'integer':case 'long':case 'single':case 'double':return 0;case 'currency':return new VBCurrency();case 'date':return new Date(1899,11,30);case 'object':return NOTHING;default:return undefined;} }
 function coerce(value,type='Variant',fixedLength=null) {
-  type=lower(type);
+  const original=value;value=unbox(value);type=lower(type);
   if(type==='variant')return cloneValue(value);
   if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   if(value===MISSING)throw new VBError('Argument not optional',449);
   if(type==='object'){if(value===NOTHING || value&&typeof value==='object'&&!(value instanceof Date)&&!(value instanceof VBCurrency)&&!(value instanceof VBDecimal)&&!(value instanceof VBArray)&&!value.__fields)return value;throw new VBError(value===null?'Invalid use of Null':'Object required',value===null?94:424);}
-  if(type==='string'){const s=vbString(value);return fixedLength==null?s:s.padEnd(fixedLength,' ').slice(0,fixedLength);}
-  if(type==='date')return asDate(value);
-  if(type==='decimal')return decimal(value);
+  if(type==='string'){const s=vbString(original);return fixedLength==null?s:s.padEnd(fixedLength,' ').slice(0,fixedLength);}
+  if(type==='date')return asDate(scalarType(original)==='boolean'||value instanceof VBCurrency||value instanceof VBDecimal?numeric(value):value);
+  if(type==='decimal')return decimal(original);
   if(type==='currency')return value instanceof VBCurrency?value:new VBCurrency(value);
-  if(type==='boolean'){if(typeof value==='string'&&/^(true|false)$/i.test(value))return /^true$/i.test(value)?-1:0;return numeric(value)!==0?-1:0;}
-  if(['byte','integer','long'].includes(type)){const n=value instanceof VBDecimal?Number(value.roundedInteger()):bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
+  if(type==='boolean'){if(typeof value==='string'){if(value==='#TRUE#'||/^(true)$/i.test(value))return -1;if(value==='#FALSE#'||/^(false)$/i.test(value))return 0;}return numeric(value)!==0?-1:0;}
+  if(['byte','integer','long'].includes(type)){if(type==='byte'&&scalarType(original)==='boolean')return value?255:0;if(typeof value==='string')value=new VBDecimal(normalizeNumericString(value,type));const n=value instanceof VBDecimal?Number(value.roundedInteger()):bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
   if(type==='single'){const n=Math.fround(numeric(value));if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;}
   if(type==='double')return numeric(value);
   if(value?.__fields){if(lower(value.__type)!==type)throw new VBError('Type mismatch',13);return cloneValue(value);}
@@ -470,9 +707,10 @@ function coerce(value,type='Variant',fixedLength=null) {
   return value;
 }
 class Cell {
-  constructor(type='Variant',value=defaultValue(type),constant=false,fixedLength=null){this.type=type;this.constant=constant;this.fixedLength=fixedLength;this._value=coerce(value,type,fixedLength);}
+  constructor(type='Variant',value=defaultValue(type),constant=false,fixedLength=null){this.type=type;this.constant=constant;this.fixedLength=fixedLength;this._scalar=storageScalar(value,type,fixedLength);this._value=unbox(this._scalar);}
   get(){return this._value;}
-  set(value){if(this.constant)throw new VBError('Assignment to constant not permitted',500);const next=coerce(value,this.type,this.fixedLength);if(this.isArray){if(!(next instanceof VBArray)||lower(next.type)!==lower(this.elementType))throw new VBError('Array type mismatch',13);}if(this._value?.__fields){if(!next?.__fields||!matchingRecord(this._value,next))throw new VBError('User-defined type mismatch',13);return commitRecord(this._value,next);}this._value=next;return this._value;}
+  getScalar(){if(!scalarType(this._value))return this._value;return this._scalar instanceof VBScalar&&Object.is(this._scalar.value,this._value)?this._scalar:storageScalar(this._value,this.type,this.fixedLength);}
+  set(value){if(this.constant)throw new VBError('Assignment to constant not permitted',500);const tagged=storageScalar(value,this.type,this.fixedLength),next=unbox(tagged);if(this.isArray){if(!(next instanceof VBArray)||lower(next.type)!==lower(this.elementType))throw new VBError('Array type mismatch',13);}if(this._value?.__fields){if(!next?.__fields||!matchingRecord(this._value,next))throw new VBError('User-defined type mismatch',13);return commitRecord(this._value,next);}this._value=next;this._scalar=tagged;return this._value;}
 }
 /** Lazily creates As New variables; assigning Nothing resets the factory. */
 class LazyCell extends Cell {
@@ -482,52 +720,59 @@ class LazyCell extends Cell {
   peek(){return this._value;}
 }
 class Ref {
-  constructor(get,set,type='Variant',fixedLength=null){this.get=get;this.set=set;this.type=type;this.fixedLength=fixedLength;}
+  constructor(get,set,type='Variant',fixedLength=null,getScalar=null){this.get=get;this.set=set;this.type=type;this.fixedLength=fixedLength;if(getScalar)this.getScalar=getScalar;}
 }
 class VBArray {
   constructor(bounds=[],type='Variant',elementFactory=null,fixedLength=null){this.elementFactory=elementFactory;this.fixedLength=fixedLength;this.type=type;if(bounds.length>60)throw new VBError('An array cannot exceed 60 dimensions',9);this.bounds=bounds.map(([l,u])=>{const b=[bankersRound(numeric(l)),bankersRound(numeric(u))];if(b.some(n=>n< -2147483648||n>2147483647))throw new VBError('Array bound overflow',6);return b;});this.dynamic=!bounds.length;this.allocate();}
   allocate(){let n=this.bounds.length?1:0;for(const [l,u]of this.bounds){if(u<l)throw new VBError('Subscript out of range',9);n*=u-l+1;if(n>1000000)throw new VBError('Array allocation exceeds browser runtime limit (1,000,000 elements)',7);}this.data=Array.from({length:n},()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
   offset(indices){if(indices.length!==this.bounds.length||!indices.length)throw new VBError('Subscript out of range',9);let offset=0;for(let d=0;d<indices.length;d++){const [l,u]=this.bounds[d],i=bankersRound(numeric(indices[d]));if(i<l||i>u)throw new VBError('Subscript out of range',9);offset=offset*(u-l+1)+i-l;}return offset;}
   get(...indices){return this.data[this.offset(indices)];}
-  set(indices,value){const offset=this.offset(indices),next=coerce(value,this.type,this.fixedLength);if(this.data[offset]?.__fields&&next?.__fields){if(!matchingRecord(this.data[offset],next))throw new VBError('User-defined type mismatch',13);commitRecord(this.data[offset],next);}else this.data[offset]=next;return value;}
+  getScalar(...indices){const i=this.offset(indices),tag=this.scalarData?.[i];if(!scalarType(this.data[i]))return this.data[i];return tag instanceof VBScalar&&Object.is(tag.value,this.data[i])?tag:storageScalar(this.data[i],this.type,this.fixedLength);}
+  set(indices,value){const offset=this.offset(indices),tagged=storageScalar(value,this.type,this.fixedLength),next=unbox(tagged);if(this.data[offset]?.__fields&&next?.__fields){if(!matchingRecord(this.data[offset],next))throw new VBError('User-defined type mismatch',13);commitRecord(this.data[offset],next);}else {this.data[offset]=next;(this.scalarData||=[])[offset]=tagged;}return unbox(value);}
   redim(bounds,preserve=false){
     const normalized=bounds.map(([l,u])=>[bankersRound(numeric(l)),bankersRound(numeric(u))]),old=this.bounds;
     if(preserve&&old.length&&(old.length!==normalized.length||old.some(([l,u],i)=>l!==normalized[i][0]||(i<old.length-1&&u!==normalized[i][1]))))throw new VBError('ReDim Preserve can change only the upper bound of the last dimension',9);
     if(!this.dynamic)throw new VBError('This array is fixed or temporarily locked',10);
     const next=new VBArray(normalized,this.type,this.elementFactory,this.fixedLength);next.dynamic=true;
-    if(preserve&&old.length){for(const indices of this.indices()){if(indices.every((n,d)=>n<=normalized[d][1]))next.set(indices,this.get(...indices));}}
-    this.bounds=next.bounds;this.data=next.data;return this;
+    if(preserve&&old.length){for(const indices of this.indices()){if(indices.every((n,d)=>n<=normalized[d][1]))next.set(indices,this.getScalar(...indices));}}
+    this.bounds=next.bounds;this.data=next.data;this.scalarData=next.scalarData;return this;
   }
-  erase(){if(this.dynamic){this.bounds=[];this.data=[];}else this.data=this.data.map(()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
+  erase(){this.scalarData=[];if(this.dynamic){this.bounds=[];this.data=[];}else this.data=this.data.map(()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
   *indices(){if(!this.bounds.length||!this.data.length)return;const at=this.bounds.map(([l])=>l);for(;;){yield [...at];let d=0;for(;d<at.length;d++){if(++at[d]<=this.bounds[d][1])break;at[d]=this.bounds[d][0];}if(d===at.length)return;}}
   *[Symbol.iterator](){for(const at of this.indices())yield this.get(...at);}
-  static from(values,base=0){const a=Object.create(VBArray.prototype);a.type='Variant';a.bounds=[[base,base+values.length-1]];a.dynamic=true;a.data=[...values];return a;}
+  *scalarIterator(){for(const at of this.indices())yield this.getScalar(...at);}
+  static from(values,base=0){const a=Object.create(VBArray.prototype);a.type='Variant';a.bounds=[[base,base+values.length-1]];a.dynamic=true;a.scalarData=values.map(v=>storageScalar(v,'Variant'));a.data=a.scalarData.map(unbox);return a;}
 }
 class VBCollection {
   constructor(){this.items=[];this.keys=new Map();}
   get Count(){return this.items.length;}
-  Add(item,key,before,after){if(key!==undefined&&key!==''&&this.keys.has(String(key).toLowerCase()))throw new VBError('This key is already associated with an element of this collection',457);let index=this.items.length;if(before!==undefined)index=this.index(before);if(after!==undefined)index=this.index(after)+1;const entry={item,key:key===undefined?null:String(key).toLowerCase()};this.items.splice(index,0,entry);if(entry.key!==null)this.keys.set(entry.key,entry);return item;}
-  index(key){if(typeof key==='number'){if(key<1||key>this.items.length)throw new VBError('Subscript out of range',9);return Math.trunc(key)-1;}const entry=this.keys.get(String(key).toLowerCase());if(!entry)throw new VBError('Invalid procedure call or argument',5);return this.items.indexOf(entry);}
+  Add(item,key,before,after){key=unbox(key);before=unbox(before);after=unbox(after);if(key!==undefined&&key!==''&&this.keys.has(String(key).toLowerCase()))throw new VBError('This key is already associated with an element of this collection',457);let index=this.items.length;if(before!==undefined)index=this.index(before);if(after!==undefined)index=this.index(after)+1;const scalar=storageScalar(item,'Variant');const entry={item:unbox(scalar),scalar,key:key===undefined?null:String(key).toLowerCase()};this.items.splice(index,0,entry);if(entry.key!==null)this.keys.set(entry.key,entry);return item;}
+  index(key){key=unbox(key);if(typeof key==='number'){if(key<1||key>this.items.length)throw new VBError('Subscript out of range',9);return Math.trunc(key)-1;}const entry=this.keys.get(String(key).toLowerCase());if(!entry)throw new VBError('Invalid procedure call or argument',5);return this.items.indexOf(entry);}
   Item(key){return this.items[this.index(key)].item;}
+  itemScalar(key){const entry=this.items[this.index(key)];return entry.scalar??storageScalar(entry.item,'Variant');}
+  *scalarIterator(){for(const entry of this.items)yield entry.scalar??storageScalar(entry.item,'Variant');}
   Remove(key){const i=this.index(key),entry=this.items[i];this.items.splice(i,1);if(entry.key!==null)this.keys.delete(entry.key);}
   [Symbol.iterator](){return this.items.map(x=>x.item)[Symbol.iterator]();}
 }
 class VBDictionary {
   constructor(){this.map=new Map();this.CompareMode=0;}
-  normalize(k){return this.CompareMode===1&&typeof k==='string'?k.toLowerCase():k;}
+  normalize(k){k=unbox(k);return this.CompareMode===1&&typeof k==='string'?k.toLowerCase():k;}
   get Count(){return this.map.size;}
-  Add(k,v){const key=this.normalize(k);if(this.map.has(key))throw new VBError('Key already exists',457);this.map.set(key,{key:k,value:v});}
+  Add(k,v){const key=this.normalize(k);if(this.map.has(key))throw new VBError('Key already exists',457);const scalar=storageScalar(v,'Variant');this.map.set(key,{key:unbox(k),keyScalar:storageScalar(k,'Variant'),value:unbox(scalar),scalar});}
   Item(k){return this.map.get(this.normalize(k))?.value;}
-  setItem(k,v){this.map.set(this.normalize(k),{key:k,value:v});}
+  itemScalar(k){const entry=this.map.get(this.normalize(k));return entry?.scalar??storageScalar(entry?.value,'Variant');}
+  setItem(k,v){const scalar=storageScalar(v,'Variant'),key=this.normalize(k),entry=this.map.get(key);if(entry){entry.value=unbox(scalar);entry.scalar=scalar;}else this.map.set(key,{key:unbox(k),keyScalar:storageScalar(k,'Variant'),value:unbox(scalar),scalar});}
   Exists(k){return this.map.has(this.normalize(k))?-1:0;}
   Remove(k){if(!this.map.delete(this.normalize(k)))throw new VBError('Key not found',5);}
   RemoveAll(){this.map.clear();}
-  Keys(){return VBArray.from([...this.map.values()].map(v=>v.key));}
-  Items(){return VBArray.from([...this.map.values()].map(v=>v.value));}
+  Keys(){return VBArray.from([...this.map.values()].map(v=>v.keyScalar??v.key));}
+  Items(){return VBArray.from([...this.map.values()].map(v=>v.scalar??v.value));}
+  *scalarIterator(){for(const entry of this.map.values())yield entry.keyScalar??storageScalar(entry.key,'Variant');}
   [Symbol.iterator](){return this.Keys()[Symbol.iterator]();}
 }
-function unary(op,value){if(value===null)return null;if(value instanceof VBDecimal){if(op==='-')return value.negate();if(op==='+')return value;}if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
+function unary(op,value){if(value instanceof VBScalar)return scalarUnary(op,value);if(value===null)return null;if(value instanceof VBDecimal){if(op==='-')return value.negate();if(op==='+')return value;}if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
 function binary(op,a,b,compare='binary') {
+  if(a instanceof VBScalar||b instanceof VBScalar)return scalarBinary(op,a,b,compare);
   if(a instanceof VBErrorValue||b instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   if(op==='is'){const object=v=>v===NOTHING||v&&typeof v==='object'&&!(v instanceof Date)&&!(v instanceof VBCurrency)&&!(v instanceof VBDecimal)&&!(v instanceof VBArray)&&!v.__fields;if(!object(a)||!object(b))throw new VBError('Object required',424);return objectIdentity(a)===objectIdentity(b)?-1:0;}
   if(isNothing(a)||isNothing(b))throw new VBError('Object variable not set',91);
@@ -549,9 +794,9 @@ function binary(op,a,b,compare='binary') {
   switch(op){case '+':n=x+y;break;case '-':n=x-y;break;case '*':n=x*y;break;case '/':if(y===0)throw new VBError('Division by zero',11);n=x/y;break;case '\\':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=Math.trunc(bankersRound(x)/bankersRound(y));break;case 'mod':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=bankersRound(x)%bankersRound(y);break;case '^':n=x**y;break;case 'and':return bankersRound(x)&bankersRound(y);case 'or':return bankersRound(x)|bankersRound(y);case 'xor':return bankersRound(x)^bankersRound(y);case 'eqv':return ~(bankersRound(x)^bankersRound(y));case 'imp':return (~bankersRound(x))|bankersRound(y);default:throw new VBError(`Unknown operator ${op}`,1002);}
   if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;
 }
-function describe(value){if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}
+function describe(value){if(value instanceof VBScalar)return value.type==='boolean'?value.toString():describe(value.value);if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}
 
-return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,vbString,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
+return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBScalar,SCALAR_TYPES,unbox,scalarType,tagScalar,storageScalar,readScalar,literalScalar,signedLiteralScalar,scalarBinary,scalarUnary,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,normalizeNumericString,scalarNumberString,vbString,printScalar,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
 })();
 
 /* ..\data\common.js */
@@ -737,7 +982,7 @@ return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,
 /* ..\runtime\binary-codec.js */
 __modules[8]=(()=>{
 const {VBError}=__modules[2];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[6];
+const {VBScalar,SCALAR_TYPES,scalarType,tagScalar,unbox,VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[6];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -770,7 +1015,7 @@ class Reader {
   read(length){if(!Number.isInteger(length)||length<0||this.position+length>this.bytes.length)throw new VBError('Input past end of file',62);const result=this.bytes.subarray(this.position,this.position+length);this.position+=length;return result;}
   number(type){const [size,method]=TYPES[type],b=this.read(size);return new DataView(b.buffer,b.byteOffset,b.byteLength)['get'+method](0,true);}
 }
-function variantType(value){if(value instanceof VBDecimal)return 14;if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
+function variantType(value){if(value instanceof VBScalar)return SCALAR_TYPES[value.type];if(value instanceof VBDecimal)return 14;if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
 function* arrayIndices(bounds){if(!bounds.length)return;const idx=bounds.map(([l])=>l);while(true){yield [...idx];let d=0;for(;d<bounds.length;d++){if(++idx[d]<=bounds[d][1])break;idx[d]=bounds[d][0];}if(d===bounds.length)break;}}
 function put(writer,value,schema,mode,inRecord=false,depth=0){
   if(depth>32)throw new VBError('Record nesting exceeds runtime limit',7);
@@ -779,12 +1024,13 @@ function put(writer,value,schema,mode,inRecord=false,depth=0){
     if(!schema.isArray)throw new VBError('Scalar Variant containing an array is not supported by Put',458);
     if(!value.bounds.length)throw new VBError('Subscript out of range',9);
     if(value.dynamic&&(mode==='random'||inRecord)){writer.number('integer',value.bounds.length);for(const [lo,hi]of value.bounds){writer.number('long',hi-lo+1);writer.number('long',lo);}}
-    for(const indices of arrayIndices(value.bounds))put(writer,value.get(...indices),{type:value.type,fixedLength:value.fixedLength},mode,inRecord,depth+1);
+    for(const indices of arrayIndices(value.bounds))put(writer,value.getScalar(...indices),{type:value.type,fixedLength:value.fixedLength},mode,inRecord,depth+1);
     return;
   }
-  if(value?.__fields){for(const [,cell]of value.__fields)put(writer,cell.get(),cell,mode,true,depth+1);return;}
+  if(value?.__fields){for(const [,cell]of value.__fields)put(writer,cell.getScalar(),cell,mode,true,depth+1);return;}
   if(value===NOTHING||type==='object')throw new VBError('Objects cannot be written with Put',458);
   if(type==='variant'){const kind=variantType(value);writer.number('integer',kind);if(kind<2)return;put(writer,value,{type:VARTYPES[kind]},mode,kind===8||inRecord,depth+1);return;}
+  value=unbox(value);
   if(type==='decimal'){writer.write(coerce(value,'Decimal').toBytes());return;}
   if(type==='error'){writer.number('long',value.number);return;}
   if(type==='string'){
@@ -815,7 +1061,7 @@ function get(reader,schema,current,mode,inRecord=false,depth=0){
   if(type==='object'||current===NOTHING)throw new VBError('Objects cannot be read with Get',458);
   if(type==='variant'){
     const kind=reader.number('integer');if(kind===0)return undefined;if(kind===1)return null;if(!VARTYPES[kind])throw new VBError('Unsupported Variant file descriptor: '+kind,458);
-    return get(reader,{type:VARTYPES[kind]},undefined,mode,kind===8||inRecord,depth+1);
+    return tagScalar(get(reader,{type:VARTYPES[kind]},undefined,mode,kind===8||inRecord,depth+1),VARTYPES[kind],true);
   }
   if(type==='decimal')return VBDecimal.fromBytes(reader.read(16));
   if(type==='error')return new VBErrorValue(reader.number('long'));
@@ -827,7 +1073,7 @@ function get(reader,schema,current,mode,inRecord=false,depth=0){
   const value=reader.number(type);return type==='currency'?new VBCurrency(value,true):coerce(value,type);
 }
 function encodeVariable(value,schema={},mode='binary'){const writer=new Writer();put(writer,value,schema,mode);return writer.finish();}
-function decodeVariable(bytes,schema={},current,mode='binary'){const reader=new Reader(bytes),value=get(reader,schema,current,mode);return {value,bytesRead:reader.position};}
+function decodeVariable(bytes,schema={},current,mode='binary'){const reader=new Reader(bytes),value=get(reader,schema,current,mode);return {value:unbox(value),scalar:value,bytesRead:reader.position};}
 
 return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVariable};
 })();
@@ -1213,7 +1459,7 @@ __modules[15]=(()=>{
 const {VBError}=__modules[0];
 const {lower}=__modules[5];
 const {VB_CONSTANTS}=__modules[14];
-const {VBCurrency,coerce,unary,binary}=__modules[6];
+const {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,storageScalar,signedLiteralScalar}=__modules[6];
 
 
 
@@ -1223,18 +1469,18 @@ const {VBCurrency,coerce,unary,binary}=__modules[6];
  * dependency cannot leave worker diagnostics or execution with old values. */
 function bindConstants(modules) {
   const diagnostics=[], scopes=new Map(), cache=new Map(), active=new Set();
-  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),v]));
+  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
   let steps=0;
   const report=(e,m,line)=>diagnostics.push({severity:'error',number:e.number||1002,message:e.message,source:e.source||m.name,line:e.line||line||1,column:1});
   const fail=message=>{throw new VBError(message,1002);};
   for(const m of modules.values()){
     const globals=new Map(),locals=new Map();scopes.set(m,{globals,locals});
-    m.constantBindings=new Map();m.enumBindings=new Map();m.globalEnumMembers=new Map();m.importedConstantBindings=new Map();
+    m.constantBindings=new Map();m.constantScalars=new Map();m.enumBindings=new Map();m.globalEnumMembers=new Map();m.importedConstantBindings=new Map();
     for(const d of m.declarations){const key=lower(d.name);if(globals.has(key))report(new VBError('Ambiguous name detected: '+d.name,1002),m,d.line);else globals.set(key,{m,d});
       if(d.constant&&!d.enumName&&d.scope!=='private'&&m.kind!=='module')report(new VBError('Public constants are not permitted in object modules',1002),m,d.line);
     }
     for(const p of m.procedures.values()){
-      const names=new Map(p.params.map(d=>[lower(d.name),{m,p,d}]));locals.set(p,names);p.constantBindings=new Map();p.defaultBindings=new Map();
+      const names=new Map(p.params.map(d=>[lower(d.name),{m,p,d}]));locals.set(p,names);p.constantBindings=new Map();p.defaultBindings=new Map();p.constantScalars=new Map();p.defaultScalars=new Map();
       for(const ins of p.code)if(ins.op==='dim')for(const d of ins.decls){const key=lower(d.name);if(names.has(key))report(new VBError('Duplicate declaration: '+d.name,1002),m,ins.line);else names.set(key,{m,p,d,line:ins.line});}
     }
   }
@@ -1258,13 +1504,13 @@ function bindConstants(modules) {
     if(!node||++steps>100000||depth>256)fail('Constant expression complexity limit exceeded');
     const ev=n=>evaluate(n,m,p,depth+1);
     switch(node.kind){
-      case 'literal':if(node.value===null)fail('Invalid use of Null in constant expression');return node.value;
-      case 'date':return new Date(node.value);
-      case 'currency':return new VBCurrency(node.value);
+      case 'literal':if(node.value===null)fail('Invalid use of Null in constant expression');return literalScalar(node);
+      case 'date':return literalScalar(node);
+      case 'currency':return literalScalar(node);
       case 'group':return ev(node.expr);
       case 'id':return resolve(node.name,m,p);
-      case 'unary':if(node.op==='-'&&node.expr.kind==='currency')return new VBCurrency('-'+node.expr.value);return unary(node.op,ev(node.expr));
-      case 'binary':if(node.op==='is')fail('Object identity is not a constant expression');{const value=binary(node.op,ev(node.left),ev(node.right),m.optionCompare);if(typeof value==='string'&&value.length>1048576)fail('Constant string exceeds 1 MiB compiler limit');return value;}
+      case 'unary':{const literal=signedLiteralScalar(node);if(literal)return literal;}return unary(node.op,ev(node.expr));
+      case 'binary':if(node.op==='is')fail('Object identity is not a constant expression');{const value=binary(node.op,ev(node.left),ev(node.right),m.optionCompare);if(typeof unbox(value)==='string'&&unbox(value).length>1048576)fail('Constant string exceeds 1 MiB compiler limit');return value;}
       case 'member':{
         if(node.object.kind!=='id')fail('Constant expression required');
         const owner=modules.get(lower(node.object.name));
@@ -1283,26 +1529,28 @@ function bindConstants(modules) {
     active.add(entry);
     try{
       const {m,p,d}=entry;let value=evaluate(d.initial,m,p);
-      const type=d.explicitType||lower(d.type)!=='variant'?d.type:value instanceof VBCurrency?'Currency':value instanceof Date?'Date':typeof value==='string'?'String':Number.isInteger(value)&&value>=-32768&&value<=32767?'Integer':Number.isInteger(value)&&value>=-2147483648&&value<=2147483647?'Long':'Double';
+      const type=d.explicitType||lower(d.type)!=='variant'?d.type:scalarType(value)||'Double';
       if(!['byte','integer','long','single','double','currency','date','string','boolean','variant'].includes(lower(type)))fail('Invalid constant type: '+type);
-      value=coerce(value,type);cache.set(entry,value);(p?p.constantBindings:m.constantBindings).set(lower(d.name),value);return value;
+      value=storageScalar(value,type);d.constantType=type;cache.set(entry,value);
+      (p?p.constantBindings:m.constantBindings).set(lower(d.name),unbox(value));
+      (p?p.constantScalars:m.constantScalars).set(lower(d.name),value);return value;
     }finally{active.delete(entry);}
   }
   for(const m of modules.values()){
     const scope=scopes.get(m);
     for(const entry of [...scope.globals.values(),...[...scope.locals.values()].flatMap(v=>[...v.values()])])if(entry.d.constant)try{bind(entry);}catch(e){report(e,m,entry.line||entry.d.line);}
-    for(const p of m.procedures.values())for(const param of p.params)if(param.initial)try{p.defaultBindings.set(lower(param.name),evaluate(param.initial,m,null));}catch(e){report(e,m,p.line);}
+    for(const p of m.procedures.values())for(const param of p.params)if(param.initial)try{const value=evaluate(param.initial,m,null);p.defaultBindings.set(lower(param.name),unbox(value));p.defaultScalars.set(lower(param.name),value);}catch(e){report(e,m,p.line);}
   }
   // Public constant values exist before runtime field initialization. Preserve
   // ambiguity rather than selecting whichever module happens to be first.
   for(const m of modules.values())for(const owner of modules.values())if(owner!==m)
     for(const d of owner.declarations)if(d.constant&&d.scope!=='private'&&(owner.kind==='module'||d.enumName)){
-      const key=lower(d.name);m.importedConstantBindings.set(key,m.importedConstantBindings.has(key)?{ambiguous:true}:{value:owner.constantBindings.get(key)});
+      const key=lower(d.name);m.importedConstantBindings.set(key,m.importedConstantBindings.has(key)?{ambiguous:true}:{value:owner.constantBindings.get(key),scalar:owner.constantScalars.get(key)});
     }
   // Resolved enum namespaces are immutable and never expose host reflection.
   for(const m of modules.values()){
     for(const owner of modules.values())for(const e of Object.values(owner.enums))if(owner===m||e.scope!=='private'){
-      if(owner!==m&&e.scope!=='private')for(const n of e.members){const k=lower(n);m.globalEnumMembers.set(k,m.globalEnumMembers.has(k)?{ambiguous:true}:{value:owner.constantBindings.get(k)});}
+      if(owner!==m&&e.scope!=='private')for(const n of e.members){const k=lower(n);m.globalEnumMembers.set(k,m.globalEnumMembers.has(k)?{ambiguous:true}:{value:owner.constantBindings.get(k),scalar:owner.constantScalars.get(k)});}
       const key=lower(e.name),existing=m.enumBindings.get(key);
       if(existing&&existing.owner!==m.name&&owner!==m){m.enumBindings.set(key,{ambiguous:true});continue;}
       if(existing&&existing.owner===m.name)continue;
@@ -1314,7 +1562,7 @@ function bindConstants(modules) {
     for(const fields of Object.values(m.types))for(const d of fields)storage(d);
     for(const p of m.procedures.values()){
       delete p.storageReturnType;try{if(enumDefinition(p.returnType,m))p.storageReturnType='Long';}catch(e){report(e,m,p.line);}
-      for(const d of p.params){storage(d);if(d.storageType&&p.defaultBindings.has(lower(d.name)))try{p.defaultBindings.set(lower(d.name),coerce(p.defaultBindings.get(lower(d.name)),d.storageType));}catch(e){report(e,m,p.line);}}
+      for(const d of p.params){storage(d);if(d.storageType&&p.defaultBindings.has(lower(d.name)))try{const value=storageScalar(p.defaultScalars.get(lower(d.name)),d.storageType);p.defaultBindings.set(lower(d.name),unbox(value));p.defaultScalars.set(lower(d.name),value);}catch(e){report(e,m,p.line);}}
       for(const ins of p.code)if(ins.op==='dim'||ins.op==='redim')for(const d of ins.decls)storage(d);
     }
   }
@@ -1423,7 +1671,8 @@ class ExpressionParser {
   expression(min=0) {
     let node; const t=this.take(); const value=String(t.value).toLowerCase();
     if(t.type==='number'&&t.raw.endsWith('@'))node={kind:'currency',value:t.raw.slice(0,-1)};
-    else if(t.type==='number'||t.type==='string') node={kind:'literal',value:t.value};
+    else if(t.type==='number') node={kind:'literal',value:numericLiteralValue(t),valueType:numericLiteralType(t),numberSuffix:/[%&!#]$/.test(t.raw)?t.raw.at(-1):null};
+    else if(t.type==='string') node={kind:'literal',value:t.value,valueType:'string'};
     else if(t.type==='date') node={kind:'date',value:t.value};
     else if(value==='('){node=this.expression();this.expect(')');node={kind:'group',expr:node};}
     else if(value==='+'||value==='-'||value==='not') node={kind:'unary',op:value,expr:this.expression(value==='not'?6:13)};
@@ -1432,8 +1681,8 @@ class ExpressionParser {
     else if(value==='typeof'){const expr=this.expression(8);this.expect('is');node={kind:'typeof',expr,name:this.qualifiedName()};}
     else if(value==='.') { const name=this.take();if(name.type!=='id')throw new VBError('Expected member name',1002);node={kind:'member',object:{kind:'with'},name:name.value}; }
     else if(t.type==='id') {
-      if(value==='true')node={kind:'literal',value:-1};
-      else if(value==='false')node={kind:'literal',value:0};
+      if(value==='true')node={kind:'literal',value:-1,valueType:'boolean'};
+      else if(value==='false')node={kind:'literal',value:0,valueType:'boolean'};
       else if(value==='null')node={kind:'literal',value:null};
       else if(value==='nothing')node={kind:'nothing'};
       else if(value==='empty')node={kind:'empty'};
@@ -1456,7 +1705,7 @@ class ExpressionParser {
   parse() { const node=this.expression();if(this.peek().type!=='eof')throw new VBError(`Unexpected '${this.peek().raw}' in expression`,1002,null,0,this.peek().start+1);return node; }
 }
 const parseExpression = text => new ExpressionParser(text.trim()).parse();
-function parseCall(text) {
+function parseCall(text,{explicit=false}={}) {
   const p=new ExpressionParser(text); let callee=p.take(); let node;
   if(callee.value==='.') { const name=p.take();node={kind:'member',object:{kind:'with'},name:name.value}; }
   else if(callee.type==='id') node={kind:'id',name:callee.value};
@@ -1464,10 +1713,35 @@ function parseCall(text) {
   while(p.match('.')){const name=p.take();node={kind:'member',object:node,name:name.value};}
   if(p.peek().type==='eof') return {kind:'call',callee:node,args:[]};
   const rest=text.slice(p.peek().start).trim();
-  if(rest.startsWith('(')) return parseExpression(text);
+  if(rest.startsWith('(')) {
+    let expression;try{expression=parseExpression(text);}catch(error){if(explicit)throw error;}
+    if(expression){
+      // Without Call the parentheses around a single argument are an
+      // expression grouping, forcing a temporary even for a ByRef formal.
+      if(!explicit&&expression.kind==='call'&&expression.args.length===1&&JSON.stringify(expression.callee)===JSON.stringify(node))expression.args[0]={kind:'group',expr:expression.args[0]};
+      return expression;
+    }
+  }
   const args=[];do{args.push(p.argument());}while(p.match(','));
   if(p.peek().type!=='eof')throw new VBError(`Unexpected '${p.peek().raw}' in argument list`,1002);
   return {kind:'call',callee:node,args};
+}
+
+function numericLiteralType(token){
+  const suffix=token.raw.at(-1),explicit={'%':'integer','&':'long','!':'single','#':'double'}[suffix];
+  if(explicit)return explicit;
+  if(/^[&][ho]/i.test(token.raw))return parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8)<=65535?'integer':'long';
+  if(/[.eEdD]/.test(token.raw))return 'double';
+  return token.value>=-32768&&token.value<=32767?'integer':token.value>=-2147483648&&token.value<=2147483647?'long':'double';
+}
+
+function numericLiteralValue(token){
+  if(/^&[ho]/i.test(token.raw)){
+    const n=parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8);
+    if(n>4294967295)throw new VBError('Overflow in numeric literal',6);
+    return n>2147483647?n-4294967296:n>=32768&&n<=65535&&!token.raw.endsWith('&')?n-65536:n;
+  }
+  return token.value;
 }
 
 return {ExpressionParser,parseExpression,parseCall};
@@ -1671,7 +1945,7 @@ class ProcedureCompiler {
     if((m=text.match(/^(?:(.+)\.)?Line\s*\(([^,]+),([^\)]+)\)\s*-\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*([^,]+))?(?:\s*,\s*(B|BF))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:m[7]?'rect':'line',coords:[m[2],m[3],m[4],m[5]].map(E),color:E(m[6]||'0'),fill:/bf/i.test(m[7]||'')},line);return;}
     if((m=text.match(/^(?:(.+)\.)?PSet\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'pixel',coords:[E(m[2]),E(m[3])],color:E(m[4]||'0')},line);return;}
     if((m=text.match(/^(?:(.+)\.)?Circle\s*\(([^,]+),([^\)]+)\)\s*,\s*([^,]+)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'circle',coords:[E(m[2]),E(m[3]),E(m[4])],color:E(m[5]||'0')},line);return;}
-    if(/^RaiseEvent\b/i.test(text)){this.emit('raiseEvent',{expr:parseCall(text.replace(/^RaiseEvent\s+/i,''))},line);return;}
+    if(/^RaiseEvent\b/i.test(text)){this.emit('raiseEvent',{expr:parseCall(text.replace(/^RaiseEvent\s+/i,''),{explicit:true})},line);return;}
     if((m=text.match(/^(LSet|RSet)\s+(.+?)\s*=\s*(.+)$/i))){const target=E(m[2]);if(!['id','member','call'].includes(target.kind))throw new VBError('Expected assignable string variable',1002);this.emit('stringAlign',{target,expr:E(m[3]),right:/rset/i.test(m[1])},line);return;}
     if(/^Mid\$?\s*\(/i.test(text)){
       const tokens=tokenize(text);let level=0,equal;for(const t of tokens){if(t.value==='(')level++;else if(t.value===')')level--;else if(t.value==='='&&level===0){equal=t;break;}}
@@ -1682,7 +1956,7 @@ class ProcedureCompiler {
     const ts=tokenize(text);let depth=0,eq=null;
     for(const t of ts){if(t.value==='(')depth++;else if(t.value===')')depth--;else if(t.value==='='&&depth===0){eq=t;break;}}
     if(eq){const target=E(text.slice(0,eq.start));if(!['id','member','call'].includes(target.kind))throw new VBError('Invalid assignment target',1002);this.emit('assign',{target,expr:E(text.slice(eq.end)),objectSet:/^Set\s/i.test(original)},line);return;}
-    if(/^Call\s+/i.test(text)){this.emit('expr',{expr:parseCall(text.replace(/^Call\s+/i,''))},line);return;}
+    if(/^Call\s+/i.test(text)){this.emit('expr',{expr:parseCall(text.replace(/^Call\s+/i,''),{explicit:true})},line);return;}
     this.emit('expr',{expr:parseCall(text)},line);
   }
 }
@@ -1965,6 +2239,7 @@ const nativeBindingMethods = {
       if (context?.locals?.has(name) || owner?.globals?.has(name)) return null;
       const own = descriptor(this,module,name);
       if (own) return own;
+      if(owner?.nativeInternal)return null;
       const matches = [];
       for (const m of this.modules.values()) if (m !== owner) {
         const d = scopeDeclarations(m.module).get(name);
@@ -2148,7 +2423,8 @@ const nativeNumericMethods = {
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
     plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(node.kind==='byval'){this.numeric(node.expr);}
+      if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
+      else if(node.kind==='byval'){this.numeric(node.expr);}
       else if(p.bounds!==null&&p.bounds!==undefined){
         if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
         const a=this.variable(node);
@@ -2160,7 +2436,7 @@ const nativeNumericMethods = {
       }else if(key(p.type)==='currency'){slot.type=p.type;this.currencyExpression(node);this.storeCurrency(slot);slots[i]=slot;return;}
       else if(key(p.type)==='date'){slot.type=p.type;this.dateExpression(node);this.storeDate(slot);slots[i]=slot;return;}
       else if(REAL_TYPES.has(key(p.type))){slot.type=p.type;this.floatExpression(node,key(p.type)==='single');this.storeFloat(slot);slots[i]=slot;return;}
-      else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{this.numeric(node);this.check(p.type);}
+      else if(key(p.type)==='string')this.textExpression(node);else if(key(p.type)==='boolean'){this.truth(node);this.check('Boolean');}else{if(p.nativeCoerce&&this.type(node)==='string')this.call({kind:'call',callee:{kind:'id',name:'CLng'},args:[node]});else this.numeric(node);this.check(p.type);}
       x.push();this.rawStorageAddress(slot);x.emit(0x5a,0x89,0x10);slots[i]=slot;
     });
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}
@@ -2380,8 +2656,88 @@ const nativeCallMethods={
 return {planNativeArguments,nativeCallMethods};
 })();
 
-/* currency.js */
+/* callbacks.js */
 __modules[26]=(()=>{
+
+/** Original x86 stdcall callback thunks. No executable heap or native compiler.
+ * Contract: https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/addressof-operator
+ * Callbacks execute on the application's original thread. Foreign-thread entry
+ * fails closed before accessing process-global VB error/owner state.
+ */
+const key = value => String(value).toLowerCase();
+const types = new Set(['byte','integer','long','boolean','single','double','currency','date']);
+const real = new Set(['single','double','date']);
+const E = 'native:error:';
+const state = ['frame','pending','number','description','source','erl'];
+const arg = argument => ({argument});
+const mem = memory => ({memory});
+const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
+
+const nativeCallbackMethods = {
+  nativeCallbackArgument(parameter, node) {
+    if (parameter.byRef || key(parameter.type) !== 'long' || parameter.bounds != null)
+      this.fail('AddressOf requires a scalar ByVal Long function-pointer parameter');
+    const parts = node.name.split('.');
+    if (parts.length > 2) this.fail('Native AddressOf requires a standard-module procedure in this project');
+    const callee = parts.length === 1 ? {kind:'id', name:parts[0]} :
+      {kind:'member', object:{kind:'id', name:parts[0]}, name:parts[1]};
+    if (this.variable(callee)) this.fail('AddressOf cannot reference a variable');
+    const target = this.resolveProcedure(callee), signature = target?.proc;
+    if (!signature || target.module.module.kind !== 'module' || target.module.nativeInternal)
+      this.fail('Native AddressOf requires an authored Sub or Function in a standard module');
+    if (!['sub','function'].includes(signature.kind) ||
+        signature.kind === 'function' && !types.has(key(signature.returnType)) ||
+        signature.params.some(p => p.optional || p.paramArray || p.bounds != null || !types.has(key(p.type))))
+      this.fail('Native callbacks require fixed scalar numeric/Date parameters and returns; String, arrays, Optional and ParamArray are not supported');
+    if (!this.nativeCallbacks) {
+      this.nativeCallbacks = new Map();
+      this.slot('native:callback:thread');
+    }
+    let callback = this.nativeCallbacks.get(target.label);
+    if (!callback) {
+      callback = {target, label:'native:callback:' + this.nativeCallbacks.size};
+      this.nativeCallbacks.set(target.label,callback);
+    }
+    this.x.value(callback.label);
+  }
+};
+
+function emitNativeCallbackHelpers(c) {
+  if (!c.nativeCallbacks?.size) return;
+  const x = c.x;
+  for (const {target,label} of c.nativeCallbacks.values()) {
+    const signature = target.proc, type = key(signature.returnType), ownThread = x.unique();
+    x.label(label).enter(36);
+    x.api('kernel32.dll','GetCurrentThreadId').emit(0x3b,0x05).addr('native:callback:thread').branch('e',ownThread);
+    // The current backend's globals and VB error frames are single-threaded.
+    // Never run application callbacks from another native thread or race its state.
+    x.api('kernel32.dll','ExitProcess',[5]).label(ownThread);
+    state.forEach((name,i) => { x.value(mem(E+name)); save(x,-4*(i+1)); });
+    x.emit(0xd9,0x7d,0xdc); // fnstcw [ebp-36]; preserve the foreign caller's x87 CW.
+    x.value(0).store(E+'frame').call(E+'clear');
+    // Preserve the external stdcall argument byte layout. The authored procedure
+    // handles exact-width loads, owned locals, cleanup and numeric return ABI.
+    for (let offset=target.argumentBytes+4; offset>=8; offset-=4) x.push(arg(offset));
+    x.call(target.label);
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x5d,0xe0); // fstp qword [ebp-32]
+    else { save(x,-32); x.emit(0x89,0x55,0xe4); } // EAX, EDX
+    // Unhandled callback errors cannot jump across the suspended external stack.
+    // Use the ordinary fatal diagnostic after the authored frame has cleaned up;
+    // On Error inside the callback remains fully functional.
+    x.emit(0x83,0x3d).addr(E+'pending').emit(0).branch('ne',E+'fatal');
+    state.forEach((name,i) => x.value(arg(-4*(i+1))).store(E+name));
+    x.emit(0xd9,0x6d,0xdc); // fldcw [ebp-36]
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x45,0xe0);
+    else x.value(arg(-32)).emit(0x8b,0x55,0xe4);
+    x.leave(target.argumentBytes);
+  }
+}
+
+return {nativeCallbackMethods,emitNativeCallbackHelpers};
+})();
+
+/* currency.js */
+__modules[27]=(()=>{
 const {VBCurrency}=__modules[6];
 /** Native CY values are signed 64-bit integers scaled by 10,000. Expressions
  * return an immutable snapshot address in EAX; ABI returns use EDX:EAX. Never
@@ -2559,7 +2915,7 @@ return {nativeCurrencyMethods,emitNativeCurrencyHelpers};
 })();
 
 /* dates.js */
-__modules[27]=(()=>{
+__modules[28]=(()=>{
 const {dateToSerial}=__modules[1];
 /** Native Automation DATE: civil date/time in eight bytes, not a JS timestamp.
  * Values use immutable Double snapshots; semantic Date type and range checking
@@ -2755,8 +3111,252 @@ function emitTimeSerial(c) {
 return {nativeDateMethods,emitNativeDateHelpers};
 })();
 
+/* date-intervals.js */
+__modules[29]=(()=>{
+const {compileProject}=__modules[20];
+/** Native calendar intervals. The arithmetic routines below are original private
+ * compiler support code, lowered by our JavaScript frontend and x86 emitter. They
+ * never invoke a VB compiler, Script Host, CLR, or an embedded JavaScript engine.
+ * Contracts: Microsoft's DateAdd/DateDiff/DatePart and FormatDateTime references:
+ * https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/dateadd-function
+ * https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/datediff-function
+ * https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/datepart-function
+ * https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-varformatdatetime
+ */
+
+const key = value => String(value).toLowerCase();
+const D = 'native:date:', DLL = 'oleaut32.dll';
+const arg = argument => ({argument}), addr = address => ({address});
+const store = (x, offset) => x.emit(0x89, 0x85).imm(offset);
+const intervals = ['yyyy', 'q', 'm', 'y', 'd', 'w', 'ww', 'h', 'n', 's'];
+const returns = {dateadd:'date', datediff:'long', datepart:'integer', formatdatetime:'string'};
+const NATIVE_DATE_CONSTANTS = Object.freeze({
+  vbusesystem:0, vbsunday:1, vbmonday:2, vbtuesday:3, vbwednesday:4,
+  vbthursday:5, vbfriday:6, vbsaturday:7, vbfirstjan1:1,
+  vbfirstfourdays:2, vbfirstfullweek:3, vbgeneraldate:0,
+  vblongdate:1, vbshortdate:2, vblongtime:3, vbshorttime:4
+});
+
+// All declarations are Private, and their compiler scope is isolated from the
+// application. A user's Public Year/CDate/IntervalIndex cannot redirect these.
+const source = String.raw`Option Explicit
+Private Function Ordinal(ByVal value As Date) As Double
+ Ordinal = CDbl(DateSerial(Year(value), Month(value), Day(value)))
+End Function
+Private Function Linear(ByVal value As Date) As Double
+ Linear = Ordinal(value) + (CDbl(Hour(value)) * 3600 + Minute(value) * 60 + Second(value)) / 86400
+End Function
+Private Function Serial(ByVal value As Double) As Date
+ Dim whole As Double
+ If value < -657434 Or value >= 2958466 Then Err.Raise 5
+ whole = Int(value)
+ If whole < 0 Then
+  Serial = CDate(whole - (value - whole))
+ Else
+  Serial = CDate(value)
+ End If
+End Function
+Private Function MonthDays(ByVal y As Long, ByVal m As Long) As Long
+ Select Case m
+ Case 4, 6, 9, 11
+  MonthDays = 30
+ Case 2
+  MonthDays = 28
+  If y Mod 4 = 0 And (y Mod 100 <> 0 Or y Mod 400 = 0) Then MonthDays = 29
+ Case Else
+  MonthDays = 31
+ End Select
+End Function
+Private Function DateAddCore(ByVal interval As String, ByVal number As Double, ByVal value As Date) As Date
+ Dim unit As Long, y As Long, m As Long, d As Long, limit As Long
+ Dim months As Double, result As Double, fraction As Double, largest As Double
+ unit = IntervalIndex(interval)
+ number = Round(number, 0)
+ Select Case unit
+ Case 0: largest = 10000
+ Case 1: largest = 40000
+ Case 2: largest = 120000
+ Case 3, 4, 5: largest = 4000000
+ Case 6: largest = 600000
+ Case 7: largest = 100000000
+ Case 8: largest = 6000000000#
+ Case 9: largest = 400000000000#
+ End Select
+ If Abs(number) > largest Then Err.Raise 5
+ If unit <= 2 Then
+  months = CDbl(number)
+  If unit = 0 Then months = months * 12
+  If unit = 1 Then months = months * 3
+  months = months + CDbl(Year(value)) * 12 + Month(value) - 1
+  If months < 1200 Or months >= 120000 Then Err.Raise 5
+  y = CLng(Int(months / 12))
+  m = CLng(months - CDbl(y) * 12) + 1
+  d = Day(value)
+  limit = MonthDays(y, m)
+  If d > limit Then d = limit
+  fraction = (CDbl(Hour(value)) * 3600 + Minute(value) * 60 + Second(value)) / 86400
+  result = CDbl(DateSerial(y, m, d)) + fraction
+ Else
+  result = CDbl(number)
+  Select Case unit
+  Case 6
+   result = result * 7
+  Case 7
+   result = result / 24
+  Case 8
+   result = result / 1440
+  Case 9
+   result = result / 86400
+  End Select
+  result = Linear(value) + result
+ End If
+ DateAddCore = Serial(result)
+End Function
+Private Function DateDiffCore(ByVal interval As String, ByVal date1 As Date, ByVal date2 As Date, Optional ByVal firstdayofweek As Long = 1, Optional ByVal firstweekofyear As Long = 1) As Long
+ Dim unit As Long, first As Long
+ Dim a As Double, b As Double, result As Double
+ unit = IntervalIndex(interval)
+ If unit = 6 Then
+  first = FirstDay(firstdayofweek)
+  If firstweekofyear < 0 Or firstweekofyear > 3 Then Err.Raise 5
+ End If
+ Select Case unit
+ Case 0
+  result = Year(date2) - Year(date1)
+ Case 1
+  result = CDbl(Year(date2) - Year(date1)) * 4 + (Month(date2) - 1) \ 3 - (Month(date1) - 1) \ 3
+ Case 2
+  result = CDbl(Year(date2) - Year(date1)) * 12 + Month(date2) - Month(date1)
+ Case Else
+  a = Ordinal(date1)
+  b = Ordinal(date2)
+  Select Case unit
+  Case 3, 4
+   result = b - a
+  Case 5
+   result = Fix((b - a) / 7)
+  Case 6
+   result = Int((b + 7 - first) / 7) - Int((a + 7 - first) / 7)
+  Case 7
+   result = (b - a) * 24 + Hour(date2) - Hour(date1)
+  Case 8
+   result = (b - a) * 1440 + (Hour(date2) - Hour(date1)) * 60 + Minute(date2) - Minute(date1)
+  Case 9
+   result = (b - a) * 86400 + CDbl(Hour(date2) - Hour(date1)) * 3600 + (Minute(date2) - Minute(date1)) * 60 + Second(date2) - Second(date1)
+  End Select
+ End Select
+ DateDiffCore = CLng(result)
+End Function`;
+
+const parameter = (name, type, optional = false) => ({name,type,byRef:false,bounds:null,optional,nativeCoerce:true});
+function signature(name, params, returnType, defaults = []) {
+  return {proc:{name,params,returnType,kind:'function'},label:D+name,nativeDefaults:new Map(defaults)};
+}
+const nativePart = signature('datepart', [parameter('interval','String'),parameter('date','Date'),parameter('firstdayofweek','Long',true),parameter('firstweekofyear','Long',true)], 'Integer', [['firstdayofweek',1],['firstweekofyear',1]]);
+const nativeFormat = signature('formatdatetime', [parameter('date','Date'),parameter('namedformat','Long',true)], 'String', [['namedformat',0]]);
+
+function ensureArithmeticModule(compiler) {
+  if (compiler.dateIntervalModule) return compiler.dateIntervalModule;
+  let name = 'VB6NativeCalendar', count = 0;
+  while (compiler.modules.has(key(name))) name = 'VB6NativeCalendar' + (++count);
+  const program = compileProject({name, startup:'Sub Main', modules:[{id:name,name,kind:'module',code:source}]});
+  if (!program.valid) throw new Error('Invalid internal native calendar: ' + JSON.stringify(program.diagnostics));
+  const module = program.modules.get(key(name)); module.nativeInternal = true;
+  compiler.externals.set(key(name), new Map());
+  const previousModule = compiler.preparingModule, previousProcedure = compiler.preparingProcedure;
+  compiler.prepareModule(module);
+  compiler.preparingModule = previousModule; compiler.preparingProcedure = previousProcedure;
+  compiler.dateIntervalModule = compiler.modules.get(key(name));
+  // Public intrinsic argument names need not expose internal implementation names.
+  for (const [name, args] of [['dateaddcore',['interval','number','date']], ['datediffcore',['interval','date1','date2','firstdayofweek','firstweekofyear']]]) {
+    const context = compiler.dateIntervalModule.procedures.get(name);
+    context.nativeIntrinsicParams = context.proc.params.map((p,i) => ({...p,name:args[i],nativeCoerce:true}));
+  }
+  return compiler.dateIntervalModule;
+}
+
+const nativeDateIntervalMethods = {
+  dateIntervalType(node) {
+    if (node.kind !== 'call' || node.callee.kind !== 'id') return null;
+    const name = key(node.callee.name);
+    return returns[name] && !this.variable(node.callee) && !this.resolveProcedure(node.callee) ? returns[name] : null;
+  },
+  dateIntervalBuiltin(node, name) {
+    const x = this.x;
+    if (this.context?.module.nativeInternal && ['intervalindex','firstday'].includes(name)) {
+      if (name === 'intervalindex') this.textExpression(node.args[0]); else this.numeric(node.args[0]);
+      x.push().call(D+name); return true;
+    }
+    if (!Object.hasOwn(returns,name) || this.variable(node.callee) || this.resolveProcedure(node.callee)) return false;
+    let target;
+    if (name === 'datepart') target = nativePart;
+    else if (name === 'formatdatetime') target = nativeFormat;
+    else {
+      const context = ensureArithmeticModule(this).procedures.get(name+'core');
+      target = {...context,proc:{...context.proc,name,params:context.nativeIntrinsicParams}};
+    }
+    this.nativeDateIntervalsUsed = true;
+    this.nativeTypedCall(target,this.nativeCallPlan(target,node.args));
+    return true;
+  }
+};
+
+function emitNativeDateIntervalHelpers(c) {
+  if (!c.nativeDateIntervalsUsed) return;
+  const x=c.x, check=()=>x.call('native:number:check');
+  // Exact BSTR length and ASCII case folding: no NUL-prefix acceptance or
+  // locale-dependent folding of non-ASCII characters into interval tokens.
+  x.label(D+'intervalindex').enter().api(DLL,'SysStringLen',[arg(8)]).emit(0x89,0xc3);
+  for (let i=0;i<intervals.length;i++) {
+    const token=intervals[i], next=x.unique();
+    x.emit(0x89,0xd8).compare(token.length).branch('ne',next).value(arg(8)).emit(0x89,0xc6);
+    for(let j=0;j<token.length;j++) x.emit(0x0f,0xb7,0x86).imm(j*2).emit(0x83,0xc8,32).compare(token.charCodeAt(j)).branch('ne',next);
+    x.value(i).leave(4).label(next);
+  }
+  x.jump('error:5');
+  const explicit=x.unique();
+  x.label(D+'firstday').enter(4).value(arg(8)).compare(0).branch('l','error:5').compare(7).branch('g','error:5').test().branch('ne',explicit);
+  x.api('kernel32.dll','GetLocaleInfoW',[0x400,0x2000100c,addr(-4),2]).test().branch('e','error:5');
+  x.value(arg(-4)).compare(6).branch('a','error:5').emit(0x83,0xc0,1,0x31,0xd2,0xb9).imm(7).emit(0xf7,0xf1,0x8d,0x42,1);
+  x.label(explicit).leave(4);
+
+  // A local, non-owning VT_DATE VARIANT points at no application memory. Only
+  // the returned BSTR is owned; cleanup occurs even if numeric conversion fails.
+  const variant = dateOffset => {
+    x.value(7);store(x,-16);x.value(0);store(x,-12);
+    x.value(arg(dateOffset));store(x,-8);x.value(arg(dateOffset+4));store(x,-4);
+  };
+  x.label(D+'formatdatetime').enter(20).value(arg(16)).compare(0).branch('l','error:5').compare(4).branch('g','error:5');
+  variant(8); x.value(0);store(x,-20);
+  x.api(DLL,'VarFormatDateTime',[addr(-16),arg(16),0,addr(-20)]);check();x.value(arg(-20)).leave(12);
+
+  x.label(D+'datepart').enter(36).push(arg(8)).call(D+'intervalindex');
+  // Keep the interval index until irrelevant week arguments have been ignored.
+  // Installed OleAut32 VarFormat accepts VB's Sunday=1 convention despite the
+  // contradictory first-day table in its tokenization documentation. Native
+  // execution compares every weekday/week convention with the independent host.
+  const ordinary=x.unique(), conventionsReady=x.unique();
+  store(x,-36);
+  x.compare(5).branch('l',ordinary).compare(6).branch('g',ordinary);
+  x.push(arg(20)).call(D+'firstday');store(x,-28);
+  x.value(arg(24)).compare(0).branch('l','error:5').compare(3).branch('g','error:5');store(x,-32);
+  x.jump(conventionsReady).label(ordinary).value(1);store(x,-28);store(x,-32);
+  x.label(conventionsReady).value(arg(-36));
+  x.emit(0x8b,0x04,0x85).addr(D+'interval-formats');store(x,-24);
+  variant(12);x.value(0);store(x,-20);
+  x.api(DLL,'VarFormat',[addr(-16),arg(-24),arg(-28),arg(-32),0,addr(-20)]);check();
+  x.api(DLL,'VarI4FromStr',[arg(-20),0x400,0,addr(-32)]).push().api(DLL,'SysFreeString',[arg(-20)]).emit(0x58);check();x.value(arg(-32)).leave(20);
+  const formats=intervals.map(token=>c.string(token));
+  c.ro.align(4).label(D+'interval-formats');
+  // Materialize strings first: adding one inside this table would corrupt it.
+  for(const label of formats)c.ro.reference(label,'va');
+}
+
+return {NATIVE_DATE_CONSTANTS,nativeDateIntervalMethods,emitNativeDateIntervalHelpers};
+})();
+
 /* control-arrays.js */
-__modules[28]=(()=>{
+__modules[30]=(()=>{
 
 /** Statically designed control arrays, including Index event arguments. Each
  * element retains its own native HWND and ID; no flattened duplicate names. */
@@ -2833,10 +3433,228 @@ const nativeControlArrayMethods={
 return {nativeControlArrayMethods};
 })();
 
-/* storage.js */
-__modules[29]=(()=>{
+/* arrays.js */
+__modules[31]=(()=>{
 
+/** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
+ * passes a descriptor slot by reference; it is never exposed to browser code. */
+const key = value => String(value).toLowerCase();
+const A = 'native:array:';
+const DLL = 'oleaut32.dll';
+const arg = argument => ({argument});
+const addr = address => ({address});
+const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
+// The old one-MiB quota was a compiler policy, not a SAFEARRAY limit. Keep
+// signed x86 count/offset arithmetic checked; actual allocation is OS-limited.
+// Eight-byte alignment makes all typed element quotas exact integers.
+// https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraycreate
+// https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/too-many-dimensions
+const NATIVE_ARRAY_MAX_BYTES = 0x7ffffff8;
+const NATIVE_ARRAY_MAX_RANK = 60;
+const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
+
+/** Optional stricter host budget; it cannot relax checked x86 size arithmetic. */
+function nativeArrayLimit(value, fail = message => { throw new Error(message); }) {
+  if(value === undefined)return NATIVE_ARRAY_MAX_BYTES;
+  if(!Number.isSafeInteger(value) || value < 1 || value > NATIVE_ARRAY_MAX_BYTES)
+    fail('maxArrayBytes must be an integer from 1 to ' + NATIVE_ARRAY_MAX_BYTES);
+  return value;
+}
+
+const nativeArrayMethods = {
+  arrayWorkspace(bytes, name = 'array-work') {
+    const c = this.context, variable = {name:this.x.unique(name), type:'Long', nativeBytes:bytes};
+    if(c?.proc?.name) {
+      c.size += bytes;
+      if(c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
+      variable.offset = -c.size;
+    } else {variable.label = variable.name; this.allocateStorage(variable);}
+    return variable;
+  },
+  arrayPin() {
+    const pin = this.arrayWorkspace(4,'array-pin');
+    if(this.context?.proc?.name)this.context.arrayPins.push(pin);
+    return pin;
+  },
+  releaseArrayPin(pin) {
+    if(!pin)return;
+    const x=this.x;x.push();this.rawStorageAddress(pin);x.push().call(A+'unpin').emit(0x58);
+  },
+  arrayRef(variable) {
+    this.rawStorageAddress(variable);
+    this.x.emit(0x8b,0x00).test().branch('e','error:9');
+  },
+  elementAddress(variable) {
+    const x=this.x, array=variable.elementOf, rank=variable.indices.length;
+    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..60');
+    const indices=this.arrayWorkspace(rank*4), out=this.arrayWorkspace(4), pin=this.arrayPin();
+    // Evaluate every subscript exactly once, left-to-right, before dereferencing
+    // the current descriptor. A subscript expression may itself resize the array.
+    variable.indices.forEach((node,i)=>{
+      this.numeric(node);x.push();this.rawStorageAddress(indices);x.emit(0x5a,0x89,0x90).imm(i*4);
+    });
+    this.arrayRef(array);x.emit(0x89,0xc3,0x53).invoke(DLL,'SafeArrayGetDim').compare(rank).branch('ne','error:9');
+    x.emit(0x53).invoke(DLL,'SafeArrayLock').call(A+'check');
+    // Publish ownership before a fallible index lookup. Recovery and procedure
+    // exit release this pin even when another argument or the callee throws.
+    this.rawStorageAddress(pin);x.emit(0x89,0x18);
+    this.rawStorageAddress(out);x.push();this.rawStorageAddress(indices);x.push().emit(0x53).invoke(DLL,'SafeArrayPtrOfIndex').call(A+'check');
+    this.rawStorageAddress(out);x.emit(0x8b,0x00);
+    return pin;
+  },
+  initializeArrayStorage(variable) {
+    if(!variable.nativeArray || variable.parameter || variable.nativeDynamic)return;
+    const x=this.x, done=x.unique(), label=x.unique('fixed-bounds');
+    this.ro.align(4).label(label);
+    for(const bound of variable.nativeBounds)this.ro.u32(bound.upper-bound.lower+1).u32(bound.lower);
+    this.rawStorageAddress(variable);x.emit(0x83,0x38,0).branch('ne',done);
+    x.push(variable.fixedLength || 0).push(0).push(label).push(variable.nativeBounds.length).push(VT[key(variable.type)]);
+    this.rawStorageAddress(variable);x.push().call(A+'redim');
+    this.arrayRef(variable);x.emit(0x66,0x83,0x48,2,0x10).label(done); // FADF_FIXEDSIZE
+  },
+  destroyArrayStorage(variable) {
+    this.rawStorageAddress(variable);this.x.push().call(A+'destroy');
+  },
+  redimArrayStorage(decl, preserve) {
+    const x=this.x, variable=this.variable({kind:'id',name:decl.name});
+    if(!variable?.nativeArray || variable.elementOf)this.fail('ReDim requires a declared native array: '+decl.name);
+    if(!variable.nativeDynamic)this.fail('ReDim cannot resize a fixed native array: '+decl.name);
+    if(decl.explicitType && key(decl.type)!==key(variable.type))this.fail('ReDim cannot change a typed array element type');
+    if(decl.fixedLength && decl.fixedLength!==variable.fixedLength)this.fail('ReDim cannot change a fixed String element length');
+    const rank=decl.bounds?.length;
+    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to 60 dimensions');
+    const bounds=this.arrayWorkspace(rank*8);
+    // Keep a stable slot address, not a stale SAFEARRAY pointer, across bound expressions.
+    this.rawStorageAddress(variable);x.push();
+    for(let i=0;i<rank;i++) {
+      this.numeric(decl.bounds[i][0] || {kind:'literal',value:this.context.module.module.optionBase || 0});x.push();
+      this.numeric(decl.bounds[i][1]);x.emit(0x5b,0x39,0xd8).branch('l','error:9').emit(0x29,0xd8).branch('o','error:7').emit(0x40).branch('o','error:7');
+      x.push();this.rawStorageAddress(bounds);x.emit(0x5a,0x89,0x90).imm(i*8).emit(0x89,0x98).imm(i*8+4);
+    }
+    x.emit(0x5b).push(variable.fixedLength || 0).push(preserve?1:0);
+    this.rawStorageAddress(bounds);x.push().push(rank).push(VT[key(variable.type)]).emit(0x53).call(A+'redim');
+  },
+  arrayBoundCall(node, upper) {
+    if(node.args.length<1||node.args.length>2)this.fail('LBound/UBound expects an array and optional dimension');
+    const variable=this.variable(node.args[0]);
+    if(!variable?.nativeArray||variable.elementOf)this.fail('LBound/UBound requires a native array');
+    this.rawStorageAddress(variable);this.x.push();this.numeric(node.args[1] || {kind:'literal',value:1});
+    this.x.emit(0x5b).push().emit(0x53).call(A+(upper?'upper':'lower'));
+  },
+  eraseStorage(node) {
+    const variable=this.variable(node);
+    if(!variable?.nativeArray||variable.elementOf)this.fail('Native Erase requires an array');
+    this.x.push(variable.fixedLength || 0);this.rawStorageAddress(variable);this.x.push().call(A+'erase');
+  },
+  assignArrayStorage(variable, node) {
+    const source=this.variable(node);
+    if(!variable.nativeDynamic)this.fail('Whole-array assignment requires a dynamic destination');
+    if(!source?.nativeArray || source.elementOf || key(variable.type)!==key(source.type) || (variable.fixedLength||0)!==(source.fixedLength||0))this.fail('Array assignment requires identical declared element types and fixed String lengths');
+    this.rawStorageAddress(variable);this.x.push();this.rawStorageAddress(source);this.x.emit(0x5b).push().emit(0x53).call(A+'copy');
+  }
+};
+
+/** Runtime helpers preserve EBX/ESI/EDI and return HRESULT failures through the
+ * existing VB error frame, never through a native Windows callback stack. */
+function emitNativeArrayHelpers(compiler) {
+  const x=compiler.x, maxBytes=compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES;
+  const checked=x.unique();
+  x.label(A+'check').test().branch('ns',checked).compare(0x8002000b).branch('e','error:9')
+    .compare(0x8002000d).branch('e','error:10').compare(0x8007000e).branch('e','error:7').jump('error:5').label(checked).emit(0xc3);
+
+  const unpinned=x.unique();
+  x.label(A+'unpin').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',unpinned)
+    .push().invoke(DLL,'SafeArrayUnlock').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(unpinned).value(0).leave(4);
+  const destroyed=x.unique();
+  x.label(A+'destroy').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',destroyed)
+    .push().invoke(DLL,'SafeArrayDestroy').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(destroyed).value(0).leave(4);
+
+  // Product of counts is independent of SAFEARRAY's reversed dimension storage.
+  const countLoop=x.unique(), countDone=x.unique();
+  x.label(A+'count').enter().value(arg(8)).test().branch('e','error:9')
+    .emit(0x0f,0xb7,0x38,0x8d,0x70,16,0xbb).imm(1).label(countLoop).emit(0x85,0xff).branch('e',countDone)
+    .emit(0x0f,0xaf,0x1e).branch('o','error:7').emit(0x83,0xc6,8,0x4f).jump(countLoop)
+    .label(countDone).emit(0x89,0xd8).compare(maxBytes).branch('g','error:7').leave(4);
+
+  for(const upper of [false,true]) {
+    x.label(A+(upper?'upper':'lower')).enter(4).value(arg(8)).emit(0x8b,0x00).test().branch('e','error:9')
+      .emit(0x89,0xc3).value(arg(12)).compare(1).branch('l','error:9');
+    x.emit(0x53).invoke(DLL,'SafeArrayGetDim').emit(0x39,0x45,12).branch('g','error:9');
+    x.push(addr(-4)).push(arg(12)).emit(0x53).invoke(DLL,upper?'SafeArrayGetUBound':'SafeArrayGetLBound').call(A+'check').value(arg(-4)).leave(8);
+  }
+
+  // redim(slot, vt, rank, bounds-in-declaration-order, preserve, fixedStringLength)
+  const noOld=x.unique(), counts=x.unique(), counted=x.unique(), byteLimit=x.unique(), halfLimit=x.unique(), doubleLimit=x.unique(), limitDone=x.unique();
+  const create=x.unique(), validate=x.unique(), preserveNow=x.unique(), success=x.unique(), publish=x.unique(), finish=x.unique();
+  x.label(A+'redim').enter(24).value(arg(8)).emit(0x89,0xc3,0x8b,0x00);save(x,-4);
+  x.test().branch('e',noOld).emit(0x66,0xf7,0x40,2,0x10,0).branch('ne','error:10')
+    .emit(0x83,0x78,8,0).branch('ne','error:10');
+  x.label(noOld).value(arg(16)).compare(1).branch('l','error:9').compare(NATIVE_ARRAY_MAX_RANK).branch('g','error:9')
+    .emit(0x89,0xc7).value(arg(20)).emit(0x89,0xc6).value(1);save(x,-16);
+  x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
+    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(maxBytes).branch('g','error:7');save(x,-16);
+  x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
+  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
+    .value(arg(-16)).compare(Math.floor(maxBytes/4)).branch('g','error:7').jump(limitDone);
+  x.label(halfLimit).value(arg(-16)).compare(Math.floor(maxBytes/2)).branch('g','error:7').jump(limitDone);
+  x.label(doubleLimit).value(arg(-16)).compare(Math.floor(maxBytes/8)).branch('g','error:7').jump(limitDone);
+  x.label(byteLimit).label(limitDone).value(0);save(x,-12);
+  x.value(arg(-4)).test().branch('e',create).value(arg(24)).test().branch('e',create);
+  x.api(DLL,'SafeArrayGetDim',[arg(-4)]).emit(0x3b,0x45,16).branch('ne','error:9');
+  x.push(arg(-4)).call(A+'count');save(x,-12);
+  x.value(arg(20)).emit(0x89,0xc6,0xbf).imm(1).label(validate);
+  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetLBound').call(A+'check');
+  x.value(arg(-20)).emit(0x3b,0x46,4).branch('ne','error:9').emit(0x3b,0x7d,16).branch('e',preserveNow);
+  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetUBound').call(A+'check')
+    .emit(0x8b,0x06,0x03,0x46,4,0x48,0x3b,0x45,0xec).branch('ne','error:9')
+    .emit(0x83,0xc6,8,0x47).jump(validate);
+  x.label(preserveNow).emit(0x56).push(arg(-4)).invoke(DLL,'SafeArrayRedim').call(A+'check').jump(success);
+  x.label(create).api(DLL,'SafeArrayCreate',[arg(12),arg(16),arg(20)]).test().branch('e','error:7');save(x,-8);
+  x.value(arg(-4)).test().branch('e',publish).push().invoke(DLL,'SafeArrayDestroy').test().branch('ns',publish);
+  // Do not leak the new allocation or overwrite the old owner if destruction fails.
+  x.push().push(arg(-8)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
+  x.label(publish).value(arg(-8)).emit(0x89,0x03).value(0);save(x,-12);
+  x.label(success).value(arg(28)).test().branch('e',finish);
+  x.value(arg(-16)).emit(0x2b,0x45,0xf4).test().branch('le',finish).emit(0x89,0xc7);
+  x.value(arg(-12)).emit(0xc1,0xe0,2,0x8b,0x13,0x03,0x42,12,0x89,0xc6)
+    .push(arg(28)).emit(0x57,0x56).call('native:string:initialize-fixed');
+  x.label(finish).value(0).leave(24);
+
+  // Erase a dynamic array destroys its descriptor. Fixed arrays keep their shape
+  // and storage; BSTR elements are released, never zeroed without being freed.
+  const eraseDone=x.unique(), reset=x.unique(), numeric=x.unique();
+  x.label(A+'erase').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',eraseDone)
+    .emit(0x89,0xc6,0x83,0x7e,8,0).branch('ne','error:10')
+    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne',reset).push(arg(8)).call(A+'destroy').jump(eraseDone);
+  x.label(reset).emit(0x56).call(A+'count').emit(0x89,0xc7,0x66,0xf7,0x46,2,0,1).branch('e',numeric)
+    .emit(0x57,0xff,0x76,12).call('native:string:clear');
+  x.value(arg(12)).test().branch('e',eraseDone).push().emit(0x57,0xff,0x76,12).call('native:string:initialize-fixed').jump(eraseDone);
+  x.label(numeric).emit(0x89,0xf8,0x0f,0xaf,0x46,4,0x89,0xc1,0x8b,0x7e,12,0x31,0xc0,0xfc,0xf3,0xaa)
+    .label(eraseDone).value(0).leave(8);
+
+  // SafeArrayCopy deep-copies BSTRs. Validate and allocate before changing the
+  // destination. Copying a fixed array into a dynamic one must not copy fixedness.
+  const copyUnlocked=x.unique(), copyEmpty=x.unique(), copyDone=x.unique(), copyPublish=x.unique();
+  x.label(A+'copy').enter(8).value(arg(8)).emit(0x89,0xc3,0x8b,0x00,0x89,0xc6).test().branch('e',copyUnlocked)
+    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne','error:10').emit(0x83,0x7e,8,0).branch('ne','error:10');
+  x.label(copyUnlocked).value(arg(12)).emit(0x8b,0x00).test().branch('e',copyEmpty).emit(0x39,0xf0).branch('e',copyDone).emit(0x89,0xc7);
+  x.value(0);save(x,-4);x.push(addr(-4)).emit(0x57).invoke(DLL,'SafeArrayCopy').call(A+'check');
+  x.value(arg(-4)).emit(0x66,0x83,0x60,2,0xef,0x85,0xf6).branch('e',copyPublish)
+    .emit(0x56).invoke(DLL,'SafeArrayDestroy').test().branch('ns',copyPublish);
+  x.push().push(arg(-4)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
+  x.label(copyPublish).value(arg(-4)).emit(0x89,0x03).jump(copyDone);
+  x.label(copyEmpty).emit(0x53).call(A+'destroy');
+  x.label(copyDone).value(0).leave(8);
+}
+
+return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers};
+})();
+
+/* storage.js */
+__modules[32]=(()=>{
+const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[31];
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
+
 const key = value => String(value).toLowerCase();
 const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency', 'date']);
 const MAX_NATIVE_STRING = 1024 * 1024;
@@ -2875,13 +3693,13 @@ function storageLayout(compiler, decl, module, proc) {
     decl.nativeArray = true;
     decl.nativeDynamic = !decl.bounds.length;
     if (decl.parameter && (!decl.byRef || decl.bounds.length)) compiler.fail('Native array parameters must be unsized and ByRef', module);
-    if (decl.bounds.length > 8) compiler.fail('Native fixed arrays support at most eight dimensions', module);
+    if (decl.bounds.length > NATIVE_ARRAY_MAX_RANK) compiler.fail('Native fixed arrays support at most 60 dimensions', module);
     decl.nativeBounds = decl.bounds.map(([low, high]) => {
       const lower = boundValue(compiler, low, module, proc), upper = boundValue(compiler, high, module, proc);
       if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
       const stride = count * elementBytes;
       count *= upper - lower + 1;
-      if (!Number.isSafeInteger(count) || count * elementBytes > 1024 * 1024) compiler.fail('Native fixed array exceeds the one MiB storage limit', module);
+      if (!Number.isSafeInteger(count) || count * elementBytes > (compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES)) compiler.fail('Native fixed array exceeds checked x86 backing-address range or configured budget', module);
       return {lower, upper, stride};
     });
   }
@@ -3005,212 +3823,8 @@ function emitNativeStorageHelpers(compiler) {
 return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers};
 })();
 
-/* arrays.js */
-__modules[30]=(()=>{
-
-/** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
- * passes a descriptor slot by reference; it is never exposed to browser code. */
-const key = value => String(value).toLowerCase();
-const A = 'native:array:';
-const DLL = 'oleaut32.dll';
-const arg = argument => ({argument});
-const addr = address => ({address});
-const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
-const NATIVE_ARRAY_MAX_BYTES = 1024 * 1024;
-const NATIVE_ARRAY_MAX_RANK = 8;
-const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
-
-const nativeArrayMethods = {
-  arrayWorkspace(bytes, name = 'array-work') {
-    const c = this.context, variable = {name:this.x.unique(name), type:'Long', nativeBytes:bytes};
-    if(c?.proc?.name) {
-      c.size += bytes;
-      if(c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
-      variable.offset = -c.size;
-    } else {variable.label = variable.name; this.allocateStorage(variable);}
-    return variable;
-  },
-  arrayPin() {
-    const pin = this.arrayWorkspace(4,'array-pin');
-    if(this.context?.proc?.name)this.context.arrayPins.push(pin);
-    return pin;
-  },
-  releaseArrayPin(pin) {
-    if(!pin)return;
-    const x=this.x;x.push();this.rawStorageAddress(pin);x.push().call(A+'unpin').emit(0x58);
-  },
-  arrayRef(variable) {
-    this.rawStorageAddress(variable);
-    this.x.emit(0x8b,0x00).test().branch('e','error:9');
-  },
-  elementAddress(variable) {
-    const x=this.x, array=variable.elementOf, rank=variable.indices.length;
-    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..8');
-    const indices=this.arrayWorkspace(rank*4), out=this.arrayWorkspace(4), pin=this.arrayPin();
-    // Evaluate every subscript exactly once, left-to-right, before dereferencing
-    // the current descriptor. A subscript expression may itself resize the array.
-    variable.indices.forEach((node,i)=>{
-      this.numeric(node);x.push();this.rawStorageAddress(indices);x.emit(0x5a,0x89,0x90).imm(i*4);
-    });
-    this.arrayRef(array);x.emit(0x89,0xc3,0x53).invoke(DLL,'SafeArrayGetDim').compare(rank).branch('ne','error:9');
-    x.emit(0x53).invoke(DLL,'SafeArrayLock').call(A+'check');
-    // Publish ownership before a fallible index lookup. Recovery and procedure
-    // exit release this pin even when another argument or the callee throws.
-    this.rawStorageAddress(pin);x.emit(0x89,0x18);
-    this.rawStorageAddress(out);x.push();this.rawStorageAddress(indices);x.push().emit(0x53).invoke(DLL,'SafeArrayPtrOfIndex').call(A+'check');
-    this.rawStorageAddress(out);x.emit(0x8b,0x00);
-    return pin;
-  },
-  initializeArrayStorage(variable) {
-    if(!variable.nativeArray || variable.parameter || variable.nativeDynamic)return;
-    const x=this.x, done=x.unique(), label=x.unique('fixed-bounds');
-    this.ro.align(4).label(label);
-    for(const bound of variable.nativeBounds)this.ro.u32(bound.upper-bound.lower+1).u32(bound.lower);
-    this.rawStorageAddress(variable);x.emit(0x83,0x38,0).branch('ne',done);
-    x.push(variable.fixedLength || 0).push(0).push(label).push(variable.nativeBounds.length).push(VT[key(variable.type)]);
-    this.rawStorageAddress(variable);x.push().call(A+'redim');
-    this.arrayRef(variable);x.emit(0x66,0x83,0x48,2,0x10).label(done); // FADF_FIXEDSIZE
-  },
-  destroyArrayStorage(variable) {
-    this.rawStorageAddress(variable);this.x.push().call(A+'destroy');
-  },
-  redimArrayStorage(decl, preserve) {
-    const x=this.x, variable=this.variable({kind:'id',name:decl.name});
-    if(!variable?.nativeArray || variable.elementOf)this.fail('ReDim requires a declared native array: '+decl.name);
-    if(!variable.nativeDynamic)this.fail('ReDim cannot resize a fixed native array: '+decl.name);
-    if(decl.explicitType && key(decl.type)!==key(variable.type))this.fail('ReDim cannot change a typed array element type');
-    if(decl.fixedLength && decl.fixedLength!==variable.fixedLength)this.fail('ReDim cannot change a fixed String element length');
-    const rank=decl.bounds?.length;
-    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to eight dimensions');
-    const bounds=this.arrayWorkspace(rank*8);
-    // Keep a stable slot address, not a stale SAFEARRAY pointer, across bound expressions.
-    this.rawStorageAddress(variable);x.push();
-    for(let i=0;i<rank;i++) {
-      this.numeric(decl.bounds[i][0] || {kind:'literal',value:this.context.module.module.optionBase || 0});x.push();
-      this.numeric(decl.bounds[i][1]);x.emit(0x5b,0x39,0xd8).branch('l','error:9').emit(0x29,0xd8).branch('o','error:7').emit(0x40).branch('o','error:7');
-      x.push();this.rawStorageAddress(bounds);x.emit(0x5a,0x89,0x90).imm(i*8).emit(0x89,0x98).imm(i*8+4);
-    }
-    x.emit(0x5b).push(variable.fixedLength || 0).push(preserve?1:0);
-    this.rawStorageAddress(bounds);x.push().push(rank).push(VT[key(variable.type)]).emit(0x53).call(A+'redim');
-  },
-  arrayBoundCall(node, upper) {
-    if(node.args.length<1||node.args.length>2)this.fail('LBound/UBound expects an array and optional dimension');
-    const variable=this.variable(node.args[0]);
-    if(!variable?.nativeArray||variable.elementOf)this.fail('LBound/UBound requires a native array');
-    this.rawStorageAddress(variable);this.x.push();this.numeric(node.args[1] || {kind:'literal',value:1});
-    this.x.emit(0x5b).push().emit(0x53).call(A+(upper?'upper':'lower'));
-  },
-  eraseStorage(node) {
-    const variable=this.variable(node);
-    if(!variable?.nativeArray||variable.elementOf)this.fail('Native Erase requires an array');
-    this.x.push(variable.fixedLength || 0);this.rawStorageAddress(variable);this.x.push().call(A+'erase');
-  },
-  assignArrayStorage(variable, node) {
-    const source=this.variable(node);
-    if(!variable.nativeDynamic)this.fail('Whole-array assignment requires a dynamic destination');
-    if(!source?.nativeArray || source.elementOf || key(variable.type)!==key(source.type) || (variable.fixedLength||0)!==(source.fixedLength||0))this.fail('Array assignment requires identical declared element types and fixed String lengths');
-    this.rawStorageAddress(variable);this.x.push();this.rawStorageAddress(source);this.x.emit(0x5b).push().emit(0x53).call(A+'copy');
-  }
-};
-
-/** Runtime helpers preserve EBX/ESI/EDI and return HRESULT failures through the
- * existing VB error frame, never through a native Windows callback stack. */
-function emitNativeArrayHelpers(compiler) {
-  const x=compiler.x;
-  const checked=x.unique();
-  x.label(A+'check').test().branch('ns',checked).compare(0x8002000b).branch('e','error:9')
-    .compare(0x8002000d).branch('e','error:10').compare(0x8007000e).branch('e','error:7').jump('error:5').label(checked).emit(0xc3);
-
-  const unpinned=x.unique();
-  x.label(A+'unpin').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',unpinned)
-    .push().invoke(DLL,'SafeArrayUnlock').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(unpinned).value(0).leave(4);
-  const destroyed=x.unique();
-  x.label(A+'destroy').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',destroyed)
-    .push().invoke(DLL,'SafeArrayDestroy').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(destroyed).value(0).leave(4);
-
-  // Product of counts is independent of SAFEARRAY's reversed dimension storage.
-  const countLoop=x.unique(), countDone=x.unique();
-  x.label(A+'count').enter().value(arg(8)).test().branch('e','error:9')
-    .emit(0x0f,0xb7,0x38,0x8d,0x70,16,0xbb).imm(1).label(countLoop).emit(0x85,0xff).branch('e',countDone)
-    .emit(0x0f,0xaf,0x1e).branch('o','error:7').emit(0x83,0xc6,8,0x4f).jump(countLoop)
-    .label(countDone).emit(0x89,0xd8).compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7').leave(4);
-
-  for(const upper of [false,true]) {
-    x.label(A+(upper?'upper':'lower')).enter(4).value(arg(8)).emit(0x8b,0x00).test().branch('e','error:9')
-      .emit(0x89,0xc3).value(arg(12)).compare(1).branch('l','error:9');
-    x.emit(0x53).invoke(DLL,'SafeArrayGetDim').emit(0x39,0x45,12).branch('g','error:9');
-    x.push(addr(-4)).push(arg(12)).emit(0x53).invoke(DLL,upper?'SafeArrayGetUBound':'SafeArrayGetLBound').call(A+'check').value(arg(-4)).leave(8);
-  }
-
-  // redim(slot, vt, rank, bounds-in-declaration-order, preserve, fixedStringLength)
-  const noOld=x.unique(), counts=x.unique(), counted=x.unique(), byteLimit=x.unique(), halfLimit=x.unique(), doubleLimit=x.unique(), limitDone=x.unique();
-  const create=x.unique(), validate=x.unique(), preserveNow=x.unique(), success=x.unique(), publish=x.unique(), finish=x.unique();
-  x.label(A+'redim').enter(24).value(arg(8)).emit(0x89,0xc3,0x8b,0x00);save(x,-4);
-  x.test().branch('e',noOld).emit(0x66,0xf7,0x40,2,0x10,0).branch('ne','error:10')
-    .emit(0x83,0x78,8,0).branch('ne','error:10');
-  x.label(noOld).value(arg(16)).compare(1).branch('l','error:9').compare(NATIVE_ARRAY_MAX_RANK).branch('g','error:9')
-    .emit(0x89,0xc7).value(arg(20)).emit(0x89,0xc6).value(1);save(x,-16);
-  x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
-    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7');save(x,-16);
-  x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
-  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
-    .value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/4).branch('g','error:7').jump(limitDone);
-  x.label(halfLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/2).branch('g','error:7').jump(limitDone);
-  x.label(doubleLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/8).branch('g','error:7').jump(limitDone);
-  x.label(byteLimit).label(limitDone).value(0);save(x,-12);
-  x.value(arg(-4)).test().branch('e',create).value(arg(24)).test().branch('e',create);
-  x.api(DLL,'SafeArrayGetDim',[arg(-4)]).emit(0x3b,0x45,16).branch('ne','error:9');
-  x.push(arg(-4)).call(A+'count');save(x,-12);
-  x.value(arg(20)).emit(0x89,0xc6,0xbf).imm(1).label(validate);
-  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetLBound').call(A+'check');
-  x.value(arg(-20)).emit(0x3b,0x46,4).branch('ne','error:9').emit(0x3b,0x7d,16).branch('e',preserveNow);
-  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetUBound').call(A+'check')
-    .emit(0x8b,0x06,0x03,0x46,4,0x48,0x3b,0x45,0xec).branch('ne','error:9')
-    .emit(0x83,0xc6,8,0x47).jump(validate);
-  x.label(preserveNow).emit(0x56).push(arg(-4)).invoke(DLL,'SafeArrayRedim').call(A+'check').jump(success);
-  x.label(create).api(DLL,'SafeArrayCreate',[arg(12),arg(16),arg(20)]).test().branch('e','error:7');save(x,-8);
-  x.value(arg(-4)).test().branch('e',publish).push().invoke(DLL,'SafeArrayDestroy').test().branch('ns',publish);
-  // Do not leak the new allocation or overwrite the old owner if destruction fails.
-  x.push().push(arg(-8)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
-  x.label(publish).value(arg(-8)).emit(0x89,0x03).value(0);save(x,-12);
-  x.label(success).value(arg(28)).test().branch('e',finish);
-  x.value(arg(-16)).emit(0x2b,0x45,0xf4).test().branch('le',finish).emit(0x89,0xc7);
-  x.value(arg(-12)).emit(0xc1,0xe0,2,0x8b,0x13,0x03,0x42,12,0x89,0xc6)
-    .push(arg(28)).emit(0x57,0x56).call('native:string:initialize-fixed');
-  x.label(finish).value(0).leave(24);
-
-  // Erase a dynamic array destroys its descriptor. Fixed arrays keep their shape
-  // and storage; BSTR elements are released, never zeroed without being freed.
-  const eraseDone=x.unique(), reset=x.unique(), numeric=x.unique();
-  x.label(A+'erase').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',eraseDone)
-    .emit(0x89,0xc6,0x83,0x7e,8,0).branch('ne','error:10')
-    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne',reset).push(arg(8)).call(A+'destroy').jump(eraseDone);
-  x.label(reset).emit(0x56).call(A+'count').emit(0x89,0xc7,0x66,0xf7,0x46,2,0,1).branch('e',numeric)
-    .emit(0x57,0xff,0x76,12).call('native:string:clear');
-  x.value(arg(12)).test().branch('e',eraseDone).push().emit(0x57,0xff,0x76,12).call('native:string:initialize-fixed').jump(eraseDone);
-  x.label(numeric).emit(0x89,0xf8,0x0f,0xaf,0x46,4,0x89,0xc1,0x8b,0x7e,12,0x31,0xc0,0xfc,0xf3,0xaa)
-    .label(eraseDone).value(0).leave(8);
-
-  // SafeArrayCopy deep-copies BSTRs. Validate and allocate before changing the
-  // destination. Copying a fixed array into a dynamic one must not copy fixedness.
-  const copyUnlocked=x.unique(), copyEmpty=x.unique(), copyDone=x.unique(), copyPublish=x.unique();
-  x.label(A+'copy').enter(8).value(arg(8)).emit(0x89,0xc3,0x8b,0x00,0x89,0xc6).test().branch('e',copyUnlocked)
-    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne','error:10').emit(0x83,0x7e,8,0).branch('ne','error:10');
-  x.label(copyUnlocked).value(arg(12)).emit(0x8b,0x00).test().branch('e',copyEmpty).emit(0x39,0xf0).branch('e',copyDone).emit(0x89,0xc7);
-  x.value(0);save(x,-4);x.push(addr(-4)).emit(0x57).invoke(DLL,'SafeArrayCopy').call(A+'check');
-  x.value(arg(-4)).emit(0x66,0x83,0x60,2,0xef,0x85,0xf6).branch('e',copyPublish)
-    .emit(0x56).invoke(DLL,'SafeArrayDestroy').test().branch('ns',copyPublish);
-  x.push().push(arg(-4)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
-  x.label(copyPublish).value(arg(-4)).emit(0x89,0x03).jump(copyDone);
-  x.label(copyEmpty).emit(0x53).call(A+'destroy');
-  x.label(copyDone).value(0).leave(8);
-}
-
-return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayMethods,emitNativeArrayHelpers};
-})();
-
 /* errors.js */
-__modules[31]=(()=>{
+__modules[33]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -3286,6 +3900,12 @@ const nativeErrorMethods = {
     localImmediate(x,F.dispatch,context.label+':error-dispatch');
     localImmediate(x,F.source,this.string(context.module.name));
     localImmediate(x,F.current,context.label+':0');localImmediate(x,F.next,context.label+':0');
+    if(context.module.nativeInternal){
+      // Intrinsics are not authored procedures: retain the caller's Erl/Source.
+      const noCaller=x.unique();x.value(arg(F.previous)).test().branch('e',noCaller).emit(0x89,0xc2);
+      x.emit(0x8b,0x42,F.erl&255);localStore(x,F.erl);
+      x.emit(0x8b,0x42,F.source&255);localStore(x,F.source);x.label(noCaller);
+    }
   },
   leaveErrorFrame() {
     // EAX is the return value; restoring the prior frame must not overwrite it.
@@ -3345,20 +3965,24 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[32]=(()=>{
+__modules[34]=(()=>{
 const {normalizeProject}=__modules[13];
 const {compileProject, parseParameters}=__modules[20];
 const {PE32Image, BinarySection}=__modules[21];
 const {X86}=__modules[22];
 const {nativeBindingMethods}=__modules[23];
 const {nativeCallMethods}=__modules[25];
-const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[26];
-const {nativeDateMethods,emitNativeDateHelpers}=__modules[27];
+const {nativeCallbackMethods,emitNativeCallbackHelpers}=__modules[26];
+const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[27];
+const {nativeDateMethods,emitNativeDateHelpers}=__modules[28];
+const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[29];
 const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[24];
-const {nativeControlArrayMethods}=__modules[28];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[29];
-const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[30];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[31];
+const {nativeControlArrayMethods}=__modules[30];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[32];
+const {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers}=__modules[31];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[33];
+
+
 
 
 
@@ -3378,7 +4002,7 @@ const mem = memory => ({memory});
 const INT_TYPES = new Set(['long', 'integer', 'byte', 'boolean']);
 const CLASSES = {CommandButton:'BUTTON', Label:'STATIC', TextBox:'EDIT', CheckBox:'BUTTON', OptionButton:'BUTTON', Frame:'BUTTON', ListBox:'LISTBOX', ComboBox:'COMBOBOX', Timer:null};
 const BOOL_CONDITIONS = {'=':0x94, '<>':0x95, '<':0x9c, '<=':0x9e, '>':0x9f, '>=':0x9d};
-const CONSTANTS = {vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullstring:''};
+const CONSTANTS = {...NATIVE_DATE_CONSTANTS,vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullstring:''};
 class NativeCompileError extends Error {
   constructor(message, source = '', line = 0) { super(`${source ? source + ':' + line + ': ' : ''}${message}`); this.name = 'NativeCompileError'; this.diagnostics = [{severity:'error',source,line,message}]; }
 }
@@ -3403,7 +4027,8 @@ function extractNativeDeclarations(module) {
 }
 
 class NativeCompiler {
-  constructor(project) {
+  constructor(project, options = {}) {
+    this.maxArrayBytes=nativeArrayLimit(options.maxArrayBytes, message=>this.fail(message));
     this.project = normalizeProject(project); this.externals = new Map();
     if (this.project.dataSources?.connections?.length || this.project.modules.some(m => m.form?.controls?.some(c => c.properties?.DataSource || c.properties?.DataMember || /^(?:Data|Adodc)$/i.test(c.type)))) this.fail('Data-source providers and data-bound controls require the HTML or Electron desktop target; freestanding PE32 AOT does not implement the data runtime');
     if (project.resources?.entries?.length) this.fail('Native resource lowering is not yet implemented; use the classic or desktop target');
@@ -3429,7 +4054,7 @@ class NativeCompiler {
   prepareModule(module) {
     this.preparingModule=module;this.preparingProcedure=null;
     if (!['form','module'].includes(module.kind) || module.interfaces.length || Object.keys(module.types).length) this.fail('Native AOT does not yet lower classes, interfaces or UDTs', module);
-    const result = {module,name:module.name,form:module.form,globals:new Map(),procedures:new Map(),controls:new Map(),controlArrays:new Map(),externals:this.externals.get(key(module.name))};
+    const result = {module,nativeInternal:!!module.nativeInternal,name:module.name,form:module.form,globals:new Map(),procedures:new Map(),controls:new Map(),controlArrays:new Map(),externals:this.externals.get(key(module.name))};
     this.modules.set(key(module.name), result);
     for (const decl of module.declarations) {
       if (decl.constant) continue; this.scalar(decl);
@@ -3500,7 +4125,7 @@ class NativeCompiler {
     if (node.kind === 'member' && node.object.kind === 'id') { const owner=this.modules.get(key(node.object.name)), variable=owner?.globals.get(key(node.name)); if(variable && owner!==context?.module && variable.scope!=='public') this.fail('Private native variable is not accessible: '+node.name); return variable; }
     return null;
   }
-  publicVariable(name) { const matches = [...this.modules.values()].flatMap(m => [...m.globals.values()].filter(v => key(v.name) === key(name) && v.scope === 'public')); if (matches.length > 1) this.fail('Ambiguous global: ' + name); return matches[0]; }
+  publicVariable(name) { if(this.context?.module.nativeInternal)return; const matches = [...this.modules.values()].flatMap(m => [...m.globals.values()].filter(v => key(v.name) === key(name) && v.scope === 'public')); if (matches.length > 1) this.fail('Ambiguous global: ' + name); return matches[0]; }
   constant(node) {
     const binding=this.nativeConstant(node);if(binding)return binding.value;
     return node.kind==='id'&&!this.variable(node)?CONSTANTS[key(node.name)]:undefined;
@@ -3536,6 +4161,7 @@ class NativeCompiler {
   handle(object) { this.ensure(object); this.x.value(this.controlHandleRef(object)); }
   type(node) {
     const bound=this.nativeConstant(node);if(bound)return bound.type;
+    const intervalType=this.dateIntervalType(node);if(intervalType)return intervalType;
     const dateType=this.dateType(node);if(dateType)return dateType;
     const currencyType=this.currencyType(node);if(currencyType)return currencyType;
     const numericType=this.numericType(node);if(numericType)return numericType;
@@ -3638,12 +4264,14 @@ class NativeCompiler {
     }
     if (callee.kind !== 'id') return null;
     const name = key(callee.name), own = current?.procedures.get(name) || current?.externals.get(name); if (own) return own;
+    if(current?.nativeInternal)return;
     const candidates = [...this.modules.values()].flatMap(m => [...m.procedures.values(),...m.externals.values()].filter(p => key((p.proc || p).name) === name && (p.proc || p).scope === 'public'));
     if (candidates.length > 1) this.fail('Ambiguous native procedure: ' + callee.name); return candidates[0];
   }
   call(node) {
     const x = this.x, args = node.args, name = node.callee.kind === 'id' ? key(node.callee.name).replace(/\$$/,'') : null;
     if(this.errorCall(node))return;
+    if(this.dateIntervalBuiltin(node,name))return;
     if(this.dateBuiltin(node,name))return;
     if(this.currencyBuiltin(node,name))return;
     if(this.numericBuiltin(node,name))return;
@@ -3695,7 +4323,7 @@ class NativeCompiler {
     x.sequence=outer.sequence;context.stringTemps=[];context.arrayPins=[];
     for (let i = 0; i < code.length; i++) {
       const ins = this.instruction = code[i]; x.label(context.label + ':' + i).call(context.label+':clear-strings');this.errorCheckpoint(context,i,ins);
-      this.sourceMap.push({symbol:context.label + ':' + i,source:ins.source,line:ins.line,procedure:ins.procedure});
+      if(!context.module.nativeInternal)this.sourceMap.push({symbol:context.label + ':' + i,source:ins.source,line:ins.line,procedure:ins.procedure});
       if(this.errorInstruction(ins,context))continue;
       if (ins.op === 'dim') { for (const decl of ins.decls) if (!decl.constant && decl.initial) { this.storageExpression(context.locals.get(key(decl.name)),decl.initial); this.store(context.locals.get(key(decl.name))); } }
       else if (ins.op === 'assign') {
@@ -3971,7 +4599,7 @@ class NativeCompiler {
   }
   helpers() {
     const x = this.x;
-    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);emitNativeDateHelpers(this);
+    emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);emitNativeDateHelpers(this);emitNativeDateIntervalHelpers(this);
     emitNativeStorageHelpers(this);
     emitNativeArrayHelpers(this);
     // int-to-string(value, buffer), including INT_MIN without signed negation overflow.
@@ -3986,9 +4614,11 @@ class NativeCompiler {
   build() {
     for (const module of this.modules.values()) for (const proc of module.procedures.values()) this.procedure(proc);
     for (const module of this.modules.values()) if (module.form) this.form(module);
+    emitNativeCallbackHelpers(this);
     this.helpers(); this.context = null; this.instruction = null;
     const x = this.x, loop = x.unique(), dispatch = x.unique(), quit = x.unique();
     x.label('entry').api('kernel32.dll','GetModuleHandleW',[0]).store('instance');
+    if(this.nativeCallbacks?.size)x.api('kernel32.dll','GetCurrentThreadId').store('native:callback:thread');
     for (const module of this.modules.values()) if (module.form) {
       x.value(mem('instance')).store(module.wc,16).api('user32.dll','LoadCursorW',[0,32512]).store(module.wc,24);
       x.api('user32.dll','RegisterClassW',[module.wc]).test().branch('e','error:7');
@@ -4009,23 +4639,23 @@ class NativeCompiler {
     x.label(dispatch).api('user32.dll','TranslateMessage',['msg']).api('user32.dll','DispatchMessageW',['msg']).jump(loop).label(quit).api('kernel32.dll','ExitProcess',[0]);
     this.image.manifest('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo><dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="x86" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency></assembly>');
     const linked = this.image.finish('entry');
-    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
+    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,arrayLimits:{maxBytes:this.maxArrayBytes,maxRank:60},runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),callbacks:[...(this.nativeCallbacks?.values()||[])].map(({target,label})=>({module:target.module.name,procedure:target.proc.name,rva:linked.symbols[label],argumentBytes:target.argumentBytes,thread:'application',convention:'stdcall'})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods);
+Object.assign(NativeCompiler.prototype,nativeCallbackMethods,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
 function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');
   if (!project || !Array.isArray(project.modules) || project.modules.length > 128) throw new NativeCompileError('Native project must contain at most 128 modules');
-  return new NativeCompiler(project).build();
+  return new NativeCompiler(project,options).build();
 }
 
 return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[33]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[32];
+__modules[35]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[34];
 const {PE32Image, BinarySection, PE32_BASE}=__modules[21];
 const {X86}=__modules[22];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
@@ -4035,5 +4665,5 @@ const {X86}=__modules[22];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[33];
+globalThis["VB6Native"]=__modules[35];
 })();

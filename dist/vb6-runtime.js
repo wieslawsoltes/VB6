@@ -2,8 +2,62 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* ..\..\packages\win32-browser\src\core.js */
+/* ..\..\packages\win32-browser\src\gpu-presenter.js */
 __modules[0]=(()=>{
+
+/** WebGPU presentation of a retained, CPU-readable GDI surface. Raster operations
+ * remain synchronous in the compatibility engine; only presentation is GPU work.
+ * One cached texture and a fullscreen triangle replace Canvas2D display blits. */
+const SHADER=`@group(0) @binding(0) var image: texture_2d<f32>;
+struct Size { value: vec2f, padding: vec2f };
+@group(0) @binding(1) var<uniform> size: Size;
+@vertex fn vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
+  var positions = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  return vec4f(positions[index], 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) position: vec4f) -> @location(0) vec4f {
+  let dimensions = textureDimensions(image);
+  let point = min(vec2u(position.xy / size.value * vec2f(dimensions)), dimensions - vec2u(1u));
+  return vec4f(textureLoad(image, vec2i(point), 0).rgb, 1.0);
+}`;
+class GPURasterPresenter {
+  constructor(device,format){
+    this.device=device;this.revision=-1;this.width=this.height=0;this.disposed=false;
+    const module=device.createShaderModule({code:SHADER});
+    const descriptor={layout:'auto',vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}};
+    this.ready=(async()=>{
+      const info=await module.getCompilationInfo();
+      const errors=info.messages.filter(message=>message.type==='error');
+      if(errors.length)throw new Error('GDI presentation shader: '+errors.map(e=>e.message).join('; '));
+      const pipeline=await device.createRenderPipelineAsync(descriptor);
+      if(this.disposed)return;
+      this.pipeline=pipeline;
+      this.uniform=device.createBuffer({size:16,usage:0x40|0x08}); // UNIFORM | COPY_DST
+    })();
+  }
+  static async create(device,format){const presenter=new GPURasterPresenter(device,format);try{await presenter.ready;return presenter;}catch(error){presenter.dispose();throw error;}}
+  render(context,source,revision,width,height){
+    const d=this.device;if(!d)throw new Error('GPU raster presenter is disposed');if(!this.pipeline)throw new Error('Await GPU raster presenter.ready before rendering');
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||!source.width||!source.height)throw new RangeError('Invalid GPU presentation dimensions');
+    if(source.width>d.limits.maxTextureDimension2D||source.height>d.limits.maxTextureDimension2D)throw new RangeError('GDI texture exceeds device dimensions');
+    if(!this.texture||this.width!==source.width||this.height!==source.height){
+      this.texture?.destroy();this.width=source.width;this.height=source.height;
+      this.texture=d.createTexture({size:[this.width,this.height],format:'rgba8unorm',usage:0x04|0x02|0x10});
+      this.bindGroup=d.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:this.texture.createView()},{binding:1,resource:{buffer:this.uniform}}]});this.revision=-1;
+    }
+    if(this.revision!==revision){d.queue.copyExternalImageToTexture({source},{texture:this.texture,premultipliedAlpha:false},[this.width,this.height]);this.revision=revision;}
+    d.queue.writeBuffer(this.uniform,0,new Float32Array([width,height,0,0]));
+    const encoder=d.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),loadOp:'clear',storeOp:'store',clearValue:{r:0,g:0,b:0,a:1}}]});
+    pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.draw(3);pass.end();d.queue.submit([encoder.finish()]);
+  }
+  dispose(){this.disposed=true;this.texture?.destroy();this.uniform?.destroy();this.texture=this.uniform=this.bindGroup=this.pipeline=this.device=null;}
+}
+
+return {GPURasterPresenter};
+})();
+
+/* ..\..\packages\win32-browser\src\core.js */
+__modules[1]=(()=>{
 
 /** MIT. A bounded, process-private 32-bit address and handle space. */
 const ERROR = Object.freeze({SUCCESS:0,FILE_NOT_FOUND:2,PATH_NOT_FOUND:3,ACCESS_DENIED:5,INVALID_HANDLE:6,NOT_ENOUGH_MEMORY:8,INVALID_DATA:13,SHARING_VIOLATION:32,NOT_SUPPORTED:50,FILE_EXISTS:80,INVALID_PARAMETER:87,INSUFFICIENT_BUFFER:122,MOD_NOT_FOUND:126,PROC_NOT_FOUND:127,DIR_NOT_EMPTY:145,ALREADY_EXISTS:183,ENVVAR_NOT_FOUND:203,MORE_DATA:234,NO_MORE_ITEMS:259,OPERATION_ABORTED:995,INVALID_WINDOW_HANDLE:1400});
@@ -67,9 +121,457 @@ class MemoryFileSystem {
 return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
 })();
 
+/* ..\..\packages\win32-browser\src\gdi-transform.js */
+__modules[2]=(()=>{
+const {Win32Error,integer}=__modules[1];
+
+const TRANSFORM_CONSTANTS=Object.freeze({GM_COMPATIBLE:1,GM_ADVANCED:2,MWT_IDENTITY:1,MWT_LEFTMULTIPLY:2,MWT_RIGHTMULTIPLY:3,MM_TEXT:1,MM_LOMETRIC:2,MM_HIMETRIC:3,MM_LOENGLISH:4,MM_HIENGLISH:5,MM_TWIPS:6,MM_ISOTROPIC:7,MM_ANISOTROPIC:8});
+const IDENTITY=Object.freeze([1,0,0,1,0,0]);
+function multiply(a,b){return [a[0]*b[0]+a[2]*b[1],a[1]*b[0]+a[3]*b[1],a[0]*b[2]+a[2]*b[3],a[1]*b[2]+a[3]*b[3],a[0]*b[4]+a[2]*b[5]+a[4],a[1]*b[4]+a[3]*b[5]+a[5]];}
+function inverse(a){const det=a[0]*a[3]-a[1]*a[2];if(!Number.isFinite(det)||Math.abs(det)<1e-20)throw new Win32Error('Singular coordinate transform');return [a[3]/det,-a[1]/det,-a[2]/det,a[0]/det,(a[2]*a[5]-a[3]*a[4])/det,(a[1]*a[4]-a[0]*a[5])/det];}
+function mapPoint(a,x,y){const px=a[0]*x+a[2]*y+a[4],py=a[1]*x+a[3]*y+a[5];if(!Number.isFinite(px)||!Number.isFinite(py)||Math.abs(px)>0x3ffffff||Math.abs(py)>0x3ffffff)throw new Win32Error('Transformed coordinate out of range');return [px,py];}
+function mapping(s){
+  let sx=1,sy=1;const mode=s.mapMode||1;
+  if(mode>=2&&mode<=6){sx=96/({2:254,3:2540,4:100,5:1000,6:1440})[mode];sy=-sx;}
+  else if(mode>=7){sx=s.viewportExtX/s.windowExtX;sy=s.viewportExtY/s.windowExtY;if(mode===7){const n=Math.min(Math.abs(sx),Math.abs(sy));sx=Math.sign(sx)*n;sy=Math.sign(sy)*n;}}
+  return multiply([sx,0,0,sy,s.viewportX-sx*(s.windowX||0),s.viewportY-sy*(s.windowY||0)],s.world||IDENTITY);
+}
+function translatedOnly(s){const a=mapping(s);return a[0]===1&&!a[1]&&!a[2]&&a[3]===1;}
+function devicePoint(s,x,y){return mapPoint(mapping(s),x,y).map(Math.round);}
+function mapBounds(a,r){const p=[[r[0],r[1]],[r[2],r[1]],[r[2],r[3]],[r[0],r[3]]].map(([x,y])=>mapPoint(a,x,y));return [Math.floor(Math.min(...p.map(p=>p[0]))),Math.floor(Math.min(...p.map(p=>p[1]))),Math.ceil(Math.max(...p.map(p=>p[0]))),Math.ceil(Math.max(...p.map(p=>p[1])))];}
+function readTransform(memory,p){const v=memory.view(p,24),a=[0,4,8,12,16,20].map(o=>v.getFloat32(o,true));if(a.some(n=>!Number.isFinite(n)))throw new Win32Error('Non-finite XFORM');return a;}
+function installTransforms(w,{dc,add}){
+  const m=w.memory,pair=(p,x,y)=>{const v=m.view(p,8);v.setInt32(0,x,true);v.setInt32(4,y,true);};
+  add('GetGraphicsMode',1,id=>dc(id).graphicsMode||1);
+  add('SetGraphicsMode',2,(id,mode)=>{mode=integer(mode,1,2);const s=dc(id),old=s.graphicsMode||1;if(mode===1&&(s.world||IDENTITY).some((v,i)=>v!==IDENTITY[i]))throw new Win32Error('Reset world transform before GM_COMPATIBLE');s.graphicsMode=mode;return old;});
+  add('GetWorldTransform',2,(id,p)=>{const a=dc(id).world||IDENTITY,v=m.view(p,24);a.forEach((n,i)=>v.setFloat32(i*4,n,true));return 1;});
+  const set=(s,a)=>{if(s.graphicsMode!==2)throw new Win32Error('World transform requires GM_ADVANCED');inverse(a);s.world=Object.freeze(a);return 1;};
+  add('SetWorldTransform',2,(id,p)=>set(dc(id),readTransform(m,p)));
+  add('ModifyWorldTransform',3,(id,p,mode)=>{const s=dc(id);mode=integer(mode,1,3);const a=mode===1?IDENTITY:readTransform(m,p),old=s.world||IDENTITY;return set(s,mode===1?[...IDENTITY]:mode===2?multiply(old,a):multiply(a,old));});
+  add('CombineTransform',3,(out,a,b)=>{const x=readTransform(m,a),y=readTransform(m,b),r=multiply(y,x),v=m.view(out,24);if(r.some(n=>!Number.isFinite(Math.fround(n))))throw new Win32Error('XFORM overflow');r.forEach((n,i)=>v.setFloat32(i*4,n,true));return 1;});
+  add('GetMapMode',1,id=>dc(id).mapMode||1,{replace:true});
+  add('SetMapMode',2,(id,mode)=>{mode=integer(mode,1,8);const s=dc(id),old=s.mapMode||1;s.mapMode=mode;s.windowExtX=s.windowExtY=s.viewportExtX=s.viewportExtY=1;return old;},{replace:true});
+  for(const [name,x,y] of [['WindowOrg','windowX','windowY'],['WindowExt','windowExtX','windowExtY'],['ViewportExt','viewportExtX','viewportExtY']]){
+    add('Get'+name+'Ex',2,(id,p)=>{const s=dc(id);pair(p,s[x],s[y]);return 1;});
+    add('Set'+name+'Ex',4,(id,a,b,p)=>{const s=dc(id);a=integer(a,-0x7fffffff,0x7fffffff);b=integer(b,-0x7fffffff,0x7fffffff);if(p)pair(p,s[x],s[y]);if(name!=='WindowOrg'&&(s.mapMode||1)<7)return 1;if(name!=='WindowOrg'&&(!a||!b))throw new Win32Error('Mapping extents cannot be zero');s[x]=a;s[y]=b;return 1;});
+  }
+  add('OffsetWindowOrgEx',4,(id,x,y,p)=>{const s=dc(id);return w.resolve('gdi32','SetWindowOrgEx').fn(id,s.windowX+Number(x),s.windowY+Number(y),p);});
+  for(const [name,x,y]of [['Window','windowExtX','windowExtY'],['Viewport','viewportExtX','viewportExtY']])add('Scale'+name+'ExtEx',6,(id,xn,xd,yn,yd,p)=>{const s=dc(id);[xn,xd,yn,yd]=[xn,xd,yn,yd].map(n=>integer(n,-0x7fffffff,0x7fffffff));if(!xd||!yd)throw new Win32Error('Zero mapping denominator');return w.resolve('gdi32','Set'+name+'ExtEx').fn(id,Math.round(s[x]*xn/xd),Math.round(s[y]*yn/yd),p);});
+  for(const inv of [false,true])add(inv?'DPtoLP':'LPtoDP',3,(id,p,n)=>{n=integer(n,0,Math.floor(m.maxBytes/8));const s=dc(id),a=inv?inverse(mapping(s)):mapping(s),v=m.view(p,n*8),points=Array.from({length:n},(_,i)=>mapPoint(a,v.getInt32(i*8,true),v.getInt32(i*8+4,true)).map(Math.round));points.forEach(([x,y],i)=>{v.setInt32(i*8,x,true);v.setInt32(i*8+4,y,true);});return 1;});
+}
+
+return {TRANSFORM_CONSTANTS,IDENTITY,multiply,inverse,mapPoint,mapping,translatedOnly,devicePoint,mapBounds,readTransform,installTransforms};
+})();
+
+/* ..\..\packages\win32-browser\src\gdi-path.js */
+__modules[3]=(()=>{
+const {Win32Error,integer}=__modules[1];
+const {mapping,mapPoint,inverse,IDENTITY}=__modules[2];
+
+
+const PATH_CONSTANTS=Object.freeze({ALTERNATE:1,WINDING:2,PT_CLOSEFIGURE:1,PT_LINETO:2,PT_BEZIERTO:4,PT_MOVETO:6});
+function installPaths(w,{dc,bitmaps,regions,add,style}){
+  const h=w.handles,m=w.memory,max=integer(w.options.maxPathPoints??16384,4,262144);
+  const wrap=(name,fn)=>{const old=w.resolve('gdi32',name);add(name,old.arity,(...args)=>fn(old.fn,...args),{replace:true});};
+  const checked=(x,y)=>[integer(x,-0x4000000,0x3ffffff),integer(y,-0x4000000,0x3ffffff)];
+  const device=(s,x,y)=>mapPoint(mapping(s),...checked(x,y)).map(Math.round);
+  const path=s=>{if(s.path?.state!=='closed')throw new Win32Error('A completed path is required',1003);return s.path;};
+  const append=(s,entries)=>{const old=s.path.entries;if(old.length+entries.length>max)throw new Win32Error('Path point quota exceeded',8);s.path={state:'open',entries:[...old,...entries]};};
+  const last=s=>s.path.entries.at(-1);
+  const start=(s,p)=>{if(!last(s)||last(s).type&1)append(s,[{point:p,type:6}]);};
+  const points=(p,n,min=2)=>{n=integer(n,min,max);const v=m.view(p,n*8);return Array.from({length:n},(_,i)=>[v.getInt32(i*8,true),v.getInt32(i*8+4,true)]);};
+  const flatten=entries=>{
+    const out=[];let at=null;
+    for(let i=0;i<entries.length;i++){
+      const e=entries[i],type=e.type&~1;
+      if(type!==4){out.push(e);at=e.point;continue;}
+      if(!at||i+2>=entries.length||entries[i+1].type!==4||(entries[i+2].type&~1)!==4)throw new Win32Error('Invalid Bezier path');
+      const end=entries[i+2],stack=[[at,e.point,entries[i+1].point,end.point,0]];i+=2;
+      while(stack.length){const [a,b,c,d,depth]=stack.pop(),dx=d[0]-a[0],dy=d[1]-a[1],length=Math.hypot(dx,dy),distance=p=>length?Math.abs(dy*p[0]-dx*p[1]+d[0]*a[1]-d[1]*a[0])/length:Math.hypot(p[0]-a[0],p[1]-a[1]);
+        if(depth>=16||Math.max(distance(b),distance(c))<=.25){out.push({point:d.map(Math.round),type:2});if(out.length>max)throw new Win32Error('Flattened path quota exceeded',8);continue;}
+        const mid=(p,q)=>[(p[0]+q[0])/2,(p[1]+q[1])/2],ab=mid(a,b),bc=mid(b,c),cd=mid(c,d),abc=mid(ab,bc),bcd=mid(bc,cd),center=mid(abc,bcd);
+        stack.push([center,bcd,cd,d,depth+1],[a,ab,abc,center,depth+1]);
+      }
+      if(end.type&1)out[out.length-1]={...out.at(-1),type:3};at=end.point;
+    }
+    return out;
+  };
+  const figures=entries=>{const result=[];let current=null;for(const e of flatten(entries)){if((e.type&~1)===6){current=[];result.push(current);}if(!current)throw new Win32Error('Path has no starting point');current.push(e.point);if(e.type&1){current.closed=true;current=null;}}return result.filter(p=>p.length>=2);};
+  const shape=(s,entries)=>regions.polygons(figures(entries),s.polyFillMode||1);
+  const strokeShape=(s,entries)=>{
+    const pen=h.get(s.pen,'pen');if(pen.null)return regions.rectangle(0,0,0,0);
+    const transform=mapping(s),width=Math.max(1,(pen.width||1)*Math.sqrt(Math.abs(transform[0]*transform[3]-transform[1]*transform[2]))),polys=[];
+    for(const figure of figures(entries)){
+      const p=figure.closed?[...figure,figure[0]]:figure;
+      for(let i=1;i<p.length;i++){const a=p[i-1],b=p[i],length=Math.hypot(b[0]-a[0],b[1]-a[1]);if(!length)continue;const ox=-(b[1]-a[1])*width/2/length,oy=(b[0]-a[0])*width/2/length;
+        polys.push([[a[0]+ox,a[1]+oy],[a[0]-ox,a[1]-oy],[b[0]-ox,b[1]-oy],[b[0]+ox,b[1]+oy]].map(p=>p.map(Math.round)));if(polys.length*4>max)throw new Win32Error('Stroke path quota exceeded',8);}
+    }
+    return polys.length?regions.polygons(polys,2):regions.rectangle(0,0,0,0);
+  };
+  const paint=(s,fill,stroke)=>{
+    const effective=bitmaps.effective(s),f=fill?regions.combine(fill,effective,1):null,t=stroke?regions.combine(stroke,effective,1):null;
+    const union=f&&t?regions.combine(f,t,2):f||t;if(!union?.count)return 1;
+    const image=bitmaps.read(s,union.bounds),brush=h.get(s.brush,'brush'),pen=h.get(s.pen,'pen');
+    for(const [region,color]of [[f,brush.color||0],[t,pen.color||0]])if(region)for(const band of region.bands)for(let y=band.top;y<band.bottom;y++)for(let j=0;j<band.spans.length;j+=2)for(let x=band.spans[j];x<band.spans[j+1];x++){const i=((y-union.bounds[1])*image.width+x-union.bounds[0])*4;image.data.set([color&255,color>>>8&255,color>>>16&255,0],i);}
+    bitmaps.write(s,union.bounds,image);return 1;
+  };
+  const render=(s,entries,fill,stroke)=>paint(s,fill&&!h.get(s.brush,'brush').null?shape(s,entries):null,stroke?strokeShape(s,entries):null);
+  const submit=(s,entries,fill=true,stroke=true)=>{if(s.path?.state==='open'){append(s,entries);return 1;}return render(s,entries,fill,stroke);};
+  add('BeginPath',1,id=>{dc(id).path={state:'open',entries:[]};return 1;});
+  add('EndPath',1,id=>{const s=dc(id);if(s.path?.state!=='open')throw new Win32Error('No open path',1003);s.path={...s.path,state:'closed'};return 1;});
+  add('AbortPath',1,id=>{dc(id).path=null;return 1;});
+  add('CloseFigure',1,id=>{const s=dc(id);if(s.path?.state!=='open')throw new Win32Error('No open path',1003);const entries=s.path.entries;if(entries.length)s.path={state:'open',entries:[...entries.slice(0,-1),{...entries.at(-1),type:entries.at(-1).type|1}]};return 1;});
+  add('FlattenPath',1,id=>{const s=dc(id),p=path(s);s.path={state:'closed',entries:flatten(p.entries)};return 1;});
+  add('WidenPath',1,id=>{const s=dc(id),r=strokeShape(s,path(s).entries),entries=[];for(const [l,t,right,b]of regions.rectangles(r))entries.push({point:[l,t],type:6},{point:[right,t],type:2},{point:[right,b],type:2},{point:[l,b],type:3});if(entries.length>max)throw new Win32Error('Widened path quota exceeded',8);s.path={state:'closed',entries};return 1;});
+  add('GetPath',4,(id,p,types,n)=>{const s=dc(id),entries=path(s).entries;n=integer(n,0,max);if(!n)return entries.length;if(n<entries.length)throw new Win32Error('Path output buffer too small');const pts=m.view(p,entries.length*8),flags=m.bytes(types,entries.length),back=inverse(mapping(s)),result=entries.map(e=>mapPoint(back,...e.point).map(Math.round));result.forEach(([x,y],i)=>{pts.setInt32(i*8,x,true);pts.setInt32(i*8+4,y,true);flags[i]=entries[i].type;});return entries.length;},{failure:-1});
+  add('PathToRegion',1,id=>{const s=dc(id),r=shape(s,path(s).entries),handle=h.add('region',{shape:r});s.path=null;return handle;});
+  add('SelectClipPath',2,(id,mode)=>{mode=integer(mode,1,5);const s=dc(id),r=shape(s,path(s).entries),next=mode===5?r:regions.combine(s.clip||regions.rectangle(...bitmaps.bounds(s)),r,mode);s.clip=next;s.path=null;return 1;});
+  for(const [name,fill,stroke]of [['FillPath',true,false],['StrokePath',false,true],['StrokeAndFillPath',true,true]])add(name,1,id=>{const s=dc(id),entries=path(s).entries;const result=render(s,entries,fill,stroke);s.path=null;return result;});
+  wrap('MoveToEx',(old,id,x,y,p)=>{const s=dc(id),entry={point:device(s,x,y),type:6};if(s.path?.state==='open'&&s.path.entries.length>=max)throw new Win32Error('Path quota exceeded',8);const result=old(id,x,y,p);if(s.path?.state==='open')append(s,[entry]);return result;});
+  wrap('LineTo',(old,id,x,y)=>{const s=dc(id);if(s.path?.state!=='open')return old(id,x,y);const entries=[];if(!last(s)||last(s).type&1)entries.push({point:device(s,s.x,s.y),type:6});entries.push({point:device(s,x,y),type:2});append(s,entries);[s.x,s.y]=checked(x,y);return 1;});
+  for(const name of ['Rectangle','Ellipse'])wrap(name,(old,id,l,t,r,b)=>{const s=dc(id);if(s.path?.state!=='open')return old(id,l,t,r,b);let p;
+    if(name==='Rectangle')p=[[l,t],[r,t],[r,b],[l,b]];
+    else{[l,t,r,b]=[l,t,r,b].map(n=>integer(n,-0x4000000,0x3ffffff));const n=Math.min(1024,Math.max(16,Math.ceil(Math.PI*Math.sqrt(Math.max(Math.abs(r-l),Math.abs(b-t))))));p=Array.from({length:n},(_,i)=>[(l+r)/2+(r-l)/2*Math.cos(i/n*2*Math.PI),(t+b)/2+(b-t)/2*Math.sin(i/n*2*Math.PI)]).map(p=>p.map(Math.round));}
+    append(s,p.map((vertex,i)=>({point:device(s,...vertex),type:i===0?6:i===p.length-1?3:2})));return 1;});
+  const poly=(id,polys,closed,bezier=false,to=false)=>{
+    const s=dc(id),entries=[];
+    for(let p of polys){
+      if(to)p=[[s.x,s.y],...p];
+      if(bezier&&(p.length-1)%3)throw new Win32Error('Bezier points must be 1+3n');
+      const continuing=to&&s.path?.state==='open'&&last(s)&&!(last(s).type&1);
+      entries.push(...p.map((vertex,i)=>({point:device(s,...vertex),type:i===0?6:(bezier?4:2)|(closed&&i===p.length-1?1:0)})).slice(continuing?1:0));
+    }
+    const result=submit(s,entries,closed,true);
+    if(to)[s.x,s.y]=polys.at(-1).at(-1);
+    return result;
+  };
+  add('Polygon',3,(id,p,n)=>poly(id,[points(p,n)],true));
+  add('Polyline',3,(id,p,n)=>poly(id,[points(p,n)],false));
+  add('PolylineTo',3,(id,p,n)=>poly(id,[points(p,n,1)],false,false,true));
+  add('PolyBezier',3,(id,p,n)=>poly(id,[points(p,n,4)],false,true));
+  add('PolyBezierTo',3,(id,p,n)=>poly(id,[points(p,n,3)],false,true,true));
+  for(const closed of [false,true])add(closed?'PolyPolygon':'PolyPolyline',4,(id,p,counts,n)=>{n=integer(n,1,max);const v=m.view(counts,n*4),polys=[];let offset=0;for(let i=0;i<n;i++){const count=integer(v.getInt32(i*4,true),2,max);if(offset+count>max)throw new Win32Error('Polygon point quota exceeded',8);polys.push(points(p+offset*8,count));offset+=count;}return poly(id,polys,closed);});
+}
+
+return {PATH_CONSTANTS,installPaths};
+})();
+
+/* ..\..\packages\win32-browser\src\gdi-text.js */
+__modules[4]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[1];
+const {mapping,multiply,mapPoint,mapBounds}=__modules[2];
+
+
+const TEXT_CONSTANTS=Object.freeze({OBJ_FONT:6,FW_NORMAL:400,FW_BOLD:700,ANSI_CHARSET:0,DEFAULT_CHARSET:1,TRANSPARENT:1,OPAQUE:2,TA_NOUPDATECP:0,TA_UPDATECP:1,TA_LEFT:0,TA_RIGHT:2,TA_CENTER:6,TA_TOP:0,TA_BOTTOM:8,TA_BASELINE:24,TA_RTLREADING:256,ETO_OPAQUE:2,ETO_CLIPPED:4,ETO_RTLREADING:128,ETO_PDY:8192,DT_CENTER:1,DT_RIGHT:2,DT_VCENTER:4,DT_BOTTOM:8,DT_WORDBREAK:16,DT_SINGLELINE:32,DT_EXPANDTABS:64,DT_CALCRECT:1024,DT_NOPREFIX:2048});
+const fields=['height','width','escapement','orientation','weight'];
+const bytes=['italic','underline','strikeOut','charSet','outPrecision','clipPrecision','quality','pitchAndFamily'];
+const cssColor=c=>'#'+[c&255,c>>>8&255,c>>>16&255].map(n=>n.toString(16).padStart(2,'0')).join('');
+function installText(w,{dc,bitmaps,regions,add,stock,stocks}){
+  const h=w.handles,m=w.memory,limit=integer(w.options.maxTextLength??16384,1,1048576);
+  const canvas=(width,height)=>{
+    if(width*height>bitmaps.maxPixels)throw new Win32Error('Text raster quota exceeded',8);
+    let c;if(w.options.createCanvas)c=w.options.createCanvas(width,height);
+    else if(typeof globalThis.OffscreenCanvas==='function')c=new globalThis.OffscreenCanvas(width,height);
+    else{const doc=w.options.window?.document||globalThis.document;if(doc){c=doc.createElement('canvas');c.width=width;c.height=height;}}
+    if(!c?.getContext)throw new Win32Error('Font rendering requires Canvas2D, OffscreenCanvas, or createCanvas adapter',50);
+    c.width=width;c.height=height;return c;
+  };
+  const font=(faceName='Arial',height=-12,pitchAndFamily=0)=>({height,width:0,escapement:0,orientation:0,weight:400,italic:0,underline:0,strikeOut:0,charSet:1,outPrecision:0,clipPrecision:0,quality:0,pitchAndFamily,faceName});
+  const fontStocks=[10,11,12,13,14,16,17],ensure=index=>{if(!stocks.has(index))stock(index,'font',font([10,11,16].includes(index)?'monospace':'Arial',-12,[10,11,16].includes(index)?1:2));return stocks.get(index);};
+  const oldStock=w.resolve('gdi32','GetStockObject');add('GetStockObject',1,index=>fontStocks.includes(Number(index))?ensure(Number(index)):oldStock.fn(index),{replace:true});
+  const oldCurrent=w.resolve('gdi32','GetCurrentObject');add('GetCurrentObject',2,(id,type)=>Number(type)===6?(dc(id).font||ensure(13)):oldCurrent.fn(id,type),{replace:true});
+  const oldSelect=w.resolve('gdi32','SelectObject');add('SelectObject',2,(id,obj)=>{const s=dc(id);if(h.has(obj,'font')&&!s.font)s.font=ensure(13);return oldSelect.fn(id,obj);},{replace:true});
+  const get=s=>h.get(s.font||ensure(13),'font');
+  const readFont=(p,wide)=>{const v=m.view(p,wide?92:60),f={};fields.forEach((k,i)=>f[k]=v.getInt32(i*4,true));bytes.forEach((k,i)=>f[k]=v.getUint8(20+i));f.faceName=m.decode(m.bytes(p+28,wide?64:32),wide).split('\0')[0];return validate(f);};
+  const validate=f=>{fields.forEach(k=>f[k]=integer(f[k],-32767,32767));bytes.forEach(k=>f[k]=integer(f[k],0,255));f.faceName=String(f.faceName||'Arial').slice(0,31);return f;};
+  const writeFont=(f,p,n,wide)=>{const size=wide?92:60;if(!p)return size;if(integer(n,0,0x7fffffff)<size)throw new Win32Error('LOGFONT buffer too small');const v=m.view(p,size);m.bytes(p,size).fill(0);fields.forEach((k,i)=>v.setInt32(i*4,f[k],true));bytes.forEach((k,i)=>v.setUint8(20+i,f[k]));m.putString(p+28,f.faceName,32,wide);return size;};
+  for(const wide of [false,true]){
+    const suffix=wide?'W':'A';
+    add('CreateFontIndirect'+suffix,1,p=>h.add('font',readFont(p,wide)));
+    add('CreateFont'+suffix,14,(height,width,escapement,orientation,weight,italic,underline,strikeOut,charSet,outPrecision,clipPrecision,quality,pitchAndFamily,p)=>h.add('font',validate({height,width,escapement,orientation,weight,italic,underline,strikeOut,charSet,outPrecision,clipPrecision,quality,pitchAndFamily,faceName:m.string(p,wide)})));
+    const old=w.resolve('gdi32','GetObject'+suffix);add('GetObject'+suffix,3,(id,n,p)=>h.has(id,'font')?writeFont(h.get(id,'font'),p,n,wide):old.fn(id,n,p),{replace:true});
+  }
+  const setup=s=>{
+    const f=get(s),c=canvas(1,1),ctx=c.getContext('2d');if(!ctx)throw new Win32Error('Canvas2D text context unavailable',50);
+    let size=Math.abs(f.height)||12;const family=f.faceName.replace(/["\\\n\r]/g,'');
+    ctx.font=`${f.italic?'italic ':''}${Math.max(1,Math.min(1000,f.weight||400))} ${size}px "${family}", sans-serif`;
+    if(['monospace','serif','sans-serif','system-ui','cursive','fantasy'].includes(family.toLowerCase()))ctx.font=ctx.font.replace('\"'+family+'\"',family);
+    ctx.textBaseline='alphabetic';ctx.direction=s.textAlign&256?'rtl':'ltr';
+    if(f.height>0){const measured=ctx.measureText('Mg'),cell=(measured.fontBoundingBoxAscent??measured.actualBoundingBoxAscent)+(measured.fontBoundingBoxDescent??measured.actualBoundingBoxDescent);if(cell>0){size=size*f.height/cell;ctx.font=ctx.font.replace(/[\d.]+px/,size+'px');}}
+    const metric=ctx.measureText('Mg'),ascent=metric.fontBoundingBoxAscent??metric.actualBoundingBoxAscent??size*.8,descent=metric.fontBoundingBoxDescent??metric.actualBoundingBoxDescent??size*.2;
+    const average=ctx.measureText('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz').width/52;
+    return {ctx,font:f,size,ascent,descent,height:ascent+descent,xscale:f.width&&average?Math.abs(f.width)/average:1};
+  };
+  const read=(p,n,wide)=>{n=integer(n,0,limit);if(typeof p==='string')return p.slice(0,n);if(!n)return '';return m.decode(m.bytes(p,n*(wide?2:1)),wide);};
+  const extent=(s,text,c=null)=>{if(!text.length)return {width:0,height:0,context:c};c=c||setup(s);return {width:c.ctx.measureText(text).width*c.xscale+text.length*(s.charExtra||0),height:c.height,context:c};};
+  const draw=(s,x,y,text,flags=0,rectangle=null,advances=null)=>{
+    flags=unsigned(flags);if(flags&~(2|4|128|8192))throw new Win32Error('Unsupported ExtTextOut options (glyph-index input requires a font-specific adapter)',50);
+    if(flags&6&&!rectangle)throw new Win32Error('ExtTextOut rectangle required');
+    const c=setup(s),e=extent(s,text,c),align=s.textAlign||0;
+    if(align&1){x=s.x;y=s.y;}x=Number(x);y=Number(y);if(!Number.isFinite(x)||!Number.isFinite(y))throw new Win32Error('Invalid text origin');
+    let advanceX=e.width,advanceY=0;
+    if(advances){advanceX=advances.reduce((n,p)=>n+p[0],0);advanceY=advances.reduce((n,p)=>n+p[1],0);}
+    const offset=(align&6)===6?-advanceX/2:(align&2)?-advanceX:0;
+    const baseline=(align&24)===24?0:(align&8)?-c.descent:c.ascent;
+    const angle=-c.font.escapement*Math.PI/1800,rotation=[Math.cos(angle),Math.sin(angle),-Math.sin(angle),Math.cos(angle),x,y],matrix=multiply(mapping(s),rotation);
+    const logical=[offset-2,baseline-c.ascent-2,offset+Math.max(0,advanceX,e.width)+c.size+2,baseline+c.descent+Math.abs(advanceY)+2];
+    let bounds=mapBounds(matrix,logical);if(flags&2){const b=mapBounds(mapping(s),rectangle);bounds=[Math.min(bounds[0],b[0]),Math.min(bounds[1],b[1]),Math.max(bounds[2],b[2]),Math.max(bounds[3],b[3])];}
+    let clip=bitmaps.effective(s);if(flags&4)clip=regions.combine(clip,regions.transform(regions.rectangle(...rectangle),mapping(s)),1);
+    const advance=()=>{if(align&1){s.x=Math.round(x+advanceX*Math.cos(angle)-advanceY*Math.sin(angle));s.y=Math.round(y+advanceX*Math.sin(angle)+advanceY*Math.cos(angle));}};
+    const region=regions.combine(regions.rectangle(...bounds),clip,1);if(!region.count){advance();return 1;}
+    bounds=region.bounds;const width=bounds[2]-bounds[0],height=bounds[3]-bounds[1],surface=canvas(width,height),ctx=surface.getContext('2d');
+    ctx.font=c.ctx.font;ctx.textBaseline='alphabetic';ctx.direction=flags&128||align&256?'rtl':'ltr';ctx.textAlign='left';
+    if(flags&2){const a=mapping(s);ctx.setTransform(a[0],a[1],a[2],a[3],a[4]-bounds[0],a[5]-bounds[1]);ctx.fillStyle=cssColor(s.backgroundColor);ctx.fillRect(rectangle[0],rectangle[1],rectangle[2]-rectangle[0],rectangle[3]-rectangle[1]);}
+    ctx.setTransform(matrix[0],matrix[1],matrix[2],matrix[3],matrix[4]-bounds[0],matrix[5]-bounds[1]);
+    if(s.backgroundMode===2&&text.length){ctx.fillStyle=cssColor(s.backgroundColor);ctx.fillRect(offset,baseline-c.ascent,advanceX,c.height);}
+    ctx.fillStyle=cssColor(s.textColor);ctx.save();ctx.scale(c.xscale,1);
+    if(!advances&&!s.charExtra)ctx.fillText(text,offset/c.xscale,baseline);
+    else{let px=offset,py=baseline,index=0;for(const character of text){ctx.fillText(character,px/c.xscale,py);if(advances){for(let k=0;k<character.length;k++){px+=advances[index+k][0];py+=advances[index+k][1];}}else px+=c.ctx.measureText(character).width*c.xscale+(s.charExtra||0);index+=character.length;}}
+    ctx.restore();if(c.font.underline)ctx.fillRect(offset,baseline+1,advanceX,Math.max(1,c.size/16));if(c.font.strikeOut)ctx.fillRect(offset,baseline-c.ascent*.35,advanceX,Math.max(1,c.size/16));
+    const pixels=ctx.getImageData(0,0,width,height),target=bitmaps.read(s,bounds);
+    for(const band of region.bands)for(let py=band.top;py<band.bottom;py++)for(let j=0;j<band.spans.length;j+=2)for(let px=band.spans[j];px<band.spans[j+1];px++){
+      const i=((py-bounds[1])*width+px-bounds[0])*4,a=pixels.data[i+3]/255;if(!a)continue;for(let k=0;k<3;k++)target.data[i+k]=Math.round(pixels.data[i+k]*a+target.data[i+k]*(1-a));target.data[i+3]=0;
+    }
+    bitmaps.write(s,bounds,target);advance();return 1;
+  };
+  for(const [name,key]of [['TextAlign','textAlign'],['TextCharacterExtra','charExtra']]){
+    add('Get'+name,1,id=>dc(id)[key]||0,{failure:key==='charExtra'?0x80000000:0xffffffff});
+    add('Set'+name,2,(id,value)=>{value=integer(value,-0x7fffffff,0x7fffffff);if(key==='textAlign'&&(value&~(1|6|24|256)||![0,2,6].includes(value&6)||![0,8,24].includes(value&24)))throw new Win32Error('Invalid text alignment');const s=dc(id),old=s[key]||0;s[key]=value;return old;},{failure:key==='charExtra'?0x80000000:0xffffffff});
+  }
+  const rect=p=>{const v=m.view(p,16);return [0,4,8,12].map(o=>v.getInt32(o,true));};
+  const pair=(p,x,y)=>{const v=m.view(p,8);v.setInt32(0,Math.round(x),true);v.setInt32(4,Math.round(y),true);};
+  for(const wide of [false,true]){
+    const suffix=wide?'W':'A';
+    add('TextOut'+suffix,5,(id,x,y,p,n)=>draw(dc(id),x,y,read(p,n,wide)),{replace:true,mode:'browser',notes:'Canvas font shaping/rasterization on window and memory DCs, with complex clipping and affine transforms.'});
+    add('ExtTextOut'+suffix,8,(id,x,y,flags,r,p,n,dx)=>{const text=read(p,n,wide),advance=[];if(dx){const stride=flags&8192?8:4,v=m.view(dx,text.length*stride);for(let i=0;i<text.length;i++)advance.push([v.getInt32(i*stride,true),stride===8?v.getInt32(i*stride+4,true):0]);}return draw(dc(id),x,y,text,flags,r?rect(r):null,dx?advance:null);},{mode:'browser'});
+    for(const name of ['GetTextExtentPoint32','GetTextExtentPoint'])add(name+suffix,4,(id,p,n,out)=>{const e=extent(dc(id),read(p,n,wide));pair(out,e.width,e.height);return 1;},{mode:'browser'});
+    add('GetTextFace'+suffix,3,(id,n,out)=>{const f=get(dc(id));if(!out)return f.faceName.length+1;n=integer(n,0,Math.floor(m.maxBytes/(wide?2:1)));return n?m.putString(out,f.faceName,n,wide)+1:0;});
+    add('GetTextMetrics'+suffix,2,(id,out)=>{const c=setup(dc(id)),size=wide?60:56,v=m.view(out,size),values=[c.height,c.ascent,c.descent,Math.max(0,c.height-c.size),0,c.ctx.measureText('x').width*c.xscale,c.ctx.measureText('W').width*c.xscale,c.font.weight,0,96,96];m.bytes(out,size).fill(0);values.forEach((n,i)=>v.setInt32(i*4,Math.round(n),true));let o=44;for(const ch of [32,wide?65535:255,63,32]){if(wide){v.setUint16(o,ch,true);o+=2;}else v.setUint8(o++,ch);}for(const value of [c.font.italic,c.font.underline,c.font.strikeOut,6,c.font.charSet])v.setUint8(o++,value);return 1;},{mode:'browser',notes:'Metrics come from the selected Canvas font; native GDI hinting/font mapper values are not guaranteed identical.'});
+    add('GetTextExtentExPoint'+suffix,7,(id,p,n,maxExtent,fit,dx,out)=>{const s=dc(id),text=read(p,n,wide);if(text.length>4096)throw new Win32Error('Cumulative text extent work quota exceeded',8);const c=setup(s),widths=Array.from({length:text.length},(_,i)=>Math.round(extent(s,text.slice(0,i+1),c).width)),fv=fit?m.view(fit,4):null,dv=dx?m.view(dx,widths.length*4):null,ov=m.view(out,8);let count=0;for(const value of widths){if(value<=Number(maxExtent))count++;else break;}if(fv)fv.setInt32(0,count,true);widths.forEach((n,i)=>dv?.setInt32(i*4,n,true));ov.setInt32(0,widths.at(-1)||0,true);ov.setInt32(4,text.length?Math.round(c.height):0,true);return 1;},{mode:'browser'});
+    w.register('user32','DrawText'+suffix,(id,p,n,r,flags)=>{
+      const s=dc(id),rectangle=rect(r),c=setup(s);flags=unsigned(flags);if(flags&~(1|2|4|8|16|32|64|1024|2048))throw new Win32Error('DrawText option is not supported',50);
+      let text=Number(n)===-1?m.string(p,wide):read(p,n,wide);if(text.length>limit)throw new Win32Error('Text length quota exceeded',8);
+      if(!(flags&2048))text=text.replace(/&&/g,'\u0001').replace(/&/g,'').replace(/\u0001/g,'&');if(flags&64)text=text.replace(/\t/g,'        ');if(flags&32)text=text.replace(/[\r\n]+/g,' ');
+      const lines=[];for(const paragraph of text.split(/\r?\n/)){if(!(flags&16)||flags&32){lines.push(paragraph);continue;}let line='';for(const word of paragraph.split(/(\s+)/)){const next=line+word;if(line&&extent(s,next,c).width>rectangle[2]-rectangle[0]){lines.push(line.trimEnd());line=word.trimStart();}else line=next;}lines.push(line);}
+      const lineHeight=Math.round(c.height),height=lines.length*lineHeight,width=Math.ceil(Math.max(0,...lines.map(t=>extent(s,t,c).width)));
+      if(!text.length&&(flags&1024)&&!(flags&32)){const v=m.view(r,16);v.setInt32(8,rectangle[0],true);v.setInt32(12,rectangle[1],true);return 1;}
+      if(flags&1024){const v=m.view(r,16);v.setInt32(8,rectangle[0]+width,true);v.setInt32(12,rectangle[1]+height,true);return height;}
+      let y=rectangle[1];if(flags&32&&flags&4)y+=Math.floor((rectangle[3]-rectangle[1]-height)/2);else if(flags&32&&flags&8)y=rectangle[3]-height;
+      const old=s.textAlign;try{s.textAlign=0;for(const line of lines){const width=extent(s,line,c).width,x=flags&1?(rectangle[0]+rectangle[2]-width)/2:flags&2?rectangle[2]-width:rectangle[0];draw(s,x,y,line,4,rectangle);y+=lineHeight;}}finally{s.textAlign=old;}return Math.round(y-rectangle[1]);
+    },{arity:5,mode:'browser'});
+  }
+}
+
+return {TEXT_CONSTANTS,installText};
+})();
+
+/* ..\..\packages\win32-browser\src\user32-paint.js */
+__modules[5]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[1];
+
+const PAINT_CONSTANTS=Object.freeze({WM_PAINT:15,WM_ERASEBKGND:20,RDW_INVALIDATE:1,RDW_INTERNALPAINT:2,RDW_ERASE:4,RDW_VALIDATE:8,RDW_NOINTERNALPAINT:16,RDW_NOERASE:32,RDW_NOCHILDREN:64,RDW_ALLCHILDREN:128,RDW_UPDATENOW:256,RDW_ERASENOW:512,RDW_FRAME:1024,RDW_NOFRAME:2048,DCX_WINDOW:1,DCX_CACHE:2,DCX_INTERSECTRGN:128,DCX_EXCLUDERGN:64});
+/** Window-owned HRGNs and independent pending/active update regions. All state is
+ * process-local and is destroyed with its registered application window. */
+function installPainting(w,{dc,bitmaps,regions}){
+  const h=w.handles,m=w.memory,tasks=new Map(),add=(name,arity,fn,options={})=>w.register('user32',name,fn,{arity,mode:'browser',...options});
+  const win=id=>{if(!h.has(id,'window'))throw new Win32Error('Invalid window handle',1400);return h.get(id,'window');};
+  const empty=()=>regions.rectangle(0,0,0,0);
+  const full=e=>{const r=e.getClientRect?.(),node=e.context?.canvas||e.node;return regions.rectangle(0,0,Math.round(r?.width??node?.clientWidth??node?.width??0),Math.round(r?.height??node?.clientHeight??node?.height??0));};
+  const state=e=>e.gdiPaint||(e.gdiPaint={update:empty(),erase:false,active:null,internal:false,nonclient:false,notifying:false});
+  const region=id=>{const r=h.get(id,'region');if(r.windowOwner)throw new Win32Error('Region ownership belongs to a window',5);return r;};
+  const rect=p=>{const v=m.view(p,16);return [0,4,8,12].map(o=>v.getInt32(o,true));};
+  const writeRect=(p,r)=>{const v=m.view(p,16);r.forEach((n,i)=>v.setInt32(i*4,n,true));};
+  const request=id=>{
+    if(tasks.has(id)||w.disposed)return;const e=win(id);if(!e.requestPaint&&!e.message&&!e.requestNonClientPaint)return;
+    tasks.set(id,setTimeout(()=>{
+      tasks.delete(id);
+      if(!w.disposed&&h.has(id,'window'))notify(id).catch(error=>w.options.onError?.(error));
+    },0));
+  };
+  const eraseBackground=(e,handle)=>{
+    if(e.eraseBackground)return e.eraseBackground(handle)!==false;
+    if(e.getBackgroundColor&&handle){
+      const d=dc(handle),r=bitmaps.effective(d),color=unsigned(e.getBackgroundColor())&0xffffff;
+      if(r.count){const image=bitmaps.read(d,r.bounds);for(const band of r.bands)for(let y=band.top;y<band.bottom;y++)for(let j=0;j<band.spans.length;j+=2)for(let x=band.spans[j];x<band.spans[j+1];x++){
+        const i=((y-r.bounds[1])*image.width+x-r.bounds[0])*4;image.data.set([color&255,color>>>8&255,color>>>16&255,0],i);
+      }bitmaps.write(d,r.bounds,image);}return true;
+    }
+    return false;
+  };
+  const notify=async(id,force=false,eraseOnly=false)=>{
+    const e=win(id),s=state(e);if(s.notifying)return 1;
+    if(!(force||s.update.count||s.internal||s.nonclient))return 1;
+    if(tasks.has(id)){clearTimeout(tasks.get(id));tasks.delete(id);}
+    s.notifying=true;
+    try{
+      if(s.nonclient){if(e.requestNonClientPaint)await e.requestNonClientPaint();else if(e.message)await e.message(133,1,0,false);else throw new Win32Error('No nonclient repaint adapter',50);s.nonclient=false;}
+      if(eraseOnly){if(s.erase){const handle=getDC(id);try{dc(handle).paintClip=s.update;s.erase=false;try{if(!eraseBackground(e,handle))s.erase=true;}catch(error){s.erase=true;throw error;}}finally{release(id,handle);}}return 1;}
+      if(force||s.update.count||s.internal){s.internal=false;if(e.requestPaint)await e.requestPaint();else if(e.message)await e.message(15,0,0,false);else throw new Win32Error('No WM_PAINT adapter for this window',50);}
+      return 1;
+    }finally{s.notifying=false;}
+  };
+  const change=(id,shape,invalidate,erase)=>{const e=win(id),s=state(e),clip=regions.combine(shape||full(e),full(e),1),next=regions.combine(s.update,clip,invalidate?2:4);s.update=next;if(invalidate)s.erase=s.erase||!!erase;else if(!next.count)s.erase=false;if(invalidate)request(id);return 1;};
+  add('InvalidateRect',3,(id,p,erase)=>change(id,p?regions.rectangle(...rect(p)):null,true,erase));
+  add('ValidateRect',2,(id,p)=>change(id,p?regions.rectangle(...rect(p)):null,false,false));
+  add('InvalidateRgn',3,(id,r,erase)=>change(id,r?region(r).shape:null,true,erase));
+  add('ValidateRgn',2,(id,r)=>change(id,r?region(r).shape:null,false,false));
+  const erasePending=e=>{const s=state(e);if(!s.erase)return;const id=e.gdiWindowHandle;if(!id)return;const handle=getDC(id);try{dc(handle).paintClip=s.update;s.erase=false;try{if(!eraseBackground(e,handle))s.erase=true;}catch(error){s.erase=true;throw error;}}finally{release(id,handle);}};
+  add('GetUpdateRect',3,(id,p,erase)=>{const e=win(id),s=state(e);if(p)writeRect(p,s.update.bounds);if(erase&&s.erase){e.gdiWindowHandle=Number(id);erasePending(e);}return s.update.count?1:0;});
+  add('GetUpdateRgn',3,(id,r,erase)=>{const e=win(id),s=state(e),dest=region(r);if(erase&&s.erase){e.gdiWindowHandle=Number(id);erasePending(e);}dest.shape=s.update;return dest.shape.type;});
+  add('SetWindowRgn',3,(id,r,redraw)=>{
+    const e=win(id),s=state(e),object=r?region(r):null,shape=object?.shape??null;
+    const wr=e.getRect?.(),origin=e.clientOrigin?.(),dx=origin&&wr?Math.round(origin[0]-wr.left):0,dy=origin&&wr?Math.round(origin[1]-wr.top):0;
+    const clientShape=shape?regions.offset(shape,-dx,-dy):null;
+    if(e.setRegion)e.setRegion(shape?regions.rectangles(shape):null);
+    else if(e.node?.style){const path=shape?regions.rectangles(shape).map(([l,t,right,b])=>`M${l} ${t}H${right}V${b}H${l}Z`).join(' '):null;e.node.style.clipPath=path===null?'':path?`path('${path}')`:'inset(100%)';}
+    else if(!e.allowVirtualRegion)throw new Win32Error('Window shape requires a DOM or explicit region adapter',50);
+    const old=s.shapeHandle;if(object)object.windowOwner=Number(id);s.shapeHandle=Number(r)||0;e.gdiWindowShape=shape;e.gdiClientShape=clientShape;
+    if(old&&old!==Number(r)&&h.has(old,'region'))h.close(old,'region');if(redraw)change(id,null,true,true);return 1;
+  });
+  add('GetWindowRgn',2,(id,r)=>{const e=win(id),dest=region(r);if(!e.gdiWindowShape)return 0;dest.shape=e.gdiWindowShape;return dest.shape.type;});
+  add('GetWindowRgnBox',2,(id,p)=>{const shape=win(id).gdiWindowShape;writeRect(p,shape?.bounds||[0,0,0,0]);return shape?.type||0;});
+  const getDC=w.resolve('user32','GetDC').fn,release=w.resolve('user32','ReleaseDC').fn;
+  add('BeginPaint',2,(id,p)=>{
+    const e=win(id),s=state(e),v=m.view(p,64);if(s.active)throw new Win32Error('BeginPaint already active for this window');
+    const handle=getDC(id),d=dc(handle),snapshot=s.update,erase=s.erase;
+    s.active={handle,region:snapshot};s.update=empty();s.erase=false;s.internal=false;
+    try{d.paintClip=snapshot;d.paintOwner=Number(id);const erased=erase&&eraseBackground(e,handle);m.bytes(p,64).fill(0);v.setUint32(0,handle,true);v.setInt32(4,erase&&!erased?1:0,true);writeRect(p+8,snapshot.bounds);}
+    catch(error){s.update=regions.combine(s.update,snapshot,2);s.erase=s.erase||erase;s.active=null;release(id,handle);throw error;}
+    return handle;
+  });
+  add('EndPaint',2,(id,p)=>{const e=win(id),s=state(e),handle=m.readU32(p);m.view(p,64);if(!s.active||handle!==s.active.handle)throw new Win32Error('PAINTSTRUCT does not match the active paint');release(id,handle);s.active=null;if(s.update.count||s.internal)request(id);return 1;});
+  add('ReleaseDC',2,(id,handle)=>{if(dc(handle).paintOwner)throw new Win32Error('Use EndPaint for a paint DC');return release(id,handle);},{replace:true});
+  add('UpdateWindow',1,id=>notify(id));
+  add('RedrawWindow',4,async(id,p,r,flags)=>{
+    flags=unsigned(flags);
+    if(flags&~4095||(flags&1)&&(flags&8)||(flags&64)&&(flags&128))throw new Win32Error('Invalid redraw flags');
+    const e=win(id),shape=r?region(r).shape:p?regions.rectangle(...rect(p)):full(e),targets=[[Number(id),shape]],visited=new Set([Number(id)]);
+    // All affected geometry is validated before any pending region is changed.
+    for(let i=0;i<targets.length;i++){
+      const [parent,parentShape]=targets[i],pe=win(parent);
+      if(flags&64||(!(flags&128)&&((Number(typeof pe.style==='function'?pe.style():pe.style||0)&0x2000000)!==0)))continue;
+      for(const [child,item]of h.entries)if(item.type==='window'&&Number(typeof item.value.parent==='function'?item.value.parent():item.value.parent)===parent&&!visited.has(child)){
+        visited.add(child);const origin=pe.clientOrigin?.()||[0,0],co=item.value.clientOrigin?.()||[0,0];
+        targets.push([child,regions.combine(regions.offset(parentShape,Math.round(origin[0]-co[0]),Math.round(origin[1]-co[1])),full(item.value),1)]);
+      }
+    }
+    const plans=targets.map(([handle,shape])=>{const e=win(handle),s=state(e);if(flags&1024&&flags&1&&!e.requestNonClientPaint&&!e.message)throw new Win32Error('Nonclient repaint requires an adapter',50);return {handle,e,s,next:flags&9?regions.combine(s.update,regions.combine(shape,full(e),1),flags&1?2:4):s.update};});
+    for(const {handle,e,s,next}of plans){s.update=next;if(flags&1&&flags&4)s.erase=true;if(flags&8&&!next.count)s.erase=false;if(flags&2)s.internal=true;if(flags&16)s.internal=false;if(flags&32)s.erase=false;if(flags&1024&&flags&1)s.nonclient=true;if(flags&2048&&flags&8)s.nonclient=false;}
+    for(const {handle,s}of plans){if(flags&256)await notify(handle);else if(flags&512)await notify(handle,false,true);if(s.update.count||s.internal||s.nonclient)request(handle);}
+    return 1;
+  });
+  add('GetDCEx',3,(id,r,flags)=>{flags=unsigned(flags);if(flags&~(2|64|128)||flags&64&&flags&128)throw new Win32Error('Unsupported DCX flags',50);const e=win(id),shape=flags&192?region(r).shape:null,clip=flags&64?regions.combine(full(e),shape,4):shape,handle=getDC(id);if(clip)dc(handle).clip=clip;if(r&&flags&192)h.close(r,'region');return handle;});
+  for(const wide of [false,true]){
+    const name='SendMessage'+(wide?'W':'A'),old=w.resolve('user32',name);add(name,4,(id,msg,wp,lp)=>Number(msg)===15?notify(id,true):old.fn(id,msg,wp,lp),{replace:true});
+  }
+  w.releaseWindowGDI=id=>{const e=win(id),s=e.gdiPaint;if(tasks.has(id)){clearTimeout(tasks.get(id));tasks.delete(id);}if(s?.shapeHandle&&h.has(s.shapeHandle,'region'))h.close(s.shapeHandle,'region');e.gdiPaint=null;e.gdiWindowShape=e.gdiClientShape=null;if(e.node?.style)e.node.style.clipPath='';};
+  w.disposeWindowGDI=()=>{for(const id of [...tasks.keys()]){clearTimeout(tasks.get(id));tasks.delete(id);}for(const [id,e]of h.entries)if(e.type==='window')w.releaseWindowGDI(id);};
+}
+
+return {PAINT_CONSTANTS,installPainting};
+})();
+
+/* ..\..\packages\win32-browser\src\gdi-geometry.js */
+__modules[6]=(()=>{
+const {Win32Error,integer}=__modules[1];
+
+const point=n=>integer(n,-0x4000000,0x3ffffff);
+const quota=()=>{throw new Win32Error('Region scan conversion work quota exceeded',8);};
+/** Exact ceil of an integer edge intersection. Large coordinates use BigInt to
+ * avoid loss of a pixel when intermediate products exceed Number precision. */
+function edgeX(a,b,y){
+  const dy=b[1]-a[1],dx=b[0]-a[0],n=a[0]*dy+(y-a[1])*dx;
+  if(Number.isSafeInteger(a[0]*dy)&&Number.isSafeInteger((y-a[1])*dx)&&Number.isSafeInteger(n))return Math.ceil(n/dy);
+  const d=BigInt(dy),v=BigInt(a[0])*d+BigInt(y-a[1])*BigInt(dx);
+  return Number(v/d+(v>0n&&v%d!==0n?1n:0n));
+}
+/** Integer scan conversion with ALTERNATE or WINDING fill. Edges are sampled at
+ * integer device rows and intervals are half-open. No bitmap-area allocation. */
+function polygonRegion(store,polygons,mode=1){
+  mode=integer(mode,1,2);let count=0,top=Infinity,bottom=-Infinity;const edges=[];
+  if(!Array.isArray(polygons))throw new Win32Error('Polygon array required');
+  for(const polygon of polygons){
+    if(!Array.isArray(polygon)||polygon.length<2)throw new Win32Error('A polygon requires at least two points');
+    count+=polygon.length;if(count>store.limit*4||count>store.workLimit)quota();
+    const points=polygon.map(p=>{if(!Array.isArray(p)||p.length!==2)throw new Win32Error('Invalid POINT');return p.map(point);});
+    for(let i=0;i<points.length;i++){
+      let a=points[i],b=points[(i+1)%points.length];if(a[1]===b[1])continue;
+      const sign=a[1]<b[1]?1:-1;if(sign<0)[a,b]=[b,a];
+      edges.push({a,b,sign});top=Math.min(top,a[1]);bottom=Math.max(bottom,b[1]);
+    }
+  }
+  if(!edges.length)return store.rectangle(0,0,0,0);
+  if((bottom-top)*edges.length>store.workLimit)quota();
+  const bands=[],budget={count:0};
+  for(let y=top;y<bottom;y++){
+    const hits=[];for(const e of edges)if(e.a[1]<=y&&e.b[1]>y)hits.push([edgeX(e.a,e.b,y),e.sign]);
+    hits.sort((a,b)=>a[0]-b[0]);let winding=0,active=false;const spans=[];
+    for(let i=0;i<hits.length;){const x=hits[i][0];do{winding+=mode===1?1:hits[i][1];i++;}while(i<hits.length&&hits[i][0]===x);
+      const next=mode===1?(winding&1)!==0:winding!==0;if(active!==next){spans.push(x);active=next;}}
+    store.append(bands,y,y+1,spans,budget);
+  }
+  return store.finish(bands);
+}
+/** Bounded analytic ellipse/rounded-rectangle scan conversion. Pixel edges are
+ * deterministic across engines; curved-edge GDI rasterizer parity is measured
+ * separately from Boolean geometry and is not assumed from API availability. */
+function roundedRegion(store,left,top,right,bottom,ew,eh){
+  [left,top,right,bottom]=[left,top,right,bottom].map(point);
+  if(left>right)[left,right]=[right,left];if(top>bottom)[top,bottom]=[bottom,top];
+  // GDI curved region constructors exclude the last right/bottom raster edge.
+  right--;bottom--;if(right<left)[left,right]=[right,left];if(bottom<top)[top,bottom]=[bottom,top];
+  ew=Math.min(right-left,Math.abs(integer(ew,-0x7fffffff,0x7fffffff)));
+  eh=Math.min(bottom-top,Math.abs(integer(eh,-0x7fffffff,0x7fffffff)));
+  if(!ew||!eh)return store.rectangle(left,top,right,bottom);
+  if(bottom-top>store.workLimit)quota();
+  const rx=ew/2,ry=eh/2,bands=[],budget={count:0};
+  for(let y=top;y<bottom;y++){
+    const cy=y<top+ry?top+ry:bottom-ry;
+    const yy=y+.5,dy=yy<top+ry||yy>bottom-ry?(yy-cy)/ry:0;
+    const inset=rx-rx*Math.sqrt(Math.max(0,1-dy*dy));
+    const l=Math.ceil(left+inset-.5),r=Math.ceil(right-inset-.5);
+    store.append(bands,y,y+1,l<r?[l,r]:[],budget);
+  }
+  return store.finish(bands);
+}
+function transformRegion(store,region,matrix){
+  if(!Array.isArray(matrix)||matrix.length!==6||matrix.some(n=>!Number.isFinite(n)))throw new Win32Error('Invalid region transform');
+  const [a,b,c,d,tx,ty]=matrix;
+  if(a===1&&!b&&!c&&d===1&&Number.isInteger(tx)&&Number.isInteger(ty))return store.offset(region,tx,ty);
+  if(!region.count)return region;
+  // Transform all bands as one winding polygon set. Shared edges cancel and
+  // self-overlap is handled once, rather than repeatedly unioning scan rows.
+  return polygonRegion(store,store.rectangles(region).map(([l,t,r,bt])=>[[l,t],[r,t],[r,bt],[l,bt]].map(([x,y])=>[point(Math.round(a*x+c*y+tx)),point(Math.round(b*x+d*y+ty))])),2);
+}
+/** Rectangular morphological erosion: subtract the complement dilated by the
+ * requested horizontal/vertical border widths. The result works on holes and
+ * disconnected components, not just the outer bounding rectangle. */
+function frameRegion(store,region,x,y){
+  x=Math.abs(integer(x,-0x7fffffff,0x7fffffff));y=Math.abs(integer(y,-0x7fffffff,0x7fffffff));
+  if(!x||!y||!region.count)return store.rectangle(0,0,0,0);
+  const [l,t,r,b]=region.bounds;
+  if(x*2>=r-l||y*2>=b-t)return region;
+  const innerBox=store.rectangle(l+x,t+y,r-x,b-y);
+  const holes=store.combine(store.rectangle(l,t,r,b),region,4);
+  let inner=innerBox,work=0;
+  for(const q of store.rectangles(holes)){
+    work+=inner.count+holes.count;if(work>store.workLimit)quota();
+    const dilated=store.rectangle(Math.max(l,q[0]-x),Math.max(t,q[1]-y),Math.min(r,q[2]+x),Math.min(b,q[3]+y));
+    inner=store.combine(inner,dilated,4);
+  }
+  return store.combine(region,inner,4);
+}
+
+return {polygonRegion,roundedRegion,transformRegion,frameRegion};
+})();
+
 /* ..\..\packages\win32-browser\src\gdi-region.js */
-__modules[1]=(()=>{
-const {Win32Error,integer}=__modules[0];
+__modules[7]=(()=>{
+const {polygonRegion,roundedRegion,transformRegion,frameRegion}=__modules[6];
+const {mapping,devicePoint,mapBounds,inverse,readTransform}=__modules[2];
+const {Win32Error,integer}=__modules[1];
+
+
 
 const REGION_CONSTANTS=Object.freeze({RGN_AND:1,RGN_OR:2,RGN_XOR:3,RGN_DIFF:4,RGN_COPY:5,ERROR:0,NULLREGION:1,SIMPLEREGION:2,COMPLEXREGION:3,OBJ_REGION:8,RDH_RECTANGLES:1});
 const MIN=-0x4000000,MAX=0x3ffffff;
@@ -87,6 +589,10 @@ class RegionStore {
     this.limit=integer(options.maxRegionRectangles??4096,1,65536);
     this.workLimit=integer(options.maxRegionWork??1048576,16,16777216);
   }
+  polygons(polygons,mode=1){return polygonRegion(this,polygons,mode);}
+  rounded(...args){return roundedRegion(this,...args);}
+  transform(region,matrix){return transformRegion(this,region,matrix);}
+  frame(region,x,y){return frameRegion(this,region,x,y);}
   rectangle(left,top,right,bottom){
     [left,top,right,bottom]=[left,top,right,bottom].map(coordinate);
     if(left>right)[left,right]=[right,left];if(top>bottom)[top,bottom]=[bottom,top];
@@ -174,13 +680,13 @@ class RegionStore {
 
 /** Register region, application clip and region-painting APIs on the shared DCs. */
 function installRegions(w,{dc,bitmaps,regions,add}){
-  const h=w.handles,m=w.memory,get=id=>h.get(id,'region'),set=(id,shape)=>{get(id).shape=shape;return shape.type;};
+  const h=w.handles,m=w.memory,get=id=>{const r=h.get(id,'region');if(r.windowOwner)throw new Win32Error('Region ownership belongs to a window',5);return r;},set=(id,shape)=>{get(id).shape=shape;return shape.type;};
   const rect=p=>{const v=m.view(p,16);return [0,4,8,12].map(o=>v.getInt32(o,true));};
   const writeRect=(p,r)=>{const v=m.view(p,16);r.forEach((n,i)=>v.setInt32(i*4,n,true));};
   const create=shape=>h.add('region',{shape});
   const deviceRegion=s=>regions.rectangle(...bitmaps.bounds(s));
-  const effective=s=>s.clip?regions.combine(s.clip,deviceRegion(s),1):deviceRegion(s);
-  const logicalRect=(s,r)=>regions.offset(regions.rectangle(...r),s.viewportX,s.viewportY);
+  const effective=s=>bitmaps.effective(s);
+  const logicalRect=(s,r)=>regions.transform(regions.rectangle(...r),mapping(s));
   const select=(s,object,mode)=>{
     mode=integer(mode,1,5);
     if(!object){if(mode!==5)throw new Win32Error('NULL clip requires RGN_COPY');s.clip=null;return effective(s).type;}
@@ -207,11 +713,10 @@ function installRegions(w,{dc,bitmaps,regions,add}){
   add('ExtCreateRegion',3,(transform,count,p)=>{
     count=integer(count,32,m.maxBytes);const v=m.view(p,count),n=v.getUint32(8,true),bytes=v.getUint32(12,true);
     if(v.getUint32(0,true)!==32||v.getUint32(4,true)!==1||n>regions.limit||bytes<n*16||bytes>count-32||32+n*16>count)throw new Win32Error('Invalid or excessive RGNDATA');
-    let dx=0,dy=0;
-    if(transform){const x=m.view(transform,24),a=[0,4,8,12,16,20].map(o=>x.getFloat32(o,true));if(a[0]!==1||a[1]!==0||a[2]!==0||a[3]!==1||!Number.isInteger(a[4])||!Number.isInteger(a[5]))throw new Win32Error('Region XFORM supports identity and integral translation only',50);[dx,dy]=a.slice(4);}
+    const matrix=transform?readTransform(m,transform):null;
     let shape=regions.fromRectangles(Array.from({length:n},(_,i)=>rect(p+32+i*16)));
     const bounds=rect(p+16);if(!bounds.every((x,i)=>x===shape.bounds[i]))throw new Win32Error('RGNDATA bounding rectangle is inconsistent');
-    shape=regions.offset(shape,dx,dy);return create(shape);
+    if(matrix)shape=regions.transform(shape,matrix);return create(shape);
   });
   add('SelectClipRgn',2,(handle,object)=>select(dc(handle),object,5));
   add('ExtSelectClipRgn',3,(handle,object,mode)=>select(dc(handle),object,mode));
@@ -226,12 +731,12 @@ function installRegions(w,{dc,bitmaps,regions,add}){
     // GetClipBox reports the precise effective visible complexity separately.
     s.clip=next;return mode===4&&!next.count?1:3;
   });
-  add('OffsetClipRgn',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!s.clip)return effective(s).type;const next=regions.offset(s.clip,x,y);s.clip=next;return next.type;});
-  add('GetClipBox',2,(handle,out)=>{const s=dc(handle),shape=effective(s);writeRect(out,shape.count?shape.bounds.map((n,i)=>n-(i%2?s.viewportY:s.viewportX)):[0,0,0,0]);return shape.type;});
-  add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff)+s.viewportX;y=integer(y,-0x80000000,0x7fffffff)+s.viewportY;return regions.contains(effective(s),x,y)?1:0;});
-  add('RectVisible',2,(handle,p)=>{const s=dc(handle),r=rect(p);return regions.intersects(effective(s),[r[0]+s.viewportX,r[1]+s.viewportY,r[2]+s.viewportX,r[3]+s.viewportY])?1:0;});
+  add('OffsetClipRgn',3,(handle,x,y)=>{const s=dc(handle);x=integer(x,-0x80000000,0x7fffffff);y=integer(y,-0x80000000,0x7fffffff);if(!s.clip)return effective(s).type;const matrix=mapping(s),next=regions.offset(s.clip,Math.round(matrix[0]*x+matrix[2]*y),Math.round(matrix[1]*x+matrix[3]*y));s.clip=next;return next.type;});
+  add('GetClipBox',2,(handle,out)=>{const s=dc(handle),shape=effective(s);writeRect(out,shape.count?mapBounds(inverse(mapping(s)),shape.bounds):[0,0,0,0]);return shape.type;});
+  add('PtVisible',3,(handle,x,y)=>{const s=dc(handle);[x,y]=devicePoint(s,integer(x,-0x80000000,0x7fffffff),integer(y,-0x80000000,0x7fffffff));return regions.contains(effective(s),x,y)?1:0;});
+  add('RectVisible',2,(handle,p)=>{const s=dc(handle),r=rect(p);return regions.combine(effective(s),logicalRect(s,r),1).count?1:0;});
   const paint=(handle,object,brush,invert=false)=>{
-    const s=dc(handle),shape=logicalRectShape(s,get(object).shape),b=invert?null:h.get(brush,'brush');if(b?.null)return 1;
+    const s=dc(handle),shape=logicalRectShape(s,typeof object==='object'?object:get(object).shape),b=invert?null:h.get(brush,'brush');if(b?.null)return 1;
     const clipped=regions.combine(shape,effective(s),1);if(!clipped.count)return 1;
     const r=clipped.bounds,image=bitmaps.read(s,r),color=b?.color||0;
     for(const band of clipped.bands)for(let y=band.top;y<band.bottom;y++)for(let j=0;j<band.spans.length;j+=2)for(let x=band.spans[j];x<band.spans[j+1];x++){
@@ -241,19 +746,30 @@ function installRegions(w,{dc,bitmaps,regions,add}){
     }
     bitmaps.write(s,r,image);return 1;
   };
-  const logicalRectShape=(s,shape)=>regions.offset(shape,s.viewportX,s.viewportY);
+  const logicalRectShape=(s,shape)=>regions.transform(shape,mapping(s));
   add('FillRgn',3,(handle,object,brush)=>paint(handle,object,brush));
   add('PaintRgn',2,(handle,object)=>paint(handle,object,dc(handle).brush));
   add('InvertRgn',2,(handle,object)=>paint(handle,object,0,true));
-  return {select};
+  add('FrameRgn',5,(handle,object,brush,x,y)=>paint(handle,regions.frame(get(object).shape,x,y),brush));
+  add('CreateEllipticRgn',4,(l,t,r,b)=>create(regions.rounded(l,t,r,b,Math.abs(r-l),Math.abs(b-t))));
+  add('CreateEllipticRgnIndirect',1,p=>{const [l,t,r,b]=rect(p);return create(regions.rounded(l,t,r,b,Math.abs(r-l),Math.abs(b-t)));});
+  add('CreateRoundRectRgn',6,(...args)=>create(regions.rounded(...args)));
+  const points=(p,n)=>{n=integer(n,2,regions.limit*4);const v=m.view(p,n*8);return Array.from({length:n},(_,i)=>[v.getInt32(i*8,true),v.getInt32(i*8+4,true)]);};
+  add('CreatePolygonRgn',3,(p,n,mode)=>create(regions.polygons([points(p,n)],mode)));
+  add('CreatePolyPolygonRgn',4,(p,counts,n,mode)=>{n=integer(n,1,regions.limit);const v=m.view(counts,n*4),polys=[];let offset=0;for(let i=0;i<n;i++){const count=integer(v.getInt32(i*4,true),2,regions.limit*4);if(offset+count>regions.limit*4)throw new Win32Error('Polygon point quota exceeded',8);polys.push(points(p+offset*8,count));offset+=count;}return create(regions.polygons(polys,mode));});
+  add('GetPolyFillMode',1,id=>dc(id).polyFillMode||1);
+  add('SetPolyFillMode',2,(id,mode)=>{mode=integer(mode,1,2);const s=dc(id),old=s.polyFillMode||1;s.polyFillMode=mode;return old;});
+  return {select,paint};
 }
 
 return {REGION_CONSTANTS,RegionStore,installRegions};
 })();
 
 /* ..\..\packages\win32-browser\src\gdi-bitmap.js */
-__modules[2]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[0];
+__modules[8]=(()=>{
+const {mapping,inverse,mapPoint,mapBounds,devicePoint,translatedOnly}=__modules[2];
+const {Win32Error,integer,unsigned}=__modules[1];
+
 
 // All bitmap addresses are process-private. DIBs use Win32 BGR/BGRA scan lines,
 // not Canvas RGBA. DDB scan lines are WORD aligned; DIBs are DWORD aligned.
@@ -274,7 +790,7 @@ function ropInfo(value){value=unsigned(value);if(!rops.has(value))throw new Win3
 function applyROP(code,p,s,d){let out=0;for(let i=0;i<8;i++)if(code>>i&1)out|=(i&4?p:~p)&(i&2?s:~s)&(i&1?d:~d);return out&255;}
 
 class BitmapStore {
-  constructor(w,regions){this.regions=regions;this.w=w;this.m=w.memory;this.h=w.handles;this.maxPixels=integer(w.options.maxRasterPixels??Math.max(1,Math.min(4194304,Math.floor(w.memory.maxBytes/4))),1,16777216);}
+  constructor(w,regions){this.clipCache=new WeakMap();this.regions=regions;this.w=w;this.m=w.memory;this.h=w.handles;this.maxPixels=integer(w.options.maxRasterPixels??Math.max(1,Math.min(4194304,Math.floor(w.memory.maxBytes/4))),1,16777216);}
   geometry(width,height,bpp,dib=false){width=integer(width,1,32767);height=integer(height,1,32767);if(![1,24,32].includes(bpp)||dib&&bpp===1)throw new Win32Error('Only 1-bit DDB and 24/32-bit BI_RGB bitmaps are supported',50);const unit=dib?32:16,stride=Math.ceil(width*bpp/unit)*unit/8,size=stride*height;if(size>this.m.maxBytes)throw new Win32Error('Bitmap exceeds process memory quota',8);return {width,height,bpp,stride,size};}
   header(pointer,usage=0){if(unsigned(usage)!==0)throw new Win32Error('Logical palettes are not supported',50);const v=this.m.view(pointer,40);if(v.getUint32(0,true)!==40)throw new Win32Error('Only BITMAPINFOHEADER is supported',50);const width=v.getInt32(4,true),signedHeight=v.getInt32(8,true),bpp=v.getUint16(14,true);if(v.getUint16(12,true)!==1||!signedHeight)throw new Win32Error('Invalid bitmap planes or height');if(v.getUint32(16,true)!==0||v.getUint32(32,true)!==0)throw new Win32Error('Only uncompressed true-color BI_RGB without a color table is supported',50);return {...this.geometry(width,Math.abs(signedHeight),bpp,true),topDown:signedHeight<0,dib:true};}
   create(width,height,bpp,{dib=false,topDown=true,bits=0,stock=false}={}){const g=this.geometry(width,height,bpp,dib);const input=bits?this.m.bytes(bits,g.size).slice():null;const ptr=this.m.alloc(g.size);this.m.block(ptr).owner='gdi-bitmap';try{if(input)this.m.bytes(ptr,g.size).set(input);return this.h.add('bitmap',{...g,ptr,dib,topDown,stock,dimensionX:0,dimensionY:0});}catch(error){this.m.free(ptr);throw error;}}
@@ -282,8 +798,16 @@ class BitmapStore {
   data(bitmap){return this.m.bytes(bitmap.ptr,bitmap.size);}
   bytesFor(rect){const width=rect[2]-rect[0],height=rect[3]-rect[1];if(width<0||height<0||width*height>this.maxPixels)throw new Win32Error('Raster operation exceeds pixel quota',8);return {width,height,data:new Uint8ClampedArray(width*height*4)};}
   bounds(state){if(state.bitmap){const b=this.get(state.bitmap);return [0,0,b.width,b.height];}const d=state.window,r=d.getClientRect?.(),c=d.context?.canvas||d.node;return [0,0,integer(Math.ceil(r?.width??c?.width??c?.clientWidth??0),0,32767),integer(Math.ceil(r?.height??c?.height??c?.clientHeight??0),0,32767)];}
-  clip(state,rect){const r=intersect(rect,this.bounds(state));if(!state.clip)return r;return this.regions.combine(this.regions.rectangle(...r),state.clip,1).bounds;}
-  spans(state,y,left,right){return state.clip?this.regions.row(state.clip,y):[left,right];}
+  effective(state){
+    const bounds=this.bounds(state),window=state.window,shape=window?.gdiWindowShape??window?.gdiClientShape??null,paint=state.paintClip??null,prior=this.clipCache.get(state);
+    const rect=shape&&window?.gdiWindowShape?window.getRect?.():null,origin=rect?window.clientOrigin?.():null;
+    const dx=origin?Math.round(rect.left-origin[0]):0,dy=origin?Math.round(rect.top-origin[1]):0;
+    if(prior&&prior.clip===state.clip&&prior.shape===shape&&prior.dx===dx&&prior.dy===dy&&prior.paint===paint&&bounds.every((n,i)=>n===prior.bounds[i]))return prior.region;
+    let region=this.regions.rectangle(...bounds);for(const clip of [state.clip,shape?this.regions.offset(shape,dx,dy):null,paint])if(clip)region=this.regions.combine(region,clip,1);
+    this.clipCache.set(state,{bounds,clip:state.clip,shape,paint,dx,dy,region});return region;
+  }
+  clip(state,rect){return this.regions.combine(this.regions.rectangle(...intersect(rect,this.bounds(state))),this.effective(state),1).bounds;}
+  spans(state,y,left,right){return this.regions.row(this.effective(state),y);}
   context(state){const c=state.window.context||state.window.node?.getContext?.('2d');if(!c)throw new Win32Error('Drawing adapter does not support pixel readback/writeback',50);return c;}
   readBitmap(b,rect){const image=this.bytesFor(rect),bytes=this.data(b),[l,t]=rect;for(let y=0;y<image.height;y++){const row=(b.topDown?t+y:b.height-1-t-y)*b.stride;for(let x=0;x<image.width;x++){const i=(y*image.width+x)*4,px=l+x;if(b.bpp===1){const c=bytes[row+(px>>>3)]&(0x80>>(px&7))?255:0;image.data.set([c,c,c,255],i);}else{const p=row+px*b.bpp/8;image.data[i]=bytes[p+2];image.data[i+1]=bytes[p+1];image.data[i+2]=bytes[p];image.data[i+3]=b.bpp===32?bytes[p+3]:255;}}}return image;}
   writeBitmap(b,rect,image,background=0xffffff){const bytes=this.data(b),[l,t]=rect;for(let y=0;y<image.height;y++){const row=(b.topDown?t+y:b.height-1-t-y)*b.stride;for(let x=0;x<image.width;x++){const i=(y*image.width+x)*4,px=l+x;if(b.bpp===1){const p=row+(px>>>3),mask=0x80>>(px&7);bytes[p]=rgbValue(image.data,i)===(background&0xffffff)?bytes[p]|mask:bytes[p]&~mask;}else{const p=row+px*b.bpp/8;bytes[p]=image.data[i+2];bytes[p+1]=image.data[i+1];bytes[p+2]=image.data[i];if(b.bpp===32)bytes[p+3]=image.data[i+3];}}}}
@@ -295,19 +819,22 @@ class BitmapStore {
     if((blend||transparent)&&[dw,dh,sw,sh].some(n=>n<=0))throw new Win32Error('Alpha/transparent blits require positive extents');
     if(blend){extra=unsigned(extra);if(extra&0xffff||extra>>>24>1)throw new Win32Error('Unsupported BLENDFUNCTION');if(extra>>>24&&(!src?.bitmap||this.get(src.bitmap).bpp!==32))throw new Win32Error('Per-pixel alpha requires a 32-bit source bitmap');}
     if(!blend&&!transparent&&(Math.abs(dw)!==Math.abs(sw)||Math.abs(dh)!==Math.abs(sh))&&src&&dst.stretchMode!==3)throw new Win32Error('Scaled raster transfers require COLORONCOLOR',50);
-    dx+=dst.viewportX;dy+=dst.viewportY;if(src){sx+=src.viewportX;sy+=src.viewportY;}
-    const rawDst=[Math.min(dx,dx+dw),Math.min(dy,dy+dh),Math.max(dx,dx+dw),Math.max(dy,dy+dh)],r=this.clip(dst,rawDst);
-    const rawSrc=[Math.min(sx,sx+sw),Math.min(sy,sy+sh),Math.max(sx,sx+sw),Math.max(sy,sy+sh)];
+    const dm=mapping(dst),di=inverse(dm),sm=src?mapping(src):null;
+    const logicalDst=[Math.min(dx,dx+dw),Math.min(dy,dy+dh),Math.max(dx,dx+dw),Math.max(dy,dy+dh)];
+    const rawDst=mapBounds(dm,logicalDst),r=this.clip(dst,rawDst);
+    const rawSrc=src?mapBounds(sm,[Math.min(sx,sx+sw),Math.min(sy,sy+sh),Math.max(sx,sx+sw),Math.max(sy,sy+sh)]):[0,0,0,0];
     if(rop.source){if(!src)throw new Win32Error('Source device context required',6);const b=this.bounds(src);if(rawSrc[0]<0||rawSrc[1]<0||rawSrc[2]>b[2]||rawSrc[3]>b[3])throw new Win32Error('Source rectangle is outside its bitmap');if(blend&&(dst.bitmap?dst.bitmap===src.bitmap:dst.window===src.window)){const overlap=intersect(rawSrc,rawDst);if(overlap[2]>overlap[0])throw new Win32Error('Overlapping AlphaBlend rectangles');}}
     if(!dw||!dh||rop.source&&(!sw||!sh)||r[2]===r[0])return 1;
     const brush=this.h.get(dst.brush,'brush');if(rop.pattern&&brush.null)return 1;
     // Snapshot before writes: aliased source/destination is safe for every ROP.
     const source=rop.source?this.read(src,rawSrc):null,image=this.read(dst,r),pattern=rgbBytes(brush.color||0),mono=src?.bitmap&&this.get(src.bitmap).bpp===1;
-    const fg=rgbBytes(dst.textColor),bg=rgbBytes(dst.backgroundColor),constant=(extra>>>16&255)/255,perPixel=extra>>>24===1;
-    for(let y=0;y<image.height;y++){const spans=this.spans(dst,r[1]+y,r[0],r[2]);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
-      const i=(y*image.width+x)*4;
-      const ix=source?Math.min(source.width-1,Math.max(0,Math.floor(sx+((r[0]+x+.5-dx)/dw)*sw)-rawSrc[0])):0;
-      const iy=source?Math.min(source.height-1,Math.max(0,Math.floor(sy+((r[1]+y+.5-dy)/dh)*sh)-rawSrc[1])):0;
+    const effective=this.effective(dst),fg=rgbBytes(dst.textColor),bg=rgbBytes(dst.backgroundColor),constant=(extra>>>16&255)/255,perPixel=extra>>>24===1;
+    for(let y=0;y<image.height;y++){const spans=this.regions.row(effective,r[1]+y);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
+      const i=(y*image.width+x)*4,px=r[0]+x+.5,py=r[1]+y+.5,lx=di[0]*px+di[2]*py+di[4],ly=di[1]*px+di[3]*py+di[5];
+      if(lx<logicalDst[0]||lx>=logicalDst[2]||ly<logicalDst[1]||ly>=logicalDst[3])continue;
+      const ux=sx+((lx-dx)/dw)*sw,uy=sy+((ly-dy)/dh)*sh;
+      const ix=source?Math.min(source.width-1,Math.max(0,Math.floor(sm[0]*ux+sm[2]*uy+sm[4])-rawSrc[0])):0;
+      const iy=source?Math.min(source.height-1,Math.max(0,Math.floor(sm[1]*ux+sm[3]*uy+sm[5])-rawSrc[1])):0;
       const si=source?(iy*source.width+ix)*4:0,s=mono?(source.data[si]?bg:fg):source?.data;
       const offset=mono?0:si;
       if(transparent&&rgbValue(s,offset)===(unsigned(extra)&0xffffff))continue;
@@ -316,18 +843,18 @@ class BitmapStore {
     }
     }this.write(dst,r,image);return 1;
   }
-  pixel(state,x,y,color){x=coord(x)+state.viewportX;y=coord(y)+state.viewportY;const r=this.clip(state,[x,y,x+1,y+1]);if(!r[2])return 0xffffffff;const image=this.read(state,r);if(color===undefined)return rgbValue(image.data);image.data.set(rgbBytes(color));this.write(state,r,image);return state.bitmap&&this.get(state.bitmap).bpp===1?rgbValue(this.read(state,r).data):color&0xffffff;}
+  pixel(state,x,y,color){[x,y]=devicePoint(state,coord(x),coord(y));const r=this.clip(state,[x,y,x+1,y+1]);if(!r[2])return 0xffffffff;const image=this.read(state,r);if(color===undefined)return rgbValue(image.data);image.data.set(rgbBytes(color));this.write(state,r,image);return state.bitmap&&this.get(state.bitmap).bpp===1?rgbValue(this.read(state,r).data):color&0xffffff;}
   // Integer software primitives for memory DCs. Font rasterization remains a
   // Canvas/host facility; no platform font metrics are fabricated in workers.
   primitive(state,operation,args,style){
     if(!['line','rect','ellipse'].includes(operation))throw new Win32Error('Software memory DC does not support this primitive',50);
-    let [x1,y1,x2,y2]=args.map(coord);x1+=state.viewportX;x2+=state.viewportX;y1+=state.viewportY;y2+=state.viewportY;
+    let [x1,y1,x2,y2]=args.map(coord);const matrix=mapping(state),back=inverse(matrix);
     const width=style.pen.width||1,pad=operation==='line'?Math.ceil(width/2):0;
-    const r=this.clip(state,[Math.min(x1,x2)-pad,Math.min(y1,y2)-pad,Math.max(x1,x2)+pad,Math.max(y1,y2)+pad]);if(!r[2])return;
-    const image=this.read(state,r),pen=rgbBytes(style.pen.color||0),brush=rgbBytes(style.brush.color||0);
+    const r=this.clip(state,mapBounds(matrix,[Math.min(x1,x2)-pad,Math.min(y1,y2)-pad,Math.max(x1,x2)+pad,Math.max(y1,y2)+pad]));if(!r[2])return;
+    const effective=this.effective(state),image=this.read(state,r),pen=rgbBytes(style.pen.color||0),brush=rgbBytes(style.brush.color||0);
     const l=Math.min(x1,x2),t=Math.min(y1,y2),right=Math.max(x1,x2),bottom=Math.max(y1,y2),rx=(right-l)/2,ry=(bottom-t)/2;
-    for(let y=0;y<image.height;y++){const spans=this.spans(state,r[1]+y,r[0],r[2]);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
-      const px=r[0]+x,py=r[1]+y;let fill=false,stroke=false;
+    for(let y=0;y<image.height;y++){const spans=this.regions.row(effective,r[1]+y);for(let span=0;span<spans.length;span+=2)for(let x=Math.max(r[0],spans[span])-r[0];x<Math.min(r[2],spans[span+1])-r[0];x++){
+      const vx=r[0]+x+.5,vy=r[1]+y+.5,px=back[0]*vx+back[2]*vy+back[4]-.5,py=back[1]*vx+back[3]*vy+back[5]-.5;let fill=false,stroke=false;
       if(operation==='rect'){fill=px>=l&&px<right&&py>=t&&py<bottom;stroke=fill&&(px<l+width||px>=right-width||py<t+width||py>=bottom-width);}
       else if(operation==='ellipse'){const nx=px+.5-l-rx,ny=py+.5-t-ry;fill=rx>0&&ry>0&&nx*nx/(rx*rx)+ny*ny/(ry*ry)<=1;stroke=fill&&(rx<=width||ry<=width||nx*nx/((rx-width)**2)+ny*ny/((ry-width)**2)>=1);}
       else {const dx=x2-x1,dy=y2-y1,len=dx*dx+dy*dy,u=len?((px-x1)*dx+(py-y1)*dy)/len:-1;stroke=u>=0&&u<1&&((px-x1-u*dx)**2+(py-y1-u*dy)**2)<=width*width/4;}
@@ -341,8 +868,8 @@ return {GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo,BitmapStore};
 })();
 
 /* ..\..\packages\win32-browser\src\clipboard.js */
-__modules[3]=(()=>{
-const {Win32Error,unsigned}=__modules[0];
+__modules[9]=(()=>{
+const {Win32Error,unsigned}=__modules[1];
 
 /** Synchronous, app-private clipboard. System clipboard synchronization is explicit. */
 function installClipboard(w){
@@ -373,8 +900,8 @@ return {installClipboard};
 })();
 
 /* ..\..\packages\win32-browser\src\kernel32.js */
-__modules[4]=(()=>{
-const {ERROR,Win32Error,integer,unsigned}=__modules[0];
+__modules[10]=(()=>{
+const {ERROR,Win32Error,integer,unsigned}=__modules[1];
 
 function installKernel32(w){
   const m=w.memory,h=w.handles,fs=w.fs;
@@ -464,8 +991,8 @@ return {installKernel32};
 })();
 
 /* ..\..\packages\win32-browser\src\user32.js */
-__modules[5]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[0];
+__modules[11]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[1];
 
 /** Registered windows only: never queries or controls unrelated page DOM. */
 function installUser32(w){
@@ -548,8 +1075,8 @@ return {installUser32};
 })();
 
 /* ..\..\packages\win32-browser\src\advapi32.js */
-__modules[6]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[0];
+__modules[12]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[1];
 
 /** App-private registry: no machine registry is read or modified. */
 function installRegistry(w){
@@ -576,10 +1103,18 @@ return {installRegistry};
 })();
 
 /* ..\..\packages\win32-browser\src\gdi32.js */
-__modules[7]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[0];
-const {RegionStore,installRegions}=__modules[1];
-const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[2];
+__modules[13]=(()=>{
+const {installTransforms,mapping,translatedOnly,IDENTITY}=__modules[2];
+const {installPaths}=__modules[3];
+const {installText}=__modules[4];
+const {installPainting}=__modules[5];
+const {Win32Error,integer,unsigned}=__modules[1];
+const {RegionStore,installRegions}=__modules[7];
+const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[8];
+
+
+
+
 
 
 
@@ -590,16 +1125,17 @@ function installGDI(w){
   const stocks=new Map(),stock=(index,type,value)=>stocks.set(index,h.add(type,{...value,stock:true}));
   stock(0,'brush',{color:0xffffff});stock(4,'brush',{color:0});stock(5,'brush',{null:true});stock(6,'pen',{color:0xffffff,width:1});stock(7,'pen',{color:0,width:1});stock(8,'pen',{null:true,width:1});
   const dc=handle=>h.get(handle,'dc');
-  const newState=()=>({pen:stocks.get(7),brush:stocks.get(0),bitmap:0,x:0,y:0,viewportX:0,viewportY:0,clip:null,saved:[],stretchMode:1,textColor:0,backgroundColor:0xffffff,backgroundMode:2});
+  const newState=()=>({pen:stocks.get(7),brush:stocks.get(0),bitmap:0,font:0,x:0,y:0,world:IDENTITY,graphicsMode:1,mapMode:1,windowX:0,windowY:0,windowExtX:1,windowExtY:1,viewportExtX:1,viewportExtY:1,polyFillMode:1,textAlign:0,charExtra:0,viewportX:0,viewportY:0,clip:null,saved:[],stretchMode:1,textColor:0,backgroundColor:0xffffff,backgroundMode:2});
   const states=()=>[...h.entries.values()].filter(e=>e.type==='dc').flatMap(e=>[e.value,...e.value.saved]);
-  const selected=object=>states().some(s=>s.pen===Number(object)||s.brush===Number(object)||s.bitmap===Number(object));
+  const selected=object=>states().some(s=>s.pen===Number(object)||s.brush===Number(object)||s.bitmap===Number(object)||s.font===Number(object));
   const style=state=>({pen:h.get(state.pen,'pen'),brush:h.get(state.brush,'brush'),textColor:state.textColor,backgroundColor:state.backgroundColor,backgroundMode:state.backgroundMode});
   const draw=(state,operation,args)=>{
+    if(!translatedOnly(state)||state.window?.gdiClientShape||state.paintClip||operation==='ellipse'&&state.window?.readPixels){if(operation==='pixel')return bitmaps.pixel(state,...args);return bitmaps.primitive(state,operation,args,style(state));}
     if(state.bitmap){if(operation==='pixel'){bitmaps.pixel(state,args[0],args[1],args[2]);return;}return bitmaps.primitive(state,operation,args,style(state));}
     // Hosts with a raster adapter also receive correct clipping. Legacy draw-only
     // descriptors continue to work for the original unclipped drawing surface.
     if(state.clip){if(operation==='pixel'){bitmaps.pixel(state,args[0],args[1],args[2]);return;}return bitmaps.primitive(state,operation,args,style(state));}
-    args=[...args];args[0]+=state.viewportX;args[1]+=state.viewportY;if(['line','rect','ellipse'].includes(operation)){args[2]+=state.viewportX;args[3]+=state.viewportY;}
+    args=[...args];const transform=mapping(state);args[0]+=transform[4];args[1]+=transform[5];if(['line','rect','ellipse'].includes(operation)){args[2]+=transform[4];args[3]+=transform[5];}
     const s=style(state);if(state.window.draw)return state.window.draw(operation,args,s);
     const ctx=bitmaps.context(state);ctx.save();try{
       ctx.strokeStyle=colorRef(s.pen.color||0);ctx.lineWidth=s.pen.width||1;ctx.fillStyle=colorRef(s.brush.color||0);
@@ -621,13 +1157,13 @@ function installGDI(w){
   add('CreateCompatibleDC',1,handle=>{if(handle)dc(handle);if(h.entries.size+2>h.limit)throw new Win32Error('Handle quota exceeded',8);const bitmap=bitmaps.create(1,1,1,{stock:true});try{const id=h.add('dc',{...newState(),memory:true,bitmap,defaultBitmap:bitmap});bitmaps.get(bitmap).defaultFor=id;return id;}catch(error){m.free(bitmaps.get(bitmap).ptr);h.close(bitmap,'bitmap');throw error;}});
   const deleteDC=handle=>{const state=dc(handle);if(!state.memory)throw new Win32Error('Use ReleaseDC for a window DC',6);m.free(bitmaps.get(state.defaultBitmap).ptr);h.close(state.defaultBitmap,'bitmap');h.close(handle,'dc');return 1;};
   add('DeleteDC',1,deleteDC);
-  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(entry?.type==='region')return regionAPI.select(state,object,5);if(!entry||!['pen','brush','bitmap'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
+  add('SelectObject',2,(handle,object)=>{const state=dc(handle),entry=h.entries.get(Number(object));if(entry?.type==='region')return regionAPI.select(state,object,5);if(!entry||!['pen','brush','bitmap','font'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.type==='bitmap'){
       if(!state.memory||entry.value.defaultFor&&entry.value.defaultFor!==Number(handle))throw new Win32Error('Bitmap cannot be selected into this DC',87);
       for(const [id,e]of h.entries)if(e.type==='dc'&&id!==Number(handle)&&[e.value,...e.value.saved].some(s=>s.bitmap===Number(object)))throw new Win32Error('Bitmap is selected into another DC',87);
     }const old=state[entry.type];state[entry.type]=Number(object);return old;});
-  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap','region'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
-  add('GetCurrentObject',2,(handle,type)=>{const state=dc(handle),field={1:'pen',2:'brush',7:'bitmap'}[Number(type)];if(!field)throw new Win32Error('Object type is not implemented',50);return state[field]||0;});
-  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,bitmap:7,region:8})[e.type]||0;});
+  add('DeleteObject',1,object=>{const entry=h.entries.get(Number(object));if(entry?.type==='dc')return deleteDC(object);if(!entry||!['pen','brush','bitmap','region','font'].includes(entry.type))throw new Win32Error('Invalid GDI object',6);if(entry.value.stock)return 1;if(entry.value.windowOwner)throw new Win32Error('Region ownership belongs to a window',5);if(selected(object))return 0;if(entry.type==='bitmap')m.free(entry.value.ptr);h.close(object,entry.type);return 1;});
+  add('GetCurrentObject',2,(handle,type)=>{const state=dc(handle),field={1:'pen',2:'brush',6:'font',7:'bitmap'}[Number(type)];if(!field)throw new Win32Error('Object type is not implemented',50);return state[field]||0;});
+  add('GetObjectType',1,handle=>{const e=h.entries.get(Number(handle));if(!e)throw new Win32Error('Invalid GDI handle',6);return e.type==='dc'?(e.value.memory?10:3):({pen:1,brush:2,font:6,bitmap:7,region:8})[e.type]||0;});
   const bitmapInfo=(b,p)=>{const v=m.view(p,40);v.setUint32(0,40,true);v.setInt32(4,b.width,true);v.setInt32(8,b.topDown?-b.height:b.height,true);v.setUint16(12,1,true);v.setUint16(14,b.bpp,true);v.setUint32(16,0,true);v.setUint32(20,Math.ceil(b.width*b.bpp/32)*4*b.height,true);for(let o=24;o<40;o+=4)v.setUint32(o,0,true);};
   for(const suffix of ['A','W'])add('GetObject'+suffix,3,(object,count,out)=>{const e=h.entries.get(Number(object));if(!e||!['pen','brush','bitmap'].includes(e.type))throw new Win32Error('Unsupported GDI object',6);const b=e.value,size=e.type==='pen'?16:e.type==='brush'?12:24;if(!out)return size;count=integer(count,0,0x7fffffff);const n=e.type==='bitmap'&&b.dib&&count>=84?84:size;if(count<n||unsigned(out)%4)throw new Win32Error('Invalid GDI object buffer');const v=m.view(out,n);m.bytes(out,n).fill(0);
     if(e.type==='pen'){v.setUint32(0,b.null?5:0,true);v.setInt32(4,b.width||1,true);v.setUint32(12,b.color||0,true);}
@@ -668,7 +1204,7 @@ function installGDI(w){
   }
   add('GdiFlush',0,()=>1,{notes:'Memory operations and host pixel transfers are synchronous. Browser presentation is independently scheduled.'});
   add('GetPixel',3,(handle,x,y)=>bitmaps.pixel(dc(handle),x,y),{failure:0xffffffff});
-  add('SetPixel',4,(handle,x,y,color)=>{const state=dc(handle);color=unsigned(color)&0xffffff;if(state.bitmap||state.clip)return bitmaps.pixel(state,x,y,color);draw(state,'pixel',[coord(x),coord(y),color]);return color;},{failure:0xffffffff});
+  add('SetPixel',4,(handle,x,y,color)=>{const state=dc(handle);color=unsigned(color)&0xffffff;if(state.bitmap||state.clip||state.paintClip||state.window?.gdiClientShape||!translatedOnly(state))return bitmaps.pixel(state,x,y,color);draw(state,'pixel',[coord(x),coord(y),color]);return color;},{failure:0xffffffff});
   add('SetPixelV',4,(handle,x,y,color)=>{const result=w.invoke('gdi32','SetPixel',[handle,x,y,color]);return result===0xffffffff?0:1;});
   add('MoveToEx',4,(handle,x,y,old)=>{const state=dc(handle);x=coord(x);y=coord(y);if(old)pair(old,state.x,state.y);state.x=x;state.y=y;return 1;});
   add('GetCurrentPositionEx',2,(handle,out)=>{const s=dc(handle);pair(out,s.x,s.y);return 1;});
@@ -680,8 +1216,8 @@ function installGDI(w){
   }
   add('SetBkMode',2,(handle,mode)=>{integer(mode,1,2);const state=dc(handle),old=state.backgroundMode;state.backgroundMode=Number(mode);return old;});
   add('GetBkMode',1,handle=>dc(handle).backgroundMode);
-  for(const wide of [false,true])add('TextOut'+(wide?'W':'A'),5,(handle,x,y,p,n)=>{n=integer(n,0,m.maxBytes/(wide?2:1));const text=typeof p==='string'?p.slice(0,n):m.decode(m.bytes(p,n*(wide?2:1)),wide);draw(dc(handle),'text',[coord(x),coord(y),text]);return 1;},{mode:'browser',notes:'Canvas/host font metrics; software memory DC text is not implemented.'});
-  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,...snapshot}=state;state.saved.push(snapshot);return state.saved.length;});
+  for(const wide of [false,true])add('TextOut'+(wide?'W':'A'),5,(handle,x,y,p,n)=>{n=integer(n,0,m.maxBytes/(wide?2:1));const text=typeof p==='string'?p.slice(0,n):m.decode(m.bytes(p,n*(wide?2:1)),wide);draw(dc(handle),'text',[coord(x),coord(y),text]);return 1;},{mode:'browser',notes:'Replaced by the shared Canvas font renderer during GDI installation.'});
+  add('SaveDC',1,handle=>{const state=dc(handle);if(state.saved.length>=256)throw new Win32Error('Saved DC stack exceeds 256',8);const {saved,path,...snapshot}=state;state.saved.push(snapshot);return state.saved.length;});
   add('RestoreDC',2,(handle,level)=>{const state=dc(handle);level=coord(level);const index=level<0?state.saved.length+level:level-1;if(!level||index<0||index>=state.saved.length)throw new Win32Error('Invalid saved DC level');const snapshot=state.saved[index];state.saved.splice(index);Object.assign(state,snapshot);return 1;});
   add('SetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);x=coord(x);y=coord(y);if(old)pair(old,state.viewportX,state.viewportY);state.viewportX=x;state.viewportY=y;return 1;});
   add('OffsetViewportOrgEx',4,(handle,x,y,old)=>{const state=dc(handle);return w.invoke('gdi32','SetViewportOrgEx',[handle,coord(state.viewportX+coord(x)),coord(state.viewportY+coord(y)),old]);});
@@ -691,6 +1227,8 @@ function installGDI(w){
   add('SetStretchBltMode',2,(handle,mode)=>{const state=dc(handle);if(Number(mode)!==3)throw new Win32Error('Only COLORONCOLOR scaling is supported',50);const old=state.stretchMode;state.stretchMode=3;return old;});
   add('GetStretchBltMode',1,handle=>dc(handle).stretchMode);
   const regionAPI=installRegions(w,{dc,bitmaps,regions,add});
+  const services={dc,bitmaps,regions,add,stocks,stock,newState,style,draw,regionAPI};
+  installTransforms(w,services);installPaths(w,services);installText(w,services);installPainting(w,services);
   add('GetDeviceCaps',2,(handle,index)=>{const s=dc(handle),r=bitmaps.bounds(s);const values={2:1,8:r[2],10:r[3],12:32,14:1,88:96,90:96};if(!(index in values))throw new Win32Error('Device capability not implemented',50);return values[index];});
 }
 
@@ -698,15 +1236,20 @@ return {colorRef,installGDI};
 })();
 
 /* ..\..\packages\win32-browser\src\index.js */
-__modules[8]=(()=>{
-const {REGION_CONSTANTS,RegionStore}=__modules[1];
-const {GDI_CONSTANTS}=__modules[2];
-const {installClipboard}=__modules[3];
-const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
-const {installKernel32}=__modules[4];
-const {installUser32}=__modules[5];
-const {installRegistry}=__modules[6];
-const {installGDI,colorRef}=__modules[7];
+__modules[14]=(()=>{
+const {GPURasterPresenter}=__modules[0];
+const {TRANSFORM_CONSTANTS}=__modules[2];
+const {PATH_CONSTANTS}=__modules[3];
+const {TEXT_CONSTANTS}=__modules[4];
+const {PAINT_CONSTANTS}=__modules[5];
+const {REGION_CONSTANTS,RegionStore}=__modules[7];
+const {GDI_CONSTANTS}=__modules[8];
+const {installClipboard}=__modules[9];
+const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[1];
+const {installKernel32}=__modules[10];
+const {installUser32}=__modules[11];
+const {installRegistry}=__modules[12];
+const {installGDI,colorRef}=__modules[13];
 
 
 
@@ -716,7 +1259,12 @@ const {installGDI,colorRef}=__modules[7];
 
 
 
-const WIN32_CONSTANTS=Object.freeze({...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
+
+
+
+
+
+const WIN32_CONSTANTS=Object.freeze({...TRANSFORM_CONSTANTS,...PATH_CONSTANTS,...TEXT_CONSTANTS,...PAINT_CONSTANTS,...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
 function normalizeDLL(name){const dll=String(name).replace(/\\/g,'/').split('/').at(-1).replace(/\.dll$/i,'').toLowerCase();if(!/^[a-z0-9_.-]+$/.test(dll))throw new Win32Error('Invalid DLL name',126);return dll;}
 /** Reusable browser/worker/Node compatibility process; never loads native code. */
 class Win32Browser {
@@ -733,21 +1281,21 @@ class Win32Browser {
   invoke(dll,name,args=[]){if(this.disposed)throw new Win32Error('Compatibility process is disposed',995);const api=this.resolve(dll,name);if(!Array.isArray(args)||args.length!==api.arity)throw new Win32Error('Invalid argument count for '+api.dll+'!'+name,87);const failure=error=>{if(!(error instanceof Win32Error))throw error;if(api.statusError)return error.code;this.lastError=error.code;this.options.onDiagnostic?.({dll:api.dll,name,code:error.code,message:error.message});return typeof api.failure==='function'?api.failure(args):api.failure;};try{const value=api.fn(...args);return value?.then?value.catch(failure):value;}catch(error){return failure(error);}}
   manifest(){return [...this.modules.values()].flatMap(exports=>[...exports.values()].map(({dll,name,arity,mode,notes})=>({dll,name,arity,mode,notes}))).sort((a,b)=>(a.dll+'!'+a.name).localeCompare(b.dll+'!'+b.name));}
   registerWindow(descriptor){if(!descriptor||typeof descriptor!=='object')throw new Win32Error('Window descriptor required');return this.handles.add('window',descriptor);}
-  unregisterWindow(handle){if(!this.handles.has(handle,'window'))return;for(const [key,t]of this.timers)if(t.handle===Number(handle)){clearInterval(t.timer);this.timers.delete(key);}for(const [id,e]of this.handles.entries)if(e.type==='dc'&&e.value.handle===Number(handle))this.handles.close(id,'dc');this.handles.close(handle,'window');}
+  unregisterWindow(handle){if(!this.handles.has(handle,'window'))return;this.releaseWindowGDI?.(handle);for(const [key,t]of this.timers)if(t.handle===Number(handle)){clearInterval(t.timer);this.timers.delete(key);}for(const [id,e]of this.handles.entries)if(e.type==='dc'&&e.value.handle===Number(handle))this.handles.close(id,'dc');this.handles.close(handle,'window');}
   registerCallback(fn,{onTimer=fn}={}){if(typeof fn!=='function'||typeof onTimer!=='function')throw new Win32Error('Callback must be a function');const handle=this.handles.add('callback',fn);this.timerCallbacks.set(handle,onTimer);return handle;}
   unregisterCallback(handle){for(const t of this.timers.values())if(t.callback===handle)throw new Win32Error('Callback is still used by a timer',5);this.handles.close(handle,'callback');this.timerCallbacks.delete(handle);}
   sleep(milliseconds){milliseconds=unsigned(milliseconds);return new Promise((resolve,reject)=>{const state={timer:null,reject};this.delays.add(state);const end=this.clock()+milliseconds;const next=()=>{if(this.disposed){this.delays.delete(state);reject(new Win32Error('Sleep cancelled',995));return;}const remaining=end-this.clock();if(remaining<=0){this.delays.delete(state);resolve();}else state.timer=setTimeout(next,Math.min(remaining,0x7fffffff));};state.timer=setTimeout(next,Math.min(milliseconds,0x7fffffff));});}
   registrySnapshot(){return [...this.registry].map(([path,r])=>[path,{name:r.name,values:[...r.values].map(([key,v])=>[key,{...v,value:Array.isArray(v.value)?v.value.slice():v.value}])}]);}
   async openURL(wide,handle,operation,file,parameters,directory,show){if(handle)this.handles.get(handle,'window');const verb=this.memory.string(operation,wide).toLowerCase();if(verb&&verb!=='open'||this.memory.string(parameters,wide)||this.memory.string(directory,wide))return 31;let url;try{url=new URL(this.memory.string(file,wide));}catch{throw new Win32Error('Invalid navigation URL',87);}if(!['http:','https:','mailto:'].includes(url.protocol)||!this.options.allowNavigation||typeof this.options.openURL!=='function')return 5;return await this.options.openURL(url.href,show)?33:5;}
-  dispose(){if(this.disposed)return;this.disposed=true;for(const t of this.timers.values())clearInterval(t.timer);this.timers.clear();for(const d of this.delays){clearTimeout(d.timer);d.reject(new Win32Error('Operation cancelled',995));}this.delays.clear();this.handles.entries.clear();this.timerCallbacks.clear();this.memory.clear();}
+  dispose(){if(this.disposed)return;this.disposeWindowGDI?.();this.disposed=true;for(const t of this.timers.values())clearInterval(t.timer);this.timers.clear();for(const d of this.delays){clearTimeout(d.timer);d.reject(new Win32Error('Operation cancelled',995));}this.delays.clear();this.handles.entries.clear();this.timerCallbacks.clear();this.memory.clear();}
 }
 function createWin32(options={}){return new Win32Browser(options);}
 
-return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
+return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,GPURasterPresenter,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
 
 /* ..\language\errors.js */
-__modules[9]=(()=>{
+__modules[15]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -757,8 +1305,8 @@ return {VBError};
 })();
 
 /* calendar.js */
-__modules[10]=(()=>{
-const {VBError}=__modules[9];
+__modules[16]=(()=>{
+const {VBError}=__modules[15];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -790,6 +1338,7 @@ function asDate(value){
   if((match=text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/))){[,y,m,d,h=0,n=0,s=0,ms=0]=match;}
   else if((match=text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i))){[,m,d,y,h=0,n=0,s=0]=match;y=Number(y);if(y<100)y+=y<30?2000:1900;if(match[7]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[7])?12:0);}}
   else if((match=text.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?\s*(AM|PM)?$/i))){[,h,n,s=0,ms=0]=match;[y,m,d]=[1899,12,30];if(match[5]){if(+h<1||+h>12)throw new VBError('Type mismatch',13);h=+h%12+(/^PM$/i.test(match[5])?12:0);}}
+  else if((match=text.match(/^(\d{1,2})[\/,](\d{1,2})$/))){[,m,d]=match;y=new Date().getFullYear();}
   else {const parsed=new Date(text);if(!Number.isFinite(parsed.getTime()))throw new VBError('Type mismatch',13);return validateDate(parsed);}
   [y,m,d,h,n,s]=[y,m,d,h,n,s].map(Number);ms=Number(String(ms).padEnd(3,'0'));
   if(m<1||m>12||d<1||d>daysInMonth(y,m-1)||h<0||h>23||n>59||s>59)throw new VBError('Type mismatch',13);
@@ -835,9 +1384,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ..\language\lexer.js */
-__modules[11]=(()=>{
-const {asDate}=__modules[10];
-const {VBError}=__modules[9];
+__modules[17]=(()=>{
+const {asDate}=__modules[16];
+const {VBError}=__modules[15];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -890,7 +1439,7 @@ function splitTop(text, separator = ',') {
   for (let i=0;i<text.length;i++) {
     const c = text[i];
     if (c === '"' && !date) { if (quoted && text[i+1] === '"') i++; else quoted = !quoted; }
-    else if (!quoted && c === '#' && (date || text.indexOf('#',i+1) >= 0)) date = !date;
+    else if (!quoted && c === '#' && (date || !/[\w\u0080-\uffff\]]/.test(text[i-1]||'') && text.indexOf('#',i+1) >= 0)) date = !date;
     else if (!quoted && !date) {
       if (c === '(') depth++;
       else if (c === ')') depth--;
@@ -929,8 +1478,8 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* decimal.js */
-__modules[12]=(()=>{
-const {VBError}=__modules[9];
+__modules[18]=(()=>{
+const {VBError}=__modules[15];
 
 const MAX=(1n<<96n)-1n;
 const abs=n=>n<0n?-n:n;
@@ -1007,7 +1556,7 @@ return {VBDecimal};
 })();
 
 /* ..\core\window-context.js */
-__modules[13]=(()=>{
+__modules[19]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -1039,8 +1588,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ..\core\core.js */
-__modules[14]=(()=>{
-const {uiDocument}=__modules[13];
+__modules[20]=(()=>{
+const {uiDocument}=__modules[19];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -1102,11 +1651,11 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* values.js */
-__modules[15]=(()=>{
-const {VBDecimal}=__modules[12];
-const {asDate,dateToSerial}=__modules[10];
-const { VBError }=__modules[11];
-const { lower }=__modules[14];
+__modules[21]=(()=>{
+const {VBDecimal}=__modules[18];
+const {asDate,dateToSerial}=__modules[16];
+const { VBError }=__modules[17];
+const { lower }=__modules[20];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -1117,7 +1666,187 @@ class VBErrorValue {
   constructor(number){number=bankersRound(numeric(number));if(number<0||number>65535)throw new VBError('Overflow',6);this.number=number;Object.freeze(this);}
   toString(){return 'Error '+this.number;}
 }
-const explicitErrorValue=value=>value instanceof VBErrorValue?value.number:value;
+const explicitErrorValue=value=>unbox(value) instanceof VBErrorValue?unbox(value).number:unbox(value);
+
+/** Execution-only scalar metadata. Public Cell.get()/Array.get() and host
+ * adapters still expose ordinary JS values; getScalar() retains VB subtype and
+ * whether an expression originated from Variant storage. Object identity is
+ * never wrapped. The tag is immutable and is not a native COM VARIANT layout. */
+class VBScalar {
+  constructor(value,type,variant=false) {
+    this.type=String(type).toLowerCase();this.variant=!!variant;
+    if(!Object.hasOwn(SCALAR_TYPES,this.type))throw new VBError('Invalid scalar type: '+type,13);
+    if(this.type==='empty'||this.type==='null'){if(value!==(this.type==='empty'?undefined:null))throw new VBError('Invalid null/empty scalar',13);this.value=value;}
+    else if(this.type==='error'){if(!(value instanceof VBErrorValue)&&value!==MISSING)throw new VBError('Invalid Error scalar',13);this.value=value;}
+    else this.value=coerce(value,this.type);
+    Object.freeze(this);
+  }
+  valueOf(){return this.type==='boolean'?(this.value?-1:0):this.value;}
+  toString(){return this.type==='boolean'?(this.value?'True':'False'):String(this.value);}
+}
+const SCALAR_TYPES=Object.freeze({empty:0,null:1,integer:2,long:3,single:4,double:5,currency:6,date:7,string:8,error:10,boolean:11,decimal:14,byte:17});
+const unbox=value=>value instanceof VBScalar?value.value:value;
+function scalarType(value){
+  if(value instanceof VBScalar)return value.type;
+  if(value===undefined)return 'empty';if(value===null)return 'null';
+  if(value instanceof VBCurrency)return 'currency';if(value instanceof VBDecimal)return 'decimal';
+  if(value instanceof Date)return 'date';if(value instanceof VBErrorValue||value===MISSING)return 'error';
+  return typeof value==='number'?'double':typeof value==='string'?'string':typeof value==='boolean'?'boolean':null;
+}
+function tagScalar(value,type=scalarType(value),variant=false){
+  if(!type)return value;
+  if(value instanceof VBScalar&&value.type===String(type).toLowerCase()&&value.variant===!!variant)return value;
+  return new VBScalar(unbox(value),type,variant);
+}
+function storageScalar(value,type='Variant',fixedLength=null){
+  const key=String(type).toLowerCase(),actual=scalarType(value);
+  if(key==='variant')return actual?tagScalar(cloneValue(unbox(value)),actual,true):cloneValue(value);
+  const result=coerce(value,key,fixedLength);
+  return Object.hasOwn(SCALAR_TYPES,key)?tagScalar(result,key,false):result;
+}
+function readScalar(cell){if(cell instanceof LazyCell)return cell.get();return typeof cell.getScalar==='function'?cell.getScalar():Promise.resolve(cell.get()).then(value=>storageScalar(value,cell.type));}
+function literalScalar(node){
+  if(node.kind==='currency')return tagScalar(new VBCurrency(node.value),'currency');
+  if(node.kind==='date')return tagScalar(new Date(node.value),'date');
+  const type=node.valueType||scalarType(node.value);return tagScalar(type==='null'?null:coerce(node.value,type),type,false);
+}
+function signedLiteralScalar(node){
+  if(node.op!=='-')return null;
+  const n=node.expr;
+  if(n.kind==='currency')return tagScalar(new VBCurrency('-'+n.value),'currency');
+  if(n.kind!=='literal'||typeof n.value!=='number'||n.valueType==='boolean')return null;
+  const value=-n.value;
+  const type=n.numberSuffix?n.valueType:n.valueType==='long'&&value>=-32768&&value<=32767?'integer':n.valueType==='double'&&Number.isInteger(value)&&value===-2147483648?'long':n.valueType;
+  return tagScalar(coerce(value,type),type);
+}
+const INTEGER_BOUNDS=Object.freeze({byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]});
+function scalarResult(value,type,variant){
+  if(value===null||value===undefined)return tagScalar(value,scalarType(value),true);
+  if(type==='boolean')return tagScalar(value?-1:0,type,variant);
+  if(INTEGER_BOUNDS[type]){
+    while(value<INTEGER_BOUNDS[type][0]||value>INTEGER_BOUNDS[type][1]){
+      if(!variant)throw new VBError('Overflow',6);
+      type=type==='byte'?'integer':type==='integer'?'long':'double';
+      if(type==='double')break;
+    }
+  }
+  if(type==='single'&&!Number.isFinite(Math.fround(value))){if(!variant)throw new VBError('Overflow',6);type='double';}
+  if(type==='double'&&!Number.isFinite(value))throw new VBError('Overflow',6);
+  return tagScalar(coerce(value,type),type,variant);
+}
+function arithmeticType(a,b,op){
+  let x=scalarType(a),y=scalarType(b);
+  const normal=t=>t==='empty'||t==='boolean'?'integer':t==='string'||t==='date'?'double':t;
+  if(op==='^')return 'double';
+  if(['and','or','xor','eqv','imp'].includes(op)&&x==='boolean'&&y==='boolean')return 'boolean';
+  if(['and','or','xor','eqv','imp','\\','mod'].includes(op)){
+    if(!['byte','integer','boolean','empty'].includes(x)||!['byte','integer','boolean','empty'].includes(y))return 'long';
+    return x==='byte'&&y==='byte'?'byte':'integer';
+  }
+  if((x==='decimal'||y==='decimal')&&['+','-','*','/'].includes(op))return 'decimal';
+  if((op==='+'||op==='-')&&(x==='date'||y==='date')&&!(op==='-'&&x==='date'&&y==='date'))return 'date';
+  if(op==='-'&&x==='date'&&y==='date')return 'double';
+  if(x==='empty')x=y==='empty'?'integer':y;if(y==='empty')y=x;
+  x=normal(x);y=normal(y);
+  if(op==='/'){
+    if(x==='decimal'||y==='decimal')return 'decimal';
+    return (x==='single'||y==='single')&&[x,y].every(t=>['byte','integer','single'].includes(t))?'single':'double';
+  }
+  if((x==='single'&&y==='long')||(x==='long'&&y==='single'))return 'double';
+  if(op==='*'&&[x,y].includes('currency')&&[x,y].some(t=>['single','double'].includes(t)))return 'double';
+  const order=op==='*'?['byte','integer','long','single','currency','double','decimal']:['byte','integer','long','single','double','currency','decimal'];
+  return order[Math.max(order.indexOf(x),order.indexOf(y))]||'double';
+}
+function compareScalar(a,b,compare){
+  let x=unbox(a),y=unbox(b),tx=scalarType(a),ty=scalarType(b);
+  if(tx==='empty'){x=ty==='string'?'':0;tx=ty==='string'?'string':'integer';}
+  if(ty==='empty'){y=tx==='string'?'':0;ty=tx==='string'?'string':'integer';}
+  const sx=tx==='string',sy=ty==='string';
+  if(sx!==sy){
+    if(a.variant&&b.variant)return sx?1:-1;
+    if(sx&&!a.variant&&b.variant||sy&&!b.variant&&a.variant){x=vbString(a);y=vbString(b);tx=ty='string';}
+    else {const target=sx?ty:tx;if(sx){x=coerce(a,target);tx=target;}else {y=coerce(b,target);ty=target;}}
+  }
+  if(tx==='string'&&ty==='string'){
+    if(compare==='text'){x=x.toLocaleLowerCase();y=y.toLocaleLowerCase();}
+    return x<y?-1:x>y?1:0;
+  }
+  if(tx==='decimal'||ty==='decimal')return decimal(tagScalar(x,tx)).compare(decimal(tagScalar(y,ty)));
+  if(tx==='date'||ty==='date'){x=numeric(x);y=numeric(y);return x<y?-1:x>y?1:0;}
+  if(tx==='currency'||ty==='currency'){x=new VBCurrency(x).raw;y=new VBCurrency(y).raw;}
+  else {x=numeric(x);y=numeric(y);if((tx==='single'||ty==='single')&&tx!=='long'&&ty!=='long'){x=Math.fround(x);y=Math.fround(y);}}
+  return x<y?-1:x>y?1:0;
+}
+/** Scalar expressions implement VB promotion without relying on JS coercion.
+ * Unboxed low-level SDK operators retain their established raw-value API. */
+function scalarBinary(op,left,right,compare='binary'){
+  const a=left instanceof VBScalar?left:tagScalar(left,scalarType(left),true),b=right instanceof VBScalar?right:tagScalar(right,scalarType(right),true);
+  let x=unbox(a),y=unbox(b);const tx=scalarType(a),ty=scalarType(b),variant=!!(a?.variant||b?.variant);
+  if(op==='is')return tagScalar(binary('is',x,y),'boolean');
+  if(x instanceof VBErrorValue||y instanceof VBErrorValue){
+    if(x instanceof VBErrorValue&&y instanceof VBErrorValue&&['=','<>','<','>','<=','>='].includes(op))return scalarBinary(op,tagScalar(x.number,'long',true),tagScalar(y.number,'long',true));
+    throw new VBError('Type mismatch',13);
+  }
+  if(x===MISSING||y===MISSING)throw new VBError('Argument not optional',449);
+  if(x===NOTHING||y===NOTHING)throw new VBError('Object variable not set',91);
+  if(op==='&')return x===null&&y===null?tagScalar(null,'null',true):tagScalar((x==null?'':vbString(a))+(y==null?'':vbString(b)),'string',variant);
+  if(x===null||y===null){
+    if(!['and','or','imp'].includes(op))return tagScalar(null,'null',true);
+    const other=x===null?b:a;
+    if(unbox(other)===null)return tagScalar(null,'null',true);
+    const n=coerce(other,'long'),t=scalarType(other),type=t==='boolean'?'boolean':t==='byte'?'byte':['integer','empty'].includes(t)?'integer':'long';
+    if(op==='and'&&n===0)return tagScalar(0,type==='boolean'?'boolean':type,true);
+    if(op==='or'&&n!==0)return tagScalar(n,type,true);
+    if(op==='imp'){
+      const result=x===null?n:type==='byte'?(~n)&255:~n;
+      if(result!==0)return tagScalar(result,type,true);
+    }
+    return tagScalar(null,'null',true);
+  }
+  if(['=','<>','<','>','<=','>='].includes(op)){
+    const c=compareScalar(a,b,compare),result={'=':c===0,'<>':c!==0,'<':c<0,'>':c>0,'<=':c<=0,'>=':c>=0}[op];
+    return tagScalar(result?-1:0,'boolean',variant);
+  }
+  if(op==='like')return tagScalar(binary(op,vbString(a),vbString(b),compare),'boolean',variant);
+  if(op==='+'){
+    if(tx==='empty'&&ty!=='empty')return tagScalar(y,ty==='boolean'?'integer':ty,variant);
+    if(ty==='empty'&&tx!=='empty')return tagScalar(x,tx==='boolean'?'integer':tx,variant);
+    const sx=tx==='string',sy=ty==='string';
+    if(sx&&sy||sx&&!a.variant&&b.variant||sy&&!b.variant&&a.variant)return tagScalar(vbString(a)+vbString(b),'string',variant);
+    if(sx!==sy&&!a.variant&&!b.variant)throw new VBError('Type mismatch',13);
+  }
+  const type=arithmeticType(a,b,op);
+  if(type==='decimal'&&['+','-','*','/'].includes(op)){
+    const da=decimal(a),db=decimal(b);return tagScalar(op==='+'?da.add(db):op==='-'?da.subtract(db):op==='*'?da.multiply(db):da.divide(db),'decimal',variant);
+  }
+  if(type==='currency'&&['+','-','*'].includes(op)){
+    const ca=new VBCurrency(x),cb=new VBCurrency(y);return tagScalar(new VBCurrency(op==='+'?ca.raw+cb.raw:op==='-'?ca.raw-cb.raw:roundRatio(ca.raw*cb.raw,10000n),true),'currency',variant);
+  }
+  if(['and','or','xor','eqv','imp','\\','mod'].includes(op)){x=coerce(x,'long');y=coerce(y,'long');}
+  else{x=numeric(x);y=numeric(y);}
+  if(op==='^'&&(x===0&&y<0||x<0&&!Number.isInteger(y)))throw new VBError('Invalid procedure call or argument',5);
+  if(op==='/'&&x===0&&y===0&&!(ty==='empty'&&['single','double','string','date'].includes(tx)))throw new VBError('Overflow',6);
+  let result=binary(op,x,y,compare);
+  if(type==='byte'&&['eqv','imp'].includes(op))result&=255;
+  if(type==='date'){
+    try{return tagScalar(asDate(result),'date',variant);}catch(e){if(!variant)throw e;return scalarResult(result,'double',true);}
+  }
+  return scalarResult(result,type,variant);
+}
+function scalarUnary(op,input){
+  const value=input instanceof VBScalar?input:tagScalar(input,scalarType(input),true),raw=unbox(value),type=scalarType(value),variant=!!value?.variant;
+  if(raw===null)return tagScalar(null,'null',true);
+  if(op==='not'){
+    const result=~coerce(raw,'long'),out=type==='boolean'?'boolean':type==='byte'?'byte':['integer','empty'].includes(type)?'integer':'long';
+    return tagScalar(out==='byte'?result&255:result,out,variant);
+  }
+  if(type==='currency')return tagScalar(op==='-'?new VBCurrency(-raw.raw,true):raw,type,variant);
+  if(type==='decimal')return tagScalar(op==='-'?raw.negate():raw,type,variant);
+  const out=type==='byte'||type==='boolean'||type==='empty'?'integer':type==='string'?'double':type;
+  if(out==='date')return tagScalar(asDate(op==='-'?-numeric(raw):numeric(raw)),'date',variant);
+  return scalarResult(op==='-'?-numeric(raw):numeric(raw),out,variant);
+}
+
 
 /** Stable typed view: interface-only dispatch without copying object identity. */
 class VBInterfaceView {
@@ -1127,9 +1856,12 @@ const objectIdentity=value=>value?.__vbInterface?value.target:value;
 function objectSupports(value,name){const target=objectIdentity(value),type=lower(name).replace(/^vb\./,'');return !!target?.__vbInstance&&(lower(target.module.name)===type||Object.hasOwn(target.module.interfaceBindings||{},type));}
 function interfaceView(value,type){const target=objectIdentity(value),key=lower(type);if(lower(target.module.name)===key)return target;if(!Object.hasOwn(target.module.interfaceBindings||{},key))throw new VBError('Type mismatch: object does not implement '+type,13);target.interfaceViews ||= new Map();if(!target.interfaceViews.has(key))target.interfaceViews.set(key,new VBInterfaceView(target,key));return target.interfaceViews.get(key);}
 const isNothing = value => value === NOTHING;
-function truth(value){if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);if(value===MISSING)throw new VBError('Argument not optional',449);if(value===NOTHING)throw new VBError('Object variable not set',91);return value != null && value !== undefined && (typeof value === 'string' ? value !== '' : Number(value) !== 0);}
-function numeric(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return 0;if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return dateToSerial(value);const n=Number(value);if(!Number.isFinite(n))throw new VBError('Type mismatch',13);return n; }
+function truth(value){if(value instanceof VBScalar&&value.type==='string')return coerce(value,'boolean')!==0;value=unbox(value);if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);if(value===MISSING)throw new VBError('Argument not optional',449);if(value===NOTHING)throw new VBError('Object variable not set',91);return value != null && value !== undefined && (typeof value === 'string' ? value !== '' : Number(value) !== 0);}
+function numeric(value) { value=unbox(value);if(typeof value==='boolean')return value?-1:0; if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return 0;if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return dateToSerial(value);if(typeof value==='string')value=normalizeNumericString(value);const n=Number(value);if(!Number.isFinite(n))throw new VBError(Number.isNaN(n)?'Type mismatch':'Overflow',Number.isNaN(n)?13:6);return n; }
 function decimal(value){
+  const type=scalarType(value);value=unbox(value);
+  if(type==='single')value=Number(value).toPrecision(7);
+  if(typeof value==='string')value=normalizeNumericString(value);
   if(value instanceof VBDecimal)return value;
   if(value instanceof VBCurrency)return VBDecimal.fromParts(value.raw,4);
   if(value===MISSING)throw new VBError('Argument not optional',449);
@@ -1137,7 +1869,59 @@ function decimal(value){
   if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   return new VBDecimal(value instanceof Date?numeric(value):value);
 }
-function vbString(value) { if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13); if(value===MISSING)throw new VBError('Argument not optional',449); if(isNothing(value))throw new VBError('Object variable or With block variable not set',91); if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);if(value instanceof Date)return value.toLocaleString();if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();return String(value); }
+/** Invariant numeric text. Locale-specific profiles can translate separators at
+ * the host boundary; parsing never accepts JavaScript-only 0x/Infinity/NaN. */
+function normalizeNumericString(value,target='double') {
+  const text=value.trim();if(text.length>4096)throw new VBError('Numeric input exceeds conversion limit',7);
+  const radix=text.match(/^([+-]?)&([hHoO])([0-9a-fA-F]+)$/);
+  if(radix){
+    if(radix[2].toLowerCase()==='o'&&/[^0-7]/.test(radix[3]))throw new VBError('Type mismatch',13);
+    let n=BigInt((radix[2].toLowerCase()==='h'?'0x':'0o')+radix[3]);
+    if(n>0xffffffffn)throw new VBError('Overflow',6);
+    n=BigInt.asIntN(target==='integer'?16:32,n);if(radix[1]==='-')n=-n;
+    return n.toString();
+  }
+  const normalized=text.replace(/,/g,'').replace(/[dD]/g,'e');
+  if(!text||!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(normalized)||/^[,+.-]*$/.test(text))throw new VBError('Type mismatch',13);
+  return normalized;
+}
+function scalarNumberString(value,type='double') {
+  const n=numeric(value);if(n===0)return '0';
+  if(type!=='single'&&type!=='double')return String(n);
+  const precision=type==='single'?7:15,rounded=Number(n.toPrecision(precision));
+  if(Math.abs(rounded)>=10**precision||Math.abs(rounded)<.0001){
+    const [m,e]=rounded.toExponential(precision-1).split('e');
+    return m.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'')+'E'+(Number(e)<0?'-':'+')+String(Math.abs(Number(e))).padStart(2,'0');
+  }
+  return String(rounded);
+}
+function vbString(value) {
+  if(value instanceof VBScalar){
+    if(value.type==='boolean')return value.value?'True':'False';
+    if(value.type==='single'||value.type==='double')return scalarNumberString(value.value,value.type);
+  }
+  value=unbox(value);
+  if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
+  if(value===MISSING)throw new VBError('Argument not optional',449);
+  if(isNothing(value))throw new VBError('Object variable or With block variable not set',91);
+  if(value===undefined)return '';if(value===null)throw new VBError('Invalid use of Null',94);
+  if(value instanceof Date){
+    const time=value.toLocaleTimeString('en-US'),base=value.getFullYear()===1899&&value.getMonth()===11&&value.getDate()===30;
+    return base?time:value.toLocaleDateString('en-US')+(value.getHours()||value.getMinutes()||value.getSeconds()?' '+time:'');
+  }
+  if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();
+  return typeof value==='boolean'?(value?'True':'False'):String(value);
+}
+/** Source Print/Write representations. Kept separate from debugger rendering. */
+function printScalar(value,csv=false){
+ const raw=unbox(value),type=scalarType(value);
+ if(type==='boolean')return csv?(raw?'#TRUE#':'#FALSE#'):(raw?'True':'False');
+ if(raw===null)return csv?'#NULL#':'Null';
+ if(raw===undefined)return '';
+ if(raw instanceof VBErrorValue)return csv?'#ERROR '+raw.number+'#':raw.toString();
+ if(raw instanceof Date&&csv){const pad=n=>String(n).padStart(2,'0');return '#'+String(raw.getFullYear()).padStart(4,'0')+'-'+pad(raw.getMonth()+1)+'-'+pad(raw.getDate())+' '+pad(raw.getHours())+':'+pad(raw.getMinutes())+':'+pad(raw.getSeconds())+'#';}
+ const text=vbString(value);return csv&&type==='string'? '"'+text.replace(/"/g,'""')+'"':text;
+}
 /** Round an exact rational to the nearest integer, ties to even. */
 function roundRatio(numerator, denominator) {
   if (denominator === 0n) throw new VBError('Division by zero',11);
@@ -1149,13 +1933,14 @@ function roundRatio(numerator, denominator) {
 }
 /** Parse invariant decimal Currency without passing through IEEE-754 first. */
 function currencyRaw(value) {
+  value=unbox(value);
   if(value instanceof VBCurrency)return value.raw;
   if(value===undefined)return 0n;
   if(value===null)throw new VBError('Invalid use of Null',94);
   if(isNothing(value))throw new VBError('Object variable not set',91);
   if(value instanceof Date)value=numeric(value);
   if(typeof value==='boolean')value=value?-1:0;
-  const text=String(value).trim();
+  const text=typeof value==='string'?normalizeNumericString(value):String(value).trim();
   const m=text.match(/^([+-]?)(\d+(?:\.\d*)?|\.\d+)(?:[eEdD]([+-]?\d+))?$/);
   if(!m)throw new VBError('Type mismatch',13);
   const exponent=Number(m[3]||0), parts=m[2].split('.'), digits=(parts.join('').replace(/^0+/,'')||'0');
@@ -1185,28 +1970,28 @@ function cloneValue(value,seen=new Map(),depth=0){
   if(value instanceof Date)return new Date(value);
   if(!value||typeof value!=='object'||value===NOTHING||value instanceof VBCurrency)return value;
   if(seen.has(value))return seen.get(value);
-  if(value instanceof VBArray){const copy=Object.create(VBArray.prototype);seen.set(value,copy);copy.type=value.type;copy.bounds=value.bounds.map(b=>[...b]);copy.dynamic=value.dynamic;copy.elementFactory=value.elementFactory;copy.fixedLength=value.fixedLength;copy.data=value.data.map(v=>cloneValue(v,seen,depth+1));return copy;}
-  if(value.__fields instanceof Map){const fields=new Map(),copy=makeRecord(value.__type,fields);seen.set(value,copy);for(const [name,cell] of value.__fields){const field=Object.create(Cell.prototype);Object.assign(field,{type:cell.type,constant:false,fixedLength:cell.fixedLength,isArray:cell.isArray,elementType:cell.elementType,_value:cloneValue(cell.get(),seen,depth+1)});fields.set(name,field);Object.defineProperty(copy,name,{enumerable:true,get:()=>field.get(),set:v=>field.set(v)});}return copy;}
+  if(value instanceof VBArray){const copy=Object.create(VBArray.prototype);seen.set(value,copy);copy.type=value.type;copy.bounds=value.bounds.map(b=>[...b]);copy.dynamic=value.dynamic;copy.elementFactory=value.elementFactory;copy.fixedLength=value.fixedLength;copy.scalarData=value.scalarData?.slice();copy.data=value.data.map(v=>cloneValue(v,seen,depth+1));return copy;}
+  if(value.__fields instanceof Map){const fields=new Map(),copy=makeRecord(value.__type,fields);seen.set(value,copy);for(const [name,cell] of value.__fields){const field=Object.create(Cell.prototype);Object.assign(field,{type:cell.type,constant:false,fixedLength:cell.fixedLength,isArray:cell.isArray,elementType:cell.elementType,_value:cloneValue(cell.get(),seen,depth+1),_scalar:cell.getScalar?.()});fields.set(name,field);Object.defineProperty(copy,name,{enumerable:true,get:()=>field.get(),set:v=>field.set(v)});}return copy;}
   return value;
 }
 function matchingRecord(target,source){
   if(lower(target.__type)!==lower(source.__type)||target.__fields.size!==source.__fields.size)return false;
   for(const [key,cell]of target.__fields){const next=source.__fields.get(key);if(!next||lower(cell.type)!==lower(next.type)||cell.fixedLength!==next.fixedLength||!!cell.isArray!==!!next.isArray)return false;if(cell.get()?.__fields&&(!next.get()?.__fields||!matchingRecord(cell.get(),next.get())))return false;}return true;
 }
-function commitRecord(target,source){for(const [key,cell]of target.__fields){const next=source.__fields.get(key).get();if(cell.get()?.__fields&&next?.__fields)commitRecord(cell.get(),next);else if(cell.get() instanceof VBArray&&next instanceof VBArray){const array=cell.get();array.bounds=next.bounds;array.data=next.data;array.elementFactory=next.elementFactory;array.fixedLength=next.fixedLength;array.dynamic=next.dynamic;}else cell._value=next;}return target;}
+function commitRecord(target,source){for(const [key,cell]of target.__fields){const next=source.__fields.get(key).get();if(cell.get()?.__fields&&next?.__fields)commitRecord(cell.get(),next);else if(cell.get() instanceof VBArray&&next instanceof VBArray){const array=cell.get();array.bounds=next.bounds;array.data=next.data;array.elementFactory=next.elementFactory;array.fixedLength=next.fixedLength;array.dynamic=next.dynamic;array.scalarData=next.scalarData;}else {cell._value=next;cell._scalar=source.__fields.get(key).getScalar();}}return target;}
 function defaultValue(type='Variant') { switch(lower(type)){case 'string':return '';case 'boolean':case 'byte':case 'integer':case 'long':case 'single':case 'double':return 0;case 'currency':return new VBCurrency();case 'date':return new Date(1899,11,30);case 'object':return NOTHING;default:return undefined;} }
 function coerce(value,type='Variant',fixedLength=null) {
-  type=lower(type);
+  const original=value;value=unbox(value);type=lower(type);
   if(type==='variant')return cloneValue(value);
   if(value instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   if(value===MISSING)throw new VBError('Argument not optional',449);
   if(type==='object'){if(value===NOTHING || value&&typeof value==='object'&&!(value instanceof Date)&&!(value instanceof VBCurrency)&&!(value instanceof VBDecimal)&&!(value instanceof VBArray)&&!value.__fields)return value;throw new VBError(value===null?'Invalid use of Null':'Object required',value===null?94:424);}
-  if(type==='string'){const s=vbString(value);return fixedLength==null?s:s.padEnd(fixedLength,' ').slice(0,fixedLength);}
-  if(type==='date')return asDate(value);
-  if(type==='decimal')return decimal(value);
+  if(type==='string'){const s=vbString(original);return fixedLength==null?s:s.padEnd(fixedLength,' ').slice(0,fixedLength);}
+  if(type==='date')return asDate(scalarType(original)==='boolean'||value instanceof VBCurrency||value instanceof VBDecimal?numeric(value):value);
+  if(type==='decimal')return decimal(original);
   if(type==='currency')return value instanceof VBCurrency?value:new VBCurrency(value);
-  if(type==='boolean'){if(typeof value==='string'&&/^(true|false)$/i.test(value))return /^true$/i.test(value)?-1:0;return numeric(value)!==0?-1:0;}
-  if(['byte','integer','long'].includes(type)){const n=value instanceof VBDecimal?Number(value.roundedInteger()):bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
+  if(type==='boolean'){if(typeof value==='string'){if(value==='#TRUE#'||/^(true)$/i.test(value))return -1;if(value==='#FALSE#'||/^(false)$/i.test(value))return 0;}return numeric(value)!==0?-1:0;}
+  if(['byte','integer','long'].includes(type)){if(type==='byte'&&scalarType(original)==='boolean')return value?255:0;if(typeof value==='string')value=new VBDecimal(normalizeNumericString(value,type));const n=value instanceof VBDecimal?Number(value.roundedInteger()):bankersRound(numeric(value)),bounds={byte:[0,255],integer:[-32768,32767],long:[-2147483648,2147483647]}[type];if(n<bounds[0]||n>bounds[1])throw new VBError('Overflow',6);return n;}
   if(type==='single'){const n=Math.fround(numeric(value));if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;}
   if(type==='double')return numeric(value);
   if(value?.__fields){if(lower(value.__type)!==type)throw new VBError('Type mismatch',13);return cloneValue(value);}
@@ -1214,9 +1999,10 @@ function coerce(value,type='Variant',fixedLength=null) {
   return value;
 }
 class Cell {
-  constructor(type='Variant',value=defaultValue(type),constant=false,fixedLength=null){this.type=type;this.constant=constant;this.fixedLength=fixedLength;this._value=coerce(value,type,fixedLength);}
+  constructor(type='Variant',value=defaultValue(type),constant=false,fixedLength=null){this.type=type;this.constant=constant;this.fixedLength=fixedLength;this._scalar=storageScalar(value,type,fixedLength);this._value=unbox(this._scalar);}
   get(){return this._value;}
-  set(value){if(this.constant)throw new VBError('Assignment to constant not permitted',500);const next=coerce(value,this.type,this.fixedLength);if(this.isArray){if(!(next instanceof VBArray)||lower(next.type)!==lower(this.elementType))throw new VBError('Array type mismatch',13);}if(this._value?.__fields){if(!next?.__fields||!matchingRecord(this._value,next))throw new VBError('User-defined type mismatch',13);return commitRecord(this._value,next);}this._value=next;return this._value;}
+  getScalar(){if(!scalarType(this._value))return this._value;return this._scalar instanceof VBScalar&&Object.is(this._scalar.value,this._value)?this._scalar:storageScalar(this._value,this.type,this.fixedLength);}
+  set(value){if(this.constant)throw new VBError('Assignment to constant not permitted',500);const tagged=storageScalar(value,this.type,this.fixedLength),next=unbox(tagged);if(this.isArray){if(!(next instanceof VBArray)||lower(next.type)!==lower(this.elementType))throw new VBError('Array type mismatch',13);}if(this._value?.__fields){if(!next?.__fields||!matchingRecord(this._value,next))throw new VBError('User-defined type mismatch',13);return commitRecord(this._value,next);}this._value=next;this._scalar=tagged;return this._value;}
 }
 /** Lazily creates As New variables; assigning Nothing resets the factory. */
 class LazyCell extends Cell {
@@ -1226,52 +2012,59 @@ class LazyCell extends Cell {
   peek(){return this._value;}
 }
 class Ref {
-  constructor(get,set,type='Variant',fixedLength=null){this.get=get;this.set=set;this.type=type;this.fixedLength=fixedLength;}
+  constructor(get,set,type='Variant',fixedLength=null,getScalar=null){this.get=get;this.set=set;this.type=type;this.fixedLength=fixedLength;if(getScalar)this.getScalar=getScalar;}
 }
 class VBArray {
   constructor(bounds=[],type='Variant',elementFactory=null,fixedLength=null){this.elementFactory=elementFactory;this.fixedLength=fixedLength;this.type=type;if(bounds.length>60)throw new VBError('An array cannot exceed 60 dimensions',9);this.bounds=bounds.map(([l,u])=>{const b=[bankersRound(numeric(l)),bankersRound(numeric(u))];if(b.some(n=>n< -2147483648||n>2147483647))throw new VBError('Array bound overflow',6);return b;});this.dynamic=!bounds.length;this.allocate();}
   allocate(){let n=this.bounds.length?1:0;for(const [l,u]of this.bounds){if(u<l)throw new VBError('Subscript out of range',9);n*=u-l+1;if(n>1000000)throw new VBError('Array allocation exceeds browser runtime limit (1,000,000 elements)',7);}this.data=Array.from({length:n},()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
   offset(indices){if(indices.length!==this.bounds.length||!indices.length)throw new VBError('Subscript out of range',9);let offset=0;for(let d=0;d<indices.length;d++){const [l,u]=this.bounds[d],i=bankersRound(numeric(indices[d]));if(i<l||i>u)throw new VBError('Subscript out of range',9);offset=offset*(u-l+1)+i-l;}return offset;}
   get(...indices){return this.data[this.offset(indices)];}
-  set(indices,value){const offset=this.offset(indices),next=coerce(value,this.type,this.fixedLength);if(this.data[offset]?.__fields&&next?.__fields){if(!matchingRecord(this.data[offset],next))throw new VBError('User-defined type mismatch',13);commitRecord(this.data[offset],next);}else this.data[offset]=next;return value;}
+  getScalar(...indices){const i=this.offset(indices),tag=this.scalarData?.[i];if(!scalarType(this.data[i]))return this.data[i];return tag instanceof VBScalar&&Object.is(tag.value,this.data[i])?tag:storageScalar(this.data[i],this.type,this.fixedLength);}
+  set(indices,value){const offset=this.offset(indices),tagged=storageScalar(value,this.type,this.fixedLength),next=unbox(tagged);if(this.data[offset]?.__fields&&next?.__fields){if(!matchingRecord(this.data[offset],next))throw new VBError('User-defined type mismatch',13);commitRecord(this.data[offset],next);}else {this.data[offset]=next;(this.scalarData||=[])[offset]=tagged;}return unbox(value);}
   redim(bounds,preserve=false){
     const normalized=bounds.map(([l,u])=>[bankersRound(numeric(l)),bankersRound(numeric(u))]),old=this.bounds;
     if(preserve&&old.length&&(old.length!==normalized.length||old.some(([l,u],i)=>l!==normalized[i][0]||(i<old.length-1&&u!==normalized[i][1]))))throw new VBError('ReDim Preserve can change only the upper bound of the last dimension',9);
     if(!this.dynamic)throw new VBError('This array is fixed or temporarily locked',10);
     const next=new VBArray(normalized,this.type,this.elementFactory,this.fixedLength);next.dynamic=true;
-    if(preserve&&old.length){for(const indices of this.indices()){if(indices.every((n,d)=>n<=normalized[d][1]))next.set(indices,this.get(...indices));}}
-    this.bounds=next.bounds;this.data=next.data;return this;
+    if(preserve&&old.length){for(const indices of this.indices()){if(indices.every((n,d)=>n<=normalized[d][1]))next.set(indices,this.getScalar(...indices));}}
+    this.bounds=next.bounds;this.data=next.data;this.scalarData=next.scalarData;return this;
   }
-  erase(){if(this.dynamic){this.bounds=[];this.data=[];}else this.data=this.data.map(()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
+  erase(){this.scalarData=[];if(this.dynamic){this.bounds=[];this.data=[];}else this.data=this.data.map(()=>this.elementFactory?this.elementFactory():coerce(defaultValue(this.type),this.type,this.fixedLength));}
   *indices(){if(!this.bounds.length||!this.data.length)return;const at=this.bounds.map(([l])=>l);for(;;){yield [...at];let d=0;for(;d<at.length;d++){if(++at[d]<=this.bounds[d][1])break;at[d]=this.bounds[d][0];}if(d===at.length)return;}}
   *[Symbol.iterator](){for(const at of this.indices())yield this.get(...at);}
-  static from(values,base=0){const a=Object.create(VBArray.prototype);a.type='Variant';a.bounds=[[base,base+values.length-1]];a.dynamic=true;a.data=[...values];return a;}
+  *scalarIterator(){for(const at of this.indices())yield this.getScalar(...at);}
+  static from(values,base=0){const a=Object.create(VBArray.prototype);a.type='Variant';a.bounds=[[base,base+values.length-1]];a.dynamic=true;a.scalarData=values.map(v=>storageScalar(v,'Variant'));a.data=a.scalarData.map(unbox);return a;}
 }
 class VBCollection {
   constructor(){this.items=[];this.keys=new Map();}
   get Count(){return this.items.length;}
-  Add(item,key,before,after){if(key!==undefined&&key!==''&&this.keys.has(String(key).toLowerCase()))throw new VBError('This key is already associated with an element of this collection',457);let index=this.items.length;if(before!==undefined)index=this.index(before);if(after!==undefined)index=this.index(after)+1;const entry={item,key:key===undefined?null:String(key).toLowerCase()};this.items.splice(index,0,entry);if(entry.key!==null)this.keys.set(entry.key,entry);return item;}
-  index(key){if(typeof key==='number'){if(key<1||key>this.items.length)throw new VBError('Subscript out of range',9);return Math.trunc(key)-1;}const entry=this.keys.get(String(key).toLowerCase());if(!entry)throw new VBError('Invalid procedure call or argument',5);return this.items.indexOf(entry);}
+  Add(item,key,before,after){key=unbox(key);before=unbox(before);after=unbox(after);if(key!==undefined&&key!==''&&this.keys.has(String(key).toLowerCase()))throw new VBError('This key is already associated with an element of this collection',457);let index=this.items.length;if(before!==undefined)index=this.index(before);if(after!==undefined)index=this.index(after)+1;const scalar=storageScalar(item,'Variant');const entry={item:unbox(scalar),scalar,key:key===undefined?null:String(key).toLowerCase()};this.items.splice(index,0,entry);if(entry.key!==null)this.keys.set(entry.key,entry);return item;}
+  index(key){key=unbox(key);if(typeof key==='number'){if(key<1||key>this.items.length)throw new VBError('Subscript out of range',9);return Math.trunc(key)-1;}const entry=this.keys.get(String(key).toLowerCase());if(!entry)throw new VBError('Invalid procedure call or argument',5);return this.items.indexOf(entry);}
   Item(key){return this.items[this.index(key)].item;}
+  itemScalar(key){const entry=this.items[this.index(key)];return entry.scalar??storageScalar(entry.item,'Variant');}
+  *scalarIterator(){for(const entry of this.items)yield entry.scalar??storageScalar(entry.item,'Variant');}
   Remove(key){const i=this.index(key),entry=this.items[i];this.items.splice(i,1);if(entry.key!==null)this.keys.delete(entry.key);}
   [Symbol.iterator](){return this.items.map(x=>x.item)[Symbol.iterator]();}
 }
 class VBDictionary {
   constructor(){this.map=new Map();this.CompareMode=0;}
-  normalize(k){return this.CompareMode===1&&typeof k==='string'?k.toLowerCase():k;}
+  normalize(k){k=unbox(k);return this.CompareMode===1&&typeof k==='string'?k.toLowerCase():k;}
   get Count(){return this.map.size;}
-  Add(k,v){const key=this.normalize(k);if(this.map.has(key))throw new VBError('Key already exists',457);this.map.set(key,{key:k,value:v});}
+  Add(k,v){const key=this.normalize(k);if(this.map.has(key))throw new VBError('Key already exists',457);const scalar=storageScalar(v,'Variant');this.map.set(key,{key:unbox(k),keyScalar:storageScalar(k,'Variant'),value:unbox(scalar),scalar});}
   Item(k){return this.map.get(this.normalize(k))?.value;}
-  setItem(k,v){this.map.set(this.normalize(k),{key:k,value:v});}
+  itemScalar(k){const entry=this.map.get(this.normalize(k));return entry?.scalar??storageScalar(entry?.value,'Variant');}
+  setItem(k,v){const scalar=storageScalar(v,'Variant'),key=this.normalize(k),entry=this.map.get(key);if(entry){entry.value=unbox(scalar);entry.scalar=scalar;}else this.map.set(key,{key:unbox(k),keyScalar:storageScalar(k,'Variant'),value:unbox(scalar),scalar});}
   Exists(k){return this.map.has(this.normalize(k))?-1:0;}
   Remove(k){if(!this.map.delete(this.normalize(k)))throw new VBError('Key not found',5);}
   RemoveAll(){this.map.clear();}
-  Keys(){return VBArray.from([...this.map.values()].map(v=>v.key));}
-  Items(){return VBArray.from([...this.map.values()].map(v=>v.value));}
+  Keys(){return VBArray.from([...this.map.values()].map(v=>v.keyScalar??v.key));}
+  Items(){return VBArray.from([...this.map.values()].map(v=>v.scalar??v.value));}
+  *scalarIterator(){for(const entry of this.map.values())yield entry.keyScalar??storageScalar(entry.key,'Variant');}
   [Symbol.iterator](){return this.Keys()[Symbol.iterator]();}
 }
-function unary(op,value){if(value===null)return null;if(value instanceof VBDecimal){if(op==='-')return value.negate();if(op==='+')return value;}if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
+function unary(op,value){if(value instanceof VBScalar)return scalarUnary(op,value);if(value===null)return null;if(value instanceof VBDecimal){if(op==='-')return value.negate();if(op==='+')return value;}if(value instanceof VBCurrency){if(op==='-')return new VBCurrency(-value.raw,true);if(op==='+')return value;}if(op==='not')return ~bankersRound(numeric(value));if(op==='-')return -numeric(value);return numeric(value);}
 function binary(op,a,b,compare='binary') {
+  if(a instanceof VBScalar||b instanceof VBScalar)return scalarBinary(op,a,b,compare);
   if(a instanceof VBErrorValue||b instanceof VBErrorValue)throw new VBError('Type mismatch',13);
   if(op==='is'){const object=v=>v===NOTHING||v&&typeof v==='object'&&!(v instanceof Date)&&!(v instanceof VBCurrency)&&!(v instanceof VBDecimal)&&!(v instanceof VBArray)&&!v.__fields;if(!object(a)||!object(b))throw new VBError('Object required',424);return objectIdentity(a)===objectIdentity(b)?-1:0;}
   if(isNothing(a)||isNothing(b))throw new VBError('Object variable not set',91);
@@ -1293,15 +2086,15 @@ function binary(op,a,b,compare='binary') {
   switch(op){case '+':n=x+y;break;case '-':n=x-y;break;case '*':n=x*y;break;case '/':if(y===0)throw new VBError('Division by zero',11);n=x/y;break;case '\\':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=Math.trunc(bankersRound(x)/bankersRound(y));break;case 'mod':if(bankersRound(y)===0)throw new VBError('Division by zero',11);n=bankersRound(x)%bankersRound(y);break;case '^':n=x**y;break;case 'and':return bankersRound(x)&bankersRound(y);case 'or':return bankersRound(x)|bankersRound(y);case 'xor':return bankersRound(x)^bankersRound(y);case 'eqv':return ~(bankersRound(x)^bankersRound(y));case 'imp':return (~bankersRound(x))|bankersRound(y);default:throw new VBError(`Unknown operator ${op}`,1002);}
   if(!Number.isFinite(n))throw new VBError('Overflow',6);return n;
 }
-function describe(value){if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}
+function describe(value){if(value instanceof VBScalar)return value.type==='boolean'?value.toString():describe(value.value);if(value instanceof VBErrorValue)return value.toString();if(value===MISSING)return '<Missing>'; if(value===undefined)return 'Empty';if(value===null)return 'Null';if(value===NOTHING)return 'Nothing';if(value instanceof VBArray)return `Array(${value.bounds.map(([l,u])=>`${l} To ${u}`).join(', ')})`;if(value instanceof VBCurrency||value instanceof VBDecimal)return value.toString();if(typeof value==='string')return '"'+value+'"';if(value instanceof Date)return '#'+value.toLocaleString()+'#';if(typeof value==='object')return value.__type||value.constructor?.name||'Object';return String(value);}
 
-return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,vbString,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
+return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBScalar,SCALAR_TYPES,unbox,scalarType,tagScalar,storageScalar,readScalar,literalScalar,signedLiteralScalar,scalarBinary,scalarUnary,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,normalizeNumericString,scalarNumberString,vbString,printScalar,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
 })();
 
 /* automation.js */
-__modules[16]=(()=>{
-const {VBError}=__modules[11];
-const {Ref,MISSING}=__modules[15];
+__modules[22]=(()=>{
+const {VBError}=__modules[17];
+const {Ref,MISSING,unbox,readScalar}=__modules[21];
 /** Trusted host-installed Automation adapters. Projects never supply executable factories. */
 
 
@@ -1314,8 +2107,9 @@ function automationDefaultName(o){return state(o).defaultMember;}
 async function automationInvoke(o,name,mode,args=[]){
   const {s,m}=member(o,name,mode);if(args.length>65)throw new VBError('Too many Automation arguments',450);
   const params=(mode===4||mode===8)?[...m.params,{name:'value'}]:m.params;if(args.length>params.length||params.some((p,i)=>!p.optional&&(i>=args.length||args[i]===MISSING)))throw new VBError('Wrong number of Automation arguments',450);
-  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(await arg.ref.get());}else values.push(arg);}
-  const result=await s.adapter.invoke(m.name,mode,values,refs.map(([i])=>i));
+  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(typeof s.adapter.invokeScalar==='function'?await readScalar(arg.ref):unbox(await arg.ref.get()));}else values.push(typeof s.adapter.invokeScalar==='function'?arg:unbox(arg));}
+  const invoke=s.adapter.invokeScalar||s.adapter.invoke;
+  const result=await invoke.call(s.adapter,m.name,mode,values,refs.map(([i])=>i));
   // An adapter must return an explicit value and optional copyback array.
   if(s.closed||s.session.closed)throw new VBError('Automation session closed during invocation',91);
   if(!result||typeof result!=='object'||!Object.hasOwn(result,'value'))throw new VBError('Invalid Automation adapter response',440);
@@ -1327,7 +2121,7 @@ function automationMember(o,name,readProperty=false){
   const {m}=member(o,name),mode=m.modes.includes(2)?2:m.modes.includes(1)?1:0;
   if(!mode)throw new VBError('Automation property is write-only',394);
   if(readProperty&&mode===2&&!m.params.length)return automationInvoke(o,m.name,mode,[]);
-  const fn=(...args)=>automationInvoke(o,m.name,mode,args);fn.vbRawArgs=true;fn.vbPreserveMissing=true;fn.vbParams=m.params;
+  const fn=(...args)=>automationInvoke(o,m.name,mode,args);fn.vbScalarInvoke=args=>automationInvoke(o,m.name,mode,args);fn.vbRawArgs=true;fn.vbPreserveMissing=true;fn.vbParams=m.params;
   return {__native:fn,__signature:{params:m.params},receiver:o};
 }
 function automationReference(o,name,args=[],objectSet=false){
@@ -1353,13 +2147,13 @@ class AutomationSession {
 }
 
 /** Bounded enumeration snapshot, not an unrestricted native iterator lifetime. */
-async function automationEnumerate(o){const s=state(o);if(typeof s.adapter.enumerate!=='function')throw new VBError('Automation object does not expose enumeration',451);const values=await s.adapter.enumerate();state(o);if(!Array.isArray(values)||values.length>10000)throw new VBError('Invalid Automation enumeration',7);return values;}
+async function automationEnumerate(o){const s=state(o);if(typeof s.adapter.enumerate!=='function')throw new VBError('Automation object does not expose enumeration',451);const values=await (s.adapter.enumerateScalar||s.adapter.enumerate).call(s.adapter);state(o);if(!Array.isArray(values)||values.length>10000)throw new VBError('Invalid Automation enumeration',7);return values;}
 
 return {isAutomationObject,automationDefaultName,automationInvoke,automationMember,automationReference,AutomationRegistry,automationEnumerate};
 })();
 
 /* ..\controls\adapters.js */
-__modules[17]=(()=>{
+__modules[23]=(()=>{
 
 /** Host code only. Native project data cannot register code or fetch plug-ins. */
 class ControlAdapterRegistry {
@@ -1384,9 +2178,9 @@ return {ControlAdapterRegistry};
 })();
 
 /* ..\data\common.js */
-__modules[18]=(()=>{
-const {VBError}=__modules[11];
-const {VBArray, VBCurrency, VBDecimal}=__modules[15];
+__modules[24]=(()=>{
+const {VBError}=__modules[17];
+const {VBArray, VBCurrency, VBDecimal}=__modules[21];
 
 
 const DATA_LIMITS = Object.freeze({rows:100000, cells:1000000, bytes:20*1024*1024, pages:100});
@@ -1564,11 +2358,14 @@ return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,
 })();
 
 /* ..\data\defaults.js */
-__modules[19]=(()=>{
+__modules[25]=(()=>{
 
 // Registration is private to trusted library objects; a forged __type never grants a default property.
 const values = new WeakSet();
-function dataDefault(object) { values.add(object); return object; }
+const types = new WeakMap();
+function dataDefault(object, scalarType) { values.add(object); if (typeof scalarType === 'function') types.set(object, scalarType); return object; }
+// Type resolvers are registered only by trusted field/parameter constructors.
+function dataDefaultType(object) { return types.get(object)?.(); }
 function hasDataDefault(object) { return object != null && (typeof object === 'object' || typeof object === 'function') && values.has(object); }
 
 // A private allowlist for legacy public lowercase names such as rdoConnections.
@@ -1576,12 +2373,12 @@ const members = new WeakMap();
 function dataMembers(object,names) { members.set(object,new Set(names.map(name=>name.toLowerCase()))); return object; }
 function hasDataMember(object,name) { return members.get(object)?.has(String(name).toLowerCase()) || false; }
 
-return {dataDefault,hasDataDefault,dataMembers,hasDataMember};
+return {dataDefault,dataDefaultType,hasDataDefault,dataMembers,hasDataMember};
 })();
 
 /* ..\data\collection.js */
-__modules[20]=(()=>{
-const {assertData}=__modules[18];
+__modules[26]=(()=>{
+const {assertData}=__modules[24];
 
 class DataCollection {
   constructor(items=[]){this.items=items;}
@@ -1603,10 +2400,10 @@ return {DataCollection,NamedCollection};
 })();
 
 /* ..\data\recordset.js */
-__modules[21]=(()=>{
-const {dataDefault}=__modules[19];
-const {VBError}=__modules[11];
-const {VBArray,VBCurrency,VBDecimal,coerce,bankersRound,numeric,binary,truth}=__modules[15];
+__modules[27]=(()=>{
+const {dataDefault}=__modules[25];
+const {VBError}=__modules[17];
+const {VBArray,VBCurrency,VBDecimal,coerce,bankersRound,numeric,binary,truth}=__modules[21];
 
 
 
@@ -1614,6 +2411,7 @@ const {VBArray,VBCurrency,VBDecimal,coerce,bankersRound,numeric,binary,truth}=__
 const TYPES=new Map([[2,'Integer'],[3,'Long'],[4,'Single'],[5,'Double'],[6,'Currency'],[7,'Date'],[11,'Boolean'],[17,'Byte'],[16,'Integer'],[18,'Long'],[19,'Double'],[21,'Decimal'],[8,'String'],[129,'String'],[130,'String'],[200,'String'],[201,'String'],[202,'String'],[203,'String'],[12,'Variant'],[20,'Decimal'],[14,'Decimal'],[131,'Decimal'],[72,'GUID'],[133,'Date'],[134,'Date'],[135,'Date'],[128,'Binary'],[204,'Binary'],[205,'Binary']]);
 // Additional integer widths returned by native OLE DB schema rowsets.
 const INTEGER_RANGES=new Map([[16,[-128n,127n]],[18,[0n,65535n]],[19,[0n,4294967295n]],[20,[-(1n<<63n),(1n<<63n)-1n]],[21,[0n,(1n<<64n)-1n]]]);
+const fieldScalarType=type=>TYPES.get(Number(type));
 const fold=value=>String(value).toLowerCase();
 const copy=value=>value instanceof Date?new Date(value):value instanceof Uint8Array?value.slice():value;
 const args=value=>value instanceof VBArray?[...value]:Array.isArray(value)?value:[value];
@@ -1655,7 +2453,7 @@ class DisconnectedRecordset {
       },
       get Count(){return rs.columns.length;},
       setItem(key,value){this.Item(key).Value=value;},
-      Item(key){const col=rs.column(key);return dataDefault({Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}});},
+      Item(key){const col=rs.column(key);return dataDefault({Name:col.Name,Type:col.Type,DefinedSize:col.DefinedSize,get Value(){return copy(rs.current()[col.Name]);},set Value(value){rs.edit(col,value);},get OriginalValue(){const row=rs.current();return copy(rs._pending?.row===row?rs._pending.before?.[col.Name]??null:row[col.Name]);}},()=>fieldScalarType(col.Type));},
       [Symbol.iterator](){return rs.columns.map(c=>this.Item(c.Name)).values();}
     };
   }
@@ -1725,13 +2523,13 @@ class DisconnectedRecordset {
   setRowValue(row,key,value,expected){this.requireWrite();if(!this.rows.includes(row))fail('Bound row has been deleted',3021);const col=this.column(key),next=fieldValue(col,value);if(expected!==undefined&&(!Object.is(row[col.Name],expected)&&!(row[col.Name] instanceof Date&&expected instanceof Date&&row[col.Name].getTime()===expected.getTime())&&!(row[col.Name] instanceof VBCurrency&&expected instanceof VBCurrency&&row[col.Name].raw===expected.raw)))fail('Bound value changed while the editor was active',3197);this.Update();const index=this.view().indexOf(row);if(index<0)fail('Bound row no longer belongs to the current view',3021);this.position=index;this.edit(col,next);this.Update();}
 }
 
-return {fieldValue,DisconnectedRecordset};
+return {fieldScalarType,fieldValue,DisconnectedRecordset};
 })();
 
 /* ..\data\provider-recordset.js */
-__modules[22]=(()=>{
-const {DisconnectedRecordset,fieldValue}=__modules[21];
-const {assertData,after,DATA_LIMITS,sameValue}=__modules[18];
+__modules[28]=(()=>{
+const {DisconnectedRecordset,fieldValue}=__modules[27];
+const {assertData,after,DATA_LIMITS,sameValue}=__modules[24];
 
 
 /** The same observable cursor as the bound controls use, with awaited provider writes. */
@@ -1848,11 +2646,11 @@ return {ProviderRecordset};
 })();
 
 /* ..\data\connected-recordset.js */
-__modules[23]=(()=>{
-const {VBDecimal,VBCurrency,coerce}=__modules[15];
-const {ProviderRecordset}=__modules[22];
-const {DisconnectedRecordset,fieldValue}=__modules[21];
-const {assertData,after,dataList,sameValue}=__modules[18];
+__modules[29]=(()=>{
+const {VBDecimal,VBCurrency,coerce}=__modules[21];
+const {ProviderRecordset}=__modules[28];
+const {DisconnectedRecordset,fieldValue}=__modules[27];
+const {assertData,after,dataList,sameValue}=__modules[24];
 
 
 
@@ -2081,8 +2879,8 @@ return {ConnectedRecordset};
 })();
 
 /* ..\data\sql-parameters.js */
-__modules[24]=(()=>{
-const {assertData}=__modules[18];
+__modules[30]=(()=>{
+const {assertData}=__modules[24];
 
 /** Lossless SQL token positions. Parameter substitution never visits quoted strings or comments. */
 function sqlTokens(source) {
@@ -2159,10 +2957,10 @@ return {sqlTokens,DAO_TYPES,parameterPlan,simpleSelect};
 })();
 
 /* ..\data\criteria.js */
-__modules[25]=(()=>{
-const {VBDecimal,VBCurrency}=__modules[15];
-const {assertData}=__modules[18];
-const {sqlTokens}=__modules[24];
+__modules[31]=(()=>{
+const {VBDecimal,VBCurrency}=__modules[21];
+const {assertData}=__modules[24];
+const {sqlTokens}=__modules[30];
 
 
 
@@ -2229,12 +3027,12 @@ return {compareData,compileCriteria};
 })();
 
 /* ..\data\dao-recordset.js */
-__modules[26]=(()=>{
-const {dataDefault}=__modules[19];
-const {assertData,after,dataList,sameValue}=__modules[18];
-const {fieldValue}=__modules[21];
-const {compileCriteria,compareData}=__modules[25];
-const {DAO_TYPES}=__modules[24];
+__modules[32]=(()=>{
+const {dataDefault}=__modules[25];
+const {assertData,after,dataList,sameValue}=__modules[24];
+const {fieldValue,fieldScalarType}=__modules[27];
+const {compileCriteria,compareData}=__modules[31];
+const {DAO_TYPES}=__modules[30];
 
 
 
@@ -2276,7 +3074,7 @@ class DAORecordset {
       get FieldSize(){const value=field.Value;return value==null?0:typeof value==='string'?value.length*2:value.length??(field.Type===3?2:field.Type===2?1:4);},
       GetChunk(offset,length){offset=Number(offset);length=Number(length);assertData(Number.isSafeInteger(offset)&&offset>=0&&Number.isSafeInteger(length)&&length>=0,'Invalid chunk range',5);const value=field.Value;if(value==null)return null;assertData(typeof value==='string'||value instanceof Uint8Array,'Chunk requires text or binary',3251);return value.slice(offset,offset+length);},
       AppendChunk(value){const old=field.Value;assertData(old==null||typeof old===typeof value,'Chunk type mismatch',13);if(typeof value==='string')field.Value=(old||'')+value;else{assertData(value instanceof Uint8Array&&(old==null||old instanceof Uint8Array),'Binary chunk requires bytes',13);const result=new Uint8Array((old?.length||0)+value.length);if(old)result.set(old);result.set(value,old?.length||0);field.Value=result;}}
-    };return dataDefault(field);
+    };return dataDefault(field,()=>fieldScalarType(DAO_TYPES[field.Type]||c.Type));
   }
   Edit(){this.require();assertData(this.Updatable,'Recordset is read-only',3027);this.CancelUpdate();assertData(!this._deleted,'Record is deleted',3167);const row=this.cursor.current();this._row=row;this._buffer=rowCopy(row);this._original=rowCopy(row);this._mode=1;}
   AddNew(){this.require();assertData(this.Updatable,'Recordset is read-only',3027);this.CancelUpdate();this._mode=2;this._buffer=Object.fromEntries(this.cursor.columns.map(c=>[c.Name,null]));this._row=null;this._original=null;this._deleted=false;}
@@ -2338,15 +3136,15 @@ return {DAORecordset};
 })();
 
 /* ..\data\rdo.js */
-__modules[27]=(()=>{
-const {assertData,DATA_LIMITS,quoteIdentifier}=__modules[18];
-const {dataDefault,dataMembers}=__modules[19];
-const {DataCollection}=__modules[20];
-const {ConnectedRecordset}=__modules[23];
-const {DAORecordset}=__modules[26];
-const {fieldValue}=__modules[21];
-const {sqlTokens,simpleSelect}=__modules[24];
-const {VBArray}=__modules[15];
+__modules[33]=(()=>{
+const {assertData,DATA_LIMITS,quoteIdentifier}=__modules[24];
+const {dataDefault,dataMembers}=__modules[25];
+const {DataCollection}=__modules[26];
+const {ConnectedRecordset}=__modules[29];
+const {DAORecordset}=__modules[32];
+const {fieldValue}=__modules[27];
+const {sqlTokens,simpleSelect}=__modules[30];
+const {VBArray}=__modules[21];
 
 
 
@@ -2522,7 +3320,7 @@ return {RDO_TYPES,RDO_CONSTANTS,RDOParameter,RDOQuery,RDOResultset,RDOConnection
 })();
 
 /* ..\data\vendor\sqlite.js */
-__modules[28]=(()=>{
+__modules[34]=(()=>{
 
 // Generated by tools/vendor-sqlite.mjs. sql.js 1.14.2 (MIT); SQLite public domain.
 // JavaScript SHA256 35e39a73b2e0bc1c2202a4cadb23bcf7a3a77071a39c270f014402968785b95f; WASM SHA256 38c14f6e379210bc942bdc4ebca44e7bfdb4318ecc1c72ca666a28fdce96670a.
@@ -2719,15 +3517,15 @@ return {initializeSQLite};
 })();
 
 /* ..\data\dao.js */
-__modules[29]=(()=>{
-const {dataDefault}=__modules[19];
-const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[18];
-const {DataCollection,NamedCollection}=__modules[20];
-const {ConnectedRecordset}=__modules[23];
-const {DAORecordset}=__modules[26];
-const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[24];
-const {fieldValue}=__modules[21];
-const {initializeSQLite}=__modules[28];
+__modules[35]=(()=>{
+const {dataDefault}=__modules[25];
+const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[24];
+const {DataCollection,NamedCollection}=__modules[26];
+const {ConnectedRecordset}=__modules[29];
+const {DAORecordset}=__modules[32];
+const {DAO_TYPES,parameterPlan,sqlTokens,simpleSelect}=__modules[30];
+const {fieldValue,fieldScalarType}=__modules[27];
+const {initializeSQLite}=__modules[34];
 
 
 
@@ -2773,7 +3571,7 @@ class DAOTableDef {
   RefreshLink(){assertData(false,'Linked Jet/ACE TableDefs require a native catalog provider',3251);}
 }
 class DAOParameter {
-  constructor(definition){this.__type='DAO.Parameter';Object.assign(this,definition);this._value=null;dataDefault(this);}
+  constructor(definition){this.__type='DAO.Parameter';Object.assign(this,definition);this._value=null;dataDefault(this,()=>fieldScalarType(DAO_TYPES[this.Type]||12));}
   get Value(){return copy(this._value);}
   set Value(value){this._value=fieldValue({Name:this.Name,Type:DAO_TYPES[this.Type]||12,DefinedSize:this.Size},value);}
 }
@@ -2914,9 +3712,9 @@ return {DAOField,DAOIndex,DAOTableDef,DAOParameter,DAOQueryDef,DAODatabase,DAOWo
 })();
 
 /* ..\data\sqlite.js */
-__modules[30]=(()=>{
-const {initializeSQLite}=__modules[28];
-const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[18];
+__modules[36]=(()=>{
+const {initializeSQLite}=__modules[34];
+const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[24];
 
 
 /** Real embedded SQLite. A context owns a disk; connections share its live database handles. */
@@ -3050,9 +3848,9 @@ return {SQLiteProvider};
 })();
 
 /* ..\data\wire.js */
-__modules[31]=(()=>{
-const {VBCurrency,VBDecimal}=__modules[15];
-const {assertData}=__modules[18];
+__modules[37]=(()=>{
+const {VBCurrency,VBDecimal}=__modules[21];
+const {assertData}=__modules[24];
 
 
 const arrayBufferByteLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'byteLength').get;
@@ -3089,9 +3887,9 @@ return {encodeCell,decodeCell,encodeResult,decodeResult};
 })();
 
 /* ..\data\http.js */
-__modules[32]=(()=>{
-const {encodeCell,decodeResult}=__modules[31];
-const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[18];
+__modules[38]=(()=>{
+const {encodeCell,decodeResult}=__modules[37];
+const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[24];
 
 
 async function boundedBody(response,limit){
@@ -3231,9 +4029,9 @@ return {HTTPProvider,GatewayProvider};
 })();
 
 /* ..\data\files.js */
-__modules[33]=(()=>{
-const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[18];
-const {fieldValue}=__modules[21];
+__modules[39]=(()=>{
+const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[24];
+const {fieldValue}=__modules[27];
 
 
 function parseCSV(text){
@@ -3286,13 +4084,13 @@ return {parseCSV,writeCSV,FileDataProvider};
 })();
 
 /* ..\data\connection.js */
-__modules[34]=(()=>{
-const {dataDefault}=__modules[19];
-const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[18];
-const {ConnectedRecordset}=__modules[23];
-const {fieldValue}=__modules[21];
-const {DataCollection}=__modules[20];
-const {DAOEngine,DAODatabase}=__modules[29];
+__modules[40]=(()=>{
+const {dataDefault}=__modules[25];
+const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[24];
+const {ConnectedRecordset}=__modules[29];
+const {fieldValue,fieldScalarType}=__modules[27];
+const {DataCollection}=__modules[26];
+const {DAOEngine,DAODatabase}=__modules[35];
 
 
 
@@ -3372,7 +4170,7 @@ class ADOCommand {
   }
   get CommandTimeout(){return this._commandTimeout;}
   set CommandTimeout(value){value=Number(value);assertData(Number.isFinite(value)&&value>=1&&value<=600,'CommandTimeout must be 1–600 seconds',5);this._commandTimeout=value;this._timeoutExplicit=true;}
-  CreateParameter(name='',type=202,direction=1,size=0,value=null){return dataDefault({Name:String(name),Type:Number(type),Direction:Number(direction),Size:Number(size),Value:value});}
+  CreateParameter(name='',type=202,direction=1,size=0,value=null){const parameter={Name:String(name),Type:Number(type),Direction:Number(direction),Size:Number(size),Value:value};return dataDefault(parameter,()=>fieldScalarType(parameter.Type));}
   async execute(affected,parameters,options=this.CommandType,target){
     let cn=this.ActiveConnection,owned=false;
     if(typeof cn==='string'){const text=cn;cn=this.context.connection();await cn.Open(text);owned=true;}
@@ -3399,10 +4197,56 @@ class ADOCommand {
 return {ADOConnection,ADOCommand,DataCollection,DAOEngine,DAODatabase};
 })();
 
+/* sequential-codec.js */
+__modules[41]=(()=>{
+const {VBError}=__modules[17];
+const {VBErrorValue,tagScalar,coerce,defaultValue}=__modules[21];
+const {asDate}=__modules[16];
+
+
+
+/** Read one VB sequential Input field, not an entire physical line.
+ * Quoted fields end at the first closing quote (VB Input is not CSV).
+ * The returned cursor allows another Input statement to consume the same row.
+ */
+function readInputField(text,start=0,type='Variant'){
+  if(typeof text!=='string'||!Number.isInteger(start)||start<0||start>text.length)throw new VBError('Invalid file position',5);
+  let i=start;while(text[i]===' '||text[i]==='\t')i++;
+  if(i===text.length)throw new VBError('Input past end of file',62);
+  const quoted=text[i]==='"';let token='';
+  if(quoted){
+    const end=text.indexOf('"',i+1);if(end<0)throw new VBError('Input past end of file',62);
+    token=text.slice(i+1,end);i=end+1;
+  }else{
+    const begin=i;while(i<text.length&&text[i]!==','&&text[i]!=='\r'&&text[i]!=='\n')i++;
+    if(i===text.length)throw new VBError('Input past end of file',62);
+    token=text.slice(begin,i).trim();
+  }
+  while(text[i]===' '||text[i]==='\t')i++;
+  if(text[i]===',')i++;
+  else if(text[i]==='\r'){i++;if(text[i]==='\n')i++;}
+  else if(text[i]==='\n')i++;
+  const target=String(type).toLowerCase();let value;
+  if(target==='string')value=tagScalar(token,'string');
+  else if(quoted)value=target==='variant'?tagScalar(token,'string',true):defaultValue(type);
+  else if(token==='')value=tagScalar(undefined,'empty',true);
+  else if(token==='#NULL#')value=tagScalar(null,'null',true);
+  else if(token==='#TRUE#'||token==='#FALSE#')value=tagScalar(token==='#TRUE#'?-1:0,'boolean',true);
+  else if(/^#ERROR [-+]?\d+#$/.test(token))value=tagScalar(new VBErrorValue(Number(token.slice(7,-1))),'error',true);
+  else if(token.startsWith('#')&&token.endsWith('#'))value=tagScalar(asDate(token.slice(1,-1)),'date',true);
+  else if(target==='boolean'||target==='date')throw new VBError('Overflow',6);
+  else if(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/.test(token))value=tagScalar(coerce(token,'Double'),'double',true);
+  else value=target==='variant'?tagScalar(token,'string',true):defaultValue(type);
+  return {value,next:i};
+}
+
+return {readInputField};
+})();
+
 /* binary-codec.js */
-__modules[35]=(()=>{
-const {VBError}=__modules[11];
-const {VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[15];
+__modules[42]=(()=>{
+const {VBError}=__modules[17];
+const {VBScalar,SCALAR_TYPES,scalarType,tagScalar,unbox,VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[21];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -3435,7 +4279,7 @@ class Reader {
   read(length){if(!Number.isInteger(length)||length<0||this.position+length>this.bytes.length)throw new VBError('Input past end of file',62);const result=this.bytes.subarray(this.position,this.position+length);this.position+=length;return result;}
   number(type){const [size,method]=TYPES[type],b=this.read(size);return new DataView(b.buffer,b.byteOffset,b.byteLength)['get'+method](0,true);}
 }
-function variantType(value){if(value instanceof VBDecimal)return 14;if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
+function variantType(value){if(value instanceof VBScalar)return SCALAR_TYPES[value.type];if(value instanceof VBDecimal)return 14;if(value instanceof VBErrorValue)return 10;if(value===undefined)return 0;if(value===null)return 1;if(value instanceof VBCurrency)return 6;if(value instanceof Date)return 7;if(typeof value==='string')return 8;if(typeof value==='boolean')return 11;if(typeof value==='number')return 5;throw new VBError('Cannot serialize objects or scalar Variants containing arrays',458);}
 function* arrayIndices(bounds){if(!bounds.length)return;const idx=bounds.map(([l])=>l);while(true){yield [...idx];let d=0;for(;d<bounds.length;d++){if(++idx[d]<=bounds[d][1])break;idx[d]=bounds[d][0];}if(d===bounds.length)break;}}
 function put(writer,value,schema,mode,inRecord=false,depth=0){
   if(depth>32)throw new VBError('Record nesting exceeds runtime limit',7);
@@ -3444,12 +4288,13 @@ function put(writer,value,schema,mode,inRecord=false,depth=0){
     if(!schema.isArray)throw new VBError('Scalar Variant containing an array is not supported by Put',458);
     if(!value.bounds.length)throw new VBError('Subscript out of range',9);
     if(value.dynamic&&(mode==='random'||inRecord)){writer.number('integer',value.bounds.length);for(const [lo,hi]of value.bounds){writer.number('long',hi-lo+1);writer.number('long',lo);}}
-    for(const indices of arrayIndices(value.bounds))put(writer,value.get(...indices),{type:value.type,fixedLength:value.fixedLength},mode,inRecord,depth+1);
+    for(const indices of arrayIndices(value.bounds))put(writer,value.getScalar(...indices),{type:value.type,fixedLength:value.fixedLength},mode,inRecord,depth+1);
     return;
   }
-  if(value?.__fields){for(const [,cell]of value.__fields)put(writer,cell.get(),cell,mode,true,depth+1);return;}
+  if(value?.__fields){for(const [,cell]of value.__fields)put(writer,cell.getScalar(),cell,mode,true,depth+1);return;}
   if(value===NOTHING||type==='object')throw new VBError('Objects cannot be written with Put',458);
   if(type==='variant'){const kind=variantType(value);writer.number('integer',kind);if(kind<2)return;put(writer,value,{type:VARTYPES[kind]},mode,kind===8||inRecord,depth+1);return;}
+  value=unbox(value);
   if(type==='decimal'){writer.write(coerce(value,'Decimal').toBytes());return;}
   if(type==='error'){writer.number('long',value.number);return;}
   if(type==='string'){
@@ -3480,7 +4325,7 @@ function get(reader,schema,current,mode,inRecord=false,depth=0){
   if(type==='object'||current===NOTHING)throw new VBError('Objects cannot be read with Get',458);
   if(type==='variant'){
     const kind=reader.number('integer');if(kind===0)return undefined;if(kind===1)return null;if(!VARTYPES[kind])throw new VBError('Unsupported Variant file descriptor: '+kind,458);
-    return get(reader,{type:VARTYPES[kind]},undefined,mode,kind===8||inRecord,depth+1);
+    return tagScalar(get(reader,{type:VARTYPES[kind]},undefined,mode,kind===8||inRecord,depth+1),VARTYPES[kind],true);
   }
   if(type==='decimal')return VBDecimal.fromBytes(reader.read(16));
   if(type==='error')return new VBErrorValue(reader.number('long'));
@@ -3492,15 +4337,17 @@ function get(reader,schema,current,mode,inRecord=false,depth=0){
   const value=reader.number(type);return type==='currency'?new VBCurrency(value,true):coerce(value,type);
 }
 function encodeVariable(value,schema={},mode='binary'){const writer=new Writer();put(writer,value,schema,mode);return writer.finish();}
-function decodeVariable(bytes,schema={},current,mode='binary'){const reader=new Reader(bytes),value=get(reader,schema,current,mode);return {value,bytesRead:reader.position};}
+function decodeVariable(bytes,schema={},current,mode='binary'){const reader=new Reader(bytes),value=get(reader,schema,current,mode);return {value:unbox(value),scalar:value,bytesRead:reader.position};}
 
 return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVariable};
 })();
 
 /* filesystem.js */
-__modules[36]=(()=>{
-const { VBError }=__modules[11];
-const {encodeANSI,decodeANSI}=__modules[35];
+__modules[43]=(()=>{
+const {readInputField}=__modules[41];
+const { VBError }=__modules[17];
+const {encodeANSI,decodeANSI}=__modules[42];
+
 
 
 const MAX_FILE=20*1024*1024;
@@ -3546,6 +4393,12 @@ class VirtualFileSystem {
   refresh(h){h.content=['binary','random'].includes(h.mode)?this.readBytes(h.path):this.read(h.path);return h;}
   print(number,text,newline=true){const h=this.handle(number);this.requireAccess(h,'write');if(!['output','append'].includes(h.mode))throw new VBError('Bad file mode',54);const addition=String(text)+(newline?'\r\n':'');this.assertUnlocked(h,h.position,h.position+addition.length);h.content+=addition;h.position=h.content.length;this.write(h.path,h.content);}
   lineInput(number){const h=this.refresh(this.handle(number));this.requireAccess(h,'read');if(h.mode!=='input')throw new VBError('Bad file mode',54);if(h.position>=h.content.length)throw new VBError('Input past end of file',62);let end=h.content.indexOf('\n',h.position);if(end<0)end=h.content.length;this.assertUnlocked(h,h.position,end);const s=h.content.slice(h.position,end).replace(/\r$/,'');h.position=Math.min(end+1,h.content.length);return s;}
+  inputValue(number,type='Variant'){
+    const h=this.refresh(this.handle(number));this.requireAccess(h,'read');
+    if(!['input','binary'].includes(h.mode))throw new VBError('Bad file mode',54);
+    const text=h.content instanceof Uint8Array?decodeANSI(h.content):h.content;
+    const result=readInputField(text,h.position,type);this.assertUnlocked(h,h.position,result.next);h.position=result.next;return result.value;
+  }
   input(number,count){const h=this.refresh(this.handle(number));this.requireAccess(h,'read');if(!['input','binary'].includes(h.mode))throw new VBError('Bad file mode',54);count=integer(count,0,MAX_FILE);if(h.position+count>h.content.length)throw new VBError('Input past end of file',62);this.assertUnlocked(h,h.position,h.position+count);const s=h.content.slice(h.position,h.position+count);h.position+=count;return s instanceof Uint8Array?decodeANSI(s):s;}
   eof(number){const h=this.refresh(this.handle(number));return h.position>=h.content.length?-1:0;}
   lof(number){return this.refresh(this.handle(number)).content.length;}
@@ -3564,16 +4417,16 @@ return {VirtualFileSystem};
 })();
 
 /* ..\data\context.js */
-__modules[37]=(()=>{
-const {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS}=__modules[27];
-const {DAOEngine}=__modules[29];
-const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[18];
-const {SQLiteProvider}=__modules[30];
-const {HTTPProvider,GatewayProvider}=__modules[32];
-const {FileDataProvider}=__modules[33];
-const {ADOConnection,ADOCommand,DataCollection}=__modules[34];
-const {ConnectedRecordset}=__modules[23];
-const {VirtualFileSystem}=__modules[36];
+__modules[44]=(()=>{
+const {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS}=__modules[33];
+const {DAOEngine}=__modules[35];
+const {normalizeDataSources,assertData,DATA_CONSTANTS}=__modules[24];
+const {SQLiteProvider}=__modules[36];
+const {HTTPProvider,GatewayProvider}=__modules[38];
+const {FileDataProvider}=__modules[39];
+const {ADOConnection,ADOCommand,DataCollection}=__modules[40];
+const {ConnectedRecordset}=__modules[29];
+const {VirtualFileSystem}=__modules[43];
 
 
 
@@ -3646,8 +4499,8 @@ return {DataContext};
 })();
 
 /* financial.js */
-__modules[38]=(()=>{
-const {VBError}=__modules[9];
+__modules[45]=(()=>{
+const {VBError}=__modules[15];
 /**
  * Double-precision financial functions for the browser VB runtime.
  * Pure ES module: no DOM, network, filesystem or dynamic evaluation.
@@ -3836,7 +4689,7 @@ return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FI
 })();
 
 /* ..\theme\theme.js */
-__modules[39]=(()=>{
+__modules[46]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
@@ -3893,8 +4746,10 @@ return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,color
 })();
 
 /* ..\graphics\surface.js */
-__modules[40]=(()=>{
-const { colorValue, getTheme }=__modules[39];
+__modules[47]=(()=>{
+const {GPURasterPresenter}=__modules[0];
+const { colorValue, getTheme }=__modules[46];
+
 
 /** Demand-rendered 2D primitives: WebGPU triangles, Canvas2D fallback, DOM text. */
 const surfaces = new WeakMap();
@@ -3936,6 +4791,7 @@ class GraphicsSurface {
   releaseGPU(){
     // A surface owns its buffers/context, never the window's shared device.
     this.gpuGeneration=(this.gpuGeneration||0)+1;
+    this.rasterPresenter?.dispose();this.rasterPresenter=null;this.rasterPending=null;
     this.vertexBuffer?.destroy();this.uniform?.destroy();this.gpuContext?.unconfigure();this.gpuCanvas?.remove();
     this.vertexBuffer=this.uniform=this.gpuContext=this.gpuCanvas=this.pipeline=this.bindGroup=this.device=null;
     this.bufferSize=0;this.backend='canvas2d';
@@ -3966,7 +4822,7 @@ class GraphicsSurface {
       }finally{validation=await device.popErrorScope();}
       if(validation)throw validation;
       if(!current()){uniform.destroy();context.unconfigure();return false;}
-      Object.assign(this,{device,pipeline,uniform,bindGroup,gpuCanvas:canvas,gpuContext:context,gpuError:null});
+      Object.assign(this,{device,pipeline,uniform,bindGroup,gpuCanvas:canvas,gpuContext:context,gpuFormat:format,gpuError:null});
       this.canvas.before(canvas);this.canvas.style.zIndex='1';this.backend='webgpu';
       device.lost.then(info=>{if(current()&&this.device===device){this.gpuError='WebGPU device lost: '+info.message;this.releaseGPU();this.onBackend('Canvas2D · device lost');this.invalidate();}});
       this.resize();this.onBackend('WebGPU');return true;
@@ -3996,8 +4852,8 @@ class GraphicsSurface {
   resize(){if(this.disposed)return;const rect=this.container.getBoundingClientRect(),dpr=Math.min(this.container.ownerDocument.defaultView.devicePixelRatio||1,3,8192/Math.max(1,this.container.clientWidth||rect.width),8192/Math.max(1,this.container.clientHeight||rect.height));this.width=Math.max(1,Math.min(8192,Math.round(this.container.clientWidth||rect.width)));this.height=Math.max(1,Math.min(8192,Math.round(this.container.clientHeight||rect.height)));for(const canvas of [this.canvas,this.gpuCanvas])if(canvas){const width=Math.max(1,Math.min(8192,Math.round(this.width*dpr))),height=Math.max(1,Math.min(8192,Math.round(this.height*dpr)));if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;}this.dpr=dpr;this.invalidate();}
   add(kind,coords,color=0,fill=false,width=1){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000); use Cls between frames.');this.commands.push({kind,coords:[...coords],color,fill,width});this.invalidate();}
   text(text,x,y,color=0,font='12px Arial'){if(this.commands.length>=50000)throw new Error('Graphics command limit reached (50,000).');this.commands.push({kind:'text',text:String(text),coords:[x,y],color,font});this.invalidate();}
-  clear(){this.commands=[];this.rasterBytes=0;this.gdiCanvas=null;this.invalidate();}
-  // Raster transfers are recorded in command order and use the Canvas fallback.
+  clear(){this.rasterPresenter?.dispose();this.rasterPresenter=null;this.commands=[];this.rasterBytes=0;this.gdiCanvas=null;this.invalidate();}
+  // Raster transfers retain CPU-readable command order; presentation may use WebGPU.
   // No synchronous GPU readback or CSS/device-pixel coordinate mixing is needed.
   writePixels(x,y,image){
     const {width,height,data}=image,bytes=width*height*4;
@@ -4044,7 +4900,22 @@ class GraphicsSurface {
   vertices(){const out=[];const triangle=(p1,p2,p3,c)=>{for(const p of [p1,p2,p3])out.push(p[0],p[1],...c);};const rect=(x,y,w,h,c)=>{triangle([x,y],[x+w,y],[x,y+h],c);triangle([x+w,y],[x+w,y+h],[x,y+h],c);};const line=(x1,y1,x2,y2,width,c)=>{const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy)||1,ox=-dy/length*width/2,oy=dx/length*width/2;triangle([x1+ox,y1+oy],[x2+ox,y2+oy],[x1-ox,y1-oy],c);triangle([x1-ox,y1-oy],[x2+ox,y2+oy],[x2-ox,y2-oy],c);};
     if(this.grid){const c=rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
     for(const cmd of this.commands){const c=rgba(cmd.color,this.theme),a=cmd.coords;if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else if(cmd.kind==='line')line(...a,cmd.width,c);else if(cmd.kind==='rect'){const x=Math.min(a[0],a[2]),y=Math.min(a[1],a[3]),w=Math.abs(a[2]-a[0]),h=Math.abs(a[3]-a[1]);if(cmd.fill)rect(x,y,w,h,c);else{rect(x,y,w,cmd.width,c);rect(x,y+h-cmd.width,w,cmd.width,c);rect(x,y,cmd.width,h,c);rect(x+w-cmd.width,y,cmd.width,h,c);}}else if(cmd.kind==='circle'){const n=Math.min(180,Math.max(16,Math.round(a[2]*2))),[cx,cy,r]=a;for(let i=0;i<n;i++){const a1=i/n*Math.PI*2,a2=(i+1)/n*Math.PI*2,p1=[cx+Math.cos(a1)*r,cy+Math.sin(a1)*r],p2=[cx+Math.cos(a2)*r,cy+Math.sin(a2)*r];if(cmd.fill)triangle([cx,cy],p1,p2,c);else line(...p1,...p2,cmd.width,c);}}}return new Float32Array(out);}
-  render(){if(this.disposed)return;if(this.rasterBytes){const actual='Canvas2D · GDI bitmap';if(this.renderingBackend!==actual){this.renderingBackend=actual;this.onBackend(actual);}if(this.gpuCanvas)this.gpuCanvas.hidden=true;const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);ctx.save();try{ctx.imageSmoothingEnabled=false;ctx.drawImage(this.rasterize(),0,0);}finally{ctx.restore();}return;}const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
+  render(){if(this.disposed)return;if(this.rasterBytes){
+      if(this.backend==='webgpu'&&this.gpuCanvas){
+        if(!this.rasterPresenter&&!this.rasterPending){
+          const generation=this.gpuGeneration,device=this.device;
+          this.rasterPending=GPURasterPresenter.create(device,this.gpuFormat).then(presenter=>{
+            if(this.disposed||this.gpuGeneration!==generation||this.device!==device){presenter.dispose();return;}
+            this.rasterPending=null;if(this.rasterBytes){this.rasterPresenter=presenter;this.invalidate();}else presenter.dispose();
+          }).catch(error=>{if(!this.disposed&&this.gpuGeneration===generation){this.gpuError=error.message||String(error);this.releaseGPU();this.invalidate();}});
+        }
+        if(this.rasterPresenter)try{
+          this.rasterPresenter.render(this.gpuContext,this.rasterize(),this.paintRevision,this.gpuCanvas.width,this.gpuCanvas.height);
+          this.gpuCanvas.hidden=false;const ctx=this.context;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+          if(this.renderingBackend!=='WebGPU · GDI texture'){this.renderingBackend='WebGPU · GDI texture';this.onBackend(this.renderingBackend);}return;
+        }catch(error){this.gpuError=error.message||String(error);this.releaseGPU();}
+      }
+      const actual='Canvas2D · GDI bitmap';if(this.renderingBackend!==actual){this.renderingBackend=actual;this.onBackend(actual);}if(this.gpuCanvas)this.gpuCanvas.hidden=true;const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);ctx.save();try{ctx.imageSmoothingEnabled=false;ctx.drawImage(this.rasterize(),0,0);}finally{ctx.restore();}return;}const actual=this.picture?'Canvas2D · raster picture':this.backend==='webgpu'?'WebGPU':'Canvas2D';if(actual!==this.renderingBackend){this.renderingBackend=actual;this.onBackend(actual);}const ctx=this.context;ctx.setTransform(this.dpr,0,0,this.dpr,0,0);ctx.clearRect(0,0,this.width,this.height);if(this.gpuCanvas)this.gpuCanvas.hidden=!!this.picture;if(this.backend==='webgpu'&&this.gpuCanvas&&!this.picture){try{const data=this.vertices(),device=this.device;device.queue.writeBuffer(this.uniform,0,new Float32Array([this.width,this.height,0,0]));if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});}if(data.length)device.queue.writeBuffer(this.vertexBuffer,0,data);const encoder=device.createCommandEncoder(),bg=rgba(this.background,this.theme);const pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);}catch(error){this.gpuError=error.message||String(error);this.backend='canvas2d';this.gpuCanvas.remove();this.gpuCanvas=null;this.onBackend('Canvas2D');}}
     if(this.backend==='canvas2d'||this.picture){ctx.fillStyle=oleColor(this.background,'#c0c0c0',this.theme);ctx.fillRect(0,0,this.width,this.height);if(this.picture)ctx.drawImage(this.picture,0,0);if(this.grid){ctx.fillStyle='#808080';for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)ctx.fillRect(x,y,1,1);}for(const cmd of this.commands){const a=cmd.coords;ctx.strokeStyle=ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.lineWidth=cmd.width||1;ctx.beginPath();if(cmd.kind==='pixel')ctx.fillRect(a[0],a[1],1,1);if(cmd.kind==='line'){ctx.moveTo(a[0]+.5,a[1]+.5);ctx.lineTo(a[2]+.5,a[3]+.5);ctx.stroke();}if(cmd.kind==='rect'){const r=[Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1])];cmd.fill?ctx.fillRect(...r):ctx.strokeRect(...r);}if(cmd.kind==='circle'){ctx.arc(a[0],a[1],Math.abs(a[2]),0,Math.PI*2);cmd.fill?ctx.fill():ctx.stroke();}}}
     for(const cmd of this.commands)if(cmd.kind==='text'){ctx.fillStyle=oleColor(cmd.color,'#000000',this.theme);ctx.font=cmd.font;ctx.textBaseline='top';ctx.fillText(cmd.text,...cmd.coords);}
   }
@@ -4055,8 +4926,8 @@ return {refreshGraphicsSurfaces,oleColor,getGPUDevice,GraphicsSurface};
 })();
 
 /* native-windows.js */
-__modules[41]=(()=>{
-const {refreshGraphicsSurfaces}=__modules[40];
+__modules[48]=(()=>{
+const {refreshGraphicsSurfaces}=__modules[47];
 
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -4248,8 +5119,8 @@ return {installNativeHost};
 })();
 
 /* ..\project\binary-assets.js */
-__modules[42]=(()=>{
-const {VBError}=__modules[11];
+__modules[49]=(()=>{
+const {VBError}=__modules[17];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
 const fail=message=>{throw new VBError(message,1002);};
@@ -4260,10 +5131,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ..\project\native-text.js */
-__modules[43]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[35];
-const {VBError}=__modules[11];
-const {fromBase64,toBase64}=__modules[42];
+__modules[50]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[42];
+const {VBError}=__modules[17];
+const {fromBase64,toBase64}=__modules[49];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -4327,9 +5198,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ..\project\frx.js */
-__modules[44]=(()=>{
-const {VBError}=__modules[11];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[43];
+__modules[51]=(()=>{
+const {VBError}=__modules[17];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[50];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -4432,9 +5303,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ..\project\res.js */
-__modules[45]=(()=>{
-const {VBError}=__modules[11];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[44];
+__modules[52]=(()=>{
+const {VBError}=__modules[17];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[51];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -4526,11 +5397,11 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* resources.js */
-__modules[46]=(()=>{
-const {VBError}=__modules[11];
-const {VBArray,bankersRound,numeric}=__modules[15];
-const {normalizeResources,decodeStringTable}=__modules[45];
-const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[44];
+__modules[53]=(()=>{
+const {VBError}=__modules[17];
+const {VBArray,bankersRound,numeric}=__modules[21];
+const {normalizeResources,decodeStringTable}=__modules[52];
+const {fromBase64,rasterDataURL,toBase64,MAX_RESOURCE_BYTES}=__modules[51];
 
 
 
@@ -4560,9 +5431,75 @@ class ResourceStore {
 return {ResourceStore};
 })();
 
+/* scalar-library.js */
+__modules[54]=(()=>{
+const {VBError}=__modules[15];
+const {VBScalar,VBArray,VBErrorValue,MISSING,unbox,scalarType,tagScalar,storageScalar,SCALAR_TYPES,scalarUnary,numeric,truth,vbString,bankersRound,coerce}=__modules[21];
+
+
+// These signatures describe VB expression results, not JavaScript implementation
+// return types. Host consumers may continue calling the original raw functions.
+const RESULTS=Object.freeze({
+ cbyte:'byte',cint:'integer',clng:'long',csng:'single',cdbl:'double',ccur:'currency',cdate:'date',cvdate:'date',cstr:'string',cbool:'boolean',cdec:'decimal',cverr:'error',
+ vartype:'integer',typename:'string',iserror:'boolean',isarray:'boolean',isempty:'boolean',isnull:'boolean',isnumeric:'boolean',isdate:'boolean',isobject:'boolean',ismissing:'boolean',
+ len:'long',lenb:'long',instr:'long',instrrev:'long',strcomp:'integer',asc:'integer',ascw:'integer',sgn:'integer',lbound:'long',ubound:'long',erl:'long',freefile:'integer',lof:'long',loc:'long',seek:'long',eof:'boolean',
+ year:'integer',month:'integer',day:'integer',hour:'integer',minute:'integer',second:'integer',weekday:'integer',datepart:'integer',datediff:'long',timer:'single',rnd:'single',
+ now:'date',date:'date',time:'date',dateserial:'date',timeserial:'date',datevalue:'date',timevalue:'date',dateadd:'date',
+ sqr:'double',exp:'double',log:'double',sin:'double',cos:'double',tan:'double',atn:'double',val:'double',
+ fv:'double',pv:'double',pmt:'double',ipmt:'double',ppmt:'double',nper:'double',rate:'double',npv:'double',irr:'double',mirr:'double',sln:'double',syd:'double',ddb:'double',
+ msgbox:'integer',doevents:'integer',rgb:'long',qbcolor:'long',filelen:'long',loadresstring:'string'
+});
+const LENGTHS=Object.freeze({byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8,decimal:16,error:16});
+const VARIANT_STRINGS=new Set(['left','right','mid','trim','ltrim','rtrim','ucase','lcase','space','string','chr','chrw','str','hex','oct','format','error']);
+const TITLE=Object.freeze({empty:'Empty',null:'Null',integer:'Integer',long:'Long',single:'Single',double:'Double',currency:'Currency',date:'Date',string:'String',boolean:'Boolean',decimal:'Decimal',error:'Error',byte:'Byte'});
+function installScalarLibrary(map,vm){
+ for(const [key,original] of map){
+  if(typeof original!=='function')continue;
+  // Shared implementation aliases (notably CDate/CVDate) have different VB
+  // declarations. Never attach per-alias/per-VM metadata to the shared function.
+  const fn=Object.assign(function(...args){return original.apply(this,args);},original);
+  map.set(key,fn);
+  fn.vbScalarInvoke=(args,frame)=>{
+   const raw=args.map(unbox),name=key.replace(/\$$/,''),input=args[0];
+   if(name==='vartype'&&scalarType(input))return tagScalar(SCALAR_TYPES[scalarType(input)],'integer');
+   if(name==='typename'&&scalarType(input))return tagScalar(TITLE[scalarType(input)],'string');
+   if(name==='callbyname')return vm.callByName(raw[0],vbString(args[1]),coerce(args[2],'long'),args.slice(3),frame,true).then(value=>storageScalar(value,'Variant'));
+   if(name==='cstr'&&unbox(input) instanceof VBErrorValue)return tagScalar(unbox(input).toString(),'string');
+   if(['cbyte','cint','clng','csng','cdbl','ccur','cdate','cvdate','cstr','cbool','cdec'].includes(name)){const type=RESULTS[name];if(type==='date'&&unbox(input) instanceof VBErrorValue)throw new VBError('Type mismatch',13);return tagScalar(coerce(name==='cstr'?input:unbox(input) instanceof VBErrorValue?unbox(input).number:input,type),type,name==='cdec'||name==='cvdate');}
+   if(name==='cvar')return storageScalar(input,'Variant');
+   if(name==='array')return fn(...args);
+   if(name==='iif')return storageScalar(truth(input)?args[1]:args[2],'Variant');
+   if(name==='choose'){const index=bankersRound(numeric(input));return storageScalar(index>0&&index<args.length?args[index]:null,'Variant');}
+   if(name==='switch'){for(let i=0;i<args.length;i+=2)if(truth(args[i]))return storageScalar(args[i+1],'Variant');return tagScalar(null,'null',true);}
+   if(name==='len'||name==='lenb'){if(raw[0]===null)return tagScalar(null,'null',true);if(input instanceof VBScalar&&input.variant)return tagScalar(vbString(input).length*(name==='lenb'?2:1),'long',true);if(LENGTHS[scalarType(input)])return tagScalar(LENGTHS[scalarType(input)],'long',true);}
+   if(['abs','int','fix','round'].includes(name)){
+    if(raw[0]===null)return tagScalar(null,'null',true);
+    let type=scalarType(input),variant=input instanceof VBScalar?input.variant:true;
+    if(name==='abs'&&numeric(input)<0)return scalarUnary('-',input);
+    if(type==='empty'||type==='boolean')type='integer';if(type==='string')type='double';
+    const result=fn(...raw);return tagScalar(result,type||scalarType(result),variant);
+   }
+   const result=fn.vbInvoke?fn.vbInvoke(raw,frame):fn(...raw);
+   const wrap=value=>{
+    if(value===null||value===undefined||value===MISSING)return value;
+    const type=RESULTS[name]||scalarType(value);
+    if(!type)return value;
+    if(typeof value==='number'&&!Number.isFinite(value))throw new VBError('Overflow',6);
+    if(['single','byte','integer','long','double','boolean'].includes(type))value=coerce(value,type);
+    return tagScalar(value,type,name==='cdec'||name==='cverr'||VARIANT_STRINGS.has(name)&&!key.endsWith('$'));
+   };
+   return result&&typeof result.then==='function'?result.then(wrap):wrap(result);
+  };
+ }
+ return map;
+}
+
+return {installScalarLibrary};
+})();
+
 /* error-messages.js */
-__modules[47]=(()=>{
-const {VBError}=__modules[9];
+__modules[55]=(()=>{
+const {VBError}=__modules[15];
 
 /** Invariant English descriptions for the errors produced by this runtime.
  * Localized Windows resource tables and arbitrary COM HRESULT messages are not
@@ -4596,9 +5533,9 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[48]=(()=>{
-const {VBError}=__modules[11];
-const {MISSING,VBArray,coerce,vbString}=__modules[15];
+__modules[56]=(()=>{
+const {VBError}=__modules[17];
+const {MISSING,VBArray,coerce,vbString}=__modules[21];
 
 
 const invalid=()=>{throw new VBError('Invalid procedure call or argument',5);};
@@ -4691,10 +5628,10 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[49]=(()=>{
-const {VBError}=__modules[9];
-const {MISSING,VBArray,numeric}=__modules[15];
-const {FINANCIAL_FUNCTIONS}=__modules[38];
+__modules[57]=(()=>{
+const {VBError}=__modules[15];
+const {MISSING,VBArray,numeric}=__modules[21];
+const {FINANCIAL_FUNCTIONS}=__modules[45];
 
 
 
@@ -4722,8 +5659,8 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[50]=(()=>{
-const {FINANCIAL_SIGNATURES}=__modules[38];
+__modules[58]=(()=>{
+const {FINANCIAL_SIGNATURES}=__modules[45];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
 const BUILTIN_SIGNATURES={
@@ -4745,7 +5682,7 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* constants.js */
-__modules[51]=(()=>{
+__modules[59]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -4772,19 +5709,21 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[52]=(()=>{
-const {errorDescription}=__modules[47];
-const {stringLibrary}=__modules[48];
-const {financialLibrary}=__modules[49];
-const {ResourceStore}=__modules[46];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[10];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[50];
-const {DisconnectedRecordset}=__modules[21];
-const {recordLength}=__modules[35];
-const { VBError }=__modules[11];
-const { lower }=__modules[14];
-const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[15];
-const {VB_CONSTANTS}=__modules[51];
+__modules[60]=(()=>{
+const {installScalarLibrary}=__modules[54];
+const {errorDescription}=__modules[55];
+const {stringLibrary}=__modules[56];
+const {financialLibrary}=__modules[57];
+const {ResourceStore}=__modules[53];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[16];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[58];
+const {DisconnectedRecordset}=__modules[27];
+const {recordLength}=__modules[42];
+const { VBError }=__modules[17];
+const { lower }=__modules[20];
+const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[21];
+const {VB_CONSTANTS}=__modules[59];
+
 
 
 
@@ -4827,14 +5766,14 @@ function createLibrary(vm) {
     LoadResString:id=>resources.string(id),LoadResData:(id,format)=>resources.data(id,format),LoadResPicture:(id,format=0)=>resources.picture(id,format),
     Abs:x=>x instanceof VBDecimal?x.absolute():x instanceof VBCurrency?new VBCurrency(x.raw<0n?-x.raw:x.raw,true):Math.abs(numeric(x)),Sgn:x=>Math.sign(numeric(x)),Int:x=>x instanceof VBDecimal?x.integer(true):Math.floor(numeric(x)),Fix:x=>x instanceof VBDecimal?x.integer():Math.trunc(numeric(x)),Sqr:x=>{if(numeric(x)<0)throw new VBError('Invalid procedure call',5);return Math.sqrt(numeric(x));},Exp:x=>Math.exp(numeric(x)),Log:x=>{if(numeric(x)<=0)throw new VBError('Invalid procedure call',5);return Math.log(numeric(x));},Sin:x=>Math.sin(numeric(x)),Cos:x=>Math.cos(numeric(x)),Tan:x=>Math.tan(numeric(x)),Atn:x=>Math.atan(numeric(x)),Round:(x,n=0)=>{if(x instanceof VBCurrency||x instanceof VBDecimal)return x.round(bankersRound(numeric(n)));n=numeric(n);if(n<0||n>28)throw new VBError('Invalid procedure call',5);return bankersRound(numeric(x)*10**n)/10**n;},
     Rnd:(n=1)=>{n=numeric(n);if(n<0)rng=(-n*0x1000000)>>>0;if(n!==0){rng=(Math.imul(rng,1664525)+1013904223)>>>0;lastRandom=rng/4294967296;}return lastRandom;},Randomize:n=>{rng=(n===undefined?Date.now():numeric(n)*1000000)>>>0;},
-    CDec:x=>decimal(explicitErrorValue(x)),CByte:x=>coerce(explicitErrorValue(x),'Byte'),CInt:x=>coerce(explicitErrorValue(x),'Integer'),CLng:x=>coerce(explicitErrorValue(x),'Long'),CSng:x=>coerce(explicitErrorValue(x),'Single'),CDbl:x=>coerce(explicitErrorValue(x),'Double'),CCur:x=>coerce(explicitErrorValue(x),'Currency'),CStr:x=>x instanceof VBErrorValue?x.toString():vbString(x),CBool:x=>coerce(explicitErrorValue(x),'Boolean'),CDate:vbDate,CVar:x=>x,CVErr:number=>new VBErrorValue(number),IsError:x=>x instanceof VBErrorValue?-1:0,
+    CDec:x=>decimal(explicitErrorValue(x)),CByte:x=>coerce(explicitErrorValue(x),'Byte'),CInt:x=>coerce(explicitErrorValue(x),'Integer'),CLng:x=>coerce(explicitErrorValue(x),'Long'),CSng:x=>coerce(explicitErrorValue(x),'Single'),CDbl:x=>coerce(explicitErrorValue(x),'Double'),CCur:x=>coerce(explicitErrorValue(x),'Currency'),CStr:x=>x instanceof VBErrorValue?x.toString():vbString(x),CBool:x=>coerce(explicitErrorValue(x),'Boolean'),CDate:vbDate,CVDate:vbDate,CVar:x=>x,CVErr:number=>new VBErrorValue(number),IsError:x=>x instanceof VBErrorValue?-1:0,
     Val:x=>{const s=String(x).replace(/\s/g,'');if(/^&h/i.test(s))return parseInt(s.slice(2),16)||0;if(/^&o/i.test(s))return parseInt(s.slice(2),8)||0;return parseFloat(s)||0;},Str:x=>(numeric(x)>=0?' ':'')+String(numeric(x)),Hex:x=>(bankersRound(numeric(x))>>>0).toString(16).toUpperCase(),Oct:x=>(bankersRound(numeric(x))>>>0).toString(8),
     Len:x=>x?.__fields?recordLength(x):x==null?(x===null?null:0):x instanceof VBArray?x.data.length:String(x).length,LenB:x=>String(x??'').length*2,Left:(s,n)=>s===null?null:vbString(s).slice(0,requireLength(n)),Right:(s,n)=>s===null?null:(n=requireLength(n),n?vbString(s).slice(-n):''),Mid:(s,start,n)=>{if(s===null)return null;start=bankersRound(numeric(start));if(start<1)throw new VBError('Invalid procedure call',5);return n===undefined?vbString(s).slice(start-1):vbString(s).substr(start-1,requireLength(n));},
     Trim:s=>s===null?null:vbString(s).replace(/^ +| +$/g,''),LTrim:s=>s===null?null:vbString(s).replace(/^ +/,''),RTrim:s=>s===null?null:vbString(s).replace(/ +$/,''),UCase:s=>s===null?null:vbString(s).toUpperCase(),LCase:s=>s===null?null:vbString(s).toLowerCase(),Space:n=>' '.repeat(requireLength(n)),String:(n,c)=>{n=requireLength(n);return (typeof c==='number'?String.fromCharCode(c):vbString(c).charAt(0)).repeat(n);},Chr:n=>String.fromCharCode(coerce(n,'Byte')),ChrW:n=>String.fromCharCode(numeric(n)&65535),Asc:s=>{s=vbString(s);if(!s.length)throw new VBError('Invalid procedure call',5);return s.charCodeAt(0)&255;},AscW:s=>{s=vbString(s);if(!s.length)throw new VBError('Invalid procedure call',5);const n=s.charCodeAt(0);return n>32767?n-65536:n;},StrReverse:s=>vbString(s).split('').reverse().join(''),
     ...stringLibrary(vm),StrConv:(s,mode)=>mode===1?vbString(s).toUpperCase():mode===2?vbString(s).toLowerCase():mode===3?vbString(s).toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()):vbString(s),
     Format:vbFormat,FormatNumber:(n,d=2)=>numeric(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}),FormatCurrency:(n,d=2)=>'$'+numeric(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}),FormatPercent:(n,d=2)=>(numeric(n)*100).toFixed(d)+'%',FormatDateTime:(d,style=0)=>vbFormat(vbDate(d),['General Date','Long Date','Short Date','Long Time','Short Time'][style]),
     Array:(...a)=>VBArray.from(a,vm.currentFrame?.module.optionBase||0),LBound:(a,d=1)=>{if(!(a instanceof VBArray)||!a.bounds[d-1])throw new VBError('Subscript out of range',9);return a.bounds[d-1][0];},UBound:(a,d=1)=>{if(!(a instanceof VBArray)||!a.bounds[d-1])throw new VBError('Subscript out of range',9);return a.bounds[d-1][1];},
-    IsArray:x=>x instanceof VBArray?-1:0,IsEmpty:x=>x===undefined?-1:0,IsNull:x=>x===null?-1:0,IsNumeric:x=>x===null||x===NOTHING||x===MISSING||x instanceof VBErrorValue||x instanceof Date||x===''||typeof x==='object'&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal)?0:Number.isFinite(Number(x))?-1:0,IsDate:x=>{if(x===null||x===undefined||typeof x==='object'&&!(x instanceof Date))return 0;try{asDate(x);return -1;}catch{return 0;}},IsObject:x=>x!==null&&x!==MISSING&&!(x instanceof VBErrorValue)&&typeof x==='object'&&!(x instanceof Date)&&!(x instanceof VBArray)&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal)&&!x.__fields?-1:0,IsMissing:x=>x===MISSING?-1:0,
+    IsArray:x=>x instanceof VBArray?-1:0,IsEmpty:x=>x===undefined?-1:0,IsNull:x=>x===null?-1:0,IsNumeric:x=>{if(x===undefined||x===null||x===NOTHING||x===MISSING||x instanceof VBErrorValue||x instanceof Date||typeof x==='object'&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal))return 0;try{numeric(x);return -1;}catch{return 0;}},IsDate:x=>{if(x===null||x===undefined||typeof x==='object'&&!(x instanceof Date))return 0;try{asDate(x);return -1;}catch{return 0;}},IsObject:x=>x!==null&&x!==MISSING&&!(x instanceof VBErrorValue)&&typeof x==='object'&&!(x instanceof Date)&&!(x instanceof VBArray)&&!(x instanceof VBCurrency)&&!(x instanceof VBDecimal)&&!x.__fields?-1:0,IsMissing:x=>x===MISSING?-1:0,
     TypeName:x=>x instanceof VBErrorValue?'Error':x===MISSING?'Error':x instanceof VBCollection?'Collection':x instanceof VBDictionary?'Dictionary':x===NOTHING?'Nothing':x===undefined?'Empty':x===null?'Null':x instanceof VBArray?x.type+'()':x instanceof Date?'Date':x instanceof VBDecimal?'Decimal':x instanceof VBCurrency?'Currency':typeof x==='string'?'String':typeof x==='number'?'Double':x.__type||x.constructor?.name||'Object',VarType:x=>x instanceof VBErrorValue||x===MISSING?10:x===undefined?0:x===null?1:x instanceof VBArray?8192+({byte:17,integer:2,long:3,single:4,double:5,currency:6,date:7,string:8,object:9,boolean:11,variant:12}[String(x.type).toLowerCase()]||12):x instanceof Date?7:x instanceof VBDecimal?14:x instanceof VBCurrency?6:typeof x==='string'?8:typeof x==='number'?5:9,
     IIf:(test,a,b)=>truth(test)?a:b,Choose:(index,...a)=>a[Math.trunc(numeric(index))-1]??null,Switch:(...a)=>{for(let i=0;i<a.length;i+=2)if(truth(a[i]))return a[i+1];return null;},
     Now:()=>new Date(),Date:()=>{const d=new Date();d.setHours(0,0,0,0);return d;},Time:()=>{const d=new Date(),r=new Date(1899,11,30);r.setHours(d.getHours(),d.getMinutes(),d.getSeconds());return r;},Timer:()=>{const d=new Date();return d.getHours()*3600+d.getMinutes()*60+d.getSeconds()+d.getMilliseconds()/1000;},DateValue:d=>{d=vbDate(d);d.setHours(0,0,0,0);return d;},TimeValue:d=>{const v=vbDate(d),r=new Date(1899,11,30);r.setHours(v.getHours(),v.getMinutes(),v.getSeconds());return r;},Year:d=>vbDate(d).getFullYear(),Month:d=>vbDate(d).getMonth()+1,Day:d=>vbDate(d).getDate(),Hour:d=>vbDate(d).getHours(),Minute:d=>vbDate(d).getMinutes(),Second:d=>vbDate(d).getSeconds(),Weekday:weekday,MonthName:monthName,WeekdayName:weekdayName,
@@ -4856,16 +5795,16 @@ function createLibrary(vm) {
   for(const name of ['Error','Left','Right','Mid','Trim','LTrim','RTrim','UCase','LCase','Space','String','Chr','ChrW','Str','Hex','Oct','Format','Input','Dir','Environ','Command']){
     const base=functions[name],fn=(...args)=>{const result=base(...args);if(result===null)throw new VBError('Invalid use of Null',94);return result;};fn.vbParams=base.vbParams;map.set(lower(name)+'$',fn);
   }
-  return map;
+  return installScalarLibrary(map,vm);
 }
 
 return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ..\controls\rtf.js */
-__modules[53]=(()=>{
-const {VBError}=__modules[11];
-const {decodeANSI}=__modules[35];
+__modules[61]=(()=>{
+const {VBError}=__modules[17];
+const {decodeANSI}=__modules[42];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
  * HTML, native OLE objects, embedded code and external links are never executed.
  */
@@ -4974,9 +5913,9 @@ return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
 /* ..\controls\input.js */
-__modules[54]=(()=>{
-const {Cell,truth}=__modules[15];
-const {lower}=__modules[14];
+__modules[62]=(()=>{
+const {Cell,truth}=__modules[21];
+const {lower}=__modules[20];
 
 
 // Browser/Windows button bitmasks agree, but `button` is an ordinal and a
@@ -5090,8 +6029,8 @@ return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsI
 })();
 
 /* ..\controls\form-window.js */
-__modules[55]=(()=>{
-const {el}=__modules[14];
+__modules[63]=(()=>{
+const {el}=__modules[20];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
 function installFormWindow(form){
@@ -5116,9 +6055,9 @@ return {installFormWindow};
 })();
 
 /* ..\controls\native-widgets.js */
-__modules[56]=(()=>{
-const {el}=__modules[14];
-const {getTheme}=__modules[39];
+__modules[64]=(()=>{
+const {el}=__modules[20];
+const {getTheme}=__modules[46];
 
 
 /** Bounds-only model used by the classic two-button spin control. */
@@ -5192,8 +6131,8 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ..\controls\scrollbar.js */
-__modules[57]=(()=>{
-const {el}=__modules[14];
+__modules[65]=(()=>{
+const {el}=__modules[20];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
 function scrollbarGeometry(min,max,value,length,page=1){
@@ -5233,7 +6172,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ..\theme\icon-art.js */
-__modules[58]=(()=>{
+__modules[66]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -5392,8 +6331,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ..\theme\icons.js */
-__modules[59]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[58];
+__modules[67]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[66];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -5420,11 +6359,11 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ..\theme\menu.js */
-__modules[60]=(()=>{
-const {uiDocument}=__modules[13];
-const {el}=__modules[14];
-const {icon}=__modules[59];
-const {getTheme}=__modules[39];
+__modules[68]=(()=>{
+const {uiDocument}=__modules[19];
+const {el}=__modules[20];
+const {icon}=__modules[67];
+const {getTheme}=__modules[46];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
 
@@ -5509,10 +6448,10 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ..\controls\richtext.js */
-__modules[61]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[53];
-const {VBError}=__modules[11];
-const {oleColor}=__modules[40];
+__modules[69]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[61];
+const {VBError}=__modules[17];
+const {oleColor}=__modules[47];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
 
 
@@ -5600,11 +6539,11 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ..\project\model.js */
-__modules[62]=(()=>{
-const {normalizeDataSources}=__modules[18];
-const { clone, lower, safeName }=__modules[14];
-const {normalizeResources}=__modules[45];
-const { VBError }=__modules[11];
+__modules[70]=(()=>{
+const {normalizeDataSources}=__modules[24];
+const { clone, lower, safeName }=__modules[20];
+const {normalizeResources}=__modules[52];
+const { VBError }=__modules[17];
 
 
 
@@ -5671,9 +6610,9 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ..\controls\collections.js */
-__modules[63]=(()=>{
-const { VBError }=__modules[11];
-const { lower }=__modules[14];
+__modules[71]=(()=>{
+const { VBError }=__modules[17];
+const { lower }=__modules[20];
 
 
 class ControlCollection {
@@ -5719,23 +6658,23 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ..\controls\controls.js */
-__modules[64]=(()=>{
-const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[54];
-const {installFormWindow}=__modules[55];
-const {ClassicCombo,ClassicUpDown}=__modules[56];
-const {ClassicScrollbar}=__modules[57];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[60];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[61];
-const {parseRTF}=__modules[53];
-const { el, lower, clone }=__modules[14];
-const { VBError }=__modules[11];
-const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[15];
-const { MemoryRecordset }=__modules[52];
-const { GraphicsSurface }=__modules[40];
-const { cssColor : oleColor, fontFamily, getTheme }=__modules[39];
-const { icon, controlIcon }=__modules[59];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[62];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[63];
+__modules[72]=(()=>{
+const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[62];
+const {installFormWindow}=__modules[63];
+const {ClassicCombo,ClassicUpDown}=__modules[64];
+const {ClassicScrollbar}=__modules[65];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[68];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[69];
+const {parseRTF}=__modules[61];
+const { el, lower, clone }=__modules[20];
+const { VBError }=__modules[17];
+const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[21];
+const { MemoryRecordset }=__modules[60];
+const { GraphicsSurface }=__modules[47];
+const { cssColor : oleColor, fontFamily, getTheme }=__modules[46];
+const { icon, controlIcon }=__modules[67];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[70];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[71];
 
 
 
@@ -6103,10 +7042,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[65]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[64];
-const {clone}=__modules[14];
-const {newId}=__modules[62];
+__modules[73]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[72];
+const {clone}=__modules[20];
+const {newId}=__modules[70];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -6185,10 +7124,10 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[66]=(()=>{
-const {VBError}=__modules[11];
-const {el}=__modules[14];
-const {NOTHING}=__modules[15];
+__modules[74]=(()=>{
+const {VBError}=__modules[17];
+const {el}=__modules[20];
+const {NOTHING}=__modules[21];
 
 
 
@@ -6245,9 +7184,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ..\controls\dialog.js */
-__modules[67]=(()=>{
-const {el}=__modules[14];
-const {icon}=__modules[59];
+__modules[75]=(()=>{
+const {el}=__modules[20];
+const {icon}=__modules[67];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -6282,11 +7221,11 @@ return {messageBoxOptions,runtimeDialog};
 })();
 
 /* ..\language\binding.js */
-__modules[68]=(()=>{
-const {VBError}=__modules[9];
-const {lower}=__modules[14];
-const {VB_CONSTANTS}=__modules[51];
-const {VBCurrency,coerce,unary,binary}=__modules[15];
+__modules[76]=(()=>{
+const {VBError}=__modules[15];
+const {lower}=__modules[20];
+const {VB_CONSTANTS}=__modules[59];
+const {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,storageScalar,signedLiteralScalar}=__modules[21];
 
 
 
@@ -6296,18 +7235,18 @@ const {VBCurrency,coerce,unary,binary}=__modules[15];
  * dependency cannot leave worker diagnostics or execution with old values. */
 function bindConstants(modules) {
   const diagnostics=[], scopes=new Map(), cache=new Map(), active=new Set();
-  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),v]));
+  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
   let steps=0;
   const report=(e,m,line)=>diagnostics.push({severity:'error',number:e.number||1002,message:e.message,source:e.source||m.name,line:e.line||line||1,column:1});
   const fail=message=>{throw new VBError(message,1002);};
   for(const m of modules.values()){
     const globals=new Map(),locals=new Map();scopes.set(m,{globals,locals});
-    m.constantBindings=new Map();m.enumBindings=new Map();m.globalEnumMembers=new Map();m.importedConstantBindings=new Map();
+    m.constantBindings=new Map();m.constantScalars=new Map();m.enumBindings=new Map();m.globalEnumMembers=new Map();m.importedConstantBindings=new Map();
     for(const d of m.declarations){const key=lower(d.name);if(globals.has(key))report(new VBError('Ambiguous name detected: '+d.name,1002),m,d.line);else globals.set(key,{m,d});
       if(d.constant&&!d.enumName&&d.scope!=='private'&&m.kind!=='module')report(new VBError('Public constants are not permitted in object modules',1002),m,d.line);
     }
     for(const p of m.procedures.values()){
-      const names=new Map(p.params.map(d=>[lower(d.name),{m,p,d}]));locals.set(p,names);p.constantBindings=new Map();p.defaultBindings=new Map();
+      const names=new Map(p.params.map(d=>[lower(d.name),{m,p,d}]));locals.set(p,names);p.constantBindings=new Map();p.defaultBindings=new Map();p.constantScalars=new Map();p.defaultScalars=new Map();
       for(const ins of p.code)if(ins.op==='dim')for(const d of ins.decls){const key=lower(d.name);if(names.has(key))report(new VBError('Duplicate declaration: '+d.name,1002),m,ins.line);else names.set(key,{m,p,d,line:ins.line});}
     }
   }
@@ -6331,13 +7270,13 @@ function bindConstants(modules) {
     if(!node||++steps>100000||depth>256)fail('Constant expression complexity limit exceeded');
     const ev=n=>evaluate(n,m,p,depth+1);
     switch(node.kind){
-      case 'literal':if(node.value===null)fail('Invalid use of Null in constant expression');return node.value;
-      case 'date':return new Date(node.value);
-      case 'currency':return new VBCurrency(node.value);
+      case 'literal':if(node.value===null)fail('Invalid use of Null in constant expression');return literalScalar(node);
+      case 'date':return literalScalar(node);
+      case 'currency':return literalScalar(node);
       case 'group':return ev(node.expr);
       case 'id':return resolve(node.name,m,p);
-      case 'unary':if(node.op==='-'&&node.expr.kind==='currency')return new VBCurrency('-'+node.expr.value);return unary(node.op,ev(node.expr));
-      case 'binary':if(node.op==='is')fail('Object identity is not a constant expression');{const value=binary(node.op,ev(node.left),ev(node.right),m.optionCompare);if(typeof value==='string'&&value.length>1048576)fail('Constant string exceeds 1 MiB compiler limit');return value;}
+      case 'unary':{const literal=signedLiteralScalar(node);if(literal)return literal;}return unary(node.op,ev(node.expr));
+      case 'binary':if(node.op==='is')fail('Object identity is not a constant expression');{const value=binary(node.op,ev(node.left),ev(node.right),m.optionCompare);if(typeof unbox(value)==='string'&&unbox(value).length>1048576)fail('Constant string exceeds 1 MiB compiler limit');return value;}
       case 'member':{
         if(node.object.kind!=='id')fail('Constant expression required');
         const owner=modules.get(lower(node.object.name));
@@ -6356,26 +7295,28 @@ function bindConstants(modules) {
     active.add(entry);
     try{
       const {m,p,d}=entry;let value=evaluate(d.initial,m,p);
-      const type=d.explicitType||lower(d.type)!=='variant'?d.type:value instanceof VBCurrency?'Currency':value instanceof Date?'Date':typeof value==='string'?'String':Number.isInteger(value)&&value>=-32768&&value<=32767?'Integer':Number.isInteger(value)&&value>=-2147483648&&value<=2147483647?'Long':'Double';
+      const type=d.explicitType||lower(d.type)!=='variant'?d.type:scalarType(value)||'Double';
       if(!['byte','integer','long','single','double','currency','date','string','boolean','variant'].includes(lower(type)))fail('Invalid constant type: '+type);
-      value=coerce(value,type);cache.set(entry,value);(p?p.constantBindings:m.constantBindings).set(lower(d.name),value);return value;
+      value=storageScalar(value,type);d.constantType=type;cache.set(entry,value);
+      (p?p.constantBindings:m.constantBindings).set(lower(d.name),unbox(value));
+      (p?p.constantScalars:m.constantScalars).set(lower(d.name),value);return value;
     }finally{active.delete(entry);}
   }
   for(const m of modules.values()){
     const scope=scopes.get(m);
     for(const entry of [...scope.globals.values(),...[...scope.locals.values()].flatMap(v=>[...v.values()])])if(entry.d.constant)try{bind(entry);}catch(e){report(e,m,entry.line||entry.d.line);}
-    for(const p of m.procedures.values())for(const param of p.params)if(param.initial)try{p.defaultBindings.set(lower(param.name),evaluate(param.initial,m,null));}catch(e){report(e,m,p.line);}
+    for(const p of m.procedures.values())for(const param of p.params)if(param.initial)try{const value=evaluate(param.initial,m,null);p.defaultBindings.set(lower(param.name),unbox(value));p.defaultScalars.set(lower(param.name),value);}catch(e){report(e,m,p.line);}
   }
   // Public constant values exist before runtime field initialization. Preserve
   // ambiguity rather than selecting whichever module happens to be first.
   for(const m of modules.values())for(const owner of modules.values())if(owner!==m)
     for(const d of owner.declarations)if(d.constant&&d.scope!=='private'&&(owner.kind==='module'||d.enumName)){
-      const key=lower(d.name);m.importedConstantBindings.set(key,m.importedConstantBindings.has(key)?{ambiguous:true}:{value:owner.constantBindings.get(key)});
+      const key=lower(d.name);m.importedConstantBindings.set(key,m.importedConstantBindings.has(key)?{ambiguous:true}:{value:owner.constantBindings.get(key),scalar:owner.constantScalars.get(key)});
     }
   // Resolved enum namespaces are immutable and never expose host reflection.
   for(const m of modules.values()){
     for(const owner of modules.values())for(const e of Object.values(owner.enums))if(owner===m||e.scope!=='private'){
-      if(owner!==m&&e.scope!=='private')for(const n of e.members){const k=lower(n);m.globalEnumMembers.set(k,m.globalEnumMembers.has(k)?{ambiguous:true}:{value:owner.constantBindings.get(k)});}
+      if(owner!==m&&e.scope!=='private')for(const n of e.members){const k=lower(n);m.globalEnumMembers.set(k,m.globalEnumMembers.has(k)?{ambiguous:true}:{value:owner.constantBindings.get(k),scalar:owner.constantScalars.get(k)});}
       const key=lower(e.name),existing=m.enumBindings.get(key);
       if(existing&&existing.owner!==m.name&&owner!==m){m.enumBindings.set(key,{ambiguous:true});continue;}
       if(existing&&existing.owner===m.name)continue;
@@ -6387,7 +7328,7 @@ function bindConstants(modules) {
     for(const fields of Object.values(m.types))for(const d of fields)storage(d);
     for(const p of m.procedures.values()){
       delete p.storageReturnType;try{if(enumDefinition(p.returnType,m))p.storageReturnType='Long';}catch(e){report(e,m,p.line);}
-      for(const d of p.params){storage(d);if(d.storageType&&p.defaultBindings.has(lower(d.name)))try{p.defaultBindings.set(lower(d.name),coerce(p.defaultBindings.get(lower(d.name)),d.storageType));}catch(e){report(e,m,p.line);}}
+      for(const d of p.params){storage(d);if(d.storageType&&p.defaultBindings.has(lower(d.name)))try{const value=storageScalar(p.defaultScalars.get(lower(d.name)),d.storageType);p.defaultBindings.set(lower(d.name),unbox(value));p.defaultScalars.set(lower(d.name),value);}catch(e){report(e,m,p.line);}}
       for(const ins of p.code)if(ins.op==='dim'||ins.op==='redim')for(const d of ins.decls)storage(d);
     }
   }
@@ -6398,8 +7339,8 @@ return {bindConstants};
 })();
 
 /* ..\language\default-types.js */
-__modules[69]=(()=>{
-const {VBError}=__modules[11];
+__modules[77]=(()=>{
+const {VBError}=__modules[17];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -6425,8 +7366,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ..\language\interfaces.js */
-__modules[70]=(()=>{
-const {lower}=__modules[14];
+__modules[78]=(()=>{
+const {lower}=__modules[20];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -6469,8 +7410,8 @@ return {validateInterfaces};
 })();
 
 /* ..\language\expression.js */
-__modules[71]=(()=>{
-const { tokenize, VBError }=__modules[11];
+__modules[79]=(()=>{
+const { tokenize, VBError }=__modules[17];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -6496,7 +7437,8 @@ class ExpressionParser {
   expression(min=0) {
     let node; const t=this.take(); const value=String(t.value).toLowerCase();
     if(t.type==='number'&&t.raw.endsWith('@'))node={kind:'currency',value:t.raw.slice(0,-1)};
-    else if(t.type==='number'||t.type==='string') node={kind:'literal',value:t.value};
+    else if(t.type==='number') node={kind:'literal',value:numericLiteralValue(t),valueType:numericLiteralType(t),numberSuffix:/[%&!#]$/.test(t.raw)?t.raw.at(-1):null};
+    else if(t.type==='string') node={kind:'literal',value:t.value,valueType:'string'};
     else if(t.type==='date') node={kind:'date',value:t.value};
     else if(value==='('){node=this.expression();this.expect(')');node={kind:'group',expr:node};}
     else if(value==='+'||value==='-'||value==='not') node={kind:'unary',op:value,expr:this.expression(value==='not'?6:13)};
@@ -6505,8 +7447,8 @@ class ExpressionParser {
     else if(value==='typeof'){const expr=this.expression(8);this.expect('is');node={kind:'typeof',expr,name:this.qualifiedName()};}
     else if(value==='.') { const name=this.take();if(name.type!=='id')throw new VBError('Expected member name',1002);node={kind:'member',object:{kind:'with'},name:name.value}; }
     else if(t.type==='id') {
-      if(value==='true')node={kind:'literal',value:-1};
-      else if(value==='false')node={kind:'literal',value:0};
+      if(value==='true')node={kind:'literal',value:-1,valueType:'boolean'};
+      else if(value==='false')node={kind:'literal',value:0,valueType:'boolean'};
       else if(value==='null')node={kind:'literal',value:null};
       else if(value==='nothing')node={kind:'nothing'};
       else if(value==='empty')node={kind:'empty'};
@@ -6529,7 +7471,7 @@ class ExpressionParser {
   parse() { const node=this.expression();if(this.peek().type!=='eof')throw new VBError(`Unexpected '${this.peek().raw}' in expression`,1002,null,0,this.peek().start+1);return node; }
 }
 const parseExpression = text => new ExpressionParser(text.trim()).parse();
-function parseCall(text) {
+function parseCall(text,{explicit=false}={}) {
   const p=new ExpressionParser(text); let callee=p.take(); let node;
   if(callee.value==='.') { const name=p.take();node={kind:'member',object:{kind:'with'},name:name.value}; }
   else if(callee.type==='id') node={kind:'id',name:callee.value};
@@ -6537,20 +7479,45 @@ function parseCall(text) {
   while(p.match('.')){const name=p.take();node={kind:'member',object:node,name:name.value};}
   if(p.peek().type==='eof') return {kind:'call',callee:node,args:[]};
   const rest=text.slice(p.peek().start).trim();
-  if(rest.startsWith('(')) return parseExpression(text);
+  if(rest.startsWith('(')) {
+    let expression;try{expression=parseExpression(text);}catch(error){if(explicit)throw error;}
+    if(expression){
+      // Without Call the parentheses around a single argument are an
+      // expression grouping, forcing a temporary even for a ByRef formal.
+      if(!explicit&&expression.kind==='call'&&expression.args.length===1&&JSON.stringify(expression.callee)===JSON.stringify(node))expression.args[0]={kind:'group',expr:expression.args[0]};
+      return expression;
+    }
+  }
   const args=[];do{args.push(p.argument());}while(p.match(','));
   if(p.peek().type!=='eof')throw new VBError(`Unexpected '${p.peek().raw}' in argument list`,1002);
   return {kind:'call',callee:node,args};
+}
+
+function numericLiteralType(token){
+  const suffix=token.raw.at(-1),explicit={'%':'integer','&':'long','!':'single','#':'double'}[suffix];
+  if(explicit)return explicit;
+  if(/^[&][ho]/i.test(token.raw))return parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8)<=65535?'integer':'long';
+  if(/[.eEdD]/.test(token.raw))return 'double';
+  return token.value>=-32768&&token.value<=32767?'integer':token.value>=-2147483648&&token.value<=2147483647?'long':'double';
+}
+
+function numericLiteralValue(token){
+  if(/^&[ho]/i.test(token.raw)){
+    const n=parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8);
+    if(n>4294967295)throw new VBError('Overflow in numeric literal',6);
+    return n>2147483647?n-4294967296:n>=32768&&n<=65535&&!token.raw.endsWith('&')?n-65536:n;
+  }
+  return token.value;
 }
 
 return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ..\language\conditional.js */
-__modules[72]=(()=>{
-const { VBError }=__modules[11];
-const { parseExpression }=__modules[71];
-const { binary, unary, truth }=__modules[15];
+__modules[80]=(()=>{
+const { VBError }=__modules[17];
+const { parseExpression }=__modules[79];
+const { binary, unary, truth }=__modules[21];
 
 
 
@@ -6589,14 +7556,14 @@ return {preprocess};
 })();
 
 /* ..\language\compiler.js */
-__modules[73]=(()=>{
-const {bindConstants}=__modules[68];
-const {defaultIdentifierType,addDefaultTypes}=__modules[69];
-const {validateInterfaces}=__modules[70];
-const { preprocess }=__modules[72];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[11];
-const { parseExpression, parseCall }=__modules[71];
-const { lower }=__modules[14];
+__modules[81]=(()=>{
+const {bindConstants}=__modules[76];
+const {defaultIdentifierType,addDefaultTypes}=__modules[77];
+const {validateInterfaces}=__modules[78];
+const { preprocess }=__modules[80];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[17];
+const { parseExpression, parseCall }=__modules[79];
+const { lower }=__modules[20];
 
 
 
@@ -6744,7 +7711,7 @@ class ProcedureCompiler {
     if((m=text.match(/^(?:(.+)\.)?Line\s*\(([^,]+),([^\)]+)\)\s*-\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*([^,]+))?(?:\s*,\s*(B|BF))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:m[7]?'rect':'line',coords:[m[2],m[3],m[4],m[5]].map(E),color:E(m[6]||'0'),fill:/bf/i.test(m[7]||'')},line);return;}
     if((m=text.match(/^(?:(.+)\.)?PSet\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'pixel',coords:[E(m[2]),E(m[3])],color:E(m[4]||'0')},line);return;}
     if((m=text.match(/^(?:(.+)\.)?Circle\s*\(([^,]+),([^\)]+)\)\s*,\s*([^,]+)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'circle',coords:[E(m[2]),E(m[3]),E(m[4])],color:E(m[5]||'0')},line);return;}
-    if(/^RaiseEvent\b/i.test(text)){this.emit('raiseEvent',{expr:parseCall(text.replace(/^RaiseEvent\s+/i,''))},line);return;}
+    if(/^RaiseEvent\b/i.test(text)){this.emit('raiseEvent',{expr:parseCall(text.replace(/^RaiseEvent\s+/i,''),{explicit:true})},line);return;}
     if((m=text.match(/^(LSet|RSet)\s+(.+?)\s*=\s*(.+)$/i))){const target=E(m[2]);if(!['id','member','call'].includes(target.kind))throw new VBError('Expected assignable string variable',1002);this.emit('stringAlign',{target,expr:E(m[3]),right:/rset/i.test(m[1])},line);return;}
     if(/^Mid\$?\s*\(/i.test(text)){
       const tokens=tokenize(text);let level=0,equal;for(const t of tokens){if(t.value==='(')level++;else if(t.value===')')level--;else if(t.value==='='&&level===0){equal=t;break;}}
@@ -6755,7 +7722,7 @@ class ProcedureCompiler {
     const ts=tokenize(text);let depth=0,eq=null;
     for(const t of ts){if(t.value==='(')depth++;else if(t.value===')')depth--;else if(t.value==='='&&depth===0){eq=t;break;}}
     if(eq){const target=E(text.slice(0,eq.start));if(!['id','member','call'].includes(target.kind))throw new VBError('Invalid assignment target',1002);this.emit('assign',{target,expr:E(text.slice(eq.end)),objectSet:/^Set\s/i.test(original)},line);return;}
-    if(/^Call\s+/i.test(text)){this.emit('expr',{expr:parseCall(text.replace(/^Call\s+/i,''))},line);return;}
+    if(/^Call\s+/i.test(text)){this.emit('expr',{expr:parseCall(text.replace(/^Call\s+/i,''),{explicit:true})},line);return;}
     this.emit('expr',{expr:parseCall(text)},line);
   }
 }
@@ -6828,10 +7795,10 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* debug-control.js */
-__modules[74]=(()=>{
-const {VBError,tokenize}=__modules[11];
-const {lower}=__modules[14];
-const {truth}=__modules[15];
+__modules[82]=(()=>{
+const {VBError,tokenize}=__modules[17];
+const {lower}=__modules[20];
+const {truth}=__modules[21];
 
 
 
@@ -6972,10 +7939,10 @@ return {StopExecution,isSequencePoint,statementIndex,RuntimeDebugger,immediateSt
 })();
 
 /* win32.js */
-__modules[75]=(()=>{
-const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[8];
-const {VBError}=__modules[11];
-const {VBArray,VBCurrency,numeric,coerce}=__modules[15];
+__modules[83]=(()=>{
+const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[14];
+const {VBError}=__modules[17];
+const {VBArray,VBCurrency,numeric,coerce}=__modules[21];
 
 
 
@@ -7065,7 +8032,7 @@ class VBWin32Bridge {
       parent:()=>isForm?0:c.form?.hWnd||0,controlId:Number(c.props.TabIndex||0)+1,
       getText:()=>c.get(textKey),setText:s=>c.set(textKey,s),isVisible:()=>!!c.props.Visible,isEnabled:()=>!!c.props.Enabled,
       setEnabled:enabled=>c.set('Enabled',enabled?-1:0),show:command=>{if(![0,1,4,5,8,9].includes(command))throw new Win32Error('Window state is not supported by this browser adapter',50);c.set('Visible',command===0?0:-1);},
-      getRect:()=>c.node.getBoundingClientRect(),getClientRect:()=>({width:(c.content||c.input||c.node).clientWidth,height:(c.content||c.input||c.node).clientHeight}),clientOrigin:()=>{const r=(c.content||c.input||c.node).getBoundingClientRect();return [r.left,r.top];},
+      getRect:()=>c.node.getBoundingClientRect(),getClientRect:()=>{const n=c.content||c.input||c.node;return {width:n.clientWidth||Math.max(0,Number(c.props.ClientWidth??c.props.Width)/15),height:n.clientHeight||Math.max(0,Number(c.props.ClientHeight??c.props.Height)/15)};},clientOrigin:()=>{const r=(c.content||c.input||c.node).getBoundingClientRect();return [r.left,r.top];},
       getPosition:()=>[c.props.Left/15,c.props.Top/15,(c.props.Left+c.props.Width)/15,(c.props.Top+c.props.Height)/15],
       move:(x,y,width,height)=>{c.movedByUser=true;Object.assign(c.props,{Left:x*15,Top:y*15,Width:width*15,Height:height*15});if(isForm)Object.assign(c.props,{ClientWidth:Math.max(0,width-8)*15,ClientHeight:Math.max(0,height-32)*15});c.refresh();},
       getCheck:()=>Number(c.props.Value||0),setCheck:state=>c.set('Value',state),click:()=>c.node.click()};
@@ -7079,6 +8046,10 @@ class VBWin32Bridge {
     };
     if(['Form','MDIForm','PictureBox'].includes(c.type)){
       const raster=fn=>(...args)=>{try{return fn(...args);}catch(error){if(error instanceof RangeError)throw new Win32Error(error.message,8);throw error;}};
+      // Paint is queued without awaiting the active VB stack (UpdateWindow must not deadlock).
+      descriptor.requestNonClientPaint=()=>{c.refresh();};
+      descriptor.getBackgroundColor=()=>Number(c.props.BackColor??0xffffff);
+      descriptor.requestPaint=()=>{c.event('Paint',[],true).catch(error=>this.vm.reportError(error));};
       descriptor.readPixels=raster((...args)=>c.ensureSurface().readPixels(...args));
       descriptor.writePixels=raster((...args)=>c.ensureSurface().writePixels(...args));
     }
@@ -7092,8 +8063,8 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[76]=(()=>{
-const {VBError}=__modules[11];
+__modules[84]=(()=>{
+const {VBError}=__modules[17];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
 class DebugEvaluationAbort extends VBError {
@@ -7121,11 +8092,11 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[77]=(()=>{
-const {VBError}=__modules[11];
-const {parseExpression}=__modules[71];
-const {lower}=__modules[14];
-const {Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[15];
+__modules[85]=(()=>{
+const {VBError}=__modules[17];
+const {parseExpression}=__modules[79];
+const {lower}=__modules[20];
+const {VBScalar,scalarType,tagScalar,literalScalar,signedLiteralScalar,unbox,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[21];
 
 
 
@@ -7134,9 +8105,9 @@ const BLOCKED=new Set(['constructor','prototype','__proto__','caller','callee','
 const PURE=new Set(('abs sgn int fix round sqr sin cos tan atn exp log cint clng cbyte csng cdbl ccur cdec cstr cbool cdate cvdate cvar cverr iserror val str hex oct len lenb left right mid trim ltrim rtrim ucase lcase chr chrw asc ascw strreverse instr instrrev strcomp lbound ubound isarray isempty isnull isnumeric isdate isobject ismissing typename vartype year month day hour minute second weekday dateserial timeserial dateadd datediff datepart rgb qbcolor').split(' '));
 const own=(object,key)=>Object.getOwnPropertyDescriptor(object,key);
 const field=(fields,key)=>fields?.get(key)||[...(fields||[])].find(([name])=>lower(name)===key)?.[1];
-function scalar(v){return v===null||v===undefined||v===NOTHING||v===MISSING||typeof v==='string'||typeof v==='number'||typeof v==='boolean'||v instanceof Date||v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue;}
-function type(v,fallback){if(fallback&&lower(fallback)!=='variant')return fallback;if(v===NOTHING)return 'Nothing';if(v===MISSING||v instanceof VBErrorValue)return 'Error';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(v instanceof VBArray)return v.type+'()';if(v instanceof VBDecimal)return 'Decimal';if(v instanceof VBCurrency)return 'Currency';if(v instanceof Date)return 'Date';if(typeof v==='string')return 'String';if(typeof v==='number')return 'Double';if(v instanceof VBCollection)return 'Collection';if(v instanceof VBDictionary)return 'Dictionary';return own(v||{},'__type')?.value||'Object';}
-function debugDescription(v){if(v===NOTHING)return 'Nothing';if(v===MISSING)return '<Missing>';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(typeof v==='string')return '"'+v.slice(0,4000)+(v.length>4000?'…':'')+'"';if(v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue)return v.toString();if(v instanceof Date)return '#'+(Number.isFinite(v.getTime())?v.toLocaleString():'Invalid date')+'#';if(v instanceof VBArray)return 'Array('+v.bounds.map(([lo,hi])=>lo+' To '+hi).join(', ')+')';if(typeof v==='object')return type(v);return String(v);}
+function scalar(v){return v instanceof VBScalar|| v===null||v===undefined||v===NOTHING||v===MISSING||typeof v==='string'||typeof v==='number'||typeof v==='boolean'||v instanceof Date||v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue;}
+function type(v,fallback){if(v instanceof VBScalar){const t=v.type;return t.charAt(0).toUpperCase()+t.slice(1);}if(fallback&&lower(fallback)!=='variant')return fallback;if(v===NOTHING)return 'Nothing';if(v===MISSING||v instanceof VBErrorValue)return 'Error';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(v instanceof VBArray)return v.type+'()';if(v instanceof VBDecimal)return 'Decimal';if(v instanceof VBCurrency)return 'Currency';if(v instanceof Date)return 'Date';if(typeof v==='string')return 'String';if(typeof v==='number')return 'Double';if(v instanceof VBCollection)return 'Collection';if(v instanceof VBDictionary)return 'Dictionary';return own(v||{},'__type')?.value||'Object';}
+function debugDescription(v){if(v instanceof VBScalar){if(v.type==='boolean')return v.value?'True':'False';v=unbox(v);}if(v===NOTHING)return 'Nothing';if(v===MISSING)return '<Missing>';if(v===undefined)return 'Empty';if(v===null)return 'Null';if(typeof v==='string')return '"'+v.slice(0,4000)+(v.length>4000?'…':'')+'"';if(v instanceof VBCurrency||v instanceof VBDecimal||v instanceof VBErrorValue)return v.toString();if(v instanceof Date)return '#'+(Number.isFinite(v.getTime())?v.toLocaleString():'Invalid date')+'#';if(v instanceof VBArray)return 'Array('+v.bounds.map(([lo,hi])=>lo+' To '+hi).join(', ')+')';if(typeof v==='object')return type(v);return String(v);}
 /** Automatic debugger evaluation reads storage, never executes project methods,
  * property accessors, lazy constructors, browser/COM functions or arbitrary JS
  * getters. Explicit Immediate execution remains a separately named operation. */
@@ -7144,30 +8115,30 @@ class DebugInspector {
  constructor(vm){this.vm=vm;this.cache=new Map();}
  parse(text){text=String(text).trim();if(!text||text.length>4096)throw new VBError('Debugger expression must contain 1–4096 characters',5);if(this.cache.has(text))return this.cache.get(text);const node=parseExpression(text);if(this.cache.size>=128)this.cache.delete(this.cache.keys().next().value);this.cache.set(text,node);return node;}
  frame(index=null){const vm=this.vm;if(index!==null&&index!==undefined){if(!Number.isInteger(index)||!vm.stack[index])throw new VBError('The selected stack frame is no longer available',5);return vm.stack[index];}return vm.currentFrame||([...vm.instances.values()][0]?vm.makeFrame([...vm.instances.values()][0]):null);}
- cell(cell){if(cell instanceof LazyCell)return cell.peek();if(cell instanceof Ref){if(typeof cell.debugGet==='function')return cell.debugGet();throw new VBError('Automatic evaluation of a computed ByRef value is disabled',5);}if(cell instanceof Cell)return cell._value;throw new VBError('Value cannot be inspected without executing code',5);}
- identifier(name,frame){const key=lower(name);if(BLOCKED.has(key)||key.startsWith('__'))throw new VBError('Member access is not permitted',438);if(!frame)throw new VBError('Runtime is not initialized',5);if(key==='me')return frame.instance;if(frame.locals.has(key))return this.cell(frame.locals.get(key));if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return this.cell(frame.result);if(frame.instance.fields.has(key))return this.cell(frame.instance.fields.get(key));if(frame.proc.constantBindings?.has(key))return frame.proc.constantBindings.get(key);if(frame.module.constantBindings?.has(key))return frame.module.constantBindings.get(key);if(frame.module.importedConstantBindings?.has(key)){const member=frame.module.importedConstantBindings.get(key);if(member.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return member.value;}if(frame.module.enumBindings?.has(key)){const value=frame.module.enumBindings.get(key);if(value.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return value;}if(this.vm.instances.has(key))return this.vm.instances.get(key);for(const instance of this.vm.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private'))return this.cell(instance.fields.get(key));if(frame.instance.formObject){try{return this.member(frame.instance.formObject,name,frame);}catch(error){if(error.number!==438)throw error;}}if(this.vm.library.has(key)){const value=this.vm.library.get(key);if(typeof value==='function')throw new VBError('Automatic procedure evaluation is disabled: '+name,5);return value;}if(frame.module.procedures.has(key)||frame.module.procedures.has(key+':get'))throw new VBError('Automatic procedure evaluation is disabled: '+name,5);throw new VBError('Variable not defined: '+name,500);}
+ cell(cell){if(cell instanceof LazyCell)return cell.peek();if(cell instanceof Ref){if(typeof cell.debugGetScalar==='function')return cell.debugGetScalar();if(typeof cell.debugGet==='function')return cell.debugGet();throw new VBError('Automatic evaluation of a computed ByRef value is disabled',5);}if(cell instanceof Cell)return cell.getScalar();throw new VBError('Value cannot be inspected without executing code',5);}
+ identifier(name,frame){const key=lower(name);if(BLOCKED.has(key)||key.startsWith('__'))throw new VBError('Member access is not permitted',438);if(!frame)throw new VBError('Runtime is not initialized',5);if(key==='me')return frame.instance;if(frame.locals.has(key))return this.cell(frame.locals.get(key));if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return this.cell(frame.result);if(frame.instance.fields.has(key))return this.cell(frame.instance.fields.get(key));if(frame.proc.constantBindings?.has(key))return frame.proc.constantScalars?.get(key)??frame.proc.constantBindings.get(key);if(frame.module.constantBindings?.has(key))return frame.module.constantScalars?.get(key)??frame.module.constantBindings.get(key);if(frame.module.importedConstantBindings?.has(key)){const member=frame.module.importedConstantBindings.get(key);if(member.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return member.scalar??member.value;}if(frame.module.enumBindings?.has(key)){const value=frame.module.enumBindings.get(key);if(value.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return value;}if(this.vm.instances.has(key))return this.vm.instances.get(key);for(const instance of this.vm.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private'))return this.cell(instance.fields.get(key));if(frame.instance.formObject){try{return this.member(frame.instance.formObject,name,frame);}catch(error){if(error.number!==438)throw error;}}if(this.vm.library.has(key)){const value=this.vm.library.get(key);if(typeof value==='function')throw new VBError('Automatic procedure evaluation is disabled: '+name,5);return value;}if(frame.module.procedures.has(key)||frame.module.procedures.has(key+':get'))throw new VBError('Automatic procedure evaluation is disabled: '+name,5);throw new VBError('Variable not defined: '+name,500);}
  member(object,name,frame){const key=lower(name);if(BLOCKED.has(key)||key.startsWith('_'))throw new VBError('Member access is not permitted',438);if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable not set',91);if(object.__vbEnum){if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return object.values[key];}if(object.__vbInstance){this.vm.assertVisible(object,name,frame);const cell=object.fields.get(key);if(cell)return this.cell(cell);if(object.module.procedures.has(key)||object.module.procedures.has(key+':get'))throw new VBError('Automatic property/procedure evaluation is disabled: '+name,5);if(object.formObject)return this.member(object.formObject,name,frame);throw new VBError('Member not found: '+name,438);}if(object.__fields){const cell=field(object.__fields,key);if(!cell)throw new VBError('Member not found: '+name,438);return this.cell(cell);}if(object.__control&&object.props){const actual=Object.keys(object.props).find(n=>lower(n)===key);if(actual)return object.props[actual];}
   if(key==='count'&&object instanceof VBCollection)return object.items.length;if(key==='count'&&object instanceof VBDictionary)return object.map.size;
   const actual=Object.getOwnPropertyNames(object).find(n=>lower(n)===key&&/^[A-Z]/.test(n)),descriptor=actual&&own(object,actual);if(!descriptor||!('value'in descriptor)||typeof descriptor.value==='function')throw new VBError('Automatic getter/method evaluation is disabled: '+name,438);return descriptor.value;
  }
- evaluate(text,frameIndex=null){return this.node(this.parse(text),this.frame(frameIndex),{count:0},0);}
- node(node,frame,budget,depth){if(++budget.count>512||depth>64)throw new VBError('Debugger expression is too complex',7);const evaluate=n=>this.node(n,frame,budget,depth+1);switch(node.kind){case 'literal':return node.value;case 'currency':return new VBCurrency(node.value);case 'date':return new Date(node.value);case 'empty':return undefined;case 'nothing':return NOTHING;case 'missing':return MISSING;case 'group':return evaluate(node.expr);case 'id':return this.identifier(node.name,frame);case 'with':if(!frame?.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);case 'member':return this.member(evaluate(node.object),node.name,frame);case 'unary':{const v=evaluate(node.expr);if(!scalar(v))throw new VBError('Automatic default-property evaluation is disabled',5);return unary(node.op,v);}case 'binary':{const a=evaluate(node.left),b=evaluate(node.right);if(node.op!=='is'&&(!scalar(a)||!scalar(b)))throw new VBError('Automatic default-property evaluation is disabled',5);if(node.op==='like'&&String(a).length+String(b).length>2048)throw new VBError('Debugger Like operands are too long',7);return binary(node.op,a,b,frame?.module.optionCompare);}case 'typeof':{const object=evaluate(node.expr),name=lower(node.name).replace(/^vb\./,'');if(object===NOTHING)return 0;if(scalar(object)||object instanceof VBArray||object?.__fields)throw new VBError('Object required',424);return (objectSupports(object,name)||name==='object'||name===lower(type(object))||name==='form'&&!!object.module?.form||name==='control'&&!!object.__control)?-1:0;}case 'call':{
+ evaluate(text,frameIndex=null){return unbox(this.node(this.parse(text),this.frame(frameIndex),{count:0},0));}
+ node(node,frame,budget,depth){if(++budget.count>512||depth>64)throw new VBError('Debugger expression is too complex',7);const evaluate=n=>this.node(n,frame,budget,depth+1);switch(node.kind){case 'literal':return literalScalar(node);case 'currency':return literalScalar(node);case 'date':return literalScalar(node);case 'empty':return undefined;case 'nothing':return NOTHING;case 'missing':return MISSING;case 'group':return evaluate(node.expr);case 'id':return this.identifier(node.name,frame);case 'with':if(!frame?.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);case 'member':return this.member(evaluate(node.object),node.name,frame);case 'unary':{const literal=signedLiteralScalar(node);if(literal)return literal;const v=evaluate(node.expr);if(!scalar(v))throw new VBError('Automatic default-property evaluation is disabled',5);return unary(node.op,v);}case 'binary':{const a=evaluate(node.left),b=evaluate(node.right);if(node.op!=='is'&&(!scalar(a)||!scalar(b)))throw new VBError('Automatic default-property evaluation is disabled',5);if(node.op==='like'&&String(a).length+String(b).length>2048)throw new VBError('Debugger Like operands are too long',7);return node.op==='is'?tagScalar(binary('is',a,b),'boolean'):binary(node.op,a,b,frame?.module.optionCompare);}case 'typeof':{const object=evaluate(node.expr),name=lower(node.name).replace(/^vb\./,'');if(object===NOTHING)return tagScalar(0,'boolean');if(scalar(object)||object instanceof VBArray||object?.__fields)throw new VBError('Object required',424);return tagScalar((objectSupports(object,name)||name==='object'||name===lower(type(object))||name==='form'&&!!object.module?.form||name==='control'&&!!object.__control)?-1:0,'boolean');}case 'call':{
     // Array and collection indexing are storage reads; intrinsic functions below
     // have a bounded, explicit allowlist and do not call into the user program.
     const pure=node.callee.kind==='id'&&PURE.has(lower(node.callee.name).replace(/\$$/,''));let target;
     if(pure){const key=lower(node.callee.name),local=frame&&(frame.locals.has(key)||frame.instance.fields.has(key)||frame.module.procedures.has(key)||frame.module.procedures.has(key+':get')||[...this.vm.instances.values()].some(i=>i.module.kind==='module'&&(i.fields.has(key)||i.module.procedures.has(key)||i.module.procedures.has(key+':get'))));if(local)target=evaluate(node.callee);else target=this.vm.library.get(key);}
     else target=evaluate(node.callee);
     if(node.args.some(n=>n.kind==='named'||n.kind==='missing'))throw new VBError('Use positional arguments in automatic debugger expressions',5);const args=node.args.map(evaluate);
-    if(target instanceof VBArray)return args.length?target.get(...args):target;if(target instanceof VBCollection){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.Item(args[0]);}if(target instanceof VBDictionary){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.Item(args[0]);}
+    if(target instanceof VBArray)return args.length?target.getScalar(...args):target;if(target instanceof VBCollection){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.itemScalar(args[0]);}if(target instanceof VBDictionary){if(args.length!==1)throw new VBError('Wrong number of arguments',450);return target.itemScalar(args[0]);}
     if(!pure||typeof target!=='function')throw new VBError('Automatic procedure evaluation is disabled',5);
     const key=lower(node.callee.name).replace(/\$$/,'');if(args.some(v=>!scalar(v))&&!['isarray','isobject','typename','vartype','isempty','isnull','iserror','ismissing','lbound','ubound','len'].includes(key))throw new VBError('Automatic default-property evaluation is disabled',5);
     if(['lbound','ubound'].includes(key)&&!(args[0]instanceof VBArray))throw new VBError('Expected array',13);
-    return target.vbInvoke?target.vbInvoke(args,frame):target(...args);
+    return target.vbScalarInvoke?target.vbScalarInvoke(args,frame):target.vbInvoke?target.vbInvoke(args.map(unbox),frame):target(...args.map(unbox));
   }default:throw new VBError('Automatic debugger evaluation cannot execute '+node.kind,5);}}
  reference(node,frame){if(node.kind==='group')return this.reference(node.expr,frame);if(node.kind==='id'){const key=lower(node.name);let cell=frame.locals.get(key)||frame.instance.fields.get(key);if(!cell&&key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))cell=frame.result;if(!cell)for(const instance of this.vm.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private')){cell=instance.fields.get(key);break;}if(!(cell instanceof Cell)||cell.constant)throw new VBError('The expression is read-only or requires code execution',5);return cell;}if(node.kind==='member'){const object=this.node(node.object,frame,{count:0},0),key=lower(node.name);if(BLOCKED.has(key)||key.startsWith('_'))throw new VBError('Member access is not permitted',438);if(object?.__vbInstance)this.vm.assertVisible(object,node.name,frame);const cell=object?.__vbInstance?object.fields.get(key):field(object?.__fields,key);if(cell instanceof Cell&&!cell.constant)return cell;throw new VBError('Only stored fields can be edited here; use Immediate for property setters',5);}if(node.kind==='call'){const object=this.node(node.callee,frame,{count:0},0);if(!(object instanceof VBArray))throw new VBError('Only stored array elements can be edited here',5);const args=node.args.map(n=>this.node(n,frame,{count:0},0));object.offset(args);return {type:object.type,get:()=>object.get(...args),set:value=>object.set(args,value)};}throw new VBError('The expression is not an editable storage location',5);}
  assign(expression,text,{frameIndex=null,pauseId}={}){if(this.vm.state!=='paused')throw new VBError('Variable editing requires break mode',5);if(pauseId!==undefined&&pauseId!==this.vm.debugPauseId)throw new VBError('The debugger context changed; refresh before editing',5);const frame=this.frame(frameIndex),ref=this.reference(this.parse(expression),frame),value=this.node(this.parse(text),frame,{count:0},0);ref.set(value);return this.inspect(expression,{frameIndex});}
- entry(expression,name,value,cell,frame){let editable=false;try{this.reference(this.parse(expression),frame);editable=true;}catch{}const fields=value?.__vbInstance?value.fields:value?.__fields,total=fields?.size??(value instanceof VBArray?value.data.length:value instanceof VBCollection?value.items.length:value instanceof VBDictionary?value.map.size:0);const literal=typeof value==='string'?'"'+value.replace(/"/g,'""')+'"':debugDescription(value);if(literal.length>4096)editable=false;return {expression,name,value:debugDescription(value),literal:literal.length<=4096?literal:undefined,type:type(value,cell?.type),editable,expandable:total>0,total};}
- inspect(expression,{frameIndex=null,offset=0,limit=100}={}){const frame=this.frame(frameIndex);if(!frame)throw new VBError('Runtime is not initialized',5);const value=this.node(this.parse(expression),frame,{count:0},0);let ref;try{ref=this.reference(this.parse(expression),frame);}catch{}const result=this.entry(expression,expression,value,ref,frame);result.context={module:frame.module.name,procedure:frame.proc.name,frameIndex:this.vm.stack.indexOf(frame),pauseId:this.vm.debugPauseId||0};result.children=[];offset=Math.max(0,Math.trunc(Number(offset)||0));limit=Math.max(1,Math.min(200,Math.trunc(Number(limit)||100)));const fields=value?.__vbInstance?value.fields:value?.__fields;if(fields){let i=0;for(const [name,cell]of fields){if(i++<offset)continue;if(result.children.length>=limit)break;const child=expression+'.'+name;try{this.vm.assertVisible(value,name,frame);result.children.push(this.entry(child,name,this.cell(cell),cell,frame));}catch(error){result.children.push({expression:child,name,value:'<'+error.message+'>',type:cell.type||'Variant',editable:false,expandable:false});}}}else if(value instanceof VBArray){for(let i=offset;i<Math.min(value.data.length,offset+limit);i++){let rest=i;const at=new Array(value.bounds.length);for(let d=value.bounds.length-1;d>=0;d--){const [lo,hi]=value.bounds[d],length=hi-lo+1;at[d]=lo+rest%length;rest=Math.floor(rest/length);}const expr=expression+'('+at.join(', ')+')';result.children.push(this.entry(expr,'('+at.join(', ')+')',value.data[i],{type:value.type},frame));}}else if(value instanceof VBCollection){for(let i=offset;i<Math.min(value.items.length,offset+limit);i++){const expr=expression+'('+(i+1)+')';result.children.push(this.entry(expr,'('+(i+1)+')',value.items[i].item,null,frame));}}else if(value instanceof VBDictionary){let i=0;for(const {key,value:item}of value.map.values()){if(i++<offset)continue;if(result.children.length>=limit)break;if(typeof key!=='string'&&typeof key!=='number')continue;const expr=expression+'('+(typeof key==='string'?'"'+key.replace(/"/g,'""')+'"':key)+')';result.children.push(this.entry(expr,String(key),item,null,frame));}}result.offset=offset;result.nextOffset=offset+result.children.length;result.truncated=result.nextOffset<result.total;return result;}
+ entry(expression,name,value,cell,frame){let editable=false;try{this.reference(this.parse(expression),frame);editable=true;}catch{}const fields=value?.__vbInstance?value.fields:value?.__fields,total=fields?.size??(value instanceof VBArray?value.data.length:value instanceof VBCollection?value.items.length:value instanceof VBDictionary?value.map.size:0);const raw=unbox(value);const literal=typeof raw==='string'?'"'+raw.replace(/"/g,'""')+'"':debugDescription(value);if(literal.length>4096)editable=false;return {expression,name,value:debugDescription(value),literal:literal.length<=4096?literal:undefined,type:type(value,cell?.type),editable,expandable:total>0,total};}
+ inspect(expression,{frameIndex=null,offset=0,limit=100}={}){const frame=this.frame(frameIndex);if(!frame)throw new VBError('Runtime is not initialized',5);const value=this.node(this.parse(expression),frame,{count:0},0);let ref;try{ref=this.reference(this.parse(expression),frame);}catch{}const result=this.entry(expression,expression,value,ref,frame);result.context={module:frame.module.name,procedure:frame.proc.name,frameIndex:this.vm.stack.indexOf(frame),pauseId:this.vm.debugPauseId||0};result.children=[];offset=Math.max(0,Math.trunc(Number(offset)||0));limit=Math.max(1,Math.min(200,Math.trunc(Number(limit)||100)));const fields=value?.__vbInstance?value.fields:value?.__fields;if(fields){let i=0;for(const [name,cell]of fields){if(i++<offset)continue;if(result.children.length>=limit)break;const child=expression+'.'+name;try{this.vm.assertVisible(value,name,frame);result.children.push(this.entry(child,name,this.cell(cell),cell,frame));}catch(error){result.children.push({expression:child,name,value:'<'+error.message+'>',type:cell.type||'Variant',editable:false,expandable:false});}}}else if(value instanceof VBArray){for(let i=offset;i<Math.min(value.data.length,offset+limit);i++){let rest=i;const at=new Array(value.bounds.length);for(let d=value.bounds.length-1;d>=0;d--){const [lo,hi]=value.bounds[d],length=hi-lo+1;at[d]=lo+rest%length;rest=Math.floor(rest/length);}const expr=expression+'('+at.join(', ')+')';result.children.push(this.entry(expr,'('+at.join(', ')+')',value.getScalar(...at),{type:value.type},frame));}}else if(value instanceof VBCollection){for(let i=offset;i<Math.min(value.items.length,offset+limit);i++){const expr=expression+'('+(i+1)+')';result.children.push(this.entry(expr,'('+(i+1)+')',value.itemScalar(i+1),null,frame));}}else if(value instanceof VBDictionary){let i=0;for(const {key,value:item}of value.map.values()){if(i++<offset)continue;if(result.children.length>=limit)break;if(typeof key!=='string'&&typeof key!=='number')continue;const expr=expression+'('+(typeof key==='string'?'"'+key.replace(/"/g,'""')+'"':key)+')';result.children.push(this.entry(expr,String(key),value.itemScalar(key),null,frame));}}result.offset=offset;result.nextOffset=offset+result.children.length;result.truncated=result.nextOffset<result.total;return result;}
  locals({frameIndex=null,includeFields=true,offset=0,limit=500}={}){const frame=this.frame(frameIndex);if(!frame)return [];const result=[],seen=new Set();const sources=[[frame.locals,'Local'],...(includeFields?[[frame.instance.fields,'Module']]:[])];let index=0;for(const [cells,scope]of sources)for(const [name,cell]of cells){if(seen.has(name))continue;seen.add(name);if(index++<offset)continue;if(result.length>=Math.min(1000,limit))return result;try{result.push({...this.entry(name,name,this.cell(cell),cell,frame),scope});}catch(error){result.push({name,expression:name,value:'<'+error.message+'>',type:cell.type||'ByRef',scope,editable:false});}}return result;}
 }
 
@@ -7175,8 +8146,8 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[78]=(()=>{
-const {VBError}=__modules[11];
+__modules[86]=(()=>{
+const {VBError}=__modules[17];
 
 const instructionKey=ins=>{const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;return JSON.stringify(rest);};
 const key=instructionKey;
@@ -7202,10 +8173,10 @@ return {instructionKey,linearInstruction,instructionMap};
 })();
 
 /* live-edit.js */
-__modules[79]=(()=>{
-const {statementIndex}=__modules[74];
-const {instructionMap,linearInstruction,instructionKey}=__modules[78];
-const {VBError}=__modules[11];
+__modules[87]=(()=>{
+const {statementIndex}=__modules[82];
+const {instructionMap,linearInstruction,instructionKey}=__modules[86];
+const {VBError}=__modules[17];
 
 
 
@@ -7267,25 +8238,27 @@ return {sameActiveLayout,planLiveEdit,nextStatementIndex};
 })();
 
 /* vm.js */
-__modules[80]=(()=>{
-const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[74];
-const {VBWin32Bridge}=__modules[75];
-const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[16];
-const {DataContext}=__modules[37];
-const {errorDescription}=__modules[47];
-const {DebugEvaluationSession}=__modules[76];
-const {hasDataDefault,hasDataMember}=__modules[19];
-const {defaultIdentifierType}=__modules[69];
-const {DebugInspector}=__modules[77];
-const {planLiveEdit,nextStatementIndex}=__modules[79];
-const {encodeVariable,decodeVariable,makeRecord}=__modules[35];
-const { Signal, lower, VERSION }=__modules[14];
-const { VBError, splitTop, tokenize }=__modules[11];
-const { parseExpression, parseCall }=__modules[71];
-const { compileProject }=__modules[73];
-const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[15];
-const { VirtualFileSystem }=__modules[36];
-const { createLibrary, MemoryRecordset }=__modules[52];
+__modules[88]=(()=>{
+const {VBScalar,SCALAR_TYPES,printScalar,unbox,tagScalar,scalarType,storageScalar,readScalar,literalScalar,signedLiteralScalar}=__modules[21];
+const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[82];
+const {VBWin32Bridge}=__modules[83];
+const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[22];
+const {DataContext}=__modules[44];
+const {errorDescription}=__modules[55];
+const {DebugEvaluationSession}=__modules[84];
+const {hasDataDefault,hasDataMember,dataDefaultType}=__modules[25];
+const {defaultIdentifierType}=__modules[77];
+const {DebugInspector}=__modules[85];
+const {planLiveEdit,nextStatementIndex}=__modules[87];
+const {encodeVariable,decodeVariable,makeRecord}=__modules[42];
+const { Signal, lower, VERSION }=__modules[20];
+const { VBError, splitTop, tokenize }=__modules[17];
+const { parseExpression, parseCall }=__modules[79];
+const { compileProject }=__modules[81];
+const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[21];
+const { VirtualFileSystem }=__modules[43];
+const { createLibrary, MemoryRecordset }=__modules[60];
+
 
 
 
@@ -7386,16 +8359,16 @@ class VirtualMachine extends Signal {
     const key=lower(decl.name);if(target.has(key))return target.get(key);
     const staticKey=lower(frame.proc.name)+':'+(frame.proc.accessor||'')+'.'+key,staticCells=frame.instance.staticCells;
     if(staticFlag&&staticCells.has(staticKey)){target.set(key,staticCells.get(staticKey));return target.get(key);}
-    const type=decl.storageType||decl.type;let value;
+    const type=decl.storageType||decl.constantType||decl.type;let value;
     if(decl.bounds!==null&&decl.bounds!==undefined){const bounds=await this.evalBounds(decl.bounds,frame);value=await this.createArray(bounds,type,frame,decl.fixedLength);value.dynamic=!bounds.length;}
     else if(decl.autoNew){const cell=new LazyCell(decl.type,()=>this.createObject(decl.type,frame));cell.scope=decl.scope;target.set(key,cell);if(staticFlag)staticCells.set(staticKey,cell);return cell;}
     else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame);
-    else value=decl.constant?(frame.proc.constantBindings?.has(key)?frame.proc.constantBindings.get(key):frame.module.constantBindings.get(key)):decl.initial?await this.evaluate(decl.initial,frame):this.program.modules.has(lower(decl.type))||this.data.isObjectType(decl.type)?NOTHING:defaultValue(type);
+    else value=decl.constant?(frame.proc.constantScalars?.has(key)?frame.proc.constantScalars.get(key):frame.module.constantScalars?.get(key)??frame.module.constantBindings.get(key)):decl.initial?await this.evaluateScalar(decl.initial,frame):this.program.modules.has(lower(decl.type))||this.data.isObjectType(decl.type)?NOTHING:defaultValue(type);
     const cell=new Cell(decl.bounds!==null&&decl.bounds!==undefined?'Variant':type,value,decl.constant,decl.fixedLength);cell.scope=decl.scope;cell.isArray=decl.bounds!==null&&decl.bounds!==undefined;cell.elementType=type;target.set(key,cell);if(decl.withEvents)this.bindEventCell(cell,frame.instance,decl.name);if(staticFlag)staticCells.set(staticKey,cell);return cell;
   }
   recordSchema(name,module){const local=Object.entries(module.types).find(([key])=>lower(key)===lower(name));if(local)return local[1];for(const candidate of this.program.modules.values()){const match=Object.entries(candidate.types).find(([key])=>lower(key)===lower(name));if(match)return match[1];}return null;}
   async createArray(bounds,type,frame,fixedLength=null,depth=0){const record=this.recordSchema(type,frame.module)?await this.createRecord(type,frame,depth+1):null;return new VBArray(bounds,type,record?()=>cloneValue(record):null,fixedLength);}
-  async createRecord(name,frame,depth=0){if(depth>32)throw new VBError('Recursive user-defined type',1002);const fields=new Map();for(const member of this.recordSchema(name,frame.module)||[]){const type=member.storageType||member.type;let value;if(member.bounds!==null){value=await this.createArray(await this.evalBounds(member.bounds,frame),type,frame,member.fixedLength,depth+1);value.dynamic=!member.bounds.length;}else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame,depth+1);else value=member.initial?await this.evaluate(member.initial,frame):defaultValue(type);const cell=new Cell(member.bounds!==null?'Variant':type,value,false,member.fixedLength);cell.isArray=member.bounds!==null;cell.elementType=type;fields.set(member.name,cell);}return makeRecord(name,fields);}
+  async createRecord(name,frame,depth=0){if(depth>32)throw new VBError('Recursive user-defined type',1002);const fields=new Map();for(const member of this.recordSchema(name,frame.module)||[]){const type=member.storageType||member.type;let value;if(member.bounds!==null){value=await this.createArray(await this.evalBounds(member.bounds,frame),type,frame,member.fixedLength,depth+1);value.dynamic=!member.bounds.length;}else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame,depth+1);else value=member.initial?await this.evaluateScalar(member.initial,frame):defaultValue(type);const cell=new Cell(member.bounds!==null?'Variant':type,value,false,member.fixedLength);cell.isArray=member.bounds!==null;cell.elementType=type;fields.set(member.name,cell);}return makeRecord(name,fields);}
   // Event connections follow assignment order; replacing a reference detaches the old source.
   bindEventCell(cell,owner,prefix){
     const sink={owner,prefix},set=cell.set.bind(cell);let source=null;
@@ -7406,14 +8379,19 @@ class VirtualMachine extends Signal {
     const event=instance.module.events?.get(lower(name));if(!event)throw new VBError('Event not declared: '+name,1002);
     if(nodes.length!==event.params.length)throw new VBError('Wrong number of arguments to event '+name,450);
     const args=[];
-    for(let i=0;i<nodes.length;i++){const param=event.params[i],node=nodes[i];let ref;
-      if(param.byRef&&['id','member','call'].includes(node.kind)){try{ref=await this.reference(node,frame,true);}catch(error){if(!(error instanceof VBError))throw error;}}
-      if(param.byRef)args.push({ref:ref||new Cell(param.type,await this.evaluate(node,frame))});else args.push(coerce(await this.evaluate(node,frame),param.type));
+    for(let i=0;i<nodes.length;i++){
+      const param=event.params[i],type=param.storageType||param.type;
+      const actual=param.byRef?await this.sourceArgument(nodes[i],frame):await this.evaluateScalar(nodes[i],frame);
+      if(param.byRef&&actual?.ref){
+        if(Object.hasOwn(SCALAR_TYPES,lower(type))&&lower(actual.ref.type)!==lower(type))throw new VBError('ByRef argument type mismatch',13);
+        args.push(actual);
+      }else if(param.byRef)args.push({ref:new Cell(type,actual)});
+      else args.push(storageScalar(actual,type));
     }
     for(const sink of [...(this.eventSinks.get(instance)||[])]){if(!(this.eventSinks.get(instance)||[]).includes(sink))continue;const proc=sink.owner.module.procedures.get(lower(sink.prefix+'_'+name));if(proc)await this.callProcedure(sink.owner,proc,args,frame);}
     this.emit('event',{instance,name,args:args.map(a=>a?.ref?a.ref.get():a)});
   }
-  async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluate(lo,frame)):frame.module.optionBase,numeric(await this.evaluate(hi,frame))]);return result;}
+  async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluateScalar(lo,frame)):frame.module.optionBase,numeric(await this.evaluateScalar(hi,frame))]);return result;}
   async start({breakOnEntry=false,runToCursor=null}={}) {
     if(this.immediateContext)throw new VBError('Reset design-mode Immediate before starting the project',5);
     try { if(runToCursor)this.runTarget=this.breakpointLocation(runToCursor.module,runToCursor.line,runToCursor.column??null);await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
@@ -7448,27 +8426,100 @@ class VirtualMachine extends Signal {
   requestUnload(instance){if(this.state==='stopped')return Promise.resolve();return new Promise(resolve=>{this.eventQueue.push({action:()=>this.unloadForm(instance,0),resolve,key:'unload:'+instance.module.name});this.processEvents();});}
   async doEvents(){await new Promise(resolve=>setTimeout(resolve,0));for(let i=0;i<32&&this.eventQueue.length&&this.state==='running';i++)await this.runQueuedEvent(this.eventQueue.shift());return [...this.formInstances].filter(i=>i.loaded).length;}
   async createObject(name,frame=this.currentFrame){if(this.automation?.has(name))return this.automation.create(name);const key=lower(name);if(key==='collection')return new VBCollection();if(key==='scripting.dictionary'||key==='dictionary')return new VBDictionary();if(key==='scripting.filesystemobject')return this.fs.fso();const dataObject=this.data.createObject(name);if(dataObject)return dataObject;const module=this.program.modules.get(key);if(module){if(module.form?.type==='MDIForm')throw new VBError('An MDI Form cannot be created with New',360);const instance=new VBInstance(module);if(module.form)await this.attachForm(instance);await this.initializeFields(instance);const init=module.form?this.formProcedure(instance,'initialize'):module.procedures.get('class_initialize');if(init)await this.callProcedure(instance,init,[]);return instance;}throw new VBError(`ActiveX component cannot create object in browser runtime: ${name}`,429);}
+  /** Adapt one public JavaScript member back into a source value. Unknown
+   * numeric adapters are Double; only documented built-ins receive a subtype. */
+  nativeScalar(object,name,value){
+    if(value instanceof VBScalar||!scalarType(value))return value;
+    const key=lower(name||''),raw=unbox(value);let type=scalarType(value),variant=false;
+    if(hasDataDefault(object)&&['value','originalvalue'].includes(key)){const declared=lower(dataDefaultType(object)||'');return raw==null?storageScalar(raw,'Variant'):Object.hasOwn(SCALAR_TYPES,declared)?tagScalar(raw,declared,true):storageScalar(value,'Variant');}
+    if(object===this.err&&['number','helpcontext','lastdllerror'].includes(key))type='long';
+    else if(object instanceof VBCollection||object instanceof VBDictionary){if(key==='count')type='long';if(key==='exists')type='boolean';}
+    else if(object?.__control){
+      const control=object.type||object.model?.type;
+      if(['enabled','visible','tabstop','autoredraw','wordwrap','multiline','locked','sorted','cancel','default','mdichild'].includes(key))type='boolean';
+      else if(['left','top','width','height','scalewidth','scaleheight','scaleleft','scaletop','currentx','currenty'].includes(key))type='single';
+      else if(['hwnd','hdc','backcolor','forecolor','selstart','sellength','maxlength','interval','itemdata'].includes(key))type='long';
+      else if(['listindex','listcount','tabindex','index','mousepointer','borderstyle','appearance','windowstate','scalemode','alignment','style'].includes(key))type='integer';
+      else if(key==='selected')type='boolean';
+      else if(key==='value')type=control==='OptionButton'?'boolean':control==='DTPicker'?'date':['HScrollBar','VScrollBar','CheckBox'].includes(control)?'integer':type;
+    }
+    return tagScalar(raw,type,variant);
+  }
+  async invokeScalar(target,args,frame){
+    const fn=target?.__native||target,receiver=target?.receiver;
+    if(fn.vbScalarInvoke)return this.debugAwait(fn.vbScalarInvoke(args,frame));
+    const name=lower(target?.memberName||'');
+    if((receiver instanceof VBCollection||receiver instanceof VBDictionary)&&name==='item')return receiver.itemScalar(...args);
+    if(receiver===this.library.get('debug')&&name==='print'){this.output(args.map(v=>printScalar(v)).join(' '));return;}
+    const input=receiver instanceof VBCollection||receiver instanceof VBDictionary?args:args.map(unbox);
+    const result=await this.debugAwait(fn.vbInvoke?fn.vbInvoke(input,frame):fn.apply(receiver,input));
+    return this.nativeScalar(receiver,name,result);
+  }
+  async expressionValue(value,frame){
+    if(value?.__procedure)return this.callProcedure(value.instance,value.__procedure,[],frame,true);
+    if(value?.__native||typeof value==='function')return this.invokeScalar(value,[],frame);
+    return value;
+  }
+  /** Classify ByRef expressions without probing a getter and evaluating it a
+   * second time. Properties/functions bind temporaries, real storage aliases. */
+  async sourceOperand(node,frame){
+    if(node.kind==='id'){
+      const key=lower(node.name);
+      let ref=key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind)?frame.result:frame.locals.get(key)||frame.instance.fields.get(key);
+      if(!ref)for(const instance of this.instances.values())if(instance.module.kind==='module'&&instance.fields.has(key)&&(instance===frame.instance||instance.fields.get(key).scope!=='private')){ref=instance.fields.get(key);break;}
+      if(ref&&!ref.constant)return {ref};
+      const value=await this.getIdentifier(node.name,frame,{noInvoke:true});
+      // Implicit declaration performed by getIdentifier is genuine storage.
+      if(!ref&&frame.locals.has(key))return {ref:frame.locals.get(key)};
+      return {value};
+    }
+    if(node.kind==='member'){
+      const object=await this.evaluateScalar(node.object,frame,{raw:true});
+      this.assertVisible(object,node.name,frame);
+      const fields=object?.__vbInstance?object.fields:object?.__fields;
+      const ref=fields&&[...fields].find(([key])=>lower(key)===lower(node.name))?.[1];
+      return ref&&!ref.constant?{ref}:{value:await this.getMemberScalar(object,node.name,frame)};
+    }
+    if(node.kind==='call'){
+      const resolved=await this.sourceOperand(node.callee,frame),target=resolved.ref?await readScalar(resolved.ref):resolved.value;
+      if(target instanceof VBArray){
+        if(!node.args.length)return resolved.ref?{ref:resolved.ref}:{value:target};
+        const indices=[];for(const arg of node.args)indices.push(numeric(await this.evaluateScalar(arg,frame)));
+        target.offset(indices);
+        const ref=new Ref(()=>target.get(...indices),v=>target.set(indices,v),target.type,target.fixedLength,()=>target.getScalar(...indices));
+        ref.debugGet=ref.get;ref.debugGetScalar=ref.getScalar;ref.win32Array=target;ref.win32Offset=target.offset(indices);
+        return {ref};
+      }
+      return {value:await this.callResolvedExpression(node,target,frame)};
+    }
+    return {value:await this.evaluateScalar(node,frame)};
+  }
+  async sourceArgument(node,frame){
+    const resolved=await this.sourceOperand(node,frame);
+    if(resolved.ref)return resolved;
+    return this.expressionValue(resolved.value,frame);
+  }
   async getIdentifier(name,frame,{noInvoke=false}={}) {
     const key=lower(name);
     if(key==='me')return frame.instance;
-    if(frame.locals.has(key))return frame.locals.get(key).get();
-    if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return frame.result.get();
-    if(frame.instance.fields.has(key))return frame.instance.fields.get(key).get();
-    if(frame.proc.constantBindings?.has(key))return frame.proc.constantBindings.get(key);
-    if(frame.module.constantBindings?.has(key))return frame.module.constantBindings.get(key);
+    if(frame.locals.has(key))return readScalar(frame.locals.get(key));
+    if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return readScalar(frame.result);
+    if(frame.instance.fields.has(key))return readScalar(frame.instance.fields.get(key));
+    if(frame.proc.constantBindings?.has(key))return frame.proc.constantScalars?.get(key)??frame.proc.constantBindings.get(key);
+    if(frame.module.constantBindings?.has(key))return frame.module.constantScalars?.get(key)??frame.module.constantBindings.get(key);
     const enumeration=frame.module.enumBindings?.get(key);if(enumeration){if(enumeration.ambiguous)throw new VBError('Ambiguous enum name: '+name,1002);return enumeration;}
     const localProc=frame.module.procedures.get(key);if(localProc)return {__procedure:localProc,instance:frame.instance};
-    const property=frame.module.procedures.get(key+':get');if(property)return await this.callProcedure(frame.instance,property,[]);
-    if(frame.instance.formObject&&!(String(name).endsWith('$')&&this.library.has(key+'$'))&&this.hasMember(frame.instance.formObject,name))return this.nativeMember(frame.instance.formObject,name);
-    const constant=frame.module.importedConstantBindings?.get(key);if(constant){if(constant.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return constant.value;}
+    const property=frame.module.procedures.get(key+':get');if(property)return await this.callProcedure(frame.instance,property,[],frame,true);
+    if(frame.instance.formObject&&!(String(name).endsWith('$')&&this.library.has(key+'$'))&&this.hasMember(frame.instance.formObject,name))return this.nativeMemberScalar(frame.instance.formObject,name);
+    const constant=frame.module.importedConstantBindings?.get(key);if(constant){if(constant.ambiguous)throw new VBError('Ambiguous constant: '+name,1002);return constant.scalar??constant.value;}
     if(this.instances.has(key))return this.instances.get(key);
     for(const instance of this.instances.values())if(instance.module.kind==='module'){
-      if(instance.fields.has(key)&&instance.fields.get(key).scope!=='private')return instance.fields.get(key).get();const proc=instance.module.procedures.get(key);if(proc&&proc.scope!=='private')return {__procedure:proc,instance};
+      if(instance.fields.has(key)&&instance.fields.get(key).scope!=='private')return readScalar(instance.fields.get(key));const proc=instance.module.procedures.get(key);if(proc&&proc.scope!=='private')return {__procedure:proc,instance};
     }
     const intrinsicKey=String(name).endsWith('$')&&this.library.has(key+'$')?key+'$':key;
-    if(this.library.has(intrinsicKey))return this.library.get(intrinsicKey);
+    if(this.library.has(intrinsicKey)){const value=this.library.get(intrinsicKey);return typeof value==='number'?tagScalar(value,value>=-32768&&value<=32767?'integer':'long'):tagScalar(value);}
     if(frame.module.optionExplicit)throw new VBError(`Variable not defined: ${name}`,500);
-    const cell=new Cell(defaultIdentifierType(name,frame.module.defaultTypes));frame.locals.set(key,cell);return cell.get();
+    const cell=new Cell(defaultIdentifierType(name,frame.module.defaultTypes));frame.locals.set(key,cell);return readScalar(cell);
   }
   nativeKey(object,name){
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable or With block variable not set',91);
@@ -7484,7 +8535,8 @@ class VirtualMachine extends Signal {
     return null;
   }
   hasMember(object,name){try{return this.nativeKey(object,name)!==null;}catch{return false;}}
-  nativeMember(object,name){const key=this.nativeKey(object,name);if(key===null)throw new VBError(`Object does not support property or method: ${name}`,438);const v=object[key];if(typeof v==='function')return {__native:v,receiver:object};return v;}
+  nativeMember(object,name){const value=this.nativeMemberScalar(object,name);return unbox(value);}
+  nativeMemberScalar(object,name){const key=this.nativeKey(object,name);if(key===null)throw new VBError(`Object does not support property or method: ${name}`,438);const v=object[key];if(typeof v==='function')return {__native:v,receiver:object,memberName:name};return this.nativeScalar(object,name,v);}
   assertVisible(object,name,frame){
     if(!object?.__vbInstance||frame?.module===object.module)return;
     const key=lower(name),field=object.fields.get(key),members=[object.module.procedures.get(key),object.module.procedures.get(key+':get'),object.module.procedures.get(key+':let'),object.module.procedures.get(key+':set')].filter(Boolean);
@@ -7495,52 +8547,55 @@ class VirtualMachine extends Signal {
     if(!member)throw new VBError('Member not found in '+object.interfaceName+': '+name,438);
     return {__procedure:object.target.module.procedures.get(member.procedure),__signature:member.signature,instance:object.target};
   }
-  async getMember(object,name,frame){
+  async getMember(object,name,frame){return unbox(await this.getMemberScalar(object,name,frame));}
+  async getMemberScalar(object,name,frame){
     if(isAutomationObject(object))return automationMember(object,name,true);
-    if(object?.__vbEnum){const key=lower(name);if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return object.values[key];}
-    if(object?.__vbInterface){const members=object.target.module.interfaceBindings[object.interfaceName].members,key=lower(name);const value=this.interfaceProcedure(object,name,members[key]?null:'get');return value.__signature.kind==='property'&&!value.__signature.params.length?this.callProcedure(value.instance,value.__procedure,[],frame):value;}
+    if(object?.__vbEnum){const key=lower(name);if(!Object.hasOwn(object.values,key))throw new VBError('Enum member not found: '+name,438);return tagScalar(object.values[key],'long');}
+    if(object?.__vbInterface){const members=object.target.module.interfaceBindings[object.interfaceName].members,key=lower(name);const value=this.interfaceProcedure(object,name,members[key]?null:'get');return value.__signature.kind==='property'&&!value.__signature.params.length?this.callProcedure(value.instance,value.__procedure,[],frame,true):value;}
     this.assertVisible(object,name,frame);
-    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key).get();const proc=object.module.procedures.get(key);if(proc)return {__procedure:proc,instance:object};const property=object.module.procedures.get(key+':get');if(property){if(property.scope==='private'&&object.module!==frame?.module)throw new VBError('Property get is not accessible',438);return property.params.length?{__procedure:property,instance:object}:this.callProcedure(object,property,[]);}if(object.formObject){if(key==='show')return {__native:(modal=0)=>this.showForm(object,truth(modal)),receiver:this};if(key==='hide')return {__native:()=>object.formObject.Hide(),receiver:this};return this.nativeMember(object.formObject,name);}throw new VBError(`Method or data member not found: ${name}`,438);}
-    return this.nativeMember(object,name);
+    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return readScalar(object.fields.get(key));const proc=object.module.procedures.get(key);if(proc)return {__procedure:proc,instance:object};const property=object.module.procedures.get(key+':get');if(property){if(property.scope==='private'&&object.module!==frame?.module)throw new VBError('Property get is not accessible',438);return property.params.length?{__procedure:property,instance:object}:this.callProcedure(object,property,[],frame,true);}if(object.formObject){if(key==='show')return {__native:(modal=0)=>this.showForm(object,truth(modal)),receiver:this};if(key==='hide')return {__native:()=>object.formObject.Hide(),receiver:this};return this.nativeMemberScalar(object.formObject,name);}throw new VBError(`Method or data member not found: ${name}`,438);}
+    if(object?.__fields){const field=[...object.__fields].find(([n])=>lower(n)===lower(name));if(field)return readScalar(field[1]);}
+    return this.nativeMemberScalar(object,name);
   }
   async defaultValue(value,depth=0){
-    if(value===this.err)return this.err.Number;
+    if(value===this.err)return tagScalar(this.err.Number,'long');
     if(depth>32)throw new VBError('Circular default-member evaluation',28);
-    if(value?.__control)return value.defaultValue();
-    if(hasDataDefault(value))return this.defaultValue(value.Value,depth+1);
+    if(value?.__control)return this.nativeScalar(value,['TextBox','RichTextBox','ComboBox','ListBox','FileListBox','DirListBox','DriveListBox','MSFlexGrid','MSHFlexGrid','DataGrid'].includes(value.type)?'Text':['CheckBox','OptionButton','HScrollBar','VScrollBar','Slider','ProgressBar','UpDown','DTPicker'].includes(value.type)?'Value':'Caption',value.defaultValue());
+    if(hasDataDefault(value))return this.defaultValue(this.nativeScalar(value,'Value',value.Value),depth+1);
     if(isAutomationObject(value)){const name=automationDefaultName(value);if(!name)throw new VBError('Automation object has no default value',438);return this.defaultValue(await automationInvoke(value,name,2,[]),depth+1);}
     const instance=objectIdentity(value),name=value?.__vbInterface?instance.module.interfaceBindings[value.interfaceName]?.defaultMember:instance?.module?.defaultMember;
-    if(instance?.__vbInstance&&name){const member=await this.getMember(value,name,this.currentFrame),result=member?.__procedure?await this.callProcedure(member.instance,member.__procedure,[],this.currentFrame):member;return this.defaultValue(result,depth+1);}
+    if(instance?.__vbInstance&&name){const member=await this.getMemberScalar(value,name,this.currentFrame),result=member?.__procedure?await this.callProcedure(member.instance,member.__procedure,[],this.currentFrame,true):member;return this.defaultValue(result,depth+1);}
     return value;
   }
-  async evaluate(node,frame=this.currentFrame,{raw=false}={}) {
+  async evaluate(node,frame=this.currentFrame,options={}) {return unbox(await this.evaluateScalar(node,frame,options));}
+  async evaluateScalar(node,frame=this.currentFrame,{raw=false}={}) {
     if(!frame){const instance=this.instances.values().next().value;if(!instance)throw new VBError('Runtime is not initialized',5);frame=this.makeFrame(instance);}
     let value;
     switch(node.kind){
-      case 'missing':return MISSING;case 'nothing':return NOTHING;case 'currency':return new VBCurrency(node.value);case 'literal':return node.value;case 'empty':return undefined;case 'date':return new Date(node.value);case 'group':return this.evaluate(node.expr,frame,{raw});
+      case 'missing':return MISSING;case 'nothing':return NOTHING;case 'currency':case 'literal':case 'date':return literalScalar(node);case 'empty':return tagScalar(undefined,'empty',true);case 'group':return this.evaluateScalar(node.expr,frame,{raw});
       case 'id':value=await this.getIdentifier(node.name,frame);break;
       case 'with':if(!frame.withStack.length)throw new VBError('Invalid or unqualified reference',1002);return frame.withStack.at(-1);
-      case 'member':value=await this.getMember(await this.evaluate(node.object,frame,{raw:true}),node.name,frame);break;
-      case 'addressOf':return this.win32.callback(await this.evaluate(parseExpression(node.name),frame,{raw:true}));
+      case 'member':value=await this.getMemberScalar(await this.evaluateScalar(node.object,frame,{raw:true}),node.name,frame);break;
+      case 'addressOf':return tagScalar(this.win32.callback(await this.evaluateScalar(parseExpression(node.name),frame,{raw:true})),'long');
       case 'new':return this.createObject(node.name,frame);
       case 'typeof':{
-        const object=await this.evaluate(node.expr,frame,{raw:true}),type=lower(node.name).replace(/^vb\./,'');
-        if(object===NOTHING)return 0;
-        if(!object||typeof object!=='object'||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBArray||object instanceof VBErrorValue||object.__fields||object===MISSING)throw new VBError('Object required',424);
-        if(type==='object')return -1;
-        if(objectSupports(object,type))return -1;
+        const object=await this.evaluateScalar(node.expr,frame,{raw:true}),type=lower(node.name).replace(/^vb\./,'');
+        if(object===NOTHING)return tagScalar(0,'boolean');
+        if(!object||typeof object!=='object'||object instanceof VBScalar||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBArray||object instanceof VBErrorValue||object.__fields||object===MISSING)throw new VBError('Object required',424);
+        if(type==='object')return tagScalar(-1,'boolean');
+        if(objectSupports(object,type))return tagScalar(-1,'boolean');
         const actual=lower(object instanceof VBCollection?'Collection':object instanceof VBDictionary?'Dictionary':object.__type||object.model?.type||'');
-        return (actual===type||actual==='dictionary'&&type==='scripting.dictionary'||type==='form'&&!!object.module?.form||type==='control'&&!!object.__control)?-1:0;
+        return tagScalar((actual===type||actual==='dictionary'&&type==='scripting.dictionary'||type==='form'&&!!object.module?.form||type==='control'&&!!object.__control)?-1:0,'boolean');
       }
-      case 'unary':if(node.op==='-'&&node.expr.kind==='currency')return new VBCurrency('-'+node.expr.value);return unary(node.op,await this.defaultValue(await this.evaluate(node.expr,frame)));
-      case 'binary':if(node.op==='is')return binary('is',await this.evaluate(node.left,frame,{raw:true}),await this.evaluate(node.right,frame,{raw:true}));return binary(node.op,await this.defaultValue(await this.evaluate(node.left,frame)),await this.defaultValue(await this.evaluate(node.right,frame)),frame.module.optionCompare);
+      case 'unary':{const literal=signedLiteralScalar(node);if(literal)return literal;}return unary(node.op,await this.defaultValue(await this.evaluateScalar(node.expr,frame)));
+      case 'binary':if(node.op==='is')return tagScalar(binary('is',unbox(await this.evaluateScalar(node.left,frame,{raw:true})),unbox(await this.evaluateScalar(node.right,frame,{raw:true}))),'boolean');return binary(node.op,await this.defaultValue(await this.evaluateScalar(node.left,frame)),await this.defaultValue(await this.evaluateScalar(node.right,frame)),frame.module.optionCompare);
       case 'call':return this.callExpression(node,frame);
       default:throw new VBError(`Invalid expression kind: ${node.kind}`,1002);
     }
     if(raw)return value;
-    if(value?.__procedure)return this.callProcedure(value.instance,value.__procedure,[],frame);
-    if(value?.__native)return this.debugAwait(value.__native.call(value.receiver));
-    if(typeof value==='function')return this.debugAwait(value());
+    if(value?.__procedure)return this.callProcedure(value.instance,value.__procedure,[],frame,true);
+    if(value?.__native)return this.invokeScalar(value,[],frame);
+    if(typeof value==='function')return this.invokeScalar(value,[],frame);
     return value;
   }
   argumentSlots(nodes,params,allowExtra=false){
@@ -7559,35 +8614,39 @@ class VirtualMachine extends Signal {
     return slots;
   }
   async callExpression(node,frame){
-    let target=node.callee.kind==='id'&&lower(node.callee.name)===lower(frame.proc.name)?{__procedure:frame.proc,instance:frame.instance}:await this.evaluate(node.callee,frame,{raw:true});
+    let target=node.callee.kind==='id'&&lower(node.callee.name)===lower(frame.proc.name)?{__procedure:frame.proc,instance:frame.instance}:await this.evaluateScalar(node.callee,frame,{raw:true});
+    return this.callResolvedExpression(node,target,frame);
+  }
+  async callResolvedExpression(node,target,frame){
     if(isAutomationObject(target)){const name=automationDefaultName(target);if(!name)throw new VBError('Automation object has no default property',438);target=automationMember(target,name);}
     const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
-    if(instance?.__vbInstance&&defaultName)target=await this.getMember(target,defaultName,frame);
+    if(instance?.__vbInstance&&defaultName)target=await this.getMemberScalar(target,defaultName,frame);
     const proc=target?.__procedure,signature=target?.__signature||proc,fn=target?.__native||(typeof target==='function'?target:null),params=signature?.params||(fn?.vbShortParams&&node.args.length===2&&node.args.every(n=>n.kind!=='named')?fn.vbShortParams:fn?.vbParams);
     const slots=this.argumentSlots(node.args,params,!!proc?.params.at(-1)?.paramArray||!!fn?.vbVariadic);
     const actual=[];
     for(const {index,node:arg}of slots){
       const param=params?.[index];
       if(arg.kind==='missing'){actual[index]=proc||fn?.vbPreserveMissing?MISSING:undefined;continue;}
-      if(arg.kind==='byval'){if(!proc?.external)throw new VBError('ByVal call-site override is supported only for Declare calls',49);actual[index]={__win32ByVal:true,value:await this.evaluate(arg.expr,frame)};continue;}
-      if((param?.byRef||proc?.external&&param?.type.toLowerCase()==='string')&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
-        try{actual[index]={ref:await this.reference(arg,frame,true)};continue;}catch(error){if(!(error instanceof VBError))throw error;}
+      if(arg.kind==='byval'){if(!proc?.external)throw new VBError('ByVal call-site override is supported only for Declare calls',49);actual[index]={__win32ByVal:true,value:await this.evaluateScalar(arg.expr,frame)};continue;}
+      if(param?.byRef&&!param.paramArray&&!proc?.external){actual[index]=await this.sourceArgument(arg,frame);continue;}
+      if(proc?.external&&(param?.byRef||param?.type.toLowerCase()==='string')&&!param.paramArray&&['id','member','call'].includes(arg.kind)){
+        actual[index]={ref:await this.reference(arg,frame,true)};continue;
       }
-      const value=await this.evaluate(arg,frame);
+      const value=await this.evaluateScalar(arg,frame);
       actual[index]=proc||fn?.vbRawArgs?value:await this.defaultValue(value);
     }
-    if(proc){for(let i=0;i<actual.length;i++)if(!(i in actual))actual[i]=MISSING;return this.callProcedure(target.instance,proc,actual,frame);}
+    if(proc){for(let i=0;i<actual.length;i++)if(!(i in actual))actual[i]=MISSING;return this.callProcedure(target.instance,proc,actual,frame,true);}
     if(fn&&params){for(let i=0;i<params.length;i++){if(!slots.some(s=>s.index===i&&s.node.kind!=='missing')&&!params[i].optional&&!params[i].paramArray)throw new VBError('Argument not optional: '+params[i].name,449);if(fn.vbPreserveMissing&&!(i in actual))actual[i]=MISSING;}}
-    if(target instanceof VBArray)return actual.length?target.get(...actual):target;
-    if(target instanceof VBCollection||target instanceof VBDictionary)return target.Item(...actual);
-    if(target?.__native)return this.debugAwait(target.__native.apply(target.receiver,actual));
-    if(typeof target==='function')return this.debugAwait(target.vbInvoke?target.vbInvoke(actual,frame):target(...actual));
-    if(target?.Item&&typeof target.Item==='function')return target.Item(...actual);
-    if(target?.__vbInstance){const getter=target.module.procedures.get('item:get');if(getter)return this.callProcedure(target,getter,actual,frame);}
+    if(target instanceof VBArray)return actual.length?target.getScalar(...actual):target;
+    if(target instanceof VBCollection||target instanceof VBDictionary)return target.itemScalar(...actual);
+    if(target?.__native)return this.invokeScalar(target,actual,frame);
+    if(typeof target==='function')return this.invokeScalar(target,actual,frame);
+    if(target?.Item&&typeof target.Item==='function')return tagScalar(await this.debugAwait(target.Item(...actual.map(unbox))),undefined,true);
+    if(target?.__vbInstance){const getter=target.module.procedures.get('item:get');if(getter)return this.callProcedure(target,getter,actual,frame,true);}
     throw new VBError('Expected array or callable procedure',13);
   }
   async reference(node,frame=this.currentFrame,objectSet=false) {
-    if(node.kind==='group')return new Cell('Variant',await this.evaluate(node.expr,frame));
+    if(node.kind==='group')return new Cell('Variant',await this.evaluateScalar(node.expr,frame));
     if(node.kind==='id'){
       const key=lower(node.name);if(key===lower(frame.proc.name)&&['function','property'].includes(frame.proc.kind))return frame.result;
       let cell=frame.locals.get(key)||frame.instance.fields.get(key);
@@ -7599,57 +8658,60 @@ class VirtualMachine extends Signal {
       if(frame.module.optionExplicit)throw new VBError(`Variable not defined: ${node.name}`,500);
       cell=new Cell(defaultIdentifierType(node.name,frame.module.defaultTypes));frame.locals.set(key,cell);return cell;
     }
-    if(node.kind==='member')return this.memberReference(await this.evaluate(node.object,frame,{raw:true}),node.name,frame,objectSet);
+    if(node.kind==='member')return this.memberReference(await this.evaluateScalar(node.object,frame,{raw:true}),node.name,frame,objectSet);
     if(node.kind==='call'){
-      let target=await this.evaluate(node.callee,frame,{raw:true});const args=[];for(const a of node.args)args.push(await this.evaluate(a,frame));
+      let target=await this.evaluateScalar(node.callee,frame,{raw:true});const args=[];for(const a of node.args)args.push(await this.evaluateScalar(a,frame));
       if(isAutomationObject(target))return automationReference(target,automationDefaultName(target),args,objectSet);
       const instance=objectIdentity(target),defaultName=target?.__vbInterface?instance.module.interfaceBindings[target.interfaceName]?.defaultMember:instance?.module?.defaultMember;
       if(instance?.__vbInstance&&defaultName){const getter=()=>this.callExpression(node,frame);if(target.__vbInterface){const member=this.interfaceProcedure(target,defaultName,objectSet?'set':'let');return new Ref(getter,v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}const setter=instance.module.procedures.get(defaultName+':'+(objectSet?'set':'let'));if(!setter)throw new VBError('Default property is read-only',383);return new Ref(getter,v=>this.callProcedure(instance,setter,[...args,v],frame));}
       if(target instanceof VBArray&&!args.length&&node.callee.kind==='id')return this.reference(node.callee,frame,true);
-      if(target instanceof VBArray){const ref=new Ref(()=>target.get(...args),value=>target.set(args,value),target.type,target.fixedLength);ref.win32Array=target;ref.win32Offset=target.offset(args);return ref;}
-      if(target instanceof VBDictionary)return new Ref(()=>target.Item(...args),value=>target.setItem(...args,value));
-      if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args),v=>target.receiver.setItem(...args,v));
+      if(target instanceof VBArray){const ref=new Ref(()=>target.get(...args),value=>target.set(args,value),target.type,target.fixedLength,()=>target.getScalar(...args));ref.debugGetScalar=ref.getScalar;ref.win32Array=target;ref.win32Offset=target.offset(args);return ref;}
+      if(target instanceof VBDictionary)return new Ref(()=>target.Item(...args),value=>target.setItem(...args,value),'Variant',null,()=>target.itemScalar(...args));
+      if(target?.__native&&target.receiver?.setItem)return new Ref(()=>target.__native.apply(target.receiver,args.map(unbox)),v=>target.receiver.setItem(...args.map(unbox),unbox(v)));
       if(node.callee.kind==='member'){
-        const object=await this.evaluate(node.callee.object,frame,{raw:true});const name=lower(node.callee.name);
+        const object=await this.evaluateScalar(node.callee.object,frame,{raw:true});const name=lower(node.callee.name);
         if(isAutomationObject(object))return automationReference(object,node.callee.name,args,objectSet);
         if(object?.__vbInterface){const member=this.interfaceProcedure(object,node.callee.name,objectSet?'set':'let');return new Ref(()=>this.callExpression(node,frame),v=>this.callProcedure(member.instance,member.__procedure,[...args,v],frame));}
-        if(object?.__vbInstance){const proc=object.module.procedures.get(name+':let')||object.module.procedures.get(name+':set');if(proc){if(proc.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,node.callee.name,frame),v=>this.callProcedure(object,proc,[...args,v],frame));}}
-        if(object?.setIndexed)return new Ref(()=>object[node.callee.name](...args),value=>object.setIndexed(node.callee.name,args,value));
+        if(object?.__vbInstance){const proc=object.module.procedures.get(name+':let')||object.module.procedures.get(name+':set');if(proc){if(proc.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMemberScalar(object,node.callee.name,frame),v=>this.callProcedure(object,proc,[...args,v],frame));}}
+        if(object?.setIndexed)return new Ref(()=>object[node.callee.name](...args.map(unbox)),value=>object.setIndexed(node.callee.name,args.map(unbox),unbox(value)));
       }
-      if(target&&typeof target.setItem==='function')return new Ref(()=>target.Item(...args),v=>target.setItem(...args,v));
+      if(target&&typeof target.setItem==='function')return new Ref(()=>target.Item(...args.map(unbox)),v=>target.setItem(...args.map(unbox),unbox(v)));
       throw new VBError('Invalid indexed assignment',13);
     }
     throw new VBError('Invalid assignment target',1002);
   }
   async memberReference(object,name,frame,objectSet=false){
     if(isAutomationObject(object))return automationReference(object,name,[],objectSet);
-    if(object?.__vbInterface){const member=this.interfaceProcedure(object,name,objectSet?'set':'let');return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(member.instance,member.__procedure,[v],frame));}
+    if(object?.__vbInterface){const member=this.interfaceProcedure(object,name,objectSet?'set':'let');return new Ref(()=>this.getMemberScalar(object,name,frame),v=>this.callProcedure(member.instance,member.__procedure,[v],frame));}
     this.assertVisible(object,name,frame);
-    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key);const setter=object.module.procedures.get(key+':let')||object.module.procedures.get(key+':set');if(setter){if(setter.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMember(object,name,frame),v=>this.callProcedure(object,setter,[v],frame));}if(object.formObject)return this.memberReference(object.formObject,name,frame);throw new VBError(`Method or data member not found: ${name}`,438);}
+    if(object?.__vbInstance){const key=lower(name);if(object.fields.has(key))return object.fields.get(key);const setter=object.module.procedures.get(key+':let')||object.module.procedures.get(key+':set');if(setter){if(setter.scope==='private'&&object.module!==frame?.module)throw new VBError('Property assignment is not accessible',438);return new Ref(()=>this.getMemberScalar(object,name,frame),v=>this.callProcedure(object,setter,[v],frame));}if(object.formObject)return this.memberReference(object.formObject,name,frame);throw new VBError(`Method or data member not found: ${name}`,438);}
     if(object?.__fields){const entry=[...object.__fields].find(([key])=>lower(key)===lower(name));if(entry)return entry[1];}
-    const key=this.nativeKey(object,name);if(key===null){if(Object.getPrototypeOf(object)===Object.prototype){object[name]=undefined;return new Ref(()=>object[name],v=>object[name]=v);}throw new VBError(`Property not found: ${name}`,438);}return new Ref(()=>object[key],v=>{object[key]=v;return v;});
+    const key=this.nativeKey(object,name);if(key===null){if(Object.getPrototypeOf(object)===Object.prototype){object[name]=undefined;return new Ref(()=>object[name],v=>object[name]=v);}throw new VBError(`Property not found: ${name}`,438);}return new Ref(()=>object[key],v=>{object[key]=unbox(v);return unbox(v);},'Variant',null,()=>this.nativeScalar(object,name,object[key]));
   }
-  async callByName(object,name,callType,args=[],frame=this.currentFrame){
+  async callByName(object,name,callType,args=[],frame=this.currentFrame,scalarReturn=false){
+    const result=await this.callByNameScalar(object,name,callType,args,frame);return scalarReturn?result:unbox(result);
+  }
+  async callByNameScalar(object,name,callType,args=[],frame=this.currentFrame){
     if(![1,2,4,8].includes(callType))throw new VBError('Invalid procedure call',5);
     const key=lower(name);if(BLOCKED_MEMBERS.has(key)||key.startsWith('_'))throw new VBError('Member access is not permitted',438);
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable not set',91);
     if(typeof object!=='object'||object instanceof VBArray||object instanceof Date||object instanceof VBCurrency||object instanceof VBDecimal||object instanceof VBErrorValue||object===MISSING||object.__fields)throw new VBError('Object required',424);
     if(callType===8){const value=args.at(-1);if(value!==NOTHING&&(!value||typeof value!=='object'||value instanceof VBArray||value instanceof Date||value instanceof VBCurrency||value instanceof VBDecimal||value instanceof VBErrorValue||value.__fields))throw new VBError('Object required',424);}
     if(isAutomationObject(object))return this.debugAwait(automationInvoke(object,name,callType,args));
-    if(object.__vbInterface){const member=this.interfaceProcedure(object,name,({2:'get',4:'let',8:'set'})[callType]||null);return this.callProcedure(member.instance,member.__procedure,args,frame);}
+    if(object.__vbInterface){const member=this.interfaceProcedure(object,name,({2:'get',4:'let',8:'set'})[callType]||null);return this.callProcedure(member.instance,member.__procedure,args,frame,true);}
     if(object.__vbInstance){
       // Automation dispatch is public even when invoked by code in the same class.
       const proc=object.module.procedures.get(key+(callType===1?'':callType===2?':get':callType===4?':let':':set'));
-      if(proc){if(proc.scope==='private')throw new VBError('Member is not publicly accessible',438);return this.callProcedure(object,proc,args,frame);}
+      if(proc){if(proc.scope==='private')throw new VBError('Member is not publicly accessible',438);return this.callProcedure(object,proc,args,frame,true);}
       const field=object.fields.get(key);
-      if(field){if(field.scope==='private')throw new VBError('Member is not publicly accessible',438);if(callType===2){if(args.length)throw new VBError('Wrong number of arguments',450);return field.get();}if(callType===4||callType===8){if(args.length!==1)throw new VBError('Wrong number of arguments',450);if(callType===4&&lower(field.type)==='object')throw new VBError('Object assignment requires vbSet',13);return field.set(args[0]);}throw new VBError('Member is not a method',438);}
-      if(object.formObject)return this.callByName(object.formObject,name,callType,args,frame);
+      if(field){if(field.scope==='private')throw new VBError('Member is not publicly accessible',438);if(callType===2){if(args.length)throw new VBError('Wrong number of arguments',450);return readScalar(field);}if(callType===4||callType===8){if(args.length!==1)throw new VBError('Wrong number of arguments',450);if(callType===4&&lower(field.type)==='object')throw new VBError('Object assignment requires vbSet',13);return field.set(args[0]);}throw new VBError('Member is not a method',438);}
+      if(object.formObject)return this.callByNameScalar(object.formObject,name,callType,args,frame);
       throw new VBError('Method or data member not found: '+name,438);
     }
     const native=this.nativeKey(object,name);if(native===null)throw new VBError('Object does not support property or method: '+name,438);
     const value=object[native];
-    if(callType===1){if(typeof value!=='function')throw new VBError('Member is not a method',438);return this.debugAwait(value.apply(object,args));}
-    if(callType===2){if(typeof value==='function'){if(!['item','list','selected','itemdata','textmatrix','colwidth','rowheight'].includes(key))throw new VBError('Member is not a property',438);return this.debugAwait(value.apply(object,args));}if(args.length)throw new VBError('Wrong number of arguments',450);return value;}
+    if(callType===1){if(typeof value!=='function')throw new VBError('Member is not a method',438);return this.invokeScalar({__native:value,receiver:object,memberName:name},args,frame);}
+    if(callType===2){if(typeof value==='function'){if(!['item','list','selected','itemdata','textmatrix','colwidth','rowheight'].includes(key))throw new VBError('Member is not a property',438);return this.invokeScalar({__native:value,receiver:object,memberName:name},args,frame);}if(args.length)throw new VBError('Wrong number of arguments',450);return this.nativeScalar(object,name,value);}
     if(!args.length)throw new VBError('Argument not optional',449);
     if(typeof value==='function'){
       if(key==='item'&&typeof object.setItem==='function')return object.setItem(...args);
@@ -7659,23 +8721,33 @@ class VirtualMachine extends Signal {
     if(args.length!==1)throw new VBError('Wrong number of arguments',450);
     let owner=object,descriptor;for(let i=0;owner&&i<5;i++,owner=Object.getPrototypeOf(owner)){descriptor=Object.getOwnPropertyDescriptor(owner,native);if(descriptor)break;}
     if(descriptor&&(descriptor.get&&!descriptor.set||'writable'in descriptor&&!descriptor.writable))throw new VBError('Property is read-only',383);
-    object[native]=args[0];return args[0];
+    object[native]=unbox(args[0]);return args[0];
   }
-  async callProcedure(instance,proc,args=[],caller=null){
-    if(proc.external)return this.debugAwait(this.win32.invoke(proc,args));
+  async callProcedure(instance,proc,args=[],caller=null,scalarReturn=false){
+    if(proc.external){const value=await this.debugAwait(this.win32.invoke(proc,args.map(a=>a?.ref?a:a?.__win32ByVal?{...a,value:unbox(a.value)}:unbox(a))));return scalarReturn?storageScalar(value,proc.storageReturnType||proc.returnType||'Variant'):value;}
     if(this.stack.length>=this.options.maxCallDepth)throw new VBError('Out of stack space',28);
     const frame=this.makeFrame(instance,proc);frame.caller=caller;if(this.recordSchema(proc.returnType,frame.module))frame.result=new Cell(proc.returnType,await this.createRecord(proc.returnType,frame));
     if(args.length>proc.params.length&&!proc.params.at(-1)?.paramArray)throw new VBError(`Wrong number of arguments to ${proc.name}`,450);
     for(let i=0;i<proc.params.length;i++){
       const param=proc.params[i];let actual=i<args.length?args[i]:MISSING,cell;
-      if(param.paramArray){cell=new Cell('Variant',VBArray.from(args.slice(i).map(v=>v?.ref?v.ref.get():v)));frame.locals.set(lower(param.name),cell);break;}
-      if(actual===MISSING){if(param.initial)actual=proc.defaultBindings?.has(lower(param.name))?proc.defaultBindings.get(lower(param.name)):await this.evaluate(param.initial,frame);else if(!param.optional)throw new VBError(`Argument not optional: ${param.name}`,449);else actual=lower(param.type)==='variant'?MISSING:defaultValue(param.type);}
-      if(param.byRef&&actual?.ref){if(param.storageType&&param.bounds===null&&lower(actual.ref.type)!==lower(param.storageType))throw new VBError('ByRef argument type mismatch',13);if(this.recordSchema(param.type,frame.module)){const value=await actual.ref.get();if(!value?.__fields||lower(value.__type)!==lower(param.type))throw new VBError('ByRef user-defined type mismatch',13);}cell=objectSupports(await actual.ref.get(),param.type)&&lower(actual.ref.type)!==lower(param.type)?new Ref(async()=>coerce(await actual.ref.get(),param.type),v=>actual.ref.set(v),param.type):actual.ref;}
-      else cell=new Cell(param.bounds!==null?'Variant':param.storageType||param.type,actual?.ref?await actual.ref.get():actual);
+      if(param.paramArray){cell=new Cell('Variant',VBArray.from(await Promise.all(args.slice(i).map(v=>v?.ref?readScalar(v.ref):v))));frame.locals.set(lower(param.name),cell);break;}
+      if(unbox(actual)===MISSING){if(param.initial)actual=proc.defaultScalars?.has(lower(param.name))?proc.defaultScalars.get(lower(param.name)):await this.evaluateScalar(param.initial,frame);else if(!param.optional)throw new VBError(`Argument not optional: ${param.name}`,449);else actual=lower(param.type)==='variant'?MISSING:defaultValue(param.type);}
+      const declared=param.storageType||param.type;
+      if(param.byRef&&actual?.ref){
+        const ref=actual.ref,value=await ref.get();
+        if(param.bounds!==null){if(!(value instanceof VBArray)||lower(value.type)!==lower(declared))throw new VBError('ByRef array type mismatch',13);cell=ref;}
+        else if(this.recordSchema(param.type,frame.module)){if(!value?.__fields||lower(value.__type)!==lower(param.type))throw new VBError('ByRef user-defined type mismatch',13);cell=ref;}
+        else if(Object.hasOwn(SCALAR_TYPES,lower(declared))&&lower(ref.type)!==lower(declared))throw new VBError('ByRef argument type mismatch',13);
+        else if(lower(declared)==='variant'&&scalarType(value)){
+          cell=new Ref(()=>ref.get(),v=>ref.set(v),'Variant',ref.fixedLength,async()=>storageScalar(await readScalar(ref),'Variant'));
+          // Only storage-backed references may participate in automatic watches.
+          if(ref instanceof Cell||typeof ref.debugGetScalar==='function'){cell.debugGetScalar=()=>storageScalar(ref instanceof Cell?ref.getScalar():ref.debugGetScalar(),'Variant');cell.debugGet=()=>unbox(cell.debugGetScalar());}
+        }else cell=objectSupports(value,param.type)&&lower(ref.type)!==lower(param.type)?new Ref(async()=>coerce(await ref.get(),param.type),v=>ref.set(v),param.type):ref;
+      }else cell=new Cell(param.bounds!==null?'Variant':declared,actual?.ref?await readScalar(actual.ref):actual);
       frame.locals.set(lower(param.name),cell);
     }
     this.stack.push(frame);this.currentFrame=frame;
-    try {await this.execute(frame);return frame.result.get();}
+    try {await this.execute(frame);return scalarReturn?frame.result.getScalar():frame.result.get();}
     finally{this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&!this.debugEvaluation&&frame.proc.code.some(isSequencePoint))this.stepMode=null;if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
   }
   async checkpoint(ins,frame){
@@ -7719,42 +8791,51 @@ class VirtualMachine extends Signal {
       try{
         switch(ins.op){
           case 'dim':for(const decl of ins.decls)await this.declare(decl,frame,frame.locals,ins.static||frame.proc.static);break;
-          case 'assign':{const ref=await this.reference(ins.target,frame,ins.objectSet);const value=await this.evaluate(ins.expr,frame);if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);await ref.set(ins.objectSet?value:await this.defaultValue(value));break;}
-          case 'expr':await this.evaluate(ins.expr,frame);break;
-          case 'print':{const values=[];for(const e of ins.exprs){const v=await this.defaultValue(await this.evaluate(e,frame));values.push(v===null?'Null':v===undefined?'':v instanceof VBErrorValue?v.toString():vbString(v));}this.output(values.join(' '),ins.newline);break;}
-          case 'assert':if(this.options.debugStatements!==false&&!truth(await this.evaluate(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);await this.debugger.breakAfter(ins,frame,'assert');}break;
-          case 'branch':{const test=truth(await this.evaluate(ins.test,frame));if(ins.invert?test:!test)frame.pc=ins.target;break;}
+          case 'assign':{const ref=await this.reference(ins.target,frame,ins.objectSet);const value=await this.evaluateScalar(ins.expr,frame);if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);await ref.set(ins.objectSet?value:await this.defaultValue(value));break;}
+          case 'expr':await this.evaluateScalar(ins.expr,frame);break;
+          case 'print':{const values=[];for(const e of ins.exprs){const v=await this.defaultValue(await this.evaluateScalar(e,frame));values.push(printScalar(v));}this.output(values.join(' '),ins.newline);break;}
+          case 'assert':if(this.options.debugStatements!==false&&!truth(await this.evaluateScalar(ins.expr,frame))){this.output('Assertion failed: '+ins.source+':'+ins.line);await this.debugger.breakAfter(ins,frame,'assert');}break;
+          case 'branch':{const test=truth(await this.evaluateScalar(ins.test,frame));if(ins.invert?test:!test)frame.pc=ins.target;break;}
           case 'jump':frame.pc=ins.target;break;
           case 'computedJump':{
-            const index=coerce(await this.defaultValue(await this.evaluate(ins.expr,frame)),'Long');
+            const index=coerce(await this.defaultValue(await this.evaluateScalar(ins.expr,frame)),'Long');
             if(index<0||index>255)throw new VBError('Invalid procedure call or argument',5);
             if(index>0&&index<=ins.targets.length){if(ins.gosub)frame.gosubStack.push(frame.pc);frame.pc=ins.targets[index-1];}break;
           }
-          case 'raiseError':{const number=coerce(await this.defaultValue(await this.evaluate(ins.expr,frame)),'Long');if(number<1||number>65535)throw new VBError('Invalid procedure call or argument',5);throw new VBError(errorDescription(number),number);}
+          case 'raiseError':{const number=coerce(await this.defaultValue(await this.evaluateScalar(ins.expr,frame)),'Long');if(number<1||number>65535)throw new VBError('Invalid procedure call or argument',5);throw new VBError(errorDescription(number),number);}
 
-          case 'temp':frame.temps.set(ins.id,await this.evaluate(ins.expr,frame));break;
-          case 'case':{const value=frame.temps.get(ins.id);let matched=false;for(const c of ins.cases){if(c.kind==='range')matched=truth(binary('>=',value,await this.evaluate(c.low,frame),frame.module.optionCompare))&&truth(binary('<=',value,await this.evaluate(c.high,frame),frame.module.optionCompare));else matched=truth(binary(c.op||'=',value,await this.evaluate(c.expr,frame),frame.module.optionCompare));if(matched)break;}if(!matched)frame.pc=ins.target;break;}
-          case 'forInit':{const ref=await this.reference(parseExpression(ins.name),frame),start=numeric(await this.evaluate(ins.start,frame)),end=numeric(await this.evaluate(ins.end,frame)),step=numeric(await this.evaluate(ins.step,frame));if(step===0)throw new VBError('For Step cannot be zero in the browser runtime',5);await ref.set(start);frame.temps.set(ins.id,{ref,end,step});if(step>0?start>end:start<end)frame.pc=ins.target;break;}
-          case 'forNext':{const data=frame.temps.get(ins.id),next=numeric(await data.ref.get())+data.step;await data.ref.set(next);if(data.step>0?next<=data.end:next>=data.end)frame.pc=ins.target;break;}
-          case 'eachInit':{let value=await this.evaluate(ins.expr,frame);if(isAutomationObject(value))value=await this.debugAwait(automationEnumerate(value));if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
+          case 'temp':frame.temps.set(ins.id,await this.evaluateScalar(ins.expr,frame));break;
+          case 'case':{const value=frame.temps.get(ins.id);let matched=false;for(const c of ins.cases){if(c.kind==='range')matched=truth(binary('>=',value,await this.evaluateScalar(c.low,frame),frame.module.optionCompare))&&truth(binary('<=',value,await this.evaluateScalar(c.high,frame),frame.module.optionCompare));else matched=truth(binary(c.op||'=',value,await this.evaluateScalar(c.expr,frame),frame.module.optionCompare));if(matched)break;}if(!matched)frame.pc=ins.target;break;}
+          case 'forInit':{
+            const ref=await this.reference(parseExpression(ins.name),frame),start=await this.evaluateScalar(ins.start,frame),end=await this.evaluateScalar(ins.end,frame),step=await this.evaluateScalar(ins.step,frame);
+            numeric(start);numeric(end);const direction=numeric(step)>=0;
+            await ref.set(start);frame.temps.set(ins.id,{ref,end,step,direction});
+            if(truth(binary(direction?'>':'<',await readScalar(ref),end,frame.module.optionCompare)))frame.pc=ins.target;break;
+          }
+          case 'forNext':{
+            const data=frame.temps.get(ins.id);if(!data)throw new VBError('For loop not initialized',92);
+            await data.ref.set(binary('+',await readScalar(data.ref),data.step,frame.module.optionCompare));
+            if(truth(binary(data.direction?'<=':'>=',await readScalar(data.ref),data.end,frame.module.optionCompare)))frame.pc=ins.target;break;
+          }
+          case 'eachInit':{let value=await this.evaluateScalar(ins.expr,frame);if(isAutomationObject(value))value=await this.debugAwait(automationEnumerate(value));if(!value?.[Symbol.iterator])throw new VBError('Object is not a collection',451);const iterator=value.scalarIterator?value.scalarIterator():value[Symbol.iterator](),ref=await this.reference(parseExpression(ins.name),frame);frame.temps.set(ins.id,{iterator,ref});const next=iterator.next();if(next.done)frame.pc=ins.target;else await ref.set(next.value);break;}
           case 'eachNext':{const data=frame.temps.get(ins.id),next=data.iterator.next();if(!next.done){await data.ref.set(next.value);frame.pc=ins.target;}break;}
           case 'stringAlign':{
             const ref=await this.reference(ins.target,frame,true),current=await ref.get();
             if(typeof current!=='string')throw new VBError('String assignment requires a String variable',13);
-            const source=vbString(await this.evaluate(ins.expr,frame)).slice(0,current.length);
+            const source=vbString(await this.evaluateScalar(ins.expr,frame)).slice(0,current.length);
             await ref.set(ins.right?source.padStart(current.length,' '):source.padEnd(current.length,' '));break;
           }
           case 'stringMid':{
             const ref=await this.reference(ins.target,frame,true),current=await ref.get();
             if(typeof current!=='string')throw new VBError('Mid requires a String variable',13);
-            const start=coerce(await this.evaluate(ins.start,frame),'Long'),length=ins.length?coerce(await this.evaluate(ins.length,frame),'Long'):current.length;
+            const start=coerce(await this.evaluateScalar(ins.start,frame),'Long'),length=ins.length?coerce(await this.evaluateScalar(ins.length,frame),'Long'):current.length;
             if(start<1||length<0)throw new VBError('Invalid procedure call',5);
-            const source=vbString(await this.evaluate(ins.expr,frame)),count=Math.max(0,Math.min(length,source.length,current.length-start+1));
+            const source=vbString(await this.evaluateScalar(ins.expr,frame)),count=Math.max(0,Math.min(length,source.length,current.length-start+1));
             if(count)await ref.set(current.slice(0,start-1)+source.slice(0,count)+current.slice(start-1+count));break;
           }
           case 'redim':for(const decl of ins.decls){let ref;try{ref=await this.reference({kind:'id',name:decl.name},frame,true);}catch(e){if(e.number===500){frame.locals.set(lower(decl.name),new Cell());ref=frame.locals.get(lower(decl.name));}else throw e;}const bounds=await this.evalBounds(decl.bounds,frame),value=await ref.get();if(value instanceof VBArray)value.redim(bounds,ins.preserve);else{const a=await this.createArray(bounds,decl.storageType||decl.type,frame,decl.fixedLength);a.dynamic=true;await ref.set(a);}}break;
-          case 'erase':for(const expr of ins.exprs){const value=await this.evaluate(expr,frame);if(!(value instanceof VBArray))throw new VBError('Expected array',13);value.erase();}break;
-          case 'withPush':frame.withStack.push(await this.evaluate(ins.expr,frame,{raw:true}));break;
+          case 'erase':for(const expr of ins.exprs){const value=await this.evaluateScalar(expr,frame);if(!(value instanceof VBArray))throw new VBError('Expected array',13);value.erase();}break;
+          case 'withPush':frame.withStack.push(await this.evaluateScalar(ins.expr,frame,{raw:true}));break;
           case 'withPop':frame.withStack.pop();break;
           case 'withUnwind':frame.withStack.splice(-ins.count);break;
           case 'onError':frame.errorMode=ins.mode;frame.errorTarget=ins.target;frame.errorActive=false;frame.errorPc=null;break;
@@ -7764,17 +8845,17 @@ class VirtualMachine extends Signal {
           case 'return':if(frame.errorActive)this.err.Clear();return;
           case 'stop':if(this.options.debugStatements===false){this.stop();throw new StopExecution();}await this.debugger.breakAfter(ins,frame,'stop');break;
           case 'end':this.stop();throw new StopExecution();
-          case 'form':{if(ins.expr.kind==='call'){const array=await this.evaluate(ins.expr.callee,frame,{raw:true});if(array?.__type==='ControlArray'){if(ins.expr.args.length!==1)throw new VBError('Control arrays require one index',450);const index=await this.evaluate(ins.expr.args[0],frame);if(ins.action==='load')array.Load(index);else array.Unload(index);break;}}const object=await this.evaluate(ins.expr,frame,{raw:true});if(ins.action==='unload')await this.unloadForm(object);else await this.loadForm(object);break;}
-          case 'fileOpen':this.fs.open(await this.evaluate(ins.path,frame),ins.mode,await this.evaluate(ins.handle,frame),ins.recordLength?await this.evaluate(ins.recordLength,frame):128,ins.access,ins.sharing);break;
-          case 'fileRecord':{const n=await this.evaluate(ins.handle,frame),position=ins.position?await this.evaluate(ins.position,frame):undefined,ref=await this.reference(ins.target,frame,true),value=await ref.get(),mode=this.fs.handle(n).mode;if(ins.action==='put')this.fs.put(n,position,encodeVariable(value,ref,mode));else{const result=this.fs.get(n,position,bytes=>decodeVariable(bytes,ref,value,mode));await ref.set(result);}break;}
-          case 'fileSeek':this.fs.seek(await this.evaluate(ins.handle,frame),await this.evaluate(ins.position,frame));break;
-          case 'fileLock':this.fs.lock(await this.evaluate(ins.handle,frame),ins.start?await this.evaluate(ins.start,frame):undefined,ins.end?await this.evaluate(ins.end,frame):undefined,ins.unlock);break;
-          case 'fileCopy':this.fs.copy(await this.evaluate(ins.sourcePath,frame),await this.evaluate(ins.destination,frame));break;
-          case 'fileRename':this.fs.rename(await this.evaluate(ins.sourcePath,frame),await this.evaluate(ins.destination,frame));break;
-          case 'fileClose':if(!ins.handles.length)this.fs.close();else for(const h of ins.handles)this.fs.close(await this.evaluate(h,frame));break;
-          case 'filePrint':{const values=[];for(const e of ins.exprs)values.push(await this.defaultValue(await this.evaluate(e,frame)));const text=ins.csv?values.map(v=>typeof v==='string'?'"'+v.replace(/"/g,'""')+'"':String(v??'')).join(','):values.map(v=>String(v??'')).join('');this.fs.print(await this.evaluate(ins.handle,frame),text,ins.newline);break;}
-          case 'fileInput':{const text=this.fs.lineInput(await this.evaluate(ins.handle,frame));const values=ins.whole?[text]:this.parseCSV(text);for(let i=0;i<ins.targets.length;i++)await (await this.reference(ins.targets[i],frame)).set(values[i]??'');break;}
-          case 'graphics':{const obj=await this.evaluate(ins.object,frame,{raw:true}),control=obj?.__vbInstance?obj.formObject:obj;if(!control?.draw)throw new VBError('Object does not support graphics methods',438);const coords=[];for(const e of ins.coords)coords.push(numeric(await this.evaluate(e,frame)));control.draw(ins.kind,coords,numeric(await this.evaluate(ins.color,frame)),ins.fill);break;}
+          case 'form':{if(ins.expr.kind==='call'){const array=await this.evaluateScalar(ins.expr.callee,frame,{raw:true});if(array?.__type==='ControlArray'){if(ins.expr.args.length!==1)throw new VBError('Control arrays require one index',450);const index=await this.evaluateScalar(ins.expr.args[0],frame);if(ins.action==='load')array.Load(index);else array.Unload(index);break;}}const object=await this.evaluateScalar(ins.expr,frame,{raw:true});if(ins.action==='unload')await this.unloadForm(object);else await this.loadForm(object);break;}
+          case 'fileOpen':this.fs.open(await this.evaluateScalar(ins.path,frame),ins.mode,await this.evaluateScalar(ins.handle,frame),ins.recordLength?await this.evaluateScalar(ins.recordLength,frame):128,ins.access,ins.sharing);break;
+          case 'fileRecord':{const n=await this.evaluateScalar(ins.handle,frame),position=ins.position?await this.evaluateScalar(ins.position,frame):undefined,ref=await this.reference(ins.target,frame,true),value=await readScalar(ref),mode=this.fs.handle(n).mode;if(ins.action==='put')this.fs.put(n,position,encodeVariable(value,ref,mode));else{const result=this.fs.get(n,position,bytes=>{const decoded=decodeVariable(bytes,ref,unbox(value),mode);return {...decoded,value:decoded.scalar};});await ref.set(result);}break;}
+          case 'fileSeek':this.fs.seek(await this.evaluateScalar(ins.handle,frame),await this.evaluateScalar(ins.position,frame));break;
+          case 'fileLock':this.fs.lock(await this.evaluateScalar(ins.handle,frame),ins.start?await this.evaluateScalar(ins.start,frame):undefined,ins.end?await this.evaluateScalar(ins.end,frame):undefined,ins.unlock);break;
+          case 'fileCopy':this.fs.copy(await this.evaluateScalar(ins.sourcePath,frame),await this.evaluateScalar(ins.destination,frame));break;
+          case 'fileRename':this.fs.rename(await this.evaluateScalar(ins.sourcePath,frame),await this.evaluateScalar(ins.destination,frame));break;
+          case 'fileClose':if(!ins.handles.length)this.fs.close();else for(const h of ins.handles)this.fs.close(await this.evaluateScalar(h,frame));break;
+          case 'filePrint':{const values=[];for(const e of ins.exprs)values.push(await this.defaultValue(await this.evaluateScalar(e,frame)));const text=values.map(v=>printScalar(v,ins.csv)).join(ins.csv?',':'');this.fs.print(await this.evaluateScalar(ins.handle,frame),text,ins.newline);break;}
+          case 'fileInput':{const n=unbox(await this.evaluateScalar(ins.handle,frame));for(const target of ins.targets){const ref=await this.reference(target,frame,true);const value=ins.whole?this.fs.lineInput(n):this.fs.inputValue(n,ref.type);await ref.set(value);}break;}
+          case 'graphics':{const obj=await this.evaluateScalar(ins.object,frame,{raw:true}),control=obj?.__vbInstance?obj.formObject:obj;if(!control?.draw)throw new VBError('Object does not support graphics methods',438);const coords=[];for(const e of ins.coords)coords.push(numeric(await this.evaluateScalar(e,frame)));control.draw(ins.kind,coords,numeric(await this.evaluateScalar(ins.color,frame)),ins.fill);break;}
           case 'raiseEvent':await this.raiseEvent(frame.instance,ins.expr.callee.name,ins.expr.args,frame);break;
           default:throw new VBError('Invalid bytecode instruction '+ins.op,1002);
         }
@@ -7828,18 +8909,18 @@ class VirtualMachine extends Signal {
       this.debugEvaluation?.check();statement=statement.trim();if(!statement)continue;
       if(/^\?/.test(statement)||/^(?:Debug\.)?Print\b/i.test(statement)){
         const expression=statement.replace(/^(?:\?|(?:Debug\.)?Print\s*)/i,'');
-        value=await this.evaluate(parseExpression(expression),frame);this.output(describe(value));continue;
+        value=await this.evaluateScalar(parseExpression(expression),frame);this.output(describe(value));continue;
       }
       const objectSet=/^Set\s/i.test(statement),source=statement.replace(/^(?:Let|Set)\s+/i,'');
       let depth=0,equal=null;for(const token of tokenize(source)){if(token.value==='(')depth++;else if(token.value===')')depth--;else if(token.value==='='&&depth===0){equal=token;break;}}
       if(equal){
         const target=parseExpression(source.slice(0,equal.start));if(!['id','member','call'].includes(target.kind))throw new VBError('Invalid assignment target',1002);
         const ref=await this.reference(target,frame,objectSet);
-        value=await this.evaluate(parseExpression(source.slice(equal.end)),frame);
+        value=await this.evaluateScalar(parseExpression(source.slice(equal.end)),frame);
         if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);
         await ref.set(objectSet?value:await this.defaultValue(value));
       }else{
-        value=await this.evaluate(parseCall(statement.replace(/^Call\s+/i,'')),frame);if(value!==undefined)this.output(describe(value));
+        value=await this.evaluateScalar(parseCall(statement.replace(/^Call\s+/i,''),{explicit:/^Call\s+/i.test(statement)}),frame);if(value!==undefined)this.output(describe(value));
       }
     }
     return value;
@@ -7857,7 +8938,7 @@ class VirtualMachine extends Signal {
     if(this.state!=='paused'){this.immediateFrames ||= new WeakMap();const instance=frame.instance;if(!this.immediateFrames.has(instance))this.immediateFrames.set(instance,frame);frame=this.immediateFrames.get(instance);}
     const session=new DebugEvaluationSession(this,{instructionLimit,timeLimit}),saved={frame:this.currentFrame,err:{...this.err},lastError:this.lastError,erl:this.lastErrorErl,step:this.stepMode,pauseRequested:this.pauseRequested,runTarget:this.runTarget};
     this.debugEvaluation=session;this.currentFrame=frame;this.emit('evaluation',{active:true,frameIndex:this.stack.indexOf(frame)});
-    try {const value=immediate?await this.immediateAt(text,frame):await this.evaluate(parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return value;}
+    try {const value=immediate?await this.immediateAt(text,frame):await this.evaluateScalar(parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return unbox(value);}
     finally {session.dispose();this.debugEvaluation=null;this.currentFrame=saved.frame;if(this.state==='stopped')this.pauseResolver?.();Object.assign(this.err,saved.err);this.lastError=saved.lastError;this.lastErrorErl=saved.erl;this.stepMode=saved.step;this.pauseRequested=saved.pauseRequested;this.runTarget=saved.runTarget;this.emit('evaluation',{active:false,instructions:session.instructions,milliseconds:performance.now()-session.started});if(this.eventQueue.length&&!this.stack.length&&this.state!=='paused')queueMicrotask(()=>this.processEvents());}
   }
   async evaluateWatch(text,options={}){return this.debugInspector.evaluate(text,options.frameIndex??null);}
@@ -7878,19 +8959,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[81]=(()=>{
-const {RuntimeAgentControl}=__modules[65];
-const {RuntimeMDI}=__modules[66];
-const {runtimeDialog,messageBoxOptions}=__modules[67];
-const { applyTheme, themeId }=__modules[39];
-const { icon }=__modules[59];
-const {rasterDataURL}=__modules[44];
-const { el, download, lower, clone }=__modules[14];
-const { compileProject }=__modules[73];
-const { VirtualMachine }=__modules[80];
-const { VirtualFileSystem }=__modules[36];
-const { describe }=__modules[15];
-const { BrowserForm }=__modules[64];
+__modules[89]=(()=>{
+const {RuntimeAgentControl}=__modules[73];
+const {RuntimeMDI}=__modules[74];
+const {runtimeDialog,messageBoxOptions}=__modules[75];
+const { applyTheme, themeId }=__modules[46];
+const { icon }=__modules[67];
+const {rasterDataURL}=__modules[51];
+const { el, download, lower, clone }=__modules[20];
+const { compileProject }=__modules[81];
+const { VirtualMachine }=__modules[88];
+const { VirtualFileSystem }=__modules[43];
+const { describe }=__modules[21];
+const { BrowserForm }=__modules[72];
 
 
 
@@ -7948,30 +9029,30 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[82]=(()=>{
-const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[8];
-const {AutomationRegistry}=__modules[16];
-const {ControlAdapterRegistry}=__modules[17];
-const {DataContext}=__modules[37];
-const {ADOConnection,ADOCommand}=__modules[34];
-const {ConnectedRecordset}=__modules[23];
-const {DATA_CONSTANTS}=__modules[18];
-const {FINANCIAL_FUNCTIONS}=__modules[38];
-const {installNativeHost}=__modules[41];
-const {ResourceStore}=__modules[46];
-const {readRES,writeRES,setResource,setResourceString}=__modules[45];
-const {THEMES,applyTheme,colorValue}=__modules[39];
-const {MemoryRecordset}=__modules[52];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[53];
-const { ApplicationHost }=__modules[81];
-const { VirtualMachine }=__modules[80];
-const { compileProject, compileModule }=__modules[73];
-const { parseExpression }=__modules[71];
-const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal }=__modules[15];
-const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[10];
-const { VirtualFileSystem }=__modules[36];
-const { BrowserControl, BrowserForm }=__modules[64];
-const { GraphicsSurface }=__modules[40];
+__modules[90]=(()=>{
+const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[14];
+const {AutomationRegistry}=__modules[22];
+const {ControlAdapterRegistry}=__modules[23];
+const {DataContext}=__modules[44];
+const {ADOConnection,ADOCommand}=__modules[40];
+const {ConnectedRecordset}=__modules[29];
+const {DATA_CONSTANTS}=__modules[24];
+const {FINANCIAL_FUNCTIONS}=__modules[45];
+const {installNativeHost}=__modules[48];
+const {ResourceStore}=__modules[53];
+const {readRES,writeRES,setResource,setResourceString}=__modules[52];
+const {THEMES,applyTheme,colorValue}=__modules[46];
+const {MemoryRecordset}=__modules[60];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[61];
+const { ApplicationHost }=__modules[89];
+const { VirtualMachine }=__modules[88];
+const { compileProject, compileModule }=__modules[81];
+const { parseExpression }=__modules[79];
+const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox }=__modules[21];
+const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[16];
+const { VirtualFileSystem }=__modules[43];
+const { BrowserControl, BrowserForm }=__modules[72];
+const { GraphicsSurface }=__modules[47];
 
 
 
@@ -7996,9 +9077,9 @@ const { GraphicsSurface }=__modules[40];
 
 
 async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);if(options.nativeWindows!==false)installNativeHost(host);await host.start();return host;}
-const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
+const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[82];
+globalThis["VB6Runtime"]=__modules[90];
 })();
