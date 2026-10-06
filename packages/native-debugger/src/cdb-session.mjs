@@ -66,7 +66,7 @@ export class CdbSession extends EventEmitter {
       this.child.stdout.on('data', bytes => this.receive(bytes));
       this.child.stderr.on('data', bytes => this.receive(bytes));
       this.child.on('error', error => this.fail(error));
-      this.child.on('exit', (code, signal) => { this.settlePending(new NativeDebugError('Debugger exited', 'DEBUGGER_EXITED')); if (this.state !== 'closed') { this.setState('closed'); this.emit('closed', {code, signal}); } this.cleanup(); });
+      this.child.on('exit', (code, signal) => { this.breakAbort?.abort(new NativeDebugError('Debugger exited', 'DEBUGGER_EXITED')); this.settlePending(new NativeDebugError('Debugger exited', 'DEBUGGER_EXITED')); if (this.state !== 'closed') { this.setState('closed'); this.emit('closed', {code, signal}); } this.cleanup(); });
       await this.waitPaused();
       if (debugChildren) await this.command('.childdbg 1');
       this.rememberProcesses(parseProcesses(await this.command('|')), true);
@@ -81,7 +81,7 @@ export class CdbSession extends EventEmitter {
     return items;
   }
   cleanup() { const dir = this.directory; this.directory = null; if (dir) fs.rm(dir, {recursive: true, force: true}).catch(() => {}); }
-  fail(error) { if (this.state === 'closed') return; this.lastFailure = error; this.settlePending(error); this.setState('failed'); this.emit('failure', {message: error.message}); }
+  fail(error) { if (this.state === 'closed') return; this.lastFailure = error; this.breakAbort?.abort(error); this.settlePending(error); this.setState('failed'); this.emit('failure', {message: error.message}); }
   settlePending(error, value) { const pending = this.pending; this.pending = null; if (!pending) return; clearTimeout(pending.timer); error ? pending.reject(error) : pending.resolve(value); }
   receive(bytes) {
     if (['closed', 'failed'].includes(this.state)) return;
@@ -99,15 +99,17 @@ export class CdbSession extends EventEmitter {
       this.lastStop = this.buffer.slice(0, prompt.index).trim(); this.buffer = ''; this.pauseId++; this.setState('paused'); this.emit('paused', {...this.snapshot(), reason: this.lastStop.slice(-8192)});
     } else this.buffer = '';
   }
-  waitPaused() {
+  waitPaused({signal} = {}) {
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (this.state === 'paused') return Promise.resolve(this.snapshot());
     if (this.state === 'failed') return Promise.reject(this.lastFailure || new NativeDebugError('Debugger failed', 'DEBUGGER_EXITED'));
     if (['closed', 'new', 'detaching'].includes(this.state)) return Promise.reject(new NativeDebugError('Debugger is not waiting for a stop', 'DEBUGGER_EXITED'));
     return new Promise((resolve, reject) => {
-      const finish = (error, value) => { clearTimeout(timer); this.off('paused', paused); this.off('closed', closed); this.off('failure', failed); error ? reject(error) : resolve(value); };
+      const finish = (error, value) => { clearTimeout(timer); this.off('paused', paused); this.off('closed', closed); this.off('failure', failed); signal?.removeEventListener('abort', cancelled); error ? reject(error) : resolve(value); };
       const paused = value => finish(null, value), closed = () => finish(new NativeDebugError('Debugger exited before stopping', 'DEBUGGER_EXITED')), failed = e => finish(new NativeDebugError(e.message));
+      const cancelled = () => finish(signal.reason);
       const timer = setTimeout(() => finish(new NativeDebugError('Debugger did not stop before the timeout', 'TIMEOUT')), this.timeout);
-      this.on('paused', paused); this.on('closed', closed); this.on('failure', failed);
+      this.on('paused', paused); this.on('closed', closed); this.on('failure', failed); signal?.addEventListener('abort', cancelled, {once:true});
     });
   }
   assertPaused(pauseId) {
@@ -150,7 +152,31 @@ export class CdbSession extends EventEmitter {
     }
     switch (operation) {
       case 'status': return this.snapshot();
-      case 'pause': { if (this.state === 'paused') return this.snapshot(); if (this.state !== 'running') throw new NativeDebugError('Process is not running'); const pid = this.pid || this.targetPid; if (!pid) throw new NativeDebugError('Target PID is unavailable'); const stopped = this.waitPaused(); this.setState('breaking'); try { await this.breakProcess(pid); return await stopped; } catch (error) { stopped.catch(() => {}); if (this.state === 'breaking') this.setState('running'); throw error; } }
+      case 'pause': {
+        if (this.state === 'paused') return this.snapshot();
+        if (this.state !== 'running') throw new NativeDebugError('Process is not running');
+        const pid = this.pid || this.targetPid;
+        if (!pid) throw new NativeDebugError('Target PID is unavailable');
+        const controller = new AbortController(); this.breakAbort = controller;
+        this.setState('breaking');
+        // Observe both promises immediately. Waiting for the helper first could
+        // leave a stop timeout/closure rejection unhandled; a helper failure
+        // must also release the stop waiter rather than waiting for its timer.
+        const stopped = this.waitPaused({signal:controller.signal});
+        try {
+          const helper = Promise.resolve().then(() => {
+            controller.signal.throwIfAborted();
+            return this.breakProcess(pid, {signal:controller.signal});
+          });
+          const [, snapshot] = await Promise.all([helper, stopped]);
+          controller.signal.throwIfAborted();
+          return snapshot;
+        } catch (error) {
+          controller.abort(error);
+          if (this.state === 'breaking') this.setState('running');
+          throw error;
+        } finally { if (this.breakAbort === controller) this.breakAbort = null; }
+      }
       case 'continue': case 'stepInto': case 'stepOver': case 'stepOut': {
         return this.resumeCommand({continue:'g',stepInto:'t',stepOver:'p',stepOut:'gu'}[operation],pause);
       }
@@ -235,6 +261,7 @@ export class CdbSession extends EventEmitter {
   }
   async abort() {
     this.generation++;
+    this.breakAbort?.abort(new NativeDebugError('Debugger session closed', 'DEBUGGER_EXITED'));
     this.settlePending(new NativeDebugError('Debugger session closed', 'DEBUGGER_EXITED'));
     // -pd prevents ending this debugger from terminating the attached target.
     if (this.child && !this.child.killed && this.state !== 'closed') this.child.kill();

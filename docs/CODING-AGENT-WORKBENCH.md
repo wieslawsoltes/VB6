@@ -181,3 +181,44 @@ explicitly queued; the normal start confirmation previews that text. Use the
 
 See [recovery and compaction](CODING-AGENT-RECOVERY.md) for retry accounting,
 complete-turn retention, model-context limits and fallible checkpoint boundaries.
+
+
+## Selective restoration and review state
+
+The Changes tab includes **Previous change**, **Next change**, and **Restore selected
+change…**. A change block is a consecutive run of inserted/deleted lines; unchanged
+lines separate independently restorable blocks. Selecting an inserted/deleted diff
+line also selects its block. A confirmation shows the exact current and checkpoint
+block (large previews are labelled as shortened). Cancelling does not change source.
+Restoring records one normal Undo entry and preserves every other source change in
+the module, designer properties, other modules, and unrelated project fields.
+
+This is local source restoration, not Git staging, an agent permission grant, or an
+automatic provider operation. It has the same idle/design-mode, workspace-epoch,
+revision and exact-current-source checks as complete module restoration. Concurrent
+edits anywhere in the module reject the operation instead of fuzzy matching offsets.
+Renamed/added/removed modules and omitted captures cannot be selectively restored.
+Large diff middles may be shown as one explicitly labelled coarse replacement;
+newline-dense sources over the interactive limit offer full-source restore only.
+Exact UTF-16 offsets preserve Unicode, CRLF/LF, and missing-final-newline state.
+
+The review now warns when the project or checkpoint changes. Restore and review
+feedback actions are disabled until **Refresh changes**. Invalidation observes the
+existing coalesced revision notifications: it does not serialize the project or
+recompute a diff on each streamed token. Refresh keeps your feedback draft. A saved
+line target survives unchanged refreshes, layout changes, task switching, and panel
+reopening; if either captured text changes, the old target is cleared rather than
+silently moved to another line. Select a current line again or queue file-level
+feedback. An unchanged queued-message preview is not rebuilt on every update.
+
+Each task retains its review scope, selected document/block, diff layout, expanded
+line count, scroll position, feedback draft/target, and selected queued message while
+this page remains open. New tasks start with independent defaults. Reset/deletion
+releases the presentation state. Nothing is persisted across browser refresh or
+exported with the project, and no credentials or grants are copied.
+
+Validation includes randomized exact offset reconstruction, insertion/deletion and
+mixed-ending cases, stale revision/workspace rejection, normal Undo and Cancel,
+unchanged refresh/reopen targets, stale-feedback invalidation without recapturing,
+and independent task/queue selections. Existing full permissions, manual queue
+dispatch, provider recovery, and context-compaction tests continue to run.
