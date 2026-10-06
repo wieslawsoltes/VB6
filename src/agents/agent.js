@@ -78,10 +78,11 @@ export class CodingAgent {
     if (mode === 'full' && fullAccessConfirmed !== true) throw new Error('Full IDE access requires explicit local confirmation for every run.');
     providerInfo(provider); model = modelId(model);
     const config = normalizeAgentLimits({...this.limits, ...Object.fromEntries(Object.entries({maxTurns, maxCalls, maxTokens, tokenBudget, maxContextBytes, requestTimeoutMs, maxRetries, autoCompactTokens, contextWindowTokens, compactKeepTurns, compactOutputTokens, toolResultBytes}).filter(([, value]) => value !== undefined))});
+    const outputTokenLimit = transport.capabilities?.outputTokenLimit !== false;
     const limits = {turns: config.maxTurns, calls: config.maxCalls, output: config.maxTokens, tokens: config.tokenBudget, context: config.maxContextBytes};
     // A follow-up or Continue does not silently replenish the session's allowance.
     if (this.budgetUsed + 256 > limits.tokens) throw new Error('Session token budget reached. Increase the session budget in Permissions before continuing, or start a new task.');
-    if (continuation && !compactOnly && this.truncatedOutput && Math.min(limits.output, limits.tokens - this.budgetUsed) <= this.truncatedOutput)
+    if (continuation && !compactOnly && outputTokenLimit && this.truncatedOutput && Math.min(limits.output, limits.tokens - this.budgetUsed) <= this.truncatedOutput)
       throw new Error('Increase the output tokens per request and, if needed, the session token budget before retrying this truncated turn.');
     const projectId = this.adapter.snapshot().id;
     if (this.history.length && (this.provider !== provider || this.model !== model || !this.matchesWorkspace())) throw new Error('Start a new task when changing provider, model or reloading the project.');
@@ -272,7 +273,8 @@ export class CodingAgent {
     } catch (error) {
       if (error instanceof AgentRunPause && !signal?.aborted) return pause(error.kind, error.message, error.details);
       if (error instanceof ProviderOutputLimitError && ['request', 'validation'].includes(phase) && !signal?.aborted) {
-        this.truncatedOutput = attemptedOutput;
+        this.truncatedOutput = outputTokenLimit ? attemptedOutput : 0;
+        if (!outputTokenLimit) return pause('output', 'The provider stopped this incomplete reply at its output limit. No partial tools ran. This authentication mode does not support increasing a provider output cap. Review Continue for an explicit retry, compact completed context, or start a smaller task. Prior usage is retained.', {attemptedOutput, outputTokenLimit: false});
         return pause('output', 'Output token limit reached. The partial reply is not complete and no partial tools ran. Increase Output tokens per request in Permissions, then review Continue to retry the pending request. Prior usage is retained; retrying may incur charges.', {attemptedOutput});
       }
       this.pendingTurn = null;
