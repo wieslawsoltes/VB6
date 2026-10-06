@@ -4,6 +4,9 @@ on:
     branches: [feat/ocx-hosting-lifecycle]
 permissions:
   contents: read
+concurrency:
+  group: ocx-integration-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   source:
     runs-on: ubuntu-latest
@@ -13,13 +16,82 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Record source refs for local integration
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge exact source and verify every tracked blob
         run: |
-          git bundle create ocx-integration.bundle refs/remotes/origin/main HEAD
-          git rev-parse refs/remotes/origin/main HEAD > ocx-integration.txt
+          python .ocx-integrate.py
+          echo 'a753ded1d3b4796cb778222cbc7c9a68585fcb3ae7fdeb39cc725c446943799b  ocx-integration-index.txt' | sha256sum --check
+          git ls-files -z | tar --null -T - -cf ocx-source.tar
       - uses: actions/upload-artifact@v4
         with:
-          name: ocx-integration-source
+          name: ocx-merged-source
           path: |
-            ocx-integration.bundle
-            ocx-integration.txt
+            ocx-source.tar
+            ocx-integration-index.txt
+          retention-days: 7
+  native:
+    needs: source
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: ocx-merged-source
+      - run: tar -xf ocx-source.tar
+      - run: node tools/interop/test-native.mjs
+      - run: node tools/interop/test-activex.mjs
+      - run: node tools/interop/test-ocx.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-integrated-${{ matrix.architecture }}
+          path: reports/native-interop
+  publish:
+    needs: native
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-hosting-lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Materialize exact integrated source
+        run: |
+          python .ocx-integrate.py
+          echo 'a753ded1d3b4796cb778222cbc7c9a68585fcb3ae7fdeb39cc725c446943799b  ocx-integration-index.txt' | sha256sum --check
+          # Workflow edits require the authorized connector; do not increase the
+          # workflow token's authority. Restore its original workflow tree here.
+          git restore --source=HEAD --staged --worktree .github/workflows
+          rm .ocx-integrate.py ocx-integration-index.txt
+      - run: npm test
+      - name: Commit merge and export reproducible proof
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'merge: retain scalar Variants with OCX events, licensing and persistence'
+          git bundle create ocx-integrated.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > ocx-integrated.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-integrated-publication
+          path: |
+            ocx-integrated.bundle
+            ocx-integrated.txt
+      - run: git push origin HEAD:refs/heads/feat/ocx-hosting-lifecycle
