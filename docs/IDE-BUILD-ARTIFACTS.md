@@ -15,14 +15,16 @@ Version 2 of `tools/ide-artifacts.json` records a byte count and SHA-256 for eve
 - `dist/studio.js` and `dist/VB6-Studio-Web.html`;
 - `dist/vb6-runtime.js` and `src/exporter/runtime-payload.js`;
 - `dist/win32-browser.js` and `packages/win32-browser/dist/win32-browser.js`;
+- `dist/auto-layout.js` and `packages/auto-layout/dist/auto-layout.js`;
+- `dist/vb6-native.js`, `src/editor/diagnostics-payload.js` and `dist/studio.css`;
 - `dist/OCX-Source-Control-Lab.html`;
 - every `dist/examples/<id>.html` in the authored `EXAMPLES` catalog.
 
-The expected inventory is derived independently from source: the fixed seven paths (including the OCX source-control lab and both Win32 bundle copies) and validated unique sample IDs. It is not accepted from arbitrary manifest entries. Every normal build fails if expectations are absent, malformed, incomplete, extra or mismatched. Missing, non-regular, truncated and changed outputs fail. `npm run verify:ide-artifacts` checks existing artifacts without regenerating them; its name is retained for compatibility, but it verifies the full inventory. The small verifier can load before generated payloads exist, so a clean source-only build does not need an older runtime to bootstrap.
+The expected inventory is derived independently from source: the fixed twelve paths (including both standalone layout/Win32 copies, native/diagnostics bundles and IDE CSS) and validated unique sample IDs. It is not accepted from arbitrary manifest entries. Every normal build fails if expectations are absent, malformed, incomplete, extra or mismatched. Missing, non-regular, truncated and changed outputs fail. `npm run verify:ide-artifacts` checks existing artifacts without regenerating them; its name is retained for compatibility, but it verifies the full inventory. The small verifier can load before generated payloads exist, so a clean source-only build does not need an older runtime to bootstrap.
 
 Normal builds do **not** refresh expected fingerprints. After intentionally changing sources, run `npm run build:update-ide-artifacts`, inspect the source and manifest diff, test, and commit both. This explicit update operation is rejected when `CI` is set. CI only builds, verifies and uploads; it cannot silently bless drift. These hashes establish reproducibility, not publisher identity or correctness of unreviewed code.
 
-All other committed generated outputs, including the independent auto-layout package, native compiler bundle, CSS and editable sample projects, retain their existing `git diff --exit-code` checks. The manifest replaces that check only for the named untracked artifacts. No UI, runtime, native, browser, license or security assertion is removed. Negative tests cover every required artifact and strict inventory validation.
+Other committed outputs, such as runtime control CSS and editable sample projects, retain their existing `git diff --exit-code` checks. The manifest replaces that check only for the named untracked artifacts. No UI, runtime, native, browser, license or security assertion is removed. Negative tests cover every required artifact and strict inventory validation.
 
 ## Merge workflow
 

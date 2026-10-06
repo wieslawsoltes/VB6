@@ -56,7 +56,7 @@ End Sub
 
 Runtime geometry is updated synchronously before Resize/user code reads it. Browser paints are collected in one animation-frame batch, using changed-node indices. Runtime layout does not overwrite the saved design model. Browser `Controls.Add`, removal, control-array instances, `Move` and `Container` reparenting update the layout graph. Cyclic or foreign runtime containers are rejected. Maximized opted-in browser forms follow host viewport resizing; ordinary forms retain the existing windowing behavior.
 
-Horizontal/vertical flow and horizontal wrapping support explicit preferred sizes, padding, margins, gaps, grow/shrink weights, limits, alignment and justification. This release does not add text measurement, content-driven AutoSize, CSS Grid or a general Cassowary-style constraint language. It is not full Windows Forms API parity.
+Horizontal/vertical flow and horizontal wrapping support explicit preferred sizes, padding, margins, gaps, grow/shrink weights, limits, alignment and justification. Version 0.2 adds browser text-measured Hug/Fill, both wrap directions, grid and the optional [Auto Layout designer](auto-layout-designer.md). These advanced features target HTML/Electron; a general constraint language is not included. It is not full Windows Forms API parity.
 
 ## Export and compatibility
 
@@ -77,12 +77,12 @@ The companion is UTF-8 JSON, versioned and size-limited. Import matches form/con
 
 The independent package is `packages/auto-layout` (`@vb6/auto-layout`). It contains the ES module, browser IIFE, TypeScript declarations, README and MIT license. `npm run pack:layout` produces and independently tests a local tarball; it does not publish to npm.
 
-The solver compiles parent graphs into typed numeric columns and an iterative parent-first order. Resizes of anchored/docked trees are O(n), use reusable geometry/change buffers, and make no per-control allocation in the hot pass. Identical sizes take an O(1) fast path. Non-topological property changes update one validated record without rebuilding the tree. Graph changes rebuild in O(n). The bounded flex algorithm can require O(n²) work in a pathological saturated line; no universal sub-millisecond guarantee is made.
+The solver compiles parent graphs into typed numeric columns and an iterative parent-first order. Resizes of anchored/docked trees are O(n), use reusable geometry/change buffers, and make no per-control allocation in the hot pass. Identical sizes take an O(1) fast path. Non-topological property changes update one validated record without rebuilding the tree. Graph changes rebuild in O(n). The capped flex algorithm sorts saturation thresholds in O(n log n) worst-case work per line; no universal sub-millisecond guarantee is made.
 
 Run `npm run bench:layout` to produce machine-labelled median/p95 measurements in `reports/layout/benchmark.json`. These numbers measure the solver, not DOM/native rendering or complete application frame time.
 
 ## Validation
 
-`npm run test:layout` covers all masks, restore/clamping, nested/unsorted graphs, deep trees, dirty buffers, flow/docking, atomic updates, opt-in isolation, source companions, code/diagnostics and native-vs-JavaScript differential cases. `npm run test:layout:browser` exercises the actual IDE, runtime and exported HTML. The layout workflow tests Chromium, Firefox and WebKit over HTTP, tests isolated native EXEs on Windows, benchmarks and independently packs the standalone package. Generated evidence is retained as Actions artifacts rather than checked-in transient screenshots.
+`npm run test:layout` covers all masks, restore/clamping, nested/unsorted graphs, deep trees, dirty buffers, flow/docking, atomic updates, opt-in isolation, source companions, code/diagnostics and native-vs-JavaScript differential cases. `npm run test:layout:browser` exercises the actual IDE, runtime and exported HTML. The retained Validate workflow tests layout in Chromium, Firefox and WebKit over HTTP and the existing native layout subset on Windows. The newer designer has a separate `test:layout:designer` command within that same workflow. Generated evidence is retained as Actions artifacts rather than checked-in transient screenshots.
 
 References: [Microsoft AnchorStyles](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.anchorstyles), [Control.Anchor](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.control.anchor), and [Windows Forms DefaultLayout implementation](https://github.com/dotnet/winforms/blob/main/src/System.Windows.Forms/System/Windows/Forms/Layout/DefaultLayout.cs). Anchor semantics informed this independent implementation; no WinForms source was copied.

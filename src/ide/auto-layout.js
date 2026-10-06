@@ -125,7 +125,7 @@ export function installAutoLayout(ide){
   ide.record=(before,label,...args)=>{
     if(layoutEnabled(ide.project)&&ide.runState==='design')for(const module of ide.project.modules){
       const old=before.modules.find(m=>m.id===module.id)?.form;if(!old||!module.form)continue;
-      const previousIds=new Set(old.controls.map(c=>[c.id,c])),added=module.form.controls.filter(c=>!previousIds.has(c.id)).map(c=>c.id);
+      const previousIds=new Set(old.controls.map(c=>c.id)),added=module.form.controls.filter(c=>!previousIds.has(c.id)).map(c=>c.id);
       if(!layoutEnabled(before)||added.length&&/^Add (?!auto layout)/i.test(label))arrangeFormEdit(old,module.form,added);
     }
     return record(before,label,...args);

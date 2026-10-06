@@ -30,6 +30,19 @@ jobs:
           python-version: '3.12'
       - run: npm run build
       - run: npm test
+      - name: Independently extracted layout package and labelled solver benchmarks
+        run: |
+          npm run pack:layout
+          npm run bench:layout
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: auto-layout-package-and-benchmarks
+          path: |
+            release/vb6-auto-layout-*.tgz
+            reports/layout/benchmark.json
+            reports/auto-layout/benchmark.json
+          retention-days: 7
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium
       - name: Resolve browser executable
@@ -75,6 +88,20 @@ jobs:
         env:
           VB6_BROWSER: ${{ matrix.browser }}
         run: npm run test:themes:browser
+      - name: Resolve Chromium for the existing layout harness
+        if: matrix.browser == 'chromium'
+        run: |
+          python - <<'PYTHON' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PYTHON
+      - name: Opt-in layout panel, canvas transactions and advanced runtime exports
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: |
+          npm run test:layout:browser
+          npm run test:layout:designer
       - name: Application themes, control state and complete matching icon packs
         env:
           VB6_BROWSER: ${{ matrix.browser }}
@@ -92,16 +119,25 @@ jobs:
             reports/ide-themes
             reports/application-themes/${{ matrix.browser }}
             reports/win32-exports
+            reports/layout
+            reports/auto-layout
           if-no-files-found: ignore
           retention-days: 7
   win32-system-contracts:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Validate existing native layout exports against Windows Forms and HWND bounds
+        shell: pwsh
+        run: |
+          node tools/win32-layout-fixtures.mjs
+          powershell -NoProfile -File tools/test-winforms-anchors.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tools/test-win32-layout.ps1
       - name: Record installed Windows calendar and formatting contracts
         shell: pwsh
         run: ./tools/win32-system-oracle.ps1
@@ -111,5 +147,7 @@ jobs:
         if: always()
         with:
           name: win32-system-contracts
-          path: reports/win32-system
+          path: |
+            reports/win32-system
+            reports/layout/native
           retention-days: 7

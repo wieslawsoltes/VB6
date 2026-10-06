@@ -58,6 +58,13 @@ reports/ide-themes/
 # Source-derived OCX lab, verified by the same exact artifact manifest.
 /dist/OCX-Source-Control-Lab.html
 
+# Source-derived layout/native/diagnostics/style bundles; SHA256 verified on every build.
+/dist/auto-layout.js
+/packages/auto-layout/dist/auto-layout.js
+/dist/vb6-native.js
+/src/editor/diagnostics-payload.js
+/dist/studio.css
+reports/auto-layout/
 # Generated, fingerprint-verified standalone Win32 bundles and export evidence.
 /dist/win32-browser.js
 /packages/win32-browser/dist/win32-browser.js

@@ -53,7 +53,7 @@
     "test:classic-html": "python tools/browser-classic-html.py",
     "test:layout": "node --test --test-concurrency=4 tests/layout-*.test.mjs",
     "test:layout:browser": "python tools/browser-layout-tests.py",
-    "bench:layout": "node tools/bench-layout.mjs",
+    "bench:layout": "node tools/bench-layout.mjs && node tools/bench-auto-layout.mjs",
     "pack:layout": "node tools/pack-layout.mjs",
     "test:chatgpt": "node --test tests/chatgpt-*.test.mjs",
     "test:chatgpt:browser": "python tools/chatgpt-browser-tests.py && python tools/chatgpt-signin-browser-tests.py",
@@ -68,6 +68,7 @@
     "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py",
     "pretest:chatgpt": "npm run build",
     "test:sample-exports": "python tools/browser-sample-exports.py",
+    "test:layout:designer": "python tools/auto-layout-browser-tests.py",
     "test:application-themes": "node --test tests/application-themes.test.mjs tests/icon-packs.test.mjs",
     "test:application-themes:browser": "python tools/browser-application-theme-tests.py"
   },

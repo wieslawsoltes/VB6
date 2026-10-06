@@ -81,7 +81,7 @@ Private Sub SetValue(ByVal node As Long, ByVal field As Long, ByVal value As Dou
  If field = AN And (value <> Fix(value) Or value > 15) Then Err.Raise 380
  If field = DK And (value <> Fix(value) Or value > 5) Then Err.Raise 380
  If field = MD And (value <> Fix(value) Or value > 3) Then Err.Raise 380
- If field = AL And (value <> Fix(value) Or value > 3) Then Err.Raise 380
+ If field = AL And (value <> Fix(value) Or value > 5 Or value = 4) Then Err.Raise 380
  If field = JU And (value <> Fix(value) Or value > 5) Then Err.Raise 380
  If field = MNW And D(MXW,node) > 0 And value > D(MXW,node) Then Err.Raise 380
  If field = MNH And D(MXH,node) > 0 And value > D(MXH,node) Then Err.Raise 380
