@@ -1,0 +1,115 @@
+name: OCX preview correction
+on:
+  push:
+    branches: [feat/ocx-hosting-lifecycle]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-preview-correction-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply exact reviewed source
+        run: |
+          echo '3edcc3e5ef6844b2a37b31989c65ba29c55c12d542fe166d13bf07dd1dc51eca  .ocx-preview.patch' | sha256sum --check
+          git apply --index .ocx-preview.patch
+          npm run build
+          npm test
+          git add -u
+          git ls-files -z | tar --null -T - -cf ocx-preview-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-preview-source
+          path: ocx-preview-source.tar
+          retention-days: 7
+  native:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: ocx-preview-source
+      - run: tar -xf ocx-preview-source.tar
+      - run: npm ci --no-audit --no-fund
+        working-directory: desktop
+      - run: npm run fixtures:native
+      - run: npm run build:windows -- --project validation/NativeSmoke.vb6web --graphics auto --stage-only
+      - run: node tools/test-native-host.mjs .native-build/nativesmoke-x64
+      - run: npm run build:windows -- --graphics auto --stage-only
+      - name: Repeat native IDE preview with unchanged security assertions
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($i in 1..3) {
+            node tools/test-native-host.mjs .native-build/vb6-studio-x64
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            Copy-Item validation/vb6-studio-x64.host.json "validation/preview-$i.json"
+          }
+          if ($failed) { exit 1 }
+      - name: Build and launch isolated single-file IDE
+        shell: pwsh
+        run: |
+          npm run build:windows -- --graphics auto --out release/windows/studio
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = (Get-ChildItem release/windows/studio -Filter *.exe).FullName
+          node tools/test-portable.mjs "$exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-preview-correction-windows
+          path: |
+            validation/*.json
+            validation/*.log
+          retention-days: 7
+  publish:
+    needs: native
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-hosting-lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publish tested source without workflow changes
+        run: |
+          echo '3edcc3e5ef6844b2a37b31989c65ba29c55c12d542fe166d13bf07dd1dc51eca  .ocx-preview.patch' | sha256sum --check
+          git apply --index .ocx-preview.patch
+          rm .ocx-preview.patch
+          npm run build
+          npm test
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -u
+          git diff --cached --exit-code -- .github/workflows
+          git commit -m 'fix(ocx): prepare native preview before navigating and guard stale runs'
+          git bundle create ocx-preview-publication.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} refs/remotes/origin/main > ocx-preview-publication.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-preview-publication
+          path: |
+            ocx-preview-publication.bundle
+            ocx-preview-publication.txt
+          retention-days: 7
+      - run: git push origin HEAD:refs/heads/feat/ocx-hosting-lifecycle
