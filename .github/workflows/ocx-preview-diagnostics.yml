@@ -1,0 +1,63 @@
+name: OCX preview diagnostics
+on:
+  push:
+    branches: [fix/ocx-preview-diagnostics]
+permissions:
+  contents: read
+jobs:
+  windows-preview:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: desktop
+      - name: Add bounded smoke-only navigation observations
+        shell: bash
+        run: |
+          node --input-type=commonjs - <<'JS'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const file='desktop/smoke.cjs';let source=fs.readFileSync(file,'utf8');
+          const anchor='  try {\n    await until';assert(source.includes(anchor));
+          source=source.replace(anchor,`  report.navigation=[];report.console=[];
+            const record=(array,value)=>{array.push(value);if(array.length>80)array.shift();};
+            root.webContents.on('did-fail-load',(_event,code,message,url,main)=>record(report.navigation,{event:'failed',code,message,url,main}));
+            root.webContents.on('did-fail-provisional-load',(_event,code,message,url,main)=>record(report.navigation,{event:'cancelled',code,message,url,main}));
+            root.webContents.on('did-frame-navigate',(_event,url,code,text,main)=>record(report.navigation,{event:'navigated',url,code,text,main}));
+            root.webContents.on('console-message',(details,level,message,line,sourceId)=>record(report.console,{message:String(details.message??message).slice(0,2000),source:String(details.sourceId??sourceId),line:details.lineNumber??line}));
+          try {
+            await until`);
+          const failure='    report.error = error.stack || error.message;';assert(source.includes(failure));
+          source=source.replace(failure,`    report.error = error.stack || error.message;
+            try{report.frames=root.webContents.mainFrame.framesInSubtree.map(frame=>({url:frame.url,name:frame.name,processId:frame.processId,routingId:frame.routingId}));}catch{}
+            try{report.renderer=await js('({state:vb6Studio.runState,frame:vb6Studio.runtimeFrame?{src:vb6Studio.runtimeFrame.src,connected:vb6Studio.runtimeFrame.isConnected,srcdoc:vb6Studio.runtimeFrame.srcdoc.length}:null,status:document.querySelector(".statusbar")?.textContent,frames:[...document.querySelectorAll("iframe")].map(f=>({src:f.src,connected:f.isConnected}))})');}catch{}
+          `);
+          fs.writeFileSync(file,source);
+          JS
+      - run: npm run build:windows -- --graphics auto --stage-only
+      - name: Repeat unchanged native IDE assertions with diagnostics
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($i in 1..3) {
+            node tools/test-native-host.mjs .native-build/vb6-studio-x64
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            Copy-Item validation/vb6-studio-x64.host.json "validation/preview-$i.json"
+            Copy-Item validation/vb6-studio-x64.host.json.log "validation/preview-$i.log"
+          }
+          if ($failed) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-preview-diagnostics
+          path: |
+            validation/preview-*.json
+            validation/preview-*.log
+          retention-days: 7
