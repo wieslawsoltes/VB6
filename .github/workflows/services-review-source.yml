@@ -1,0 +1,26 @@
+name: Win32 services source review
+on:
+  push:
+    branches: [feature/win32-common-services]
+    paths: [.github/workflows/services-review-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive branch and current main for offline review
+        run: |
+          git bundle create /tmp/win32-services-review.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD refs/remotes/origin/main > /tmp/win32-services-revisions.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-services-review-source
+          path: |
+            /tmp/win32-services-review.bundle
+            /tmp/win32-services-revisions.txt
+          retention-days: 7
