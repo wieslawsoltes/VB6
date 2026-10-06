@@ -1,0 +1,58 @@
+name: Retain current GDI main in native export
+on:
+  push:
+    branches: [feat/native-compatibility-boundaries]
+    paths: [.github/workflows/native-current-main-integration.yml]
+permissions:
+  contents: write
+concurrency:
+  group: native-current-main-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge pinned main without discarding source conflicts
+        run: |
+          set -euo pipefail
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          target=5e9a3191ff04d00b13e4f100c48e219a836b7a4b
+          git merge-base --is-ancestor f4ee8d47bed69ae26b65d20637b8f5f8da13d815 "$target"
+          if ! git merge --no-commit --no-ff "$target"; then
+            python3 - <<'PY'
+          import subprocess
+          paths=[p for p in subprocess.check_output(['git','diff','--name-only','--diff-filter=U','-z']).decode().split('\0') if p]
+          if not paths: raise SystemExit('Merge failed without generated conflicts')
+          for p in paths:
+              if not (p.startswith('dist/') or p in ['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js']):
+                  raise SystemExit('Source conflict needs review: '+p)
+              subprocess.run(['git','checkout','--ours','--',p],check=True)
+              subprocess.run(['git','add','--',p],check=True)
+          PY
+          fi
+          npm run build
+          npm test
+          git add src/exporter/runtime-payload.js src/editor/diagnostics-payload.js dist packages/win32-browser/dist examples
+          git diff --cached --check
+          git commit -m 'merge: retain advanced GDI and GPU presentation in native calendar and callback export' -m 'Preserve pinned main 5e9a3191ff04d00b13e4f100c48e219a836b7a4b; only generated conflicts are regenerated. Existing workflow blobs were retained through the authorized repository connection. Build and full regression suite passed.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-compatibility-boundaries
+          git bundle create /tmp/native-integrated.bundle HEAD refs/remotes/origin/main
+          git archive HEAD --output=/tmp/native-integrated-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-integrated-review
+          path: |
+            /tmp/native-integrated.bundle
+            /tmp/native-integrated-source.zip
+          retention-days: 2
