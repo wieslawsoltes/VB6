@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Integrate reviewed upstream and verify every authored source change
+      - name: Recover checksum-verified authored services implementation
         shell: bash
         run: |
           set -euo pipefail
@@ -55,23 +55,35 @@ jobs:
               assert hashlib.sha256(f.read_bytes()).hexdigest()==e['after'], str(f)
           for p in parts: p.unlink()
           Path('.services-staging').rmdir()
-          Path('.github/workflows/services-materialize.yml').unlink()
-          print('Verified all 23 source/test/sample/documentation preimages and results.')
+          print('Verified all 23 authored preimages and results.')
           PY
-      - name: Build, test and package actual combined source
+          npm run build
+          node tools/win32-api-inventory.mjs
+          git add -A
+          # New generated sample HTML retains upstream license comments verbatim.
+          # Validate authored whitespace; generated output is checked by reproducibility.
+          git diff --cached --check -- . ':!dist' ':!src/exporter/runtime-payload.js' ':!src/editor/diagnostics-payload.js' ':!packages/win32-browser/dist'
+          git commit -m 'feat(win32): common file, text, synchronization, registry, GUID and property services with six samples'
+      - name: Preserve current main and rebuild only generated conflicts
         shell: bash
         run: |
           set -euo pipefail
+          git merge --no-commit --no-ff 6aeeae789151397c58648cd9d99678105935979f || true
+          python3 - <<'PY'
+          import subprocess
+          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          assert all(p.startswith('dist/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js') for p in conflicts), conflicts
+          PY
+          rm .github/workflows/services-materialize.yml
           npm run build
           node tools/win32-api-inventory.mjs
-          git hash-object tests/icons.test.mjs
-          nl -ba tests/icons.test.mjs
+          git add -A
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check -- . ':!dist' ':!src/exporter/runtime-payload.js' ':!src/editor/diagnostics-payload.js' ':!packages/win32-browser/dist'
           npm test | tee /tmp/services-integration-tests.txt
           npm run pack:win32-browser | tee /tmp/services-package-tests.txt
-          git add -A
-          git diff --cached --check
-          test -z "$(git diff --name-only --diff-filter=U)"
-          git commit -m 'feat(win32): common services across files, text, synchronization, registry, GUIDs and window properties'
+          git diff --exit-code
+          git commit -m 'fix(win32): retain native callbacks and agent permission changes in combined services build'
           npm run build
           node tools/win32-api-inventory.mjs
           git diff --exit-code
@@ -85,7 +97,7 @@ jobs:
           git push origin HEAD:refs/heads/feature/win32-common-services
           git archive --format=zip HEAD -o /tmp/vb6-services-source.zip
           git rev-parse HEAD HEAD^{tree} > /tmp/services-revision.txt
-      - name: Retain exact source and diagnostic state even after failure
+      - name: Retain exact history and diagnostics
         if: always()
         shell: bash
         run: |
@@ -93,19 +105,6 @@ jobs:
           git bundle create /tmp/vb6-services-source.bundle HEAD refs/remotes/origin/main
           git status --short > /tmp/services-source-status.txt
           git diff --binary HEAD > /tmp/services-working.patch
-          python3 - <<'PY'
-          import hashlib,json,subprocess,zipfile
-          from pathlib import Path
-          files=subprocess.check_output(['git','ls-files','-z','--cached','--others','--exclude-standard']).decode().split('\0')
-          with zipfile.ZipFile('/tmp/services-diagnostics.zip','w',zipfile.ZIP_DEFLATED) as z:
-              for name in sorted(set(files)):
-                  p=Path(name)
-                  if not name or not p.is_file() or name.startswith(('reports/','release/','.services-staging/')): continue
-                  z.write(p,name)
-          p=Path('tests/icons.test.mjs')
-          Path('/tmp/services-icons-test.txt').write_text(p.read_text())
-          print('Icon test bytes',p.stat().st_size,'SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
-          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -116,8 +115,6 @@ jobs:
             /tmp/services-revision.txt
             /tmp/services-integration-tests.txt
             /tmp/services-package-tests.txt
-            /tmp/services-diagnostics.zip
-            /tmp/services-icons-test.txt
             /tmp/services-source-status.txt
             /tmp/services-working.patch
             release/vb6-win32-browser-*.tgz
