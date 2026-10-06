@@ -2,7 +2,7 @@ name: Text code-page reference
 on:
   push:
     branches: [feat/runtime-text-compatibility]
-    paths: ['.github/workflows/text-codepage-reference.yml','tools/conformance/export-text-nls.ps1','tools/conformance/text-edge-reference.ps1','tools/conformance/script-text-reference.ps1']
+    paths: ['.github/workflows/text-codepage-reference.yml','tools/conformance/export-text-nls.ps1','tools/conformance/text-edge-reference.ps1','tools/conformance/script-text-reference.ps1','tools/conformance/text-search-reference.ps1']
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,6 +26,9 @@ jobs:
       - name: Capture Script Host byte-string operations independently
         shell: powershell
         run: tools/conformance/script-text-reference.ps1 -Output reports/text-codepages/windows-script-text.json
+      - name: Capture byte search and per-locale casing
+        shell: powershell
+        run: tools/conformance/text-search-reference.ps1 -Output reports/text-codepages/windows-text-search.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
