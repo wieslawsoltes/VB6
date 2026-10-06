@@ -47,3 +47,7 @@ reports/layout/
 /dist/vb6-runtime.js
 /dist/examples/*.html
 /src/exporter/runtime-payload.js
+
+# Optional standalone compute package output
+/artifacts/vb6-compute/
+reports/compute/
