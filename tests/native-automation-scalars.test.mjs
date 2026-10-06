@@ -50,3 +50,13 @@ test('compiled VB preserves native scalar types through calls, property puts and
  assert.deepEqual(output,['17 2 4 5','True -1 11','4 4']);assert.ok(seen.filter(m=>m.op==='call').every(m=>m.lcid===1045));
 });
 test('compiled native ByRef copyback retains subtype and exact receiver count',async()=>{const {output,seen}=await compileWithTransport('Dim n As Long\nn=5\nd.Bump n\nDebug.Print n, VarType(n)');assert.deepEqual(output,['6 3']);assert.deepEqual(seen.find(m=>m.member==='Bump').byRef,[0]);assert.equal(seen.find(m=>m.member==='Bump').args[0].vt,3);});
+
+test('native enumeration retains scalar tags and the client LCID in compiled For Each',async()=>{
+ const client=new NativeAutomationClient({allowed:['Test.Typed'],allowNativeCode:true,lcid:1045}),seen=[];
+ const values=[{t:'currency',v:'1.2345'},{t:'decimal',v:'2.0000000000000000000000000001'},{t:'number',vt:2,v:7},{t:'number',vt:4,v:Math.fround(1.6)},{t:'boolean',v:true}];
+ client.request=async message=>{seen.push(message);if(message.op==='create')return {t:'object',id:'o1',metadata:{enumerable:true,members:[]}};if(message.op==='enumerate')return values;if(message.op==='release')return {};throw Error('Unexpected request');};
+ const program=compileProject({name:'Enum',startup:'Sub Main',modules:[{name:'M',kind:'module',code:'Sub Main()\nDim d As Object, v As Variant\nSet d = CreateObject("Test.Typed")\nFor Each v In d\nDebug.Print VarType(v)\nNext\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);
+ const output=[],vm=new VirtualMachine(program,{automation:client.registry(),print:s=>output.push(s)});
+ try{await vm.start();assert.deepEqual(output,['6','14','2','4','11']);assert.equal(seen.find(m=>m.op==='enumerate').lcid,1045);}
+ finally{vm.stop();await vm.automationClose;assert.equal(seen.filter(m=>m.op==='release').length,1);}
+});

@@ -16,7 +16,7 @@ namespace VB6Interop {
   interface DispatchInvoke {
     [PreserveSig] int GetTypeInfoCount(out uint count);
     [PreserveSig] int GetTypeInfo(uint index,uint lcid,out ITypeInfo info);
-    [PreserveSig] int GetIDsOfNames(ref Guid iid,[MarshalAs(UnmanagedType.LPArray,ArraySubType=UnmanagedType.LPWStr)] string[] names,uint count,uint lcid,[Out] int[] ids);
+    [PreserveSig] int GetIDsOfNames(ref Guid iid,[In,MarshalAs(UnmanagedType.LPArray,ArraySubType=UnmanagedType.LPWStr,SizeParamIndex=2)] string[] names,uint count,uint lcid,[Out,MarshalAs(UnmanagedType.LPArray,SizeParamIndex=2)] int[] ids);
     [PreserveSig] int Invoke(int id,ref Guid iid,uint lcid,ushort flags,ref DISPPARAMS args,IntPtr result,ref EXCEPINFO error,out uint argumentError);
   }
   sealed class NativeDispatchException : COMException {
@@ -134,8 +134,9 @@ namespace VB6Interop {
       }finally{if(array!=IntPtr.Zero)SafeArrayDestroy(array);}
     }
     static object InvokeDirect(Entry target,string member,int mode,int lcid,object[] encoded,object[] byref,Dictionary<string,object> schema){
-      var dispatch=(DispatchInvoke)target.Value;var iid=Guid.Empty;var ids=new int[1];
+      var dispatch=(DispatchInvoke)target.Value;var iid=Guid.Empty;var ids=new[]{-1};
       Marshal.ThrowExceptionForHR(dispatch.GetIDsOfNames(ref iid,new[]{member},1,(uint)lcid,ids));
+      if(ids[0]==-1)throw new InvalidOperationException("Native dispatch did not resolve a member identifier");
       var references=new HashSet<int>();
       foreach(var v in byref){int index=Convert.ToInt32(v);if(index<0||index>=encoded.Length||!references.Add(index))throw new ArgumentException("Invalid ByRef index");}
       var args=ZeroMemory(Math.Max(VariantSize,VariantSize*encoded.Length));var result=NewVariant();var named=IntPtr.Zero;var storage=new IntPtr[encoded.Length];

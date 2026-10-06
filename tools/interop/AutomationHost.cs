@@ -184,7 +184,7 @@ namespace VB6Interop {
       var target=ObjectAt(S(request,"handle"));
       if(op=="release"){Release(S(request,"handle"));return D("released",true);}
       if(op=="loadState"||op=="saveState")return Persistence(target,request);
-      if(op=="enumerate"){var sequence=target.Value as IEnumerable;if(sequence==null)throw new NotSupportedException("Component is not enumerable");var values=new List<object>();var enumerator=sequence.GetEnumerator();try{while(enumerator.MoveNext()){if(values.Count>=10000)throw new NotSupportedException("Enumeration exceeds 10,000 entries");values.Add(Export(enumerator.Current));}}finally{var disposable=enumerator as IDisposable;if(disposable!=null)disposable.Dispose();else if(Marshal.IsComObject(enumerator))Marshal.ReleaseComObject(enumerator);}return values;}
+      if(op=="enumerate")return EnumerateNative(target,N(request,"lcid",1033));
       if(op!="call")throw new ArgumentException("Unknown Automation operation");
       string member=S(request,"member");int mode=N(request,"mode"),lcid=N(request,"lcid",1033);if(!Name(member)||!new[]{1,2,4,8}.Contains(mode))throw new ArgumentException("Invalid Automation invocation");
       var schema=((Dictionary<string,object>[])target.Metadata["members"]).FirstOrDefault(m=>string.Equals((string)m["name"],member,StringComparison.OrdinalIgnoreCase));

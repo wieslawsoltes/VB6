@@ -87,6 +87,17 @@ End Sub`}]});
     const keys=await scalarClient.request({op:'call',handle:handle.id,member:'Keys',mode:1,args:[]});
     check('native-created SAFEARRAY coordinates',()=>{assert.equal(keys.value.elementType,12);assert.deepEqual(keys.value.bounds,[[0,8]]);assert.deepEqual(keys.value.v.map(v=>v.v),['2','3','4','5','6','14','11','17','8']);});
     await scalarClient.request({op:'release',handle:handle.id});
+    const enumeration=await scalarClient.request({op:'create',progId:'Scripting.Dictionary'});
+    const enumKeys=[{t:'currency',v:'1.2345'},{t:'decimal',v:'2.0000000000000000000000000001'},{t:'number',vt:2,v:7},{t:'number',vt:4,v:Math.fround(1.6)},{t:'boolean',v:true}];
+    for(const key of enumKeys)await scalarClient.request({op:'call',handle:enumeration.id,member:'Add',mode:1,args:[key,{t:'empty'}]});
+    const nativeKeys=(await scalarClient.request({op:'call',handle:enumeration.id,member:'Keys',mode:1,args:[]})).value.v;
+    check('independent SAFEARRAY retains typed Dictionary keys',()=>assert.deepEqual(nativeKeys,enumKeys));
+    for(let i=0;i<25;i++)assert.deepEqual(await scalarClient.request({op:'enumerate',handle:enumeration.id,lcid:1033}),nativeKeys);
+    check('IEnumVARIANT preserves Currency, Decimal and scalar types over repeated lifetimes',()=>assert.equal(nativeKeys[0].t,'currency'));
+    await scalarClient.request({op:'release',handle:enumeration.id});
+    const afterEnumeration=await scalarClient.request({op:'info'});
+    check('enumeration releases handles',()=>assert.deepEqual(afterEnumeration,{objects:0,windows:0}));
+
   }finally{await scalarClient.close();}
   report.status='passed';
 }catch(error){
