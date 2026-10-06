@@ -53,7 +53,7 @@ jobs:
               encoded += content.decode('ascii')
           encoded += 'AgAAAAAEWVo='
           assert len(encoded) == 54252
-          data = lzma.decompress(base64.b64decode(encoded, validate=True), memlimit=64*1024*1024)
+          data = lzma.decompress(base64.b64decode(encoded, validate=True), memlimit=128*1024*1024)
           assert len(data) == 137848
           assert hashlib.sha256(data).hexdigest() == 'ced44bca28c2ef59b2f2c357642a6b038303c400af299ede8897062680b4dcd6'
           changes = json.loads(data)
