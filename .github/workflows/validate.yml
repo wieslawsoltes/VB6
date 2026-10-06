@@ -15,6 +15,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Capture exact source snapshots for integration review
+        run: |
+          git archive --format=zip HEAD -o /tmp/current-source.zip
+          git fetch --no-tags origin c8fbe92fc2d9b9cf62c483a7d481c14a2a32878a
+          git archive --format=zip c8fbe92fc2d9b9cf62c483a7d481c14a2a32878a -o /tmp/recovered-win32-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-source-review
+          path: |
+            /tmp/current-source.zip
+            /tmp/recovered-win32-source.zip
+          retention-days: 7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
