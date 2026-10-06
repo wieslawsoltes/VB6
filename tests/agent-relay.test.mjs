@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {AGENT_LIMIT_FIELDS} from '../src/agents/limits.js';
+import {providerFailure} from '../src/agents/providers.js';
 import {createAgentRelay} from '../tools/agent-relay.mjs';
 const token = 'local-token-'.repeat(4), origin = 'http://127.0.0.1:8080';
 async function fixture(t, fetchImpl = async () => new Response('{"ok":true}'), keys = {openai: 'cloud-openai', anthropic: 'cloud-anthropic', google: 'cloud-google'}) {
@@ -70,11 +71,11 @@ test('relay: missing server-side key fails closed and ignores browser key', asyn
 });
 for (const status of [401, 429, 500]) test('relay: upstream HTTP ' + status + ' body is not exposed', async t => {
   const f = await fixture(t, async () => new Response('cloud-openai confidential-error', {status}));
-  const response = await f.request(); assert.equal(response.status, status); assert.equal(response.text, '');
+  const response = await f.request(); assert.equal(response.status, status); assert.deepEqual(JSON.parse(response.text), {error: {code: status === 401 ? 'authentication_error' : 'provider_error'}}); assert.ok(!response.text.includes('confidential')); assert.ok(!response.text.includes('cloud-'));
 });
 test('relay: upstream exceptions are sanitized', async t => {
   const f = await fixture(t, async () => { throw new Error('cloud-openai confidential-error'); });
-  const response = await f.request(); assert.equal(response.status, 400); assert.equal(response.text, '{"error":"Relay request failed."}');
+  const response = await f.request(); assert.equal(response.status, 502); assert.equal(response.text, '{"error":{"code":"server_error"}}');
 });
 test('relay: client disconnect cancels pending upstream request', async t => {
   let signal, entered; const ready = new Promise(resolve => { entered = resolve; });
@@ -93,12 +94,34 @@ test('relay: at most four upstream requests can be active', async t => {
   assert.equal((await f.request({method: 'OPTIONS', body: ''})).status, 204);
 });
 
-for (const [value, expected] of [['2.5', '3'], ['9000', '300'], ['private-secret-not-a-date', undefined]]) test('relay: retry delay is bounded and sanitized: ' + value, async t => {
+for (const [value, expected] of [['2.5', '3'], ['9000', '9000'], ['private-secret-not-a-date', undefined]]) test('relay: retry advice is canonical and never shortened: ' + value, async t => {
   const f = await fixture(t, async () => new Response('private-error-body', {status: 429, headers: {'retry-after': value, 'x-provider-secret': 'private-secret'}}));
   const response = await f.request();
-  assert.equal(response.status, 429); assert.equal(response.text, '');
+  assert.equal(response.status, 429); assert.equal(JSON.parse(response.text).error.code, value === '9000' ? 'rate_limit_exceeded' : 'provider_error');
   assert.equal(response.headers['retry-after'], expected);
   assert.equal(response.headers['access-control-expose-headers'], 'Retry-After');
   assert.equal(response.headers['x-provider-secret'], undefined);
   assert.ok(!JSON.stringify(response).includes('private-secret'));
+});
+
+for (const [status, upstreamError, kind, automatic] of [
+  [400, {code: 'context_length_exceeded'}, 'context', false],
+  [400, {type: 'invalid_request_error', message: 'prompt is too long: private-data'}, 'context', false],
+  [429, {code: 'insufficient_quota'}, 'quota', false],
+  [400, {code: 'content_policy_violation'}, 'safety', false],
+  [529, {type: 'overloaded_error'}, 'server', true],
+  [403, {status: 'PERMISSION_DENIED'}, 'access', false]
+]) test('relay: preserves safe ' + kind + ' classification without private provider details', async t => {
+  const f = await fixture(t, async () => new Response(JSON.stringify({error: {message: 'private-provider-message', ...upstreamError}, request_id: 'secret-request-id'}), {status}));
+  const response = await f.request();
+  assert.equal(response.status, status);
+  assert.ok(!/private|secret/.test(response.text));
+  const failure = providerFailure(JSON.parse(response.text), status);
+  assert.equal(failure.kind, kind); assert.equal(failure.retryable, automatic);
+});
+test('relay: missing relay key is recoverable configuration, not automatic 503 retry', async t => {
+  const f = await fixture(t, async () => assert.fail('must not call upstream'), {});
+  const response = await f.request();
+  const failure = providerFailure(JSON.parse(response.text), response.status);
+  assert.equal(failure.kind, 'access'); assert.equal(failure.retryable, false);
 });

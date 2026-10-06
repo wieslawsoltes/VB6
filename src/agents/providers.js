@@ -39,7 +39,7 @@ function parseProviderJSON(text) {
 /** Reading is bounded for JSON and SSE, including malformed/unending streams. */
 export async function readEvents(response, receive, {signal, maxBytes = 8 * 1024 * 1024} = {}) {
   const reader = response.body?.getReader();
-  if (!reader) throw new Error('The provider returned no response body.');
+  if (!reader) throw new ProviderTransportError('The provider returned no response body.', {retryable: true, kind: 'stream'});
   let size = 0, buffer = '', json = '', pendingCR = false;
   const decoder = new TextDecoder('utf-8', {fatal: true}), sse = (response.headers.get('content-type') || '').includes('text/event-stream');
   const abort = () => { void reader.cancel().catch(() => {}); };
@@ -51,7 +51,9 @@ export async function readEvents(response, receive, {signal, maxBytes = 8 * 1024
   try {
     while (true) {
       signal?.throwIfAborted();
-      const chunk = await reader.read(); signal?.throwIfAborted();
+      let chunk;
+      try { chunk = await reader.read(); } catch { signal?.throwIfAborted(); throw new ProviderTransportError('Provider stream disconnected. No partial tools were executed.', {retryable: true, kind: 'stream'}); }
+      signal?.throwIfAborted();
       if (chunk.done) break;
       size += chunk.value.byteLength;
       if (size > maxBytes) throw new Error('Provider response exceeded the size limit.');
@@ -66,12 +68,41 @@ export async function readEvents(response, receive, {signal, maxBytes = 8 * 1024
     else { buffer += decoder.decode() + (pendingCR ? '\n' : ''); if (buffer.trim()) event(buffer); }
   } finally { signal?.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
-/** Safe metadata for an explicit user retry; never includes upstream bodies or credentials. */
+/** Safe metadata for bounded automatic or explicit user recovery; never includes upstream bodies or credentials. */
 export class ProviderTransportError extends Error {
-  constructor(message, {status = 0, retryable = false, retryAfterMs = 0} = {}) {
+  constructor(message, {status = 0, retryable = false, retryAfterMs = 0, kind = 'transport'} = {}) {
     super(message); this.name = 'ProviderTransportError';
-    this.status = status; this.retryable = retryable; this.retryAfterMs = retryAfterMs;
+    this.status = status; this.retryable = retryable; this.retryAfterMs = retryAfterMs; this.kind = kind;
   }
+}
+/** Classify only exact protocol codes. Never echo provider messages, request IDs, or arbitrary bodies. */
+export function providerFailure(data = {}, status = 0, retryAfterMs = 0) {
+  const value = data.response?.error || data.error || {};
+  const codes = [value.code, value.type, value.status, data.response?.incomplete_details?.reason];
+  const has = allowed => codes.some(code => typeof code === 'string' && allowed.includes(code));
+  let kind = status >= 400 && status < 500 && ![408, 429].includes(status) ? 'request' : 'provider', retryable = [408, 429, 500, 502, 503, 504, 529].includes(status), hint = 'The provider could not complete this turn.';
+  const contextMessage = typeof value.message === 'string' && /^(?:prompt is too long:|this model.s maximum context length is|the input token count .*exceeds the maximum)/i.test(value.message.slice(0, 500));
+  if (has(['context_length_exceeded', 'context_window_exceeded', 'prompt_too_long', 'request_too_large']) || contextMessage) { kind = 'context'; retryable = false; hint = 'Provider context window exceeded; compact the conversation or lower context/output settings.'; }
+  else if (has(['insufficient_quota', 'quota_exceeded', 'billing_hard_limit_reached', 'credit_balance_too_low'])) { kind = 'quota'; retryable = false; hint = 'Provider quota or billing allowance exhausted. Check the provider account before continuing.'; }
+  else if ([401, 403].includes(status) || has(['authentication_error', 'invalid_api_key', 'permission_error', 'permission_denied', 'PERMISSION_DENIED', 'UNAUTHENTICATED'])) { kind = 'access'; retryable = false; hint = 'Check provider credentials and model access.'; }
+  else if (has(['content_policy_violation', 'safety_violation', 'refusal'])) { kind = 'safety'; retryable = false; hint = 'Provider safety policy rejected this request. No automatic alternative will be attempted.'; }
+  else if (has(['invalid_request_error', 'invalid_argument', 'INVALID_ARGUMENT', 'not_found_error'])) { kind = 'request'; retryable = false; hint = 'Provider rejected the request. Check the model and supported settings.'; }
+  else if (has(['rate_limit_exceeded', 'rate_limit_error', 'RESOURCE_EXHAUSTED'])) { kind = 'rate'; retryable = true; hint = 'Provider rate limit reached.'; }
+  else if (has(['server_error', 'internal_error', 'api_error', 'overloaded_error', 'service_unavailable', 'INTERNAL', 'UNAVAILABLE'])) { kind = 'server'; retryable = true; hint = 'Provider temporarily unavailable.'; }
+  // A failed generation without a useful code can be explicitly resumed, but is not blindly auto-retried.
+  return new ProviderTransportError((status ? 'Provider HTTP ' + status + '. ' : '') + hint + ' No partial tools were executed.', {status, retryAfterMs, retryable, kind});
+}
+export async function responseFailure(response, signal) {
+  let data = {};
+  try { await readEvents(response, value => { data = value; }, {signal, maxBytes: 16384}); } catch { signal?.throwIfAborted(); }
+  const header = response.headers.get('retry-after'), failure = providerFailure(data, response.status, retryAfter(header));
+  const seconds = typeof header === 'string' && /^\d+(?:\.\d+)?$/.test(header.trim()) ? Number(header) : NaN;
+  const deadline = Number.isFinite(seconds) ? Date.now() + seconds * 1000 : Date.parse(header);
+  if (failure.retryable && Number.isFinite(deadline) && deadline > Date.now() + 300000) {
+    failure.retryable = false; failure.kind = 'cooldown'; failure.retryAt = Math.min(Number.MAX_SAFE_INTEGER, deadline);
+    failure.message = 'Provider requested a long retry delay. Retry later; the IDE will not shorten the cooldown or extend permissions.';
+  }
+  return failure;
 }
 /** A confirmed output-token stop is retried only after a new user decision and larger output allowance.
  * Incomplete native tool/reasoning blocks are never added to the conversation or executed.
@@ -103,17 +134,15 @@ export function createTransport({provider, apiKey = '', relay = '', relayToken =
         body: origin ? JSON.stringify({provider, operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
     } catch {
       signal?.throwIfAborted();
-      throw new ProviderTransportError(timer.aborted ? 'Provider request timed out. An explicit retry may incur additional charges.' : 'Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.', {retryable: true});
+      throw new ProviderTransportError(timer.aborted ? 'Provider request timed out. Retrying may incur additional charges.' : 'Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.', {retryable: true});
     }
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
-      // Do not echo untrusted response bodies: they can contain credentials or prompt data.
-      throw new ProviderTransportError('Provider HTTP ' + response.status + '. ' + (response.status === 429 ? 'Rate limit or quota reached; retry later.' : response.status === 401 || response.status === 403 ? 'Check credentials and model access.' : 'Check the model ID and provider limits.'), {status: response.status, retryable: [408, 429, 500, 502, 503, 504, 529].includes(response.status), retryAfterMs: retryAfter(response.headers.get('retry-after'))});
+    try {
+      if (!response.ok) throw await responseFailure(response, combined);
+      await readEvents(response, receive, {signal: combined});
     }
-    try { await readEvents(response, receive, {signal: combined}); }
     catch (error) {
       signal?.throwIfAborted();
-      if (timer.aborted) throw new ProviderTransportError('Provider response timed out. Partial public text is preserved; no partial tool call was executed. An explicit retry may incur additional charges.', {retryable: true});
+      if (timer.aborted) throw new ProviderTransportError('Provider response timed out. Partial public text is preserved; no partial tool call was executed. Retrying may incur additional charges.', {retryable: true});
       throw error;
     }
   };
@@ -144,8 +173,8 @@ export function toolCatalog(tools) {
 export function requestBody(provider, model, history, definitions, instructions, maxTokens) {
   providerInfo(provider); model = modelId(model);
   if (provider === 'openai') return {model, instructions, input: history, store: false, parallel_tool_calls: false, include: ['reasoning.encrypted_content'], stream: true, max_output_tokens: maxTokens, tools: definitions.map(tool => ({type: 'function', ...tool, strict: false}))};
-  if (provider === 'anthropic') return {model, system: instructions, messages: history, stream: true, tool_choice: {type: 'auto', disable_parallel_tool_use: true}, max_tokens: maxTokens, tools: definitions.map(({parameters, ...tool}) => ({...tool, input_schema: parameters}))};
-  return {model, systemInstruction: {parts: [{text: instructions}]}, contents: history, generationConfig: {maxOutputTokens: maxTokens}, tools: [{functionDeclarations: definitions.map(({parameters, ...tool}) => ({...tool, parametersJsonSchema: parameters}))}]};
+  if (provider === 'anthropic') return {model, system: instructions, messages: history, stream: true, ...(definitions.length ? {tool_choice: {type: 'auto', disable_parallel_tool_use: true}} : {}), max_tokens: maxTokens, tools: definitions.map(({parameters, ...tool}) => ({...tool, input_schema: parameters}))};
+  return {model, systemInstruction: {parts: [{text: instructions}]}, contents: history, generationConfig: {maxOutputTokens: maxTokens}, ...(definitions.length ? {tools: [{functionDeclarations: definitions.map(({parameters, ...tool}) => ({...tool, parametersJsonSchema: parameters}))}]} : {})};
 }
 export function userMessage(provider, text) { return provider === 'google' ? {role: 'user', parts: [{text}]} : {role: 'user', content: text}; }
 /** Preserve provider-native reasoning/signature blocks for tool continuations; display only public text. */
@@ -164,7 +193,8 @@ export function responseCollector(provider, onText = () => {}) {
         for (const part of item.content || []) if (part.type === 'output_text') publicText(part.text);
       throw new ProviderOutputLimitError();
     }
-    if (data.error || data.type === 'error' || data.type === 'response.failed' || data.type === 'response.incomplete') throw new Error('The provider could not complete this turn. No partial tools were executed.');
+    if (['response.failed', 'response.incomplete'].includes(data.type) && (!data.response || typeof data.response !== 'object')) throw new Error('Malformed provider failure event. No partial tools were executed.');
+    if (data.error || response.error || data.type === 'error' || data.type === 'response.failed' || data.type === 'response.incomplete' || response.status === 'failed') throw providerFailure(data);
     if (provider === 'openai') {
       if (data.type === 'response.output_text.delta') publicText(data.delta || '');
       if (data.type === 'response.completed' || Array.isArray(data.output)) { raw = data.response || data; finished = raw.status === 'completed'; usage = raw.usage || {}; }
@@ -199,12 +229,12 @@ export function responseCollector(provider, onText = () => {}) {
     }
   }
   function result() {
-    if (!finished) throw new Error('Provider stream ended before completion. No partial tools were executed.');
+    if (!finished) throw new ProviderTransportError('Provider stream ended before completion. No partial tools were executed.', {retryable: true, kind: 'stream'});
     let message, calls, text;
     if (provider === 'openai') {
       message = raw.output;
       calls = message.filter(item => item.type === 'function_call').map(item => ({id: item.call_id, name: item.name, arguments: parseProviderJSON(item.arguments)}));
-      text = message.filter(item => item.type === 'message').flatMap(item => item.content || []).map(item => item.text || item.refusal || '').join('');
+      text = message.filter(item => item.type === 'message').flatMap(item => item.content || []).filter(item => ['output_text', 'refusal'].includes(item.type)).map(item => item.text || item.refusal || '').join('');
     } else if (provider === 'anthropic') {
       if (stop === 'max_tokens') {
         if (!publicCharacters) for (const block of raw || blocks) if (block?.type === 'text') publicText(block.text);
@@ -237,7 +267,7 @@ export function responseCollector(provider, onText = () => {}) {
     const parts = provider === 'google' ? ['promptTokenCount', 'candidatesTokenCount', 'thoughtsTokenCount', 'toolUsePromptTokenCount'] : ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
     const reported = valid(total) || parts.some(key => valid(usage[key]));
     const tokens = valid(total) ? total : parts.reduce((sum, key) => sum + (valid(usage[key]) ? usage[key] : 0), 0);
-    return {tokens: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(tokens)), usageReported: reported};
+    return {tokens: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(tokens)), usageReported: reported, inputTokens: provider === 'google' ? (valid(usage.promptTokenCount) ? usage.promptTokenCount : null) : valid(usage.input_tokens) ? usage.input_tokens + (provider === 'anthropic' ? (valid(usage.cache_read_input_tokens) ? usage.cache_read_input_tokens : 0) + (valid(usage.cache_creation_input_tokens) ? usage.cache_creation_input_tokens : 0) : 0) : null};
   }
   return {receive, result, usage: usageSummary, get publicCharacters() { return publicCharacters; }};
 }

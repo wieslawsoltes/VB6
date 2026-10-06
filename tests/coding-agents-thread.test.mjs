@@ -90,7 +90,7 @@ test('limits: persistence saves only numeric preferences, survives denial, and r
 test('usage: incomplete OpenAI response usage is captured before failure and private data never streams', () => {
   const text = [], collector = responseCollector('openai', delta => text.push(delta));
   assert.throws(() => collector.receive({type: 'response.incomplete', response: {status: 'incomplete', usage: {total_tokens: 456}, output: [{type: 'reasoning', encrypted_content: 'PRIVATE'}]}}), /could not complete/);
-  assert.deepEqual(collector.usage(), {tokens: 456, usageReported: true}); assert.deepEqual(text, []);
+  assert.deepEqual(collector.usage(), {tokens: 456, usageReported: true, inputTokens: null}); assert.deepEqual(text, []);
 });
 test('usage: Anthropic initial public text and cumulative usage include cache tokens without exposing thinking', () => {
   const text = [], collector = responseCollector('anthropic', delta => text.push(delta));
@@ -103,7 +103,7 @@ test('usage: Anthropic initial public text and cumulative usage include cache to
   assert.equal(text.join(''), 'Hello world'); assert.equal(collector.result().text, 'Hello world'); assert.equal(collector.usage().tokens, 65);
 });
 test('usage: Google thought tokens count once and missing usage remains explicitly unknown', () => {
-  const collector = responseCollector('google'); assert.deepEqual(collector.usage(), {tokens: 0, usageReported: false});
+  const collector = responseCollector('google'); assert.deepEqual(collector.usage(), {tokens: 0, usageReported: false, inputTokens: null});
   collector.receive({candidates: [{content: {parts: [{text: 'Hello'}]}, finishReason: 'STOP'}], usageMetadata: {promptTokenCount: 10, candidatesTokenCount: 2, thoughtsTokenCount: 3, cachedContentTokenCount: 5}});
   assert.equal(collector.result().tokens, 15);
 });

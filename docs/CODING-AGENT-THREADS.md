@@ -37,11 +37,11 @@ The local relay accepts the same bounded context size and validated generation t
 
 ## Limit recovery
 
-The Task tab shows a classic **Review limits… / Resume task** notice when work pauses. Review limits focuses the relevant numeric setting. Resume task uses the existing Continue confirmation; there are no automatic retries, automatic limit increases or implicit permission grants.
+The Task tab shows a classic **Review limits… / Resume task** notice when work pauses. Review limits focuses the relevant numeric setting. Resume task uses the existing Continue confirmation; there are no automatic limit increases or implicit permission grants. Separately, recognized transient generation failures receive bounded automatic retries; see [recovery and compaction](CODING-AGENT-RECOVERY.md).
 
 | Pause | Recovery behavior |
 | --- | --- |
-| Request context is too large | Pause before sending. Raise Request context bytes, then Continue with the retained prompt/history. If the required size exceeds the application or provider limit, use New Task with Context instead. |
+| Request context is too large | Compact complete older turns automatically when enabled, or pause before sending. Use Compact context, review context/output settings and Continue with retained goal and recent history. New Task with Context remains a fallback when a useful checkpoint cannot fit. |
 | A complete tool batch exceeds the run allowance or result-space reserve | Retain the validated native response in memory, but execute **none** of that batch. Continue uses it without asking the provider to generate it again or double-counting its reported usage. |
 | Provider explicitly reports its output-token cap | Keep public partial text labelled Interrupted, but discard the unfinished native response and execute no partial tools. Increase the effective output allowance, then explicitly retry the pending request from the last complete native history. Prior usage remains counted. |
 | Request, tool-call or cumulative session-token allowance is exhausted | Keep completed tool results. Review limits/permissions and Continue; a session-token allowance must be explicitly increased rather than reset. |
@@ -50,7 +50,7 @@ Deferred operations retain their **original arguments**. Continue rechecks the c
 
 A final response with no tool calls needs no result-space reservation. It is retained as a completed answer even if its added native context would make a future request too large; that subsequent request pauses before I/O. Unknown/unavailable tool attempts also count against the run limit, rather than triggering repeated billed requests outside the tool cap.
 
-Only confirmed provider output-cap markers are recoverable this way: OpenAI `response.incomplete` / `incomplete_details.reason = max_output_tokens`, Anthropic `stop_reason = max_tokens`, and Google `finishReason = MAX_TOKENS`. Safety blocks, malformed streams and unspecified incomplete responses remain terminal. Output-cap retry requires a larger **effective** output allowance (also constrained by remaining session budget); retrying the same insufficient cap does not send another request. Native signatures/reasoning from incomplete responses are not reconstructed or appended. Provider context/output restrictions and billing still apply.
+Only confirmed provider output-cap markers are recoverable this way: OpenAI `response.incomplete` / `incomplete_details.reason = max_output_tokens`, Anthropic `stop_reason = max_tokens`, and Google `finishReason = MAX_TOKENS`. Safety blocks and malformed protocol data remain terminal. Transport EOF is a retryable interruption, while a valid but unspecified OpenAI failure/incomplete event allows manual Continue without executing partial tools. Output-cap retry requires a larger **effective** output allowance (also constrained by remaining session budget); retrying the same insufficient cap does not send another request. Native signatures/reasoning from incomplete responses are not reconstructed or appended. Provider context/output restrictions and billing still apply.
 
 Protocol references checked October 6, 2026:
 
@@ -73,3 +73,5 @@ Recovery regressions also cover all three native output-cap envelopes, unchanged
 The composer now includes Codex-style permission profiles, full IDE access with
 explicit per-run acknowledgement, granular rules and revoke controls. See
 [Permission profiles](CODING-AGENT-PERMISSIONS.md) for the complete behavior.
+
+Recovery-specific tests also cover automatic reconnects, safe relay classifications, full Retry-After deadlines, permission cancellation, atomic public checkpoints for all three protocols, pending-batch preservation and failure rollback. See [the recovery guide](CODING-AGENT-RECOVERY.md#validation).
