@@ -1,6 +1,7 @@
 param([string]$Output='reports/characters')
 $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Force $Output | Out-Null
+$Output=[IO.Path]::GetFullPath($Output)
 Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class CharacterACP { [DllImport("kernel32.dll")] public static extern uint GetACP(); }'
 $acp=[CharacterACP]::GetACP()
 if($acp -ne 1252){throw "This reference requires ACP 1252, found $acp; no comparisons were certified"}
@@ -58,14 +59,29 @@ End Sub
 '@
 for($i=0;$i -lt $expressions.Count;$i++){$script+="`r`nProbe $i, `""+$expressions[$i].Replace('"','""')+'"'}
 $scriptPath=Join-Path $Output 'character-reference.vbs'
-[IO.File]::WriteAllText([IO.Path]::GetFullPath($scriptPath),$script,[Text.Encoding]::ASCII)
+$script=($script -replace "`r?`n","`r`n")+"`r`n"
+[IO.File]::WriteAllText($scriptPath,$script,[Text.Encoding]::ASCII)
 $cscript=Join-Path $env:WINDIR 'SysWOW64\cscript.exe'
 if(!(Test-Path $cscript)){throw 'The independent 32-bit Windows Script Host is required'}
-$stdout=Join-Path $Output 'native-output.txt';$stderr=Join-Path $Output 'native-stderr.txt'
-& $cscript //nologo //B //T:90 $scriptPath 1> $stdout 2> $stderr
-if($LASTEXITCODE -ne 0){throw "Windows Script Host exited $LASTEXITCODE"}
+# Explicit engine and absolute paths avoid default-host/file-association state.
+# Read both pipes asynchronously, so the complete 65K table cannot fill a pipe.
+$start=New-Object Diagnostics.ProcessStartInfo
+$start.FileName=$cscript
+$start.Arguments='//nologo //E:VBScript //T:90 "'+$scriptPath+'"'
+$start.UseShellExecute=$false;$start.CreateNoWindow=$true
+$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+$process=New-Object Diagnostics.Process;$process.StartInfo=$start
+if(!$process.Start()){throw 'Could not start Windows Script Host'}
+$outTask=$process.StandardOutput.ReadToEndAsync();$errTask=$process.StandardError.ReadToEndAsync()
+if(!$process.WaitForExit(120000)){$process.Kill();throw 'Windows Script Host exceeded 120 seconds'}
+$exit=$process.ExitCode;$stdout=Join-Path $Output 'native-output.txt';$stderr=Join-Path $Output 'native-stderr.txt'
+[IO.File]::WriteAllText($stdout,$outTask.Result,[Text.Encoding]::UTF8)
+[IO.File]::WriteAllText($stderr,$errTask.Result,[Text.Encoding]::UTF8)
+$process.Dispose()
+Write-Host "Host exit $exit; stdout $((Get-Item $stdout).Length) bytes; stderr $((Get-Item $stderr).Length) bytes"
+if($exit -ne 0 -or $errTask.Result.Trim().Length -gt 0){throw "Windows Script Host failed: $($errTask.Result)"}
 $map=New-Object byte[] 65536;$characters=New-Object int[] 256;$cases=@();$m=0;$c=0;$p=0
-foreach($line in [IO.File]::ReadAllLines([IO.Path]::GetFullPath($stdout))){
+foreach($line in [IO.File]::ReadAllLines($stdout)){
  $fields=$line.Split('|')
  switch($fields[0]){
   'M' {if($fields.Length -ne 3 -or [int]$fields[1] -ne $m -or $m -ge 65536){throw 'Invalid Asc table sequence'};$map[$m]=[byte]$fields[2];$m++}
@@ -74,7 +90,7 @@ foreach($line in [IO.File]::ReadAllLines([IO.Path]::GetFullPath($stdout))){
   default {throw "Unexpected reference output: $line"}
  }
 }
-if($m -ne 65536 -or $c -ne 256 -or $p -ne $expressions.Count){throw 'Incomplete native reference output'}
+if($m -ne 65536 -or $c -ne 256 -or $p -ne $expressions.Count){throw "Incomplete native reference output: M=$m C=$c P=$p expected $($expressions.Count)"}
 $dll=Join-Path $env:WINDIR 'SysWOW64\vbscript.dll'
 $report=@{schema=1;oracle='Installed x86 Windows Script Host, not licensed VB6';acp=$acp;lcid=1033;os=[Environment]::OSVersion.VersionString;dllVersion=(Get-Item $dll).VersionInfo.FileVersion;dllSha256=(Get-FileHash $dll -Algorithm SHA256).Hash;scriptSha256=(Get-FileHash $scriptPath -Algorithm SHA256).Hash;ascBase64=[Convert]::ToBase64String($map);chr=$characters;cases=$cases;ascCases=$m;chrCases=$c;edgeCases=$p}
 $report | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $Output 'reference.json')
