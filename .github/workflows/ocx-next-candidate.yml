@@ -1,0 +1,51 @@
+name: OCX remaining contracts candidate
+on:
+  push:
+    branches: [feat/ocx-persistence-and-sites]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-next-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply exact source candidate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,gzip,hashlib,pathlib,subprocess
+          data=''.join(pathlib.Path('.ocx-native.'+str(i)).read_text().strip() for i in (1,2,3))
+          patch=gzip.decompress(base64.b64decode(data,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='44865180ee357bfb8ddf71a74c00097bb2f9ac7a03031b9ef0a31d0e39de0599'
+          path=pathlib.Path('ocx-native.patch');path.write_bytes(patch)
+          subprocess.run(['git','apply','--unidiff-zero',str(path)],check=True)
+          path.unlink()
+          if pathlib.Path('.ocx-native-repair.patch').exists():subprocess.run(['git','apply','--unidiff-zero','.ocx-native-repair.patch'],check=True)
+          PY
+      - name: Native clean-room persistence and licensing contracts
+        run: node tools/interop/test-ocx-contracts.mjs
+      - run: node tools/interop/test-native.mjs
+      - run: node tools/interop/test-activex.mjs
+      - run: node tools/interop/test-ocx.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-next-${{ matrix.architecture }}
+          path: reports/native-interop
+          retention-days: 7
