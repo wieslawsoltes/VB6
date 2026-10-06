@@ -23,7 +23,8 @@ jobs:
       - name: Verify source and strengthen the native selection assertion
         shell: bash
         run: |
-          test "$(git rev-parse HEAD^)" = 691238cceef370f98b003fd3b686ff2ae70eb212
+          git merge-base --is-ancestor 691238cceef370f98b003fd3b686ff2ae70eb212 HEAD
+          test "$(git diff --name-only 691238cceef370f98b003fd3b686ff2ae70eb212 HEAD)" = .github/workflows/agent-workbench-merge-prepare.yml
           git rev-parse HEAD > publication-base.txt
           python3 - <<'PY'
           import hashlib, subprocess
@@ -41,7 +42,6 @@ jobs:
               check(selected.count()==1 and selected.text_content()=='modified — Form1.frm', 'Expected the modified Form1 source selected')
               selection={'selectInnerText':documents.inner_text(),'selectedOptionText':selected.text_content()}
               check(modified!=original, 'Source must actually change before it can be restored')"""
-          new = new.replace('\n    ', '\n')
           assert source.count(old) == 1
           source = source.replace(old, new)
           old = "    return {'sourceRestoration':True,'normalUndo':True,'patchExport':True,'inertMarkup':True,'noProviderRequestsForReview':True}"
