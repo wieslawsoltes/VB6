@@ -28,6 +28,15 @@ def archive(path:Path,entries:dict[str,bytes]):
         bad=z.testzip()
         if bad:raise RuntimeError('ZIP verification failed: '+bad)
 
+def documentation_copies():
+    """Maintained documentation shipped beside the release archives."""
+    return {
+        ROOT/'docs/COMPATIBILITY.md': f'{PREFIX}-Compatibility.md',
+        ROOT/'docs/TESTING.md': f'{PREFIX}-Validation.md',
+        ROOT/'docs/VISUAL-AUDIT.md': f'{PREFIX}-Visual-Audit.md',
+        ROOT/'RELEASE-NOTES.md': f'{PREFIX}-Release-Notes.md',
+    }
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--out',type=Path,default=ROOT.parent/'release');parser.add_argument('--git-bundle',action='store_true');options=parser.parse_args();out=options.out.resolve();out.mkdir(parents=True,exist_ok=True)
     if not (ROOT/'dist/VB6-Studio-Web.html').exists():raise SystemExit('Run npm run build and validation first.')
@@ -56,10 +65,11 @@ def main():
     sdk['package.json']=json.dumps({'name':'vb6-browser-runtime','version':VERSION,'private':True,'type':'module','license':'MIT','exports':{'.':'./src/runtime/entry.js','./styles':'./vb6-controls.css'}},indent=2).encode()
     sdk['README.md']=f'''# VB6 browser runtime SDK {VERSION}\n\nIndependent runtime and browser-control modules, without the IDE. See demo.html for a self-contained rich-text application and mdi.html for a runtime MDI/resource application and docs/ARCHITECTURE.md for embedding. The demo embeds its runtime and has no server/CDN dependency.\n\nFor a split page, include vb6-controls.css and vb6-runtime.js, then call `await VB6Runtime.mountApplication(project, container, {{persist:false}})`. For ESM, import `mountApplication` or `RuntimeAPI` from `./src/runtime/entry.js`.\n\nRuntimeAPI includes ResourceStore, readRES/writeRES, setResource/setResourceString, the compiler/VM/host, controls, virtual byte filesystem, Currency, distinct MISSING/Empty/Null/Nothing, VBErrorValue, Gregorian calendar and OLE-date helpers, cells/references, disconnected MemoryRecordset, structured RichTextDocument/parseRTF/writeRTF, and the THEMES/applyTheme/colorValue helpers. Choose the application theme through project.settings.theme before starting. Runtime controls use the shared classic style layer, including ComboBox, UpDown, scrollbars and modal dialogs. Project-defined interfaces, DefType declarations, runtime MDI and explicitly bounded debugger evaluation are described in the compatibility matrix. API contracts are experimental; this is not a native DLL/OCX/ADO runtime.\n\nThe original source package contains the complete tests and build tools. Its validated compatibility boundaries are summarized in docs/COMPATIBILITY.md. No native helper, npm dependency or proprietary font is bundled.\n'''.encode()
     archive(out/f'VB6-Runtime-SDK-{VERSION}.zip',sdk)
-    copies={ROOT/'dist/VB6-Studio-Web.html':f'{PREFIX}.html',ROOT/'dist/examples/richtext.html':f'VB6-Rich-Text-Editor-{VERSION}.html',ROOT/'dist/examples/orders.html':f'VB6-Order-Entry-{VERSION}.html',ROOT/'docs/COMPATIBILITY.md':f'{PREFIX}-Compatibility.md',ROOT/'docs/TESTING.md':f'{PREFIX}-Validation.md',ROOT/f'docs/RELEASE-NOTES-{VERSION}.md':f'{PREFIX}-Release-Notes.md',ROOT/'docs/WORKTREES.md':f'{PREFIX}-Worktrees.md',ROOT/'reports/screenshots/ide-designer.png':f'{PREFIX}-preview.png',ROOT/'reports/screenshots/richtext-editor.png':f'{PREFIX}-richtext-preview.png'}
-    copies.update({ROOT/'docs/VISUAL-AUDIT.md':f'{PREFIX}-Visual-Audit.md',ROOT/'reports/browser-visual-tests.md':f'{PREFIX}-Visual-Validation.md',ROOT/'reports/visual/classic-designer.png':f'{PREFIX}-preview.png',ROOT/'reports/visual/split-procedure-views.png':f'{PREFIX}-split-code-preview.png',ROOT/'reports/visual/contrast-code.png':f'{PREFIX}-contrast-preview.png'})
+    copies={ROOT/'dist/VB6-Studio-Web.html':f'{PREFIX}.html',ROOT/'dist/examples/richtext.html':f'VB6-Rich-Text-Editor-{VERSION}.html',ROOT/'dist/examples/orders.html':f'VB6-Order-Entry-{VERSION}.html',ROOT/'reports/screenshots/ide-designer.png':f'{PREFIX}-preview.png',ROOT/'reports/screenshots/richtext-editor.png':f'{PREFIX}-richtext-preview.png'}
+    copies.update({ROOT/'reports/browser-visual-tests.md':f'{PREFIX}-Visual-Validation.md',ROOT/'reports/visual/classic-designer.png':f'{PREFIX}-preview.png',ROOT/'reports/visual/split-procedure-views.png':f'{PREFIX}-split-code-preview.png',ROOT/'reports/visual/contrast-code.png':f'{PREFIX}-contrast-preview.png'})
     copies.update({ROOT/'dist/examples/compatibility.html':f'VB6-Runtime-Workbench-{VERSION}.html',ROOT/'reports/features-04/object-browser-classic.png':f'{PREFIX}-object-browser.png',ROOT/'reports/features-04/project-search.png':f'{PREFIX}-project-search.png',ROOT/'reports/features-04/bookmarks-split.png':f'{PREFIX}-bookmarks.png',ROOT/'reports/features-04/runtime-workbench.png':f'{PREFIX}-runtime-preview.png',ROOT/'reports/browser-features-04.md':f'{PREFIX}-Feature-Validation.md'})
     copies.update({ROOT/'dist/examples/mdi.html':f'VB6-MDI-Workspace-{VERSION}.html',ROOT/'reports/boundaries-06/mdi-runtime.png':f'{PREFIX}-mdi-preview.png',ROOT/'reports/boundaries-06/resource-editor.png':f'{PREFIX}-resource-editor.png',ROOT/'reports/boundaries-06/explicit-evaluation.png':f'{PREFIX}-evaluation-preview.png'})
+    copies.update(documentation_copies())
     for src,name in copies.items():shutil.copyfile(src,out/name)
     visual={f'screenshots/{p.name}':p.read_bytes() for p in sorted((ROOT/'reports/visual').glob('*.png'))}
     for rel in ['docs/VISUAL-AUDIT.md','reports/browser-visual-tests.json','reports/browser-visual-tests.md','tests/visual-goldens.json']:visual[rel]=(ROOT/rel).read_bytes()

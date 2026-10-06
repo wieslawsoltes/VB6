@@ -312,8 +312,8 @@ Native MDIForm/UserControl/UserDocument/report designers, type-library/add-in lo
 | [Architecture / SDK embedding](docs/ARCHITECTURE.md) | Source architecture and reusable components |
 | [Compatibility](docs/COMPATIBILITY.md) | Supported behavior and explicit boundaries |
 | [Testing and validation](docs/TESTING.md) | Reproducible checks and validation evidence |
-| [Visual audit](docs/VISUAL-AUDIT.md) | Visual coverage and fidelity limits |
-| [Worktrees](docs/WORKTREES.md) | Development worktree documentation |
+| [Visual validation](docs/VISUAL-AUDIT.md) | Rendering invariants, review procedure and fidelity limits |
+| [Documentation index](docs/README.md) | Build, maintenance and extension guides |
 
 ## License
 

@@ -79,3 +79,16 @@ history and pull requests retain change provenance; CI artifacts retain
 revision-specific logs and measurements. A historical pass is not validation of
 a later revision. Preserve useful contracts in their owning guide before
 removing a superseded document, and update links and packaging inputs together.
+
+## Compatibility reference sources
+
+Official descriptions inform implementation, not certification. Shared VBA
+language and Win32 behavior are not an exact licensed VB6 differential oracle.
+No proprietary fonts, icons or runtime binaries are redistributed.
+
+- Microsoft, Implements statement (shared VBA/Classic VB syntax): https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/implements-statement
+- Microsoft, DefType statements: https://learn.microsoft.com/en-us/office/vba/language/concepts/getting-started/deftype-statements
+- Microsoft, RESOURCEHEADER: https://learn.microsoft.com/en-us/windows/win32/menurc/resourceheader
+- Microsoft, STRINGTABLE resource: https://learn.microsoft.com/en-us/windows/win32/menurc/stringtable-resource
+- Microsoft, WM_MDICASCADE (Win32 window behavior, not browser parity certification): https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-mdicascade
+- Microsoft, Visual Basic 6.0 Resource Center: https://learn.microsoft.com/en-us/previous-versions/visualstudio/visual-basic-6/visual-basic-6.0-documentation
