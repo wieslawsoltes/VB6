@@ -36,6 +36,7 @@ jobs:
           pathlib.Path('ocx-candidate.patch').write_bytes(patch)
           PY
           git apply --unidiff-zero ocx-candidate.patch
+          git apply --unidiff-zero .ocx-repair.patch
       - run: node tools/interop/test-native.mjs
       - run: node tools/interop/test-activex.mjs
       - run: node tools/interop/test-ocx.mjs
@@ -68,7 +69,8 @@ jobs:
           pathlib.Path('ocx-candidate.patch').write_bytes(patch)
           PY
           git apply --unidiff-zero ocx-candidate.patch
-          rm ocx-candidate.patch .ocx-candidate.1 .ocx-candidate.2 .ocx-candidate.3 .github/workflows/ocx-candidate.yml
+          git apply --unidiff-zero .ocx-repair.patch
+          rm ocx-candidate.patch .ocx-candidate.1 .ocx-candidate.2 .ocx-candidate.3 .ocx-repair.patch .github/workflows/ocx-candidate.yml
       - run: npm run build
       - run: npm test
       - name: Commit and push without rewriting history
