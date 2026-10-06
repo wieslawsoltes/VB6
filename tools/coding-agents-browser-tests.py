@@ -841,14 +841,30 @@ def hosted_preview(page,mode):
     }""")
     runtime=page.get_by_title('Running Visual Basic application',exact=True).element_handle().content_frame()
     runtime.wait_for_function('!!globalThis.vb6Application')
-    check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame.hasAttribute("srcdoc") && vb6Studio.runtimeFrame.contentDocument===null'))
+    check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame.hasAttribute("srcdoc") && !vb6Studio.runtimeFrame.sandbox.contains("allow-same-origin")'))
+    # Verify the browser's actual opaque origin without requesting a forbidden
+    # cross-origin DOM read (WebKit reports contentDocument access as a page error).
+    # https://html.spec.whatwg.org/multipage/browsers.html#concept-origin-opaque
+    page.evaluate("""() => {
+      globalThis.previewMessageOrigin=undefined;
+      const source=vb6Studio.runtimeFrame.contentWindow;
+      const listener=event=>{
+        if(event.isTrusted && event.source===source && event.data==='hosted-preview-origin-probe'){
+          previewMessageOrigin=event.origin;removeEventListener('message',listener);
+        }
+      };
+      addEventListener('message',listener);
+    }""")
+    runtime.evaluate("parent.postMessage('hosted-preview-origin-probe','*')")
+    page.wait_for_function('typeof previewMessageOrigin === "string"')
+    check(page.evaluate('previewMessageOrigin === "null"'), 'Runtime message must have an opaque origin')
     check(runtime.evaluate('typeof vb6Native === "undefined" && typeof require === "undefined"'))
     page.evaluate('vb6Studio.stop()')
     result=page.evaluate('vb6Studio.designImmediate.execute("? 6 * 7")')
     check(result.get('value')=='42')
     check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame && vb6Studio.runState==="design" && !vb6Studio.designImmediate.frame.hasAttribute("srcdoc")'))
     page.evaluate('vb6Studio.designImmediate.reset();previewObserver.disconnect();previewURLs.forEach(url=>URL.revokeObjectURL(url));delete vb6Studio.runtimeDocumentLoader;void 0;')
-    return {'hostHookForRunAndImmediate':True,'noSrcdocNavigation':True,'opaqueSandbox':True,'nativeBridgeAbsent':True}
+    return {'hostHookForRunAndImmediate':True,'noSrcdocNavigation':True,'opaqueSandbox':True,'nativeBridgeAbsent':True,'messageOrigin':page.evaluate('previewMessageOrigin')}
 
 
 def hosted_preview_stale(page,mode):
