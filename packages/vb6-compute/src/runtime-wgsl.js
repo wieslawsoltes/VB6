@@ -1,4 +1,5 @@
 import {COMMAND_WGSL} from './protocol.js';
+import {ARRAY_WGSL} from './arrays-wgsl.js';
 /** Helpers deliberately use explicit error cells: WGSL has no exceptions. */
 export function runtimeWGSL(words) {
   return `${COMMAND_WGSL}
@@ -18,11 +19,13 @@ var<private> vb_lane:u32;
 var<private> vb_draws:u32;
 var<private> vb_last_error:u32;
 var<private> vb_halt:bool;
+var<private> vb_fatal:bool;
 fn fail(n:u32) { if(vb_error==0u) { vb_error=n; vb_error_line=vb_line; vb_error_source=vb_source; } }
+fn fatal(n:u32) {fail(n);vb_fatal=true;}
 fn raise_error(n:i32) {if(n<1i || n>65535i) {fail(5u);return;}fail(u32(n));}
 fn tick(line:u32,source:u32)->bool {
   vb_line=line; vb_source=source;
-  if(vb_steps>=params.fuel) { fail(10001u); return false; }
+  if(vb_steps>=params.fuel) { fatal(10001u); return false; }
   vb_steps+=1u; return true;
 }
 fn get_i(a:u32)->i32 { return bitcast<i32>(mem[a]); }
@@ -89,20 +92,7 @@ fn shared_cas(index:i32,compare:u32,value:u32)->u32 {
     if(result.exchanged || result.old_value!=compare) {return result.old_value;}
   }
 }
-fn array_at(base:u32,rank:u32,indices:vec4<i32>)->u32 {
-  if(mem[base]!=rank) {fail(9u);return 0u;}
-  var address=base+14u;
-  for(var d=0u;d<rank;d+=1u) {
-    let low=get_i(base+2u+d*3u); let high=get_i(base+3u+d*3u); let index=indices[d];
-    if(index<low || index>high) {fail(9u);return 0u;}
-    address+=u32(index-low)*mem[base+4u+d*3u];
-  }
-  return address;
-}
-fn array_bound(base:u32,dimension:i32,upper:bool)->i32 {
-  if(dimension<1 || u32(dimension)>mem[base]) {fail(9u);return 0;}
-  return get_i(base+2u+u32(dimension-1)*3u+select(0u,1u,upper));
-}
+${ARRAY_WGSL}
 fn rgb(r:i32,g:i32,b:i32)->i32 {
   if(r<0 || g<0 || b<0) {fail(5u);return 0;}
   return min(r,255)|(min(g,255)<<8u)|(min(b,255)<<16u);
@@ -115,7 +105,7 @@ fn ole_color(v:i32)->vec4<f32> {
 fn draw_shape(kind:u32,a:vec4<f32>,b:vec4<f32>,color:i32,fill:bool) {
   if(vb_error!=0u || vb_halt) {return;}
   if((kind==4u && a.z<0.0) || b.x<0.0) {fail(5u);return;}
-  if(vb_draws>=params.capacity) {fail(10002u);return;}
+  if(vb_draws>=params.capacity) {fatal(10002u);return;}
   let rgba=ole_color(color); if(vb_error!=0u) {return;}
   var c:DrawCommand; c.tags=vec4<u32>(kind,select(0u,1u,fill),0u,0u);
   c.a=a;c.b=b;c.color=rgba;c.color2=rgba;c.matrix=vec4<f32>(1.0,0.0,0.0,1.0);

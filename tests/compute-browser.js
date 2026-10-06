@@ -83,6 +83,7 @@ globalThis.runComputeBrowserTests=async function() {
     try{await ComputeProgram.create(gpu,a);}catch(e){failed=e.code==='GPU_WGSL';}ok(failed);equal(gpu.resources.size,before);
   });
   await test('disposing a program rejects further execution',async()=>{const p=await ComputeProgram.create(gpu,compileCompute(make('')));await p.dispose();let rejected=false;try{p.run();}catch(e){rejected=e.code==='GPU_DISPOSED';}ok(rejected);});
+  await runComputeExtendedTests({gpu,test,equal,ok});
   const resources=gpu.resources.size;
   await gpu.dispose();
   return {available:true,adapter:{vendor:info.vendor,architecture:info.architecture,device:info.device,description:info.description},tests,passed:tests.filter(t=>t.passed).length,failed:tests.filter(t=>!t.passed).length,resourcesAfterTests:resources};

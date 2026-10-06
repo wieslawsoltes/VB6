@@ -31,6 +31,7 @@ try:
         page.on('pageerror', lambda e: page_errors.append(str(e)))
         url = f'http://127.0.0.1:{server.server_port}'
         page.goto(url + '/artifacts/vb6-compute/playground.html')
+        page.add_script_tag(content=(ROOT / 'tests/compute-extended-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-browser.js').read_text())
         report = page.evaluate('runComputeBrowserTests()')
         report['browser'] = browser.version

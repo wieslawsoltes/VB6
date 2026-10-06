@@ -1,7 +1,7 @@
 /** Versioned, host-shareable compute ABI. All state cells occupy one u32 word. */
-export const COMPUTE_ABI = 1;
+export const COMPUTE_ABI = 2;
 export const STATE_HEADER_WORDS = 6; // error, line, steps, draw count, procedure id, reserved
-export const ARRAY_HEADER_WORDS = 14; // rank, length, four {lower, upper, stride} triples
+export const ARRAY_HEADER_WORDS = 16; // rank, length, four bound/stride triples, capacity, flags/locks
 export const COMMAND_WORDS = 40;
 export const MAX_CURVE_EDGES = 32;
 export const BUFFER_USAGE = Object.freeze({ MAP_READ:1, COPY_SRC:4, COPY_DST:8, UNIFORM:64, STORAGE:128, INDIRECT:256, QUERY_RESOLVE:512 });

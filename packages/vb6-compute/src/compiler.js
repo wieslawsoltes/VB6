@@ -10,7 +10,7 @@ const wgtype = type => type==='single'?'f32':'i32';
 
 /** Lowers the shared VB compiler IR to actual WGSL, not JavaScript execution.
  * Every invocation owns its state. A bounded PC loop preserves VB control flow.
- * Native WGSL functions implement the acyclic call graph, including ByRef aliases.
+ * Depth-specialized WGSL functions implement bounded calls and recursion with ByRef aliases.
  */
 export function compileComputeIR(program, options={}) {
   if(!program?.valid || !(program.modules instanceof Map))
@@ -19,6 +19,9 @@ export function compileComputeIR(program, options={}) {
   if(!['strict','single'].includes(precision))throw new ComputeError('precision must be strict or single','GPU_OPTION');
   const workgroupSize=integer(options.workgroupSize??64,'workgroupSize',1,256);
   const maxStateWords=integer(options.maxStateWords??16384,'maxStateWords',1,65536);
+  const dynamicArrayCapacity=integer(options.dynamicArrayCapacity??256,'dynamicArrayCapacity',1,65536);
+  const maxCallDepth=integer(options.maxCallDepth??16,'maxCallDepth',1,64);
+  const gosubStackDepth=integer(options.gosubStackDepth??64,'gosubStackDepth',1,1024);
   const warnings=[], globals=new Map(), procedures=new Map(), compiled=new Map(), active=new Set();
   const initial=[], exports=[], sources=[]; let current=null,requiresShared=false;
   const error=(message,code='GPU_UNSUPPORTED',line=current?.line||1)=>{
@@ -51,17 +54,19 @@ export function compileComputeIR(program, options={}) {
     if(decl.autoNew||decl.withEvents||decl.fixedLength)error('Object and fixed-string storage require the host runtime');
     const type=typeOf(decl.storageType||decl.type), offset=initial.length;
     if(decl.bounds!==null && decl.bounds!==undefined) {
-      if(!decl.bounds.length)error('Dynamic arrays require a host allocation; use fixed bounds for compute storage','GPU_DYNAMIC_ARRAY');
-      integer(decl.bounds.length,'array rank',1,4);
+      const dynamic=decl.bounds.length===0;
+      integer(decl.bounds.length,'array rank',0,4);
       const bounds=decl.bounds.map(([low,high])=>[
         integer(low?constNumber(low,module,proc):module.optionBase,'lower bound',-1073741824,1073741823),
         integer(constNumber(high,module,proc),'upper bound',-1073741824,1073741823)]);
-      let length=1;const strides=[];
+      let length=dynamic?0:1;const strides=[];
       for(const [low,high] of bounds){if(high<low)error('Array upper bound is below its lower bound','GPU_BOUNDS');strides.push(length);length*=high-low+1;if(length>maxStateWords)error('Array exceeds the compute state limit','GPU_LIMIT');}
+      const capacity=dynamic?dynamicArrayCapacity:length;
+      if(initial.length+ARRAY_HEADER_WORDS+capacity>maxStateWords)error('Compute array storage exceeds state limit','GPU_LIMIT');
       initial.push(bounds.length,length);
       for(let d=0;d<4;d++)initial.push(...(bounds[d]?[bounds[d][0]>>>0,bounds[d][1]>>>0,strides[d]]:[0,0,0]));
-      initial.push(...new Array(length).fill(0));
-      return done({name:decl.name,type,offset,address:`${offset}u`,array:true,bounds,length,words:ARRAY_HEADER_WORDS+length});
+      initial.push(capacity,dynamic?1:0,...new Array(capacity).fill(0));
+      return done({name:decl.name,type,offset,address:`${offset}u`,array:true,dynamic,bounds,length,capacity,words:ARRAY_HEADER_WORDS+capacity});
     }
     let value=decl.initial?constNumber(decl.initial,module,proc):0;
     if(!Number.isFinite(value))error('Non-finite initial value','GPU_VALUE');
@@ -76,6 +81,14 @@ export function compileComputeIR(program, options={}) {
     for(const decl of module.declarations)if(!decl.constant){const symbol=allocate(decl,module);symbol.scope=decl.scope;scope.set(key(decl.name),symbol);exports.push({...symbol,module:module.name});}
     for(const [name,proc] of module.procedures)procedures.set(key(module.name)+'.'+name,{module,proc,id:procedures.size+1});
   }
+  // A (procedure, depth) specialization makes a finite DAG acceptable to WGSL.
+  // Static variables are shared by logical procedure, automatic storage by frame.
+  const specializations=new Map(),staticLocals=new Map();let nextId=procedures.size;
+  function specialize(info,depth){
+    const k=info.id+':'+depth;if(specializations.has(k))return specializations.get(k);
+    if(specializations.size>=1024)error('Compute call graph exceeds 1024 specializations','GPU_LIMIT');
+    const result={...info,rootId:info.id,id:depth===0?info.id:++nextId,depth};specializations.set(k,result);return result;
+  }
   const entryName=String(options.entry||program.startup||'Main').replace(/^Sub\s+/i,'');
   function resolveProcedure(name,module=null) {
     if(name.includes('.')){const p=procedures.get(name.toLowerCase());if(!p)error('Procedure not found: '+name,'GPU_NAME');if(module&&p.module!==module&&p.proc.scope==='private')error('Private procedure is inaccessible: '+name,'GPU_NAME');return p;}
@@ -83,10 +96,10 @@ export function compileComputeIR(program, options={}) {
     const matches=[...procedures.values()].filter(p=>key(p.proc.name)===key(name)&&p.proc.scope!=='private');
     if(matches.length!==1)error(matches.length?'Ambiguous procedure: '+name:'Procedure not found: '+name,'GPU_NAME');return matches[0];
   }
-  const entry=resolveProcedure(entryName);
+  const entry=specialize(resolveProcedure(entryName),0);
   if(entry.proc.kind!=='sub'||entry.proc.params.length)error('The compute entry must be a parameterless Sub','GPU_ENTRY');
   function compileProcedure(info) {
-    if(active.has(info.id))error('Recursive call graph requires an explicit GPU stack and is not supported by this target','GPU_RECURSION');
+    if(active.has(info.id))error('Internal cyclic specialization','GPU_IR');
     if(compiled.has(info.id))return;
     active.add(info.id);const {module,proc,id}=info;
     current={module,proc,line:proc.line};
@@ -94,13 +107,27 @@ export function compileComputeIR(program, options={}) {
     if(proc.params.some(p=>p.paramArray))error('ParamArray requires tagged Variant storage','GPU_TYPE');
     const locals=new Map(),reset=[],params=[],lines=[],loops=new Map(),temps=new Map();let serial=0;
     const resultType=proc.kind==='sub'?'void':typeOf(proc.storageReturnType||proc.returnType);
+    if(info.depth>=maxCallDepth){
+      const signature=proc.params.map((p,i)=>`arg${i}:${p.byRef?'u32':wgtype(typeOf(p.storageType||p.type))}`).join(',');
+      compiled.set(id,`fn proc_${id}(${signature})${resultType==='void'?'':'->'+wgtype(resultType)} {fail(28u);${resultType==='void'?'return;':`return ${zero(resultType)};`}}`);
+      active.delete(id);sources.push({id,module:module.name,procedure:proc.name,line:proc.line,depth:info.depth});return;
+    }
     for(let i=0;i<proc.params.length;i++){
       const p=proc.params[i],type=typeOf(p.storageType||p.type),array=p.bounds!==null;
       if(p.byRef) {locals.set(key(p.name),{name:p.name,type,array,address:`arg${i}`,parameter:true});params.push(`arg${i}:u32`);}
       else {if(array)error('Array arguments must be ByRef');const s=allocate({...p,initial:null,bounds:null},module,proc);locals.set(key(p.name),s);params.push(`arg${i}:${wgtype(type)}`);reset.push(`${type==='single'?'put_f':'put_i'}(${s.address},arg${i});`);}
     }
     if(resultType!=='void') {const s=allocate({name:proc.name,type:resultType,bounds:null},module,proc);locals.set(key(proc.name),s);reset.push(`mem[${s.address}]=0u;`);}
-    for(const ins of proc.code)if(ins.op==='dim')for(const d of ins.decls)if(!d.constant){const s=allocate({...d,initial:null,line:ins.line},module,proc);locals.set(key(d.name),s);if(!proc.static&&!ins.static)for(let n=s.array?ARRAY_HEADER_WORDS:0;n<s.words;n++)reset.push(`mem[${s.offset+n}u]=0u;`);}
+    for(const ins of proc.code)if(ins.op==='dim')for(const d of ins.decls)if(!d.constant){
+      const staticKey=info.rootId+':'+key(d.name),isStatic=proc.static||ins.static;
+      let s=isStatic?staticLocals.get(staticKey):null;
+      if(!s){s=allocate({...d,initial:null,line:ins.line},module,proc);if(isStatic)staticLocals.set(staticKey,s);}
+      locals.set(key(d.name),s);
+      if(!proc.static&&!ins.static){
+        if(s.array)reset.push(`array_erase(${s.address});`);
+        else reset.push(`mem[${s.address}]=0u;`);
+      }
+    }
     const out=line=>lines.push('        '+line);
     const bind=(code,type)=>{const name=`t${serial++}`;out(`let ${name}:${wgtype(type)}=${code};`);return {code:name,type};};
     const convert=(value,to)=>{
@@ -134,7 +161,7 @@ export function compileComputeIR(program, options={}) {
           const indexes=node.args.map(a=>convert(expr(a),'long'));
           while(indexes.length<4)indexes.push('0i');
           const addr=`a${serial++}`;out(`let ${addr}=array_at(${array.address},${node.args.length}u,vec4<i32>(${indexes.join(',')}));`);
-          return {...array,array:false,address:addr};
+          return {...array,array:false,address:addr,arrayBase:array.address};
         }
       }
       return null;
@@ -251,8 +278,8 @@ export function compileComputeIR(program, options={}) {
         if(n==='computecircle')out(`draw_shape(4u,vec4<f32>(${a.join(',')},0.0),vec4<f32>(1.0,0.0,0.0,0.0),${color},true);`);
         return {code:'',type:'void'};
       }
-      const callee=resolveProcedure(name,module);
-      const bindings=new Map(),evaluated=[];
+      const callee=specialize(resolveProcedure(name,module),info.depth+1);
+      const bindings=new Map(),evaluated=[],locks=[];
       let positional=0,named=false;
       for(const arg of args){
         let slot;if(arg.kind==='named'){named=true;slot=callee.proc.params.findIndex(p=>key(p.name)===key(arg.name));if(slot<0)error('Unknown named argument: '+arg.name,'GPU_ARGUMENT');}
@@ -263,7 +290,7 @@ export function compileComputeIR(program, options={}) {
         if(p.byRef){
           const ref=address(value);
           if(p.bounds!==null){if(!ref?.array||ref.type!==pt)error('ByRef array argument type mismatch','GPU_ARGUMENT');bindings.set(slot,ref.address);}
-          else if(ref){if(ref.array||ref.type!==pt)error('ByRef argument type mismatch; use parentheses for an explicit temporary','GPU_ARGUMENT');bindings.set(slot,ref.address);}
+          else if(ref){if(ref.array||ref.type!==pt)error('ByRef argument type mismatch; use parentheses for an explicit temporary','GPU_ARGUMENT');bindings.set(slot,ref.address);if(ref.arrayBase){const token=`lock${serial++}`;out(`let ${token}=array_lock(${ref.arrayBase});`);locks.push({token,base:ref.arrayBase});}}
           else {const v=expr(value),s=allocate({name:'$argument',type:pt,bounds:null},module,proc);out(`${pt==='single'?'put_f':'put_i'}(${s.address},${convert(v,pt)});`);bindings.set(slot,s.address);}
         }else bindings.set(slot,convert(expr(value),pt));
       }
@@ -277,12 +304,14 @@ export function compileComputeIR(program, options={}) {
       const saved=current;compileProcedure(callee);current=saved;
       const code=`proc_${callee.id}(${evaluated.join(',')})`,type=callee.proc.kind==='sub'?'void':typeOf(callee.proc.storageReturnType||callee.proc.returnType);
       let value;if(type==='void'){out(code+';');value={code:'',type};}else value=bind(code,type);
+      for(const lock of locks)out(`if(${lock.token}) {array_unlock(${lock.base});}`);
       out(`vb_line=${current.line}u;vb_source=${id}u;`);return value;
     }
     const ret=resultType==='void'?'return;':`return ${resultType==='single'?'get_f':'get_i'}(${locals.get(key(proc.name)).address});`;
     const defaultRet=resultType==='void'?'return;':`return ${zero(resultType)};`;
     // Loop state is private to this activation; start/end/step are evaluated once.
     const declarations=[];
+    if(proc.code.some(ins=>ins.op==='gosub'||ins.op==='gosubReturn'||ins.gosub))declarations.push(`var gosub_stack:array<u32,${gosubStackDepth}>;var gosub_sp=0u;`);
     for(const ins of proc.code){
       if(ins.op==='forInit'){
         const variable=symbol(ins.name);if(!variable||variable.array)error('For control variable must be declared','GPU_NAME',ins.line);
@@ -300,6 +329,32 @@ export function compileComputeIR(program, options={}) {
         case 'assign':{if(ins.objectSet)error('Set assignment requires object storage');const s=address(ins.target);if(!s||s.array)error('Expected an assignable scalar or array element','GPU_NAME');const v=expr(ins.expr);out(`${s.type==='single'?'put_f':'put_i'}(${s.address},${convert(v,s.type)});`);break;}
         case 'expr':expr(ins.expr);break;
         case 'jump':next=`pc=${ins.target}u;`;break;
+        case 'gosub':
+          out(`if(gosub_sp>=${gosubStackDepth}u) {fail(28u);} else {gosub_stack[gosub_sp]=${pc+1}u;gosub_sp+=1u;}`);
+          next=`pc=${ins.target}u;`;break;
+        case 'gosubReturn':
+          out('if(gosub_sp==0u) {fail(3u);} else {gosub_sp-=1u;}');
+          next='pc=gosub_stack[gosub_sp];';break;
+        case 'computedJump':{
+          if(ins.targets.length>255)error('On GoTo/GoSub supports at most 255 targets','GPU_LIMIT');
+          const index=convert(expr(ins.expr),'long');out(`if(${index}<0i || ${index}>255i) {fail(5u);}`);
+          if(ins.gosub)out(`if(${index}>=1i && ${index}<=${ins.targets.length}i && vb_error==0u) {if(gosub_sp>=${gosubStackDepth}u) {fail(28u);} else {gosub_stack[gosub_sp]=${pc+1}u;gosub_sp+=1u;}}`);
+          next=`switch ${index} {${ins.targets.map((target,i)=>`case ${i+1}i: {pc=${target}u;}`).join('')} default: {pc=${pc+1}u;} }`;break;
+        }
+        case 'redim':{
+          for(const d of ins.decls){
+            const s=symbol(d.name);if(!s?.array)error('ReDim requires a declared typed array','GPU_TYPE');
+            if(s.dynamic===false)error('A fixed array cannot be ReDimmed','GPU_FIXED_ARRAY');
+            if(d.explicitType&&typeOf(d.type)!==s.type)error('ReDim cannot change a typed array element type','GPU_TYPE');
+            if(!d.bounds?.length||d.bounds.length>4)error('ReDim supports one through four dimensions','GPU_BOUNDS');
+            const lows=[],highs=[];
+            for(const [low,high] of d.bounds){lows.push(low?convert(expr(low),'long'):`${module.optionBase||0}i`);highs.push(convert(expr(high),'long'));}
+            while(lows.length<4){lows.push('0i');highs.push('0i');}
+            out(`array_redim(${s.address},${d.bounds.length}u,vec4<i32>(${lows.join(',')}),vec4<i32>(${highs.join(',')}),${!!ins.preserve});`);
+          }break;
+        }
+        case 'erase':
+          for(const node of ins.exprs){const s=nodeSymbol(node);if(!s?.array)error('Erase requires an array','GPU_TYPE');out(`array_erase(${s.address});`);}break;
         case 'branch':{const v=expr(ins.test);next=`pc=select(${ins.target}u,${pc+1}u,${ins.invert?'!':''}(${v.code}!=${zero(v.type)}));`;break;}
         case 'forInit':{
           const l=loops.get(ins.id),start=expr(ins.start),end=expr(ins.end),step=expr(ins.step);
@@ -324,7 +379,7 @@ export function compileComputeIR(program, options={}) {
         case 'onError':out(`error_mode=${{off:0,next:1,goto:2}[ins.mode]}u; handler=${ins.target??0}u; handler_active=false; vb_last_error=0u;`);break;
         case 'raiseError':{const v=expr(ins.expr);out(`raise_error(${convert(v,'long')});`);break;}
         case 'resume':out('if(!handler_active) {fail(20u);} handler_active=false; vb_last_error=0u;');next=`pc=${ins.mode==='goto'?ins.target+'u':ins.mode==='next'?'error_pc+1u':'error_pc'};`;break;
-        case 'assert':{const v=expr(ins.expr);out(`if(${v.code}==${zero(v.type)}) {fail(10003u);}`);break;}
+        case 'assert':{const v=expr(ins.expr);out(`if(${v.code}==${zero(v.type)}) {fatal(10003u);}`);break;}
         case 'graphics':{
           if(ins.object.kind!=='id'||key(ins.object.name)!=='me')error('Only the compute surface (unqualified graphics) is available','GPU_HOST_DRAW');
           const coords=ins.coords.map(v=>convert(expr(v),'single')),color=convert(expr(ins.color),'long');
@@ -339,6 +394,7 @@ export function compileComputeIR(program, options={}) {
     }
     const body=`fn proc_${id}(${params.join(',')})${resultType==='void'?'':'->'+wgtype(resultType)} {
   if(vb_error!=0u || vb_halt) {${defaultRet}}
+  vb_line=${proc.line}u;vb_source=${id}u;
   ${reset.join('\n  ')}
   ${declarations.join('\n  ')}
   var pc=0u;var done=false;var error_mode=0u;var handler=0u;var handler_active=false;var error_pc=0u;
@@ -350,7 +406,7 @@ ${blocks.join('\n')}
     }
     if(vb_error!=0u) {
       // Resource-limit faults are fatal; error handlers cannot evade the budget.
-      if(error_mode==0u || handler_active || vb_error>=10000u) {${defaultRet}}
+      if(error_mode==0u || handler_active || vb_fatal) {${defaultRet}}
       vb_last_error=vb_error;vb_error=0u;error_pc=previous_pc;done=false;
       if(error_mode==1u) {pc=previous_pc+1u;} else {handler_active=true;pc=handler;}
     }
@@ -359,7 +415,7 @@ ${blocks.join('\n')}
   }
   ${ret}
 }`;
-    compiled.set(id,body);active.delete(id);sources.push({id,module:module.name,procedure:proc.name,line:proc.line});
+    compiled.set(id,body);active.delete(id);sources.push({id,module:module.name,procedure:proc.name,line:proc.line,depth:info.depth});
   }
   compileProcedure(entry);
   if(initial.length>maxStateWords)error(`State requires ${initial.length} words; limit is ${maxStateWords}`,'GPU_LIMIT');
@@ -368,14 +424,15 @@ ${blocks.join('\n')}
 @compute @workgroup_size(${workgroupSize})
 fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   if(invocation.x>=params.count) {return;}
-  vb_lane=invocation.x;vb_error=0u;vb_steps=0u;vb_draws=0u;vb_last_error=0u;vb_halt=false;
+  vb_lane=invocation.x;vb_error=0u;vb_steps=0u;vb_draws=0u;vb_last_error=0u;vb_halt=false;vb_fatal=false;
   let base=vb_lane*${stride}u;
   for(var i=0u;i<${words}u;i+=1u) {mem[i]=state[base+${STATE_HEADER_WORDS}u+i];}
   proc_${entry.id}();
   state[base]=vb_error;state[base+1u]=select(0u,vb_error_line,vb_error!=0u);state[base+2u]=vb_steps;
-  state[base+3u]=vb_draws;state[base+4u]=select(0u,vb_error_source,vb_error!=0u);state[base+5u]=0u;
+  state[base+3u]=vb_draws;state[base+4u]=select(0u,vb_error_source,vb_error!=0u);state[base+5u]=select(0u,1u,vb_fatal);
   for(var i=0u;i<${words}u;i+=1u) {state[base+${STATE_HEADER_WORDS}u+i]=mem[i];}
 }`;
-  return {abi:COMPUTE_ABI,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
+  if(source.length>4*1024*1024)error('Generated WGSL exceeds 4 MiB; reduce maxCallDepth or split the module','GPU_LIMIT');
+  return {abi:COMPUTE_ABI,dynamicArrayCapacity,gosubStackDepth,maxCallDepth,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
     stateWords:words,stateStride:stride,initialState:initial,globals:exports,sources:sources.sort((a,b)=>a.id-b.id),diagnostics:warnings,wgsl:source};
 }
