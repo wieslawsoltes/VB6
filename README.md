@@ -256,3 +256,14 @@ Native project support also includes explicit ZIP filename-codepage selection, p
 ### Advanced browser Win32 GDI
 
 `@vb6/win32-browser` 0.4.0 exposes 311 Win32 export names and adds curved/polygon/path regions, transforms, memory-DC fonts, owned window shapes and paint/update lifecycles. GDI rasters can now use the reusable WebGPU texture presenter with an explicit Canvas2D fallback. The classic Win32 API Workbench includes a **Paths and text** example. See [advanced contracts and measured compatibility boundaries](packages/win32-browser/ADVANCED-GDI.md). No full native raster/font certification or npm registry publication is claimed.
+
+### Local change review and follow-ups
+
+The classic agent **Changes** tab compares current module source/designer state
+against task-start or latest-run checkpoints, with bounded diffs, patch export,
+line-targeted feedback and revision-checked source-only restoration through normal
+Undo. **Queue message** stores follow-ups locally while generation runs; Queue
+supports editing/reordering and explicit fresh-confirmation dispatch without
+replacing unsent composer drafts or inheriting Full-access grants. Nothing sends
+automatically. See [the workbench guide](docs/CODING-AGENT-WORKBENCH.md) for
+coverage, memory limits, stale-workspace protection and non-Git boundaries.

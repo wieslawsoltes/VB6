@@ -676,6 +676,148 @@ def permission_plan(page,mode):
     return {'planInstructions':True,'nonMutatingCatalog':True}
 
 
+def queued_followups(page, mode, provider='openai'):
+    requests=mock(page,provider,lambda i,b:([],'Finished queued turn.'))
+    configure(page,provider,'readonly')
+    page.get_by_label('Agent task',exact=True).fill('First queued message.')
+    page.get_by_role('button',name='Queue message',exact=True).click()
+    check(len(requests)==0)
+    page.get_by_label('Agent task',exact=True).fill('Composer draft that must survive.')
+    tab(page,'Queue')
+    check(page.get_by_label('Queued agent messages',exact=True).locator('option').count()==1)
+    page.get_by_role('button',name='Send selected message…',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True)
+    check('First queued message.' in dialog.inner_text())
+    dialog.get_by_role('button',name='Cancel',exact=True).click()
+    check(len(requests)==0)
+    check(page.get_by_label('Queued agent messages',exact=True).locator('option').count()==1)
+    page.get_by_role('button',name='Send selected message…',exact=True).click()
+    page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True).get_by_role('button',name='Start Task',exact=True).click()
+    finish(page)
+    check(len(requests)==1)
+    body=json.dumps(requests[0]);check('First queued message.' in body);check('Composer draft that must survive.' not in body)
+    check(page.get_by_label('Queued agent messages',exact=True).locator('option').count()==0)
+    tab(page,'Task');check(page.get_by_label('Agent task',exact=True).input_value()=='Composer draft that must survive.')
+    return {'provider':provider,'manualConfirmOnly':True,'consumedAfterAcceptance':True,'draftPreserved':True}
+
+
+def queue_while_running(page,mode):
+    configure(page,mode='readonly')
+    page.evaluate("""() => {
+      const panel=vb6Studio.documents.tools.get('tool:coding-agents');
+      panel.transportFactory=()=>async (_, {signal,receive})=>new Promise((resolve,reject)=>{
+        window.queueStarted=true;window.finishQueueRequest=()=>{receive({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'Only original run finished.'}]}],usage:{total_tokens:10}});resolve()};
+        signal.addEventListener('abort',()=>reject(signal.reason),{once:true});
+      });
+    }""")
+    start(page);page.wait_for_function('window.queueStarted===true')
+    page.get_by_label('Agent task',exact=True).fill('Queued while running.')
+    page.get_by_role('button',name='Queue message',exact=True).click()
+    tab(page,'Queue');check(page.get_by_role('button',name='Send selected message…',exact=True).is_disabled())
+    page.get_by_role('button',name='Edit selected message…',exact=True).click()
+    page.get_by_label('Edit queued message',exact=True).fill('Edited while running.')
+    page.get_by_role('dialog',name='AI Coding Agent — Edit Queued Message',exact=True).get_by_role('button',name='Save Message',exact=True).click()
+    check('Edited while running.' in page.get_by_label('Queued message preview',exact=True).inner_text())
+    page.evaluate('window.finishQueueRequest()');finish(page)
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.requests')==1)
+    check(page.get_by_label('Queued agent messages',exact=True).locator('option').count()==1)
+    check(not page.get_by_role('button',name='Send selected message…',exact=True).is_disabled())
+    return {'editingDuringRun':True,'noAutomaticFollowup':True}
+
+
+def queue_permission_confirmation(page,mode):
+    requests=mock(page,'openai',lambda i,b:([],'Done.'))
+    configure(page);page.get_by_label('Task permission profile',exact=True).select_option('full')
+    page.get_by_role('button',name='Queue message',exact=True).click();tab(page,'Queue')
+    page.get_by_role('button',name='Send selected message…',exact=True).click()
+    page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True).get_by_role('button',name='Start Task',exact=True).click();finish(page)
+    check(len(requests)==0);check(page.get_by_label('Queued agent messages',exact=True).locator('option').count()==1)
+    check('not confirmed' in page.locator('.agent-status').inner_text())
+    # A changed queue entry while confirmation is pending must not send its predecessor.
+    page.get_by_role('button',name='Send selected message…',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True);dialog.get_by_label('Confirm Full IDE access for this run',exact=True).check()
+    page.evaluate("const q=vb6Studio.codingAgents.conversations.active.followups;const item=q.list()[0];q.edit(item.id,'changed after confirmation began',item.version)")
+    dialog.get_by_role('button',name='Start Task',exact=True).click();finish(page)
+    check(len(requests)==0);check('changed during confirmation' in page.locator('.agent-status').inner_text())
+    return {'freshFullAcknowledgment':True,'staleQueueRejected':True,'noConsumptionOnPreflightFailure':True}
+
+
+def queue_task_lifecycle(page,mode):
+    configure(page,mode='readonly');page.get_by_label('Agent task',exact=True).fill('A');page.get_by_role('button',name='Queue message',exact=True).click()
+    first=page.evaluate('vb6Studio.codingAgents.conversations.activeId')
+    page.get_by_role('button',name='New Task',exact=True).click()
+    page.get_by_label('Agent task',exact=True).fill('B');page.get_by_role('button',name='Queue message',exact=True).click()
+    tab(page,'Tasks');page.get_by_label('Agent tasks',exact=True).select_option(first)
+    tab(page,'Queue');check(page.get_by_label('Queued message preview',exact=True).inner_text()=='A')
+    page.evaluate("vb6Studio.closeDocument('tool:coding-agents');vb6Studio.command('codingAgents')")
+    tab(page,'Queue');check(page.get_by_label('Queued message preview',exact=True).inner_text()=='A')
+    check(page.get_by_label('Provider API key',exact=True).input_value()=='')
+    check(not page.evaluate("JSON.stringify(vb6Studio.project).includes('followup-')"))
+    page.evaluate("vb6Studio.loadProject(structuredClone(vb6Studio.project));vb6Studio.command('codingAgents')");tab(page,'Queue')
+    check(page.get_by_role('button',name='Send selected message…',exact=True).is_disabled())
+    return {'unstartedQueueBindsWorkspace':True,'taskIsolation':True,'reopenKeepsQueueClearsCredentials':True}
+
+
+def make_review_change(page):
+    def strategy(i,body):
+        if i==1:return [{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',body),'edits':[{'module':'Form1','start':0,'end':0,'text':"' Review change <img onerror=alert(1)>\n",'expectedText':''}]}}],'Preparing a source edit.'
+        return [],'Source edited.'
+    requests=mock(page,'openai',strategy);configure(page,mode='autoedit');original=page.evaluate('vb6Studio.project.modules[0].code');start(page);finish(page)
+    return requests,original
+
+
+def review_restore(page,mode):
+    requests,original=make_review_change(page);modified=page.evaluate('vb6Studio.project.modules[0].code')
+    tab(page,'Changes');check('modified' in page.get_by_label('Changed project documents',exact=True).inner_text())
+    check('Review change' in page.get_by_label('Project change diff',exact=True).inner_text())
+    check(page.get_by_label('Project change diff',exact=True).locator('img').count()==0)
+    with page.expect_download() as info:page.get_by_role('button',name='Save review patch…',exact=True).click()
+    patch=Path(info.value.path()).read_text();check('+\' Review change' in patch);check('not-a-real-key-private' not in patch)
+    check(len(requests)==2)
+    page.get_by_role('button',name='Restore source…',exact=True).click()
+    page.get_by_role('dialog',name='AI Coding Agent — Restore Reviewed Source',exact=True).get_by_role('button',name='Restore Source',exact=True).click()
+    check(page.evaluate('vb6Studio.project.modules[0].code')==original)
+    check(page.evaluate("vb6Studio.history.undoStack.at(-1).label.startsWith('Restore reviewed source')"))
+    page.evaluate("vb6Studio.command('undo')");check(page.evaluate('vb6Studio.project.modules[0].code')==modified)
+    check(len(requests)==2)
+    return {'sourceRestoration':True,'normalUndo':True,'patchExport':True,'inertMarkup':True,'noProviderRequestsForReview':True}
+
+
+def review_stale_and_reload(page,mode):
+    requests,original=make_review_change(page);tab(page,'Changes')
+    page.get_by_role('button',name='Restore source…',exact=True).click()
+    page.evaluate("text => { vb6Studio.project.modules[0].code += text; vb6Studio.markDirty(); }", "\n' manual edit")
+    page.get_by_role('dialog',name='AI Coding Agent — Restore Reviewed Source',exact=True).get_by_role('button',name='Restore Source',exact=True).click()
+    check('manual edit' in page.evaluate('vb6Studio.project.modules[0].code'))
+    check('changed after review' in page.locator('.agent-status').inner_text())
+    page.evaluate("vb6Studio.loadProject(structuredClone(vb6Studio.project));vb6Studio.command('codingAgents')")
+    tab(page,'Changes');check('Previous workspace' in page.get_by_label('Change review summary',exact=True).inner_text());check(page.get_by_role('button',name='Restore source…',exact=True).is_disabled())
+    check(len(requests)==2)
+    return {'staleRevisionRefused':True,'sameIDReloadRefused':True}
+
+
+def review_feedback(page,mode):
+    requests,original=make_review_change(page);tab(page,'Changes')
+    page.locator('.agent-diff-line[data-kind="+"]').first.click()
+    page.get_by_label('Change review feedback',exact=True).fill('Keep this comment but add a test.')
+    page.get_by_role('button',name='Queue review feedback',exact=True).click()
+    check(len(requests)==2);tab(page,'Queue')
+    text=page.get_by_label('Queued message preview',exact=True).inner_text()
+    check('Form1.frm' in text and 'current line 1' in text and 'add a test' in text and 'Re-read' in text)
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.requests')==2)
+    tab(page,'Changes');page.screenshot(path=str(REPORTS/f'{mode}-change-review.png'))
+    return {'lineTargetedFeedback':True,'explicitLocalQueueOnly':True}
+
+
+def review_last_run(page,mode):
+    requests,original=make_review_change(page)
+    page.get_by_label('Agent task',exact=True).fill('Explain only.');page.get_by_label('Task permission profile',exact=True).select_option('readonly');start(page);finish(page)
+    tab(page,'Changes');check(page.get_by_label('Changed project documents',exact=True).locator('option').count()==1)
+    page.get_by_label('Review change scope',exact=True).select_option('run');check(page.get_by_label('Changed project documents',exact=True).locator('option').count()==0)
+    page.get_by_label('Review change scope',exact=True).select_option('task');check(page.get_by_label('Changed project documents',exact=True).locator('option').count()==1)
+    return {'taskAndLastRunCheckpoints':True}
+
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -699,7 +841,8 @@ try:
                 case(browser,mode,provider,lambda page,mode,provider=provider:provider_workflow(page,mode,provider))
                 case(browser,mode,provider+'-plan-question',lambda page,mode,provider=provider:plan_question(page,mode,provider))
                 case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))
-            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan)]:case(browser,mode,name,fn)
+                case(browser,mode,provider+'-queue',lambda page,mode,provider=provider:queued_followups(page,mode,provider))
+            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan),('queue-while-running',queue_while_running),('queue-permission-confirmation',queue_permission_confirmation),('queue-task-lifecycle',queue_task_lifecycle),('review-restore',review_restore),('review-stale-reload',review_stale_and_reload),('review-feedback',review_feedback),('review-last-run',review_last_run)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()
