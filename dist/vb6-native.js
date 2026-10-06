@@ -2,7 +2,7 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* ../language/errors.js */
+/* ..\language\errors.js */
 __modules[0]=(()=>{
 
 class VBError extends Error {
@@ -12,7 +12,7 @@ class VBError extends Error {
 return {VBError};
 })();
 
-/* ../runtime/calendar.js */
+/* ..\runtime\calendar.js */
 __modules[1]=(()=>{
 const {VBError}=__modules[0];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
@@ -91,7 +91,7 @@ function weekdayName(day,abbreviate=0,first=1){day=integer(day);if(day<1||day>7)
 return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,monthName,weekdayName};
 })();
 
-/* ../language/lexer.js */
+/* ..\language\lexer.js */
 __modules[2]=(()=>{
 const {asDate}=__modules[1];
 const {VBError}=__modules[0];
@@ -185,7 +185,7 @@ function logicalLines(source) {
 return {tokenize,splitTop,logicalLines,VBError};
 })();
 
-/* ../runtime/decimal.js */
+/* ..\runtime\decimal.js */
 __modules[3]=(()=>{
 const {VBError}=__modules[0];
 
@@ -263,7 +263,7 @@ class VBDecimal {
 return {VBDecimal};
 })();
 
-/* ../core/window-context.js */
+/* ..\core\window-context.js */
 __modules[4]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
@@ -295,7 +295,7 @@ function hasUIDialog() {
 return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
-/* ../core/core.js */
+/* ..\core\core.js */
 __modules[5]=(()=>{
 const {uiDocument}=__modules[4];
 
@@ -358,7 +358,7 @@ const VERSION = '0.6.0';
 return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERSION};
 })();
 
-/* ../runtime/values.js */
+/* ..\runtime\values.js */
 __modules[6]=(()=>{
 const {VBDecimal}=__modules[3];
 const {asDate,dateToSerial}=__modules[1];
@@ -799,7 +799,7 @@ function describe(value){if(value instanceof VBScalar)return value.type==='boole
 return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBScalar,SCALAR_TYPES,unbox,scalarType,tagScalar,storageScalar,readScalar,literalScalar,signedLiteralScalar,scalarBinary,scalarUnary,VBInterfaceView,objectIdentity,objectSupports,interfaceView,isNothing,truth,numeric,decimal,normalizeNumericString,scalarNumberString,vbString,printScalar,roundRatio,VBCurrency,makeRecord,cloneValue,defaultValue,coerce,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,unary,binary,describe,VBDecimal};
 })();
 
-/* ../data/common.js */
+/* ..\data\common.js */
 __modules[7]=(()=>{
 const {VBError}=__modules[2];
 const {VBArray, VBCurrency, VBDecimal}=__modules[6];
@@ -979,7 +979,7 @@ function resultFromRows(rows,fields){
 return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,quoteIdentifier,sameValue,parseConnectionString,connectionConfiguration,assertPublicConfiguration,normalizeDataSources,safeHttpURL,pathValue,columnType,resultFromRows};
 })();
 
-/* ../runtime/binary-codec.js */
+/* ..\runtime\binary-codec.js */
 __modules[8]=(()=>{
 const {VBError}=__modules[2];
 const {VBScalar,SCALAR_TYPES,scalarType,tagScalar,unbox,VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[6];
@@ -1078,7 +1078,7 @@ function decodeVariable(bytes,schema={},current,mode='binary'){const reader=new 
 return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVariable};
 })();
 
-/* ../project/binary-assets.js */
+/* ..\project\binary-assets.js */
 __modules[9]=(()=>{
 const {VBError}=__modules[2];
 
@@ -1090,7 +1090,7 @@ function toBase64(bytes){if(bytes.length>MAX_RESOURCE_BYTES)fail('resource excee
 return {fromBase64,toBase64};
 })();
 
-/* ../project/native-text.js */
+/* ..\project\native-text.js */
 __modules[10]=(()=>{
 const {decodeANSI,encodeANSI}=__modules[8];
 const {VBError}=__modules[2];
@@ -1157,7 +1157,7 @@ function encodeNativeText(text,document={encoding:'windows-1252',bom:false},over
 return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferredEOL,unquote,nativePathValue,quote,commentAt,replaceLineValue,decodeNativeBytes,decodeNativeText,encodeNativeText};
 })();
 
-/* ../project/frx.js */
+/* ..\project\frx.js */
 __modules[11]=(()=>{
 const {VBError}=__modules[2];
 const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[10];
@@ -1262,7 +1262,7 @@ function prepareResources(project){
 return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPath,fromBase64,toBase64,resourceOffset,readFRXRecord,writeFRXRecord,rasterDataURL,rasterBytes,hydrateResources,prepareResources};
 })();
 
-/* ../project/res.js */
+/* ..\project\res.js */
 __modules[12]=(()=>{
 const {VBError}=__modules[2];
 const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[11];
@@ -1356,7 +1356,7 @@ function listResourceStrings(model){const result=[];for(const entry of model?.en
 return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStringTable,encodeStringTable,setResource,removeResource,setResourceString,listResourceStrings};
 })();
 
-/* ../project/model.js */
+/* ..\project\model.js */
 __modules[13]=(()=>{
 const {normalizeDataSources}=__modules[7];
 const { clone, lower, safeName }=__modules[5];
@@ -1427,7 +1427,7 @@ function projectStats(project){return {modules:project.modules.length,forms:proj
 return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_DEFAULTS,createControl,createForm,newProject,normalizeProject,uniqueName,findModule,projectStats};
 })();
 
-/* ../runtime/constants.js */
+/* ..\runtime\constants.js */
 __modules[14]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
@@ -1454,7 +1454,7 @@ Object.freeze(VB_CONSTANTS);
 return {VB_CONSTANTS};
 })();
 
-/* ../language/binding.js */
+/* ..\language\binding.js */
 __modules[15]=(()=>{
 const {VBError}=__modules[0];
 const {lower}=__modules[5];
@@ -1572,7 +1572,7 @@ function bindConstants(modules) {
 return {bindConstants};
 })();
 
-/* ../language/default-types.js */
+/* ..\language\default-types.js */
 __modules[16]=(()=>{
 const {VBError}=__modules[2];
 
@@ -1599,7 +1599,7 @@ function defaultIdentifierType(name,table={}){
 return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
-/* ../language/interfaces.js */
+/* ..\language\interfaces.js */
 __modules[17]=(()=>{
 const {lower}=__modules[5];
 
@@ -1643,7 +1643,7 @@ function validateInterfaces(modules){
 return {validateInterfaces};
 })();
 
-/* ../language/expression.js */
+/* ..\language\expression.js */
 __modules[18]=(()=>{
 const { tokenize, VBError }=__modules[2];
 
@@ -1747,7 +1747,7 @@ function numericLiteralValue(token){
 return {ExpressionParser,parseExpression,parseCall};
 })();
 
-/* ../language/conditional.js */
+/* ..\language\conditional.js */
 __modules[19]=(()=>{
 const { VBError }=__modules[2];
 const { parseExpression }=__modules[18];
@@ -1789,7 +1789,7 @@ function preprocess(source, constants = {}, sourceName = '') {
 return {preprocess};
 })();
 
-/* ../language/compiler.js */
+/* ..\language\compiler.js */
 __modules[20]=(()=>{
 const {bindConstants}=__modules[15];
 const {defaultIdentifierType,addDefaultTypes}=__modules[16];
