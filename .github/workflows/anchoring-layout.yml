@@ -1,0 +1,36 @@
+name: Optional anchoring and layout
+on:
+  push:
+    branches: [feat/optional-anchoring-layout]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'packages/**'
+      - '.github/workflows/anchoring-layout.yml'
+permissions:
+  contents: read
+concurrency:
+  group: layout-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and test
+        run: npm run build && npm test
+      - name: Archive reproducible source for validation
+        if: always()
+        run: git archive --format=tar HEAD > layout-source.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: layout-source
+          path: layout-source.tar
+          retention-days: 3
