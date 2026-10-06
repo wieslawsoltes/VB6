@@ -123,6 +123,12 @@ virtual files/resources, and workspace management. It is a real iterative tool-u
 Streaming text, tool activity, before/after edit review, Stop, normal Undo,
 request/tool/token limits and downloadable in-memory transcripts are included.
 
+The composer now offers **Ask for approval, Read only, Plan, Auto edit, Full IDE
+access, and Custom** profiles. Scope and exact-tool Allow/Ask/Deny rules, run-only
+approvals, explicit full-access acknowledgement, lease expiry and revoke controls
+are enforced by the IDE tool adapter. Full IDE access is not unrestricted host
+shell/disk/network access. See [permission profiles](docs/CODING-AGENT-PERMISSIONS.md).
+
 The **Task** tab now renders a live conversation with streaming replies, collapsible
 tool steps, approval/interruption states, safe formatted text and copyable code.
 Draft while the agent runs; Enter sends, Shift+Enter adds a line, and Jump to latest

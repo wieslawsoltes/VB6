@@ -1,5 +1,6 @@
 import {CodingAgent} from './agent.js';
 import {normalizeAgentLimits} from './limits.js';
+import {normalizeAgentPermissions} from './permissions.js';
 
 let nextId = 0;
 const titleOf = value => {
@@ -8,9 +9,10 @@ const titleOf = value => {
 };
 /** Bounded, memory-only tasks. Native histories and grants never become project data. */
 export class AgentConversations {
-  constructor(adapter, {onEvent = () => {}, askUser, maxTasks = 8, defaultLimits} = {}) {
+  constructor(adapter, {onEvent = () => {}, askUser, maxTasks = 8, defaultLimits, permissionConstraints = {}} = {}) {
     if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 16) throw new Error('Invalid task limit.');
     this.defaultLimits = normalizeAgentLimits(defaultLimits);
+    this.permissionConstraints = permissionConstraints;
     this.adapter = adapter; this.onEvent = onEvent; this.askUser = askUser; this.maxTasks = maxTasks;
     this.tasks = new Map(); this.activeId = ''; this.create();
   }
@@ -23,10 +25,13 @@ export class AgentConversations {
     this.idle(); title = titleOf(title);
     if (this.tasks.size >= this.maxTasks) throw new Error('Task limit reached. Delete an old task before starting another.');
     const id = 'agent-task-' + (++nextId), created = new Date().toISOString();
-    const task = {id, title, created, updated: created, draft: '', limits: {...this.defaultLimits}, agent: null};
-    task.agent = new CodingAgent(this.adapter, {askUser: this.askUser, sessionKey: id, onEvent: event => {
+    const task = {id, title, created, updated: created, draft: '', limits: {...this.defaultLimits}, permissions: {mode: 'review', scopes: [], scopeRules: {}, toolRules: {}, approvalPolicy: 'on-request', permissionMinutes: 10}, agent: null};
+    task.agent = new CodingAgent(this.adapter, {askUser: this.askUser, sessionKey: id, permissionConstraints: this.permissionConstraints, onEvent: event => {
       task.updated = event.time; this.notifyEvent(event, id);
     }});
+    this.permissionConstraints = task.agent.permissionConstraints;
+    const host = task.agent.permissionConstraints;
+    task.permissions = normalizeAgentPermissions({mode: host.allowedModes.includes('review') ? 'review' : host.allowedModes[0], permissionMinutes: Math.min(10, host.maxMinutes)}, task.agent.tools);
     task.agent.limits = {...task.limits};
     this.tasks.set(id, task); this.activeId = id; this.notify('task', 'Selected ' + title + '.'); return task;
   }
