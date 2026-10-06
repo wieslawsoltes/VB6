@@ -2,8 +2,9 @@
 
 Run commands from the repository root. The source build requires **Node.js 22
 or later** and has no root npm dependencies. Python and Playwright are needed
-for browser checks; desktop and installed-provider tests have separate
-prerequisites. Start with the [documentation index](README.md) for each subsystem.
+for browser checks, plus Pillow for image checks. Desktop and installed-provider
+tests have separate prerequisites. Start with the [documentation index](README.md)
+for each subsystem.
 
 ## Build and portable tests
 
@@ -33,7 +34,7 @@ Use the Playwright version pinned in the checked-in
 [validation workflow](../.github/workflows/validate.yml):
 
 ```sh
-python -m pip install playwright==1.57.0
+python -m pip install playwright==1.57.0 pillow
 python -m playwright install --with-deps chromium firefox webkit
 npm run build
 ```
