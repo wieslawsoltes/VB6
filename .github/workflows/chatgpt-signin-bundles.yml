@@ -1,0 +1,41 @@
+name: Build sign-in fix bundles
+on:
+  push:
+    branches: [fix/chatgpt-signin-feedback]
+    paths: ['.github/workflows/chatgpt-signin-bundles.yml']
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.ref == 'refs/heads/fix/chatgpt-signin-feedback'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify reviewed source
+        run: |
+          sha256sum -c <<'HASHES'
+          6a6af96bbf153036e1a888b7c2053958213e3c9e2e023102d1a146e379c316ae  src/agents/chatgpt-connection.js
+          86392fb5ad1f06db3e94547b020ea7e6131e4509fd317bfe0d30bde81eb3842e  tests/chatgpt-connection.test.mjs
+          f826dad5cd228d7b01a0eb878a3f868980a28e71ccb464bc3f98aa6c801da6c6  tools/chatgpt-signin-browser-tests.py
+          e1faf03c3c1eed1a65a940fb33322a59965658dddb63e9f4bc23f0d1e0fafb4f  package.json
+          438ecbc69d4269bbc9ba6cc3c85a81edcae72eff1696826ee9e9997f7765fee1  docs/CHATGPT-SIGNIN-TROUBLESHOOTING.md
+          HASHES
+      - run: npm run build
+      - run: npm test
+      - name: Commit generated files only after verifying the complete candidate tree
+        run: |
+          git add dist/studio.js dist/VB6-Studio-Web.html
+          git rm .github/workflows/chatgpt-signin-bundles.yml
+          git diff --cached --check
+          test "$(git write-tree)" = 34a8a76c9bdbc4e2e77931453ab87e22bd8e5f7a
+          test "$(git ls-remote origin refs/heads/fix/chatgpt-signin-feedback | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'build(agents): regenerate verified sign-in bundles and remove temporary builder'
+          git push origin HEAD:refs/heads/fix/chatgpt-signin-feedback
