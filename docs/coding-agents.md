@@ -382,6 +382,17 @@ Continuation-specific references:
 
 The public conversation and reviewed context handoff keep each validated agent question before its answer, so short answers such as “Yes” do not lose their meaning when switching tasks. Cancelling a question records the question but does not invent an answer or permit continuation. Questions remain inert text; the handoff is an editable excerpt, not authorization or proof of the current project state. Native provider signatures, raw tool results and permission grants remain excluded.
 
+### Local change review and follow-ups
+
+The classic agent **Changes** tab compares current module source/designer state
+against task-start or latest-run checkpoints, with bounded diffs, patch export,
+line-targeted feedback and revision-checked source-only restoration through normal
+Undo. **Queue message** stores follow-ups locally while generation runs; Queue
+supports editing/reordering and explicit fresh-confirmation dispatch without
+replacing unsent composer drafts or inheriting Full-access grants. Nothing sends
+automatically. See [the workbench guide](CODING-AGENT-WORKBENCH.md) for
+coverage, memory limits, stale-workspace protection and non-Git boundaries.
+
 ## ChatGPT account mode
 
 OpenAI can also use **ChatGPT account — ChatGPT plan usage** through the local relay, without an API key. This is an explicit alternative to API billing, not a fallback. For sign-in, consent, accounts, model discovery, storage, supported deployment and output-limit differences, see [CHATGPT-LOGIN.md](CHATGPT-LOGIN.md).

@@ -105,6 +105,7 @@ export class CodingAgent {
       this.emit('permission', permissionSummary(permissions) + '. Full IDE access does not grant host shell, disk or unrestricted network access.');
       const tools = this.tools.filter(tool => this.permissionSession.decision(tool.name).action !== 'deny');
       const catalog = toolCatalog(tools);
+      if (!compactOnly) this.emit('run-start', 'Run started with freshly reviewed permissions.');
       if (!continuation && !compactOnly) { this.goal ||= prompt; this.latestPrompt = prompt; this.history.push(userMessage(provider, prompt)); this.historyBytes = sizeOf(this.history); this.emit('user', prompt); }
       else this.emit('resume', this.pendingTurn
         ? 'Continuing a validated deferred batch. It has not executed; original arguments and current permissions/revisions are checked.'
