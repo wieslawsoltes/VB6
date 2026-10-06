@@ -1,0 +1,110 @@
+name: Preserve OCX main in agent workbench
+on:
+  push:
+    branches: [feat/agent-change-review-queue]
+    paths: [.github/workflows/agent-workbench-ocx-sync.yml]
+permissions:
+  contents: write
+concurrency:
+  group: agent-workbench-ocx-sync
+  cancel-in-progress: true
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/feat/agent-change-review-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify both input trees and integrate current main
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = 1401826a72386bbe30bb9110111c67184157d778
+          test "$(git rev-parse 1401826a72386bbe30bb9110111c67184157d778^{tree})" = c20539d3edea72e54f470913e2c9fdd5760d6cbe
+          test "$(git rev-parse b6f623d5c9e55efd4f2da39c5b22e0a609427491^{tree})" = 133c9719085b54dac5cb42b03ff74637c369abb7
+          git rev-parse HEAD > publication-base.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          import subprocess
+          result = subprocess.run(['git','merge','--no-commit','--no-ff','b6f623d5c9e55efd4f2da39c5b22e0a609427491'])
+          if result.returncode:
+              paths=set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+              generated={'dist/VB6-Studio-Web.html','dist/studio.js','dist/studio.css'}
+              assert result.returncode==1 and paths and paths <= generated | {'desktop/smoke.cjs'}, sorted(paths)
+              for path in sorted(paths & generated):
+                  subprocess.run(['git','checkout','--ours','--',path],check=True)
+                  subprocess.run(['git','add','--',path],check=True)
+          PY
+      - name: Combine reviewed diagnostics with main's evaluation and InputBox fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,subprocess
+          def source(rev): return subprocess.check_output(['git','show',rev+':desktop/smoke.cjs'],text=True)
+          s=source('1401826a72386bbe30bb9110111c67184157d778')
+          m=source('b6f623d5c9e55efd4f2da39c5b22e0a609427491')
+          helper=m[m.index('// A renderer can disappear'):m.index('exports.run =')]
+          helper=helper.replace('async function evaluate(', 'async function evaluateRenderer(').replace('exports.evaluate = evaluate;', 'exports.evaluate = evaluateRenderer;')
+          assert s.count('function createSmokeProbe(')==1
+          s=s.replace('function createSmokeProbe(',helper+'function createSmokeProbe(',1)
+          assert s.count('const evaluate = async (target, text, userGesture = false) => {')==1
+          s=s.replace('const evaluate = async (target, text, userGesture = false) => {','const evaluate = async (target, text, userGesture = true) => {')
+          assert s.count('return await withDeadline(() => target.executeJavaScript(text, userGesture), label);')==1
+          s=s.replace('return await withDeadline(() => target.executeJavaScript(text, userGesture), label);','return await evaluateRenderer(target, text, userGesture);')
+          old='      await evaluate(inputWindow.webContents, \'document.querySelector("input").value="Native input OK";document.querySelector("form").requestSubmit();void 0;\',true);'
+          start=m.index('      // Submitting destroys the InputBox webContents.')
+          end=m.index("      await until(()=>js('inputResult",start)
+          assert s.count(old)==1
+          s=s.replace(old,m[start:end].rstrip('\n'))
+          p=Path('desktop/smoke.cjs');p.write_text(s)
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='f8342f277afca61c79954944077d9dc1c89c6fb2d50ef14bb8bc050791aab453'
+          subprocess.run(['git','add','--',str(p)],check=True)
+          PY
+      - name: Build complete combined distributions
+        shell: bash
+        run: npm run build | tee build.log
+      - name: Remove publisher and verify exact locally tested product tree
+        shell: bash
+        run: |
+          git rm -- .github/workflows/agent-workbench-ocx-sync.yml
+          git add -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples packages/win32-browser/dist
+          git diff --cached --check
+          test -z "$(git diff --name-only --diff-filter=U)"
+          test "$(git write-tree)" = de70c9377ba3bfab13539ddf43c1283c52fd6b93
+      - name: Full integrated suite and both native smoke contracts
+        shell: bash
+        run: |
+          node --check desktop/smoke.cjs
+          node --test tests/native-smoke*.test.mjs | tee smoke-tests.log
+          npm test | tee tests.log
+          npm run test:agents | tee agents.log
+      - name: Publish tested integration without temporary workflow
+        shell: bash
+        run: |
+          git commit -m 'build(agents): preserve OCX main and both native smoke safeguards'
+          test "$(git ls-remote origin refs/heads/feat/agent-change-review-queue | cut -f1)" = "$(cat publication-base.txt)"
+          git push origin HEAD:feat/agent-change-review-queue
+          git rev-parse HEAD > head.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workbench-ocx-integrated
+          path: |
+            build.log
+            smoke-tests.log
+            tests.log
+            agents.log
+            head.txt
+            tree.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
