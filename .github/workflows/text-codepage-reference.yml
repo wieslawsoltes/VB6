@@ -1,0 +1,26 @@
+name: Text code-page reference
+on:
+  push:
+    branches: [feat/runtime-text-compatibility]
+    paths: ['.github/workflows/text-codepage-reference.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-reference:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Capture strict installed-Windows code-page mappings
+        shell: powershell
+        run: tools/conformance/export-codepages.ps1 -Output reports/text-codepages/windows-codepages.bin
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: text-codepage-reference
+          path: reports/text-codepages/
+          if-no-files-found: error
+          retention-days: 14
