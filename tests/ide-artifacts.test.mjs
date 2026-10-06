@@ -67,7 +67,7 @@ test('built repository outputs match the committed IDE fingerprints',()=>{assert
 
 test('fresh-checkout npm entry points build and verify before tests or serving',()=>{
   const scripts=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8')).scripts;
-  for(const name of ['pretest','pretest:agents','preserve'])assert.equal(scripts[name],'npm run build');
+  for(const name of ['pretest','pretest:agents','pretest:chatgpt','preserve'])assert.equal(scripts[name],'npm run build');
   assert.equal(scripts.build,'node tools/build.mjs');
   assert.equal(scripts['verify:ide-artifacts'],'node tools/ide-artifacts.mjs');
 });

@@ -63,7 +63,8 @@
     "build:compute": "node tools/build-compute.mjs",
     "compile:compute": "node tools/compile-compute.mjs",
     "test:compute": "node --test tests/compute*.test.mjs",
-    "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py"
+    "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py",
+    "pretest:chatgpt": "npm run build"
   },
   "engines": {
     "node": ">=22"

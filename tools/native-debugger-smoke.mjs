@@ -7,6 +7,7 @@ import {spawn} from 'node:child_process';
 import {createNativeDebuggerBridge} from '../packages/native-debugger/src/bridge.mjs';
 import {CdbSession,findCdb,breakWindowsProcess} from '../packages/native-debugger/src/cdb-session.mjs';
 import {isBreakpointStop} from './native-debugger-stop.mjs';
+import {qualifyFixtureSourceStep} from './native-debugger-step.mjs';
 
 if(process.platform!=='win32')throw new Error('Run this test on Windows with Microsoft Debugging Tools installed.');
 const target=await fs.realpath(process.argv[2]||'reports/native-debugger/x64/DebugTarget.exe'),directory=path.dirname(target),cdbPath=await findCdb();
@@ -75,7 +76,7 @@ try{
   assert.equal(written.pauseId,launched.pauseId);assert.ok(written.pauseId>writePause);
   await assert.rejects(launched.request('continue',{pauseId:writePause}),{code:'STALE_PAUSE'});
   assert.deepEqual((await launched.request('readMemory',{address:counter.address,count:4})).bytes,[37,0,0,0]);record('native memory write readback and mutation-ticket invalidation');
-  await launched.request('stepMode',{mode:'source',pauseId:launched.pauseId});const lineBefore=/target\.c @ (\d+)/i.exec((await launched.request('stack')).text)?.[1];assert.ok(lineBefore,'Source breakpoint requires line symbols');const at=launched.pauseId;await launched.request('stepOver',{pauseId:at});await launched.waitPaused();assert.ok(launched.pauseId>at);const lineAfter=/target\.c @ (\d+)/i.exec((await launched.request('stack')).text)?.[1];assert.ok(lineAfter,'Source step retains line symbols');assert.notEqual(lineAfter,lineBefore);record('source-line step using matching fixture symbols',{lineBefore,lineAfter});
+  const {at,lineBefore,lineAfter}=await qualifyFixtureSourceStep(launched,bp.id);record('source-line step using matching fixture symbols',{lineBefore,lineAfter,fixtureBreakpointDisabledDuringStep:true});
   await assert.rejects(launched.request('setRegister',{register:registers.registers.rip?'rax':'eax',value:'1',pauseId:at}),{code:'STALE_PAUSE'});record('stale native mutation rejected');
   await launched.request('stepMode',{mode:'assembly',pauseId:launched.pauseId});await launched.request('removeBreakpoint',{id:bp.id,pauseId:launched.pauseId});
   await hit(launched,'DebugLibrary!LibraryTick');const dllStack=await launched.request('stack');assert.match(dllStack.text,/DebugLibrary!LibraryTick/);assert.match(dllStack.text,/DebugTarget!/);record('native DLL call stack includes caller in host executable');
