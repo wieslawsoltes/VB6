@@ -1,3 +1,4 @@
+import {validateLayout} from '../layout/contract.js';
 import {normalizeDataSources} from '../data/common.js';
 import { clone, lower, safeName } from '../core/core.js';
 import {normalizeResources} from './res.js';
@@ -12,7 +13,7 @@ export const CONTROL_DEFAULTS={
 };
 export function createControl(type,name=null,left=300,top=300){const id=newId();return {id,name:name||type+'1',type,parent:null,properties:{Name:name||type+'1',Left:left,Top:top,Width:1800,Height:450,Visible:-1,Enabled:-1,TabIndex:0,TabStop:['Label','Frame','Shape','Line','Image','StatusBar','ProgressBar','Timer','ImageList','CommonDialog'].includes(type)?0:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,ForeColor:-2147483640,BackColor:-2147483633,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[type]||{})}};}
 export function createForm(name='Form1',caption=name){return {id:newId(),name,kind:'form',code:`Option Explicit\n\nPrivate Sub Form_Load()\n    \nEnd Sub\n`,form:{id:newId(),name,type:'Form',properties:{Name:name,Caption:caption,ClientWidth:9000,ClientHeight:6000,Width:9120,Height:6450,Left:300,Top:300,StartUpPosition:2,BorderStyle:2,BackColor:-2147483633,ForeColor:-2147483640,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,ScaleMode:1,KeyPreview:0,Visible:-1,Enabled:-1},controls:[],menus:[]}};}
-export function newProject(name='Project1'){const form=createForm();return {schema:PROJECT_SCHEMA,id:newId(),name,description:'',startup:form.name,modules:[form],settings:{snapToGrid:true,gridSize:120,showGrid:true,renderer:'auto',tabWidth:4,requireVariableDeclaration:true},references:[],assets:{},vfs:{files:{},directories:['/']},appSettings:{}};}
+export function newProject(name='Project1'){const form=createForm();return {schema:PROJECT_SCHEMA,id:newId(),name,description:'',startup:form.name,modules:[form],settings:{anchoring:false,snapToGrid:true,gridSize:120,showGrid:true,renderer:'auto',tabWidth:4,requireVariableDeclaration:true},references:[],assets:{},vfs:{files:{},directories:['/']},appSettings:{}};}
 function validateForm(form,moduleName){
   if(!form||typeof form!=='object'||Array.isArray(form))throw new VBError('Invalid form model: '+moduleName,1002);
   form.id ||= newId();form.name=moduleName;form.properties ||= {};form.controls ||= [];form.menus ||= [];
@@ -54,6 +55,7 @@ export function normalizeProject(value){
   project.settings.renderer=project.settings.renderer==='canvas2d'?'canvas2d':'auto';
   if(project.dataSources)project.dataSources=normalizeDataSources(project.dataSources);
   if(project.resources)project.resources=normalizeResources(project.resources);
+  project.settings.anchoring=project.settings.anchoring===true;validateLayout(project);
   return project;
 }
 export function uniqueName(project,base='Form',module=null){const names=new Set(module?module.form.controls.map(c=>lower(c.name)):project.modules.map(m=>lower(m.name)));let n=1;while(names.has(lower(base+n)))n++;return base+n;}

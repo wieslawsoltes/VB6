@@ -1,3 +1,4 @@
+import {decodeLayoutSidecar} from '../src/layout/project-sidecar.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -93,6 +94,9 @@ export async function stageClassic(options) {
   const native = /\.vbp$/i.test(input);
   if (!native && !/\.(vb6web|vb6proj|json)$/i.test(input)) throw new Error('Expected .vbp or .vb6web project');
   const project = native ? null : JSON.parse(original.toString('utf8'));
+  let anchoring=project?.settings?.anchoring===true;
+  if(native){try{const companion=await fs.readFile(input+'.vb6layout.json');anchoring=decodeLayoutSidecar(companion).enabled;}catch(error){if(error.code!=='ENOENT')throw error;}}
+  if(anchoring)throw new Error('The licensed classic VB6 compiler does not support the optional anchoring/layout extension. Use the HTML/Electron Windows target, or disable anchoring and implement explicit classic Form_Resize code. Layout metadata will not be silently discarded.');
   const name = productName(options.name || (native ? ansiValue(field(decodeVBP(original), 'ExeName32')).replace(/\.exe$/i, '') || path.basename(input, path.extname(input)) : project.name));
   const buildBase = path.join(root, '.native-build'); await fs.mkdir(buildBase, { recursive: true });
   const stage = await fs.mkdtemp(path.join(buildBase, 'classic-'));
