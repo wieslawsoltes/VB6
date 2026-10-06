@@ -10,7 +10,7 @@ The message composer stays available for drafting while a task runs. Enter sends
 
 Completed replies support a bounded, text-only Markdown subset: paragraphs, headings, lists, inline code, bold text, fenced code blocks and HTTP(S) links. Copy buttons copy messages or code without executing them. Model HTML, images, embeds and script links are not rendered as active content. Very large formatting workloads fall back to literal text. The renderer neither requests nor displays private reasoning or opaque native signatures.
 
-Following the newest message scrolls automatically. Scrolling upward freezes the visible window and preserves existing message elements, text selection and expanded tool details. **Jump to latest** restores following. Initially the latest 150 entries are mounted; **Show earlier messages** loads another 100. The public task model keeps at most 1,200 entries and four million accounted characters; each public field preview is capped at 262,144 characters. Omission/truncation is explicit and does not rewrite native provider context or undo project changes.
+Following the newest message scrolls automatically. Scrolling upward freezes the visible window and preserves existing message elements, text selection and expanded tool details. **Jump to latest** or scrolling to the bottom restores following immediately, including replies that finished while you were reading an older window. Task switching, hidden tabs and panel reopen retain each task’s reading position and expanded tools in memory. Pruning anchors to the actual visible message; resetting the same task clears its old view. Initially the latest 150 entries are mounted; **Show earlier messages** loads another 100. The public task model keeps at most 1,200 entries and four million accounted characters; each public field preview is capped at 262,144 characters. Omission/truncation is explicit and does not rewrite native provider context or undo project changes.
 
 ## Limits
 
@@ -31,12 +31,45 @@ The token allowance is cumulative within a task. Follow-ups and Continue retain 
 
 Usage is taken from provider-reported totals (including relevant cache/reasoning usage fields), not merely from visible text. Reported usage on failed/incomplete responses is retained. Missing usage is **unknown, not zero**: the UI separately labels a conservative request-byte/public-text safety estimate, includes it in the allowance, and does not call it billed usage. Actual input and hidden output usage are not known before a request completes, so one request can exceed the allowance. An explicit retry can also incur charges for the failed request. Review provider billing separately.
 
-Numeric limit preferences alone can persist in browser storage under `vb6.codingAgents.limits.v1`. Each in-memory task keeps independent settings; new tasks inherit the latest preferences. No task messages, API keys, model history, connection settings or permissions are stored with them. Corrupt/unavailable storage falls back safely to defaults. Changes do not extend the existing ten-minute scoped permission grant, remove approval dialogs or enable external MCP access.
+Numeric limit preferences alone can persist in browser storage under `vb6.codingAgents.limits.v1`. Each in-memory task keeps independent settings; new tasks inherit the latest preferences. No task messages, API keys, model history, connection settings or permissions are stored with them. Corrupt/unavailable storage falls back safely to defaults. Token-limit changes do not extend the separately confirmed permission lease, remove its approval rules or enable external MCP access. Permission leases default to ten minutes and are independently configurable under the host ceiling.
 
 The local relay accepts the same bounded context size and validated generation timeout, but retains fixed official provider destinations, loopback-only binding, exact-origin checks, authentication, no credential forwarding from the browser, four concurrent requests and bounded responses.
+
+## Limit recovery
+
+The Task tab shows a classic **Review limits… / Resume task** notice when work pauses. Review limits focuses the relevant numeric setting. Resume task uses the existing Continue confirmation; there are no automatic retries, automatic limit increases or implicit permission grants.
+
+| Pause | Recovery behavior |
+| --- | --- |
+| Request context is too large | Pause before sending. Raise Request context bytes, then Continue with the retained prompt/history. If the required size exceeds the application or provider limit, use New Task with Context instead. |
+| A complete tool batch exceeds the run allowance or result-space reserve | Retain the validated native response in memory, but execute **none** of that batch. Continue uses it without asking the provider to generate it again or double-counting its reported usage. |
+| Provider explicitly reports its output-token cap | Keep public partial text labelled Interrupted, but discard the unfinished native response and execute no partial tools. Increase the effective output allowance, then explicitly retry the pending request from the last complete native history. Prior usage remains counted. |
+| Request, tool-call or cumulative session-token allowance is exhausted | Keep completed tool results. Review limits/permissions and Continue; a session-token allowance must be explicitly increased rather than reset. |
+
+Deferred operations retain their **original arguments**. Continue rechecks the current tool catalog, permission mode, workspace epoch and normal revision guards. The IDE changes revisions when authority is reopened: an old mutating operation can therefore be rejected as stale even without source edits. Its error is returned to the model, which must re-read current state before proposing a new edit. The runner never changes `expectedRevision` to make an old operation succeed. Prior successful edits are never replayed. A denial, Stop, project replacement or failure after a batch starts cannot become a resumable partially applied batch. A new prompt cannot accidentally replace a deferred batch; use Continue or a new task.
+
+A final response with no tool calls needs no result-space reservation. It is retained as a completed answer even if its added native context would make a future request too large; that subsequent request pauses before I/O. Unknown/unavailable tool attempts also count against the run limit, rather than triggering repeated billed requests outside the tool cap.
+
+Only confirmed provider output-cap markers are recoverable this way: OpenAI `response.incomplete` / `incomplete_details.reason = max_output_tokens`, Anthropic `stop_reason = max_tokens`, and Google `finishReason = MAX_TOKENS`. Safety blocks, malformed streams and unspecified incomplete responses remain terminal. Output-cap retry requires a larger **effective** output allowance (also constrained by remaining session budget); retrying the same insufficient cap does not send another request. Native signatures/reasoning from incomplete responses are not reconstructed or appended. Provider context/output restrictions and billing still apply.
+
+Protocol references checked October 6, 2026:
+
+- [OpenAI Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events).
+- [Anthropic streaming messages](https://platform.claude.com/docs/en/build-with-claude/streaming) and [stop reasons](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons).
+- [Google GenerateContent FinishReason](https://ai.google.dev/api/generate-content#FinishReason).
+
+Anthropic streaming deltas must match their content-block type. Private thinking/tool-input blocks cannot feed the public-text renderer through a mismatched text delta. Nonsequential, negative, noninteger or oversized sparse block indices are rejected before allocation/rendering.
 
 ## Validation
 
 Run `npm run build`, `npm run test:agents`, and `python tools/coding-agents-browser-tests.py`. The browser suite covers native-protocol doubles for OpenAI, Anthropic and Google against the real IDE adapter, with no paid API requests. CI runs Chromium, Firefox and WebKit against HTTP modules, HTTP standalone and file standalone builds. The optional `--opaque` mode is only an inline UI fallback for environments that prohibit navigation; it is not a substitute for real-origin CI.
 
 Focused regressions cover waiting/streaming/tool-only turns, authoritative final reconciliation, denial/interruption, safe rendering/copy, draft and partial-response recovery, IME/Enter behavior, selection/scroll anchoring, bounded history, presets/storage validation, cumulative budgets, failure estimates and no-replay continuation.
+
+Recovery regressions also cover all three native output-cap envelopes, unchanged-cap retry prevention, exactly-once deferred batches, stale edits, denied operations, read-only downgrade, workspace replacement, complete-answer context boundaries, hidden-tab/panel reading state, automatic catch-up and bounded-history pruning.
+
+## Permission profiles
+
+The composer now includes Codex-style permission profiles, full IDE access with
+explicit per-run acknowledgement, granular rules and revoke controls. See
+[Permission profiles](CODING-AGENT-PERMISSIONS.md) for the complete behavior.

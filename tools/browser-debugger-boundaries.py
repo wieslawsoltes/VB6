@@ -235,8 +235,99 @@ def native_bad_endpoint(page):
     base.check(not fixture.calls)
 
 
+def hosted_preview_sessions(page):
+    """Embedding loader fixture, not a real Electron protocol/CSP assertion."""
+    base.project(page,'Sub Main()\nDebug.Print 17\nEnd Sub')
+    page.evaluate('''()=>{
+      globalThis.previewDocuments=[];globalThis.previewURLs=[];
+      vb6Studio.runtimeDocumentLoader=html=>{
+        previewDocuments.push(html);
+        const url=URL.createObjectURL(new Blob([html],{type:'text/html'}));previewURLs.push(url);return Promise.resolve(url);
+      };
+    }''')
+    base.command(page,'run');base.output(page,'17')
+    base.check(page.evaluate('previewDocuments.length')==1)
+    base.check(page.evaluate('!vb6Studio.runtimeFrame.hasAttribute("srcdoc")&&vb6Studio.runtimeFrame.src.startsWith("blob:")'))
+    base.command(page,'stop');page.wait_for_function('vb6Studio.runState==="design"')
+    event_project(page)
+    page.evaluate('vb6Studio.designImmediate.execute("? 6 * 7")')
+    base.check(page.evaluate('vb6Studio.immediateOutput')==['42'])
+    base.check(page.evaluate('previewDocuments.length')==2)
+    base.check(page.evaluate('!vb6Studio.designImmediate.frame.hasAttribute("srcdoc")'))
+    page.evaluate('globalThis.designPreviewFrame=vb6Studio.designImmediate.frame')
+    # Promotion must keep storage, frame, URL and approval rather than starting
+    # Main or creating an unapproved srcdoc on a different path.
+    base.command(page,'immediateEvents')
+    page.wait_for_function('vb6Studio.designImmediate.promoted&&vb6Studio.runState==="running"')
+    base.check(page.evaluate('vb6Studio.runtimeFrame===designPreviewFrame&&previewDocuments.length===2'))
+    page.evaluate('vb6Studio.executeImmediate("Form1.Show")')
+    frame=page.locator('iframe[title="Design-mode Immediate runtime"]').element_handle().content_frame()
+    base.check(frame.evaluate('''()=>{try{void parent.document.body;return false;}catch{return typeof vb6Native==='undefined';}}'''))
+    frame.get_by_role('button',name='Click event',exact=True).click();base.output(page,'timer')
+    base.check('startup' not in page.evaluate('vb6Studio.output'))
+    base.command(page,'stop');page.wait_for_function('vb6Studio.runState==="design"')
+    page.evaluate('previewURLs.forEach(url=>URL.revokeObjectURL(url));delete vb6Studio.runtimeDocumentLoader')
+
+
+def hosted_preview_stale_run(page):
+    base.project(page,'Sub Main()\nDebug.Print "fresh run"\nEnd Sub')
+    page.evaluate('''()=>{
+      vb6Studio.runtimeDocumentLoader=()=>new Promise((resolve,reject)=>{globalThis.rejectOldPreview=reject;});
+      vb6Studio.run();globalThis.oldPreviewFrame=vb6Studio.runtimeFrame;
+    }''')
+    base.check(page.evaluate('!oldPreviewFrame.hasAttribute("srcdoc")'))
+    base.command(page,'stop');page.wait_for_function('vb6Studio.runState==="design"')
+    page.evaluate('delete vb6Studio.runtimeDocumentLoader')
+    base.command(page,'run');base.output(page,'fresh run')
+    page.evaluate('globalThis.freshPreviewFrame=vb6Studio.runtimeFrame;rejectOldPreview(new Error("obsolete preview refusal"))')
+    # Drain the loader promise chain; no timing-based timeout or error suppression.
+    page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    base.check(page.evaluate('vb6Studio.runtimeFrame===freshPreviewFrame&&vb6Studio.runState==="running"'))
+    base.check(page.evaluate('!oldPreviewFrame.isConnected'))
+    base.check('obsolete preview refusal' not in page.locator('.status-message').inner_text())
+    base.command(page,'stop')
+
+
+def hosted_preview_stale_immediate(page):
+    base.project(page,'Sub Main()\nDebug.Print "must not start"\nEnd Sub')
+    page.evaluate('''()=>{
+      vb6Studio.runtimeDocumentLoader=()=>new Promise((resolve,reject)=>{globalThis.rejectOldImmediate=reject;});
+      globalThis.obsoleteImmediate=vb6Studio.designImmediate.execute('? 1').then(()=>"unexpected success",error=>error.message);
+    }''')
+    page.evaluate('vb6Studio.designImmediate.reset();delete vb6Studio.runtimeDocumentLoader')
+    base.check('reset' in page.evaluate('obsoleteImmediate').lower())
+    page.evaluate('vb6Studio.designImmediate.execute("? 42")')
+    page.evaluate('globalThis.freshImmediateFrame=vb6Studio.designImmediate.frame;rejectOldImmediate(new Error("obsolete immediate refusal"))')
+    page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    base.check(page.evaluate('vb6Studio.designImmediate.frame===freshImmediateFrame&&freshImmediateFrame.isConnected'))
+    base.check(page.evaluate('vb6Studio.immediateOutput')==['42'])
+    base.check(page.evaluate('vb6Studio.runState')=='design')
+    page.evaluate('vb6Studio.designImmediate.reset()')
+
+
+def hosted_preview_refusal(page):
+    base.project(page,'Sub Main()\nDebug.Print "must not run"\nEnd Sub')
+    result=page.evaluate('''async()=>{
+      vb6Studio.runtimeDocumentLoader=()=>Promise.reject(new Error('approval refused'));
+      try{await vb6Studio.designImmediate.execute('? 42');return 'unexpected success';}catch(error){return error.message;}
+    }''')
+    base.check(result=='approval refused',result)
+    base.check(page.evaluate('!vb6Studio.designImmediate.frame&&!vb6Studio.designImmediate.busy'))
+    base.check(page.evaluate('vb6Studio.runState')=='design')
+    base.check(page.locator('.design-immediate-window').count()==0)
+    base.command(page,'run')
+    page.wait_for_function('vb6Studio.runState==="design"&&!vb6Studio.runtimeFrame')
+    base.check(page.evaluate('vb6Studio.output')==[])
+    base.check('approval refused' in page.locator('.status-message').inner_text())
+    # A denied native request must not silently fall back to srcdoc execution.
+    page.evaluate('delete vb6Studio.runtimeDocumentLoader')
+    page.evaluate('vb6Studio.designImmediate.execute("? 42")')
+    base.check(page.evaluate('vb6Studio.immediateOutput')==['42'])
+    page.evaluate('vb6Studio.designImmediate.reset()')
+
+
 def main():
-    cases=[('Versioned Edit and Continue exposes retained source without replay',versioned),('Event-driven Immediate debugs actual timer and button callbacks',events),('Replacing a promoted Immediate project disposes the runtime',event_replace),('Native debugger classic controls and private connection token (transport fixture)',native_steps),('Native breakpoint and explicit memory UI (transport fixture)',native_memory),('Native hardware data-breakpoint dialog and removal (transport fixture)',native_data_breakpoint),('Native poll wins over delayed command reply and refreshes retained stop',native_poll_race),('Native connection refuses non-loopback destinations',native_bad_endpoint)]
+    cases=[('Hosted F5 and Immediate share the approved preview loader (embedding fixture)',hosted_preview_sessions),('Old preview refusal cannot stop a replacement run',hosted_preview_stale_run),('Old Immediate refusal cannot reset a replacement session',hosted_preview_stale_immediate),('Denied preview requests stay inert and recover cleanly',hosted_preview_refusal),('Versioned Edit and Continue exposes retained source without replay',versioned),('Event-driven Immediate debugs actual timer and button callbacks',events),('Replacing a promoted Immediate project disposes the runtime',event_replace),('Native debugger classic controls and private connection token (transport fixture)',native_steps),('Native breakpoint and explicit memory UI (transport fixture)',native_memory),('Native hardware data-breakpoint dialog and removal (transport fixture)',native_data_breakpoint),('Native poll wins over delayed command reply and refreshes retained stop',native_poll_race),('Native connection refuses non-loopback destinations',native_bad_endpoint)]
     origins=os.environ.get('VB6_DEBUGGER_ORIGINS','modular,standalone,file').split(',')
     if any(origin not in ('modular','standalone','file','inline') for origin in origins):raise ValueError('Invalid debugger test origin')
     class QuietHandler(SimpleHTTPRequestHandler):

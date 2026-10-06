@@ -53,7 +53,7 @@ No raw CDB command, extension-loading interface or shell command is exposed over
 
 ## Validation and equivalence
 
-`tests/debugger-boundaries.test.mjs` tests source event delivery and versioned state preservation. `tests/native-debugger*.test.mjs` covers native protocol/transport and browser client contracts. `tools/browser-debugger-boundaries.py` runs eight cases on modular HTTP, standalone HTTP and standalone file origins in each CI browser (24 per engine); its native UI cases explicitly use a transport fixture and are not evidence of native-engine execution.
+`tests/debugger-boundaries.test.mjs` tests source event delivery and versioned state preservation. `tests/native-debugger*.test.mjs` covers native protocol/transport and browser client contracts. `tools/browser-debugger-boundaries.py` runs twelve cases on modular HTTP, standalone HTTP and standalone file origins in each CI browser (36 per engine); its native UI cases explicitly use a transport fixture and are not evidence of native-engine execution.
 
 `tools/native-debugger-smoke.mjs` runs separately on Windows with compiled x86/x64 EXE and DLL fixtures and matching symbols. It verifies actual CDB behavior and fails rather than skipping when a required engine, target or operation is unavailable. Its fixture initializes COM but is not a licensed Microsoft VB6 compiler/debugger oracle.
 
@@ -77,6 +77,27 @@ VB6_BROWSER=firefox python tools/browser-debugger-boundaries.py
 VB6_BROWSER=webkit python tools/browser-debugger-boundaries.py
 ```
 
-`VB6_DEBUGGER_ORIGINS=inline` runs the eight cases with `set_content` only and must not be reported as deployment-origin validation. The native UI transport fixture deliberately reorders a command response and a newer stop event, while the Windows matrix independently runs the real authenticated HTTP bridge against CDB and compiled x86/x64 targets. Reports identify the target architecture from the PE header separately from the Node host architecture. A failure to take an evidence screenshot does not suppress the original failing case or the JSON report.
+`VB6_DEBUGGER_ORIGINS=inline` runs the twelve cases with `set_content` only and must not be reported as deployment-origin validation. The native UI transport fixture deliberately reorders a command response and a newer stop event, while the Windows matrix independently runs the real authenticated HTTP bridge against CDB and compiled x86/x64 targets. Reports identify the target architecture from the PE header separately from the Node host architecture. A failure to take an evidence screenshot does not suppress the original failing case or the JSON report.
 
 Additional native command reference: [ba — Break on Access](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/ba--break-on-access-).
+
+## Native IDE preview loading
+
+F5 and design-mode Immediate now share `src/ide/runtime-document.js`. The browser
+keeps its opaque-origin `srcdoc` path. The native IDE installs an embedding-only
+loader before navigation and accepts only private `vb6://app/preview/` URLs from
+its authenticated IPC boundary. It never falls back to `srcdoc` after a native
+approval failure. Existing restrictive CSP, sandbox flags and IPC sender checks
+are unchanged; the runtime receives no native bridge or debugger credentials.
+
+Approval completion is tied to both the frame and its session identity. Reset,
+project replacement or a newer run makes an old completion inert, including
+rejected approvals. Event-mode promotion keeps the already approved document
+instead of restarting it. The loader is not stored in project or layout data.
+
+The native portable-IDE smoke additionally exercises design Immediate arithmetic,
+no-startup event promotion, an actual button handler, sandbox/bridge isolation and
+Reset. It locates the exact active preview URL and reports the current status,
+frame URL and recent output when initialization fails. The browser embedding
+fixture is not a substitute for running this smoke under Electron on Windows.
+See [the continuation validation record](DEBUGGER-CONTINUATION-VALIDATION.md).

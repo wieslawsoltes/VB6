@@ -12,6 +12,7 @@ const moduleURI = (name, type = 'source') => 'vb6://module/' + encodeURIComponen
 
 /** Adapts the real IDE project/history/runtime APIs, never a second shadow workspace. */
 export function createIdeAdapter(ide, {approve = async () => false, onActivity = () => {}, historyLabel = 'MCP'} = {}) {
+  const policyReceipt = Symbol('local agent authorization');
   let observedProjectId=ide.project.id;
   let revision = 1, eventSequence = 1, authorityEpoch = 1, workspaceEpoch = 1, enabled = false, changeTimer;
   let authorityLifetime = new AbortController(), sharingLifetime = new AbortController();
@@ -27,7 +28,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   if(typeof ide.onRuntimeMessage==='function'){const original=ide.onRuntimeMessage;originals.set('onRuntimeMessage',original);ide.onRuntimeMessage=function(event){const d=event.data,valid=this.runtimeFrame&&event.source===this.runtimeFrame.contentWindow&&d?.channel==='vb6-runtime'&&d.token===this.bridgeToken;const result=original.call(this,event);if(valid){if(d.type==='state'||d.type==='immediate')changed();else if(['output','watches','error','agentActivity'].includes(d.type))notify();}return result;};}
   const unlisten = ['run','stop','pause'].map(type => ide.on?.(type, changed)).filter(Boolean);
   const adapter = {
-    permissions, tools: [], templates: [{uriTemplate: 'vb6://module/{name}/source', name: 'Module source', mimeType: 'text/plain'}, {uriTemplate: 'vb6://module/{name}/form', name: 'Form model', mimeType: 'application/json'}],
+    permissions, approveAgentOperation: approve, tools: [], templates: [{uriTemplate: 'vb6://module/{name}/source', name: 'Module source', mimeType: 'text/plain'}, {uriTemplate: 'vb6://module/{name}/form', name: 'Form model', mimeType: 'application/json'}],
     get revision() { return revision; }, get eventSequence() { return eventSequence; }, get enabled() { return enabled; },
     get workspaceEpoch() { return workspaceEpoch; }, get authorityEpoch() { return authorityEpoch; }, get authoritySignal() { return authorityLifetime.signal; },
     setEnabled(value) { sharingLifetime.abort(); sharingLifetime = new AbortController(); invalidateAuthority(); enabled = !!value; changed(); },
@@ -39,7 +40,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
       return [{uri: 'vb6://project', name: 'Project workspace', mimeType: 'application/json'}, {uri: 'vb6://diagnostics', name: 'Compiler diagnostics', mimeType: 'application/json'}, {uri: 'vb6://output', name: 'Runtime output', mimeType: 'application/json'}, {uri: 'vb6://debug', name: 'Debugger snapshot', mimeType: 'application/json'}, ...ide.project.modules.flatMap(m => [{uri: moduleURI(m.name), name: m.name + ' source', mimeType: 'text/plain'}, ...(m.form ? [{uri: moduleURI(m.name, 'form'), name: m.name + ' designer', mimeType: 'application/json'}] : [])])];
     },
     async readResource(uri, context = {}) {
-      adapter.assertEnabled(); checkAbort(context.signal); let data, mimeType = 'application/json';
+      adapter.assertEnabled(); checkAbort(context.signal); if (permissions.policy) throw new McpError(-32001, 'Use permission-checked IDE tools for coding-agent resource access.'); let data, mimeType = 'application/json';
       if (uri === 'vb6://project') data = {revision, project: clone(ide.project)};
       else if (uri === 'vb6://diagnostics') { const compiled = compileProject(ide.project); data = {revision, valid: compiled.valid, diagnostics: compiled.diagnostics}; }
       else if (uri === 'vb6://output') data = {revision, output: clone((ide.output || []).slice(-1000)), immediate: clone((ide.immediateOutput || []).slice(-1000))};
@@ -61,13 +62,16 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   };
   function requireModule(name) { const module = findModule(ide.project, name); if (!module) throw new McpError(-32602, 'Unknown module: ' + name); return module; }
   function checkRevision(expected) { if (expected !== revision) throw new McpError(-32002, 'Project changed; read its current revision and retry.', {expectedRevision: expected, actualRevision: revision}); }
-  function debugSnapshot() { return {revision, pauseId:ide.debuggerWindows?.pauseId||0, frameIndex:ide.debuggerWindows?.frameIndex??null, pendingEdits:!!ide.pendingEdits, runState: ide.runState, locals: clone(ide.locals || []), stack: clone(ide.stack || []), watches: clone(ide.watchValues || []), breakpoints: clone(ide.breakpoints || [])}; }
+  function debugSnapshot() { return {revision, pauseId:ide.debuggerWindows?.pauseId||0, frameIndex:ide.debuggerWindows?.frameIndex??null, pendingEdits:!!ide.pendingEdits, evaluating:!!ide.evaluating, execution:clone(ide.debuggerWindows?.execution||null), runState: ide.runState, locals: clone(ide.locals || []), stack: clone(ide.stack || []), watches: clone(ide.watchValues || []), breakpoints: clone(ide.breakpoints || [])}; }
   async function consent(name, args, context, {design = true} = {}) {
     context.signal = AbortSignal.any([context.signal, authorityLifetime.signal].filter(Boolean));
     adapter.assertEnabled(); checkAbort(context.signal); checkRevision(args.expectedRevision);
     if (design && ide.runState !== 'design') throw new McpError(-32000, 'Stop the application before changing the project.');
     const project = ide.project, runtimeState = ide.runState, pauseId = ide.debuggerWindows?.pauseId, frameIndex = ide.debuggerWindows?.frameIndex;
-    if (permissions.permits(name,project.id)) context.signal = AbortSignal.any([context.signal,permissions.signal].filter(Boolean));
+    if (permissions.policy) {
+      if (context[policyReceipt] !== permissions.policy) throw new McpError(-32001, 'Missing local agent authorization.');
+      permissions.policy.assertTool(name, project.id, context);
+    } else if (permissions.permits(name,project.id)) context.signal = AbortSignal.any([context.signal,permissions.signal].filter(Boolean));
     else if (!await awaitAbort(approve({name, arguments: clone(args), projectName: project.name, peer: context.peer || context.sessionKey}, {signal: context.signal}), context.signal)) throw new McpError(-32001, 'The local user declined this operation.');
     checkAbort(context.signal); adapter.assertEnabled(); checkRevision(args.expectedRevision);
     if (project !== ide.project || runtimeState !== ide.runState || pauseId !== ide.debuggerWindows?.pauseId || frameIndex !== ide.debuggerWindows?.frameIndex) throw new McpError(-32002, 'Project or runtime changed while approval was pending.');
@@ -88,6 +92,17 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
       const requestSignal = AbortSignal.any([context.signal, sharingLifetime.signal].filter(Boolean));
       checkAbort(requestSignal);
       const requestContext = {...context, signal: requestSignal}, snapshot = clone(args);
+      const policy = permissions.policy;
+      if (policy) {
+        requestContext.signal = AbortSignal.any([requestSignal, policy.signal]);
+        // Deny before preparation, reads, waits or effects. Validate revisions before prompting.
+        policy.assertTool(name, ide.project.id, requestContext);
+        if (required.includes('expectedRevision')) checkRevision(snapshot.expectedRevision);
+        await policy.authorize({name, arguments: clone(snapshot), projectId: ide.project.id, projectName: ide.project.name,
+          peer: context.peer || context.sessionKey}, requestContext, approve);
+        checkAbort(requestContext.signal);
+        requestContext[policyReceipt] = policy;
+      }
       try { const result = await awaitAbort(execute(snapshot, requestContext), requestSignal); try { onActivity({direction: 'in', method: name}); } catch {} return result; }
       catch (error) { try { onActivity({direction: 'in', method: name, error: error.message}); } catch {} throw error; }
     }});

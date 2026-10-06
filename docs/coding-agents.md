@@ -125,27 +125,23 @@ arbitrary host-shell commands, JavaScript evaluation, native filesystem access o
 an external MCP client. Code that you approve for runtime execution can itself
 access the application's configured data sources and integrations.
 
-### Review, read-only and delegated Agent modes
+### Permission profiles and operation review
 
-**Review each change / execution** is the default. An operation dialog shows the
-provider, operation, arguments and expected revision. Source replacement and
-atomic multi-module edits show Before/After using the same pure edit function
-as the actual undo transaction. Large previews are explicitly marked as truncated;
-Save full review downloads the full arguments and source comparisons. Cancel is
-the default button. A denial terminates the task instead of letting the model try
-another operation to bypass it.
+Use the composer permission selector or Permissions tab for **Ask for approval,
+Read only, Plan, Auto edit, Full IDE access, and Custom / selected scopes**.
+Full IDE access has a distinct unchecked acknowledgement on every Run/Continue.
+Allow/Ask/Deny scope and exact-tool rules, Ask when needed / Never ask policy,
+1–60-minute run leases, active exact-tool grants and a Revoke permissions & stop
+control provide more precise control. Never ask denies instead of approving.
+Full access never overrides deny rules, host restrictions or the browser/runtime
+boundary. Defaults remain Ask for approval with a ten-minute maximum run lease.
 
-**Read only** removes mutators and execution tools from the provider catalog. A
-model hallucinating a removed tool gets an error, not access. It may still inspect
-requested project/source/debugger data and run the non-executing compiler tool.
-
-**Agent mode** authorizes only checked scopes: code, project, designer, files,
-debugger, runtime, public data definitions or workspace. Start Task explicitly lists those scopes. Grants
-last for this run, at most ten minutes; non-granted effects still require review.
-They are revoked on completion, failure, Stop, project replacement/reload, expiry
-or page unload. Permissions are local UI decisions; no model tool grants them.
-The provider agent has its own adapter and cannot inherit external MCP grants or
-enable MCP sharing by starting a task.
+Operation dialogs retain Before/After and full review export. **Allow once** is
+invocation-only; **Allow tool for this run** covers this exact tool with any valid
+arguments until the current run/lease ends. Cancel stays the default. Neither
+choice bypasses revisions or extends authority to another task or external MCP.
+See [permission profiles and security boundaries](CODING-AGENT-PERMISSIONS.md)
+for complete precedence, host ceilings, lifecycle and execution/network caveats.
 
 Changes recheck revisions and runtime state after approval. Stale edits are
 rejected rather than blindly replacing user work. Atomic multi-module code edits
@@ -222,6 +218,8 @@ append the task prompt again or replay completed IDE tool operations**. The mode
 may still propose another operation in its next response; normal approval and
 revision safeguards remain in force. Historical results are not assumed current.
 
+Confirmed output-token stops, request-context limits and fully validated but unexecuted oversized tool batches now pause without losing the task. The Task tab provides **Review limits…** and **Resume task**. See [limit recovery](CODING-AGENT-THREADS.md#limit-recovery) for exact no-replay, stale-revision and provider-specific rules.
+
 There are **no automatic retries**. HTTP 408, 429, 500, 502, 503, 504 and 529, and
 pre-response connection failures and request timeouts (including timed-out
 streaming responses), allow a manual Continue. A bounded
@@ -229,7 +227,7 @@ provider `Retry-After` suggestion is shown (at most five minutes); it schedules
 nothing. The local relay forwards only this sanitized retry metadata, not error
 bodies or arbitrary provider headers. An earlier request may already have been
 processed/billed. Authentication/validation failures, cancellation, denied
-operations, malformed/incomplete native responses and uncertain tool batches remain blocked and
+operations, malformed native responses, unspecified incomplete responses and uncertain tool batches remain blocked and
 require a new task. The engine never retries a possibly half-applied batch.
 
 The new Extended default allows 128 provider requests and 1,024 tool calls per run,
@@ -250,7 +248,7 @@ guarantee immediate cessation of billing.
 See the [complete presets, ranges and accounting rules](CODING-AGENT-THREADS.md#limits).
 Generation requests default to ten minutes and can be configured up to thirty;
 model discovery remains capped at two minutes. Longer generation timeouts do not
-extend the existing ten-minute scoped permission grant.
+extend the separately selected permission lease (ten minutes by default).
 
 The task status displays native context size in KiB, not a model-specific token
 estimate. The request-context default is 6 MB, configurable up to 16 MB; provider

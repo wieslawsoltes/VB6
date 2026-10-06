@@ -156,5 +156,5 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
   resource('vb6://resources','Native resource inventory',()=>adapter.tools.find(t=>t.name==='vb6.resources.list').execute({},{}));
   const resources=adapter.resources.bind(adapter),read=adapter.readResource.bind(adapter);
   adapter.resources=async()=>[...await resources(),...[...extraResources].map(([uri,r])=>({uri,name:r.name,mimeType:'application/json'}))];
-  adapter.readResource=async(uri,ctx={})=>{adapter.assertEnabled();checkAbort(ctx.signal);const r=extraResources.get(uri);return r?[{uri,mimeType:'application/json',text:JSON.stringify(await r.read(),null,2)}]:read(uri,ctx);};
+  adapter.readResource=async(uri,ctx={})=>{adapter.assertEnabled();checkAbort(ctx.signal);if(adapter.permissions.policy)throw new McpError(-32001,'Use permission-checked IDE tools for coding-agent resource access.');const r=extraResources.get(uri);return r?[{uri,mimeType:'application/json',text:JSON.stringify(await r.read(),null,2)}]:read(uri,ctx);};
 }

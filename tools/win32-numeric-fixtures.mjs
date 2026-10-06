@@ -157,9 +157,15 @@ Public Sub Main()
     d = Failed(0.5)
     If Err.Number <> 11 Then ExitProcess 59
     Err.Clear
+    ' The old one-MiB quota is gone; 200001 Doubles must now fit.
     ReDim values(200000)
+    If Err.Number <> 0 Or UBound(values) <> 200000 Then ExitProcess 63
+    values(200000) = 1.25
+    ' This count requires 2147483648 bytes: reject before attempting allocation.
+    ReDim Preserve values(268435455)
     If Err.Number <> 7 Then ExitProcess 60
     Err.Clear
+    If UBound(values) <> 200000 Or values(200000) <> 1.25 Then ExitProcess 64
     For n = 1 To 2000
         d = Recursive(4, 128.5) + Mixed(1, 2.5, 3.25, 4, "ABI")
         If d <> 18.78125 Then ExitProcess 61

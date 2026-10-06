@@ -52,7 +52,7 @@ test('Date arrays cannot alias Double arrays despite identical element size',()=
 });
 for(const code of ['CDate()','DateSerial(1,2)','TimeSerial(1,2,3,4)','Weekday()','Weekday(Now,1,2)','Year()','Now(1)','IsDate()'])test('Date builtin arity fails closed: '+code,()=>assert.throws(()=>compile('Dim d As Date\nd = '+code),/argument/));
 test('Date array quota uses eight-byte elements',()=>{
- assert.throws(()=>compile('Dim a(0 To 131072) As Date'),/one MiB/);
+ assert.throws(()=>compile('Dim a(0 To 268435455) As Date'),/x86/);
 });
 test('Date literal conversion preserves absolute negative fractions and range endpoints',()=>{
  const c={fail:compiler.fail,floatLiteral:n=>n};

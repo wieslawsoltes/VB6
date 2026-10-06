@@ -73,6 +73,14 @@ export class ProviderTransportError extends Error {
     this.status = status; this.retryable = retryable; this.retryAfterMs = retryAfterMs;
   }
 }
+/** A confirmed output-token stop is retried only after a new user decision and larger output allowance.
+ * Incomplete native tool/reasoning blocks are never added to the conversation or executed.
+ * Sources: OpenAI response.incomplete / incomplete_details.reason; Anthropic stop_reason;
+ * Google GenerateContent FinishReason. See docs/CODING-AGENT-THREADS.md#limit-recovery.
+ */
+export class ProviderOutputLimitError extends Error {
+  constructor() { super('Provider turn did not finish: output token limit reached. No partial tools were executed.'); this.name = 'ProviderOutputLimitError'; }
+}
 export function retryAfter(value, now = Date.now()) {
   if (typeof value !== 'string' || value.length > 100) return 0;
   const seconds = /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
@@ -150,16 +158,30 @@ export function responseCollector(provider, onText = () => {}) {
     if (data.response?.usage) usage = data.response.usage;
     if (data.usage) usage = {...usage, ...data.usage};
     if (data.usageMetadata) usage = data.usageMetadata;
+    const response = data.response || data;
+    if (provider === 'openai' && (data.type === 'response.incomplete' || Array.isArray(data.output)) && response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens' && !response.error && !data.error) {
+      if (!publicCharacters) for (const item of response.output || []) if (item.type === 'message')
+        for (const part of item.content || []) if (part.type === 'output_text') publicText(part.text);
+      throw new ProviderOutputLimitError();
+    }
     if (data.error || data.type === 'error' || data.type === 'response.failed' || data.type === 'response.incomplete') throw new Error('The provider could not complete this turn. No partial tools were executed.');
     if (provider === 'openai') {
       if (data.type === 'response.output_text.delta') publicText(data.delta || '');
       if (data.type === 'response.completed' || Array.isArray(data.output)) { raw = data.response || data; finished = raw.status === 'completed'; usage = raw.usage || {}; }
     } else if (provider === 'anthropic') {
       if (data.type === 'message_start') usage = {...data.message?.usage};
-      if (data.type === 'content_block_start') { blocks[data.index] = structuredClone(data.content_block); if (data.content_block?.type === 'text') publicText(data.content_block.text); }
+      if (data.type === 'content_block_start') {
+        if (!Number.isSafeInteger(data.index) || data.index !== blocks.length || blocks.length >= 65536 || !data.content_block || typeof data.content_block.type !== 'string')
+          throw new Error('Invalid provider stream block index or shape.');
+        blocks.push(structuredClone(data.content_block));
+        if (data.content_block.type === 'text') publicText(data.content_block.text);
+      }
       if (data.type === 'content_block_delta') {
+        if (!Number.isSafeInteger(data.index) || data.index < 0 || data.index >= blocks.length) throw new Error('Invalid provider stream block index.');
         const block = blocks[data.index], delta = data.delta;
-        if (!block) throw new Error('Invalid provider stream order.');
+        if (!block || !delta) throw new Error('Invalid provider stream order.');
+        const expected = {text_delta: 'text', input_json_delta: 'tool_use', thinking_delta: 'thinking', signature_delta: 'thinking'}[delta.type];
+        if (expected && block.type !== expected) throw new Error('Invalid provider stream block type.');
         if (delta.type === 'text_delta') { block.text = (block.text || '') + delta.text; publicText(delta.text); }
         if (delta.type === 'input_json_delta') argumentsByIndex.set(data.index, (argumentsByIndex.get(data.index) || '') + delta.partial_json);
         if (delta.type === 'thinking_delta') block.thinking = (block.thinking || '') + delta.thinking;
@@ -184,12 +206,17 @@ export function responseCollector(provider, onText = () => {}) {
       calls = message.filter(item => item.type === 'function_call').map(item => ({id: item.call_id, name: item.name, arguments: parseProviderJSON(item.arguments)}));
       text = message.filter(item => item.type === 'message').flatMap(item => item.content || []).map(item => item.text || item.refusal || '').join('');
     } else if (provider === 'anthropic') {
-      if (!['end_turn', 'tool_use', 'stop_sequence'].includes(stop)) throw new Error('Provider turn did not finish normally. Increase the output limit or start a new task.');
+      if (stop === 'max_tokens') {
+        if (!publicCharacters) for (const block of raw || blocks) if (block?.type === 'text') publicText(block.text);
+        throw new ProviderOutputLimitError();
+      }
+      if (!['end_turn', 'tool_use', 'stop_sequence'].includes(stop)) throw new Error('Provider turn did not finish normally. Start a new task.');
       if (!raw) { raw = blocks; for (const [index, json] of argumentsByIndex) raw[index].input = parseProviderJSON(json); }
       message = {role: 'assistant', content: raw};
       calls = raw.filter(item => item.type === 'tool_use').map(item => ({id: item.id, name: item.name, arguments: item.input}));
       text = raw.filter(item => item.type === 'text').map(item => item.text).join('');
     } else {
+      if (stop === 'MAX_TOKENS') throw new ProviderOutputLimitError();
       if (stop !== 'STOP') throw new Error('Provider turn did not finish normally. No partial tools were executed.');
       message = {role: 'model', parts: googleParts};
       calls = googleParts.filter(item => item.functionCall).map((item, index) => ({id: item.functionCall.id || 'call_' + index, nativeId: item.functionCall.id, name: item.functionCall.name, arguments: item.functionCall.args || {}}));

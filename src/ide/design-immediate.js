@@ -1,3 +1,4 @@
+import {loadRuntimeDocument} from './runtime-document.js';
 import {el} from '../core/core.js';
 import {newId} from '../project/model.js';
 import {exportApplication} from '../exporter/exporter.js';
@@ -42,7 +43,13 @@ export class DesignImmediateSession {
       };
       window.addEventListener('message',this.listener);
     });
-    this.ide.root.append(this.window);this.frame.srcdoc=html;return this.ready;
+    this.ide.root.append(this.window);
+    const frame=this.frame,generation=this.generation,ready=this.ready;
+    loadRuntimeDocument(this.ide,frame,html,{
+      isCurrent:()=>this.frame===frame&&this.generation===generation&&this.token===token,
+      onError:error=>{this.readyReject?.(error);this.reset();}
+    });
+    return ready;
   }
   async execute(text,{module=this.ide.activeModule?.name??null,instructionLimit=100000,timeLimit=5000}={}){
     if(this.ide.runState!=='design')throw new Error('The IDE is no longer in design mode');
