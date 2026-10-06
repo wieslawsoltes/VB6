@@ -1244,6 +1244,10 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 
 .agent-plain-tail{white-space:pre-wrap;overflow-wrap:anywhere;max-height:380px;overflow:auto;font:inherit}
 
+.agent-limit-recovery{flex:0 0 auto;padding:6px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);font:inherit}
+.agent-limit-recovery p{margin:0 0 5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.agent-limit-recovery[hidden]{display:none}
+
 /*!
  * Classic staircase bevels adapted from the inset box-shadow technique in
  * 98.css by Jordan Scales. Source attribution requested in:

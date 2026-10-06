@@ -1245,6 +1245,10 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 
 .agent-plain-tail{white-space:pre-wrap;overflow-wrap:anywhere;max-height:380px;overflow:auto;font:inherit}
 
+.agent-limit-recovery{flex:0 0 auto;padding:6px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);font:inherit}
+.agent-limit-recovery p{margin:0 0 5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.agent-limit-recovery[hidden]{display:none}
+
 /*!
  * Classic staircase bevels adapted from the inset box-shadow technique in
  * 98.css by Jordan Scales. Source attribution requested in:
@@ -19246,6 +19250,14 @@ class ProviderTransportError extends Error {
     this.status = status; this.retryable = retryable; this.retryAfterMs = retryAfterMs;
   }
 }
+/** A confirmed output-token stop is retried only after a new user decision and larger output allowance.
+ * Incomplete native tool/reasoning blocks are never added to the conversation or executed.
+ * Sources: OpenAI response.incomplete / incomplete_details.reason; Anthropic stop_reason;
+ * Google GenerateContent FinishReason. See docs/CODING-AGENT-THREADS.md#limit-recovery.
+ */
+class ProviderOutputLimitError extends Error {
+  constructor() { super('Provider turn did not finish: output token limit reached. No partial tools were executed.'); this.name = 'ProviderOutputLimitError'; }
+}
 function retryAfter(value, now = Date.now()) {
   if (typeof value !== 'string' || value.length > 100) return 0;
   const seconds = /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
@@ -19323,16 +19335,30 @@ function responseCollector(provider, onText = () => {}) {
     if (data.response?.usage) usage = data.response.usage;
     if (data.usage) usage = {...usage, ...data.usage};
     if (data.usageMetadata) usage = data.usageMetadata;
+    const response = data.response || data;
+    if (provider === 'openai' && (data.type === 'response.incomplete' || Array.isArray(data.output)) && response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens' && !response.error && !data.error) {
+      if (!publicCharacters) for (const item of response.output || []) if (item.type === 'message')
+        for (const part of item.content || []) if (part.type === 'output_text') publicText(part.text);
+      throw new ProviderOutputLimitError();
+    }
     if (data.error || data.type === 'error' || data.type === 'response.failed' || data.type === 'response.incomplete') throw new Error('The provider could not complete this turn. No partial tools were executed.');
     if (provider === 'openai') {
       if (data.type === 'response.output_text.delta') publicText(data.delta || '');
       if (data.type === 'response.completed' || Array.isArray(data.output)) { raw = data.response || data; finished = raw.status === 'completed'; usage = raw.usage || {}; }
     } else if (provider === 'anthropic') {
       if (data.type === 'message_start') usage = {...data.message?.usage};
-      if (data.type === 'content_block_start') { blocks[data.index] = structuredClone(data.content_block); if (data.content_block?.type === 'text') publicText(data.content_block.text); }
+      if (data.type === 'content_block_start') {
+        if (!Number.isSafeInteger(data.index) || data.index !== blocks.length || blocks.length >= 65536 || !data.content_block || typeof data.content_block.type !== 'string')
+          throw new Error('Invalid provider stream block index or shape.');
+        blocks.push(structuredClone(data.content_block));
+        if (data.content_block.type === 'text') publicText(data.content_block.text);
+      }
       if (data.type === 'content_block_delta') {
+        if (!Number.isSafeInteger(data.index) || data.index < 0 || data.index >= blocks.length) throw new Error('Invalid provider stream block index.');
         const block = blocks[data.index], delta = data.delta;
-        if (!block) throw new Error('Invalid provider stream order.');
+        if (!block || !delta) throw new Error('Invalid provider stream order.');
+        const expected = {text_delta: 'text', input_json_delta: 'tool_use', thinking_delta: 'thinking', signature_delta: 'thinking'}[delta.type];
+        if (expected && block.type !== expected) throw new Error('Invalid provider stream block type.');
         if (delta.type === 'text_delta') { block.text = (block.text || '') + delta.text; publicText(delta.text); }
         if (delta.type === 'input_json_delta') argumentsByIndex.set(data.index, (argumentsByIndex.get(data.index) || '') + delta.partial_json);
         if (delta.type === 'thinking_delta') block.thinking = (block.thinking || '') + delta.thinking;
@@ -19357,12 +19383,17 @@ function responseCollector(provider, onText = () => {}) {
       calls = message.filter(item => item.type === 'function_call').map(item => ({id: item.call_id, name: item.name, arguments: parseProviderJSON(item.arguments)}));
       text = message.filter(item => item.type === 'message').flatMap(item => item.content || []).map(item => item.text || item.refusal || '').join('');
     } else if (provider === 'anthropic') {
-      if (!['end_turn', 'tool_use', 'stop_sequence'].includes(stop)) throw new Error('Provider turn did not finish normally. Increase the output limit or start a new task.');
+      if (stop === 'max_tokens') {
+        if (!publicCharacters) for (const block of raw || blocks) if (block?.type === 'text') publicText(block.text);
+        throw new ProviderOutputLimitError();
+      }
+      if (!['end_turn', 'tool_use', 'stop_sequence'].includes(stop)) throw new Error('Provider turn did not finish normally. Start a new task.');
       if (!raw) { raw = blocks; for (const [index, json] of argumentsByIndex) raw[index].input = parseProviderJSON(json); }
       message = {role: 'assistant', content: raw};
       calls = raw.filter(item => item.type === 'tool_use').map(item => ({id: item.id, name: item.name, arguments: item.input}));
       text = raw.filter(item => item.type === 'text').map(item => item.text).join('');
     } else {
+      if (stop === 'MAX_TOKENS') throw new ProviderOutputLimitError();
       if (stop !== 'STOP') throw new Error('Provider turn did not finish normally. No partial tools were executed.');
       message = {role: 'model', parts: googleParts};
       calls = googleParts.filter(item => item.functionCall).map((item, index) => ({id: item.functionCall.id || 'call_' + index, nativeId: item.functionCall.id, name: item.functionCall.name, arguments: item.functionCall.args || {}}));
@@ -19396,7 +19427,7 @@ function appendTurn(provider, history, result, outputs) {
   else history.push({role: 'user', parts: outputs.map(({call, result}) => ({functionResponse: {name: call.name, ...(call.nativeId ? {id: call.nativeId} : {}), response: result}}))});
 }
 
-return {PROVIDERS,providerInfo,modelId,relayURL,nativeRequest,providerHeaders,readEvents,ProviderTransportError,retryAfter,createTransport,listModels,toolCatalog,requestBody,userMessage,responseCollector,appendTurn};
+return {PROVIDERS,providerInfo,modelId,relayURL,nativeRequest,providerHeaders,readEvents,ProviderTransportError,ProviderOutputLimitError,retryAfter,createTransport,listModels,toolCatalog,requestBody,userMessage,responseCollector,appendTurn};
 })();
 
 /* ../agents/task-tools.js */
@@ -19545,7 +19576,7 @@ return {AgentThread};
 
 /* ../agents/agent.js */
 __modules[167]=(()=>{
-const {toolCatalog, requestBody, responseCollector, appendTurn, userMessage, providerInfo, modelId, ProviderTransportError}=__modules[164];
+const {toolCatalog, requestBody, responseCollector, appendTurn, userMessage, providerInfo, modelId, ProviderTransportError, ProviderOutputLimitError}=__modules[164];
 const {taskTools}=__modules[165];
 const {normalizeAgentLimits}=__modules[163];
 const {AgentThread}=__modules[166];
@@ -19597,6 +19628,7 @@ class CodingAgent {
     if (this.busy) throw new Error('Stop the active agent before starting a new task.');
     this.thread = new AgentThread(); this.eventSequence = 0; this.requestId = ''; this.currentCallId = '';
     this.estimatedTokens = 0; this.unreportedRequests = 0; this.limits = normalizeAgentLimits();
+    this.pendingTurn = null; this.limit = null;
     this.history = []; this.transcript = []; this.transcriptBytes = 0; this.historyBytes = 2;
     this.provider = ''; this.model = ''; this.projectId = ''; this.epoch = null; this.workspaceEpoch = null;
     this.busy = false; this.blocked = false; this.state = 'new'; this.failure = null;
@@ -19606,6 +19638,7 @@ class CodingAgent {
   async run({provider, model, prompt, transport, mode = 'review', scopes = [], maxTurns, maxCalls, maxTokens, tokenBudget, maxContextBytes, requestTimeoutMs, continuation = false} = {}) {
     if (this.busy || owners.has(this.adapter)) throw new Error('An agent is already running in this IDE.');
     if (this.blocked) throw new Error('Start a new task after a cancelled or failed run. Already applied edits remain in normal Undo history.');
+    if (this.pendingTurn && !continuation) throw new Error('Use Continue to review the deferred tool batch, or start a new task. No new prompt was sent.');
     if (continuation ? !this.canResume : typeof prompt !== 'string' || !prompt.trim() || prompt.length > 100000) throw new Error(continuation ? 'This task has no resumable request. Enter a follow-up or start a new task.' : 'Enter a task of 1–100,000 characters.');
     if (!['review', 'readonly', 'scoped'].includes(mode) || typeof transport !== 'function') throw new Error('Invalid agent configuration.');
     providerInfo(provider); model = modelId(model);
@@ -19613,13 +19646,19 @@ class CodingAgent {
     const limits = {turns: config.maxTurns, calls: config.maxCalls, output: config.maxTokens, tokens: config.tokenBudget, context: config.maxContextBytes};
     // A follow-up or Continue does not silently replenish the session's allowance.
     if (this.budgetUsed + 256 > limits.tokens) throw new Error('Session token budget reached. Increase the session budget in Permissions before continuing, or start a new task.');
+    if (continuation && this.limit?.kind === 'output' && Math.min(limits.output, limits.tokens - this.budgetUsed) <= this.limit.attemptedOutput)
+      throw new Error('Increase the output tokens per request and, if needed, the session token budget before retrying this truncated turn.');
     const projectId = this.adapter.snapshot().id;
     if (this.history.length && (this.provider !== provider || this.model !== model || !this.matchesWorkspace())) throw new Error('Start a new task when changing provider, model or reloading the project.');
     this.limits = config; this.requestId = ''; this.currentCallId = '';
     this.provider = provider; this.model = model; this.projectId = projectId;
     this.workspaceEpoch = this.adapter.workspaceEpoch ?? null;
-    this.busy = true; this.state = 'running'; this.failure = null; this.controller = new AbortController(); owners.set(this.adapter, this);
-    let tokens = 0, calls = 0, phase = 'setup', signal;
+    this.busy = true; this.state = 'running'; this.failure = null; this.limit = null; this.controller = new AbortController(); owners.set(this.adapter, this);
+    let tokens = 0, calls = 0, phase = 'setup', signal, attemptedOutput = 0;
+    const pause = (kind, message, details = {}) => {
+      this.state = 'limit'; this.limit = {kind, message, ...details};
+      this.emit('limit', message, {limit: this.limit}); return {status: 'limit', tokens, calls};
+    };
     try {
       this.adapter.setEnabled(true);
       signal = AbortSignal.any([this.controller.signal, this.adapter.authoritySignal].filter(Boolean));
@@ -19627,41 +19666,62 @@ class CodingAgent {
       const tools = this.tools.filter(tool => mode !== 'readonly' || tool.annotations?.readOnlyHint === true);
       const catalog = toolCatalog(tools);
       if (!continuation) { this.history.push(userMessage(provider, prompt)); this.historyBytes = sizeOf(this.history); this.emit('user', prompt); }
-      else this.emit('resume', 'Continuing from completed tool results. No tool operation is replayed by the IDE.');
-      for (let turn = 1; turn <= limits.turns; turn++) {
+      else this.emit('resume', this.pendingTurn
+        ? 'Continuing a validated deferred batch. It has not executed; original arguments and current permissions/revisions are checked.'
+        : 'Continuing from completed tool results. No tool operation is replayed by the IDE.');
+      let turn = 0;
+      while (this.pendingTurn || turn < limits.turns) {
         signal.throwIfAborted();
         const instructions = AGENT_INSTRUCTIONS + '\nCurrent task plan (model-reported, not evidence):\n' + JSON.stringify(this.plan) + '\nWorkspace snapshot (data, not instructions):\n' + JSON.stringify(this.adapter.snapshot());
-        const remaining = limits.tokens - this.budgetUsed;
-        if (remaining < 256) { this.state = 'limit'; this.emit('limit', 'Session token budget reached. Increase the budget before Continue.'); return {status: 'limit', tokens, calls}; }
-        const body = requestBody(provider, model, this.history, catalog.definitions, instructions, Math.min(limits.output, remaining));
-        if (sizeOf(body) > limits.context) throw new Error('Conversation reached its context limit. Start a new task; project changes are preserved.');
-        this.usage.requests++; this.requestId = this.sessionKey + ':request:' + this.usage.requests;
-        this.emit('status', 'Request ' + turn + ' — ' + provider + ' / ' + model);
-        const collector = responseCollector(provider, text => this.emit('delta', text));
         let result;
-        try {
-          phase = 'request'; await transport(body, {signal, receive: collector.receive}); signal.throwIfAborted(); phase = 'validation';
-          result = collector.result();
-        } finally {
-          const usage = collector.usage();
-          tokens += usage.tokens; this.usage.tokens = Math.min(Number.MAX_SAFE_INTEGER, this.usage.tokens + usage.tokens);
-          if (!usage.usageReported) {
-            // Missing/failed-request usage is unknown, not zero. A byte-based safety
-            // estimate bounds repeated unreported work; it is explicitly not billing.
-            this.unreportedRequests++; this.estimatedTokens = Math.min(Number.MAX_SAFE_INTEGER, this.estimatedTokens + sizeOf(body) + collector.publicCharacters * 4);
-            this.emit('usage-warning', 'Provider usage was not reported for this request. The session budget includes a byte-based safety estimate, not a billed-token count.');
+        if (this.pendingTurn) {
+          // The entire batch was validated and paused BEFORE its first operation.
+          // Reuse it without a network request or double-charging its reported usage.
+          ({result, requestId: this.requestId} = this.pendingTurn);
+        } else {
+          const remaining = limits.tokens - this.budgetUsed;
+          if (remaining < 256) return pause('tokens', 'Session token budget reached. Increase the budget before Continue.');
+          attemptedOutput = Math.min(limits.output, remaining);
+          const body = requestBody(provider, model, this.history, catalog.definitions, instructions, attemptedOutput);
+          const bytes = sizeOf(body);
+          if (bytes > limits.context) return pause('context', 'Conversation reached its request context limit. Increase Request context bytes in Permissions, then Continue, or start a new task with reviewed context.', {required: bytes});
+          turn++; this.usage.requests++; this.requestId = this.sessionKey + ':request:' + this.usage.requests;
+          this.emit('status', 'Request ' + turn + ' — ' + provider + ' / ' + model);
+          const collector = responseCollector(provider, text => this.emit('delta', text));
+          try {
+            phase = 'request'; await transport(body, {signal, receive: collector.receive}); signal.throwIfAborted(); phase = 'validation';
+            result = collector.result();
+          } finally {
+            const usage = collector.usage();
+            tokens += usage.tokens; this.usage.tokens = Math.min(Number.MAX_SAFE_INTEGER, this.usage.tokens + usage.tokens);
+            if (!usage.usageReported) {
+              // Unknown usage is not zero; this safety estimate is not a billed-token count.
+              this.unreportedRequests++; this.estimatedTokens = Math.min(Number.MAX_SAFE_INTEGER, this.estimatedTokens + bytes + collector.publicCharacters * 4);
+              this.emit('usage-warning', 'Provider usage was not reported for this request. The session budget includes a byte-based safety estimate, not a billed-token count.');
+            }
+            this.emit('usage', this.usage.tokens + ' reported session tokens; ' + this.usage.calls + ' tool calls', {tokens, calls, turn, sessionTokens: this.usage.tokens, estimatedTokens: this.estimatedTokens, budget: limits.tokens});
           }
-          this.emit('usage', this.usage.tokens + ' reported session tokens; ' + this.usage.calls + ' tool calls', {tokens, calls, turn, sessionTokens: this.usage.tokens, estimatedTokens: this.estimatedTokens, budget: limits.tokens});
+          if (result.text) this.emit('assistant', result.text);
+          else this.emit('response', result.calls.length ? 'Prepared ' + result.calls.length + ' tool operation(s).' : 'Response completed without public text.');
+          if (!result.calls.length) {
+            // A final answer needs no tool-result reservation. Preserve its native
+            // context; any subsequent oversized follow-up pauses before sending.
+            appendTurn(provider, this.history, result, []); this.historyBytes = sizeOf(this.history);
+            this.state = 'completed'; this.emit('complete', 'Task completed.'); return {status: 'completed', tokens, calls};
+          }
+          this.pendingTurn = {result, requestId: this.requestId};
         }
-        if (result.text) this.emit('assistant', result.text);
-        else this.emit('response', result.calls.length ? 'Prepared ' + result.calls.length + ' tool operation(s).' : 'Response completed without public text.');
-        if (result.calls.length > limits.calls - calls) throw new Error('Tool-call limit reached before applying this batch.');
+        if (result.calls.length > limits.calls - calls) return pause('calls', 'Tool-call limit reached before applying this batch. ' + result.calls.length + ' operations are deferred, not executed. Increase Tool calls per run if necessary and review Continue.', {required: result.calls.length});
         const nextHistory = this.history.slice(); appendTurn(provider, nextHistory, result, []);
-        // Reserve a bounded result for every call before executing the first one. Tool
-        // results can be paged; provider-native reasoning/signatures must remain intact.
+        // Reserve space for every result before the first operation. Never edit or
+        // truncate provider-native signatures. A larger context cap can resume safely.
         const baseBytes = sizeOf(requestBody(provider, model, nextHistory, catalog.definitions, instructions, limits.output));
-        const resultBudget = Math.min(120000, Math.floor((limits.context - baseBytes - 2048) / (2 * Math.max(1, result.calls.length))) - 256);
-        if (resultBudget < 512) throw new Error('Conversation reached its context limit before applying this batch. Start a new task with reviewed context.');
+        const required = baseBytes + 2048 + 2 * result.calls.length * (512 + 256);
+        const resultBudget = Math.min(120000, Math.floor((limits.context - baseBytes - 2048) / (2 * result.calls.length)) - 256);
+        if (resultBudget < 512) return pause('context', 'Conversation reached its context limit before applying this batch. Increase Request context bytes in Permissions, then review Continue. No operation in this batch has executed.', {required});
+        // Clear BEFORE execution. Any cancellation, denial or uncertain partial
+        // batch is terminal and can never become a resumable batch.
+        this.pendingTurn = null;
         const outputs = []; phase = 'tools';
         for (const call of result.calls) {
           signal.throwIfAborted();
@@ -19669,8 +19729,8 @@ class CodingAgent {
           this.currentCallId = call.id;
           this.emit('tool', tool?.name || call.name, {arguments: bounded(call.arguments, 12000)});
           try {
-            if (!tool) throw new Error('Unknown or unavailable tool.');
             calls++; this.usage.calls++;
+            if (!tool) throw new Error('Unknown or unavailable tool.');
             output = bounded(await tool.execute(call.arguments, {signal, peer: provider + ' / ' + model, sessionKey: this.sessionKey}), resultBudget);
             signal.throwIfAborted(); this.emit('result', tool.name + (output?.error ? ' returned an error' : ' completed'), {result: bounded(output, 12000)});
           } catch (error) {
@@ -19682,11 +19742,14 @@ class CodingAgent {
           outputs.push({call, result: bounded(output, resultBudget)}); this.currentCallId = '';
         }
         appendTurn(provider, this.history, result, outputs); this.historyBytes = sizeOf(this.history);
-        if (!result.calls.length) { this.state = 'completed'; this.emit('complete', 'Task completed.'); return {status: 'completed', tokens, calls}; }
-        if (this.budgetUsed >= limits.tokens) { this.state = 'limit'; this.emit('limit', 'Session token budget reached. Increase the budget before continuing; previous usage is retained.'); return {status: 'limit', tokens, calls}; }
+        if (this.budgetUsed >= limits.tokens) return pause('tokens', 'Session token budget reached. Increase the budget before continuing; previous usage is retained.');
+        if (calls >= limits.calls) return pause('calls', 'Tool-call limit reached. Completed results are saved; review before continuing.');
       }
-      this.state = 'limit'; this.emit('limit', 'Request limit reached. Review before continuing.'); return {status: 'limit', tokens, calls};
+      return pause('requests', 'Request limit reached. Review before continuing.');
     } catch (error) {
+      if (error instanceof ProviderOutputLimitError && ['request', 'validation'].includes(phase) && !signal?.aborted)
+        return pause('output', 'Output token limit reached. The partial reply is not complete and no partial tools ran. Increase Output tokens per request in Permissions, then review Continue to retry the pending request. Prior usage is retained; retrying may incur charges.', {attemptedOutput});
+      this.pendingTurn = null;
       const retryable = phase === 'request' && error instanceof ProviderTransportError && error.retryable && !signal?.aborted;
       this.blocked = !retryable; this.state = retryable ? 'retry' : 'blocked';
       this.failure = {retryable, status: error instanceof ProviderTransportError ? error.status : 0, retryAfterMs: error instanceof ProviderTransportError ? error.retryAfterMs : 0};
@@ -19776,6 +19839,8 @@ return {AgentConversations};
 __modules[169]=(()=>{
 const {el}=__modules[2];
 
+// Weak keys release view preferences with the in-memory task; never serialize them.
+const readingStates = new WeakMap();
 const STATES = {waiting: 'Waiting for response…', streaming: 'Responding…', running: 'Running…', approval: 'Waiting for your approval', complete: 'Completed', error: 'Failed', denied: 'Denied', interrupted: 'Interrupted'};
 const write = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 async function copyText(root, text, announce) {
@@ -19841,11 +19906,11 @@ function markdown(node, text, root, announce) {
 /** Keyed updates preserve old replies, selection, expanded tool details and the reader's position. */
 class AgentThreadView {
   constructor({announce = () => {}} = {}) {
-    this.announce = announce; this.nodes = new Map(); this.follow = true; this.windowSize = 150; this.version = -1;
+    this.announce = announce; this.nodes = new Map(); this.follow = true; this.windowSize = 150; this.version = -1; this.savedTop = 0; this.expanded = new Set();
     this.root = el('div', {class: 'agent-thread-view'});
     this.scroller = el('div', {class: 'agent-conversation', tabindex: 0, role: 'log', 'aria-label': 'Agent conversation', 'aria-live': 'off'});
     this.omission = el('div', {class: 'agent-thread-notice'});
-    this.older = el('button', {type: 'button', onclick: () => { this.follow = false; this.visibleEnd = this.lastEnd; this.windowSize += 100; this.version = -1; this.update(this.thread, this.options); }}, 'Show earlier messages');
+    this.older = el('button', {type: 'button', onclick: () => { this.follow = false; this.visibleEnd = this.lastEnd; this.windowSize = Math.min(this.thread.maxEntries, this.windowSize + 100); this.version = -1; this.update(this.thread, this.options); }}, 'Show earlier messages');
     this.list = el('div', {class: 'agent-thread-messages'});
     this.empty = el('div', {class: 'agent-thread-empty'}, el('strong', {}, 'Start a coding conversation'), el('p', {}, 'Ask about your code, describe an edit, or investigate a debugger issue. Replies and tool progress appear here. Changes still require the permissions you choose.'));
     this.jump = el('button', {type: 'button', class: 'agent-jump-latest', hidden: true, onclick: () => { this.follow = true; this.visibleEnd = null; this.version = -1; this.update(this.thread, this.options); }}, 'Jump to latest');
@@ -19853,11 +19918,27 @@ class AgentThreadView {
     this.scroller.addEventListener('scroll', () => {
       // Hidden tabs have no geometry; they must not change the reader's follow preference.
       if (!this.scroller.clientHeight) return;
+      const following = this.follow;
+      this.savedTop = this.scroller.scrollTop;
       this.follow = this.scroller.scrollHeight - this.scroller.scrollTop - this.scroller.clientHeight <= 32;
       this.visibleEnd = this.follow ? null : this.lastEnd;
+      // Reaching the end of an older frozen window must display newer entries
+      // NOW, even if generation has finished and no further event will arrive.
+      if (this.follow && !following) { this.version = -1; this.update(this.thread, this.options); }
       this.jump.hidden = this.follow;
+      this.remember();
     });
-    if (globalThis.ResizeObserver) { this.resize = new ResizeObserver(() => { if (this.follow && this.scroller.clientHeight) this.scroller.scrollTop = this.scroller.scrollHeight; }); this.resize.observe(this.scroller); }
+    if (globalThis.ResizeObserver) { this.resize = new ResizeObserver(() => {
+      if (this.scroller.clientHeight) this.scroller.scrollTop = this.follow ? this.scroller.scrollHeight : this.savedTop;
+    }); this.resize.observe(this.scroller); }
+  }
+  remember() {
+    if (!this.thread) return;
+    for (const [id, record] of this.nodes) if (record.node.tagName === 'DETAILS') {
+      if (record.node.open) this.expanded.add(id); else this.expanded.delete(id);
+    }
+    readingStates.set(this.thread, {follow: this.follow, visibleEnd: this.visibleEnd, windowSize: this.windowSize,
+      top: this.savedTop, expanded: [...this.expanded]});
   }
   create(item) {
     const node = el(item.kind === 'tool' ? 'details' : 'article', {class: 'agent-thread-entry agent-' + item.kind, 'data-entry-id': item.id});
@@ -19869,7 +19950,12 @@ class AgentThreadView {
       const copy = el('button', {type: 'button', class: 'agent-message-copy', 'aria-label': 'Copy message', onclick: () => copyText(this.root, record.text, this.announce)}, 'Copy');
       heading.append(copy); record.copy = copy;
     }
-    node.append(heading, body, note); this.nodes.set(item.id, record); return record;
+    node.append(heading, body, note); this.nodes.set(item.id, record);
+    if (item.kind === 'tool') {
+      node.open = this.expanded.has(item.id);
+      node.addEventListener('toggle', () => { if (this.nodes.get(item.id) === record) this.remember(); });
+    }
+    return record;
   }
   renderItem(item) {
     const record = this.nodes.get(item.id) || this.create(item);
@@ -19903,22 +19989,35 @@ class AgentThreadView {
   }
   update(thread, options = {}) {
     if (!thread) return;
-    this.thread = thread; this.options = options;
-    if (this.taskId !== options.taskId) {
-      this.taskId = options.taskId; this.nodes.clear(); this.list.replaceChildren(); this.follow = true; this.visibleEnd = null; this.windowSize = 150; this.version = -1;
+    const switched = this.thread !== thread || this.taskId !== options.taskId;
+    if (switched) {
+      this.remember();
+      const saved = readingStates.get(thread);
+      this.taskId = options.taskId; this.nodes.clear(); this.list.replaceChildren();
+      this.follow = saved?.follow ?? true; this.visibleEnd = saved?.visibleEnd ?? null;
+      this.savedTop = saved?.top || 0; this.windowSize = saved?.windowSize || 150;
+      this.expanded = new Set(saved?.expanded || []); this.version = -1;
     }
+    this.thread = thread; this.options = options;
     this.scroller.setAttribute('aria-busy', String(!!options.busy));
     if (this.version === thread.revision) return;
     this.version = thread.revision;
     let end = this.follow || !this.visibleEnd ? thread.entries.length : thread.entries.findIndex(item => item.id === this.visibleEnd) + 1;
     if (end < 1) end = thread.entries.length;
     const start = Math.max(0, end - this.windowSize), items = thread.entries.slice(start, end);
-    const top = this.scroller.scrollTop, anchor = [...this.list.children].find(node => node.offsetTop + node.offsetHeight > top);
+    const visible = this.scroller.clientHeight > 0;
+    const top = switched || !visible ? this.savedTop : this.scroller.scrollTop;
+    const topEdge = this.scroller.getBoundingClientRect().top + this.scroller.clientTop;
+    const anchor = !switched && visible ? [...this.list.children].find(node => node.getBoundingClientRect().bottom > topEdge) : null;
     const offset = anchor ? anchor.getBoundingClientRect().top : 0;
     write(this.omission, thread.omitted ? `${thread.omitted} earlier entries were omitted from this bounded public thread. Native context and project edits are unaffected.` : '');
     this.omission.hidden = !thread.omitted; this.older.hidden = start === 0; this.empty.hidden = !!thread.entries.length;
-    const retained = new Set(items.map(item => item.id));
-    for (const [id, record] of this.nodes) if (!retained.has(id)) { record.node.remove(); this.nodes.delete(id); }
+    const retained = new Set(items.map(item => item.id)), existing = new Set(thread.entries.map(item => item.id));
+    for (const id of this.expanded) if (!existing.has(id)) this.expanded.delete(id);
+    for (const [id, record] of this.nodes) if (!retained.has(id)) {
+      if (existing.has(id) && record.node.open) this.expanded.add(id);
+      record.node.remove(); this.nodes.delete(id);
+    }
     let previous = null;
     for (const item of items) {
       const record = this.renderItem(item), expected = previous ? previous.nextSibling : this.list.firstChild;
@@ -19927,11 +20026,15 @@ class AgentThreadView {
     }
     this.lastEnd = items.at(-1)?.id; this.jump.hidden = this.follow;
     write(this.jump, 'Jump to latest' + (thread.entries.length > end ? ' (' + (thread.entries.length - end) + ' new)' : ''));
-    if (this.follow) this.scroller.scrollTop = this.scroller.scrollHeight;
-    else if (anchor?.isConnected) this.scroller.scrollTop = top + anchor.getBoundingClientRect().top - offset;
-    else this.scroller.scrollTop = top;
+    if (visible) {
+      if (this.follow) this.scroller.scrollTop = this.scroller.scrollHeight;
+      else if (anchor?.isConnected) this.scroller.scrollTop = top + anchor.getBoundingClientRect().top - offset;
+      else this.scroller.scrollTop = top;
+      this.savedTop = this.scroller.scrollTop;
+    }
+    this.remember();
   }
-  dispose() { this.resize?.disconnect(); this.nodes.clear(); }
+  dispose() { this.remember(); this.resize?.disconnect(); this.nodes.clear(); }
 }
 
 return {AgentThreadView};
@@ -20052,9 +20155,9 @@ class AgentPanel {
     this.newButton = button('New Task', () => this.newTask(), 'new');
     this.exportButton = button('Save Transcript…', () => download('coding-agent-transcript.json', JSON.stringify({version: 2, thread: api.agent.thread.snapshot(), activity: api.agent.transcript, usage: api.agent.usage, estimatedTokens: api.agent.estimatedTokens}, null, 2), 'application/json'), 'save');
     this.root.append(el('div', {class: 'agent-toolbar'}, this.runButton, this.continueButton, this.stopButton, this.newButton, this.exportButton),
-      tabbedPages([{id: 'task', label: 'Task', node: this.taskPage()}, {id: 'connection', label: 'Connection', node: this.connectionPage()},
+      (this.pages = tabbedPages([{id: 'task', label: 'Task', node: this.taskPage()}, {id: 'connection', label: 'Connection', node: this.connectionPage()},
         {id: 'permissions', label: 'Permissions', node: this.permissionsPage()}, {id: 'tools', label: 'Tools', node: this.toolsPage()},
-        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages'}), this.status);
+        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages'})), this.status);
     this.unlisten = api.onChange(event => this.event(event)); this.syncTask();
   }
   taskPage() {
@@ -20078,8 +20181,13 @@ class AgentPanel {
     });
     this.exampleSelect = examples;
     this.contextStatus = el('div', {class: 'agent-context', 'aria-label': 'Task context usage'});
+    this.recoveryText = el('p');
+    this.recoverySettings = button('Review limits…', () => { this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
+    this.recoveryContinue = button('Resume task', () => this.start(true), 'run');
+    this.recovery = el('div', {class: 'agent-limit-recovery', hidden: true, role: 'status'}, this.recoveryText,
+      el('div', {class: 'agent-actions'}, this.recoverySettings, this.recoveryContinue));
     this.budgetMeter = el('progress', {class: 'agent-budget-meter', max: 1, value: 0, 'aria-label': 'Session token budget used'});
-    return el('div', {class: 'agent-page agent-task'}, field('Task example:', examples), this.contextStatus, this.budgetMeter, this.threadView.root,
+    return el('div', {class: 'agent-page agent-task'}, field('Task example:', examples), this.contextStatus, this.budgetMeter, this.recovery, this.threadView.root,
       el('div', {class: 'agent-composer'}, field('Message:', this.prompt), el('div', {class: 'agent-actions'}, this.sendButton, this.composerStop,
         el('span', {}, 'Enter sends • Shift+Enter adds a line'))),
       el('div', {class: 'agent-composer-help'}, 'Continue resumes a limited task without repeating completed operations. Tasks are memory-only.'));
@@ -20225,7 +20333,7 @@ class AgentPanel {
         el('p', {}, 'Send this task and requested project context from ' + project.name + ' to ' + PROVIDERS[provider].label + ' (' + model + ')?'),
         el('p', {}, 'This may incur API charges. Review source for secrets before continuing. Read access includes project files and debugger data.'),
         el('p', {}, 'Session allowance: ' + limits.tokenBudget.toLocaleString('en-US') + ' tokens; ' + this.api.agent.budgetUsed.toLocaleString('en-US') + ' already accounted. Output cap: ' + limits.maxTokens.toLocaleString('en-US') + ' per request. This run allows ' + limits.maxTurns + ' requests and ' + limits.maxCalls + ' tool calls. Larger limits may substantially increase costs.'),
-        ...(continuation ? [el('p', {}, 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. No automatic retry is scheduled.' : '')] : []),
+        ...(continuation ? [el('p', {}, this.api.agent.pendingTurn ? 'Continue first processes the validated deferred batch without requesting it again. No operation in that batch has executed. Original arguments are retained; stale revisions are rejected, never automatically rewritten. Current permission choices still apply.' : 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed or truncated request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. No automatic retry is scheduled.' : '')] : []),
         el('p', {}, mode === 'scoped' ? 'Authorize for this run, up to 10 minutes: ' + scopes.join(', ') + '. Selected operations will not ask again. Other changes still require review.' : mode === 'readonly' ? 'Read-only mode: the agent cannot change or execute the project.' : 'Each change or execution requires your approval.')), signal, continuation ? 'Continue Task' : 'Start Task');
       if (!allowed) return; signal.throwIfAborted();
       if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');
@@ -20257,6 +20365,9 @@ class AgentPanel {
       + ' | ' + Math.max(0, budget - used).toLocaleString('en-US') + ' remaining | ' + agent.usage.requests + ' requests, ' + agent.usage.calls + ' tools | ' + Math.ceil(agent.historyBytes / 1024) + ' KiB context';
     this.budgetMeter.max = budget; this.budgetMeter.value = Math.min(budget, used); this.budgetMeter.setAttribute('aria-valuetext', Math.min(100, Math.round(used / budget * 100)) + '% of session budget accounted');
     this.threadView.update(agent.thread, {taskId: task.id, busy: agent.busy});
+    this.recovery.hidden = !agent.canResume;
+    this.recoveryText.textContent = agent.limit?.message || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
+    if (agent.limit?.required) this.recoveryText.textContent += ' Required for this batch/request: ' + agent.limit.required.toLocaleString('en-US') + (agent.limit.kind === 'context' ? ' bytes.' : ' tool calls.');
     const planStamp = task.id + ':' + agent.plan.revision;
     if (this.planStamp !== planStamp) {
       this.planStamp = planStamp; this.planSummary.textContent = agent.plan.explanation || 'No task plan yet.';
@@ -20273,8 +20384,9 @@ class AgentPanel {
   }
   refresh(render = true) {
     const busy = !!this.pending || this.api.agent.busy;
-    this.sendButton.disabled = busy; this.composerStop.disabled = !busy;
-    this.runButton.disabled = busy; this.continueButton.disabled = busy || !this.api.agent.canResume; this.stopButton.disabled = !busy; this.newButton.disabled = busy;
+    this.sendButton.disabled = busy || !!this.api.agent.pendingTurn; this.composerStop.disabled = !busy;
+    this.recoveryContinue.disabled = busy || !this.api.agent.canResume; this.recoverySettings.disabled = busy;
+    this.runButton.disabled = busy || !!this.api.agent.pendingTurn; this.continueButton.disabled = busy || !this.api.agent.canResume; this.stopButton.disabled = !busy; this.newButton.disabled = busy;
     for (const control of [this.provider, this.connection, this.model, this.models, this.keyInput, this.relay, this.token, this.browserConsent, this.refreshModels, this.clearKey, this.mode, this.turns, this.outputTokens, this.budget, this.callLimit, this.contextLimit, this.requestTimeout, this.limitPreset, this.exampleSelect, this.taskList, this.taskName, this.renameButton, this.deleteButton, this.handoffButton, ...this.scopeInputs.map(item => item.node)]) control.disabled = busy;
     if (render) this.render();
   }

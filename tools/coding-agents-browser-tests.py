@@ -459,6 +459,117 @@ def composer_keyboard(page,mode):
     return {'enterSends':True,'shiftEnterNewline':True,'imeDoesNotSend':True}
 
 
+def thread_catch_up(page,mode):
+    page.evaluate("""() => {
+      const agent=vb6Studio.codingAgents.agent;
+      for(let i=0;i<40;i++){agent.emit('user','Read '+i);agent.emit('status','Request',{requestId:'read'+i});agent.emit('assistant','Reply '+i,{requestId:'read'+i});}
+    }""")
+    page.wait_for_function("document.querySelectorAll('.agent-thread-entry').length===80")
+    log=page.get_by_label('Agent conversation',exact=True)
+    log.evaluate("e=>{e.scrollTop=100;e.dispatchEvent(new Event('scroll'));}")
+    page.evaluate("const a=vb6Studio.codingAgents.agent;a.emit('status','new',{requestId:'after-reading'});a.emit('assistant','New final reply',{requestId:'after-reading'});")
+    page.get_by_role('button',name='Jump to latest (1 new)',exact=True).wait_for(state='visible')
+    check(page.locator('[data-entry-id="response:after-reading"]').count()==0)
+    log.evaluate("e=>{e.scrollTop=e.scrollHeight;e.dispatchEvent(new Event('scroll'));}")
+    page.wait_for_function("document.querySelector('[data-entry-id=\"response:after-reading\"]')?.textContent.includes('New final reply')")
+    check(log.evaluate('e=>e.scrollHeight-e.scrollTop-e.clientHeight')<=2)
+    check(page.evaluate("vb6Studio.documents.tools.get('tool:coding-agents').threadView.follow"))
+    return {'finishedRepliesRevealWithoutAnotherEvent':True,'bottomRestoresFollowing':True}
+
+
+def thread_return(page,mode):
+    first=page.evaluate("""() => {
+      const api=vb6Studio.codingAgents,a=api.agent;
+      a.emit('status','read',{requestId:'remember'});a.emit('tool','vb6.project.get',{callId:'remember-call',arguments:{}});a.emit('result','Project read',{callId:'remember-call',result:{id:'test'}});
+      for(let i=0;i<40;i++)a.emit('user','Keep reading '+i+'\\nThis task has its own reading position.');
+      return api.conversations.activeId;
+    }""")
+    page.locator('.agent-tool summary').click();page.wait_for_function("document.querySelector('.agent-tool').open")
+    page.get_by_label('Agent conversation',exact=True).evaluate("e=>{e.scrollTop=400;e.dispatchEvent(new Event('scroll'));}")
+    page.get_by_role('button',name='New Task',exact=True).click()
+    tab(page,'Tasks');page.get_by_label('Agent tasks',exact=True).select_option(first);tab(page,'Task')
+    page.wait_for_function("Math.abs(document.querySelector('.agent-conversation').scrollTop-400)<2")
+    check(page.locator('.agent-tool').evaluate('e=>e.open'));check(not page.evaluate("vb6Studio.documents.tools.get('tool:coding-agents').threadView.follow"))
+    page.evaluate("vb6Studio.documents.closeTool('tool:coding-agents');vb6Studio.command('codingAgents');")
+    page.wait_for_function("Math.abs(document.querySelector('.agent-conversation').scrollTop-400)<2")
+    check(page.locator('.agent-tool').evaluate('e=>e.open'))
+    tab(page,'Connection');page.evaluate("vb6Studio.codingAgents.agent.emit('user','Arrived on a hidden tab')");tab(page,'Task')
+    check(page.get_by_label('Agent conversation',exact=True).evaluate('e=>Math.abs(e.scrollTop-400)')<2)
+    # Same task ID with a new thread object must discard old DOM, even at revision zero.
+    page.evaluate("vb6Studio.codingAgents.agent.reset();vb6Studio.documents.tools.get('tool:coding-agents').render();")
+    check(page.locator('.agent-thread-entry').count()==0)
+    return {'taskLocalReading':True,'expandedToolsRestored':True,'panelReopen':True,'hiddenTab':True,'resetIdentity':True}
+
+
+def thread_pruning_anchor(page,mode):
+    page.evaluate("""() => {
+      const a=vb6Studio.codingAgents.agent;a.thread.maxEntries=200;
+      for(let i=0;i<100;i++){a.emit('user','Question '+i);a.emit('status','Request',{requestId:'prune'+i});a.emit('assistant','Reply '+i,{requestId:'prune'+i});}
+    }""")
+    page.wait_for_function("document.querySelectorAll('.agent-thread-entry').length===150")
+    page.get_by_label('Agent conversation',exact=True).evaluate("e=>{e.scrollTop=0;e.dispatchEvent(new Event('scroll'));}")
+    page.get_by_role('button',name='Show earlier messages',exact=True).click()
+    page.wait_for_function("document.querySelectorAll('.agent-thread-entry').length===200")
+    page.evaluate("""() => {
+      const log=document.querySelector('.agent-conversation');log.scrollTop=1800;log.dispatchEvent(new Event('scroll'));
+      const top=log.getBoundingClientRect().top+log.clientTop;
+      window.readingAnchor=Array.from(document.querySelectorAll('.agent-thread-entry')).find(e=>e.getBoundingClientRect().bottom>top);
+      window.anchorTop=readingAnchor.getBoundingClientRect().top;
+      vb6Studio.codingAgents.agent.emit('user','Trigger bounded-history pruning.');
+    }""")
+    page.wait_for_function("vb6Studio.codingAgents.agent.thread.omitted===1 && document.querySelectorAll('.agent-thread-entry').length===199")
+    check(page.evaluate('readingAnchor.isConnected && Math.abs(readingAnchor.getBoundingClientRect().top-anchorTop)<2'))
+    return {'visibleAnchorSurvivesPruning':True,'omissionExplicit':True}
+
+
+def batch_recovery(page,mode):
+    requests=mock(page,'openai',lambda i,b:([{'name':'vb6_project_get'},{'name':'vb6_project_get'}],'') if i==1 else ([], 'Deferred reads completed.'))
+    configure(page,mode='readonly');tab(page,'Permissions');page.get_by_label('Maximum agent tool calls',exact=True).fill('1');tab(page,'Task');start(page);finish(page)
+    page.get_by_role('button',name='Resume task',exact=True).wait_for(state='visible')
+    check(len(requests)==1);check(page.evaluate('vb6Studio.codingAgents.agent.usage.calls')==0)
+    check(page.get_by_role('button',name='Send',exact=True).is_disabled());check('deferred' in page.locator('.agent-limit-recovery').inner_text())
+    page.get_by_role('button',name='Review limits…',exact=True).click();page.get_by_label('Maximum agent tool calls',exact=True).fill('4');tab(page,'Task')
+    page.get_by_role('button',name='Resume task',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Continue Task',exact=True);check('deferred batch' in dialog.inner_text());dialog.get_by_role('button',name='Continue Task',exact=True).click();finish(page)
+    check(len(requests)==2);check(sum(i.get('type')=='function_call_output' for i in requests[1]['input'])==2)
+    page.wait_for_function("document.querySelectorAll('.agent-tool[data-status=complete]').length===2")
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.tokens')==246)
+    check(page.evaluate("vb6Studio.codingAgents.agent.state==='completed' && !vb6Studio.codingAgents.agent.pendingTurn"))
+    return {'deferredNotExecuted':True,'reviewLimitsFromThread':True,'batchNotRequestedTwice':True,'usageNotDoubled':True}
+
+
+def output_recovery(page,mode,provider):
+    requests=[]
+    def route_handler(route):
+        if route.request.method=='OPTIONS':
+            route.fulfill(status=204,headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'POST'});return
+        requests.append(route.request.post_data_json)
+        data=packet(provider, [{'name':'vb6_project_get'}] if len(requests)==1 else [], 'Partial output.' if len(requests)==1 else 'Complete output.')
+        if len(requests)==1:
+            if provider=='openai':data['type']='response.incomplete';data['response']['status']='incomplete';data['response']['incomplete_details']={'reason':'max_output_tokens'}
+            elif provider=='anthropic':data['stop_reason']='max_tokens'
+            else:data['candidates'][0]['finishReason']='MAX_TOKENS'
+        route.fulfill(status=200,content_type='text/event-stream',headers={'Access-Control-Allow-Origin':'*'},body=sse(provider,data))
+    page.route({'openai':'https://api.openai.com/**','anthropic':'https://api.anthropic.com/**','google':'https://generativelanguage.googleapis.com/**'}[provider],route_handler)
+    configure(page,provider,mode='readonly');tab(page,'Permissions');page.get_by_label('Maximum output tokens',exact=True).fill('512');tab(page,'Task');start(page);finish(page)
+    page.get_by_role('button',name='Resume task',exact=True).wait_for(state='visible')
+    check(len(requests)==1);check(page.evaluate('vb6Studio.codingAgents.agent.usage.calls')==0)
+    check('Partial output.' in page.locator('.agent-assistant[data-status=interrupted]').inner_text())
+    check(page.evaluate("vb6Studio.codingAgents.agent.limit.kind==='output'"))
+    # An unchanged output allowance must fail before another paid request.
+    page.get_by_role('button',name='Resume task',exact=True).click();page.get_by_role('dialog',name='AI Coding Agent — Continue Task',exact=True).get_by_role('button',name='Continue Task',exact=True).click();finish(page)
+    check(len(requests)==1);check('Increase the output' in page.locator('.agent-status').inner_text())
+    page.get_by_role('button',name='Review limits…',exact=True).click();page.get_by_label('Maximum output tokens',exact=True).fill('1024');tab(page,'Task')
+    page.get_by_label('Agent task',exact=True).fill('Unsent follow-up')
+    page.screenshot(path=str(REPORTS/f'{mode}-{provider}-output-recovery.png'))
+    page.get_by_role('button',name='Resume task',exact=True).click();page.get_by_role('dialog',name='AI Coding Agent — Continue Task',exact=True).get_by_role('button',name='Continue Task',exact=True).click();finish(page)
+    check(len(requests)==2);check('Unsent follow-up' not in json.dumps(requests));check(page.get_by_label('Agent task',exact=True).input_value()=='Unsent follow-up')
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.tokens')==246);check(page.evaluate("vb6Studio.codingAgents.agent.state==='completed'"))
+    page.wait_for_function("document.querySelectorAll('.agent-assistant').length===2")
+    check('Complete output.' in page.locator('.agent-assistant[data-status=complete]').inner_text())
+    return {'outputCapRecoverable':True,'largerCapRequired':True,'partialToolsNotExecuted':True,'partialTextRetained':True,'draftNotSent':True,'cumulativeUsage':True}
+
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -481,7 +592,8 @@ try:
             for provider in ['openai','anthropic','google']:
                 case(browser,mode,provider,lambda page,mode,provider=provider:provider_workflow(page,mode,provider))
                 case(browser,mode,provider+'-plan-question',lambda page,mode,provider=provider:plan_question(page,mode,provider))
-            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard)]:case(browser,mode,name,fn)
+                case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))
+            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()
