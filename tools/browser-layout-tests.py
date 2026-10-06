@@ -124,6 +124,26 @@ End Sub
         page.evaluate('void vb6Studio.optionsDialog()');page.get_by_role('tab',name='General',exact=True).click();page.get_by_label('Enable anchoring and automatic layout (this project)').uncheck();page.get_by_role('button',name='OK',exact=True).click();page.evaluate('vb6Studio.designer.select(["button"])')
         check(page.locator('[data-property="Anchor"]').count()==0,'Property not hidden');check(page.locator('[data-anchor-edge]').count()==0,'Guides not hidden');check(page.evaluate('vb6Studio.activeModule.form.controls[0].properties.Anchor')==10,'Dormant metadata was deleted')
     case('disabling hides tools and properties without erasing authored metadata',off_again)
+    def components():
+        values=page.evaluate("""async()=>{
+          const A=VB6StudioAPI,p=A.newProject('LayoutComponents'),m=p.modules[0];p.settings.anchoring=true;m.code='Option Explicit\\n';
+          const c=A.createControl('Layout.Gauge.1','Gauge1',300,300);Object.assign(c.properties,{Anchor:10,Mode:0,Serial:'ABC'});m.form.controls=[c];
+          const factory=(model,options)=>new A.BrowserControl(model,options);
+          const registry=new A.ControlAdapterRegistry().register(c.type,{designer:factory,runtime:factory,metadata:{baseName:'Gauge',properties:[{name:'Value',default:25},{name:'Mode',default:0,choices:[{value:0,label:'Auto'},{value:1,label:'Manual'}]},{name:'Serial',default:'ABC',readOnly:true}],events:[{name:'Changing',params:[{name:'Value',type:'Long'}]}],defaultEvent:'Changing'}});
+          vb6Studio.loadProject(p);vb6Studio.installControlAdapters(registry);vb6Studio.designer.select([c.id]);
+          const defaultValue=vb6Studio.designer.formView.controls[0].props.Value;
+          vb6Studio.setProperty('Anchor',10);vb6Studio.setProperties({MinimumWidth:900,Mode:1});
+          let readonly='',choice='';try{vb6Studio.setProperty('Serial','bad')}catch(e){readonly=e.message}
+          try{vb6Studio.setProperties({MinimumWidth:1200,Mode:99})}catch(e){choice=e.message}
+          const control=vb6Studio.activeModule.form.controls[0],minimum=control.properties.MinimumWidth,mode=control.properties.Mode;
+          const disabled=vb6Studio.inspector.fields.get('Serial').disabled,anchorEditor=!!document.querySelector('[aria-label="Edit Anchor"]');
+          vb6Studio.designer.select([]);vb6Studio.setProperty('ClientWidth',9600);const left=control.properties.Left;
+          vb6Studio.designer.select([c.id]);await vb6Studio.command('defaultEvent');
+          return {defaultValue,readonly,choice,minimum,mode,disabled,anchorEditor,left,event:vb6Studio.activeModule.code.includes('Sub Gauge1_Changing(')};
+        }""")
+        check(values['defaultValue']==25 and values['minimum']==900 and values['mode']==1 and values['left']==900,str(values))
+        check('read-only' in values['readonly'] and 'choice' in values['choice'] and values['disabled'] and values['anchorEditor'] and values['event'],str(values));return values
+    case('anchoring coexists with OCX defaults, readonly properties and custom events',components)
     browser.close()
 server.shutdown()
 (REPORT/f'browser-{browser_name}.json').write_text(json.dumps({'browser':browser_name,'origin':'set_content' if CONTENT else 'http','results':results},indent=2))

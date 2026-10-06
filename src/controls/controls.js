@@ -29,7 +29,7 @@ function safeImage(picture,assets={}){if(typeof picture==='string'){if(/^data:im
 export class BrowserControl {
   constructor(model,{controlRegistry=null,design=false,vm=null,instance=null,form=null,anchoring=false,assets={},backend='auto',onBackend=()=>{}}={}) {
     this.anchoring=(anchoring===true||form?.anchoring===true||vm?.program?.settings?.anchoring===true);this.controlRegistry=controlRegistry||vm?.host?.controlRegistry;this.__control=true;this.__type=model.type;this.model=model;this.design=design;this.vm=vm;this.instance=instance;this.form=form;this.assets=assets;this.backend=backend;this.onBackend=onBackend;this.disposed=false;this.type=model.type;
-    this.props={Left:0,Top:0,Width:1800,Height:450,Visible:-1,Enabled:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,BackColor:-2147483633,ForeColor:-2147483640,TabIndex:0,TabStop:-1,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[model.type]||{}),...clone(model.properties||{}),Name:model.name};
+    this.props={Left:0,Top:0,Width:1800,Height:450,Visible:-1,Enabled:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,BackColor:-2147483633,ForeColor:-2147483640,TabIndex:0,TabStop:-1,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[model.type]||{}),...(this.controlRegistry?.defaults?.(model.type)||{}),...clone(model.properties||{}),Name:model.name};
     for(const key of Object.keys(this.props))if(layoutKey(key))delete this.props[key];
     if(this.anchoring)for(const [key,value]of Object.entries(layoutDefaults(model)))this.props[key]=layoutProperty(key,model.properties?.[key]??value,model.properties||{});
     for(const [key,value]of Object.entries(this.props))if(value?.resource)this.props[key]=CONTROL_DEFAULTS[model.type]?.[key]??'';
@@ -361,7 +361,7 @@ export class BrowserForm extends BrowserControl {
     if(!type||type==='OLE')throw new VBError('No browser control adapter for '+progId,429);
     if(!/^[A-Za-z_]\w*$/.test(String(name))||this.controlMap.has(lower(name)))throw new VBError('Control name must be a unique identifier',730);
     let parent=null;if(container){const value=typeof container==='string'?this.controlMap.get(lower(container)):container?.__vbInstance?container.formObject:container;if(value!==this){if(!this.controls.includes(value)||!['Frame','PictureBox','TabStrip','SSTab'].includes(value.type))throw new VBError('Invalid control container',380);parent=value.model.name;}}
-    const model=createControl(type,String(name));model.parent=parent;model.properties.Visible=0;
+    const model=createControl(type,String(name));model.properties={...model.properties,...(this.controlRegistry?.defaults?.(type)||{}),Name:String(name)};model.parent=parent;model.properties.Visible=0;
     const control=this.mountDynamic(model);this.controlMap.set(lower(name),control);this.instance?.fields.set(lower(name),new Cell('Object',control));return control;
   }
   removeControl(control){

@@ -1262,6 +1262,18 @@ html:has(.browser-window-root), body:has(> .browser-window-root) { width:100%; h
 .agent-full-confirm{display:flex;align-items:flex-start;gap:6px;font-weight:bold;padding:8px;border:1px solid var(--button-shadow,#808080)}
 .agent-full-confirm input{flex:none}
 
+/* Local change review and follow-ups remain classic tool pages, not a new app shell. */
+.agent-queue>select,.agent-changes>select{width:100%;min-height:90px;flex:none}
+.agent-queue>.agent-log{flex:1;min-height:100px;max-height:350px}
+.agent-review-lines{min-height:120px;max-height:350px;overflow:auto;background:var(--vb-window);color:var(--vb-window-text);border:2px solid;border-color:var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow);padding:4px;flex:none}
+.agent-review-lines .agent-diff-line{display:block;border:0!important;box-shadow:none!important;border-radius:0!important;background:var(--vb-window);color:var(--vb-window-text);font:12px/1.5 Consolas,'Courier New',monospace;text-align:left;white-space:pre;tab-size:5;min-width:100%;padding:0 4px!important;cursor:pointer}
+.agent-review-lines .agent-diff-line[data-kind="+"]{font-weight:bold;background:var(--vb-info)}
+.agent-review-lines .agent-diff-line[data-kind="-"]{text-decoration:line-through}
+.agent-review-lines .agent-diff-line[aria-pressed="true"]{background:var(--vb-selection);color:var(--vb-selection-text)}
+.agent-diff-gap{padding:3px;color:var(--vb-text);background:var(--vb-face)}
+.agent-changes>.agent-field>textarea{min-height:50px;max-height:150px}
+.agent-changes>[hidden]{display:none}
+
 /*!
  * Classic staircase bevels adapted from the inset box-shadow technique in
  * 98.css by Jordan Scales. Source attribution requested in:

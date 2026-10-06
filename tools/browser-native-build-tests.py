@@ -107,15 +107,34 @@ with sync_playwright() as pw:
             extra = ROOT / 'validation' / folder
             if not (extra / f'{name}.vb6web').exists():
                 continue
+            # Isolate each export in a fresh document. Chromium limits bursts
+            # of downloads from one frame even when the menu click is real;
+            # the fixture matrix must not depend on the runner's speed.
+            page.close()
+            page = browser.new_page(accept_downloads=True, viewport={'width': 1440, 'height': 960})
+            page.set_default_timeout(15000)
+            page.on('request', lambda request: requests.append(request.url) if request.url.startswith(('https:', 'http:')) else None)
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text())
+            page.wait_for_function('!!globalThis.vb6Studio?.project')
             original = json.loads((extra / f'{name}.vb6web').read_text())
             page.evaluate('p => vb6Studio.loadProject(p)', original)
             before = page.evaluate('JSON.stringify(vb6Studio.project.modules)')
             # Exercise the user path rather than issuing an unbounded burst of
             # script-only downloads (which Chromium may throttle per frame).
             page.get_by_role('menubar', name='Main menu').get_by_role('menuitem', name='File', exact=True).click()
-            with page.expect_download() as pending:
-                page.locator('.classic-menu [data-command="exportWin32"]').click()
-            downloaded = pending.value
+            try:
+                with page.expect_download() as pending:
+                    page.locator('.classic-menu [data-command="exportWin32"]').click()
+                downloaded = pending.value
+            except Exception:
+                (OUT / f'{name}-failure.json').write_text(json.dumps({
+                    'build': page.evaluate('vb6Studio.lastNativeBuild || null'),
+                    'output': page.evaluate('vb6Studio.output'),
+                    'pageErrors': errors, 'requests': requests,
+                }, indent=2))
+                page.screenshot(path=str(OUT / f'{name}-failure.png'))
+                raise
             downloaded.save_as(OUT / f'{name}.exe')
             check(f'{name}: Make EXE preserves source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
             check(f'{name}: Make EXE equals Node', (OUT / f'{name}.exe').read_bytes() == (extra / f'{name}.exe').read_bytes())

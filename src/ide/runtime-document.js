@@ -6,9 +6,15 @@
  * The caller owns the frame and session identity. A delayed host response must
  * neither navigate a disposed frame nor stop/report errors against a new run.
  */
+const requests = new WeakMap();
+
 export function loadRuntimeDocument(ide, frame, html, {isCurrent, onError}) {
-  const current = () => frame.isConnected && isCurrent();
-  if (!current()) return;
+  // Request identity is separate from session identity: an active session can
+  // prepare more than one document for the same iframe (for example on restart).
+  if (!frame.isConnected || !isCurrent()) return;
+  const request = {};
+  requests.set(frame, request);
+  const current = () => requests.get(frame) === request && frame.isConnected && isCurrent();
   const failed = error => { if (current()) onError(error); };
   try {
     if (typeof ide.runtimeDocumentLoader !== 'function') {
