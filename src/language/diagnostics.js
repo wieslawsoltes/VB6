@@ -28,12 +28,13 @@ export class ProjectDiagnosticCache {
   constructor(){this.entries=new Map();}
   *steps(project) {
     const modules=new Map(),diagnostics=[],seen=new Set();let compiledModules=0,cacheHits=0;
-    const constants=JSON.stringify(project.settings?.conditionalConstants||{});
+    const constants=JSON.stringify(project.settings?.conditionalConstants||{}),counts=new Map();
+    for(const input of project.modules)if(input.id!==undefined&&input.id!==null){const id=String(input.id);counts.set(id,(counts.get(id)||0)+1);}
     for(let i=0;i<project.modules.length;i++) {
-      const input=project.modules[i],key=String(input.id||i)+':'+i;seen.add(key);
+      const input=project.modules[i],id=String(input.id),key=counts.get(id)===1?'id:'+id:'position:'+i,attributes=JSON.stringify(input.attributes||[]);seen.add(key);
       let entry=this.entries.get(key);
-      if(!entry||entry.code!==input.code||entry.name!==input.name||entry.kind!==input.kind||entry.constants!==constants||entry.attributes!==JSON.stringify(input.attributes||[])) {
-        entry={code:input.code,name:input.name,kind:input.kind,constants,attributes:JSON.stringify(input.attributes||[])};compiledModules++;
+      if(!entry||entry.code!==input.code||entry.name!==input.name||entry.kind!==input.kind||entry.constants!==constants||entry.attributes!==attributes) {
+        entry={code:input.code,name:input.name,kind:input.kind,constants,attributes};compiledModules++;
         try {entry.compiled=compileModule({...input,conditionalConstants:project.settings?.conditionalConstants||{}});}
         catch(error){entry.error=compilerDiagnostic(error,input.name);}
         this.entries.set(key,entry);

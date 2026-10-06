@@ -2,12 +2,12 @@
   "version": 2,
   "files": {
     "dist/studio.js": {
-      "bytes": 6119501,
-      "sha256": "f6cd7be957465b1b6c3b50cc7097c777189ed7c8cf9c06da20c2a025aeaa541c"
+      "bytes": 6169096,
+      "sha256": "502fd983c76d336b8c82929f9a3c953a7cb9086e0125f9721a4e8490975cc1e1"
     },
     "dist/VB6-Studio-Web.html": {
-      "bytes": 6429445,
-      "sha256": "aa257611f658e15a3acb3ca94785061901ed86653ab2d804d65f4c054c4dba2d"
+      "bytes": 6479040,
+      "sha256": "b45e9cbb7d9d82ae0b6f949211e639974aafd72cb0b376ed822af290878320e2"
     },
     "dist/win32-browser.js": {
       "bytes": 212919,
@@ -26,124 +26,124 @@
       "sha256": "32bb2c6755e6163393536bd7948961a93dfb314fcd4c6d4988272b2ca9ad07fc"
     },
     "dist/vb6-native.js": {
-      "bytes": 488878,
-      "sha256": "2903870850e181e4bf521fdccf358ecd26b0939ee3b77879211117d99e46a04f"
+      "bytes": 505108,
+      "sha256": "dba4d3d6ae4a1b8470d6cde7c0da6ac297347e15832f28eca4eab8ecb01225c7"
     },
     "src/editor/diagnostics-payload.js": {
-      "bytes": 174276,
-      "sha256": "99ef0d4c708ae2108e898bcb3258f34849ecbf362872c9d0e4e60534c60e968c"
+      "bytes": 190933,
+      "sha256": "a3ed576c1173a2567956754ffd752cff318d9b52f56f8c0de8470b91a8072ce0"
     },
     "dist/studio.css": {
       "bytes": 309483,
       "sha256": "564ff407f4207430194568eb45d0fab8426ddfa03b97533f513c0d97f43e062f"
     },
     "dist/vb6-runtime.js": {
-      "bytes": 2118151,
-      "sha256": "7fd2d42aa4c6372e56ba51094e7691114a32e82e9edaca82d5346a27cc59bfae"
+      "bytes": 2134417,
+      "sha256": "29a0ab5165896f84b2fdf9b6d11ff1f88758f25c4eda1f6220cad0b25257b04f"
     },
     "src/exporter/runtime-payload.js": {
-      "bytes": 2271215,
-      "sha256": "e9c793aea953e8f97a5438e5d45c928d1372cc1a0bcc28300c292b265db92e57"
+      "bytes": 2287728,
+      "sha256": "f346ea98913534dd6d0de89a178122ab4e571f3ce19a8dddf071d83f6af3991b"
     },
     "dist/OCX-Source-Control-Lab.html": {
-      "bytes": 2130266,
-      "sha256": "5eb260d428163f5cf26371eb8d407d600c98ea505f47a66a2050c3bd58bddd4d"
+      "bytes": 2146532,
+      "sha256": "5ab4481d064af450f218c39ca00058798d4ed2a556cade330f46febe32d7d501"
     },
     "dist/examples/orders.html": {
-      "bytes": 2274404,
-      "sha256": "7c3c5af2f5b861d14d76b568144b6bab08c605d7cbf0d6073eb8849a7fff089b"
+      "bytes": 2290670,
+      "sha256": "e74f2d5fad7618a9c0f4d08dca7f44ded60bc11773ed7c2f5528aafa2fba5761"
     },
     "dist/examples/calculator.html": {
-      "bytes": 2268578,
-      "sha256": "763e3054b019bde91ed6b31dacfd6e460a99c3d13946010314e49d3a4310882b"
+      "bytes": 2284844,
+      "sha256": "4c53b6d7b4a9705890cc219f41d042dbcbaaba4ac9f77112ae2e4e269934a75d"
     },
     "dist/examples/clock.html": {
-      "bytes": 2262226,
-      "sha256": "b42bfc5f7a5299c024047e1c9615426b44c92e75edf7260e57108a93fb49cfcf"
+      "bytes": 2278492,
+      "sha256": "c8b1eef23446fcbf61a9807a2e4bfe2422cc655295a25430a0b133cbc3b57141"
     },
     "dist/examples/graphics.html": {
-      "bytes": 2261941,
-      "sha256": "98cd148a8b31e69d94b1e7e1c51ebcc57a2f768488d6a4e54e504dabefab3e0b"
+      "bytes": 2278207,
+      "sha256": "7e76f99cfa30e01a17be06c34d6bd5a3948b82b24a6c20a931612ef3027952d8"
     },
     "dist/examples/data.html": {
-      "bytes": 2264090,
-      "sha256": "6e189d5c1bbc30798ef9196b5c71d56b2364f96e4591c96133d68b4a6e8e1ad4"
+      "bytes": 2280356,
+      "sha256": "90bc11e8858578424de4b82ff78c22a54051629755d191ffa736978bf5b386da"
     },
     "dist/examples/controls.html": {
-      "bytes": 2264511,
-      "sha256": "67e000542ff23b80953b1a3161d329bbed2418f88f7bb793b436e948b2ace3e6"
+      "bytes": 2280777,
+      "sha256": "6c4b19fb955398febcdf31d90299ebb0010b88cf183fd056549c160895e67cbf"
     },
     "dist/examples/language.html": {
-      "bytes": 2260192,
-      "sha256": "57cb09370a8062f947334d7e563c4091f571dd412f9b6993c41e3b1fdeba9733"
+      "bytes": 2276458,
+      "sha256": "5c533b071a0c70acef42379185d106b03219f07cd536f1f61d428233a2066299"
     },
     "dist/examples/events.html": {
-      "bytes": 2264970,
-      "sha256": "2c6f556e3877648eecbc8fcbf1f9a856d6f42396e42bd8a88a389ca138e75fb5"
+      "bytes": 2281236,
+      "sha256": "18e6541f1330f7cc93303cec55e0c91b89e0016d112ea551f6b4dbdc35db09b7"
     },
     "dist/examples/richtext.html": {
-      "bytes": 2267848,
-      "sha256": "303ddd7fc2588a20aef94cbe0ea67cbe236789ca24a3505eee99dc9ed3868f39"
+      "bytes": 2284114,
+      "sha256": "23a6318621cd04580c7478fbf3e602770b5b5fda53b10678e0b22e828682eed5"
     },
     "dist/examples/compatibility.html": {
-      "bytes": 2269974,
-      "sha256": "7c4c3392a8f0f3d92a9230d9b8ecc8e972e71a37d5b129508b591e0c2595d645"
+      "bytes": 2286240,
+      "sha256": "a7e87e534e2eef9f3d1e4b779833044c5026955ea2974cfda4e8ae5ded7563a1"
     },
     "dist/examples/mdi.html": {
-      "bytes": 2265107,
-      "sha256": "a0c9634afa7b7bf5b29ba6df7ce7266af33b02454fc89118c5b645468a0c4434"
+      "bytes": 2281373,
+      "sha256": "50189d2d6716dfc228049f6b59f68e14463d1ce8558e7dc559c39bbdf700a291"
     },
     "dist/examples/sqlite-customers.html": {
-      "bytes": 2267323,
-      "sha256": "a9aa9d8bbd1bb58c12c0b6c821c104956aa0aa3085bb00bb4263ab4894c6974a"
+      "bytes": 2283589,
+      "sha256": "ed8c04dfff4188183abafcf64b09d04eb7fcb2b83c27f86fd29eb3134e19a1c9"
     },
     "dist/examples/rest-customers.html": {
-      "bytes": 2267163,
-      "sha256": "68b9c66ad62692e572ab124f7ce7d1f683fa2c000ddcfb2296b914b355b63852"
+      "bytes": 2283429,
+      "sha256": "ebcdbb53d4964c361143829a47167772f18152a183a11235936d442c0ca8104c"
     },
     "dist/examples/rest-public-users.html": {
-      "bytes": 2266944,
-      "sha256": "facb15b1a6af75f2031be67c2492012a9203c97add458d083c2e6a70d72e635b"
+      "bytes": 2283210,
+      "sha256": "52736e8e5e33d6eea2163205378c5ee0d4a7019d5373ecadd59ee117825b16a5"
     },
     "dist/examples/graphql-customers.html": {
-      "bytes": 2267071,
-      "sha256": "030b71cd03bcfcb03fafdf112f9c7b5af72699709aa0d94ca04a19005435f7ab"
+      "bytes": 2283337,
+      "sha256": "ebbae3eca67a283bf63a51d6eb1df1e52397d48ff5c722b9d19acc2d5fba6809"
     },
     "dist/examples/win32.html": {
-      "bytes": 2276189,
-      "sha256": "30169c24b652b877598af1979e912224df84d57e98d86b6ef5a07b1ad596c018"
+      "bytes": 2292455,
+      "sha256": "0665cc142a6ff59af632e8f88d9e8a596c1cbcdcf4e66bfe7fec7f27f5968742"
     },
     "dist/examples/win32-files.html": {
-      "bytes": 2266544,
-      "sha256": "3fed7b8a57b606d93757a4f08e60ecb15963d9735a9a125948d43c6784285df9"
+      "bytes": 2282810,
+      "sha256": "a1bc124a7b3d0c619e0374250593382c64e25410f8e797a7db567b3161874a73"
     },
     "dist/examples/win32-text.html": {
-      "bytes": 2264026,
-      "sha256": "094ddeee25f55f17cd5226a022c64c5195428035399d038b52a264c294431eec"
+      "bytes": 2280292,
+      "sha256": "a5d52c1be5406387ad19fadd9ca0cebaf542d09f0e72e01d0b7e1109c80ed4f2"
     },
     "dist/examples/win32-sync.html": {
-      "bytes": 2264235,
-      "sha256": "09cd3f03a92a4de20282d601e69fe9e7c7bb70196f44c5cb9f5fbce76ac6f9c2"
+      "bytes": 2280501,
+      "sha256": "c3cdc8c1965998bfdd5090eab6f4b3bce40e0ab25298f8846866a8aecfaaddd9"
     },
     "dist/examples/win32-registry.html": {
-      "bytes": 2264991,
-      "sha256": "42e49f7189c116edc2d36ead69809c3640c75dce087e425c37860509d3245387"
+      "bytes": 2281257,
+      "sha256": "0d7f800310c1bbac05890ab6fc09282d6b83f8a4a52757c0dd0b47f23669155d"
     },
     "dist/examples/win32-guid.html": {
-      "bytes": 2264388,
-      "sha256": "9da354a629c2c49b90cb0a12e70c24cc8a56b6b60a848123626ca953855e6770"
+      "bytes": 2280654,
+      "sha256": "a6c983a0c77ad63c45cb015bfd563562e71d5b574a55ebf1ba3b628930b0ee9b"
     },
     "dist/examples/win32-properties.html": {
-      "bytes": 2264071,
-      "sha256": "9e0112d4e58982fdbde234e30b3ea5cd234cb924a8fd374ca626216eb545e4cf"
+      "bytes": 2280337,
+      "sha256": "038427d704f5431e6ddd1c41b2200f0a6ad453385525a36c01ccb4801be73ec5"
     },
     "dist/examples/win32-calendar.html": {
-      "bytes": 2265150,
-      "sha256": "299000367760694646aad4703c92d0ee287ebe4307170d24294a4836c0ed24d8"
+      "bytes": 2281416,
+      "sha256": "da64d52ef27cf9cb41b246181fa1477a955e7b54193ea0fe7f4ed82b18c3ce86"
     },
     "dist/examples/win32-settings.html": {
-      "bytes": 2264966,
-      "sha256": "29ea92bf0eebaf69a4447ea5aec76c283d91a57d8a0dbb4e396c52ea2aef832c"
+      "bytes": 2281232,
+      "sha256": "34c2752a2afe183b0a7b1263e3bce76021b755d36e76b95f85d38f313ecc0283"
     }
   }
 }
