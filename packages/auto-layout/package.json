@@ -1,0 +1,21 @@
+{
+  "name": "@vb6/auto-layout",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dependency-free parent-local anchoring, docking and bounded flex layout",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./browser": "./dist/auto-layout.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "dist"
+  ],
+  "license": "MIT",
+  "sideEffects": false
+}

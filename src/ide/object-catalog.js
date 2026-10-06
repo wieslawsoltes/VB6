@@ -1,3 +1,4 @@
+import {layoutMembers,layoutType} from '../layout/intelligence.js';
 import {EditorIntelligence} from '../editor/intelligence.js';
 import {TYPE_CATALOG,ENUM_TYPES,BUILTIN_SYMBOLS,runtimeType,builtinGroup} from '../editor/type-catalog.js';
 import {readProcedureAttributes} from './procedure-tools.js';
@@ -43,9 +44,9 @@ export function buildObjectCatalog(project){
   // Share the same declarative signatures and types as the source editor.
   // Keep legacy default-event descriptors, but replace guessed property types.
   const intelligence=new EditorIntelligence();
-  for(const type of [...TYPE_CATALOG.values(),...ENUM_TYPES.values(),...intelligence.referenceTypes(project)]){
+  for(const type of [...TYPE_CATALOG.values(),...ENUM_TYPES.values(),...intelligence.referenceTypes(project),...['AnchorStyles','DockStyle','LayoutMode'].map(n=>layoutType(project,n)).filter(Boolean)]){
     const library=type.library||(type.name.includes('.')?type.name.split('.')[0]:'VB'),name=type.name.split('.').slice(type.name.includes('.')?1:0).join('.');
-    const current=classes.find(c=>c.library===library&&c.name===name),members=(runtimeType(project,type.name)||type).members;
+    const current=classes.find(c=>c.library===library&&c.name===name),members=[...(runtimeType(project,type.name)||type).members,...((type.aliases||[]).some(a=>a.startsWith('VB.'))?layoutMembers(project,type.name):[])];
     const typed=new Set(members.map(m=>m.name.toLowerCase())),extra=current?.members.filter(m=>!typed.has(m.name.toLowerCase()))||[];
     if(current)classes.splice(classes.indexOf(current),1);
     add(library,name,type.library?'Explicit portable type-library metadata; native execution is not implied.':'Browser adapter metadata shared with IntelliSense; not complete native OCX type information.',[...extra,...members]);

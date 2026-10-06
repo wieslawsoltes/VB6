@@ -1,3 +1,5 @@
+import {layoutMembers,layoutType,layoutConstantSymbols} from '../layout/intelligence.js';
+import {layoutEnabled} from '../layout/contract.js';
 import {displayParameter} from './signature-syntax.js';
 import {normalizeTypeLibrary,referenceSnapshot} from './reference-metadata.js';
 import {typeCompletionContext,typeCandidates} from './type-completion.js';
@@ -110,7 +112,7 @@ export class EditorIntelligence {
     type=String(type||'Variant').replace(/\s*\.\s*/g,'.').trim().replace(/\[([^\]]+)\]/g,'$1');
     if(project.name&&type.toLowerCase().startsWith(project.name.toLowerCase()+'.'))type=type.slice(project.name.length+1);
     const target=eq(module.name,type)?module:project.modules.find(m=>eq(m.name,type));
-    if(target)return {name:target.name,type:target.name,kind:target.kind,moduleId:target.id,members:coalesce(this.index(target,project).symbols.filter(s=>!s.owner&&(target.id===module.id||s.scope!=='private'))).concat(target.form?builtinType(target.form.type||'Form')?.members||[]:[])};
+    if(target)return {name:target.name,type:target.name,kind:target.kind,moduleId:target.id,members:coalesce(this.index(target,project).symbols.filter(s=>!s.owner&&(target.id===module.id||s.scope!=='private'))).concat(target.form?[...(builtinType(target.form.type||'Form')?.members||[]),...layoutMembers(project,target.form.type||'Form')]:[])};
     const pieces=type.split('.'),qualifier=pieces.length>1?pieces.slice(0,-1).join('.'):null,recordName=pieces.at(-1);
     for(const m of [module,...project.modules.filter(m=>m.id!==module.id)]){
       if(qualifier&&!eq(m.name,qualifier))continue;
@@ -118,7 +120,8 @@ export class EditorIntelligence {
       if(record)return record;
     }
     const references=this.referenceTypes(project),ref=references.find(t=>eq(t.name,type)||(t.aliases||[]).some(a=>eq(a,type)))||references.find(t=>eq(t.name.split('.').at(-1),type));
-    return ref?.kind==='alias'?this.type(project,module,ref.target,seen):(ref?{...ref,members:coalesce(ref.members)}:null)||runtimeType(project,type)||builtinType(type);
+    const resolved=ref?.kind==='alias'?this.type(project,module,ref.target,seen):(ref?{...ref,members:coalesce(ref.members)}:null)||runtimeType(project,type)||builtinType(type)||layoutType(project,type);
+    return resolved?{...resolved,members:[...(resolved.members||[]),...(((resolved.aliases||[]).some(a=>a.startsWith('VB.'))||['Form','MDIForm'].includes(resolved.name))?layoutMembers(project,resolved.name):[])]}:null;
   }
   declared(project,module,symbol){
     if(!symbol?.moduleId)return symbol;
@@ -140,7 +143,7 @@ export class EditorIntelligence {
     if(!symbol)return [];
     if(symbol.namespace){
       if(eq(symbol.namespace,project.name))return project.modules.map(m=>({name:m.name,type:m.name,kind:m.kind==='class'&&!this.index(m,project).predeclared?'class':'module',moduleId:m.id,line:1}));
-      if(eq(symbol.namespace,'VBA'))return [...BUILTIN_SYMBOLS,...CONSTANT_SYMBOLS,...PRIMITIVE_TYPES.map(name=>({name,type:name,kind:'type'})),...new Set(BUILTIN_SYMBOLS.map(s=>builtinGroup(s.name)))].map(s=>typeof s==='string'?{name:s,namespace:'VBA.'+s,kind:'module'}:s);
+      if(eq(symbol.namespace,'VBA'))return [...BUILTIN_SYMBOLS,...CONSTANT_SYMBOLS,...(layoutEnabled(project)?layoutConstantSymbols:[]),...PRIMITIVE_TYPES.map(name=>({name,type:name,kind:'type'})),...new Set(BUILTIN_SYMBOLS.map(s=>builtinGroup(s.name)))].map(s=>typeof s==='string'?{name:s,namespace:'VBA.'+s,kind:'module'}:s);
       if(symbol.namespace.startsWith('VBA.'))return BUILTIN_SYMBOLS.filter(s=>eq('VBA.'+builtinGroup(s.name),symbol.namespace));
       const types=[...TYPE_CATALOG.values(),...ENUM_TYPES.values(),...this.referenceTypes(project)];
       const matching=types.filter(t=>visible(t)&&(t.name.toLowerCase().startsWith(symbol.namespace.toLowerCase()+'.')||eq(symbol.namespace,'VB')&&(t.aliases||[]).some(a=>a.startsWith('VB.'))));
@@ -166,7 +169,7 @@ export class EditorIntelligence {
     if(target){const index=this.index(target,project);return {name:target.name,type:target.name,moduleId:target.id,kind:target.kind==='class'&&!index.predeclared?'class':'module',line:1};}
     for(const other of project.modules){if(other.kind!=='module'||other.id===module.id)continue;result=find(coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&s.scope!=='private')),name);if(result)return result;}
     if(module.form){result=find(builtinType(module.form.type||'Form')?.members||[],name);if(result)return result;}
-    result=find(GLOBAL_OBJECTS,name)||find(BUILTIN_SYMBOLS,name)||find(CONSTANT_SYMBOLS,name)||find(this.referenceGlobals(project),name);if(result)return result;
+    result=find(GLOBAL_OBJECTS,name)||find(BUILTIN_SYMBOLS,name)||find([...CONSTANT_SYMBOLS,...(layoutEnabled(project)?layoutConstantSymbols:[])],name)||find(this.referenceGlobals(project),name);if(result)return result;
     if(eq(name,'Forms'))return {name:'Forms',type:'Forms',kind:'object'};
     const namespace=[project.name,'VBA','VB','ADODB','DAO','Scripting',...this.referenceTypes(project).map(t=>t.library)].find(n=>n&&eq(n,name));
     if(namespace)return {name:namespace,namespace,kind:'module'};
@@ -281,7 +284,7 @@ export class EditorIntelligence {
     }else {
       const expected=this.expectedType(project,module,line,text,offset),enumType=this.type(project,module,expected);
       if(expected&&(enumType?.kind==='enum'||eq(expected,'Boolean'))){items=(enumType?.members||[]).filter(s=>s.kind==='constant');context='constants';}
-      else if(constants){items=[...scope.symbols.filter(s=>s.kind==='constant'),...project.modules.filter(m=>m.id!==module.id&&m.kind==='module').flatMap(m=>this.index(m,project).symbols.filter(s=>!s.owner&&s.scope!=='private'&&s.kind==='constant')),...CONSTANT_SYMBOLS,...this.referenceGlobals(project).filter(s=>s.kind==='constant')];context='constants';}
+      else if(constants){items=[...scope.symbols.filter(s=>s.kind==='constant'),...project.modules.filter(m=>m.id!==module.id&&m.kind==='module').flatMap(m=>this.index(m,project).symbols.filter(s=>!s.owner&&s.scope!=='private'&&s.kind==='constant')),...CONSTANT_SYMBOLS,...(layoutEnabled(project)?layoutConstantSymbols:[]),...this.referenceGlobals(project).filter(s=>s.kind==='constant')];context='constants';}
       else if(/^\s*RaiseEvent\s+/i.test(st.masked)){items=scope.symbols.filter(s=>s.kind==='event');context='events';}
       else if(contextual)return empty;
       else {
@@ -289,7 +292,7 @@ export class EditorIntelligence {
         for(const other of project.modules){if(other.kind==='module'||this.index(other,project).predeclared)items.push({name:other.name,kind:'module',type:other.name,moduleId:other.id,line:1});if(other.kind==='module'&&other.id!==module.id)items.push(...coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&s.scope!=='private'&&s.kind!=='event')));}
         if(module.kind!=='module')items.push({name:'Me',type:module.name,kind:'object'});
         if(module.form)items.push(...this.members(project,module,module.form.type||'Form'));
-        items.push(...GLOBAL_OBJECTS,{name:'Forms',type:'Forms',kind:'object'},...BUILTIN_SYMBOLS,...CONSTANT_SYMBOLS,...this.referenceGlobals(project),...KEYWORDS.filter(name=>!eq(name,'Me')||module.kind!=='module').map(name=>({name,kind:'keyword'})));
+        items.push(...GLOBAL_OBJECTS,{name:'Forms',type:'Forms',kind:'object'},...BUILTIN_SYMBOLS,...CONSTANT_SYMBOLS,...(layoutEnabled(project)?layoutConstantSymbols:[]),...this.referenceGlobals(project),...KEYWORDS.filter(name=>!eq(name,'Me')||module.kind!=='module').map(name=>({name,kind:'keyword'})));
         const info=this.parameterInfo(project,module,line,text,offset);
         if(info&&!['event','array'].includes(info.kind)){const used=new Set(info.context.args.slice(0,-1).map(a=>a.match(/^\s*([\w\[\]]+)\s*:=/)?.[1]).filter(Boolean).map(symbolKey));items.unshift(...info.parameters.filter(p=>!p.paramArray&&!used.has(symbolKey(p.name))).map(p=>({...p,name:p.name+':=',insertText:p.name+':=',kind:'parameter'})));}
       }
