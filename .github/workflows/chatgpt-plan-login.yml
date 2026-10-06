@@ -1,7 +1,16 @@
 name: ChatGPT plan login
 on:
   push:
-    branches: [feature/chatgpt-plan-login]
+    branches: [main]
+    paths:
+      - 'src/agents/**'
+      - 'tools/agent-**'
+      - 'tools/chatgpt-**'
+      - 'tests/*chatgpt*'
+      - 'tests/helpers/chatgpt-fixture.mjs'
+      - 'docs/CHATGPT-LOGIN.md'
+      - 'package.json'
+      - '.github/workflows/chatgpt-plan-login.yml'
   pull_request:
     paths:
       - 'src/agents/**'
