@@ -16,7 +16,7 @@ storage, never a four-byte pointer-sized value slot. Read-only literals and
 expressions become writable temporaries without copy-back. An ungrouped Double
 variable still cannot alias a Date reference. Fixed and dynamic Date arrays use
 `VT_DATE` (7), preserve their element type through copying and `ReDim Preserve`,
-and retain existing bounds, one-MiB backing limits, element locks and error
+and retain existing bounds, checked x86 backing-size limits, element locks and error
 cleanup. An array or reference of Double is not interchangeable with Date.
 
 `CDate`, `IsDate`, `CStr`, `DateValue`, `TimeValue`, `DateSerial`, `TimeSerial`,
@@ -72,8 +72,8 @@ for portable authored dates. Runtime clock getters are intentionally local.
 Scalar `Declare` Date arguments and results use their declared ABI, including
 qualified calls, 8-byte `ByVal` values, 4-byte `ByRef` pointers, mixed argument
 widths, nonfinite/out-of-range result rejection and error recovery. Authors must
-supply a correctly matching DLL and signature. This does not add callback,
-structure or arbitrary COM support.
+supply a correctly matching DLL and signature. Guarded same-thread scalar AddressOf callbacks are documented separately;
+this does not add structure or arbitrary COM support.
 
 `tools/win32-date-fixtures.mjs` produces the self-contained Date regression EXE.
 A separate `AotDateABI` fixture deliberately depends on a small test DLL, built
@@ -90,8 +90,8 @@ node tools/win32-date-fixtures.mjs
 npm run build:win32 -- --project validation/dates/AotDates.vb6web --out release/dates
 ```
 
-Unsupported interval/formatting APIs such as native `DateAdd`, `DateDiff`,
-`DatePart`, and `FormatDateTime` are still diagnosed; they are not stubbed.
+Native `DateAdd`, `DateDiff`, `DatePart`, and `FormatDateTime` now have the
+separate implemented contract linked below; general Format syntax is not included.
 Variant/Decimal, UDT/classes, general native COM/OCX, native machine-code
 debugging and no-extraction WebGPU remain separate work. Direct AOT uses Win32
 controls/GDI. The Electron target is the separate WebGPU-capable distribution.
@@ -126,3 +126,7 @@ Every reference probe captures the actual native error before comparing its valu
 An unexpected error therefore exits with the probe number instead of displaying
 a modal error until timeout. Neither expected errors nor successful results can
 pass by accidentally reusing a preceding probe's value.
+
+## Calendar interval extension
+
+DateAdd, DateDiff, DatePart and FormatDateTime are now implemented by the direct exporter; their contracts, raw-reference differences and validation are documented in [Native calendar intervals](WIN32-CALENDAR-INTERVALS.md). Standard-module numeric/Date callbacks now use [guarded AddressOf thunks](WIN32-CALLBACKS.md); this is not general callback or COM support.

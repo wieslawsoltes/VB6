@@ -20,7 +20,7 @@ test('native Option Base applies to omitted lower bounds only',()=>{
   const d=storageLayout(compiler,declaration('Long',[[null,literal(3)],[literal(0),literal(2)]]),{optionBase:1});
   assert.deepEqual(d.nativeBounds,[{lower:1,upper:3,stride:4},{lower:0,upper:2,stride:12}]);assert.equal(d.nativeCount,9);
 });
-for(const [name,bounds]of [['reversed',[[literal(5),literal(4)]]],['too large',[[literal(0),literal(1048576)]]],['fractional',[[literal(0.5),literal(3)]]],['overflow',[[literal(0),literal(2147483648)]]]]){
+for(const [name,bounds]of [['reversed',[[literal(5),literal(4)]]],['too large',[[literal(0),literal(536870911)]]],['fractional',[[literal(0.5),literal(3)]]],['overflow',[[literal(0),literal(2147483648)]]]]){
   test('native storage rejects '+name+' arrays',()=>assert.throws(()=>storageLayout(compiler,declaration('Long',bounds),{optionBase:0})));
 }
 for(const [name,code]of [

@@ -27,7 +27,7 @@ test('Currency storage, fixed-array and ABI sizes are eight bytes, not pointers'
   assert.equal(nativeParameterBytes({type:'Currency',byRef:false}),8);
   assert.equal(nativeParameterBytes({type:'Currency',byRef:true}),4);
   assert.equal(nativeParameterBytes({type:'Currency',byRef:true,bounds:[]}),4);
-  const a={name:'a',type:'Currency',bounds:[[{kind:'literal',value:0},{kind:'literal',value:131072}]]};assert.throws(()=>storageLayout({fail},a,{}),/MiB/);
+  const a={name:'a',type:'Currency',bounds:[[{kind:'literal',value:0},{kind:'literal',value:268435455}]]};assert.throws(()=>storageLayout({fail},a,{}),/x86/);
 });
 test('Currency Declare signature preserves value and reference ABI',()=>{
   const d=extractNativeDeclarations({name:'M',code:'Private Declare Function Cy Lib "test" (ByVal a As Currency, ByRef b As Currency, ByVal c As Double) As Currency'}).declarations.get('cy');

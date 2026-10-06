@@ -570,6 +570,112 @@ def output_recovery(page,mode,provider):
     return {'outputCapRecoverable':True,'largerCapRequired':True,'partialToolsNotExecuted':True,'partialTextRetained':True,'draftNotSent':True,'cumulativeUsage':True}
 
 
+def permission_full(page,mode):
+    requests=mock(page,'openai',lambda i,b:([{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',b),'edits':[{'module':'Form1','start':0,'end':0,'text':"' full-access edit\n",'expectedText':''}]}}] if i==1 else [],'Full IDE access done.'))
+    configure(page);page.get_by_label('Task permission profile',exact=True).select_option('full')
+    start(page);finish(page);check(len(requests)==0)
+    check('not confirmed' in page.locator('.agent-status').inner_text())
+    page.locator('.agent-panel').get_by_role('button',name='Run',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True)
+    check('FULL IDE ACCESS' in dialog.inner_text());dialog.get_by_label('Confirm Full IDE access for this run',exact=True).check()
+    dialog.get_by_role('button',name='Start Task',exact=True).click();finish(page)
+    check(len(requests)==2);check(page.evaluate('vb6Studio.project.modules[0].code.startsWith("\' full-access edit")'))
+    check(page.evaluate("!vb6Studio.codingAgents.agent.transcript.some(e=>e.type==='approval')"))
+    check('Inactive' in page.get_by_label('Effective agent permissions',exact=True).inner_text())
+    check(page.evaluate("vb6Studio.codingAgents.agent.transcript.some(e=>e.type==='permission'&&e.permission?.action==='allow')"))
+    page.screenshot(path=str(REPORTS/f'{mode}-full-permissions.png'))
+    return {'separateUncheckedConsent':True,'noPerToolPrompts':True,'realCodeEdit':True,'leaseEnded':True}
+
+
+def permission_autoedit(page,mode):
+    requests=mock(page,'openai',lambda i,b:([{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',b),'edits':[{'module':'Form1','start':0,'end':0,'text':"' auto-edit\n",'expectedText':''}]}}] if i==1 else [{'name':'vb6_runtime_start','arguments':{'expectedRevision':source_revision('openai',b)}}] if i==2 else [],'Auto edit.'))
+    configure(page,mode='autoedit');start(page)
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Review Operation',exact=True);dialog.wait_for()
+    check('vb6.runtime.start' in dialog.inner_text());check(page.evaluate('vb6Studio.project.modules[0].code.startsWith("\' auto-edit")'))
+    dialog.get_by_role('button',name='Cancel',exact=True).click();finish(page)
+    check(page.evaluate("vb6Studio.codingAgents.agent.state==='blocked'"));check(len(requests)==2)
+    return {'automaticEdit':True,'executionStillReviewed':True,'denialStops':True}
+
+
+def permission_rule_denial(page,mode):
+    original=page.evaluate('JSON.stringify(vb6Studio.project)')
+    requests=mock(page,'openai',lambda i,b:([{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',b),'edits':[{'module':'Form1','start':0,'end':0,'text':'BAD','expectedText':''}]}}],'Blocked rule.'))
+    configure(page,mode='full');tab(page,'Permissions')
+    page.get_by_label('Permission rule for code',exact=True).select_option('deny')
+    page.get_by_label('Permission rule tool',exact=True).select_option('vb6.code.edit')
+    page.get_by_label('Permission rule action',exact=True).select_option('allow');page.get_by_role('button',name='Set tool rule',exact=True).click()
+    page.screenshot(path=str(REPORTS/f'{mode}-permission-rules.png'))
+    tab(page,'Task');page.locator('.agent-panel').get_by_role('button',name='Run',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True);dialog.get_by_label('Confirm Full IDE access for this run',exact=True).check();dialog.get_by_role('button',name='Start Task',exact=True).click();finish(page)
+    check(len(requests)==1);check(not any(t['name']=='vb6_code_edit' for t in requests[0]['tools']))
+    check(page.evaluate('JSON.stringify(vb6Studio.project)')==original);check(page.evaluate("vb6Studio.codingAgents.agent.state==='blocked'"))
+    check(page.locator('[aria-modal=true]').count()==0)
+    return {'denyOverridesFullAndExactAllow':True,'noMutation':True,'notAdvertised':True}
+
+
+def permission_never_ask(page,mode):
+    requests=mock(page,'openai',lambda i,b:([{'name':'vb6_runtime_start','arguments':{'expectedRevision':source_revision('openai',b)}}],'Never ask.'))
+    configure(page,mode='autoedit');tab(page,'Permissions');page.get_by_label('Approval policy',exact=True).select_option('never');tab(page,'Task');start(page);finish(page)
+    check(len(requests)==1);check(page.locator('[aria-modal=true]').count()==0)
+    check(page.evaluate("vb6Studio.runState==='design'&&vb6Studio.codingAgents.agent.state==='blocked'"))
+    return {'neverMeansDenyNotAllow':True}
+
+
+def permission_approve_run(page,mode):
+    requests=mock(page,'openai',lambda i,b:([{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',b),'edits':[{'module':'Form1','start':0,'end':0,'text':"' approved step "+str(i)+"\n",'expectedText':''}]}}] if i<3 else [],'Two edits.'))
+    configure(page);start(page)
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Review Operation',exact=True);dialog.wait_for();check('exact tool' in dialog.inner_text())
+    dialog.get_by_role('button',name='Allow tool for this run',exact=True).click();finish(page)
+    check(len(requests)==3);check(page.evaluate("vb6Studio.codingAgents.agent.transcript.filter(e=>e.type==='approval').length") == 1)
+    check(page.evaluate("vb6Studio.project.modules[0].code.startsWith(\"' approved step 2\\n' approved step 1\\n\")"))
+    check(page.evaluate('vb6Studio.codingAgents.agent.permissionSession.snapshot().approvedTools.length')==0)
+    return {'exactToolRunApproval':True,'twoRealEditsOnePrompt':True,'grantNotPersisted':True}
+
+
+def permission_task_profiles(page,mode):
+    configure(page);page.get_by_label('Task permission profile',exact=True).select_option('full')
+    tab(page,'Permissions');page.get_by_label('Permission lease minutes',exact=True).fill('30')
+    page.get_by_label('Permission rule for files',exact=True).select_option('deny');tab(page,'Task')
+    first=page.evaluate('vb6Studio.codingAgents.conversations.activeId')
+    page.get_by_role('button',name='New Task',exact=True).click()
+    check(page.get_by_label('Task permission profile',exact=True).input_value()=='review')
+    tab(page,'Tasks');page.get_by_label('Agent tasks',exact=True).select_option(first);tab(page,'Task')
+    check(page.get_by_label('Task permission profile',exact=True).input_value()=='full')
+    tab(page,'Permissions');check(page.get_by_label('Permission lease minutes',exact=True).input_value()=='30')
+    check(page.get_by_label('Permission rule for files',exact=True).input_value()=='deny')
+    check(not page.evaluate('vb6Studio.codingAgents.adapter.permissions.snapshot(vb6Studio.project.id).active'))
+    page.evaluate("vb6Studio.closeDocument('tool:coding-agents');vb6Studio.command('codingAgents')")
+    check(page.get_by_label('Task permission profile',exact=True).input_value()=='full')
+    check(page.get_by_label('Provider API key',exact=True).input_value()=='')
+    return {'perTaskProfile':True,'newTaskSafeDefault':True,'noAuthorityOrCredentialPersistence':True}
+
+
+def permission_revoke(page,mode):
+    configure(page);page.get_by_label('Task permission profile',exact=True).select_option('full')
+    page.evaluate("""() => {
+      const panel=vb6Studio.documents.tools.get('tool:coding-agents');
+      panel.transportFactory=()=>async (_, {signal})=>new Promise((resolve,reject)=>{
+        window.permissionRequestStarted=true;signal.addEventListener('abort',()=>reject(signal.reason),{once:true});
+      });
+    }""")
+    page.locator('.agent-panel').get_by_role('button',name='Run',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Start Task',exact=True);dialog.get_by_label('Confirm Full IDE access for this run',exact=True).check();dialog.get_by_role('button',name='Start Task',exact=True).click()
+    page.wait_for_function('window.permissionRequestStarted===true')
+    check(page.get_by_label('Task permission profile',exact=True).is_disabled())
+    page.get_by_role('button',name='Revoke permissions & stop',exact=True).click();finish(page)
+    check(page.evaluate('vb6Studio.codingAgents.agent.permissionSession.signal.aborted'))
+    check(page.evaluate("vb6Studio.codingAgents.agent.state==='blocked'"))
+    return {'explicitRevokeAbortsProvider':True,'noMidRunEscalation':True}
+
+
+def permission_plan(page,mode):
+    requests=mock(page,'openai',lambda i,b:([],'Plan: inspect Form1, propose changes, ask the user before implementing.'))
+    configure(page);page.get_by_label('Task permission profile',exact=True).select_option('plan');start(page);finish(page)
+    check(len(requests)==1);check('PLAN MODE' in requests[0]['instructions'])
+    check(not any(t['name'] in ['vb6_code_edit','vb6_runtime_start'] for t in requests[0]['tools']))
+    return {'planInstructions':True,'nonMutatingCatalog':True}
+
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -593,7 +699,7 @@ try:
                 case(browser,mode,provider,lambda page,mode,provider=provider:provider_workflow(page,mode,provider))
                 case(browser,mode,provider+'-plan-question',lambda page,mode,provider=provider:plan_question(page,mode,provider))
                 case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))
-            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery)]:case(browser,mode,name,fn)
+            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()

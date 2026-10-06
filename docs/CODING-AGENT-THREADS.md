@@ -31,7 +31,7 @@ The token allowance is cumulative within a task. Follow-ups and Continue retain 
 
 Usage is taken from provider-reported totals (including relevant cache/reasoning usage fields), not merely from visible text. Reported usage on failed/incomplete responses is retained. Missing usage is **unknown, not zero**: the UI separately labels a conservative request-byte/public-text safety estimate, includes it in the allowance, and does not call it billed usage. Actual input and hidden output usage are not known before a request completes, so one request can exceed the allowance. An explicit retry can also incur charges for the failed request. Review provider billing separately.
 
-Numeric limit preferences alone can persist in browser storage under `vb6.codingAgents.limits.v1`. Each in-memory task keeps independent settings; new tasks inherit the latest preferences. No task messages, API keys, model history, connection settings or permissions are stored with them. Corrupt/unavailable storage falls back safely to defaults. Changes do not extend the existing ten-minute scoped permission grant, remove approval dialogs or enable external MCP access.
+Numeric limit preferences alone can persist in browser storage under `vb6.codingAgents.limits.v1`. Each in-memory task keeps independent settings; new tasks inherit the latest preferences. No task messages, API keys, model history, connection settings or permissions are stored with them. Corrupt/unavailable storage falls back safely to defaults. Token-limit changes do not extend the separately confirmed permission lease, remove its approval rules or enable external MCP access. Permission leases default to ten minutes and are independently configurable under the host ceiling.
 
 The local relay accepts the same bounded context size and validated generation timeout, but retains fixed official provider destinations, loopback-only binding, exact-origin checks, authentication, no credential forwarding from the browser, four concurrent requests and bounded responses.
 
@@ -67,3 +67,9 @@ Run `npm run build`, `npm run test:agents`, and `python tools/coding-agents-brow
 Focused regressions cover waiting/streaming/tool-only turns, authoritative final reconciliation, denial/interruption, safe rendering/copy, draft and partial-response recovery, IME/Enter behavior, selection/scroll anchoring, bounded history, presets/storage validation, cumulative budgets, failure estimates and no-replay continuation.
 
 Recovery regressions also cover all three native output-cap envelopes, unchanged-cap retry prevention, exactly-once deferred batches, stale edits, denied operations, read-only downgrade, workspace replacement, complete-answer context boundaries, hidden-tab/panel reading state, automatic catch-up and bounded-history pruning.
+
+## Permission profiles
+
+The composer now includes Codex-style permission profiles, full IDE access with
+explicit per-run acknowledgement, granular rules and revoke controls. See
+[Permission profiles](CODING-AGENT-PERMISSIONS.md) for the complete behavior.

@@ -28,3 +28,11 @@
 .agent-limit-recovery{flex:0 0 auto;padding:6px;border:1px solid var(--vb-shadow);background:var(--vb-face);color:var(--vb-text);font:inherit}
 .agent-limit-recovery p{margin:0 0 5px;white-space:pre-wrap;overflow-wrap:anywhere}
 .agent-limit-recovery[hidden]{display:none}
+
+/* Permission controls use the same classic theme tokens, never a separate chat shell. */
+.agent-permission-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.agent-permission-bar .agent-field{flex:1;min-width:240px;margin:0}
+.agent-permission-badge{padding:4px 2px;font-size:11px;overflow-wrap:anywhere}
+.agent-permission-badge[data-profile="full"]{font-weight:bold;border-bottom:1px solid var(--button-shadow,#808080)}
+.agent-full-confirm{display:flex;align-items:flex-start;gap:6px;font-weight:bold;padding:8px;border:1px solid var(--button-shadow,#808080)}
+.agent-full-confirm input{flex:none}

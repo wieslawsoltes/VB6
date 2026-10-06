@@ -69,7 +69,7 @@ try {
  $p=Launch 'AotNumbers'
  $exited=$p.WaitForExit(30000)
  if(-not $exited){throw ('Numeric program did not exit: '+(Diagnostic $p))}
- Check ('62 native floating/ABI/array/error assertions and 2000 FPU recursion cycles; exit '+$p.ExitCode) ($p.ExitCode -eq 0)
+ Check ('64 native floating/ABI/array/error assertions and 2000 FPU recursion cycles; exit '+$p.ExitCode) ($p.ExitCode -eq 0)
  $script:app=Launch 'Calculator';$script:form=WaitForm $app;$script:display=[NumericWindowsTest]::GetDlgItem($form,100)
  Check 'Calculator uses native EDIT control' ([NumericWindowsTest]::Class($display) -eq 'Edit')
  Check 'Calculator display retains right alignment' (([NumericWindowsTest]::GetWindowLong($display,-16) -band 3) -eq 2)
