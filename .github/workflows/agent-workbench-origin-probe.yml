@@ -1,0 +1,94 @@
+name: Publish portable agent preview isolation regression
+on:
+  push:
+    branches: [feat/agent-change-review-queue]
+    paths: [.github/workflows/agent-workbench-origin-probe.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/feat/agent-change-review-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply hash-verified browser-origin assertion
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = 7fb7f020ba7e4887d222415e0b1c807e32c4e988
+          git rev-parse HEAD > publication-base.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('tools/coding-agents-browser-tests.py')
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == '7f8a8cb6a8f9f39762a537fe30da697c2f79ba9d0e5d60c3f4980af0f95c5b4d'
+          s=p.read_text()
+          old='''    check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame.hasAttribute("srcdoc") && vb6Studio.runtimeFrame.contentDocument===null'))'''
+          new='''    check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame.hasAttribute("srcdoc") && !vb6Studio.runtimeFrame.sandbox.contains("allow-same-origin")'))
+              # Verify the browser's actual opaque origin without requesting a forbidden
+              # cross-origin DOM read (WebKit reports contentDocument access as a page error).
+              # https://html.spec.whatwg.org/multipage/browsers.html#concept-origin-opaque
+              page.evaluate("""() => {
+                globalThis.previewMessageOrigin=undefined;
+                const source=vb6Studio.runtimeFrame.contentWindow;
+                const listener=event=>{
+                  if(event.isTrusted && event.source===source && event.data==='hosted-preview-origin-probe'){
+                    previewMessageOrigin=event.origin;removeEventListener('message',listener);
+                  }
+                };
+                addEventListener('message',listener);
+              }""")
+              runtime.evaluate("parent.postMessage('hosted-preview-origin-probe','*')")
+              page.wait_for_function('typeof previewMessageOrigin === "string"')
+              check(page.evaluate('previewMessageOrigin === "null"'), 'Runtime message must have an opaque origin')'''
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old="'opaqueSandbox':True,'nativeBridgeAbsent':True}"
+          assert s.count(old)==1
+          s=s.replace(old,"'opaqueSandbox':True,'nativeBridgeAbsent':True,'messageOrigin':page.evaluate('previewMessageOrigin')}")
+          p.write_text(s)
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == 'fe0f5b2d7205b0fcc6b2065fb1c2308f0542d5795b7742d6bcdcb9eacabf4d9a'
+          compile(s,str(p),'exec')
+          PY
+      - name: Validate unchanged product and full Node suite
+        shell: bash
+        run: |
+          npm run build | tee workbench-build.log
+          npm test | tee workbench-full-tests.log
+          npm run test:agents | tee workbench-agent-tests.log
+          git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Remove publisher and publish exact tested tree
+        shell: bash
+        run: |
+          git add -- tools/coding-agents-browser-tests.py
+          git rm -- .github/workflows/agent-workbench-origin-probe.yml
+          git diff --cached --check
+          test "$(git write-tree)" = 1707f42846757011516db9135f7b19296ad5f472
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test(agents): prove opaque preview origin without prohibited DOM reads'
+          test "$(git ls-remote origin refs/heads/feat/agent-change-review-queue | cut -f1)" = "$(cat publication-base.txt)"
+          git push origin HEAD:feat/agent-change-review-queue
+          git rev-parse HEAD > head.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-workbench-opaque-origin-validation
+          path: |
+            workbench-build.log
+            workbench-full-tests.log
+            workbench-agent-tests.log
+            publication-base.txt
+            head.txt
+            tree.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
