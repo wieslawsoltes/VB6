@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./examples/common-services": "./examples/common-services.mjs"
   },
   "files": [
     "src",
@@ -16,7 +17,9 @@
     "GDI.md",
     "REGIONS.md",
     "ADVANCED-GDI.md",
-    "SERVICES.md"
+    "SERVICES.md",
+    "examples",
+    "JAVASCRIPT-SAMPLE.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs"
