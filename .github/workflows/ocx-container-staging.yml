@@ -42,7 +42,8 @@ jobs:
           path: reports/native-interop
           retention-days: 7
   publish:
-    needs: native
+    # Publishing a review branch is independent of native certification.
+    # Merge remains gated on the final PR's complete native/browser check set.
     if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-container-contracts'
     runs-on: ubuntu-latest
     timeout-minutes: 10
