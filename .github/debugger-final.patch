@@ -1,0 +1,101 @@
+diff --git a/tests/native-debugger-stop.test.mjs b/tests/native-debugger-stop.test.mjs
+new file mode 100644
+index 00000000..283cd247
+--- /dev/null
++++ b/tests/native-debugger-stop.test.mjs
+@@ -0,0 +1,18 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {isBreakpointStop} from '../tools/native-debugger-stop.mjs';
++const target={pid:1234,symbol:'DebugTarget!DebugTick',id:7};
++const session={state:'paused',pid:1234,lastStop:'Breakpoint 7 hit\r\nDebugTarget!DebugTick:\r\n'};
++const stack={frames:[{index:0,symbol:'DebugTarget!DebugTick+0x2 [C:\\src\\target.c @ 17]'}]};
++test('native qualification requires current-frame symbol, target PID and breakpoint event',()=>{
++  assert.equal(isBreakpointStop(session,stack,target),true);
++  assert.equal(isBreakpointStop({...session,pid:5678},stack,target),false);
++  assert.equal(isBreakpointStop({...session,state:'running'},stack,target),false);
++  assert.equal(isBreakpointStop({...session,lastStop:'Breakpoint 70 hit\n'},stack,target),false);
++  assert.equal(isBreakpointStop({...session,lastStop:'Create process\n'},stack,target),false);
++});
++test('native qualification rejects a suspended caller and missing frame zero',()=>{
++  assert.equal(isBreakpointStop(session,{frames:[{index:0,symbol:'ntdll!ZwDelayExecution+0x14'}, {...stack.frames[0],index:4}]},target),false);
++  assert.equal(isBreakpointStop(session,{frames:[{...stack.frames[0],index:4}]},target),false);
++  assert.equal(isBreakpointStop(session,{frames:[{index:0,symbol:'DebugTarget!DebugTickOther'}]},target),false);
++});
+diff --git a/tools/native-debugger-smoke.mjs b/tools/native-debugger-smoke.mjs
+index df4d993f..b81a0494 100644
+--- a/tools/native-debugger-smoke.mjs
++++ b/tools/native-debugger-smoke.mjs
+@@ -6,6 +6,7 @@ import path from 'node:path';
+ import {spawn} from 'node:child_process';
+ import {createNativeDebuggerBridge} from '../packages/native-debugger/src/bridge.mjs';
+ import {CdbSession,findCdb,breakWindowsProcess} from '../packages/native-debugger/src/cdb-session.mjs';
++import {isBreakpointStop} from './native-debugger-stop.mjs';
+ 
+ if(process.platform!=='win32')throw new Error('Run this test on Windows with Microsoft Debugging Tools installed.');
+ const target=await fs.realpath(process.argv[2]||'reports/native-debugger/x64/DebugTarget.exe'),directory=path.dirname(target),cdbPath=await findCdb();
+@@ -18,10 +19,10 @@ const record=(name,details={})=>{report.checks.push({name,passed:true,...details
+ const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
+ async function make(options){const session=new CdbSession({cdbPath,timeout:30000,breakProcess:async pid=>{report.breakRequests=(report.breakRequests||0)+1;await breakWindowsProcess(pid);}});sessions.push(session);session.on('output',e=>{report.output=((report.output||'')+e.text).slice(-200000);});await session.start(options);if(options.executable)owned.add(session.pid);return session;}
+ async function hit(session,symbol,max=30){
+-  const breakpoint=await session.request('setBreakpoint',{location:symbol,pauseId:session.pauseId});
++  const pid=session.pid,breakpoint=await session.request('setBreakpoint',{location:symbol,pauseId:session.pauseId});
+   for(let i=0;i<max;i++){
+     await session.request('continue',{pauseId:session.pauseId});await session.waitPaused();const stack=await session.request('stack');
+-    if(stack.text.includes(symbol)){record('breakpoint '+symbol,{pauseId:session.pauseId});return breakpoint;}
++    if(isBreakpointStop(session,stack,{pid,symbol,id:breakpoint.id})){record('breakpoint '+symbol,{pauseId:session.pauseId});return breakpoint;}
+   }
+   throw new Error('Did not reach '+symbol+' after '+max+' debugger stops.');
+ }
+@@ -55,13 +56,14 @@ try{
+   // Return to an actual source breakpoint rather than stepping a thread that
+   // was only suspended while Windows delivered the child creation event.
+   for(let n=0;n<30;n++){
+-    if((await launched.request('stack')).text.includes('DebugTarget!DebugTick'))break;
++    if(isBreakpointStop(launched,await launched.request('stack'),{pid:parentPid,symbol:'DebugTarget!DebugTick',id:bp.id}))break;
+     await launched.request('continue',{pauseId:launched.pauseId});await launched.waitPaused();
+   }
+-  assert.match((await launched.request('stack')).text,/DebugTarget!DebugTick/);
++  assert.ok(isBreakpointStop(launched,await launched.request('stack'),{pid:parentPid,symbol:'DebugTarget!DebugTick',id:bp.id}),'Parent must stop at the actual DebugTick breakpoint, not a caller frame');
++  const stopContext={pid:launched.pid,processIndex:launched.processIndex,threadIndex:launched.threadIndex};
+   record('native child process tracking',{processes:processes.processes});
+   const threads=await launched.request('threads');assert.ok(threads.threads.length>=2);record('native thread enumeration',{threads:threads.threads.length});
+-  const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);record('cross-process native stack snapshots restore current context');
++  const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);assert.deepEqual({pid:launched.pid,processIndex:launched.processIndex,threadIndex:launched.threadIndex},stopContext);assert.ok(isBreakpointStop(launched,await launched.request('stack'),{pid:parentPid,symbol:'DebugTarget!DebugTick',id:bp.id}));record('cross-process native stack snapshots restore current context');
+   const registers=await launched.request('registers');assert.ok(registers.registers.rip||registers.registers.eip);record('native x86 or x64 register context',{registers:registers.registers});
+   const disassembly=await launched.request('disassemble');assert.match(disassembly.text,/DebugTick|[0-9a-f]{8}/i);record('native machine disassembly');
+   const counter=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugCounter'});const memory=await launched.request('readMemory',{address:counter.address,count:4});assert.equal(memory.unreadableBytes,0);record('resolve exported data address and read native memory',{address:counter.address});
+diff --git a/tools/native-debugger-stop.mjs b/tools/native-debugger-stop.mjs
+new file mode 100644
+index 00000000..945be610
+--- /dev/null
++++ b/tools/native-debugger-stop.mjs
+@@ -0,0 +1,11 @@
++/** A caller frame does not prove that a process stopped at its breakpoint.
++ * Used by real-CDB qualification to distinguish a breakpoint stop from a
++ * thread merely suspended in Sleep while Windows reports a child event. */
++export function isBreakpointStop(session, stack, {pid, symbol, id}) {
++  if (session.state !== 'paused' || session.pid !== pid) return false;
++  const frame = stack.frames?.find(frame => frame.index === 0);
++  if (!frame || !Number.isSafeInteger(id) || id < 0) return false;
++  const name = frame.symbol.split(/[+\s]/, 1)[0].toLowerCase();
++  return name === symbol.toLowerCase() &&
++    new RegExp('(?:^|\\n)Breakpoint ' + id + ' hit(?:\\r?\\n|$)', 'i').test(session.lastStop || '');
++}
+diff --git a/tools/recovery-browser-tests.py b/tools/recovery-browser-tests.py
+index 93b78672..f089961c 100644
+--- a/tools/recovery-browser-tests.py
++++ b/tools/recovery-browser-tests.py
+@@ -32,8 +32,10 @@ def case(browser,name,fn):
+     finally:
+         if p:p.close()
+ def startup(p):
+-    info=p.evaluate('({docking:vb6Studio.docking.model.windows.size,bars:vb6Studio.commandBars.model.bars.length,debugWindows:vb6Studio.debuggerWindows.views.size,tools:!!vb6Studio.ideTools,editor:!!vb6Studio.editor.intelligence})')
+-    check(info['docking']>=12 and info['bars']==4 and info['debugWindows']==8 and info['editor']);return info
++    info=p.evaluate('({docking:vb6Studio.docking.model.windows.size,bars:vb6Studio.commandBars.model.bars.length,debugWindows:[...vb6Studio.debuggerWindows.views.keys()],nativeWindow:vb6Studio.docking.model.windows.has("nativeDebugger"),tools:!!vb6Studio.ideTools,editor:!!vb6Studio.editor.intelligence})')
++    check(info['docking']>=12 and info['bars']==4 and info['editor']);
++    check(set(info['debugWindows'])=={'immediate','locals','watch','callStack','breakpoints','errors','output','evaluation','executingSource'},str(info));
++    check(info['nativeWindow'],'Native debugger must retain its separate dock window');return info
+ def floating(p):
+     p.evaluate('window.savedPanel=vb6Studio.projectPanel;vb6Studio.docking.float("project")')
+     check(p.evaluate('vb6Studio.docking.group("project").edge')=='float')
