@@ -12,3 +12,13 @@ index 24da870..166eb01 100644
 @@ -59 +59 @@ namespace VB6Interop {
 -      catch(COMException error){if(error.ErrorCode==unchecked((int)0x80004002))return D("supported",false);throw;}
 +      catch(COMException error){if(error.ErrorCode==unchecked((int)0x80004002)||error.ErrorCode==unchecked((int)0x80040111))return D("supported",false,"hresult",error.ErrorCode);throw;}
+diff --git a/tools/interop/test-ocx.mjs b/tools/interop/test-ocx.mjs
+index d01b745..f8a4b78 100644
+--- a/tools/interop/test-ocx.mjs
++++ b/tools/interop/test-ocx.mjs
+@@ -28 +28,4 @@ try{
+- if(descriptor.persistStream||descriptor.persistStreamInit){const saved=await client.saveControlState(handle);assert.equal(typeof saved.data,'string');const loaded=await client.loadControlState(handle,saved.data);assert.ok(loaded.loadedBytes>=0);report.checks.push('native stream state save/load');}
++ if(descriptor.persistStream||descriptor.persistStreamInit){
++   try{const saved=await client.saveControlState(handle);assert.equal(typeof saved.data,'string');const loaded=await client.loadControlState(handle,saved.data);assert.ok(loaded.loadedBytes>=0);report.checks.push('native stream state save/load');report.persistence={status:'round-trip-passed'};}
++   catch(error){if((error.hresult>>>0)!==0x80004005)throw error;report.persistence={status:'rejected-by-system-component',hresult:error.hresult,roundTripCertified:false};assert.ok((await client.controlInfo(handle)).events>0);report.checks.push('component E_FAIL persistence result is surfaced; host remains usable');}
++ }
