@@ -160,8 +160,17 @@ class Themes(unittest.TestCase):
             self.page.get_by_label('IDE theme',exact=True).select_option(theme)
             self.assertEqual(self.page.get_by_label('Application theme',exact=True).locator('option').count(),3)
         checkbox=self.page.get_by_label('Follow system light/dark appearance',exact=True)
-        checkbox.focus();self.page.keyboard.press('Space');self.assertTrue(checkbox.is_checked())
+        # Programmatic focus retains pointer modality in Firefox. Exercise real
+        # keyboard navigation, not engine-specific :focus-visible heuristics.
+        checkbox.focus()
+        self.page.keyboard.press('Shift+Tab')
+        self.assertFalse(checkbox.evaluate('(e)=>e===e.ownerDocument.activeElement'))
+        self.page.keyboard.press('Tab')
+        self.assertTrue(checkbox.evaluate('(e)=>e===e.ownerDocument.activeElement'))
+        self.assertTrue(checkbox.evaluate('(e)=>e.matches(":focus-visible")'))
+        self.page.keyboard.press('Space');self.assertTrue(checkbox.is_checked())
         self.assertGreater(float(checkbox.evaluate('(e)=>parseFloat(getComputedStyle(e).outlineWidth)')),0)
+        self.record('Keyboard Tab and Space',checkboxToggled=True,focusVisible=True)
         self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
     def test_detached_windows_receive_live_theme_and_return(self):
         self.set_theme('fluent-dark')
