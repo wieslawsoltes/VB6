@@ -10,6 +10,7 @@ using System.Web.Script.Serialization;
 public static class TextNlsReference {
  [DllImport("kernel32.dll",SetLastError=true,ExactSpelling=true)] static extern int WideCharToMultiByte(uint cp,uint flags,IntPtr input,int count,IntPtr output,int bytes,IntPtr replacement,IntPtr used);
  [DllImport("kernel32.dll",SetLastError=true,ExactSpelling=true)] static extern int LCMapStringW(uint locale,uint flags,IntPtr input,int count,IntPtr output,int chars);
+ [DllImport("kernel32.dll",SetLastError=true,ExactSpelling=true)] static extern int MultiByteToWideChar(uint cp,uint flags,IntPtr input,int count,IntPtr output,int chars);
  static string Map(uint locale,uint flags,string text,IntPtr a,IntPtr b) {
   for(int i=0;i<text.Length;i++)Marshal.WriteInt16(a,i*2,(short)text[i]);
   int n=LCMapStringW(locale,flags,a,text.Length,b,32);
@@ -19,7 +20,7 @@ public static class TextNlsReference {
  public static void Write(string path) {
   int[] pages={1252,1250,1251,1253,1254,1255,1256,1257,1258,874,932,936,949,950};
   int[] locales={1033,1045,1049,1032,1055,1037,1025,1061,1062,1063,1066,1054,1041,2052,1042,1028};
-  var enc=new Dictionary<string,object>();var maps=new Dictionary<string,object>();var probes=new List<object>();
+  var enc=new Dictionary<string,object>();var maps=new Dictionary<string,object>();var decodings=new Dictionary<string,object>();var probes=new List<object>();
   IntPtr a=Marshal.AllocHGlobal(1024),b=Marshal.AllocHGlobal(1024),used=Marshal.AllocHGlobal(4);
   try {
    foreach(int cp in pages) {
@@ -35,6 +36,21 @@ public static class TextNlsReference {
      rows.Add(new object[]{c,v});
     }
     enc[cp.ToString()]=rows;
+    var decoded=new List<object>();
+    for(int first=0;first<256;first++) {
+     Marshal.WriteByte(a,(byte)first);
+     int one=MultiByteToWideChar((uint)cp,0,a,1,b,32);
+     if(one!=1)throw new Exception("Unexpected default single-byte decoding");
+     decoded.Add(new object[]{first,(int)(ushort)Marshal.ReadInt16(b)});
+     bool lead=cp==932?((first>=0x81&&first<=0x9f)||(first>=0xe0&&first<=0xfc)):(cp==936||cp==949||cp==950)&&first>=0x81&&first<=0xfe;
+     if(!lead)continue;
+     for(int second=1;second<256;second++) {
+      Marshal.WriteByte(a,1,(byte)second);int n=MultiByteToWideChar((uint)cp,0,a,2,b,32);
+      if(n!=1)throw new Exception("Unexpected default DBCS decoding");
+      decoded.Add(new object[]{first*256+second,(int)(ushort)Marshal.ReadInt16(b)});
+     }
+    }
+    decodings[cp.ToString()]=decoded;
    }
    foreach(int locale in locales) {
     bool east=locale==1041||locale==2052||locale==1042||locale==1028;
@@ -49,6 +65,12 @@ public static class TextNlsReference {
       string s=((char)c).ToString(),v=Map((uint)locale,kind.Value,s,a,b);
       if(v!=s)rows.Add(new object[]{s,v});
      }
+     // Include supplementary-plane casing rather than treating surrogate pairs as two letters.
+     if(kind.Key=="upper"||kind.Key=="lower")for(int c=0x10000;c<=0x10ffff;c++) {
+      string s=char.ConvertFromUtf32(c),v=Map((uint)locale,kind.Value,s,a,b);
+      if(v!=s)rows.Add(new object[]{s,v});
+     }
+     // Width conversion combines half-width voiced/semi-voiced kana pairs.
      if(kind.Key=="wide")for(int c=0xff61;c<=0xff9d;c++)for(int mark=0xff9e;mark<=0xff9f;mark++) {
       string s=((char)c).ToString()+((char)mark).ToString();
       string v=Map((uint)locale,kind.Value,s,a,b);
@@ -62,7 +84,7 @@ public static class TextNlsReference {
     maps[locale.ToString()]=lm;
    }
    var json=new JavaScriptSerializer{MaxJsonLength=64*1024*1024};
-   File.WriteAllText(path,json.Serialize(new{schema=1,source="Windows Kernel32: flags=0 code-page encoding; LCMapStringW explicit locale",encodings=enc,maps,probes}),new UTF8Encoding(false));
+   File.WriteAllText(path,json.Serialize(new{schema=2,source="Windows Kernel32: flags=0 code-page encoding; LCMapStringW explicit locale",encodings=enc,decodings,maps,probes}),new UTF8Encoding(false));
   } finally {Marshal.FreeHGlobal(a);Marshal.FreeHGlobal(b);Marshal.FreeHGlobal(used);}
  }
 }
