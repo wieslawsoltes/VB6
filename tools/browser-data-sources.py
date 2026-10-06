@@ -35,7 +35,10 @@ try:
             p=page_for(browser,'sqlite-customers');ready(p,2)
             p.locator('[data-control="txtName"] input').fill('Saved from textbox');button(p,'cmdSave').click();button(p,'cmdLoad').click()
             p.wait_for_function('vb6Application.forms[0].controlMap.get("txtname").Text==="Saved from textbox"')
-            button(p,'cmdNew').click();ready(p,3);check(p.locator('[data-control="txtName"] input').input_value()=='New customer')
+            button(p,'cmdNew').click();ready(p,3)
+            # RecordCount changes before the queued control repaint. Assert the
+            # actual visible value with polling, not a snapshot of the old frame.
+            expect(p.locator('[data-control="txtName"] input')).to_have_value('New customer')
             button(p,'cmdDelete').click();ready(p,2)
             p.get_by_role('button',name='MoveFirst',exact=True).click();p.wait_for_function('vb6Application.forms[0].controlMap.get("txtname").Text==="Saved from textbox"')
             # A new app host reopens the real SQLite bytes, not a cached recordset.

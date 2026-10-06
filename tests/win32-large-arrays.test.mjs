@@ -52,3 +52,12 @@ test('native CLI parses a strict decimal byte budget without lossy unit suffixes
  assert.equal(parseWin32Options(['--max-array-bytes','1048576']).maxArrayBytes,1048576);
  for(const value of ['1.5','1e6','1MiB','Infinity'])assert.throws(()=>parseWin32Options(['--max-array-bytes',value]),/integer/);
 });
+
+test('numeric execution fixture covers both removed quota and atomic x86-width rejection', async()=>{
+ const {numericFixture}=await import('../tools/win32-numeric-fixtures.mjs');
+ const project=numericFixture(), code=project.modules[0].code;
+ assert.match(code,/ReDim values\(200000\)\s+If Err\.Number <> 0 Or UBound\(values\) <> 200000 Then ExitProcess 63/);
+ assert.match(code,/ReDim Preserve values\(268435455\)\s+If Err\.Number <> 7 Then ExitProcess 60/);
+ assert.match(code,/If UBound\(values\) <> 200000 Or values\(200000\) <> 1\.25 Then ExitProcess 64/);
+ assert.ok(compileWin32(project).bytes.length);
+});
