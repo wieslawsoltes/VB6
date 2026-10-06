@@ -1,0 +1,87 @@
+name: Verify PR60 integration
+on:
+  push:
+    branches: [validation/pr60-final-integration]
+    paths: ['.github/workflows/pr60-integration.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/validation/pr60-final-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Combine reviewed source and regenerate generated conflicts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pr60-evidence"
+          git archive --format=zip 62cfd898c08885945778dfb19b81430f00bc7538 > "$RUNNER_TEMP/pr60-evidence/original-pr-source.zip"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          base = '4cc9031c37a294710bf436373cbdb6e25005958b'
+          head = '62cfd898c08885945778dfb19b81430f00bc7538'
+          main = '3df8dcc6227fbf734c5c7710b0e29ec06c43b210'
+          def git(*args): return subprocess.check_output(['git', *args], text=True)
+          assert git('merge-base', head, main).strip() == base
+          result = subprocess.run(['git','merge','--no-commit','--no-ff',main])
+          conflicts = git('diff','--name-only','--diff-filter=U').splitlines()
+          assert result.returncode == 0 or conflicts, 'Merge failed without resolvable conflicts'
+          allowed = {'dist/studio.js','dist/VB6-Studio-Web.html','package.json'}
+          assert set(conflicts) <= allowed, 'Unexpected source conflicts: ' + repr(conflicts)
+          print('Reviewed conflict paths:', conflicts)
+          for path in conflicts:
+              if path != 'package.json':
+                  subprocess.run(['git','checkout','--ours','--',path], check=True)
+                  subprocess.run(['git','add','--',path], check=True)
+          # Preserve all main scripts; apply only the two independently scoped PR test-script updates.
+          old, fix, merged = [json.loads(git('show', sha + ':package.json')) for sha in (base,head,main)]
+          assert {k:v for k,v in old.items() if k != 'scripts'} == {k:v for k,v in fix.items() if k != 'scripts'}
+          changed = {k for k in set(old['scripts']) | set(fix['scripts']) if old['scripts'].get(k) != fix['scripts'].get(k)}
+          assert changed == {'test:chatgpt','test:chatgpt:browser'}, changed
+          for key in changed:
+              assert merged['scripts'][key] == old['scripts'][key], 'Conflicting script edit: ' + key
+              merged['scripts'][key] = fix['scripts'][key]
+          pathlib.Path('package.json').write_text(json.dumps(merged, indent=2) + '\n')
+          subprocess.run(['git','add','package.json'], check=True)
+          PY
+          git rm .github/workflows/pr60-integration.yml
+          npm run build
+          git add -u
+          git diff --cached --check
+          python3 - <<'PY'
+          import subprocess
+          allowed={'dist/VB6-Studio-Web.html','dist/studio.js','docs/CHATGPT-SIGNIN-TROUBLESHOOTING.md','package.json','src/agents/chatgpt-connection.js','tests/chatgpt-connection.test.mjs','tools/chatgpt-signin-browser-tests.py'}
+          changed=set(subprocess.check_output(['git','diff','--cached','--name-only','3df8dcc6227fbf734c5c7710b0e29ec06c43b210'],text=True).splitlines())
+          assert changed == allowed, changed
+          PY
+      - name: Full integrated Node regression suite
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/pr60-evidence/node-tests.log"
+          git diff --exit-code
+      - name: Publish isolated candidate for independent review, not the PR or main
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/validation/pr60-final-integration | cut -f1)" = "$GITHUB_SHA"
+          git commit -m 'Merge current main into independently verifiable sign-in recovery candidate'
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/pr60-evidence/candidate-ids.txt"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/pr60-evidence/candidate-files.txt"
+          git diff --stat 3df8dcc6227fbf734c5c7710b0e29ec06c43b210 HEAD > "$RUNNER_TEMP/pr60-evidence/diff-stat.txt"
+          git archive --format=zip HEAD > "$RUNNER_TEMP/pr60-evidence/candidate-source.zip"
+          git push origin HEAD:refs/heads/validation/pr60-final-integration
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr60-integration-evidence
+          path: ${{ runner.temp }}/pr60-evidence
+          retention-days: 3
