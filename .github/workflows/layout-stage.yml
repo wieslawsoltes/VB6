@@ -1,0 +1,68 @@
+name: Stage verified anchoring source
+on:
+  push:
+    branches: [feat/optional-anchoring-layout]
+    paths: ['.github/layout-stage-part-*.br', '.github/workflows/layout-stage.yml']
+permissions:
+  contents: write
+concurrency:
+  group: layout-source-stage
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/optional-anchoring-layout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify and apply exact source delta
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {createHash} from 'node:crypto';
+          import {brotliDecompressSync} from 'node:zlib';
+          const hash=b=>createHash('sha256').update(b).digest('hex');
+          const parts=Array.from({length:5},(_,i)=>`.github/layout-stage-part-${i+1}.br`);
+          const raw=brotliDecompressSync(Buffer.concat(parts.map(p=>fs.readFileSync(p))));
+          if(hash(raw)!=='87fd325d19ab486326eba11b57a549e15ef0531cb857c6a2aa6dbeec74daeb33')throw Error('Manifest hash mismatch');
+          const manifest=JSON.parse(raw);if(manifest.version!==1||manifest.files.length!==50)throw Error('Invalid manifest');
+          const prepared=[],seen=new Set();
+          for(const f of manifest.files){
+            if(typeof f.path!=='string'||path.isAbsolute(f.path)||f.path.includes('\\')||f.path.split('/').some(p=>!p||p==='..'||p==='.'||p==='.git')||seen.has(f.path))throw Error('Unsafe or duplicate path');
+            seen.add(f.path);const exists=fs.existsSync(f.path);let old=exists?fs.readFileSync(f.path):Buffer.alloc(0);
+            if(f.base===null?exists:!exists||hash(old)!==f.base)throw Error('Changed source baseline: '+f.path);
+            let end=-1;for(const [at,len,text]of f.edits){if(!Number.isInteger(at)||!Number.isInteger(len)||at<0||len<0||at<end||at+len>old.length||typeof text!=='string')throw Error('Invalid edit: '+f.path);end=at+len;}
+            for(const [at,len,text]of [...f.edits].reverse())old=Buffer.concat([old.subarray(0,at),Buffer.from(text,'utf8'),old.subarray(at+len)]);
+            if(hash(old)!==f.sha)throw Error('Result hash mismatch: '+f.path);prepared.push([f.path,old]);
+          }
+          for(const [file,bytes]of prepared){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}
+          for(const file of [...parts,'.github/workflows/layout-stage.yml'])fs.unlinkSync(file);
+          console.log('Verified and applied '+prepared.length+' source files; removed all temporary staging files.');
+          JS
+      - run: npm run build
+      - name: Full regression suite
+        run: node --test --test-concurrency=4 tests/*.test.mjs
+      - run: npm run pack:layout
+      - name: Commit source and regenerated distributions without force
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat(layout): add opt-in anchoring, standalone solver, designer and native export integration'
+          git push origin HEAD:refs/heads/feat/optional-anchoring-layout
+          git archive --format=tar HEAD > layout-source.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: layout-staged-source
+          path: |
+            layout-source.tar
+            release/vb6-auto-layout-*.tgz
+          retention-days: 3
