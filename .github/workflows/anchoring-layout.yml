@@ -1,14 +1,11 @@
 name: Optional anchoring and layout
 on:
   push:
-    branches: [feat/optional-anchoring-layout]
+    branches: [main, feat/optional-anchoring-layout]
+    paths: ['src/**', 'tests/**', 'tools/**', 'packages/auto-layout/**', 'package.json', '.github/workflows/anchoring-layout.yml']
   pull_request:
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'tools/**'
-      - 'packages/**'
-      - '.github/workflows/anchoring-layout.yml'
+    paths: ['src/**', 'tests/**', 'tools/**', 'packages/auto-layout/**', 'package.json', '.github/workflows/anchoring-layout.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -23,14 +20,77 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build and test
-        run: npm run build && npm test
-      - name: Archive reproducible source for validation
+      - run: npm run build
+      - run: npm run test:layout
+      - run: npm run bench:layout
+      - run: npm run pack:layout
+      - name: Verify reproducible generated output
+        run: git diff --exit-code -- dist packages/auto-layout/dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - name: Archive exact tested source
         if: always()
         run: git archive --format=tar HEAD > layout-source.tar
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: layout-source
-          path: layout-source.tar
-          retention-days: 3
+          name: layout-source-and-package
+          path: |
+            layout-source.tar
+            reports/layout/benchmark.json
+            release/vb6-auto-layout-*.tgz
+          retention-days: 7
+  browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Resolve Chromium executable
+        if: matrix.browser == 'chromium'
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PY
+      - run: npm run test:layout:browser
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: layout-browser-${{ matrix.browser }}
+          path: reports/layout
+          retention-days: 7
+  native-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/win32-layout-fixtures.mjs
+      - name: Compare all 16 anchor masks with actual Windows Forms
+        shell: powershell
+        run: ./tools/test-winforms-anchors.ps1
+      - name: Execute isolated native x86 applications and compare HWND geometry
+        shell: pwsh
+        run: ./tools/test-win32-layout.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: layout-native-windows
+          path: reports/layout/native
+          retention-days: 7
