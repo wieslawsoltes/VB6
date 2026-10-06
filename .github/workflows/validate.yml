@@ -30,6 +30,10 @@ jobs:
           python-version: '3.12'
       - run: npm run build
       - run: npm test
+      - name: Report retention and packaging regressions
+        run: |
+          python tools/test-report-retention.py
+          python tools/test-package-notices.py
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium
       - name: Resolve browser executable
@@ -49,6 +53,13 @@ jobs:
           python tools/browser-boundaries-06.py
       - name: Verify reproducible generated bundles
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-validation-reports
+          path: reports
+          if-no-files-found: ignore
+          retention-days: 7
   browser-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -83,6 +94,10 @@ jobs:
         env:
           VB6_BROWSER: ${{ matrix.browser }}
         run: npm run test:sample-exports
+      - name: Modular deployment exports, startup failures, persistence and CSP
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:exporter:browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -92,6 +107,7 @@ jobs:
             reports/ide-themes
             reports/application-themes/${{ matrix.browser }}
             reports/win32-exports
+            reports/exporter
           if-no-files-found: ignore
           retention-days: 7
   win32-system-contracts:

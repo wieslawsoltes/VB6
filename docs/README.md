@@ -8,6 +8,7 @@ These guides describe the implemented system, not complete native VB6 parity.
 
 - [Architecture and SDK embedding](ARCHITECTURE.md): module boundaries, execution,
   persistence and extension points.
+- [Application export](APPLICATION-EXPORT.md): deployment APIs, modular output, CSP and validation.
 - [Build artifacts](IDE-BUILD-ARTIFACTS.md): source-only builds, exact fingerprints
   and safe regeneration when integrating changes.
 - [Testing](TESTING.md): setup, reproducible checks and validation boundaries.

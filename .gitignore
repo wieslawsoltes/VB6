@@ -2,67 +2,34 @@ node_modules/
 __pycache__/
 *.pyc
 .DS_Store
-reports/saved-project.vb6web
-reports/exported-app.html
-reports/features-04/runtime-export.html
 .native-build/
 release/
 validation/
 
-# Generated top-level-window test screenshots; retained as CI artifacts.
-reports/browser-windows/
+# Keep only the porting index; generated test/build evidence belongs in CI artifacts.
+# Add an explicit exception only for a reviewed, durable porting tracker.
+/reports/*
+!/reports/README.md
+# Packaging regenerates the source manifest inside each release archive.
+/SOURCE-SHA256SUMS.txt
 
-# Generated native-project browser artifacts.
-reports/native-projects/
-
-# Win32 compatibility screenshots/results are uploaded by CI.
-reports/win32-browser/
-# Data integration evidence and local gateway secrets.
-reports/data-sources/
+# Local gateway profiles and data.
 server-profiles.local.json
 *.sqlite
-
-# Generated debugger browser evidence; retained as CI artifacts.
-reports/debugger-runtime/
-# Coding-agent browser validation reports and screenshots (CI artifacts).
-reports/coding-agents/
-
-# Classic HTML pixel fixtures and benchmark evidence
-reports/classic-html/
-
-# Debugger compatibility browser evidence
-reports/debugger-boundaries/
-reports/native-debugger/
-
-# ChatGPT connection fixtures; retained as CI artifacts.
-reports/chatgpt-login/
 
 # Deterministic IDE/runtime/sample outputs: exact fingerprints checked on every build.
 /dist/studio.js
 /dist/VB6-Studio-Web.html
-
-# Optional layout validation and native fixture artifacts.
-reports/layout/
-
 /dist/vb6-runtime.js
 /dist/examples/*.html
 /src/exporter/runtime-payload.js
 
-# Optional standalone compute package output
+# Optional standalone compute package output.
 /artifacts/vb6-compute/
-reports/compute/
-
-# Optional IDE-theme screenshots and browser evidence (CI artifacts).
-reports/ide-themes/
 
 # Source-derived OCX lab, verified by the same exact artifact manifest.
 /dist/OCX-Source-Control-Lab.html
 
-# Generated, fingerprint-verified standalone Win32 bundles and export evidence.
+# Generated, fingerprint-verified standalone Win32 bundles.
 /dist/win32-browser.js
 /packages/win32-browser/dist/win32-browser.js
-reports/win32-exports/
-reports/win32-system/
-
-# Application-theme/icon-pack browser fixtures and evidence (CI artifacts).
-reports/application-themes/

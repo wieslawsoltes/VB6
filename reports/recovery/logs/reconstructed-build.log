@@ -1,5 +1,0 @@
-
-> vb6-studio-web@0.4.0 build
-> node tools/build.mjs
-
-Built runtime (382,942 bytes) and 10 standalone applications.

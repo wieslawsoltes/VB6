@@ -1,9 +1,0 @@
-{
-  "name": "visual",
-  "exitCode": 0,
-  "seconds": 66.796,
-  "log": "reports/release-06/visual.log",
-  "passed": 43,
-  "failed": 0,
-  "report": "reports/browser-visual-tests.json"
-}

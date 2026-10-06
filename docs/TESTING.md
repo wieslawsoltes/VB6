@@ -12,6 +12,7 @@ for each subsystem.
 npm run build
 npm test
 python tools/test-package-notices.py
+python tools/test-report-retention.py
 ```
 
 `npm test` runs the root `tests/*.test.mjs` suite; its pretest hook also rebuilds.
@@ -80,7 +81,7 @@ python tools/browser-boundaries-06.py
 Historical suffixes in tool names do not make their current regression coverage
 obsolete. Keep tests that exercise existing behavior. The active browser matrix
 also exercises detached windows, IDE/application themes and exact downloaded
-sample exports. Run it locally in a POSIX shell with:
+sample and modular deployment exports. Run it locally in a POSIX shell with:
 
 ```sh
 for engine in chromium firefox webkit; do
@@ -88,6 +89,7 @@ for engine in chromium firefox webkit; do
   VB6_BROWSER="$engine" npm run test:themes:browser
   VB6_BROWSER="$engine" npm run test:application-themes:browser
   VB6_BROWSER="$engine" npm run test:sample-exports
+  VB6_BROWSER="$engine" npm run test:exporter:browser
 done
 ```
 
@@ -121,6 +123,9 @@ entry points, not a claim that every suite runs in CI:
 | Layout extensions | `npm run test:layout` | `npm run test:layout:browser`; `npm run bench:layout` |
 | Compute compiler/runtime | `npm run test:compute` | `npm run test:compute:browser`; [compute package](../packages/vb6-compute/README.md) |
 
+[Application export](APPLICATION-EXPORT.md) documents modular output, startup,
+persistence and Content Security Policy checks.
+
 `package.json` owns command definitions. The checked-in workflow owns the CI
 matrix; removed workflows are not implicit merge gates. Specialist guides may
 require additional OS, provider, graphics or native-toolchain checks that are
@@ -150,9 +155,55 @@ Keep these distinctions explicit:
   Licensed VB6 compilation needs an owner-supplied installation; staging, mocks
   and skipped licensed tests are not native compiler certification.
 
-Release packaging requires its configured validation inputs; packaging success
-only proves archive construction. It does not rerun tests or make an old report
-current. Source archives generate their own `SOURCE-SHA256SUMS.txt`; use that
-manifest to verify the bytes in that archive. Preserve license notices in source,
-SDK, browser and example archives. See [compatibility](COMPATIBILITY.md) and
-[build artifacts](IDE-BUILD-ARTIFACTS.md) for the remaining boundaries.
+## Report retention
+
+The root `.gitignore` keeps only `reports/README.md` in version control by
+default. Add an explicit exception only for a reviewed, durable porting tracker;
+prefer extending the owning documents linked by the index. Existing commands
+continue writing generated JSON, logs, screenshots, benchmarks, exports and
+round-trip output beneath `reports/`. Ignoring them does not disable tests or
+artifact uploads.
+
+The Validate workflow uploads core validation reports, cross-browser evidence
+and Windows system contracts with the run that produced them. Download artifacts
+before their retention period expires. Historical reports and the obsolete root
+`SOURCE-SHA256SUMS.txt` remain in Git history; do not use their old totals to
+certify a different revision. Reviewed visual input hashes remain in
+`tests/visual-goldens.json` and are not Microsoft VB6 reference pixels.
+
+## Regenerate release evidence and verify archives
+
+```sh
+python tools/validate-release.py
+python tools/package-release.py --out <release-directory> --git-bundle
+python tools/verify-release.py --release-dir <release-directory> --work <new-empty-directory> --version 0.6.0
+```
+
+The release validator runs the build, Node tests and all seven core browser
+suites, recording fresh logs and `reports/release-validation.json`. Add
+`--check-goldens` only in the recorded browser/font environment. Failed or
+interrupted runs do not retain a passing summary. A passing default CI run is
+not a substitute for every release check; the extra visual suite must also pass.
+Launch probes (`npm run probe:launch`) remain separate from inline validation.
+
+Packaging requires a passing integrated summary, generated report files and
+previews. Missing evidence produces reproduction instructions, not a fallback to
+deleted snapshots. The historical manual `visual-review-06.json` is no longer
+required. Source archives contain the porting index and its linked package
+documentation, not disposable reports. Each source archive gets a newly generated
+`SOURCE-SHA256SUMS.txt`; removing the obsolete root copy does not disable hashing.
+
+The archive verifier extracts the actual source ZIP, checks its manifest and
+path/font restrictions, rebuilds generated files, compares delivered bytes,
+reruns Node/browser tests and checks the SDK, archive integrity and optional Git
+bundle. Its result is separate evidence, not native VB6 certification.
+
+Run report-retention and packaging regressions independently with:
+
+```sh
+python tools/test-report-retention.py
+python tools/test-package-notices.py
+```
+
+These tests use isolated, explicitly synthetic fixtures to exercise the runner
+and actual ZIP writers. They never manufacture passing production evidence.

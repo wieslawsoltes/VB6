@@ -1,9 +1,0 @@
-{
-  "name": "finalization",
-  "exitCode": 0,
-  "seconds": 38.379,
-  "log": "reports/release-06/finalization.log",
-  "passed": 39,
-  "failed": 0,
-  "report": "reports/finalization-05/browser-finalization-05.json"
-}

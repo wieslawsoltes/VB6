@@ -1,9 +1,0 @@
-{
-  "name": "compatibility",
-  "exitCode": 0,
-  "seconds": 14.659,
-  "log": "reports/release-06/compatibility.log",
-  "passed": 14,
-  "failed": 0,
-  "report": "reports/browser-parity-tests.json"
-}
