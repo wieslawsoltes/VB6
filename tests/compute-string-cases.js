@@ -56,4 +56,6 @@ export const STRING_CASES=[
   unit('negative Left length is error five','s="keep"\nOn Error Resume Next\ns=Left$("abc",-1&)\nn=Err.Number',{s:'keep',n:5}),
   unit('empty AscW is error five','On Error Resume Next\nn=AscW("")\nn=Err.Number',{n:5}),
   unit('unsupported runtime text comparison is diagnosed','On Error Resume Next\nn=StrComp("a","A",1)\nn=Err.Number',{n:5}),
+  {name:'fixed String ByVal argument becomes independent variable String',source:'Public s As String * 3\nPublic n As Long\nSub Main()\ns="abc"\nEdit s\nEnd Sub\nSub Edit(ByVal text As String)\ntext="abcdef"\nn=Len(text)\nEnd Sub',expected:{s:'abc',n:6}},
+  {name:'parenthesized fixed String uses a non-copyback ByRef temporary',source:'Public s As String * 3\nPublic n As Long\nSub Main()\ns="abc"\nEdit (s)\nEnd Sub\nSub Edit(ByRef text As String)\ntext="abcdef"\nn=Len(text)\nEnd Sub',expected:{s:'abc',n:6}},
 ];

@@ -319,6 +319,10 @@ export function compileComputeIR(program, options={}) {
         const value=arg.kind==='named'?arg.expr:arg,pt=typeOf(p.storageType||p.type);
         if(p.byRef){
           const ref=address(value);
+          // Fixed strings use a separate native argument copy-back contract.
+          // Do not alias their bounded slab as a variable-length String parameter.
+          if(ref?.type==='string'&&ref.stringStorage?.fixedLength)
+            error('Fixed-length String ByRef copy-back is not implemented; use a variable-length String temporary or a parenthesized value','GPU_FIXED_STRING_BYREF');
           if(p.bounds!==null){if(!ref?.array||ref.type!==pt)error('ByRef array argument type mismatch','GPU_ARGUMENT');bindings.set(slot,ref.address);}
           else if(ref){if(ref.array||ref.type!==pt)error('ByRef argument type mismatch; use parentheses for an explicit temporary','GPU_ARGUMENT');bindings.set(slot,ref.address);if(ref.arrayBase){const token=`lock${serial++}`;out(`let ${token}=array_lock(${ref.arrayBase});`);locks.push({token,base:ref.arrayBase});}}
           else {const v=expr(value),s=allocate({name:'$argument',type:pt,bounds:null},module,proc);out(`${store(pt)}(${s.address},${convert(v,pt)});`);bindings.set(slot,s.address);}

@@ -68,6 +68,11 @@ export function decodeState(artifact,buffer,count=1) {
     for(const s of artifact.globals) {
       const offset=base+STATE_HEADER_WORDS+s.offset+(s.array?ARRAY_HEADER_WORDS:0);
       const name=s.module+'.'+s.name;
+      if(s.type==='string'){
+        const count=s.array?s.capacity:1;
+        for(let i=0;i<count;i++)if(words[offset+i]!==s.stringStorage.offset+i*s.stringStorage.stride)
+          throw new ComputeError('Corrupt GPU String reference: '+name,'GPU_ABI');
+      }
       if(s.array){const layout=readArrayLayout(words,base+STATE_HEADER_WORDS+s.offset,s);arrays[name]=layout;globals[name]=s.type==='string'?Array.from({length:layout.length},(_,i)=>decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset+i*s.stringStorage.stride,s.stringStorage)):Array.from(words.subarray(offset,offset+layout.length),v=>decodeScalar(v,s.type));}
       else globals[name]=s.type==='string'?decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset,s.stringStorage):decodeScalar(words[offset],s.type);
     }

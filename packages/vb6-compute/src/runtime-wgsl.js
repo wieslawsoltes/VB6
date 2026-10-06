@@ -97,7 +97,7 @@ ${ARRAY_WGSL}
 ${stringHelpers||`fn array_clear(base:u32,start:u32,stop:u32)->bool {
   if(!array_charge(stop-start)) {return false;}
   for(var i=start;i<stop;i+=1u) {mem[base+ARRAY_DATA+i]=0u;}return true;
-}`} 
+}`}
 fn rgb(r:i32,g:i32,b:i32)->i32 {
   if(r<0 || g<0 || b<0) {fail(5u);return 0;}
   return min(r,255)|(min(g,255)<<8u)|(min(b,255)<<16u);

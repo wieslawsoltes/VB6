@@ -25,3 +25,21 @@ for(const body of ['s=CStr(1.5!)','n=CLng("123")','n=1&+"2"','n=Abs("2")','If "T
 test('locale comparison is not approximated as ASCII',()=>assert.throws(()=>compileCompute('Option Compare Text\nPublic n As Long\nSub Main()\nIf "A"="a" Then n=1&\nEnd Sub'),e=>e.code==='GPU_COMPARE'));
 for(const mutate of [a=>delete a.stringABI,a=>a.stringABI=2,a=>delete a.globals[0].stringStorage,a=>a.globals[0].stringStorage.offset=999999,a=>a.globals[0].stringStorage.stride++,a=>a.initialState[0]=0,a=>a.initialState[1]=9999,a=>a.globals.push({...a.globals[0],name:'alias'})])test('malformed String artifact '+mutate,()=>{const a=compileCompute('Public s As String\nSub Main()\nEnd Sub');mutate(a);assert.throws(()=>validateArtifact(a));});
 test('readback rejects corrupt UTF-16 units',()=>{const b=encodeStringBlock('x',{capacity:8});b[3]=65536;assert.throws(()=>decodeStringBlock(b,0,{capacity:8}),e=>e.code==='GPU_ABI');});
+
+for(const [declaration,argument,parameter] of [
+  ['Public fixedText As String * 3','fixedText','ByRef text As String'],
+  ['Public fixedText(1) As String * 3','fixedText(0)','ByRef text As String'],
+  ['Public fixedText(1) As String * 3','fixedText','ByRef text() As String']
+])test('fixed String ByRef copy-back is diagnosed: '+argument,()=>{
+  assert.throws(()=>compileCompute(declaration+'\nSub Main()\nEdit '+argument+'\nEnd Sub\nSub Edit('+parameter+')\nEnd Sub'),e=>e.code==='GPU_FIXED_STRING_BYREF');
+});
+test('String readback refuses corrupt canonical references',()=>{
+  const a=compileCompute('Public s As String\nSub Main()\nEnd Sub'),state=createInitialState(a);
+  state[6]=0;
+  assert.throws(()=>decodeState(a,state.buffer),e=>e.code==='GPU_ABI');
+});
+test('String array readback validates unallocated capacity references',()=>{
+  const a=compileCompute('Public s() As String\nSub Main()\nEnd Sub'),state=createInitialState(a);
+  const symbol=a.globals[0];state[6+symbol.offset+16+symbol.capacity-1]=0;
+  assert.throws(()=>decodeState(a,state.buffer),e=>e.code==='GPU_ABI');
+});
