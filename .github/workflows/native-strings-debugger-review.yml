@@ -1,0 +1,22 @@
+name: Review native String and debugger integration
+on:
+  push:
+    branches: [feat/native-declare-strings]
+    paths: [.github/workflows/native-strings-debugger-review.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git bundle create /tmp/native-string-debugger.bundle HEAD refs/remotes/origin/main
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-string-debugger-review
+          path: /tmp/native-string-debugger.bundle
+          retention-days: 2
