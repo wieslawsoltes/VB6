@@ -41,36 +41,36 @@ export class PropertyInspector {
       this.grid.append(this.row(key,props[key],target));
       if(key==='Font'&&this.fontExpanded)for(const fontKey of fontKeys)this.grid.append(this.row(fontKey,props[fontKey],target,true));
     }
-    this.grid.scrollTop=scroll;this.grid.setAttribute('aria-rowcount',String(this.rows.size));if(!this.rows.has(this.activeKey))this.activeKey=this.rows.keys().next().value;this.setActive(this.activeKey);this.setReadOnly(this.ide.runState!=='design');
+    this.grid.scrollTop=scroll;this.grid.setAttribute('aria-rowcount',String(this.rows.size));if(!this.rows.has(this.activeKey))this.activeKey=this.rows.keys().next().value;this.setActive(this.activeKey);if(this.targets.length===1&&this.ide.controlRegistry?.hasPropertyPages?.(target.type))this.grid.append(el('button',{class:'property-pages-button',onclick:()=>this.ide.showControlPropertyPages().catch(e=>alertDialog(e.message,'Component Properties'))},'Property Pages…'));this.setReadOnly(this.ide.runState!=='design');
   }
   setActive(key){
     this.activeKey=key;for(const [name,row] of this.rows||[]){const yes=name===key;row.classList.toggle('active',yes);row.setAttribute('aria-selected',String(yes));const field=this.fields.get(name);if(field)field.tabIndex=yes?0:-1;row.querySelectorAll('button').forEach(b=>b.tabIndex=yes?0:-1);}
-    const row=this.rows?.get(key);if(row)this.grid.setAttribute('aria-activedescendant',row.id);const label=key==='Name'?'(Name)':key||'';this.description.replaceChildren(el('strong',{},label),DESCRIPTIONS[key]||'Returns or sets the '+label+' property of the selected object.');
+    const row=this.rows?.get(key);if(row)this.grid.setAttribute('aria-activedescendant',row.id);const label=key==='Name'?'(Name)':key||'';this.description.replaceChildren(el('strong',{},label),this.ide.controlRegistry?.property?.(this.targets?.[0]?.type,key)?.description||DESCRIPTIONS[key]||'Returns or sets the '+label+' property of the selected object.');
   }
   row(key,value,target,child=false){
     const mixed=key!=='Font'&&this.targets.length>1&&!this.targets.every(t=>JSON.stringify(t.properties[key])===JSON.stringify(value)),label=key==='Name'?'(Name)':key;
     const row=el('div',{class:'property-row'+(child?' font-child':''),id:'property-row-'+key,role:'row','data-property':key}),name=el('div',{class:'property-name',role:'gridcell',title:label},label),wrap=el('div',{class:'property-value-editor',role:'gridcell'});
     if(key==='Font'){name.replaceChildren(el('button',{class:'font-expander',title:this.fontExpanded?'Collapse Font':'Expand Font','aria-label':this.fontExpanded?'Collapse Font':'Expand Font','aria-expanded':this.fontExpanded,onclick:e=>{e.stopPropagation();this.fontExpanded=!this.fontExpanded;this.activeKey='Font';this.render();}},this.fontExpanded?'−':'+'),'Font');}
-    const choices=enumeration(key,target),isColor=/Color$/.test(key),isObject=typeof value==='object',format=()=>mixed?'':key==='Font'?'(Font)':Array.isArray(value)?'(List)':isColor?oleHex(value):value===null?'':isObject?'(Resource)':String(value);
+    const descriptor=this.ide.controlRegistry?.property?.(target.type,key),propertyReadOnly=this.targets.some(t=>this.ide.controlRegistry?.property?.(t.type,key)?.readOnly);row.dataset.readOnly=propertyReadOnly?'true':'false';const choices=descriptor?.choices||enumeration(key,target),isColor=/Color$/.test(key),isObject=typeof value==='object',format=()=>mixed?'':key==='Font'?'(Font)':Array.isArray(value)?'(List)':isColor?oleHex(value):value===null?'':isObject?'(Resource)':String(value);
     let field;if(choices){field=el('select',{'aria-label':label});if(mixed)field.append(el('option',{value:''},''));for(const choice of choices)field.append(el('option',{value:choice.value},choice.label));field.value=mixed?'':String(BOOLS.has(key)?Number(value)?-1:0:value);if(field.selectedIndex<0){field.append(el('option',{value:String(value)},String(value)));field.value=String(value);}}
-    else field=el('input',{'aria-label':label,value:format(),readonly:isObject||key==='Kind'||key==='Font',spellcheck:false});
+    else field=el('input',{'aria-label':label,value:format(),readonly:propertyReadOnly||isObject||key==='Kind'||key==='Font',spellcheck:false});
     field.dataset.property=key;if(mixed)field.setAttribute('aria-description','Multiple different values');
     if(isColor)wrap.append(el('span',{class:'color-swatch',style:{background:mixed?'transparent':cssColor(value)}}));
     const editFont=async()=>{const values=await fontDialog(target.properties||{});if(values)this.apply(values);};
     const editText=async()=>{const input=el('textarea',{'aria-label':'Property text',class:'property-text-dialog',value:Array.isArray(value)?value.join('\n'):String(value??'')});const accepted=await modal(label+' - '+target.name,{content:el('div',{},el('p',{},Array.isArray(value)?'Enter one item per line.':'Edit the property value.'),input)});if(accepted)this.ide.setProperty(key,Array.isArray(value)?input.value.split('\n'):input.value);};
     const palette=()=>showColorPalette(wrap,value,n=>this.ide.setProperty(key,n));
-    const editor=key==='Font'?editFont:isColor?palette:Array.isArray(value)||['Text','Caption','Tag','ToolTipText'].includes(key)?editText:null;
+    const editor=propertyReadOnly?null:key==='Font'?editFont:isColor?palette:Array.isArray(value)||['Text','Caption','Tag','ToolTipText'].includes(key)?editText:null;
     if(editor){const button=el('button',{class:'property-edit-button',title:'Edit '+label,'aria-label':'Edit '+label,onclick:editor},isColor?icon('arrow-down',12):'…');wrap.append(field,button);field.addEventListener('keydown',e=>{if(e.altKey&&e.key==='ArrowDown'){e.preventDefault();e.stopPropagation();editor();}});}else wrap.append(field);
     field.addEventListener('focus',()=>this.setActive(key));
     row.addEventListener('pointerdown',e=>{this.setActive(key);if(e.target===name){e.preventDefault();this.grid.focus({preventScroll:true});}});
-    name.addEventListener('dblclick',()=>{if(this.readOnly)return;if(choices){const i=choices.findIndex(c=>c.value===Number(value));this.ide.setProperty(key,choices[(i+1)%choices.length].value);}else if(editor)editor();else{field.focus();field.select?.();}});
+    name.addEventListener('dblclick',()=>{if(this.readOnly||propertyReadOnly)return;if(choices){const i=choices.findIndex(c=>c.value===Number(value));this.ide.setProperty(key,choices[(i+1)%choices.length].value);}else if(editor)editor();else{field.focus();field.select?.();}});
     field.addEventListener('keydown',e=>{
       if(e.key==='Enter'){e.preventDefault();e.stopPropagation();field.blur();this.grid.focus({preventScroll:true});}
       if(e.key==='Escape'){e.preventDefault();e.stopPropagation();field.dataset.cancel='1';field.value=choices?String(BOOLS.has(key)?Number(value)?-1:0:value):format();field.blur();delete field.dataset.cancel;this.grid.focus({preventScroll:true});}
     });
     field.addEventListener('change',()=>{
       if(field.dataset.cancel){delete field.dataset.cancel;return;}
-      if(this.readOnly||field.readOnly||mixed&&field.value==='')return;
+      if(this.readOnly||propertyReadOnly||field.readOnly||mixed&&field.value==='')return;
       try{let result=choices?parsePropertyNumber(field.value):key==='Index'&&!field.value.trim()?undefined:typeof value==='number'||key==='Index'||isColor?parsePropertyNumber(field.value):field.value;if(!mixed&&Object.is(result,value))return;this.ide.setProperty(key,result);}
       catch(error){field.value=choices?String(BOOLS.has(key)?Number(value)?-1:0:value):format();alertDialog(error.message,'Invalid property value');}
     });
@@ -84,5 +84,5 @@ export class PropertyInspector {
     else return;
     e.preventDefault();e.stopPropagation();this.setActive(keys[Math.max(0,Math.min(keys.length-1,index))]);this.rows.get(this.activeKey)?.scrollIntoView({block:'nearest'});this.grid.focus({preventScroll:true});
   }
-  setReadOnly(value){this.readOnly=!!value;for(const field of this.grid.querySelectorAll('input,select,button'))field.disabled=!!value;}
+  setReadOnly(value){this.readOnly=!!value;for(const field of this.grid.querySelectorAll('input,select,button'))field.disabled=!!value||field.closest('[data-read-only=true]')!==null;}
 }

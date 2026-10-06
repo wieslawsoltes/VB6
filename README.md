@@ -57,7 +57,7 @@ The source includes modeless Object Browser, project search and atomic replaceme
 
 The compiler and cooperative VM execute VB-style source through their own instruction model, not JavaScript eval of user VB text. Supported features include procedures/classes/properties, named and optional arguments, ByRef paths, instance static storage, arrays and records, control flow and error handling, events, exact backed Currency, distinct Empty/Null/Nothing/Missing/Error values, calendar helpers and private binary/text files. The compatibility matrix identifies incomplete coercion, lifetime and binding semantics.
 
-There are 37 offered browser control types, including classic intrinsic-style controls and TreeView, ListView, RichTextBox, grids, tabs, toolbars, calendars, charts and file-dialog adapters. Familiar names do not imply full native API coverage. In-memory recordsets are not external ADO/DAO providers. Native COM/OCX, DLL calls, Windows API execution and arbitrary add-ins are not implemented.
+There are 37 offered browser control types, including classic intrinsic-style controls and TreeView, ListView, RichTextBox, grids, tabs, toolbars, calendars, charts and file-dialog adapters. Familiar names do not imply full native API coverage. In-memory recordsets are not external ADO/DAO providers. Installed COM/OCX execution is available only through the explicitly granted Windows companion; it is not native-binary execution inside the browser. Arbitrary add-ins and universal native API compatibility are not implemented. See [OCX designer, runtime adapters and Windows hosting](docs/OCX-SUPPORT.md) for events, property pages, persistence, licensing and precise boundaries.
 
 ## Eleven examples
 

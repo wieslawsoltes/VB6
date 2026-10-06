@@ -7,10 +7,26 @@ async function until(test, label, timeout = 30000) {
   do { if (await test()) return; await delay(50); } while (Date.now() < end);
   throw new Error('Timed out: ' + label);
 }
+// A renderer can disappear while an evaluation is in flight. Bound every
+// evaluation so a lost Electron reply cannot bypass the smoke-test deadline.
+async function evaluate(target, source, userGesture = true, timeout = 15000) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => target.executeJavaScript(source, userGesture)),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Renderer evaluation timed out: ' + source.slice(0, 240))), timeout); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+exports.evaluate = evaluate;
 exports.run = async ({ app, root, records, manifest, reportPath }) => {
   const report = { ok: false, target: manifest.kind, electron: process.versions.electron, platform: process.platform, arch: process.arch, checks: [] };
-  const check = (name, value) => { assert.ok(value, name); report.checks.push(name); };
-  const js = text => root.webContents.executeJavaScript(text, true).catch(error => { throw new Error('Renderer evaluation failed: ' + text.slice(0, 240) + '\n' + error.message); });
+  const checkpoint = () => { if (reportPath) fs.writeFileSync(reportPath, JSON.stringify(report, null, 2)); };
+  const check = (name, value) => {
+    assert.ok(value, name); report.checks.push(name); checkpoint();
+    console.log('PASS ' + name);
+  };
+  const js = text => evaluate(root.webContents, text).catch(error => { throw new Error('Renderer evaluation failed: ' + text.slice(0, 240) + '\n' + error.message); });
   // Match the current document URL, not any preview left in the frame tree
   // during asynchronous teardown. Diagnostics must identify the failed session.
   const previewFrame = async expression => {
@@ -19,10 +35,10 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       const url = await js(`${expression}.src`);
       await until(() => root.webContents.mainFrame.frames.some(f => f.url === url), 'preview frame');
       const frame = root.webContents.mainFrame.frames.find(f => f.url === url);
-      await until(() => frame.executeJavaScript('!!globalThis.vb6Application'), 'runtime preview started');
+      await until(() => evaluate(frame, '!!globalThis.vb6Application'), 'runtime preview started');
       check('preview never uses inherited srcdoc', await js(`!${expression}.hasAttribute('srcdoc')`));
       check('preview remains sandboxed without same-origin access', await js(`!${expression}.sandbox.contains('allow-same-origin') && ${expression}.sandbox.contains('allow-scripts')`));
-      check('preview has no native bridge', await frame.executeJavaScript('typeof vb6Native === "undefined"'));
+      check('preview has no native bridge', await evaluate(frame, 'typeof vb6Native === "undefined"'));
       return frame;
     } catch (error) {
       let details;
@@ -57,7 +73,7 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await until(()=>records.size===1&&[...records.values()][0].window.isVisible(),'detached native properties');
       const tool=[...records.values()][0].window;
       check('native tool keeps original live pane',await js('[...vb6Studio.browserWindows.windows.values()][0].node.ownerDocument!==document'));
-      check('native tool cannot invoke root IPC',await tool.webContents.executeJavaScript('(async()=>{if(typeof vb6Native==="undefined")return true;try{await vb6Native.info();return false;}catch{return true;}})()',true));
+      check('native tool cannot invoke root IPC',await evaluate(tool.webContents, '(async()=>{if(typeof vb6Native==="undefined")return true;try{await vb6Native.info();return false;}catch{return true;}})()',true));
       tool.close();
       await until(()=>records.size===0,'OS close returns tool');
       check('OS close returns pane without destroying IDE state',await js('vb6Studio.browserWindows.windows.size===0 && vb6Studio.docking.panels.get("properties")===paneBefore'));
@@ -80,7 +96,7 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
           const frame=await previewFrame('vb6Studio.runtimeFrame');
           check('IDE preview '+pass+' runs under document-specific CSP',true);
           check('native preview '+pass+' uses a fresh host document',!urls.has(frame.url));urls.add(frame.url);
-          check('IDE preview '+pass+' rejects arbitrary inline scripts',await frame.executeJavaScript(`(async()=>{
+          check('IDE preview '+pass+' rejects arbitrary inline scripts',await evaluate(frame, `(async()=>{
             const script=document.createElement('script');script.textContent='globalThis.untrustedPreviewScript=true';document.body.append(script);
             await new Promise(resolve=>setTimeout(resolve,25));return !globalThis.untrustedPreviewScript;
           })()`));
@@ -106,8 +122,8 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js('vb6Studio.designImmediate.enableEvents()');
       check('native event Immediate reuses the approved document', await js(`vb6Studio.runtimeFrame.src===${JSON.stringify(immediateURL)} && vb6Studio.designImmediate.promoted`));
       await js('vb6Studio.executeImmediate("Form1.Show")');
-      await until(() => immediateFrame.executeJavaScript('!!document.querySelector("[data-control=Command1]")'), 'Immediate form');
-      await immediateFrame.executeJavaScript('document.querySelector("[data-control=Command1]").click();void 0;', true);
+      await until(() => evaluate(immediateFrame, '!!document.querySelector("[data-control=Command1]")'), 'Immediate form');
+      await evaluate(immediateFrame, 'document.querySelector("[data-control=Command1]").click();void 0;', true);
       await until(() => js('vb6Studio.output.includes("native-immediate-event")'), 'Immediate event handler');
       check('native event Immediate never ran Main', await js('!vb6Studio.output.includes("unexpected-startup")'));
       await js('vb6Studio.stop(false)');
@@ -149,7 +165,7 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       check('one native window for startup form', records.size === 1);
       check('form adopted into native window', await js('f1.node.ownerDocument !== document && f1.node.ownerDocument.defaultView === f1.nativeWindow.win'));
       const id1 = await js('f1.nativeWindow.id'), w1 = records.get(id1).window;
-      await w1.webContents.executeJavaScript('document.querySelector("[data-control=Command1]").click(); void 0;', true);
+      await evaluate(w1.webContents, 'document.querySelector("[data-control=Command1]").click(); void 0;', true);
       await until(() => js('f1.controls[1].Text === "Native event OK"'), 'native control click');
       check('native DOM click dispatches into shared VM', true);
       await until(() => js('f1.controls[1].input.value === "Native event OK"'), 'native visual refresh');
@@ -158,12 +174,19 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await until(() => records.size === 2, 'second window');
       const id2 = await js('f2.nativeWindow.id'), w2 = records.get(id2).window;
       check('independent HWNDs', !w1.getNativeWindowHandle().equals(w2.getNativeWindowHandle()));
-      check('child frame cannot directly invoke controller IPC',await w1.webContents.executeJavaScript('(async()=>{if(typeof vb6Native==="undefined")return true;try{await vb6Native.info();return false;}catch{return true;}})()',true));
+      check('child frame cannot directly invoke controller IPC',await evaluate(w1.webContents, '(async()=>{if(typeof vb6Native==="undefined")return true;try{await vb6Native.info();return false;}catch{return true;}})()',true));
       await js('globalThis.inputResult=null;host.inputBox("Input smoke","Native input","initial").then(value=>{inputResult=value;});void 0;');
       await until(()=>records.size===3,'native InputBox window');
       const inputWindow=[...records.values()].find(r=>r.window!==w1&&r.window!==w2).window;
       await until(()=>!w1.isEnabled()&&!w2.isEnabled()&&inputWindow.isEnabled(),'InputBox modality');
-      await inputWindow.webContents.executeJavaScript('document.querySelector("input").value="Native input OK";document.querySelector("form").requestSubmit();void 0;',true);
+      // Submitting destroys the InputBox webContents. Execute through the
+      // surviving controller's shared DOM, not the renderer being destroyed:
+      // its evaluation reply can otherwise be lost after the submit handler.
+      await js(`(()=>{
+        const dialog=[...host.nativeWindows.dialogs.values()][0];
+        dialog.doc.querySelector('input').value='Native input OK';
+        dialog.doc.querySelector('form').requestSubmit();return true;
+      })()`);
       await until(()=>js('inputResult==="Native input OK"'),'InputBox return');
       await until(()=>records.size===2&&w1.isEnabled()&&w2.isEnabled(),'InputBox owner restoration');
       check('native InputBox returns edited text and restores owner windows',true);
