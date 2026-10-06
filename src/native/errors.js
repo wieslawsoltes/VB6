@@ -12,17 +12,17 @@ const localImmediate = (x, offset, value) => { x.value(value);localStore(x,offse
 
 export const nativeErrorMethods = {
   prepareErrors() {
-    for (const name of ['frame','pending','number','description','source','erl']) this.slot(E+name);
+    for (const name of ['frame','pending','number','description','source','erl','lastdllerror']) this.slot(E+name);
   },
   errorProperty(node) {
     if(node.kind!=='member'||node.object.kind!=='id'||key(node.object.name)!=='err')return null;
     const name=key(node.name);
-    if(!['number','description','source'].includes(name))this.fail('Native Err property is not implemented: '+node.name);
+    if(!['number','description','source','lastdllerror'].includes(name))this.fail('Native Err property is not implemented: '+node.name);
     return name;
   },
   errorExpression(node) {
     const property=this.errorProperty(node),x=this.x;
-    if(property){x.value(mem(E+property));if(property!=='number'){x.push().call('native:string:copy');this.ownString();}return true;}
+    if(property){x.value(mem(E+property));if(!['number','lastdllerror'].includes(property)){x.push().call('native:string:copy');this.ownString();}return true;}
     if(node.kind==='id'&&key(node.name)==='erl'){x.value(mem(E+'erl'));return true;}
     return false;
   },

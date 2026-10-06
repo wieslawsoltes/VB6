@@ -1,8 +1,10 @@
 import {normalizeProject} from '../project/model.js';
 import {compileProject, parseParameters} from '../language/compiler.js';
+import {tokenize} from '../language/lexer.js';
 import {PE32Image, BinarySection} from './pe32.js';
 import {X86} from './x86.js';
 import {nativeBindingMethods} from './bindings.js';
+import {nativeStringInteropMethods,emitNativeStringInteropHelpers} from './string-interop.js';
 import {nativeCallMethods} from './calls.js';
 import {nativeCallbackMethods,emitNativeCallbackHelpers} from './callbacks.js';
 import {nativeCurrencyMethods,emitNativeCurrencyHelpers} from './currency.js';
@@ -20,7 +22,7 @@ const mem = memory => ({memory});
 const INT_TYPES = new Set(['long', 'integer', 'byte', 'boolean']);
 const CLASSES = {CommandButton:'BUTTON', Label:'STATIC', TextBox:'EDIT', CheckBox:'BUTTON', OptionButton:'BUTTON', Frame:'BUTTON', ListBox:'LISTBOX', ComboBox:'COMBOBOX', Timer:null};
 const BOOL_CONDITIONS = {'=':0x94, '<>':0x95, '<':0x9c, '<=':0x9e, '>':0x9f, '>=':0x9d};
-const CONSTANTS = {...NATIVE_DATE_CONSTANTS,vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullstring:''};
+const CONSTANTS = {...NATIVE_DATE_CONSTANTS,vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullchar:'\0',vbnullstring:''};
 export class NativeCompileError extends Error {
   constructor(message, source = '', line = 0) { super(`${source ? source + ':' + line + ': ' : ''}${message}`); this.name = 'NativeCompileError'; this.diagnostics = [{severity:'error',source,line,message}]; }
 }
@@ -28,20 +30,40 @@ export class NativeCompileError extends Error {
 /** Native declarations are stripped only for this backend; the browser VM remains sandboxed. */
 export function extractNativeDeclarations(module) {
   const declarations = new Map();
-  const code = module.code.split(/\r?\n/).map((line, index) => {
-    if (!/^\s*(?:Public\s+|Private\s+)?Declare\b/i.test(line)) return line;
+  const lines = module.code.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    if (!/^\s*(?:Public\s+|Private\s+)?Declare\b/i.test(lines[index])) continue;
+    const start = index, pieces = [];
+    // Token offsets distinguish a continuation from underscores inside names,
+    // aliases, strings or comments. Blank every consumed physical line so the
+    // language frontend and exported source map keep authored line numbers.
+    try {
+      while (true) {
+        const raw = lines[index], tokens = tokenize(raw), last = tokens.at(-2);
+        const continued = last?.type === 'id' && last.value === '_' &&
+          last.start > 0 && /\s/.test(raw[last.start - 1]);
+        pieces.push(raw.slice(0,continued ? last.start : tokens.at(-1).start));
+        if (!continued) break;
+        if (++index >= lines.length) throw new Error('Unfinished native Declare continuation');
+      }
+    } catch (error) { throw new NativeCompileError(error.message,module.name,start + 1); }
+    const line = pieces.join(' ');
     const m = line.match(/^\s*(?:(Public|Private)\s+)?Declare\s+(Function|Sub)\s+(\w+)\s+Lib\s+"([\w.-]+)"(?:\s+Alias\s+"([\w?@$#]+)")?\s*\((.*)\)\s*(?:As\s+(\w+))?\s*(?:'.*)?$/i);
-    if (!m) throw new NativeCompileError('Unsupported native Declare syntax; use a single-line stdcall declaration', module.name, index + 1);
+    if (!m) throw new NativeCompileError('Unsupported native Declare syntax; use a scalar stdcall declaration', module.name, start + 1);
     const dll = /\.dll$/i.test(m[4]) ? m[4] : m[4] + '.dll', name = key(m[3]);
-    const params = parseParameters(m[6]);
-    if (declarations.has(name)) throw new NativeCompileError('Duplicate native declaration: ' + m[3], module.name, index + 1);
-    if (params.some(p => !INT_TYPES.has(key(p.type)) && !REAL_TYPES.has(key(p.type)) && key(p.type)!=='currency' || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !REAL_TYPES.has(key(m[7])) && key(m[7])!=='currency')) {
-      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean/Single/Double/Currency/Date parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
+    let params;
+    try { params = parseParameters(m[6]); }
+    catch (error) { throw new NativeCompileError(error.message,module.name,start + 1); }
+    if(params.reduce((sum,p)=>sum+nativeParameterBytes(p),0)>65532)
+      throw new NativeCompileError('Native Declare argument area exceeds the x86 stdcall return limit',module.name,start + 1);
+    if (declarations.has(name)) throw new NativeCompileError('Duplicate native declaration: ' + m[3], module.name, start + 1);
+    if (params.some(p => !INT_TYPES.has(key(p.type)) && !REAL_TYPES.has(key(p.type)) && !['currency','string'].includes(key(p.type)) || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !REAL_TYPES.has(key(m[7])) && !['currency','string'].includes(key(m[7])))) {
+      throw new NativeCompileError('Native Declare supports scalar Byte/Integer/Long/Boolean/Single/Double/Currency/Date/String parameters and returns; arrays and records require separate ABI support', module.name, start + 1);
     }
-    declarations.set(name, {name:m[3],kind:key(m[2]),scope:key(m[1] || 'public'),params,returnType:m[7] || 'Long',dll,symbol:/^#\d+$/.test(m[5] || '') ? Number(m[5].slice(1)) : m[5] || m[3],line:index + 1});
-    return ''; // Keep line numbers stable.
-  }).join('\n');
-  return {declarations, code};
+    declarations.set(name, {name:m[3],kind:key(m[2]),scope:key(m[1] || 'public'),params,returnType:m[7] || 'Long',dll,symbol:/^#\d+$/.test(m[5] || '') ? Number(m[5].slice(1)) : m[5] || m[3],line:start + 1});
+    for(let physical=start;physical<=index;physical++)lines[physical]='';
+  }
+  return {declarations, code:lines.join('\n')};
 }
 
 class NativeCompiler {
@@ -184,11 +206,11 @@ class NativeCompiler {
     const currencyType=this.currencyType(node);if(currencyType)return currencyType;
     const numericType=this.numericType(node);if(numericType)return numericType;
     if (node.kind === 'group') return this.type(node.expr);
-    const errorProperty=this.errorProperty(node);if(errorProperty)return errorProperty==='number'?'long':'string';
+    const errorProperty=this.errorProperty(node);if(errorProperty)return ['number','lastdllerror'].includes(errorProperty)?'long':'string';
     const variable=this.variable(node);if(variable)return key(variable.type);
     if(node.kind==='call'){
       const name=node.callee.kind==='id'?key(node.callee.name).replace(/\$$/,''):'';
-      if(['cstr','left','right','mid','chrw'].includes(name))return 'string';
+      if(['cstr','left','right','mid','chrw','space'].includes(name))return 'string';
       const result=this.nativeFunctionType(node);if(result)return result;
     }
     if(node.kind==='id'||node.kind==='member'){const result=this.nativeFunctionType(node);if(result)return result;}
@@ -205,6 +227,7 @@ class NativeCompiler {
   expression(node) {
     if (!node) this.fail('Missing expression'); const x = this.x;
     const bound=this.nativeConstant(node);if(bound)return this.emitNativeConstant(bound);
+    if(this.nativeNullString(node)){x.value(0);return;}
     if(this.dateOperation(node))return;
     if(this.currencyOperation(node))return;
     if(this.numericExpression(node))return;
@@ -632,6 +655,7 @@ class NativeCompiler {
   build() {
     for (const module of this.modules.values()) for (const proc of module.procedures.values()) this.procedure(proc);
     for (const module of this.modules.values()) if (module.form) this.form(module);
+    emitNativeStringInteropHelpers(this);
     emitNativeCallbackHelpers(this);
     this.helpers(); this.context = null; this.instruction = null;
     const x = this.x, loop = x.unique(), dispatch = x.unique(), quit = x.unique();
@@ -660,7 +684,7 @@ class NativeCompiler {
     return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,arrayLimits:{maxBytes:this.maxArrayBytes,maxRank:60},runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),callbacks:[...(this.nativeCallbacks?.values()||[])].map(({target,label})=>({module:target.module.name,procedure:target.proc.name,rva:linked.symbols[label],argumentBytes:target.argumentBytes,thread:'application',convention:'stdcall'})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeCallbackMethods,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
+Object.assign(NativeCompiler.prototype,nativeStringInteropMethods,nativeCallbackMethods,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
 export function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');
