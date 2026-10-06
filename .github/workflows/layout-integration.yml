@@ -1,0 +1,50 @@
+name: Layout integration source snapshots
+on:
+  push:
+    branches: [feat/optional-anchoring-layout]
+    paths: ['.github/workflows/layout-integration.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Read pinned base and main source objects
+        run: |
+          git fetch --no-tags --depth=1 origin bd4f9cfbb753cf18cdc78d89744f31789a6e5b28 5ad8ea7815877347230dda6e5254ada4181aa61c
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {execFileSync} from 'node:child_process';
+          import {createHash} from 'node:crypto';
+          const base='bd4f9cfbb753cf18cdc78d89744f31789a6e5b28',main='5ad8ea7815877347230dda6e5254ada4181aa61c';
+          const git=(...a)=>execFileSync('git',a,{maxBuffer:100*1024*1024});
+          const root=path.join(process.env.RUNNER_TEMP,'layout-integration'),files=[];
+          const hash=b=>createHash('sha256').update(b).digest('hex');
+          for(const p of git('diff','--name-only','-z',base,main).toString().split('\0').filter(Boolean)) {
+            if(p.startsWith('dist/')||p.startsWith('examples/')||/^packages\/[^/]+\/dist\//.test(p)||['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js'].includes(p))continue;
+            if(path.isAbsolute(p)||p.split('/').includes('..'))throw Error('Unsafe path');
+            const record={path:p};
+            for(const [name,ref]of [['base',base],['main',main]]) {
+              let bytes;try{bytes=git('show',ref+':'+p);}catch{record[name]=null;continue;}
+              const target=path.join(root,name,p);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);
+              record[name]={sha256:hash(bytes),blob:git('rev-parse',ref+':'+p).toString().trim()};
+            }
+            files.push(record);
+          }
+          fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify({base,main,files},null,2));
+          console.log('Captured '+files.length+' changed source paths without credentials or generated bundles.');
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layout-integration-sources
+          path: ${{ runner.temp }}/layout-integration
+          include-hidden-files: true
+          retention-days: 3
