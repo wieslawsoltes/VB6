@@ -28,3 +28,10 @@ test('property bags retain every numeric subtype through explicit scalar reads',
  for(const type of ['byte','integer','long','single','double','boolean']){assert.equal(scalarType(copy.ReadPropertyScalar(type)),type);assert.equal(typeof copy.ReadProperty(type),'number');}
  assert.deepEqual(copy.Contents,bag.Contents);assert.equal(copy.ReadPropertyScalar('Missing',null),null);
 });
+
+
+test('Byte control events retain the declaration in generated handlers',()=>{
+ const project=newProject(),module=project.modules.find(m=>m.form),model=createControl('Test.Byte','ByteControl1');module.form.controls.push(model);
+ const r=new ControlAdapterRegistry().register('Test.Byte',{runtime:adapter,metadata:{events:[{name:'Changed',params:[{name:'Value',type:'Byte',byRef:true}]}]}}),service={index:()=>({symbols:[],interfaces:[],procedures:[]})};
+ assert.match(handlerEdit(project,module,service,'ByteControl1','Changed',r).text,/Private Sub ByteControl1_Changed\(ByRef Value As Byte\)/);
+});

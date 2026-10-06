@@ -2099,6 +2099,7 @@ const {Ref,Cell,MISSING,unbox,readScalar}=__modules[21];
 
 
 const objects=new WeakMap();
+const eventTypes=new Map(['Variant','Byte','Integer','Long','Single','Double','Currency','Decimal','Date','String','Boolean','Object'].map(type=>[type.toLowerCase(),type]));
 const nameOK=n=>typeof n==='string'&&n.length<=255&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(n)&&!['constructor','prototype','caller','callee','arguments'].includes(n.toLowerCase());
 const isAutomationObject=o=>!!o&&objects.has(o);
 function state(o){const s=objects.get(o);if(!s||s.closed||s.session.closed)throw new VBError('Automation object has been released',91);return s;}
@@ -2146,7 +2147,12 @@ class AutomationSession {
     if(!Array.isArray(definitions)||definitions.length>256)throw new VBError('Invalid Automation event metadata',440);
     for(const e of definitions){
       if(!nameOK(e.name)||events.has(e.name.toLowerCase())||!Array.isArray(e.params)||e.params.length>64||e.params.some(p=>!nameOK(p.name)))throw new VBError('Invalid Automation event metadata',440);
-      events.set(e.name.toLowerCase(),{name:e.name,params:e.params.map(p=>({name:p.name,byRef:!!p.byRef,type:'Variant'}))});
+      const names=new Set(),params=e.params.map(p=>{
+        const type=eventTypes.get(String(p.type??'Variant').toLowerCase());
+        if(!type||names.has(p.name.toLowerCase()))throw new VBError('Invalid Automation event parameter metadata',440);
+        names.add(p.name.toLowerCase());return {name:p.name,byRef:!!p.byRef,type};
+      });
+      events.set(e.name.toLowerCase(),{name:e.name,params});
     }
     const object=Object.freeze(Object.create(null)),s={session:this,adapter,members,defaultMember,events,sinks:new Set(),closed:false,unsubscribe:null,eventDepth:0};
     objects.set(object,s);this.adapters.set(adapter,object);
@@ -2175,7 +2181,7 @@ async function deliverAutomationEvent(object,name,values,context){
   const s=state(object),event=s.events.get(String(name).toLowerCase());
   if(!event||!Array.isArray(values)||values.length!==event.params.length)throw new VBError('Invalid Automation event payload',440);
   if(s.eventDepth>=32)throw new VBError('Automation event recursion limit exceeded',28);
-  const args=values.map((value,i)=>event.params[i].byRef?{ref:new Cell('Variant',value)}:value);
+  const args=values.map((value,i)=>event.params[i].byRef?{ref:new Cell(event.params[i].type,value)}:value);
   s.eventDepth++;
   try{
     for(const connection of [...s.sinks]){
@@ -2372,7 +2378,7 @@ function metadataFor(type,metadata={}){
   });
   const normalizedEvents=events.map(e=>{
     if(!e||!nameOK(e.name)||eventNames.has(e.name.toLowerCase())||!Array.isArray(e.params||[])||(e.params||[]).length>64)throw new TypeError('Invalid control event');eventNames.add(e.name.toLowerCase());const paramsSeen=new Set();
-    const params=(e.params||[]).map(p=>{if(!p||!nameOK(p.name)||paramsSeen.has(p.name.toLowerCase())||!['Variant','Integer','Long','Single','Double','String','Boolean','Object','Date','Currency','Decimal'].includes(p.type||'Variant'))throw new TypeError('Invalid event parameter');paramsSeen.add(p.name.toLowerCase());return Object.freeze({name:p.name,type:p.type||'Variant',byRef:!!p.byRef});});
+    const params=(e.params||[]).map(p=>{if(!p||!nameOK(p.name)||paramsSeen.has(p.name.toLowerCase())||!['Variant','Byte','Integer','Long','Single','Double','String','Boolean','Object','Date','Currency','Decimal'].includes(p.type||'Variant'))throw new TypeError('Invalid event parameter');paramsSeen.add(p.name.toLowerCase());return Object.freeze({name:p.name,type:p.type||'Variant',byRef:!!p.byRef});});
     return Object.freeze({name:e.name,params:Object.freeze(params)});
   });
   const derived=type.split('.').filter(x=>/^[A-Za-z]/.test(x)).at(-1)?.replace(/[^A-Za-z0-9_]/g,'').slice(0,30)||'OcxControl',baseName=metadata.baseName??derived;

@@ -13,6 +13,7 @@ using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Windows.Forms;
+using TYPEDESC = System.Runtime.InteropServices.ComTypes.TYPEDESC;
 using TYPEATTR = System.Runtime.InteropServices.ComTypes.TYPEATTR;
 using FUNCDESC = System.Runtime.InteropServices.ComTypes.FUNCDESC;
 using ELEMDESC = System.Runtime.InteropServices.ComTypes.ELEMDESC;
@@ -59,6 +60,40 @@ namespace VB6Interop {
       catch(COMException error){if(error.ErrorCode==unchecked((int)0x80004002)||error.ErrorCode==unchecked((int)0x80040111))return D("supported",false,"hresult",error.ErrorCode);throw;}
       finally{if(factory!=null)Marshal.ReleaseComObject(factory);}
     }
+    // Follow typelib pointers and aliases; never infer a ByRef declaration from
+    // the current value of a Variant. Unsupported aggregate types stay Variant.
+    // Microsoft TYPEDESC / VARENUM contracts, bounded against recursive aliases.
+    static string EventParameterType(ITypeInfo owner,TYPEDESC descriptor,int depth=0){
+      if(depth>=8)throw new NotSupportedException("OCX event type nesting exceeds 8");
+      int flags=(ushort)descriptor.vt;
+      if((flags&0x3000)!=0)return "Variant";
+      var kind=(VarEnum)(flags&0x0fff);
+      if(kind==VarEnum.VT_PTR){
+        if(descriptor.lpValue==IntPtr.Zero)throw new NotSupportedException("Invalid OCX event pointer type");
+        return EventParameterType(owner,(TYPEDESC)Marshal.PtrToStructure(descriptor.lpValue,typeof(TYPEDESC)),depth+1);
+      }
+      if(kind==VarEnum.VT_USERDEFINED){
+        ITypeInfo info=null;IntPtr pointer=IntPtr.Zero;
+        try{
+          owner.GetRefTypeInfo(unchecked((int)descriptor.lpValue.ToInt64()),out info);info.GetTypeAttr(out pointer);
+          var type=(TYPEATTR)Marshal.PtrToStructure(pointer,typeof(TYPEATTR));
+          if(type.typekind==TYPEKIND.TKIND_ALIAS)return EventParameterType(info,type.tdescAlias,depth+1);
+          if(type.typekind==TYPEKIND.TKIND_ENUM)return "Long";
+          if(type.typekind==TYPEKIND.TKIND_DISPATCH||type.typekind==TYPEKIND.TKIND_INTERFACE)return "Object";
+          return "Variant";
+        }finally{if(pointer!=IntPtr.Zero&&info!=null)info.ReleaseTypeAttr(pointer);if(info!=null)Marshal.ReleaseComObject(info);}
+      }
+      switch(kind){
+        case VarEnum.VT_UI1:return "Byte";case VarEnum.VT_I2:return "Integer";
+        case VarEnum.VT_I4:case VarEnum.VT_INT:return "Long";
+        case VarEnum.VT_R4:return "Single";case VarEnum.VT_R8:return "Double";
+        case VarEnum.VT_CY:return "Currency";case VarEnum.VT_DECIMAL:return "Decimal";
+        case VarEnum.VT_DATE:return "Date";case VarEnum.VT_BSTR:return "String";
+        case VarEnum.VT_BOOL:return "Boolean";
+        case VarEnum.VT_DISPATCH:case VarEnum.VT_UNKNOWN:return "Object";
+        default:return "Variant";
+      }
+    }
     static Dictionary<string,object>[] DescribeEvents(object value){
       ITypeInfo coclass=null,source=null;IntPtr attr=IntPtr.Zero;
       try{
@@ -86,7 +121,7 @@ namespace VB6Interop {
               if((flags&PARAMFLAG.PARAMFLAG_FRETVAL)!=0){supported=false;break;}
               string name=p+1<count?names[p+1]:null;if(name==null||!Name(name))name="arg"+p;
               bool byref=e.tdesc.vt==(short)VarEnum.VT_PTR||(e.tdesc.vt&(short)VarEnum.VT_BYREF)!=0||(flags&PARAMFLAG.PARAMFLAG_FOUT)!=0;
-              parameters.Add(D("name",name,"byRef",byref,"optional",false));
+              parameters.Add(D("name",name,"byRef",byref,"optional",false,"type",EventParameterType(source,e.tdesc)));
             }
             if(supported)result.Add(D("name",names[0],"iid",type.guid.ToString(),"dispid",fn.memid,"params",parameters.ToArray()));
           }finally{if(ptr!=IntPtr.Zero)source.ReleaseFuncDesc(ptr);}

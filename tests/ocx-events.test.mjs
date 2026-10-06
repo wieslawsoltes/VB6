@@ -66,3 +66,40 @@ test('scalar-aware event adapters preserve Boolean cancellation and numeric Vari
  try{const changed=await fire('Changing',[tagScalar(4,'single'),tagScalar(0,'boolean')]);assert.deepEqual(seen,['single','boolean']);assert.equal(scalarType(changed.args[0]),'single');assert.equal(scalarType(changed.args[1]),'boolean');assert.equal(unbox(changed.args[1]),-1);disconnect();const untouched=await fire('Changing',[tagScalar(4,'long'),tagScalar(0,'boolean')]);assert.equal(scalarType(untouched.args[0]),'long');assert.equal(scalarType(untouched.args[1]),'boolean');}
  finally{await session.close();}
 });
+
+
+test('typed OCX WithEvents cancellation uses declared cells, not Variant-value inference',async()=>{
+ const registry=new AutomationRegistry().register('Test.TypedOcx',()=>{
+  let fire;return {metadata:{members:[{name:'Fire',params:[],modes:[1]}],events:[{name:'Changing',params:[{name:'Reading',type:'Long',byRef:true},{name:'Cancel',type:'bOoLeAn',byRef:true}]}]},
+   subscribe(sink){fire=sink;return ()=>{};},async invoke(){const result=await fire('Changing',[7,0],{reentrant:true});assert.deepEqual(result.args,[8,-1]);return {value:result.args[1],args:[]};},release(){}};
+ });
+ const code=`Private WithEvents Widget As Object
+Public Sub Exercise()
+ Set Widget = CreateObject("Test.TypedOcx")
+ Debug.Print Widget.Fire()
+End Sub
+Private Sub Widget_Changing(ByRef Reading As Long, ByRef Cancel As Boolean)
+ Debug.Print VarType(Reading)
+ Debug.Print VarType(Cancel)
+ Reading = Reading + 1
+ Cancel = True
+End Sub`;
+ const program=compileProject({name:'TypedEvents',startup:'Sub Main',modules:[{kind:'module',name:'M',code:'Sub Main()\nDim w As Worker\nSet w = New Worker\nw.Exercise\nEnd Sub'},{kind:'class',name:'Worker',code}]});
+ assert.deepEqual(program.diagnostics,[]);const output=[],vm=new VirtualMachine(program,{automation:registry,print:v=>output.push(v)});
+ try{await vm.start();assert.deepEqual(output,['3','11','-1']);}finally{vm.stop();await vm.automationClose;}
+});
+
+test('typed ByRef event storage enforces bounds and shares the declared type across sinks',async()=>{
+ let fire;const adapter={metadata:{members:[],events:[{name:'ByteChange',params:[{name:'Value',type:'Byte',byRef:true}]}]},invoke(){},invokeScalar(){},release(){},subscribe(sink){fire=sink;return ()=>{};}};
+ const session=new AutomationRegistry().createSession(),object=session.adopt(adapter);
+ const first=automationSubscribe(object,async(name,args)=>{assert.equal(args[0].ref.type,'Byte');assert.throws(()=>args[0].ref.set(256),e=>e.number===6);await args[0].ref.set(255);});
+ const second=automationSubscribe(object,async(name,args)=>{assert.equal(args[0].ref.type,'Byte');assert.equal(await args[0].ref.get(),255);});
+ try{const result=await fire('ByteChange',[0]);assert.equal(result.args[0].type,'byte');assert.equal(result.args[0].value,255);first();second();}finally{await session.close();}
+});
+
+test('event metadata rejects unsupported declared types and duplicate parameter names',()=>{
+ for(const params of [[{name:'Value',type:'Invalid'}],[{name:'Value',type:''}],[{name:'Value'},{name:'value'}]]){
+  const session=new AutomationRegistry().createSession();
+  assert.throws(()=>session.adopt({...fixture(),metadata:{members:[],events:[{name:'Changing',params}]}}),e=>e.number===440);
+ }
+});

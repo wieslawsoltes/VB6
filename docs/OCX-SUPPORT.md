@@ -208,3 +208,19 @@ LCID are retained on reentrant calls. `OcxPropertyBag.ReadProperty` keeps the ra
 JavaScript embedding contract; `ReadPropertyScalar` returns preserved Variant
 subtypes for compiler-aware adapters. Wire snapshots retain those tags without
 changing opaque native FRX data.
+
+
+### Declared event parameter types
+
+Event metadata now retains the declared Byte, Integer, Long, Single, Double,
+Currency, Decimal, Date, String, Boolean, Object or Variant type. The Windows
+companion resolves bounded TYPEDESC pointers, aliases and enum declarations; a
+Variant remains Variant regardless of the value currently stored in it. Typed
+ByRef cells use that declaration, so compiled `ByRef Cancel As Boolean` handlers
+work without relaxing the VM's ordinary ByRef type checks. Invalid types and
+case-insensitive duplicate event parameter names are rejected before subscription.
+The native OCX suite also exercises a compiled VB handler against the installed
+system control, rather than testing cancellation only from JavaScript.
+
+Type contracts: [TYPEDESC](https://learn.microsoft.com/en-us/windows/win32/api/oaidl/ns-oaidl-typedesc)
+and [VARENUM](https://learn.microsoft.com/en-us/windows/win32/api/wtypes/ne-wtypes-varenum).
