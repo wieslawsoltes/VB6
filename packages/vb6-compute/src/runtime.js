@@ -1,17 +1,25 @@
 import {ComputeError, COMPUTE_ABI, STATE_HEADER_WORDS, ARRAY_HEADER_WORDS, COMMAND_WORDS, BUFFER_USAGE, integer, finite} from './protocol.js';
+import {encodeStringBlock,decodeStringBlock,validateStringStorage} from './string-layout.js';
 import {ComputeDevice} from './device.js';
 import {readArrayLayout, arrayHeader} from './array-layout.js';
 
-const types=new Set(['byte','integer','long','boolean','single']);
+const types=new Set(['byte','integer','long','boolean','single','string']);
 export function validateArtifact(artifact) {
   if(artifact?.abi!==COMPUTE_ABI||artifact.target!=='webgpu-compute'||artifact.entryPoint!=='main'||typeof artifact.wgsl!=='string')throw new ComputeError('Unsupported compute artifact','GPU_ABI');
   integer(artifact.stateWords,'stateWords',0,65536);integer(artifact.workgroupSize,'workgroupSize',1,256);
   if(artifact.stateStride!==artifact.stateWords+STATE_HEADER_WORDS||!Array.isArray(artifact.initialState)||artifact.initialState.length!==artifact.stateWords)throw new ComputeError('Invalid compute state layout','GPU_ABI');
   for(const word of artifact.initialState)integer(word,'state word',0,0xffffffff);
   if(!Array.isArray(artifact.globals)||!Array.isArray(artifact.sources))throw new ComputeError('Missing compute metadata','GPU_ABI');
+  const occupied=[];
+  if(artifact.stringABI!==undefined){if(artifact.stringABI!==1)throw new ComputeError('Unsupported GPU string ABI','GPU_ABI');integer(artifact.maxStringLength,'maxStringLength',1,4096);}
   for(const s of artifact.globals) {
     if(!types.has(s.type)||typeof s.name!=='string'||typeof s.module!=='string')throw new ComputeError('Invalid global metadata','GPU_ABI');
     integer(s.offset,'global offset',0,artifact.stateWords-1);integer(s.words,'global words',1,artifact.stateWords-s.offset);
+    occupied.push([s.offset,s.offset+s.words]);
+    if(s.type==='string'){
+      if(artifact.stringABI!==1||s.stringStorage?.capacity>artifact.maxStringLength)throw new ComputeError('Invalid string ABI or capacity','GPU_ABI');
+      occupied.push(validateStringStorage(artifact,s));
+    }else if(s.stringStorage)throw new ComputeError('String storage attached to a numeric field','GPU_ABI');
     if(s.array) {
       if(typeof s.dynamic!=='boolean'||!Array.isArray(s.bounds))throw new ComputeError('Invalid array metadata','GPU_ABI');
       integer(s.capacity,'array capacity',1,65536);
@@ -20,6 +28,8 @@ export function validateArtifact(artifact) {
       if(layout.length!==s.length||JSON.stringify(layout.bounds)!==JSON.stringify(s.bounds))throw new ComputeError('Inconsistent initial array metadata','GPU_ABI');
     } else if(s.words!==1)throw new ComputeError('Invalid scalar storage','GPU_ABI');
   }
+  occupied.sort((a,b)=>a[0]-b[0]);
+  for(let i=1;i<occupied.length;i++)if(occupied[i][0]<occupied[i-1][1])throw new ComputeError('Overlapping global storage','GPU_ABI');
   return artifact;
 }
 export function encodeScalar(value,type) {
@@ -58,13 +68,18 @@ export function decodeState(artifact,buffer,count=1) {
     for(const s of artifact.globals) {
       const offset=base+STATE_HEADER_WORDS+s.offset+(s.array?ARRAY_HEADER_WORDS:0);
       const name=s.module+'.'+s.name;
-      if(s.array){const layout=readArrayLayout(words,base+STATE_HEADER_WORDS+s.offset,s);arrays[name]=layout;globals[name]=Array.from(words.subarray(offset,offset+layout.length),v=>decodeScalar(v,s.type));}
-      else globals[name]=decodeScalar(words[offset],s.type);
+      if(s.array){const layout=readArrayLayout(words,base+STATE_HEADER_WORDS+s.offset,s);arrays[name]=layout;globals[name]=s.type==='string'?Array.from({length:layout.length},(_,i)=>decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset+i*s.stringStorage.stride,s.stringStorage)):Array.from(words.subarray(offset,offset+layout.length),v=>decodeScalar(v,s.type));}
+      else globals[name]=s.type==='string'?decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset,s.stringStorage):decodeScalar(words[offset],s.type);
     }
     const source=artifact.sources.find(s=>s.id===words[base+4]);
     lanes.push({lane,error:words[base],line:words[base+1],steps:words[base+2],drawCount:words[base+3],source:source?.module,procedure:source?.procedure,depth:source?.depth,fatal:words[base+5]!==0,globals,arrays});
   }
   return lanes;
+}
+
+function stringPayload(values,storage) {
+  const blocks=values.map(v=>encodeStringBlock(v,storage)),data=new Uint32Array(values.length*storage.stride);
+  blocks.forEach((block,i)=>data.set(block,i*storage.stride));return data;
 }
 
 /** Persistent lane-private VB storage plus explicit shared atomic storage. */
@@ -105,7 +120,9 @@ export class ComputeProgram {
   writeGlobal(name,value,lane=0) {
     this.check();integer(lane,'lane',0,this.count-1);const s=field(this.artifact,name);
     if(s.array&&(!Array.isArray(value)&&!ArrayBuffer.isView(value)))throw new ComputeError('Expected an array of values','GPU_VALUE');
-    const values=s.array?Array.from(value):[value],words=new Uint32Array(values.map(v=>encodeScalar(v,s.type)));
+    const values=s.array?Array.from(value):[value];
+    if(s.array&&values.length>s.capacity)throw new ComputeError('Array input exceeds capacity','GPU_VALUE');
+    const words=s.type==='string'?stringPayload(values,s.stringStorage):new Uint32Array(values.map(v=>encodeScalar(v,s.type)));
     if(s.array&&!s.dynamic&&values.length!==s.length)throw new ComputeError('Array input length must equal '+s.length,'GPU_VALUE');
     const base=(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.offset)*4;
     return this.gpu.operation(async d=>{
@@ -115,19 +132,23 @@ export class ComputeProgram {
         const layout=readArrayLayout(header,0,s);
         if(!layout.allocated||layout.length!==values.length)throw new ComputeError('Dynamic array must be allocated with matching length','GPU_VALUE');
       }
-      if(words.length)d.queue.writeBuffer(this.state,base+(s.array?ARRAY_HEADER_WORDS*4:0),words);
+      const destination=s.type==='string'?(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.stringStorage.offset)*4:base+(s.array?ARRAY_HEADER_WORDS*4:0);
+      if(words.length)d.queue.writeBuffer(this.state,destination,words);
     });
   }
   initializeArray(name,bounds,values=null,lane=0) {
     this.check();integer(lane,'lane',0,this.count-1);const s=field(this.artifact,name);
     if(!s.array||!s.dynamic)throw new ComputeError('initializeArray requires a dynamic array','GPU_TYPE');
-    const header=arrayHeader(bounds,s.capacity),data=new Uint32Array(s.words);data.set(header);
+    const header=arrayHeader(bounds,s.capacity),data=s.type==='string'?new Uint32Array(this.artifact.initialState.slice(s.offset,s.offset+s.words)):new Uint32Array(s.words);data.set(header);
+    let strings=s.type==='string'?new Array(s.capacity).fill(''):null;
     if(values!==null){
       if((!Array.isArray(values)&&!ArrayBuffer.isView(values))||values.length!==header[1])throw new ComputeError('Array input length does not match bounds','GPU_VALUE');
-      data.set(Array.from(values,v=>encodeScalar(v,s.type)),ARRAY_HEADER_WORDS);
+      if(strings)Array.from(values).forEach((v,i)=>strings[i]=v);
+      else data.set(Array.from(values,v=>encodeScalar(v,s.type)),ARRAY_HEADER_WORDS);
     }
+    const payload=strings?stringPayload(strings,s.stringStorage):null;
     const offset=(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.offset)*4;
-    return this.gpu.operation(d=>{this.check();d.queue.writeBuffer(this.state,offset,data);});
+    return this.gpu.operation(d=>{this.check();d.queue.writeBuffer(this.state,offset,data);if(payload)d.queue.writeBuffer(this.state,(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.stringStorage.offset)*4,payload);});
   }
   writeShared(values,offset=0) {
     this.check();if(!(this.shared.usage&BUFFER_USAGE.COPY_DST))throw new ComputeError('Shared writes require COPY_DST usage','GPU_BINDING');if(!Array.isArray(values)&&!ArrayBuffer.isView(values))throw new ComputeError('Expected shared word array','GPU_VALUE');
