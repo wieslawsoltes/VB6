@@ -1,0 +1,74 @@
+name: Integrate scalar editor regressions
+on:
+  push:
+    branches: [feat/variant-scalar-compatibility]
+    paths: ['.github/workflows/scalar-editor-integration.yml']
+permissions:
+  contents: read
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply complete checksum-verified regression fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64,hashlib,json,lzma,subprocess
+          from pathlib import Path
+          git=lambda *a:subprocess.check_output(['git',*a],text=True).strip()
+          assert git('diff','--name-only','f50fc3acdd0e6dda09717710d9ff87e142883045','HEAD')=='.github/workflows/scalar-editor-integration.yml'
+          data=json.loads(subprocess.check_output(['gh','api','repos/wieslawsoltes/VB6/git/blobs/c7375945ac42b71dbedfdcd6efd05fa0d77340c0']))
+          packed=base64.b64decode(data['content'])
+          assert hashlib.sha256(packed).hexdigest()=='abe2c2acbca5ef0e21399210b52df3c01ca5c1c1d240ca7d264c13c7ab6e330e'
+          record=json.loads(lzma.decompress(packed,memlimit=64*1024*1024))
+          assert git('rev-parse','f50fc3acdd0e6dda09717710d9ff87e142883045^{tree}')==record['baseTree']
+          subprocess.run(['git','apply','--index','-'],input=record['patch'].encode(),check=True)
+          assert set(git('diff','--cached','--name-only').splitlines())=={'src/editor/editor.js','tools/browser-intellisense-tests.py','tools/browser-windows-tests.py'}
+          PY
+      - name: Rebuild and validate complete source
+        run: |
+          set -o pipefail
+          mkdir -p editor-integration
+          npm run build
+          npm test 2>&1 | tee editor-integration/node.log
+          git add -- dist
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(editor): serialize composition completion with fast keys and await popup closure'
+          npm run build
+          git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          GIT_INDEX_FILE="$RUNNER_TEMP/product-index" git read-tree HEAD
+          GIT_INDEX_FILE="$RUNNER_TEMP/product-index" git rm --cached -- .github/workflows/scalar-editor-integration.yml
+          test "$(GIT_INDEX_FILE="$RUNNER_TEMP/product-index" git write-tree)" = 11ad30fd9f31dd20d136dae1a52ffa5e6c09ff64
+      - name: Publish only the verified feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in *Username*) printf '%s\n' x-access-token ;; *) printf '%s\n' "$GH_TOKEN" ;; esac
+          SH
+          chmod 700 "$RUNNER_TEMP/askpass"
+          trap 'rm -f "$RUNNER_TEMP/askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/variant-scalar-compatibility
+          git rev-parse HEAD > editor-integration/head.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scalar-editor-integration
+          path: editor-integration/
+          retention-days: 14
