@@ -1,0 +1,38 @@
+VERSION 5.00
+Begin VB.PropertyPage GaugePage
+   Caption         =   "Gauge settings"
+   ClientHeight    =   1800
+   ClientWidth     =   3600
+   Begin VB.TextBox txtValue
+      Text            =   "0"
+      Left            =   240
+      Top             =   360
+      Width           =   3000
+      Height          =   315
+   End
+End
+Attribute VB_Name = "GaugePage"
+Attribute VB_Exposed = True
+Option Explicit
+
+Private Sub PropertyPage_SelectionChanged()
+    If SelectedControls.Count > 0 Then
+        txtValue.Text = CStr(SelectedControls(0).Value)
+    End If
+    Changed = False
+End Sub
+
+Private Sub txtValue_Change()
+    Changed = True
+End Sub
+
+Private Sub txtValue_KeyPress(ByRef KeyAscii As Integer)
+    If KeyAscii = 13 Then KeyAscii = 0
+End Sub
+
+Private Sub PropertyPage_ApplyChanges()
+    Dim Selected As Object
+    For Each Selected In SelectedControls
+        Selected.Value = CLng(txtValue.Text)
+    Next
+End Sub

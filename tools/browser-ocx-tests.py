@@ -140,7 +140,51 @@ End Sub`}]};
     }""")
     check(result=={'refused':True,'inDesign':0,'events':1,'userMode':-1},result)
 
-CASES=[toolbox,inspector,pages,stale,event_handler,lifecycle,container_keyboard,canvas_windowless,multiselection_pages,ide_multiselection_pages,source_control_execution,source_design_consent]
+def source_property_page(page):
+    result=page.evaluate(r"""async()=>{
+      const A=VB6StudioAPI,project={name:'Pages',modules:[{name:'GaugePage',kind:'form',form:{name:'GaugePage',type:'PropertyPage',properties:{Caption:'Settings'}},code:`Option Explicit
+Private Sub PropertyPage_SelectionChanged()
+ If SelectedControls.Count > 0 Then ValueText.Text = CStr(SelectedControls(0).Value)
+ Changed = False
+End Sub
+Private Sub ValueText_Change()
+ Changed = True
+End Sub
+Private Sub PropertyPage_ApplyChanges()
+ Dim Item As Object
+ For Each Item In SelectedControls
+  Item.Value = CLng(ValueText.Text)
+ Next
+ If Failure.Value Then Err.Raise 5, , "rejected"
+End Sub`}]};
+      const models=[A.createControl('Acme.Gauge.1','First'),A.createControl('Acme.Gauge.1','Second')];models.forEach(m=>ocxRegistry.initializeModel(m));
+      const controls={ValueText:{Text:''},Failure:{Value:0}},commits=[];let refused=false;
+      try{await A.SourcePropertyPage.create(project,'GaugePage',{registry:ocxRegistry,models,controls});}catch(e){refused=/consent/.test(e.message);}
+      const p=await A.SourcePropertyPage.create(project,'GaugePage',{registry:ocxRegistry,models,controls,allowDesignCode:true,onApply:entries=>commits.push(entries.length)});
+      try{const initial=controls.ValueText.Text;controls.ValueText.Text='57';await p.dispatchControlEvent('ValueText','Change');const dirty=p.IsPageDirty;await p.apply();const applied=models.map(m=>m.properties.Value);
+        controls.ValueText.Text='99';controls.Failure.Value=-1;await p.dispatchControlEvent('ValueText','Change');let rolledBack=false;try{await p.apply();}catch(e){rolledBack=/rejected/.test(e.message)&&models.every(m=>m.properties.Value===57)&&p.IsPageDirty;}
+        models[1].properties.Value=60;let stale=false;try{await p.apply();}catch(e){stale=/changed/.test(e.message);}
+        return {refused,initial,dirty,applied,commits,rolledBack,stale};
+      }finally{await p.close();}
+    }""")
+    check(result=={'refused':True,'initial':'25','dirty':True,'applied':[57,57],'commits':[2],'rolledBack':True,'stale':True},result)
+
+def source_array_events(page):
+    result=page.evaluate(r"""async()=>{
+      const A=VB6StudioAPI,project={name:'Arrays',modules:[{name:'Gauge',kind:'form',form:{name:'Gauge',type:'UserControl',properties:{}},code:`Option Explicit
+Public Event Samples(ByRef Values() As Long)
+Public Function Measure() As Long
+ Dim Data(2 To 3) As Long
+ Data(2) = 11
+ RaiseEvent Samples(Data)
+ Measure = Data(2)
+End Function`}]};
+      const c=await A.SourceUserControl.create(project,'Gauge'),seen=[];const stop=c.subscribe(async(name,args)=>{const values=await args[0].ref.get();seen.push([name,values.type,values.bounds,values.get([2])]);values.set([2],49);});
+      try{return {value:await c.invoke('Measure'),seen,array:c.Events[0].params[0].array};}finally{stop();await c.close();}
+    }""")
+    check(result=={'value':49,'seen':[['Samples','Long',[[2,3]],11]],'array':True},result)
+
+CASES=[toolbox,inspector,pages,stale,event_handler,lifecycle,container_keyboard,canvas_windowless,multiselection_pages,ide_multiselection_pages,source_control_execution,source_design_consent,source_property_page,source_array_events]
 class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self,*args):pass
 def main():

@@ -18,7 +18,7 @@ function metadataFor(type,metadata={}){
   });
   const normalizedEvents=events.map(e=>{
     if(!e||!nameOK(e.name)||eventNames.has(e.name.toLowerCase())||!Array.isArray(e.params||[])||(e.params||[]).length>64)throw new TypeError('Invalid control event');eventNames.add(e.name.toLowerCase());const paramsSeen=new Set();
-    const params=(e.params||[]).map(p=>{if(!p||!nameOK(p.name)||paramsSeen.has(p.name.toLowerCase())||!['Variant','Byte','Integer','Long','Single','Double','String','Boolean','Object','Date','Currency','Decimal'].includes(p.type||'Variant'))throw new TypeError('Invalid event parameter');paramsSeen.add(p.name.toLowerCase());return Object.freeze({name:p.name,type:p.type||'Variant',byRef:!!p.byRef});});
+    const params=(e.params||[]).map(p=>{if(!p||!nameOK(p.name)||paramsSeen.has(p.name.toLowerCase())||!['Variant','Byte','Integer','Long','Single','Double','String','Boolean','Object','Date','Currency','Decimal'].includes(p.type||'Variant'))throw new TypeError('Invalid event parameter');paramsSeen.add(p.name.toLowerCase());if(p.array!==undefined&&typeof p.array!=='boolean'||p.array&&!p.byRef)throw new TypeError('Array events require ByRef parameters');return Object.freeze({name:p.name,type:p.type||'Variant',byRef:!!p.byRef,...(p.array?{array:true}:{})});});
     return Object.freeze({name:e.name,params:Object.freeze(params)});
   });
   const derived=type.split('.').filter(x=>/^[A-Za-z]/.test(x)).at(-1)?.replace(/[^A-Za-z0-9_]/g,'').slice(0,30)||'OcxControl',baseName=metadata.baseName??derived;

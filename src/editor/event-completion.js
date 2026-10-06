@@ -18,7 +18,7 @@ export function declarationTargets(project,module,service,controlRegistry=null){
       const names=NONVISUAL_TYPES.has(control.type)?(control.type==='Timer'?['Timer']:[]):[DEFAULT_EVENTS[control.type]||'Click',...CONTROL_EVENTS];
       const extra=control.properties?.Index!==undefined?['Index As Integer']:[];
       const custom=controlRegistry?.describe?.(control.type)?.events;
-      result.push({id:control.id||'control:'+control.name,name:control.name,type:control.type,kind:'events',members:custom?.length?custom.map(e=>({name:e.name,kind:'event',type:'Void',params:[...extra,...e.params.map(p=>(p.byRef?'ByRef ':'ByVal ')+p.name+' As '+p.type)]})):[...new Set(names)].map(name=>event(control.type,name,extra))});
+      result.push({id:control.id||'control:'+control.name,name:control.name,type:control.type,kind:'events',members:custom?.length?custom.map(e=>({name:e.name,kind:'event',type:'Void',params:[...extra,...e.params.map(p=>(p.byRef?'ByRef ':'ByVal ')+p.name+(p.array?'()':'')+' As '+p.type)]})):[...new Set(names)].map(name=>event(control.type,name,extra))});
     }
     const menus=new Map((module.form.menus||[]).filter(m=>m.name).map(m=>[symbolKey(m.name),m]));
     for(const menu of menus.values())result.push({id:menu.id||'menu:'+menu.name,name:menu.name,kind:'events',members:[event('Menu','Click',menu.properties?.Index!==undefined?['Index As Integer']:[])]});

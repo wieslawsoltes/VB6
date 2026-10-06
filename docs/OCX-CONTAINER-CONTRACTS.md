@@ -277,7 +277,7 @@ python tools/browser-ocx-source-lab.py
 ```
 
 Browser scripts default to actual navigation, not inline substitution. The classic
-IDE script has 12 scenarios per origin; the source lab has 12 checks per origin.
+IDE script has 14 scenarios per origin; the source lab has 12 checks per origin.
 Recovery CI passed actual navigation in Chromium, Firefox and WebKit. The
 original local delivery used inline Chromium only; that mode is not substituted
 for the mandatory PR navigation checks. To reproduce the labelled inline mode:
@@ -306,8 +306,9 @@ A non-Windows invocation fails rather than being reported as a native pass.
 
 The recovered native code, existing Automation/ActiveX/OCX suites and actual
 three-browser matrix passed recovery CI. Final-head PR validation must additionally
-pass the complete repository workflow set, including packaged Windows application
-and IDE smoke tests. Earlier recovery passes are not substitutes for final checks.
+pass the repository's current validation workflow and the focused native/browser
+OCX checks. The simplified repository workflow inventory is preserved; earlier
+recovery passes are not substitutes for current-source native/browser evidence.
 
 ## Remaining compatibility work
 
@@ -330,3 +331,10 @@ passes do not certify every vendor control or unsupported container contract.
 - [IPersistPropertyBag::Save](https://learn.microsoft.com/en-us/windows/win32/api/ocidl/nf-ocidl-ipersistpropertybag-save)
 - [IPersistStorage::Save](https://learn.microsoft.com/en-us/windows/win32/api/objidl/nf-objidl-ipersiststorage-save)
 - [IPersistStorage::SaveCompleted](https://learn.microsoft.com/en-us/windows/win32/api/objidl/nf-objidl-ipersiststorage-savecompleted)
+
+## Source PropertyPage continuation
+
+Actual `.pag` source execution, atomic selected-control editing and typed-array
+events are now exposed by the explicit SDK host. See
+[OCX-SOURCE-PROPERTY-PAGES.md](OCX-SOURCE-PROPERTY-PAGES.md) for consent, lifecycle,
+undo/failure behavior, examples and remaining visual/native authoring boundaries.

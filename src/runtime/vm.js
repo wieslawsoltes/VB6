@@ -155,7 +155,13 @@ export class VirtualMachine extends Signal {
     for(let i=0;i<nodes.length;i++){
       const param=event.params[i],type=param.storageType||param.type;
       const actual=param.byRef?await this.sourceArgument(nodes[i],frame):await this.evaluateScalar(nodes[i],frame);
-      if(param.byRef&&actual?.ref){
+      if(Array.isArray(param.bounds)){
+        // Arrays are declared element storage, not a scalar of the element type.
+        // Keep the original reference so ReDim and element edits copy back to VB.
+        const value=actual?.ref?await actual.ref.get():unbox(actual);
+        if(!param.byRef||!actual?.ref||!(value instanceof VBArray)||lower(value.type)!==lower(type))throw new VBError('ByRef array type mismatch',13);
+        args.push(actual);
+      }else if(param.byRef&&actual?.ref){
         if(Object.hasOwn(SCALAR_TYPES,lower(type))&&lower(actual.ref.type)!==lower(type))throw new VBError('ByRef argument type mismatch',13);
         args.push(actual);
       }else if(param.byRef)args.push({ref:new Cell(type,actual)});

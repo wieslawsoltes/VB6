@@ -1,5 +1,6 @@
 Type=Control
 UserControl=Gauge.ctl
+PropertyPage=GaugePage.pag
 Name="ControlsLab"
 Startup="(None)"
 MajorVer=1

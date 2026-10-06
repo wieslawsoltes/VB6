@@ -7,7 +7,7 @@ export class OcxPropertyPageSession {
     this.#registry=registry;this.#models=[...models];this.#snapshots=models.map(model=>JSON.stringify(model));this.#apply=onApply;
   }
   get IsPageDirty(){return this.#pending.size>0;}
-  get Objects(){this.#assertActive();return this.#models.map(model=>JSON.parse(JSON.stringify(model)));}
+  get Objects(){this.#assertActive();return this.#models.map((model,i)=>{const copy=JSON.parse(JSON.stringify(model));copy.properties={...copy.properties,...structuredClone(this.#pending.get(i)||{})};return copy;});}
   edit(changes,index=null){
     this.#assertActive();const selected=index===null?this.#models.map((_,i)=>i):[index];
     if(selected.some(i=>!Number.isInteger(i)||i<0||i>=this.#models.length))throw RangeError('Invalid property-page selection index');

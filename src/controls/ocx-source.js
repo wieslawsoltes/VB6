@@ -5,6 +5,7 @@
 import {VirtualMachine,VBInstance} from '../runtime/vm.js';
 import {compileProject} from '../language/compiler.js';
 import {Cell,NOTHING,unbox,readScalar} from '../runtime/values.js';
+import {ocxEventCell} from './ocx-events.js';
 import {OcxPropertyBag} from './ocx-site.js';
 import {OcxAmbientProperties} from './ocx-ambient.js';
 const identifier=name=>typeof name==='string'&&/^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(name)&&!['constructor','prototype','__proto__'].includes(name.toLowerCase());
@@ -54,7 +55,7 @@ export class SourceUserControl {
   get Dirty(){return this.#dirty;}
   get Closed(){return this.#closed;}
   get Revision(){return this.#revision;}
-  get Events(){return [...(this.#module.events||new Map()).values()].map(e=>({name:e.name,params:e.params.map(p=>({name:p.name,type:p.storageType||p.type,byRef:!!p.byRef}))}));}
+  get Events(){return [...(this.#module.events||new Map()).values()].map(e=>({name:e.name,params:e.params.map(p=>({name:p.name,type:p.storageType||p.type,byRef:!!p.byRef,...(Array.isArray(p.bounds)?{array:true}:{})}))}));}
   get Properties(){return {...this.#properties};}
   async #initialize(state){await this.#vm.initialize();await this.#vm.initializeFields(this.#instance);this.#vm.setState('running');await this.#lifecycle('Initialize');await this.#lifecycle(state===undefined?'InitProperties':'ReadProperties',state===undefined?[]:[sourceBag(this.#bag)]);await this.#sync();return this;}
   #lifecycle(name,args=[]){const proc=this.#module.procedures.get('usercontrol_'+name.toLowerCase());return proc?this.#vm.callProcedure(this.#instance,proc,args,this.#vm.currentFrame):undefined;}
@@ -88,7 +89,7 @@ export class SourceUserControl {
     if(this.#design&&name.toLowerCase()!=='paint'||this.#ambient.UIDead&&name.toLowerCase()!=='paint')return {handled:false,args:[...values]};
     const procedure=this.#module.procedures.get('usercontrol_'+name.toLowerCase());if(!procedure)return {handled:false,args:[...values]};
     if(values.length!==procedure.params.length)throw TypeError('Source-control input event argument count mismatch');
-    const cells=procedure.params.map((param,i)=>new Cell(param.storageType||param.type||'Variant',values[i]));
+    const cells=procedure.params.map((param,i)=>ocxEventCell(param,values[i]));
     await this.#vm.callProcedure(this.#instance,procedure,cells.map((cell,i)=>procedure.params[i].byRef?{ref:cell}:readScalar(cell)),this.#vm.currentFrame);
     return {handled:true,args:cells.map((cell,i)=>procedure.params[i].byRef?readScalar(cell):values[i])};
   });}
