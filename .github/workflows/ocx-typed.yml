@@ -44,6 +44,8 @@ jobs:
       - name: Apply reviewed typed event correction
         shell: bash
         run: |
+          # Disable Windows checkout newline conversion for exact Git bytes.
+          git -c core.autocrlf=false checkout-index --force --all
           echo 'dcf7220ab26ff2fa2816f8bb0da7f84cd5fb01547f8dd6723a06612c5f800bed  .ocx-typed.patch' | sha256sum --check
           git apply --check .ocx-typed.patch
           git apply .ocx-typed.patch
