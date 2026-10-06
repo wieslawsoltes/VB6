@@ -2,7 +2,7 @@ name: Text code-page reference
 on:
   push:
     branches: [feat/runtime-text-compatibility]
-    paths: ['.github/workflows/text-codepage-reference.yml']
+    paths: ['.github/workflows/text-codepage-reference.yml','tools/conformance/export-text-nls.ps1']
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,6 +17,9 @@ jobs:
       - name: Capture strict installed-Windows code-page mappings
         shell: powershell
         run: tools/conformance/export-codepages.ps1 -Output reports/text-codepages/windows-codepages.bin
+      - name: Capture best-fit encodings and explicit-LCID case, width and kana mappings
+        shell: powershell
+        run: tools/conformance/export-text-nls.ps1 -Output reports/text-codepages/windows-text-nls.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
