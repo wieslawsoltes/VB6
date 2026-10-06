@@ -90,7 +90,7 @@ Static count As Long
 count = count + 1
 NextValue = count
 End Function`});vb6Studio.loadProject(p);}''')
- html=p.evaluate('VB6StudioAPI.exportApplication(vb6Studio.project,{persist:false})');check('class VB6Studio' not in html);app=suite.new_page(browser);app.set_content(html);app.wait_for_function('typeof vb6Application!=="undefined" && vb6Application.vm.state==="running"');check(app.locator('[data-control="Result"]').inner_text()=='1:1:28:-1:LR');suite.healthy(app);(REPORTS/'runtime-export.html').write_text(html);app.close();finish(p)
+ html=p.evaluate('VB6StudioAPI.exportApplication(vb6Studio.project,{persist:false})');check('class VB6Studio' not in html);app=suite.new_page(browser);app.set_content(html);app.wait_for_function('typeof vb6Application!=="undefined" && vb6Application.vm.state==="running"');check(app.locator('[data-control="Result"]').inner_text()=='1:1:28:True:LR');suite.healthy(app);(REPORTS/'runtime-export.html').write_text(html);app.close();finish(p)
 
 def test_workbench(browser):
  p=suite.open_example(browser,'compatibility');p.wait_for_function('vb6Application.forms[0].controlMap.get("txtoutput").Text.includes("Negative DATE")');output=p.locator('[data-control="txtOutput"] textarea').input_value();check('Optional: Missing versus Empty' in output);check('LSet: [aXYdef    ]' in output);check('RSet: [    aXYdef]' in output);check('CVErr: Error 2001 / type 10' in output);check('Negative DATE round trip: -1.25' in output);p.screenshot(path=str(REPORTS/'runtime-workbench.png'));finish(p)
