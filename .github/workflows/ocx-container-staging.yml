@@ -1,0 +1,29 @@
+name: OCX container source staging
+on:
+  push:
+    branches: [feat/ocx-container-contracts]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-container-staging
+  cancel-in-progress: true
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export exact source refs
+        run: |
+          git bundle create ocx-container-source.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} refs/remotes/origin/main > ocx-container-source.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-container-source
+          path: |
+            ocx-container-source.bundle
+            ocx-container-source.txt
+          retention-days: 7
