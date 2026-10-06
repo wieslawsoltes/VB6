@@ -8,22 +8,78 @@ concurrency:
   group: ocx-container-staging
   cancel-in-progress: true
 jobs:
-  snapshot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Export exact source refs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Materialize checksummed source
+        run: python .ocx-apply.py
+      - name: Native persistence, notification and multiple-interface contracts
+        run: node tools/interop/test-container-contracts.mjs
+      - run: node tools/interop/test-native.mjs
+      - run: node tools/interop/test-activex.mjs
+      - run: node tools/interop/test-ocx.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-container-native-${{ matrix.architecture }}
+          path: reports/native-interop
+          retention-days: 7
+  publish:
+    needs: native
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-container-contracts'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Materialize checked source and remove temporary transport
         run: |
-          git bundle create ocx-container-source.bundle HEAD refs/remotes/origin/main
-          git rev-parse HEAD HEAD^{tree} refs/remotes/origin/main > ocx-container-source.txt
+          python .ocx-apply.py
+          # The workflow token does not edit workflow files. The authorized
+          # connector applies the permanent workflow and removes this helper.
+          git restore --source=HEAD --staged --worktree .github/workflows
+          rm .ocx-transfer.{1,2,3,4,5,6} .ocx-apply.py
+          rm -f .ocx-repairs.patch
+      - run: npm run build
+      - run: npm test
+      - name: Commit source and record reproducible evidence
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat(ocx): recover container contracts, source controls and native persistence'
+          git bundle create ocx-container-publication.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > ocx-container-publication.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: ocx-container-source
+          name: ocx-container-publication
           path: |
-            ocx-container-source.bundle
-            ocx-container-source.txt
+            ocx-container-publication.bundle
+            ocx-container-publication.txt
           retention-days: 7
+      - name: Publish without rewriting branch history
+        run: git push origin HEAD:refs/heads/feat/ocx-container-contracts
