@@ -15,17 +15,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Capture exact source snapshots for integration review
-        run: |
-          git archive --format=zip HEAD -o /tmp/current-source.zip
-          git fetch --no-tags origin c8fbe92fc2d9b9cf62c483a7d481c14a2a32878a
-          git archive --format=zip c8fbe92fc2d9b9cf62c483a7d481c14a2a32878a -o /tmp/recovered-win32-source.zip
+      - name: Archive exact source for reproducible validation
+        run: git archive --format=zip HEAD -o /tmp/vb6-source.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: win32-source-review
-          path: |
-            /tmp/current-source.zip
-            /tmp/recovered-win32-source.zip
+          name: source-${{ github.sha }}
+          path: /tmp/vb6-source.zip
           retention-days: 7
       - uses: actions/setup-node@v4
         with:
@@ -76,10 +71,35 @@ jobs:
         env:
           VB6_BROWSER: ${{ matrix.browser }}
         run: npm run test:windows
+      - name: Download every sample from the IDE and reopen exact HTML bytes
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:sample-exports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: browser-windows-${{ matrix.browser }}
-          path: reports/browser-windows
+          path: |
+            reports/browser-windows
+            reports/win32-exports
           if-no-files-found: ignore
+          retention-days: 7
+  win32-system-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Record installed Windows calendar and formatting contracts
+        shell: pwsh
+        run: ./tools/win32-system-oracle.ps1
+      - name: Compare every native field to the standalone browser package
+        run: node tools/compare-win32-system.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-system-contracts
+          path: reports/win32-system
           retention-days: 7

@@ -6,7 +6,7 @@ The complete IDE bundles, runtime bundle, embedded exporter payload and generate
 
 Run `npm run build` in a source checkout or source-only ZIP before opening `dist/VB6-Studio-Web.html`. No npm installation is needed for this build. `npm run serve`, `npm test`, `npm run test:agents` and `npm run test:chatgpt` also build and verify first, preserving the existing test-before-build CI entry points. The resulting filenames, standalone format, browser behavior and classic styling are unchanged. Direct imports of the exporter require this initial build because its embedded runtime payload is generated.
 
-The ordinary **Project compatibility** workflow uploads the complete `dist/` and source payloads in `project-compatibility-<revision>`. Its separate source-archive job downloads that artifact and rebuilds/tests without a Git checkout. The existing GitHub Pages build generates and deploys the complete `dist/` directory. Browser release archives and native application staging include the actual built files. GitHub's automatic source ZIP is source, not a prebuilt browser release.
+The retained **Validate** workflow captures its exact source snapshot, builds the complete applications, runs repository/browser regressions and checks reproducibility. Its browser matrix downloads every catalog example from the real IDE and reopens those exact bytes. The feature-specific workflows retired by PR #66 are not restored. The existing GitHub Pages build generates and deploys the complete `dist/` directory. Built release archives and native application staging include the actual generated files. GitHub's automatic source ZIP is source, not a prebuilt browser release.
 
 ## Exact verification, not unchecked regeneration
 
@@ -14,13 +14,15 @@ Version 2 of `tools/ide-artifacts.json` records a byte count and SHA-256 for eve
 
 - `dist/studio.js` and `dist/VB6-Studio-Web.html`;
 - `dist/vb6-runtime.js` and `src/exporter/runtime-payload.js`;
+- `dist/win32-browser.js` and `packages/win32-browser/dist/win32-browser.js`;
+- `dist/OCX-Source-Control-Lab.html`;
 - every `dist/examples/<id>.html` in the authored `EXAMPLES` catalog.
 
-The expected inventory is derived independently from source: the fixed four paths and validated unique sample IDs. It is not accepted from arbitrary manifest entries. Every normal build fails if expectations are absent, malformed, incomplete, extra or mismatched. Missing, non-regular, truncated and changed outputs fail. `npm run verify:ide-artifacts` checks existing artifacts without regenerating them; its name is retained for compatibility, but it verifies the full inventory. The small verifier can load before generated payloads exist, so a clean source-only build does not need an older runtime to bootstrap.
+The expected inventory is derived independently from source: the fixed seven paths (including the OCX source-control lab and both Win32 bundle copies) and validated unique sample IDs. It is not accepted from arbitrary manifest entries. Every normal build fails if expectations are absent, malformed, incomplete, extra or mismatched. Missing, non-regular, truncated and changed outputs fail. `npm run verify:ide-artifacts` checks existing artifacts without regenerating them; its name is retained for compatibility, but it verifies the full inventory. The small verifier can load before generated payloads exist, so a clean source-only build does not need an older runtime to bootstrap.
 
 Normal builds do **not** refresh expected fingerprints. After intentionally changing sources, run `npm run build:update-ide-artifacts`, inspect the source and manifest diff, test, and commit both. This explicit update operation is rejected when `CI` is set. CI only builds, verifies and uploads; it cannot silently bless drift. These hashes establish reproducibility, not publisher identity or correctness of unreviewed code.
 
-All other committed generated outputs, including the independent Win32/auto-layout packages, native compiler bundle, CSS and editable sample projects, retain their existing `git diff --exit-code` checks. The manifest replaces that check only for the named untracked artifacts. No UI, runtime, native, browser, license or security assertion is removed. Negative tests cover every required artifact and strict inventory validation.
+All other committed generated outputs, including the independent auto-layout package, native compiler bundle, CSS and editable sample projects, retain their existing `git diff --exit-code` checks. The manifest replaces that check only for the named untracked artifacts. No UI, runtime, native, browser, license or security assertion is removed. Negative tests cover every required artifact and strict inventory validation.
 
 ## Merge workflow
 
@@ -33,3 +35,9 @@ Merge authored sources normally, rebuild with the explicit update command, revie
 The exact `LICENSES/98.css.txt` notice is also LF because the unchanged license-integrity regression compares it with the verbatim notice embedded in CSS. Full Windows-style checkout testing caught this separate mismatch. The notice text and strict assertion are preserved, not normalized or removed.
 
 The account relay tests import the IDE tool adapter and therefore the exporter. Their independent `test:chatgpt` command also builds first; the cross-platform CI job must not depend on a preceding agent test or checked-in payload. The clean-source validation runs this command before any other build.
+
+## Export/download regression coverage
+
+`npm run test:sample-exports` loads every authored sample into the actual IDE, clicks its Export HTML toolbar command, captures the resulting browser download and reopens those exact bytes over HTTP and file origins. Embedded project equality, self-contained startup and all eight Win32 service examples are checked; each service runs twice with stable transient resource counts. The graphics Workbench exercises drawing, DIBs, regions and paths/text. Remote data examples retain their external-service requirements when a user requests remote data.
+
+Both standalone Win32 copies now use the same exact fingerprint contract as the runtime. The extracted npm archive still contains the complete browser-global script; `pack:win32-browser` verifies fingerprints before packaging. Ordinary builds and CI cannot refresh their expected hashes.

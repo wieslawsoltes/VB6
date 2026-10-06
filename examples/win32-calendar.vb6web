@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "id": "example_win32-calendar_1",
+  "name": "Win32 Calendar and Counters",
+  "description": "FILETIME round trips, explicit Gregorian date/time pictures and interlocked LONG values",
+  "startup": "frmServices",
+  "modules": [
+    {
+      "id": "example_win32-calendar_2",
+      "name": "frmServices",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate completedRuns As Long\nPrivate Sub Form_Load()\n    lblStatus.Caption = \"Ready\"\nEnd Sub\nPrivate Sub cmdRun_Click()\n    On Error GoTo Failed\n    txtOutput.Text = RunService(Me.hWnd)\n    completedRuns = completedRuns + 1\n    lblStatus.Caption = \"Completed \" & CStr(completedRuns)\n    Exit Sub\nFailed:\n    txtOutput.Text = \"Error \" & CStr(Err.Number) & \": \" & Err.Description & \" (Win32 \" & CStr(Err.LastDLLError) & \")\"\nEnd Sub\n",
+      "form": {
+        "id": "example_win32-calendar_3",
+        "name": "frmServices",
+        "type": "Form",
+        "properties": {
+          "Name": "frmServices",
+          "Caption": "Win32 Calendar and Counters",
+          "ClientWidth": 8100,
+          "ClientHeight": 4200,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "example_win32-calendar_4",
+            "name": "lblStatus",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblStatus",
+              "Left": 2940,
+              "Top": 960,
+              "Width": 4500,
+              "Height": 330,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Starting...",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-calendar_5",
+            "name": "lblDescription",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblDescription",
+              "Left": 240,
+              "Top": 180,
+              "Width": 7650,
+              "Height": 600,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "FILETIME round trips, explicit Gregorian date/time pictures and interlocked LONG values",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-calendar_6",
+            "name": "cmdRun",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdRun",
+              "Left": 240,
+              "Top": 870,
+              "Width": 2460,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Run API sample",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_win32-calendar_7",
+            "name": "txtOutput",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "txtOutput",
+              "Left": 240,
+              "Top": 1500,
+              "Width": 7620,
+              "Height": 1860,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "Click Run API sample. All state is application-private.",
+              "MultiLine": -1,
+              "ScrollBars": 2,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": -1,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-calendar_8",
+            "name": "lblBoundary",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblBoundary",
+              "Left": 240,
+              "Top": 3600,
+              "Width": 7620,
+              "Height": 360,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "No access to host files, registry, other apps or native DLLs.",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    },
+    {
+      "id": "example_win32-calendar_9",
+      "name": "Services",
+      "kind": "module",
+      "code": "Option Explicit\nPrivate Type SYSTEMTIME\n    Year As Integer\n    Month As Integer\n    DayOfWeek As Integer\n    Day As Integer\n    Hour As Integer\n    Minute As Integer\n    Second As Integer\n    Milliseconds As Integer\nEnd Type\nPrivate Type FILETIME\n    Low As Long\n    High As Long\nEnd Type\nPrivate Declare Function SystemTimeToFileTime Lib \"kernel32\" (source As SYSTEMTIME, target As FILETIME) As Long\nPrivate Declare Function FileTimeToSystemTime Lib \"kernel32\" (source As FILETIME, target As SYSTEMTIME) As Long\nPrivate Declare Function CompareFileTime Lib \"kernel32\" (first As FILETIME, second As FILETIME) As Long\nPrivate Declare Function GetDateFormat Lib \"kernel32\" Alias \"GetDateFormatA\" (ByVal locale As Long, ByVal flags As Long, value As SYSTEMTIME, ByVal picture As String, ByVal output As String, ByVal capacity As Long) As Long\nPrivate Declare Function GetTimeFormat Lib \"kernel32\" Alias \"GetTimeFormatA\" (ByVal locale As Long, ByVal flags As Long, value As SYSTEMTIME, ByVal picture As String, ByVal output As String, ByVal capacity As Long) As Long\nPrivate Declare Function InterlockedIncrement Lib \"kernel32\" (value As Long) As Long\nPublic Function RunService(ByVal target As Long) As String\n    Dim value As SYSTEMTIME, restored As SYSTEMTIME, first As FILETIME, second As FILETIME\n    Dim text As String, dateText As String, timeText As String, n As Long, count As Long\n    value.Year = 2024\n    value.Month = 2\n    value.Day = 29\n    value.Hour = 13\n    value.Minute = 5\n    value.Second = 9\n    value.Milliseconds = 123\n    If SystemTimeToFileTime(value, first) = 0 Then Err.Raise 5\n    If FileTimeToSystemTime(first, restored) = 0 Then Err.Raise 5\n    If SystemTimeToFileTime(restored, second) = 0 Then Err.Raise 5\n    text = String$(128, 0)\n    n = GetDateFormat(&H409, 0, value, \"dddd, dd MMMM yyyy\", text, Len(text))\n    If n = 0 Then Err.Raise 5\n    dateText = Left$(text, n - 1)\n    n = GetTimeFormat(&H409, 0, value, \"HH:mm:ss\", text, Len(text))\n    If n = 0 Then Err.Raise 5\n    timeText = Left$(text, n - 1)\n    count = 41\n    n = InterlockedIncrement(count)\n    If n <> count Then Err.Raise 5\n    RunService = \"Date: \" & dateText & vbCrLf & \"Time: \" & timeText & vbCrLf & \"Round trip: \" & CStr(CompareFileTime(first, second)) & vbCrLf & \"Counter: \" & CStr(count)\nEnd Function\n"
+    }
+  ],
+  "settings": {
+    "anchoring": false,
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

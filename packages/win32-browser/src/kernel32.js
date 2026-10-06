@@ -1,3 +1,4 @@
+import {installProfiles} from './kernel32-profiles.js';
 import {ERROR,Win32Error,integer,unsigned} from './core.js';
 
 export function installKernel32(w){
@@ -63,23 +64,6 @@ export function installKernel32(w){
   aw('GetFileAttributes',1,(wide,p)=>{const path=pathOf(p,wide);if(fs.directories.has(path))return 16;if(fs.exists(path))return 128;throw new Win32Error('File not found',2);},{failure:0xffffffff});
   aw('CreateDirectory',2,(wide,p,security)=>{if(security)throw new Win32Error('Security descriptors are not supported',50);const path=pathOf(p,wide);ensureParent(path);if(fs.exists(path)||fs.directories.has(path))throw new Win32Error('Already exists',183);fs.directories.add(path);fs.dirty=true;return 1;});
   aw('RemoveDirectory',1,(wide,p)=>{const path=pathOf(p,wide);if(!fs.directories.has(path))throw new Win32Error('Directory not found',3);if(path==='/'||path===fs.cwd)throw new Win32Error('Directory in use',5);if([...fs.files.keys(),...fs.directories].some(x=>x.startsWith(path+'/')))throw new Win32Error('Directory not empty',145);fs.directories.delete(path);fs.dirty=true;return 1;});
-  installProfiles(w,aw);
+  installProfiles(w);
   w.register('winmm','timeGetTime',()=>Math.floor(w.clock()-w.epoch)>>>0,{arity:0,mode:'browser',notes:'Process-relative monotonic browser time.'});
-}
-
-function installProfiles(w,aw){
-  const m=w.memory,fs=w.fs,ci=s=>String(s).trim().toLowerCase();
-  function path(p,wide){const s=m.string(p,wide);return fs.normalize(s.includes('\\')||s.includes('/')||s.includes(':')?s:'/Windows/'+s);}
-  function read(p,wide){const file=path(p,wide);if(!fs.exists(file)){w.lastError=2;return {file,lines:[],sections:new Map()};}const b=fs.readBytes(file);const str=b[0]===255&&b[1]===254?m.decode(b.subarray(2),true):m.decode(b);const lines=str.replace(/^\uFEFF/,'').split(/\r?\n/),sections=new Map();let current=null;
-    lines.forEach((line,i)=>{const s=line.trim(),match=/^\[([^\]]+)\]/.exec(s);if(match){const key=ci(match[1]);if(!sections.has(key))sections.set(key,{name:match[1],start:i,keys:new Map()});current=sections.get(key);}else if(current&&s&&!/^[;#]/.test(s)){const eq=s.indexOf('=');if(eq>=0){const name=s.slice(0,eq).trim(),key=ci(name);if(!current.keys.has(key))current.keys.set(key,{name,value:s.slice(eq+1).trim(),line:i});}}});return {file,lines,sections};}
-  aw('GetPrivateProfileString',6,(wide,app,key,def,out,n,file)=>{const doc=read(file,wide),section=doc.sections.get(ci(m.string(app,wide)));if(!app||!key){const names=!app?[...doc.sections.values()].map(s=>s.name):[...(section?.keys.values()||[])].map(k=>k.name);const value=names.length?names.join('\0')+'\0':'';return m.putString(out,value,n,wide,true);}const entry=section?.keys.get(ci(m.string(key,wide)));let value=entry?.value??m.string(def,wide).replace(/ +$/,'');if(entry&&value.length>=2&&(['"',"'"].includes(value[0]))&&value.at(-1)===value[0])value=value.slice(1,-1);return m.putString(out,value,n,wide);});
-  aw('GetPrivateProfileInt',4,(wide,app,key,def,file)=>{const doc=read(file,wide),entry=doc.sections.get(ci(m.string(app,wide)))?.keys.get(ci(m.string(key,wide)));if(!entry)return unsigned(def);const n=parseInt(entry.value,10);return (Number.isNaN(n)?0:n)>>>0;});
-  aw('WritePrivateProfileString',4,(wide,app,key,value,file)=>{if(!app&&!key&&!value)return 1;if(!app)throw new Win32Error('Section required');const doc=read(file,wide),name=m.string(app,wide),k=m.string(key,wide),s=doc.sections.get(ci(name)),entry=s?.keys.get(ci(k));if(/[\r\n\[\]]/.test(name)||/[\r\n=]/.test(k)||/[\r\n]/.test(m.string(value,wide)))throw new Win32Error('Invalid INI field');
-    let lines=doc.lines;if(!key){if(s){let end=lines.length;for(let i=s.start+1;i<lines.length;i++)if(/^\s*\[/.test(lines[i])){end=i;break;}lines.splice(s.start,end-s.start);}}
-    else if(!value){if(entry)lines.splice(entry.line,1);}
-    else if(entry)lines[entry.line]=entry.name+'='+m.string(value,wide);
-    else if(s){let end=lines.length;for(let i=s.start+1;i<lines.length;i++)if(/^\s*\[/.test(lines[i])){end=i;break;}lines.splice(end,0,k+'='+m.string(value,wide));}
-    else lines.push('['+name+']',k+'='+m.string(value,wide));
-    const str=lines.join('\r\n');const old=fs.exists(doc.file)?fs.readBytes(doc.file):[];const unicode=old[0]===255&&old[1]===254;const b=m.stringBytes(str,unicode);if(unicode){const bytes=new Uint8Array(b.length+2);bytes.set([255,254]);bytes.set(b,2);fs.writeBytes(doc.file,bytes);}else fs.writeBytes(doc.file,b);return 1;
-  },{notes:'Project-private INI files. Preserves unrelated lines; does not implement Windows registry IniFileMapping.'});
 }
