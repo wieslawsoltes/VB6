@@ -43,26 +43,36 @@ jobs:
           }
           for(const [file,bytes]of prepared){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}
           for(const file of [...parts,'.github/workflows/layout-stage.yml'])fs.unlinkSync(file);
-          console.log('Verified and applied '+prepared.length+' source files; removed all temporary staging files.');
+          console.log('Verified and applied '+prepared.length+' source files.');
           JS
       - run: npm run build
       - name: Full regression suite
-        run: node --test --test-concurrency=4 tests/*.test.mjs
-      - run: npm run pack:layout
-      - name: Commit source and regenerated distributions without force
         run: |
+          node --test --test-concurrency=4 tests/*.test.mjs > "$RUNNER_TEMP/layout-tests.log" 2>&1 || { tail -100 "$RUNNER_TEMP/layout-tests.log"; exit 1; }
+          tail -15 "$RUNNER_TEMP/layout-tests.log"
+      - run: npm run pack:layout
+      - name: Commit source without modifying workflow files
+        run: |
+          # Workflow changes are applied separately through the authorized connector.
+          # The Actions token publishes only ordinary source and generated files.
+          git restore --source=HEAD -- .github/workflows
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
           git commit -m 'feat(layout): add opt-in anchoring, standalone solver, designer and native export integration'
-          git push origin HEAD:refs/heads/feat/optional-anchoring-layout
-          git archive --format=tar HEAD > layout-source.tar
+          git archive --format=tar HEAD > "$RUNNER_TEMP/layout-source.tar"
+          git push origin HEAD:refs/heads/feat/optional-anchoring-layout > "$RUNNER_TEMP/layout-publication.log" 2>&1 || { cat "$RUNNER_TEMP/layout-publication.log"; exit 1; }
+          cat "$RUNNER_TEMP/layout-publication.log"
+          git rev-parse HEAD > "$RUNNER_TEMP/layout-head.txt"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: layout-staged-source
           path: |
-            layout-source.tar
+            ${{ runner.temp }}/layout-source.tar
+            ${{ runner.temp }}/layout-publication.log
+            ${{ runner.temp }}/layout-tests.log
+            ${{ runner.temp }}/layout-head.txt
             release/vb6-auto-layout-*.tgz
           retention-days: 3
