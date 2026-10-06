@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Optional local, token-authenticated relay. Keys stay in environment variables. */
 import http from 'node:http';
+import {openChatGPTBrowser} from './chatgpt-browser.mjs';
 import {createChatGPTAuth, createChatGPTStore, ChatGPTAuthError} from './chatgpt-auth.mjs';
 import {chatGPTControl, chatGPTUpstream} from './chatgpt-relay.mjs';
 import {randomBytes, timingSafeEqual} from 'node:crypto';
@@ -11,7 +12,7 @@ const KEY_NAMES = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', goo
 // Return only a canonical classification, never the upstream body/message/request ID.
 const ERROR_CODES = Object.freeze({context: 'context_length_exceeded', quota: 'insufficient_quota', access: 'authentication_error', request: 'invalid_request_error', safety: 'content_policy_violation', rate: 'rate_limit_exceeded', server: 'server_error', cooldown: 'rate_limit_exceeded', provider: 'provider_error'});
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalThis.fetch, chatgpt = null} = {}) {
+export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalThis.fetch, chatgpt = null, openBrowser = null} = {}) {
   if (typeof token !== 'string' || token.length < 32 || /[\r\n]/.test(token)) throw new Error('Relay token must contain at least 32 characters.');
   if (!Array.isArray(origins) || !origins.length || origins.some(origin => { try { const u = new URL(origin); return !['http:', 'https:'].includes(u.protocol) || u.origin !== origin; } catch { return true; } })) throw new Error('Specify exact allowed HTTP(S) IDE origins.');
   const allowed = new Set(origins); let active = 0, managementActive = 0;
@@ -37,7 +38,7 @@ export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalT
       for await (const chunk of req) { size += chunk.length; if (size > (management ? 16384 : AGENT_LIMIT_FIELDS.maxContextBytes.max + 4096)) { res.writeHead(413).end(); return; } chunks.push(chunk); }
       const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (req.url === '/agent/chatgpt') {
-        const result = await chatGPTControl(chatgpt, data);
+        const result = await chatGPTControl(chatgpt, data, {openBrowser, signal: controller.signal});
         res.setHeader('Content-Type', 'application/json'); res.writeHead(200).end(JSON.stringify(result)); return;
       }
       providerInfo(data.provider);
@@ -84,8 +85,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const origins = (process.env.VB6_AGENT_ORIGINS || 'http://127.0.0.1:8080').split(',').map(value => value.trim());
   const keys = Object.fromEntries(Object.entries(KEY_NAMES).map(([provider, name]) => [provider, process.env[name] || '']));
   const chatgpt = process.env.VB6_CHATGPT_ENABLED === '0' ? null : createChatGPTAuth({store: await createChatGPTStore({...(process.env.VB6_CHATGPT_HOME ? {directory: process.env.VB6_CHATGPT_HOME} : {}), remember: process.env.VB6_CHATGPT_REMEMBER === '1'})});
-  const server = createAgentRelay({token, origins, keys, chatgpt});
+  const server = createAgentRelay({token, origins, keys, chatgpt, openBrowser: openChatGPTBrowser});
   const shutdown = async () => { server.close(); server.closeAllConnections(); await chatgpt?.close(); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown); server.requestTimeout = 120000; server.headersTimeout = 15000;
-  server.listen(port, '127.0.0.1', () => console.log('VB6 agent relay: http://127.0.0.1:' + port + '\nAllowed origins: ' + origins.join(', ') + '\nLocal access token (keep private): ' + token));
+  server.listen(port, '127.0.0.1', async () => {
+    console.log('VB6 agent relay: http://127.0.0.1:' + port + '\nAllowed origins: ' + origins.join(', ') + '\nLocal access token (keep private): ' + token);
+    console.log('ChatGPT: system-browser sign-in supported. No JavaScript popup is required.');
+    if (process.argv.includes('--sign-in')) {
+      try {
+        const result = await chatGPTControl(chatgpt, {operation: 'login', openBrowser: true}, {openBrowser: openChatGPTBrowser});
+        console.log(result.browser === 'launched' ? 'Sign-in handed to your system browser. Complete consent there.' : 'Open this sign-in link in a browser on this computer:');
+        console.log(result.authorizationUrl); // PKCE authorization link, never OAuth credentials.
+        console.log('After consent, paste the local access token into the IDE and select Refresh account status.');
+      } catch { console.error('ChatGPT sign-in could not start. Check the network and updated relay. The relay remains available.'); }
+    }
+  });
 }
