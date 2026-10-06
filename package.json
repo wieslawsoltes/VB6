@@ -68,9 +68,12 @@
     "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py",
     "pretest:chatgpt": "npm run build",
     "test:sample-exports": "python tools/browser-sample-exports.py",
-    "test:layout:designer": "python tools/auto-layout-browser-tests.py",
     "test:application-themes": "node --test tests/application-themes.test.mjs tests/icon-packs.test.mjs",
-    "test:application-themes:browser": "python tools/browser-application-theme-tests.py"
+    "test:application-themes:browser": "python tools/browser-application-theme-tests.py",
+    "export:application": "node tools/export-application.mjs",
+    "test:exporter": "node --test tests/exporter-*.test.mjs",
+    "test:exporter:browser": "python tools/browser-exporter-tests.py",
+    "test:layout:designer": "python tools/auto-layout-browser-tests.py"
   },
   "engines": {
     "node": ">=22"

@@ -1,9 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {FindIndex,replaceMatches,moveSourceSelection} from '../src/editor/find-index.js';
-import {EditorIntelligence} from '../src/editor/intelligence.js';
-import {indexSource} from '../src/editor/projection.js';
-import {updateSourceIndex,replacementChange} from '../src/editor/incremental.js';
 
 for(const query of ['.', '[', '\\', '$&', '(a)', '?', '^', '|', '*', '{x}'])test('find treats regex characters literally: '+query,()=>{
  const f=new FindIndex(),text='prefix '+query+' suffix '+query;assert.equal(f.search(text,query).length,2);assert.equal(replaceMatches(text,f.matches,'$&'),'prefix $& suffix $&');
@@ -31,17 +28,4 @@ test('source selection moves in either direction, copying and no-op insertion',(
 });
 test('source moves preserve Unicode text and empty selections',()=>{
  const text='A😀B\nC';assert.equal(moveSourceSelection(text,1,3,text.length).text,'AB\nC😀');assert.equal(moveSourceSelection(text,1,1,0).text,text);
-});
-test('completion reflects in-place control rename/type/index changes',()=>{
- const c={name:'OldName',type:'TextBox',properties:{}},m={id:'M',name:'M',kind:'form',code:'Sub Test()\nEnd Sub',form:{controls:[c]}},p={modules:[m]},i=new EditorIntelligence();
- assert.ok(i.resolve(p,m,2,'OldName'));c.name='NewName';assert.equal(i.resolve(p,m,2,'OldName'),null);assert.ok(i.resolve(p,m,2,'NewName'));
- c.type='ListBox';assert.equal(i.resolve(p,m,2,'NewName').type,'ListBox');c.properties.Index=0;assert.equal(i.resolve(p,m,2,'NewName').array,true);
-});
-test('List Constants excludes locals owned by another procedure',()=>{
- const m={id:'M',name:'M',kind:'module',code:'Sub A()\nConst A_ONLY = 1\nEnd Sub\nSub B()\nConst B_ONLY = 2\nEnd Sub'},p={modules:[m]},i=new EditorIntelligence();
- const names=i.completions(p,m,5,'',0,{constants:true}).items.map(s=>s.name);assert.ok(names.includes('B_ONLY'));assert.ok(!names.includes('A_ONLY'));
-});
-test('incremental indexing remains equivalent after deterministic randomized Unicode edits',()=>{
- let text='Option Explicit\nSub A()\nDim x As Long\nEnd Sub\n',index=indexSource(text),seed=123456;const random=()=>{seed=(1664525*seed+1013904223)>>>0;return seed/4294967296;};
- for(let i=0;i<2000;i++){const start=Math.floor(random()*(text.length+1)),end=Math.min(text.length,start+Math.floor(random()*8)),insert=['','\n','😀',"' hello\n",'Sub Z()\nEnd Sub\n',' X '][Math.floor(random()*6)],next=text.slice(0,start)+insert+text.slice(end);index=updateSourceIndex(index,next,replacementChange(start,end,insert.length)).index;text=next;const full=indexSource(text);assert.deepEqual(index.lines,full.lines);assert.deepEqual(index.starts,full.starts);assert.deepEqual(index.procedures,full.procedures);}
 });

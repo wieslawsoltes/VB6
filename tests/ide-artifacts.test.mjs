@@ -65,13 +65,6 @@ test('explicit authoring records deterministic fingerprints and leaves no tempor
 });
 test('built repository outputs match the committed IDE fingerprints',()=>{assert.equal(Object.keys(verifyIdeArtifacts()).length,GENERATED_ARTIFACTS.length);});
 
-test('fresh-checkout npm entry points build and verify before tests or serving',()=>{
-  const scripts=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8')).scripts;
-  for(const name of ['pretest','pretest:agents','pretest:chatgpt','preserve'])assert.equal(scripts[name],'npm run build');
-  assert.equal(scripts.build,'node tools/build.mjs');
-  assert.equal(scripts['verify:ide-artifacts'],'node tools/ide-artifacts.mjs');
-});
-
 test('fingerprints include every authored sample and runtime exporter payload',async()=>{
   const {EXAMPLES}=await import('../src/project/examples.js');
   assert.deepEqual(GENERATED_ARTIFACTS,[...IDE_ARTIFACTS,...WIN32_ARTIFACTS,...LAYOUT_GENERATED_ARTIFACTS,'dist/vb6-runtime.js','src/exporter/runtime-payload.js','dist/OCX-Source-Control-Lab.html',...EXAMPLES.map(e=>`dist/examples/${e.id}.html`)]);

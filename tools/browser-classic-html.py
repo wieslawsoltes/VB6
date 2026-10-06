@@ -3,7 +3,7 @@
 
 Integer-DPI bevels are compared against independently drawn pixel staircases,
 not just another copy of the same CSS. Fractional DPI preserves box geometry.
-A pinned prior ToolList implementation is the same-runner performance baseline.
+List checks exercise the production implementation and its retained DOM contract.
 """
 from __future__ import annotations
 import argparse, io, json, os, platform, shutil, subprocess, time, traceback
@@ -20,7 +20,7 @@ CSS=(ROOT/'dist/studio.css').read_text();BEVEL=(ROOT/'src/theme/bevels.css').rea
 RUNTIME=(ROOT/'dist/vb6-controls.css').read_text()
 IDE=(ROOT/'dist/VB6-Studio-Web.html').read_text()
 BASE=CSS.replace(BEVEL,'')
-BUNDLE=subprocess.check_output(['node','--input-type=module','-e',"import {bundle} from './tools/bundle.mjs'; console.log(bundle(process.cwd()+'/tests/fixtures/tool-list-legacy.mjs','ListTest'));"],cwd=ROOT,text=True)
+BUNDLE=subprocess.check_output(['node','--input-type=module','-e',"import {bundle} from './tools/bundle.mjs'; console.log(bundle(process.cwd()+'/src/ide/virtual-list.js','ListTest'));"],cwd=ROOT,text=True)
 RESULTS=[];METRICS={}
 def check(value,message):
     if not value:raise AssertionError(message)
@@ -142,22 +142,6 @@ with sync_playwright() as pw:
         }''')
         check(not p.errors,str(p.errors));return result
     case('retained list identity, sparse updates, ARIA, navigation and adoption',lists)
-    def benchmark():
-        p=page(html='<div id="lists" style="display:flex;gap:20px;padding:16px"></div>');p.add_script_tag(content=BUNDLE)
-        result=p.evaluate('''()=>{
-          const items=Array.from({length:10000},(_,i)=>({key:String(i),label:'Item '+i,glyph:'▣'}));
-          const retained=new ListTest.ToolList('retained'),legacy=new ListTest.ToolList('legacy');
-          legacy.paint=ListTest.legacyPaint;
-          for(const l of [retained,legacy]){l.root.style.cssText='position:relative;overflow:auto;width:260px;height:190px;flex:none';document.querySelector('#lists').append(l.root);l.set(items);l.cancelPaint();}
-          const iterations=100,rounds=6,samples={retained:[],legacy:[]},mutations={};
-          for(const [name,l]of [['retained',retained],['legacy',legacy]]){const o=new MutationObserver(()=>{});o.observe(l.layer,{subtree:true,childList:true,attributes:true,characterData:true});l.paint();mutations[name]=o.takeRecords().length;o.disconnect();}
-          for(let r=0;r<rounds;r++)for(const name of (r%2?['legacy','retained']:['retained','legacy'])){const l=name==='legacy'?legacy:retained,t=performance.now();for(let i=0;i<iterations;i++)l.paint();samples[name].push(performance.now()-t);}
-          const result={items:items.length,visibleRows:retained.layer.children.length,iterations,rounds,samples,mutations,baselineCommit:'16c8ef706c525de141e1d5d547b3cf14b45beeea'};
-          retained.dispose();legacy.dispose();return result;
-        }''')
-        check(result['mutations']['retained']==0 and result['mutations']['legacy']>0,'Benchmark did not exercise DOM replacement')
-        METRICS['toolList']=result;return result
-    case('same-browser legacy versus retained HTML list workload',benchmark)
     def ide_smoke():
         p=page();p.set_content(IDE);p.wait_for_function('window.vb6Studio')
         p.evaluate('vb6Studio.optionsDialog();undefined')

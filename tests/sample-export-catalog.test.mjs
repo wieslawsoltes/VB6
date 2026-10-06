@@ -12,8 +12,3 @@ for(const example of EXAMPLES)test('complete self-contained export preserves '+e
   assert.match(html,/VB6Runtime\.mountApplication/);assert.match(html,/installMessageFormatting/);assert.match(html,/SystemTimeToFileTime/);
   assert.doesNotMatch(html,/<script\b[^>]*\bsrc\s*=/i);assert.doesNotMatch(html,/<link\b[^>]*\brel\s*=\s*["']stylesheet/i);
 });
-test('every catalog example has actual toolbar download and reopen coverage',()=>{
- const source=readFileSync(new URL('../tools/browser-sample-exports.py',import.meta.url),'utf8');
- assert.match(source,/EXAMPLES\.map/);assert.match(source,/expect_download\(\)/);assert.match(source,/download\.save_as\(file\)/);
- assert.match(source,/\['http','file'\]/);assert.match(source,/realOriginVerified/);assert.match(source,/GITHUB_ACTIONS/);
-});

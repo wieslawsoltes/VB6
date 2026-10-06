@@ -6,8 +6,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 VERSION=json.loads((ROOT/'package.json').read_text())['version']
 PREFIX=f'VB6-Studio-Web-{VERSION}'
-DIRS={'LICENSES','src','tools','tests','docs','examples','dist','reports'}
-ROOT_FILES={'README.md','RELEASE-NOTES.md','THIRD-PARTY-NOTICES.md','LICENSE','package.json','.gitignore','RECOVERY.md'}
+DIRS={'.github','LICENSES','desktop','packages','src','tools','tests','docs','examples','dist','reports'}
+ROOT_FILES={'.gitattributes','README.md','RELEASE-NOTES.md','THIRD-PARTY-NOTICES.md','LICENSE','package.json','.gitignore'}
 EXCLUDED={'reports/saved-project.vb6web','reports/exported-app.html','reports/features-04/runtime-export.html'}
 def digest(data:bytes)->str:return hashlib.sha256(data).hexdigest()
 def files():
@@ -15,7 +15,9 @@ def files():
         if not p.is_file():continue
         rel=p.relative_to(ROOT)
         if rel.parts[0] not in DIRS and str(rel) not in ROOT_FILES:continue
-        if '__pycache__' in rel.parts or p.suffix=='.pyc' or str(rel) in EXCLUDED:continue
+        if any(part in {'.git','node_modules','__pycache__','.native-build'} for part in rel.parts):continue
+        if p.suffix in {'.pyc','.sqlite'} or rel.as_posix() in EXCLUDED:continue
+        if p.name in {'.env','server-profiles.local.json'} or p.name.startswith('.env.'):continue
         if p.suffix.lower() in {'.ttf','.otf','.woff','.woff2','.eot'}:raise RuntimeError('Font redistribution is not permitted: '+str(rel))
         yield rel,p
 

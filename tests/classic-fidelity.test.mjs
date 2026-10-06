@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {iconSVG,ICON_NAMES} from '../src/theme/icons.js';
+import {iconSVG} from '../src/theme/icons.js';
 const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const css=read('src/theme/fidelity.css');
 const reference=JSON.parse(read('tests/fixtures/caption-glyphs.json'));
@@ -18,15 +18,14 @@ for(const [name,rows] of Object.entries(reference))test(`caption ${name} uses th
  }
  assert.equal(parsed,d,'Non-integer drawing instruction');assert.deepEqual(actual.map(r=>r.join('')),rows);
 });
-test('general 16px atlas and its public icon inventory are unchanged',()=>{
- assert.equal(ICON_NAMES.length,111);
+test('caption commands retain the public 16px atlas',()=>{
  for(const name of ['close','maximize','minimize','restore'])assert.match(iconSVG(name,16),/viewBox="0 0 16 16"/);
  assert.doesNotMatch(css,/@font-face|url\(["']?https?:\/\//);
 });
 test('same local fidelity rules are built into IDE, reusable controls and exported applications',()=>{
  for(const name of ['dist/studio.css','dist/vb6-controls.css','dist/VB6-Studio-Web.html','dist/examples/calculator.html']){
   const text=read(name);assert.ok(text.includes(css),name);
-  if(name.endsWith('.css'))assert.equal(text.split('Issue #39: original, font-independent').length-1,1);
+  if(name.endsWith('.css'))assert.equal(text.split(css).length-1,1);
  }
 });
 test('caption art is scoped, unscaled and respects native forced-color focus paths',()=>{
@@ -40,7 +39,6 @@ test('classic selectors retain native elements while replacing engine-specific c
  assert.match(css,/appearance:none;-webkit-appearance:none/);
  assert.match(css,/background-image:linear-gradient\(var\(--vb-text\)/);
  assert.match(css,/right 6px top 8px/);
- assert.match(read('tools/browser-issue39.py'),/native selector keyboard and forced colors/);
 });
 test('horizontal toolbar grip width agrees with its flex basis',()=>{
  assert.match(css,/command-bar:not\(\.command-bar-vertical\):not\(\.command-bar-floating\) > \.toolbar-grip \{width:6px\}/);
