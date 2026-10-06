@@ -8,6 +8,9 @@ on:
       - 'tools/agent-**'
       - 'tools/chatgpt-**'
       - 'tests/*chatgpt*'
+      - 'tests/helpers/chatgpt-fixture.mjs'
+      - 'docs/CHATGPT-LOGIN.md'
+      - 'package.json'
       - '.github/workflows/chatgpt-plan-login.yml'
   workflow_dispatch:
 permissions:
@@ -16,20 +19,47 @@ concurrency:
   group: chatgpt-plan-login-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  auth:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm run build
-      - run: npm test
-      - name: Package reproducible validation workspace (no credentials)
-        run: tar --exclude=.git --exclude=node_modules --exclude=reports -czf "$RUNNER_TEMP/vb6-login-validation-source.tar.gz" .
-      - uses: actions/upload-artifact@v4
+      - run: npm run test:chatgpt
+      - run: npm run test:agents
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: chatgpt-plan-validation-source
-          path: ${{ runner.temp }}/vb6-login-validation-source.tar.gz
-          retention-days: 3
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: git diff --exit-code -- dist
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Real HTTP navigation and loopback OAuth callback (mock OpenAI only)
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:chatgpt:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chatgpt-login-${{ matrix.browser }}
+          path: reports/chatgpt-login
+          if-no-files-found: ignore
+          retention-days: 7
