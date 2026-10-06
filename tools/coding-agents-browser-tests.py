@@ -768,7 +768,15 @@ def make_review_change(page):
 
 def review_restore(page,mode):
     requests,original=make_review_change(page);modified=page.evaluate('vb6Studio.project.modules[0].code')
-    tab(page,'Changes');check('modified' in page.get_by_label('Changed project documents',exact=True).inner_text())
+    tab(page,'Changes')
+    documents=page.get_by_label('Changed project documents',exact=True)
+    # Native select.innerText omits option labels in WebKit. Check the actual
+    # selected option, not a browser-specific rendering of the select element.
+    selected=documents.locator('option:checked')
+    check(documents.locator('option').count()==1, 'Expected one changed source document')
+    check(selected.count()==1 and selected.text_content()=='modified — Form1.frm', 'Expected the modified Form1 source selected')
+    selection={'selectInnerText':documents.inner_text(),'selectedOptionText':selected.text_content()}
+    check(modified!=original, 'Source must actually change before it can be restored')
     check('Review change' in page.get_by_label('Project change diff',exact=True).inner_text())
     check(page.get_by_label('Project change diff',exact=True).locator('img').count()==0)
     with page.expect_download() as info:page.get_by_role('button',name='Save review patch…',exact=True).click()
@@ -780,7 +788,7 @@ def review_restore(page,mode):
     check(page.evaluate("vb6Studio.history.undoStack.at(-1).label.startsWith('Restore reviewed source')"))
     page.evaluate("vb6Studio.command('undo')");check(page.evaluate('vb6Studio.project.modules[0].code')==modified)
     check(len(requests)==2)
-    return {'sourceRestoration':True,'normalUndo':True,'patchExport':True,'inertMarkup':True,'noProviderRequestsForReview':True}
+    return {'sourceRestoration':True,'normalUndo':True,'patchExport':True,'inertMarkup':True,'noProviderRequestsForReview':True,'selection':selection}
 
 
 def review_stale_and_reload(page,mode):
