@@ -16,15 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Apply exact reviewed source patch
         shell: bash
         run: |
-          test "$(git rev-parse HEAD^)" = 5ad8ea7815877347230dda6e5254ada4181aa61c
-          test "$(git rev-parse HEAD^:.)" = de70c9377ba3bfab13539ddf43c1283c52fd6b93
+          test "$(git rev-parse HEAD^)" = d38aa69ceaa2838d561e2e2c0f34c7e58ad5f643
+          test "$(git rev-parse HEAD~2)" = 5ad8ea7815877347230dda6e5254ada4181aa61c
+          test "$(git rev-parse 'HEAD~2^{tree}')" = de70c9377ba3bfab13539ddf43c1283c52fd6b93
           git rev-parse HEAD > publication-base.txt
           python3 - <<'PY'
           import base64, hashlib, subprocess, zlib
@@ -38,6 +39,7 @@ jobs:
           patch = zlib.decompress(base64.b64decode(''.join(pieces), validate=True))
           assert len(patch) == 60225
           assert hashlib.sha256(patch).hexdigest() == '6af72ec48b3485f706a1c200b33ad406b641f733d393585f5bdef5ebe1b1c9cb'
+          Path('selective-reviewed.patch').write_bytes(patch)
           subprocess.run(['git','apply','--check','-'],input=patch,check=True)
           subprocess.run(['git','apply','--index','-'],input=patch,check=True)
           allowed = {'README.md','docs/CODING-AGENT-WORKBENCH.md','src/agents/changes.js','src/agents/followups.js','src/agents/review-hunks.js','src/agents/studio.js','src/agents/workbench-view.js','tests/coding-agents-compaction.test.mjs','tests/coding-agents-hunks.test.mjs','tools/coding-agents-browser-tests.py'}
@@ -80,6 +82,7 @@ jobs:
             selective-build.log
             selective-full-tests.log
             selective-agent-tests.log
+            selective-reviewed.patch
             publication-base.txt
             head.txt
             tree.txt
