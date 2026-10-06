@@ -5,3 +5,10 @@ index f880504..4020c2f 100644
 @@ -49 +49 @@ namespace VB6Interop {
 -    public readonly List<EventConnection> Events=new List<EventConnection>(); public int EventDepth; public bool DesignMode;
 +    public readonly List<EventConnection> Events=new List<EventConnection>(); public int EventDepth; public bool DesignMode=false;
+diff --git a/tools/interop/OcxSupport.cs b/tools/interop/OcxSupport.cs
+index 24da870..166eb01 100644
+--- a/tools/interop/OcxSupport.cs
++++ b/tools/interop/OcxSupport.cs
+@@ -59 +59 @@ namespace VB6Interop {
+-      catch(COMException error){if(error.ErrorCode==unchecked((int)0x80004002))return D("supported",false);throw;}
++      catch(COMException error){if(error.ErrorCode==unchecked((int)0x80004002)||error.ErrorCode==unchecked((int)0x80040111))return D("supported",false,"hresult",error.ErrorCode);throw;}
