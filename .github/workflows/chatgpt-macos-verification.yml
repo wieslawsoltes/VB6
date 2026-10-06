@@ -1,0 +1,40 @@
+name: ChatGPT browser verification
+on:
+  push:
+    branches: [validation/chatgpt-plan-browsers]
+    paths: ['.github/workflows/chatgpt-macos-verification.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c24b0aa9c08998ccc16bf59263ec97ff781285fc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: git diff --exit-code -- dist
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install ${{ matrix.browser }}
+      - name: Real browser navigation, popup, and loopback callback; fixture OpenAI only
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:chatgpt:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chatgpt-macos-${{ matrix.browser }}
+          path: reports/chatgpt-login
+          if-no-files-found: ignore
+          retention-days: 7
