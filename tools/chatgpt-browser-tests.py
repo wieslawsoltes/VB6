@@ -58,14 +58,21 @@ try:
             check(page.get_by_label('Agent connection', exact=True).is_disabled(), filename + ': ChatGPT enforces relay')
             if args.opaque:
                 page.get_by_role('button', name='Sign in with ChatGPT', exact=True).click()
-                page.wait_for_function('!!window.__fixtureAuthURL')
-                q = urllib.parse.parse_qs(urllib.parse.urlparse(page.evaluate('window.__fixtureAuthURL')).query)
+                page.wait_for_function("!!vb6Studio.documents.tools.get('tool:coding-agents').chatgpt.link.getAttribute('href')")
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(page.evaluate("vb6Studio.documents.tools.get('tool:coding-agents').chatgpt.link.href")).query)
                 callback = q['redirect_uri'][0] + '?' + urllib.parse.urlencode({'state':q['state'][0], 'code':'fixture-code', 'client_id':'oaiapp_fixture'})
                 check(urllib.request.urlopen(callback).status == 200, filename + ': verified loopback callback (opaque browser fixture)')
-                check(page.evaluate('window.__fixturePopup.opener === null'), filename + ': product severs fixture popup opener')
+                check(page.evaluate("vb6Studio.documents.tools.get('tool:coding-agents').chatgpt.link.rel === 'noopener noreferrer'"), filename + ': product marks manual link opener-isolated (opaque harness)')
             else:
+                # A blocked JavaScript popup cannot prevent the actual user-clicked link.
+                page.evaluate("() => { window.open = () => { throw new Error('JavaScript popups disabled'); }; }")
+                page.get_by_role('button', name='Sign in with ChatGPT', exact=True).click()
+                page.get_by_role('dialog', name='ChatGPT sign-in', exact=True).wait_for()
                 with context.expect_page() as popup_info:
-                    page.get_by_role('button', name='Sign in with ChatGPT', exact=True).click()
+                    link = page.get_by_role('link', name='Open ChatGPT sign-in', exact=True)
+                    if filename == 'index.html':
+                        link.focus(); link.press('Enter')
+                    else: link.click()
                 popup = popup_info.value
                 popup.get_by_role('link', name='Approve fixture consent').wait_for()
                 check(popup.evaluate('window.opener === null'), filename + ': OAuth popup has no opener')
