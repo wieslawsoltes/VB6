@@ -34,6 +34,9 @@ reports/classic-html/
 reports/debugger-boundaries/
 reports/native-debugger/
 
+# ChatGPT connection fixtures; retained as CI artifacts.
+reports/chatgpt-login/
+
 # Optional standalone compute package output
 /artifacts/vb6-compute/
 reports/compute/

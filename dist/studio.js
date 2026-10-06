@@ -18805,29 +18805,42 @@ class McpPanel {
 return {installMcp};
 })();
 
-/* ..\agents\review.js */
+/* ..\agents\chatgpt-protocol.js */
 __modules[170]=(()=>{
-const {findModule}=__modules[43];
-const {sourceEdits}=__modules[163];
 
-
-/** Build review data from the same pure edit implementation used for the undo transaction. */
-function operationReview(project, request) {
-  const changes = [], args = request.arguments;
-  if (request.name === 'vb6.code.edit') {
-    const candidate = sourceEdits(project, args.edits);
-    for (const module of project.modules) {
-      const after = findModule(candidate, module.id);
-      if (after && module.code !== after.code) changes.push({module: module.name, before: module.code, after: after.code});
-    }
-  } else if (request.name === 'vb6.module.write') {
-    const module = findModule(project, args.module);
-    if (module) changes.push({module: module.name, before: module.code, after: args.code});
+/** ChatGPT-plan Responses preview profile. API-key requests are intentionally untouched.
+ * https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+ */
+function chatGPTRequest(body) {
+  if (!body || !Array.isArray(body.input) || body.input.some(item => item?.role === 'system')) throw new Error('ChatGPT mode requires array input and developer instructions.');
+  if (typeof body.model !== 'string' || !/^[\w.-]{1,150}$/.test(body.model)) throw new Error('Invalid ChatGPT model.');
+  const tools = body.tools || [];
+  if (!Array.isArray(tools) || tools.some(tool => tool?.type !== 'function' || !/^[\w-]{1,64}$/.test(tool.name))) throw new Error('ChatGPT mode supports registered local function tools only.');
+  const input = structuredClone(body.input);
+  for (const item of input) if (item.type === 'function_call') {
+    if (item.namespace && item.namespace !== 'vb6') throw new Error('Unrecognized ChatGPT tool namespace.');
+    item.namespace = 'vb6';
   }
-  return {request, changes};
+  // Explicit allowlist: never forward unsupported output caps, server state, hosted tools or billing overrides.
+  return {model: body.model, instructions: typeof body.instructions === 'string' ? body.instructions : '', input,
+    store: false, stream: true, parallel_tool_calls: false, include: ['reasoning.encrypted_content'],
+    tools: tools.length ? [{type: 'namespace', name: 'vb6', description: 'Permission-gated tools in the user’s VB6 Studio project. No host shell or credential access.',
+      tools: tools.map(({name, description, parameters}) => ({type: 'function', name, description, parameters, strict: false}))}] : []};
+}
+function chatGPTModels(value) {
+  if (!value || !Array.isArray(value.models)) throw new Error('Invalid ChatGPT model catalog.');
+  const seen = new Set();
+  return value.models.filter(model => model?.visibility === 'list' && typeof model.slug === 'string' && /^[\w.-]{1,150}$/.test(model.slug) && !seen.has(model.slug) && seen.add(model.slug))
+    .map(model => ({id: model.slug, label: typeof model.display_name === 'string' ? model.display_name.slice(0, 256) : model.slug}));
+}
+/** Reject namespace spoofing before the shared collector can dispatch a registered local tool. */
+function validateChatGPTEvent(event) {
+  const items = [...(event?.response?.output || []), ...(event?.output || []), ...(event?.item ? [event.item] : [])];
+  for (const item of items) if (item?.type === 'function_call' && item.namespace !== 'vb6') throw new Error('ChatGPT returned an unrecognized tool namespace. No tools were executed.');
+  return event;
 }
 
-return {operationReview};
+return {chatGPTRequest,chatGPTModels,validateChatGPTEvent};
 })();
 
 /* ..\agents\limits.js */
@@ -18882,7 +18895,9 @@ return {AGENT_LIMIT_FIELDS,DEFAULT_AGENT_LIMITS,AGENT_LIMIT_PRESETS,normalizeAge
 
 /* ..\agents\providers.js */
 __modules[172]=(()=>{
+const {validateChatGPTEvent}=__modules[170];
 const {normalizeAgentLimits}=__modules[171];
+
 
 /** Native provider protocols. No SDK, remote script, credential persistence or arbitrary endpoints. */
 const PROVIDERS = Object.freeze({
@@ -18967,6 +18982,11 @@ function providerFailure(data = {}, status = 0, retryAfterMs = 0) {
   const has = allowed => codes.some(code => typeof code === 'string' && allowed.includes(code));
   let kind = status >= 400 && status < 500 && ![408, 429].includes(status) ? 'request' : 'provider', retryable = [408, 429, 500, 502, 503, 504, 529].includes(status), hint = 'The provider could not complete this turn.';
   const contextMessage = typeof value.message === 'string' && /^(?:prompt is too long:|this model.s maximum context length is|the input token count .*exceeds the maximum)/i.test(value.message.slice(0, 500));
+  if (has(['subscription_sharing_usage_limit_exceeded'])) return new ProviderTransportError('ChatGPT plan usage limit reached. Review ChatGPT Settings → Usage. API billing will not be used automatically.', {status, kind: 'quota'});
+  if (has(['subscription_sharing_user_not_eligible', 'chatpass_v2_scope_not_authorized', 'chatpass_v2_invalid_authorization_context', 'chatgpt_consent_required'])) return new ProviderTransportError('ChatGPT plan use is not authorized for this account/workspace. Review sign-in consent and policy. No billing fallback.', {status, kind: 'access'});
+  if (has(['chatgpt_sign_in_required', 'chatgpt_session_expired', 'subscription_sharing_invalid_user', 'chatgpt_invalid_client'])) return new ProviderTransportError('Sign in to the selected ChatGPT account again in Connection. API billing will not be used automatically.', {status, kind: 'access'});
+  if (has(['chatgpt_relay_disabled'])) return new ProviderTransportError('ChatGPT sign-in is not enabled in this relay. Start the updated local relay with ChatGPT support.', {status, kind: 'access'});
+  if (has(['subscription_sharing_unsupported_capability', 'subscription_sharing_route_not_supported'])) return new ProviderTransportError('ChatGPT plan preview does not support this request capability or route. Review the integration; no automatic retry or billing fallback.', {status, kind: 'request'});
   // Explicit safety codes are terminal regardless of HTTP status or message heuristics.
   if (has(['content_policy_violation', 'safety_violation', 'refusal'])) { kind = 'safety'; retryable = false; hint = 'Provider safety policy rejected this request. No automatic alternative will be attempted.'; }
   else if (has(['context_length_exceeded', 'context_window_exceeded', 'prompt_too_long', 'request_too_large']) || contextMessage) { kind = 'context'; retryable = false; hint = 'Provider context window exceeded; compact the conversation or lower context/output settings.'; }
@@ -19004,27 +19024,29 @@ function retryAfter(value, now = Date.now()) {
   const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - now;
   return Number.isFinite(ms) ? Math.max(0, Math.min(300000, Math.ceil(ms))) : 0;
 }
-function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch, requestTimeoutMs} = {}) {
+function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch, requestTimeoutMs, authMode = 'api-key', accountId = ''} = {}) {
   providerInfo(provider);
+  if (!['api-key', 'chatgpt'].includes(authMode)) throw new Error('Invalid authentication mode.');
+  if (authMode === 'chatgpt' && (provider !== 'openai' || !relay || typeof accountId !== 'string' || !accountId || accountId.length > 128)) throw new Error('ChatGPT mode requires OpenAI, a local relay and a signed-in account.');
   const timeoutMs = normalizeAgentLimits({requestTimeoutMs}).requestTimeoutMs;
   const origin = relay ? relayURL(relay) : '';
   if (origin && (!relayToken || /[\r\n]/.test(relayToken))) throw new Error('Enter the relay access token.');
   // Snapshot secrets in a closure; never expose them through the returned interface.
   const headers = origin ? {'Content-Type': 'application/json', Authorization: 'Bearer ' + relayToken} : providerHeaders(provider, apiKey);
-  return async (body, {signal, receive = () => {}, models = false, cursor = ''} = {}) => {
+  const transport = async (body, {signal, receive = () => {}, models = false, cursor = ''} = {}) => {
     const timer = AbortSignal.timeout(models ? Math.min(timeoutMs, 120000) : timeoutMs), combined = AbortSignal.any([signal, timer].filter(Boolean));
     const native = nativeRequest(provider, body, {models, cursor});
     let response;
     try {
       response = await fetchImpl(origin ? origin + '/agent' : native.url, {method: origin ? 'POST' : native.method, headers, credentials: 'omit', redirect: 'error', cache: 'no-store', signal: combined,
-        body: origin ? JSON.stringify({provider, operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
+        body: origin ? JSON.stringify({provider, ...(authMode === 'chatgpt' ? {authMode, accountId} : {}), operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
     } catch {
       signal?.throwIfAborted();
       throw new ProviderTransportError(timer.aborted ? 'Provider request timed out. Retrying may incur additional charges.' : 'Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.', {retryable: true});
     }
     try {
       if (!response.ok) throw await responseFailure(response, combined);
-      await readEvents(response, receive, {signal: combined});
+      await readEvents(response, authMode === 'chatgpt' && !models ? data => receive(validateChatGPTEvent(data)) : receive, {signal: combined});
     }
     catch (error) {
       signal?.throwIfAborted();
@@ -19032,11 +19054,14 @@ function createTransport({provider, apiKey = '', relay = '', relayToken = '', fe
       throw error;
     }
   };
+  Object.defineProperty(transport, 'capabilities', {value: Object.freeze({outputTokenLimit: authMode !== 'chatgpt'})});
+  return transport;
 }
-async function listModels(transport, provider, signal) {
+async function listModels(transport, provider, signal, {details = false} = {}) {
   const ids = new Set(); let cursor = '';
   for (let page = 0; page < 20; page++) {
     let result; await transport(null, {models: true, cursor, signal, receive: data => { result = data; }});
+    if (result?.chatgpt === true) return details ? result.data : result.data.map(item => item.id);
     for (const item of result?.data || result?.models || []) {
       if (provider === 'google' && !item.supportedGenerationMethods?.includes('generateContent')) continue;
       const id = item.id || item.name?.replace(/^models\//, ''); if (id) ids.add(id);
@@ -19044,7 +19069,7 @@ async function listModels(transport, provider, signal) {
     const next = provider === 'google' ? result?.nextPageToken : result?.has_more ? result.last_id : '';
     if (!next || next === cursor) break; cursor = next;
   }
-  return [...ids].sort();
+  return details ? [...ids].sort().map(id => ({id, label: id})) : [...ids].sort();
 }
 function toolCatalog(tools) {
   const names = new Map();
@@ -19169,8 +19194,166 @@ function appendTurn(provider, history, result, outputs) {
 return {PROVIDERS,providerInfo,modelId,relayURL,nativeRequest,providerHeaders,readEvents,ProviderTransportError,providerFailure,responseFailure,ProviderOutputLimitError,retryAfter,createTransport,listModels,toolCatalog,requestBody,userMessage,responseCollector,appendTurn};
 })();
 
-/* ..\agents\recovery.js */
+/* ..\agents\chatgpt-connection.js */
 __modules[173]=(()=>{
+const {el}=__modules[6];
+const {relayURL, readEvents}=__modules[172];
+/** Classic-IDE connection controls. Only the relay bearer enters browser memory, never OAuth tokens. */
+
+
+const field = (label, control) => el('label', {class: 'agent-field'}, el('span', {}, label), control);
+const button = (label, action) => el('button', {type: 'button', onclick: action}, label);
+const errors = {
+  chatgpt_login_in_progress: 'A sign-in is already pending in this relay. Refresh status or cancel it first.',
+  chatgpt_relay_disabled: 'Start the updated local relay with ChatGPT enabled (VB6_CHATGPT_ENABLED must not be 0).',
+  chatgpt_invalid_client: 'OpenAI rejected this client registration. Review the registration and sign in again.',
+  chatgpt_connection_failed: 'Cannot reach OpenAI from the relay. Check the connection and try again.',
+  chatgpt_unknown_account: 'Choose a ChatGPT account from this relay, or sign in to add one.'
+};
+async function chatGPTControl({relay, relayToken, operation, accountId, loginId, consent = false, signal, fetchImpl = globalThis.fetch}) {
+  const origin = relayURL(relay);
+  if (!relayToken || /[\r\n]/.test(relayToken)) throw new Error('Enter the local relay access token in Connection. This is not a provider API key.');
+  let response;
+  try { response = await fetchImpl(origin + '/agent/chatgpt', {method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error',
+    headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + relayToken}, body: JSON.stringify({operation, accountId, loginId, consent}), signal: AbortSignal.any([signal, AbortSignal.timeout(90000)].filter(Boolean))}); }
+  catch { signal?.throwIfAborted(); throw new Error('Cannot reach the ChatGPT relay. Check its URL, allowed IDE origin and browser local-network permission.'); }
+  let value;
+  try { await readEvents(response, data => { value = data; }, {signal, maxBytes: 262144}); }
+  catch (error) { signal?.throwIfAborted(); if (response.ok) throw error; }
+  if (!response.ok) throw new Error(errors[value?.error?.code] || (response.status === 401 ? 'The relay access token is missing or invalid.' : response.status === 404 ? 'This relay does not support ChatGPT sign-in. Restart it with the updated source.' : 'ChatGPT connection operation failed. Check the account, relay and OpenAI availability.'));
+  return value;
+}
+class ChatGPTConnection {
+  constructor(panel) {
+    this.panel = panel; this.snapshot = null; this.busy = false; this.controller = null; this.disposed = false;
+    this.mode = el('select', {'aria-label': 'OpenAI authentication'}, el('option', {value: 'api-key'}, 'API key — API billing'), el('option', {value: 'chatgpt'}, 'ChatGPT account — ChatGPT plan usage'));
+    this.accounts = el('select', {'aria-label': 'ChatGPT account'}, el('option', {value: ''}, '(Sign in to add an account)'));
+    this.message = el('p', {role: 'status', 'aria-label': 'ChatGPT connection status'}, 'ChatGPT sign-in uses your local relay. No API key is needed.');
+    this.login = button('Sign in with ChatGPT', () => this.action('login'));
+    this.reconsent = button('Enable plan usage…', () => this.action('login', true));
+    this.check = button('Refresh account status', () => this.action('status'));
+    this.logout = button('Sign out', () => this.action('logout'));
+    this.cancel = button('Cancel sign-in', () => this.cancelLogin());
+    this.link = el('a', {target: '_blank', rel: 'noopener noreferrer', hidden: true}, 'Open ChatGPT sign-in');
+    this.details = el('fieldset', {}, el('legend', {}, 'ChatGPT account'), field('Account:', this.accounts), this.message,
+      el('div', {class: 'agent-actions'}, this.login, this.reconsent, this.check, this.logout, this.cancel), this.link,
+      el('p', {}, 'Sign in and approve plan usage in the OpenAI window. Your eligible ChatGPT allowance and app/workspace limits apply; this is not unlimited API access. No automatic fallback to API-key billing.'),
+      el('p', {}, 'The local relay owns sign-in and refresh tokens. By default they remain only in relay memory; restart requires sign-in again. Clear Credentials clears browser-to-relay access, not your ChatGPT session; use Sign out to revoke it.'),
+      el('p', {}, 'This preview does not accept a per-request output-token cap. Session usage, request/tool limits, timeouts and existing IDE permissions still apply, but a single request may exceed the remaining budget.'),
+      el('a', {href: 'https://chatgpt.com/#settings/Usage', target: '_blank', rel: 'noopener noreferrer'}, 'ChatGPT Settings → Usage'));
+    this.root = el('div', {}, field('Authentication:', this.mode), this.details);
+    this.mode.onchange = () => { this.resetCatalog(); this.render(); if (this.enabled && this.panel.token.value && !this.snapshot) void this.action('status'); };
+    this.accounts.onchange = () => { this.resetCatalog(); this.render(); };
+    for (const control of [panel.relay, panel.token]) control.addEventListener('input', () => { this.snapshot = null; this.accounts.replaceChildren(el('option', {value: ''}, '(Refresh account status)')); this.resetCatalog(); this.render(); });
+  }
+  get enabled() { return this.panel.provider.value === 'openai' && this.mode.value === 'chatgpt'; }
+  get selected() { return this.snapshot?.accounts?.find(a => a.id === this.accounts.value); }
+  resetCatalog() { this.panel.model.value = ''; this.panel.models.replaceChildren(el('option', {value: ''}, '(Refresh models)')); }
+  options() {
+    if (!this.enabled) return {authMode: 'api-key'};
+    if (!this.selected?.signedIn || !this.selected.planEnabled) throw new Error('Sign in with ChatGPT and enable plan usage in Connection before running or discovering models.');
+    return {authMode: 'chatgpt', accountId: this.selected.id};
+  }
+  binding() { return this.enabled ? JSON.stringify(['chatgpt', relayURL(this.panel.relay.value), this.selected?.id || '']) : 'api-key'; }
+  description() { return this.enabled ? 'ChatGPT plan usage — ' + (this.selected?.label || 'no account') + '. No automatic API billing fallback. Per-request output cap is not supported by this preview.' : 'API-key billing. Provider API charges may apply.'; }
+  render(busy = !!this.panel.pending || this.panel.api.agent.busy) {
+    this.root.hidden = this.panel.provider.value !== 'openai'; this.details.hidden = !this.enabled;
+    if (this.enabled) { this.panel.connection.value = 'relay'; this.panel.connection.onchange?.(); }
+    for (const control of [this.mode, this.accounts, this.login, this.reconsent, this.check]) control.disabled = busy || this.busy;
+    this.panel.connection.disabled = busy || this.busy || this.enabled;
+    this.logout.disabled = busy || this.busy || !this.selected?.signedIn;
+    this.reconsent.disabled ||= !this.selected || this.selected.planEnabled;
+    this.cancel.disabled = !(this.busy || this.snapshot?.login === 'pending');
+    if (this.panel.outputTokens) {
+      const input = this.panel.outputTokens;
+      input.disabled = busy || this.busy;
+      input.setAttribute('aria-label', this.enabled ? 'ChatGPT output reserve (not a provider cap)' : 'Maximum output tokens');
+      input.title = this.enabled ? 'Local context-planning reserve only. OpenAI does not accept a hard output cap in ChatGPT-plan mode.' : '';
+      const label = input.parentElement?.querySelector('span');
+      if (label) label.textContent = this.enabled ? 'Output reserve (not a cap):' : 'Output tokens/request:';
+    }
+  }
+  apply(value) {
+    if (!value || !Array.isArray(value.accounts) || value.accounts.length > 16 || value.accounts.some(a => typeof a.id !== 'string' || typeof a.label !== 'string')) throw new Error('Invalid ChatGPT relay status.');
+    const before = this.accounts.value;
+    this.snapshot = value;
+    this.accounts.replaceChildren(el('option', {value: ''}, '(Add a ChatGPT account)'), ...value.accounts.map(a => el('option', {value: a.id}, a.label + (a.signedIn ? a.planEnabled ? ' — plan enabled' : ' — plan consent required' : ' — signed out'))));
+    this.accounts.value = value.accounts.some(a => a.id === before) ? before : value.accounts.findLast(a => a.signedIn)?.id || value.accounts.at(-1)?.id || '';
+    const labels = {pending: 'Waiting for OpenAI sign-in and consent…', complete: 'Sign-in verified.', 'consent-required': 'Signed in, but ChatGPT plan permission was not granted. Use Enable plan usage or explicitly select API-key mode.', failed: 'Sign-in could not be verified. Retry sign-in.', declined: 'Sign-in was declined; no account was replaced.', expired: 'Sign-in timed out. Try again.', cancelled: 'Sign-in cancelled.'};
+    this.message.textContent = (labels[value.login] || 'Account status refreshed.') + (value.storage === 'owner-only-file' ? ' This relay remembers tokens in its owner-only local file.' : ' OAuth tokens are held only in relay memory.');
+    this.render();
+  }
+  async action(operation, consent = false) {
+    if (this.busy || this.panel.pending || this.panel.api.agent.busy || this.disposed) return;
+    // Open synchronously for browser popup policies, then sever opener before navigation.
+    let popup;
+    if (operation === 'login') { popup = this.panel.root.ownerDocument.defaultView.open('about:blank', '_blank'); if (popup) popup.opener = null; }
+    const controller = new AbortController(); this.controller = controller; this.busy = true; this.panel.refresh();
+    const loginId = operation === 'login' ? Array.from(crypto.getRandomValues(new Uint8Array(24)), x => x.toString(16).padStart(2, '0')).join('') : undefined;
+    if (loginId) this.loginId = loginId;
+    const config = {loginId, relay: this.panel.relay.value, relayToken: this.panel.token.value, accountId: this.accounts.value || undefined};
+    try {
+      if (operation === 'login' && !this.snapshot) { const current = await chatGPTControl({...config, operation: 'status', signal: controller.signal}); controller.signal.throwIfAborted(); this.apply(current); config.accountId = this.accounts.value || undefined; }
+      const value = await chatGPTControl({...config, operation, consent, signal: controller.signal});
+      controller.signal.throwIfAborted(); this.apply(value);
+      if (operation === 'logout') { this.resetCatalog(); this.message.textContent = value.revoked ? 'Signed out; renewable session revoked. Registration retained for future sign-in.' : 'Signed out locally. Remote revocation was not confirmed; disconnect this app in ChatGPT settings.'; }
+      if (operation === 'login') {
+        const url = new URL(value.authorizationUrl);
+        if (url.origin !== 'https://auth.openai.com' || url.pathname !== '/api/accounts/authorize' || url.username || url.password || url.hash) throw new Error('The relay returned an invalid sign-in address.');
+        this.link.href = url.href; this.link.hidden = false;
+        if (popup && !popup.closed) popup.location.replace(url.href);
+        const initialIds = new Set(value.accounts.map(a => a.id));
+        for (let i = 0; i < 420; i++) {
+          await new Promise((resolve, reject) => { const abort = () => { clearTimeout(timer); reject(new DOMException('Cancelled', 'AbortError')); }, timer = setTimeout(() => { controller.signal.removeEventListener('abort', abort); resolve(); }, 1500); controller.signal.addEventListener('abort', abort, {once: true}); if (controller.signal.aborted) abort(); });
+          const current = await chatGPTControl({...config, operation: 'status', signal: controller.signal}); controller.signal.throwIfAborted(); this.apply(current);
+          if (current.login !== 'pending') {
+            const added = current.accounts.find(a => !initialIds.has(a.id) && a.signedIn); if (added) this.accounts.value = added.id;
+            this.resetCatalog(); break;
+          }
+        }
+      }
+    } catch (error) { popup?.close(); if (!this.disposed) this.message.textContent = error.name === 'AbortError' ? 'Sign-in cancelled.' : error.message; }
+    finally { if (this.controller === controller) this.controller = null; if (this.loginId === loginId) this.loginId = ''; this.busy = false; this.link.hidden = true; this.link.removeAttribute('href'); if (!this.disposed) this.panel.refresh(); }
+  }
+  async cancelLogin() {
+    const loginId = this.loginId || (this.snapshot?.login === 'pending' ? this.snapshot.loginId : '');
+    this.controller?.abort(); if (!loginId) return;
+    try { const value = await chatGPTControl({relay: this.panel.relay.value, relayToken: this.panel.token.value, operation: 'cancel', loginId}); if (!this.disposed) this.apply(value); }
+    catch { if (!this.disposed) this.message.textContent = 'Local wait cancelled. Could not contact relay to cancel sign-in; its pending login expires automatically.'; }
+  }
+  dispose() { this.disposed = true; if (this.busy) void this.cancelLogin(); this.controller?.abort(); }
+}
+
+return {chatGPTControl,ChatGPTConnection};
+})();
+
+/* ..\agents\review.js */
+__modules[174]=(()=>{
+const {findModule}=__modules[43];
+const {sourceEdits}=__modules[163];
+
+
+/** Build review data from the same pure edit implementation used for the undo transaction. */
+function operationReview(project, request) {
+  const changes = [], args = request.arguments;
+  if (request.name === 'vb6.code.edit') {
+    const candidate = sourceEdits(project, args.edits);
+    for (const module of project.modules) {
+      const after = findModule(candidate, module.id);
+      if (after && module.code !== after.code) changes.push({module: module.name, before: module.code, after: after.code});
+    }
+  } else if (request.name === 'vb6.module.write') {
+    const module = findModule(project, args.module);
+    if (module) changes.push({module: module.name, before: module.code, after: args.code});
+  }
+  return {request, changes};
+}
+
+return {operationReview};
+})();
+
+/* ..\agents\recovery.js */
+__modules[175]=(()=>{
 
 /** Browser-local recovery policy. Only generation requests are retried, never IDE tools. */
 function retryDelay(attempt, retryAfterMs = 0, random = Math.random) {
@@ -19195,7 +19378,7 @@ return {retryDelay,abortableDelay,AgentRunPause};
 })();
 
 /* ..\agents\context.js */
-__modules[174]=(()=>{
+__modules[176]=(()=>{
 const {userMessage}=__modules[172];
 
 const encoder = new TextEncoder();
@@ -19261,7 +19444,7 @@ return {contextBytes,estimatedInputTokens,COMPACTION_INSTRUCTIONS,publicHistory,
 })();
 
 /* ..\agents\task-tools.js */
-__modules[175]=(()=>{
+__modules[177]=(()=>{
 const {McpError, validateArguments, awaitAbort, checkAbort}=__modules[155];
 
 const text = maxLength => ({type: 'string', minLength: 1, maxLength});
@@ -19318,7 +19501,7 @@ return {taskTools};
 })();
 
 /* ..\agents\thread.js */
-__modules[176]=(()=>{
+__modules[178]=(()=>{
 
 /** Public, bounded presentation state. Opaque native provider histories never enter this model. */
 class AgentThread {
@@ -19405,7 +19588,7 @@ return {AgentThread};
 })();
 
 /* ..\agents\permissions.js */
-__modules[177]=(()=>{
+__modules[179]=(()=>{
 const {AGENT_SCOPES, agentScope}=__modules[156];
 const {McpError, awaitAbort, checkAbort}=__modules[155];
 
@@ -19565,14 +19748,14 @@ return {AGENT_PERMISSION_PROFILES,permissionEffects,isInspectionTool,normalizePe
 })();
 
 /* ..\agents\agent.js */
-__modules[178]=(()=>{
+__modules[180]=(()=>{
 const {toolCatalog, requestBody, responseCollector, appendTurn, userMessage, providerInfo, modelId, ProviderTransportError, ProviderOutputLimitError}=__modules[172];
-const {retryDelay, abortableDelay, AgentRunPause}=__modules[173];
-const {estimatedInputTokens, COMPACTION_INSTRUCTIONS, compactionPrompt, compactedCandidates}=__modules[174];
-const {taskTools}=__modules[175];
+const {retryDelay, abortableDelay, AgentRunPause}=__modules[175];
+const {estimatedInputTokens, COMPACTION_INSTRUCTIONS, compactionPrompt, compactedCandidates}=__modules[176];
+const {taskTools}=__modules[177];
 const {normalizeAgentLimits}=__modules[171];
-const {AgentThread}=__modules[176];
-const {AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[177];
+const {AgentThread}=__modules[178];
+const {AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[179];
 
 
 
@@ -19652,10 +19835,11 @@ class CodingAgent {
     if (mode === 'full' && fullAccessConfirmed !== true) throw new Error('Full IDE access requires explicit local confirmation for every run.');
     providerInfo(provider); model = modelId(model);
     const config = normalizeAgentLimits({...this.limits, ...Object.fromEntries(Object.entries({maxTurns, maxCalls, maxTokens, tokenBudget, maxContextBytes, requestTimeoutMs, maxRetries, autoCompactTokens, contextWindowTokens, compactKeepTurns, compactOutputTokens, toolResultBytes}).filter(([, value]) => value !== undefined))});
+    const outputTokenLimit = transport.capabilities?.outputTokenLimit !== false;
     const limits = {turns: config.maxTurns, calls: config.maxCalls, output: config.maxTokens, tokens: config.tokenBudget, context: config.maxContextBytes};
     // A follow-up or Continue does not silently replenish the session's allowance.
     if (this.budgetUsed + 256 > limits.tokens) throw new Error('Session token budget reached. Increase the session budget in Permissions before continuing, or start a new task.');
-    if (continuation && !compactOnly && this.truncatedOutput && Math.min(limits.output, limits.tokens - this.budgetUsed) <= this.truncatedOutput)
+    if (continuation && !compactOnly && outputTokenLimit && this.truncatedOutput && Math.min(limits.output, limits.tokens - this.budgetUsed) <= this.truncatedOutput)
       throw new Error('Increase the output tokens per request and, if needed, the session token budget before retrying this truncated turn.');
     const projectId = this.adapter.snapshot().id;
     if (this.history.length && (this.provider !== provider || this.model !== model || !this.matchesWorkspace())) throw new Error('Start a new task when changing provider, model or reloading the project.');
@@ -19678,6 +19862,7 @@ class CodingAgent {
       this.emit('permission', permissionSummary(permissions) + '. Full IDE access does not grant host shell, disk or unrestricted network access.');
       const tools = this.tools.filter(tool => this.permissionSession.decision(tool.name).action !== 'deny');
       const catalog = toolCatalog(tools);
+      if (!compactOnly) this.emit('run-start', 'Run started with freshly reviewed permissions.');
       if (!continuation && !compactOnly) { this.goal ||= prompt; this.latestPrompt = prompt; this.history.push(userMessage(provider, prompt)); this.historyBytes = sizeOf(this.history); this.emit('user', prompt); }
       else this.emit('resume', this.pendingTurn
         ? 'Continuing a validated deferred batch. It has not executed; original arguments and current permissions/revisions are checked.'
@@ -19845,7 +20030,8 @@ class CodingAgent {
     } catch (error) {
       if (error instanceof AgentRunPause && !signal?.aborted) return pause(error.kind, error.message, error.details);
       if (error instanceof ProviderOutputLimitError && ['request', 'validation'].includes(phase) && !signal?.aborted) {
-        this.truncatedOutput = attemptedOutput;
+        this.truncatedOutput = outputTokenLimit ? attemptedOutput : 0;
+        if (!outputTokenLimit) return pause('output', 'The provider stopped this incomplete reply at its output limit. No partial tools ran. This authentication mode does not support increasing a provider output cap. Review Continue for an explicit retry, compact completed context, or start a smaller task. Prior usage is retained.', {attemptedOutput, outputTokenLimit: false});
         return pause('output', 'Output token limit reached. The partial reply is not complete and no partial tools ran. Increase Output tokens per request in Permissions, then review Continue to retry the pending request. Prior usage is retained; retrying may incur charges.', {attemptedOutput});
       }
       this.pendingTurn = null;
@@ -19866,11 +20052,207 @@ class CodingAgent {
 return {AGENT_INSTRUCTIONS,CodingAgent};
 })();
 
+/* ..\agents\followups.js */
+__modules[181]=(()=>{
+
+// Original local queue inspired by Codex Queue vs Steer (reviewed 2026-10-06):
+// https://developers.openai.com/blog/mastering-codex-remote-for-engineering
+// Deliberately no automatic sending, credential storage or permission inheritance.
+class AgentFollowups {
+  constructor({maxItems = 16, maxCharacters = 200000, getWorkspace} = {}) {
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 100 || !Number.isSafeInteger(maxCharacters) || maxCharacters < 1 || maxCharacters > 1000000) throw new Error('Invalid follow-up queue limits.');
+    if (getWorkspace !== undefined && typeof getWorkspace !== 'function') throw new Error('Invalid follow-up workspace reader.');
+    this.getWorkspace = getWorkspace; this.maxItems = maxItems; this.maxCharacters = maxCharacters; this.items = []; this.revision = 0; this.sequence = 0; this.selectedId = '';
+  }
+  get characters() { return this.items.reduce((sum, item) => sum + item.text.length, 0); }
+  validate(text, replaced = 0) {
+    if (typeof text !== 'string' || !text.trim() || text.length > 100000) throw new Error('A queued message must contain 1–100,000 characters.');
+    if (this.characters - replaced + text.length > this.maxCharacters) throw new Error('Follow-up queue character limit reached. Remove or shorten a message.');
+  }
+  add(text) {
+    this.validate(text);
+    if (this.items.length >= this.maxItems) throw new Error('Follow-up queue is full. Send or remove a message first.');
+    const workspace = this.getWorkspace?.();
+    const context = workspace ? Object.freeze({projectId: workspace.projectId, epoch: workspace.epoch}) : null;
+    const item = Object.freeze({context, id: 'followup-' + (++this.sequence), text, created: new Date().toISOString(), version: 1});
+    this.items.push(item); this.revision++; return item;
+  }
+  get(id) { const item = this.items.find(item => item.id === id); if (!item) throw new Error('Queued message no longer exists.'); return item; }
+  edit(id, text, version) {
+    const item = this.get(id);
+    if (version !== item.version) throw new Error('Queued message changed. Review it again.');
+    this.validate(text, item.text.length);
+    const next = Object.freeze({...item, text, version: item.version + 1});
+    this.items[this.items.indexOf(item)] = next; this.revision++; return next;
+  }
+  move(id, direction) {
+    if (direction !== -1 && direction !== 1) throw new Error('Choose Move up or Move down.');
+    const index = this.items.indexOf(this.get(id)), next = index + direction;
+    if (next >= 0 && next < this.items.length) { [this.items[index], this.items[next]] = [this.items[next], this.items[index]]; this.revision++; }
+  }
+  remove(id, version) {
+    const item = this.get(id);
+    if (version !== undefined && item.version !== version) throw new Error('Queued message changed. Review it again.');
+    this.items.splice(this.items.indexOf(item), 1); this.revision++;
+  }
+  inCurrentWorkspace(item) {
+    const current = this.getWorkspace?.();
+    return !item.context || !!current && current.projectId === item.context.projectId && current.epoch === item.context.epoch;
+  }
+  matches(item) { return this.items.some(current => current.id === item.id && current.version === item.version && current.text === item.text); }
+  list() { return this.items.slice(); }
+  clear() { this.items = []; this.selectedId = ''; this.revision++; }
+}
+
+return {AgentFollowups};
+})();
+
+/* ..\agents\changes.js */
+__modules[182]=(()=>{
+
+// Local project review, inspired by the Codex review pane (reviewed 2026-10-06):
+// https://developers.openai.com/codex/app/review/
+// This is not Git staging. Snapshots never enter provider context automatically.
+const LIMITS = Object.freeze({documents: 2000, characters: 4000000, perDocument: 500000});
+const extension = kind => ({form: 'frm', class: 'cls', module: 'bas'})[kind] || 'txt';
+const identity = (project, epoch) => ({projectId: project.id, projectName: project.name, epoch});
+
+function captureAgentReview(project, epoch, limits = LIMITS) {
+  for (const key of Object.keys(LIMITS)) if (!Number.isSafeInteger(limits[key]) || limits[key] < 1 || limits[key] > LIMITS[key]) throw new Error('Invalid review limits.');
+  const documents = [], keys = new Set(); let characters = 0, omittedDocuments = 0;
+  function add(module, area, text) {
+    if (documents.length >= limits.documents) { omittedDocuments++; return; }
+    const key = area + ':' + module.id;
+    if (keys.has(key)) throw new Error('Duplicate module identity in change review.');
+    keys.add(key);
+    const omitted = text.length > limits.perDocument || characters + text.length > limits.characters;
+    if (!omitted) characters += text.length;
+    documents.push(Object.freeze({key, moduleId: module.id, name: module.name, kind: module.kind, area,
+      path: module.name + '.' + extension(module.kind) + (area === 'designer' ? '.designer.json' : ''),
+      text: omitted ? null : text, omitted}));
+  }
+  for (const module of project.modules) {
+    add(module, 'source', module.code);
+    if (module.form) add(module, 'designer', JSON.stringify(module.form, null, 2));
+  }
+  return Object.freeze({...identity(project, epoch), created: new Date().toISOString(), characters, omittedDocuments, documents: Object.freeze(documents)});
+}
+function compareAgentReview(before, after) {
+  const old = new Map(before.documents.map(doc => [doc.key, doc])), now = new Map(after.documents.map(doc => [doc.key, doc]));
+  const sameWorkspace = before.projectId === after.projectId && before.epoch === after.epoch;
+  const changes = [];
+  for (const key of new Set([...old.keys(), ...now.keys()])) {
+    const a = old.get(key), b = now.get(key), doc = b || a;
+    // A capped inventory cannot prove that an unlisted document was deleted/added.
+    const unknown = !!a?.omitted || !!b?.omitted || (!a && before.omittedDocuments > 0) || (!b && after.omittedDocuments > 0);
+    if (!unknown && a && b && a.text === b.text && a.name === b.name && a.kind === b.kind) continue;
+    const status = unknown ? 'not-compared' : !a ? 'added' : !b ? 'removed' : a.name !== b.name || a.kind !== b.kind ? 'renamed' : 'modified';
+    changes.push(Object.freeze({key, path: doc.path, moduleId: doc.moduleId, area: doc.area, before: a || null, after: b || null, status,
+      canRestore: sameWorkspace && !unknown && !!a && !!b && doc.area === 'source' && a.name === b.name && a.kind === b.kind && a.text !== b.text}));
+  }
+  return Object.freeze({before, after, sameWorkspace, changes: Object.freeze(changes)});
+}
+class AgentChangeReview {
+  constructor() { this.first = null; this.last = null; this.thread = null; this.revision = 0; this.feedbackText = ''; this.feedbackKey = ''; this.feedbackTarget = null; this.view = {}; }
+  begin(project, epoch, thread) {
+    const snapshot = captureAgentReview(project, epoch);
+    if (this.thread !== thread) { this.first = null; this.last = null; this.thread = thread; this.feedbackText = ''; this.feedbackKey = ''; this.feedbackTarget = null; this.view = {}; }
+    if (!this.first) this.first = snapshot;
+    this.last = snapshot; this.revision++;
+  }
+  compare(project, epoch, scope = 'task') {
+    if (!['task', 'run'].includes(scope)) throw new Error('Choose task or last-run changes.');
+    const before = scope === 'task' ? this.first : this.last;
+    return before ? compareAgentReview(before, captureAgentReview(project, epoch)) : null;
+  }
+  clear() { this.first = this.last = this.thread = null; this.feedbackText = ''; this.feedbackKey = ''; this.feedbackTarget = null; this.view = {}; this.revision++; }
+}
+
+/** Pure source-only restoration. Caller must check busy state/revision after local consent. */
+function restoreReviewedSource(comparison, key, project, epoch) {
+  if (!comparison?.sameWorkspace || project.id !== comparison.after.projectId || epoch !== comparison.after.epoch) throw new Error('Project was replaced or reloaded. Refresh the review; old checkpoints cannot restore this workspace.');
+  const change = comparison.changes.find(change => change.key === key);
+  if (!change?.canRestore) throw new Error('Only complete source changes in an existing, unrenamed module can be restored.');
+  const module = project.modules.find(module => module.id === change.moduleId);
+  if (!module || module.name !== change.after.name || module.kind !== change.after.kind || module.code !== change.after.text) throw new Error('Source changed after review. Refresh and review the current diff first.');
+  const candidate = structuredClone(project);
+  candidate.modules.find(module => module.id === change.moduleId).code = change.before.text;
+  return candidate;
+}
+
+// Bounded line diff. Exact source line endings are retained (including missing final LF).
+// LCS is restricted to the changed middle; large middles use an exact replace hunk.
+function agentLineDiff(before, after, {maxCells = 250000, maxLines = 20000} = {}) {
+  if (typeof before !== 'string' || typeof after !== 'string') throw new Error('A complete text comparison is required.');
+  if (!Number.isSafeInteger(maxCells) || maxCells < 1 || maxCells > 1000000 || !Number.isSafeInteger(maxLines) || maxLines < 1 || maxLines > 100000) throw new Error('Invalid diff limits.');
+  const split = text => text.match(/[^\n]*\n|[^\n]+$/g) || [];
+  // Stop before allocating per-line objects for extremely newline-dense files.
+  const tooManyLines = text => { let count = 0; for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10 && ++count >= maxLines) return true; return false; };
+  if (tooManyLines(before) || tooManyLines(after)) return {rows: [], coarse: true, oversized: true, added: null, removed: null};
+  const a = split(before), b = split(after); let prefix = 0, suffix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+  while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix++;
+  const n = a.length - prefix - suffix, m = b.length - prefix - suffix, coarse = (n + 1) * (m + 1) > maxCells || a.length + b.length > maxLines;
+  const rows = []; let oldLine = 1, newLine = 1;
+  const push = (kind, text) => rows.push({kind, text, oldLine: kind === '+' ? null : oldLine++, newLine: kind === '-' ? null : newLine++});
+  for (let i = 0; i < prefix; i++) push(' ', a[i]);
+  if (coarse) { for (let i = 0; i < n; i++) push('-', a[prefix + i]); for (let j = 0; j < m; j++) push('+', b[prefix + j]); }
+  else {
+    const table = new Uint32Array((n + 1) * (m + 1)), width = m + 1;
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+      table[i * width + j] = a[prefix + i] === b[prefix + j] ? 1 + table[(i + 1) * width + j + 1] : Math.max(table[(i + 1) * width + j], table[i * width + j + 1]);
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && a[prefix + i] === b[prefix + j]) { push(' ', a[prefix + i]); i++; j++; }
+      else if (i < n && (j === m || table[(i + 1) * width + j] >= table[i * width + j + 1])) push('-', a[prefix + i++]);
+      else push('+', b[prefix + j++]);
+    }
+  }
+  for (let i = a.length - suffix; i < a.length; i++) push(' ', a[i]);
+  return {rows, coarse, added: rows.filter(row => row.kind === '+').length, removed: rows.filter(row => row.kind === '-').length};
+}
+function agentReviewPatch(comparison) {
+  if (!comparison) throw new Error('Run a task before exporting changes.');
+  const output = ['# VB6 local source/designer review; NOT a Git index or agent-only attribution.', '# Includes other/manual project edits since the selected checkpoint.'];
+  for (const change of comparison.changes) {
+    if (change.status === 'not-compared') { output.push('# OMITTED: ' + JSON.stringify(change.path)); continue; }
+    const a = change.before, b = change.after, diff = agentLineDiff(a?.text || '', b?.text || '');
+    if (a?.path !== b?.path) output.push('# Document identity: ' + JSON.stringify(a?.path || null) + ' -> ' + JSON.stringify(b?.path || null));
+    output.push('--- ' + (a ? JSON.stringify('before/' + a.path) : '/dev/null'), '+++ ' + (b ? JSON.stringify('after/' + b.path) : '/dev/null'));
+    if (diff.oversized) {
+      // Exact full replacement export, without allocating hundreds of thousands of rows.
+      const lines = text => { let n = text.endsWith('\n') || !text ? 0 : 1; for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++; return n; };
+      const ac = lines(a?.text || ''), bc = lines(b?.text || '');
+      output.push('@@ -' + (ac ? 1 : 0) + ',' + ac + ' +' + (bc ? 1 : 0) + ',' + bc + ' @@');
+      for (const [mark, text] of [['-', a?.text || ''], ['+', b?.text || '']]) if (text) {
+        const body = text.endsWith('\n') ? text.slice(0, -1) : text;
+        output.push(mark + body.replace(/\n/g, '\n' + mark));
+        if (!text.endsWith('\n')) output.push('\\ No newline at end of file');
+      }
+      continue;
+    }
+    const oldCount = diff.rows.filter(row => row.kind !== '+').length, newCount = diff.rows.filter(row => row.kind !== '-').length;
+    output.push('@@ -' + (oldCount ? 1 : 0) + ',' + oldCount + ' +' + (newCount ? 1 : 0) + ',' + newCount + ' @@');
+    for (const row of diff.rows) {
+      output.push(row.kind + (row.text.endsWith('\n') ? row.text.slice(0, -1) : row.text));
+      if (!row.text.endsWith('\n')) output.push('\\ No newline at end of file');
+    }
+  }
+  return output.join('\n') + '\n';
+}
+
+return {captureAgentReview,compareAgentReview,AgentChangeReview,restoreReviewedSource,agentLineDiff,agentReviewPatch};
+})();
+
 /* ..\agents\conversations.js */
-__modules[179]=(()=>{
-const {CodingAgent}=__modules[178];
+__modules[183]=(()=>{
+const {CodingAgent}=__modules[180];
+const {AgentFollowups}=__modules[181];
+const {AgentChangeReview}=__modules[182];
 const {normalizeAgentLimits}=__modules[171];
-const {normalizeAgentPermissions}=__modules[177];
+const {normalizeAgentPermissions}=__modules[179];
+
+
 
 
 
@@ -19881,11 +20263,11 @@ const titleOf = value => {
 };
 /** Bounded, memory-only tasks. Native histories and grants never become project data. */
 class AgentConversations {
-  constructor(adapter, {onEvent = () => {}, askUser, maxTasks = 8, defaultLimits, permissionConstraints = {}} = {}) {
+  constructor(adapter, {onEvent = () => {}, askUser, maxTasks = 8, defaultLimits, permissionConstraints = {}, getReviewProject} = {}) {
     if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 16) throw new Error('Invalid task limit.');
     this.defaultLimits = normalizeAgentLimits(defaultLimits);
     this.permissionConstraints = permissionConstraints;
-    this.adapter = adapter; this.onEvent = onEvent; this.askUser = askUser; this.maxTasks = maxTasks;
+    this.getReviewProject = getReviewProject; this.adapter = adapter; this.onEvent = onEvent; this.askUser = askUser; this.maxTasks = maxTasks;
     this.tasks = new Map(); this.activeId = ''; this.create();
   }
   get active() { return this.tasks.get(this.activeId); }
@@ -19897,9 +20279,14 @@ class AgentConversations {
     this.idle(); title = titleOf(title);
     if (this.tasks.size >= this.maxTasks) throw new Error('Task limit reached. Delete an old task before starting another.');
     const id = 'agent-task-' + (++nextId), created = new Date().toISOString();
-    const task = {id, title, created, updated: created, draft: '', limits: {...this.defaultLimits}, permissions: {mode: 'review', scopes: [], scopeRules: {}, toolRules: {}, approvalPolicy: 'on-request', permissionMinutes: 10}, agent: null};
+    const task = {id, title, created, updated: created, draft: '', followups: new AgentFollowups({getWorkspace: () => ({projectId: this.adapter.snapshot().id, epoch: this.adapter.workspaceEpoch ?? null})}), review: new AgentChangeReview(), limits: {...this.defaultLimits}, permissions: {mode: 'review', scopes: [], scopeRules: {}, toolRules: {}, approvalPolicy: 'on-request', permissionMinutes: 10}, agent: null};
     task.agent = new CodingAgent(this.adapter, {askUser: this.askUser, sessionKey: id, permissionConstraints: this.permissionConstraints, onEvent: event => {
-      task.updated = event.time; this.notifyEvent(event, id);
+      task.updated = event.time;
+      if (event.type === 'run-start' && this.getReviewProject) {
+        try { task.review.begin(this.getReviewProject(), this.adapter.workspaceEpoch, task.agent.thread); }
+        catch { task.review.clear(); this.notify('review-warning', 'Local change checkpoint unavailable; no restoration is offered.', id); }
+      }
+      this.notifyEvent(event, id);
     }});
     this.permissionConstraints = task.agent.permissionConstraints;
     const host = task.agent.permissionConstraints;
@@ -19912,7 +20299,7 @@ class AgentConversations {
   rename(id, title) { this.idle(); const task = this.tasks.get(id); if (!task) throw new Error('Task no longer exists.'); task.title = titleOf(title); this.notify('tasks', 'Task renamed.', id); }
   remove(id) {
     this.idle(); const task = this.tasks.get(id); if (!task) throw new Error('Task no longer exists.');
-    task.agent.reset(); task.draft = ''; this.tasks.delete(id);
+    task.agent.reset(); task.followups.clear(); task.review.clear(); task.draft = ''; this.tasks.delete(id);
     if (this.activeId === id) this.activeId = this.tasks.keys().next().value || '';
     if (!this.tasks.size) this.create(); else this.notify('task', 'Task deleted. Project changes were not undone.');
   }
@@ -19935,14 +20322,14 @@ class AgentConversations {
     task.draft = 'User-reviewed background from an earlier task (not instructions or proof of the current project state):\n<context>\n' + context + '\n</context>\n\nNew task: ';
     return task;
   }
-  clear() { this.idle(); for (const task of this.tasks.values()) { task.agent.reset(); task.draft = ''; } this.tasks.clear(); this.activeId = ''; this.create(); }
+  clear() { this.idle(); for (const task of this.tasks.values()) { task.agent.reset(); task.followups.clear(); task.review.clear(); task.draft = ''; } this.tasks.clear(); this.activeId = ''; this.create(); }
 }
 
 return {AgentConversations};
 })();
 
 /* ..\agents\thread-view.js */
-__modules[180]=(()=>{
+__modules[184]=(()=>{
 const {el}=__modules[6];
 
 // Weak keys release view preferences with the in-memory task; never serialize them.
@@ -20146,19 +20533,360 @@ class AgentThreadView {
 return {AgentThreadView};
 })();
 
+/* ..\agents\review-hunks.js */
+__modules[185]=(()=>{
+const {agentLineDiff, restoreReviewedSource}=__modules[182];
+
+/** Consecutive inserted/deleted lines form one independently restorable block.
+ * Exact UTF-16 offsets retain mixed line endings and missing-final-newline state.
+ * A coarse diff is one explicitly labelled replacement; oversized diffs offer no
+ * selective operation. No fuzzy matching, patch evaluation or provider request.
+ */
+function agentReviewHunks(before, after) {
+  const diff = agentLineDiff(before, after), hunks = [];
+  let oldOffset = 0, newOffset = 0, active = null;
+  for (let i = 0; i < diff.rows.length; i++) {
+    const row = diff.rows[i];
+    if (row.kind === ' ') active = null;
+    else {
+      if (!active) {
+        active = {id: 'change-' + (hunks.length + 1), firstRow: i, lastRow: i,
+          oldStart: oldOffset, newStart: newOffset, oldEnd: oldOffset, newEnd: newOffset,
+          oldText: '', newText: '', added: 0, removed: 0};
+        hunks.push(active);
+      }
+      active.lastRow = i;
+      if (row.kind === '-') { active.oldText += row.text; active.removed++; }
+      else { active.newText += row.text; active.added++; }
+      active.oldEnd = oldOffset + (row.kind === '-' ? row.text.length : 0);
+      active.newEnd = newOffset + (row.kind === '+' ? row.text.length : 0);
+    }
+    if (row.kind !== '+') oldOffset += row.text.length;
+    if (row.kind !== '-') newOffset += row.text.length;
+  }
+  return {...diff, hunks: Object.freeze(hunks.map(hunk => Object.freeze(hunk)))};
+}
+
+/** Caller retains the same consent, idle/design and revision checks as full restore.
+ * Recompute the canonical block from the captured text; accept an identifier, not
+ * caller-provided offsets/content. The entire current source must still match.
+ */
+function restoreReviewedHunk(comparison, key, hunkId, project, epoch) {
+  // Reuse the complete-source guard; the returned clone preserves unrelated fields.
+  const candidate = restoreReviewedSource(comparison, key, project, epoch);
+  const change = comparison.changes.find(item => item.key === key);
+  const {hunks} = agentReviewHunks(change.before.text, change.after.text);
+  const hunk = hunks.find(item => item.id === hunkId);
+  if (!hunk) throw new Error('Select a complete change block from the current review.');
+  candidate.modules.find(module => module.id === change.moduleId).code =
+    change.after.text.slice(0, hunk.newStart) + hunk.oldText + change.after.text.slice(hunk.newEnd);
+  return candidate;
+}
+
+return {agentReviewHunks,restoreReviewedHunk};
+})();
+
+/* ..\agents\workbench-view.js */
+__modules[186]=(()=>{
+const {el, download, clone}=__modules[6];
+const {agentReviewPatch, restoreReviewedSource}=__modules[182];
+const {agentReviewHunks, restoreReviewedHunk}=__modules[185];
+
+
+
+const button = (text, run) => el('button', {type: 'button', onclick: run}, text);
+const select = (label, values) => el('select', {'aria-label': label}, ...values.map(([value, text]) => el('option', {value}, text)));
+const field = (label, node) => el('label', {class: 'agent-field'}, el('span', {}, label), node);
+
+/** Trusted local UI only: nothing here is a model tool or an automatic provider request. */
+class AgentWorkbenchView {
+  constructor(panel, confirm) {
+    this.panel = panel; this.confirm = confirm; this.limit = 500;
+    // Cheap invalidation only. Do not capture/serialize project state on each edit
+    // or token. The existing adapter coalesces notifications and owns revisions.
+    this.unlisten = panel.api.adapter.onChange(() => this.update());
+  }
+  saveReviewState() {
+    if (!this.reviewOwner || !this.files) return;
+    const view = this.reviewOwner.review.view;
+    Object.assign(view, {scope: this.scope.value, format: this.format.value, key: this.files.value,
+      limit: this.limit, hunkId: this.hunkId, beforeText: this.selected()?.before?.text, afterText: this.selected()?.after?.text});
+    if (!this.pendingScroll && this.diff.getClientRects().length && this.diff.clientHeight) view.scroll = this.diff.scrollTop;
+  }
+  staleReview() {
+    const adapter = this.panel.api.adapter;
+    return !!this.comparison && (this.reviewOwner !== this.task || !this.comparison.sameWorkspace ||
+      this.comparison.after.epoch !== adapter.workspaceEpoch || this.comparison.after.projectId !== this.panel.ide.project.id ||
+      this.reviewRevision !== adapter.revision || this.checkpointRevision !== this.task.review.revision);
+  }
+  dispose() { this.saveReviewState(); this.unlisten?.(); }
+
+  get task() { return this.panel.api.conversations.active; }
+  message(text) { this.panel.status.textContent = text; }
+  act(fn) { try { return fn(); } catch (error) { this.message(error.message); } }
+  queuePage() {
+    this.queueList = el('select', {size: 6, 'aria-label': 'Queued agent messages'});
+    this.queuePreview = el('pre', {class: 'agent-log', tabindex: 0, 'aria-label': 'Queued message preview'});
+    this.queueList.onchange = () => { this.task.followups.selectedId = this.queueList.value; this.queueSelection(); };
+    this.queueAdd = button('Queue draft', () => this.queueDraft());
+    this.queueSend = button('Send selected message…', () => this.panel.start(false, false, this.queueList.value));
+    this.queueEdit = button('Edit selected message…', () => this.editQueued());
+    this.queueRemove = button('Remove selected message', () => this.act(() => { this.task.followups.remove(this.queueList.value); this.updateQueue(true); }));
+    this.queueUp = button('Move up', () => this.act(() => { this.task.followups.move(this.queueList.value, -1); this.updateQueue(true); }));
+    this.queueDown = button('Move down', () => this.act(() => { this.task.followups.move(this.queueList.value, 1); this.updateQueue(true); }));
+    this.queueStatus = el('p', {role: 'status'});
+    this.queueRoot = el('div', {class: 'agent-page agent-queue'},
+      el('p', {}, 'Prepare follow-ups while the agent runs. The queue is local and memory-only; nothing sends automatically or changes the active request. Send selected message opens a fresh provider/budget/permission confirmation. Full IDE access must be acknowledged again.'),
+      this.queueStatus, this.queueList, el('div', {class: 'agent-actions'}, this.queueAdd, this.queueSend, this.queueEdit, this.queueRemove, this.queueUp, this.queueDown), this.queuePreview);
+    return this.queueRoot;
+  }
+  queueDraft() {
+    if (this.panel.pending) return;
+    this.act(() => {
+      const item = this.task.followups.add(this.panel.prompt.value);
+      this.panel.prompt.value = ''; this.task.draft = ''; this.updateQueue(true); this.queueList.value = item.id; this.task.followups.selectedId = item.id; this.queueSelection();
+      this.message('Message queued locally. It will not send until you select it and confirm a new run.');
+    });
+  }
+  queueSelection() {
+    const item = this.task.followups.list().find(item => item.id === this.queueList.value);
+    const preview = item ? item.text.slice(0, 20000) + (item.text.length > 20000 ? '\n[Preview shortened; Edit displays the complete queued message.]' : '') : 'No queued message selected.';
+    if (this.queuePreview.textContent !== preview) this.queuePreview.textContent = preview;
+    const disabled = !!this.panel.pending || !item;
+    for (const node of [this.queueEdit, this.queueRemove, this.queueUp, this.queueDown]) node.disabled = disabled;
+    const agent = this.task.agent;
+    this.queueSend.disabled = disabled || agent.busy || !agent.matchesWorkspace() || item && !this.task.followups.inCurrentWorkspace(item) || !['new', 'completed'].includes(agent.state);
+    const index = this.task.followups.list().indexOf(item);
+    this.queueUp.disabled ||= index < 1;
+    this.queueDown.disabled ||= index >= this.task.followups.list().length - 1;
+  }
+  updateQueue(force = false) {
+    if (!this.queueList) return;
+    const queue = this.task.followups, stamp = this.task.id + ':' + queue.revision;
+    if (force || this.queueStamp !== stamp) {
+      const selected = queue.selectedId || '';
+      this.queueStamp = stamp;
+      this.queueList.replaceChildren(...queue.list().map((item, i) => el('option', {value: item.id}, (i + 1) + '. ' + item.text.replace(/\s+/g, ' ').slice(0, 140))));
+      if (queue.list().some(item => item.id === selected)) this.queueList.value = selected;
+      else this.queueList.selectedIndex = queue.items.length ? 0 : -1;
+      queue.selectedId = this.queueList.value;
+    }
+    this.queueStatus.textContent = queue.items.length + ' / ' + queue.maxItems + ' queued messages; ' + queue.characters.toLocaleString('en-US') + ' / ' + queue.maxCharacters.toLocaleString('en-US') + ' characters. Paused/failed tasks must be resumed or replaced before sending a follow-up.';
+    this.queueAdd.disabled = !!this.panel.pending;
+    this.panel.queueDraftButton.disabled = !!this.panel.pending;
+    this.panel.queueBadge.textContent = 'Queued: ' + queue.items.length;
+    this.queueSelection();
+  }
+  async editQueued() {
+    if (this.panel.pending) return;
+    const task = this.task, item = task.followups.list().find(item => item.id === this.queueList.value);
+    if (!item) return;
+    // Queue editing is safe while generation is active; it cannot change that request.
+    const controller = new AbortController(); this.panel.pending = controller; this.panel.refresh();
+    const text = el('textarea', {class: 'agent-handoff', 'aria-label': 'Edit queued message', maxLength: 100000}, item.text);
+    try {
+      const allowed = await this.confirm('AI Coding Agent — Edit Queued Message', el('div', {class: 'agent-review'}, el('p', {}, 'Edit this local queued message. Saving does not send it.'), text), controller.signal, 'Save Message');
+      if (allowed && !controller.signal.aborted && task === this.task) task.followups.edit(item.id, text.value, item.version);
+    } catch (error) { this.message(error.message); }
+    finally { if (this.panel.pending === controller) this.panel.pending = null; this.panel.refresh(); }
+  }
+  changesPage() {
+    this.scope = select('Review change scope', [['task', 'Since this task started'], ['run', 'Since the latest run started']]);
+    this.scope.onchange = () => { this.saveReviewState(); this.refreshChanges(); };
+    this.files = el('select', {size: 6, 'aria-label': 'Changed project documents'}); this.files.onchange = () => { this.limit = 500; this.hunkId = ''; this.showDiff(); this.saveReviewState(); };
+    this.summary = el('p', {role: 'status', 'aria-label': 'Change review summary'});
+    this.stale = el('p', {role: 'status', 'aria-label': 'Change review freshness', hidden: true});
+    this.diffInfo = el('p'); this.diff = el('div', {class: 'agent-review-lines', tabindex: 0, 'aria-label': 'Project change diff'});
+    this.format = select('Change diff layout', [['unified', 'Unified diff'], ['split', 'Before / After']]); this.format.onchange = () => { this.showDiff(); this.saveReviewState(); };
+    this.more = button('Show more diff lines', () => { this.limit += 500; this.showDiff(); this.saveReviewState(); });
+    this.previousChange = button('Previous change', () => this.selectHunk(-1));
+    this.nextChange = button('Next change', () => this.selectHunk(1));
+    this.hunkStatus = el('span', {'aria-label': 'Selected change block'});
+    this.restoreHunk = button('Restore selected change…', () => this.restoreSource(this.hunkId));
+    this.diff.onscroll = () => this.saveReviewState();
+    this.open = button('Open document', () => this.act(() => {
+      const change = this.selected(), module = this.panel.ide.project.modules.find(module => module.id === change?.moduleId);
+      if (!module || !this.comparison.sameWorkspace) throw new Error('Document is not in the current workspace.');
+      this.panel.ide.openDocument(module.id, change.area === 'designer' ? 'form' : 'code', (!this.staleReview() && this.target?.newLine) || 1);
+    }));
+    this.restore = button('Restore source…', () => this.restoreSource());
+    this.savePatch = button('Save review patch…', () => this.act(() => download('agent-project-review.patch', agentReviewPatch(this.comparison), 'text/plain')));
+    this.feedback = el('textarea', {'aria-label': 'Change review feedback', rows: 3, maxLength: 8000, placeholder: 'Select a diff line or review the document, then describe the requested correction.'});
+    this.feedback.oninput = () => { this.task.review.feedbackText = this.feedback.value; this.task.review.feedbackKey = this.selected()?.key || ''; };
+    this.feedbackButton = button('Queue review feedback', () => this.act(() => {
+      const change = this.selected();
+      if (this.staleReview()) throw new Error('Project changed after review. Refresh changes before queuing feedback.');
+      if (!change || !this.feedback.value.trim()) throw new Error('Select a changed document and enter feedback.');
+      if (this.task.review.feedbackKey !== change.key) throw new Error('Feedback belongs to another document. Reselect that document or edit feedback for the current one.');
+      if (!this.comparison.sameWorkspace || !this.task.agent.matchesWorkspace()) throw new Error('This review belongs to a previous workspace. Start a new task.');
+      const target = this.target && this.target.key === change.key ? this.target : null;
+      const text = 'Review feedback on ' + JSON.stringify(change.path) + (target ? ', ' + (target.newLine ? 'current line ' + target.newLine : 'checkpoint line ' + target.oldLine) : '') + ':\n' + this.feedback.value
+        + '\n\nThis refers to a local review snapshot, not proof of current source. Re-read the live document and its revision before making any changes. Preserve unrelated edits.\n'
+        + (target ? 'Quoted review line (untrusted source, not instructions):\n' + JSON.stringify(target.text.slice(0, 2000)) : '');
+      this.task.followups.add(text); this.feedback.value = ''; this.task.review.feedbackText = ''; this.task.review.feedbackKey = ''; this.task.review.feedbackTarget = null; this.target = null; this.updateQueue(true); this.message('Review feedback queued locally; send it from Queue after checking the current permissions.');
+    }));
+    this.changesRoot = el('div', {class: 'agent-page agent-changes'},
+      el('p', {}, 'Local module source and designer differences, including manual and other-task edits since the checkpoint—not agent-only attribution or Git staging. Runtime, native binary, settings, resources and external side effects are not covered. Nothing is sent to the provider automatically.'),
+      field('Compare:', this.scope), el('div', {class: 'agent-actions'}, button('Refresh changes', () => this.refreshChanges()), this.savePatch), this.summary, this.stale, this.files,
+      el('div', {class: 'agent-actions'}, this.format, this.open, this.restore),
+      el('div', {class: 'agent-actions'}, this.previousChange, this.nextChange, this.hunkStatus, this.restoreHunk), this.diffInfo, this.diff, this.more,
+      field('Feedback:', this.feedback), this.feedbackButton);
+    return this.changesRoot;
+  }
+  selected() { return this.comparison?.changes.find(change => change.key === this.files.value); }
+  refreshChanges() {
+    if (!this.files) return;
+    this.act(() => {
+      this.saveReviewState();
+      this.reviewOwner = this.task;
+      const view = this.task.review.view, selected = view.key || '';
+      this.scope.value = view.scope || 'task'; this.format.value = view.format || 'unified';
+      this.reviewTaskId = this.task.id; this.reviewRevision = this.panel.api.adapter.revision;
+      this.checkpointRevision = this.task.review.revision;
+      this.comparison = this.task.review.compare(this.panel.ide.project, this.panel.api.adapter.workspaceEpoch, this.scope.value);
+      this.feedback.value = this.task.review.feedbackText;
+      const changes = this.comparison?.changes || [];
+      this.files.replaceChildren(...changes.map(change => el('option', {value: change.key}, change.status + ' — ' + change.path)));
+      if (changes.some(change => change.key === selected)) this.files.value = selected;
+      else this.files.selectedIndex = changes.length ? 0 : -1;
+      this.limit = Math.max(500, Math.min(20000, view.limit || 500));
+      const selectedChange = this.selected();
+      this.hunkId = view.beforeText === selectedChange?.before?.text && view.afterText === selectedChange?.after?.text ? view.hunkId || '' : '';
+      const omitted = this.comparison ? this.comparison.before.omittedDocuments + this.comparison.after.omittedDocuments : 0;
+      this.summary.textContent = !this.comparison ? 'No checkpoint yet. A confirmed run captures a local review checkpoint before sending the request.'
+        : (!this.comparison.sameWorkspace ? 'Previous workspace — restoration and feedback disabled. ' : '') + changes.length + ' changed/not-compared documents. Checkpoint: ' + this.comparison.before.created + '. Review revision: ' + this.reviewRevision
+          + (omitted ? '. Document inventory capped: ' + omitted + ' omitted entries; absence does not prove deletion.' : '');
+      this.showDiff();
+      // A hidden newly reopened panel cannot accept scrollTop yet. Keep the saved
+      // position until tab entry, rather than overwriting it with the hidden zero.
+      this.pendingScroll = !this.diff.getClientRects().length || !this.diff.clientHeight;
+      if (!this.pendingScroll) this.diff.scrollTop = view.scroll || 0;
+      this.update();
+    });
+  }
+  showDiff() {
+    const change = this.selected(), saved = this.task.review.feedbackTarget;
+    this.target = saved && change && saved.key === change.key && saved.before === change.before?.text && saved.after === change.after?.text &&
+      saved.epoch === this.comparison.after.epoch ? saved.row : null;
+    // Do not silently move line-specific feedback onto changed text after refresh.
+    if (saved && saved.key === change?.key && !this.target) {
+      this.task.review.feedbackTarget = null;
+      this.message('Review text changed. Feedback draft retained; select a current line to target it again.');
+    }
+    this.diff.replaceChildren(); this.more.hidden = true; this.currentHunks = []; this.hunkStatus.textContent = 'No change block selected';
+    this.previousChange.disabled = this.nextChange.disabled = this.restoreHunk.disabled = true;
+    this.savePatch.disabled = !this.comparison;
+    const busy = this.panel.api.conversations.busy || !!this.panel.pending;
+    this.restore.disabled = busy || this.panel.ide.runState !== 'design' || !change?.canRestore || this.staleReview();
+    this.open.disabled = !change?.after || !this.comparison.sameWorkspace || this.staleReview();
+    this.feedbackButton.disabled = !!this.panel.pending || !change || !this.comparison.sameWorkspace || this.staleReview();
+    if (!change) { this.diffInfo.textContent = this.comparison ? 'No source/designer differences in the captured range.' : 'Start a task to capture a checkpoint.'; return; }
+    if (change.status === 'not-compared') { this.diffInfo.textContent = 'Not compared: this document or its inventory exceeded the local review limits. No truncated text can be restored.'; return; }
+    const before = change.before?.text || '', after = change.after?.text || '';
+    if (!this.diffCache || this.diffCache.before !== before || this.diffCache.after !== after) this.diffCache = {before, after, value: agentReviewHunks(before, after)};
+    const diff = this.diffCache.value; this.currentHunks = diff.hunks;
+    if (!diff.hunks.some(hunk => hunk.id === this.hunkId)) this.hunkId = diff.hunks[0]?.id || '';
+    this.updateHunkControls();
+    this.diffInfo.textContent = change.path + ': +' + diff.added + ' / -' + diff.removed + ' lines' + (diff.coarse ? ' (large changed range represented as a replacement).' : '.') + ' Select a line to target feedback. Restore only supports existing, unrenamed module source, not designer structure.';
+    if (this.format.value === 'split' || diff.oversized) {
+      if (diff.oversized) this.diffInfo.textContent = change.path + ': line count exceeds the interactive diff limit. Bounded Before/After preview only; Save review patch exports the exact full replacement.';
+      this.diff.append(el('div', {class: 'agent-diff'}, ...[['Before', before], ['After', after]].map(([title, text]) => el('div', {}, el('strong', {}, title), el('pre', {class: 'agent-log', tabindex: 0}, text.slice(0, 20000) + (text.length > 20000 ? '\n[Preview shortened. Save review patch for complete captured text.]' : '')))))); return;
+    }
+    // Display changed regions with three context lines; bound DOM work independently of source.
+    const indices = new Set();
+    diff.rows.forEach((row, i) => { if (row.kind !== ' ') for (let j = Math.max(0, i - 3); j <= Math.min(diff.rows.length - 1, i + 3); j++) indices.add(j); });
+    const visible = [...indices].sort((a, b) => a - b); let previous = -2;
+    for (const i of visible.slice(0, this.limit)) {
+      const row = diff.rows[i];
+      if (i !== previous + 1) this.diff.append(el('div', {class: 'agent-diff-gap'}, '…'));
+      const line = button((row.oldLine ?? '') + '\t' + (row.newLine ?? '') + '\t' + row.kind + ' ' + row.text.replace(/\r?\n$/, ''), () => {
+        this.diff.querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
+        line.setAttribute('aria-pressed', 'true'); this.target = {...row, key: change.key};
+        this.task.review.feedbackTarget = {key: change.key, row: this.target, before, after, epoch: this.comparison.after.epoch};
+        const hunk = diff.hunks.find(hunk => i >= hunk.firstRow && i <= hunk.lastRow);
+        if (hunk) { this.hunkId = hunk.id; this.updateHunkControls(); }
+        this.saveReviewState();
+      });
+      line.className = 'agent-diff-line'; line.dataset.kind = row.kind; line.dataset.row = i; line.setAttribute('aria-pressed', String(!!this.target && this.target.kind === row.kind && this.target.oldLine === row.oldLine && this.target.newLine === row.newLine && this.target.text === row.text));
+      this.diff.append(line); previous = i;
+    }
+    if (!visible.length) this.diff.append(el('p', {}, 'Document name/type changed; source text is unchanged.'));
+    this.more.hidden = visible.length <= this.limit;
+    if (!this.more.hidden) this.diff.append(el('p', {}, '[Showing ' + this.limit + ' of ' + visible.length + ' diff/context lines. Save review patch for full captured text.]'));
+  }
+  updateHunkControls() {
+    const index = this.currentHunks?.findIndex(hunk => hunk.id === this.hunkId) ?? -1;
+    this.hunkStatus.textContent = index < 0 ? 'No change block selected' : 'Change ' + (index + 1) + ' of ' + this.currentHunks.length;
+    this.previousChange.disabled = index <= 0;
+    this.nextChange.disabled = index < 0 || index + 1 >= this.currentHunks.length;
+    this.restoreHunk.disabled = index < 0 || this.restore.disabled || this.staleReview();
+  }
+  selectHunk(direction) {
+    const index = this.currentHunks.findIndex(hunk => hunk.id === this.hunkId), hunk = this.currentHunks[index + direction];
+    if (!hunk) return;
+    this.hunkId = hunk.id;
+    // Include the target's row in the bounded visible window before scrolling.
+    this.limit = Math.max(this.limit, hunk.lastRow + 1);
+    this.showDiff(); this.diff.querySelector('[data-row="' + hunk.firstRow + '"]')?.scrollIntoView({block: 'nearest'});
+    this.saveReviewState();
+  }
+  async restoreSource(hunkId = null) {
+    if (this.panel.pending || this.panel.api.conversations.busy) return;
+    const task = this.task, comparison = this.comparison, change = this.selected(), expectedRevision = this.reviewRevision;
+    if (!change?.canRestore) return;
+    if (this.staleReview()) { this.message('Project changed after review. Refresh changes before restoring.'); return; }
+    const hunk = hunkId ? this.currentHunks.find(item => item.id === hunkId) : null;
+    if (hunkId && !hunk) return;
+    const controller = new AbortController(); this.panel.pending = controller; this.panel.refresh();
+    try {
+      const signal = AbortSignal.any([controller.signal, this.panel.api.adapter.authoritySignal]);
+      const yes = await this.confirm(hunk ? 'AI Coding Agent — Restore Selected Change' : 'AI Coding Agent — Restore Reviewed Source', el('div', {class: 'agent-review'},
+        el('p', {}, 'Restore ' + change.path + ' to the selected checkpoint? This is a local user edit, not an agent permission grant. The reviewed diff can include manual and other-task changes.'),
+        el('p', {}, hunk ? 'Only this changed block is reverted. Other changes in this module remain. The complete source must still match the reviewed snapshot. This records one normal Undo entry.' : 'Only this module’s code is restored as one Undo entry. Designer structure and all other project fields are kept. A changed project/revision, active agent or running application cancels restoration.'),
+        ...(hunk ? [el('p', {}, 'Selected block: +' + hunk.added + ' / -' + hunk.removed + ' lines' + (this.diffCache.value.coarse ? ' (coarse replacement of the large changed range)' : '')),
+          el('div', {class: 'agent-diff'}, ...[['Current block', hunk.newText], ['Checkpoint block', hunk.oldText]].map(([label, text]) => el('div', {}, el('strong', {}, label), el('pre', {class: 'agent-log'}, text.slice(0, 20000) + (text.length > 20000 ? '\n[Preview shortened; review the saved patch first.]' : '')))))] : [])),
+        signal, hunk ? 'Restore Change' : 'Restore Source');
+      if (!yes) return; signal.throwIfAborted();
+      if (this.task !== task || this.panel.api.conversations.busy || this.panel.ide.runState !== 'design' || this.panel.api.adapter.revision !== expectedRevision) throw new Error('Project, task or runtime changed after review. Refresh changes before restoring.');
+      const next = hunk ? restoreReviewedHunk(comparison, change.key, hunk.id, this.panel.ide.project, this.panel.api.adapter.workspaceEpoch) : restoreReviewedSource(comparison, change.key, this.panel.ide.project, this.panel.api.adapter.workspaceEpoch), before = clone(this.panel.ide.project);
+      this.panel.ide.project = next; this.panel.ide.record(before, (hunk ? 'Restore reviewed change ' : 'Restore reviewed source ') + change.path);
+      this.refreshChanges(); this.message(hunk ? 'Selected change restored; other source edits kept. Normal Undo restores this change.' : 'Reviewed source restored. Normal Undo restores the previous source.');
+    } catch (error) { this.message(error.message); }
+    finally { if (this.panel.pending === controller) this.panel.pending = null; this.panel.refresh(); }
+  }
+  update() {
+    this.updateQueue();
+    // Never serialize project snapshots on streaming deltas. Refresh explicitly/on tab entry.
+    if (this.stale) {
+      this.stale.hidden = !this.staleReview();
+      this.stale.textContent = this.stale.hidden ? '' : 'Project or checkpoint changed after review. Refresh changes before restoring or queuing feedback. Your draft is retained.';
+    }
+    if (this.restore) this.restore.disabled = !!this.panel.pending || this.panel.api.conversations.busy || this.panel.ide.runState !== 'design' || !this.selected()?.canRestore || this.staleReview();
+    if (this.restoreHunk) this.updateHunkControls();
+    if (this.feedbackButton) this.feedbackButton.disabled = !!this.panel.pending || !this.selected() || !this.comparison?.sameWorkspace || this.staleReview();
+  }
+}
+
+return {AgentWorkbenchView};
+})();
+
 /* ..\agents\studio.js */
-__modules[181]=(()=>{
+__modules[187]=(()=>{
+const {ChatGPTConnection}=__modules[173];
 const {el, download}=__modules[6];
 const {modal, tabbedPages, icon}=__modules[16];
-const {operationReview}=__modules[170];
+const {operationReview}=__modules[174];
 const {createIdeAdapter}=__modules[166];
 const {AGENT_SCOPES}=__modules[156];
-const {CodingAgent}=__modules[178];
-const {AgentConversations}=__modules[179];
-const {AgentThreadView}=__modules[180];
-const {AGENT_PERMISSION_PROFILES, AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[177];
+const {CodingAgent}=__modules[180];
+const {AgentConversations}=__modules[183];
+const {AgentThreadView}=__modules[184];
+const {AgentWorkbenchView}=__modules[186];
+const {AGENT_PERMISSION_PROFILES, AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[179];
 const {AGENT_LIMIT_FIELDS, AGENT_LIMIT_PRESETS, normalizeAgentLimits, loadAgentLimits, saveAgentLimits}=__modules[171];
 const {PROVIDERS, createTransport, listModels, modelId}=__modules[172];
+
+
 
 
 
@@ -20220,7 +20948,7 @@ function installCodingAgents(ide, studioAPI, {transportFactory = createTransport
     return allowed;
   };
   const adapter = createIdeAdapter(ide, {approve, historyLabel: 'AI Agent'});
-  const conversations = new AgentConversations(adapter, {askUser: questionDialog, permissionConstraints, defaultLimits: loadAgentLimits(),
+  const conversations = new AgentConversations(adapter, {askUser: questionDialog, permissionConstraints, defaultLimits: loadAgentLimits(), getReviewProject: () => ide.project,
     onEvent: event => { for (const listener of listeners) { try { listener(event); } catch {} } }});
   const api = {get agent() { return conversations.agent; }, conversations, adapter,
     onChange(listener) { listeners.add(listener); return () => listeners.delete(listener); }};
@@ -20258,6 +20986,7 @@ class AgentPanel {
     this.ide = ide; this.api = api; this.transportFactory = transportFactory;
     this.key = 'tool:coding-agents'; this.title = 'AI Coding Agents'; this.glyph = 'module'; this.width = 840; this.height = 650;
     this.root = el('div', {class: 'agent-panel'});
+    this.workbench = new AgentWorkbenchView(this, cancellableDialog);
     this.status = el('div', {class: 'agent-status', role: 'status'}, 'Idle — no project data has been sent.');
     this.runButton = button('Run', () => this.start(), 'run'); this.continueButton = button('Continue', () => this.start(true), 'run'); this.stopButton = button('Stop', () => this.cancel(), 'stop');
     this.compactButton = button('Compact context', () => this.start(false, true));
@@ -20265,8 +20994,9 @@ class AgentPanel {
     this.exportButton = button('Save Transcript…', () => download('coding-agent-transcript.json', JSON.stringify({version: 2, thread: api.agent.thread.snapshot(), activity: api.agent.transcript, usage: api.agent.usage, estimatedTokens: api.agent.estimatedTokens}, null, 2), 'application/json'), 'save');
     this.root.append(el('div', {class: 'agent-toolbar'}, this.runButton, this.continueButton, this.stopButton, this.compactButton, this.newButton, this.exportButton),
       (this.pages = tabbedPages([{id: 'task', label: 'Task', node: this.taskPage()}, {id: 'connection', label: 'Connection', node: this.connectionPage()},
+        {id: 'changes', label: 'Changes', node: this.workbench.changesPage()}, {id: 'queue', label: 'Queue', node: this.workbench.queuePage()},
         {id: 'permissions', label: 'Permissions', node: this.permissionsPage()}, {id: 'tools', label: 'Tools', node: this.toolsPage()},
-        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages'})), this.status);
+        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages', onSelect: id => { if (id === 'changes') this.workbench.refreshChanges(); }})), this.status);
     this.unlisten = api.onChange(event => this.event(event)); this.syncTask();
   }
   taskPage() {
@@ -20279,6 +21009,8 @@ class AgentPanel {
     });
     this.threadView = new AgentThreadView({announce: text => { this.status.textContent = text; }});
     this.log = this.threadView.scroller;
+    this.queueDraftButton = button('Queue message', () => this.workbench.queueDraft());
+    this.queueBadge = button('Queued: 0', () => this.pages.select('queue'));
     this.sendButton = button('Send', () => this.start(), 'run');
     this.composerStop = button('Stop generation', () => this.cancel(), 'stop');
     this.quickMode = choices('Task permission profile', Object.entries(AGENT_PERMISSION_PROFILES));
@@ -20295,13 +21027,13 @@ class AgentPanel {
     this.exampleSelect = examples;
     this.contextStatus = el('div', {class: 'agent-context', 'aria-label': 'Task context usage'});
     this.recoveryText = el('p');
-    this.recoverySettings = button('Review limits…', () => { if (this.api.agent.failure?.kind === 'access') { this.pages.select('connection'); this.keyInput.focus(); return; } this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
+    this.recoverySettings = button('Review limits…', () => { if (this.api.agent.failure?.kind === 'access') { this.pages.select('connection'); (this.chatgpt?.enabled ? this.chatgpt.login : this.keyInput).focus(); return; } this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
     this.recoveryContinue = button('Resume task', () => this.start(true), 'run');
     this.recovery = el('div', {class: 'agent-limit-recovery', hidden: true, role: 'status'}, this.recoveryText,
       el('div', {class: 'agent-actions'}, this.recoverySettings, this.recoveryContinue));
     this.budgetMeter = el('progress', {class: 'agent-budget-meter', max: 1, value: 0, 'aria-label': 'Session token budget used'});
     return el('div', {class: 'agent-page agent-task'}, field('Task example:', examples), this.contextStatus, this.budgetMeter, this.recovery, this.threadView.root,
-      el('div', {class: 'agent-composer'}, el('div', {class: 'agent-permission-bar'}, field('Permissions:', this.quickMode), this.revokeButton), this.permissionBadge, field('Message:', this.prompt), el('div', {class: 'agent-actions'}, this.sendButton, this.composerStop,
+      el('div', {class: 'agent-composer'}, el('div', {class: 'agent-permission-bar'}, field('Permissions:', this.quickMode), this.revokeButton), this.permissionBadge, field('Message:', this.prompt), el('div', {class: 'agent-actions'}, this.sendButton, this.composerStop, this.queueDraftButton, this.queueBadge,
         el('span', {}, 'Enter sends • Shift+Enter adds a line'))),
       el('div', {class: 'agent-composer-help'}, 'Continue resumes an interrupted task without repeating completed operations. /compact creates a context checkpoint. Tasks are memory-only.'));
   }
@@ -20317,13 +21049,14 @@ class AgentPanel {
     this.token = input('Agent relay token', {type: 'password', autocomplete: 'off', spellcheck: 'false'});
     this.browserConsent = input('Accept browser key exposure', {type: 'checkbox'});
     this.refreshModels = button('Refresh Models', () => this.discover());
-    this.clearKey = button('Clear Credentials', () => { this.keyInput.value = ''; this.token.value = ''; this.status.textContent = 'Credentials cleared.'; });
-    this.provider.onchange = () => { this.keyInput.value = ''; this.model.value = ''; this.models.replaceChildren(el('option', {value: ''}, '(Refresh models)')); };
+    this.clearKey = button('Clear Credentials', () => { this.keyInput.value = ''; this.token.value = ''; this.chatgpt.snapshot = null; this.chatgpt.accounts.replaceChildren(el('option', {value: ''}, '(Refresh account status)')); this.status.textContent = 'Browser credentials cleared. Use ChatGPT Sign out to revoke its relay session.'; });
+    this.provider.onchange = () => { this.chatgpt?.render(); this.keyInput.value = ''; this.model.value = ''; this.models.replaceChildren(el('option', {value: ''}, '(Refresh models)')); };
     const direct = group('Direct API', field('API key:', this.keyInput), field('Personal use only:', this.browserConsent), el('p', {}, 'The key is exposed to this page and browser extensions. It is held only until this window closes or the page reloads; it is never saved in the project or browser storage. Enable the checkbox to accept this risk.'));
-    const relay = group('Local relay', field('Relay URL:', this.relay), field('Access token:', this.token), el('p', {}, 'Start tools/agent-relay.mjs with provider API keys in environment variables. Only the local access token enters the browser. The relay must explicitly allow this IDE origin.'));
+    const relay = group('Local relay', field('Relay URL:', this.relay), field('Access token:', this.token), el('p', {}, 'Start tools/agent-relay.mjs. For API-key mode use provider keys in environment variables; ChatGPT mode uses the Sign in button below. Only the local access token enters the browser. The relay must explicitly allow this IDE origin.'));
     const toggle = () => { direct.hidden = this.connection.value !== 'direct'; relay.hidden = this.connection.value !== 'relay'; }; this.connection.onchange = toggle; toggle();
-    return el('div', {class: 'agent-page'}, field('Provider:', this.provider), field('Connection:', this.connection), relay, direct,
-      group('Model', field('Available models:', this.models), field('Model ID:', this.model), el('div', {class: 'agent-actions'}, this.refreshModels, this.clearKey), el('p', {}, 'Model availability and tool support depend on your account. API usage is billed by the selected provider. No keys or requests are included in exported applications.')));
+    this.chatgpt = new ChatGPTConnection(this); this.chatgpt.render();
+    return el('div', {class: 'agent-page'}, field('Provider:', this.provider), field('Connection:', this.connection), relay, direct, this.chatgpt.root,
+      group('Model', field('Available models:', this.models), field('Model ID:', this.model), el('div', {class: 'agent-actions'}, this.refreshModels, this.clearKey), el('p', {}, 'Model availability and tool support depend on your account. API-key usage is billed by the selected provider. ChatGPT mode uses your eligible plan allowance. No keys or requests are included in exported applications.')));
   }
   permissionsPage() {
     this.mode = choices('Agent permission mode', Object.entries(AGENT_PERMISSION_PROFILES));
@@ -20396,12 +21129,12 @@ class AgentPanel {
     if (Object.hasOwn(this.toolRules, selected)) this.ruleList.value = selected;
   }
   profileChanged() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     this.approvalPolicy.value = ['readonly', 'plan', 'full'].includes(this.mode.value) ? 'never' : 'on-request';
     this.updatePermissions();
   }
   updatePermissions() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     try {
       const config = this.readPermissions(), host = this.api.agent.permissionConstraints;
       if (!host.allowedModes.includes(config.mode) || config.permissionMinutes > host.maxMinutes) throw new Error('These permissions exceed the host policy.');
@@ -20457,7 +21190,7 @@ class AgentPanel {
     if (agent.provider) this.provider.value = agent.provider;
     if (agent.model) this.model.value = agent.model;
     this.prompt.value = task.draft; this.showLimits(task.limits); this.showPermissions(task.permissions); this.taskName.value = task.title;
-    this.status.textContent = 'Selected ' + task.title + (agent.matchesWorkspace() ? ' — ' + agent.state : ' — previous project session; start a new task.'); this.refresh();
+    this.status.textContent = 'Selected ' + task.title + (agent.matchesWorkspace() ? ' — ' + agent.state : ' — previous project session; start a new task.'); this.refresh(); this.workbench.refreshChanges();
   }
   async deleteTask() {
     if (this.pending || this.api.conversations.busy) return;
@@ -20482,27 +21215,34 @@ class AgentPanel {
   activityPage() { this.activity = el('pre', {class: 'agent-log agent-activity', tabindex: 0, 'aria-label': 'Coding agent activity'}); return el('div', {class: 'agent-page'}, this.activity); }
   transport() {
     if (this.connection.value === 'direct' && !this.browserConsent.checked) throw new Error('Accept browser key exposure in Connection, or use the local relay.');
-    return this.transportFactory({provider: this.provider.value, apiKey: this.keyInput.value, relay: this.connection.value === 'relay' ? this.relay.value : '', relayToken: this.token.value, requestTimeoutMs: this.readLimits().requestTimeoutMs});
+    const auth = this.chatgpt.options();
+    return this.transportFactory({...auth, provider: this.provider.value, apiKey: this.keyInput.value, relay: this.connection.value === 'relay' ? this.relay.value : '', relayToken: this.token.value, requestTimeoutMs: this.readLimits().requestTimeoutMs});
   }
   async discover() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     this.pending = new AbortController(); this.refresh(); this.status.textContent = 'Reading provider model catalog…';
     try {
-      const models = await listModels(this.transport(), this.provider.value, this.pending.signal);
-      this.models.replaceChildren(el('option', {value: ''}, '(Choose a model)'), ...models.map(id => el('option', {value: id}, id)));
+      const models = await listModels(this.transport(), this.provider.value, this.pending.signal, {details: true});
+      this.models.replaceChildren(el('option', {value: ''}, '(Choose a model)'), ...models.map(item => el('option', {value: item.id}, item.label)));
       this.status.textContent = models.length + ' models returned. Choose one supporting function calls.';
     } catch (error) { this.status.textContent = error.message; }
     finally { this.pending = null; this.refresh(); }
   }
-  async start(continuation = false, compactOnly = false) {
-    if (!continuation && this.prompt.value.trim() === '/compact') compactOnly = true;
-    if (this.pending || this.api.agent.busy) return;
+  async start(continuation = false, compactOnly = false, queuedId = null) {
+    // A draft /compact command must never replace a separately selected queue item.
+    if (!continuation && !queuedId && this.prompt.value.trim() === '/compact') compactOnly = true;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     const setup = new AbortController(); this.pending = setup; this.refresh();
     try {
-      const provider = this.provider.value, model = modelId(this.model.value), prompt = this.prompt.value, limits = this.readLimits();
+      const task = this.api.conversations.active, queued = queuedId ? task.followups.get(queuedId) : null;
+      if (queued && (continuation || compactOnly)) throw new Error('Queued messages require a separately confirmed task run.');
+      if (queued && (!['new', 'completed'].includes(task.agent.state) || !task.agent.matchesWorkspace() || !task.followups.inCurrentWorkspace(queued))) throw new Error('Resume or replace the paused/failed task before sending a queued message.');
+      const provider = this.provider.value, model = modelId(this.model.value), prompt = queued ? queued.text : this.prompt.value, limits = this.readLimits();
       if (!continuation && !compactOnly && !prompt.trim()) throw new Error('Enter a task on the Task tab.');
       if (compactOnly && (!this.api.agent.canCompact || provider !== this.api.agent.provider || model !== this.api.agent.model)) throw new Error('Choose the task’s original provider/model and a task with completed context to compact.');
       if (continuation && (!this.api.agent.canResume || provider !== this.api.agent.provider || model !== this.api.agent.model)) throw new Error("Choose the task's original provider/model and a resumable task, or start a new task.");
+      const binding = this.chatgpt.binding();
+      if ((continuation || compactOnly || this.api.agent.historyBytes) && this.api.conversations.active.authBinding && this.api.conversations.active.authBinding !== binding) throw new Error('This task belongs to another billing mode or ChatGPT account. Restore its connection, or create a new task with reviewed context.');
       const transport = this.transport(), permissions = this.readPermissions(), {mode, scopes} = permissions;
       if (!this.api.agent.permissionConstraints.allowedModes.includes(mode) || permissions.permissionMinutes > this.api.agent.permissionConstraints.maxMinutes) throw new Error('These permissions exceed the host policy.');
       const fullConfirmation = input('Confirm Full IDE access for this run', {type: 'checkbox'});
@@ -20511,10 +21251,11 @@ class AgentPanel {
       const signal = AbortSignal.any([setup.signal, authority]);
       const allowed = await cancellableDialog(compactOnly ? 'AI Coding Agent — Compact Context' : continuation ? 'AI Coding Agent — Continue Task' : 'AI Coding Agent — Start Task', el('div', {class: 'agent-review'},
         el('p', {}, 'Send this task and requested project context from ' + project.name + ' to ' + PROVIDERS[provider].label + ' (' + model + ')?'),
+        ...(queued ? [el('p', {}, 'Send the selected queued message to task ' + task.title + '? The unsent composer draft is not included.'), el('pre', {class: 'agent-log'}, prompt.slice(0, 4000) + (prompt.length > 4000 ? '\n[Preview shortened; cancel to edit the full queued message.]' : ''))] : []),
         ...(compactOnly ? [el('p', {}, 'Request a checkpoint of this task’s public history from the same provider. No IDE tools will execute. Existing context is replaced only after a valid summary; the public thread and cumulative budget remain. Summaries may lose detail.')] : []),
         el('p', {}, 'Recovery: up to ' + limits.maxRetries + ' automatic retries per generation request. Checkpoints and retry attempts consume this run’s request and session allowances.'),
-        el('p', {}, 'This may incur API charges. Review source for secrets before continuing. Read access includes project files and debugger data.'),
-        el('p', {}, 'Session allowance: ' + limits.tokenBudget.toLocaleString('en-US') + ' tokens; ' + this.api.agent.budgetUsed.toLocaleString('en-US') + ' already accounted. Output cap: ' + limits.maxTokens.toLocaleString('en-US') + ' per request. This run allows ' + limits.maxTurns + ' requests and ' + limits.maxCalls + ' tool calls. Larger limits may substantially increase costs.'),
+        el('p', {}, this.chatgpt.description() + ' Review source for secrets before continuing. Read access includes project files and debugger data.'),
+        el('p', {}, 'Session allowance: ' + limits.tokenBudget.toLocaleString('en-US') + ' tokens; ' + this.api.agent.budgetUsed.toLocaleString('en-US') + ' already accounted. ' + (this.chatgpt.enabled ? 'No per-request output cap in ChatGPT preview. ' : 'Output cap: ' + limits.maxTokens.toLocaleString('en-US') + ' per request. ') + 'This run allows ' + limits.maxTurns + ' requests and ' + limits.maxCalls + ' tool calls. Larger limits may substantially increase costs.'),
         ...(continuation ? [el('p', {}, this.api.agent.pendingTurn ? 'Continue first processes the validated deferred batch without requesting it again. No operation in that batch has executed. Original arguments are retained; stale revisions are rejected, never automatically rewritten. Current permission choices still apply.' : 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed or truncated request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. Continue will honor any remaining delay.' : '')] : []),
         el('p', {}, permissionSummary(permissions)),
         el('p', {}, mode === 'full' ? 'FULL IDE ACCESS: project edits/deletions, runtime execution and debugger evaluation may occur without further approval. Running project code may use its configured networks, data sources or native integrations. This cannot be undone by Stop. This does not add arbitrary host shell/disk access or bypass provider/browser security.' : mode === 'scoped' ? 'Delegated scopes: ' + (scopes.join(', ') || '(none)') + '. Other effects use the approval policy.' : ['readonly', 'plan'].includes(mode) ? 'Read-only boundary: no project edits or execution. Plan mode produces a proposal, not automatic implementation.' : mode === 'autoedit' ? 'Automatically edit non-destructive code, designer, virtual files, public data definitions and workspace. Ask before execution, project replacement and destructive effects.' : 'Each change or execution requires approval unless an explicit allow rule applies.'),
@@ -20522,24 +21263,33 @@ class AgentPanel {
         ...(mode === 'full' ? [el('label', {class: 'agent-full-confirm'}, fullConfirmation, 'I understand and authorize Full IDE access for this run only.')] : []), confirmButton), signal, compactOnly ? 'Compact Context' : continuation ? 'Continue Task' : 'Start Task');
       if (!allowed) return; signal.throwIfAborted();
       if (mode === 'full' && !fullConfirmation.checked) throw new Error('Full IDE access was not confirmed. No request was sent.');
+      if (task !== this.api.conversations.active || queued && (!task.followups.matches(queued) || !task.followups.inCurrentWorkspace(queued))) throw new Error('Task or queued message changed during confirmation. Review it again.');
       if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');
       this.pending = null; this.api.conversations.active.limits = limits; this.api.conversations.defaultLimits = saveAgentLimits(limits);
       this.api.conversations.active.permissions = permissions;
+      this.api.conversations.active.authBinding = binding;
+      this.api.conversations.active.authDescription = this.chatgpt.description();
       const options = {provider, model, prompt, transport, ...permissions, fullAccessConfirmed: mode === 'full' && fullConfirmation.checked, ...limits};
+      this.sendingQueued = queued ? {task, item: queued} : null;
       const run = compactOnly ? this.api.agent.compact(options) : continuation ? this.api.agent.resume(options) : this.api.agent.run(options);
       if (compactOnly && this.prompt.value.trim() === '/compact') { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
       this.refresh(); await run;
     } catch (error) { this.status.textContent = error.name === 'AbortError' ? 'Agent cancelled.' : error.message; }
-    finally { if (this.pending === setup) this.pending = null; this.refresh(); }
+    finally { this.sendingQueued = null; if (this.pending === setup) this.pending = null; this.refresh(); }
   }
-  cancel() { this.pending?.abort(); this.api.agent.stop(); }
+  cancel() { if (this.chatgpt?.busy) void this.chatgpt.cancelLogin(); this.pending?.abort(); this.api.agent.stop(); }
   newTask() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     try { this.api.conversations.active.draft = this.prompt.value; this.api.conversations.create(); this.syncTask(); } catch (error) { this.status.textContent = error.message; }
   }
   event(event) {
     if (event.taskId && event.taskId !== this.api.conversations.activeId) return;
-    if (event.type === 'user') { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
+    if (event.type === 'user') {
+      const sending = this.sendingQueued;
+      if (sending && sending.task === this.api.conversations.active && event.text === sending.item.text) {
+        sending.task.followups.remove(sending.item.id, sending.item.version); this.sendingQueued = null;
+      } else { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
+    }
     if (!['delta', 'idle', 'permission'].includes(event.type)) this.status.textContent = event.text;
     const win = this.root.ownerDocument.defaultView;
     if (!this.frame) { this.frameWindow = win; this.frame = win.requestAnimationFrame(() => { this.frame = null; this.render(); this.refresh(false); }); }
@@ -20560,7 +21310,7 @@ class AgentPanel {
     this.revokeTool.disabled = !lease?.active || !lease.approvedTools.length;
     this.budgetMeter.max = budget; this.budgetMeter.value = Math.min(budget, used); this.budgetMeter.setAttribute('aria-valuetext', Math.min(100, Math.round(used / budget * 100)) + '% of session budget accounted');
     this.recovery.hidden = !agent.canResume;
-    this.recoveryText.textContent = agent.limit?.message || ({access: 'Check provider credentials and model access in Connection, then Continue. No automatic retry; completed edits are retained.', quota: 'Provider quota/billing needs attention. Retry with Continue after the provider account is ready; prior context and usage are retained.', request: 'The provider rejected request settings. Review the model/output limits before Continue, or create a new task to change models.'})[agent.failure?.kind] || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
+    this.recoveryText.textContent = agent.limit?.message || ({access: this.chatgpt.enabled ? 'Refresh ChatGPT account status or sign in again in Connection, then Continue. API billing is never used automatically; completed edits are retained.' : 'Check provider credentials and model access in Connection, then Continue. No automatic retry; completed edits are retained.', quota: 'Provider quota/billing needs attention. Retry with Continue after the provider account is ready; prior context and usage are retained.', request: 'The provider rejected request settings. Review the model/output limits before Continue, or create a new task to change models.'})[agent.failure?.kind] || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
     if (agent.limit?.required) this.recoveryText.textContent += ' Required for this batch/request: ' + agent.limit.required.toLocaleString('en-US') + (agent.limit.kind === 'context' ? ' bytes.' : ' tool calls.');
     this.threadView.update(agent.thread, {taskId: task.id, busy: agent.busy});
     const planStamp = task.id + ':' + agent.plan.revision;
@@ -20572,32 +21322,34 @@ class AgentPanel {
     if (this.tasksStamp !== stamp) { this.tasksStamp = stamp; this.taskList.replaceChildren(...tasks.map(item => el('option', {value: item.id}, item.title + ' — ' + (item.currentWorkspace ? item.state : 'previous project')))); }
     this.taskList.value = task.id;
     if (this.displayedTask !== task.id) { this.displayedTask = task.id; this.taskName.value = task.title; }
-    this.taskDetails.textContent = 'Task: ' + task.title + '\nProvider/model: ' + (agent.provider ? agent.provider + ' / ' + agent.model : '(not started)') + '\nState: ' + agent.state + '\nProject session: ' + (agent.matchesWorkspace() ? 'current' : 'changed — cannot resume') + '\nContext is memory-only; no signatures, tool history or grants are copied by New Task with Context.';
+    this.taskDetails.textContent = 'Task: ' + task.title + '\nProvider/model: ' + (agent.provider ? agent.provider + ' / ' + agent.model : '(not started)') + '\nBilling: ' + (task.authDescription || '(not started)') + '\nState: ' + agent.state + '\nProject session: ' + (agent.matchesWorkspace() ? 'current' : 'changed — cannot resume') + '\nContext is memory-only; no signatures, tool history or grants are copied by New Task with Context.';
 
     const activityStamp = task.id + ':' + (entries.at(-1)?.id || 0);
     if (this.activityStamp !== activityStamp) { this.activityStamp = activityStamp; this.activity.textContent = entries.filter(event => !['user', 'assistant', 'question', 'answer'].includes(event.type)).map(event => event.time.slice(11, 19) + ' ' + event.type + ': ' + event.text + (event.arguments ? '\n' + JSON.stringify(event.arguments, null, 2) : '') + (event.result ? '\n' + JSON.stringify(event.result, null, 2) : '')).join('\n').slice(-200000); }
   }
   refresh(render = true) {
-    const busy = !!this.pending || this.api.agent.busy;
+    const busy = !!this.pending || this.api.agent.busy || !!this.chatgpt?.busy;
     this.revokeButton.disabled = !busy;
     this.compactButton.disabled = busy || !this.api.agent.canCompact;
     this.sendButton.disabled = busy || !!this.api.agent.pendingTurn; this.composerStop.disabled = !busy;
     this.recoveryContinue.disabled = busy || !this.api.agent.canResume; this.recoverySettings.disabled = busy;
     this.runButton.disabled = busy || !!this.api.agent.pendingTurn; this.continueButton.disabled = busy || !this.api.agent.canResume; this.stopButton.disabled = !busy; this.newButton.disabled = busy;
     for (const control of [this.provider, this.connection, this.model, this.models, this.keyInput, this.relay, this.token, this.browserConsent, this.refreshModels, this.clearKey, this.mode, this.quickMode, this.approvalPolicy, this.permissionMinutes, this.ruleTool, this.ruleAction, this.ruleAdd, this.ruleRemove, this.ruleList, this.resetPermissions, ...this.scopeRules.map(item => item.node), this.turns, this.outputTokens, this.budget, this.callLimit, this.contextLimit, this.requestTimeout, ...this.recoveryLimits.map(item => item.node), this.limitPreset, this.exampleSelect, this.taskList, this.taskName, this.renameButton, this.deleteButton, this.handoffButton, ...this.scopeInputs.map(item => item.node)]) control.disabled = busy;
+    this.chatgpt?.render(!!this.pending || this.api.agent.busy);
     if (render) this.render();
+    this.workbench.update();
   }
-  dispose() { this.api.conversations.active.draft = this.prompt.value; this.cancel(); this.keyInput.value = ''; this.token.value = ''; this.unlisten?.(); if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame); this.threadView.dispose(); }
+  dispose() { this.chatgpt?.dispose(); this.api.conversations.active.draft = this.prompt.value; this.cancel(); this.keyInput.value = ''; this.token.value = ''; this.unlisten?.(); if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame); this.threadView.dispose(); this.workbench.dispose(); }
 }
 
 return {installCodingAgents};
 })();
 
 /* studio-entry.js */
-__modules[182]=(()=>{
+__modules[188]=(()=>{
 const {VB6Studio, StudioAPI}=__modules[153];
 const {installMcp}=__modules[169];
-const {installCodingAgents}=__modules[181];
+const {installCodingAgents}=__modules[187];
 
 
 
@@ -20606,5 +21358,5 @@ if (globalThis.vb6Studio) installCodingAgents(globalThis.vb6Studio, StudioAPI);
 
 return {VB6Studio,StudioAPI,installMcp};
 })();
-globalThis["VB6Studio"]=__modules[182];
+globalThis["VB6Studio"]=__modules[188];
 })();

@@ -1,3 +1,4 @@
+import {validateChatGPTEvent} from './chatgpt-protocol.js';
 import {normalizeAgentLimits} from './limits.js';
 /** Native provider protocols. No SDK, remote script, credential persistence or arbitrary endpoints. */
 export const PROVIDERS = Object.freeze({
@@ -82,6 +83,11 @@ export function providerFailure(data = {}, status = 0, retryAfterMs = 0) {
   const has = allowed => codes.some(code => typeof code === 'string' && allowed.includes(code));
   let kind = status >= 400 && status < 500 && ![408, 429].includes(status) ? 'request' : 'provider', retryable = [408, 429, 500, 502, 503, 504, 529].includes(status), hint = 'The provider could not complete this turn.';
   const contextMessage = typeof value.message === 'string' && /^(?:prompt is too long:|this model.s maximum context length is|the input token count .*exceeds the maximum)/i.test(value.message.slice(0, 500));
+  if (has(['subscription_sharing_usage_limit_exceeded'])) return new ProviderTransportError('ChatGPT plan usage limit reached. Review ChatGPT Settings → Usage. API billing will not be used automatically.', {status, kind: 'quota'});
+  if (has(['subscription_sharing_user_not_eligible', 'chatpass_v2_scope_not_authorized', 'chatpass_v2_invalid_authorization_context', 'chatgpt_consent_required'])) return new ProviderTransportError('ChatGPT plan use is not authorized for this account/workspace. Review sign-in consent and policy. No billing fallback.', {status, kind: 'access'});
+  if (has(['chatgpt_sign_in_required', 'chatgpt_session_expired', 'subscription_sharing_invalid_user', 'chatgpt_invalid_client'])) return new ProviderTransportError('Sign in to the selected ChatGPT account again in Connection. API billing will not be used automatically.', {status, kind: 'access'});
+  if (has(['chatgpt_relay_disabled'])) return new ProviderTransportError('ChatGPT sign-in is not enabled in this relay. Start the updated local relay with ChatGPT support.', {status, kind: 'access'});
+  if (has(['subscription_sharing_unsupported_capability', 'subscription_sharing_route_not_supported'])) return new ProviderTransportError('ChatGPT plan preview does not support this request capability or route. Review the integration; no automatic retry or billing fallback.', {status, kind: 'request'});
   // Explicit safety codes are terminal regardless of HTTP status or message heuristics.
   if (has(['content_policy_violation', 'safety_violation', 'refusal'])) { kind = 'safety'; retryable = false; hint = 'Provider safety policy rejected this request. No automatic alternative will be attempted.'; }
   else if (has(['context_length_exceeded', 'context_window_exceeded', 'prompt_too_long', 'request_too_large']) || contextMessage) { kind = 'context'; retryable = false; hint = 'Provider context window exceeded; compact the conversation or lower context/output settings.'; }
@@ -119,27 +125,29 @@ export function retryAfter(value, now = Date.now()) {
   const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - now;
   return Number.isFinite(ms) ? Math.max(0, Math.min(300000, Math.ceil(ms))) : 0;
 }
-export function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch, requestTimeoutMs} = {}) {
+export function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch, requestTimeoutMs, authMode = 'api-key', accountId = ''} = {}) {
   providerInfo(provider);
+  if (!['api-key', 'chatgpt'].includes(authMode)) throw new Error('Invalid authentication mode.');
+  if (authMode === 'chatgpt' && (provider !== 'openai' || !relay || typeof accountId !== 'string' || !accountId || accountId.length > 128)) throw new Error('ChatGPT mode requires OpenAI, a local relay and a signed-in account.');
   const timeoutMs = normalizeAgentLimits({requestTimeoutMs}).requestTimeoutMs;
   const origin = relay ? relayURL(relay) : '';
   if (origin && (!relayToken || /[\r\n]/.test(relayToken))) throw new Error('Enter the relay access token.');
   // Snapshot secrets in a closure; never expose them through the returned interface.
   const headers = origin ? {'Content-Type': 'application/json', Authorization: 'Bearer ' + relayToken} : providerHeaders(provider, apiKey);
-  return async (body, {signal, receive = () => {}, models = false, cursor = ''} = {}) => {
+  const transport = async (body, {signal, receive = () => {}, models = false, cursor = ''} = {}) => {
     const timer = AbortSignal.timeout(models ? Math.min(timeoutMs, 120000) : timeoutMs), combined = AbortSignal.any([signal, timer].filter(Boolean));
     const native = nativeRequest(provider, body, {models, cursor});
     let response;
     try {
       response = await fetchImpl(origin ? origin + '/agent' : native.url, {method: origin ? 'POST' : native.method, headers, credentials: 'omit', redirect: 'error', cache: 'no-store', signal: combined,
-        body: origin ? JSON.stringify({provider, operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
+        body: origin ? JSON.stringify({provider, ...(authMode === 'chatgpt' ? {authMode, accountId} : {}), operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
     } catch {
       signal?.throwIfAborted();
       throw new ProviderTransportError(timer.aborted ? 'Provider request timed out. Retrying may incur additional charges.' : 'Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.', {retryable: true});
     }
     try {
       if (!response.ok) throw await responseFailure(response, combined);
-      await readEvents(response, receive, {signal: combined});
+      await readEvents(response, authMode === 'chatgpt' && !models ? data => receive(validateChatGPTEvent(data)) : receive, {signal: combined});
     }
     catch (error) {
       signal?.throwIfAborted();
@@ -147,11 +155,14 @@ export function createTransport({provider, apiKey = '', relay = '', relayToken =
       throw error;
     }
   };
+  Object.defineProperty(transport, 'capabilities', {value: Object.freeze({outputTokenLimit: authMode !== 'chatgpt'})});
+  return transport;
 }
-export async function listModels(transport, provider, signal) {
+export async function listModels(transport, provider, signal, {details = false} = {}) {
   const ids = new Set(); let cursor = '';
   for (let page = 0; page < 20; page++) {
     let result; await transport(null, {models: true, cursor, signal, receive: data => { result = data; }});
+    if (result?.chatgpt === true) return details ? result.data : result.data.map(item => item.id);
     for (const item of result?.data || result?.models || []) {
       if (provider === 'google' && !item.supportedGenerationMethods?.includes('generateContent')) continue;
       const id = item.id || item.name?.replace(/^models\//, ''); if (id) ids.add(id);
@@ -159,7 +170,7 @@ export async function listModels(transport, provider, signal) {
     const next = provider === 'google' ? result?.nextPageToken : result?.has_more ? result.last_id : '';
     if (!next || next === cursor) break; cursor = next;
   }
-  return [...ids].sort();
+  return details ? [...ids].sort().map(id => ({id, label: id})) : [...ids].sort();
 }
 export function toolCatalog(tools) {
   const names = new Map();
