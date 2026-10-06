@@ -1,0 +1,27 @@
+name: OCX reconciliation snapshot
+on:
+  push:
+    branches: [feat/ocx-container-source]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    if: github.repository == 'wieslawsoltes/VB6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export immutable current sources
+        run: |
+          git bundle create ocx-reconcile.bundle HEAD refs/remotes/origin/main refs/remotes/origin/feat/ocx-property-browsing
+          git rev-parse HEAD HEAD^{tree} refs/remotes/origin/main refs/remotes/origin/feat/ocx-property-browsing > ocx-reconcile.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-reconcile-source
+          path: |
+            ocx-reconcile.bundle
+            ocx-reconcile.txt
+          retention-days: 7
