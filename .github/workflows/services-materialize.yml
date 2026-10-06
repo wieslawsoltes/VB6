@@ -1,0 +1,97 @@
+name: Win32 services integration
+on:
+  push:
+    branches: [feature/win32-common-services]
+    paths: [.github/workflows/services-materialize.yml]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Integrate reviewed upstream and verify every authored source change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git merge --no-commit --no-ff f905988a06004cb60f404d2bddeecc1318c361d8
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, subprocess
+          from pathlib import Path, PurePosixPath
+          parts=[Path('.services-staging')/(str(i)+'.b64') for i in range(3)]
+          encoded=''.join(p.read_text().strip() for p in parts)
+          assert len(encoded)==49836
+          compressed=base64.b64decode(encoded,validate=True)
+          decoder=lzma.LZMADecompressor(memlimit=128*1024*1024)
+          data=decoder.decompress(compressed,max_length=144131)
+          assert decoder.eof and not decoder.unused_data and len(data)==144130
+          assert hashlib.sha256(data).hexdigest()=='e9bbf108a02b670b64a07bd5acf29d5cd7ce18428d95ac19fb85bb7122cc6bcd'
+          entries=json.loads(data)['files']
+          assert len(entries)==23 and len({e['path'] for e in entries})==23
+          for e in entries:
+              p=PurePosixPath(e['path'])
+              assert not p.is_absolute() and '..' not in p.parts
+              f=Path(p)
+              if e['before'] is None:
+                  assert not f.exists(), str(f)
+              else:
+                  assert f.is_file() and hashlib.sha256(f.read_bytes()).hexdigest()==e['before'], str(f)
+          for e in entries:
+              f=Path(e['path'])
+              if 'patch' in e:
+                  subprocess.run(['git','apply','--whitespace=error'],input=e['patch'].encode(),check=True)
+              else:
+                  f.parent.mkdir(parents=True,exist_ok=True)
+                  f.write_text(e['content'],encoding='utf-8')
+              assert hashlib.sha256(f.read_bytes()).hexdigest()==e['after'], str(f)
+          for p in parts: p.unlink()
+          Path('.services-staging').rmdir()
+          Path('.github/workflows/services-materialize.yml').unlink()
+          print('Verified all 23 source/test/sample/documentation preimages and results.')
+          PY
+      - name: Build, test and package actual combined source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          node tools/win32-api-inventory.mjs
+          npm test | tee /tmp/services-integration-tests.txt
+          npm run pack:win32-browser | tee /tmp/services-package-tests.txt
+          git add -A
+          git diff --cached --check
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m 'feat(win32): common services across files, text, synchronization, registry, GUIDs and window properties'
+          npm run build
+          node tools/win32-api-inventory.mjs
+          git diff --exit-code
+      - name: Publish only to the unchanged feature branch
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)" = "$EXPECTED_SHA"
+          git push origin HEAD:refs/heads/feature/win32-common-services
+          git archive --format=zip HEAD -o /tmp/vb6-services-source.zip
+          git bundle create /tmp/vb6-services-source.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} > /tmp/services-revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-services-integration
+          path: |
+            /tmp/vb6-services-source.zip
+            /tmp/vb6-services-source.bundle
+            /tmp/services-revision.txt
+            /tmp/services-integration-tests.txt
+            /tmp/services-package-tests.txt
+            release/vb6-win32-browser-*.tgz
+          retention-days: 14
