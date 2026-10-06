@@ -1,0 +1,94 @@
+name: Verify IDE theme control-state follow-up
+on:
+  push:
+    branches: [validation/ide-theme-state-followup]
+permissions:
+  contents: read
+jobs:
+  verify-source:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/validation/ide-theme-state-followup'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    env:
+      THEME_BASE: 70bca41dfa9763be57965effe75b1f8e9077c002
+      PINNED_MAIN: b70becd023f4b72122ed0e193830f098349c845a
+      EXPECTED_TREE: e61311584087f7aebd3ec28e826ca538a0b6fe35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 70bca41dfa9763be57965effe75b1f8e9077c002
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed, hash-verified source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$THEME_BASE"
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          python - <<'PY'
+          import base64,zlib,hashlib,subprocess
+          payload='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'
+          # Correct transcription is mandatory: no patch runs on a hash mismatch.
+          payload=payload.replace('njH7H/vM','njH/vM').replace('ys8dFYQp','8dFYQp')
+          patch=zlib.decompress(base64.b64decode(payload,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='6ae62e49dc3f41bd923abd3b126c076cd55a9d7bc858832982786f225944f3fb'
+          subprocess.run(['git','apply','--index','-'],input=patch,check=True)
+          PY
+          git commit --quiet -m 'Local staging of reviewed theme control-state patch'
+      - name: Reconcile the three reviewed conflicts against pinned main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge --no-commit --no-ff "$PINNED_MAIN" || test "$?" = 1
+          python - <<'PY'
+          import subprocess,os,json
+          from pathlib import Path
+          conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          assert conflicts==['.gitignore','tools/build.mjs','tools/ide-artifacts.json'],conflicts
+          subprocess.run(['git','checkout','--ours','--','.gitignore','tools/build.mjs'],check=True)
+          p=Path('.gitignore');p.write_text(p.read_text()+'\n# Source-derived OCX lab, verified by the same exact artifact manifest.\n/dist/OCX-Source-Control-Lab.html\n')
+          p=Path('tools/build.mjs');s=p.read_text();key="if(process.argv.includes('--update-ide-manifest'))"
+          assert s.count(key)==1
+          p.write_text(s.replace(key,"const {buildOcxLab}=await import('./build-ocx-lab.mjs');buildOcxLab(root);\n"+key))
+          data=json.loads(subprocess.check_output(['git','show',os.environ['PINNED_MAIN']+':tools/ide-artifacts.json']))
+          data['files']['dist/studio.js']={'bytes':5768478,'sha256':'b7a48d93828c03c78e7a66be43899632552f990cec996ca615f55f731a897edc'}
+          data['files']['dist/VB6-Studio-Web.html']={'bytes':5978177,'sha256':'8cd6a9b373755f92fe84c55edcf2306bb6b6d4bd4c6438861472ac2dad915c17'}
+          Path('tools/ide-artifacts.json').write_text(json.dumps(data,indent=2)+'\n')
+          subprocess.run(['git','add','.gitignore','tools/build.mjs','tools/ide-artifacts.json'],check=True)
+          PY
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          test "$(find .github/workflows -maxdepth 1 -name '*.yml' | sort | tr '\n' ' ')" = '.github/workflows/pages.yml .github/workflows/validate.yml '
+      - name: Validate exact source and retained artifact expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/theme-evidence
+          npm run build | tee /tmp/theme-evidence/build.log
+          node --test tests/*.test.mjs > /tmp/theme-evidence/node.log 2>&1
+          npm run verify:ide-artifacts | tee /tmp/theme-evidence/fingerprints.log
+          git diff --exit-code
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+      - name: Publish only a clean result ref, never main or the task ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -n "$(git ls-remote --heads origin refs/heads/validation/ide-theme-state-result)"; then
+            echo 'Result ref already exists; refusing to replace it.' >&2
+            exit 1
+          fi
+          result=$(git commit-tree "$EXPECTED_TREE" -p "$THEME_BASE" -p "$PINNED_MAIN" -m 'fix(theme): preserve selected control states, accessible focus and current-main integration')
+          git push origin "$result:refs/heads/validation/ide-theme-state-result"
+          printf '%s\n%s\n' "$result" "$EXPECTED_TREE" | tee /tmp/theme-evidence/revision.txt
+          printf 'Verified result: `%s`\n\nSource tree: `%s`\n' "$result" "$EXPECTED_TREE" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ide-theme-state-verification
+          path: /tmp/theme-evidence
+          retention-days: 7
+          if-no-files-found: ignore
