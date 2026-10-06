@@ -1,6 +1,6 @@
 import {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements} from './debug-control.js';
 import {VBWin32Bridge} from './win32.js';
-import {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate} from './automation.js';
+import {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate,automationSubscribe} from './automation.js';
 import {DataContext} from '../data/context.js';
 import {errorDescription} from './error-messages.js';
 import {DebugEvaluationSession} from './debug-evaluation.js';
@@ -111,10 +111,30 @@ export class VirtualMachine extends Signal {
   async createRecord(name,frame,depth=0){if(depth>32)throw new VBError('Recursive user-defined type',1002);const fields=new Map();for(const member of this.recordSchema(name,frame.module)||[]){const type=member.storageType||member.type;let value;if(member.bounds!==null){value=await this.createArray(await this.evalBounds(member.bounds,frame),type,frame,member.fixedLength,depth+1);value.dynamic=!member.bounds.length;}else if(this.recordSchema(type,frame.module))value=await this.createRecord(type,frame,depth+1);else value=member.initial?await this.evaluate(member.initial,frame):defaultValue(type);const cell=new Cell(member.bounds!==null?'Variant':type,value,false,member.fixedLength);cell.isArray=member.bounds!==null;cell.elementType=type;fields.set(member.name,cell);}return makeRecord(name,fields);}
   // Event connections follow assignment order; replacing a reference detaches the old source.
   bindEventCell(cell,owner,prefix){
-    const sink={owner,prefix},set=cell.set.bind(cell);let source=null;
-    const connect=value=>{if(source){const entries=this.eventSinks.get(source);if(entries){const i=entries.indexOf(sink);if(i>=0)entries.splice(i,1);}}source=value&&typeof value==='object'?value:null;if(source){let entries=this.eventSinks.get(source);if(!entries)this.eventSinks.set(source,entries=[]);entries.push(sink);}};
+    const sink={owner,prefix},set=cell.set.bind(cell);let source=null,unsubscribe=null;
+    const connect=value=>{
+      unsubscribe?.();unsubscribe=null;
+      if(source){const entries=this.eventSinks.get(source);if(entries){const i=entries.indexOf(sink);if(i>=0)entries.splice(i,1);}}
+      source=value&&typeof value==='object'?value:null;
+      if(source){
+        let entries=this.eventSinks.get(source);if(!entries)this.eventSinks.set(source,entries=[]);entries.push(sink);
+        if(isAutomationObject(source))unsubscribe=automationSubscribe(source,(name,args,context)=>this.dispatchAutomationEvent(owner,prefix+'_'+name,args,context));
+      }
+    };
     cell.set=value=>{const result=set(value);connect(result);return result;};connect(cell.get());
   }
+  async dispatchAutomationEvent(instance,name,args,{reentrant=false}={}){
+    if(['stopped','error'].includes(this.state)||this.immediateContext)return;
+    const proc=instance?.module.procedures.get(lower(name));if(!proc)return;
+    // A synchronous COM callback may interrupt precisely the outstanding native call.
+    // Ordinary idle notifications remain on the VM event queue; never run two stacks.
+    if(reentrant&&this.stack.length){
+      if(this.state==='paused'||this.debugEvaluation)throw new VBError('Native event callback cannot enter a paused/debug-evaluation frame',5);
+      return this.callProcedure(instance,proc,args);
+    }
+    return this.dispatch(instance,name,args);
+  }
+
   async raiseEvent(instance,name,nodes,frame){
     const event=instance.module.events?.get(lower(name));if(!event)throw new VBError('Event not declared: '+name,1002);
     if(nodes.length!==event.params.length)throw new VBError('Wrong number of arguments to event '+name,450);

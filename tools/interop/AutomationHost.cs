@@ -38,14 +38,17 @@ namespace VB6Interop {
     void Load(IStream stream); void Save(IStream stream, [MarshalAs(UnmanagedType.Bool)] bool clearDirty); void GetSizeMax(out long size); void InitNew();
   }
   sealed class ControlHost : AxHost {
-    public ControlHost(Guid clsid) : base(clsid.ToString(), 2) {}
+    readonly string licenseKey;
+    public ControlHost(Guid clsid,string key=null) : base(clsid.ToString(), 2) { licenseKey=key; }
+    protected override object CreateInstanceCore(Guid clsid) { return licenseKey==null?base.CreateInstanceCore(clsid):AutomationHost.CreateLicensed(clsid,licenseKey); }
     public object Instance { get { return GetOcx(); } }
   }
   sealed class Entry {
     public object Value; public long Identity; public Form Window; public ControlHost Control;
     public Dictionary<string,object> Metadata;
+    public readonly List<EventConnection> Events=new List<EventConnection>(); public int EventDepth; public bool DesignMode=false;
   }
-  public static class AutomationHost {
+  public static partial class AutomationHost {
     const int Limit=1024*1024, MaxObjects=128;
     static readonly JavaScriptSerializer Json=new JavaScriptSerializer { MaxJsonLength=Limit, RecursionLimit=32 };
     static readonly Dictionary<string,Entry> Objects=new Dictionary<string,Entry>();
@@ -97,7 +100,7 @@ namespace VB6Interop {
             if(fn.memid==0)defaultMember=name;
           } finally { if(ptr!=IntPtr.Zero)info.ReleaseFuncDesc(ptr); }
         }
-        return D("members",members.Values.ToArray(),"defaultMember",defaultMember,"guid",type.guid.ToString(),"enumerable",value is IEnumerable,"persistStream",value is PersistStream,"persistStreamInit",value is PersistStreamInit);
+        return D("members",members.Values.ToArray(),"defaultMember",defaultMember,"guid",type.guid.ToString(),"enumerable",value is IEnumerable,"persistStream",value is PersistStream,"persistStreamInit",value is PersistStreamInit,"events",DescribeEvents(value));
       } finally { if(attr!=IntPtr.Zero&&info!=null)info.ReleaseTypeAttr(attr);if(info!=null&&Marshal.IsComObject(info))Marshal.ReleaseComObject(info); }
     }
     static object Export(object value,int depth=0) {
@@ -140,7 +143,7 @@ namespace VB6Interop {
       }
     }
     static void Release(string id) {
-      var e=ObjectAt(id);Objects.Remove(id);Identities.Remove(e.Identity);
+      var e=ObjectAt(id);if(e.EventDepth>0)throw new InvalidOperationException("Cannot release the source of an active native event");Unadvise(e);Objects.Remove(id);Identities.Remove(e.Identity);
       try {if(e.Window!=null)e.Window.Dispose();else if(Marshal.IsComObject(e.Value))Marshal.FinalReleaseComObject(e.Value);}finally{e.Value=null;}
     }
     static object Persistence(Entry entry,Dictionary<string,object> request) {
@@ -161,17 +164,22 @@ namespace VB6Interop {
       if(!Initialized)throw new UnauthorizedAccessException("Initialize an explicitly granted session first");
       if(op=="info"){Application.DoEvents();return D("objects",Objects.Count,"windows",Objects.Values.Count(e=>e.Window!=null&&!e.Window.IsDisposed));}
       if(op=="close"){Quitting=true;return D("closed",true);}
+      if(op=="eventReturn")return EventReturn(request);
+      if(op=="licenseInfo")return Licensing(S(request,"progId"));
       if(op=="create"){
         string progId=S(request,"progId");if(!Allowed.Contains(progId))throw new UnauthorizedAccessException("ProgID is not allowed: "+progId);bool preview=Convert.ToBoolean(V(request,"preview",false));if(preview&&!Controls.Contains(progId))throw new UnauthorizedAccessException("Native control preview was not granted");
         var type=Type.GetTypeFromProgID(progId,true);CheckKillbit(type.GUID);object value=null;Form window=null;ControlHost control=null;
         try {
-          if(preview){window=new Form {Text="VB6 native component — "+progId,Width=640,Height=480};control=new ControlHost(type.GUID) {Dock=DockStyle.Fill};((System.ComponentModel.ISupportInitialize)control).BeginInit();window.Controls.Add(control);((System.ComponentModel.ISupportInitialize)control).EndInit();window.Show();Application.DoEvents();value=control.Instance;}
-          else value=Activator.CreateInstance(type);
+          if(preview){window=new Form {Text="VB6 native component — "+progId,Width=640,Height=480};control=new ControlHost(type.GUID,V(request,"licenseKey") as string) {Dock=DockStyle.Fill};((System.ComponentModel.ISupportInitialize)control).BeginInit();window.Controls.Add(control);((System.ComponentModel.ISupportInitialize)control).EndInit();window.Show();Application.DoEvents();value=control.Instance;}
+          else value=V(request,"licenseKey")==null?Activator.CreateInstance(type):CreateLicensed(type.GUID,S(request,"licenseKey"));
           var result=Map(Export(value));var entry=ObjectAt(S(result,"id"));entry.Window=window;entry.Control=control;return result;
         }catch{if(window!=null)window.Dispose();else if(value!=null&&Marshal.IsComObject(value))Marshal.FinalReleaseComObject(value);throw;}
       }
       var target=ObjectAt(S(request,"handle"));
       if(op=="release"){Release(S(request,"handle"));return D("released",true);}
+      if(op=="advise")return Advise(S(request,"handle"),target);
+      if(op=="unadvise"){Unadvise(target);return D("events",0);}
+      if(new[]{"controlInfo","showPropertyPages","setControlBounds","controlVisible","controlEnabled","controlFocus"}.Contains(op))return ControlOperation(target,request);
       if(op=="loadState"||op=="saveState")return Persistence(target,request);
       if(op=="enumerate"){var sequence=target.Value as IEnumerable;if(sequence==null)throw new NotSupportedException("Component is not enumerable");var values=new List<object>();var enumerator=sequence.GetEnumerator();try{while(enumerator.MoveNext()){if(values.Count>=10000)throw new NotSupportedException("Enumeration exceeds 10,000 entries");values.Add(Export(enumerator.Current));}}finally{var disposable=enumerator as IDisposable;if(disposable!=null)disposable.Dispose();else if(Marshal.IsComObject(enumerator))Marshal.ReleaseComObject(enumerator);}return values;}
       if(op!="call")throw new ArgumentException("Unknown Automation operation");
@@ -192,14 +200,11 @@ namespace VB6Interop {
       try {
         // Blocking stdin must not freeze ActiveX windows while the client is idle.
         // Bound the reader before allocating an arbitrarily large request string.
-        var requests=new BlockingCollection<string>(16);
+        var requests=Requests;
         var reader=new Thread(()=>{try{var buffer=new StringBuilder();int c;while((c=Console.Read())!=-1){if(c=='\n'){requests.Add(buffer.ToString());buffer.Clear();}else if(c!='\r'){if(buffer.Length>=Limit)throw new InvalidDataException("Request too large");buffer.Append((char)c);}}if(buffer.Length>0)requests.Add(buffer.ToString());}catch{Quitting=true;}finally{requests.CompleteAdding();}});
         reader.IsBackground=true;reader.Start();
-        while(!Quitting){string line;if(!requests.TryTake(out line,25)){Application.DoEvents();if(requests.IsCompleted)break;continue;}int id=0;object response;
-          try{if(line.Length>Limit)throw new ArgumentException("Request too large");var request=Map(Json.DeserializeObject(line));id=N(request,"id");if(id<=0)throw new ArgumentException("Invalid request id");response=D("id",id,"result",Handle(request));}
-          catch(Exception error){while(error is TargetInvocationException&&error.InnerException!=null)error=error.InnerException;int hr=Marshal.GetHRForException(error);int number=(hr&unchecked((int)0xFFFF0000))==unchecked((int)0x800A0000)?hr&65535:hr==unchecked((int)0x80020003)?438:hr==unchecked((int)0x80020005)?13:440;response=D("id",id,"error",D("message",error.Message,"hresult",hr,"number",number));}
-          string json=Json.Serialize(response);if(json.Length>Limit)json=Json.Serialize(D("id",id,"error",D("message","Automation response exceeds 1 MiB","number",7)));Console.WriteLine(json);Console.Out.Flush();
-        }
+        while(!Quitting){string line;if(!requests.TryTake(out line,25)){Application.DoEvents();if(requests.IsCompleted)break;continue;}ProcessRequest(line);}
+
       } finally {foreach(var id in Objects.Keys.ToArray())try{Release(id);}catch{} }
     }
   }
