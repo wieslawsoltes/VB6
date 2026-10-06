@@ -5,12 +5,13 @@ Add-Type -AssemblyName System.Web.Extensions
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $paths = @(
   'AutomationHost.cs', 'NativeDispatch.cs', 'NativeEnumeration.cs',
-  'OcxSupport.cs', 'OcxPersistence.cs', 'OcxContainer.cs'
+  'OcxSupport.cs', 'OcxPersistence.cs', 'OcxContainer.cs', 'OcxPropertyBrowsing.cs'
 ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 $paths += Join-Path $root 'tests/fixtures/ocx/ContainerContracts.cs'
+$paths += Join-Path $root 'tests/fixtures/ocx/PropertyBrowsingContracts.cs'
 Add-Type -Path $paths -ReferencedAssemblies System.Windows.Forms,System.Drawing,System.Web.Extensions,System.Core
 try {
-  [VB6Interop.AutomationHost]::RunOcxContainerContracts()
+  [VB6Interop.AutomationHost]::RunOcxAllContainerContracts()
 } catch {
   # Keep the native managed stack, not just PowerShell's invocation wrapper.
   $failure = $_.Exception
