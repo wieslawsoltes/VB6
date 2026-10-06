@@ -92,7 +92,7 @@ try:
             page.get_by_label('Agent task', exact=True).fill('Inspect the current VB6 project.')
             panel.get_by_role('button', name='Run', exact=True).click()
             dialog = page.get_by_role('dialog', name='AI Coding Agent — Start Task', exact=True)
-            check('ChatGPT plan usage' in dialog.inner_text() and True, filename + ': run confirmation identifies billing mode')
+            check('ChatGPT plan usage' in dialog.inner_text(), filename + ': run confirmation identifies billing mode')
             dialog.get_by_role('button', name='Start Task', exact=True).click()
             page.wait_for_function("vb6Studio.codingAgents.agent.state === 'completed'")
             check(page.evaluate('vb6Studio.codingAgents.agent.budgetUsed') == 50, filename + ': real tool continuation and usage accounting')
