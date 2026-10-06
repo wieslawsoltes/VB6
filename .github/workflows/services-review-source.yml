@@ -1,4 +1,4 @@
-name: Win32 services integration
+name: Win32 services final integration
 on:
   push:
     branches: [feature/win32-common-services]
@@ -17,66 +17,52 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Integrate reviewed main and verified source changes
+      - name: Preserve reviewed UI fidelity and portable bundle updates
         run: |
           set -euo pipefail
           git config user.name 'Wiesław Šoltés'
           git config user.email 'wieslawsoltes@users.noreply.github.com'
-          git merge --no-commit --no-ff 72dae4fa89e165f6f0dc0ba0aad5cb7615508ea3 || true
+          git merge --no-commit --no-ff 728a9201806a4d455113867d2778c3262666a05b || true
           test -f .git/MERGE_HEAD
           python3 - <<'PY'
-          from pathlib import Path
-          import subprocess,gzip,hashlib
+          import subprocess
           conflicts=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
-          allowed={'README.md','src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js'}
+          allowed={'src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js'}
           assert all(p in allowed or p.startswith('dist/') for p in conflicts), conflicts
-          if 'README.md' in conflicts:
-              p=Path('README.md');s=p.read_text()
-              assert s.count('<<<<<<< HEAD\n')==1
-              a,rest=s.split('<<<<<<< HEAD\n');ours,rest=rest.split('=======\n');theirs,z=rest.split('>>>>>>> 72dae4fa89e165f6f0dc0ba0aad5cb7615508ea3\n')
-              assert 'Common browser Win32 services' in ours and 'Scalar and Variant source compatibility' in theirs
-              p.write_text(a+ours+'\n'+theirs+z)
-          patch=gzip.decompress(Path('.services-final.patch.gz').read_bytes())
-          assert hashlib.sha256(patch).hexdigest()=='559013dac9639623e74ee62bee4bbb765f587cdcd256b0623ed6be9a3c90c606'
-          Path('/tmp/services-final.patch').write_bytes(patch)
           PY
-          git apply --unidiff-zero /tmp/services-final.patch
           npm run build
           node tools/win32-api-inventory.mjs
-          git add README.md packages src tools dist examples .github/workflows/scalar-conformance.yml .github/workflows/typed-native-interop.yml
+          git add README.md packages src tools dist examples .github/workflows/issue39.yml
           test -z "$(git diff --name-only --diff-filter=U)"
-          # Verify product-only tree without changing this preparation checkout.
           cp .git/index /tmp/services-product.index
-          GIT_INDEX_FILE=/tmp/services-product.index git update-index --force-remove .github/workflows/services-review-source.yml .services-final.patch.gz
-          test "$(GIT_INDEX_FILE=/tmp/services-product.index git write-tree)" = 'd428f5818da7da85d95b3fe1ec9d2ee07a7b4fea'
-      - name: Validate the exact combined implementation
+          GIT_INDEX_FILE=/tmp/services-product.index git update-index --force-remove .github/workflows/services-review-source.yml
+          test "$(GIT_INDEX_FILE=/tmp/services-product.index git write-tree)" = '0b678398d4615638a1371be4ce8c30038a072224'
+      - name: Validate exact combined source and extracted package
         run: |
           set -euo pipefail
           npm test | tee /tmp/services-node-tests.txt
           npm run pack:win32-browser | tee /tmp/services-package-tests.txt
-          node tools/win32-services-contracts.mjs > /tmp/services-js-contracts.json
           git diff --exit-code
-      - name: Publish only to the unchanged feature branch
+      - name: Publish only to unchanged feature branch
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)" = "$EXPECTED_SHA"
-          git commit -m 'feat(win32-services): finish common services and preserve current scalar-runtime main'
+          git commit -m 'fix(win32-services): retain latest classic UI fidelity in regenerated builds'
           git push origin HEAD:refs/heads/feature/win32-common-services
-          git bundle create /tmp/services-integrated.bundle HEAD refs/remotes/origin/main
-          git archive --format=zip HEAD -o /tmp/services-integrated-source.zip
-          git rev-parse HEAD HEAD^{tree} > /tmp/services-integrated-revision.txt
+          git bundle create /tmp/services-final.bundle HEAD refs/remotes/origin/main
+          git archive --format=zip HEAD -o /tmp/services-final-source.zip
+          git rev-parse HEAD HEAD^{tree} > /tmp/services-final-revision.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: services-integrated-validation
+          name: services-final-integration
           path: |
-            /tmp/services-integrated.bundle
-            /tmp/services-integrated-source.zip
-            /tmp/services-integrated-revision.txt
+            /tmp/services-final.bundle
+            /tmp/services-final-source.zip
+            /tmp/services-final-revision.txt
             /tmp/services-node-tests.txt
             /tmp/services-package-tests.txt
-            /tmp/services-js-contracts.json
             release/vb6-win32-browser-*.tgz
           retention-days: 7
