@@ -43,6 +43,19 @@
   --vb-icon-r: #800000;
   --vb-icon-e: #ff0000;
   --vb-icon-m: #800080;
+  --vb-icon-classic-display: inline;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: none;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: initial;
+  --vb-pack-caption-maximize: initial;
+  --vb-pack-caption-minimize: initial;
+  --vb-pack-caption-restore: initial;
+  --vb-pack-caption-detach: initial;
+  --vb-pack-caption-help: initial;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -74,6 +87,7 @@
   --vb-sys-28: var(--vb-inactive-end);
   --vb-sys-29: var(--vb-selection);
   --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: light;
 }
 [data-vb-theme="standard"] {
   --vb-face: #d4d0c8;
@@ -119,6 +133,19 @@
   --vb-icon-r: #800000;
   --vb-icon-e: #ff0000;
   --vb-icon-m: #800080;
+  --vb-icon-classic-display: inline;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: none;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: initial;
+  --vb-pack-caption-maximize: initial;
+  --vb-pack-caption-minimize: initial;
+  --vb-pack-caption-restore: initial;
+  --vb-pack-caption-detach: initial;
+  --vb-pack-caption-help: initial;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -150,6 +177,7 @@
   --vb-sys-28: var(--vb-inactive-end);
   --vb-sys-29: var(--vb-selection);
   --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: light;
 }
 [data-vb-theme="contrast"] {
   --vb-face: #000000;
@@ -195,6 +223,19 @@
   --vb-icon-r: #ff8080;
   --vb-icon-e: #ff0000;
   --vb-icon-m: #ff80ff;
+  --vb-icon-classic-display: inline;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: none;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: initial;
+  --vb-pack-caption-maximize: initial;
+  --vb-pack-caption-minimize: initial;
+  --vb-pack-caption-restore: initial;
+  --vb-pack-caption-detach: initial;
+  --vb-pack-caption-help: initial;
   --vb-sys-0: var(--vb-face);
   --vb-sys-1: var(--vb-desktop);
   --vb-sys-2: var(--vb-title);
@@ -226,6 +267,927 @@
   --vb-sys-28: var(--vb-inactive-end);
   --vb-sys-29: var(--vb-selection);
   --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: dark;
+}
+[data-vb-theme="fluent"] {
+  --vb-face: #f3f3f3;
+  --vb-light: #ffffff;
+  --vb-highlight: #e8e8e8;
+  --vb-shadow: #8a8a8a;
+  --vb-dark: #505050;
+  --vb-text: #1a1a1a;
+  --vb-title: #f3f3f3;
+  --vb-title-end: #f3f3f3;
+  --vb-title-text: #1a1a1a;
+  --vb-inactive: #ededed;
+  --vb-inactive-end: #ededed;
+  --vb-inactive-text: #616161;
+  --vb-window: #ffffff;
+  --vb-window-text: #1a1a1a;
+  --vb-selection: #0067b8;
+  --vb-selection-text: #ffffff;
+  --vb-workspace: #e4e7eb;
+  --vb-desktop: #d9e2ec;
+  --vb-gray: #646464;
+  --vb-info: #ffffff;
+  --vb-info-text: #1a1a1a;
+  --vb-link: #005a9e;
+  --vb-keyword: #003e9c;
+  --vb-comment: #256327;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: inline;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: light;
+  --vb-app-font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --vb-app-size: 12px;
+  --vb-app-radius: 4px;
+  --vb-app-window-radius: 8px;
+  --vb-app-border: #8a8a8a;
+  --vb-app-separator: #d6d6d6;
+  --vb-app-control: #ffffff;
+  --vb-app-hover: #e5edf5;
+  --vb-app-pressed: #d4e3ef;
+  --vb-app-focus: #0067b8;
+  --vb-app-surface: #fafafa;
+  --vb-app-gutter: #f5f5f5;
+  --vb-app-gutter-text: #626262;
+  --vb-app-error: #b42318;
+  --vb-app-string: #8f2424;
+  --vb-app-shadow: 0 6px 20px #00000026, 0 1px 3px #00000020;
+  --vb-app-control-shadow: 0 1px 1px #00000012;
+  --vb-app-pressed-shadow: inset 0 1px 2px #00000016;
+  --vb-app-material: #f3f3f3;
+  --vb-app-scrim: #00000030;
+  --vb-app-thumb: #777777;
+  --vb-app-success: #256327;
+  --vb-app-warning: #805200;
+  --vb-app-execution-text: #161616;
+  color-scheme:light;
+}
+[data-vb-theme="fluent-dark"] {
+  --vb-face: #202020;
+  --vb-light: #545454;
+  --vb-highlight: #383838;
+  --vb-shadow: #8a8a8a;
+  --vb-dark: #b4b4b4;
+  --vb-text: #f5f5f5;
+  --vb-title: #282828;
+  --vb-title-end: #282828;
+  --vb-title-text: #f5f5f5;
+  --vb-inactive: #252525;
+  --vb-inactive-end: #252525;
+  --vb-inactive-text: #b4b4b4;
+  --vb-window: #191919;
+  --vb-window-text: #f5f5f5;
+  --vb-selection: #80caff;
+  --vb-selection-text: #102331;
+  --vb-workspace: #141414;
+  --vb-desktop: #182630;
+  --vb-gray: #ababab;
+  --vb-info: #303030;
+  --vb-info-text: #f5f5f5;
+  --vb-link: #80caff;
+  --vb-keyword: #8dc8ff;
+  --vb-comment: #9ccc8a;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: inline;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: dark;
+  --vb-app-font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --vb-app-size: 12px;
+  --vb-app-radius: 4px;
+  --vb-app-window-radius: 8px;
+  --vb-app-border: #888888;
+  --vb-app-separator: #484848;
+  --vb-app-control: #303030;
+  --vb-app-hover: #393f46;
+  --vb-app-pressed: #414d59;
+  --vb-app-focus: #80caff;
+  --vb-app-surface: #252525;
+  --vb-app-gutter: #232323;
+  --vb-app-gutter-text: #b4b4b4;
+  --vb-app-error: #ffb4ab;
+  --vb-app-string: #f1ada4;
+  --vb-app-shadow: 0 8px 24px #00000066, 0 1px 3px #00000066;
+  --vb-app-control-shadow: 0 1px 1px #00000055;
+  --vb-app-pressed-shadow: inset 0 1px 2px #00000055;
+  --vb-app-material: #202020;
+  --vb-app-scrim: #00000066;
+  --vb-app-thumb: #adadad;
+  --vb-app-success: #9ccc8a;
+  --vb-app-warning: #ffd58a;
+  --vb-app-execution-text: #161616;
+  color-scheme:dark;
+}
+[data-vb-theme="macos26"] {
+  --vb-face: #ececf0;
+  --vb-light: #ffffff;
+  --vb-highlight: #e8e8e8;
+  --vb-shadow: #8a8a8a;
+  --vb-dark: #505050;
+  --vb-text: #1d1d1f;
+  --vb-title: #ececf0;
+  --vb-title-end: #ececf0;
+  --vb-title-text: #1d1d1f;
+  --vb-inactive: #ededed;
+  --vb-inactive-end: #ededed;
+  --vb-inactive-text: #616161;
+  --vb-window: #ffffff;
+  --vb-window-text: #1d1d1f;
+  --vb-selection: #005ec4;
+  --vb-selection-text: #ffffff;
+  --vb-workspace: #dfe1e9;
+  --vb-desktop: #d9ddeb;
+  --vb-gray: #646464;
+  --vb-info: #ffffff;
+  --vb-info-text: #1a1a1a;
+  --vb-link: #0057b8;
+  --vb-keyword: #7136a8;
+  --vb-comment: #386738;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: inline;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: light;
+  --vb-app-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --vb-app-size: 12px;
+  --vb-app-radius: 6px;
+  --vb-app-window-radius: 12px;
+  --vb-app-border: #8a8a8a;
+  --vb-app-separator: #d6d6d6;
+  --vb-app-control: #ffffff;
+  --vb-app-hover: #e0e7f4;
+  --vb-app-pressed: #ccd9ef;
+  --vb-app-focus: #005ec4;
+  --vb-app-surface: #f7f7fa;
+  --vb-app-gutter: #f5f5f5;
+  --vb-app-gutter-text: #626262;
+  --vb-app-error: #b42318;
+  --vb-app-string: #8f2424;
+  --vb-app-shadow: 0 12px 32px #20203833, 0 1px 4px #00000026;
+  --vb-app-control-shadow: 0 1px 2px #0000001f, inset 0 1px #ffffffcc;
+  --vb-app-pressed-shadow: inset 0 1px 2px #00000016;
+  --vb-app-material: color-mix(in srgb, #ececf0 92%, transparent);
+  --vb-app-scrim: #00000030;
+  --vb-app-thumb: #777777;
+  --vb-app-success: #256327;
+  --vb-app-warning: #805200;
+  --vb-app-execution-text: #161616;
+  color-scheme:light;
+}
+[data-vb-theme="macos26-dark"] {
+  --vb-face: #2b2b30;
+  --vb-light: #545454;
+  --vb-highlight: #383838;
+  --vb-shadow: #8a8a8a;
+  --vb-dark: #b4b4b4;
+  --vb-text: #f5f5f5;
+  --vb-title: #303036;
+  --vb-title-end: #303036;
+  --vb-title-text: #f5f5f5;
+  --vb-inactive: #252525;
+  --vb-inactive-end: #252525;
+  --vb-inactive-text: #b4b4b4;
+  --vb-window: #1e1e23;
+  --vb-window-text: #f5f5f5;
+  --vb-selection: #8bc2ff;
+  --vb-selection-text: #102235;
+  --vb-workspace: #17171c;
+  --vb-desktop: #222535;
+  --vb-gray: #ababab;
+  --vb-info: #303030;
+  --vb-info-text: #f5f5f5;
+  --vb-link: #91c6ff;
+  --vb-keyword: #dbadff;
+  --vb-comment: #9cd69c;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: inline;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: dark;
+  --vb-app-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --vb-app-size: 12px;
+  --vb-app-radius: 6px;
+  --vb-app-window-radius: 12px;
+  --vb-app-border: #888888;
+  --vb-app-separator: #484848;
+  --vb-app-control: #303030;
+  --vb-app-hover: #41434e;
+  --vb-app-pressed: #4c5263;
+  --vb-app-focus: #8bc2ff;
+  --vb-app-surface: #303036;
+  --vb-app-gutter: #232323;
+  --vb-app-gutter-text: #b4b4b4;
+  --vb-app-error: #ffb4ab;
+  --vb-app-string: #f1ada4;
+  --vb-app-shadow: 0 8px 24px #00000066, 0 1px 3px #00000066;
+  --vb-app-control-shadow: 0 1px 2px #00000066, inset 0 1px #ffffff12;
+  --vb-app-pressed-shadow: inset 0 1px 2px #00000055;
+  --vb-app-material: color-mix(in srgb, #2b2b30 94%, transparent);
+  --vb-app-scrim: #00000066;
+  --vb-app-thumb: #adadad;
+  --vb-app-success: #9ccc8a;
+  --vb-app-warning: #ffd58a;
+  --vb-app-execution-text: #161616;
+  color-scheme:dark;
+}
+[data-vb-theme="x11"] {
+  --vb-face: #bdbdb3;
+  --vb-light: #f2f2e8;
+  --vb-highlight: #d6d6cc;
+  --vb-shadow: #66665c;
+  --vb-dark: #35352d;
+  --vb-text: #1a1a1a;
+  --vb-title: #526872;
+  --vb-title-end: #526872;
+  --vb-title-text: #ffffff;
+  --vb-inactive: #a5a59a;
+  --vb-inactive-end: #a5a59a;
+  --vb-inactive-text: #292922;
+  --vb-window: #fffff4;
+  --vb-window-text: #1a1a1a;
+  --vb-selection: #365762;
+  --vb-selection-text: #ffffff;
+  --vb-workspace: #777970;
+  --vb-desktop: #526872;
+  --vb-gray: #505047;
+  --vb-info: #ffffdf;
+  --vb-info-text: #1a1a1a;
+  --vb-link: #1d477f;
+  --vb-keyword: #233b83;
+  --vb-comment: #285e2d;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: inline;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: light;
+  --vb-app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+  --vb-app-size: 11px;
+  --vb-app-radius: 0px;
+  --vb-app-window-radius: 0px;
+  --vb-app-border: #66665c;
+  --vb-app-separator: #929287;
+  --vb-app-control: #bdbdb3;
+  --vb-app-hover: #cecec4;
+  --vb-app-pressed: #a6a69c;
+  --vb-app-focus: #233b83;
+  --vb-app-surface: #bdbdb3;
+  --vb-app-gutter: #e7e7db;
+  --vb-app-gutter-text: #44443d;
+  --vb-app-error: #b42318;
+  --vb-app-string: #8f2424;
+  --vb-app-shadow: 3px 3px 0 #00000066;
+  --vb-app-control-shadow: inset 1px 1px #f2f2e8, inset -1px -1px #66665c;
+  --vb-app-pressed-shadow: inset 1px 1px #66665c, inset -1px -1px #f2f2e8;
+  --vb-app-material: #bdbdb3;
+  --vb-app-scrim: #00000030;
+  --vb-app-thumb: #bdbdb3;
+  --vb-app-success: #256327;
+  --vb-app-warning: #805200;
+  --vb-app-execution-text: #161616;
+  color-scheme:light;
+}
+[data-vb-theme="x11-dark"] {
+  --vb-face: #343c3e;
+  --vb-light: #858f90;
+  --vb-highlight: #576265;
+  --vb-shadow: #99a4a6;
+  --vb-dark: #b5bfc0;
+  --vb-text: #f5f5f5;
+  --vb-title: #385861;
+  --vb-title-end: #385861;
+  --vb-title-text: #ffffff;
+  --vb-inactive: #343c3e;
+  --vb-inactive-end: #343c3e;
+  --vb-inactive-text: #b4b4b4;
+  --vb-window: #202729;
+  --vb-window-text: #f4f4e9;
+  --vb-selection: #b6d5dd;
+  --vb-selection-text: #192528;
+  --vb-workspace: #1c2527;
+  --vb-desktop: #273f47;
+  --vb-gray: #ababab;
+  --vb-info: #303030;
+  --vb-info-text: #f5f5f5;
+  --vb-link: #80caff;
+  --vb-keyword: #8dc8ff;
+  --vb-comment: #9ccc8a;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: inline;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: dark;
+  --vb-app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+  --vb-app-size: 11px;
+  --vb-app-radius: 0px;
+  --vb-app-window-radius: 0px;
+  --vb-app-border: #99a4a6;
+  --vb-app-separator: #5a686b;
+  --vb-app-control: #343c3e;
+  --vb-app-hover: #48575c;
+  --vb-app-pressed: #263033;
+  --vb-app-focus: #b6d5dd;
+  --vb-app-surface: #343c3e;
+  --vb-app-gutter: #2d3537;
+  --vb-app-gutter-text: #bcc4c4;
+  --vb-app-error: #ffb4ab;
+  --vb-app-string: #f1ada4;
+  --vb-app-shadow: 3px 3px 0 #00000099;
+  --vb-app-control-shadow: inset 1px 1px #858f90, inset -1px -1px #151d20;
+  --vb-app-pressed-shadow: inset 1px 1px #151d20, inset -1px -1px #858f90;
+  --vb-app-material: #343c3e;
+  --vb-app-scrim: #00000066;
+  --vb-app-thumb: #75878c;
+  --vb-app-success: #9ccc8a;
+  --vb-app-warning: #ffd58a;
+  --vb-app-execution-text: #161616;
+  color-scheme:dark;
+}
+[data-vb-theme="x11-cde"] {
+  --vb-face: #aebfbe;
+  --vb-light: #e4eeee;
+  --vb-highlight: #ccdad8;
+  --vb-shadow: #546d6c;
+  --vb-dark: #2b4141;
+  --vb-text: #1a1a1a;
+  --vb-title: #365d66;
+  --vb-title-end: #365d66;
+  --vb-title-text: #ffffff;
+  --vb-inactive: #8caaa9;
+  --vb-inactive-end: #8caaa9;
+  --vb-inactive-text: #1d3332;
+  --vb-window: #f8faef;
+  --vb-window-text: #1a1a1a;
+  --vb-selection: #365d66;
+  --vb-selection-text: #ffffff;
+  --vb-workspace: #617d7d;
+  --vb-desktop: #45757b;
+  --vb-gray: #425757;
+  --vb-info: #fffbdc;
+  --vb-info-text: #1a1a1a;
+  --vb-link: #005a9e;
+  --vb-keyword: #003e9c;
+  --vb-comment: #256327;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: inline;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: var(--vb-link);
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: light;
+  --vb-app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+  --vb-app-size: 11px;
+  --vb-app-radius: 0px;
+  --vb-app-window-radius: 0px;
+  --vb-app-border: #546d6c;
+  --vb-app-separator: #7e9996;
+  --vb-app-control: #aebfbe;
+  --vb-app-hover: #c7d5d2;
+  --vb-app-pressed: #94adaa;
+  --vb-app-focus: #224b6a;
+  --vb-app-surface: #aebfbe;
+  --vb-app-gutter: #dde7df;
+  --vb-app-gutter-text: #405453;
+  --vb-app-error: #b42318;
+  --vb-app-string: #8f2424;
+  --vb-app-shadow: 3px 3px 0 #00000066;
+  --vb-app-control-shadow: inset 1px 1px #e4eeee, inset -1px -1px #546d6c;
+  --vb-app-pressed-shadow: inset 1px 1px #546d6c, inset -1px -1px #e4eeee;
+  --vb-app-material: #aebfbe;
+  --vb-app-scrim: #00000030;
+  --vb-app-thumb: #aebfbe;
+  --vb-app-success: #256327;
+  --vb-app-warning: #805200;
+  --vb-app-execution-text: #161616;
+  color-scheme:light;
+}
+[data-vb-theme="x11-cde-dark"] {
+  --vb-face: #2e4547;
+  --vb-light: #79989b;
+  --vb-highlight: #446367;
+  --vb-shadow: #91aeb0;
+  --vb-dark: #c2d4d5;
+  --vb-text: #f5f5f5;
+  --vb-title: #365d66;
+  --vb-title-end: #365d66;
+  --vb-title-text: #ffffff;
+  --vb-inactive: #2e4547;
+  --vb-inactive-end: #2e4547;
+  --vb-inactive-text: #b4b4b4;
+  --vb-window: #1b2b2d;
+  --vb-window-text: #f5f5f5;
+  --vb-selection: #b6d9d7;
+  --vb-selection-text: #172b2a;
+  --vb-workspace: #172527;
+  --vb-desktop: #20474b;
+  --vb-gray: #ababab;
+  --vb-info: #303030;
+  --vb-info-text: #f5f5f5;
+  --vb-link: #80caff;
+  --vb-keyword: #8dc8ff;
+  --vb-comment: #9ccc8a;
+  --vb-breakpoint: #a4262c;
+  --vb-execution: #ffe58a;
+  --vb-icon-k: #000000;
+  --vb-icon-w: #ffffff;
+  --vb-icon-f: #c0c0c0;
+  --vb-icon-s: #808080;
+  --vb-icon-d: #404040;
+  --vb-icon-n: #000080;
+  --vb-icon-b: #0000ff;
+  --vb-icon-t: #008080;
+  --vb-icon-c: #00ffff;
+  --vb-icon-g: #008000;
+  --vb-icon-l: #00ff00;
+  --vb-icon-o: #808000;
+  --vb-icon-y: #ffff00;
+  --vb-icon-h: #ffff80;
+  --vb-icon-r: #800000;
+  --vb-icon-e: #ff0000;
+  --vb-icon-m: #800080;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: inline;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: var(--vb-link);
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-sys-0: var(--vb-face);
+  --vb-sys-1: var(--vb-desktop);
+  --vb-sys-2: var(--vb-title);
+  --vb-sys-3: var(--vb-inactive);
+  --vb-sys-4: var(--vb-face);
+  --vb-sys-5: var(--vb-window);
+  --vb-sys-6: var(--vb-dark);
+  --vb-sys-7: var(--vb-text);
+  --vb-sys-8: var(--vb-window-text);
+  --vb-sys-9: var(--vb-title-text);
+  --vb-sys-10: var(--vb-face);
+  --vb-sys-11: var(--vb-face);
+  --vb-sys-12: var(--vb-workspace);
+  --vb-sys-13: var(--vb-selection);
+  --vb-sys-14: var(--vb-selection-text);
+  --vb-sys-15: var(--vb-face);
+  --vb-sys-16: var(--vb-shadow);
+  --vb-sys-17: var(--vb-gray);
+  --vb-sys-18: var(--vb-text);
+  --vb-sys-19: var(--vb-inactive-text);
+  --vb-sys-20: var(--vb-light);
+  --vb-sys-21: var(--vb-dark);
+  --vb-sys-22: var(--vb-highlight);
+  --vb-sys-23: var(--vb-info-text);
+  --vb-sys-24: var(--vb-info);
+  --vb-sys-25: var(--vb-face);
+  --vb-sys-26: var(--vb-link);
+  --vb-sys-27: var(--vb-title-end);
+  --vb-sys-28: var(--vb-inactive-end);
+  --vb-sys-29: var(--vb-selection);
+  --vb-sys-30: var(--vb-face);
+  --vb-app-color-scheme: dark;
+  --vb-app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+  --vb-app-size: 11px;
+  --vb-app-radius: 0px;
+  --vb-app-window-radius: 0px;
+  --vb-app-border: #91aeb0;
+  --vb-app-separator: #527476;
+  --vb-app-control: #2e4547;
+  --vb-app-hover: #3e6164;
+  --vb-app-pressed: #253b3d;
+  --vb-app-focus: #b6d9d7;
+  --vb-app-surface: #2e4547;
+  --vb-app-gutter: #273d3f;
+  --vb-app-gutter-text: #bfd1d0;
+  --vb-app-error: #ffb4ab;
+  --vb-app-string: #f1ada4;
+  --vb-app-shadow: 3px 3px 0 #00000099;
+  --vb-app-control-shadow: inset 1px 1px #79989b, inset -1px -1px #152b2d;
+  --vb-app-pressed-shadow: inset 1px 1px #152b2d, inset -1px -1px #79989b;
+  --vb-app-material: #2e4547;
+  --vb-app-scrim: #00000066;
+  --vb-app-thumb: #79989b;
+  --vb-app-success: #9ccc8a;
+  --vb-app-warning: #ffd58a;
+  --vb-app-execution-text: #161616;
+  color-scheme:dark;
 }
 :root { --vb-font:"MS Sans Serif",Tahoma,Arial,sans-serif; --vb-size:11px; --vb-caption-height:18px; --vb-scrollbar:16px; }
 [data-vb-theme] { color:var(--vb-text); color-scheme:light; }
@@ -238,6 +1200,10 @@
 :is(button:disabled,[aria-disabled="true"]) .pixel-icon .icon-disabled { display:inline; }
 
 [data-vb-theme="contrast"] .vb-command { text-shadow:none; }
+[data-vb-theme="fluent-dark"]{color-scheme:dark}
+[data-vb-theme="macos26-dark"]{color-scheme:dark}
+[data-vb-theme="x11-dark"]{color-scheme:dark}
+[data-vb-theme="x11-cde-dark"]{color-scheme:dark}
 
 /* Shared classic window primitives. All geometry is CSS px at 100% zoom. */
 :where(.ide-shell,.ide-dialog,.vb-form,.vb-dialog,.classic-menu) { font-family:var(--vb-font); font-size:var(--vb-size); }
@@ -1521,7 +2487,601 @@ button[data-browser-detach] {--vb-caption-mask:var(--vb-caption-detach)}
  :is(.window-buttons,.tool-caption) button[data-browser-detach]:disabled::after {background:GrayText}
 }
 
-/* Generated by tools/ide-theme-css.mjs. IDE palettes do not change runtime THEMES. */
+/* Pack visibility is inherited and explicitly rebound at theme boundaries.
+ * Switching never walks/replaces icon DOM, so focus, selection and event handlers
+ * survive in current, lazy-created and detached IDE/application surfaces. */
+.pixel-icon {color:inherit;}
+.theme-icon-layer {pointer-events:none;}
+:is(.menu-selected,.selected,.active,[aria-selected="true"]) > .pixel-icon,
+:is(.menu-selected,.selected,[aria-selected="true"]) .theme-icon-layer {--vb-pack-ink:currentColor;--vb-pack-fill:currentColor;}
+:is(button:disabled,[aria-disabled="true"],.disabled) .theme-icon-layer {--vb-pack-ink:var(--vb-gray);--vb-pack-fill:var(--vb-gray);}
+.icon[data-icon=close] {--vb-caption-mask:var(--vb-pack-caption-close,var(--vb-caption-close));}
+.icon[data-icon=maximize] {--vb-caption-mask:var(--vb-pack-caption-maximize,var(--vb-caption-maximize));}
+.icon[data-icon=minimize] {--vb-caption-mask:var(--vb-pack-caption-minimize,var(--vb-caption-minimize));}
+.icon[data-icon=restore] {--vb-caption-mask:var(--vb-pack-caption-restore,var(--vb-caption-restore));}
+button[data-browser-detach] {--vb-caption-mask:var(--vb-pack-caption-detach,var(--vb-caption-detach));}
+.app-title button[title="About this application"] {--vb-caption-mask:var(--vb-pack-caption-help,var(--vb-caption-help));}
+/* Font-free supplemental chrome indicators; original Classic text is retained. */
+.theme-indicator {display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;pointer-events:none;}
+.theme-indicator>.indicator-classic {display:var(--vb-icon-classic-display,inline);}
+.theme-indicator>.indicator-modern {display:var(--vb-modern-icon-display,none);align-items:center;justify-content:center;}
+.theme-indicator .pixel-icon {max-width:100%;max-height:100%;}
+@media(forced-colors:active) {
+ .theme-icon-layer {--vb-pack-ink:ButtonText;--vb-pack-fill:ButtonText;forced-color-adjust:none;}
+ :is(.menu-selected,.selected,[aria-selected="true"]) .theme-icon-layer {--vb-pack-ink:HighlightText;--vb-pack-fill:HighlightText;}
+ :is(button:disabled,[aria-disabled="true"],.disabled) .theme-icon-layer {--vb-pack-ink:GrayText;--vb-pack-fill:GrayText;}
+ .theme-icon-layer [transform] {display:none;}
+}
+
+/* Generated by tools/application-theme-css.mjs. No IDE selectors. */
+[data-vb-theme="classic"] {
+ --app-radius: initial;
+ --app-window-radius: initial;
+ --app-control-shadow: initial;
+ --app-pressed-shadow: initial;
+ --app-input-shadow: initial;
+ --app-hover-shadow: initial;
+ --app-border: initial;
+ --app-separator: initial;
+ --app-surface: initial;
+ --app-focus: initial;
+ --app-thumb: initial;
+ --app-font: initial;
+ --app-caption-weight: initial;
+ --app-caption-background: initial;
+ --app-window-shadow: initial;
+ --app-frame-image: initial;
+ --app-frame-border: initial;
+ --app-pressed-padding: initial;
+ --app-disabled-shadow: initial;
+ --app-disabled-text-shadow: initial;
+ --app-progress-fill: initial;
+ --app-check-background: initial;
+ --app-check-mark: initial;
+ --app-check-border: initial;
+ --app-check-shadow: initial;
+ --app-radio-radius: initial;
+ --app-range-track: initial;
+ --app-range-thumb: initial;
+ --app-material: initial;
+ --app-backdrop: initial;
+ --app-duration: initial;
+ --app-focus-width: initial;
+ --app-focus-style: initial;
+ --app-window-button-radius: initial;
+ --app-radio-transform: initial;
+ --app-disabled-color: initial;
+ --app-form-icon-shadow: initial;
+ --app-legacy-icon-display: initial;
+ --app-tree-icon-border-width: initial;
+ --app-tree-icon-background: initial;
+ --app-tab-shadow: initial;
+}
+[data-vb-theme="standard"] {
+ --app-radius: initial;
+ --app-window-radius: initial;
+ --app-control-shadow: initial;
+ --app-pressed-shadow: initial;
+ --app-input-shadow: initial;
+ --app-hover-shadow: initial;
+ --app-border: initial;
+ --app-separator: initial;
+ --app-surface: initial;
+ --app-focus: initial;
+ --app-thumb: initial;
+ --app-font: initial;
+ --app-caption-weight: initial;
+ --app-caption-background: initial;
+ --app-window-shadow: initial;
+ --app-frame-image: initial;
+ --app-frame-border: initial;
+ --app-pressed-padding: initial;
+ --app-disabled-shadow: initial;
+ --app-disabled-text-shadow: initial;
+ --app-progress-fill: initial;
+ --app-check-background: initial;
+ --app-check-mark: initial;
+ --app-check-border: initial;
+ --app-check-shadow: initial;
+ --app-radio-radius: initial;
+ --app-range-track: initial;
+ --app-range-thumb: initial;
+ --app-material: initial;
+ --app-backdrop: initial;
+ --app-duration: initial;
+ --app-focus-width: initial;
+ --app-focus-style: initial;
+ --app-window-button-radius: initial;
+ --app-radio-transform: initial;
+ --app-disabled-color: initial;
+ --app-form-icon-shadow: initial;
+ --app-legacy-icon-display: initial;
+ --app-tree-icon-border-width: initial;
+ --app-tree-icon-background: initial;
+ --app-tab-shadow: initial;
+}
+[data-vb-theme="contrast"] {
+ --app-radius: initial;
+ --app-window-radius: initial;
+ --app-control-shadow: initial;
+ --app-pressed-shadow: initial;
+ --app-input-shadow: initial;
+ --app-hover-shadow: initial;
+ --app-border: initial;
+ --app-separator: initial;
+ --app-surface: initial;
+ --app-focus: initial;
+ --app-thumb: initial;
+ --app-font: initial;
+ --app-caption-weight: initial;
+ --app-caption-background: initial;
+ --app-window-shadow: initial;
+ --app-frame-image: initial;
+ --app-frame-border: initial;
+ --app-pressed-padding: initial;
+ --app-disabled-shadow: initial;
+ --app-disabled-text-shadow: initial;
+ --app-progress-fill: initial;
+ --app-check-background: initial;
+ --app-check-mark: initial;
+ --app-check-border: initial;
+ --app-check-shadow: initial;
+ --app-radio-radius: initial;
+ --app-range-track: initial;
+ --app-range-thumb: initial;
+ --app-material: initial;
+ --app-backdrop: initial;
+ --app-duration: initial;
+ --app-focus-width: initial;
+ --app-focus-style: initial;
+ --app-window-button-radius: initial;
+ --app-radio-transform: initial;
+ --app-disabled-color: initial;
+ --app-form-icon-shadow: initial;
+ --app-legacy-icon-display: initial;
+ --app-tree-icon-border-width: initial;
+ --app-tree-icon-background: initial;
+ --app-tab-shadow: initial;
+}
+[data-vb-theme="fluent"] {
+ --app-radius: 4px;
+ --app-window-radius: 8px;
+ --app-control-shadow: inset 0 0 0 1px #8a8a8a, 0 1px 1px #00000012;
+ --app-pressed-shadow: inset 0 0 0 1px #0067b8, inset 0 1px 2px #00000016;
+ --app-input-shadow: inset 0 0 0 1px #8a8a8a;
+ --app-hover-shadow: inset 0 0 0 1px #0067b8;
+ --app-border: #8a8a8a;
+ --app-separator: #d6d6d6;
+ --app-surface: #fafafa;
+ --app-focus: #0067b8;
+ --app-thumb: #777777;
+ --app-font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: #f3f3f3;
+ --app-window-shadow: 0 6px 20px #00000026, 0 1px 3px #00000020;
+ --app-frame-image: none;
+ --app-frame-border: #8a8a8a;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #646464;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #0067b8;
+ --app-check-background: #0067b8;
+ --app-check-mark: #ffffff;
+ --app-check-border: #0067b8;
+ --app-check-shadow: none;
+ --app-radio-radius: 50%;
+ --app-range-track: #d6d6d6;
+ --app-range-thumb: #0067b8;
+ --app-material: #f3f3f3;
+ --app-backdrop: none;
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 4px;
+ --app-radio-transform: none;
+ --app-disabled-color: #646464;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #0067b8;
+}
+[data-vb-theme="fluent-dark"] {
+ --app-radius: 4px;
+ --app-window-radius: 8px;
+ --app-control-shadow: inset 0 0 0 1px #888888, 0 1px 1px #00000055;
+ --app-pressed-shadow: inset 0 0 0 1px #80caff, inset 0 1px 2px #00000055;
+ --app-input-shadow: inset 0 0 0 1px #888888;
+ --app-hover-shadow: inset 0 0 0 1px #80caff;
+ --app-border: #888888;
+ --app-separator: #484848;
+ --app-surface: #252525;
+ --app-focus: #80caff;
+ --app-thumb: #adadad;
+ --app-font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: #202020;
+ --app-window-shadow: 0 8px 24px #00000066, 0 1px 3px #00000066;
+ --app-frame-image: none;
+ --app-frame-border: #888888;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #ababab;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #80caff;
+ --app-check-background: #80caff;
+ --app-check-mark: #102331;
+ --app-check-border: #80caff;
+ --app-check-shadow: none;
+ --app-radio-radius: 50%;
+ --app-range-track: #484848;
+ --app-range-thumb: #80caff;
+ --app-material: #202020;
+ --app-backdrop: none;
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 4px;
+ --app-radio-transform: none;
+ --app-disabled-color: #ababab;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #80caff;
+}
+[data-vb-theme="macos26"] {
+ --app-radius: 6px;
+ --app-window-radius: 12px;
+ --app-control-shadow: inset 0 0 0 1px #8a8a8a, 0 1px 2px #0000001f, inset 0 1px #ffffffcc;
+ --app-pressed-shadow: inset 0 0 0 1px #005ec4, inset 0 1px 2px #00000016;
+ --app-input-shadow: inset 0 0 0 1px #8a8a8a;
+ --app-hover-shadow: inset 0 0 0 1px #005ec4;
+ --app-border: #8a8a8a;
+ --app-separator: #d6d6d6;
+ --app-surface: #f7f7fa;
+ --app-focus: #005ec4;
+ --app-thumb: #777777;
+ --app-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: color-mix(in srgb, #ececf0 92%, transparent);
+ --app-window-shadow: 0 12px 32px #20203833, 0 1px 4px #00000026;
+ --app-frame-image: none;
+ --app-frame-border: #8a8a8a;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #646464;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #005ec4;
+ --app-check-background: #005ec4;
+ --app-check-mark: #ffffff;
+ --app-check-border: #005ec4;
+ --app-check-shadow: none;
+ --app-radio-radius: 50%;
+ --app-range-track: #d6d6d6;
+ --app-range-thumb: #005ec4;
+ --app-material: color-mix(in srgb, #ececf0 92%, transparent);
+ --app-backdrop: blur(12px) saturate(1.1);
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 50%;
+ --app-radio-transform: none;
+ --app-disabled-color: #646464;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #005ec4;
+}
+[data-vb-theme="macos26-dark"] {
+ --app-radius: 6px;
+ --app-window-radius: 12px;
+ --app-control-shadow: inset 0 0 0 1px #888888, 0 1px 2px #00000066, inset 0 1px #ffffff12;
+ --app-pressed-shadow: inset 0 0 0 1px #8bc2ff, inset 0 1px 2px #00000055;
+ --app-input-shadow: inset 0 0 0 1px #888888;
+ --app-hover-shadow: inset 0 0 0 1px #8bc2ff;
+ --app-border: #888888;
+ --app-separator: #484848;
+ --app-surface: #303036;
+ --app-focus: #8bc2ff;
+ --app-thumb: #adadad;
+ --app-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: color-mix(in srgb, #2b2b30 94%, transparent);
+ --app-window-shadow: 0 8px 24px #00000066, 0 1px 3px #00000066;
+ --app-frame-image: none;
+ --app-frame-border: #888888;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #ababab;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #8bc2ff;
+ --app-check-background: #8bc2ff;
+ --app-check-mark: #102235;
+ --app-check-border: #8bc2ff;
+ --app-check-shadow: none;
+ --app-radio-radius: 50%;
+ --app-range-track: #484848;
+ --app-range-thumb: #8bc2ff;
+ --app-material: color-mix(in srgb, #2b2b30 94%, transparent);
+ --app-backdrop: blur(12px) saturate(1.1);
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 50%;
+ --app-radio-transform: none;
+ --app-disabled-color: #ababab;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #8bc2ff;
+}
+[data-vb-theme="x11"] {
+ --app-radius: 0px;
+ --app-window-radius: 0px;
+ --app-control-shadow: inset 1px 1px #f2f2e8, inset -1px -1px #66665c;
+ --app-pressed-shadow: inset 1px 1px #66665c, inset -1px -1px #f2f2e8;
+ --app-input-shadow: inset 0 0 0 1px #66665c;
+ --app-hover-shadow: inset 0 0 0 1px #233b83;
+ --app-border: #66665c;
+ --app-separator: #929287;
+ --app-surface: #bdbdb3;
+ --app-focus: #233b83;
+ --app-thumb: #bdbdb3;
+ --app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: #bdbdb3;
+ --app-window-shadow: 3px 3px 0 #00000066;
+ --app-frame-image: none;
+ --app-frame-border: #66665c;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #505047;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #365762;
+ --app-check-background: #365762;
+ --app-check-mark: #ffffff;
+ --app-check-border: #365762;
+ --app-check-shadow: none;
+ --app-radio-radius: 0px;
+ --app-range-track: #929287;
+ --app-range-thumb: #365762;
+ --app-material: #bdbdb3;
+ --app-backdrop: none;
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 0px;
+ --app-radio-transform: rotate(45deg);
+ --app-disabled-color: #505047;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #365762;
+}
+[data-vb-theme="x11-dark"] {
+ --app-radius: 0px;
+ --app-window-radius: 0px;
+ --app-control-shadow: inset 1px 1px #858f90, inset -1px -1px #151d20;
+ --app-pressed-shadow: inset 1px 1px #151d20, inset -1px -1px #858f90;
+ --app-input-shadow: inset 0 0 0 1px #99a4a6;
+ --app-hover-shadow: inset 0 0 0 1px #b6d5dd;
+ --app-border: #99a4a6;
+ --app-separator: #5a686b;
+ --app-surface: #343c3e;
+ --app-focus: #b6d5dd;
+ --app-thumb: #75878c;
+ --app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: #343c3e;
+ --app-window-shadow: 3px 3px 0 #00000099;
+ --app-frame-image: none;
+ --app-frame-border: #99a4a6;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #ababab;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #b6d5dd;
+ --app-check-background: #b6d5dd;
+ --app-check-mark: #192528;
+ --app-check-border: #b6d5dd;
+ --app-check-shadow: none;
+ --app-radio-radius: 0px;
+ --app-range-track: #5a686b;
+ --app-range-thumb: #b6d5dd;
+ --app-material: #343c3e;
+ --app-backdrop: none;
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 0px;
+ --app-radio-transform: rotate(45deg);
+ --app-disabled-color: #ababab;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #b6d5dd;
+}
+[data-vb-theme="x11-cde"] {
+ --app-radius: 0px;
+ --app-window-radius: 0px;
+ --app-control-shadow: inset 1px 1px #e4eeee, inset -1px -1px #546d6c;
+ --app-pressed-shadow: inset 1px 1px #546d6c, inset -1px -1px #e4eeee;
+ --app-input-shadow: inset 0 0 0 1px #546d6c;
+ --app-hover-shadow: inset 0 0 0 1px #224b6a;
+ --app-border: #546d6c;
+ --app-separator: #7e9996;
+ --app-surface: #aebfbe;
+ --app-focus: #224b6a;
+ --app-thumb: #aebfbe;
+ --app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: #aebfbe;
+ --app-window-shadow: 3px 3px 0 #00000066;
+ --app-frame-image: none;
+ --app-frame-border: #546d6c;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #425757;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #365d66;
+ --app-check-background: #365d66;
+ --app-check-mark: #ffffff;
+ --app-check-border: #365d66;
+ --app-check-shadow: none;
+ --app-radio-radius: 0px;
+ --app-range-track: #7e9996;
+ --app-range-thumb: #365d66;
+ --app-material: #aebfbe;
+ --app-backdrop: none;
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 0px;
+ --app-radio-transform: rotate(45deg);
+ --app-disabled-color: #425757;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #365d66;
+}
+[data-vb-theme="x11-cde-dark"] {
+ --app-radius: 0px;
+ --app-window-radius: 0px;
+ --app-control-shadow: inset 1px 1px #79989b, inset -1px -1px #152b2d;
+ --app-pressed-shadow: inset 1px 1px #152b2d, inset -1px -1px #79989b;
+ --app-input-shadow: inset 0 0 0 1px #91aeb0;
+ --app-hover-shadow: inset 0 0 0 1px #b6d9d7;
+ --app-border: #91aeb0;
+ --app-separator: #527476;
+ --app-surface: #2e4547;
+ --app-focus: #b6d9d7;
+ --app-thumb: #79989b;
+ --app-font: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+ --app-caption-weight: 600;
+ --app-caption-background: #2e4547;
+ --app-window-shadow: 3px 3px 0 #00000099;
+ --app-frame-image: none;
+ --app-frame-border: #91aeb0;
+ --app-pressed-padding: 4px 9px;
+ --app-disabled-shadow: inset 0 0 0 1px #ababab;
+ --app-disabled-text-shadow: none;
+ --app-progress-fill: #b6d9d7;
+ --app-check-background: #b6d9d7;
+ --app-check-mark: #172b2a;
+ --app-check-border: #b6d9d7;
+ --app-check-shadow: none;
+ --app-radio-radius: 0px;
+ --app-range-track: #527476;
+ --app-range-thumb: #b6d9d7;
+ --app-material: #2e4547;
+ --app-backdrop: none;
+ --app-duration: 90ms;
+ --app-focus-width: 2px;
+ --app-focus-style: solid;
+ --app-window-button-radius: 0px;
+ --app-radio-transform: rotate(45deg);
+ --app-disabled-color: #ababab;
+ --app-form-icon-shadow: none;
+ --app-legacy-icon-display: none;
+ --app-tree-icon-border-width: 0px;
+ --app-tree-icon-background: transparent;
+ --app-tab-shadow: inset 0 -2px #b6d9d7;
+}
+[data-vb-theme-family="macos26"][data-vb-reduce-transparency="true"] {--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}
+[data-vb-reduce-motion="true"] {--app-duration:0s;}
+@media(prefers-reduced-motion:reduce) {[data-vb-theme]{--app-duration:0s;}}
+@media(prefers-reduced-transparency:reduce) {[data-vb-theme-family="macos26"]{--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}}
+
+/* Application skins. Only runtime component classes are addressed; every var
+ * has the original classic fallback and resets at nested theme boundaries.
+ * Authored geometry, RGB/pictures, VB fonts and runtime input semantics stay put. */
+.vb-form,.vb-dialog {border-radius:var(--app-window-radius,0);}
+.vb-form-title {font-family:var(--app-font,inherit);font-weight:var(--app-caption-weight,bold);background:var(--app-caption-background,linear-gradient(90deg,var(--vb-title),var(--vb-title-end)));}
+.vb-inactive>.vb-form-title {background:linear-gradient(90deg,var(--vb-inactive),var(--vb-inactive-end));color:var(--vb-inactive-text);}
+.vb-form-menu,.vb-dialog {font-family:var(--app-font,var(--vb-font));}
+.vb-form-menu button,.vb-tab-button,.vb-toolbar button,.vb-data button,.vb-month button {border-radius:var(--app-radius,0)!important;}
+
+.vb-form-icon {box-shadow:var(--app-form-icon-shadow,inset 0 3px var(--vb-selection));}
+.vb-form-icon::after {display:var(--app-legacy-icon-display,block);}
+.vb-tree-icon {border-width:var(--app-tree-icon-border-width,1px);background:var(--app-tree-icon-background,#ffff80);}
+.vb-tree-icon::before {display:var(--app-legacy-icon-display,block);}
+.vb-tree-icon>.pixel-icon {display:var(--vb-modern-icon-display,none);position:absolute;inset:-2px auto auto -1px;}
+.vb-form-title .vb-window-button {border-radius:var(--app-window-button-radius,0);}
+.vb-control.disabled {text-shadow:var(--app-disabled-text-shadow,1px 1px var(--vb-light));color:var(--app-disabled-color,var(--vb-shadow))!important;}
+.vb-control:focus-visible,.vb-form-title:focus-visible {outline-color:var(--app-focus,var(--vb-text));}
+.vb-control:focus-visible {outline-style:var(--app-focus-style,dotted);}
+.vb-control:not(.vb-shape):not(.vb-label) :is(input:not([type=checkbox]):not([type=radio]),textarea,select),.vb-dialog input:not([type=checkbox]):not([type=radio]) {border-radius:var(--app-radius,0);}
+.vb-command {border-radius:var(--app-radius,0);transition:box-shadow var(--app-duration,0s) linear;}
+.vb-command:focus::after {border-color:var(--app-focus,var(--vb-text));border-radius:var(--app-radius,0);}
+.vb-frame {border-color:var(--app-border,var(--vb-shadow));border-radius:var(--app-radius,0);}
+.vb-picture,.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-radius:var(--app-radius,0);}
+.vb-tree-toggle {border-radius:var(--app-radius,0);border-color:var(--app-border,var(--vb-shadow));}
+.vb-check input {border-radius:var(--app-radius,0);}
+.vb-check input[type=radio] {border-radius:var(--app-radio-radius,50%);}
+.vb-check input:checked {background:var(--app-check-background,var(--vb-window));border-color:var(--app-check-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));box-shadow:var(--app-check-shadow,none);}
+.vb-check input[type=checkbox]:checked::after,.vb-check input[type=radio]:checked::after {background:var(--app-check-mark,var(--vb-window-text));}
+.vb-check input:indeterminate {background:var(--app-check-background,var(--vb-face));}
+.vb-check input[type=checkbox]:indeterminate::after {background:var(--app-check-mark,var(--vb-gray));}
+.vb-check input[type=radio] {transform:var(--app-radio-transform,none);}
+.vb-check input:disabled {background:var(--vb-face);}
+.vb-check input:disabled::after {background:var(--vb-gray);}
+.vb-check input:focus-visible {outline:var(--app-focus-width,1px) var(--app-focus-style,dotted) var(--app-focus,var(--vb-text));outline-offset:2px;}
+.vb-dialog input:not([type=checkbox]):not([type=radio]):focus-visible {outline:var(--app-focus-width,0px) solid var(--app-focus,var(--vb-text));outline-offset:1px;}
+.vb-progress {border-radius:var(--app-radius,0);border-color:var(--app-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
+.vb-progress-fill {background:var(--app-progress-fill,repeating-linear-gradient(90deg,var(--vb-selection) 0px,var(--vb-selection) 8px,transparent 8px,transparent 10px));border-radius:var(--app-radius,0);}
+.vb-status-panel {border-color:var(--app-separator,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
+.vb-lv-header>div {border-color:var(--app-separator,var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light));}
+.vb-tabs {border-color:var(--app-separator,var(--vb-shadow));}
+.vb-tab-header {border-bottom-color:var(--app-separator,var(--vb-light));}
+.vb-toolbar {border-top-color:var(--app-separator,var(--vb-light));border-bottom-color:var(--app-separator,var(--vb-shadow));}
+.vb-tab-button.active {box-shadow:var(--app-tab-shadow,inset -1px -1px var(--vb-shadow),inset 1px 1px var(--vb-highlight));}
+.vb-month {border-color:var(--app-border,var(--vb-shadow));border-radius:var(--app-radius,0);}
+.vb-scrollbar {border-color:var(--app-border,var(--vb-shadow));border-radius:var(--app-radius,0);}
+.vb-scroll-thumb {background:var(--app-thumb,var(--vb-face));border-radius:var(--app-radius,0);}
+.vb-range:focus-visible {outline:var(--app-focus-width,1px) var(--app-focus-style,dotted) var(--app-focus,var(--vb-text))!important;outline-offset:-2px;}
+.vb-range::-webkit-slider-runnable-track {background:var(--app-range-track,var(--vb-face));border-radius:var(--app-radius,0);}
+.vb-range::-webkit-slider-thumb {background:var(--app-range-thumb,var(--vb-face));border-radius:var(--app-radius,0);}
+.vb-range::-moz-range-track {background:var(--app-range-track,revert);border-radius:var(--app-radius,revert);}
+.vb-range::-moz-range-thumb {background:var(--app-range-thumb,revert);border-radius:var(--app-radius,revert);}
+.vb-combo-popup {border-radius:var(--app-radius,0);border-color:var(--app-border,var(--vb-dark));box-shadow:var(--app-window-shadow,inset 1px 1px var(--vb-shadow));color-scheme:var(--vb-app-color-scheme,light);}
+.vb-popup-menu.classic-menu {border-radius:var(--app-window-radius,0);font-family:var(--app-font,var(--vb-font));}
+.vb-popup-menu.classic-menu .popup-menu-item {border-radius:var(--app-radius,0);}
+.vb-popup-menu.classic-menu .popup-menu-item[aria-disabled=true] {color:var(--vb-gray);text-shadow:var(--app-disabled-text-shadow,1px 1px var(--vb-light));}
+.vb-popup-menu.classic-menu .menu-selected:not([aria-disabled=true]) {background:var(--vb-selection);color:var(--vb-selection-text);}
+@media(forced-colors:none) {
+ .vb-form:not(.vb-borderless),.vb-dialog,.vb-popup-menu.classic-menu {background-image:var(--app-frame-image,var(--vb-bevel-raised-image));border-color:var(--app-frame-border,transparent);box-shadow:var(--app-window-shadow,none);}
+ .vb-form.vb-borderless {border-radius:0;}
+ .vb-form-title {backdrop-filter:var(--app-backdrop,none);}
+ .vb-command,.vb-dialog-actions button {box-shadow:var(--app-control-shadow,var(--vb-bevel-raised));}
+ .vb-command:hover:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--app-hover-shadow,var(--vb-bevel-raised));}
+ .vb-command:active:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed));padding:var(--app-pressed-padding,5px 8px 3px 10px);}
+ .vb-command:is(.disabled,:disabled,[aria-disabled=true]) {box-shadow:var(--app-disabled-shadow,var(--vb-bevel-raised));}
+ .vb-dialog-actions button {border-radius:var(--app-radius,0);}
+ .vb-dialog-actions button:active:not(:disabled) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed));}
+ .vb-form-title .vb-window-button,.vb-combo-arrow,.vb-spin-button,.vb-scroll-thumb {box-shadow:var(--app-control-shadow,var(--vb-bevel-raised));}
+ .vb-form-title .vb-window-button:active:not(:disabled),.vb-combo-arrow:active:not(:disabled),.vb-spin-button:active:not(:disabled) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed));}
+ .vb-scroll-arrow {box-shadow:var(--app-control-shadow,var(--vb-bevel-raised))!important;}
+ .vb-scroll-arrow:active:not(:disabled) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed))!important;}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]),.vb-control textarea,.vb-control select,.vb-dialog input:not([type=checkbox]):not([type=radio]) {box-shadow:var(--app-input-shadow,var(--vb-bevel-sunken));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,.vb-control textarea:focus-visible,.vb-control select:focus-visible {box-shadow:var(--app-hover-shadow,var(--vb-bevel-sunken));}
+ .vb-control :is(input,textarea):read-only {outline-color:var(--app-border,var(--vb-shadow));}
+ .vb-form ::-webkit-scrollbar-thumb,.vb-dialog ::-webkit-scrollbar-thumb,.vb-combo-popup::-webkit-scrollbar-thumb {border-radius:var(--app-radius,0);background:var(--app-thumb,var(--vb-face));box-shadow:var(--app-control-shadow,var(--vb-bevel-raised));}
+}
+/* Only optional palettes use material effects. They do not alter content or
+ * authored fonts/images. No backdrop blur is applied to editor or drawing data. */
+
+@media(forced-colors:active) {
+ [data-vb-theme] {--app-backdrop:none;--app-caption-background:Canvas;--vb-title-text:CanvasText;--app-focus:Highlight;--app-border:ButtonText;--app-frame-border:ButtonText;--app-frame-image:none;--app-duration:0s;--app-range-track:ButtonText;--app-range-thumb:Highlight;--app-progress-fill:Highlight;--app-check-background:Highlight;--app-check-mark:HighlightText;--app-check-border:Highlight;}
+ .vb-form-title {color:CanvasText;background:Canvas;}
+ .vb-popup-menu .menu-selected:not([aria-disabled=true]),.vb-combo-option.selected {forced-color-adjust:none;background:Highlight;color:HighlightText;}
+ .vb-check input:is(:checked,:indeterminate),.vb-check input::after {forced-color-adjust:none;}
+ .vb-dialog input:focus-visible,.vb-control:focus-visible {outline:2px solid Highlight;}
+ .vb-control select {appearance:auto!important;background-image:none!important;}
+}
+
+.application-theme-preview {margin:8px 0;contain:layout style;isolation:isolate;}
+
+/* Generated by tools/ide-theme-css.mjs. IDE preference scope stays independent of application appearance. */
 html[data-ide-theme="fluent"],
 html[data-ide-theme="fluent"] :where(.classic-menu:not(.runtime-popup), .classic-tooltip, .property-color-popup),
 .ide-theme-preview[data-preview-theme="fluent"] {
@@ -1608,6 +3168,19 @@ html[data-ide-theme="fluent"] :where(.classic-menu:not(.runtime-popup), .classic
   --vb-sys-28: var(--vb-inactive-end);
   --vb-sys-29: var(--vb-selection);
   --vb-sys-30: var(--vb-face);
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: inline;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: light;
 }
 html[data-ide-theme="fluent-dark"],
@@ -1713,6 +3286,19 @@ html[data-ide-theme="fluent-dark"] :where(.classic-menu:not(.runtime-popup), .cl
   --vb-icon-r: #f1ada4;
   --vb-icon-e: #ffb4ab;
   --vb-icon-m: #dbadff;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: inline;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: dark;
 }
 html[data-ide-theme="macos26"],
@@ -1801,6 +3387,19 @@ html[data-ide-theme="macos26"] :where(.classic-menu:not(.runtime-popup), .classi
   --vb-sys-28: var(--vb-inactive-end);
   --vb-sys-29: var(--vb-selection);
   --vb-sys-30: var(--vb-face);
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: inline;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: light;
 }
 html[data-ide-theme="macos26-dark"],
@@ -1906,6 +3505,19 @@ html[data-ide-theme="macos26-dark"] :where(.classic-menu:not(.runtime-popup), .c
   --vb-icon-r: #f1ada4;
   --vb-icon-e: #ffb4ab;
   --vb-icon-m: #dbadff;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: inline;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%221.8%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: dark;
 }
 html[data-ide-theme="x11"],
@@ -1994,6 +3606,19 @@ html[data-ide-theme="x11"] :where(.classic-menu:not(.runtime-popup), .classic-to
   --vb-sys-28: var(--vb-inactive-end);
   --vb-sys-29: var(--vb-selection);
   --vb-sys-30: var(--vb-face);
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: inline;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: light;
 }
 html[data-ide-theme="x11-dark"],
@@ -2099,6 +3724,19 @@ html[data-ide-theme="x11-dark"] :where(.classic-menu:not(.runtime-popup), .class
   --vb-icon-r: #f1ada4;
   --vb-icon-e: #ffb4ab;
   --vb-icon-m: #dbadff;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: inline;
+  --vb-icon-x11-cde-display: none;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: currentColor;
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.3%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: dark;
 }
 html[data-ide-theme="x11-cde"],
@@ -2187,6 +3825,19 @@ html[data-ide-theme="x11-cde"] :where(.classic-menu:not(.runtime-popup), .classi
   --vb-sys-28: var(--vb-inactive-end);
   --vb-sys-29: var(--vb-selection);
   --vb-sys-30: var(--vb-face);
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: inline;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: var(--vb-link);
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: light;
 }
 html[data-ide-theme="x11-cde-dark"],
@@ -2292,6 +3943,19 @@ html[data-ide-theme="x11-cde-dark"] :where(.classic-menu:not(.runtime-popup), .c
   --vb-icon-r: #f1ada4;
   --vb-icon-e: #ffb4ab;
   --vb-icon-m: #dbadff;
+  --vb-icon-classic-display: none;
+  --vb-icon-fluent-display: none;
+  --vb-icon-macos26-display: none;
+  --vb-icon-x11-display: none;
+  --vb-icon-x11-cde-display: inline;
+  --vb-modern-icon-display: inline-flex;
+  --vb-pack-ink: currentColor; --vb-pack-fill: var(--vb-link);
+  --vb-pack-caption-close: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%203l10%2010M13%203%203%2013%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-maximize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-minimize: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%2012L13%2012%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-restore: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5%205V2h9v9h-3%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%229%22%20height%3D%229%22%20rx%3D%220%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-detach: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M3%205H1.5v9h9V12M7%201.5h7.5V9M14%202%206%2010%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
+  --vb-pack-caption-help: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3Cpath%20d%3D%22M8%207v5m0-8h.1%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.45%22%20stroke-linecap%3D%22square%22%2F%3E%3C%2Fsvg%3E");
   color-scheme: dark;
 }
 
@@ -2509,7 +4173,7 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
   /* Reset inherited typography at the existing project-theme boundary. */
   & .designer-scroll[data-vb-theme] {
     --vb-font:"MS Sans Serif",Tahoma,Arial,sans-serif;--vb-size:11px;--vb-caption-height:18px;--vb-scrollbar:16px;
-    font:11px/normal "MS Sans Serif",Tahoma,Arial,sans-serif;color:var(--vb-text);color-scheme:light;
+    font:11px/normal "MS Sans Serif",Tahoma,Arial,sans-serif;color:var(--vb-text);color-scheme:var(--vb-app-color-scheme,light);
     scrollbar-color:auto;background:var(--ide-surface);
   }
   & .designer-scroll[data-vb-theme="contrast"] {color-scheme:dark;}
@@ -2664,3 +4328,5 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
     }
   }
 }
+
+.application-theme-note {font-size:11px;line-height:1.4;margin:6px 0;color:var(--vb-gray);}

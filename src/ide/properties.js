@@ -1,3 +1,5 @@
+import {themedIndicator} from '../theme/icons.js';
+import {resolveApplicationTheme} from '../theme/application-appearance.js';
 import {layoutEnabled,layoutDefaults,layoutKey} from '../layout/contract.js';
 import {anchorDialog} from '../layout/designer-tools.js';
 import {formatAnchor,parseAnchor} from '../../packages/auto-layout/src/index.js';
@@ -22,6 +24,10 @@ export class PropertyInspector {
     this.columnHandle=el('div',{class:'property-column-resizer'});this.wrapper.append(this.grid,this.columnHandle);
     resizeHandle(this.columnHandle,'x',delta=>{this.column=Math.max(25,Math.min(75,this.column+delta/Math.max(1,this.grid.clientWidth)*100));this.wrapper.style.setProperty('--property-name-width',this.column+'%');},{label:'Property column width',value:()=>this.column,min:25,max:75});
     container.append(this.object,this.tabs,this.wrapper,this.description);this.object.addEventListener('change',()=>this.ide.designer.select(this.object.value==='form'?[]:[this.object.value]));
+    this.appearanceAbort=new AbortController();
+    const document=ide.root.ownerDocument;
+    document.addEventListener('vb-theme-change',()=>this.refreshApplicationColors(),{signal:this.appearanceAbort.signal});
+    document.defaultView.addEventListener('pagehide',e=>{if(!e.persisted)this.appearanceAbort.abort();},{signal:this.appearanceAbort.signal});
     this.grid.addEventListener('keydown',e=>this.keydown(e));this.grid.addEventListener('focus',()=>{this.setActive(this.activeKey);});
   }
   render(){
@@ -41,7 +47,7 @@ export class PropertyInspector {
     keys.sort((a,b)=>a==='Name'?-1:b==='Name'?1:a.localeCompare(b));if(this.mode==='categorized')keys.sort((a,b)=>groupFor(a).localeCompare(groupFor(b))||a.localeCompare(b));
     const scroll=this.grid.scrollTop;this.grid.replaceChildren();this.fields=new Map();this.rows=new Map();let group='';
     for(const key of keys){
-      if(this.mode==='categorized'&&groupFor(key)!==group){group=groupFor(key);const g=group;const button=el('button',{class:'property-group',role:'row','aria-expanded':!this.collapsed.has(g),onclick:()=>{this.collapsed.has(g)?this.collapsed.delete(g):this.collapsed.add(g);this.render();}},el('span',{class:'tree-toggle'},this.collapsed.has(g)?'+':'−'),group);this.grid.append(button);}
+      if(this.mode==='categorized'&&groupFor(key)!==group){group=groupFor(key);const g=group;const button=el('button',{class:'property-group',role:'row','aria-expanded':!this.collapsed.has(g),onclick:()=>{this.collapsed.has(g)?this.collapsed.delete(g):this.collapsed.add(g);this.render();}},el('span',{class:'tree-toggle'},themedIndicator(this.collapsed.has(g)?'arrow-right':'arrow-down',this.collapsed.has(g)?'+':'−',8)),group);this.grid.append(button);}
       if(this.mode==='categorized'&&this.collapsed.has(group))continue;
       this.grid.append(this.row(key,props[key],target));
       if(key==='Font'&&this.fontExpanded)for(const fontKey of fontKeys)this.grid.append(this.row(fontKey,props[fontKey],target,true));
@@ -55,15 +61,15 @@ export class PropertyInspector {
   row(key,value,target,child=false){
     const mixed=key!=='Font'&&this.targets.length>1&&!this.targets.every(t=>JSON.stringify(t.properties[key]??(layoutEnabled(this.ide.project)?layoutDefaults(t)[key]:undefined))===JSON.stringify(value)),label=key==='Name'?'(Name)':key;
     const row=el('div',{class:'property-row'+(child?' font-child':''),id:'property-row-'+key,role:'row','data-property':key}),name=el('div',{class:'property-name',role:'gridcell',title:label},label),wrap=el('div',{class:'property-value-editor',role:'gridcell'});
-    if(key==='Font'){name.replaceChildren(el('button',{class:'font-expander',title:this.fontExpanded?'Collapse Font':'Expand Font','aria-label':this.fontExpanded?'Collapse Font':'Expand Font','aria-expanded':this.fontExpanded,onclick:e=>{e.stopPropagation();this.fontExpanded=!this.fontExpanded;this.activeKey='Font';this.render();}},this.fontExpanded?'−':'+'),'Font');}
+    if(key==='Font'){name.replaceChildren(el('button',{class:'font-expander',title:this.fontExpanded?'Collapse Font':'Expand Font','aria-label':this.fontExpanded?'Collapse Font':'Expand Font','aria-expanded':this.fontExpanded,onclick:e=>{e.stopPropagation();this.fontExpanded=!this.fontExpanded;this.activeKey='Font';this.render();}},themedIndicator(this.fontExpanded?'arrow-down':'arrow-right',this.fontExpanded?'−':'+',8)),'Font');}
     const descriptor=this.ide.controlRegistry?.property?.(target.type,key),propertyReadOnly=this.targets.some(t=>this.ide.controlRegistry?.property?.(t.type,key)?.readOnly);row.dataset.readOnly=propertyReadOnly?'true':'false';const choices=descriptor?.choices||enumeration(key,target),isColor=/Color$/.test(key),isObject=typeof value==='object',format=()=>mixed?'':key==='Anchor'?formatAnchor(value):key==='Font'?'(Font)':Array.isArray(value)?'(List)':isColor?oleHex(value):value===null?'':isObject?'(Resource)':String(value);
     let field;if(choices){field=el('select',{'aria-label':label});if(mixed)field.append(el('option',{value:''},''));for(const choice of choices)field.append(el('option',{value:choice.value},choice.label));field.value=mixed?'':String(BOOLS.has(key)?Number(value)?-1:0:value);if(field.selectedIndex<0){field.append(el('option',{value:String(value)},String(value)));field.value=String(value);}}
     else field=el('input',{'aria-label':label,value:format(),readonly:propertyReadOnly||isObject||key==='Kind'||key==='Font',spellcheck:false});
     field.dataset.property=key;if(mixed)field.setAttribute('aria-description','Multiple different values');
-    if(isColor)wrap.append(el('span',{class:'color-swatch',style:{background:mixed?'transparent':colorValue(value,'#c0c0c0',this.ide.project.settings.theme)}}));
+    if(isColor)wrap.append(el('span',{class:'color-swatch',...(mixed?{}:{'data-application-color':value}),style:{background:mixed?'transparent':colorValue(value,'#c0c0c0',this.applicationTheme())}}));
     const editFont=async()=>{const values=await fontDialog(target.properties||{});if(values)this.apply(values);};
     const editText=async()=>{const input=el('textarea',{'aria-label':'Property text',class:'property-text-dialog',value:Array.isArray(value)?value.join('\n'):String(value??'')});const accepted=await modal(label+' - '+target.name,{content:el('div',{},el('p',{},Array.isArray(value)?'Enter one item per line.':'Edit the property value.'),input)});if(accepted)this.ide.setProperty(key,Array.isArray(value)?input.value.split('\n'):input.value);};
-    const palette=()=>showColorPalette(wrap,value,n=>this.ide.setProperty(key,n),this.ide.project.settings.theme||'classic');
+    const palette=()=>showColorPalette(wrap,value,n=>this.ide.setProperty(key,n),()=>this.applicationTheme()||'classic');
     const editAnchor=async()=>{const result=await anchorDialog(value,'Anchor - '+(this.targets.length>1?'Multiple Controls':target.name));if(result!==null)this.ide.setProperty('Anchor',result);};
     const editor=propertyReadOnly?null:key==='Anchor'?editAnchor:key==='Font'?editFont:isColor?palette:Array.isArray(value)||['Text','Caption','Tag','ToolTipText'].includes(key)?editText:null;
     if(editor){const button=el('button',{class:'property-edit-button',title:'Edit '+label,'aria-label':'Edit '+label,onclick:editor},isColor?icon('arrow-down',12):'…');wrap.append(field,button);field.addEventListener('keydown',e=>{if(e.altKey&&e.key==='ArrowDown'){e.preventDefault();e.stopPropagation();editor();}});}else wrap.append(field);
@@ -82,6 +88,8 @@ export class PropertyInspector {
     });
     row.append(name,wrap);this.rows.set(key,row);this.fields.set(key,field);return row;
   }
+  applicationTheme(){return resolveApplicationTheme(this.ide.project.settings,!!this.ide.root.ownerDocument.defaultView.matchMedia?.('(prefers-color-scheme: dark)').matches).id;}
+  refreshApplicationColors(){const theme=this.applicationTheme();for(const swatch of this.grid.querySelectorAll('[data-application-color]'))swatch.style.background=colorValue(swatch.dataset.applicationColor,'#c0c0c0',theme);}
   apply(values){if(this.ide.setProperties)this.ide.setProperties(values);else for(const [k,v] of Object.entries(values))this.ide.setProperty(k,v);}
   keydown(e){
     if(e.defaultPrevented)return;const typing=e.target.matches('input,select,textarea'),keys=[...this.rows.keys()];let index=Math.max(0,keys.indexOf(this.activeKey));

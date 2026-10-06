@@ -1,3 +1,4 @@
+import {APPLICATION_THEME_ATTRIBUTES,copyApplicationTheme} from '../theme/application-appearance.js';
 import {refreshGraphicsSurfaces} from '../graphics/surface.js';
 /** Native Windows adapter. One VM owns all forms; same-origin windows retain DOM/event identity. */
 export function installNativeHost(host, bridge = globalThis.vb6Native) {
@@ -5,6 +6,8 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
   const document = host.container.ownerDocument, browser = document.defaultView;
   const forms = new Map(), dialogs = new Map();
   let disposed = false;
+  const themeChanged=()=>{for(const {doc} of forms.values()){if(!doc)continue;copyApplicationTheme(host.container,doc.documentElement);doc.documentElement.dispatchEvent(new doc.defaultView.CustomEvent('vb-theme-change',{bubbles:true}));}};
+  host.container.addEventListener('vb-theme-change',themeChanged);
   const report = error => host.send('output', { text: 'Native window: ' + error.message, newline: true });
   const command = (id, name, value) => bridge.windowCommand(id, name, value).catch(report);
   function open(options) {
@@ -13,8 +16,8 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
     if (!win) throw new Error('Native window creation was denied');
     const doc = win.document;
     if(browser.vb6NativeGPUUnavailable)win.vb6NativeGPUUnavailable=browser.vb6NativeGPUUnavailable;
-    for (const name of ['data-vb-theme', 'lang']) {
-      const value = document.documentElement.getAttribute(name); if (value) doc.documentElement.setAttribute(name, value);
+    for (const name of [...APPLICATION_THEME_ATTRIBUTES, 'lang']) {
+      const value = host.container.getAttribute(name)??document.documentElement.getAttribute(name); if (value) doc.documentElement.setAttribute(name, value);
     }
     for (const node of document.querySelectorAll('style,link[rel="stylesheet"]')) doc.head.append(node.cloneNode(true));
     const style = doc.createElement('style');
@@ -180,7 +183,7 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
   const start = host.start.bind(host);
   host.start = async () => { const result = await start(); if (!forms.size) await command('controller', 'show'); return result; };
   const dispose = host.dispose.bind(host);
-  host.dispose = () => { if (disposed) return; disposed = true; dispose(); for (const d of dialogs.values()) d.finish(''); unsubscribe(); };
+  host.dispose = () => { if (disposed) return; disposed = true; host.container.removeEventListener('vb-theme-change',themeChanged); dispose(); for (const d of dialogs.values()) d.finish(''); unsubscribe(); };
   host.nativeWindows = { forms, dialogs };
   return true;
 }

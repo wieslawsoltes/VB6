@@ -1,3 +1,4 @@
+import {THEMES} from '../src/theme/theme.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -78,5 +79,5 @@ test('IDE menus get the same glyph as toolbars without mutating descriptors',()=
 test('generated themes reset icon colors at each theme boundary rather than invert descendants',()=>{
  const css=fs.readFileSync(new URL('../src/theme/palette.css',import.meta.url),'utf8');
  assert.doesNotMatch(css,/filter:\s*(invert|grayscale)/);assert.match(css,/icon-disabled/);
- for(const color of Object.keys(ICON_PALETTE))assert.equal(css.split('--vb-icon-'+color+':').length-1,3,color);
+ for(const color of Object.keys(ICON_PALETTE))assert.equal(css.split('--vb-icon-'+color+':').length-1,Object.keys(THEMES).length,color);
 });

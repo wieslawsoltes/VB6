@@ -1,3 +1,4 @@
+import {themedIndicator} from '../theme/icons.js';
 import {el} from '../core/core.js';
 import {ToolList} from './virtual-list.js';
 import {buildObjectCatalog,searchCatalog} from './object-catalog.js';
@@ -15,7 +16,7 @@ export class ObjectBrowser {
     this.query=el('input',{'aria-label':'Object Browser search',placeholder:'Search members'});this.private=el('input',{type:'checkbox',checked:true});
     this.root.append(el('div',{class:'object-search'},this.query,el('button',{onclick:()=>this.search()},icon('find'),' Search'),el('label',{},this.private,'Private members')));
     this.resultList=new ToolList('Object Browser search results',item=>{if(item)this.chooseResult(item);},()=>this.viewDefinition());
-    this.resultBox=el('section',{class:'object-search-results',hidden:true},el('div',{class:'tool-section-label'},'Search Results',el('button',{title:'Hide search results',onclick:()=>this.resultBox.hidden=true},'×')),this.resultList.root);
+    this.resultBox=el('section',{class:'object-search-results',hidden:true},el('div',{class:'tool-section-label'},'Search Results',el('button',{title:'Hide search results',onclick:()=>this.resultBox.hidden=true},themedIndicator('close','×'))),this.resultList.root);
     this.classList=new ToolList('Object Browser classes',item=>this.selectClass(item),()=>this.viewDefinition());this.memberList=new ToolList('Object Browser members',item=>this.selectMember(item),()=>this.viewDefinition());
     this.classCaption=el('div',{class:'tool-section-label'},'Classes');this.memberCaption=el('div',{class:'tool-section-label'},'Members');
     const splitter=el('div',{class:'object-splitter',role:'separator',tabindex:0,'aria-label':'Object Browser column splitter','aria-orientation':'vertical'});

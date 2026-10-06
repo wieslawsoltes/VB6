@@ -66,7 +66,10 @@
     "compile:compute": "node tools/compile-compute.mjs",
     "test:compute": "node --test tests/compute*.test.mjs",
     "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py",
-    "pretest:chatgpt": "npm run build"
+    "pretest:chatgpt": "npm run build",
+    "test:sample-exports": "python tools/browser-sample-exports.py",
+    "test:application-themes": "node --test tests/application-themes.test.mjs tests/icon-packs.test.mjs",
+    "test:application-themes:browser": "python tools/browser-application-theme-tests.py"
   },
   "engines": {
     "node": ">=22"

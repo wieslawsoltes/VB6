@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {IDE_THEMES,OPTIONAL_IDE_THEMES,IDE_THEME_ATTRIBUTES,ideThemeId,normalizeIdeAppearance,resolveIdeTheme,IdeThemeController,copyIdeThemeAttributes} from '../src/theme/ide-appearance.js';
-import {THEMES,SYSTEM_ROLES,themeId,colorValue} from '../src/theme/theme.js';
+import {CLASSIC_THEMES,THEMES,SYSTEM_ROLES,themeId,colorValue} from '../src/theme/theme.js';
 import {renderIdeThemePalettes} from '../tools/ide-theme-css.mjs';
 const ids=['fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark','x11-cde','x11-cde-dark'];
 const luminance=hex=>hex.slice(1).match(/../g).map(v=>parseInt(v,16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((a,v,i)=>a+v*[.2126,.7152,.0722][i],0);
@@ -10,17 +10,18 @@ const contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return (Math.max(x,y)
 class Root extends EventTarget {constructor(){super();this.attributes=new Map();this.writes=0;}getAttribute(n){return this.attributes.get(n)??null;}setAttribute(n,v){this.writes++;this.attributes.set(n,v);}removeAttribute(n){this.attributes.delete(n);}}
 function environment() {const view=new EventTarget(),media=new EventTarget();media.matches=false;view.CustomEvent=CustomEvent;view.matchMedia=()=>media;return {documentElement:new Root(),defaultView:view,media};}
 
-test('optional IDE profiles are complete, immutable, and separate from the runtime registry',()=>{
+test('optional IDE profiles share complete immutable application palettes, not settings',()=>{
  assert.deepEqual(Object.keys(OPTIONAL_IDE_THEMES),ids);
- assert.deepEqual(Object.keys(THEMES),['classic','standard','contrast']);
+ assert.deepEqual(Object.keys(CLASSIC_THEMES),['classic','standard','contrast']);
+ assert.deepEqual(Object.keys(THEMES),[...Object.keys(CLASSIC_THEMES),...ids]);
  assert.equal(Object.keys(IDE_THEMES).length,11);
  for(const [id,profile] of Object.entries(OPTIONAL_IDE_THEMES)){
   assert.equal(id,profile.id);assert.ok(Object.isFrozen(profile));assert.ok(Object.isFrozen(profile.colors));assert.ok(Object.isFrozen(profile.tokens));
   assert.deepEqual(Object.keys(profile.colors),Object.keys(THEMES.classic.colors));
   for(const color of Object.values(profile.colors)) assert.match(color,/^#[a-f0-9]{6}$/i);
   for(const role of SYSTEM_ROLES) assert.ok(profile.colors[role]);
-  assert.equal(themeId(id),'classic');
-  assert.equal(colorValue(0x8000000f,'#000000',id),THEMES.classic.colors.face);
+  assert.equal(themeId(id),id);assert.equal(THEMES[id],profile);
+  assert.equal(colorValue(0x8000000f,'#000000',id),profile.colors.face);
  }
 });
 for(const id of ids) test(`theme ${id} has readable normal, selected, caption, syntax and status text`,()=>{
@@ -47,7 +48,7 @@ test('system appearance resolves all light/dark pairs without changing the saved
   assert.equal(resolveIdeTheme(input,false).id,base);assert.equal(resolveIdeTheme(input,true).id,base+'-dark');assert.equal(input.theme,theme);
   assert.equal(resolveIdeTheme({theme},true).id,theme);
  }
- for(const theme of Object.keys(THEMES)) assert.equal(resolveIdeTheme({theme,followSystemTheme:true},true).id,theme);
+ for(const theme of Object.keys(CLASSIC_THEMES)) assert.equal(resolveIdeTheme({theme,followSystemTheme:true},true).id,theme);
 });
 test('root controller makes bounded changes, dispatches events, follows the OS and handles bfcache',()=>{
  const doc=environment(),controller=new IdeThemeController(doc),events=[],legacy=[];

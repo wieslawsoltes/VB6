@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "id": "example_win32-settings_1",
+  "name": "Win32 INI Sections and Messages",
+  "description": "Complete INI sections, NUL-separated buffers, error text and LocalFree ownership",
+  "startup": "frmServices",
+  "modules": [
+    {
+      "id": "example_win32-settings_2",
+      "name": "frmServices",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate completedRuns As Long\nPrivate Sub Form_Load()\n    lblStatus.Caption = \"Ready\"\nEnd Sub\nPrivate Sub cmdRun_Click()\n    On Error GoTo Failed\n    txtOutput.Text = RunService(Me.hWnd)\n    completedRuns = completedRuns + 1\n    lblStatus.Caption = \"Completed \" & CStr(completedRuns)\n    Exit Sub\nFailed:\n    txtOutput.Text = \"Error \" & CStr(Err.Number) & \": \" & Err.Description & \" (Win32 \" & CStr(Err.LastDLLError) & \")\"\nEnd Sub\n",
+      "form": {
+        "id": "example_win32-settings_3",
+        "name": "frmServices",
+        "type": "Form",
+        "properties": {
+          "Name": "frmServices",
+          "Caption": "Win32 INI Sections and Messages",
+          "ClientWidth": 8100,
+          "ClientHeight": 4200,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "example_win32-settings_4",
+            "name": "lblStatus",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblStatus",
+              "Left": 2940,
+              "Top": 960,
+              "Width": 4500,
+              "Height": 330,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Starting...",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-settings_5",
+            "name": "lblDescription",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblDescription",
+              "Left": 240,
+              "Top": 180,
+              "Width": 7650,
+              "Height": 600,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Complete INI sections, NUL-separated buffers, error text and LocalFree ownership",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-settings_6",
+            "name": "cmdRun",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdRun",
+              "Left": 240,
+              "Top": 870,
+              "Width": 2460,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Run API sample",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_win32-settings_7",
+            "name": "txtOutput",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "txtOutput",
+              "Left": 240,
+              "Top": 1500,
+              "Width": 7620,
+              "Height": 1860,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "Click Run API sample. All state is application-private.",
+              "MultiLine": -1,
+              "ScrollBars": 2,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": -1,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-settings_8",
+            "name": "lblBoundary",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblBoundary",
+              "Left": 240,
+              "Top": 3600,
+              "Width": 7620,
+              "Height": 360,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "No access to host files, registry, other apps or native DLLs.",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    },
+    {
+      "id": "example_win32-settings_9",
+      "name": "Services",
+      "kind": "module",
+      "code": "Option Explicit\nPrivate Declare Function WritePrivateProfileSection Lib \"kernel32\" Alias \"WritePrivateProfileSectionA\" (ByVal section As String, ByVal entries As String, ByVal file As String) As Long\nPrivate Declare Function GetPrivateProfileSection Lib \"kernel32\" Alias \"GetPrivateProfileSectionA\" (ByVal section As String, ByVal output As String, ByVal capacity As Long, ByVal file As String) As Long\nPrivate Declare Function GetPrivateProfileInt Lib \"kernel32\" Alias \"GetPrivateProfileIntA\" (ByVal section As String, ByVal key As String, ByVal fallback As Long, ByVal file As String) As Long\nPrivate Declare Function FormatMessage Lib \"kernel32\" Alias \"FormatMessageA\" (ByVal flags As Long, ByVal source As Long, ByVal message As Long, ByVal language As Long, output As Long, ByVal capacity As Long, ByVal arguments As Long) As Long\nPrivate Declare Sub CopyMemory Lib \"kernel32\" Alias \"RtlMoveMemory\" (target As Any, source As Any, ByVal length As Long)\nPrivate Declare Function LocalFree Lib \"kernel32\" (ByVal memory As Long) As Long\nPublic Function RunService(ByVal target As Long) As String\n    Dim entries As String, output As String, section As String, message As String\n    Dim n As Long, pointer As Long, i As Long, data() As Byte, count As Long\n    entries = \"Theme=Classic\" & Chr$(0) & \"Count=42\" & Chr$(0) & Chr$(0)\n    If WritePrivateProfileSection(\"Demo\", entries, \"system-demo.ini\") = 0 Then Err.Raise 5\n    output = String$(128, 0)\n    n = GetPrivateProfileSection(\"Demo\", output, Len(output), \"system-demo.ini\")\n    If n = 0 Then Err.Raise 5\n    section = Replace(Left$(output, n), Chr$(0), \";\")\n    count = GetPrivateProfileInt(\"Demo\", \"Count\", 0, \"system-demo.ini\")\n    n = FormatMessage(&H1300, 0, 5, &H409, pointer, 0, 0)\n    If n = 0 Then Err.Raise 5\n    ReDim data(0 To n - 1)\n    CopyMemory data(0), ByVal pointer, n\n    If LocalFree(pointer) <> 0 Then Err.Raise 5\n    For i = 0 To n - 1\n        message = message & Chr$(data(i))\n    Next i\n    RunService = \"Section: \" & section & vbCrLf & \"Count: \" & CStr(count) & vbCrLf & \"Message: \" & message & \"Local memory: released\"\nEnd Function\n"
+    }
+  ],
+  "settings": {
+    "anchoring": false,
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

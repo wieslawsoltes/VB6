@@ -46,8 +46,9 @@ and coding-agent/MCP conversations, settings, reviews, permissions and activity.
 Fluent uses flat layers, restrained corners and accent focus. macOS uses rounded
 frames, in-page document traffic lights, and restrained glass only on functional
 chrome and menus: code and data surfaces stay opaque. Motif/CDE use square frames,
-beveled controls and diamond radio buttons. Existing command artwork stays
-recognizable; its semantic palette adapts for dark and selected states.
+beveled controls and diamond radio buttons. Each optional family has a complete matching original vector icon pack, with
+light/dark and selected/disabled states. Classic keeps its original pixel artwork.
+See [theme icon packs](THEME-ICON-PACKS.md).
 
 Current IDE commands, keyboard navigation, IME/text selection, revision checks,
 agent permissions, docking and source-editor metrics remain owned by their
@@ -57,8 +58,9 @@ light/dark resolution; returning them to the IDE retains their view state.
 
 ## Application and native-platform boundaries
 
-**IDE theme does not change Application theme.** The latter still offers only
-classic, standard and high-contrast runtime palettes. Authored forms and controls
+**IDE theme does not change Application theme.** Applications now offer the same
+eight optional variants alongside the three Classic palettes, with independent
+project-owned settings. See [application themes](APPLICATION-THEMES.md). Authored forms and controls
 retain their VB6 fonts, colors, sizes and relative coordinates. Property color
 swatches resolve system colors using the application palette even when the
 surrounding Properties window has a dark IDE skin. RGB values remain authored
@@ -93,9 +95,10 @@ SF Symbols or proprietary artwork are redistributed.
   selected theme. MCP configuration continues to require the ordinary permission
   and revision checks; this does not expose any new permission-control route.
 
-The runtime `THEMES` registry and runtime CSS are deliberately unchanged. The
-build includes optional skins only in IDE outputs; it verifies the same
-fingerprint manifest as other changes. To author new output fingerprints locally,
+The shared `THEMES` registry now contains all eleven profiles. Application and
+IDE component skins and preference controllers remain independently scoped.
+The build includes application skins and matching icon packs in runtime outputs
+as well as the IDE, and verifies the same fingerprint manifest as other changes. To author new output fingerprints locally,
 use the documented `npm run build:update-ide-artifacts` command, not a CI bypass.
 
 ## Validation
@@ -116,7 +119,7 @@ Chromium/Firefox/WebKit matrix; no feature-specific workflow is added.
 Node tests check immutable complete palettes, readable normal/selected/caption/
 syntax text contrast (at least 4.5:1 for tested pairs), malformed preferences,
 light/dark pairs, bounded updates, BFCache/listener lifetime, detached attributes,
-deterministic generation and runtime exclusion. MCP tests cover theme preference
+deterministic generation and IDE/application isolation. MCP tests cover theme preference
 preservation and normal authority/revision rejection.
 
 The browser suite exercises all eight choices through Options, transactional
