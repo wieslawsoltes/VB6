@@ -5,6 +5,9 @@ on:
     paths: ['.github/workflows/text-date-reference-capture.yml']
 permissions:
   contents: read
+concurrency:
+  group: text-date-reference-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   reference:
     runs-on: windows-latest
@@ -21,9 +24,9 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import hashlib
+          import subprocess
+          assert subprocess.check_output(['git','rev-parse','HEAD:tools/conformance/windows-oracle.cs'],text=True).strip()=='cd8ab29de3e340aae1ee01bea1103610545f175f'
           p=Path('tools/conformance/windows-oracle.cs');s=p.read_text()
-          assert hashlib.sha1(b'blob '+str(len(p.read_bytes())).encode()+b'\0'+p.read_bytes()).hexdigest()=='cd8ab29b82e3191dcf281e2822184bef78c22be9' if False else True
           old='public string value; public int hresult;';assert s.count(old)==1
           s=s.replace(old,'public string value; public string bits; public int hresult;')
           old='  public static Result Run(';assert s.count(old)==1
