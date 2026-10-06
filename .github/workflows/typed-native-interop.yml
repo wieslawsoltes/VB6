@@ -1,0 +1,44 @@
+name: Typed native interoperability
+on:
+  pull_request:
+    paths: ['src/runtime/**', 'src/language/**', 'tools/interop/**', 'tests/native-automation-scalars.test.mjs', '.github/workflows/typed-native-interop.yml']
+  push:
+    branches: [main, feat/variant-scalar-compatibility]
+    paths: ['src/runtime/**', 'src/language/**', 'tools/interop/**', 'tests/native-automation-scalars.test.mjs', '.github/workflows/typed-native-interop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: typed-interop-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Portable scalar transport and policy regressions
+        run: node --test tests/native-automation-scalars.test.mjs
+      - name: Execute compiled VB with real Windows VARIANT and SAFEARRAY values
+        run: node tools/interop/test-native.mjs
+      - name: Independently verify installed ActiveX control and cleanup
+        if: always()
+        run: node tools/interop/test-activex.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: typed-interop-${{ matrix.arch }}-${{ github.sha }}
+          path: reports/native-interop/
+          if-no-files-found: error
+          retention-days: 14
