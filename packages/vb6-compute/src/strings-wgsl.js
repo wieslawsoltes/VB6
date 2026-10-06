@@ -1,6 +1,6 @@
 /** Bounded UTF-16 String operations. All per-character work consumes the same
  * dispatch fuel as VB instructions. No host interpreter, locale or native BSTR. */
-export function stringsWGSL(arrays) {
+export function stringsWGSL(arrays,doubleArrays=[]) {
   return `
 fn str_len(s:i32)->u32 {if(vb_error!=0u || vb_halt) {return 0u;}return mem[u32(s)];}
 fn str_unit(s:i32,i:u32)->u32 {return mem[u32(s)+3u+i];}
@@ -28,6 +28,10 @@ fn put_s(cell:u32,value:i32) {
   for(var i=count;i<length;i+=1u) {mem[dst+3u+i]=32u;}mem[dst]=length;
 }
 fn array_clear(base:u32,start:u32,stop:u32)->bool {
+  ${doubleArrays.map(s=>`if(base==${s.offset}u) {
+    if(!array_charge((stop-start)*2u)) {return false;}
+    for(var i=start;i<stop;i+=1u) {put_d(base+ARRAY_DATA+i,vec2<u32>(0u));}return true;
+  }`).join('\n')}
   ${arrays.map(s=>`if(base==${s.offset}u) {
     if(!array_charge((stop-start)*${s.stringStorage.fixedLength+1}u)) {return false;}
     for(var i=start;i<stop;i+=1u) {str_reset_unchecked(${s.stringStorage.offset}u+i*${s.stringStorage.stride}u);}return true;

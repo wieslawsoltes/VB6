@@ -61,6 +61,10 @@ try:
         page.add_script_tag(content=(ROOT / 'tests/compute-images-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-application-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-strings-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-string-extras-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-doubles-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-currency-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-dates-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-browser.js').read_text())
         report = page.evaluate('runComputeBrowserTests()')
         if report.get('available'):
@@ -96,6 +100,24 @@ try:
             page.locator('#dispose').click()
             page.wait_for_function("document.getElementById('status').textContent==='Disposed.'")
             report['stringPlayground'] = 'passed: UTF-16 String/array results, persistent rerun, drawing, dispose'
+            page.locator('#example').select_option('compatibility')
+            page.locator('#run').click()
+            page.wait_for_function("document.getElementById('status').textContent.includes('Module1.ExactSum')")
+            state = json.loads(page.locator('#status').inner_text())[0]['globals']
+            assert state['Module1.Quotient'] == 1 / 3
+            assert state['Module1.ExactSum'] == 9007199254740992
+            assert state['Module1.Ledger'] == '922337203685477.5807'
+            assert state['Module1.NextDate'] == 45351
+            assert state['Module1.DayOfYear'] == 60
+            assert state['Module1.Selected'] == ['alpha', 'alphabet']
+            assert state['Module1.PatternMatch'] is True
+            page.locator('#again').click()
+            page.wait_for_function("JSON.parse(document.getElementById('status').textContent)[0].globals['Module1.Runs']===2")
+            page.screenshot(path=str(REPORTS / 'compatibility.png'), full_page=True)
+            page.locator('#dispose').click()
+            page.wait_for_function("document.getElementById('status').textContent==='Disposed.'")
+            report['compatibilityPlayground'] = 'passed: exact wide values, Date, String arrays, Like, persistent rerun, drawing, dispose'
+
         if report.get('available') and not report.get('failed'):
             page.goto(url + '/artifacts/vb6-compute/events.html')
             page.wait_for_function("globalThis.computeApplication && !globalThis.computeApplication.closed")

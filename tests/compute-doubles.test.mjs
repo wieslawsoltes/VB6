@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {compileCompute} from '../src/compute/index.js';
+import {createInitialState,decodeState,validateArtifact} from '../packages/vb6-compute/src/runtime.js';
+import {encodeDouble,decodeDouble,doubleLiteral} from '../packages/vb6-compute/src/double-layout.js';
+const program=body=>`Public a As Double\nPublic result As Double\nSub Main()\n${body}\nEnd Sub`;
+for(const value of [0,-0,Number.MIN_VALUE,-Number.MIN_VALUE,Number.MAX_VALUE,Math.PI,1+2**-52,2147483648,-2147483648])test('binary64 wire roundtrip '+value,()=>assert.ok(Object.is(decodeDouble(...encodeDouble(value)),value)));
+for(const value of [NaN,Infinity,-Infinity,'1',null])test('invalid Double input '+String(value),()=>assert.throws(()=>encodeDouble(value)));
+for(const body of ['result=1# / 3#','result=a+1#','result=a-1#','result=a*3#','result=-a','result=Abs(a)','result=Sqr(a)','result=Int(a)','result=Fix(a)','result=CDbl(2147483647&)','result=CDbl(CSng(1!))','If a Then result=1#','Debug.Assert a=0#','For a=1# To 4#\nresult=result+a\nNext a','Select Case a\nCase 0# To 1#\nresult=42#\nEnd Select'])test('binary64 lowering '+body,()=>{const a=compileCompute(program(body));validateArtifact(a);assert.equal(a.globals[0].type,'double');assert.match(a.wgsl,/vec2<u32>/);});
+test('Long/Single promotion uses exact binary64 instead of f32',()=>{const a=compileCompute(program('result=2147483647&+1!'));assert.match(a.wgsl,/d_add\(/);assert.match(a.wgsl,/d_from_i\(/);});
+test('Double array cells hold canonical references to two-word payloads',()=>{const a=compileCompute('Public a(1 To 3) As Double\nSub Main()\na(2)=1.5#\nEnd Sub');const s=a.globals[0];validateArtifact(a);assert.equal(s.doubleStorage.stride,2);const state=createInitialState(a);const decoded=decodeState(a,state.buffer);assert.deepEqual(decoded[0].globals['Module1.a'],[0,0,0]);});
+test('Double ABI corruption is rejected',()=>{const a=compileCompute(program(''));a.initialState[a.globals[0].offset]=999;assert.throws(()=>validateArtifact(a));});
+test('Double readback checks reference identity',()=>{const a=compileCompute(program(''));const words=createInitialState(a);words[6]=999;assert.throws(()=>decodeState(a,words.buffer));});
+test('Double procedure values survive suspension in vector fields',()=>{const a=compileCompute(program('result=Twice(1.5#)')+'\nFunction Twice(ByVal x As Double) As Double\nTwice=x+x\nEnd Function');assert.match(a.wgsl,/result:vec2<u32>/);assert.match(a.wgsl,/arg0:vec2<u32>/);});
+for(const code of ['result=Sin(a)','result=Log(a)','result=a^2#'])test('unimplemented Double math fails explicitly '+code,()=>assert.throws(()=>compileCompute(program(code)),e=>e.code==='GPU_DOUBLE_MATH'));
+test('minimum Double literal stays two-word binary64',()=>assert.equal(doubleLiteral(Number.MIN_VALUE),'vec2<u32>(1u,0u)'));

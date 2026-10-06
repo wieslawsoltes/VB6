@@ -29,10 +29,15 @@ test('actual extracted npm archive includes a functional independent CLI',()=>te
  const archive=path.join(dir,info[0].filename),out=path.join(dir,'extracted');fs.mkdirSync(out);execFileSync('tar',['-xzf',archive,'-C',out]);
  const input=path.join(dir,'sample.bas'),output=path.join(dir,'sample.html');fs.writeFileSync(input,simple);
  execFileSync(process.execPath,[path.join(out,'package/cli.mjs'),input,'--out',output],{cwd:dir});assert.match(fs.readFileSync(output,'utf8'),/ComputeApplication.create/);
- const manifest=JSON.parse(fs.readFileSync(path.join(out,'package/package.json')));assert.equal(manifest.bin['vb6-compute'],'./cli.mjs');assert.equal(manifest.version,'0.3.0');
+ const manifest=JSON.parse(fs.readFileSync(path.join(out,'package/package.json')));assert.equal(manifest.bin['vb6-compute'],'./cli.mjs');assert.equal(manifest.version,'0.4.0');
  const stringInput=path.join(out,'package/strings.bas'),json=path.join(dir,'strings.json');
  execFileSync(process.execPath,[path.join(out,'package/cli.mjs'),stringInput,'--out',json,'--max-string-length','64'],{cwd:dir});
  const strings=JSON.parse(fs.readFileSync(json));assert.equal(strings.stringABI,1);assert.equal(strings.maxStringLength,64);
+ const compat=path.join(out,'package/compatibility.bas'),wide=path.join(dir,'wide.json');
+ execFileSync(process.execPath,[path.join(out,'package/cli.mjs'),compat,'--out',wide,'--two-digit-year-max','2039'],{cwd:dir});
+ const artifact=JSON.parse(fs.readFileSync(wide));assert.equal(artifact.doubleABI,1);assert.equal(artifact.currencyABI,1);assert.equal(artifact.dateABI,1);assert.equal(artifact.twoDigitYearMax,2039);
+ fs.writeFileSync(input,'Public s As String\nSub Main()\ns=Chr$(128)\nEnd Sub');
+ execFileSync(process.execPath,[path.join(out,'package/cli.mjs'),input,'--out',wide,'--code-page','1252','--force'],{cwd:dir});assert.equal(JSON.parse(fs.readFileSync(wide)).codePage,1252);
 }));
 
 test('CLI forwards the explicit UTF-16 String capacity',()=>temp(dir=>{const input=path.join(dir,'input.bas'),output=path.join(dir,'output.json');fs.writeFileSync(input,'Public s As String\nSub Main()\ns="abc"\nEnd Sub');const io=capture();assert.equal(runComputeCLI(api,[input,'--out',output,'--max-string-length','8'],io),0);assert.equal(JSON.parse(fs.readFileSync(output)).maxStringLength,8);}));

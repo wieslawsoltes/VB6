@@ -10,7 +10,8 @@ export function readArrayLayout(words, offset, symbol) {
   for(let d=0;d<4;d++){
     const lo=words[offset+2+d*3]|0,hi=words[offset+3+d*3]|0,stride=words[offset+4+d*3];
     if(d<rank){
-      if(hi<lo||stride!==product)invalid();
+      const empty=symbol.dynamic&&rank===1&&length===0&&lo===0&&hi===-1;
+      if((hi<lo&&!empty)||stride!==product)invalid();
       bounds.push([lo,hi]);product*=hi-lo+1;if(product>capacity)invalid();
     }else if(lo!==0||hi!==0||stride!==0)invalid();
   }
@@ -25,7 +26,7 @@ export function arrayHeader(bounds,capacity,dynamic=true) {
   const header=new Uint32Array(ARRAY_HEADER_WORDS);let length=bounds.length?1:0;
   for(let d=0;d<bounds.length;d++){
     const b=bounds[d];if(!Array.isArray(b)||b.length!==2)throw new ComputeError('Bounds require [lower,upper] pairs','GPU_BOUNDS');
-    const lo=integer(b[0],'lower bound',-2147483648,2147483647),hi=integer(b[1],'upper bound',lo,2147483647);
+    const lo=integer(b[0],'lower bound',-2147483648,2147483647),empty=dynamic&&bounds.length===1&&lo===0&&b[1]===-1,hi=integer(b[1],'upper bound',empty?-1:lo,2147483647);
     header.set([lo>>>0,hi>>>0,length],2+d*3);length*=hi-lo+1;
     if(length>capacity)throw new ComputeError('Array exceeds reserved GPU capacity','GPU_LIMIT');
   }

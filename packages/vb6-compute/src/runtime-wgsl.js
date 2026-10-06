@@ -3,7 +3,7 @@ import {ARRAY_WGSL} from './arrays-wgsl.js';
 /** Helpers deliberately use explicit error cells: WGSL has no exceptions. */
 export function runtimeWGSL(words,stringHelpers='') {
   return `${COMMAND_WGSL}
-struct RunParams { count:u32, fuel:u32, capacity:u32, width:u32, height:u32, time:f32, shared_words:u32, pad1:u32 }
+struct RunParams { count:u32, fuel:u32, capacity:u32, width:u32, height:u32, time:f32, shared_words:u32, pad1:u32, now_lo:u32, now_hi:u32, pad2:u32, pad3:u32 }
 @group(0) @binding(0) var<storage,read_write> state:array<u32>;
 @group(0) @binding(1) var<storage,read_write> draws:array<DrawCommand>;
 @group(0) @binding(2) var<uniform> params:RunParams;

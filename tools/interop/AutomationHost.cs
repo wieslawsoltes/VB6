@@ -204,6 +204,7 @@ namespace VB6Interop {
       var target=ObjectAt(S(request,"handle"));
       if(op=="release"){Release(S(request,"handle"));return D("released",true);}
       if(op=="advise")return Advise(S(request,"handle"),target);
+      if(op=="controlBrowseProperty")return BrowseControlProperty(target,request);
       if(op=="eventInterfaces")return target.Metadata["eventInterfaces"];
       if(op=="adviseInterface")return Advise(S(request,"handle"),target,S(request,"iid"));
       if(op=="unadviseInterface"){Unadvise(target,S(request,"iid"));return D("unadvised",true);}
