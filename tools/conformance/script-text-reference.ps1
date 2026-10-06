@@ -42,15 +42,21 @@ $lines=New-Object 'System.Collections.Generic.List[string]';$lines.Add($prefix)
 for($i=0;$i -lt $expressions.Count;$i++){$lines.Add('Call Probe('+ $i +', "'+$expressions[$i].Replace('"','""')+'")')}
 [IO.File]::WriteAllText([IO.Path]::GetFullPath($script),[string]::Join("`r`n",$lines),[Text.Encoding]::ASCII)
 $start=New-Object Diagnostics.ProcessStartInfo
-$start.FileName="$env:WINDIR\System32\cscript.exe";$start.Arguments='//nologo //B "'+[IO.Path]::GetFullPath($script)+'"';$start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+$start.FileName="$env:WINDIR\SysWOW64\cscript.exe"
+if(-not (Test-Path $start.FileName)){throw 'The independent reference requires installed x86 Windows Script Host'}
+$start.Arguments='//nologo //T:30 //E:VBScript "'+[IO.Path]::GetFullPath($script)+'"';$start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
 $process=New-Object Diagnostics.Process;$process.StartInfo=$start
-if(-not $process.Start()){throw 'Cannot start installed Windows Script Host'}
-$stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
-if(-not $process.WaitForExit(60000)){$process.Kill();throw 'Script Host reference timed out'}
-$text=$stdout.Result;$errorText=$stderr.Result
-if($process.ExitCode -ne 0){throw "Script Host failed: $($process.ExitCode) $errorText $text"}
-$rows=@($text -split '\r?\n' | Where-Object {$_ -ne ''})
-if($rows.Count -ne $expressions.Count){throw "Incomplete Script Host records: $($rows.Count)/$($expressions.Count): $text"}
-$result=New-Object 'System.Collections.Generic.List[object]'
-for($i=0;$i -lt $rows.Count;$i++){$parts=$rows[$i] -split '\|',4;if($parts.Count -ne 4 -or [int]$parts[0] -ne $i){throw 'Malformed Script Host result'};$result.Add(@{expression=$expressions[$i];number=[int]$parts[1];type=[int]$parts[2];value=$parts[3]})}
-@{schema=1;reference='Installed Windows Script Host, LCID 1033; not a licensed VB6 compiler';os=[Environment]::OSVersion.VersionString;records=$result.ToArray()} | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 $Output
+try {
+ if(-not $process.Start()){throw 'Cannot start installed Windows Script Host'}
+ $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
+ if(-not $process.WaitForExit(35000)){$process.Kill();$process.WaitForExit();throw 'Script Host reference timed out'}
+ $text=$stdout.GetAwaiter().GetResult();$errorText=$stderr.GetAwaiter().GetResult()
+ [IO.File]::WriteAllText([IO.Path]::GetFullPath((Join-Path $dir 'text-reference.stdout.log')),$text)
+ [IO.File]::WriteAllText([IO.Path]::GetFullPath((Join-Path $dir 'text-reference.stderr.log')),$errorText)
+ if($process.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($errorText)){throw "Script Host failed: $($process.ExitCode) $errorText $text"}
+ $rows=@($text -split '\r?\n' | Where-Object {$_ -ne ''})
+ if($rows.Count -ne $expressions.Count){throw "Incomplete Script Host records: $($rows.Count)/$($expressions.Count): $text"}
+ $result=New-Object 'System.Collections.Generic.List[object]'
+ for($i=0;$i -lt $rows.Count;$i++){$parts=$rows[$i] -split '\|',4;if($parts.Count -ne 4 -or [int]$parts[0] -ne $i){throw 'Malformed Script Host result'};$result.Add(@{expression=$expressions[$i];number=[int]$parts[1];type=[int]$parts[2];value=$parts[3]})}
+ @{schema=1;reference='Installed x86 Windows Script Host, LCID 1033; not a licensed VB6 compiler';os=[Environment]::OSVersion.VersionString;records=$result.ToArray()} | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 $Output
+} finally {$process.Dispose()}
