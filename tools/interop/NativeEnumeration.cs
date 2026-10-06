@@ -23,7 +23,9 @@ namespace VB6Interop {
       try {
         // DISPID_NEWENUM is the Automation enumeration contract; it does not
         // expose arbitrary member IDs or permit ungranted object activation.
-        int hr=((DispatchInvoke)target.Value).Invoke(-4,ref iid,(uint)lcid,2,ref args,result,ref error,out argumentError);
+        // Type libraries expose _NewEnum as either FUNC or PROPERTYGET.
+        // Invoke both read contexts once; never replay a failed enumeration.
+        int hr=((DispatchInvoke)target.Value).Invoke(-4,ref iid,(uint)lcid,3,ref args,result,ref error,out argumentError);
         if(hr<0)throw new NativeDispatchException(error.bstrDescription??"Cannot obtain Automation enumerator",hr,error,argumentError);
         ushort vt=(ushort)Marshal.ReadInt16(result);
         if(vt!=9&&vt!=13)throw new NotSupportedException("Invalid Automation enumerator result");
