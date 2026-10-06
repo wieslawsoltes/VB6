@@ -1,0 +1,66 @@
+name: Agent recovery classification finalization
+on:
+  push:
+    branches: [fix/agent-recovery-compaction]
+    paths: [.github/workflows/agent-safety-finalize.yml]
+permissions:
+  contents: write
+concurrency:
+  group: agent-recovery-classification-finalization
+  cancel-in-progress: false
+jobs:
+  finalize:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/agent-recovery-compaction'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed terminal-error priority correction
+        run: |
+          mkdir -p /tmp/agent-classification-validation
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('src/agents/providers.js')
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='bd905ae855e3f6d47315c1b2ff1caf1087409ded6b63a04733e4e84c401870c5'
+          s=p.read_text()
+          line="  else if (has(['content_policy_violation', 'safety_violation', 'refusal'])) { kind = 'safety'; retryable = false; hint = 'Provider safety policy rejected this request. No automatic alternative will be attempted.'; }\n"
+          needle="  if (has(['context_length_exceeded', 'context_window_exceeded', 'prompt_too_long', 'request_too_large']) || contextMessage)"
+          assert s.count(line)==1 and s.count(needle)==1
+          s=s.replace(line,'').replace(needle,"  // Explicit safety codes are terminal regardless of HTTP status or message heuristics.\n"+line.replace('  else if','  if')+needle.replace('  if','  else if'))
+          p.write_text(s)
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='8442b88480eae57f471f8ba5900d378c1e612f8933954293148c39d1751226b8'
+          assert hashlib.sha256(Path('tests/coding-agents-error-priority.test.mjs').read_bytes()).hexdigest()=='334fb4e1da3b1a76145e307dd3c58708246096114c093a04c4ddfc44a2c75fd5'
+          PY
+      - name: Rebuild and validate all source
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/agent-classification-validation/build.log
+          npm test 2>&1 | tee /tmp/agent-classification-validation/tests.log
+          npm run test:agents 2>&1 | tee /tmp/agent-classification-validation/agents.log
+          git diff --check
+          git add src/agents/providers.js dist/studio.js dist/VB6-Studio-Web.html
+          npm run build
+          git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - name: Publish exact validated source with a branch-head check
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/fix/agent-recovery-compaction | cut -f1)" = "$EXPECTED_HEAD"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(agents): keep explicit safety refusals terminal across HTTP classifications'
+          git rev-parse HEAD > /tmp/agent-classification-validation/source-head.txt
+          git rev-parse HEAD^{tree} > /tmp/agent-classification-validation/source-tree.txt
+          git archive HEAD | gzip > /tmp/agent-classification-validation/verified-source.tar.gz
+          sha256sum /tmp/agent-classification-validation/verified-source.tar.gz > /tmp/agent-classification-validation/SHA256SUMS.txt
+          git push origin HEAD:refs/heads/fix/agent-recovery-compaction
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-classification-final-validation
+          path: /tmp/agent-classification-validation/
+          retention-days: 7
