@@ -2,7 +2,7 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* ../../packages/win32-browser/src/gpu-presenter.js */
+/* ..\..\packages\win32-browser\src\gpu-presenter.js */
 __modules[0]=(()=>{
 
 /** WebGPU presentation of a retained, CPU-readable GDI surface. Raster operations
@@ -56,7 +56,7 @@ class GPURasterPresenter {
 return {GPURasterPresenter};
 })();
 
-/* ../../packages/win32-browser/src/core.js */
+/* ..\..\packages\win32-browser\src\core.js */
 __modules[1]=(()=>{
 
 /** MIT. A bounded, process-private 32-bit address and handle space. */
@@ -121,7 +121,7 @@ class MemoryFileSystem {
 return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
 })();
 
-/* ../../packages/win32-browser/src/gdi-transform.js */
+/* ..\..\packages\win32-browser\src\gdi-transform.js */
 __modules[2]=(()=>{
 const {Win32Error,integer}=__modules[1];
 
@@ -163,7 +163,7 @@ function installTransforms(w,{dc,add}){
 return {TRANSFORM_CONSTANTS,IDENTITY,multiply,inverse,mapPoint,mapping,translatedOnly,devicePoint,mapBounds,readTransform,installTransforms};
 })();
 
-/* ../../packages/win32-browser/src/gdi-path.js */
+/* ..\..\packages\win32-browser\src\gdi-path.js */
 __modules[3]=(()=>{
 const {Win32Error,integer}=__modules[1];
 const {mapping,mapPoint,inverse,IDENTITY}=__modules[2];
@@ -256,7 +256,7 @@ function installPaths(w,{dc,bitmaps,regions,add,style}){
 return {PATH_CONSTANTS,installPaths};
 })();
 
-/* ../../packages/win32-browser/src/gdi-text.js */
+/* ..\..\packages\win32-browser\src\gdi-text.js */
 __modules[4]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 const {mapping,multiply,mapPoint,mapBounds}=__modules[2];
@@ -365,7 +365,7 @@ function installText(w,{dc,bitmaps,regions,add,stock,stocks}){
 return {TEXT_CONSTANTS,installText};
 })();
 
-/* ../../packages/win32-browser/src/user32-paint.js */
+/* ..\..\packages\win32-browser\src\user32-paint.js */
 __modules[5]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 
@@ -471,7 +471,7 @@ function installPainting(w,{dc,bitmaps,regions}){
 return {PAINT_CONSTANTS,installPainting};
 })();
 
-/* ../../packages/win32-browser/src/gdi-geometry.js */
+/* ..\..\packages\win32-browser\src\gdi-geometry.js */
 __modules[6]=(()=>{
 const {Win32Error,integer}=__modules[1];
 
@@ -565,7 +565,7 @@ function frameRegion(store,region,x,y){
 return {polygonRegion,roundedRegion,transformRegion,frameRegion};
 })();
 
-/* ../../packages/win32-browser/src/gdi-region.js */
+/* ..\..\packages\win32-browser\src\gdi-region.js */
 __modules[7]=(()=>{
 const {polygonRegion,roundedRegion,transformRegion,frameRegion}=__modules[6];
 const {mapping,devicePoint,mapBounds,inverse,readTransform}=__modules[2];
@@ -765,7 +765,7 @@ function installRegions(w,{dc,bitmaps,regions,add}){
 return {REGION_CONSTANTS,RegionStore,installRegions};
 })();
 
-/* ../../packages/win32-browser/src/gdi-bitmap.js */
+/* ..\..\packages\win32-browser\src\gdi-bitmap.js */
 __modules[8]=(()=>{
 const {mapping,inverse,mapPoint,mapBounds,devicePoint,translatedOnly}=__modules[2];
 const {Win32Error,integer,unsigned}=__modules[1];
@@ -867,7 +867,7 @@ class BitmapStore {
 return {GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo,BitmapStore};
 })();
 
-/* ../../packages/win32-browser/src/clipboard.js */
+/* ..\..\packages\win32-browser\src\clipboard.js */
 __modules[9]=(()=>{
 const {Win32Error,unsigned}=__modules[1];
 
@@ -899,7 +899,7 @@ function installClipboard(w){
 return {installClipboard};
 })();
 
-/* ../../packages/win32-browser/src/kernel32.js */
+/* ..\..\packages\win32-browser\src\kernel32.js */
 __modules[10]=(()=>{
 const {ERROR,Win32Error,integer,unsigned}=__modules[1];
 
@@ -990,7 +990,7 @@ function installProfiles(w,aw){
 return {installKernel32};
 })();
 
-/* ../../packages/win32-browser/src/user32.js */
+/* ..\..\packages\win32-browser\src\user32.js */
 __modules[11]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 
@@ -1074,7 +1074,7 @@ function installRectangles(w,add){
 return {installUser32};
 })();
 
-/* ../../packages/win32-browser/src/advapi32.js */
+/* ..\..\packages\win32-browser\src\advapi32.js */
 __modules[12]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 
@@ -1102,7 +1102,7 @@ function installRegistry(w){
 return {installRegistry};
 })();
 
-/* ../../packages/win32-browser/src/gdi32.js */
+/* ..\..\packages\win32-browser\src\gdi32.js */
 __modules[13]=(()=>{
 const {installTransforms,mapping,translatedOnly,IDENTITY}=__modules[2];
 const {installPaths}=__modules[3];
@@ -1235,7 +1235,7 @@ function installGDI(w){
 return {colorRef,installGDI};
 })();
 
-/* ../../packages/win32-browser/src/index.js */
+/* ..\..\packages\win32-browser\src\index.js */
 __modules[14]=(()=>{
 const {GPURasterPresenter}=__modules[0];
 const {TRANSFORM_CONSTANTS}=__modules[2];
@@ -1294,7 +1294,7 @@ function createWin32(options={}){return new Win32Browser(options);}
 return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,GPURasterPresenter,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
 
-/* ../language/errors.js */
+/* ..\language\errors.js */
 __modules[15]=(()=>{
 
 class VBError extends Error {
@@ -1383,7 +1383,7 @@ function weekdayName(day,abbreviate=0,first=1){day=integer(day);if(day<1||day>7)
 return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,monthName,weekdayName};
 })();
 
-/* ../language/lexer.js */
+/* ..\language\lexer.js */
 __modules[17]=(()=>{
 const {asDate}=__modules[16];
 const {VBError}=__modules[15];
@@ -1555,7 +1555,7 @@ class VBDecimal {
 return {VBDecimal};
 })();
 
-/* ../core/window-context.js */
+/* ..\core\window-context.js */
 __modules[19]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
@@ -1587,7 +1587,7 @@ function hasUIDialog() {
 return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
-/* ../core/core.js */
+/* ..\core\core.js */
 __modules[20]=(()=>{
 const {uiDocument}=__modules[19];
 
@@ -2152,7 +2152,7 @@ async function automationEnumerate(o){const s=state(o);if(typeof s.adapter.enume
 return {isAutomationObject,automationDefaultName,automationInvoke,automationMember,automationReference,AutomationRegistry,automationEnumerate};
 })();
 
-/* ../controls/adapters.js */
+/* ..\controls\adapters.js */
 __modules[23]=(()=>{
 
 /** Host code only. Native project data cannot register code or fetch plug-ins. */
@@ -2177,7 +2177,7 @@ class ControlAdapterRegistry {
 return {ControlAdapterRegistry};
 })();
 
-/* ../data/common.js */
+/* ..\data\common.js */
 __modules[24]=(()=>{
 const {VBError}=__modules[17];
 const {VBArray, VBCurrency, VBDecimal}=__modules[21];
@@ -2357,7 +2357,7 @@ function resultFromRows(rows,fields){
 return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,quoteIdentifier,sameValue,parseConnectionString,connectionConfiguration,assertPublicConfiguration,normalizeDataSources,safeHttpURL,pathValue,columnType,resultFromRows};
 })();
 
-/* ../data/defaults.js */
+/* ..\data\defaults.js */
 __modules[25]=(()=>{
 
 // Registration is private to trusted library objects; a forged __type never grants a default property.
@@ -2376,7 +2376,7 @@ function hasDataMember(object,name) { return members.get(object)?.has(String(nam
 return {dataDefault,dataDefaultType,hasDataDefault,dataMembers,hasDataMember};
 })();
 
-/* ../data/collection.js */
+/* ..\data\collection.js */
 __modules[26]=(()=>{
 const {assertData}=__modules[24];
 
@@ -2399,7 +2399,7 @@ NamedCollection.prototype.Append.vbRawArgs=true;
 return {DataCollection,NamedCollection};
 })();
 
-/* ../data/recordset.js */
+/* ..\data\recordset.js */
 __modules[27]=(()=>{
 const {dataDefault}=__modules[25];
 const {VBError}=__modules[17];
@@ -2526,7 +2526,7 @@ class DisconnectedRecordset {
 return {fieldScalarType,fieldValue,DisconnectedRecordset};
 })();
 
-/* ../data/provider-recordset.js */
+/* ..\data\provider-recordset.js */
 __modules[28]=(()=>{
 const {DisconnectedRecordset,fieldValue}=__modules[27];
 const {assertData,after,DATA_LIMITS,sameValue}=__modules[24];
@@ -2645,7 +2645,7 @@ class ProviderRecordset extends DisconnectedRecordset {
 return {ProviderRecordset};
 })();
 
-/* ../data/connected-recordset.js */
+/* ..\data\connected-recordset.js */
 __modules[29]=(()=>{
 const {VBDecimal,VBCurrency,coerce}=__modules[21];
 const {ProviderRecordset}=__modules[28];
@@ -2878,7 +2878,7 @@ class ConnectedRecordset extends ProviderRecordset {
 return {ConnectedRecordset};
 })();
 
-/* ../data/sql-parameters.js */
+/* ..\data\sql-parameters.js */
 __modules[30]=(()=>{
 const {assertData}=__modules[24];
 
@@ -2956,7 +2956,7 @@ function simpleSelect(source) {
 return {sqlTokens,DAO_TYPES,parameterPlan,simpleSelect};
 })();
 
-/* ../data/criteria.js */
+/* ..\data\criteria.js */
 __modules[31]=(()=>{
 const {VBDecimal,VBCurrency}=__modules[21];
 const {assertData}=__modules[24];
@@ -3026,7 +3026,7 @@ function compileCriteria(text,columns){
 return {compareData,compileCriteria};
 })();
 
-/* ../data/dao-recordset.js */
+/* ..\data\dao-recordset.js */
 __modules[32]=(()=>{
 const {dataDefault}=__modules[25];
 const {assertData,after,dataList,sameValue}=__modules[24];
@@ -3135,7 +3135,7 @@ class DAORecordset {
 return {DAORecordset};
 })();
 
-/* ../data/rdo.js */
+/* ..\data\rdo.js */
 __modules[33]=(()=>{
 const {assertData,DATA_LIMITS,quoteIdentifier}=__modules[24];
 const {dataDefault,dataMembers}=__modules[25];
@@ -3319,7 +3319,7 @@ for(const [prototype,method,names,required] of [
 return {RDO_TYPES,RDO_CONSTANTS,RDOParameter,RDOQuery,RDOResultset,RDOConnection,RDOEnvironment,RDOEngine};
 })();
 
-/* ../data/vendor/sqlite.js */
+/* ..\data\vendor\sqlite.js */
 __modules[34]=(()=>{
 
 // Generated by tools/vendor-sqlite.mjs. sql.js 1.14.2 (MIT); SQLite public domain.
@@ -3516,7 +3516,7 @@ function initializeSQLite(){return initSqlJs({wasmBinary:Uint8Array.from(atob(em
 return {initializeSQLite};
 })();
 
-/* ../data/dao.js */
+/* ..\data\dao.js */
 __modules[35]=(()=>{
 const {dataDefault}=__modules[25];
 const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[24];
@@ -3711,7 +3711,7 @@ class DAOEngine {
 return {DAOField,DAOIndex,DAOTableDef,DAOParameter,DAOQueryDef,DAODatabase,DAOWorkspace,DAOEngine};
 })();
 
-/* ../data/sqlite.js */
+/* ..\data\sqlite.js */
 __modules[36]=(()=>{
 const {initializeSQLite}=__modules[34];
 const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[24];
@@ -3847,7 +3847,7 @@ class SQLiteProvider {
 return {SQLiteProvider};
 })();
 
-/* ../data/wire.js */
+/* ..\data\wire.js */
 __modules[37]=(()=>{
 const {VBCurrency,VBDecimal}=__modules[21];
 const {assertData}=__modules[24];
@@ -3886,7 +3886,7 @@ function decodeResult(result){assertData(Array.isArray(result.columns)&&Array.is
 return {encodeCell,decodeCell,encodeResult,decodeResult};
 })();
 
-/* ../data/http.js */
+/* ..\data\http.js */
 __modules[38]=(()=>{
 const {encodeCell,decodeResult}=__modules[37];
 const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[24];
@@ -4028,7 +4028,7 @@ class GatewayProvider extends HTTPProvider {
 return {HTTPProvider,GatewayProvider};
 })();
 
-/* ../data/files.js */
+/* ..\data\files.js */
 __modules[39]=(()=>{
 const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[24];
 const {fieldValue}=__modules[27];
@@ -4083,7 +4083,7 @@ class FileDataProvider {
 return {parseCSV,writeCSV,FileDataProvider};
 })();
 
-/* ../data/connection.js */
+/* ..\data\connection.js */
 __modules[40]=(()=>{
 const {dataDefault}=__modules[25];
 const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[24];
@@ -4416,7 +4416,7 @@ class VirtualFileSystem {
 return {VirtualFileSystem};
 })();
 
-/* ../data/context.js */
+/* ..\data\context.js */
 __modules[44]=(()=>{
 const {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS}=__modules[33];
 const {DAOEngine}=__modules[35];
@@ -4688,7 +4688,7 @@ const FINANCIAL_FUNCTIONS = Object.freeze({FV,PV,PMT,IPMT,PPMT,NPER,RATE,NPV,IRR
 return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FINANCIAL_SIGNATURES,FINANCIAL_FUNCTIONS};
 })();
 
-/* ../theme/theme.js */
+/* ..\theme\theme.js */
 __modules[46]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
@@ -4745,7 +4745,7 @@ function normalizeAppearance(value={}) {
 return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,colorValue,cssColor,fontFamily,DEFAULT_APPEARANCE,normalizeAppearance};
 })();
 
-/* ../graphics/surface.js */
+/* ..\graphics\surface.js */
 __modules[47]=(()=>{
 const {GPURasterPresenter}=__modules[0];
 const { colorValue, getTheme }=__modules[46];
@@ -5118,7 +5118,7 @@ function installNativeHost(host, bridge = globalThis.vb6Native) {
 return {installNativeHost};
 })();
 
-/* ../project/binary-assets.js */
+/* ..\project\binary-assets.js */
 __modules[49]=(()=>{
 const {VBError}=__modules[17];
 
@@ -5130,7 +5130,7 @@ function toBase64(bytes){if(bytes.length>MAX_RESOURCE_BYTES)fail('resource excee
 return {fromBase64,toBase64};
 })();
 
-/* ../project/native-text.js */
+/* ..\project\native-text.js */
 __modules[50]=(()=>{
 const {decodeANSI,encodeANSI}=__modules[42];
 const {VBError}=__modules[17];
@@ -5197,7 +5197,7 @@ function encodeNativeText(text,document={encoding:'windows-1252',bom:false},over
 return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferredEOL,unquote,nativePathValue,quote,commentAt,replaceLineValue,decodeNativeBytes,decodeNativeText,encodeNativeText};
 })();
 
-/* ../project/frx.js */
+/* ..\project\frx.js */
 __modules[51]=(()=>{
 const {VBError}=__modules[17];
 const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[50];
@@ -5302,7 +5302,7 @@ function prepareResources(project){
 return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPath,fromBase64,toBase64,resourceOffset,readFRXRecord,writeFRXRecord,rasterDataURL,rasterBytes,hydrateResources,prepareResources};
 })();
 
-/* ../project/res.js */
+/* ..\project\res.js */
 __modules[52]=(()=>{
 const {VBError}=__modules[17];
 const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[51];
@@ -5801,7 +5801,7 @@ function createLibrary(vm) {
 return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
-/* ../controls/rtf.js */
+/* ..\controls\rtf.js */
 __modules[61]=(()=>{
 const {VBError}=__modules[17];
 const {decodeANSI}=__modules[42];
@@ -5912,7 +5912,7 @@ class RichTextDocument {
 return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
-/* ../controls/input.js */
+/* ..\controls\input.js */
 __modules[62]=(()=>{
 const {Cell,truth}=__modules[21];
 const {lower}=__modules[20];
@@ -6028,7 +6028,7 @@ function ownsInputEvent(control,event){return ownerOf(event.target)===control&&a
 return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsInput,inputScaleFactor,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
 })();
 
-/* ../controls/form-window.js */
+/* ..\controls\form-window.js */
 __modules[63]=(()=>{
 const {el}=__modules[20];
 
@@ -6054,7 +6054,7 @@ function installFormWindow(form){
 return {installFormWindow};
 })();
 
-/* ../controls/native-widgets.js */
+/* ..\controls\native-widgets.js */
 __modules[64]=(()=>{
 const {el}=__modules[20];
 const {getTheme}=__modules[46];
@@ -6130,7 +6130,7 @@ class ClassicCombo {
 return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
-/* ../controls/scrollbar.js */
+/* ..\controls\scrollbar.js */
 __modules[65]=(()=>{
 const {el}=__modules[20];
 
@@ -6171,7 +6171,7 @@ class ClassicScrollbar {
 return {scrollbarGeometry,ClassicScrollbar};
 })();
 
-/* ../theme/icon-art.js */
+/* ..\theme\icon-art.js */
 __modules[66]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
@@ -6330,7 +6330,7 @@ const CONTROL_ART=Object.freeze(controls);
 return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
-/* ../theme/icons.js */
+/* ..\theme\icons.js */
 __modules[67]=(()=>{
 const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[66];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
@@ -6358,7 +6358,7 @@ function controlIcon(type){return make(type,16,true);}
 return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,controlIcon};
 })();
 
-/* ../theme/menu.js */
+/* ..\theme\menu.js */
 __modules[68]=(()=>{
 const {uiDocument}=__modules[19];
 const {el}=__modules[20];
@@ -6405,7 +6405,7 @@ class MenuSession {
       row.append(mark,label,el('span',{class:'menu-shortcut'},item.shortcut||''),el('span',{class:'menu-arrow'},item.items?icon('arrow-right'):null));
       const entry={row,item,enabled,level:depth};state.rows.push(entry);
       row.addEventListener('click',()=>this.activate(state,entry));
-      row.addEventListener('pointerenter',()=>{if(!enabled)return;this.select(state,state.rows.indexOf(entry),false);clearTimeout(this.timer);this.timer=setTimeout(()=>{if(active===this&&entry.item.items)this.submenu(state,entry,false);else this.trim(depth+1);},180);});
+      row.addEventListener('pointerenter',()=>{if(!enabled)return;this.select(state,state.rows.indexOf(entry),true);clearTimeout(this.timer);this.timer=setTimeout(()=>{if(active===this&&entry.item.items)this.submenu(state,entry,false);else this.trim(depth+1);},180);});
       node.append(row);
     }
     node.addEventListener('keydown',e=>this.keydown(state,e));
@@ -6447,7 +6447,7 @@ function showMenu(items,x,y,onCommand,options={}){closeMenu(false);active=new Me
 return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
-/* ../controls/richtext.js */
+/* ..\controls\richtext.js */
 __modules[69]=(()=>{
 const {parseRTF,RichTextDocument,richText}=__modules[61];
 const {VBError}=__modules[17];
@@ -6538,7 +6538,7 @@ const RICH_SELECTION_PROPERTIES=Object.freeze(Object.keys(FIELDS));
 return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
-/* ../project/model.js */
+/* ..\project\model.js */
 __modules[70]=(()=>{
 const {normalizeDataSources}=__modules[24];
 const { clone, lower, safeName }=__modules[20];
@@ -6609,7 +6609,7 @@ function projectStats(project){return {modules:project.modules.length,forms:proj
 return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_DEFAULTS,createControl,createForm,newProject,normalizeProject,uniqueName,findModule,projectStats};
 })();
 
-/* ../controls/collections.js */
+/* ..\controls\collections.js */
 __modules[71]=(()=>{
 const { VBError }=__modules[17];
 const { lower }=__modules[20];
@@ -6657,7 +6657,7 @@ class ControlArray {
 return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,StatusPanels,TabItems,ImageItems,ControlArray};
 })();
 
-/* ../controls/controls.js */
+/* ..\controls\controls.js */
 __modules[72]=(()=>{
 const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[62];
 const {installFormWindow}=__modules[63];
@@ -7183,7 +7183,7 @@ class RuntimeMDI {
 return {arrangeMDIRects,RuntimeMDI};
 })();
 
-/* ../controls/dialog.js */
+/* ..\controls\dialog.js */
 __modules[75]=(()=>{
 const {el}=__modules[20];
 const {icon}=__modules[67];
@@ -7220,7 +7220,7 @@ function runtimeDialog(host,title,body,buttons,input=null,options={}){
 return {messageBoxOptions,runtimeDialog};
 })();
 
-/* ../language/binding.js */
+/* ..\language\binding.js */
 __modules[76]=(()=>{
 const {VBError}=__modules[15];
 const {lower}=__modules[20];
@@ -7338,7 +7338,7 @@ function bindConstants(modules) {
 return {bindConstants};
 })();
 
-/* ../language/default-types.js */
+/* ..\language\default-types.js */
 __modules[77]=(()=>{
 const {VBError}=__modules[17];
 
@@ -7365,7 +7365,7 @@ function defaultIdentifierType(name,table={}){
 return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
-/* ../language/interfaces.js */
+/* ..\language\interfaces.js */
 __modules[78]=(()=>{
 const {lower}=__modules[20];
 
@@ -7409,7 +7409,7 @@ function validateInterfaces(modules){
 return {validateInterfaces};
 })();
 
-/* ../language/expression.js */
+/* ..\language\expression.js */
 __modules[79]=(()=>{
 const { tokenize, VBError }=__modules[17];
 
@@ -7513,7 +7513,7 @@ function numericLiteralValue(token){
 return {ExpressionParser,parseExpression,parseCall};
 })();
 
-/* ../language/conditional.js */
+/* ..\language\conditional.js */
 __modules[80]=(()=>{
 const { VBError }=__modules[17];
 const { parseExpression }=__modules[79];
@@ -7555,7 +7555,7 @@ function preprocess(source, constants = {}, sourceName = '') {
 return {preprocess};
 })();
 
-/* ../language/compiler.js */
+/* ..\language\compiler.js */
 __modules[81]=(()=>{
 const {bindConstants}=__modules[76];
 const {defaultIdentifierType,addDefaultTypes}=__modules[77];
