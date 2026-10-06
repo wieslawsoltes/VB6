@@ -1,0 +1,35 @@
+name: ChatGPT plan login
+on:
+  push:
+    branches: [feature/chatgpt-plan-login]
+  pull_request:
+    paths:
+      - 'src/agents/**'
+      - 'tools/agent-**'
+      - 'tools/chatgpt-**'
+      - 'tests/*chatgpt*'
+      - '.github/workflows/chatgpt-plan-login.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: chatgpt-plan-login-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build
+      - run: npm test
+      - name: Package reproducible validation workspace (no credentials)
+        run: tar --exclude=.git --exclude=node_modules --exclude=reports -czf "$RUNNER_TEMP/vb6-login-validation-source.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-plan-validation-source
+          path: ${{ runner.temp }}/vb6-login-validation-source.tar.gz
+          retention-days: 3
