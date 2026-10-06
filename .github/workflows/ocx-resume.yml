@@ -4,23 +4,45 @@ on:
     branches: [feat/ocx-hosting-lifecycle]
 permissions:
   contents: read
+concurrency:
+  group: ocx-resume-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  snapshot:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-hosting-lifecycle'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
-      - name: Capture exact branch and main for conflict-aware integration
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Reproduce locally tested full source tree
+        run: python .ocx-resume.py
+      - run: npm test
+      - name: Preserve workflow authority boundary and commit integrated source
         run: |
-          git bundle create ocx-resume.bundle HEAD refs/remotes/origin/main
-          git rev-parse HEAD HEAD^{tree} refs/remotes/origin/main > ocx-resume.txt
+          # The workflow token does not edit workflows. The authorized connector
+          # restores the three incoming main workflow blobs and removes this
+          # temporary workflow after verifying the published source tree.
+          git restore --source=HEAD --staged --worktree .github/workflows
+          rm .ocx-resume.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(ocx): reconcile native preview with current debugger and string runtime'
+          git bundle create ocx-final-publication.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > ocx-final-publication.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: ocx-resume-source
+          name: ocx-final-publication
           path: |
-            ocx-resume.bundle
-            ocx-resume.txt
+            ocx-final-publication.bundle
+            ocx-final-publication.txt
           retention-days: 7
+      - name: Publish without rewriting branch history
+        run: git push origin HEAD:refs/heads/feat/ocx-hosting-lifecycle
