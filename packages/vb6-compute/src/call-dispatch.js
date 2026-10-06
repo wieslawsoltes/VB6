@@ -6,18 +6,18 @@
 export function emitCallFrame({id,params,resultType,reset=[],declarations=[],blocks=[],result='0i',limit=false}) {
   const fields=new Map([['pc','u32'],['caller','u32'],['done','bool'],['error_mode','u32'],['handler','u32'],['handler_active','bool'],['error_pc','u32'],['statement_pc','u32']]);
   for(const p of params){const [name,type]=p.split(':');fields.set(name,type);}
-  if(resultType!=='void')fields.set('result',resultType==='single'?'f32':'i32');
+  if(resultType!=='void')fields.set('result',resultType==='double'?'vec2<u32>':resultType==='single'?'f32':'i32');
   const init=[];
   for(const declaration of declarations){
     const re=/var\s+(\w+)(?::([^;=]+))?(?:=([^;]+))?;/g;let m;
     while((m=re.exec(declaration))){fields.set(m[1],m[2]||(/u$/.test(m[3])?'u32':'bool'));if(m[3])init.push(`${m[1]}=${m[3]};`);}
   }
   // Values computed before a yield must survive until the caller resumes.
-  function lift(code){return code.replace(/\blet (\w+)(?::(i32|f32))?=/g,(_,name,type)=>{
+  function lift(code){return code.replace(/\blet (\w+)(?::(i32|f32|vec2<u32>))?=/g,(_,name,type)=>{
     if(!type)type=name.startsWith('lock')?'bool':'u32';fields.set(name,type);return name+'=';
   });}
   const cases=[];let continuation=blocks.length;
-  const leave=resultType==='void'?'':`frame_${id}.result=0${resultType==='single'?'.0f':'i'};`;
+  const leave=resultType==='void'?'':`frame_${id}.result=${resultType==='double'?'vec2<u32>(0u)':resultType==='single'?'0.0f':'0i'};`;
   const abort=`${leave}vb_current=frame_${id}.caller;return;`;
   for(const block of blocks){
     let label=block.pc,code=`statement_pc=${block.pc}u;\nif(!tick(${block.line}u,${id}u)) {${abort}}\n`;

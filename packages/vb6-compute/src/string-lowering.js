@@ -5,7 +5,7 @@ export function createStringLowering({arena,expr,bind,out,error,module,nodeSymbo
   const requireString=value=>{if(value.type!=='string')error('Expected String value; implicit locale-sensitive conversion is unavailable','GPU_CONVERSION');return value.code;};
   const requireInteger=value=>{
     if(value.type==='string'||value.type==='void')error('Expected numeric argument','GPU_TYPE');
-    return value.type==='single'?`to_i(${value.code})`:value.code;
+    return value.type==='double'?`d_to_i(${value.code})`:value.type==='single'?`to_i(${value.code})`:value.code;
   };
   function compareMode(value){
     if(module.optionCompare&&module.optionCompare!=='binary'){
@@ -16,7 +16,7 @@ export function createStringLowering({arena,expr,bind,out,error,module,nodeSymbo
   }
   function toString(value,{leading=false}={}) {
     if(value.type==='string')return value;
-    if(value.type==='single'||value.type==='void')error('GPU string conversion currently accepts String, Boolean and integer types; floating-point/locale formatting is not implemented','GPU_CONVERSION');
+    if(value.type==='double'||value.type==='single'||value.type==='void')error('GPU string conversion currently accepts String, Boolean and integer types; floating-point/locale formatting is not implemented','GPU_CONVERSION');
     if(value.type==='boolean'&&!leading){const yes=arena.literal('True'),no=arena.literal('False');return raw(`select(${no},${yes},${value.code}!=0i)`,'string');}
     return temporary(dst=>`str_integer(${dst},${value.code},${leading})`);
   }

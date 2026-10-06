@@ -1,3 +1,5 @@
+import {DOUBLE_WGSL} from './double-wgsl.js';
+import {attachDouble,doubleLiteral} from './double-layout.js';
 import {ComputeError, COMPUTE_ABI, STATE_HEADER_WORDS, ARRAY_HEADER_WORDS, integer, shaderLiteral} from './protocol.js';
 import {runtimeWGSL} from './runtime-wgsl.js';
 import {StringStorage,encodeStringBlock} from './string-layout.js';
@@ -5,14 +7,17 @@ import {stringsWGSL} from './strings-wgsl.js';
 import {createStringLowering} from './string-lowering.js';
 import {emitCallFrame,emitDispatcher} from './call-dispatch.js';
 const key = s => String(s).toLowerCase().replace(/[$%&!#@]$/, '');
-const scalarTypes = new Set(['boolean','byte','integer','long','single','string']);
+const scalarTypes = new Set(['boolean','byte','integer','long','single','double','string']);
 const comparisons = {'=':'==','<>':'!=','<':'<','>':'>','<=':'<=','>=':'>='};
 const bits = {and:'&',or:'|',xor:'^',eqv:'^',imp:'|'};
 const colorConstants = {vbblack:0,vbred:255,vbgreen:65280,vbblue:16711680,vbwhite:16777215,vbyellow:65535,vbmagenta:16711935,vbcyan:16776960,vbtrue:-1,vbfalse:0};
-const zero = type => type==='single'?'0.0f':'0i';
-const store = type => type==='string'?'put_s':type==='single'?'put_f':'put_i';
+const zero = type => type==='double'?'vec2<u32>(0u)':type==='single'?'0.0f':'0i';
+const store = type => type==='string'?'put_s':type==='double'?'put_d':type==='single'?'put_f':'put_i';
 const stringConstants={vbnullstring:'',vbcrlf:'\r\n',vbnewline:'\r\n',vbcr:'\r',vblf:'\n',vbtab:'\t',vbnullchar:'\0',vbback:'\b',vbformfeed:'\f',vbverticaltab:'\v'};
-const wgtype = type => type==='single'?'f32':'i32';
+const wgtype = type => type==='double'?'vec2<u32>':type==='single'?'f32':'i32';
+const load = type => type==='double'?'get_d':type==='single'?'get_f':'get_i';
+const truth = v => v.type==='double'?`d_nonzero(${v.code})`:`(${v.code}!=${zero(v.type)})`;
+const relation = (a,op,b,type) => type==='double'?`d_cmp(${a},${b})${op}0i`:`${a}${op}${b}`;
 
 /** Lowers the shared VB compiler IR to actual WGSL, not JavaScript execution.
  * Every invocation owns its state. A bounded PC loop preserves VB control flow.
@@ -30,7 +35,7 @@ export function compileComputeIR(program, options={}) {
   const maxStringLength=integer(options.maxStringLength??256,'maxStringLength',1,4096);
   const gosubStackDepth=integer(options.gosubStackDepth??64,'gosubStackDepth',1,1024);
   const warnings=[], globals=new Map(), procedures=new Map(), compiled=new Map(), active=new Set();
-  const initial=[], exports=[], sources=[]; let current=null,requiresShared=false;
+  const initial=[], exports=[], sources=[],doubleArrays=[]; let current=null,requiresShared=false,hasDouble=false;
   const error=(message,code='GPU_UNSUPPORTED',line=current?.line||1)=>{
     throw new ComputeError(message,code,{source:current?.module?.name,line,procedure:current?.proc?.name});
   };
@@ -39,6 +44,7 @@ export function compileComputeIR(program, options={}) {
   const typeOf=(type)=>{
     const t=key(type||'Variant');
     if(t==='double'&&precision==='single'){warn('Explicit single-precision mode replaces Double values and operations with f32; this is not VB6 Double parity.');return 'single';}
+    if(t==='double')hasDouble=true;
     if(!scalarTypes.has(t))error(`Type ${type||'Variant'} is not supported by the typed compute target. Use Boolean, Byte, Integer, Long, Single or String.`,'GPU_TYPE');
     return t;
   };
@@ -80,6 +86,7 @@ export function compileComputeIR(program, options={}) {
       for(let d=0;d<4;d++)initial.push(...(bounds[d]?[bounds[d][0]>>>0,bounds[d][1]>>>0,strides[d]]:[0,0,0]));
       initial.push(capacity,dynamic?1:0,...new Array(capacity).fill(0));
       const symbol={name:decl.name,type,offset,address:`${offset}u`,array:true,dynamic,bounds,length,capacity,words:ARRAY_HEADER_WORDS+capacity};
+      if(type==='double'){attachDouble(initial,symbol);doubleArrays.push(symbol);}
       return done(type==='string'?arena.attach(symbol,decl):symbol);
     }
     if(type==='string'){
@@ -89,6 +96,7 @@ export function compileComputeIR(program, options={}) {
         const block=encodeStringBlock(value,symbol.stringStorage);block.forEach((w,i)=>initial[symbol.stringStorage.offset+i]=w);}
       return done(symbol);
     }
+    if(type==='double'){initial.push(0);return done(attachDouble(initial,{name:decl.name,type,offset,address:`${offset}u`,array:false,words:1},decl.initial?constNumber(decl.initial,module,proc):0));}
     let value=decl.initial?constNumber(decl.initial,module,proc):0;
     if(!Number.isFinite(value))error('Non-finite initial value','GPU_VALUE');
     if(type==='single'){const f=new Float32Array([value]);if(!Number.isFinite(f[0]))error('Single initial value overflows','GPU_VALUE');initial.push(new Uint32Array(f.buffer)[0]);}
@@ -138,7 +146,7 @@ export function compileComputeIR(program, options={}) {
       if(p.byRef) {locals.set(key(p.name),{name:p.name,type,array,address:`arg${i}`,parameter:true});params.push(`arg${i}:u32`);}
       else {if(array)error('Array arguments must be ByRef');const s=allocate({...p,initial:null,bounds:null},module,proc);locals.set(key(p.name),s);params.push(`arg${i}:${wgtype(type)}`);reset.push(`${store(type)}(${s.address},arg${i});`);}
     }
-    if(resultType!=='void') {const s=allocate({name:proc.name,type:resultType,bounds:null},module,proc);locals.set(key(proc.name),s);reset.push(s.type==='string'?`str_reset(${s.address});`:`mem[${s.address}]=0u;`);}
+    if(resultType!=='void') {const s=allocate({name:proc.name,type:resultType,bounds:null},module,proc);locals.set(key(proc.name),s);reset.push(s.type==='string'?`str_reset(${s.address});`:s.type==='double'?`put_d(${s.address},vec2<u32>(0u));`:`mem[${s.address}]=0u;`);}
     for(const ins of proc.code)if(ins.op==='dim')for(const d of ins.decls)if(!d.constant){
       const staticKey=info.rootId+':'+key(d.name),isStatic=proc.static||ins.static;
       let s=isStatic?staticLocals.get(staticKey):null;
@@ -146,7 +154,7 @@ export function compileComputeIR(program, options={}) {
       locals.set(key(d.name),s);
       if(!proc.static&&!ins.static){
         if(s.array)reset.push(`array_erase(${s.address});`);
-        else reset.push(s.type==='string'?`str_reset(${s.address});`:`mem[${s.address}]=0u;`);
+        else reset.push(s.type==='string'?`str_reset(${s.address});`:s.type==='double'?`put_d(${s.address},vec2<u32>(0u));`:`mem[${s.address}]=0u;`);
       }
     }
     const out=line=>lines.push('        '+line);
@@ -155,9 +163,10 @@ export function compileComputeIR(program, options={}) {
       if(to==='void'||value.type==='void')error('Sub cannot be used as a value','GPU_TYPE');
       if(to==='string')return strings.toString(value).code;
       if(value.type==='string')error('String-to-number/Boolean coercion requires a locale-aware conversion target','GPU_CONVERSION');
-      if(to==='single')return value.type==='single'?value.code:`f32(${value.code})`;
-      let v=value.type==='single'?`to_i(${value.code})`:value.code;
-      if(to==='boolean')return `select(0i,-1i,${value.code}!=${zero(value.type)})`;
+      if(to==='double'){hasDouble=true;return value.type==='double'?value.code:`${value.type==='single'?'d_from_f':'d_from_i'}(${value.code})`;}
+      if(to==='single')return value.type==='double'?`d_to_f(${value.code})`:value.type==='single'?value.code:`f32(${value.code})`;
+      let v=value.type==='double'?`d_to_i(${value.code})`:value.type==='single'?`to_i(${value.code})`:value.code;
+      if(to==='boolean')return `select(0i,-1i,${truth(value)})`;
       if(to==='integer')v=`narrow(${v},-32768i,32767i)`;
       if(to==='byte')v=`narrow(${v},0i,255i)`;
       return v;
@@ -176,7 +185,7 @@ export function compileComputeIR(program, options={}) {
       }return null;
     }
     const strings=createStringLowering({arena,expr,bind,out,error,module,nodeSymbol});
-    const literal=(value,type)=>typeOf(type)==='string'?bind(arena.literal(value),'string',false):bind(shaderLiteral(value,typeOf(type)),typeOf(type));
+    const literal=(value,type)=>typeOf(type)==='string'?bind(arena.literal(value),'string',false):bind(typeOf(type)==='double'?doubleLiteral(value):shaderLiteral(value,typeOf(type)),typeOf(type));
     function address(node){
       const s=nodeSymbol(node);if(s)return s;
       if(node?.kind==='call'){
@@ -202,7 +211,7 @@ export function compileComputeIR(program, options={}) {
       a=a==='boolean'?'integer':a;b=b==='boolean'?'integer':b;
       if(op==='/')return [a,b].includes('single')&&[a,b].every(t=>['single','byte','integer'].includes(t))?'single':typeOf('Double');
       if([a,b].includes('single')&&[a,b].includes('long'))return typeOf('Double');
-      const order=['byte','integer','long','single'];return order[Math.max(order.indexOf(a),order.indexOf(b))];
+      const order=['byte','integer','long','single','double'];return order[Math.max(order.indexOf(a),order.indexOf(b))];
     }
     function expr(node){
       if(!node)error('Missing expression','GPU_EXPRESSION');
@@ -213,8 +222,8 @@ export function compileComputeIR(program, options={}) {
           const n=node.expr,v=-n.value,t=n.numberSuffix?n.valueType:n.valueType==='long'&&v>=-32768&&v<=32767?'integer':n.valueType==='double'&&v===-2147483648?'long':n.valueType;return literal(v,t);
         }
         const a=expr(node.expr);if(a.type==='string')error('String unary coercion is not implemented','GPU_CONVERSION');let type=a.type,code=a.code;
-        if(node.op==='not'){if(type==='single')type='long';code=`~${convert(a,'long')}`;if(type==='byte')code=`(${code})&255i`;}
-        else {if(['byte','boolean'].includes(type))type='integer';if(node.op==='-')code=type==='single'?`checked_f(-${code})`:`sub_i(0i,${code})`;}
+        if(node.op==='not'){if(type==='single'||type==='double')type='long';code=`~${convert(a,'long')}`;if(type==='byte')code=`(${code})&255i`;}
+        else {if(['byte','boolean'].includes(type))type='integer';if(node.op==='-')code=type==='double'?`d_neg(${code})`:type==='single'?`checked_f(-${code})`:`sub_i(0i,${code})`;}
         return bind(convert({code,type},type),type);
       }
       if(node.kind==='binary'){
@@ -225,21 +234,21 @@ export function compileComputeIR(program, options={}) {
           return bind(`select(0i,-1i,str_compare(${a.code},${b.code},${strings.compareMode()})${comparisons[op]}0i)`,'boolean');
         }
         if(comparisons[op]){
-          if([a.type,b.type].includes('single')&&[a.type,b.type].includes('long')&&precision==='strict')error('Long/Single comparison requires Double precision; cast explicitly or select single-precision mode','GPU_PRECISION');
-          const type=[a.type,b.type].includes('single')?'single':'long';
-          return bind(`select(0i,-1i,${convert(a,type)}${comparisons[op]}${convert(b,type)})`,'boolean');
+          const type=[a.type,b.type].includes('double')?'double':[a.type,b.type].includes('single')?([a.type,b.type].includes('long')?typeOf('Double'):'single'):'long';
+          return bind(`select(0i,-1i,${relation(convert(a,type),comparisons[op],convert(b,type),type)})`,'boolean');
         }
         if(!['+','-','*','/','\\','mod','^',...Object.keys(bits)].includes(op))error('Unsupported compute operator: '+op);
-        const type=arithmeticType(a.type,b.type,op);let x=convert(a,type==='single'?'single':'long'),y=convert(b,type==='single'?'single':'long'),code;
+        const type=arithmeticType(a.type,b.type,op);let x=convert(a,['double','single'].includes(type)?type:'long'),y=convert(b,['double','single'].includes(type)?type:'long'),code;
         if(Object.hasOwn(bits,op)){code=`(${op==='imp'?'~':''}${x}${bits[op]}${y})`;if(op==='eqv')code='~'+code;if(type==='byte')code=`(${code})&255i`;}
         else if(op==='\\'||op==='mod')code=`${op==='mod'?'mod_i':'div_i'}(${x},${y})`;
-        else if(op==='^')code=`checked_f(pow(${x},${y}))`;
+        else if(op==='^'){if(type==='double')error('Binary64 exponentiation is not implemented; use an explicit compute f32 operation','GPU_DOUBLE_MATH');code=`checked_f(pow(${x},${y}))`;}
+        else if(type==='double')code=`${{'+':'d_add','-':'d_sub','*':'d_mul','/':'d_div'}[op]}(${x},${y})`;
         else if(type==='single')code=op==='/'?`div_f(${x},${y})`:`checked_f(${x}${op}${y})`;
         else code=`${{'+':'add_i','-':'sub_i','*':'mul_i'}[op]}(${x},${y})`;
         return bind(convert({code,type},type),type);
       }
       const s=address(node);
-      if(s){if(s.array)error('Array requires indices or a ByRef array parameter','GPU_TYPE');return bind(`${s.type==='single'?'get_f':'get_i'}(${s.address})`,s.type);}
+      if(s){if(s.array)error('Array requires indices or a ByRef array parameter','GPU_TYPE');return bind(`${load(s.type)}(${s.address})`,s.type);}
       if(node.kind==='id'){
         const c=getConstant(node.name,module,proc);if(c)return literal(c.value,c.type);
         return call({kind:'call',callee:node,args:[]});
@@ -288,13 +297,14 @@ export function compileComputeIR(program, options={}) {
       if(n==='rgb'){expect(3);const a=args.map(a=>convert(expr(a),'long'));return bind(`rgb(${a.join(',')})`,'long');}
       if(['abs','sgn','int','fix'].includes(n)){
         expect(1);const a=expr(args[0]);if(a.type==='string')error('Numeric function does not accept String','GPU_CONVERSION');const t=n==='sgn'?'integer':a.type==='boolean'?'integer':a.type;let code;
+        if(a.type==='double')return bind(n==='sgn'?`d_cmp(${a.code},vec2<u32>(0u))`:`${{abs:'d_abs',int:'d_floor',fix:'d_fix'}[n]}(${a.code})`,n==='sgn'?'integer':'double');
         if(n==='sgn')code=`select(select(0i,1i,${a.code}>${zero(a.type)}),-1i,${a.code}<${zero(a.type)})`;
         else if(n==='abs')code=a.type==='single'?`abs(${a.code})`:`select(${a.code},sub_i(0i,min(${a.code},0i)),${a.code}<0i)`;
         else code=a.type==='single'?`${n==='fix'?'trunc':'floor'}(${a.code})`:a.code;
         return bind(convert({code,type:t},t),t);
       }
       const math={computesin:'sin',computecos:'cos',computetan:'tan',computeatan:'atan',computesqrt:'sqrt',computeexp:'exp',computelog:'log',sin:'sin',cos:'cos',tan:'tan',atn:'atan',sqr:'sqrt',exp:'exp',log:'log'};
-      if(math[n]){expect(1);if(!n.startsWith('compute'))typeOf('Double');const x=convert(expr(args[0]),'single');if(math[n]==='sqrt')out(`if(${x}<0.0f) {fail(5u);}`);if(math[n]==='log')out(`if(${x}<=0.0f) {fail(5u);}`);return bind(`checked_f(${math[n]}(${x}))`,'single');}
+      if(math[n]){expect(1);if(!n.startsWith('compute')&&precision==='strict'){if(n==='sqr')return bind(`d_sqrt(${convert(expr(args[0]),'double')})`,'double');error('Binary64 transcendental function '+name+' is not implemented','GPU_DOUBLE_MATH');}if(!n.startsWith('compute'))typeOf('Double');const x=convert(expr(args[0]),'single');if(math[n]==='sqrt')out(`if(${x}<0.0f) {fail(5u);}`);if(math[n]==='log')out(`if(${x}<=0.0f) {fail(5u);}`);return bind(`checked_f(${math[n]}(${x}))`,'single');}
       if(n==='computemin'||n==='computemax'){expect(2);const a=args.map(a=>convert(expr(a),'single'));return bind(`${n==='computemin'?'min':'max'}(${a.join(',')})`,'single');}
       if(n==='err.clear'){expect(0);out('vb_last_error=0u;');return {code:'',type:'void'};}
       if(['computeclear','computerect','computeline','computecircle','cls','me.cls'].includes(n)){
@@ -331,7 +341,7 @@ export function compileComputeIR(program, options={}) {
       for(let i=0;i<callee.proc.params.length;i++){
         const p=callee.proc.params[i];if(bindings.get(i)==null){
           if(!p.optional||!callee.proc.defaultBindings?.has(key(p.name)))error('Missing required argument: '+p.name,'GPU_ARGUMENT');
-          const pt=typeOf(p.storageType||p.type),defaultValue=callee.proc.defaultBindings.get(key(p.name)),value=pt==='string'?arena.literal(defaultValue):shaderLiteral(defaultValue,pt);
+          const pt=typeOf(p.storageType||p.type),defaultValue=callee.proc.defaultBindings.get(key(p.name)),value=pt==='string'?arena.literal(defaultValue):pt==='double'?doubleLiteral(defaultValue):shaderLiteral(defaultValue,pt);
           if(p.byRef){const s=allocate({name:'$optional',type:pt,bounds:null},module,proc);out(`${store(pt)}(${s.address},${value});`);bindings.set(i,s.address);}else bindings.set(i,value);
         }evaluated.push(bindings.get(i));
       }
@@ -398,23 +408,23 @@ export function compileComputeIR(program, options={}) {
         }
         case 'erase':
           for(const node of ins.exprs){const s=nodeSymbol(node);if(!s?.array)error('Erase requires an array','GPU_TYPE');out(`array_erase(${s.address});`);}break;
-        case 'branch':{const v=expr(ins.test);if(v.type==='string')error('String condition requires explicit comparison','GPU_TYPE');next=`pc=select(${ins.target}u,${pc+1}u,${ins.invert?'!':''}(${v.code}!=${zero(v.type)}));`;break;}
+        case 'branch':{const v=expr(ins.test);if(v.type==='string')error('String condition requires explicit comparison','GPU_TYPE');next=`pc=select(${ins.target}u,${pc+1}u,${ins.invert?'!':''}(${truth(v)}));`;break;}
         case 'forInit':{
           const l=loops.get(ins.id),start=expr(ins.start),end=expr(ins.end),step=expr(ins.step);
           out(`${l.end}=${convert(end,l.type)}; ${l.step}=${convert(step,l.type)};`);
-          out(`${l.type==='single'?'put_f':'put_i'}(${l.address},${convert(start,l.type)});`);
-          const value=`${l.type==='single'?'get_f':'get_i'}(${l.address})`;
-          next=`pc=select(${ins.target}u,${pc+1}u,select(${value}>=${l.end},${value}<=${l.end},${l.step}>=${zero(l.type)}));`;break;
+          out(`${store(l.type)}(${l.address},${convert(start,l.type)});`);
+          const value=`${load(l.type)}(${l.address})`;
+          next=`pc=select(${ins.target}u,${pc+1}u,select(${relation(value,'>=',l.end,l.type)},${relation(value,'<=',l.end,l.type)},${relation(l.step,'>=',zero(l.type),l.type)}));`;break;
         }
         case 'forNext':{
-          const l=loops.get(ins.id),old=`${l.type==='single'?'get_f':'get_i'}(${l.address})`,sum=l.type==='single'?`checked_f(${old}+${l.step})`:`add_i(${old},${l.step})`;
-          out(`${l.type==='single'?'put_f':'put_i'}(${l.address},${convert({code:sum,type:l.type},l.type)});`);
-          next=`pc=select(${pc+1}u,${ins.target}u,select(${old}>=${l.end},${old}<=${l.end},${l.step}>=${zero(l.type)}));`;break;
+          const l=loops.get(ins.id),old=`${load(l.type)}(${l.address})`,sum=l.type==='double'?`d_add(${old},${l.step})`:l.type==='single'?`checked_f(${old}+${l.step})`:`add_i(${old},${l.step})`;
+          out(`${store(l.type)}(${l.address},${convert({code:sum,type:l.type},l.type)});`);
+          next=`pc=select(${pc+1}u,${ins.target}u,select(${relation(old,'>=',l.end,l.type)},${relation(old,'<=',l.end,l.type)},${relation(l.step,'>=',zero(l.type),l.type)}));`;break;
         }
         case 'temp':{const v=expr(ins.expr),t=temps.get(ins.id);t.type=v.type;declarations.push(`var ${t.name}:${wgtype(t.type)};`);out(`${t.name}=${v.code};`);break;}
         case 'case':{
           const t=temps.get(ins.id);if(!t?.type)error('Invalid Select Case IR','GPU_IR');const tests=[];
-          for(const c of ins.cases){if(c.kind==='range'){const low=expr(c.low),high=expr(c.high);if(low.type!==t.type||high.type!==t.type)error('Select Case values must match the selector type; cast explicitly','GPU_TYPE');tests.push(t.type==='string'?`(str_compare(${t.name},${low.code},${strings.compareMode()})>=0i && str_compare(${t.name},${high.code},${strings.compareMode()})<=0i)`:`(${t.name}>=${convert(low,t.type)} && ${t.name}<=${convert(high,t.type)})`);}else{const v=expr(c.expr);if(v.type!==t.type)error('Select Case values must match the selector type; cast explicitly','GPU_TYPE');tests.push(t.type==='string'?`(str_compare(${t.name},${v.code},${strings.compareMode()})${comparisons[c.kind==='compare'?c.op:'=']}0i)`:`(${t.name}${comparisons[c.kind==='compare'?c.op:'=']}${convert(v,t.type)})`);}}
+          for(const c of ins.cases){if(c.kind==='range'){const low=expr(c.low),high=expr(c.high);if(low.type!==t.type||high.type!==t.type)error('Select Case values must match the selector type; cast explicitly','GPU_TYPE');tests.push(t.type==='string'?`(str_compare(${t.name},${low.code},${strings.compareMode()})>=0i && str_compare(${t.name},${high.code},${strings.compareMode()})<=0i)`:`(${relation(t.name,'>=',convert(low,t.type),t.type)} && ${relation(t.name,'<=',convert(high,t.type),t.type)})`);}else{const v=expr(c.expr);if(v.type!==t.type)error('Select Case values must match the selector type; cast explicitly','GPU_TYPE');tests.push(t.type==='string'?`(str_compare(${t.name},${v.code},${strings.compareMode()})${comparisons[c.kind==='compare'?c.op:'=']}0i)`:`(${relation(t.name,comparisons[c.kind==='compare'?c.op:'='],convert(v,t.type),t.type)})`);}}
           next=`pc=select(${ins.target}u,${pc+1}u,${tests.join(' || ')});`;break;
         }
         case 'return':next='done=true;';break;
@@ -422,7 +432,7 @@ export function compileComputeIR(program, options={}) {
         case 'onError':out(`error_mode=${{off:0,next:1,goto:2}[ins.mode]}u; handler=${ins.target??0}u; handler_active=false; vb_last_error=0u;`);break;
         case 'raiseError':{const v=expr(ins.expr);out(`raise_error(${convert(v,'long')});`);break;}
         case 'resume':out('if(!handler_active) {fail(20u);} handler_active=false; vb_last_error=0u;');next=`pc=${ins.mode==='goto'?ins.target+'u':ins.mode==='next'?'error_pc+1u':'error_pc'};`;break;
-        case 'assert':{const v=expr(ins.expr);if(v.type==='string')error('String assertion requires explicit comparison','GPU_TYPE');out(`if(${v.code}==${zero(v.type)}) {fatal(10003u);}`);break;}
+        case 'assert':{const v=expr(ins.expr);if(v.type==='string')error('String assertion requires explicit comparison','GPU_TYPE');out(`if(!${truth(v)}) {fatal(10003u);}`);break;}
         case 'graphics':{
           if(ins.object.kind!=='id'||key(ins.object.name)!=='me')error('Only the compute surface (unqualified graphics) is available','GPU_HOST_DRAW');
           const coords=ins.coords.map(v=>convert(expr(v),'single')),color=convert(expr(ins.color),'long');
@@ -435,14 +445,14 @@ export function compileComputeIR(program, options={}) {
       }
       blocks.push({pc,line:ins.line||proc.line,operations:[...lines],next});
     }
-    const result=resultType==='void'?'':`${resultType==='single'?'get_f':'get_i'}(${locals.get(key(proc.name)).address})`;
+    const result=resultType==='void'?'':`${load(resultType)}(${locals.get(key(proc.name)).address})`;
     const body=emitCallFrame({id,params,resultType,reset:[`vb_line=${proc.line}u;vb_source=${id}u;`,...reset],declarations,blocks,result});
     compiled.set(id,body);active.delete(id);sources.push({id,module:module.name,procedure:proc.name,line:proc.line,depth:info.depth});
   }
   compileProcedure(entry);
   if(initial.length>maxStateWords)error(`State requires ${initial.length} words; limit is ${maxStateWords}`,'GPU_LIMIT');
   const words=initial.length,stride=STATE_HEADER_WORDS+words;
-  const source=runtimeWGSL(words,arena.used?stringsWGSL(arena.arrays):'')+'\n'+[...compiled.values()].join('\n')+`
+  const source=runtimeWGSL(words,arena.used||doubleArrays.length?stringsWGSL(arena.arrays,doubleArrays):'')+'\n'+(hasDouble?DOUBLE_WGSL:'')+'\n'+[...compiled.values()].join('\n')+`
 @compute @workgroup_size(${workgroupSize})
 fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   if(invocation.x>=params.count) {return;}
@@ -455,6 +465,6 @@ fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   for(var i=0u;i<${words}u;i+=1u) {state[base+${STATE_HEADER_WORDS}u+i]=mem[i];}
 }`;
   if(source.length>4*1024*1024)error('Generated WGSL exceeds 4 MiB; reduce maxCallDepth or split the module','GPU_LIMIT');
-  return {abi:COMPUTE_ABI,...(arena.used?{stringABI:1,maxStringLength}:{}),dynamicArrayCapacity,gosubStackDepth,maxCallDepth,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
+  return {abi:COMPUTE_ABI,doubleABI:1,...(arena.used?{stringABI:1,maxStringLength}:{}),dynamicArrayCapacity,gosubStackDepth,maxCallDepth,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
     stateWords:words,stateStride:stride,initialState:initial,globals:exports,sources:sources.sort((a,b)=>a.id-b.id),diagnostics:warnings,wgsl:source};
 }
