@@ -1,0 +1,87 @@
+name: Refresh final compatibility source
+on:
+  push:
+    branches: [feat/variant-scalar-compatibility]
+    paths: ['.github/workflows/compatibility-main-refresh.yml']
+permissions:
+  contents: read
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge reviewed main and reject handwritten conflicts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          git=lambda *a: subprocess.check_output(['git',*a],text=True).strip()
+          feature='fc8f5bd488d0bc4ccebbedd2bdf8c903f0cc1cb3'
+          main='5e9a3191ff04d00b13e4f100c48e219a836b7a4b'
+          assert git('diff','--name-only',feature,'HEAD')=='.github/workflows/compatibility-main-refresh.yml'
+          assert git('merge-base',feature,main)=='f4ee8d47bed69ae26b65d20637b8f5f8da13d815'
+          result=subprocess.run(['git','merge','--no-ff','--no-commit',main]);assert result.returncode in (0,1)
+          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
+          generated=lambda p:p.startswith('dist/') or p.startswith('examples/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js')
+          assert all(generated(p) for p in conflicts),f'Unreviewed source conflicts: {conflicts}'
+          if conflicts:
+              subprocess.run(['git','checkout','--ours','--',*conflicts],check=True)
+              subprocess.run(['git','add','--',*conflicts],check=True)
+          for path in ('packages/win32-browser','src/graphics/surface.js','src/runtime/win32.js'):
+              assert not git('diff','--cached','--name-only',main,'--',path),path
+          for path in ('tools/interop','src/runtime/automation.js','src/runtime/automation-wire.js','src/runtime/values.js','src/runtime/vm.js','src/language'):
+              assert not git('diff','--cached','--name-only',feature,'--',path),path
+          example=Path('src/project/win32-example.js').read_text()
+          assert 'pixels(1) = &HFF00&' in example and 'Private Sub cmdAdvanced_Click()' in example
+          PY
+      - name: Rebuild and validate all combined source
+        run: |
+          set -o pipefail
+          mkdir -p compatibility-refresh
+          npm run build 2>&1 | tee compatibility-refresh/build.log
+          npm test 2>&1 | tee compatibility-refresh/node.log
+          git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git diff --cached --check
+          git commit -m 'Merge current Win32 geometry without losing scalar metadata or native transport'
+          npm run build
+          git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Publish only feature branch without forcing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/compat-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in *Username*) printf '%s\n' x-access-token ;; *) printf '%s\n' "$GH_TOKEN" ;; esac
+          SH
+          chmod 700 "$RUNNER_TEMP/compat-askpass"
+          trap 'rm -f "$RUNNER_TEMP/compat-askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/compat-askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/variant-scalar-compatibility
+      - name: Preserve exact history and outcomes for independent review
+        if: always()
+        run: |
+          mkdir -p compatibility-refresh
+          git rev-parse HEAD > compatibility-refresh/head.txt
+          git status --porcelain > compatibility-refresh/status.txt
+          git diff --cached > compatibility-refresh/staged.diff
+          git bundle create compatibility-refresh/repository.bundle HEAD --all
+          git bundle verify compatibility-refresh/repository.bundle
+          sha256sum compatibility-refresh/repository.bundle > compatibility-refresh/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compatibility-main-refresh
+          path: compatibility-refresh/
+          retention-days: 7
