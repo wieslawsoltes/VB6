@@ -1,0 +1,62 @@
+name: OCX concurrent main integration
+on:
+  push:
+    branches: [feat/ocx-hosting-lifecycle]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-agent-integration-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-hosting-lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Preserve source and merge exact concurrent main
+        run: |
+          mkdir -p "$RUNNER_TEMP/ocx-evidence"
+          git bundle create "$RUNNER_TEMP/ocx-evidence/input.bundle" HEAD refs/remotes/origin/main
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          import subprocess
+          result=subprocess.run(['git','merge','--no-commit','--no-ff','bd4f9cfbb753cf18cdc78d89744f31789a6e5b28'])
+          assert result.returncode in (0,1)
+          paths=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          allowed={'dist/studio.js','dist/VB6-Studio-Web.html'}
+          assert set(paths)<=allowed, f'Authored conflicts require review: {paths}'
+          if paths: subprocess.run(['git','checkout','--ours','--',*paths],check=True)
+          PY
+      - name: Regenerate complete combined source
+        run: |
+          npm run build | tee "$RUNNER_TEMP/ocx-evidence/build.log"
+          git add -u
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check
+      - name: Full regression suite
+        run: npm test | tee "$RUNNER_TEMP/ocx-evidence/tests.log"
+      - name: Commit and record both final and staging trees
+        run: |
+          git commit -m 'merge(ocx): preserve concurrent agent recovery and diagnostics lifecycle'
+          git bundle create "$RUNNER_TEMP/ocx-evidence/publication.bundle" HEAD
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/ocx-evidence/publication.txt"
+          git rm --cached .github/workflows/ocx-agent-integration.yml
+          git write-tree >> "$RUNNER_TEMP/ocx-evidence/publication.txt"
+          git restore --staged .github/workflows/ocx-agent-integration.yml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-agent-integration-evidence
+          path: ${{ runner.temp }}/ocx-evidence
+          retention-days: 7
+      - name: Publish only validated merge without rewriting history
+        run: git push origin HEAD:refs/heads/feat/ocx-hosting-lifecycle
