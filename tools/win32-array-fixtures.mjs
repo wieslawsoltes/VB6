@@ -104,7 +104,7 @@ Public Sub Main()
     ReDim Preserve values(-2 To 0, 1 To 2)
     If Err.Number <> 9 Or values(-2) <> 18 Then ExitProcess 313
     Err.Clear
-    ReDim values(0 To 1048576)
+    ReDim values(0 To 536870911)
     If Err.Number <> 7 Or values(0) <> 20 Then ExitProcess 314
     Err.Clear
     ReDim values(4 To 3)

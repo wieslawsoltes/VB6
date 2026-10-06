@@ -1,0 +1,212 @@
+{
+  "schema": 1,
+  "id": "example_win32-guid_1",
+  "name": "Win32 GUID Workbench",
+  "description": "GUID structure layout, parsing, formatting and secure generation",
+  "startup": "frmServices",
+  "modules": [
+    {
+      "id": "example_win32-guid_2",
+      "name": "frmServices",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate completedRuns As Long\nPrivate Sub Form_Load()\n    lblStatus.Caption = \"Ready\"\nEnd Sub\nPrivate Sub cmdRun_Click()\n    On Error GoTo Failed\n    txtOutput.Text = RunService(Me.hWnd)\n    completedRuns = completedRuns + 1\n    lblStatus.Caption = \"Completed \" & CStr(completedRuns)\n    Exit Sub\nFailed:\n    txtOutput.Text = \"Error \" & CStr(Err.Number) & \": \" & Err.Description & \" (Win32 \" & CStr(Err.LastDLLError) & \")\"\nEnd Sub\n",
+      "form": {
+        "id": "example_win32-guid_3",
+        "name": "frmServices",
+        "type": "Form",
+        "properties": {
+          "Name": "frmServices",
+          "Caption": "Win32 GUID Workbench",
+          "ClientWidth": 8100,
+          "ClientHeight": 4200,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "example_win32-guid_4",
+            "name": "lblStatus",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblStatus",
+              "Left": 2940,
+              "Top": 960,
+              "Width": 4500,
+              "Height": 330,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Starting...",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-guid_5",
+            "name": "lblDescription",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblDescription",
+              "Left": 240,
+              "Top": 180,
+              "Width": 7650,
+              "Height": 600,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "GUID structure layout, parsing, formatting and secure generation",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-guid_6",
+            "name": "cmdRun",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdRun",
+              "Left": 240,
+              "Top": 870,
+              "Width": 2460,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Run API sample",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_win32-guid_7",
+            "name": "txtOutput",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "txtOutput",
+              "Left": 240,
+              "Top": 1500,
+              "Width": 7620,
+              "Height": 1860,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "Click Run API sample. All state is application-private.",
+              "MultiLine": -1,
+              "ScrollBars": 2,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": -1,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-guid_8",
+            "name": "lblBoundary",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblBoundary",
+              "Left": 240,
+              "Top": 3600,
+              "Width": 7620,
+              "Height": 360,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "No access to host files, registry, other apps or native DLLs.",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    },
+    {
+      "id": "example_win32-guid_9",
+      "name": "Services",
+      "kind": "module",
+      "code": "Option Explicit\nPrivate Declare Function CLSIDFromString Lib \"ole32\" (text As Any, guid As Any) As Long\nPrivate Declare Function StringFromGUID2 Lib \"ole32\" (guid As Any, text As Any, ByVal capacity As Long) As Long\nPrivate Declare Function CoCreateGuid Lib \"ole32\" (guid As Any) As Long\nPublic Function RunService(ByVal target As Long) As String\n    Dim text As String, input(0 To 38) As Integer, output(0 To 38) As Integer, guid(0 To 15) As Byte, i As Long, parsed As String\n    text = \"{00112233-4455-6677-8899-aabbccddeeff}\"\n    For i = 1 To Len(text)\n        input(i - 1) = AscW(Mid$(text, i, 1))\n    Next i\n    If CLSIDFromString(input(0), guid(0)) <> 0 Then Err.Raise 5\n    If StringFromGUID2(guid(0), output(0), 39) <> 39 Then Err.Raise 5\n    For i = 0 To 37\n        parsed = parsed & ChrW(output(i))\n    Next i\n    If CoCreateGuid(guid(0)) <> 0 Then Err.Raise 5\n    RunService = \"Parsed: \" & parsed & vbCrLf & \"Version: \" & CStr(guid(7) \\ 16)\nEnd Function\n"
+    }
+  ],
+  "settings": {
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

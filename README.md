@@ -123,6 +123,12 @@ virtual files/resources, and workspace management. It is a real iterative tool-u
 Streaming text, tool activity, before/after edit review, Stop, normal Undo,
 request/tool/token limits and downloadable in-memory transcripts are included.
 
+The composer now offers **Ask for approval, Read only, Plan, Auto edit, Full IDE
+access, and Custom** profiles. Scope and exact-tool Allow/Ask/Deny rules, run-only
+approvals, explicit full-access acknowledgement, lease expiry and revoke controls
+are enforced by the IDE tool adapter. Full IDE access is not unrestricted host
+shell/disk/network access. See [permission profiles](docs/CODING-AGENT-PERMISSIONS.md).
+
 The **Task** tab now renders a live conversation with streaming replies, collapsible
 tool steps, approval/interruption states, safe formatted text and copyable code.
 Draft while the agent runs; Enter sends, Shift+Enter adds a line, and Jump to latest
@@ -246,6 +252,10 @@ builds and tests a standalone `.tgz` after `npm run build`; it does not publish 
 ### Native workspace and interoperability
 
 Native project support also includes explicit ZIP filename-codepage selection, preserved/restored VBW document windows, recoverable folder-save journals, exclusive immutable ZIP snapshots, trusted custom-control/Automation adapter registries, an opt-in x86/x64 Windows stdio host, and a separately licensed compiler round-trip harness. Native activation is never granted by opening a project. See [native workspace and interoperability](docs/NATIVE-WORKSPACE-INTEROP.md) for commands, deployment contracts, tests, and remaining boundaries.
+
+### Common browser Win32 services
+
+`@vb6/win32-browser` 0.5.0 adds 86 exports (397 total) beyond graphics: file discovery, shell paths, UTF-8/Windows-1252 conversion, private environment expansion, cooperative events/semaphores, GUID values, Base64, registry enumeration, atoms and window properties. Six classic VB6 samples are included in the Examples menu and standalone HTML builds. See [service contracts, samples and isolation boundaries](packages/win32-browser/SERVICES.md). No native DLL execution or npm publication is implied.
 
 ### Advanced browser Win32 GDI
 

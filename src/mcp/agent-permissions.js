@@ -28,7 +28,7 @@ export function agentScope(name) {
 }
 export class AgentPermissions {
   constructor({now = () => Date.now(), changed = () => {}} = {}) {
-    this.now = now; this.changed = changed; this.grant = null; this.timer = null; this.controller = null;
+    this.policy = null; this.now = now; this.changed = changed; this.grant = null; this.timer = null; this.controller = null;
   }
   allow(projectId, scopes, minutes = 10) {
     if (typeof projectId !== 'string' || !projectId || !Array.isArray(scopes) || !scopes.length || scopes.some(s => !Object.hasOwn(AGENT_SCOPES, s)) || !Number.isInteger(minutes) || minutes < 1 || minutes > 60)
@@ -42,12 +42,16 @@ export class AgentPermissions {
   permits(name, projectId) {
     return !!this.grant && this.grant.projectId === projectId && this.now() < this.grant.expiresAt && this.grant.scopes.includes(agentScope(name));
   }
-  get signal() { return this.controller?.signal; }
+  // Optional in-process coding-agent policy. Independent MCP adapters keep legacy scope behavior.
+  usePolicy(policy) { this.revoke(); this.policy = policy; }
+  get signal() { return this.policy?.signal || this.controller?.signal; }
   snapshot(projectId) {
+    if (this.policy) return this.policy.snapshot(projectId);
     const active = !!this.grant && this.grant.projectId === projectId && this.now() < this.grant.expiresAt;
     return {active, scopes: active ? [...this.grant.scopes] : [], expiresAt: active ? this.grant.expiresAt : null};
   }
   revoke() {
+    const policy = this.policy; this.policy = null; policy?.revoke();
     clearTimeout(this.timer); this.timer = null; const had = !!this.grant; this.grant = null;
     this.controller?.abort(); this.controller = null; if (had) this.changed();
   }

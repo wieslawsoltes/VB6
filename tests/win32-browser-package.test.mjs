@@ -10,3 +10,5 @@ import '../packages/win32-browser/test/region-edges.test.mjs';
 import '../packages/win32-browser/test/bundle.test.mjs';
 
 import '../packages/win32-browser/test/advanced.test.mjs';
+
+import '../packages/win32-browser/test/services.test.mjs';

@@ -10,7 +10,7 @@ export function installRegistry(w){
   const add=(name,arity,fn)=>w.register('advapi32',name,fn,{arity,statusError:true,mode:'emulated',notes:'Isolated application registry, not the operating-system registry.'});
   const aw=(name,arity,fn)=>{for(const wide of [false,true])add(name+(wide?'W':'A'),arity,(...a)=>fn(wide,...a));};
   const accessOf=access=>{access=unsigned(access);if(access&~allowed)throw new Win32Error('Unsupported registry access flags',50);return access;};
-  aw('RegCreateKeyEx',9,(wide,root,name,reserved,klass,options,access,security,result,disposition)=>{if(reserved||klass||options||security)throw new Win32Error('Registry security/classes/options are not supported',50);access=accessOf(access);m.view(result,4);if(disposition)m.view(disposition,4);const base=keyOf(root,4),path=sub(base,m.string(name,wide)),existed=store.has(path),parts=path.split('\\');for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('\\');if(!store.has(p))store.set(p,{name:parts[i-1],values:new Map()});}const handle=h.add('registry',{path,access});m.writeU32(result,handle);if(disposition)m.writeU32(disposition,existed?2:1);save();return 0;});
+  aw('RegCreateKeyEx',9,(wide,root,name,reserved,klass,options,access,security,result,disposition)=>{if(reserved||klass||options||security)throw new Win32Error('Registry security/classes/options are not supported',50);access=accessOf(access);m.view(result,4);if(disposition)m.view(disposition,4);const base=keyOf(root,4),text=m.string(name,wide),path=sub(base,text),existed=store.has(path),parts=path.split('\\'),names=text.replace(/\//g,'\\').split('\\').filter(Boolean),depth=base.split('\\').length;for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('\\');if(!store.has(p))store.set(p,{name:names[i-depth-1]??parts[i-1],values:new Map()});}const handle=h.add('registry',{path,access});m.writeU32(result,handle);if(disposition)m.writeU32(disposition,existed?2:1);save();return 0;});
   aw('RegOpenKeyEx',5,(wide,root,name,options,access,result)=>{if(options)throw new Win32Error('Registry options unsupported',50);access=accessOf(access);m.view(result,4);const path=sub(keyOf(root),m.string(name,wide));if(!store.has(path))return 2;m.writeU32(result,h.add('registry',{path,access}));return 0;});
   add('RegCloseKey',1,handle=>{if(!roots.has(unsigned(handle)))h.close(handle,'registry');return 0;});
   aw('RegSetValueEx',6,(wide,handle,name,reserved,type,data,size)=>{if(reserved)throw new Win32Error('Reserved must be zero');type=unsigned(type);if(![1,2,3,4,7,11].includes(type))throw new Win32Error('Registry type not implemented',50);size=integer(size,0,w.maxFileBytes);const path=keyOf(handle,2),bytes=size?m.bytes(data,size):new Uint8Array();if(type===4&&size!==4||type===11&&size!==8)throw new Win32Error('Invalid registry integer size');if(wide&&[1,2,7].includes(type)&&size%2)throw new Win32Error('Invalid Unicode registry value');const value=[1,2,7].includes(type)?m.decode(bytes,wide):Array.from(bytes);store.get(path).values.set(m.string(name,wide).toLowerCase(),{name:m.string(name,wide),type,value});save();return 0;});
@@ -18,4 +18,39 @@ export function installRegistry(w){
   aw('RegDeleteValue',2,(wide,handle,name)=>{const path=keyOf(handle,2);if(!store.get(path).values.delete(m.string(name,wide).toLowerCase()))return 2;save();return 0;});
   aw('RegDeleteKey',2,(wide,handle,name)=>{const path=sub(keyOf(handle,4),m.string(name,wide));if(roots.has(unsigned(handle))&&!m.string(name,wide))return 5;if(!store.has(path))return 2;if([...store.keys()].some(k=>k.startsWith(path+'\\')))return 5;store.delete(path);save();return 0;});
   aw('RegEnumKeyEx',8,(wide,handle,index,name,size,reserved,klass,classSize,time)=>{if(reserved||klass||classSize||time)throw new Win32Error('Registry class/timestamp enumeration is not implemented',50);const path=keyOf(handle,8),children=[...store].filter(([k])=>k.startsWith(path+'\\')&&!k.slice(path.length+1).includes('\\')),entry=children[integer(index)]?.[1];if(!entry)return 259;const capacity=m.readU32(size),n=m.stringBytes(entry.name,wide).length/(wide?2:1);if(capacity<=n)return 234;m.putString(name,entry.name,capacity,wide);m.writeU32(size,n);return 0;});
+  // Enumeration contracts: https://learn.microsoft.com/windows/win32/api/winreg/nf-winreg-regenumvaluea
+  // https://learn.microsoft.com/windows/win32/api/winreg/nf-winreg-regqueryinfokeya
+  const childrenOf=path=>[...store].filter(([key])=>key.startsWith(path+'\\')&&!key.slice(path.length+1).includes('\\')).map(([,value])=>value);
+  const encoded=(entry,wide)=>typeof entry.value==='string'?m.stringBytes(entry.value,wide):Uint8Array.from(entry.value);
+  aw('RegEnumValue',8,(wide,handle,index,name,nameSize,reserved,type,data,dataSize)=>{
+    if(reserved||data&&!dataSize)throw new Win32Error('Invalid enumeration parameters');
+    const path=keyOf(handle,1),entry=[...store.get(path).values.values()][integer(index)];if(!entry)return 259;
+    const capacity=m.readU32(nameSize),bytes=encoded(entry,wide),length=m.stringBytes(entry.name,wide).length/(wide?2:1);
+    const dataCapacity=dataSize?m.readU32(dataSize):0;if(type)m.view(type,4);
+    if(name)m.bytes(name,capacity*(wide?2:1));else throw new Win32Error('Name buffer required');
+    if(data)m.bytes(data,dataCapacity);
+    if(type)m.writeU32(type,entry.type);if(dataSize)m.writeU32(dataSize,bytes.length);
+    if(capacity<=length||data&&dataCapacity<bytes.length)return 234;
+    m.putString(name,entry.name,capacity,wide);m.writeU32(nameSize,length);if(data)m.bytes(data,bytes.length).set(bytes);return 0;
+  });
+  aw('RegEnumKey',4,(wide,handle,index,name,capacity)=>{
+    const entry=childrenOf(keyOf(handle,8))[integer(index)];if(!entry)return 259;
+    capacity=unsigned(capacity);if(capacity<=m.stringBytes(entry.name,wide).length/(wide?2:1))return 234;
+    m.putString(name,entry.name,capacity,wide);return 0;
+  });
+  aw('RegQueryInfoKey',12,(wide,handle,klass,classSize,reserved,subkeys,maxSubkey,maxClass,values,maxName,maxData,security,time)=>{
+    if(reserved||klass&&!classSize)throw new Win32Error('Invalid key information parameters');
+    if(security||time)throw new Win32Error('Native security descriptors and timestamps are not available',50);
+    const path=keyOf(handle,1),children=childrenOf(path),entries=[...store.get(path).values.values()];
+    const capacity=classSize?m.readU32(classSize):0;
+    for(const p of [subkeys,maxSubkey,maxClass,values,maxName,maxData])if(p)m.view(p,4);
+    if(klass)m.bytes(klass,capacity*(wide?2:1));
+    const length=text=>m.stringBytes(text,wide).length/(wide?2:1);
+    const maximum=(items,fn)=>items.reduce((max,item)=>Math.max(max,fn(item)),0);
+    const outputs=[[subkeys,children.length],[maxSubkey,maximum(children,e=>length(e.name))],[maxClass,0],[values,entries.length],[maxName,maximum(entries,e=>length(e.name))],[maxData,maximum(entries,e=>encoded(e,wide).length)]];
+    for(const [pointer,value]of outputs)if(pointer)m.writeU32(pointer,value);
+    if(classSize)m.writeU32(classSize,0);if(klass){if(!capacity)return 234;m.putString(klass,'',capacity,wide);}return 0;
+  });
+  add('RegFlushKey',1,handle=>{keyOf(handle,1);save();return 0;});
+
 }

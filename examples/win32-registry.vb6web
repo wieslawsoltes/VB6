@@ -1,0 +1,212 @@
+{
+  "schema": 1,
+  "id": "example_win32-registry_1",
+  "name": "Win32 Registry Inspector",
+  "description": "App-private registry values, size queries and enumeration",
+  "startup": "frmServices",
+  "modules": [
+    {
+      "id": "example_win32-registry_2",
+      "name": "frmServices",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate completedRuns As Long\nPrivate Sub Form_Load()\n    lblStatus.Caption = \"Ready\"\nEnd Sub\nPrivate Sub cmdRun_Click()\n    On Error GoTo Failed\n    txtOutput.Text = RunService(Me.hWnd)\n    completedRuns = completedRuns + 1\n    lblStatus.Caption = \"Completed \" & CStr(completedRuns)\n    Exit Sub\nFailed:\n    txtOutput.Text = \"Error \" & CStr(Err.Number) & \": \" & Err.Description & \" (Win32 \" & CStr(Err.LastDLLError) & \")\"\nEnd Sub\n",
+      "form": {
+        "id": "example_win32-registry_3",
+        "name": "frmServices",
+        "type": "Form",
+        "properties": {
+          "Name": "frmServices",
+          "Caption": "Win32 Registry Inspector",
+          "ClientWidth": 8100,
+          "ClientHeight": 4200,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "example_win32-registry_4",
+            "name": "lblStatus",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblStatus",
+              "Left": 2940,
+              "Top": 960,
+              "Width": 4500,
+              "Height": 330,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Starting...",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-registry_5",
+            "name": "lblDescription",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblDescription",
+              "Left": 240,
+              "Top": 180,
+              "Width": 7650,
+              "Height": 600,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "App-private registry values, size queries and enumeration",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-registry_6",
+            "name": "cmdRun",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdRun",
+              "Left": 240,
+              "Top": 870,
+              "Width": 2460,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Run API sample",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_win32-registry_7",
+            "name": "txtOutput",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "txtOutput",
+              "Left": 240,
+              "Top": 1500,
+              "Width": 7620,
+              "Height": 1860,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "Click Run API sample. All state is application-private.",
+              "MultiLine": -1,
+              "ScrollBars": 2,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": -1,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-registry_8",
+            "name": "lblBoundary",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblBoundary",
+              "Left": 240,
+              "Top": 3600,
+              "Width": 7620,
+              "Height": 360,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "No access to host files, registry, other apps or native DLLs.",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    },
+    {
+      "id": "example_win32-registry_9",
+      "name": "Services",
+      "kind": "module",
+      "code": "Option Explicit\nPrivate Declare Function RegCreateKeyEx Lib \"advapi32\" Alias \"RegCreateKeyExA\" (ByVal root As Long, ByVal name As String, ByVal reserved As Long, ByVal className As Long, ByVal options As Long, ByVal access As Long, ByVal security As Long, key As Long, ByVal disposition As Long) As Long\nPrivate Declare Function RegSetValueEx Lib \"advapi32\" Alias \"RegSetValueExA\" (ByVal key As Long, ByVal name As String, ByVal reserved As Long, ByVal kind As Long, ByVal data As String, ByVal size As Long) As Long\nPrivate Declare Function RegEnumValue Lib \"advapi32\" Alias \"RegEnumValueA\" (ByVal key As Long, ByVal index As Long, ByVal name As String, nameSize As Long, ByVal reserved As Long, kind As Long, ByVal data As Long, size As Long) As Long\nPrivate Declare Function RegQueryInfoKey Lib \"advapi32\" Alias \"RegQueryInfoKeyA\" (ByVal key As Long, ByVal className As Long, ByVal classSize As Long, ByVal reserved As Long, ByVal subkeys As Long, ByVal maxKey As Long, ByVal maxClass As Long, values As Long, ByVal maxName As Long, ByVal maxData As Long, ByVal security As Long, ByVal lastWrite As Long) As Long\nPrivate Declare Function RegDeleteValue Lib \"advapi32\" Alias \"RegDeleteValueA\" (ByVal key As Long, ByVal name As String) As Long\nPrivate Declare Function RegCloseKey Lib \"advapi32\" (ByVal key As Long) As Long\nPrivate Declare Function RegDeleteKey Lib \"advapi32\" Alias \"RegDeleteKeyA\" (ByVal root As Long, ByVal name As String) As Long\nPublic Function RunService(ByVal target As Long) As String\n    Dim key As Long, count As Long, name As String, n As Long, kind As Long, size As Long\n    If RegCreateKeyEx(-2147483647, \"Software\\VB6ServicesSample\", 0, 0, 0, 983103, 0, key, 0) <> 0 Then Err.Raise 5\n    If RegSetValueEx(key, \"Caption\", 0, 1, \"café\" & Chr$(0), 5) <> 0 Then Err.Raise 5\n    If RegQueryInfoKey(key, 0, 0, 0, 0, 0, 0, count, 0, 0, 0, 0) <> 0 Then Err.Raise 5\n    name = String$(64, 0): n = Len(name)\n    If RegEnumValue(key, 0, name, n, 0, kind, 0, size) <> 0 Then Err.Raise 5\n    RunService = \"Values: \" & CStr(count) & vbCrLf & \"Name: \" & Left$(name, n) & vbCrLf & \"Bytes: \" & CStr(size)\n    RegDeleteValue key, \"Caption\"\n    RegCloseKey key\n    RegDeleteKey -2147483647, \"Software\\VB6ServicesSample\"\nEnd Function\n"
+    }
+  ],
+  "settings": {
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

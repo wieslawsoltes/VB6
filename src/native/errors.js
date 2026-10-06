@@ -72,6 +72,12 @@ export const nativeErrorMethods = {
     localImmediate(x,F.dispatch,context.label+':error-dispatch');
     localImmediate(x,F.source,this.string(context.module.name));
     localImmediate(x,F.current,context.label+':0');localImmediate(x,F.next,context.label+':0');
+    if(context.module.nativeInternal){
+      // Intrinsics are not authored procedures: retain the caller's Erl/Source.
+      const noCaller=x.unique();x.value(arg(F.previous)).test().branch('e',noCaller).emit(0x89,0xc2);
+      x.emit(0x8b,0x42,F.erl&255);localStore(x,F.erl);
+      x.emit(0x8b,0x42,F.source&255);localStore(x,F.source);x.label(noCaller);
+    }
   },
   leaveErrorFrame() {
     // EAX is the return value; restoring the prior frame must not overwrite it.

@@ -2,62 +2,8 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* gpu-presenter.js */
-__modules[0]=(()=>{
-
-/** WebGPU presentation of a retained, CPU-readable GDI surface. Raster operations
- * remain synchronous in the compatibility engine; only presentation is GPU work.
- * One cached texture and a fullscreen triangle replace Canvas2D display blits. */
-const SHADER=`@group(0) @binding(0) var image: texture_2d<f32>;
-struct Size { value: vec2f, padding: vec2f };
-@group(0) @binding(1) var<uniform> size: Size;
-@vertex fn vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
-  var positions = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
-  return vec4f(positions[index], 0.0, 1.0);
-}
-@fragment fn fs(@builtin(position) position: vec4f) -> @location(0) vec4f {
-  let dimensions = textureDimensions(image);
-  let point = min(vec2u(position.xy / size.value * vec2f(dimensions)), dimensions - vec2u(1u));
-  return vec4f(textureLoad(image, vec2i(point), 0).rgb, 1.0);
-}`;
-class GPURasterPresenter {
-  constructor(device,format){
-    this.device=device;this.revision=-1;this.width=this.height=0;this.disposed=false;
-    const module=device.createShaderModule({code:SHADER});
-    const descriptor={layout:'auto',vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}};
-    this.ready=(async()=>{
-      const info=await module.getCompilationInfo();
-      const errors=info.messages.filter(message=>message.type==='error');
-      if(errors.length)throw new Error('GDI presentation shader: '+errors.map(e=>e.message).join('; '));
-      const pipeline=await device.createRenderPipelineAsync(descriptor);
-      if(this.disposed)return;
-      this.pipeline=pipeline;
-      this.uniform=device.createBuffer({size:16,usage:0x40|0x08}); // UNIFORM | COPY_DST
-    })();
-  }
-  static async create(device,format){const presenter=new GPURasterPresenter(device,format);try{await presenter.ready;return presenter;}catch(error){presenter.dispose();throw error;}}
-  render(context,source,revision,width,height){
-    const d=this.device;if(!d)throw new Error('GPU raster presenter is disposed');if(!this.pipeline)throw new Error('Await GPU raster presenter.ready before rendering');
-    if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||!source.width||!source.height)throw new RangeError('Invalid GPU presentation dimensions');
-    if(source.width>d.limits.maxTextureDimension2D||source.height>d.limits.maxTextureDimension2D)throw new RangeError('GDI texture exceeds device dimensions');
-    if(!this.texture||this.width!==source.width||this.height!==source.height){
-      this.texture?.destroy();this.width=source.width;this.height=source.height;
-      this.texture=d.createTexture({size:[this.width,this.height],format:'rgba8unorm',usage:0x04|0x02|0x10});
-      this.bindGroup=d.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:this.texture.createView()},{binding:1,resource:{buffer:this.uniform}}]});this.revision=-1;
-    }
-    if(this.revision!==revision){d.queue.copyExternalImageToTexture({source},{texture:this.texture,premultipliedAlpha:false},[this.width,this.height]);this.revision=revision;}
-    d.queue.writeBuffer(this.uniform,0,new Float32Array([width,height,0,0]));
-    const encoder=d.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),loadOp:'clear',storeOp:'store',clearValue:{r:0,g:0,b:0,a:1}}]});
-    pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.draw(3);pass.end();d.queue.submit([encoder.finish()]);
-  }
-  dispose(){this.disposed=true;this.texture?.destroy();this.uniform?.destroy();this.texture=this.uniform=this.bindGroup=this.pipeline=this.device=null;}
-}
-
-return {GPURasterPresenter};
-})();
-
 /* core.js */
-__modules[1]=(()=>{
+__modules[0]=(()=>{
 
 /** MIT. A bounded, process-private 32-bit address and handle space. */
 const ERROR = Object.freeze({SUCCESS:0,FILE_NOT_FOUND:2,PATH_NOT_FOUND:3,ACCESS_DENIED:5,INVALID_HANDLE:6,NOT_ENOUGH_MEMORY:8,INVALID_DATA:13,SHARING_VIOLATION:32,NOT_SUPPORTED:50,FILE_EXISTS:80,INVALID_PARAMETER:87,INSUFFICIENT_BUFFER:122,MOD_NOT_FOUND:126,PROC_NOT_FOUND:127,DIR_NOT_EMPTY:145,ALREADY_EXISTS:183,ENVVAR_NOT_FOUND:203,MORE_DATA:234,NO_MORE_ITEMS:259,OPERATION_ABORTED:995,INVALID_WINDOW_HANDLE:1400});
@@ -121,9 +67,492 @@ class MemoryFileSystem {
 return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
 })();
 
-/* gdi-transform.js */
+/* services-utils.js */
+__modules[1]=(()=>{
+const {Win32Error,integer}=__modules[0];
+
+/** Register both Win32 string encodings without bringing in the VB6 runtime. */
+function registerAW(w,dll,name,arity,fn,options={}) {
+  for (const wide of [false,true]) w.register(dll,name+(wide?'W':'A'),(...args)=>fn(wide,...args),{arity,...options});
+}
+function units(m,text,wide) { return m.stringBytes(text,wide).length/(wide?2:1); }
+function putComplete(m,p,text,capacity,wide=false) {
+  capacity=integer(capacity,0,Math.floor(m.maxBytes/(wide?2:1)));
+  const length=units(m,text,wide);
+  if(capacity<=length) throw new Win32Error('String buffer is too small',122);
+  m.bytes(p,capacity*(wide?2:1));
+  m.putString(p,text,capacity,wide);
+  return length;
+}
+function rejectOverlap(a,an,b,bn) {
+  if(an && bn && Number(a)<Number(b)+bn && Number(b)<Number(a)+an)
+    throw new Win32Error('Input and output buffers overlap',87);
+}
+
+return {registerAW,units,putComplete,rejectOverlap};
+})();
+
+/* user32-properties.js */
 __modules[2]=(()=>{
-const {Win32Error,integer}=__modules[1];
+const {Win32Error,integer,unsigned}=__modules[0];
+const {registerAW,units}=__modules[1];
+
+
+/** Process-private atom table and registered-window properties.
+ * https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-globaladdatoma
+ * https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setpropa
+ * https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-enumpropsexa */
+function installWindowProperties(w){
+  const m=w.memory,h=w.handles,atoms=new Map(),byName=new Map();let next=0xc000;
+  const notes='Process-private atom names and registered application windows only. Names are case-insensitive; property data is borrowed, never freed by this API.';
+  const aw=(dll,name,arity,fn,options={})=>registerAW(w,dll,name,arity,fn,{notes,...options});
+  function parsed(p,wide){
+    if(typeof p==='number'&&p<=0xffff){if(p<1||p>=0xc000)throw new Win32Error('Invalid integer atom');return p;}
+    const name=m.string(p,wide);if(!name||units(m,name,wide)>255)throw new Win32Error('Atom name length must be 1..255');
+    if(/^#\d+$/.test(name))return integer(Number(name.slice(1)),1,0xbfff);return name;
+  }
+  function find(name){if(typeof name==='number')return name;const id=byName.get(name.toLowerCase());if(!id)throw new Win32Error('Atom not found',2);return id;}
+  function retain(name){
+    if(typeof name==='number')return name;
+    const old=byName.get(name.toLowerCase());if(old){atoms.get(old).refs++;return old;}
+    if(atoms.size>=0x4000)throw new Win32Error('Atom table is full',8);
+    while(atoms.has(next))next=next===0xffff?0xc000:next+1;
+    const id=next;atoms.set(id,{name,refs:1});byName.set(name.toLowerCase(),id);next=next===0xffff?0xc000:next+1;return id;
+  }
+  function release(id){id=integer(id,1,0xffff);if(id<0xc000)return;const atom=atoms.get(id);if(!atom)throw new Win32Error('Invalid string atom',6);if(--atom.refs===0){atoms.delete(id);byName.delete(atom.name.toLowerCase());}}
+  const atomName=id=>{id=integer(id,1,0xffff);if(id<0xc000)return '#'+id;const atom=atoms.get(id);if(!atom)throw new Win32Error('Invalid string atom',6);return atom.name;};
+  aw('kernel32','GlobalAddAtom',1,(wide,p)=>retain(parsed(p,wide)));
+  aw('kernel32','GlobalFindAtom',1,(wide,p)=>find(parsed(p,wide)));
+  aw('kernel32','GlobalGetAtomName',3,(wide,id,out,capacity)=>{capacity=integer(capacity,1,0x7fffffff);return m.putString(out,atomName(id),capacity,wide);});
+  w.register('kernel32','GlobalDeleteAtom',id=>{release(id);return 0;},{arity:1,notes});
+  const windows=new Map();
+  function props(handle){handle=Number(handle);if(!h.has(handle,'window'))throw new Win32Error('Invalid window handle',1400);let map=windows.get(handle);if(!map)windows.set(handle,map=new Map());return map;}
+  function propertyName(p,wide){if(typeof p==='number'&&p>0&&p<=0xffff)return p<0xc000?p:atomName(p);return parsed(p,wide);}
+  function propertyKey(name){return typeof name==='number'?'#'+name:'s:'+name.toLowerCase();}
+  aw('user32','SetProp',3,(wide,handle,p,data)=>{
+    const map=props(handle),name=propertyName(p,wide),key=propertyKey(name);data=unsigned(data);
+    const old=map.get(key);if(old){old.data=data;return 1;}
+    if(map.size>=integer(w.options.maxWindowProperties??1024,1,65536))throw new Win32Error('Window property quota exceeded',8);
+    const id=retain(name);map.set(key,{name,id,data,integer:typeof name==='number'});return 1;
+  });
+  aw('user32','GetProp',2,(wide,handle,p)=>{const map=props(handle);return map.get(propertyKey(propertyName(p,wide)))?.data??0;});
+  aw('user32','RemoveProp',2,(wide,handle,p)=>{const map=props(handle),key=propertyKey(propertyName(p,wide)),entry=map.get(key);if(!entry)return 0;map.delete(key);release(entry.id);return entry.data;});
+  aw('user32','EnumPropsEx',3,async(wide,handle,callback,data)=>{
+    const map=props(handle),fn=h.get(callback,'callback'),snapshot=[...map];let result=-1;
+    for(const [key,entry]of snapshot){if(w.disposed||!h.has(handle,'window'))break;if(map.get(key)!==entry)continue;
+      let pointer=entry.integer?entry.id:m.allocString(entry.name,wide);
+      try{result=Number(await fn(handle,pointer,entry.data,data))|0;if(!result)break;}
+      finally{if(!entry.integer&&!w.disposed)m.free(pointer);}
+    }return result;
+  },{failure:-1});
+  w.releaseWindowProperties=handle=>{const map=windows.get(Number(handle));if(map){for(const entry of map.values())release(entry.id);windows.delete(Number(handle));}};
+  w.disposeWindowProperties=()=>{windows.clear();atoms.clear();byName.clear();};
+}
+
+return {installWindowProperties};
+})();
+
+/* crypt32-codec.js */
+__modules[3]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
+const {registerAW,putComplete}=__modules[1];
+
+
+const CRYPT_CONSTANTS=Object.freeze({CRYPT_STRING_BASE64:1,CRYPT_STRING_NOCRLF:0x40000000,CRYPT_STRING_NOCR:0x80000000,CRYPT_STRING_STRICT:0x20000000});
+/** Base64 serialization, NOT encryption or certificate validation.
+ * https://learn.microsoft.com/windows/win32/api/wincrypt/nf-wincrypt-cryptbinarytostringa
+ * https://learn.microsoft.com/windows/win32/api/wincrypt/nf-wincrypt-cryptstringtobinarya */
+function installBinaryCodec(w){
+  const m=w.memory,alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const aw=(name,arity,fn)=>registerAW(w,'crypt32',name,arity,fn,{notes:'Raw Base64 only. Supports size queries, CRLF/LF/no-wrap, strict validation and explicit byte counts. No certificate or encryption APIs.'});
+  aw('CryptBinaryToString',5,(wide,input,count,flags,out,size)=>{
+    count=integer(count,0,Math.floor(m.maxBytes/2));flags=unsigned(flags);if((flags&0x3fffffff)!==1)throw new Win32Error('Only Base64 encoding is supported',50);
+    const bytes=count?m.bytes(input,count):new Uint8Array();let value='';
+    for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2];value+=alphabet[a>>2]+alphabet[(a&3)<<4|(b??0)>>4]+(b===undefined?'=':alphabet[(b&15)<<2|(c??0)>>6])+(c===undefined?'=':alphabet[c&63]);}
+    const eol=flags&0x40000000?'':flags&0x80000000?'\n':'\r\n';if(eol)value=(value.match(/.{1,64}/g)||[]).join(eol)+eol;
+    const capacity=m.readU32(size),needed=value.length+1;
+    if(!out){m.writeU32(size,needed);return 1;}
+    if(capacity<needed){m.writeU32(size,needed);throw new Win32Error('Encoded buffer too small',234);}
+    putComplete(m,out,value,capacity,wide);m.writeU32(size,value.length);return 1;
+  });
+  aw('CryptStringToBinary',7,(wide,input,count,flags,out,size,skip,actual)=>{
+    count=integer(count,0,Math.floor(m.maxBytes/(wide?2:1)));flags=unsigned(flags);if((flags&~0x20000000)!==1)throw new Win32Error('Only raw Base64 decoding is supported',50);
+    const text=count?m.decode(m.bytes(input,count*(wide?2:1)),wide):m.string(input,wide),value=text.replace(/[\t\r\n ]/g,'');
+    // Malformed inputs fail without writing partial binary output. Native legacy
+    // permissive trailing-junk variants are deliberately not accepted.
+    const end=value.endsWith('==')?value.length-2:value.endsWith('=')?value.length-1:value.length;
+    if(value.length%4||end<0)throw new Win32Error('Invalid Base64',13);
+    for(let i=0;i<end;i++)if(!alphabet.includes(value[i]))throw new Win32Error('Invalid Base64',13);
+    const padding=value.endsWith('==')?2:value.endsWith('=')?1:0,needed=value.length/4*3-padding;
+    if(needed>w.maxFileBytes)throw new Win32Error('Decoded data quota exceeded',8);
+    const capacity=m.readU32(size);if(skip)m.view(skip,4);if(actual)m.view(actual,4);
+    if(out&&capacity<needed){m.writeU32(size,needed);throw new Win32Error('Decoded buffer too small',234);}
+    const target=out?m.bytes(out,capacity):null;
+    if(target){let offset=0;for(let i=0;i<value.length;i+=4){const n=(alphabet.indexOf(value[i])<<18)|(alphabet.indexOf(value[i+1])<<12)|((alphabet.indexOf(value[i+2])&63)<<6)|(alphabet.indexOf(value[i+3])&63);for(const shift of [16,8,0])if(offset<needed)target[offset++]=(n>>>shift)&255;}}
+    m.writeU32(size,needed);if(skip)m.writeU32(skip,0);if(actual)m.writeU32(actual,1);return 1;
+  });
+}
+
+return {CRYPT_CONSTANTS,installBinaryCodec};
+})();
+
+/* ole32-guid.js */
+__modules[4]=(()=>{
+const {Win32Error,integer}=__modules[0];
+const {putComplete}=__modules[1];
+
+
+/** GUID byte order follows the Win32 GUID structure, not network byte order.
+ * https://learn.microsoft.com/windows/win32/api/combaseapi/nf-combaseapi-clsidfromstring
+ * https://learn.microsoft.com/windows/win32/api/combaseapi/nf-combaseapi-stringfromguid2 */
+function installGUID(w){
+  const m=w.memory,notes='GUID values only. No COM activation, registry ProgID lookup or native allocation.';
+  const add=(name,arity,fn,options={})=>w.register('ole32',name,fn,{arity,notes,...options});
+  const format=p=>{const v=m.view(p,16),hex=(n,len)=>n.toString(16).padStart(len,'0');return ('{'+hex(v.getUint32(0,true),8)+'-'+hex(v.getUint16(4,true),4)+'-'+hex(v.getUint16(6,true),4)+'-'+Array.from(m.bytes(p+8,2),n=>hex(n,2)).join('')+'-'+Array.from(m.bytes(p+10,6),n=>hex(n,2)).join('')+'}').toUpperCase();};
+  function parse(input,out){
+    const target=m.bytes(out,16);if(!input){target.fill(0);return 0;}
+    const s=m.string(input,true);if(!/^\{[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\}$/i.test(s))return 0x800401f3;
+    const parts=s.slice(1,-1).split('-'),bytes=new Uint8Array(16),v=new DataView(bytes.buffer);
+    v.setUint32(0,parseInt(parts[0],16),true);v.setUint16(4,parseInt(parts[1],16),true);v.setUint16(6,parseInt(parts[2],16),true);
+    (parts[3]+parts[4]).match(/../g).forEach((pair,i)=>bytes[8+i]=parseInt(pair,16));target.set(bytes);return 0;
+  }
+  add('CLSIDFromString',2,parse,{failure:0x80070057});
+  add('IIDFromString',2,parse,{failure:0x80070057});
+  add('StringFromGUID2',3,(guid,out,capacity)=>{capacity=integer(capacity,0,0x7fffffff);const text=format(guid);if(capacity<39)return 0;putComplete(m,out,text,capacity,true);return 39;});
+  add('CoCreateGuid',1,out=>{
+    const target=m.bytes(out,16),crypto=w.options.crypto??globalThis.crypto;
+    if(!crypto?.getRandomValues)throw new Win32Error('Secure random source unavailable',50);
+    const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[7]=(bytes[7]&15)|64;bytes[8]=(bytes[8]&63)|128;target.set(bytes);return 0;
+  },{failure:0x80004005,mode:'browser',notes:notes+' Uses Web Crypto random values (version-4 UUID); never Math.random.'});
+}
+
+return {installGUID};
+})();
+
+/* shlwapi.js */
+__modules[5]=(()=>{
+const {Win32Error}=__modules[0];
+const {registerAW,units,putComplete}=__modules[1];
+
+
+/** Lexical Windows path helpers. No shell, URL navigation or native filesystem.
+ * https://learn.microsoft.com/windows/win32/api/shlwapi/nf-shlwapi-pathcombinea
+ * https://learn.microsoft.com/windows/win32/api/shlwapi/nf-shlwapi-pathfindextensiona */
+function installPathUtilities(w){
+  const m=w.memory,notes='Bounded MAX_PATH lexical helpers. Filesystem predicates use only the private disk; no shell/network/host access.';
+  const aw=(name,arity,fn)=>registerAW(w,'shlwapi',name,arity,fn,{notes});
+  const read=(p,wide)=>{const s=m.string(p,wide);if(units(m,s,wide)>=260)throw new Win32Error('Path exceeds MAX_PATH',206);return s;};
+  const write=(p,s,wide)=>{if(units(m,s,wide)>=260)throw new Win32Error('Path exceeds MAX_PATH',206);putComplete(m,p,s,Math.min(260,Math.floor(m.size(p)/(wide?2:1))),wide);};
+  const filename=s=>Math.max(s.lastIndexOf('\\'),s.lastIndexOf('/'),s.lastIndexOf(':'))+1;
+  const extension=s=>{const start=filename(s),dot=s.lastIndexOf('.');return dot>=start?dot:s.length;};
+  const root=s=>/^(?:[A-Za-z]:\\|\\|\\\\[^\\]+\\[^\\]+\\?)$/.test(s);
+  function canonical(s){
+    if(/^\\\\[?.]\\/.test(s))throw new Win32Error('Device namespaces are unsupported',50);
+    let prefix='',rest=s;
+    const unc=/^(\\\\[^\\]+\\[^\\]+)(?:\\|$)/.exec(s),drive=/^[A-Za-z]:/.exec(s);
+    if(unc){prefix=unc[1]+'\\';rest=s.slice(unc[0].length);}else if(drive){prefix=drive[0]+(s[2]==='\\'?'\\':'');rest=s.slice(prefix.length);}else if(s[0]==='\\'){prefix='\\';rest=s.slice(1);}
+    const parts=[];for(const item of rest.split('\\')){if(!item||item==='.')continue;if(item==='..'){if(parts.length&&parts.at(-1)!=='..')parts.pop();else if(!prefix.endsWith('\\'))parts.push('..');}else parts.push(item);}
+    return prefix+parts.join('\\')||(s?'\\':'');
+  }
+  aw('PathFindFileName',1,(wide,p)=>Number(p)+units(m,read(p,wide).slice(0,filename(read(p,wide))),wide)*(wide?2:1));
+  aw('PathFindExtension',1,(wide,p)=>Number(p)+units(m,read(p,wide).slice(0,extension(read(p,wide))),wide)*(wide?2:1));
+  aw('PathRemoveExtension',1,(wide,p)=>{const s=read(p,wide);write(p,s.slice(0,extension(s)),wide);});
+  aw('PathRenameExtension',2,(wide,p,ext)=>{const s=read(p,wide),e=read(ext,wide);if(e&&(!e.startsWith('.')||/[\\/:*?]/.test(e)))throw new Win32Error('Invalid extension');write(p,s.slice(0,extension(s))+e,wide);return 1;});
+  aw('PathAddBackslash',1,(wide,p)=>{let s=read(p,wide);if(s&&!s.endsWith('\\'))s+='\\';write(p,s,wide);return Number(p)+units(m,s,wide)*(wide?2:1);});
+  aw('PathRemoveBackslash',1,(wide,p)=>{let s=read(p,wide);const index=Math.max(0,units(m,s,wide)-1);if(s.endsWith('\\')&&!root(s))s=s.slice(0,-1);write(p,s,wide);return Number(p)+index*(wide?2:1);});
+  aw('PathIsRelative',1,(wide,p)=>{const s=read(p,wide);return s.startsWith('\\')||s.length>1&&s[1]===':'?0:1;});
+  aw('PathIsRoot',1,(wide,p)=>root(read(p,wide))?1:0);
+  aw('PathIsUNC',1,(wide,p)=>read(p,wide).startsWith('\\\\')?1:0);
+  aw('PathCanonicalize',2,(wide,out,input)=>{write(out,canonical(read(input,wide)),wide);return 1;});
+  aw('PathCombine',3,(wide,out,dir,file)=>{
+    if(!dir&&!file)throw new Win32Error('At least one path is required');
+    const a=read(dir,wide),b=read(file,wide);let value;
+    if(!a||/^[A-Za-z]:|^\\\\/.test(b))value=b;
+    else if(b.startsWith('\\')){const match=/^(?:[A-Za-z]:|\\\\[^\\]+\\[^\\]+)/.exec(a);value=(match?.[0]??'')+b;}
+    else value=a+(a.endsWith('\\')||!b?'':'\\')+b;
+    write(out,canonical(value),wide);return out;
+  });
+  aw('PathFileExists',1,(wide,p)=>{const s=read(p,wide);if(!s||s.startsWith('\\\\'))return 0;const path=w.fs.normalize(s);return w.fs.exists(path)||w.fs.directories.has(path)?1:0;});
+  aw('PathIsDirectory',1,(wide,p)=>{const s=read(p,wide);return s&&!s.startsWith('\\\\')&&w.fs.directories.has(w.fs.normalize(s))?16:0;});
+}
+
+return {installPathUtilities};
+})();
+
+/* kernel32-files.js */
+__modules[6]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
+const {registerAW,units,putComplete}=__modules[1];
+
+
+/** File discovery in the existing app-private disk, not host disk discovery.
+ * WIN32_FIND_DATA has DWORD fields at 0..43, then 260/14 TCHARs.
+ * https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-findfirstfilea
+ * https://learn.microsoft.com/windows/win32/api/minwinbase/ns-minwinbase-win32_find_dataa */
+function installFileUtilities(w) {
+  const m=w.memory,h=w.handles,fs=w.fs;
+  const notes='Application-private filesystem only. Snapshot enumeration, no 8.3 aliases/reparse points; unavailable file timestamps are zero.';
+  const aw=(name,arity,fn)=>registerAW(w,'kernel32',name,arity,fn,{notes});
+  const pathOf=text=>{if(!text)throw new Win32Error('Path is empty',3);if(/^(?:\\\\|\/\/)/.test(text)||/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:[.:]|$)/i.test(text.split(/[\\/]/).at(-1)))throw new Win32Error('Devices and UNC paths are unsupported',50);return fs.normalize(text);};
+  const parent=p=>p.slice(0,p.lastIndexOf('/'))||'/';
+  function matches(pattern,name) {
+    pattern=pattern.toLowerCase();name=name.toLowerCase();if(pattern==='*.*')pattern='*';
+    // Bounded dynamic program, not a backtracking regular expression.
+    function glob(p){let row=Array(name.length+1).fill(false);row[0]=true;
+      for(const c of p){const next=Array(name.length+1).fill(false);next[0]=c==='*'&&row[0];for(let i=1;i<=name.length;i++)next[i]=c==='*'?(next[i-1]||row[i]):row[i-1]&&(c==='?'||c===name[i-1]);row=next;}return row[name.length];}
+    return glob(pattern)||(!name.includes('.')&&pattern.endsWith('.*')&&glob(pattern.slice(0,-2)));
+  }
+  function writeFind(entry,out,wide){
+    const step=wide?2:1,size=wide?592:320,n=units(m,entry.name,wide);
+    if(n>=260)throw new Win32Error('Filename exceeds WIN32_FIND_DATA capacity',206);
+    const buffer=m.bytes(out,size);buffer.fill(0);const view=m.view(out,size);
+    view.setUint32(0,entry.directory?16:128,true);view.setUint32(32,entry.size,true);
+    m.putString(out+44,entry.name,260,wide);return 1;
+  }
+  for(const wide of [false,true]){
+    w.register('kernel32','FindFirstFile'+(wide?'W':'A'),(input,out)=>{
+      const raw=m.string(input,wide);if(/[\\/]$/.test(raw))throw new Win32Error('Search path has a trailing separator',2);
+      const path=pathOf(raw),folder=parent(path),pattern=path.slice(path.lastIndexOf('/')+1);
+      if(folder.includes('*')||folder.includes('?'))throw new Win32Error('Wildcards are supported only in the filename',50);
+      if(pattern.length>259)throw new Win32Error('Search pattern is too long',206);
+      if(!fs.directories.has(folder))throw new Win32Error('Directory not found',3);
+      m.bytes(out,wide?592:320);const entries=[],seen=new Set();
+      const limit=integer(w.options.maxFindEntries??16384,1,1000000);
+      for(const [paths,directory] of [[fs.directories,true],[fs.files.keys(),false]])for(const p of paths){
+        if(p===folder||parent(p).toLowerCase()!==folder.toLowerCase()||seen.has(p.toLowerCase()))continue;
+        const name=p.slice(p.lastIndexOf('/')+1);if(!matches(pattern,name))continue;
+        if(entries.length>=limit)throw new Win32Error('File enumeration quota exceeded',8);
+        seen.add(p.toLowerCase());entries.push({name,directory,size:directory?0:fs.readBytes(p).length});
+      }
+      if(!entries.length)throw new Win32Error('No matching files',2);
+      // Validate the first record before reserving a handle, and roll back on error.
+      if(units(m,entries[0].name,wide)>=260)throw new Win32Error('Filename is too long',206);
+      const handle=h.add('find',{entries,index:0});try{writeFind(entries[0],out,wide);}catch(error){h.close(handle,'find');throw error;}return handle;
+    },{arity:2,notes,failure:-1});
+    w.register('kernel32','FindNextFile'+(wide?'W':'A'),(handle,out)=>{const state=h.get(handle,'find'),entry=state.entries[state.index+1];if(!entry)throw new Win32Error('No more files',18);writeFind(entry,out,wide);state.index++;return 1;},{arity:2,notes});
+  }
+  w.register('kernel32','FindClose',handle=>{h.close(handle,'find');return 1;},{arity:1,notes});
+  w.register('kernel32','GetFileSizeEx',(handle,out)=>{const file=h.get(handle,'file');m.view(out,8).setBigInt64(0,BigInt(fs.readBytes(file.path).length),true);return 1;},{arity:2,notes});
+  w.register('kernel32','FlushFileBuffers',handle=>{const file=h.get(handle,'file');if(!file.write)throw new Win32Error('Write access is required',5);const result=fs.flush?.(file.path);return result?.then?result.then(()=>1):1;},{arity:1,notes:'Writes to the private memory disk are immediate. Calls fs.flush(path) when supplied; no claim of host disk durability.'});
+  aw('GetFullPathName',4,(wide,input,capacity,out,filePart)=>{
+    const value='C:'+pathOf(m.string(input,wide)).replace(/\//g,'\\'),n=units(m,value,wide);
+    capacity=integer(capacity,0,Math.floor(m.maxBytes/(wide?2:1)));if(capacity<=n)return n+1;
+    if(filePart)m.view(filePart,4);putComplete(m,out,value,capacity,wide);
+    if(filePart){const index=value.lastIndexOf('\\')+1;m.writeU32(filePart,index===value.length?0:Number(out)+units(m,value.slice(0,index),wide)*(wide?2:1));}return n;
+  });
+  let sequence=1;
+  aw('GetTempFileName',4,(wide,directory,prefix,unique,out)=>{
+    const dir=pathOf(m.string(directory,wide));if(!fs.directories.has(dir))throw new Win32Error('Temporary directory not found',3);
+    const pre=m.string(prefix,wide).slice(0,3);if(/[\\/:*?<>|]/.test(pre))throw new Win32Error('Invalid temporary prefix');
+    unique=unsigned(unique)&65535;let chosen=unique,path;
+    for(let attempt=0;attempt<65535;attempt++){
+      if(!unique){chosen=sequence;sequence=sequence%65535+1;}
+      path=fs.normalize(dir+'/'+pre+chosen.toString(16).toUpperCase().padStart(4,'0')+'.tmp');
+      if(unique||!fs.exists(path)&&!fs.directories.has(path))break;path=null;
+    }
+    if(!path)throw new Win32Error('Temporary name space exhausted',80);
+    const value='C:'+path.replace(/\//g,'\\');if(units(m,value,wide)>=260)throw new Win32Error('Temporary path is too long',206);
+    m.bytes(out,260*(wide?2:1));if(!unique)fs.writeBytes(path,[]);putComplete(m,out,value,260,wide);return chosen;
+  });
+}
+
+return {installFileUtilities};
+})();
+
+/* kernel32-nls.js */
+__modules[7]=(()=>{
+const {Win32Error,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
+const {registerAW,units,putComplete,rejectOverlap}=__modules[1];
+
+
+const NLS_CONSTANTS=Object.freeze({CP_ACP:0,CP_UTF8:65001,MB_PRECOMPOSED:1,MB_COMPOSITE:2,MB_ERR_INVALID_CHARS:8,WC_ERR_INVALID_CHARS:128,WC_NO_BEST_FIT_CHARS:1024});
+/** Original implementation of documented buffer contracts:
+ * https://learn.microsoft.com/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar
+ * https://learn.microsoft.com/windows/win32/api/stringapiset/nf-stringapiset-widechartomultibyte
+ * Process ACP is deterministic Windows-1252, not the host OS locale. */
+function installNLS(w) {
+  const m=w.memory,add=(name,arity,fn)=>w.register('kernel32',name,fn,{arity,notes:'UTF-8 and process Windows-1252 only; bounded buffers, no host locale or best-fit table.'});
+  const page=cp=>{cp=unsigned(cp);if(cp===0)cp=1252;if(![1252,65001].includes(cp))throw new Win32Error('Code page is not implemented',87);return cp;};
+  const source=(p,count,wide)=>{
+    count=integer(count,-1,Math.floor(m.maxBytes/(wide?2:1)));
+    if(!p||count===0)throw new Win32Error('A nonempty input buffer is required');
+    if(count===-1){const text=m.string(p,wide);count=units(m,text,wide)+1;}
+    return m.bytes(p,count*(wide?2:1));
+  };
+  const output=(p,capacity,bytes,wide)=>{
+    capacity=integer(capacity,0,Math.floor(m.maxBytes/(wide?2:1)));
+    const length=bytes.length/(wide?2:1);
+    if(!capacity)return length;
+    if(capacity<length)throw new Win32Error('Conversion buffer is too small',122);
+    m.bytes(p,capacity*(wide?2:1)).set(bytes);return length;
+  };
+  add('GetACP',0,()=>1252);
+  add('IsValidCodePage',1,cp=>[1252,65001].includes(unsigned(cp))?1:0);
+  add('MultiByteToWideChar',6,(cp,flags,input,count,out,capacity)=>{
+    cp=page(cp);flags=unsigned(flags);
+    if(cp===65001 ? !!(flags&~8) : !!(flags&~11)||(flags&3)===3)throw new Win32Error('Unsupported conversion flags',1004);
+    const bytes=source(input,count,false);let text;
+    if(cp===65001){try{text=new TextDecoder('utf-8',{fatal:!!(flags&8),ignoreBOM:true}).decode(bytes);}catch{throw new Win32Error('Invalid UTF-8 sequence',1113);}}
+    else {text=decodeANSI(bytes);if(flags&2)text=text.normalize('NFD');}
+    const result=m.stringBytes(text,true);rejectOverlap(input,bytes.length,out,Number(capacity)*2);
+    return output(out,capacity,result,true);
+  });
+  add('WideCharToMultiByte',8,(cp,flags,input,count,out,capacity,defaultChar,usedDefault)=>{
+    cp=page(cp);flags=unsigned(flags);
+    if(cp===65001 ? !!(flags&~128) : !!(flags&~1024))throw new Win32Error('Unsupported conversion flags',1004);
+    if(cp===65001&&(defaultChar||usedDefault))throw new Win32Error('UTF-8 does not accept default character parameters');
+    const bytes=source(input,count,true),text=m.decode(bytes,true);let result,used=false;
+    if(cp===65001){if(flags&128&&!text.isWellFormed())throw new Win32Error('Unpaired UTF-16 surrogate',1113);result=new TextEncoder().encode(text);}
+    else {
+      const replacement=defaultChar?m.bytes(defaultChar,1)[0]:63;
+      if(usedDefault)m.view(usedDefault,4);
+      result=encodeANSI(text);let i=0;
+      for(const character of text){if(decodeANSI(result.subarray(i,i+1))!==character){result[i]=replacement;used=true;}i++;}
+    }
+    rejectOverlap(input,bytes.length,out,Number(capacity));
+    const length=output(out,capacity,result,false);if(usedDefault)m.writeU32(usedDefault,used?1:0);return length;
+  });
+  registerAW(w,'kernel32','ExpandEnvironmentStrings',3,(wide,input,out,size)=>{
+    const text=m.string(input,wide).replace(/%([^%]+)%/g,(all,name)=>w.environment.get(name.toUpperCase())??all),needed=units(m,text,wide)+1;
+    size=integer(size,0,Math.floor(m.maxBytes/(wide?2:1)));
+    if(size>=needed){rejectOverlap(input,typeof input==='number'?m.size(input):0,out,size*(wide?2:1));putComplete(m,out,text,size,wide);}return needed;
+  },{notes:'Single-pass expansion of process-private variables; unknown names are preserved. No host environment access.'});
+}
+
+return {NLS_CONSTANTS,installNLS};
+})();
+
+/* kernel32-sync.js */
+__modules[8]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
+const {registerAW}=__modules[1];
+
+
+const SYNC_CONSTANTS=Object.freeze({WAIT_OBJECT_0:0,WAIT_TIMEOUT:258,WAIT_FAILED:0xffffffff,INFINITE:0xffffffff,MAXIMUM_WAIT_OBJECTS:64,SYNCHRONIZE:0x100000,EVENT_MODIFY_STATE:2,SEMAPHORE_MODIFY_STATE:2,EVENT_ALL_ACCESS:0x1f0003,SEMAPHORE_ALL_ACCESS:0x1f0003});
+/** Cooperative process-private event/semaphore waits, never Atomics.wait on the UI.
+ * https://learn.microsoft.com/windows/win32/api/synchapi/nf-synchapi-waitformultipleobjects
+ * https://learn.microsoft.com/windows/win32/sync/event-objects
+ * Names are case-sensitive and shared only by this Win32Browser instance. */
+function installSynchronization(w) {
+  const m=w.memory,h=w.handles,names=new Map(),pending=new Set();
+  const limit=integer(w.options.maxPendingWaits??1024,1,65536);
+  const notes='Process-private events/semaphores. Positive waits yield a Promise; VB Declare awaits it. No threads, kernel objects, security descriptors or cross-process namespace.';
+  const add=(name,arity,fn,extra={})=>w.register('kernel32',name,fn,{arity,notes,...extra});
+  function get(handle,access=0){const e=h.get(handle,'sync');if((e.access&access)!==access)throw new Win32Error('Synchronization handle access denied',5);return e.object;}
+  function makeHandle(object,access){const handle=h.add('sync',{object,access});object.refs++;return handle;}
+  function nameOf(p,wide){const name=m.string(p,wide);if(name.length>260)throw new Win32Error('Object name is too long',206);return name;}
+  function create(wide,type,security,a,b,namePtr){
+    if(security)throw new Win32Error('Security descriptors are not supported',50);
+    const name=nameOf(namePtr,wide);let object=name?names.get(name):null;
+    if(object){if(object.type!==type)throw new Win32Error('Name belongs to another object type',6);const handle=makeHandle(object,0x1f0003);w.lastError=183;return handle;}
+    if(type==='semaphore'){a=integer(a,0,0x7fffffff);b=integer(b,1,0x7fffffff);if(a>b)throw new Win32Error('Initial count exceeds maximum');}
+    object={type,name,refs:0,manual:!!a,signaled:!!b,count:a,max:b};
+    const handle=makeHandle(object,0x1f0003);if(name)names.set(name,object);w.lastError=0;return handle;
+  }
+  for(const type of ['event','semaphore']){
+    const suffix=type==='event'?'Event':'Semaphore';
+    registerAW(w,'kernel32','Create'+suffix,4,(wide,security,a,b,name)=>create(wide,type,security,a,b,name),{notes});
+    registerAW(w,'kernel32','Open'+suffix,3,(wide,access,inherit,p)=>{
+      access=unsigned(access);if(access&~0x1f0003||inherit)throw new Win32Error('Unsupported access or inheritance',50);
+      const object=names.get(nameOf(p,wide));if(!object)throw new Win32Error('Named object not found',2);
+      if(object.type!==type)throw new Win32Error('Named object type mismatch',6);return makeHandle(object,access);
+    },{notes});
+  }
+  const ready=o=>o.type==='event'?o.signaled:o.count>0;
+  const consume=o=>{if(o.type==='event'){if(!o.manual)o.signaled=false;}else o.count--;};
+  function tryAcquire(wait){
+    for(const handle of wait.handles)if(!h.has(handle,'sync'))throw new Win32Error('A waited handle was closed',6);
+    const index=wait.all?(wait.objects.every(ready)?0:-1):wait.objects.findIndex(ready);
+    if(index<0)return null;
+    if(wait.all)wait.objects.forEach(consume);else consume(wait.objects[index]);return index;
+  }
+  function finish(wait,value,error){pending.delete(wait);clearTimeout(wait.timer);if(error)wait.reject(error);else wait.resolve(value);}
+  function notify(){for(const wait of [...pending]){try{const result=tryAcquire(wait);if(result!==null)finish(wait,result);}catch(error){finish(wait,0,error);}}}
+  add('SetEvent',1,handle=>{const o=get(handle,2);if(o.type!=='event')throw new Win32Error('Expected event',6);o.signaled=true;notify();return 1;});
+  add('ResetEvent',1,handle=>{const o=get(handle,2);if(o.type!=='event')throw new Win32Error('Expected event',6);o.signaled=false;return 1;});
+  add('ReleaseSemaphore',3,(handle,count,previous)=>{const o=get(handle,2);if(o.type!=='semaphore')throw new Win32Error('Expected semaphore',6);count=integer(count,1,0x7fffffff);if(previous)m.view(previous,4);if(o.count+count>o.max)throw new Win32Error('Semaphore maximum exceeded',298);if(previous)m.writeU32(previous,o.count);o.count+=count;notify();return 1;});
+  function wait(handles,all,timeout){
+    timeout=unsigned(timeout);if(new Set(handles).size!==handles.length)throw new Win32Error('Duplicate wait handles');
+    const state={handles,all,objects:handles.map(handle=>get(handle,0x100000)),timer:null};
+    // Aliased handles to the same object cannot be consumed twice in wait-all.
+    if(all&&new Set(state.objects).size!==state.objects.length)throw new Win32Error('Duplicate wait objects');
+    const result=tryAcquire(state);if(result!==null)return result;if(timeout===0)return 258;
+    if(pending.size>=limit)throw new Win32Error('Wait quota exceeded',8);
+    return new Promise((resolve,reject)=>{
+      Object.assign(state,{resolve,reject});pending.add(state);
+      if(timeout!==0xffffffff){const end=w.clock()+timeout;const tick=()=>{const remaining=end-w.clock();if(remaining<=0)finish(state,258);else state.timer=setTimeout(tick,Math.min(remaining,0x7fffffff));};state.timer=setTimeout(tick,Math.min(timeout,0x7fffffff));}
+    });
+  }
+  add('WaitForSingleObject',2,(handle,timeout)=>wait([Number(handle)],false,timeout),{failure:0xffffffff});
+  add('WaitForMultipleObjects',4,(count,list,all,timeout)=>{count=integer(count,1,64);const v=m.view(list,count*4);return wait(Array.from({length:count},(_,i)=>v.getUint32(i*4,true)),!!all,timeout);},{failure:0xffffffff});
+  const closeFile=w.resolve('kernel32','CloseHandle').fn;
+  add('CloseHandle',1,handle=>{
+    if(!h.has(handle,'sync'))return closeFile(handle);
+    const o=h.close(handle,'sync').object;if(--o.refs===0&&o.name)names.delete(o.name);notify();return 1;
+  },{replace:true,notes:'Closes file or synchronization handles. Closing a pending wait fails it with INVALID_HANDLE rather than leaving an unresolved promise.'});
+  w.disposeSynchronization=()=>{for(const state of [...pending])finish(state,0,new Win32Error('Compatibility process disposed',995));names.clear();};
+}
+
+return {SYNC_CONSTANTS,installSynchronization};
+})();
+
+/* gpu-presenter.js */
+__modules[9]=(()=>{
+
+/** WebGPU presentation of a retained, CPU-readable GDI surface. Raster operations
+ * remain synchronous in the compatibility engine; only presentation is GPU work.
+ * One cached texture and a fullscreen triangle replace Canvas2D display blits. */
+const SHADER=`@group(0) @binding(0) var image: texture_2d<f32>;
+struct Size { value: vec2f, padding: vec2f };
+@group(0) @binding(1) var<uniform> size: Size;
+@vertex fn vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
+  var positions = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  return vec4f(positions[index], 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) position: vec4f) -> @location(0) vec4f {
+  let dimensions = textureDimensions(image);
+  let point = min(vec2u(position.xy / size.value * vec2f(dimensions)), dimensions - vec2u(1u));
+  return vec4f(textureLoad(image, vec2i(point), 0).rgb, 1.0);
+}`;
+class GPURasterPresenter {
+  constructor(device,format){
+    this.device=device;this.revision=-1;this.width=this.height=0;this.disposed=false;
+    const module=device.createShaderModule({code:SHADER});
+    const descriptor={layout:'auto',vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}};
+    this.ready=(async()=>{
+      const info=await module.getCompilationInfo();
+      const errors=info.messages.filter(message=>message.type==='error');
+      if(errors.length)throw new Error('GDI presentation shader: '+errors.map(e=>e.message).join('; '));
+      const pipeline=await device.createRenderPipelineAsync(descriptor);
+      if(this.disposed)return;
+      this.pipeline=pipeline;
+      this.uniform=device.createBuffer({size:16,usage:0x40|0x08}); // UNIFORM | COPY_DST
+    })();
+  }
+  static async create(device,format){const presenter=new GPURasterPresenter(device,format);try{await presenter.ready;return presenter;}catch(error){presenter.dispose();throw error;}}
+  render(context,source,revision,width,height){
+    const d=this.device;if(!d)throw new Error('GPU raster presenter is disposed');if(!this.pipeline)throw new Error('Await GPU raster presenter.ready before rendering');
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||!source.width||!source.height)throw new RangeError('Invalid GPU presentation dimensions');
+    if(source.width>d.limits.maxTextureDimension2D||source.height>d.limits.maxTextureDimension2D)throw new RangeError('GDI texture exceeds device dimensions');
+    if(!this.texture||this.width!==source.width||this.height!==source.height){
+      this.texture?.destroy();this.width=source.width;this.height=source.height;
+      this.texture=d.createTexture({size:[this.width,this.height],format:'rgba8unorm',usage:0x04|0x02|0x10});
+      this.bindGroup=d.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:this.texture.createView()},{binding:1,resource:{buffer:this.uniform}}]});this.revision=-1;
+    }
+    if(this.revision!==revision){d.queue.copyExternalImageToTexture({source},{texture:this.texture,premultipliedAlpha:false},[this.width,this.height]);this.revision=revision;}
+    d.queue.writeBuffer(this.uniform,0,new Float32Array([width,height,0,0]));
+    const encoder=d.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),loadOp:'clear',storeOp:'store',clearValue:{r:0,g:0,b:0,a:1}}]});
+    pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.draw(3);pass.end();d.queue.submit([encoder.finish()]);
+  }
+  dispose(){this.disposed=true;this.texture?.destroy();this.uniform?.destroy();this.texture=this.uniform=this.bindGroup=this.pipeline=this.device=null;}
+}
+
+return {GPURasterPresenter};
+})();
+
+/* gdi-transform.js */
+__modules[10]=(()=>{
+const {Win32Error,integer}=__modules[0];
 
 const TRANSFORM_CONSTANTS=Object.freeze({GM_COMPATIBLE:1,GM_ADVANCED:2,MWT_IDENTITY:1,MWT_LEFTMULTIPLY:2,MWT_RIGHTMULTIPLY:3,MM_TEXT:1,MM_LOMETRIC:2,MM_HIMETRIC:3,MM_LOENGLISH:4,MM_HIENGLISH:5,MM_TWIPS:6,MM_ISOTROPIC:7,MM_ANISOTROPIC:8});
 const IDENTITY=Object.freeze([1,0,0,1,0,0]);
@@ -164,9 +593,9 @@ return {TRANSFORM_CONSTANTS,IDENTITY,multiply,inverse,mapPoint,mapping,translate
 })();
 
 /* gdi-path.js */
-__modules[3]=(()=>{
-const {Win32Error,integer}=__modules[1];
-const {mapping,mapPoint,inverse,IDENTITY}=__modules[2];
+__modules[11]=(()=>{
+const {Win32Error,integer}=__modules[0];
+const {mapping,mapPoint,inverse,IDENTITY}=__modules[10];
 
 
 const PATH_CONSTANTS=Object.freeze({ALTERNATE:1,WINDING:2,PT_CLOSEFIGURE:1,PT_LINETO:2,PT_BEZIERTO:4,PT_MOVETO:6});
@@ -257,9 +686,9 @@ return {PATH_CONSTANTS,installPaths};
 })();
 
 /* gdi-text.js */
-__modules[4]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[1];
-const {mapping,multiply,mapPoint,mapBounds}=__modules[2];
+__modules[12]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
+const {mapping,multiply,mapPoint,mapBounds}=__modules[10];
 
 
 const TEXT_CONSTANTS=Object.freeze({OBJ_FONT:6,FW_NORMAL:400,FW_BOLD:700,ANSI_CHARSET:0,DEFAULT_CHARSET:1,TRANSPARENT:1,OPAQUE:2,TA_NOUPDATECP:0,TA_UPDATECP:1,TA_LEFT:0,TA_RIGHT:2,TA_CENTER:6,TA_TOP:0,TA_BOTTOM:8,TA_BASELINE:24,TA_RTLREADING:256,ETO_OPAQUE:2,ETO_CLIPPED:4,ETO_RTLREADING:128,ETO_PDY:8192,DT_CENTER:1,DT_RIGHT:2,DT_VCENTER:4,DT_BOTTOM:8,DT_WORDBREAK:16,DT_SINGLELINE:32,DT_EXPANDTABS:64,DT_CALCRECT:1024,DT_NOPREFIX:2048});
@@ -366,8 +795,8 @@ return {TEXT_CONSTANTS,installText};
 })();
 
 /* user32-paint.js */
-__modules[5]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[1];
+__modules[13]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
 
 const PAINT_CONSTANTS=Object.freeze({WM_PAINT:15,WM_ERASEBKGND:20,RDW_INVALIDATE:1,RDW_INTERNALPAINT:2,RDW_ERASE:4,RDW_VALIDATE:8,RDW_NOINTERNALPAINT:16,RDW_NOERASE:32,RDW_NOCHILDREN:64,RDW_ALLCHILDREN:128,RDW_UPDATENOW:256,RDW_ERASENOW:512,RDW_FRAME:1024,RDW_NOFRAME:2048,DCX_WINDOW:1,DCX_CACHE:2,DCX_INTERSECTRGN:128,DCX_EXCLUDERGN:64});
 /** Window-owned HRGNs and independent pending/active update regions. All state is
@@ -472,8 +901,8 @@ return {PAINT_CONSTANTS,installPainting};
 })();
 
 /* gdi-geometry.js */
-__modules[6]=(()=>{
-const {Win32Error,integer}=__modules[1];
+__modules[14]=(()=>{
+const {Win32Error,integer}=__modules[0];
 
 const point=n=>integer(n,-0x4000000,0x3ffffff);
 const quota=()=>{throw new Win32Error('Region scan conversion work quota exceeded',8);};
@@ -566,10 +995,10 @@ return {polygonRegion,roundedRegion,transformRegion,frameRegion};
 })();
 
 /* gdi-region.js */
-__modules[7]=(()=>{
-const {polygonRegion,roundedRegion,transformRegion,frameRegion}=__modules[6];
-const {mapping,devicePoint,mapBounds,inverse,readTransform}=__modules[2];
-const {Win32Error,integer}=__modules[1];
+__modules[15]=(()=>{
+const {polygonRegion,roundedRegion,transformRegion,frameRegion}=__modules[14];
+const {mapping,devicePoint,mapBounds,inverse,readTransform}=__modules[10];
+const {Win32Error,integer}=__modules[0];
 
 
 
@@ -766,9 +1195,9 @@ return {REGION_CONSTANTS,RegionStore,installRegions};
 })();
 
 /* gdi-bitmap.js */
-__modules[8]=(()=>{
-const {mapping,inverse,mapPoint,mapBounds,devicePoint,translatedOnly}=__modules[2];
-const {Win32Error,integer,unsigned}=__modules[1];
+__modules[16]=(()=>{
+const {mapping,inverse,mapPoint,mapBounds,devicePoint,translatedOnly}=__modules[10];
+const {Win32Error,integer,unsigned}=__modules[0];
 
 
 // All bitmap addresses are process-private. DIBs use Win32 BGR/BGRA scan lines,
@@ -868,8 +1297,8 @@ return {GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo,BitmapStore};
 })();
 
 /* clipboard.js */
-__modules[9]=(()=>{
-const {Win32Error,unsigned}=__modules[1];
+__modules[17]=(()=>{
+const {Win32Error,unsigned}=__modules[0];
 
 /** Synchronous, app-private clipboard. System clipboard synchronization is explicit. */
 function installClipboard(w){
@@ -900,8 +1329,8 @@ return {installClipboard};
 })();
 
 /* kernel32.js */
-__modules[10]=(()=>{
-const {ERROR,Win32Error,integer,unsigned}=__modules[1];
+__modules[18]=(()=>{
+const {ERROR,Win32Error,integer,unsigned}=__modules[0];
 
 function installKernel32(w){
   const m=w.memory,h=w.handles,fs=w.fs;
@@ -991,8 +1420,8 @@ return {installKernel32};
 })();
 
 /* user32.js */
-__modules[11]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[1];
+__modules[19]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
 
 /** Registered windows only: never queries or controls unrelated page DOM. */
 function installUser32(w){
@@ -1075,8 +1504,8 @@ return {installUser32};
 })();
 
 /* advapi32.js */
-__modules[12]=(()=>{
-const {Win32Error,integer,unsigned}=__modules[1];
+__modules[20]=(()=>{
+const {Win32Error,integer,unsigned}=__modules[0];
 
 /** App-private registry: no machine registry is read or modified. */
 function installRegistry(w){
@@ -1089,7 +1518,7 @@ function installRegistry(w){
   const add=(name,arity,fn)=>w.register('advapi32',name,fn,{arity,statusError:true,mode:'emulated',notes:'Isolated application registry, not the operating-system registry.'});
   const aw=(name,arity,fn)=>{for(const wide of [false,true])add(name+(wide?'W':'A'),arity,(...a)=>fn(wide,...a));};
   const accessOf=access=>{access=unsigned(access);if(access&~allowed)throw new Win32Error('Unsupported registry access flags',50);return access;};
-  aw('RegCreateKeyEx',9,(wide,root,name,reserved,klass,options,access,security,result,disposition)=>{if(reserved||klass||options||security)throw new Win32Error('Registry security/classes/options are not supported',50);access=accessOf(access);m.view(result,4);if(disposition)m.view(disposition,4);const base=keyOf(root,4),path=sub(base,m.string(name,wide)),existed=store.has(path),parts=path.split('\\');for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('\\');if(!store.has(p))store.set(p,{name:parts[i-1],values:new Map()});}const handle=h.add('registry',{path,access});m.writeU32(result,handle);if(disposition)m.writeU32(disposition,existed?2:1);save();return 0;});
+  aw('RegCreateKeyEx',9,(wide,root,name,reserved,klass,options,access,security,result,disposition)=>{if(reserved||klass||options||security)throw new Win32Error('Registry security/classes/options are not supported',50);access=accessOf(access);m.view(result,4);if(disposition)m.view(disposition,4);const base=keyOf(root,4),text=m.string(name,wide),path=sub(base,text),existed=store.has(path),parts=path.split('\\'),names=text.replace(/\//g,'\\').split('\\').filter(Boolean),depth=base.split('\\').length;for(let i=1;i<=parts.length;i++){const p=parts.slice(0,i).join('\\');if(!store.has(p))store.set(p,{name:names[i-depth-1]??parts[i-1],values:new Map()});}const handle=h.add('registry',{path,access});m.writeU32(result,handle);if(disposition)m.writeU32(disposition,existed?2:1);save();return 0;});
   aw('RegOpenKeyEx',5,(wide,root,name,options,access,result)=>{if(options)throw new Win32Error('Registry options unsupported',50);access=accessOf(access);m.view(result,4);const path=sub(keyOf(root),m.string(name,wide));if(!store.has(path))return 2;m.writeU32(result,h.add('registry',{path,access}));return 0;});
   add('RegCloseKey',1,handle=>{if(!roots.has(unsigned(handle)))h.close(handle,'registry');return 0;});
   aw('RegSetValueEx',6,(wide,handle,name,reserved,type,data,size)=>{if(reserved)throw new Win32Error('Reserved must be zero');type=unsigned(type);if(![1,2,3,4,7,11].includes(type))throw new Win32Error('Registry type not implemented',50);size=integer(size,0,w.maxFileBytes);const path=keyOf(handle,2),bytes=size?m.bytes(data,size):new Uint8Array();if(type===4&&size!==4||type===11&&size!==8)throw new Win32Error('Invalid registry integer size');if(wide&&[1,2,7].includes(type)&&size%2)throw new Win32Error('Invalid Unicode registry value');const value=[1,2,7].includes(type)?m.decode(bytes,wide):Array.from(bytes);store.get(path).values.set(m.string(name,wide).toLowerCase(),{name:m.string(name,wide),type,value});save();return 0;});
@@ -1097,20 +1526,55 @@ function installRegistry(w){
   aw('RegDeleteValue',2,(wide,handle,name)=>{const path=keyOf(handle,2);if(!store.get(path).values.delete(m.string(name,wide).toLowerCase()))return 2;save();return 0;});
   aw('RegDeleteKey',2,(wide,handle,name)=>{const path=sub(keyOf(handle,4),m.string(name,wide));if(roots.has(unsigned(handle))&&!m.string(name,wide))return 5;if(!store.has(path))return 2;if([...store.keys()].some(k=>k.startsWith(path+'\\')))return 5;store.delete(path);save();return 0;});
   aw('RegEnumKeyEx',8,(wide,handle,index,name,size,reserved,klass,classSize,time)=>{if(reserved||klass||classSize||time)throw new Win32Error('Registry class/timestamp enumeration is not implemented',50);const path=keyOf(handle,8),children=[...store].filter(([k])=>k.startsWith(path+'\\')&&!k.slice(path.length+1).includes('\\')),entry=children[integer(index)]?.[1];if(!entry)return 259;const capacity=m.readU32(size),n=m.stringBytes(entry.name,wide).length/(wide?2:1);if(capacity<=n)return 234;m.putString(name,entry.name,capacity,wide);m.writeU32(size,n);return 0;});
+  // Enumeration contracts: https://learn.microsoft.com/windows/win32/api/winreg/nf-winreg-regenumvaluea
+  // https://learn.microsoft.com/windows/win32/api/winreg/nf-winreg-regqueryinfokeya
+  const childrenOf=path=>[...store].filter(([key])=>key.startsWith(path+'\\')&&!key.slice(path.length+1).includes('\\')).map(([,value])=>value);
+  const encoded=(entry,wide)=>typeof entry.value==='string'?m.stringBytes(entry.value,wide):Uint8Array.from(entry.value);
+  aw('RegEnumValue',8,(wide,handle,index,name,nameSize,reserved,type,data,dataSize)=>{
+    if(reserved||data&&!dataSize)throw new Win32Error('Invalid enumeration parameters');
+    const path=keyOf(handle,1),entry=[...store.get(path).values.values()][integer(index)];if(!entry)return 259;
+    const capacity=m.readU32(nameSize),bytes=encoded(entry,wide),length=m.stringBytes(entry.name,wide).length/(wide?2:1);
+    const dataCapacity=dataSize?m.readU32(dataSize):0;if(type)m.view(type,4);
+    if(name)m.bytes(name,capacity*(wide?2:1));else throw new Win32Error('Name buffer required');
+    if(data)m.bytes(data,dataCapacity);
+    if(type)m.writeU32(type,entry.type);if(dataSize)m.writeU32(dataSize,bytes.length);
+    if(capacity<=length||data&&dataCapacity<bytes.length)return 234;
+    m.putString(name,entry.name,capacity,wide);m.writeU32(nameSize,length);if(data)m.bytes(data,bytes.length).set(bytes);return 0;
+  });
+  aw('RegEnumKey',4,(wide,handle,index,name,capacity)=>{
+    const entry=childrenOf(keyOf(handle,8))[integer(index)];if(!entry)return 259;
+    capacity=unsigned(capacity);if(capacity<=m.stringBytes(entry.name,wide).length/(wide?2:1))return 234;
+    m.putString(name,entry.name,capacity,wide);return 0;
+  });
+  aw('RegQueryInfoKey',12,(wide,handle,klass,classSize,reserved,subkeys,maxSubkey,maxClass,values,maxName,maxData,security,time)=>{
+    if(reserved||klass&&!classSize)throw new Win32Error('Invalid key information parameters');
+    if(security||time)throw new Win32Error('Native security descriptors and timestamps are not available',50);
+    const path=keyOf(handle,1),children=childrenOf(path),entries=[...store.get(path).values.values()];
+    const capacity=classSize?m.readU32(classSize):0;
+    for(const p of [subkeys,maxSubkey,maxClass,values,maxName,maxData])if(p)m.view(p,4);
+    if(klass)m.bytes(klass,capacity*(wide?2:1));
+    const length=text=>m.stringBytes(text,wide).length/(wide?2:1);
+    const maximum=(items,fn)=>items.reduce((max,item)=>Math.max(max,fn(item)),0);
+    const outputs=[[subkeys,children.length],[maxSubkey,maximum(children,e=>length(e.name))],[maxClass,0],[values,entries.length],[maxName,maximum(entries,e=>length(e.name))],[maxData,maximum(entries,e=>encoded(e,wide).length)]];
+    for(const [pointer,value]of outputs)if(pointer)m.writeU32(pointer,value);
+    if(classSize)m.writeU32(classSize,0);if(klass){if(!capacity)return 234;m.putString(klass,'',capacity,wide);}return 0;
+  });
+  add('RegFlushKey',1,handle=>{keyOf(handle,1);save();return 0;});
+
 }
 
 return {installRegistry};
 })();
 
 /* gdi32.js */
-__modules[13]=(()=>{
-const {installTransforms,mapping,translatedOnly,IDENTITY}=__modules[2];
-const {installPaths}=__modules[3];
-const {installText}=__modules[4];
-const {installPainting}=__modules[5];
-const {Win32Error,integer,unsigned}=__modules[1];
-const {RegionStore,installRegions}=__modules[7];
-const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[8];
+__modules[21]=(()=>{
+const {installTransforms,mapping,translatedOnly,IDENTITY}=__modules[10];
+const {installPaths}=__modules[11];
+const {installText}=__modules[12];
+const {installPainting}=__modules[13];
+const {Win32Error,integer,unsigned}=__modules[0];
+const {RegionStore,installRegions}=__modules[15];
+const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[16];
 
 
 
@@ -1236,20 +1700,27 @@ return {colorRef,installGDI};
 })();
 
 /* index.js */
-__modules[14]=(()=>{
-const {GPURasterPresenter}=__modules[0];
-const {TRANSFORM_CONSTANTS}=__modules[2];
-const {PATH_CONSTANTS}=__modules[3];
-const {TEXT_CONSTANTS}=__modules[4];
-const {PAINT_CONSTANTS}=__modules[5];
-const {REGION_CONSTANTS,RegionStore}=__modules[7];
-const {GDI_CONSTANTS}=__modules[8];
-const {installClipboard}=__modules[9];
-const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[1];
-const {installKernel32}=__modules[10];
-const {installUser32}=__modules[11];
-const {installRegistry}=__modules[12];
-const {installGDI,colorRef}=__modules[13];
+__modules[22]=(()=>{
+const {installWindowProperties}=__modules[2];
+const {installBinaryCodec,CRYPT_CONSTANTS}=__modules[3];
+const {installGUID}=__modules[4];
+const {installPathUtilities}=__modules[5];
+const {installFileUtilities}=__modules[6];
+const {installNLS,NLS_CONSTANTS}=__modules[7];
+const {installSynchronization,SYNC_CONSTANTS}=__modules[8];
+const {GPURasterPresenter}=__modules[9];
+const {TRANSFORM_CONSTANTS}=__modules[10];
+const {PATH_CONSTANTS}=__modules[11];
+const {TEXT_CONSTANTS}=__modules[12];
+const {PAINT_CONSTANTS}=__modules[13];
+const {REGION_CONSTANTS,RegionStore}=__modules[15];
+const {GDI_CONSTANTS}=__modules[16];
+const {installClipboard}=__modules[17];
+const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
+const {installKernel32}=__modules[18];
+const {installUser32}=__modules[19];
+const {installRegistry}=__modules[20];
+const {installGDI,colorRef}=__modules[21];
 
 
 
@@ -1264,14 +1735,21 @@ const {installGDI,colorRef}=__modules[13];
 
 
 
-const WIN32_CONSTANTS=Object.freeze({...TRANSFORM_CONSTANTS,...PATH_CONSTANTS,...TEXT_CONSTANTS,...PAINT_CONSTANTS,...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
+
+
+
+
+
+
+
+const WIN32_CONSTANTS=Object.freeze({...NLS_CONSTANTS,...SYNC_CONSTANTS,...CRYPT_CONSTANTS,...TRANSFORM_CONSTANTS,...PATH_CONSTANTS,...TEXT_CONSTANTS,...PAINT_CONSTANTS,...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
 function normalizeDLL(name){const dll=String(name).replace(/\\/g,'/').split('/').at(-1).replace(/\.dll$/i,'').toLowerCase();if(!/^[a-z0-9_.-]+$/.test(dll))throw new Win32Error('Invalid DLL name',126);return dll;}
 /** Reusable browser/worker/Node compatibility process; never loads native code. */
 class Win32Browser {
   constructor(options={}){
     this.options=options;this.memory=new Memory(options);this.handles=new Handles(options.maxHandles);this.fs=options.fs||new MemoryFileSystem();this.lastError=0;this.disposed=false;this.modules=new Map();this.timers=new Map();this.timerCallbacks=new Map();this.nextTimer=1;this.delays=new Set();this.clock=options.clock||(()=>globalThis.performance?.now?.()??Date.now());this.now=options.now||(()=>new Date());this.epoch=this.clock();this.maxFileBytes=integer(options.maxFileBytes??Math.min(20*1024*1024,this.memory.maxBytes),1,this.memory.maxBytes);this.environment=new Map(Object.entries(options.environment||{}).map(([k,v])=>[k.toUpperCase(),String(v)]));
     for(const name of ['/Windows','/Temp'])this.fs.directories.add(this.fs.normalize(name));
-    installKernel32(this);installUser32(this);installRegistry(this);installGDI(this);installClipboard(this);
+    installKernel32(this);installUser32(this);installRegistry(this);installGDI(this);installClipboard(this);installFileUtilities(this);installNLS(this);installSynchronization(this);installPathUtilities(this);installGUID(this);installBinaryCodec(this);installWindowProperties(this);
     if(options.registry){for(const [path,record]of options.registry){if(!/^(HKCR|HKCU|HKLM|HKU|HKCC)(\\|$)/.test(path)||!Array.isArray(record.values))throw new Win32Error('Invalid registry snapshot');this.registry.set(path,{name:String(record.name),values:new Map(record.values)});}}
     this.register('shell32','ShellExecuteA',(handle,operation,file,parameters,directory,show)=>this.openURL(false,handle,operation,file,parameters,directory,show),{arity:6,failure:5,mode:'browser',notes:'Only explicitly enabled http/https/mailto navigation; no executable launch.'});
     this.register('shell32','ShellExecuteW',(handle,operation,file,parameters,directory,show)=>this.openURL(true,handle,operation,file,parameters,directory,show),{arity:6,failure:5,mode:'browser',notes:'Only explicitly enabled http/https/mailto navigation; no executable launch.'});
@@ -1281,17 +1759,17 @@ class Win32Browser {
   invoke(dll,name,args=[]){if(this.disposed)throw new Win32Error('Compatibility process is disposed',995);const api=this.resolve(dll,name);if(!Array.isArray(args)||args.length!==api.arity)throw new Win32Error('Invalid argument count for '+api.dll+'!'+name,87);const failure=error=>{if(!(error instanceof Win32Error))throw error;if(api.statusError)return error.code;this.lastError=error.code;this.options.onDiagnostic?.({dll:api.dll,name,code:error.code,message:error.message});return typeof api.failure==='function'?api.failure(args):api.failure;};try{const value=api.fn(...args);return value?.then?value.catch(failure):value;}catch(error){return failure(error);}}
   manifest(){return [...this.modules.values()].flatMap(exports=>[...exports.values()].map(({dll,name,arity,mode,notes})=>({dll,name,arity,mode,notes}))).sort((a,b)=>(a.dll+'!'+a.name).localeCompare(b.dll+'!'+b.name));}
   registerWindow(descriptor){if(!descriptor||typeof descriptor!=='object')throw new Win32Error('Window descriptor required');return this.handles.add('window',descriptor);}
-  unregisterWindow(handle){if(!this.handles.has(handle,'window'))return;this.releaseWindowGDI?.(handle);for(const [key,t]of this.timers)if(t.handle===Number(handle)){clearInterval(t.timer);this.timers.delete(key);}for(const [id,e]of this.handles.entries)if(e.type==='dc'&&e.value.handle===Number(handle))this.handles.close(id,'dc');this.handles.close(handle,'window');}
+  unregisterWindow(handle){if(!this.handles.has(handle,'window'))return;this.releaseWindowProperties?.(handle);this.releaseWindowGDI?.(handle);for(const [key,t]of this.timers)if(t.handle===Number(handle)){clearInterval(t.timer);this.timers.delete(key);}for(const [id,e]of this.handles.entries)if(e.type==='dc'&&e.value.handle===Number(handle))this.handles.close(id,'dc');this.handles.close(handle,'window');}
   registerCallback(fn,{onTimer=fn}={}){if(typeof fn!=='function'||typeof onTimer!=='function')throw new Win32Error('Callback must be a function');const handle=this.handles.add('callback',fn);this.timerCallbacks.set(handle,onTimer);return handle;}
   unregisterCallback(handle){for(const t of this.timers.values())if(t.callback===handle)throw new Win32Error('Callback is still used by a timer',5);this.handles.close(handle,'callback');this.timerCallbacks.delete(handle);}
   sleep(milliseconds){milliseconds=unsigned(milliseconds);return new Promise((resolve,reject)=>{const state={timer:null,reject};this.delays.add(state);const end=this.clock()+milliseconds;const next=()=>{if(this.disposed){this.delays.delete(state);reject(new Win32Error('Sleep cancelled',995));return;}const remaining=end-this.clock();if(remaining<=0){this.delays.delete(state);resolve();}else state.timer=setTimeout(next,Math.min(remaining,0x7fffffff));};state.timer=setTimeout(next,Math.min(milliseconds,0x7fffffff));});}
   registrySnapshot(){return [...this.registry].map(([path,r])=>[path,{name:r.name,values:[...r.values].map(([key,v])=>[key,{...v,value:Array.isArray(v.value)?v.value.slice():v.value}])}]);}
   async openURL(wide,handle,operation,file,parameters,directory,show){if(handle)this.handles.get(handle,'window');const verb=this.memory.string(operation,wide).toLowerCase();if(verb&&verb!=='open'||this.memory.string(parameters,wide)||this.memory.string(directory,wide))return 31;let url;try{url=new URL(this.memory.string(file,wide));}catch{throw new Win32Error('Invalid navigation URL',87);}if(!['http:','https:','mailto:'].includes(url.protocol)||!this.options.allowNavigation||typeof this.options.openURL!=='function')return 5;return await this.options.openURL(url.href,show)?33:5;}
-  dispose(){if(this.disposed)return;this.disposeWindowGDI?.();this.disposed=true;for(const t of this.timers.values())clearInterval(t.timer);this.timers.clear();for(const d of this.delays){clearTimeout(d.timer);d.reject(new Win32Error('Operation cancelled',995));}this.delays.clear();this.handles.entries.clear();this.timerCallbacks.clear();this.memory.clear();}
+  dispose(){if(this.disposed)return;this.disposeWindowGDI?.();this.disposeSynchronization?.();this.disposeWindowProperties?.();this.disposed=true;for(const t of this.timers.values())clearInterval(t.timer);this.timers.clear();for(const d of this.delays){clearTimeout(d.timer);d.reject(new Win32Error('Operation cancelled',995));}this.delays.clear();this.handles.entries.clear();this.timerCallbacks.clear();this.memory.clear();}
 }
 function createWin32(options={}){return new Win32Browser(options);}
 
 return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,GPURasterPresenter,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
-globalThis["Win32Compat"]=__modules[14];
+globalThis["Win32Compat"]=__modules[22];
 })();

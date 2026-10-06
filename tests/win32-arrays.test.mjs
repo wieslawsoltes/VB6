@@ -24,7 +24,7 @@ for(const [name,code] of [
   ['resizing a fixed array','Dim a(2) As Long\nReDim Preserve a(3)'],
   ['undeclared ReDim','ReDim missing(3) As Long'],
   ['changing declared type','Dim a() As Long\nReDim a(2) As Byte'],
-  ['excess rank','Dim a() As Long\nReDim a(1,1,1,1,1,1,1,1,1)'],
+  ['excess rank','Dim a() As Long\nReDim a('+Array(61).fill('0').join(',')+')'],
   ['unsupported object elements','Dim a() As Object'],
   ['unsupported Variant elements','Dim a() As Variant'],
   ['different fixed String lengths','Dim a() As String * 3\nDim b() As String * 4\na=b'],
