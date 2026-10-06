@@ -1,0 +1,103 @@
+name: Services empty-input validation
+on:
+  push:
+    branches: [feature/win32-common-services]
+    paths: [.github/workflows/services-empty-input.yml]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply reviewed native error and unmanaged reference fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > /tmp/services-empty-start.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          hashes={
+           'packages/win32-browser/src/crypt32-codec.js':('28b0ba93ebd410547f82fa3844891d59f26bd5f6b00e8fefacce496341b11e0a','77f65a7776aa011c6cb5e2c75149c1cbc3bd9f61a7bc023c75da96eb33ffbd98'),
+           'packages/win32-browser/test/services.test.mjs':('7a2bd09309685a127f365b74b6a416fdebdba99c2a7e3313099ade6f2790d5e4','99d657916a68529a839f851f48a8c0278b07260adf543a91a52c507500b45147'),
+           'tools/win32-services-oracle.ps1':('5391cc3c97c7773bed1b251245beaae00fe7d03c91c0c83c01363831bc122f00','efceb249b791bbcff4536fc3dc2edbe8ba663bc4d6f437c70d895434cf2bdf97'),
+           'tools/win32-services-contracts.mjs':('3f54845b1bdf2390a049d816e199d5946a0d7b745222dbaf4199e97082aef9b5','ee6f6de21eaa2c2077b0a4e48c1ebf4b8785d03d555fa3c2f64a6e0e2d260c99'),
+           'packages/win32-browser/SERVICES.md':('5d7071c57f7c1e3ee2fb0cfd3afd15f0de934f0d445a46bfca5e462edf03d2cb','d4ec395c9234926a160a2dc36c1221e0234ff15b5c9833a3b10e07cdb820b563')}
+          for p,(before,after) in hashes.items():assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==before,p
+          p=Path('packages/win32-browser/src/crypt32-codec.js');s=p.read_text();s=s.replace("if(!input)throw new Win32Error('A binary input pointer is required');","if(!input||count===0)throw new Win32Error('A nonempty binary input buffer is required');");p.write_text(s)
+          p=Path('packages/win32-browser/test/services.test.mjs');s=p.read_text();s=s.replace("+' distinguishes empty storage from a NULL input pointer'","+' rejects empty and NULL inputs without changing caller buffers'")
+          old="""  for(const [flags,text]of [[1,'\\r\\n'],[0x80000001,'\\n'],[0x40000001,'']]){
+              assert.equal(api(input,0,flags,0,size),1);assert.equal(m.readU32(size),text.length+1);
+              m.writeU32(size,32);assert.equal(api(input,0,flags,output,size),1);assert.equal(m.string(output,wide),text);assert.equal(m.readU32(size),text.length);
+            }"""
+          new="""  for(const flags of [1,0x80000001,0x40000001]){
+              m.putString(output,'keep',32,wide);m.writeU32(size,77);
+              assert.equal(api(input,0,flags,0,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);
+              assert.equal(api(input,0,flags,output,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);assert.equal(m.string(output,wide),'keep');
+            }"""
+          assert old in s;s=s.replace(old,new);p.write_text(s)
+          p=Path('tools/win32-services-oracle.ps1');s=p.read_text();s=s.replace('static extern int EncodeA(byte[] input','static extern int EncodeA(IntPtr input').replace('static extern int EncodeW(byte[] input','static extern int EncodeW(IntPtr input')
+          a=s.index('   // A managed zero-length array');b=s.index('   uint size=0,skip=9,actual=9;',a)
+          s=s[:a]+'''   // Use actual unmanaged storage for every size, including a non-NULL pointer
+             // with count zero. Record errors immediately and never reuse output from a
+             // preceding call. These calls do not depend on managed array marshalling.
+             for(int i=0;i<labels.Length;i++){
+              IntPtr binary=Marshal.AllocHGlobal(Math.Max(1,data[i].Length));
+              try{
+               if(data[i].Length>0)Marshal.Copy(data[i],0,binary,data[i].Length);
+               uint n=0;int query=wide?EncodeW(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n);
+               int queryError=query==0?Marshal.GetLastWin32Error():0;uint q=n;n=256;Marshal.WriteInt32(output,0);
+               int ok=wide?EncodeW(binary,(uint)data[i].Length,flags[i],output,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],output,ref n);
+               int error=ok==0?Marshal.GetLastWin32Error():0;
+               if(data[i].Length>0&&(query==0||ok==0))throw new InvalidOperationException("Base64 conversion failed: "+suffix+"/"+labels[i]+" query "+queryError+" output "+error);
+               result["base64-"+suffix+"-"+labels[i]]=new object[]{q,ok,n,Text(output,wide)};
+               if(data[i].Length==0)result["base64-"+suffix+"-empty-errors"]=new object[]{query,queryError,error};
+              }finally{Marshal.FreeHGlobal(binary);}
+             }
+             {uint n=77;int query=wide?EncodeW(IntPtr.Zero,0,1,IntPtr.Zero,ref n):EncodeA(IntPtr.Zero,0,1,IntPtr.Zero,ref n);int queryError=query==0?Marshal.GetLastWin32Error():0;uint q=n;n=256;Marshal.WriteInt32(output,0);int ok=wide?EncodeW(IntPtr.Zero,0,1,output,ref n):EncodeA(IntPtr.Zero,0,1,output,ref n);int error=ok==0?Marshal.GetLastWin32Error():0;result["base64-"+suffix+"-null"]=new object[]{query,queryError,q,ok,error,n,Text(output,wide)};}
+          ''' + s[b:];p.write_text(s)
+          p=Path('tools/win32-services-contracts.mjs');s=p.read_text();old="""   const input=alloc(data),out=m.alloc(256*step),n=u32(0);call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,0,n);const query=m.readU32(n);m.writeU32(n,256);const ok=call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,out,n);results['base64-'+suffix+'-'+label]=[query,ok,m.readU32(n),m.string(out,wide)];""";new="""   const input=alloc(data),out=m.alloc(256*step),n=u32(0);const queryOK=call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,0,n),queryError=queryOK?0:w.lastError,query=m.readU32(n);m.writeU32(n,256);const ok=call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,out,n),error=ok?0:w.lastError;results['base64-'+suffix+'-'+label]=[query,ok,m.readU32(n),m.string(out,wide)];
+             if(data.length===0)results['base64-'+suffix+'-empty-errors']=[queryOK,queryError,error];""";assert old in s;s=s.replace(old,new);p.write_text(s)
+          p=Path('packages/win32-browser/SERVICES.md');s=p.read_text();old='exclude it. Pointer-returning path helpers return offsets into the same allocation.';new='''exclude it. `CryptBinaryToString` rejects NULL or zero-length binary input with
+          error 87 and preserves caller buffers and capacities, including on size queries.
+          The native fixture uses actual unmanaged input pointers and captures failure codes
+          before inspecting initialized output; it does not treat stale data as a result.
+          Pointer-returning path helpers return offsets into the same allocation.''';assert old in s;s=s.replace(old,new);p.write_text(s)
+          for p,(before,after) in hashes.items():assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==after,p
+          print('All five authored corrections verified against tested hashes.')
+          PY
+          npm run build
+          npm test > /tmp/services-empty-tests.txt
+          npm run pack:win32-browser > /tmp/services-empty-package.txt
+          git diff --check -- . ':!dist' ':!src/exporter/runtime-payload.js' ':!src/editor/diagnostics-payload.js' ':!packages/win32-browser/dist'
+          git diff --exit-code -- .github
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git add packages/win32-browser tools/win32-services-contracts.mjs tools/win32-services-oracle.ps1 dist src/exporter/runtime-payload.js
+          git commit -m 'fix(win32-browser): reject empty Base64 input and measure raw-pointer Windows contracts'
+          test "$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)" = "$(cat /tmp/services-empty-start.txt)"
+          git push origin HEAD:refs/heads/feature/win32-common-services
+      - name: Retain source and validation
+        if: always()
+        run: |
+          git bundle create /tmp/services-empty.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > /tmp/services-empty-revision.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: services-empty-input
+          path: |
+            /tmp/services-empty.bundle
+            /tmp/services-empty-revision.txt
+            /tmp/services-empty-tests.txt
+            /tmp/services-empty-package.txt
+            release/vb6-win32-browser-*.tgz
+          retention-days: 7
