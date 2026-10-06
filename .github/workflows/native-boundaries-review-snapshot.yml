@@ -1,0 +1,27 @@
+name: Native continuation review snapshot
+on:
+  push:
+    branches: [feat/native-compatibility-boundaries]
+    paths: [.github/workflows/native-boundaries-review-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Snapshot source and integration history without credentials
+        run: |
+          git bundle create /tmp/native-review.bundle HEAD refs/remotes/origin/main
+          git archive HEAD --output=/tmp/native-review-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-continuation-review
+          path: |
+            /tmp/native-review.bundle
+            /tmp/native-review-source.zip
+          retention-days: 2
