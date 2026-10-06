@@ -28,6 +28,26 @@ See [build artifact maintenance](IDE-BUILD-ARTIFACTS.md) before changing expecte
 fingerprints. Never update expectations just to make a failed build pass, and
 never substitute stale prebuilt bundles for the changed source.
 
+## Maintained suite and fixture scope
+
+The Node runner discovers `tests/*.test.mjs`. Suites are named for current
+subsystems rather than release or finalization milestones. Follow the maintained
+[test scope and fixture policy](../tests/README.md). After building, focused
+source checks include:
+
+```sh
+node --test tests/editor-*.test.mjs
+node --test tests/debugger-*.test.mjs
+node --test tests/language*.test.mjs tests/runtime-*.test.mjs
+```
+
+A focused pass does not replace the full suite. Recovery, cancellation, atomic
+save, malformed-input and compatibility tests protect existing product features
+and belong in the maintained suite. Browser entry points and shared helpers in
+`tests/` are consumed by runners in `tools/`, not the Node glob. Preserve native
+scalar reference corpora, ABI fixtures and visual goldens while tests consume
+them; check dynamic consumers before deleting apparent orphans.
+
 ## Browser setup and checks
 
 Use the Playwright version pinned in the checked-in
@@ -77,6 +97,13 @@ subsystem guide. Run `npm run test:visual` for visual interactions; golden-image
 comparison needs the matching browser/font environment and an explicit review
 of any changed baseline. See [visual validation](VISUAL-AUDIT.md).
 
+`npm run test:classic-html` exercises the production `ToolList` directly:
+retained row identity, sparse updates, bounded visible rows, keyboard navigation,
+ARIA and transfer between documents, alongside independent bevel pixels and
+layout geometry. It does not require a historical painter or a before/after
+performance benchmark. Older runner names do not justify keeping copied
+predecessor implementations.
+
 ## Select checks for the changed subsystem
 
 Always run the portable suite, then the relevant integration checks. These are
@@ -105,6 +132,10 @@ Record the exact source revision, commands, browser/OS versions, results and
 skips in the PR or CI artifacts. Inspect checks for the final combined revision
 before merging; results for an earlier branch or a pre-integration source ZIP
 are not a substitute. Do not copy changing test totals into this guide.
+
+Generated reports are run evidence, not executable tests. Keep local evidence
+out of source changes unless it is an intentionally reviewed compatibility
+fixture. The checked-in workflow owns the current CI matrix and uploads.
 
 Keep these distinctions explicit:
 

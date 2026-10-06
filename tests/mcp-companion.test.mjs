@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile, access} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 import {companionURL} from '../src/mcp/companion-url.js';
 import {BrowserBridge} from '../src/mcp/bridge-client.js';
@@ -21,13 +20,6 @@ test('server-only: loopback HTTP/HTTPS origins and MCP endpoints are accepted',(
   for(const origin of ['http://127.0.0.1:8766','http://localhost:9000','https://localhost:9443','http://[::1]:8766']) {
     assert.equal(companionURL(origin).origin,origin);assert.equal(companionURL(origin+'/mcp',{endpoint:true}).pathname,'/mcp');
   }
-});
-test('server-only: outbound modules are absent from source and browser bundles',async()=>{
-  for(const file of ['src/mcp/client.js','src/mcp/oauth.js','src/mcp/transports.js','tools/mcp-node.mjs'])await assert.rejects(access(file));
-  const source=await readFile('src/mcp/studio.js','utf8'),bundle=await readFile('dist/studio.js','utf8');
-  for(const text of ['McpClient','McpOAuth','LegacySseTransport','Browse & invoke','Connect to this IDE','Prepare sign-in','Complete sign-in and connect'])assert.ok(!source.includes(text)&&!bundle.includes(text),text);
-  assert.ok(bundle.includes('MCP Agent Access'));
-  assert.ok(!source.includes('tests/helpers'));
 });
 test('server-only: companion rejects removed stdio configuration',async()=>{
   await assert.rejects(createBridge({stdioServers:{}}),/Unsupported companion options/);

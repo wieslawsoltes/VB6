@@ -22,3 +22,13 @@ test('unparenthesized Sub calls show argument context',()=>{assert.equal(callCon
 test('masking and split preserve quoted commas, nested calls and comments',()=>{assert.deepEqual(splitArguments('Optional s As String = "x,y", values(1, 2), ByRef n As Long'),['Optional s As String = "x,y"','values(1, 2)','ByRef n As Long']);assert.equal(maskSource('Rem x\n"a" & b'), '     \n    & b');});
 test('type and enum declarations expose correct typed members',()=>{const module={id:'r',name:'Records',kind:'module',code:'Public Type Point\n X As Long\n Y As Double\nEnd Type\nPublic Enum Direction\n North = 1\n South = 2\nEnd Enum\nPrivate p As Point'};const s=new EditorIntelligence(),p={modules:[module]};assert.deepEqual(s.completions(p,module,9,'p.',2).items.map(x=>x.name),['X','Y']);assert.ok(s.completions(p,module,9,'Nor',3,{constants:true}).items.some(x=>x.name==='North'));});
 test('typed browser controls expose implemented properties, not unrelated control fields',()=>{const module={id:'f',name:'Form1',kind:'form',code:'',form:{controls:[{name:'Text1',type:'TextBox',properties:{}}]}};const s=new EditorIntelligence(),items=s.completions({modules:[module]},module,1,'Text1.',6).items.map(x=>x.name);assert.ok(items.includes('SelStart'));assert.ok(items.includes('SetFocus'));assert.ok(!items.includes('Nodes'));});
+
+test('completion reflects in-place control rename/type/index changes',()=>{
+ const c={name:'OldName',type:'TextBox',properties:{}},m={id:'M',name:'M',kind:'form',code:'Sub Test()\nEnd Sub',form:{controls:[c]}},p={modules:[m]},i=new EditorIntelligence();
+ assert.ok(i.resolve(p,m,2,'OldName'));c.name='NewName';assert.equal(i.resolve(p,m,2,'OldName'),null);assert.ok(i.resolve(p,m,2,'NewName'));
+ c.type='ListBox';assert.equal(i.resolve(p,m,2,'NewName').type,'ListBox');c.properties.Index=0;assert.equal(i.resolve(p,m,2,'NewName').array,true);
+});
+test('List Constants excludes locals owned by another procedure',()=>{
+ const m={id:'M',name:'M',kind:'module',code:'Sub A()\nConst A_ONLY = 1\nEnd Sub\nSub B()\nConst B_ONLY = 2\nEnd Sub'},p={modules:[m]},i=new EditorIntelligence();
+ const names=i.completions(p,m,5,'',0,{constants:true}).items.map(s=>s.name);assert.ok(names.includes('B_ONLY'));assert.ok(!names.includes('A_ONLY'));
+});
