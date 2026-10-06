@@ -83,6 +83,26 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
     probe.checkpoint('Waiting for ' + label);
     return until(test, label, timeout);
   };
+  // Match the current document URL, not any preview left in the frame tree
+  // during asynchronous teardown. Diagnostics must identify the failed session.
+  const previewFrame = async expression => {
+    try {
+      await wait(() => js(`!!${expression}?.isConnected && ${expression}.src.startsWith('vb6://app/preview/')`), 'sandbox preview document');
+      const url = await js(`${expression}.src`);
+      await wait(() => root.webContents.mainFrame.frames.some(f => f.url === url), 'preview frame');
+      const frame = root.webContents.mainFrame.frames.find(f => f.url === url);
+      await wait(() => evaluate(frame, '!!globalThis.vb6Application'), 'runtime preview started');
+      check('preview never uses inherited srcdoc', await js(`previewSrcdocWrites===0 && !${expression}.hasAttribute('srcdoc')`));
+      check('preview remains sandboxed without same-origin access', await js(`!${expression}.sandbox.contains('allow-same-origin') && ${expression}.sandbox.contains('allow-scripts')`));
+      check('preview has no native bridge', await evaluate(frame, 'typeof vb6Native === "undefined"'));
+      return frame;
+    } catch (error) {
+      let details;
+      try { details=await js(`({state:vb6Studio.runState,status:vb6Studio.statusMessage?.textContent,src:${expression}?.getAttribute('src'),srcdoc:${expression}?.hasAttribute('srcdoc'),output:vb6Studio.output?.slice(-10)})`); }
+      catch (diagnosticError) { details={diagnosticError:diagnosticError.message}; }
+      throw new Error(error.message+'\nPreview diagnostics: '+JSON.stringify(details));
+    }
+  };
   try {
     await wait(() => js('globalThis.vb6NativeReady || globalThis.vb6NativeStartupError'), 'native bootstrap');
     const startupError=await js('globalThis.vb6NativeStartupError || null');
@@ -122,14 +142,38 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       check('MDI mode restores document without replacement',await js('editorBefore.root.ownerDocument===document && vb6Studio.editor===editorBefore'));
       await js('vb6Studio.setWindowMode("hybrid");void 0;');
 
+      await js(`globalThis.previewSrcdocWrites=0;globalThis.previewObserver=new MutationObserver(records=>{
+        previewSrcdocWrites+=records.filter(record=>record.attributeName==='srcdoc').length;
+      });previewObserver.observe(vb6Studio.root,{attributes:true,subtree:true,attributeFilter:['srcdoc']});void 0;`);
       await js('vb6Studio.run()');
-      await wait(() => js('vb6Studio.runtimeFrame?.src.startsWith("vb6://app/preview/")'), 'sandbox preview document');
-      await wait(() => root.webContents.mainFrame.frames.some(f => f.url.startsWith('vb6://app/preview/')), 'preview frame');
-      const frame = root.webContents.mainFrame.frames.find(f => f.url.startsWith('vb6://app/preview/'));
-      await wait(() => evaluate(frame, '!!globalThis.vb6Application'), 'runtime preview started');
+      await previewFrame('vb6Studio.runtimeFrame');
       check('IDE preview runs under document-specific CSP', true);
-      check('IDE preview cannot access native bridge', await evaluate(frame, 'typeof vb6Native === "undefined"'));
       await js('vb6Studio.stop()');
+
+      // The design-only session does not call run(). It must use the same
+      // document-specific CSP before it can be promoted to event debugging.
+      await js(`(()=>{
+        const project=VB6StudioAPI.newProject('Native Immediate Smoke'),form=project.modules[0];
+        const button=VB6StudioAPI.createControl('CommandButton','Command1',300,300);
+        button.properties.Caption='Native Immediate event';form.form.controls=[button];
+        form.code='Private Sub Command1_Click()\\nDebug.Print "native-immediate-event"\\nEnd Sub';
+        project.modules.unshift({id:'smoke-main',name:'M',kind:'module',code:'Sub Main()\\nDebug.Print "unexpected-startup"\\nEnd Sub'});
+        project.startup='Sub Main';vb6Studio.loadProject(project);vb6Studio.openDocument('smoke-main','code');return true;
+      })()`);
+      await js('vb6Studio.designImmediate.execute("? 6 * 7")');
+      check('native design Immediate executes without project startup', await js('vb6Studio.runState==="design" && vb6Studio.immediateOutput.join("|")==="42"'));
+      const immediateFrame = await previewFrame('vb6Studio.designImmediate.frame');
+      const immediateURL = immediateFrame.url;
+      await js('vb6Studio.designImmediate.enableEvents()');
+      check('native event Immediate reuses the approved document', await js(`vb6Studio.runtimeFrame.src===${JSON.stringify(immediateURL)} && vb6Studio.designImmediate.promoted`));
+      await js('vb6Studio.executeImmediate("Form1.Show")');
+      await wait(() => evaluate(immediateFrame, '!!document.querySelector("[data-control=Command1]")'), 'Immediate form');
+      await evaluate(immediateFrame, 'document.querySelector("[data-control=Command1]").click();void 0;', true);
+      await wait(() => js('vb6Studio.output.includes("native-immediate-event")'), 'Immediate event handler');
+      check('native event Immediate never ran Main', await js('!vb6Studio.output.includes("unexpected-startup")'));
+      await js('vb6Studio.stop(false)');
+      check('native Immediate Reset releases its frame', await js('vb6Studio.runState==="design" && !vb6Studio.runtimeFrame && !vb6Studio.designImmediate.frame'));
+      await js('previewObserver.disconnect();delete globalThis.previewObserver;void 0;');
     } else {
       await wait(() => js('!!globalThis.vb6Application?.nativeWindows'), 'application host');
       check('embedded SQLite executes with strict WebAssembly-only CSP', await js(`(async()=>{

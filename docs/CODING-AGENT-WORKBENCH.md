@@ -143,3 +143,25 @@ requires an explicit local confirmation for each dispatched follow-up. It does
 not implement live steering, Git staging/worktrees, cloud agents, OS sandboxing
 or universal Codex parity. See CODING-AGENT-PERMISSIONS.md for the independent
 permission boundary, revocation semantics and Full IDE access limitations.
+
+## Desktop preview integration
+
+Run and design-mode Immediate use the shared opaque-frame document loader
+merged from debugger PR #42; this workbench integration preserves that implementation.
+The desktop host supplies a `vb6://app/preview/` handle before any runtime HTML is
+assigned to the iframe. Desktop frames never temporarily navigate through `srcdoc`,
+which inherits the controller's restrictive script policy. The native host still
+serves per-document script hashes; no `unsafe-inline`, same-origin sandbox flag,
+Node integration, or broader IPC permission is added.
+
+A delayed document reply cannot load a stopped/reset/replaced runtime. Host
+rejections are displayed, and the frame is discarded instead of falling back to
+inline execution. Browser builds retain their existing sandboxed `srcdoc` path.
+The same loader serves debugger/runtime operations invoked through agent tools;
+this changes document transport, not the selected permission profile.
+
+The native smoke harness checks actual Run and Immediate execution, the absence
+of `srcdoc` writes, opaque sandboxing, and lack of native bridge access. Browser
+regressions cover the generic host hook, delayed replies across Stop and same-ID
+project reload, and failed initialization. Generic browser-host doubles are not
+represented as native Windows certification.

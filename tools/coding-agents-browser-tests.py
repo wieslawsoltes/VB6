@@ -830,6 +830,55 @@ def review_last_run(page,mode):
     return {'taskAndLastRunCheckpoints':True,'oneReviewRefreshPerTaskSwitch':True}
 
 
+def hosted_preview(page,mode):
+    # A generic embedding-host double, not a substitute for genuine Electron CI.
+    page.evaluate("""() => {
+      globalThis.previewURLs=[];globalThis.previewWrites=0;
+      globalThis.previewObserver=new MutationObserver(records=>previewWrites+=records.filter(r=>r.attributeName==='srcdoc').length);
+      previewObserver.observe(vb6Studio.root,{subtree:true,attributes:true,attributeFilter:['srcdoc']});
+      vb6Studio.runtimeDocumentLoader=html=>{const url=URL.createObjectURL(new Blob([html],{type:'text/html'}));previewURLs.push(url);return Promise.resolve(url);};
+      vb6Studio.run();
+    }""")
+    runtime=page.get_by_title('Running Visual Basic application',exact=True).element_handle().content_frame()
+    runtime.wait_for_function('!!globalThis.vb6Application')
+    check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame.hasAttribute("srcdoc") && vb6Studio.runtimeFrame.contentDocument===null'))
+    check(runtime.evaluate('typeof vb6Native === "undefined" && typeof require === "undefined"'))
+    page.evaluate('vb6Studio.stop()')
+    result=page.evaluate('vb6Studio.designImmediate.execute("? 6 * 7")')
+    check(result.get('value')=='42')
+    check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame && vb6Studio.runState==="design" && !vb6Studio.designImmediate.frame.hasAttribute("srcdoc")'))
+    page.evaluate('vb6Studio.designImmediate.reset();previewObserver.disconnect();previewURLs.forEach(url=>URL.revokeObjectURL(url));delete vb6Studio.runtimeDocumentLoader;void 0;')
+    return {'hostHookForRunAndImmediate':True,'noSrcdocNavigation':True,'opaqueSandbox':True,'nativeBridgeAbsent':True}
+
+
+def hosted_preview_stale(page,mode):
+    page.evaluate("""() => {
+      globalThis.pendingPreviews=[];
+      vb6Studio.runtimeDocumentLoader=html=>new Promise((resolve,reject)=>pendingPreviews.push({html,resolve,reject}));
+      vb6Studio.run();globalThis.oldPreview=vb6Studio.runtimeFrame;
+    }""")
+    check(page.evaluate('pendingPreviews.length===1 && !oldPreview.hasAttribute("srcdoc") && !oldPreview.hasAttribute("src")'))
+    page.evaluate('vb6Studio.stop(false)')
+    page.evaluate('vb6Studio.run();globalThis.currentPreview=vb6Studio.runtimeFrame;pendingPreviews[0].reject(new Error("old host failure"));void 0;')
+    check(page.evaluate('vb6Studio.runtimeFrame===currentPreview && vb6Studio.runState==="running" && !oldPreview.hasAttribute("src")'))
+    # A same-ID workspace replacement also invalidates a delayed successful handle.
+    page.evaluate('vb6Studio.loadProject(structuredClone(vb6Studio.project));pendingPreviews[1].resolve("about:blank#stale");void 0;')
+    check(page.evaluate('!vb6Studio.runtimeFrame && vb6Studio.runState==="design" && !currentPreview.hasAttribute("src")'))
+    page.evaluate('delete vb6Studio.runtimeDocumentLoader;void 0;')
+    return {'lateFailureCannotStopNewRun':True,'sameIDReloadCannotNavigateOldFrame':True}
+
+
+def hosted_preview_failure(page,mode):
+    page.evaluate('vb6Studio.runtimeDocumentLoader=()=>Promise.reject(new Error("fixture host rejection"));vb6Studio.run();void 0;')
+    page.wait_for_function('vb6Studio.runState==="design" && !vb6Studio.runtimeFrame')
+    check(page.evaluate('vb6Studio.statusMessage.textContent.includes("fixture host rejection")'))
+    result=page.evaluate('(async()=>{try{await vb6Studio.designImmediate.execute("? 1");return "unexpected success";}catch(error){return error.message;}})()')
+    check('fixture host rejection' in result)
+    check(page.evaluate('!vb6Studio.designImmediate.frame && !vb6Studio.designImmediate.busy && vb6Studio.runState==="design"'))
+    page.evaluate('delete vb6Studio.runtimeDocumentLoader;void 0;')
+    return {'runFailureVisible':True,'immediateFailureVisible':True,'noInsecureFallback':True}
+
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -854,7 +903,7 @@ try:
                 case(browser,mode,provider+'-plan-question',lambda page,mode,provider=provider:plan_question(page,mode,provider))
                 case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))
                 case(browser,mode,provider+'-queue',lambda page,mode,provider=provider:queued_followups(page,mode,provider))
-            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan),('queue-while-running',queue_while_running),('queue-permission-confirmation',queue_permission_confirmation),('queue-task-lifecycle',queue_task_lifecycle),('review-restore',review_restore),('review-stale-reload',review_stale_and_reload),('review-feedback',review_feedback),('review-last-run',review_last_run)]:case(browser,mode,name,fn)
+            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan),('queue-while-running',queue_while_running),('queue-permission-confirmation',queue_permission_confirmation),('queue-task-lifecycle',queue_task_lifecycle),('review-restore',review_restore),('review-stale-reload',review_stale_and_reload),('review-feedback',review_feedback),('review-last-run',review_last_run),('hosted-preview',hosted_preview),('hosted-preview-stale',hosted_preview_stale),('hosted-preview-failure',hosted_preview_failure)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()
