@@ -22,10 +22,11 @@ function fixture(t, options = {}) {
   let approvals = 0;
   const adapter = createIdeAdapter(ide, {approve: async () => { approvals++; return options.approve !== false; }});
   const conversations = new AgentConversations(adapter, options);
+  conversations.agent.wait = async (_, signal) => signal?.throwIfAborted();
   t.after(() => { conversations.agent.stop(); adapter.dispose(); });
   return {ide, adapter, conversations, get agent() { return conversations.agent; }, approvals: () => approvals};
 }
-const run = (agent, transport, provider = 'openai', rest = {}) => agent.run({provider, model: 'test-model', prompt: 'Implement the task.', transport, ...rest});
+const run = (agent, transport, provider = 'openai', rest = {}) => agent.run({provider, model: 'test-model', prompt: 'Implement the task.', transport, maxRetries: 0, autoCompactTokens: 0, ...rest});
 const reply = provider => async (_, {receive}) => receive(packet(provider));
 const output = (provider, body) => provider === 'openai' ? JSON.parse(body.input.at(-1).output) : provider === 'anthropic' ? JSON.parse(body.messages.at(-1).content[0].content) : body.contents.at(-1).parts[0].functionResponse.response;
 
@@ -46,7 +47,7 @@ for (const provider of providers) test(`tasks: ${provider} resumes a limited tas
   assert.equal(f.agent.canResume, false); assert.equal(f.agent.state, 'completed');
   assert.equal(f.adapter.permissions.snapshot(f.ide.project.id).active, false);
 });
-for (const provider of providers) test(`tasks: ${provider} explicit retry keeps native tool results and does not auto-retry`, async t => {
+for (const provider of providers) test(`tasks: ${provider} disabled automatic retry keeps native tool results for explicit Continue`, async t => {
   const f = fixture(t), original = f.ide.project.modules[0].code; let requests = 0;
   const transport = async (_, {receive}) => {
     requests++;

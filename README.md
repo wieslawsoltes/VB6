@@ -146,6 +146,15 @@ grants permission. **New Task with Context…** lets you review/edit a public-me
 excerpt before creating a fresh draft, without copying signatures, tools or grants.
 Tasks stay memory-only and all operate on the same live project.
 
+**Recovery and context compaction** adds bounded transient-request retries,
+**Compact context** and the local **`/compact`** command. Automatic checkpoints
+start at a configurable 64,000 estimated/reported input tokens by default; this
+active-context threshold is separate from cumulative billed usage. Checkpoints
+preserve the exact goal and latest request, with recent complete native turns,
+and never replay edits, reset usage, or renew permissions. See
+[recovery, checkpoints and Codex CLI comparison](docs/CODING-AGENT-RECOVERY.md).
+
+
 Review each change is the default. Read-only mode excludes mutators/execution;
 Agent mode can authorize selected scopes for one run, up to ten minutes. These
 permissions **never enable or inherit external MCP sharing**. Provider/API keys,
