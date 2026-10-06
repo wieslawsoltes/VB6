@@ -50,6 +50,17 @@ class AutoLayout(unittest.TestCase):
     def change(self,changes):self.page.evaluate('changes=>vb6Studio.autoLayout.apply(changes)',changes)
     def point(self,id):
         return self.page.evaluate('id=>{const v=vb6Studio.designer.formView.controls.find(c=>c.model.id===id),r=v.node.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height};}',id)
+    def spacing_point(self):
+        # Loading a form can return before the MDI document is visible in WebKit.
+        # A raw bounding_box() does not wait for visibility. Hover uses normal
+        # actionability checks (visible, stable and receiving pointer events),
+        # and reacquires the current handle after any selection-overlay refresh.
+        handle=self.page.locator('[data-layout-space="LayoutGap"]').first
+        handle.hover()
+        box=handle.bounding_box()
+        self.assertIsNotNone(box,'The actionable gap handle must have visible bounds')
+        self.assertGreater(box['width'],0);self.assertGreater(box['height'],0)
+        return box['x']+box['width']/2,box['y']+box['height']/2
     def test_default_off_and_options_enable_reflow(self):
         self.page.evaluate(FIXTURE,False);self.assertEqual(self.page.locator('.auto-layout-panel').count(),0)
         self.assertFalse(self.page.evaluate('vb6Studio.docking.model.windows.has("auto-layout")'))
@@ -86,11 +97,23 @@ class AutoLayout(unittest.TestCase):
         self.select(['b']);self.page.locator('[aria-label="Form designer"]').focus();self.page.keyboard.press('ArrowLeft')
         self.assertLess(self.props('b')['Left'],self.props('a')['Left']);self.command('autoLayoutParent');self.assertEqual(self.page.evaluate('[...vb6Studio.designer.selection]'),['frame']);self.done()
     def test_spacing_pointer_preview_cancel_commit_and_undo(self):
-        handle=self.page.locator('[data-layout-space="LayoutGap"]').first;box=handle.bounding_box();x=box['x']+box['width']/2;y=box['y']+box['height']/2
-        self.page.mouse.move(x,y);self.page.mouse.down();self.page.mouse.move(x+20,y,steps=3);self.page.wait_for_function('vb6Studio.designer.formView.controls.find(v=>v.model.id===\"b\").props.Left>vb6Studio.activeModule.form.controls.find(c=>c.id===\"b\").properties.Left');self.page.keyboard.press('Escape');self.page.mouse.up();self.assertEqual(self.props('frame')['LayoutGap'],180)
-        handle=self.page.locator('[data-layout-space="LayoutGap"]').first;box=handle.bounding_box();x=box['x']+box['width']/2;y=box['y']+box['height']/2;count=self.page.evaluate('vb6Studio.history.undoStack.length')
-        self.page.mouse.move(x,y);self.page.mouse.down();self.page.mouse.move(x+20,y,steps=3);self.page.mouse.up();self.assertEqual(self.props('frame')['LayoutGap'],480);self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'),count+1)
-        self.command('undo');self.assertEqual(self.props('frame')['LayoutGap'],180);self.done()
+        before=self.page.evaluate('JSON.stringify(vb6Studio.project)')
+        count=self.page.evaluate('vb6Studio.history.undoStack.length')
+        x,y=self.spacing_point()
+        self.page.mouse.move(x,y);self.page.mouse.down();self.page.mouse.move(x+20,y,steps=3)
+        self.page.wait_for_function('vb6Studio.designer.formView.controls.find(v=>v.model.id==="b").props.Left>vb6Studio.activeModule.form.controls.find(c=>c.id==="b").properties.Left')
+        self.assertEqual(self.page.evaluate('JSON.stringify(vb6Studio.project)'),before,'Preview must not modify authored data')
+        self.page.keyboard.press('Escape');self.page.mouse.up()
+        self.assertEqual(self.props('frame')['LayoutGap'],180)
+        self.assertEqual(self.page.evaluate('JSON.stringify(vb6Studio.project)'),before)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'),count)
+        x,y=self.spacing_point()
+        self.page.mouse.move(x,y);self.page.mouse.down();self.page.mouse.move(x+20,y,steps=3);self.page.mouse.up()
+        self.assertEqual(self.props('frame')['LayoutGap'],480)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'),count+1)
+        self.command('undo');self.assertEqual(self.props('frame')['LayoutGap'],180)
+        self.assertEqual(self.page.evaluate('JSON.stringify(vb6Studio.project)'),before)
+        self.done()
     def test_padding_keyboard_and_hide_guides(self):
         handle=self.page.locator('[data-layout-space="LayoutPaddingLeft"]');handle.focus();handle.press('ArrowRight');self.assertEqual(self.props('frame')['LayoutPaddingLeft'],195)
         self.page.get_by_label('Show layout guides',exact=True).uncheck();self.assertEqual(self.page.locator('[data-layout-space]').count(),0);self.page.get_by_label('Show layout guides',exact=True).check();self.assertGreater(self.page.locator('[data-layout-space]').count(),0);self.done()
