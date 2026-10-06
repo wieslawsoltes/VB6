@@ -1,3 +1,4 @@
+import {recordIdeArtifacts,verifyIdeArtifacts} from './ide-artifacts.mjs';
 import './theme-css.mjs';
 import fs from 'node:fs';import path from 'node:path';import {bundle} from './bundle.mjs';
 const root=path.resolve(import.meta.dirname,'..');process.chdir(root);fs.mkdirSync('dist',{recursive:true});
@@ -17,6 +18,7 @@ function stableExampleIds(project,prefix){
 }
 for(const example of EXAMPLES){const p=stableExampleIds(example.create(),example.id);fs.writeFileSync(`examples/${example.id}.vb6web`,JSON.stringify(p,null,2));fs.writeFileSync(`dist/examples/${example.id}.html`,exportApplication(p));}
 if(fs.existsSync('src/ide/main.js')){const ide=bundle(path.resolve('src/mcp/studio-entry.js'),'VB6Studio'),ideCSS=baseCSS+'\n'+fs.readFileSync('src/ide/ide.css','utf8')+'\n'+['src/editor/editor-advanced.css','src/ide/docking.css','src/ide/command-bars.css','src/ide/debug-windows.css','src/ide/ide-tools.css','src/ide/data-environment.css','src/ide/browser-windows.css','src/mcp/mcp.css','src/agents/agents.css'].filter(p=>fs.existsSync(p)).map(p=>fs.readFileSync(p,'utf8')).join('\n')+'\n'+bevelCSS;const template=fs.readFileSync('src/ide/index.html','utf8');fs.writeFileSync('dist/studio.js',ide);fs.writeFileSync('dist/studio.css',ideCSS);fs.writeFileSync('dist/index.html',template.replace('<!--STYLE-->','<link rel="stylesheet" href="studio.css">').replace('<!--SCRIPT-->','<script src="studio.js"></script>'));const standalone=template.replace('<!--STYLE-->',()=>'<style>'+ideCSS+'</style>').replace('<!--SCRIPT-->',()=>'<script>'+ide.replace(/<\/script/gi,'<\\/script')+'</script>');fs.writeFileSync('dist/VB6-Studio-Web.html',standalone);}
-console.log(`Built runtime (${runtime.length.toLocaleString()} bytes) and ${EXAMPLES.length} standalone applications.`);
-
 await import('./build-ocx-lab.mjs');
+if(process.argv.includes('--update-ide-manifest'))recordIdeArtifacts(root);
+verifyIdeArtifacts(root);
+console.log(`Built runtime (${runtime.length.toLocaleString()} bytes) and ${EXAMPLES.length} standalone applications.`);

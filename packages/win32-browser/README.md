@@ -1,3 +1,7 @@
+# Version 0.5.0: common services and six VB6 samples
+
+Adds 96 registered exports (407 total) across files/paths, Unicode, environment expansion, cooperative events/semaphores, GUIDs, Base64, registry enumeration, atoms and window properties. See [SERVICES.md](SERVICES.md) for contracts, runnable samples and private-browser boundaries. The existing GDI behavior and documented limitations are retained.
+
 # Version 0.4.0: advanced GDI and painting
 
 Adds 80 registered exports (311 total): curved/polygon/path regions, FrameRgn, affine/mapping transforms, logical fonts and real memory-DC text, window shapes, update/paint lifecycles, and a reusable WebGPU raster presenter. See [ADVANCED-GDI.md](ADVANCED-GDI.md) for implementation contracts, measured curve differences, font/backend requirements and remaining native-specific semantics. The detailed 0.1–0.3 descriptions below describe the foundation and are superseded by the advanced guide where an old limitation has been implemented.
@@ -9,7 +13,7 @@ Win32 APIs. Use the ES module in a browser, module worker, or Node.js, or the
 self-contained browser bundle. No VB6 compiler, IDE, DOM framework, native DLL,
 server, or installation on the user's machine is required.
 
-**Version 0.3.0 is a common-API foundation, not complete Win32 emulation.** Its 231
+**Version 0.5.0 is a compatibility subset, not complete Win32 emulation.** Its 407
 registered export names include ANSI/Unicode variants and aliases. An export's
 presence does not imply support for every flag, message, structure, or operating
 system behavior. See [the exact API inventory](API.md) and the boundaries below.
@@ -23,8 +27,8 @@ npm run build
 npm run pack:win32-browser
 ```
 
-This produces `release/vb6-win32-browser-0.4.0.tgz`. Install that archive in another
-project with `npm install /path/to/vb6-win32-browser-0.4.0.tgz`, or copy
+This produces `release/vb6-win32-browser-0.5.0.tgz`. Install that archive in another
+project with `npm install /path/to/vb6-win32-browser-0.5.0.tgz`, or copy
 `packages/win32-browser/src/` as an independent ES-module library. For a script tag,
 copy `packages/win32-browser/dist/win32-browser.js`; its global is `Win32Compat`.
 The archive includes the source, browser bundle, license, and API documentation.
