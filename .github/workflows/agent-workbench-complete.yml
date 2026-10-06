@@ -1,0 +1,155 @@
+name: Complete workbench and recovery integration
+on:
+  push:
+    branches: [feat/agent-change-review-queue]
+    paths: [.github/workflows/agent-workbench-complete.yml]
+permissions:
+  contents: write
+concurrency:
+  group: agent-workbench-complete
+  cancel-in-progress: true
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/feat/agent-change-review-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify both reviewed input trees and merge current main
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = 44d0faa5587fe948a2ab90bec39a3e8e76a58133
+          test "$(git rev-parse 44d0faa5587fe948a2ab90bec39a3e8e76a58133^{tree})" = e7b71ff6fec8345a0015b9a8408cec9ff7a44582
+          test "$(git rev-parse bd4f9cfbb753cf18cdc78d89744f31789a6e5b28^{tree})" = bb8d0f5ca8ff5356e6f2833b8ac1002f823220a1
+          git rev-parse HEAD > publication-base.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          import subprocess
+          result = subprocess.run(['git','merge','--no-commit','--no-ff','bd4f9cfbb753cf18cdc78d89744f31789a6e5b28'])
+          if result.returncode:
+              conflicts=set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+              allowed={'README.md','docs/coding-agents.md','src/agents/agent.js','src/agents/studio.js','tools/coding-agents-browser-tests.py','dist/VB6-Studio-Web.html','dist/studio.js'}
+              assert result.returncode==1 and conflicts and conflicts <= allowed, sorted(conflicts)
+          PY
+      - name: Apply locally reproduced source combination and interaction regressions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, ast
+          class GitFile:
+            def __init__(self, rev, path): self.rev, self.path = rev, path
+            def read_bytes(self): return subprocess.check_output(['git', 'show', self.rev + ':' + self.path])
+            def read_text(self): return self.read_bytes().decode('utf-8')
+          class GitSource:
+            def __init__(self, rev): self.rev = rev
+            def __truediv__(self, path): return GitFile(self.rev, path)
+          HEAD=GitSource('44d0faa5587fe948a2ab90bec39a3e8e76a58133')
+          MAIN=GitSource('bd4f9cfbb753cf18cdc78d89744f31789a6e5b28')
+          DEST=Path.cwd()
+          copy_paths=['desktop/smoke.cjs','docs/CODING-AGENT-WORKBENCH.md','src/agents/agents.css','src/agents/conversations.js','src/agents/changes.js','src/agents/followups.js','src/agents/workbench-view.js','tests/coding-agents-workbench.test.mjs','tests/native-smoke-harness.test.mjs']
+          for rel in copy_paths:
+           p=DEST/rel;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes((HEAD/rel).read_bytes())
+          def replace(text,old,new):
+           assert text.count(old)==1, ('Replacement not unique',old[:120],text.count(old))
+           return text.replace(old,new,1)
+          for rel in ['README.md','docs/coding-agents.md']:
+           heading='\n### Local change review and follow-ups\n'
+           main=(MAIN/rel).read_text();head=(HEAD/rel).read_text()
+           assert heading not in main and head.count(heading)==1
+           (DEST/rel).write_text(main+heading+head.split(heading,1)[1])
+          rel='src/agents/agent.js';s=(MAIN/rel).read_text()
+          s=replace(s,'      const catalog = toolCatalog(tools);','      const catalog = toolCatalog(tools);\n      if (!compactOnly) this.emit(\'run-start\', \'Run started with freshly reviewed permissions.\');')
+          (DEST/rel).write_text(s)
+          rel='src/agents/studio.js';s=(MAIN/rel).read_text();h=(HEAD/rel).read_text()
+          s=replace(s,"import {AgentThreadView} from './thread-view.js';","import {AgentThreadView} from './thread-view.js';\nimport {AgentWorkbenchView} from './workbench-view.js';")
+          s=replace(s,'defaultLimits: loadAgentLimits(),\n','defaultLimits: loadAgentLimits(), getReviewProject: () => ide.project,\n')
+          s=replace(s,"    this.root = el('div', {class: 'agent-panel'});","    this.root = el('div', {class: 'agent-panel'});\n    this.workbench = new AgentWorkbenchView(this, cancellableDialog);")
+          s=replace(s,"        {id: 'permissions', label: 'Permissions', node: this.permissionsPage()}","        {id: 'changes', label: 'Changes', node: this.workbench.changesPage()}, {id: 'queue', label: 'Queue', node: this.workbench.queuePage()},\n        {id: 'permissions', label: 'Permissions', node: this.permissionsPage()}")
+          s=replace(s,"{label: 'Coding agent pages'}","{label: 'Coding agent pages', onSelect: id => { if (id === 'changes') this.workbench.refreshChanges(); }}")
+          s=replace(s,"    this.log = this.threadView.scroller;","    this.log = this.threadView.scroller;\n    this.queueDraftButton = button('Queue message', () => this.workbench.queueDraft());\n    this.queueBadge = button('Queued: 0', () => this.pages.select('queue'));")
+          s=replace(s,"this.sendButton, this.composerStop,\n","this.sendButton, this.composerStop, this.queueDraftButton, this.queueBadge,\n")
+          s=replace(s," — previous project session; start a new task.'); this.refresh();"," — previous project session; start a new task.'); this.refresh(); this.workbench.refreshChanges();")
+          s=replace(s,'  async start(continuation = false, compactOnly = false) {\n    if (!continuation && this.prompt.value.trim() === \'/compact\') compactOnly = true;',"  async start(continuation = false, compactOnly = false, queuedId = null) {\n    // A draft /compact command must never replace a separately selected queue item.\n    if (!continuation && !queuedId && this.prompt.value.trim() === '/compact') compactOnly = true;")
+          s=replace(s,'      const provider = this.provider.value, model = modelId(this.model.value), prompt = this.prompt.value, limits = this.readLimits();',"      const task = this.api.conversations.active, queued = queuedId ? task.followups.get(queuedId) : null;\n      if (queued && (continuation || compactOnly)) throw new Error('Queued messages require a separately confirmed task run.');\n      if (queued && (!['new', 'completed'].includes(task.agent.state) || !task.agent.matchesWorkspace() || !task.followups.inCurrentWorkspace(queued))) throw new Error('Resume or replace the paused/failed task before sending a queued message.');\n      const provider = this.provider.value, model = modelId(this.model.value), prompt = queued ? queued.text : this.prompt.value, limits = this.readLimits();")
+          ql=[l for l in h.splitlines() if 'Send the selected queued message to task' in l][0]
+          s=replace(s,"        ...(compactOnly ? [el('p', {},",ql+"\n        ...(compactOnly ? [el('p', {},")
+          s=replace(s,"      if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');","      if (task !== this.api.conversations.active || queued && (!task.followups.matches(queued) || !task.followups.inCurrentWorkspace(queued))) throw new Error('Task or queued message changed during confirmation. Review it again.');\n      if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');")
+          s=replace(s,'      const run = compactOnly ?', '      this.sendingQueued = queued ? {task, item: queued} : null;\n      const run = compactOnly ?')
+          s=replace(s,"    finally { if (this.pending === setup) this.pending = null; this.refresh(); }","    finally { this.sendingQueued = null; if (this.pending === setup) this.pending = null; this.refresh(); }")
+          start=h.index("    if (event.type === 'user') {");end=h.index("    if (!['delta'",start)
+          s=replace(s,"    if (event.type === 'user') { this.prompt.value = ''; this.api.conversations.active.draft = ''; }\n",h[start:end])
+          s=replace(s,'    if (render) this.render();\n','    if (render) this.render();\n    this.workbench.update();\n')
+          (DEST/rel).write_text(s)
+          rel='src/agents/workbench-view.js';s=(DEST/rel).read_text();s=replace(s,'this.panel.start(false, this.queueList.value)','this.panel.start(false, false, this.queueList.value)');(DEST/rel).write_text(s)
+          rel='tools/coding-agents-browser-tests.py';m=(MAIN/rel).read_text();h=(HEAD/rel).read_text()
+          def functions(text):
+           lines=text.splitlines(True)
+           return {n.name:''.join(lines[n.lineno-1:n.end_lineno]) for n in ast.parse(text).body if isinstance(n,(ast.FunctionDef,ast.ClassDef))}
+          mf,hf=functions(m),functions(h)
+          extra=[name for name in hf if name not in mf]
+          for n in mf.keys()&hf.keys():assert mf[n]==hf[n] or n=='request_retry',n
+          s=replace(m,'def case(browser,mode,name,fn):','\n\n'.join(hf[n] for n in extra)+'\n\n\ndef case(browser,mode,name,fn):')
+          s=replace(s,"                case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))", "                case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))\n                case(browser,mode,provider+'-queued-followups',lambda page,mode,provider=provider:queued_followups(page,mode,provider))")
+          node=next(n for n in ast.walk(ast.parse(h)) if isinstance(n,ast.For) and isinstance(n.target,ast.Tuple) and [getattr(e,'id',None) for e in n.target.elts]==['name','fn'])
+          items=[]
+          for item in node.iter.elts:
+           name,fn=item.elts
+           if isinstance(fn,ast.Name) and fn.id in extra:items.append(ast.get_source_segment(h,item))
+          s=replace(s,"for name,fn in [('automatic-retry',automatic_retry)","for name,fn in ["+','.join(items)+",('automatic-retry',automatic_retry)")
+          compile(s,rel,'exec');(DEST/rel).write_text(s)
+          print('Integrated browser additions:', extra)
+          import base64,lzma,hashlib
+          raw=base64.b64decode('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',validate=True)
+          assert hashlib.sha256(raw).hexdigest()=='ac626170877fba62121ff8bb9b0b7fd9727ef58b45decb46bec429db5bc8f2df'
+          patch=lzma.decompress(raw)
+          subprocess.run(['git','apply','--check','-'],input=patch,check=True)
+          subprocess.run(['git','apply','-'],input=patch,check=True)
+          compile((DEST/'tools/coding-agents-browser-tests.py').read_text(),'coding-agents-browser-tests.py','exec')
+          PY
+      - name: Regenerate combined distributions
+        shell: bash
+        run: npm run build | tee build.log
+      - name: Verify exact locally tested product tree
+        shell: bash
+        run: |
+          git rm -- .github/workflows/agent-workbench-complete.yml
+          git add -- README.md desktop/smoke.cjs dist docs src tests tools/coding-agents-browser-tests.py
+          git diff --cached --check
+          test -z "$(git diff --name-only --diff-filter=U)"
+          test "$(git write-tree)" = c20539d3edea72e54f470913e2c9fdd5760d6cbe
+      - name: Full suite and agent integration tests
+        shell: bash
+        run: |
+          node --check dist/studio.js
+          npm test | tee tests.log
+          npm run test:agents | tee agents.log
+      - name: Publish tested integration without temporary workflow
+        shell: bash
+        run: |
+          git commit -m 'feat(agents): finish workbench review and queues alongside context recovery'
+          test "$(git ls-remote origin refs/heads/feat/agent-change-review-queue | cut -f1)" = "$(cat publication-base.txt)"
+          git push origin HEAD:feat/agent-change-review-queue
+          git rev-parse HEAD > head.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workbench-recovery-integrated
+          path: |
+            build.log
+            tests.log
+            agents.log
+            head.txt
+            tree.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
