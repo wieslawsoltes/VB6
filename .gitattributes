@@ -1,0 +1,11 @@
+# Keep inputs to deterministic JavaScript/CSS/HTML bundles identical on every host.
+# Native VB source/resource formats retain their existing byte/encoding policies.
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+
+# The exact third-party notice is embedded verbatim in the LF CSS source.
+/LICENSES/98.css.txt text eol=lf

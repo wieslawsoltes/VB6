@@ -55,10 +55,16 @@
     "pack:layout": "node tools/pack-layout.mjs",
     "test:chatgpt": "node --test tests/chatgpt-*.test.mjs",
     "test:chatgpt:browser": "python tools/chatgpt-browser-tests.py && python tools/chatgpt-signin-browser-tests.py",
+    "build:update-ide-artifacts": "node tools/build.mjs --update-ide-manifest",
+    "verify:ide-artifacts": "node tools/ide-artifacts.mjs",
+    "preserve": "npm run build",
+    "pretest": "npm run build",
+    "pretest:agents": "npm run build",
     "build:compute": "node tools/build-compute.mjs",
     "compile:compute": "node tools/compile-compute.mjs",
     "test:compute": "node --test tests/compute*.test.mjs",
-    "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py"
+    "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py",
+    "pretest:chatgpt": "npm run build"
   },
   "engines": {
     "node": ">=22"
