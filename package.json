@@ -9,6 +9,8 @@
     "test": "node --test tests/*.test.mjs",
     "serve": "node tools/serve.mjs",
     "validate": "npm run build && npm test && python tools/browser-tests.py && python tools/browser-parity-tests.py && npm run test:visual && npm run test:features && npm run test:recovery && npm run test:finalization && npm run test:boundaries && npm run test:windows && npm run test:mcp:browser && npm run test:project-browser && npm run test:mcp:agent && python tools/coding-agents-browser-tests.py",
+    "test:themes": "node --test tests/ide-themes.test.mjs",
+    "test:themes:browser": "python tools/browser-theme-tests.py",
     "test:visual": "python tools/browser-visual-tests.py",
     "test:visual:goldens": "python tools/browser-visual-tests.py --check-goldens",
     "test:features": "python tools/browser-features-04.py",

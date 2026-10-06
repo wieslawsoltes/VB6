@@ -6,6 +6,10 @@ A browser-native classic Visual Basic development environment, source runtime an
 
 **Not a complete, native or pixel-identical Microsoft VB6 replacement.** Detailed supported behavior and limits are in [Compatibility](docs/COMPATIBILITY.md), with [release notes](docs/RELEASE-NOTES-0.6.0.md) and [validation](docs/TESTING.md).
 
+## Optional IDE themes
+
+**Tools → Options → General → Appearance → IDE theme** now offers **Fluent WinUI 3**, **macOS 26**, **X11 Motif** and **X11 CDE**, each in light and dark variants. Classic VB6 remains the default. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
+
 ## Debugger and runtime execution control
 
 The classic debugger now includes statement-level stepping and source highlighting, all three Error Trapping modes, recoverable error breaks with retained live frames, scoped break watches, column-aware Run to Cursor and Set Next Statement, and improved caller-frame inspection and Immediate assignment. See the [debugger guide](docs/DEBUGGER.md) for shortcuts, runtime APIs, validation, and remaining compatibility limits.

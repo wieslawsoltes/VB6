@@ -1,10 +1,10 @@
 import {el} from '../core/core.js';
-import {SYSTEM_COLOR_NAMES,cssColor,colorValue,getTheme} from '../theme/theme.js';
+import {SYSTEM_COLOR_NAMES,colorValue,getTheme} from '../theme/theme.js';
 import {modal,tabbedPages} from './ui.js';
 const PALETTE=['ffffff','e0e0e0','c0c0c0','808080','404040','000000','ff0000','800000','ffff00','808000','00ff00','008000','00ffff','008080','0000ff','000080','ff00ff','800080','ffc0c0','ffe0c0','ffffc0','c0ffc0','c0ffff','c0c0ff','ffc0ff','ff8080','ffc080','ffff80','80ff80','80ffff','8080ff','ff80ff','ff8040','804000','808040','004000','004040','000040','400040','ff80c0','c08040','8080c0','0080ff','00ff80','80ff00','ff0080','804080','a0a0a0'];
 export function oleHex(value){return '&H'+(Number(value)>>>0).toString(16).toUpperCase().padStart(8,'0')+'&';}
 export function parsePropertyNumber(text){const s=String(text).trim();if(/^&H[\da-f]{1,8}&?$/i.test(s))return parseInt(s.slice(2).replace(/&$/,''),16)|0;if(/^#[\da-f]{6}$/i.test(s)){const n=parseInt(s.slice(1),16);return ((n&255)<<16)|(n&65280)|(n>>>16);}const n=Number(s);if(!s||!Number.isFinite(n))throw new Error('Enter a valid numeric value.');return n;}
-export function showColorPalette(anchor,value,onPick){
+export function showColorPalette(anchor,value,onPick,applicationTheme){
   const document=anchor.ownerDocument,window=document.defaultView,{innerWidth,innerHeight}=window;
   document.querySelectorAll('.property-color-popup').forEach(n=>n.dismiss?.());
   const previous=document.activeElement,theme=getTheme(anchor).id,abort=new AbortController(),popup=el('div',{class:'property-color-popup','data-vb-theme':theme,role:'dialog','aria-label':'Color palette'});
@@ -12,7 +12,7 @@ export function showColorPalette(anchor,value,onPick){
   const colors=el('div',{class:'palette-grid',role:'listbox','aria-label':'Palette colors'});
   PALETTE.forEach((hex,index)=>{const n=parsePropertyNumber('#'+hex),button=el('button',{class:'palette-color',title:oleHex(n),'aria-label':oleHex(n),role:'option','aria-selected':Number(value)===n,style:{background:'#'+hex},onclick:()=>finish(n)});button.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)){e.preventDefault();e.stopPropagation();const target=e.key==='Home'?0:e.key==='End'?47:Math.max(0,Math.min(47,index+({ArrowLeft:-1,ArrowRight:1,ArrowUp:-8,ArrowDown:8}[e.key])));colors.children[target].focus();}});colors.append(button);});
   const system=el('div',{class:'system-color-list',role:'listbox','aria-label':'System colors'});
-  SYSTEM_COLOR_NAMES.forEach((name,i)=>{const n=(0x80000000+i)|0;system.append(el('button',{role:'option','aria-selected':Number(value)===n,'data-system-color':i,onclick:()=>finish(n)},el('span',{class:'color-swatch',style:{background:cssColor(n)}}),name));});
+  SYSTEM_COLOR_NAMES.forEach((name,i)=>{const n=(0x80000000+i)|0;system.append(el('button',{role:'option','aria-selected':Number(value)===n,'data-system-color':i,onclick:()=>finish(n)},el('span',{class:'color-swatch',style:{background:colorValue(n,'#c0c0c0',applicationTheme||theme)}}),name));});
   system.addEventListener('keydown',e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();const index=[...system.children].indexOf(document.activeElement);system.children[(index+(e.key==='ArrowDown'?1:-1)+system.children.length)%system.children.length]?.focus();}});
   popup.append(tabbedPages([{id:'palette',label:'Palette',node:colors},{id:'system',label:'System',node:system}],{selected:(Number(value)>>>0)&0x80000000?'system':'palette',label:'Color categories'}));
   document.body.append(popup);const r=anchor.getBoundingClientRect();popup.style.left=Math.max(2,Math.min(innerWidth-popup.offsetWidth-2,r.left))+'px';popup.style.top=Math.max(2,Math.min(innerHeight-popup.offsetHeight-2,r.bottom))+'px';

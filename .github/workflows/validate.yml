@@ -64,10 +64,16 @@ jobs:
         env:
           VB6_BROWSER: ${{ matrix.browser }}
         run: npm run test:windows
+      - name: Optional IDE themes, runtime isolation and appearance persistence
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:themes:browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: browser-windows-${{ matrix.browser }}
-          path: reports/browser-windows
+          path: |
+            reports/browser-windows
+            reports/ide-themes
           if-no-files-found: ignore
           retention-days: 7

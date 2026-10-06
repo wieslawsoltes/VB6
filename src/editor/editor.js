@@ -10,7 +10,7 @@ import {tokenize} from '../language/lexer.js';
 import {DEFAULT_EVENTS,CONTROL_EVENTS} from '../controls/controls.js';
 import {Signal,el,lower} from '../core/core.js';
 import {icon} from '../theme/icons.js';
-import {normalizeAppearance} from '../theme/theme.js';
+import {normalizeIdeAppearance as normalizeAppearance} from '../theme/ide-appearance.js';
 import {indexSource,positionAt,offsetAt,sourceRange,replaceRange,textChange,mapOffset} from './projection.js';
 import {KEYWORDS,BUILTINS,MEMBERS,highlightLine,procedures,formatCode} from './language-service.js';
 

@@ -51,3 +51,6 @@ reports/layout/
 # Optional standalone compute package output
 /artifacts/vb6-compute/
 reports/compute/
+
+# Optional IDE-theme screenshots and browser evidence (CI artifacts).
+reports/ide-themes/
