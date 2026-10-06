@@ -50,14 +50,29 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       check('MDI mode restores document without replacement',await js('editorBefore.root.ownerDocument===document && vb6Studio.editor===editorBefore'));
       await js('vb6Studio.setWindowMode("hybrid");void 0;');
 
-      await js('vb6Studio.run()');
-      await until(() => js('vb6Studio.runtimeFrame?.src.startsWith("vb6://app/preview/")'), 'sandbox preview document');
-      await until(() => root.webContents.mainFrame.frames.some(f => f.url.startsWith('vb6://app/preview/')), 'preview frame');
-      const frame = root.webContents.mainFrame.frames.find(f => f.url.startsWith('vb6://app/preview/'));
-      await until(() => frame.executeJavaScript('!!globalThis.vb6Application'), 'runtime preview started');
-      check('IDE preview runs under document-specific CSP', true);
-      check('IDE preview cannot access native bridge', await frame.executeJavaScript('typeof vb6Native === "undefined"'));
-      await js('vb6Studio.stop()');
+      report.previewNavigations=[];
+      const navigated=(event,url)=>report.previewNavigations.push(typeof url==='string'?url:event.url);
+      root.webContents.on('did-start-navigation',navigated);
+      try {
+        const urls=new Set();
+        for (let pass=1;pass<=2;pass++) {
+          check('native preview '+pass+' registers its document',await js('vb6Studio.run();vb6Studio.nativePreviewReady'));
+          const url=await js('vb6Studio.runtimeFrame.src');
+          check('native preview '+pass+' has no srcdoc navigation',await js('!vb6Studio.runtimeFrame.hasAttribute("srcdoc")'));
+          check('native preview '+pass+' uses a fresh host document',url.startsWith('vb6://app/preview/')&&!urls.has(url));urls.add(url);
+          await until(() => root.webContents.mainFrame.frames.some(f => f.url===url), 'preview frame');
+          const frame = root.webContents.mainFrame.frames.find(f => f.url===url);
+          await until(() => frame.executeJavaScript('!!globalThis.vb6Application'), 'runtime preview started');
+          check('IDE preview '+pass+' runs under document-specific CSP', true);
+          check('IDE preview '+pass+' cannot access native bridge', await frame.executeJavaScript('typeof vb6Native === "undefined"'));
+          check('IDE preview '+pass+' rejects arbitrary inline scripts',await frame.executeJavaScript(`(async()=>{
+            const script=document.createElement('script');script.textContent='globalThis.untrustedPreviewScript=true';document.body.append(script);
+            await new Promise(resolve=>setTimeout(resolve,25));return !globalThis.untrustedPreviewScript;
+          })()`));
+          await js('vb6Studio.stop()');
+        }
+        check('desktop preview never starts or commits srcdoc',!report.previewNavigations.includes('about:srcdoc'));
+      } finally { root.webContents.removeListener('did-start-navigation',navigated); }
     } else {
       await until(() => js('!!globalThis.vb6Application?.nativeWindows'), 'application host');
       check('embedded SQLite executes with strict WebAssembly-only CSP', await js(`(async()=>{
@@ -180,6 +195,10 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
     if (reportPath) fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
     app.quit();
   } catch (error) {
+    try {
+      report.frames=root.webContents.mainFrame.framesInSubtree.map(f=>({url:f.url,detached:f.detached,id:f.frameTreeNodeId}));
+      if(manifest.kind==='studio') report.preview=await js(`(()=>{const s=vb6Studio,f=s.runtimeFrame;return {runState:s.runState,frame:f&&{src:f.src,srcdoc:f.hasAttribute('srcdoc'),connected:f.isConnected},diagnostics:s.diagnostics};})()`);
+    } catch (diagnosticError) { report.diagnosticError=diagnosticError.message; }
     report.error = error.stack || error.message;
     if (reportPath) fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
     app.exit(1);
