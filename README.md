@@ -269,3 +269,7 @@ The source VM preserves scalar subtype and typed-versus-Variant origin through e
 ### Advanced browser Win32 GDI
 
 `@vb6/win32-browser` 0.4.0 exposes 311 Win32 export names and adds curved/polygon/path regions, transforms, memory-DC fonts, owned window shapes and paint/update lifecycles. GDI rasters can now use the reusable WebGPU texture presenter with an explicit Canvas2D fallback. The classic Win32 API Workbench includes a **Paths and text** example. See [advanced contracts and measured compatibility boundaries](packages/win32-browser/ADVANCED-GDI.md). No full native raster/font certification or npm registry publication is claimed.
+
+## Optional anchoring and automatic layout
+
+Enable **Tools → Options → General → Layout Extensions → Enable anchoring and automatic layout (this project)** to expose Windows Forms-style edge anchoring, docking and flow layout in the classic designer, Properties, code and exports. The extension is **off and hidden by default**. The reusable, dependency-free `@vb6/auto-layout` package includes ES module/browser builds and TypeScript declarations. See [the layout guide](docs/anchoring-layout.md) and [standalone package](packages/auto-layout/README.md) for semantics, export compatibility and validation.

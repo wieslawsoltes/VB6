@@ -1,3 +1,4 @@
+import {LAYOUT_CONSTANTS} from '../layout/contract.js';
 import {installScalarLibrary} from './scalar-library.js';
 import {errorDescription} from './error-messages.js';
 import {stringLibrary} from './strings.js';
@@ -64,7 +65,7 @@ export function createLibrary(vm) {
     SaveSetting:(app,section,key,value)=>vm.saveSetting(app,section,key,value),GetSetting:(app,section,key,def='')=>vm.getSetting(app,section,key,def),DeleteSetting:(app,section,key)=>vm.deleteSetting(app,section,key),
     Beep:()=>vm.host.beep?.(),Environ:()=>'',Command:()=>'',Shell:()=>{throw new VBError('Launching native executables is not permitted in the browser runtime',453);},
   };
-  const map=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),v]));
+  const map=new Map(Object.entries({...VB_CONSTANTS,...(vm.program.settings?.anchoring===true?LAYOUT_CONSTANTS:{})}).map(([k,v])=>[lower(k),v]));
   for(const [name,fn]of Object.entries(functions)){if(name in BUILTIN_SIGNATURES)fn.vbParams=signatureParameters(BUILTIN_SIGNATURES[name]);if(['IsObject','IsMissing','IsArray','IsError','IsEmpty','IsNull','TypeName','VarType','CallByName'].includes(name))fn.vbRawArgs=true;map.set(lower(name),fn);}
   functions.CallByName.vbParams=[{name:'object'},{name:'procname'},{name:'calltype'}];functions.CallByName.vbVariadic=true;
   // The $ forms are String-returning intrinsics; unlike Variant forms they reject Null.

@@ -794,7 +794,7 @@ button[data-browser-detach] {--vb-caption-mask:var(--vb-caption-detach)}
  :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):disabled > .icon::after,
  :is(.window-buttons,.tool-caption) button[data-browser-detach]:disabled::after {background:GrayText}
 }
-</style></head><body><div id="app"></div><script id="vb6-project" type="application/json">{"schema":1,"id":"example_graphics_1","name":"GraphicsLab","description":"","startup":"frmGraphics","modules":[{"id":"example_graphics_2","name":"frmGraphics","kind":"form","code":"Option Explicit\nPrivate Sub Form_Load()\n    DrawScene\nEnd Sub\nPrivate Sub cmdDraw_Click()\n    DrawScene\nEnd Sub\nPrivate Sub DrawScene()\n    Dim i As Long\n    Dim x As Double, y As Double\n    Dim color As Long\n    Picture1.Cls\n    Randomize\n    For i = 0 To 89\n        x = 16 + i * 6\n        y = 115 - Sin(i / 11) * 70 - Rnd * 12\n        color = RGB(25 + i * 2, 70, 160)\n        Picture1.Line (x, 220)-(x + 4, y), color, BF\n    Next i\n    Picture1.Line (14, 220)-(560, 220), vbBlack\n    Picture1.Circle (500, 53), 24, vbBlue\n    Picture1.CurrentX = 20\n    Picture1.CurrentY = 18\n    Picture1.Print \"90 source-driven primitives\"\n    Debug.Print \"Graphics scene rendered.\"\nEnd Sub\n","form":{"id":"example_graphics_3","name":"frmGraphics","type":"Form","properties":{"Name":"frmGraphics","Caption":"Graphics Lab","ClientWidth":9210,"ClientHeight":5700,"Width":9120,"Height":6450,"Left":300,"Top":300,"StartUpPosition":2,"BorderStyle":2,"BackColor":-2147483633,"ForeColor":-2147483640,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ScaleMode":1,"KeyPreview":0,"Visible":-1,"Enabled":-1},"controls":[{"id":"example_graphics_4","name":"lblTitle","type":"Label","parent":null,"properties":{"Name":"lblTitle","Left":240,"Top":240,"Width":8550,"Height":375,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":13,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Visual Basic graphics methods","BackStyle":0,"Alignment":0}},{"id":"example_graphics_5","name":"Picture1","type":"PictureBox","parent":null,"properties":{"Name":"Picture1","Left":240,"Top":840,"Width":8730,"Height":3750,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","ScaleMode":3,"AutoRedraw":-1,"BorderStyle":1}},{"id":"example_graphics_6","name":"lblInfo","type":"Label","parent":null,"properties":{"Name":"lblInfo","Left":240,"Top":4800,"Width":6090,"Height":600,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Line, Circle, RGB, Cls and Print\nWebGPU acceleration with a Canvas2D fallback.","BackStyle":0,"Alignment":0}},{"id":"example_graphics_7","name":"cmdDraw","type":"CommandButton","parent":null,"properties":{"Name":"cmdDraw","Left":6930,"Top":4890,"Width":2040,"Height":450,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"\u0026Draw again","Default":-1,"Cancel":0}}],"menus":[]}}],"settings":{"snapToGrid":true,"gridSize":120,"showGrid":true,"renderer":"auto","tabWidth":4,"requireVariableDeclaration":true},"references":[],"assets":{},"vfs":{"files":{},"directories":["/"]},"appSettings":{}}</script><script>/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */
+</style></head><body><div id="app"></div><script id="vb6-project" type="application/json">{"schema":1,"id":"example_graphics_1","name":"GraphicsLab","description":"","startup":"frmGraphics","modules":[{"id":"example_graphics_2","name":"frmGraphics","kind":"form","code":"Option Explicit\nPrivate Sub Form_Load()\n    DrawScene\nEnd Sub\nPrivate Sub cmdDraw_Click()\n    DrawScene\nEnd Sub\nPrivate Sub DrawScene()\n    Dim i As Long\n    Dim x As Double, y As Double\n    Dim color As Long\n    Picture1.Cls\n    Randomize\n    For i = 0 To 89\n        x = 16 + i * 6\n        y = 115 - Sin(i / 11) * 70 - Rnd * 12\n        color = RGB(25 + i * 2, 70, 160)\n        Picture1.Line (x, 220)-(x + 4, y), color, BF\n    Next i\n    Picture1.Line (14, 220)-(560, 220), vbBlack\n    Picture1.Circle (500, 53), 24, vbBlue\n    Picture1.CurrentX = 20\n    Picture1.CurrentY = 18\n    Picture1.Print \"90 source-driven primitives\"\n    Debug.Print \"Graphics scene rendered.\"\nEnd Sub\n","form":{"id":"example_graphics_3","name":"frmGraphics","type":"Form","properties":{"Name":"frmGraphics","Caption":"Graphics Lab","ClientWidth":9210,"ClientHeight":5700,"Width":9120,"Height":6450,"Left":300,"Top":300,"StartUpPosition":2,"BorderStyle":2,"BackColor":-2147483633,"ForeColor":-2147483640,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ScaleMode":1,"KeyPreview":0,"Visible":-1,"Enabled":-1},"controls":[{"id":"example_graphics_4","name":"lblTitle","type":"Label","parent":null,"properties":{"Name":"lblTitle","Left":240,"Top":240,"Width":8550,"Height":375,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":13,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Visual Basic graphics methods","BackStyle":0,"Alignment":0}},{"id":"example_graphics_5","name":"Picture1","type":"PictureBox","parent":null,"properties":{"Name":"Picture1","Left":240,"Top":840,"Width":8730,"Height":3750,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":16777215,"ToolTipText":"","Tag":"","ScaleMode":3,"AutoRedraw":-1,"BorderStyle":1}},{"id":"example_graphics_6","name":"lblInfo","type":"Label","parent":null,"properties":{"Name":"lblInfo","Left":240,"Top":4800,"Width":6090,"Height":600,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Line, Circle, RGB, Cls and Print\nWebGPU acceleration with a Canvas2D fallback.","BackStyle":0,"Alignment":0}},{"id":"example_graphics_7","name":"cmdDraw","type":"CommandButton","parent":null,"properties":{"Name":"cmdDraw","Left":6930,"Top":4890,"Width":2040,"Height":450,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"\u0026Draw again","Default":-1,"Cancel":0}}],"menus":[]}}],"settings":{"anchoring":false,"snapToGrid":true,"gridSize":120,"showGrid":true,"renderer":"auto","tabWidth":4,"requireVariableDeclaration":true},"references":[],"assets":{},"vfs":{"files":{},"directories":["/"]},"appSettings":{}}</script><script>/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */
 (()=>{'use strict';
 const __modules=[];
 
@@ -6227,8 +6227,385 @@ class ResourceStore {
 return {ResourceStore};
 })();
 
-/* scalar-library.js */
+/* ..\..\packages\auto-layout\src\index.js */
 __modules[54]=(()=>{
+
+/**
+ * Renderer-independent layout in arbitrary logical units. No DOM, global state,
+ * clock, or dependencies. Baselines never change as a side effect of arrange().
+ */
+const AnchorStyles = Object.freeze({None:0, Top:1, Bottom:2, Left:4, Right:8, All:15});
+const DockStyle = Object.freeze({None:0, Top:1, Bottom:2, Left:3, Right:4, Fill:5});
+const LayoutMode = Object.freeze({Absolute:0, Horizontal:1, Vertical:2, Wrap:3});
+const own = (o,k) => Object.prototype.hasOwnProperty.call(o,k);
+function finite(v, fallback = 0, label = 'geometry') {
+  if (v === undefined) return fallback;
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new TypeError(`${label} must be finite`);
+  return v;
+}
+function nonnegative(v, fallback = 0, label = 'size') {
+  v = finite(v, fallback, label);
+  if (v < 0) throw new RangeError(`${label} must be nonnegative`);
+  return v;
+}
+function enumeration(value, values, fallback, label) {
+  if (value === undefined) return fallback;
+  if (typeof value === 'string') {
+    const key = Object.keys(values).find(k => k.toLowerCase() === value.toLowerCase());
+    if (key !== undefined) return values[key];
+  }
+  if (Number.isInteger(value) && Object.values(values).includes(value)) return value;
+  throw new RangeError(`Invalid ${label}: ${String(value)}`);
+}
+function parseAnchor(value = 5) {
+  if (typeof value === 'string') {
+    if (/^\d+$/.test(value.trim())) return parseAnchor(Number(value));
+    let bits = 0;
+    const names = value.split(/\s*(?:,|\||\bOr\b)\s*/i);
+    if (!names.length) throw new RangeError('Invalid Anchor');
+    for (let name of names) {
+      name = name.trim().replace(/^(?:AnchorStyles\.|vbAnchor)/i,'');
+      const key = Object.keys(AnchorStyles).find(k => k.toLowerCase() === name.toLowerCase());
+      if (key === undefined) throw new RangeError(`Invalid Anchor edge: ${name}`);
+      bits |= AnchorStyles[key];
+    }
+    return bits;
+  }
+  if (!Number.isInteger(value) || value < 0 || value > 15) throw new RangeError('Anchor must be an integer from 0 to 15');
+  return value;
+}
+function formatAnchor(value) {
+  const bits = parseAnchor(value);
+  return ['Top','Bottom','Left','Right'].filter(k => bits & AnchorStyles[k]).join(', ') || 'None';
+}
+function parseDock(value) { return enumeration(value,DockStyle,0,'Dock'); }
+function parseLayoutMode(value) { return enumeration(value,LayoutMode,0,'LayoutMode'); }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function limitPair(min, max, label) {
+  min = nonnegative(min,0,`min${label}`);
+  max = max === undefined || max === 0 || max === Infinity ? Infinity : nonnegative(max,0,`max${label}`);
+  if (max < min) throw new RangeError(`max${label} must be >= min${label}`);
+  return [min,max];
+}
+function box(v = 0, label = 'insets') {
+  if (typeof v === 'number') { v = nonnegative(v,0,label); return [v,v,v,v]; }
+  if (Array.isArray(v)) {
+    if (![1,2,4].includes(v.length)) throw new RangeError(`${label} needs 1, 2 or 4 values`);
+    const a = v.map(x => nonnegative(x,0,label));
+    return a.length === 1 ? [a[0],a[0],a[0],a[0]] : a.length === 2 ? [a[0],a[1],a[0],a[1]] : a;
+  }
+  if (v && typeof v === 'object') return ['top','right','bottom','left'].map(k => nonnegative(v[k],0,label));
+  throw new TypeError(`Invalid ${label}`);
+}
+/** All coordinates refer to the parent's client rectangle, not its outer frame. */
+function solveAnchor(bounds, baselineClient, client, anchor = 5, limits = {}, out = {}) {
+  const mask = parseAnchor(anchor), x = finite(bounds.x), y = finite(bounds.y);
+  const w = nonnegative(bounds.width), h = nonnegative(bounds.height);
+  const bw = nonnegative(baselineClient.width), bh = nonnegative(baselineClient.height);
+  const [minW,maxW] = limitPair(limits.minWidth,limits.maxWidth,'Width');
+  const [minH,maxH] = limitPair(limits.minHeight,limits.maxHeight,'Height');
+  const dx = nonnegative(client.width) - bw, dy = nonnegative(client.height) - bh;
+  const dw = clamp(w + ((mask & 12) === 12 ? dx : 0),minW,maxW);
+  const dh = clamp(h + ((mask & 3) === 3 ? dy : 0),minH,maxH);
+  out.x = x + finite(client.x) - finite(baselineClient.x) + ((mask & 4) ? 0 : (mask & 8) ? dx + w - dw : (dx + w - dw)/2);
+  out.y = y + finite(client.y) - finite(baselineClient.y) + ((mask & 1) ? 0 : (mask & 2) ? dy + h - dh : (dy + h - dh)/2);
+  out.width = dw; out.height = dh;
+  return out;
+}
+
+// Numeric columns (structure of arrays) keep the hot anchoring pass allocation-free.
+const COLS = ['x','y','w','h','bw','bh','anchor','dock','mode','minW','minH','maxW','maxH',
+  'pt','pr','pb','pl','mt','mr','mb','ml','gap','grow','shrink','basis','align','justify'];
+const aligns = ['start','center','end','stretch'];
+const justifies = ['start','center','end','space-between','space-around','space-evenly'];
+function named(value, values, fallback, label) {
+  const n = value === undefined ? fallback : values.indexOf(value);
+  if (n < 0) throw new RangeError(`Invalid ${label}: ${String(value)}`);
+  return n;
+}
+function normalizeNode(n,parentWidth,parentHeight) {
+  const b=n.bounds||n,v={};
+  v.x=finite(b.x);v.y=finite(b.y);v.w=nonnegative(b.width);v.h=nonnegative(b.height);
+  v.bw=nonnegative(n.baselineWidth,parentWidth);v.bh=nonnegative(n.baselineHeight,parentHeight);
+  v.anchor=parseAnchor(n.anchor);v.dock=parseDock(n.dock);v.mode=parseLayoutMode(n.layout);
+  [v.minW,v.maxW]=limitPair(n.minWidth,n.maxWidth,'Width');[v.minH,v.maxH]=limitPair(n.minHeight,n.maxHeight,'Height');
+  [v.pt,v.pr,v.pb,v.pl]=box(n.padding,'padding');[v.mt,v.mr,v.mb,v.ml]=box(n.margin,'margin');
+  v.gap=nonnegative(n.gap);v.grow=nonnegative(n.grow);v.shrink=nonnegative(n.shrink,1);
+  v.basis=n.basis===undefined?-1:nonnegative(n.basis);v.align=named(n.align,aligns,0,'align');v.justify=named(n.justify,justifies,0,'justify');
+  return v;
+}
+/**
+ * A compiled, mutable layout tree. IDs may be strings or numbers. Parent IDs must
+ * exist; roots use parent:null. Rectangles are parent-local, in the caller's units.
+ *
+ * arrange() returns the same reusable result object. Copy its buffers to retain
+ * an old frame. Changes are indices in topological order. No pixel rounding is
+ * applied: renderers round only at the final raster boundary.
+ */
+class LayoutEngine {
+  constructor(nodes = [], options = {}) {
+    this.options = {width:nonnegative(options.width),height:nonnegative(options.height),padding:box(options.padding),layout:parseLayoutMode(options.layout),gap:nonnegative(options.gap),justify:named(options.justify,justifies,0,'justify')};
+    this.revision = 0;
+    this.setNodes(nodes);
+  }
+  setNodes(nodes) {
+    if (!Array.isArray(nodes)) throw new TypeError('nodes must be an array');
+    const count = nodes.length, index = new Map(), records = new Array(count);
+    const children = Array.from({length:count+1},()=>[]), parents = new Int32Array(count);
+    for (let i=0;i<count;i++) {
+      const n = nodes[i];
+      if (!n || !['string','number'].includes(typeof n.id) || (typeof n.id === 'number' && !Number.isFinite(n.id))) throw new TypeError('Each node needs a finite numeric or string id');
+      if (index.has(n.id)) throw new Error(`Duplicate layout id: ${n.id}`);
+      index.set(n.id,i); records[i] = {...n,bounds:{...(n.bounds||n)},...(n.padding&&typeof n.padding==='object'?{padding:Array.isArray(n.padding)?n.padding.slice():{...n.padding}}:{}),...(n.margin&&typeof n.margin==='object'?{margin:Array.isArray(n.margin)?n.margin.slice():{...n.margin}}:{})};
+    }
+    for (let i=0;i<count;i++) {
+      const p = records[i].parent;
+      const pi = p === undefined || p === null ? count : index.get(p);
+      if (pi === undefined) throw new Error(`Missing layout parent: ${p}`);
+      parents[i] = pi; children[pi].push(i);
+    }
+    // Breadth-first topological order is iterative, even for very deep trees.
+    const order = children[count].slice();
+    for (let q=0;q<order.length;q++) for (const c of children[order[q]]) order.push(c);
+    if (order.length !== count) throw new Error('Cyclic layout parent relationship');
+    const data = Object.fromEntries(COLS.map(k=>[k,new Float64Array(count+1)]));
+    const visible = new Uint8Array(count), participant = new Uint8Array(count);
+    const opt = this.options;
+    data.w[count]=opt.width; data.h[count]=opt.height; data.mode[count]=parseLayoutMode(opt.layout); data.gap[count]=nonnegative(opt.gap); data.justify[count]=typeof opt.justify==='number'?opt.justify:named(opt.justify,justifies,0,'justify');
+    [data.pt[count],data.pr[count],data.pb[count],data.pl[count]]=opt.padding;
+    data.maxW.fill(Infinity); data.maxH.fill(Infinity);
+    for (const i of order) {
+      const n=records[i],p=parents[i],v=normalizeNode(n,Math.max(0,data.w[p]-data.pl[p]-data.pr[p]),Math.max(0,data.h[p]-data.pt[p]-data.pb[p]));
+      for(const col of COLS)data[col][i]=v[col];
+      visible[i]=n.visible!==false?1:0;participant[i]=n.participate!==false?1:0;
+    }
+    // Publish only after validation; a failed setNodes leaves the old tree usable.
+    this.nodes=records;this.index=index;this.children=children;this.parents=parents;
+    this.order=Int32Array.from(order);this.data=data;this.visible=visible;this.participant=participant;this.count=count;
+    this.rects=new Float64Array((count+1)*4);this.previous=new Float64Array(count*4);this.previous.fill(NaN);
+    this.changed=new Int32Array(count);this.work=new Float64Array(count);this.flex=new Float64Array(count);this.frozen=new Uint8Array(count);
+    this.flow=[];this.stack=[];this.result={rects:this.rects,changed:this.changed,changedCount:0,visited:0,revision:++this.revision};
+    this.dirty=true;this.lastWidth=NaN;this.lastHeight=NaN;
+    return this;
+  }
+  /** An explicit application/user edit; never call this for solver-produced bounds. */
+  update(id, patch) {
+    const i=this.index.get(id);if(i===undefined)throw new Error(`Unknown layout id: ${id}`);
+    const old=this.nodes[i],d=this.data;
+    const next={...old,baselineWidth:d.bw[i],baselineHeight:d.bh[i],...patch,bounds:{...old.bounds,...patch.bounds}};
+    if(next.id!==old.id||next.parent!==old.parent){
+      const nodes=this.nodes.map((n,j)=>({...n,baselineWidth:d.bw[j],baselineHeight:d.bh[j]}));
+      if(next.parent!==old.parent){const p=next.parent==null?this.count:this.index.get(next.parent);if(p===undefined)throw new Error(`Missing layout parent: ${next.parent}`);next.baselineWidth=patch.baselineWidth??Math.max(0,this.rects[p*4+2]-d.pl[p]-d.pr[p]);next.baselineHeight=patch.baselineHeight??Math.max(0,this.rects[p*4+3]-d.pt[p]-d.pb[p]);}
+      nodes[i]=next;return this.setNodes(nodes);
+    }
+    // Validate a detached record completely before changing any live column.
+    if(next.padding&&typeof next.padding==='object')next.padding=Array.isArray(next.padding)?next.padding.slice():{...next.padding};
+    if(next.margin&&typeof next.margin==='object')next.margin=Array.isArray(next.margin)?next.margin.slice():{...next.margin};
+    const v=normalizeNode(next,next.baselineWidth,next.baselineHeight);
+    for(const col of COLS)d[col][i]=v[col];this.visible[i]=next.visible!==false?1:0;this.participant[i]=next.participate!==false?1:0;
+    this.nodes[i]=next;this.dirty=true;this.revision++;return this;
+  }
+  /** Change root configuration without reallocating the graph or result buffers. */
+  configure(patch={}) {
+    const o=this.options,n=this.count,d=this.data;
+    const next={width:nonnegative(patch.width,o.width),height:nonnegative(patch.height,o.height),padding:patch.padding===undefined?o.padding:box(patch.padding),layout:patch.layout===undefined?o.layout:parseLayoutMode(patch.layout),gap:nonnegative(patch.gap,o.gap),justify:patch.justify===undefined?o.justify:named(patch.justify,justifies,0,'justify')};
+    this.options=next;d.mode[n]=next.layout;d.gap[n]=next.gap;d.justify[n]=next.justify;[d.pt[n],d.pr[n],d.pb[n],d.pl[n]]=next.padding;this.dirty=true;this.revision++;return this;
+  }
+  rebase(id, bounds, client) {
+    const patch={bounds:{...bounds}};
+    if (client) {patch.baselineWidth=client.width;patch.baselineHeight=client.height;}
+    return this.update(id,patch);
+  }
+  getBounds(id, out={}) {
+    const i=this.index.get(id);if(i===undefined)throw new Error(`Unknown layout id: ${id}`);
+    const k=i*4,r=this.rects;out.x=r[k];out.y=r[k+1];out.width=r[k+2];out.height=r[k+3];return out;
+  }
+  arrange(width=this.options.width,height=this.options.height) {
+    width=nonnegative(width);height=nonnegative(height);
+    const result=this.result;result.changedCount=0;result.visited=0;
+    if (!this.dirty && width===this.lastWidth && height===this.lastHeight) return result;
+    const d=this.data,r=this.rects,n=this.count,root=n*4;
+    r[root]=0;r[root+1]=0;r[root+2]=width;r[root+3]=height;
+    this.layoutChildren(n);
+    for (const i of this.order) {
+      if (this.children[i].length) this.layoutChildren(i);
+      const k=i*4;result.visited++;
+      if (r[k]!==this.previous[k]||r[k+1]!==this.previous[k+1]||r[k+2]!==this.previous[k+2]||r[k+3]!==this.previous[k+3]) {
+        this.changed[result.changedCount++]=i;
+        this.previous[k]=r[k];this.previous[k+1]=r[k+1];this.previous[k+2]=r[k+2];this.previous[k+3]=r[k+3];
+      }
+    }
+    this.dirty=false;this.lastWidth=width;this.lastHeight=height;result.revision=this.revision;
+    return result;
+  }
+  layoutChildren(parent) {
+    const d=this.data,r=this.rects,p=parent*4,ids=this.children[parent];
+    const ox=d.pl[parent],oy=d.pt[parent];
+    const cw=Math.max(0,r[p+2]-ox-d.pr[parent]),ch=Math.max(0,r[p+3]-oy-d.pb[parent]);
+    let left=ox,top=oy,right=ox+cw,bottom=oy+ch;
+    const flow=this.flow;flow.length=0;
+    // Dock consumes client space in declaration order. Fill sees space remaining
+    // at its position. Adapters may reverse z-order before compiling for WinForms.
+    for (const i of ids) {
+      const k=i*4,a=d.anchor[i],dock=d.dock[i];
+      let w=clamp(d.w[i],d.minW[i],d.maxW[i]),h=clamp(d.h[i],d.minH[i],d.maxH[i]),x=d.x[i],y=d.y[i];
+      if (!this.participant[i]) {r[k]=x;r[k+1]=y;r[k+2]=w;r[k+3]=h;continue;}
+      if (dock && this.visible[i]) {
+        const aw=Math.max(0,right-left),ah=Math.max(0,bottom-top);
+        if (dock===1||dock===2||dock===5) w=clamp(aw,d.minW[i],d.maxW[i]);
+        if (dock===3||dock===4||dock===5) h=clamp(ah,d.minH[i],d.maxH[i]);
+        x=left;y=top;
+        if(dock===1)top=Math.min(bottom,top+h);
+        else if(dock===2){y=bottom-h;bottom=Math.max(top,bottom-h);}
+        else if(dock===3)left=Math.min(right,left+w);
+        else if(dock===4){x=right-w;right=Math.max(left,right-w);}
+      } else if (d.mode[parent] && this.visible[i] && !dock) {
+        flow.push(i);continue;
+      } else {
+        const dx=cw-d.bw[i],dy=ch-d.bh[i];
+        w=clamp(d.w[i]+((a&12)===12?dx:0),d.minW[i],d.maxW[i]);
+        h=clamp(d.h[i]+((a&3)===3?dy:0),d.minH[i],d.maxH[i]);
+        x+=((a&4)?0:(a&8)?dx+d.w[i]-w:(dx+d.w[i]-w)/2);
+        y+=((a&1)?0:(a&2)?dy+d.h[i]-h:(dy+d.h[i]-h)/2);
+      }
+      r[k]=x;r[k+1]=y;r[k+2]=w;r[k+3]=h;
+    }
+    if (flow.length) this.layoutFlow(parent,flow,left,top,Math.max(0,right-left),Math.max(0,bottom-top));
+  }
+  layoutFlow(parent,ids,x,y,width,height) {
+    const d=this.data,vertical=d.mode[parent]===2,wrap=d.mode[parent]===3;
+    const main=vertical?height:width,cross=vertical?width:height,gap=d.gap[parent];
+    let begin=0,used=0,lineCross=0,crossOffset=0;
+    for (let j=0;j<ids.length;j++) {
+      const i=ids[j],base=d.basis[i]<0?(vertical?d.h[i]:d.w[i]):d.basis[i];
+      const size=clamp(base,vertical?d.minH[i]:d.minW[i],vertical?d.maxH[i]:d.maxW[i]);
+      const margins=vertical?d.mt[i]+d.mb[i]:d.ml[i]+d.mr[i];
+      const c=clamp(vertical?d.w[i]:d.h[i],vertical?d.minW[i]:d.minH[i],vertical?d.maxW[i]:d.maxH[i])+(vertical?d.ml[i]+d.mr[i]:d.mt[i]+d.mb[i]);
+      if (wrap && j>begin && used+gap+size+margins>main) {
+        this.layoutLine(parent,ids,begin,j,x,y+crossOffset,main,lineCross,false);
+        crossOffset+=lineCross+gap;begin=j;used=0;lineCross=0;
+      }
+      used+=(j>begin?gap:0)+size+margins;lineCross=Math.max(lineCross,c);
+    }
+    this.layoutLine(parent,ids,begin,ids.length,x,y+crossOffset,main,wrap?lineCross:cross,vertical);
+  }
+  layoutLine(parent,ids,begin,end,x,y,main,cross,vertical) {
+    const d=this.data,r=this.rects,s=this.work,weights=this.flex,frozen=this.frozen,gap=d.gap[parent];
+    let occupied=gap*Math.max(0,end-begin-1);
+    for(let j=begin;j<end;j++) {
+      const i=ids[j],base=d.basis[i]<0?(vertical?d.h[i]:d.w[i]):d.basis[i];
+      s[i]=clamp(base,vertical?d.minH[i]:d.minW[i],vertical?d.maxH[i]:d.maxW[i]);
+      occupied+=s[i]+(vertical?d.mt[i]+d.mb[i]:d.ml[i]+d.mr[i]);frozen[i]=0;
+    }
+    let free=main-occupied;const growing=free>=0;
+    for(let j=begin;j<end;j++){const i=ids[j];weights[i]=growing?d.grow[i]:d.shrink[i]*s[i];}
+    // Bounded freeze-and-redistribute: each non-final pass freezes >=1 item.
+    // This handles min/max saturation without changing the original flex basis.
+    for(let pass=0;pass<=end-begin&&Math.abs(free)>1e-9;pass++) {
+      let total=0;for(let j=begin;j<end;j++){const i=ids[j];if(!frozen[i])total+=weights[i];}
+      if(!total)break;
+      let clamped=false,delta=0;
+      for(let j=begin;j<end;j++) {
+        const i=ids[j];if(frozen[i]||!weights[i])continue;
+        const v=s[i]+free*weights[i]/total,min=vertical?d.minH[i]:d.minW[i],max=vertical?d.maxH[i]:d.maxW[i];
+        const next=clamp(v,min,max);
+        if(next!==v){delta+=next-s[i];s[i]=next;frozen[i]=1;clamped=true;}
+      }
+      if(clamped){free-=delta;continue;}
+      for(let j=begin;j<end;j++){const i=ids[j];if(!frozen[i])s[i]+=free*weights[i]/total;}
+      free=0;
+    }
+    let used=gap*Math.max(0,end-begin-1);
+    for(let j=begin;j<end;j++){const i=ids[j];used+=s[i]+(vertical?d.mt[i]+d.mb[i]:d.ml[i]+d.mr[i]);}
+    const remaining=Math.max(0,main-used),count=end-begin,justify=d.justify[parent];
+    let step=gap,pos=0;
+    if(justify===1)pos=remaining/2;
+    else if(justify===2)pos=remaining;
+    else if(justify===3&&count>1)step+=remaining/(count-1);
+    else if(justify===4){step+=remaining/count;pos=remaining/count/2;}
+    else if(justify===5){step+=remaining/(count+1);pos=remaining/(count+1);}
+    for(let j=begin;j<end;j++) {
+      const i=ids[j],k=i*4,start=vertical?d.mt[i]:d.ml[i],finish=vertical?d.mb[i]:d.mr[i];
+      const cstart=vertical?d.ml[i]:d.mt[i],cend=vertical?d.mr[i]:d.mb[i],available=Math.max(0,cross-cstart-cend);
+      const align=d.align[i],base=vertical?d.w[i]:d.h[i];
+      const cs=clamp(align===3?available:base,vertical?d.minW[i]:d.minH[i],vertical?d.maxW[i]:d.maxH[i]);
+      const cp=cstart+(align===1?(available-cs)/2:align===2?available-cs:0);pos+=start;
+      r[k]=x+(vertical?cp:pos);r[k+1]=y+(vertical?pos:cp);r[k+2]=vertical?cs:s[i];r[k+3]=vertical?s[i]:cs;
+      pos+=s[i]+finish+step;
+    }
+  }
+}
+
+return {AnchorStyles,DockStyle,LayoutMode,parseAnchor,formatAnchor,parseDock,parseLayoutMode,solveAnchor,LayoutEngine};
+})();
+
+/* ..\layout\contract.js */
+__modules[55]=(()=>{
+const {AnchorStyles, DockStyle, LayoutMode, parseAnchor, parseDock, parseLayoutMode}=__modules[54];
+const {VBError}=__modules[17];
+
+
+// Project-scoped language extension. Never mutate the classic control catalog or
+// intrinsic constants: two projects with different settings may coexist.
+const LAYOUT_DEFAULTS = Object.freeze({Anchor:5, Dock:0, MinimumWidth:0, MinimumHeight:0,
+  MaximumWidth:0, MaximumHeight:0, LayoutMode:0, LayoutPadding:0, LayoutMargin:0,
+  LayoutGap:0, LayoutGrow:0, LayoutShrink:1, LayoutAlign:0, LayoutJustify:0});
+const LAYOUT_KEYS = Object.freeze(Object.keys(LAYOUT_DEFAULTS));
+const LAYOUT_CONSTANTS = Object.freeze(Object.fromEntries([
+  ...Object.entries(AnchorStyles).map(([k,v])=>['vbAnchor'+k,v]),
+  ...Object.entries(DockStyle).map(([k,v])=>['vbDock'+k,v]),
+  ...Object.entries(LayoutMode).map(([k,v])=>['vbLayout'+k,v]),
+  ...['Start','Center','End','Stretch'].map((k,v)=>['vbLayoutAlign'+k,v]),
+  ...['Start','Center','End','SpaceBetween','SpaceAround','SpaceEvenly'].map((k,v)=>['vbLayoutJustify'+k,v])
+]));
+const hiddenTypes = new Set(['timer','imagelist','commondialog','menu']);
+const layoutEnabled = project => project?.settings?.anchoring === true;
+const layoutEligible = target => !!target?.type && !hiddenTypes.has(target.type.toLowerCase());
+const layoutKey = key => LAYOUT_KEYS.find(k=>k.toLowerCase()===String(key).toLowerCase());
+function layoutDefaults(target) {
+  if (!layoutEligible(target)) return {};
+  if (['form','mdiform'].includes(target.type.toLowerCase())) return {LayoutMode:0,LayoutPadding:0,LayoutGap:0,LayoutJustify:0};
+  return {...LAYOUT_DEFAULTS};
+}
+function layoutProperty(key,value,properties={}) {
+  try {
+    if(key==='Anchor')return parseAnchor(value);
+    if(key==='Dock')return parseDock(value);
+    if(key==='LayoutMode')return parseLayoutMode(value);
+    value=Number(value);
+    if(!Number.isFinite(value)||value<0||value>300000)throw new RangeError(key+' must be between 0 and 300000');
+    if(key==='LayoutAlign'&&(!Number.isInteger(value)||value>3))throw new RangeError('LayoutAlign must be 0–3');
+    if(key==='LayoutJustify'&&(!Number.isInteger(value)||value>5))throw new RangeError('LayoutJustify must be 0–5');
+    const p={...properties,[key]:value};
+    for(const axis of ['Width','Height'])if(Number(p['Maximum'+axis])>0&&Number(p['Maximum'+axis])<Number(p['Minimum'+axis]||0))throw new RangeError('Maximum'+axis+' must be zero (unlimited) or at least Minimum'+axis);
+    return value;
+  } catch(error) {throw new VBError(error.message,380);}
+}
+function validateLayout(project,normalize=true) {
+  if(!layoutEnabled(project))return;
+  for(const m of project.modules||[])if(m.form)for(const n of [m.form,...m.form.controls]) {
+    for(const key of LAYOUT_KEYS)if(Object.hasOwn(n.properties||{},key)) {
+      if(!Object.hasOwn(layoutDefaults(n),key))throw new VBError(n.name+'.'+key+' is not a layout property for this component',438);
+      const value=layoutProperty(key,n.properties[key],n.properties);if(normalize)n.properties[key]=value;
+    }
+  }
+}
+function setLayoutProperty(target,key,value) {
+  const p=target.properties||target.props;
+  p[key]=layoutProperty(key,value,p);
+  // As in WinForms, setting Anchor exits docking; setting Dock resets Anchor.
+  if(key==='Anchor')p.Dock=0;
+  if(key==='Dock')p.Anchor=5;
+}
+
+/** Synthetic enum namespaces exist only in opted-in compiler/runtime instances. */
+const LAYOUT_ENUMS=Object.freeze(Object.fromEntries(['AnchorStyles','DockStyle','LayoutMode'].map(name=>[name.toLowerCase(),Object.freeze(Object.fromEntries(Object.entries(LAYOUT_CONSTANTS).filter(([k])=>name==='AnchorStyles'?k.startsWith('vbAnchor'):name==='DockStyle'?k.startsWith('vbDock'):/^vbLayout(?:Absolute|Horizontal|Vertical|Wrap)$/.test(k))))])));
+
+return {LAYOUT_DEFAULTS,LAYOUT_KEYS,LAYOUT_CONSTANTS,layoutEnabled,layoutEligible,layoutKey,layoutDefaults,layoutProperty,validateLayout,setLayoutProperty,LAYOUT_ENUMS};
+})();
+
+/* scalar-library.js */
+__modules[56]=(()=>{
 const {VBError}=__modules[15];
 const {VBScalar,VBArray,VBErrorValue,MISSING,unbox,scalarType,tagScalar,storageScalar,SCALAR_TYPES,scalarUnary,numeric,truth,vbString,bankersRound,coerce}=__modules[21];
 
@@ -6294,7 +6671,7 @@ return {installScalarLibrary};
 })();
 
 /* error-messages.js */
-__modules[55]=(()=>{
+__modules[57]=(()=>{
 const {VBError}=__modules[15];
 
 /** Invariant English descriptions for the errors produced by this runtime.
@@ -6329,7 +6706,7 @@ return {errorDescription};
 })();
 
 /* strings.js */
-__modules[56]=(()=>{
+__modules[58]=(()=>{
 const {VBError}=__modules[17];
 const {MISSING,VBArray,coerce,vbString}=__modules[21];
 
@@ -6424,7 +6801,7 @@ return {stringLibrary};
 })();
 
 /* financial-library.js */
-__modules[57]=(()=>{
+__modules[59]=(()=>{
 const {VBError}=__modules[15];
 const {MISSING,VBArray,numeric}=__modules[21];
 const {FINANCIAL_FUNCTIONS}=__modules[45];
@@ -6455,7 +6832,7 @@ return {financialLibrary};
 })();
 
 /* signatures.js */
-__modules[58]=(()=>{
+__modules[60]=(()=>{
 const {FINANCIAL_SIGNATURES}=__modules[45];
 
 /** Public names for named-argument binding. A trailing ? denotes Optional. */
@@ -6478,7 +6855,7 @@ return {BUILTIN_SIGNATURES,signatureParameters};
 })();
 
 /* constants.js */
-__modules[59]=(()=>{
+__modules[61]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -6505,20 +6882,22 @@ return {VB_CONSTANTS};
 })();
 
 /* library.js */
-__modules[60]=(()=>{
-const {installScalarLibrary}=__modules[54];
-const {errorDescription}=__modules[55];
-const {stringLibrary}=__modules[56];
-const {financialLibrary}=__modules[57];
+__modules[62]=(()=>{
+const {LAYOUT_CONSTANTS}=__modules[55];
+const {installScalarLibrary}=__modules[56];
+const {errorDescription}=__modules[57];
+const {stringLibrary}=__modules[58];
+const {financialLibrary}=__modules[59];
 const {ResourceStore}=__modules[53];
 const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,weekdayName,monthName}=__modules[16];
-const {BUILTIN_SIGNATURES,signatureParameters}=__modules[58];
+const {BUILTIN_SIGNATURES,signatureParameters}=__modules[60];
 const {DisconnectedRecordset}=__modules[27];
 const {recordLength}=__modules[42];
 const { VBError }=__modules[17];
 const { lower }=__modules[20];
 const { NOTHING, MISSING, VBErrorValue, explicitErrorValue, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, decimal, numeric, vbString, coerce, bankersRound, truth, binary }=__modules[21];
-const {VB_CONSTANTS}=__modules[59];
+const {VB_CONSTANTS}=__modules[61];
+
 
 
 
@@ -6584,7 +6963,7 @@ function createLibrary(vm) {
     SaveSetting:(app,section,key,value)=>vm.saveSetting(app,section,key,value),GetSetting:(app,section,key,def='')=>vm.getSetting(app,section,key,def),DeleteSetting:(app,section,key)=>vm.deleteSetting(app,section,key),
     Beep:()=>vm.host.beep?.(),Environ:()=>'',Command:()=>'',Shell:()=>{throw new VBError('Launching native executables is not permitted in the browser runtime',453);},
   };
-  const map=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),v]));
+  const map=new Map(Object.entries({...VB_CONSTANTS,...(vm.program.settings?.anchoring===true?LAYOUT_CONSTANTS:{})}).map(([k,v])=>[lower(k),v]));
   for(const [name,fn]of Object.entries(functions)){if(name in BUILTIN_SIGNATURES)fn.vbParams=signatureParameters(BUILTIN_SIGNATURES[name]);if(['IsObject','IsMissing','IsArray','IsError','IsEmpty','IsNull','TypeName','VarType','CallByName'].includes(name))fn.vbRawArgs=true;map.set(lower(name),fn);}
   functions.CallByName.vbParams=[{name:'object'},{name:'procname'},{name:'calltype'}];functions.CallByName.vbVariadic=true;
   // The $ forms are String-returning intrinsics; unlike Variant forms they reject Null.
@@ -6598,7 +6977,7 @@ return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
 /* ..\controls\rtf.js */
-__modules[61]=(()=>{
+__modules[63]=(()=>{
 const {VBError}=__modules[17];
 const {decodeANSI}=__modules[42];
 /** An original bounded RTF reader/writer and UTF-16 rich-text run model.
@@ -6708,8 +7087,131 @@ class RichTextDocument {
 return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
+/* ..\layout\model.js */
+__modules[64]=(()=>{
+const {LayoutEngine}=__modules[54];
+const {layoutEligible}=__modules[55];
+
+
+const formSize = form => ({width:Number(form.properties.ClientWidth??form.properties.Width??0),height:Number(form.properties.ClientHeight??form.properties.Height??0)});
+function layoutNode(model,parent=null) {
+  const p=model.properties||model.props||{};
+  return {id:model.id,parent,bounds:{x:Number(p.Left||0),y:Number(p.Top||0),width:Number(p.Width||0),height:Number(p.Height||0)},
+    anchor:p.Anchor??5,dock:p.Dock??0,layout:p.LayoutMode??0,
+    minWidth:Number(p.MinimumWidth??0),minHeight:Number(p.MinimumHeight??0),maxWidth:Number(p.MaximumWidth??0),maxHeight:Number(p.MaximumHeight??0),
+    padding:Number(p.LayoutPadding??0),margin:Number(p.LayoutMargin??0),gap:Number(p.LayoutGap??0),grow:Number(p.LayoutGrow??0),shrink:Number(p.LayoutShrink??1),
+    align:['start','center','end','stretch'][p.LayoutAlign??0],justify:['start','center','end','space-between','space-around','space-evenly'][p.LayoutJustify??0],
+    visible:p.Visible!==0,participate:layoutEligible(model)};
+}
+function parentIds(controls) {
+  const names=new Map(),ids=new Map(controls.map(c=>[c.id,c])),parents=new Map();
+  for(const c of controls){const k=c.name.toLowerCase();if(!names.has(k))names.set(k,c);}
+  for(const c of controls){let parent=null;if(c.parent){parent=ids.get(c.nativeParentId)||names.get(c.parent.toLowerCase());if(!parent)throw new Error('Missing layout parent: '+c.parent);}
+    parents.set(c.id,parent?.id??null);}
+  return parents;
+}
+function layoutOptions(form) {
+  const p=form.properties;return {...formSize(form),padding:Number(p.LayoutPadding??0),layout:p.LayoutMode??0,gap:Number(p.LayoutGap??0),
+    justify:['start','center','end','space-between','space-around','space-evenly'][p.LayoutJustify??0]};
+}
+function formNodes(form) {
+  const parents=parentIds(form.controls);return form.controls.map(c=>layoutNode(c,parents.get(c.id)));
+}
+/** Apply one designer transaction, always relative to its original snapshot.
+ * edited IDs keep the user's new geometry; descendants retain their baselines.
+ * Results are written to the model, so undo, save, export and selection agree. */
+function arrangeFormEdit(before,after,edited=[]) {
+  const ids=new Set(edited),current=new Map(after.controls.map(c=>[c.id,c]));
+  const engine=new LayoutEngine(formNodes(before),layoutOptions(before));
+  const oldIndex=engine.index,oldNodes=engine.nodes,d=engine.data,parents=parentIds(after.controls);
+  const nodes=after.controls.map(c=>{
+    const parent=parents.get(c.id),latest=layoutNode(c,parent),i=oldIndex.get(c.id),old=oldNodes[i];
+    if(!old||old.parent!==parent||ids.has(c.id)){
+      const p=parent===null?after.properties:current.get(parent).properties,space=parent===null?formSize(after):{width:p.Width,height:p.Height};
+      return {...latest,baselineWidth:Math.max(0,space.width-2*Number(p.LayoutPadding||0)),baselineHeight:Math.max(0,space.height-2*Number(p.LayoutPadding||0))};
+    }
+    return {...latest,bounds:old.bounds,baselineWidth:d.bw[i],baselineHeight:d.bh[i]};
+  });
+  engine.options={...engine.options,...layoutOptions(after),padding:[0,0,0,0].map(()=>Number(after.properties.LayoutPadding||0)),width:engine.options.width,height:engine.options.height};
+  engine.setNodes(nodes);const size=formSize(after);engine.arrange(size.width,size.height);
+  for(const n of nodes){const c=current.get(n.id),b=engine.getBounds(n.id);if(!layoutEligible(c))continue;Object.assign(c.properties,{Left:b.x,Top:b.y,Width:b.width,Height:b.height});}
+  return engine;
+}
+
+return {formSize,layoutNode,parentIds,layoutOptions,formNodes,arrangeFormEdit};
+})();
+
+/* ..\layout\runtime.js */
+__modules[65]=(()=>{
+const {LayoutEngine}=__modules[54];
+const {layoutNode,parentIds,layoutOptions}=__modules[64];
+const {layoutEligible}=__modules[55];
+
+
+
+/** One controller and one paint callback per form. Logical geometry is updated
+ * synchronously before Resize/user code; only DOM painting is frame-batched. */
+class FormLayout {
+  constructor(form) {
+    this.form=form;this.records=new Map();this.views=new Map();this.suspended=0;this.applying=false;this.paint=new Set();this.frame=0;
+    this.engine=new LayoutEngine([],layoutOptions({properties:form.props}));
+    this.rebuild();this.arrange();
+  }
+  snapshot(control) {return {...control.model,properties:control.props};}
+  rebuild(edited=null,key='') {
+    const form=this.form,models=form.controls.map(c=>this.snapshot(c)),parents=parentIds(models);
+    const fresh=new Map(),views=new Map(),nodes=[],byId=new Map(form.controls.map(c=>[c.model.id,c]));
+    for(const control of form.controls) {
+      const m=this.snapshot(control),parent=parents.get(m.id),old=this.records.get(m.id),next=layoutNode(m,parent);
+      views.set(m.id,control);
+      if(old)Object.assign(next,{bounds:old.bounds,baselineWidth:old.baselineWidth,baselineHeight:old.baselineHeight});
+      if(!old||old.parent!==parent||edited===control&&['Left','Top','Width','Height','Anchor','Dock'].includes(key)) {
+        next.bounds=layoutNode(m,parent).bounds;
+        const pv=parent===null?form:byId.get(parent),p=pv?.props||{};
+        next.baselineWidth=Math.max(0,Number(parent===null?p.ClientWidth??p.Width:p.Width)-2*Number(p.LayoutPadding||0));
+        next.baselineHeight=Math.max(0,Number(parent===null?p.ClientHeight??p.Height:p.Height)-2*Number(p.LayoutPadding||0));
+      }
+      fresh.set(m.id,next);nodes.push(next);
+    }
+    const p=form.props;
+    Object.assign(this.engine.options,{layout:p.LayoutMode??0,gap:p.LayoutGap??0,padding:[0,0,0,0].map(()=>Number(p.LayoutPadding||0)),justify:p.LayoutJustify??0});
+    this.engine.setNodes(nodes);this.records=fresh;this.views=views;
+  }
+  edit(control,key) {
+    if(this.applying||this.form.disposed)return;
+    if(control===this.form){const p=control.props;this.engine.configure({layout:p.LayoutMode??0,padding:p.LayoutPadding??0,gap:p.LayoutGap??0,justify:['start','center','end','space-between','space-around','space-evenly'][p.LayoutJustify??0]});}
+    else if(key==='Container'||!this.records.has(control.model.id))this.rebuild(control,key);
+    else {
+      const id=control.model.id,old=this.records.get(id),next={...layoutNode(this.snapshot(control),old.parent),bounds:old.bounds,baselineWidth:old.baselineWidth,baselineHeight:old.baselineHeight};
+      if(['Left','Top','Width','Height','Anchor','Dock'].includes(key)){next.bounds=layoutNode(this.snapshot(control),old.parent).bounds;const p=(old.parent===null?this.form:this.views.get(old.parent)).props;next.baselineWidth=Math.max(0,Number(old.parent===null?p.ClientWidth??p.Width:p.Width)-2*Number(p.LayoutPadding||0));next.baselineHeight=Math.max(0,Number(old.parent===null?p.ClientHeight??p.Height:p.Height)-2*Number(p.LayoutPadding||0));}
+      this.engine.update(id,next);this.records.set(id,next);
+    }
+    this.arrange();
+  }
+  arrange() {
+    if(this.suspended||this.applying||this.form.disposed)return;
+    const p=this.form.props,result=this.engine.arrange(Number(p.ClientWidth??p.Width),Number(p.ClientHeight??p.Height));
+    this.applying=true;
+    try {
+      for(let j=0;j<result.changedCount;j++) {
+        const i=result.changed[j],n=this.engine.nodes[i],view=this.views.get(n.id);if(!view||!layoutEligible(view.model))continue;
+        const k=i*4,r=result.rects;Object.assign(view.props,{Left:r[k],Top:r[k+1],Width:r[k+2],Height:r[k+3]});this.paint.add(view);
+      }
+    } finally {this.applying=false;}
+    if(this.paint.size&&!this.frame)this.frame=requestAnimationFrame(()=>this.flush());
+  }
+  flush() {if(this.frame)cancelAnimationFrame(this.frame);this.frame=0;for(const view of this.paint)if(!view.disposed)view.refresh();this.paint.clear();}
+  suspend() {this.suspended++;}
+  resume(perform=true) {if(this.suspended)this.suspended--;if(perform!==false&&perform!==0)this.arrange();}
+  perform() {this.engine.dirty=true;this.arrange();}
+  dispose() {if(this.frame)cancelAnimationFrame(this.frame);this.frame=0;this.paint.clear();this.records.clear();this.views.clear();}
+}
+
+return {FormLayout};
+})();
+
 /* ..\controls\input.js */
-__modules[62]=(()=>{
+__modules[66]=(()=>{
 const {Cell,truth}=__modules[21];
 const {lower}=__modules[20];
 
@@ -6825,7 +7327,7 @@ return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsI
 })();
 
 /* ..\controls\form-window.js */
-__modules[63]=(()=>{
+__modules[67]=(()=>{
 const {el}=__modules[20];
 
 /** Pointer-capture lifecycle shared by runtime form moving and resizing. */
@@ -6851,7 +7353,7 @@ return {installFormWindow};
 })();
 
 /* ..\controls\native-widgets.js */
-__modules[64]=(()=>{
+__modules[68]=(()=>{
 const {el}=__modules[20];
 const {getTheme}=__modules[46];
 
@@ -6927,7 +7429,7 @@ return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
 /* ..\controls\scrollbar.js */
-__modules[65]=(()=>{
+__modules[69]=(()=>{
 const {el}=__modules[20];
 
 /** Scroll-bar geometry is independent from DOM and remains stable at fractional DPR. */
@@ -6968,7 +7470,7 @@ return {scrollbarGeometry,ClassicScrollbar};
 })();
 
 /* ..\theme\icon-art.js */
-__modules[66]=(()=>{
+__modules[70]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
  * Every cell is one native 16px pixel. Keep semantic variants separate: a size,
@@ -7127,8 +7629,8 @@ return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
 /* ..\theme\icons.js */
-__modules[67]=(()=>{
-const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[66];
+__modules[71]=(()=>{
+const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[70];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
 
 const ICON_NAMES=Object.freeze(Object.keys(ICON_ART));
@@ -7155,10 +7657,10 @@ return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,contro
 })();
 
 /* ..\theme\menu.js */
-__modules[68]=(()=>{
+__modules[72]=(()=>{
 const {uiDocument}=__modules[19];
 const {el}=__modules[20];
-const {icon}=__modules[67];
+const {icon}=__modules[71];
 const {getTheme}=__modules[46];
 /** Shared IDE/runtime popup menus: one session, a retained submenu stack, no leaked listeners. */
 
@@ -7244,8 +7746,8 @@ return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
 /* ..\controls\richtext.js */
-__modules[69]=(()=>{
-const {parseRTF,RichTextDocument,richText}=__modules[61];
+__modules[73]=(()=>{
+const {parseRTF,RichTextDocument,richText}=__modules[63];
 const {VBError}=__modules[17];
 const {oleColor}=__modules[47];
 /** RichTextBox DOM adapter. All content is constructed as text nodes, never innerHTML. */
@@ -7335,11 +7837,13 @@ return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
 /* ..\project\model.js */
-__modules[70]=(()=>{
+__modules[74]=(()=>{
+const {validateLayout}=__modules[55];
 const {normalizeDataSources}=__modules[24];
 const { clone, lower, safeName }=__modules[20];
 const {normalizeResources}=__modules[52];
 const { VBError }=__modules[17];
+
 
 
 
@@ -7354,7 +7858,7 @@ const CONTROL_DEFAULTS={
 };
 function createControl(type,name=null,left=300,top=300){const id=newId();return {id,name:name||type+'1',type,parent:null,properties:{Name:name||type+'1',Left:left,Top:top,Width:1800,Height:450,Visible:-1,Enabled:-1,TabIndex:0,TabStop:['Label','Frame','Shape','Line','Image','StatusBar','ProgressBar','Timer','ImageList','CommonDialog'].includes(type)?0:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,ForeColor:-2147483640,BackColor:-2147483633,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[type]||{})}};}
 function createForm(name='Form1',caption=name){return {id:newId(),name,kind:'form',code:`Option Explicit\n\nPrivate Sub Form_Load()\n    \nEnd Sub\n`,form:{id:newId(),name,type:'Form',properties:{Name:name,Caption:caption,ClientWidth:9000,ClientHeight:6000,Width:9120,Height:6450,Left:300,Top:300,StartUpPosition:2,BorderStyle:2,BackColor:-2147483633,ForeColor:-2147483640,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,ScaleMode:1,KeyPreview:0,Visible:-1,Enabled:-1},controls:[],menus:[]}};}
-function newProject(name='Project1'){const form=createForm();return {schema:PROJECT_SCHEMA,id:newId(),name,description:'',startup:form.name,modules:[form],settings:{snapToGrid:true,gridSize:120,showGrid:true,renderer:'auto',tabWidth:4,requireVariableDeclaration:true},references:[],assets:{},vfs:{files:{},directories:['/']},appSettings:{}};}
+function newProject(name='Project1'){const form=createForm();return {schema:PROJECT_SCHEMA,id:newId(),name,description:'',startup:form.name,modules:[form],settings:{anchoring:false,snapToGrid:true,gridSize:120,showGrid:true,renderer:'auto',tabWidth:4,requireVariableDeclaration:true},references:[],assets:{},vfs:{files:{},directories:['/']},appSettings:{}};}
 function validateForm(form,moduleName){
   if(!form||typeof form!=='object'||Array.isArray(form))throw new VBError('Invalid form model: '+moduleName,1002);
   form.id ||= newId();form.name=moduleName;form.properties ||= {};form.controls ||= [];form.menus ||= [];
@@ -7396,6 +7900,7 @@ function normalizeProject(value){
   project.settings.renderer=project.settings.renderer==='canvas2d'?'canvas2d':'auto';
   if(project.dataSources)project.dataSources=normalizeDataSources(project.dataSources);
   if(project.resources)project.resources=normalizeResources(project.resources);
+  project.settings.anchoring=project.settings.anchoring===true;validateLayout(project);
   return project;
 }
 function uniqueName(project,base='Form',module=null){const names=new Set(module?module.form.controls.map(c=>lower(c.name)):project.modules.map(m=>lower(m.name)));let n=1;while(names.has(lower(base+n)))n++;return base+n;}
@@ -7406,7 +7911,7 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* ..\controls\collections.js */
-__modules[71]=(()=>{
+__modules[75]=(()=>{
 const { VBError }=__modules[17];
 const { lower }=__modules[20];
 
@@ -7454,23 +7959,27 @@ return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,Statu
 })();
 
 /* ..\controls\controls.js */
-__modules[72]=(()=>{
-const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[62];
-const {installFormWindow}=__modules[63];
-const {ClassicCombo,ClassicUpDown}=__modules[64];
-const {ClassicScrollbar}=__modules[65];
-const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[68];
-const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[69];
-const {parseRTF}=__modules[61];
+__modules[76]=(()=>{
+const {layoutDefaults,layoutKey,layoutProperty,setLayoutProperty}=__modules[55];
+const {FormLayout}=__modules[65];
+const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[66];
+const {installFormWindow}=__modules[67];
+const {ClassicCombo,ClassicUpDown}=__modules[68];
+const {ClassicScrollbar}=__modules[69];
+const {showMenu : openClassicMenu,closeMenu,menuIsOpen}=__modules[72];
+const {RichTextController,RICH_SELECTION_PROPERTIES}=__modules[73];
+const {parseRTF}=__modules[63];
 const { el, lower, clone }=__modules[20];
 const { VBError }=__modules[17];
 const { NOTHING, Ref, Cell, truth, VBArray, vbString }=__modules[21];
-const { MemoryRecordset }=__modules[60];
+const { MemoryRecordset }=__modules[62];
 const { GraphicsSurface }=__modules[47];
 const { cssColor : oleColor, fontFamily, getTheme }=__modules[46];
-const { icon, controlIcon }=__modules[67];
-const { CONTROL_DEFAULTS, createControl, newId }=__modules[70];
-const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[71];
+const { icon, controlIcon }=__modules[71];
+const { CONTROL_DEFAULTS, createControl, newId }=__modules[74];
+const { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray }=__modules[75];
+
+
 
 
 
@@ -7497,13 +8006,21 @@ function units(mode){return ({0:1,1:15,2:.75,3:1,4:8,5:1/96,6:25.4/96,7:2.54/96}
 function safeImage(picture,assets={}){if(typeof picture==='string'){if(/^data:image\//i.test(picture)||/^blob:/i.test(picture))return picture;const a=assets[picture];if(a?.encoding==='base64'){const ext=picture.split('.').at(-1).toLowerCase(),mime={png:'png',jpg:'jpeg',jpeg:'jpeg',gif:'gif',bmp:'bmp',svg:'svg+xml',webp:'webp',ico:'x-icon'}[ext];return mime?'data:image/'+mime+';base64,'+a.data:'';}}return '';}
 
 class BrowserControl {
-  constructor(model,{controlRegistry=null,design=false,vm=null,instance=null,form=null,assets={},backend='auto',onBackend=()=>{}}={}) {
-    this.controlRegistry=controlRegistry||vm?.host?.controlRegistry;this.__control=true;this.__type=model.type;this.model=model;this.design=design;this.vm=vm;this.instance=instance;this.form=form;this.assets=assets;this.backend=backend;this.onBackend=onBackend;this.disposed=false;this.type=model.type;
+  constructor(model,{controlRegistry=null,design=false,vm=null,instance=null,form=null,anchoring=false,assets={},backend='auto',onBackend=()=>{}}={}) {
+    this.anchoring=(anchoring===true||form?.anchoring===true||vm?.program?.settings?.anchoring===true);this.controlRegistry=controlRegistry||vm?.host?.controlRegistry;this.__control=true;this.__type=model.type;this.model=model;this.design=design;this.vm=vm;this.instance=instance;this.form=form;this.assets=assets;this.backend=backend;this.onBackend=onBackend;this.disposed=false;this.type=model.type;
     this.props={Left:0,Top:0,Width:1800,Height:450,Visible:-1,Enabled:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,BackColor:-2147483633,ForeColor:-2147483640,TabIndex:0,TabStop:-1,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[model.type]||{}),...clone(model.properties||{}),Name:model.name};
+    for(const key of Object.keys(this.props))if(layoutKey(key))delete this.props[key];
+    if(this.anchoring)for(const [key,value]of Object.entries(layoutDefaults(model)))this.props[key]=layoutProperty(key,model.properties?.[key]??value,model.properties||{});
     for(const [key,value]of Object.entries(this.props))if(value?.resource)this.props[key]=CONTROL_DEFAULTS[model.type]?.[key]??'';
     this.node=el('div',{class:'vb-control','data-control':model.name,'data-control-id':model.id,'data-type':model.type,tabindex:0});this.node.style.touchAction=design?'none':'auto';this.input=null;this.childHost=this.node;this.items=[...(this.props.List||[])];this.itemData=[];this.selectedIndices=new Set();this.gridData=clone(this.props.GridData||[]);this._colWidths=[];this.currentX=0;this.currentY=0;
     const props=new Set([...RICH_SELECTION_PROPERTIES,...Object.keys(this.props),'Text','Caption','Value','ListIndex','Enabled','Visible','Left','Top','Width','Height','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','ToolTipText','Tag','MaxLength','Locked','PasswordChar','Default','Cancel','Min','Max','Rows','Cols','FixedRows','FixedCols','Row','Col','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataSource','RecordSource','DatabaseName','Connect','ConnectionString','CommandType','CursorType','LockType','ReadOnly','RecordsetType','DataMember','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Picture','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','CancelError','FileName','Filter','FilterIndex','DialogTitle','Flags','FontStrikethru','TextRTF','MultiLine','ScrollBars']);
     for(const key of props)if(!['Nodes','Tabs','Panels','Buttons','ListItems','ColumnHeaders','ListImages'].includes(key)&&!(key in this))Object.defineProperty(this,key,{enumerable:true,configurable:true,get:()=>this.get(key),set:value=>this.set(key,value)});
+    if(this.anchoring&&form)Object.defineProperty(this,'Container',{enumerable:true,get:()=>this.get('Container'),set:value=>this.set('Container',value)});
+    if(this.anchoring&&['Form','MDIForm','Frame','PictureBox','TabStrip','SSTab'].includes(this.type)) {
+      this.PerformLayout=()=>this.form?.layoutController?.perform();
+      this.SuspendLayout=()=>this.form?.layoutController?.suspend();
+      this.ResumeLayout=(perform=true)=>this.form?.layoutController?.resume(perform);
+    }
     this.build();this.attachEvents();this.refresh();
     if(!this.design&&this.vm?.win32){
       Object.defineProperty(this,'hWnd',{enumerable:true,value:this.vm.win32.registerControl(this)});
@@ -7515,6 +8032,8 @@ class BrowserControl {
     }
   }
   get(key){
+    if(key==='Container'&&this.anchoring&&this.form&&this.form!==this)return this.form.controls.find(c=>c.model.id===this.model.nativeParentId)||this.form.controls.find(c=>lower(c.model.name)===lower(this.model.parent))||this.form;
+    if(layoutKey(key)&&(!this.anchoring||!Object.hasOwn(layoutDefaults(this.model),key)))throw new VBError("Object does not support this property: "+key,438);
     if(key==='Text'){
       if(['ListBox','ComboBox','FileListBox','DirListBox','DriveListBox'].includes(this.type)&&Number(this.props.ListIndex)>=0)return this.items[Number(this.props.ListIndex)]??'';
       if(['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type))return this.TextMatrix(this.props.Row||0,this.props.Col||0);
@@ -7531,6 +8050,13 @@ class BrowserControl {
   }
   set(key,value,fromDOM=false){
     if(this.disposed)return;
+    if(key==='Container'&&this.anchoring&&this.form&&this.form!==this){
+      const owner=this.form,parent=value===owner?null:value;
+      if(parent&&(!owner.controls.includes(parent)||!['Frame','PictureBox','SSTab','TabStrip'].includes(parent.type)))throw new VBError('Invalid control container',380);
+      const seen=new Set([this]);let ancestor=parent;while(ancestor&&ancestor!==owner){if(seen.has(ancestor))throw new VBError('Cyclic control container',380);seen.add(ancestor);ancestor=ancestor.get('Container');}
+      this.model={...this.model,parent:parent?.model.name??null,nativeParentId:parent?.model.id??null};(parent?.childHost||owner.content).append(this.node);owner.layoutController?.edit(this,'Container');return;
+    }
+    if(layoutKey(key)){if(!this.anchoring||!Object.hasOwn(layoutDefaults(this.model),key))throw new VBError("Object does not support this property: "+key,438);setLayoutProperty(this,key,value);(this.form||this).layoutController?.edit(this,key);this.invalidate();return;}
     if(key==='DataSource'){this.bindRecordset(value);return;}
     if(key==='DataField'||key==='DataMember'){this.props[key]=value;if(this._dataSource)this.bindRecordset(this._dataSource);return;}
     if(this._boundRS&&this.props.DataField&&['Text','Value'].includes(key)&&!this.design){this._boundRS.Fields.Item(this.props.DataField).Value=value;}
@@ -7545,7 +8071,12 @@ class BrowserControl {
     if(key==='Value'&&['HScrollBar','VScrollBar','Slider','ProgressBar','UpDown'].includes(this.type)){value=Number(value);if(!Number.isFinite(value)||value<Math.min(Number(this.props.Min),Number(this.props.Max))||value>Math.max(Number(this.props.Min),Number(this.props.Max)))throw new VBError('Invalid property value: Value',380);}
     if(['Rows','Cols','RowCount','ColumnCount'].includes(key)){value=Math.floor(Number(value));if(value<0||value>10000)throw new VBError('Invalid property value: '+key,380);}
     if(key==='Interval'){value=Number(value);if(value<0||value>65535)throw new VBError('Invalid Timer interval',380);}
+    if(this.anchoring&&['Left','Top','Width','Height','ClientWidth','ClientHeight'].includes(key)) {
+      value=Number(value);if(!Number.isFinite(value)||Math.abs(value)>300000||/Width|Height/.test(key)&&value<0)throw new VBError('Invalid geometry: '+key,380);
+    }
     const previous=this.props[key];this.props[key]=value;if(previous===value)return;
+    if(this.anchoring&&['Form','MDIForm'].includes(this.type)&&['Width','Height','ClientWidth','ClientHeight'].includes(key)){const axis=key.endsWith('Width')?'Width':'Height';this.props[axis]=value;this.props['Client'+axis]=value;this.layoutController?.arrange();}
+    else if(this.anchoring&&['Left','Top','Width','Height','Visible'].includes(key))this.form?.layoutController?.edit(this,key);
     if(key==='Value'&&this.type==='OptionButton'&&truth(value))for(const c of this.form?.controls||[])if(c!==this&&c.type==='OptionButton'&&(c.model.parent||null)===(this.model.parent||null)){c.props.Value=0;c.invalidate();}
     if(key==='Text'&&this.type==='ComboBox'){const i=this.items.indexOf(String(value));this.props.ListIndex=i;}
     if(this.type==='Timer'&&['Interval','Enabled'].includes(key))this.updateTimer();
@@ -7653,7 +8184,12 @@ class BrowserControl {
   Find(text,start=0,end=-1,options=0){if(!this.rich)throw new VBError('Find requires RichTextBox',438);return this.rich.find(text,start,end,options);}
   GetLineFromChar(index){if(!this.rich)throw new VBError('GetLineFromChar requires RichTextBox',438);index=Number(index);this.rich.document.checkRange(index);return this.rich.text.slice(0,index).split('\r\n').length-1;}
   get RTFWarnings(){return this.rich?.document.warnings.join('\r\n')||'';}
-  SetFocus(){(this.input||this.node).focus();}Refresh(){if(['Data','Adodc'].includes(this.type)&&!this.design)return this.refreshDataControl();this.refresh();this.surface?.render();}Move(left,top,width,height){this.props.Left=Number(left);if(top!==undefined)this.props.Top=Number(top);if(width!==undefined)this.props.Width=Number(width);if(height!==undefined)this.props.Height=Number(height);this.invalidate();}ZOrder(position=0){if(position===0)this.node.parentNode?.append(this.node);else this.node.parentNode?.prepend(this.node);}
+  SetFocus(){(this.input||this.node).focus();}Refresh(){if(['Data','Adodc'].includes(this.type)&&!this.design)return this.refreshDataControl();this.refresh();this.surface?.render();}Move(left,top,width,height){
+    const values={Left:Number(left),...(top===undefined?{}:{Top:Number(top)}),...(width===undefined?{}:{Width:Number(width)}),...(height===undefined?{}:{Height:Number(height)})};
+    if(this.anchoring)for(const [key,value]of Object.entries(values))if(!Number.isFinite(value)||Math.abs(value)>300000||/Width|Height/.test(key)&&value<0)throw new VBError('Invalid geometry: '+key,380);
+    Object.assign(this.props,values);
+    if(this.anchoring&&['Form','MDIForm'].includes(this.type)){if(width!==undefined)this.props.ClientWidth=Number(width);if(height!==undefined)this.props.ClientHeight=Number(height);this.layoutController?.arrange();}
+    else this.form?.layoutController?.edit(this,'Width');this.invalidate();}ZOrder(position=0){if(position===0)this.node.parentNode?.append(this.node);else this.node.parentNode?.prepend(this.node);}
   Cls(){this.surface?.clear();this.currentX=0;this.currentY=0;}
   get CurrentX(){return this.currentX;}set CurrentX(v){this.currentX=Number(v);}get CurrentY(){return this.currentY;}set CurrentY(v){this.currentY=Number(v);}
   ensureSurface(){if(!this.surface){this.node.style.position='absolute';this.surface=new GraphicsSurface(this.node,{backend:this.backend,background:this.props.BackColor,onBackend:this.onBackend});this.surface.setPicture(safeImage(this.props.Picture,this.assets));}return this.surface;}
@@ -7775,23 +8311,23 @@ class BrowserForm extends BrowserControl {
     }
   }
   static frontSequence=0;
-  constructor(model,options={}){const p=model.properties||{},normalized={...model,properties:{...p,Width:p.ClientWidth??p.Width??9000,Height:p.ClientHeight??p.Height??6000}};super(normalized,options);this.originalModel=model;this.controls=[];this.controlMap=new Map();this.shown=false;this.form=this;this.mountControls(model.controls||[]);const form=this;this.Controls={get Count(){return form.controls.length;},Item:key=>{const control=typeof key==='number'?form.controls[key]:form.controlMap.get(lower(key));if(!control)throw new VBError('Control not found: '+key,35601);return control;},Add:(type,name,container)=>form.addControl(type,name,container),Remove:key=>form.removeControl(typeof key==='string'?form.controlMap.get(lower(key)):key),[Symbol.iterator]:()=>form.controls.values()};this.Controls.Add.vbRawArgs=true;this.Controls.Remove.vbRawArgs=true;this.attachWindowDragging();if(!this.design){this.node.addEventListener('pointerdown',()=>this.activateChrome(),true);this.node.addEventListener('focusin',()=>this.activateChrome());}if(this.props.Picture)this.ensureSurface().setPicture(safeImage(this.props.Picture,this.assets));}
+  constructor(model,options={}){const p=model.properties||{},normalized={...model,properties:{...p,Width:p.ClientWidth??p.Width??9000,Height:p.ClientHeight??p.Height??6000}};super(normalized,options);this.originalModel=model;this.controls=[];this.controlMap=new Map();this.shown=false;this.form=this;this.mountControls(model.controls||[]);if(this.anchoring&&!this.design)this.layoutController=new FormLayout(this);const form=this;this.Controls={get Count(){return form.controls.length;},Item:key=>{const control=typeof key==='number'?form.controls[key]:form.controlMap.get(lower(key));if(!control)throw new VBError('Control not found: '+key,35601);return control;},Add:(type,name,container)=>form.addControl(type,name,container),Remove:key=>form.removeControl(typeof key==='string'?form.controlMap.get(lower(key)):key),[Symbol.iterator]:()=>form.controls.values()};this.Controls.Add.vbRawArgs=true;this.Controls.Remove.vbRawArgs=true;this.attachWindowDragging();if(!this.design){this.node.addEventListener('pointerdown',()=>this.activateChrome(),true);this.node.addEventListener('focusin',()=>this.activateChrome());}if(this.props.Picture)this.ensureSurface().setPicture(safeImage(this.props.Picture,this.assets));}
   build(){this.node.className='vb-form';this.node.setAttribute('role','dialog');this.titleBar=el('div',{class:'vb-form-title'});this.captionNode=el('span',{class:'caption'});this.closeButton=el('button',{class:'vb-window-button',title:'Close','aria-label':'Close',onclick:()=>this.vm?.requestUnload(this.instance)});this.closeButton.append(icon('close'));this.minButton=el('button',{class:'vb-window-button',title:'Minimize','aria-label':'Minimize',onclick:()=>this.toggleMinimize()},icon('minimize'));this.maxButton=el('button',{class:'vb-window-button',title:'Maximize','aria-label':'Maximize',onclick:()=>this.toggleMaximize()},icon('maximize'));this.titleBar.append(el('span',{class:'vb-form-icon'},icon('form',16)),this.captionNode,this.minButton,this.maxButton,this.closeButton);this.menuBar=el('div',{class:'vb-form-menu'});this.content=el('div',{class:'vb-form-content'});this.childHost=this.content;this.node.append(this.titleBar,this.menuBar,this.content);this.form=this;}
   attachEvents(){if(this.design)return;bindMouseInput(this);bindKeyboardInput(this);this.content.addEventListener('click',e=>{if(ownsInputEvent(this,e))this.event('Click');});this.content.addEventListener('dblclick',e=>{if(ownsInputEvent(this,e))this.event('DblClick');});this.node.addEventListener('keydown',e=>{if(e.defaultPrevented)return;if(e.key==='F10'){e.preventDefault();this.menuBar.querySelector('button:not(:disabled)')?.click();return;}if(e.key==='Enter'&&!e.target.matches('textarea,[contenteditable]')){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.node.contains(e.target)&&c.Enabled&&c.Visible)||this.controls?.find(c=>c.type==='CommandButton'&&c.Default&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.key==='Escape'){const control=this.controls?.find(c=>c.type==='CommandButton'&&c.Cancel&&c.Enabled&&c.Visible);if(control){e.preventDefault();control.event('Click');}}if(e.altKey&&e.key.length===1){const key=e.key.toLowerCase(),match=text=>{const value=String(text||'').replace(/&&/g,'');return /&./.test(value)&&value.match(/&./)[0][1].toLowerCase()===key;};const control=this.controls?.find(c=>c.Enabled&&c.Visible&&match(c.props.Caption));if(control){e.preventDefault();if(control.type==='Label'){this.controls.filter(c=>c.TabStop&&c.Enabled&&c.Visible&&c.TabIndex>control.TabIndex).sort((a,b)=>a.TabIndex-b.TabIndex)[0]?.SetFocus();}else{control.SetFocus();control.node.click();}}else{const menus=(this.originalModel?.menus||[]).filter(m=>!m.parent&&m.properties.Visible!==0);const i=menus.findIndex(m=>match(m.properties.Caption));if(i>=0){e.preventDefault();this.menuBar.children[i]?.click();}}}});}
   event(name,args=[],coalesce=false){if(this.design||!this.vm||this.disposed)return Promise.resolve();return this.vm.dispatch(this.instance,(this.type==='MDIForm'?'MDIForm_':'Form_')+name,args,{coalesce});}
-  refresh(){if(!this.content)return;const p=this.props,w=Number(p.ClientWidth??p.Width??9000)/15,h=Number(p.ClientHeight??p.Height??6000)/15;this.captionNode.textContent=p.Caption||this.model.name;this.node.setAttribute('aria-label',this.captionNode.textContent);this.node.style.fontFamily=fontFamily(p.FontName);this.node.style.fontSize=Number(p.FontSize||8.25)*96/72+'px';this.node.style.width=w+8+'px';this.node.style.height='auto';this.content.style.width=w+'px';this.content.style.height=h+'px';this.content.style.background=oleColor(p.BackColor);this.node.hidden=!this.design&&!this.shown;this.node.style.left=Number(p.Left||0)/15+'px';this.node.style.top=Number(p.Top||0)/15+'px';const border=Number(p.BorderStyle??2);this.titleBar.hidden=border===0;this.node.classList.toggle('vb-borderless',border===0);this.node.classList.toggle('vb-tool-window',border===4||border===5);this.node.style.width=w+(border===0?0:8)+'px';this.minButton.hidden=p.ControlBox===0||border===3||border>=4;this.maxButton.hidden=p.ControlBox===0||border===3||border>=4;this.closeButton.hidden=p.ControlBox===0;this.minButton.disabled=p.MinButton===0;this.maxButton.disabled=p.MaxButton===0;this.node.classList.toggle('vb-fixed-window',![2,5].includes(border)||this.minimized||!!this.savedBounds);this.renderMenus();if(this.surface){this.surface.background=p.BackColor;this.surface.invalidate();}}
+  refresh(){if(!this.content)return;this.layoutController?.arrange();const p=this.props,w=Number(p.ClientWidth??p.Width??9000)/15,h=Number(p.ClientHeight??p.Height??6000)/15;this.captionNode.textContent=p.Caption||this.model.name;this.node.setAttribute('aria-label',this.captionNode.textContent);this.node.style.fontFamily=fontFamily(p.FontName);this.node.style.fontSize=Number(p.FontSize||8.25)*96/72+'px';this.node.style.width=w+8+'px';this.node.style.height='auto';this.content.style.width=w+'px';this.content.style.height=h+'px';this.content.style.background=oleColor(p.BackColor);this.node.hidden=!this.design&&!this.shown;this.node.style.left=Number(p.Left||0)/15+'px';this.node.style.top=Number(p.Top||0)/15+'px';const border=Number(p.BorderStyle??2);this.titleBar.hidden=border===0;this.node.classList.toggle('vb-borderless',border===0);this.node.classList.toggle('vb-tool-window',border===4||border===5);this.node.style.width=w+(border===0?0:8)+'px';this.minButton.hidden=p.ControlBox===0||border===3||border>=4;this.maxButton.hidden=p.ControlBox===0||border===3||border>=4;this.closeButton.hidden=p.ControlBox===0;this.minButton.disabled=p.MinButton===0;this.maxButton.disabled=p.MaxButton===0;this.node.classList.toggle('vb-fixed-window',![2,5].includes(border)||this.minimized||!!this.savedBounds);this.renderMenus();if(this.surface){this.surface.background=p.BackColor;this.surface.invalidate();}}
   renderMenus(){const menus=this.originalModel?.menus||this.model.menus||[],signature=JSON.stringify(menus);if(this.menuSnapshot===signature)return;this.menuSnapshot=signature;const roots=menus.filter(m=>!m.parent&&m.properties.Visible!==0);this.menuBar.hidden=!roots.length;this.menuBar.setAttribute('role','menubar');this.menuBar.replaceChildren(...roots.map((menu,index)=>{const button=el('button',{role:'menuitem','aria-haspopup':menus.some(m=>m.parent===menu.name)||menu.properties.WindowList?'menu':null,'aria-expanded':'false',disabled:menu.properties.Enabled===0});updateMnemonic(button,menu.properties.Caption||menu.name);button.addEventListener('click',()=>{const children=menus.filter(m=>m.parent===menu.name&&m.properties.Visible!==0);if(!children.length&&!menu.properties.WindowList){this.vm?.dispatch(this.instance,menu.name+'_Click',[]);return;}this.showMenu(children,button,menus,index);});button.addEventListener('pointerenter',()=>{if(menuIsOpen()&&!button.disabled)button.click();});button.addEventListener('keydown',e=>{if(['ArrowDown','Enter',' '].includes(e.key)){e.preventDefault();e.stopPropagation();button.click();}});return button;}));}
   showMenu(items,anchor,all,index=0){const map=values=>values.filter(m=>m.properties.Visible!==0).map(item=>item.properties.Caption==='-'?null:{label:item.properties.Caption||item.name,enabled:item.properties.Enabled!==0,checked:item.properties.Checked?true:undefined,items:all.some(m=>m.parent===item.name&&m.properties.Visible!==0)?()=>map(all.filter(m=>m.parent===item.name)):undefined,action:()=>this.vm?.dispatch(this.instance,item.name+'_Click',[])});const rect=anchor.getBoundingClientRect();const values=map(items),root=all.filter(m=>!m.parent&&m.properties.Visible!==0)[index];if(root?.properties.WindowList&&this.mdiController){const windows=this.mdiController.windowItems();if(values.length&&windows.length)values.push(null);values.push(...windows);}openClassicMenu(values,rect.left,rect.bottom,null,{opener:anchor,runtime:true,theme:getTheme(this.node).id,focusFirst:true,onSwitch:direction=>{const list=[...this.menuBar.children];for(let n=1;n<=list.length;n++){const next=list[(index+direction*n+list.length*2)%list.length];if(!next.disabled){next.click();break;}}}});}
 
-  mountControls(models){const adapters=new Map();for(const model of models){const control=createBrowserControl(model,{controlRegistry:this.controlRegistry,design:this.design,vm:this.vm,instance:this.instance,form:this,assets:this.assets,backend:this.backend,onBackend:this.onBackend});this.controls.push(control);adapters.set(model.name,control);if(model.properties?.Index!==undefined){let array=this.controlMap.get(lower(model.name));if(!(array instanceof ControlArray)){array=new ControlArray(index=>this.loadArrayElement(array,model,index),index=>this.removeControl(array.Item(index)));this.controlMap.set(lower(model.name),array);}array.items.set(Number(model.properties.Index),control);}else this.controlMap.set(lower(model.name),control);}
-    for(const control of this.controls){const parent=control.model.parent&&adapters.get(control.model.parent);(parent?.childHost||this.content).append(control.node);if(control.type==='MSChart')control.invalidate();}
+  mountControls(models){const adapters=new Map();for(const model of models){const control=createBrowserControl(model,{controlRegistry:this.controlRegistry,design:this.design,vm:this.vm,instance:this.instance,form:this,assets:this.assets,backend:this.backend,onBackend:this.onBackend});this.controls.push(control);adapters.set(lower(model.name),control);adapters.set(model.id,control);if(model.properties?.Index!==undefined){let array=this.controlMap.get(lower(model.name));if(!(array instanceof ControlArray)){array=new ControlArray(index=>this.loadArrayElement(array,model,index),index=>this.removeControl(array.Item(index)));this.controlMap.set(lower(model.name),array);}array.items.set(Number(model.properties.Index),control);}else this.controlMap.set(lower(model.name),control);}
+    for(const control of this.controls){const parent=control.model.parent&&(adapters.get(control.model.nativeParentId)||adapters.get(lower(control.model.parent)));(parent?.childHost||this.content).append(control.node);if(control.type==='MSChart')control.invalidate();}
     for(const menu of this.originalModel?.menus||this.model.menus||[]){const object={};for(const [key,value]of Object.entries(menu.properties||{})){let state=value;Object.defineProperty(object,key,{enumerable:true,get:()=>state,set:v=>{state=v;menu.properties[key]=v;this.renderMenus();}});}this.controlMap.set(lower(menu.name),object);}
   }
   mountDynamic(model){
     if(this.controls.length>=10000)throw new VBError('Control limit exceeded (10,000)',7);
     const parent=model.parent?this.controls.find(c=>lower(c.model.name)===lower(model.parent)):null;
     const control=createBrowserControl(model,{controlRegistry:this.controlRegistry,design:this.design,vm:this.vm,instance:this.instance,form:this,assets:this.assets,backend:this.backend,onBackend:this.onBackend});
-    control.dynamic=true;this.controls.push(control);(parent?.childHost||this.content).append(control.node);control.invalidate();control.updateTimer();return control;
+    control.dynamic=true;this.controls.push(control);(parent?.childHost||this.content).append(control.node);this.layoutController?.rebuild();this.layoutController?.arrange();control.invalidate();control.updateTimer();return control;
   }
   loadArrayElement(array,template,index){
     if(!Number.isInteger(index)||index<0||index>32767)throw new VBError('Invalid control array index',380);
@@ -7814,7 +8350,7 @@ class BrowserForm extends BrowserControl {
     for(const child of children)this.removeControl(child);
     this.controls.splice(this.controls.indexOf(control),1);const array=this.controlMap.get(lower(control.model.name));
     if(array instanceof ControlArray)array.items.delete(Number(control.props.Index));else{this.controlMap.delete(lower(control.model.name));this.instance?.fields.delete(lower(control.model.name));}
-    control.dispose();
+    control.dispose();this.layoutController?.rebuild();this.layoutController?.arrange();
   }
   activateChrome(){if(this.design)return;if(!this.node.inert)this.node.style.zIndex=String((this.node.getAttribute('aria-modal')==='true'?200000:0)+ ++BrowserForm.frontSequence);for(const node of this.node.parentElement?.querySelectorAll(':scope > .vb-form')||[])node.classList.toggle('vb-inactive',node!==this.node);}
   Show(){this.activateChrome(false);this.shown=true;this.node.hidden=false;this.refresh();if(!this.windowStateApplied){this.windowStateApplied=true;this.WindowState=Number(this.props.WindowState)||0;}for(const c of this.controls)c.updateTimer();this.node.style.zIndex=String(++BrowserForm.frontSequence);this.event('Paint');const first=this.controls.filter(c=>c.TabStop&&acceptsInput(c)&&!NONVISUAL_TYPES.has(c.type)).sort((a,b)=>a.TabIndex-b.TabIndex)[0];(first||this).SetFocus();}
@@ -7829,7 +8365,7 @@ class BrowserForm extends BrowserControl {
   toggleMinimize(){this.minimized=!this.minimized;this.node.classList.toggle('vb-minimized',this.minimized);this.minButton.replaceChildren(icon(this.minimized?'restore':'minimize'));this.minButton.title=this.minimized?'Restore':'Minimize';this.minButton.setAttribute('aria-label',this.minButton.title);this.props.WindowState=this.WindowState;this.refresh();this.event('Resize');}
   toggleMaximize(){if(this.minimized)this.toggleMinimize();if(this.savedBounds){Object.assign(this.props,this.savedBounds);this.savedBounds=null;}else{this.savedBounds={ClientWidth:this.props.ClientWidth,ClientHeight:this.props.ClientHeight,Left:this.props.Left,Top:this.props.Top};this.props.ClientWidth=Math.max(100,this.node.parentNode.clientWidth-8)*15;this.props.ClientHeight=Math.max(100,this.node.parentNode.clientHeight-this.chromeHeight())*15;this.props.Left=0;this.props.Top=0;}this.refresh();this.maxButton.replaceChildren(icon(this.savedBounds?'restore':'maximize'));this.maxButton.title=this.savedBounds?'Restore':'Maximize';this.maxButton.setAttribute('aria-label',this.maxButton.title);this.props.WindowState=this.WindowState;this.mdiController?.layout();this.event('Resize');}
   ensureSurface(){if(!this.surface){this.surface=new GraphicsSurface(this.content,{backend:this.backend,background:this.props.BackColor,onBackend:this.onBackend});this.surface.setPicture(safeImage(this.props.Picture,this.assets));}return this.surface;}
-  dispose(){this.cancelWindowInteraction?.();for(const c of this.controls||[])c.dispose();super.dispose();}
+  dispose(){this.layoutController?.dispose();this.cancelWindowInteraction?.();for(const c of this.controls||[])c.dispose();super.dispose();}
 }
 
 function createBrowserControl(model,options={}){const custom=(options.controlRegistry||options.vm?.host?.controlRegistry)?.create(model,options);if(custom)return custom;return model.type==='Form'||model.type==='MDIForm'?new BrowserForm(model,options):new BrowserControl(model,options);}
@@ -7838,10 +8374,10 @@ return {NONVISUAL_TYPES,DEFAULT_EVENTS,CONTROL_EVENTS,BrowserControl,BrowserForm
 })();
 
 /* agent-control.js */
-__modules[73]=(()=>{
-const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[72];
+__modules[77]=(()=>{
+const {CONTROL_EVENTS, DEFAULT_EVENTS}=__modules[76];
 const {clone}=__modules[20];
-const {newId}=__modules[70];
+const {newId}=__modules[74];
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 
 
@@ -7920,7 +8456,7 @@ return {RuntimeAgentControl};
 })();
 
 /* mdi.js */
-__modules[74]=(()=>{
+__modules[78]=(()=>{
 const {VBError}=__modules[17];
 const {el}=__modules[20];
 const {NOTHING}=__modules[21];
@@ -7980,9 +8516,9 @@ return {arrangeMDIRects,RuntimeMDI};
 })();
 
 /* ..\controls\dialog.js */
-__modules[75]=(()=>{
+__modules[79]=(()=>{
 const {el}=__modules[20];
-const {icon}=__modules[67];
+const {icon}=__modules[71];
 
 
 /** The supported MsgBox style bits. Help/system-modal options remain host limitations. */
@@ -8016,12 +8552,64 @@ function runtimeDialog(host,title,body,buttons,input=null,options={}){
 return {messageBoxOptions,runtimeDialog};
 })();
 
+/* ..\layout\language-gate.js */
+__modules[80]=(()=>{
+const {layoutEnabled,layoutDefaults,layoutKey}=__modules[55];
+
+const lower=s=>String(s).toLowerCase();
+const methods=new Set(['performlayout','suspendlayout','resumelayout']);
+const containers=new Set(['form','mdiform','frame','picturebox','tabstrip','sstab']);
+/** Just declaration identities for the diagnostics worker, never form assets. */
+function layoutBindingSnapshot(module) {
+  if(!module.form)return null;
+  return {name:module.name,type:module.form.type,controls:(module.form.controls||[]).map(c=>({name:c.name,type:c.type}))};
+}
+function validateLayoutMembers(modules,settings={}) {
+  const enabled=layoutEnabled({settings}),diagnostics=[],forms=new Map();
+  for(const module of modules.values())if(module.layoutBindings)forms.set(lower(module.name),module.layoutBindings);
+  for(const module of modules.values())for(const proc of module.procedures.values()){
+    const self=forms.get(lower(module.name)),decls=new Map([...module.declarations,...proc.params,...proc.code.filter(i=>i.op==='dim').flatMap(i=>i.decls)].map(d=>[lower(d.name),d]));
+    const withs=[],controls=new Map(self?.controls.map(c=>[lower(c.name),c])||[]);
+    const declared=name=>{const d=decls.get(lower(name));if(!d)return null;const type=String(d.type).replace(/^VB\./i,'');if(forms.has(lower(type)))return forms.get(lower(type));if(modules.has(lower(type)))return null;return /^(?:CommandButton|TextBox|Label|Frame|PictureBox|Image|Shape|Line|Timer|ListBox|ComboBox|CheckBox|OptionButton|HScrollBar|VScrollBar|Form|MDIForm|SSTab|TabStrip)$/i.test(type)?{type}:null;};
+    const resolve=node=>{
+      if(!node)return null;
+      if(node.kind==='group')return resolve(node.expr);
+      if(node.kind==='with')return withs.at(-1)||null;
+      if(node.kind==='call')return resolve(node.callee);
+      if(node.kind==='id'){
+        const name=lower(node.name);if(decls.has(name))return declared(name);
+        if(name==='me')return self;if(module.procedures.has(name))return null;
+        return controls.get(name)||forms.get(name)||null;
+      }
+      if(node.kind==='member'){const owner=resolve(node.object);return owner?.controls?.find(c=>lower(c.name)===lower(node.name))||null;}
+      return null;
+    };
+    for(const ins of proc.code){
+      const seen=new Set();
+      const check=(receiver,name)=>{
+        const property=layoutKey(name),method=methods.has(lower(name));if(!receiver||!property&&!method||seen.has(lower(name)))return;seen.add(lower(name));
+        if(enabled&&(property?Object.hasOwn(layoutDefaults(receiver),property):containers.has(lower(receiver.type))))return;
+        diagnostics.push({severity:'error',number:438,source:module.name,line:ins.line,column:ins.column||1,message:!enabled?'Enable anchoring in Tools > Options > General before using '+name+'.':receiver.type+' does not support the layout member '+name+'.'});
+      };
+      const walk=node=>{if(!node||typeof node!=='object')return;if(node.kind==='member')check(resolve(node.object),node.name);if(node.kind==='id'&&self&&!decls.has(lower(node.name))&&!module.procedures.has(lower(node.name))&&!controls.has(lower(node.name)))check(self,node.name);for(const value of Object.values(node)){if(Array.isArray(value)){for(const item of value)walk(item);}else if(value&&typeof value==='object')walk(value);}};
+      walk(ins);
+      if(ins.op==='withPush')withs.push(resolve(ins.expr));else if(ins.op==='withPop')withs.pop();
+    }
+  }
+  return diagnostics;
+}
+
+return {layoutBindingSnapshot,validateLayoutMembers};
+})();
+
 /* ..\language\binding.js */
-__modules[76]=(()=>{
+__modules[81]=(()=>{
+const {LAYOUT_CONSTANTS,LAYOUT_ENUMS}=__modules[55];
 const {VBError}=__modules[15];
 const {lower}=__modules[20];
-const {VB_CONSTANTS}=__modules[59];
+const {VB_CONSTANTS}=__modules[61];
 const {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,storageScalar,signedLiteralScalar}=__modules[21];
+
 
 
 
@@ -8029,9 +8617,9 @@ const {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,s
 /** Side-effect-free project constant binding. Cached parsed modules keep their
  * ASTs: binding maps are rebuilt on every cross-module validation, so editing a
  * dependency cannot leave worker diagnostics or execution with old values. */
-function bindConstants(modules) {
+function bindConstants(modules,settings={}) {
   const diagnostics=[], scopes=new Map(), cache=new Map(), active=new Set();
-  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
+  const intrinsic=new Map(Object.entries({...VB_CONSTANTS,...(settings.anchoring===true?LAYOUT_CONSTANTS:{})}).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
   let steps=0;
   const report=(e,m,line)=>diagnostics.push({severity:'error',number:e.number||1002,message:e.message,source:e.source||m.name,line:e.line||line||1,column:1});
   const fail=message=>{throw new VBError(message,1002);};
@@ -8060,7 +8648,7 @@ function bindConstants(modules) {
     const key=lower(name),own=Object.values(m.enums).find(e=>lower(e.name)===key);
     if(own)return {m,e:own};
     const matches=[];for(const other of modules.values())if(other!==m)for(const e of Object.values(other.enums))if(e.scope!=='private'&&lower(e.name)===key)matches.push({m:other,e});
-    if(matches.length>1)fail('Ambiguous enum type: '+name);return matches[0];
+    if(matches.length>1)fail('Ambiguous enum type: '+name);if(matches.length)return matches[0];if(settings.anchoring===true&&LAYOUT_ENUMS[key]&&!modules.has(key))return {m,e:{name,members:Object.keys(LAYOUT_ENUMS[key])},layout:true};
   }
   function evaluate(node,m,p,depth=0){
     if(!node||++steps>100000||depth>256)fail('Constant expression complexity limit exceeded');
@@ -8078,7 +8666,7 @@ function bindConstants(modules) {
         const owner=modules.get(lower(node.object.name));
         if(owner){const entry=scopes.get(owner).globals.get(lower(node.name));if(!entry?.d.constant||owner!==m&&entry.d.scope==='private')fail('Constant is not accessible: '+node.name);return bind(entry);}
         const type=enumDefinition(node.object.name,m);
-        if(type&&type.e.members.some(n=>lower(n)===lower(node.name)))return bind(scopes.get(type.m).globals.get(lower(node.name)));
+        if(type&&type.e.members.some(n=>lower(n)===lower(node.name)))return type.layout?intrinsic.get(lower(node.name)):bind(scopes.get(type.m).globals.get(lower(node.name)));
         fail('Constant member not defined: '+node.name);break;
       }
       default:fail('Constant expression cannot invoke functions, allocate objects, or read variables');
@@ -8091,7 +8679,7 @@ function bindConstants(modules) {
     active.add(entry);
     try{
       const {m,p,d}=entry;let value=evaluate(d.initial,m,p);
-      const type=d.explicitType||lower(d.type)!=='variant'?d.type:scalarType(value)||'Double';
+      let type=d.explicitType||lower(d.type)!=='variant'?d.type:scalarType(value)||'Double';if(enumDefinition(type,m))type='Long';
       if(!['byte','integer','long','single','double','currency','date','string','boolean','variant'].includes(lower(type)))fail('Invalid constant type: '+type);
       value=storageScalar(value,type);d.constantType=type;cache.set(entry,value);
       (p?p.constantBindings:m.constantBindings).set(lower(d.name),unbox(value));
@@ -8119,6 +8707,7 @@ function bindConstants(modules) {
       const values=Object.create(null);for(const n of e.members)values[lower(n)]=owner.constantBindings.get(lower(n));
       m.enumBindings.set(key,Object.freeze({__vbEnum:true,owner:owner.name,values:Object.freeze(values)}));
     }
+    if(settings.anchoring===true)for(const [key,entries]of Object.entries(LAYOUT_ENUMS))if(!m.enumBindings.has(key)&&!modules.has(key))m.enumBindings.set(key,Object.freeze({__vbEnum:true,owner:'VB6.Layout',values:Object.freeze(Object.fromEntries(Object.entries(entries).map(([k,v])=>[lower(k),v])))}));
     const storage=d=>{delete d.storageType;try{if(enumDefinition(d.type,m))d.storageType='Long';}catch(e){report(e,m,d.line);}};
     for(const d of m.declarations)storage(d);
     for(const fields of Object.values(m.types))for(const d of fields)storage(d);
@@ -8135,7 +8724,7 @@ return {bindConstants};
 })();
 
 /* ..\language\default-types.js */
-__modules[77]=(()=>{
+__modules[82]=(()=>{
 const {VBError}=__modules[17];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
@@ -8162,7 +8751,7 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ..\language\interfaces.js */
-__modules[78]=(()=>{
+__modules[83]=(()=>{
 const {lower}=__modules[20];
 
 const json=x=>JSON.stringify(x);
@@ -8206,7 +8795,7 @@ return {validateInterfaces};
 })();
 
 /* ..\language\expression.js */
-__modules[79]=(()=>{
+__modules[84]=(()=>{
 const { tokenize, VBError }=__modules[17];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
@@ -8310,9 +8899,9 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ..\language\conditional.js */
-__modules[80]=(()=>{
+__modules[85]=(()=>{
 const { VBError }=__modules[17];
-const { parseExpression }=__modules[79];
+const { parseExpression }=__modules[84];
 const { binary, unary, truth }=__modules[21];
 
 
@@ -8352,14 +8941,18 @@ return {preprocess};
 })();
 
 /* ..\language\compiler.js */
-__modules[81]=(()=>{
-const {bindConstants}=__modules[76];
-const {defaultIdentifierType,addDefaultTypes}=__modules[77];
-const {validateInterfaces}=__modules[78];
-const { preprocess }=__modules[80];
+__modules[86]=(()=>{
+const {layoutBindingSnapshot,validateLayoutMembers}=__modules[80];
+const {validateLayout}=__modules[55];
+const {bindConstants}=__modules[81];
+const {defaultIdentifierType,addDefaultTypes}=__modules[82];
+const {validateInterfaces}=__modules[83];
+const { preprocess }=__modules[85];
 const { VBError, logicalLines, splitTop, tokenize }=__modules[17];
-const { parseExpression, parseCall }=__modules[79];
+const { parseExpression, parseCall }=__modules[84];
 const { lower }=__modules[20];
+
+
 
 
 
@@ -8524,7 +9117,7 @@ class ProcedureCompiler {
 }
 
 function compileModule(input) {
-  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:{},types:{},diagnostics:[],source:input.code||'',form:input.form||null};
+  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:{},types:{},diagnostics:[],source:input.code||'',form:input.form||null,layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
   const allLines=logicalLines(preprocess(module.source,input.conditionalConstants||{},module.name));
   const lines=allLines.filter(e=>{if(/^Attribute\s+/i.test(e.text)){module.attributes.push(e.text);return false;}return true;});let current=null,body=[],enumState=null,typeState=null;
   for(const entry of lines){let {text,line}=entry,m;
@@ -8570,14 +9163,15 @@ function compileModule(input) {
 }
 function compileProject(project) {
   const modules=new Map(),diagnostics=[];
+  try{validateLayout(project,false);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||380,source:error.source||project.name,line:1,column:1});}
   for(const input of project.modules||[]){try{const module=compileModule({...input,conditionalConstants:project.settings?.conditionalConstants||{}});const key=lower(module.name);if(modules.has(key))throw new VBError(`Duplicate module name: ${module.name}`,1002,module.name,1);modules.set(key,module);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||1002,source:error.source||input.name,line:error.line||1,column:error.column||1});}}
-  diagnostics.push(...validateCompiledModules(modules));
+  diagnostics.push(...validateCompiledModules(modules,project.settings));
   return {name:project.name,startup:project.startup,modules,diagnostics,valid:!diagnostics.length,settings:project.settings||{},sourceProject:project};
 }
 
 /** Cross-module constraints shared by execution and background diagnostics. */
-function validateCompiledModules(modules) {
-  const diagnostics=bindConstants(modules);
+function validateCompiledModules(modules,settings={}) {
+  const diagnostics=[...bindConstants(modules,settings),...validateLayoutMembers(modules,settings)];
   const recordNames=new Set([...modules.values()].flatMap(m=>Object.keys(m.types).map(lower)));
   for(const module of modules.values())for(const proc of module.procedures.values())for(const param of proc.params)if(!param.byRef&&!param.paramArray&&(recordNames.has(lower(param.type))||param.bounds!==null))diagnostics.push({severity:'error',message:recordNames.has(lower(param.type))?'User-defined type may not be passed ByVal':'Array argument must be ByRef',number:1002,source:module.name,line:proc.line,column:1});
   const parents=[...modules.values()].filter(m=>m.form?.type==='MDIForm');
@@ -8591,7 +9185,7 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* debug-control.js */
-__modules[82]=(()=>{
+__modules[87]=(()=>{
 const {VBError,tokenize}=__modules[17];
 const {lower}=__modules[20];
 const {truth}=__modules[21];
@@ -8735,7 +9329,7 @@ return {StopExecution,isSequencePoint,statementIndex,RuntimeDebugger,immediateSt
 })();
 
 /* win32.js */
-__modules[83]=(()=>{
+__modules[88]=(()=>{
 const {createWin32,Win32Error,encodeANSI,decodeANSI}=__modules[14];
 const {VBError}=__modules[17];
 const {VBArray,VBCurrency,numeric,coerce}=__modules[21];
@@ -8859,7 +9453,7 @@ return {VBWin32Bridge};
 })();
 
 /* debug-evaluation.js */
-__modules[84]=(()=>{
+__modules[89]=(()=>{
 const {VBError}=__modules[17];
 
 /** Not a VB exception: Resume Next must not defeat user cancellation. */
@@ -8888,9 +9482,9 @@ return {DebugEvaluationAbort,DebugEvaluationSession};
 })();
 
 /* debug-inspector.js */
-__modules[85]=(()=>{
+__modules[90]=(()=>{
 const {VBError}=__modules[17];
-const {parseExpression}=__modules[79];
+const {parseExpression}=__modules[84];
 const {lower}=__modules[20];
 const {VBScalar,scalarType,tagScalar,literalScalar,signedLiteralScalar,unbox,Cell,LazyCell,Ref,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBErrorValue,NOTHING,MISSING,objectSupports,unary,binary,coerce,truth}=__modules[21];
 
@@ -8942,7 +9536,7 @@ return {debugDescription,DebugInspector};
 })();
 
 /* instruction-map.js */
-__modules[86]=(()=>{
+__modules[91]=(()=>{
 const {VBError}=__modules[17];
 
 const instructionKey=ins=>{const {line,column,endColumn,source,procedure,sequencePoint,...rest}=ins;return JSON.stringify(rest);};
@@ -8979,9 +9573,9 @@ return {instructionKey,linearInstruction,instructionMap,uniqueInstructionLines};
 })();
 
 /* live-edit.js */
-__modules[87]=(()=>{
-const {statementIndex}=__modules[82];
-const {instructionMap,linearInstruction,instructionKey,uniqueInstructionLines}=__modules[86];
+__modules[92]=(()=>{
+const {statementIndex}=__modules[87];
+const {instructionMap,linearInstruction,instructionKey,uniqueInstructionLines}=__modules[91];
 const {VBError}=__modules[17];
 
 
@@ -9063,10 +9657,10 @@ return {sameActiveLayout,validateStaticStorage,planLiveEdit,nextStatementIndex};
 })();
 
 /* versioned-edit.js */
-__modules[88]=(()=>{
+__modules[93]=(()=>{
 const {VBError}=__modules[17];
-const {uniqueInstructionLines}=__modules[86];
-const {planLiveEdit,validateStaticStorage}=__modules[87];
+const {uniqueInstructionLines}=__modules[91];
+const {planLiveEdit,validateStaticStorage}=__modules[92];
 
 
 
@@ -9113,27 +9707,27 @@ return {planVersionedEdit};
 })();
 
 /* vm.js */
-__modules[89]=(()=>{
+__modules[94]=(()=>{
 const {VBScalar,SCALAR_TYPES,printScalar,unbox,tagScalar,scalarType,storageScalar,readScalar,literalScalar,signedLiteralScalar}=__modules[21];
-const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[82];
-const {VBWin32Bridge}=__modules[83];
+const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[87];
+const {VBWin32Bridge}=__modules[88];
 const {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate}=__modules[22];
 const {DataContext}=__modules[44];
-const {errorDescription}=__modules[55];
-const {DebugEvaluationSession}=__modules[84];
+const {errorDescription}=__modules[57];
+const {DebugEvaluationSession}=__modules[89];
 const {hasDataDefault,hasDataMember,dataDefaultType}=__modules[25];
-const {defaultIdentifierType}=__modules[77];
-const {DebugInspector}=__modules[85];
-const {planLiveEdit,nextStatementIndex}=__modules[87];
-const {planVersionedEdit}=__modules[88];
+const {defaultIdentifierType}=__modules[82];
+const {DebugInspector}=__modules[90];
+const {planLiveEdit,nextStatementIndex}=__modules[92];
+const {planVersionedEdit}=__modules[93];
 const {encodeVariable,decodeVariable,makeRecord}=__modules[42];
 const { Signal, lower, VERSION }=__modules[20];
 const { VBError, splitTop, tokenize }=__modules[17];
-const { parseExpression, parseCall }=__modules[79];
-const { compileProject }=__modules[81];
+const { parseExpression, parseCall }=__modules[84];
+const { compileProject }=__modules[86];
 const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[21];
 const { VirtualFileSystem }=__modules[43];
-const { createLibrary, MemoryRecordset }=__modules[60];
+const { createLibrary, MemoryRecordset }=__modules[62];
 
 
 
@@ -9853,19 +10447,19 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[90]=(()=>{
-const {RuntimeAgentControl}=__modules[73];
-const {RuntimeMDI}=__modules[74];
-const {runtimeDialog,messageBoxOptions}=__modules[75];
+__modules[95]=(()=>{
+const {RuntimeAgentControl}=__modules[77];
+const {RuntimeMDI}=__modules[78];
+const {runtimeDialog,messageBoxOptions}=__modules[79];
 const { applyTheme, themeId }=__modules[46];
-const { icon }=__modules[67];
+const { icon }=__modules[71];
 const {rasterDataURL}=__modules[51];
 const { el, download, lower, clone }=__modules[20];
-const { compileProject }=__modules[81];
-const { VirtualMachine }=__modules[89];
+const { compileProject }=__modules[86];
+const { VirtualMachine }=__modules[94];
 const { VirtualFileSystem }=__modules[43];
 const { describe }=__modules[21];
-const { BrowserForm }=__modules[72];
+const { BrowserForm }=__modules[76];
 
 
 
@@ -9881,9 +10475,9 @@ const { BrowserForm }=__modules[72];
 class ApplicationHost {
   constructor(project,container=document.body,options={}){this.project=clone(project);this.container=container;this.options=options;applyTheme(container,options.theme||project.settings?.theme);this.theme=themeId(options.theme||project.settings?.theme);this.forms=[];this.mdi=new RuntimeMDI(this);this.dialogs=[];this.backend='DOM / Canvas2D';this.disposed=false;this.storageKey='vb6-app:'+project.id;this.stage=el('div',{class:'vb-app-stage',style:{position:'absolute',inset:'0',overflow:'auto',background:options.background||'var(--vb-desktop)'}});container.append(this.stage);this.console=el('pre',{class:'vb-runtime-console',style:{position:'absolute',inset:'16px',padding:'16px',margin:'0',background:'var(--vb-window)',color:'var(--vb-window-text)',border:'2px inset var(--vb-face)',overflow:'auto',font:'14px/1.5 monospace',whiteSpace:'pre-wrap'}});this.stage.append(this.console);let stored=null;try{if(options.persist!==false)stored=JSON.parse(localStorage.getItem(this.storageKey)||'null');}catch{}this.fs=new VirtualFileSystem(stored?.vfs||project.vfs||{});this.settings=stored?.settings||project.appSettings||{};this.resizeObserver=new ResizeObserver(()=>this.layoutForms());this.resizeObserver.observe(container);this.messageHandler=e=>this.onBridgeMessage(e);if(options.bridgeToken)window.addEventListener('message',this.messageHandler);}
   send(type,data={}){this.options.onMessage?.({type,...data});if(this.options.bridgeToken&&window.parent!==window)window.parent.postMessage({channel:'vb6-runtime',token:this.options.bridgeToken,type,...data},'*');}
-  async createForm(model,instance,vm){const form=new BrowserForm(model,{vm,instance,assets:this.project.assets||{},backend:this.project.settings?.renderer||'auto',onBackend:backend=>{this.backend=backend;this.send('backend',{backend});}});this.forms.push(form);this.console.hidden=true;this.stage.append(form.node);this.mdi.register(form);this.layoutForms();return form;}
+  async createForm(model,instance,vm){const form=new BrowserForm(model,{anchoring:this.project.settings?.anchoring===true,vm,instance,assets:this.project.assets||{},backend:this.project.settings?.renderer||'auto',onBackend:backend=>{this.backend=backend;this.send('backend',{backend});}});this.forms.push(form);this.console.hidden=true;this.stage.append(form.node);this.mdi.register(form);this.layoutForms();return form;}
   beginModal(form){this.modalForms ||= [];this.modalForms.push(form);const update=()=>{const top=this.modalForms.at(-1);for(const f of this.forms){f.node.inert=!!top&&f!==top;f.node.setAttribute('aria-modal',String(f===top));if(f===top)f.node.style.zIndex=String(200000+this.modalForms.length);}};update();return()=>{this.modalForms=this.modalForms.filter(f=>f!==form);update();};}
-  layoutForms(){const width=this.container.clientWidth||innerWidth,height=this.container.clientHeight||innerHeight;this.forms.forEach((form,index)=>{if(form.movedByUser||form.mdiChild)return;const naturalWidth=Number(form.props.ClientWidth??form.props.Width)/15+8,naturalHeight=Number(form.props.ClientHeight??form.props.Height)/15+32,scale=Math.min(1,(width-16)/naturalWidth,(height-16)/naturalHeight);if(width<640||height<480){form.node.style.transform=`scale(${Math.max(.3,scale)})`;form.node.style.transformOrigin='top left';form.props.Left=Math.max(4,(width-naturalWidth*scale)/2)*15;form.props.Top=Math.max(4,(height-naturalHeight*scale)/2)*15;}else{form.node.style.transform='';if(Number(form.props.StartUpPosition)!==0){form.props.Left=Math.max(8,(width-naturalWidth)/2+index*20)*15;form.props.Top=Math.max(8,(height-naturalHeight)/2+index*20)*15;}}form.refresh();});this.mdi.layout();}
+  layoutForms(){const width=this.container.clientWidth||innerWidth,height=this.container.clientHeight||innerHeight;this.forms.forEach((form,index)=>{if(form.anchoring&&form.savedBounds&&!form.minimized&&!form.mdiChild){const w=Math.max(100,width-(Number(form.props.BorderStyle)===0?0:8))*15,h=Math.max(100,height-form.chromeHeight())*15,changed=w!==form.props.ClientWidth||h!==form.props.ClientHeight;Object.assign(form.props,{ClientWidth:w,ClientHeight:h,Left:0,Top:0});form.node.style.transform='';form.refresh();if(changed)form.event('Resize',[],true);return;}if(form.movedByUser||form.mdiChild)return;const naturalWidth=Number(form.props.ClientWidth??form.props.Width)/15+8,naturalHeight=Number(form.props.ClientHeight??form.props.Height)/15+32,scale=Math.min(1,(width-16)/naturalWidth,(height-16)/naturalHeight);if(width<640||height<480){form.node.style.transform=`scale(${Math.max(.3,scale)})`;form.node.style.transformOrigin='top left';form.props.Left=Math.max(4,(width-naturalWidth*scale)/2)*15;form.props.Top=Math.max(4,(height-naturalHeight*scale)/2)*15;}else{form.node.style.transform='';if(Number(form.props.StartUpPosition)!==0){form.props.Left=Math.max(8,(width-naturalWidth)/2+index*20)*15;form.props.Top=Math.max(8,(height-naturalHeight)/2+index*20)*15;}}form.refresh();});this.mdi.layout();}
   async start(){const compiled=compileProject(this.project);this.vm=new VirtualMachine(compiled,{win32Options:this.options.win32,automation:this.options.automation,controlRegistry:this.options.controlRegistry,debugInteraction:()=>this.send('interaction'),fs:this.fs,settings:this.settings,dataFetch:this.options.dataFetch,dataCredential:this.options.dataCredential||(name=>this.modal('Data Connection Credentials','Runtime bearer token for '+name+' (not saved):',[{caption:'&OK',value:1},{caption:'&Cancel',value:0}],'',{inputType:'password'})),createForm:(...args)=>this.createForm(...args),beginModal:form=>this.beginModal(form),print:(text,newline)=>{this.console.append(document.createTextNode(text+(newline?'\n':'')));this.console.scrollTop=this.console.scrollHeight;this.send('output',{text,newline});},error:error=>this.showError(error),msgBox:(...args)=>this.msgBox(...args),inputBox:(...args)=>this.inputBox(...args),openFile:props=>this.openFile(props),saveFile:(name,data)=>this.saveFile(name,data),persist:()=>this.persist(),stop:()=>{this.forms.forEach(f=>f.Hide());this.persist();},beep:()=>this.beep(),clipboardWrite:text=>navigator.clipboard?.writeText(text).catch(()=>{})},{instructionLimit:this.options.instructionLimit||5000000,debuggerEnabled:!!(this.options.bridgeToken||this.options.debuggerEnabled),debugStatements:!!(this.options.bridgeToken||this.options.debuggerEnabled),errorTrapping:this.options.errorTrapping||this.project.settings?.errorTrapping||'unhandled'});
     this.vm.on('evaluation',data=>this.send('evaluation',data));this.vm.on('state',state=>this.send('state',{state}));this.vm.on('pause',e=>{this.send('pause',{source:e.instruction.source,line:e.instruction.line,column:e.instruction.column,endColumn:e.instruction.endColumn,procedure:e.instruction.procedure,reason:e.reason,error:e.error,conditionError:e.conditionError,watch:e.watch,pauseId:this.vm.debugPauseId,locals:this.vm.debugLocals(),stack:this.vm.debugStack()});});this.vm.on('stop',()=>this.send('stopped'));this.vm.on('error',error=>this.send('error',{error}));
     for(const bp of this.options.breakpoints||[]){try{this.vm.setBreakpoint(bp.module,bp.line,bp.condition||'',bp.enabled!==false);}catch(error){this.send('output',{text:'Unresolved breakpoint '+bp.module+':'+bp.line+' — '+error.message,newline:true});}}
@@ -9924,7 +10518,7 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[91]=(()=>{
+__modules[96]=(()=>{
 const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[14];
 const {AutomationRegistry}=__modules[22];
 const {ControlAdapterRegistry}=__modules[23];
@@ -9937,16 +10531,16 @@ const {installNativeHost}=__modules[48];
 const {ResourceStore}=__modules[53];
 const {readRES,writeRES,setResource,setResourceString}=__modules[52];
 const {THEMES,applyTheme,colorValue}=__modules[46];
-const {MemoryRecordset}=__modules[60];
-const {RichTextDocument,parseRTF,writeRTF}=__modules[61];
-const { ApplicationHost }=__modules[90];
-const { VirtualMachine }=__modules[89];
-const { compileProject, compileModule }=__modules[81];
-const { parseExpression }=__modules[79];
+const {MemoryRecordset}=__modules[62];
+const {RichTextDocument,parseRTF,writeRTF}=__modules[63];
+const { ApplicationHost }=__modules[95];
+const { VirtualMachine }=__modules[94];
+const { compileProject, compileModule }=__modules[86];
+const { parseExpression }=__modules[84];
 const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox }=__modules[21];
 const {asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,dateToSerial,serialToDate}=__modules[16];
 const { VirtualFileSystem }=__modules[43];
-const { BrowserControl, BrowserForm }=__modules[72];
+const { BrowserControl, BrowserForm }=__modules[76];
 const { GraphicsSurface }=__modules[47];
 
 
@@ -9976,6 +10570,6 @@ const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Bro
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[91];
+globalThis["VB6Runtime"]=__modules[96];
 })();
 VB6Runtime.mountApplication(JSON.parse(document.getElementById('vb6-project').textContent),document.getElementById('app'),{"persist":true}).then(host=>{globalThis.vb6Application=host;});</script></body></html>

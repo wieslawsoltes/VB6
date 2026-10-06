@@ -48,7 +48,11 @@
     "test:interop:windows": "node tools/interop/test-native.mjs",
     "verify:classic": "node tools/verify-classic-roundtrip.mjs",
     "snapshot:native": "node tools/native-snapshot.mjs",
-    "test:classic-html": "python tools/browser-classic-html.py"
+    "test:classic-html": "python tools/browser-classic-html.py",
+    "test:layout": "node --test --test-concurrency=4 tests/layout-*.test.mjs",
+    "test:layout:browser": "python tools/browser-layout-tests.py",
+    "bench:layout": "node tools/bench-layout.mjs",
+    "pack:layout": "node tools/pack-layout.mjs"
   },
   "engines": {
     "node": ">=22"
