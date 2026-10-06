@@ -6,6 +6,9 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class ComputeAutomationOracle {
+  [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode,ExactSpelling=true)] static extern int MultiByteToWideChar(uint codePage,uint flags,byte[] input,int length,[Out] char[] output,int capacity);
+  [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode,ExactSpelling=true)] static extern int WideCharToMultiByte(uint codePage,uint flags,char[] input,int length,[Out] byte[] output,int capacity,IntPtr defaultChar,out int usedDefault);
+
   [DllImport("oleaut32.dll")] static extern int VarCyAdd(long a,long b,out long r);
   [DllImport("oleaut32.dll")] static extern int VarCySub(long a,long b,out long r);
   [DllImport("oleaut32.dll")] static extern int VarCyMul(long a,long b,out long r);
@@ -55,7 +58,14 @@ public static class ComputeAutomationOracle {
       foreach(double seconds in new double[]{0,1,2,5,11,41,59,60,61,3599,86399,0.25,0.5,0.75,59.4999,59.5,59.9999,86399.4999,86399.5,86399.9999})dateInputs.Add(baseDay<0?baseDay-seconds/86400:baseDay+seconds/86400);
     for(int i=0;i<384;i++){int day=unchecked((int)(Next()%3615900))-657434;double fraction=(Next()%86400)/86400.0;dateInputs.Add(day<0?day-fraction:day+fraction);}
     foreach(double d in dateInputs){UDATE fields;int hr=VarUdateFromDate(d,0,out fields);var v=fields.st;dates.Add(new{a=Words(BitConverter.DoubleToInt64Bits(d)),fields=new int[]{v.Year,v.Month,v.Day,v.DayOfWeek+1,v.Hour,v.Minute,v.Second,fields.DayOfYear},error=hr<0?5:0});}
-    return new {source="Windows OleAut32",architecture=RuntimeInformation.ProcessArchitecture.ToString(),os=Environment.OSVersion.VersionString,cases=data,dates};
+    var codePages=new List<object>();
+    foreach(uint cp in new uint[]{1250,1252})for(int b=0;b<256;b++) {
+      var text=new char[2];if(MultiByteToWideChar(cp,0,new byte[]{(byte)b},1,text,2)!=1)throw new Exception("Code page decode failed");
+      var bytes=new byte[2];int usedDefault;int count=WideCharToMultiByte(cp,0x400,text,1,bytes,2,IntPtr.Zero,out usedDefault);
+      if(count!=1 || usedDefault!=0)throw new Exception("Code page roundtrip failed");
+      codePages.Add(new {codePage=cp,input=b,unit=(int)text[0],encoded=(int)bytes[0]});
+    }
+    return new {source="Windows OleAut32 / NLS",codePages,architecture=RuntimeInformation.ProcessArchitecture.ToString(),os=Environment.OSVersion.VersionString,cases=data,dates};
   }
 }
 '@

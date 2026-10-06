@@ -56,7 +56,7 @@ fn dt_time_serial(hour:i32,minute:i32,second:i32)->vec2<u32> {
   return dt_compose(days,d_div(d_from_i(seconds),d_from_i(86400i)));
 }
 fn dt_weekday(a:vec2<u32>,first:i32)->i32 {
-  if(first<0i || first>7i) {fail(5u);return 0i;}return dt_mod(dt_field_day(a)+6i-(max(1i,first)-1i),7i)+1i;
+  if(first<1i || first>7i) {fail(5u);return 0i;}return dt_mod(dt_field_day(a)+6i-(max(1i,first)-1i),7i)+1i;
 }
 fn dt_week_start(day:i32,first:i32)->i32 {return day-dt_mod(day+6i-first,7i);}
 fn dt_first_week(year:i32,first:i32,rule:i32)->i32 {
@@ -64,7 +64,7 @@ fn dt_first_week(year:i32,first:i32,rule:i32)->i32 {
   if(rule==1i) {return start;}if(rule==2i) {return select(start+7i,start,jan-start<=3i);}return select(start+7i,start,jan==start);
 }
 fn dt_part(part:u32,value:vec2<u32>,first:i32,week:i32)->i32 {
-  if(first<0i || first>7i || week<0i || week>3i) {fail(5u);return 0i;}
+  if(first<1i || first>7i || week<1i || week>3i) {fail(5u);return 0i;}
   let d=dt_parts(value);let ordinal=dt_field_day(value);
   switch part {
     case 0u: {return d.x;}case 1u: {return (d.y-1i)/3i+1i;}case 2u: {return d.y;}
@@ -94,7 +94,7 @@ fn dt_add(part:u32,count:i32,value:vec2<u32>)->vec2<u32> {
   let whole=d_floor(next);return dt_compose(d_to_i(whole),d_sub(next,whole));
 }
 fn dt_diff(part:u32,a:vec2<u32>,b:vec2<u32>,first:i32,week:i32)->i32 {
-  if(first<0i || first>7i || week<0i || week>3i) {fail(5u);return 0i;}
+  if(first<1i || first>7i || week<1i || week>3i) {fail(5u);return 0i;}
   let x=dt_parts(a);let y=dt_parts(b);let ad=dt_field_day(a);let bd=dt_field_day(b);
   switch part {
     case 0u: {return y.x-x.x;}case 1u: {return (y.x-x.x)*4i+(y.y-1i)/3i-(x.y-1i)/3i;}case 2u: {return (y.x-x.x)*12i+y.y-x.y;}

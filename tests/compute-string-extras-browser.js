@@ -6,6 +6,18 @@ globalThis.runComputeStringExtrasTests=async function({gpu,test,equal,ok}) {
     const p=await ComputeProgram.create(gpu,compileCompute(source,{maxStringLength:64,...options}));
     try{const [lane]=await p.run(runOptions);await check(lane,p);}finally{await p.dispose();}
   }
+  const nativeResponse=await fetch('/reports/compute/oracle/numeric.json');
+  if(!nativeResponse.ok)throw new Error('Windows NLS reference is required');
+  const native=await nativeResponse.json();
+  for(const codePage of [1250,1252])await test('Windows NLS code page '+codePage+': 256 GPU roundtrips',async()=>{
+    const vectors=native.codePages.filter(c=>c.codePage===codePage);equal(vectors.length,256);
+    const p=await ComputeProgram.create(gpu,compileCompute('Public text As String\nPublic code As Long\nSub Main()\ntext=Chr$(ComputeIndex())\ncode=Asc(text)\nEnd Sub',{codePage,maxStringLength:2}),{count:256,fuel:1000,capacity:1});
+    try {const lanes=await p.run();for(const v of vectors){equal(lanes[v.input].globals['Module1.text'].charCodeAt(0),v.unit);equal(lanes[v.input].globals['Module1.code'],v.encoded);}}finally{await p.dispose();}
+  });
+  await test('numeric String repeats selected single-byte code page',()=>execute('Public s As String\nSub Main()\ns=String$(3,379)\nEnd Sub',l=>equal(l.globals['Module1.s'],'{{{'),{codePage:1252}));
+  await test('unmappable code-page values are explicit errors, not substitutions',()=>execute('Public n As Long\nSub Main()\nn=42&\nOn Error Resume Next\nn=Asc("😀")\nn=n+Err.Number\nEnd Sub',l=>equal(l.globals['Module1.n'],47),{codePage:1250}));
+  await test('Double/Single comparison uses documented Single rounding',()=>execute('Public n As Long\nSub Main()\nIf 1.1! = 1.1000000001# Then n=42&\nEnd Sub',l=>equal(l.globals['Module1.n'],42)));
+  await test('system calendar settings are diagnosed without host locale',()=>execute('Public n As Long\nSub Main()\nOn Error Resume Next\nn=Weekday(DateSerial(2024,1,1),0)\nn=Err.Number\nEnd Sub',l=>equal(l.globals['Module1.n'],5)));
   for(const c of EXTRA_STRING_CASES)await test('String extras GPU: '+c.name,()=>execute(c.source,l=>{
     for(const [name,value] of Object.entries(c.expected))equal(l.globals['Module1.'+name],value);
     if(c.expected.a)equal(l.arrays['Module1.a'].bounds,[[0,c.expected.a.length-1]]);

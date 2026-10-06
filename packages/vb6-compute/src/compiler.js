@@ -1,3 +1,4 @@
+import {codePageWGSL} from './code-pages.js';
 import {stringPatternWGSL} from './string-pattern-wgsl.js';
 import {stringArraysWGSL} from './string-arrays-wgsl.js';
 import {lowerStringArrayAssignment} from './string-arrays-lowering.js';
@@ -41,6 +42,8 @@ export function compileComputeIR(program, options={}) {
   const maxStateWords=integer(options.maxStateWords??16384,'maxStateWords',1,65536);
   const dynamicArrayCapacity=integer(options.dynamicArrayCapacity??256,'dynamicArrayCapacity',1,65536);
   const maxCallDepth=integer(options.maxCallDepth??16,'maxCallDepth',1,64);
+  const codePage=options.codePage??null;
+  if(codePage!==null&&![1250,1252].includes(codePage))throw new ComputeError('Only explicit code pages 1250 and 1252 are implemented','GPU_CODEPAGE');
   const maxStringLength=integer(options.maxStringLength??256,'maxStringLength',1,4096);
   const twoDigitYearMax=integer(options.twoDigitYearMax??2029,'twoDigitYearMax',1999,9999);
   if(options.calendar&&options.calendar!=='gregorian')throw new ComputeError('Only Gregorian calendar is implemented','GPU_CALENDAR');
@@ -202,7 +205,7 @@ export function compileComputeIR(program, options={}) {
       }return null;
     }
     const dates=createDateLowering({expr,convert,bind,error,enable:()=>{hasDate=hasDouble=true;}});
-    const strings=createStringLowering({arena,expr,bind,out,error,module,nodeSymbol});
+    const strings=createStringLowering({arena,expr,bind,out,error,module,nodeSymbol,codePage});
     const literal=(value,type)=>typeOf(type)==='string'?bind(arena.literal(value),'string',false):bind(typeOf(type)==='date'?dateLiteral(value):typeOf(type)==='currency'?currencyLiteral(value):typeOf(type)==='double'?doubleLiteral(value):shaderLiteral(value,typeOf(type)),typeOf(type));
     function address(node){
       const s=nodeSymbol(node);if(s)return s;
@@ -259,7 +262,7 @@ export function compileComputeIR(program, options={}) {
           return bind(`select(0i,-1i,str_compare(${a.code},${b.code},${strings.compareMode()})${comparisons[op]}0i)`,'boolean');
         }
         if(comparisons[op]){
-          const type=[a.type,b.type].includes('date')?'double':[a.type,b.type].includes('currency')?'currency':[a.type,b.type].some(t=>['double','date'].includes(t))?'double':[a.type,b.type].includes('single')?([a.type,b.type].includes('long')?typeOf('Double'):'single'):'long';
+          const type=[a.type,b.type].includes('date')?'double':[a.type,b.type].includes('currency')?'currency':[a.type,b.type].includes('single')&&[a.type,b.type].includes('double')?'single':[a.type,b.type].some(t=>['double','date'].includes(t))?'double':[a.type,b.type].includes('single')?([a.type,b.type].includes('long')?typeOf('Double'):'single'):'long';
           return bind(`select(0i,-1i,${relation(convert(a,type),comparisons[op],convert(b,type),type)})`,'boolean');
         }
         if(!['+','-','*','/','\\','mod','^',...Object.keys(bits)].includes(op))error('Unsupported compute operator: '+op);
@@ -481,7 +484,7 @@ export function compileComputeIR(program, options={}) {
   compileProcedure(entry);
   if(initial.length>maxStateWords)error(`State requires ${initial.length} words; limit is ${maxStateWords}`,'GPU_LIMIT');
   const words=initial.length,stride=STATE_HEADER_WORDS+words;
-  const source=runtimeWGSL(words,arena.used||doubleArrays.length?stringsWGSL(arena.arrays,doubleArrays):'')+'\n'+(hasDouble?DOUBLE_WGSL:'')+'\n'+(hasCurrency?CURRENCY_WGSL:'')+'\n'+(hasDate?dateWGSL({twoDigitYearMax}):'')+'\n'+(hasPatterns?stringPatternWGSL(maxStringLength):'')+'\n'+(hasStringArrays?stringArraysWGSL(maxStringLength,Math.max(1,...arena.arrays.map(s=>s.capacity))):'')+'\n'+[...compiled.values()].join('\n')+`
+  const source=runtimeWGSL(words,arena.used||doubleArrays.length?stringsWGSL(arena.arrays,doubleArrays):'')+'\n'+(hasDouble?DOUBLE_WGSL:'')+'\n'+(hasCurrency?CURRENCY_WGSL:'')+'\n'+(hasDate?dateWGSL({twoDigitYearMax}):'')+'\n'+(codePage&&arena.used?codePageWGSL(codePage):'')+'\n'+(hasPatterns?stringPatternWGSL(maxStringLength):'')+'\n'+(hasStringArrays?stringArraysWGSL(maxStringLength,Math.max(1,...arena.arrays.map(s=>s.capacity))):'')+'\n'+[...compiled.values()].join('\n')+`
 @compute @workgroup_size(${workgroupSize})
 fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   if(invocation.x>=params.count) {return;}
@@ -494,6 +497,6 @@ fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   for(var i=0u;i<${words}u;i+=1u) {state[base+${STATE_HEADER_WORDS}u+i]=mem[i];}
 }`;
   if(source.length>4*1024*1024)error('Generated WGSL exceeds 4 MiB; reduce maxCallDepth or split the module','GPU_LIMIT');
-  return {abi:COMPUTE_ABI,doubleABI:1,currencyABI:1,...(hasDate?{dateABI:1,calendar:'gregorian',twoDigitYearMax}:{}),...(arena.used?{stringABI:1,maxStringLength}:{}),dynamicArrayCapacity,gosubStackDepth,maxCallDepth,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
+  return {abi:COMPUTE_ABI,...(codePage?{codePage}:{}),doubleABI:1,currencyABI:1,...(hasDate?{dateABI:1,calendar:'gregorian',twoDigitYearMax}:{}),...(arena.used?{stringABI:1,maxStringLength}:{}),dynamicArrayCapacity,gosubStackDepth,maxCallDepth,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
     stateWords:words,stateStride:stride,initialState:initial,globals:exports,sources:sources.sort((a,b)=>a.id-b.id),diagnostics:warnings,wgsl:source};
 }
