@@ -1,3 +1,6 @@
+import {stringPatternWGSL} from './string-pattern-wgsl.js';
+import {stringArraysWGSL} from './string-arrays-wgsl.js';
+import {lowerStringArrayAssignment} from './string-arrays-lowering.js';
 import {dateWGSL} from './date-wgsl.js';
 import {attachDate,dateLiteral} from './date-layout.js';
 import {createDateLowering} from './date-lowering.js';
@@ -43,7 +46,7 @@ export function compileComputeIR(program, options={}) {
   if(options.calendar&&options.calendar!=='gregorian')throw new ComputeError('Only Gregorian calendar is implemented','GPU_CALENDAR');
   const gosubStackDepth=integer(options.gosubStackDepth??64,'gosubStackDepth',1,1024);
   const warnings=[], globals=new Map(), procedures=new Map(), compiled=new Map(), active=new Set();
-  const initial=[], exports=[], sources=[],doubleArrays=[]; let current=null,requiresShared=false,hasDouble=false,hasCurrency=false,hasDate=false;
+  const initial=[], exports=[], sources=[],doubleArrays=[]; let current=null,requiresShared=false,hasDouble=false,hasCurrency=false,hasDate=false,hasPatterns=false,hasStringArrays=false;
   const error=(message,code='GPU_UNSUPPORTED',line=current?.line||1)=>{
     throw new ComputeError(message,code,{source:current?.module?.name,line,procedure:current?.proc?.name});
   };
@@ -249,6 +252,7 @@ export function compileComputeIR(program, options={}) {
       }
       if(node.kind==='binary'){
         const a=expr(node.left),b=expr(node.right),op=node.op;
+        if(op==='like'){hasPatterns=true;return bind(`str_like(${strings.requireString(a)},${strings.requireString(b)},${strings.compareMode()})`,'boolean');}
         if(op==='&'||(op==='+'&&a.type==='string'&&b.type==='string')){const x=strings.toString(a),y=strings.toString(b);return strings.temporary(dst=>`str_concat(${dst},${x.code},${y.code})`);}
         if(a.type==='string'||b.type==='string'){
           if(a.type!==b.type||!comparisons[op])error('Mixed String/numeric operators require explicit supported conversions','GPU_CONVERSION');
@@ -395,7 +399,7 @@ export function compileComputeIR(program, options={}) {
       let next=`pc=${pc+1}u;`;
       switch(ins.op){
         case 'dim':for(const d of ins.decls)if(!d.constant&&d.initial){const s=locals.get(key(d.name)),v=expr(d.initial);out(`${store(s.type)}(${s.address},${convert(v,s.type)});`);}break;
-        case 'assign':{if(ins.objectSet)error('Set assignment requires object storage');const s=address(ins.target);if(!s||s.array)error('Expected an assignable scalar or array element','GPU_NAME');const v=expr(ins.expr);out(`${store(s.type)}(${s.address},${convert(v,s.type)});`);break;}
+        case 'assign':{if(ins.objectSet)error('Set assignment requires object storage');const s=address(ins.target);if(s?.array&&lowerStringArrayAssignment(s,ins.expr,{expr,nodeSymbol,out,strings,error,convert})){hasStringArrays=true;break;}if(!s||s.array)error('Expected an assignable scalar or array element','GPU_NAME');const v=expr(ins.expr);out(`${store(s.type)}(${s.address},${convert(v,s.type)});`);break;}
         case 'stringMid':{
           const target=address(ins.target);if(!target||target.array||target.type!=='string')error('Mid assignment requires a String variable','GPU_TYPE');
           const start=convert(expr(ins.start),'long'),length=ins.length?convert(expr(ins.length),'long'):'2147483647i',value=strings.requireString(expr(ins.expr));
@@ -477,7 +481,7 @@ export function compileComputeIR(program, options={}) {
   compileProcedure(entry);
   if(initial.length>maxStateWords)error(`State requires ${initial.length} words; limit is ${maxStateWords}`,'GPU_LIMIT');
   const words=initial.length,stride=STATE_HEADER_WORDS+words;
-  const source=runtimeWGSL(words,arena.used||doubleArrays.length?stringsWGSL(arena.arrays,doubleArrays):'')+'\n'+(hasDouble?DOUBLE_WGSL:'')+'\n'+(hasCurrency?CURRENCY_WGSL:'')+'\n'+(hasDate?dateWGSL({twoDigitYearMax}):'')+'\n'+[...compiled.values()].join('\n')+`
+  const source=runtimeWGSL(words,arena.used||doubleArrays.length?stringsWGSL(arena.arrays,doubleArrays):'')+'\n'+(hasDouble?DOUBLE_WGSL:'')+'\n'+(hasCurrency?CURRENCY_WGSL:'')+'\n'+(hasDate?dateWGSL({twoDigitYearMax}):'')+'\n'+(hasPatterns?stringPatternWGSL(maxStringLength):'')+'\n'+(hasStringArrays?stringArraysWGSL(maxStringLength,Math.max(1,...arena.arrays.map(s=>s.capacity))):'')+'\n'+[...compiled.values()].join('\n')+`
 @compute @workgroup_size(${workgroupSize})
 fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   if(invocation.x>=params.count) {return;}

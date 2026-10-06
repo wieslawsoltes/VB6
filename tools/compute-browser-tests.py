@@ -61,6 +61,7 @@ try:
         page.add_script_tag(content=(ROOT / 'tests/compute-images-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-application-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-strings-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-string-extras-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-doubles-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-currency-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-dates-browser.js').read_text())

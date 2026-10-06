@@ -56,5 +56,5 @@ export function createStringLowering({arena,expr,bind,out,error,module,nodeSymbo
       case 'replace':return temporary(dst=>`str_replace(${dst},${s(0)},${s(1)},${s(2)},${n(3,'1i')},${n(4,'-1i')},${compareMode(values[5])})`);
     }
   }
-  return {call,toString,requireString,requireInteger,compareMode,temporary,raw};
+  return {space:()=>arena.literal(' '),call,toString,requireString,requireInteger,compareMode,temporary,raw};
 }
