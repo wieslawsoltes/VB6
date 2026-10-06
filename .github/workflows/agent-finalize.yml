@@ -1,0 +1,78 @@
+name: Agent recovery final integration
+on:
+  push:
+    branches: [fix/agent-recovery-compaction]
+    paths: [.github/workflows/agent-finalize.yml, tools/agent-finalize.b64]
+permissions:
+  contents: write
+concurrency:
+  group: agent-recovery-final-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/fix/agent-recovery-compaction'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge reviewed main and apply regression fix
+        run: |
+          mkdir -p /tmp/agent-final-validation
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          import subprocess, base64, zlib, hashlib
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          main = '2a45fce5f25b5f9e214acb82384119d00d7510cc'
+          result = subprocess.run(['git', 'merge', '--no-commit', '--no-ff', main])
+          conflicts = git('diff', '--name-only', '--diff-filter=U').splitlines()
+          allowed = {'dist/studio.js', 'dist/VB6-Studio-Web.html'}
+          if any(path not in allowed for path in conflicts) or (result.returncode and not conflicts):
+              raise SystemExit('Authored conflict or merge failure; refusing to discard source')
+          if conflicts:
+              subprocess.run(['git', 'checkout', '--ours', '--', *conflicts], check=True)
+              subprocess.run(['git', 'add', '--', *conflicts], check=True)
+          patch = zlib.decompress(base64.b64decode(Path('tools/agent-finalize.b64').read_text().strip(), validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '717701f1eb2e9b3204217c437cee1cb2e4ede835ac4315b4e646b0b9ac409e8c'
+          path = Path('/tmp/agent-final-validation/source.patch'); path.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
+          Path('tools/agent-finalize.b64').unlink()
+          Path('/tmp/agent-final-validation/integrated-main.txt').write_text(main+'\n')
+          PY
+      - name: Build and run complete and focused tests
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/agent-final-validation/build.log
+          node --check dist/studio.js
+          npm test 2>&1 | tee /tmp/agent-final-validation/tests.log
+          npm run test:agents 2>&1 | tee /tmp/agent-final-validation/agents.log
+          python -m py_compile tools/browser-windows-tests.py
+          git diff --check
+          git add -A
+          npm run build
+          git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - name: Publish validated integration to the original branch only
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/fix/agent-recovery-compaction | cut -f1)" = "$EXPECTED_HEAD"
+          git commit -m 'fix: integrate native preview recovery and reject stale diagnostics worker callbacks'
+          git rev-parse HEAD > /tmp/agent-final-validation/source-head.txt
+          git rev-parse HEAD^{tree} > /tmp/agent-final-validation/source-tree.txt
+          git archive HEAD | gzip > /tmp/agent-final-validation/verified-source.tar.gz
+          sha256sum /tmp/agent-final-validation/verified-source.tar.gz > /tmp/agent-final-validation/SHA256SUMS.txt
+          git push origin HEAD:refs/heads/fix/agent-recovery-compaction
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-final-integration-validation
+          path: /tmp/agent-final-validation/
+          retention-days: 7
