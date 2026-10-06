@@ -17,19 +17,85 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply checksum-verified native-contract and SDK lifecycle corrections
+      - name: Apply reviewed source corrections with exact preimage and output checks
         shell: bash
         run: |
           set -euo pipefail
           git rev-parse HEAD > /tmp/services-starting-head.txt
           test "$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)" = "$(cat /tmp/services-starting-head.txt)"
           python3 - <<'PY'
-          import base64,gzip,hashlib,subprocess
-          encoded='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'
-          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
-          assert len(patch)==14117 and hashlib.sha256(patch).hexdigest()=='83a51b76203e431a41e707da6160f4574d9c89aa3dc67a56096a49ffc50f96c3'
-          subprocess.run(['git','apply','--check'],input=patch,check=True)
-          subprocess.run(['git','apply','--whitespace=error'],input=patch,check=True)
+          from pathlib import Path
+          import hashlib
+          hashes={
+            'packages/win32-browser/src/crypt32-codec.js':('9ec16bed2a34d8ce132c57fa754dd042015aaaee23fe915addadb356ca9428f7','28b0ba93ebd410547f82fa3844891d59f26bd5f6b00e8fefacce496341b11e0a'),
+            'packages/win32-browser/src/kernel32-nls.js':('533830e15960282245de3ecd6fbb47aef0dd392dc53d22c392396f02d623d9ec','f8e363e05622767ffccfe7cdde0fb5fd4fd58d8d71aa66e4c2ecca4abedb59ec'),
+            'packages/win32-browser/test/services.test.mjs':('d327bfc96cb9c5dd3f77a83366453a7a60ee0233fbf015edbc3edb3208b76161','7a2bd09309685a127f365b74b6a416fdebdba99c2a7e3313099ade6f2790d5e4'),
+            'tools/win32-services-contracts.mjs':('38981999ff6f2e60c73ac273047ab8f432a580e95ee55de5afa4d75cfd32d151','3f54845b1bdf2390a049d816e199d5946a0d7b745222dbaf4199e97082aef9b5'),
+            'tools/win32-services-oracle.ps1':('7d2a7c7fbd89998d59f55f24824d547a688ab80347db1fd40f872f4427964bee','5391cc3c97c7773bed1b251245beaae00fe7d03c91c0c83c01363831bc122f00'),
+            'tools/browser-win32-services.py':('e24fd967894d0e5f45ec6f42e0878c4f4ac86278ff5c6c7f419caf764587e821','d6e410cd605b08ea82981a034f589a1887d2e5118eb04450dc4b101c7a09902e')}
+          for name,(before,after) in hashes.items():
+              assert hashlib.sha256(Path(name).read_bytes()).hexdigest()==before,name
+          p=Path('packages/win32-browser/src/kernel32-nls.js');s=p.read_text();s=s.replace('integer,unsigned,encodeANSI,decodeANSI','integer,unsigned,decodeANSI')
+          s=s.replace('export const NLS_CONSTANTS','// Reverse the process code page once; WideCharToMultiByte consumes UTF-16 units,\n// including one default byte for each half of an unrepresentable surrogate pair.\nconst ANSI_CODE_UNITS=new Map(Array.from({length:256},(_,value)=>[decodeANSI(Uint8Array.of(value)).charCodeAt(0),value]));\n\nexport const NLS_CONSTANTS',1)
+          old='result=encodeANSI(text);let i=0;\n      for(const character of text){if(decodeANSI(result.subarray(i,i+1))!==character){result[i]=replacement;used=true;}i++;}'
+          assert old in s;s=s.replace(old,'result=new Uint8Array(text.length);\n      for(let i=0;i<text.length;i++){const byte=ANSI_CODE_UNITS.get(text.charCodeAt(i));if(byte===undefined){result[i]=replacement;used=true;}else result[i]=byte;}');p.write_text(s)
+          p=Path('packages/win32-browser/src/crypt32-codec.js');s=p.read_text();old="const bytes=count?m.bytes(input,count):new Uint8Array();let value='';";assert old in s;s=s.replace(old,"if(!input)throw new Win32Error('A binary input pointer is required');\n    const bytes=m.bytes(input,count);let value='';");p.write_text(s)
+          p=Path('tools/win32-services-oracle.ps1');s=p.read_text();old='Wide("ansi-astral",1252,1024,"😀",2);';assert old in s;s=s.replace(old,old+'\n  '+r'Wide("ansi-astral-tail",1252,1024,"A😀é",4);Wide("ansi-unpaired",1252,1024,"\ud800A\udc00",3);Wide("ansi-astral-terminated",1252,1024,"😀",-1);')
+          old='for(int i=0;i<labels.Length;i++){uint n=0;if(wide)EncodeW(data[i],(uint)data[i].Length,flags[i],IntPtr.Zero,ref n);else EncodeA(data[i],(uint)data[i].Length,flags[i],IntPtr.Zero,ref n);uint q=n;n=256;int ok=wide?EncodeW(data[i],(uint)data[i].Length,flags[i],output,ref n):EncodeA(data[i],(uint)data[i].Length,flags[i],output,ref n);result["base64-"+suffix+"-"+labels[i]]=new object[]{q,ok,n,Text(output,wide)};}'
+          new='''// A managed zero-length array marshals as NULL. Use an allocated one-byte
+             // array with a zero count to match the JS probe's non-NULL empty buffer.
+             for(int i=0;i<labels.Length;i++){byte[] binary=data[i].Length==0?new byte[1]:data[i];uint n=0;int query=wide?EncodeW(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n);if(query==0)throw new InvalidOperationException("Base64 query failed: "+suffix+"/"+labels[i]+" error "+Marshal.GetLastWin32Error());uint q=n;n=256;Marshal.WriteInt32(output,0);int ok=wide?EncodeW(binary,(uint)data[i].Length,flags[i],output,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],output,ref n);if(ok==0)throw new InvalidOperationException("Base64 conversion failed: "+suffix+"/"+labels[i]+" error "+Marshal.GetLastWin32Error());result["base64-"+suffix+"-"+labels[i]]=new object[]{q,ok,n,Text(output,wide)};}
+             {uint n=77;int query=wide?EncodeW(null,0,1,IntPtr.Zero,ref n):EncodeA(null,0,1,IntPtr.Zero,ref n);int queryError=query==0?Marshal.GetLastWin32Error():0;uint q=n;n=256;Marshal.WriteInt32(output,0);int ok=wide?EncodeW(null,0,1,output,ref n):EncodeA(null,0,1,output,ref n);int error=ok==0?Marshal.GetLastWin32Error():0;result["base64-"+suffix+"-null"]=new object[]{query,queryError,q,ok,error,n,Text(output,wide)};}'''
+          assert old in s;s=s.replace(old,new);p.write_text(s)
+          p=Path('tools/win32-services-contracts.mjs');s=p.read_text();old="wide('ansi-astral',1252,1024,'😀',2);";assert old in s;s=s.replace(old,old+'\n '+r"wide('ansi-astral-tail',1252,1024,'A😀é',4);wide('ansi-unpaired',1252,1024,'\ud800A\udc00',3);wide('ansi-astral-terminated',1252,1024,'😀',-1);")
+          old=r"  const input=m.allocString(' QcOp\r\n4oKs ',wide)";assert old in s;s=s.replace(old,"  {const n=u32(77),out=m.alloc(256*step);w.lastError=0;const query=call('crypt32','CryptBinaryToString'+suffix,0,0,1,0,n),queryError=query?0:w.lastError,q=m.readU32(n);m.writeU32(n,256);w.lastError=0;const ok=call('crypt32','CryptBinaryToString'+suffix,0,0,1,out,n);results['base64-'+suffix+'-null']=[query,queryError,q,ok,ok?0:w.lastError,m.readU32(n),m.string(out,wide)];}\n"+old);p.write_text(s)
+          p=Path('packages/win32-browser/test/services.test.mjs');s=p.read_text();s+=r'''
+          
+          test('ANSI conversion substitutes per UTF-16 unit without losing following text',t=>{
+            const {w,m,call}=setup(t),out=m.alloc(64),used=u32(m,0),replacement=bytes(m,[33]);
+            for(const [text,expected]of [['A😀é',[65,33,33,233]],['\ud800A\udc00',[33,65,33]],['😀😀',[33,33,33,33]]]){
+              const source=m.allocString(text,true);
+              assert.equal(call('WideCharToMultiByte',1252,1024,source,text.length,0,0,replacement,used),expected.length);
+              assert.equal(m.readU32(used),1);
+              assert.equal(call('WideCharToMultiByte',1252,1024,source,text.length,out,64,replacement,used),expected.length);
+              assert.deepEqual([...m.bytes(out,expected.length)],expected);
+              m.bytes(out,64).fill(17);m.writeU32(used,55);
+              assert.equal(call('WideCharToMultiByte',1252,1024,source,text.length,out,expected.length-1,replacement,used),0);
+              assert.equal(w.lastError,122);assert.deepEqual([...m.bytes(out,64)],Array(64).fill(17));assert.equal(m.readU32(used),55);
+            }
+          });
+          test('Windows-1252 NLS roundtrip preserves all 256 code units without substitution',t=>{
+            const {m,call}=setup(t),input=bytes(m,Array.from({length:256},(_,i)=>i)),wide=m.alloc(512),output=m.alloc(256),used=u32(m,99);
+            assert.equal(call('MultiByteToWideChar',1252,0,input,256,wide,256),256);
+            assert.equal(call('WideCharToMultiByte',1252,1024,wide,256,output,256,0,used),256);
+            assert.deepEqual([...m.bytes(output,256)],[...m.bytes(input,256)]);assert.equal(m.readU32(used),0);
+          });
+          for(const wide of [false,true])test('Base64 '+(wide?'W':'A')+' distinguishes empty storage from a NULL input pointer',t=>{
+            const {w,m}=setup(t),api=(...args)=>w.invoke('crypt32','CryptBinaryToString'+(wide?'W':'A'),args),input=m.alloc(1),output=m.alloc(32*(wide?2:1)),size=u32(m,0);
+            for(const [flags,text]of [[1,'\r\n'],[0x80000001,'\n'],[0x40000001,'']]){
+              assert.equal(api(input,0,flags,0,size),1);assert.equal(m.readU32(size),text.length+1);
+              m.writeU32(size,32);assert.equal(api(input,0,flags,output,size),1);assert.equal(m.string(output,wide),text);assert.equal(m.readU32(size),text.length);
+            }
+            m.putString(output,'keep',32,wide);m.writeU32(size,77);
+            assert.equal(api(0,0,1,0,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);
+            assert.equal(api(0,0,1,output,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);assert.equal(m.string(output,wide),'keep');
+          });
+          ''';p.write_text(s)
+          p=Path('tools/browser-win32-services.py');s=p.read_text()
+          old="""   result=page.evaluate('''async()=>{const api=await import('/src/runtime/entry.js'),project=await(await fetch('/examples/win32-text.vb6web')).json();document.body.replaceChildren();const host=await api.mountApplication(project,document.body,{persist:false});try{await host.vm.dispatch(host.forms[0].instance,'cmdRun_Click',[]);return document.querySelector('[data-control="txtOutput"] textarea').value;}finally{host.dispose();}}''')
+             check(all(part in result for part in SAMPLES['win32-text']),'SDK sample failed');results.append({'case':'runtime-sdk-services','passed':True})"""
+          new="""   page.evaluate('''async()=>{const api=await import('/src/runtime/entry.js'),project=await(await fetch('/examples/win32-text.vb6web')).json();document.body.replaceChildren();globalThis.vb6Application=await api.mountApplication(project,document.body,{persist:false});}''')
+             # Property setters batch DOM updates through requestAnimationFrame. Reuse the
+             # real UI/status and queue-drain assertions instead of reading stale DOM in
+             # the same microtask as dispatch, and verify SDK cleanup over repeated runs.
+             try:
+              output=verify(page,'win32-text')
+              results.append({'case':'runtime-sdk-services','passed':True,'output':output})
+             finally:page.evaluate('()=>{vb6Application.dispose();delete globalThis.vb6Application;}')"""
+          assert old in s;s=s.replace(old,new);p.write_text(s)
+          for name,(before,after) in hashes.items():
+              assert hashlib.sha256(Path(name).read_bytes()).hexdigest()==after,name
+          print('All six authored corrections match independently tested source hashes.')
           PY
           npm run build
           npm test > /tmp/services-tests.txt
