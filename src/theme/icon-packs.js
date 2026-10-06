@@ -1,3 +1,4 @@
+import {canonicalPlatformThemeId} from './platform-themes.js';
 /** Original semantic vector artwork for every IDE command and toolbox type.
  * Fluent: fine monoline; macOS: rounded duotone; Motif: square relief;
  * CDE: colored square relief. No fonts, images, remote URLs or platform assets.
@@ -144,21 +145,23 @@ function geometry(shape,family){
  return `x="${shape.x}" y="${shape.y}" width="${shape.w}" height="${shape.h}" rx="${Math.min(rounded,shape.w/3,shape.h/3)}"`;
 }
 function render(shapes,family){
- const square=family.startsWith('x11'),mac=family==='macos26',cde=family==='x11-cde';
- const attrs=`stroke="currentColor" stroke-width="${mac?'1.35':cde?'1.25':square?'1':'1.05'}" stroke-linecap="${square?'square':'round'}" stroke-linejoin="${square?'miter':'round'}"`;
- const nodes=shapes.map(shape=>`<${shape.kind} ${geometry(shape,family)} ${attrs} fill="${shape.fill&&(mac||square)?'var(--vb-pack-fill,currentColor)':'none'}"${shape.fill&&(mac||square)?' fill-opacity="'+(cde?'.32':square?'.2':'.14')+'"':''}/>`).join('');
+ const square=family.startsWith('x11'),mac=family==='macos26';
+ const attrs=`stroke="currentColor" stroke-width="${mac?'1.35':square?'1':'1.05'}" stroke-linecap="${square?'square':'round'}" stroke-linejoin="${square?'miter':'round'}"`;
+ const nodes=shapes.map(shape=>`<${shape.kind} ${geometry(shape,family)} ${attrs} fill="${shape.fill&&(mac||square)?'var(--vb-pack-fill,currentColor)':'none'}"${shape.fill&&(mac||square)?' fill-opacity="'+(square?'.2':'.14')+'"':''}/>`).join('');
  // Relief is separate authored edge paint, never a filter over the whole UI.
  const relief=square?'<g aria-hidden="true" transform="translate(.5 .5)" opacity=".45" style="color:var(--vb-light)">'+shapes.filter(s=>s.fill).map(s=>`<${s.kind} ${geometry(s,family)} fill="none" stroke="currentColor" stroke-width="1.5"/>`).join('')+'</g>':'';
  return `<g class="icon-pack-body" style="color:var(--vb-pack-ink,currentColor)">${relief}${nodes}</g>`;
 }
 const freeze=value=>{if(value&&typeof value==='object'){for(const v of Object.values(value))freeze(v);Object.freeze(value);}return value;};
-export const ICON_PACKS=freeze(Object.fromEntries(['fluent','macos26','x11','x11-cde'].map(id=>[id,{id,
+export const ICON_PACKS=freeze(Object.fromEntries(['fluent','macos26','x11'].map(id=>[id,{id,
   icons:Object.fromEntries(Object.entries(commands).map(([name,shapes])=>[name,render(shapes,id)])),
   controls:Object.fromEntries(Object.entries(controls).map(([name,shapes])=>[name,render(shapes,id)]))}])));
-export function iconPackForTheme(theme){if(typeof theme!=='string')return 'classic';const base=theme.replace(/-dark$/,'');return Object.hasOwn(ICON_PACKS,base)?base:'classic';}
-export function iconPackBody(name,control,pack){const profile=typeof pack==='string'&&Object.hasOwn(ICON_PACKS,pack)?ICON_PACKS[pack]:null;if(!profile)return '';
+export function iconPackForTheme(theme){theme=canonicalPlatformThemeId(theme);if(typeof theme!=='string')return 'classic';const base=theme.replace(/-dark$/,'');return Object.hasOwn(ICON_PACKS,base)?base:'classic';}
+export function iconPackBody(name,control,pack){pack=canonicalPlatformThemeId(pack);const profile=typeof pack==='string'&&Object.hasOwn(ICON_PACKS,pack)?ICON_PACKS[pack]:null;if(!profile)return '';
  const table=control?profile.controls:profile.icons;return typeof name==='string'&&Object.hasOwn(table,name)?table[name]:profile.icons.missing;}
-export function captionPackSVG(name,pack){const shapes={detach:[P('M3 5H1.5v9h9V12M7 1.5h7.5V9M14 2 6 10')],help:commands['quick-info'],close:commands.close,maximize:commands.maximize,minimize:commands.minimize,restore:commands.restore}[name];
+export function captionPackSVG(name,pack){pack=canonicalPlatformThemeId(pack);let shapes={detach:[P('M3 5H1.5v9h9V12M7 1.5h7.5V9M14 2 6 10')],help:commands['quick-info'],close:commands.close,maximize:commands.maximize,minimize:commands.minimize,restore:commands.restore}[name];
  if(typeof name!=='string'||!Array.isArray(shapes)||typeof pack!=='string'||!Object.hasOwn(ICON_PACKS,pack))throw new RangeError('Unknown caption glyph');
- return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'+shapes.map(s=>`<${s.kind} ${geometry(s,pack)} fill="none" stroke="black" stroke-width="${pack==='macos26'?1.6:pack==='x11-cde'?1.45:1.3}" stroke-linecap="${pack.startsWith('x11')?'square':'round'}"/>`).join('')+'</svg>';
+ if(pack==='macos26')shapes=({maximize:[P('M3 7V3h4zM9 13h4V9z',true)],restore:[P('M3 7h4V3zM9 13V9h4z',true)],minimize:[L(3,8,13,8)],close:[P('m4 4 8 8m0-8-8 8')]}[name]||shapes);
+ if(pack==='x11')shapes=({minimize:[R(6,6,4,4)],maximize:[R(3,3,10,10)],restore:[R(5,5,6,6)]}[name]||shapes);
+ return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'+shapes.map(s=>`<${s.kind} ${geometry(s,pack)} fill="${s.fill?'black':'none'}" stroke="black" stroke-width="${pack==='macos26'?1.6:1.3}" stroke-linecap="${pack.startsWith('x11')?'square':'round'}"/>`).join('')+'</svg>';
 }

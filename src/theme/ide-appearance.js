@@ -1,6 +1,6 @@
 /** IDE preference/controller layer. Application palettes are shared; settings and
  * ownership remain independent from the authored project and its runtime. */
-import {THEMES, normalizeAppearance as normalizeClassicAppearance} from './theme.js';
+import {THEMES, themeId, normalizeAppearance as normalizeClassicAppearance} from './theme.js';
 import {PLATFORM_THEMES} from './platform-themes.js';
 export const OPTIONAL_IDE_THEMES = PLATFORM_THEMES;
 const freeze = Object.freeze;
@@ -8,7 +8,7 @@ export const IDE_THEMES = freeze({...THEMES,...OPTIONAL_IDE_THEMES});
 export const IDE_THEME_ATTRIBUTES = freeze(['data-vb-theme','data-ide-theme','data-ide-theme-family',
   'data-ide-theme-scheme','data-ide-reduce-transparency','data-ide-reduce-motion']);
 export function ideThemeId(value) {
-  return typeof value === 'string' && Object.hasOwn(IDE_THEMES,value) ? value : 'classic';
+  return themeId(value);
 }
 export function normalizeIdeAppearance(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) value = {};

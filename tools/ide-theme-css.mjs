@@ -1,3 +1,4 @@
+import {themeDetailTokens} from './theme-detail-css.mjs';
 import {iconPackTokens} from './icon-pack-css.mjs';
 /** IDE-only palette generation; never concatenate this into vb6-controls.css. */
 import fs from 'node:fs';
@@ -19,6 +20,7 @@ export function renderIdeThemePalettes() {
     const colors=theme.scheme==='dark'?{k:theme.colors.text,w:theme.colors.window,f:theme.colors.face,s:'#b0b0b0',d:'#cccccc',n:'#8dc8ff',b:'#8dc8ff',t:'#77d5cf',c:'#77d5cf',g:'#9ccc8a',l:'#b1e59b',o:'#f5d285',y:'#ffe58a',h:'#fff2b9',r:'#f1ada4',e:'#ffb4ab',m:'#dbadff'}:null;
     if (colors) for (const [key,value] of Object.entries(colors)) css+=`  --vb-icon-${key}: ${value};\n`;
     css+=iconPackTokens(theme);
+    css+=themeDetailTokens(theme);
     css+=`  color-scheme: ${theme.scheme};\n}\n`;
   }
   return css;

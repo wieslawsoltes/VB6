@@ -1,4 +1,4 @@
-import {PLATFORM_THEMES} from './platform-themes.js';
+import {PLATFORM_THEMES,canonicalPlatformThemeId} from './platform-themes.js';
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
  */
@@ -20,7 +20,7 @@ export const THEMES = Object.freeze({...CLASSIC_THEMES,...PLATFORM_THEMES});
 // Win32 GetSysColor indices. Reserved index 25 falls back to the button face.
 export const SYSTEM_ROLES = Object.freeze(['face','desktop','title','inactive','face','window','dark','text','windowText','titleText','face','face','workspace','selection','selectionText','face','shadow','gray','text','inactiveText','light','dark','highlight','infoText','info','face','link','titleEnd','inactiveEnd','selection','face']);
 export const SYSTEM_COLOR_NAMES = Object.freeze(['Scroll Bars','Desktop','Active Title Bar','Inactive Title Bar','Menu Bar','Window Background','Window Frame','Menu Text','Window Text','Title Bar Text','Active Border','Inactive Border','Application Workspace','Highlight','Highlight Text','Button Face','Button Shadow','Gray Text','Button Text','Inactive Caption Text','3D Highlight','3D Dark Shadow','3D Light','Info Text','Info Background']);
-export function themeId(id) { return typeof id==='string' && Object.hasOwn(THEMES,id) ? id : 'classic'; }
+export function themeId(id) { id=canonicalPlatformThemeId(id);return typeof id==='string' && Object.hasOwn(THEMES,id) ? id : 'classic'; }
 export function getTheme(element) {
   return THEMES[themeId(typeof element === 'string' ? element : element?.closest?.('[data-vb-theme]')?.dataset.vbTheme || element?.ownerDocument?.documentElement?.dataset.vbTheme)];
 }

@@ -203,10 +203,10 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
 
   /* Scrollbars are local to IDE surfaces. Authored controls keep classic bars. */
   & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {scrollbar-color:var(--ide-thumb) var(--vb-face);}
-  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar {width:12px;height:12px;background:var(--vb-face);}
-  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar-track {background:var(--vb-face);}
-  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar-thumb {background:var(--ide-thumb);border:3px solid var(--vb-face);border-radius:8px;box-shadow:none;min-height:22px;}
-  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar-button {display:none;}
+  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar {width:var(--detail-scrollbar-size);height:var(--detail-scrollbar-size);background:var(--vb-face);}
+  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar-track {background:var(--detail-scrollbar-track);}
+  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar-thumb {background:var(--detail-scrollbar-thumb);border:var(--detail-scrollbar-border);border-radius:var(--detail-scrollbar-radius);box-shadow:var(--detail-scrollbar-shadow);min-height:22px;}
+  & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar-button {display:var(--detail-scrollbar-buttons);}
   & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::-webkit-scrollbar-corner {background:var(--vb-face);}
 
   /* Reset inherited typography at the existing project-theme boundary. */
@@ -234,21 +234,10 @@ html[data-ide-theme-family="macos26"] {
   & .ide-dialog {border-color:var(--ide-border);box-shadow:var(--ide-shadow);}
   & .dialog-caption strong {text-align:center;}
   & .dock-group {border-radius:8px;}
-  & .document-title>.window-buttons {order:-1;gap:6px;margin-right:4px;}
-  & .document-title>.mdi-system-menu {order:2;}
-  & .document-title>.window-buttons>button:is([aria-label="Close current document"],[aria-label="Minimize document"],[aria-label="Maximize document"],[aria-label="Restore document"]) {
-    width:13px;height:13px;min-height:13px;border-radius:50%;border:1px solid #00000025;box-shadow:inset 0 1px #ffffff30;color:#282828;
-  }
-  & .document-title>.window-buttons>button[aria-label="Close current document"] {order:-3;background:#ff6058;}
-  & .document-title>.window-buttons>button[aria-label="Minimize document"] {order:-2;background:#ffbd2e;}
-  & .document-title>.window-buttons>button:is([aria-label="Maximize document"],[aria-label="Restore document"]) {order:-1;background:#28c840;}
-  & .document-title>.window-buttons>button .icon {opacity:0;}
-  & .document-title>.window-buttons>button[data-browser-detach] .icon,
-  & .document-title>.window-buttons:is(:hover,:focus-within)>button .icon {opacity:1;}
-  & .document-title>.window-buttons>button:is(:disabled,[aria-disabled=true]) {background:var(--ide-separator);}
+
 }
 
-/* X11 is a protocol, not one native skin: Motif and CDE are explicit choices. */
+/* One consistent Motif-inspired X11 skin; legacy CDE selections migrate to it. */
 html[data-ide-theme-family="x11"] {
   & :is(.app-title,.document-title strong,.dialog-caption strong) {font-weight:bold;text-align:center;}
   & :is(.dock-group,.mdi-window,.ide-dialog,.classic-menu:not(.runtime-popup),.property-color-popup) {

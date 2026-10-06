@@ -17,7 +17,7 @@ class Root extends EventTarget{
 function environment(){const view=new EventTarget(),media=new EventTarget();media.matches=false;view.matchMedia=()=>media;view.CustomEvent=CustomEvent;const doc={defaultView:view};doc.documentElement=new Root(doc);return {doc,view,media,root:new Root(doc)};}
 const ids=Object.keys(PLATFORM_THEMES);
 test('application themes share the immutable complete platform registry, with Classic as default',()=>{
- assert.equal(Object.keys(THEMES).length,11);assert.deepEqual(Object.keys(CLASSIC_THEMES),['classic','standard','contrast']);
+ assert.equal(Object.keys(THEMES).length,9);assert.deepEqual(Object.keys(CLASSIC_THEMES),['classic','standard','contrast']);
  assert.deepEqual(normalizeApplicationAppearance(),{theme:'classic',themeOptions:{followSystemTheme:false,reduceTransparency:false,reduceMotion:false}});
  for(const id of ids){assert.equal(THEMES[id],PLATFORM_THEMES[id]);assert.ok(Object.isFrozen(THEMES[id].colors));assert.equal(themeId(id),id);}
 });
@@ -54,7 +54,7 @@ test('controller is local, bounded, idempotent and follows system appearance wit
 test('transient menu/list binding mirrors the closest host and releases its listener',()=>{
  const e=environment(),a=new ApplicationThemeController(e.root),popup=new Root(e.doc);a.apply({theme:'fluent-dark',themeOptions:{reduceMotion:true}});
  const close=bindApplicationTheme(e.root,popup);for(const key of APPLICATION_THEME_ATTRIBUTES)assert.equal(popup.getAttribute(key),e.root.getAttribute(key));
- a.apply({theme:'x11-cde'});assert.equal(popup.getAttribute('data-vb-theme'),'x11-cde');close();a.apply({theme:'classic'});assert.equal(popup.getAttribute('data-vb-theme'),'x11-cde');
+ a.apply({theme:'x11'});assert.equal(popup.getAttribute('data-vb-theme'),'x11');close();a.apply({theme:'classic'});assert.equal(popup.getAttribute('data-vb-theme'),'x11');
  e.root.removeAttribute('data-vb-reduce-motion');copyApplicationTheme(e.root,popup);assert.equal(popup.getAttribute('data-vb-reduce-motion'),null);a.dispose();
 });
 test('standalone overrides cannot inject HTML attributes and have consistent initial metadata',()=>{
