@@ -110,8 +110,11 @@ with sync_playwright() as pw:
             original = json.loads((extra / f'{name}.vb6web').read_text())
             page.evaluate('p => vb6Studio.loadProject(p)', original)
             before = page.evaluate('JSON.stringify(vb6Studio.project.modules)')
+            # Exercise the user path rather than issuing an unbounded burst of
+            # script-only downloads (which Chromium may throttle per frame).
+            page.get_by_role('menubar', name='Main menu').get_by_role('menuitem', name='File', exact=True).click()
             with page.expect_download() as pending:
-                page.evaluate('vb6Studio.command("exportWin32")')
+                page.locator('.classic-menu [data-command="exportWin32"]').click()
             downloaded = pending.value
             downloaded.save_as(OUT / f'{name}.exe')
             check(f'{name}: Make EXE preserves source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
