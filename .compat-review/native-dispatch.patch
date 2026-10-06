@@ -1,0 +1,125 @@
+diff --git a/tests/native-automation-scalars.test.mjs b/tests/native-automation-scalars.test.mjs
+index 010eb81..31df4ea 100644
+--- a/tests/native-automation-scalars.test.mjs
++++ b/tests/native-automation-scalars.test.mjs
+@@ -52,0 +53,10 @@ test('compiled native ByRef copyback retains subtype and exact receiver count',a
++
++test('native enumeration retains scalar tags and the client LCID in compiled For Each',async()=>{
++ const client=new NativeAutomationClient({allowed:['Test.Typed'],allowNativeCode:true,lcid:1045}),seen=[];
++ const values=[{t:'currency',v:'1.2345'},{t:'decimal',v:'2.0000000000000000000000000001'},{t:'number',vt:2,v:7},{t:'number',vt:4,v:Math.fround(1.6)},{t:'boolean',v:true}];
++ client.request=async message=>{seen.push(message);if(message.op==='create')return {t:'object',id:'o1',metadata:{enumerable:true,members:[]}};if(message.op==='enumerate')return values;if(message.op==='release')return {};throw Error('Unexpected request');};
++ const program=compileProject({name:'Enum',startup:'Sub Main',modules:[{name:'M',kind:'module',code:'Sub Main()\nDim d As Object, v As Variant\nSet d = CreateObject("Test.Typed")\nFor Each v In d\nDebug.Print VarType(v)\nNext\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);
++ const output=[],vm=new VirtualMachine(program,{automation:client.registry(),print:s=>output.push(s)});
++ try{await vm.start();assert.deepEqual(output,['6','14','2','4','11']);assert.equal(seen.find(m=>m.op==='enumerate').lcid,1045);}
++ finally{vm.stop();await vm.automationClose;assert.equal(seen.filter(m=>m.op==='release').length,1);}
++});
+diff --git a/tools/interop/AutomationHost.cs b/tools/interop/AutomationHost.cs
+index b1aa618..9c9ca58 100644
+--- a/tools/interop/AutomationHost.cs
++++ b/tools/interop/AutomationHost.cs
+@@ -187 +187 @@ namespace VB6Interop {
+-      if(op=="enumerate"){var sequence=target.Value as IEnumerable;if(sequence==null)throw new NotSupportedException("Component is not enumerable");var values=new List<object>();var enumerator=sequence.GetEnumerator();try{while(enumerator.MoveNext()){if(values.Count>=10000)throw new NotSupportedException("Enumeration exceeds 10,000 entries");values.Add(Export(enumerator.Current));}}finally{var disposable=enumerator as IDisposable;if(disposable!=null)disposable.Dispose();else if(Marshal.IsComObject(enumerator))Marshal.ReleaseComObject(enumerator);}return values;}
++      if(op=="enumerate")return EnumerateNative(target,N(request,"lcid",1033));
+diff --git a/tools/interop/NativeDispatch.cs b/tools/interop/NativeDispatch.cs
+index c9e6e4f..9b4b65e 100644
+--- a/tools/interop/NativeDispatch.cs
++++ b/tools/interop/NativeDispatch.cs
+@@ -19 +19 @@ namespace VB6Interop {
+-    [PreserveSig] int GetIDsOfNames(ref Guid iid,[MarshalAs(UnmanagedType.LPArray,ArraySubType=UnmanagedType.LPWStr)] string[] names,uint count,uint lcid,[Out] int[] ids);
++    [PreserveSig] int GetIDsOfNames(ref Guid iid,[In,MarshalAs(UnmanagedType.LPArray,ArraySubType=UnmanagedType.LPWStr,SizeParamIndex=2)] string[] names,uint count,uint lcid,[Out,MarshalAs(UnmanagedType.LPArray,SizeParamIndex=2)] int[] ids);
+@@ -137 +137 @@ namespace VB6Interop {
+-      var dispatch=(DispatchInvoke)target.Value;var iid=Guid.Empty;var ids=new int[1];
++      var dispatch=(DispatchInvoke)target.Value;var iid=Guid.Empty;var ids=new[]{-1};
+@@ -138,0 +139 @@ namespace VB6Interop {
++      if(ids[0]==-1)throw new InvalidOperationException("Native dispatch did not resolve a member identifier");
+diff --git a/tools/interop/NativeEnumeration.cs b/tools/interop/NativeEnumeration.cs
+new file mode 100644
+index 0000000..224836a
+--- /dev/null
++++ b/tools/interop/NativeEnumeration.cs
+@@ -0,0 +1,55 @@
++// Preserve the native VARIANT of each enumerated value instead of allowing the
++// CLR enumerator to erase VT_CY, VT_DATE, VT_EMPTY or VT_DISPATCH(NULL).
++// https://learn.microsoft.com/en-us/windows/win32/api/oaidl/nf-oaidl-ienumvariant-next
++using System;
++using System.Collections.Generic;
++using System.Runtime.InteropServices;
++using DISPPARAMS = System.Runtime.InteropServices.ComTypes.DISPPARAMS;
++using EXCEPINFO = System.Runtime.InteropServices.ComTypes.EXCEPINFO;
++namespace VB6Interop {
++  [ComImport, Guid("00020404-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
++  interface NativeEnumVariant {
++    [PreserveSig] int Next(uint count, IntPtr values, out uint fetched);
++    [PreserveSig] int Skip(uint count);
++    [PreserveSig] int Reset();
++    [PreserveSig] int Clone(out NativeEnumVariant copy);
++  }
++  public static partial class AutomationHost {
++    static object EnumerateNative(Entry target, int lcid) {
++      if(lcid<0||lcid>0xfffff)throw new ArgumentException("Invalid LCID");
++      if(!Convert.ToBoolean(target.Metadata["enumerable"]))throw new NotSupportedException("Component is not enumerable");
++      var iid=Guid.Empty;var args=new DISPPARAMS();var error=new EXCEPINFO();uint argumentError;
++      var result=NewVariant();object iterator=null;
++      try {
++        // DISPID_NEWENUM is the Automation enumeration contract; it does not
++        // expose arbitrary member IDs or permit ungranted object activation.
++        int hr=((DispatchInvoke)target.Value).Invoke(-4,ref iid,(uint)lcid,2,ref args,result,ref error,out argumentError);
++        if(hr<0)throw new NativeDispatchException(error.bstrDescription??"Cannot obtain Automation enumerator",hr,error,argumentError);
++        ushort vt=(ushort)Marshal.ReadInt16(result);
++        if(vt!=9&&vt!=13)throw new NotSupportedException("Invalid Automation enumerator result");
++        var pointer=Marshal.ReadIntPtr(result,8);
++        if(pointer==IntPtr.Zero)throw new NotSupportedException("Null Automation enumerator");
++        iterator=Marshal.GetObjectForIUnknown(pointer);
++        var enumerator=(NativeEnumVariant)iterator;
++        var values=new List<object>();
++        while(true) {
++          var value=NewVariant();
++          try {
++            uint fetched;hr=enumerator.Next(1,value,out fetched);
++            Marshal.ThrowExceptionForHR(hr);
++            if(fetched>1||hr>1||(hr==0&&fetched!=1)||(hr==1&&fetched!=0))throw new InvalidOperationException("Invalid IEnumVARIANT response");
++            if(fetched==0)break;
++            if(values.Count>=10000)throw new NotSupportedException("Enumeration exceeds 10,000 entries");
++            values.Add(ExportNative(value));
++          } finally { FreeVariant(value); }
++        }
++        return values;
++      } finally {
++        // Balance only this RCW acquisition; never FinalRelease a possibly
++        // shared identity. Each native result owns its own VARIANT reference.
++        if(iterator!=null&&Marshal.IsComObject(iterator))Marshal.ReleaseComObject(iterator);
++        FreeVariant(result);
++      }
++    }
++  }
++}
+diff --git a/tools/interop/automation-host.ps1 b/tools/interop/automation-host.ps1
+index a75cee2..c43f61c 100644
+--- a/tools/interop/automation-host.ps1
++++ b/tools/interop/automation-host.ps1
+@@ -3 +3 @@ $ErrorActionPreference = 'Stop'
+-Add-Type -Path @((Join-Path $PSScriptRoot 'AutomationHost.cs'), (Join-Path $PSScriptRoot 'NativeDispatch.cs')) -ReferencedAssemblies System.Web.Extensions,System.Windows.Forms,System.Drawing
++Add-Type -Path @((Join-Path $PSScriptRoot 'AutomationHost.cs'), (Join-Path $PSScriptRoot 'NativeDispatch.cs'), (Join-Path $PSScriptRoot 'NativeEnumeration.cs')) -ReferencedAssemblies System.Web.Extensions,System.Windows.Forms,System.Drawing
+diff --git a/tools/interop/native-automation.mjs b/tools/interop/native-automation.mjs
+index d47b906..3bc5673 100644
+--- a/tools/interop/native-automation.mjs
++++ b/tools/interop/native-automation.mjs
+@@ -58 +58 @@ export class NativeAutomationClient {
+-    if(wire.metadata?.enumerable){const enumerate=async preserve=>{const values=await client.request({op:'enumerate',handle:wire.id});return values.map(value=>decode(value,preserve));};adapter.enumerate=()=>enumerate(false);adapter.enumerateScalar=()=>enumerate(true);}
++    if(wire.metadata?.enumerable){const enumerate=async preserve=>{const values=await client.request({op:'enumerate',handle:wire.id,lcid:client.lcid});return values.map(value=>decode(value,preserve));};adapter.enumerate=()=>enumerate(false);adapter.enumerateScalar=()=>enumerate(true);}
+diff --git a/tools/interop/test-native.mjs b/tools/interop/test-native.mjs
+index 76841f1..74dd835 100644
+--- a/tools/interop/test-native.mjs
++++ b/tools/interop/test-native.mjs
+@@ -89,0 +90,11 @@ End Sub`}]});
++    const enumeration=await scalarClient.request({op:'create',progId:'Scripting.Dictionary'});
++    const enumKeys=[{t:'currency',v:'1.2345'},{t:'decimal',v:'2.0000000000000000000000000001'},{t:'number',vt:2,v:7},{t:'number',vt:4,v:Math.fround(1.6)},{t:'boolean',v:true}];
++    for(const key of enumKeys)await scalarClient.request({op:'call',handle:enumeration.id,member:'Add',mode:1,args:[key,{t:'empty'}]});
++    const nativeKeys=(await scalarClient.request({op:'call',handle:enumeration.id,member:'Keys',mode:1,args:[]})).value.v;
++    check('independent SAFEARRAY retains typed Dictionary keys',()=>assert.deepEqual(nativeKeys,enumKeys));
++    for(let i=0;i<25;i++)assert.deepEqual(await scalarClient.request({op:'enumerate',handle:enumeration.id,lcid:1033}),nativeKeys);
++    check('IEnumVARIANT preserves Currency, Decimal and scalar types over repeated lifetimes',()=>assert.equal(nativeKeys[0].t,'currency'));
++    await scalarClient.request({op:'release',handle:enumeration.id});
++    const afterEnumeration=await scalarClient.request({op:'info'});
++    check('enumeration releases handles',()=>assert.deepEqual(afterEnumeration,{objects:0,windows:0}));
++
