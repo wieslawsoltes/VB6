@@ -41,7 +41,7 @@ export class PropertyInspector {
       this.grid.append(this.row(key,props[key],target));
       if(key==='Font'&&this.fontExpanded)for(const fontKey of fontKeys)this.grid.append(this.row(fontKey,props[fontKey],target,true));
     }
-    this.grid.scrollTop=scroll;this.grid.setAttribute('aria-rowcount',String(this.rows.size));if(!this.rows.has(this.activeKey))this.activeKey=this.rows.keys().next().value;this.setActive(this.activeKey);if(this.targets.length===1&&this.ide.controlRegistry?.hasPropertyPages?.(target.type))this.grid.append(el('button',{class:'property-pages-button',onclick:()=>this.ide.showControlPropertyPages().catch(e=>alertDialog(e.message,'Component Properties'))},'Property Pages…'));this.setReadOnly(this.ide.runState!=='design');
+    this.grid.scrollTop=scroll;this.grid.setAttribute('aria-rowcount',String(this.rows.size));if(!this.rows.has(this.activeKey))this.activeKey=this.rows.keys().next().value;this.setActive(this.activeKey);if(this.ide.controlRegistry?.canEditSelection?.(this.targets))this.grid.append(el('button',{class:'property-pages-button',onclick:()=>this.ide.showControlPropertyPages().catch(e=>alertDialog(e.message,'Component Properties'))},'Property Pages…'));this.setReadOnly(this.ide.runState!=='design');
   }
   setActive(key){
     this.activeKey=key;for(const [name,row] of this.rows||[]){const yes=name===key;row.classList.toggle('active',yes);row.setAttribute('aria-selected',String(yes));const field=this.fields.get(name);if(field)field.tabIndex=yes?0:-1;row.querySelectorAll('button').forEach(b=>b.tabIndex=yes?0:-1);}

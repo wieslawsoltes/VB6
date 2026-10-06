@@ -1,5 +1,7 @@
 /** Host code only. Native project data cannot register code or fetch plug-ins. */
 import {OcxControlSite,ocxControlSite} from './ocx-site.js';
+import {ocxContainerFor} from './ocx-container.js';
+import {OcxPropertyPageSession} from './ocx-pages.js';
 const nameOK=n=>typeof n==='string'&&/^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(n)&&!['constructor','prototype','__proto__'].includes(n.toLowerCase());
 const scalar=v=>v===null||['string','boolean','number'].includes(typeof v)&&(!(typeof v==='number')||Number.isFinite(v))&&(!(typeof v==='string')||v.length<=65536);
 function metadataFor(type,metadata={}){
@@ -34,11 +36,11 @@ export class ControlAdapterRegistry {
   create(model,options={}){
     const entry=this.#entries.get(String(model.type).toLowerCase()),factory=options.design?entry?.designer:entry?.runtime;
     if(!factory)return null;
-    const site=entry.lifecycle?new OcxControlSite(model,options):null;let control;
+    const site=entry.lifecycle?new OcxControlSite(model,{...options,container:options.container||ocxContainerFor(options.form,options)}):null;let control;
     try{
       control=factory(model,site?{...options,ocxSite:site}:options);
       if(!control||!control.__control||!control.node||typeof control.dispose!=='function'||typeof control.refresh!=='function'||control.model?.id!==model.id)throw new TypeError('Custom control factory must return a synchronous BrowserControl-compatible adapter');
-      if(site){site.bind(control);const dispose=control.dispose.bind(control);let closed=false;control.dispose=()=>{if(closed)return;closed=true;try{site.close();}finally{dispose();}};}
+      if(site){site.bind(control);const refresh=control.refresh.bind(control);control.refresh=(...args)=>{const value=refresh(...args);site.sync();return value;};const dispose=control.dispose.bind(control);let closed=false;control.dispose=()=>{if(closed)return;closed=true;try{site.close();}finally{dispose();}};}
       return control;
     }catch(error){try{site?.close();}catch{}try{control?.dispose?.();}catch{}throw error;}
   }
@@ -55,5 +57,16 @@ export class ControlAdapterRegistry {
   }
   hasPropertyPages(type){return !!this.#entries.get(String(type).toLowerCase())?.propertyPages;}
   async editProperties(model,options={}){const entry=this.#entries.get(String(model.type).toLowerCase());if(!entry?.propertyPages)throw new Error('No property pages for this component');const changes=await entry.propertyPages(JSON.parse(JSON.stringify(model)),{...options,metadata:entry.metadata});if(changes===null||changes===undefined||changes===false)return null;this.validateProperties(model.type,changes);return changes;}
+  canEditSelection(models){return Array.isArray(models)&&models.length>0&&models.length<=256&&new Set(models).size===models.length&&models.every(model=>model&&typeof model.type==='string'&&model.type.toLowerCase()===models[0].type.toLowerCase()&&this.hasPropertyPages(model.type));}
+  async editSelection(models,options={}){
+    if(!this.canEditSelection(models))throw TypeError('Select 1..256 components of the same property-page type');
+    const snapshots=models.map(model=>JSON.stringify(model));
+    const changes=await this.editProperties(models[0],{...options,objects:models.map(model=>JSON.parse(JSON.stringify(model)))});
+    if(models.some((model,i)=>JSON.stringify(model)!==snapshots[i]))throw Error('Property-page selection has changed; reopen the page');
+    if(changes===null)return null;
+    const canonical={};for(const [name,value] of Object.entries(changes)){const key=this.property(models[0].type,name)?.name||name;if(Object.hasOwn(canonical,key))throw TypeError('Duplicate property-page property');canonical[key]=value;}
+    for(const model of models)this.validateProperties(model.type,canonical);return canonical;
+  }
+  createPropertyPageSession(models,options){return new OcxPropertyPageSession(this,models,options);}
   save(control){const site=ocxControlSite(control);if(!site)throw new Error('This component has no portable OCX persistence site');return site.save();}
 }

@@ -1,7 +1,0 @@
-diff --git a/tools/interop/OcxPersistence.cs b/tools/interop/OcxPersistence.cs
-index 11d9ff1..b5c7c00 100644
---- a/tools/interop/OcxPersistence.cs
-+++ b/tools/interop/OcxPersistence.cs
-@@ -10,0 +11,2 @@ using System.Text;
-+using EXCEPINFO = System.Runtime.InteropServices.ComTypes.EXCEPINFO;
-+using STATSTG = System.Runtime.InteropServices.ComTypes.STATSTG;
