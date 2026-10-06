@@ -1,0 +1,76 @@
+name: Finalize verified agent workbench
+on:
+  push:
+    branches: [feat/agent-change-review-queue]
+permissions:
+  contents: write
+jobs:
+  finalize:
+    if: github.ref == 'refs/heads/feat/agent-change-review-queue'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Eliminate redundant task-switch snapshot and assert one refresh in browser regression
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, subprocess
+          from pathlib import Path
+          assert subprocess.check_output(['git','rev-parse','HEAD^'],text=True).strip() == '858dd7dcc1f148c835357fa3ace732b4dfb38cd1'
+          p=Path('src/agents/studio.js')
+          assert subprocess.check_output(['git','hash-object',str(p)],text=True).strip() == '8755dddfd4de9ff701e9bf7d4f0d51e9574c4f8d'
+          s=p.read_text(); old='this.workbench.refreshChanges(); this.workbench.refreshChanges();'
+          assert s.count(old)==1
+          p.write_text(s.replace(old,'this.workbench.refreshChanges();'))
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == '64d926ffc07f4fe0e8cf648f7e3e7abb60f2412e0d6b4c315071a92b7b89488b'
+          p=Path('tools/coding-agents-browser-tests.py')
+          assert subprocess.check_output(['git','hash-object',str(p)],text=True).strip() == 'a7faea61f3725a927ccef9e79de814fd5d1bdf81'
+          s=p.read_text(); old="def review_last_run(page,mode):\n    requests,original=make_review_change(page)\n"
+          addition=base64.b64decode('ICAgIGNoZWNrKHBhZ2UuZXZhbHVhdGUoIiIiKCkgPT4geyBjb25zdCBwYW5lbD12YjZTdHVkaW8uZG9jdW1lbnRzLnRvb2xzLmdldCgndG9vbDpjb2RpbmctYWdlbnRzJyksIHZpZXc9cGFuZWwud29ya2JlbmNoLCByZWZyZXNoPXZpZXcucmVmcmVzaENoYW5nZXM7IGxldCBjYWxscz0wOwogICAgICB2aWV3LnJlZnJlc2hDaGFuZ2VzPWZ1bmN0aW9uKCl7Y2FsbHMrKztyZXR1cm4gcmVmcmVzaC5jYWxsKHRoaXMpO307CiAgICAgIHRyeSB7cGFuZWwuc3luY1Rhc2soKTtyZXR1cm4gY2FsbHM7fSBmaW5hbGx5IHt2aWV3LnJlZnJlc2hDaGFuZ2VzPXJlZnJlc2g7fQogICAgfSIiIik9PTEsICdUYXNrIHN5bmNocm9uaXphdGlvbiBtdXN0IGNhcHR1cmUgdGhlIGN1cnJlbnQgcmV2aWV3IG9ubHkgb25jZScpCg==',validate=True).decode()
+          assert s.count(old)==1
+          s=s.replace(old,old+addition)
+          old="return {'taskAndLastRunCheckpoints':True}"; assert s.count(old)==1
+          p.write_text(s.replace(old,"return {'taskAndLastRunCheckpoints':True,'oneReviewRefreshPerTaskSwitch':True}"))
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == 'a8fa875a0d285433386d1128fe1b5bfd719352a87d95cb886e167da20801b3ec'
+          PY
+      - name: Rebuild and run all regression tests
+        shell: bash
+        run: |
+          npm run build | tee agent-workbench-build.log
+          npm run test:agents | tee agent-workbench-tests.log
+          npm test | tee agent-workbench-full-tests.log
+      - name: Verify exact tested product tree and remove this temporary helper
+        shell: bash
+        run: |
+          git add -- src/agents/studio.js tools/coding-agents-browser-tests.py dist/studio.js dist/studio.css dist/VB6-Studio-Web.html
+          git rm -- .github/workflows/agent-workbench-finalize.yml
+          git diff --cached --check
+          test "$(git write-tree)" = 47e7da813ead4f855f47ee22386f9c0e2aba2453
+          git diff --exit-code
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'perf(agents): capture change review once when switching tasks'
+          git push origin HEAD:feat/agent-change-review-queue
+          git rev-parse HEAD > head.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-workbench-final-source
+          path: |
+            agent-workbench-build.log
+            agent-workbench-tests.log
+            agent-workbench-full-tests.log
+            head.txt
+            tree.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
