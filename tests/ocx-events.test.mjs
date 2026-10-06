@@ -1,0 +1,105 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {AutomationRegistry,automationSubscribe,automationInvoke} from '../src/runtime/automation.js';
+import {VirtualMachine} from '../src/runtime/vm.js';
+import {compileProject} from '../src/language/compiler.js';
+
+function fixture(){let fire,unsubscribed=0,released=0;return {
+  metadata:{members:[{name:'Fire',params:[],modes:[1]}],events:[{name:'Changing',params:[{name:'Value'},{name:'Cancel',byRef:true}]}]},
+  subscribe(handler){fire=handler;return ()=>{unsubscribed++;fire=null;};},
+  async invoke(){return {value:(await fire('Changing',[42,0],{reentrant:true})).args[1],args:[]};},
+  release(){released++;},fire(...args){return fire(...args);},get counts(){return {unsubscribed,released};}
+};}
+test('OCX events copy back ByRef values, preserve ByVal and connection order',async()=>{
+ const a=fixture(),s=new AutomationRegistry().createSession(),o=s.adopt(a),seen=[];
+ automationSubscribe(o,async(name,args)=>{seen.push(name);args[0]=1;await args[1].ref.set(-1);});
+ const remove=automationSubscribe(o,async(name,args)=>seen.push(await args[1].ref.get()));
+ assert.equal((await automationInvoke(o,'Fire',1)), -1);assert.deepEqual(seen,['Changing',-1]);remove();remove();
+ await s.close();assert.deepEqual(a.counts,{unsubscribed:1,released:1});
+});
+test('WithEvents uses compiled handlers, synchronous cancellation, nested calls and reassignment',async()=>{
+ const adapters=[],registry=new AutomationRegistry().register('Test.Ocx',()=>{const a=fixture();adapters.push(a);return a;});
+ const code=`Option Explicit
+Private WithEvents Widget As Object
+Private depth As Long
+Public Sub Exercise()
+ Set Widget = CreateObject("Test.Ocx")
+ Debug.Print Widget.Fire()
+ Set Widget = Nothing
+End Sub
+Private Sub Widget_Changing(ByVal Value As Variant, ByRef Cancel As Variant)
+ Debug.Print Value
+ If depth = 0 Then
+  depth = 1
+  Debug.Print Widget.Fire()
+ End If
+ Cancel = True
+End Sub`;
+ const program=compileProject({name:'Events',startup:'Sub Main',modules:[{kind:'module',name:'M',code:'Sub Main()\nDim w As Worker\nSet w = New Worker\nw.Exercise\nEnd Sub'},{kind:'class',name:'Worker',code}]});
+ assert.deepEqual(program.diagnostics,[]);const output=[],vm=new VirtualMachine(program,{automation:registry,print:v=>output.push(v)});
+ try{await vm.start();assert.deepEqual(output,['42','42','-1','-1']);assert.deepEqual(await adapters[0].fire('Changing',[8,0]),{args:[8,0]});}
+ finally{vm.stop();await vm.automationClose;}
+});
+test('event schemas, names and arity are validated without invoking a handler',async()=>{
+ const a=fixture(),s=new AutomationRegistry().createSession();s.adopt(a);
+ await assert.rejects(()=>a.fire('constructor',[]),e=>e.number===440);
+ await assert.rejects(()=>a.fire('Changing',[1]),e=>e.number===440);
+ for(const events of [{},[{name:'constructor',params:[]}],[{name:'X',params:[]},{name:'x',params:[]}]] )assert.throws(()=>new AutomationRegistry().createSession().adopt({...fixture(),metadata:{members:[],events}}),e=>e.number===440);
+ await s.close();
+});
+test('disconnect during delivery skips removed handlers and additions wait until next event',async()=>{
+ const a=fixture(),s=new AutomationRegistry().createSession(),o=s.adopt(a);let seen=[],remove;
+ automationSubscribe(o,()=>{seen.push('first');remove();automationSubscribe(o,()=>seen.push('new'));});
+ remove=automationSubscribe(o,()=>seen.push('removed'));
+ await a.fire('Changing',[1,0]);assert.deepEqual(seen,['first']);await a.fire('Changing',[1,0]);assert.deepEqual(seen,['first','first','new']);await s.close();
+});
+test('event subscriptions reject asynchronous cleanup contracts',()=>{
+ const a=fixture();a.subscribe=async()=>()=>{};assert.throws(()=>new AutomationRegistry().createSession().adopt(a),e=>e.number===440);
+});
+
+
+test('scalar-aware event adapters preserve Boolean cancellation and numeric Variant subtypes',async()=>{
+ const {tagScalar,readScalar,scalarType,unbox}=await import('../src/runtime/values.js');
+ let fire;const adapter={metadata:{members:[],events:[{name:'Changing',params:[{name:'Reading'},{name:'Cancel',byRef:true}]}]},invoke(){},invokeScalar(){},release(){},subscribe(sink){fire=sink;return ()=>{};}};
+ const session=new AutomationRegistry().createSession(),object=session.adopt(adapter),seen=[];
+ const disconnect=automationSubscribe(object,async(name,args)=>{seen.push(scalarType(args[0]),scalarType(await readScalar(args[1].ref)));await args[1].ref.set(tagScalar(-1,'boolean'));});
+ try{const changed=await fire('Changing',[tagScalar(4,'single'),tagScalar(0,'boolean')]);assert.deepEqual(seen,['single','boolean']);assert.equal(scalarType(changed.args[0]),'single');assert.equal(scalarType(changed.args[1]),'boolean');assert.equal(unbox(changed.args[1]),-1);disconnect();const untouched=await fire('Changing',[tagScalar(4,'long'),tagScalar(0,'boolean')]);assert.equal(scalarType(untouched.args[0]),'long');assert.equal(scalarType(untouched.args[1]),'boolean');}
+ finally{await session.close();}
+});
+
+
+test('typed OCX WithEvents cancellation uses declared cells, not Variant-value inference',async()=>{
+ const registry=new AutomationRegistry().register('Test.TypedOcx',()=>{
+  let fire;return {metadata:{members:[{name:'Fire',params:[],modes:[1]}],events:[{name:'Changing',params:[{name:'Reading',type:'Long',byRef:true},{name:'Cancel',type:'bOoLeAn',byRef:true}]}]},
+   subscribe(sink){fire=sink;return ()=>{};},async invoke(){const result=await fire('Changing',[7,0],{reentrant:true});assert.deepEqual(result.args,[8,-1]);return {value:result.args[1],args:[]};},release(){}};
+ });
+ const code=`Private WithEvents Widget As Object
+Public Sub Exercise()
+ Set Widget = CreateObject("Test.TypedOcx")
+ Debug.Print Widget.Fire()
+End Sub
+Private Sub Widget_Changing(ByRef Reading As Long, ByRef Cancel As Boolean)
+ Debug.Print VarType(Reading)
+ Debug.Print VarType(Cancel)
+ Reading = Reading + 1
+ Cancel = True
+End Sub`;
+ const program=compileProject({name:'TypedEvents',startup:'Sub Main',modules:[{kind:'module',name:'M',code:'Sub Main()\nDim w As Worker\nSet w = New Worker\nw.Exercise\nEnd Sub'},{kind:'class',name:'Worker',code}]});
+ assert.deepEqual(program.diagnostics,[]);const output=[],vm=new VirtualMachine(program,{automation:registry,print:v=>output.push(v)});
+ try{await vm.start();assert.deepEqual(output,['3','11','-1']);}finally{vm.stop();await vm.automationClose;}
+});
+
+test('typed ByRef event storage enforces bounds and shares the declared type across sinks',async()=>{
+ let fire;const adapter={metadata:{members:[],events:[{name:'ByteChange',params:[{name:'Value',type:'Byte',byRef:true}]}]},invoke(){},invokeScalar(){},release(){},subscribe(sink){fire=sink;return ()=>{};}};
+ const session=new AutomationRegistry().createSession(),object=session.adopt(adapter);
+ const first=automationSubscribe(object,async(name,args)=>{assert.equal(args[0].ref.type,'Byte');assert.throws(()=>args[0].ref.set(256),e=>e.number===6);await args[0].ref.set(255);});
+ const second=automationSubscribe(object,async(name,args)=>{assert.equal(args[0].ref.type,'Byte');assert.equal(await args[0].ref.get(),255);});
+ try{const result=await fire('ByteChange',[0]);assert.equal(result.args[0].type,'byte');assert.equal(result.args[0].value,255);first();second();}finally{await session.close();}
+});
+
+test('event metadata rejects unsupported declared types and duplicate parameter names',()=>{
+ for(const params of [[{name:'Value',type:'Invalid'}],[{name:'Value',type:''}],[{name:'Value'},{name:'value'}]]){
+  const session=new AutomationRegistry().createSession();
+  assert.throws(()=>session.adopt({...fixture(),metadata:{members:[],events:[{name:'Changing',params}]}}),e=>e.number===440);
+ }
+});

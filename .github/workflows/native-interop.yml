@@ -52,6 +52,8 @@ jobs:
         run: npm run test:interop:windows
       - name: Installed system ActiveX control preview and lifecycle
         run: node tools/interop/test-activex.mjs
+      - name: OCX outgoing events, cancellation, containment and persistence
+        run: node tools/interop/test-ocx.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

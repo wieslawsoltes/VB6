@@ -6,6 +6,7 @@ import {AGENT_SCOPES} from '../mcp/agent-permissions.js';
 import {CodingAgent} from './agent.js';
 import {AgentConversations} from './conversations.js';
 import {AgentThreadView} from './thread-view.js';
+import {AgentWorkbenchView} from './workbench-view.js';
 import {AGENT_PERMISSION_PROFILES, AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary} from './permissions.js';
 import {AGENT_LIMIT_FIELDS, AGENT_LIMIT_PRESETS, normalizeAgentLimits, loadAgentLimits, saveAgentLimits} from './limits.js';
 import {PROVIDERS, createTransport, listModels, modelId} from './providers.js';
@@ -60,7 +61,7 @@ export function installCodingAgents(ide, studioAPI, {transportFactory = createTr
     return allowed;
   };
   const adapter = createIdeAdapter(ide, {approve, historyLabel: 'AI Agent'});
-  const conversations = new AgentConversations(adapter, {askUser: questionDialog, permissionConstraints, defaultLimits: loadAgentLimits(),
+  const conversations = new AgentConversations(adapter, {askUser: questionDialog, permissionConstraints, defaultLimits: loadAgentLimits(), getReviewProject: () => ide.project,
     onEvent: event => { for (const listener of listeners) { try { listener(event); } catch {} } }});
   const api = {get agent() { return conversations.agent; }, conversations, adapter,
     onChange(listener) { listeners.add(listener); return () => listeners.delete(listener); }};
@@ -98,14 +99,17 @@ class AgentPanel {
     this.ide = ide; this.api = api; this.transportFactory = transportFactory;
     this.key = 'tool:coding-agents'; this.title = 'AI Coding Agents'; this.glyph = 'module'; this.width = 840; this.height = 650;
     this.root = el('div', {class: 'agent-panel'});
+    this.workbench = new AgentWorkbenchView(this, cancellableDialog);
     this.status = el('div', {class: 'agent-status', role: 'status'}, 'Idle — no project data has been sent.');
     this.runButton = button('Run', () => this.start(), 'run'); this.continueButton = button('Continue', () => this.start(true), 'run'); this.stopButton = button('Stop', () => this.cancel(), 'stop');
+    this.compactButton = button('Compact context', () => this.start(false, true));
     this.newButton = button('New Task', () => this.newTask(), 'new');
     this.exportButton = button('Save Transcript…', () => download('coding-agent-transcript.json', JSON.stringify({version: 2, thread: api.agent.thread.snapshot(), activity: api.agent.transcript, usage: api.agent.usage, estimatedTokens: api.agent.estimatedTokens}, null, 2), 'application/json'), 'save');
-    this.root.append(el('div', {class: 'agent-toolbar'}, this.runButton, this.continueButton, this.stopButton, this.newButton, this.exportButton),
+    this.root.append(el('div', {class: 'agent-toolbar'}, this.runButton, this.continueButton, this.stopButton, this.compactButton, this.newButton, this.exportButton),
       (this.pages = tabbedPages([{id: 'task', label: 'Task', node: this.taskPage()}, {id: 'connection', label: 'Connection', node: this.connectionPage()},
+        {id: 'changes', label: 'Changes', node: this.workbench.changesPage()}, {id: 'queue', label: 'Queue', node: this.workbench.queuePage()},
         {id: 'permissions', label: 'Permissions', node: this.permissionsPage()}, {id: 'tools', label: 'Tools', node: this.toolsPage()},
-        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages'})), this.status);
+        {id: 'plan', label: 'Plan', node: this.planPage()}, {id: 'tasks', label: 'Tasks', node: this.tasksPage()}, {id: 'activity', label: 'Activity', node: this.activityPage()}], {label: 'Coding agent pages', onSelect: id => { if (id === 'changes') this.workbench.refreshChanges(); }})), this.status);
     this.unlisten = api.onChange(event => this.event(event)); this.syncTask();
   }
   taskPage() {
@@ -118,6 +122,8 @@ class AgentPanel {
     });
     this.threadView = new AgentThreadView({announce: text => { this.status.textContent = text; }});
     this.log = this.threadView.scroller;
+    this.queueDraftButton = button('Queue message', () => this.workbench.queueDraft());
+    this.queueBadge = button('Queued: 0', () => this.pages.select('queue'));
     this.sendButton = button('Send', () => this.start(), 'run');
     this.composerStop = button('Stop generation', () => this.cancel(), 'stop');
     this.quickMode = choices('Task permission profile', Object.entries(AGENT_PERMISSION_PROFILES));
@@ -134,15 +140,15 @@ class AgentPanel {
     this.exampleSelect = examples;
     this.contextStatus = el('div', {class: 'agent-context', 'aria-label': 'Task context usage'});
     this.recoveryText = el('p');
-    this.recoverySettings = button('Review limits…', () => { this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
+    this.recoverySettings = button('Review limits…', () => { if (this.api.agent.failure?.kind === 'access') { this.pages.select('connection'); this.keyInput.focus(); return; } this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
     this.recoveryContinue = button('Resume task', () => this.start(true), 'run');
     this.recovery = el('div', {class: 'agent-limit-recovery', hidden: true, role: 'status'}, this.recoveryText,
       el('div', {class: 'agent-actions'}, this.recoverySettings, this.recoveryContinue));
     this.budgetMeter = el('progress', {class: 'agent-budget-meter', max: 1, value: 0, 'aria-label': 'Session token budget used'});
     return el('div', {class: 'agent-page agent-task'}, field('Task example:', examples), this.contextStatus, this.budgetMeter, this.recovery, this.threadView.root,
-      el('div', {class: 'agent-composer'}, el('div', {class: 'agent-permission-bar'}, field('Permissions:', this.quickMode), this.revokeButton), this.permissionBadge, field('Message:', this.prompt), el('div', {class: 'agent-actions'}, this.sendButton, this.composerStop,
+      el('div', {class: 'agent-composer'}, el('div', {class: 'agent-permission-bar'}, field('Permissions:', this.quickMode), this.revokeButton), this.permissionBadge, field('Message:', this.prompt), el('div', {class: 'agent-actions'}, this.sendButton, this.composerStop, this.queueDraftButton, this.queueBadge,
         el('span', {}, 'Enter sends • Shift+Enter adds a line'))),
-      el('div', {class: 'agent-composer-help'}, 'Continue resumes a limited task without repeating completed operations. Tasks are memory-only.'));
+      el('div', {class: 'agent-composer-help'}, 'Continue resumes an interrupted task without repeating completed operations. /compact creates a context checkpoint. Tasks are memory-only.'));
   }
   connectionPage() {
     this.provider = choices('AI provider', Object.entries(PROVIDERS).map(([id, info]) => [id, info.label]));
@@ -192,6 +198,7 @@ class AgentPanel {
     this.outputTokens = make('maxTokens', 'Maximum output tokens'); this.budget = make('tokenBudget', 'Session token budget');
     this.contextLimit = make('maxContextBytes', 'Request context byte limit'); this.requestTimeout = make('requestTimeoutMs', 'Request timeout milliseconds');
     this.limitControls = {maxTurns: this.turns, maxCalls: this.callLimit, maxTokens: this.outputTokens, tokenBudget: this.budget, maxContextBytes: this.contextLimit, requestTimeoutMs: this.requestTimeout};
+    this.recoveryLimits = ['maxRetries', 'autoCompactTokens', 'contextWindowTokens', 'compactKeepTurns', 'compactOutputTokens', 'toolResultBytes'].map(key => { const node = make(key, AGENT_LIMIT_FIELDS[key].label); this.limitControls[key] = node; return {key, node}; });
     this.limitPreset = choices('Agent limit preset', [['custom', 'Custom'], ...Object.entries(AGENT_LIMIT_PRESETS).map(([id, preset]) => [id, preset.label])]);
     this.limitPreset.onchange = () => { const preset = AGENT_LIMIT_PRESETS[this.limitPreset.value]; if (preset) { this.showLimits(preset.limits); this.updateLimits(); } };
     this.limitError = el('p', {class: 'agent-limit-error', role: 'status'});
@@ -210,6 +217,10 @@ class AgentPanel {
         field('Request context bytes:', this.contextLimit), field('Timeout (milliseconds):', this.requestTimeout), this.limitError,
         el('p', {}, 'The default session allowance is 4,000,000 tokens. Continue and follow-ups retain prior usage; raise the allowance here to extend a session. Requests and tool calls are capped per Run/Continue.'),
         el('p', {}, 'Only these numeric preferences are saved for new tasks. Each open task keeps its own limits. Credentials, prompts, histories and permissions are never saved.')),
+      group('Recovery and context compaction', ...this.recoveryLimits.map(({key, node}) => field(AGENT_LIMIT_FIELDS[key].label + ':', node)),
+        el('p', {}, 'Transient generation failures retry with bounded backoff. Retry-After, Stop, lease expiry and all budgets remain enforced. Set retries to 0 for manual recovery. Completed edits are never replayed.'),
+        el('p', {}, 'Auto-compaction defaults to an estimated 64,000 input tokens, independent of cumulative usage. Set the threshold to 0 to disable automatic compaction. Set model context window only from your provider’s model specification (0 means unspecified). Estimates are not a tokenizer or a model-capacity guarantee.'),
+        el('p', {}, 'Compact context (or /compact) requests a tool-free checkpoint. The goal, latest request and recent whole turns are retained; older detail may be lost. Public thread and billed usage are not reset. No IDE tools execute during manual compaction. Every retry/checkpoint can incur charges.')),
       el('p', {}, 'Read access sends requested project/source/debugger data to the selected provider. Review your project for secrets first. Writes retain normal Undo and stale-revision protection. Execution can access data sources configured in project code. Stop cancels requests and pending approvals; it does not roll back already-applied edits or external side effects.'),
       el('p', {}, 'The session budget counts reported input and output tokens, including provider-reported reasoning/cache usage. Requests with missing usage receive a separately labelled byte-based safety estimate. A request can exceed the remaining budget. These are application caps, not the model’s context/output capacity or a hard billing limit. Use provider account spend controls; lower output/context settings when your model requires it. Permissions end after the run, Stop, project reload, expiry, or page reload. MCP sharing and permissions are independent.'));
   }
@@ -291,7 +302,7 @@ class AgentPanel {
     if (agent.provider) this.provider.value = agent.provider;
     if (agent.model) this.model.value = agent.model;
     this.prompt.value = task.draft; this.showLimits(task.limits); this.showPermissions(task.permissions); this.taskName.value = task.title;
-    this.status.textContent = 'Selected ' + task.title + (agent.matchesWorkspace() ? ' — ' + agent.state : ' — previous project session; start a new task.'); this.refresh();
+    this.status.textContent = 'Selected ' + task.title + (agent.matchesWorkspace() ? ' — ' + agent.state : ' — previous project session; start a new task.'); this.refresh(); this.workbench.refreshChanges();
   }
   async deleteTask() {
     if (this.pending || this.api.conversations.busy) return;
@@ -328,12 +339,18 @@ class AgentPanel {
     } catch (error) { this.status.textContent = error.message; }
     finally { this.pending = null; this.refresh(); }
   }
-  async start(continuation = false) {
+  async start(continuation = false, compactOnly = false, queuedId = null) {
+    // A draft /compact command must never replace a separately selected queue item.
+    if (!continuation && !queuedId && this.prompt.value.trim() === '/compact') compactOnly = true;
     if (this.pending || this.api.agent.busy) return;
     const setup = new AbortController(); this.pending = setup; this.refresh();
     try {
-      const provider = this.provider.value, model = modelId(this.model.value), prompt = this.prompt.value, limits = this.readLimits();
-      if (!continuation && !prompt.trim()) throw new Error('Enter a task on the Task tab.');
+      const task = this.api.conversations.active, queued = queuedId ? task.followups.get(queuedId) : null;
+      if (queued && (continuation || compactOnly)) throw new Error('Queued messages require a separately confirmed task run.');
+      if (queued && (!['new', 'completed'].includes(task.agent.state) || !task.agent.matchesWorkspace() || !task.followups.inCurrentWorkspace(queued))) throw new Error('Resume or replace the paused/failed task before sending a queued message.');
+      const provider = this.provider.value, model = modelId(this.model.value), prompt = queued ? queued.text : this.prompt.value, limits = this.readLimits();
+      if (!continuation && !compactOnly && !prompt.trim()) throw new Error('Enter a task on the Task tab.');
+      if (compactOnly && (!this.api.agent.canCompact || provider !== this.api.agent.provider || model !== this.api.agent.model)) throw new Error('Choose the task’s original provider/model and a task with completed context to compact.');
       if (continuation && (!this.api.agent.canResume || provider !== this.api.agent.provider || model !== this.api.agent.model)) throw new Error("Choose the task's original provider/model and a resumable task, or start a new task.");
       const transport = this.transport(), permissions = this.readPermissions(), {mode, scopes} = permissions;
       if (!this.api.agent.permissionConstraints.allowedModes.includes(mode) || permissions.permissionMinutes > this.api.agent.permissionConstraints.maxMinutes) throw new Error('These permissions exceed the host policy.');
@@ -341,25 +358,31 @@ class AgentPanel {
       const confirmButton = button('Review permission settings', () => { this.pending?.abort(); this.pages.select('permissions'); });
       const project = this.ide.project, authority = this.api.adapter.authoritySignal;
       const signal = AbortSignal.any([setup.signal, authority]);
-      const allowed = await cancellableDialog(continuation ? 'AI Coding Agent — Continue Task' : 'AI Coding Agent — Start Task', el('div', {class: 'agent-review'},
+      const allowed = await cancellableDialog(compactOnly ? 'AI Coding Agent — Compact Context' : continuation ? 'AI Coding Agent — Continue Task' : 'AI Coding Agent — Start Task', el('div', {class: 'agent-review'},
         el('p', {}, 'Send this task and requested project context from ' + project.name + ' to ' + PROVIDERS[provider].label + ' (' + model + ')?'),
+        ...(queued ? [el('p', {}, 'Send the selected queued message to task ' + task.title + '? The unsent composer draft is not included.'), el('pre', {class: 'agent-log'}, prompt.slice(0, 4000) + (prompt.length > 4000 ? '\n[Preview shortened; cancel to edit the full queued message.]' : ''))] : []),
+        ...(compactOnly ? [el('p', {}, 'Request a checkpoint of this task’s public history from the same provider. No IDE tools will execute. Existing context is replaced only after a valid summary; the public thread and cumulative budget remain. Summaries may lose detail.')] : []),
+        el('p', {}, 'Recovery: up to ' + limits.maxRetries + ' automatic retries per generation request. Checkpoints and retry attempts consume this run’s request and session allowances.'),
         el('p', {}, 'This may incur API charges. Review source for secrets before continuing. Read access includes project files and debugger data.'),
         el('p', {}, 'Session allowance: ' + limits.tokenBudget.toLocaleString('en-US') + ' tokens; ' + this.api.agent.budgetUsed.toLocaleString('en-US') + ' already accounted. Output cap: ' + limits.maxTokens.toLocaleString('en-US') + ' per request. This run allows ' + limits.maxTurns + ' requests and ' + limits.maxCalls + ' tool calls. Larger limits may substantially increase costs.'),
-        ...(continuation ? [el('p', {}, this.api.agent.pendingTurn ? 'Continue first processes the validated deferred batch without requesting it again. No operation in that batch has executed. Original arguments are retained; stale revisions are rejected, never automatically rewritten. Current permission choices still apply.' : 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed or truncated request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. No automatic retry is scheduled.' : '')] : []),
+        ...(continuation ? [el('p', {}, this.api.agent.pendingTurn ? 'Continue first processes the validated deferred batch without requesting it again. No operation in that batch has executed. Original arguments are retained; stale revisions are rejected, never automatically rewritten. Current permission choices still apply.' : 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed or truncated request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. Continue will honor any remaining delay.' : '')] : []),
         el('p', {}, permissionSummary(permissions)),
         el('p', {}, mode === 'full' ? 'FULL IDE ACCESS: project edits/deletions, runtime execution and debugger evaluation may occur without further approval. Running project code may use its configured networks, data sources or native integrations. This cannot be undone by Stop. This does not add arbitrary host shell/disk access or bypass provider/browser security.' : mode === 'scoped' ? 'Delegated scopes: ' + (scopes.join(', ') || '(none)') + '. Other effects use the approval policy.' : ['readonly', 'plan'].includes(mode) ? 'Read-only boundary: no project edits or execution. Plan mode produces a proposal, not automatic implementation.' : mode === 'autoedit' ? 'Automatically edit non-destructive code, designer, virtual files, public data definitions and workspace. Ask before execution, project replacement and destructive effects.' : 'Each change or execution requires approval unless an explicit allow rule applies.'),
         el('pre', {class: 'agent-log'}, JSON.stringify({scopeRules: permissions.scopeRules, toolRules: permissions.toolRules, host: this.api.agent.permissionConstraints}, null, 2)),
-        ...(mode === 'full' ? [el('label', {class: 'agent-full-confirm'}, fullConfirmation, 'I understand and authorize Full IDE access for this run only.')] : []), confirmButton), signal, continuation ? 'Continue Task' : 'Start Task');
+        ...(mode === 'full' ? [el('label', {class: 'agent-full-confirm'}, fullConfirmation, 'I understand and authorize Full IDE access for this run only.')] : []), confirmButton), signal, compactOnly ? 'Compact Context' : continuation ? 'Continue Task' : 'Start Task');
       if (!allowed) return; signal.throwIfAborted();
       if (mode === 'full' && !fullConfirmation.checked) throw new Error('Full IDE access was not confirmed. No request was sent.');
+      if (task !== this.api.conversations.active || queued && (!task.followups.matches(queued) || !task.followups.inCurrentWorkspace(queued))) throw new Error('Task or queued message changed during confirmation. Review it again.');
       if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');
       this.pending = null; this.api.conversations.active.limits = limits; this.api.conversations.defaultLimits = saveAgentLimits(limits);
       this.api.conversations.active.permissions = permissions;
       const options = {provider, model, prompt, transport, ...permissions, fullAccessConfirmed: mode === 'full' && fullConfirmation.checked, ...limits};
-      const run = continuation ? this.api.agent.resume(options) : this.api.agent.run(options);
+      this.sendingQueued = queued ? {task, item: queued} : null;
+      const run = compactOnly ? this.api.agent.compact(options) : continuation ? this.api.agent.resume(options) : this.api.agent.run(options);
+      if (compactOnly && this.prompt.value.trim() === '/compact') { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
       this.refresh(); await run;
     } catch (error) { this.status.textContent = error.name === 'AbortError' ? 'Agent cancelled.' : error.message; }
-    finally { if (this.pending === setup) this.pending = null; this.refresh(); }
+    finally { this.sendingQueued = null; if (this.pending === setup) this.pending = null; this.refresh(); }
   }
   cancel() { this.pending?.abort(); this.api.agent.stop(); }
   newTask() {
@@ -368,7 +391,12 @@ class AgentPanel {
   }
   event(event) {
     if (event.taskId && event.taskId !== this.api.conversations.activeId) return;
-    if (event.type === 'user') { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
+    if (event.type === 'user') {
+      const sending = this.sendingQueued;
+      if (sending && sending.task === this.api.conversations.active && event.text === sending.item.text) {
+        sending.task.followups.remove(sending.item.id, sending.item.version); this.sendingQueued = null;
+      } else { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
+    }
     if (!['delta', 'idle', 'permission'].includes(event.type)) this.status.textContent = event.text;
     const win = this.root.ownerDocument.defaultView;
     if (!this.frame) { this.frameWindow = win; this.frame = win.requestAnimationFrame(() => { this.frame = null; this.render(); this.refresh(false); }); }
@@ -379,7 +407,7 @@ class AgentPanel {
     const budget = task.limits.tokenBudget, used = agent.budgetUsed;
     this.contextStatus.textContent = task.title + ' — ' + agent.state + ' | ' + agent.usage.tokens.toLocaleString('en-US') + ' / ' + budget.toLocaleString('en-US') + ' reported session tokens'
       + (agent.unreportedRequests ? ' + ' + agent.estimatedTokens.toLocaleString('en-US') + ' estimated (' + agent.unreportedRequests + ' unreported requests)' : '')
-      + ' | ' + Math.max(0, budget - used).toLocaleString('en-US') + ' remaining | ' + agent.usage.requests + ' requests, ' + agent.usage.calls + ' tools | ' + Math.ceil(agent.historyBytes / 1024) + ' KiB context';
+      + ' | ' + Math.max(0, budget - used).toLocaleString('en-US') + ' remaining | ' + agent.usage.requests + ' requests, ' + agent.usage.calls + ' tools | ' + Math.ceil(agent.historyBytes / 1024) + ' KiB native history | ' + (agent.lastInputTokens == null ? 'Input tokens: estimated on next request' : agent.lastInputTokens.toLocaleString('en-US') + ' last reported input tokens') + ' | ' + agent.compactions + ' compactions';
     const lease = agent.permissionSession?.snapshot(), config = task.permissions;
     this.permissionBadge.textContent = lease?.active ? permissionSummary(config) + ' • Active until ' + new Date(lease.expiresAt).toLocaleTimeString() + ' • ' + lease.approvedTools.length + ' exact-tool approvals' : permissionSummary(config) + ' • Inactive — no permission grant';
     this.permissionBadge.dataset.profile = config.mode;
@@ -389,7 +417,7 @@ class AgentPanel {
     this.revokeTool.disabled = !lease?.active || !lease.approvedTools.length;
     this.budgetMeter.max = budget; this.budgetMeter.value = Math.min(budget, used); this.budgetMeter.setAttribute('aria-valuetext', Math.min(100, Math.round(used / budget * 100)) + '% of session budget accounted');
     this.recovery.hidden = !agent.canResume;
-    this.recoveryText.textContent = agent.limit?.message || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
+    this.recoveryText.textContent = agent.limit?.message || ({access: 'Check provider credentials and model access in Connection, then Continue. No automatic retry; completed edits are retained.', quota: 'Provider quota/billing needs attention. Retry with Continue after the provider account is ready; prior context and usage are retained.', request: 'The provider rejected request settings. Review the model/output limits before Continue, or create a new task to change models.'})[agent.failure?.kind] || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
     if (agent.limit?.required) this.recoveryText.textContent += ' Required for this batch/request: ' + agent.limit.required.toLocaleString('en-US') + (agent.limit.kind === 'context' ? ' bytes.' : ' tool calls.');
     this.threadView.update(agent.thread, {taskId: task.id, busy: agent.busy});
     const planStamp = task.id + ':' + agent.plan.revision;
@@ -409,11 +437,13 @@ class AgentPanel {
   refresh(render = true) {
     const busy = !!this.pending || this.api.agent.busy;
     this.revokeButton.disabled = !busy;
+    this.compactButton.disabled = busy || !this.api.agent.canCompact;
     this.sendButton.disabled = busy || !!this.api.agent.pendingTurn; this.composerStop.disabled = !busy;
     this.recoveryContinue.disabled = busy || !this.api.agent.canResume; this.recoverySettings.disabled = busy;
     this.runButton.disabled = busy || !!this.api.agent.pendingTurn; this.continueButton.disabled = busy || !this.api.agent.canResume; this.stopButton.disabled = !busy; this.newButton.disabled = busy;
-    for (const control of [this.provider, this.connection, this.model, this.models, this.keyInput, this.relay, this.token, this.browserConsent, this.refreshModels, this.clearKey, this.mode, this.quickMode, this.approvalPolicy, this.permissionMinutes, this.ruleTool, this.ruleAction, this.ruleAdd, this.ruleRemove, this.ruleList, this.resetPermissions, ...this.scopeRules.map(item => item.node), this.turns, this.outputTokens, this.budget, this.callLimit, this.contextLimit, this.requestTimeout, this.limitPreset, this.exampleSelect, this.taskList, this.taskName, this.renameButton, this.deleteButton, this.handoffButton, ...this.scopeInputs.map(item => item.node)]) control.disabled = busy;
+    for (const control of [this.provider, this.connection, this.model, this.models, this.keyInput, this.relay, this.token, this.browserConsent, this.refreshModels, this.clearKey, this.mode, this.quickMode, this.approvalPolicy, this.permissionMinutes, this.ruleTool, this.ruleAction, this.ruleAdd, this.ruleRemove, this.ruleList, this.resetPermissions, ...this.scopeRules.map(item => item.node), this.turns, this.outputTokens, this.budget, this.callLimit, this.contextLimit, this.requestTimeout, ...this.recoveryLimits.map(item => item.node), this.limitPreset, this.exampleSelect, this.taskList, this.taskName, this.renameButton, this.deleteButton, this.handoffButton, ...this.scopeInputs.map(item => item.node)]) control.disabled = busy;
     if (render) this.render();
+    this.workbench.update();
   }
   dispose() { this.api.conversations.active.draft = this.prompt.value; this.cancel(); this.keyInput.value = ''; this.token.value = ''; this.unlisten?.(); if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame); this.threadView.dispose(); }
 }

@@ -56,6 +56,8 @@ test('staged native application contains all hashed assets and separate script e
   try {
     assert.equal(result.manifest.kind,'application'); assert.equal(result.manifest.graphics,'auto');
     assert.ok(result.manifest.files['boot.mjs']);
+    assert.ok(result.manifest.files['runtime-document.mjs']);
+    assert.match(await fs.readFile(path.join(result.stage,'web','runtime-document.mjs'),'utf8'),/createNativeRuntimeDocumentLoader/);
     for (const script of result.manifest.scripts) assert.ok(result.manifest.files[script]);
     assert.ok((await fs.stat(path.join(result.stage,'main.cjs'))).size > 1000);
     const entry = await fs.readFile(path.join(result.stage,'web','index.html'),'utf8');
@@ -82,5 +84,18 @@ test('packaged REST example declares only its API origins and includes SQLite li
     assert.deepEqual(result.manifest.dataOrigins,['http://127.0.0.1:4286']);
     assert.match(await fs.readFile(path.join(result.stage,'LICENSE.sql.js'),'utf8'),/Permission is hereby granted/);
     assert.match(await fs.readFile(path.join(result.stage,'THIRD-PARTY-NOTICES.md'),'utf8'),/sql.js/);
+  }finally{await fs.rm(result.stage,{recursive:true,force:true});}
+});
+
+test('staged native IDE ships the shared preview loader and current source integration',async()=>{
+  const result=await stageWindows(parseOptions(['--name','Native IDE Preview Stage','--graphics','auto','--stage-only']));
+  try{
+    assert.equal(result.manifest.kind,'studio');
+    assert.ok(result.manifest.files['runtime-document.mjs']);
+    const adapter=await fs.readFile(path.join(result.stage,'web','studio.mjs'),'utf8');
+    assert.match(adapter,/createNativeRuntimeDocumentLoader/);
+    assert.doesNotMatch(adapter,/studio\.run\s*=/);
+    const sources=await Promise.all(result.manifest.scripts.map(name=>fs.readFile(path.join(result.stage,'web',name),'utf8')));
+    assert.ok(sources.some(source=>source.includes('loadRuntimeDocument(this.ide,frame,html')));
   }finally{await fs.rm(result.stage,{recursive:true,force:true});}
 });

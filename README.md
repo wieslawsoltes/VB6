@@ -57,7 +57,7 @@ The source includes modeless Object Browser, project search and atomic replaceme
 
 The compiler and cooperative VM execute VB-style source through their own instruction model, not JavaScript eval of user VB text. Supported features include procedures/classes/properties, named and optional arguments, ByRef paths, instance static storage, arrays and records, control flow and error handling, events, exact backed Currency, distinct Empty/Null/Nothing/Missing/Error values, calendar helpers and private binary/text files. The compatibility matrix identifies incomplete coercion, lifetime and binding semantics.
 
-There are 37 offered browser control types, including classic intrinsic-style controls and TreeView, ListView, RichTextBox, grids, tabs, toolbars, calendars, charts and file-dialog adapters. Familiar names do not imply full native API coverage. In-memory recordsets are not external ADO/DAO providers. Native COM/OCX, DLL calls, Windows API execution and arbitrary add-ins are not implemented.
+There are 37 offered browser control types, including classic intrinsic-style controls and TreeView, ListView, RichTextBox, grids, tabs, toolbars, calendars, charts and file-dialog adapters. Familiar names do not imply full native API coverage. In-memory recordsets are not external ADO/DAO providers. Installed COM/OCX execution is available only through the explicitly granted Windows companion; it is not native-binary execution inside the browser. Arbitrary add-ins and universal native API compatibility are not implemented. See [OCX designer, runtime adapters and Windows hosting](docs/OCX-SUPPORT.md) for events, property pages, persistence, licensing and precise boundaries.
 
 ## Eleven examples
 
@@ -145,6 +145,15 @@ plan and question tools provide structured progress and clarification; neither
 grants permission. **New Task with Context…** lets you review/edit a public-message
 excerpt before creating a fresh draft, without copying signatures, tools or grants.
 Tasks stay memory-only and all operate on the same live project.
+
+**Recovery and context compaction** adds bounded transient-request retries,
+**Compact context** and the local **`/compact`** command. Automatic checkpoints
+start at a configurable 64,000 estimated/reported input tokens by default; this
+active-context threshold is separate from cumulative billed usage. Checkpoints
+preserve the exact goal and latest request, with recent complete native turns,
+and never replay edits, reset usage, or renew permissions. See
+[recovery, checkpoints and Codex CLI comparison](docs/CODING-AGENT-RECOVERY.md).
+
 
 Review each change is the default. Read-only mode excludes mutators/execution;
 Agent mode can authorize selected scopes for one run, up to ten minutes. These
@@ -264,3 +273,14 @@ The source VM preserves scalar subtype and typed-versus-Variant origin through e
 ### Advanced browser Win32 GDI
 
 `@vb6/win32-browser` 0.4.0 exposes 311 Win32 export names and adds curved/polygon/path regions, transforms, memory-DC fonts, owned window shapes and paint/update lifecycles. GDI rasters can now use the reusable WebGPU texture presenter with an explicit Canvas2D fallback. The classic Win32 API Workbench includes a **Paths and text** example. See [advanced contracts and measured compatibility boundaries](packages/win32-browser/ADVANCED-GDI.md). No full native raster/font certification or npm registry publication is claimed.
+
+### Local change review and follow-ups
+
+The classic agent **Changes** tab compares current module source/designer state
+against task-start or latest-run checkpoints, with bounded diffs, patch export,
+line-targeted feedback and revision-checked source-only restoration through normal
+Undo. **Queue message** stores follow-ups locally while generation runs; Queue
+supports editing/reordering and explicit fresh-confirmation dispatch without
+replacing unsent composer drafts or inheriting Full-access grants. Nothing sends
+automatically. See [the workbench guide](docs/CODING-AGENT-WORKBENCH.md) for
+coverage, memory limits, stale-workspace protection and non-Git boundaries.

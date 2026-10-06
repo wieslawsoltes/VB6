@@ -129,12 +129,15 @@ export const nativeNumericMethods = {
     return false;
   },
   nativeTypedCall(target,plan) {
-    const x=this.x,signature=target.proc||target,callPins=[],callStrings=[],slots=new Array(signature.params.length);
+    const x=this.x,signature=target.proc||target,callPins=[],callStrings=[],marshalledStrings=[],slots=new Array(signature.params.length);
     // Stage in the caller's frame: arguments are evaluated exactly once in source
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
     plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
+      if(!target.proc && key(p.type)==='string'){
+        const transfer=this.nativeExternalStringArgument(p,node);marshalledStrings.push(transfer);
+        if(transfer.pin)callPins.push(transfer.pin);
+      }else if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
       else if(node.kind==='byval'){this.numeric(node.expr);}
       else if(p.bounds!==null&&p.bounds!==undefined){
         if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
@@ -153,13 +156,21 @@ export const nativeNumericMethods = {
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}
     if(target.proc)x.call(target.label);else x.invoke(target.dll,target.symbol);
     if(signature.kind==='function'&&key(signature.returnType)==='currency'){
-      this.captureCurrencyReturn();if(target.proc)this.checkNativeError();
+      this.captureCurrencyReturn();if(!target.proc)this.captureNativeDllError();if(target.proc)this.checkNativeError();
     }else if(signature.kind==='function'&&REAL_TYPES.has(key(signature.returnType))){
       const out=this.floatWorkspace();this.rawStorageAddress(out);x.emit(0xdd,0x18); // Pop ABI result before any helper/error check.
+      if(!target.proc)this.captureNativeDllError();
       if(target.proc)this.checkNativeError();x.call(N+'finite');
       if(key(signature.returnType)==='single')this.roundSingle();
       if(key(signature.returnType)==='date')x.call('native:date:validate');
-    }else if(target.proc)this.checkNativeError();
+    }else if(target.proc)this.checkNativeError();else this.captureNativeDllError();
+    // String returns transfer ownership of an ANSI byte-BSTR, not an arbitrary LPSTR.
+    const ansiResult=!target.proc&&signature.kind==='function'&&key(signature.returnType)==='string'?this.ownString():null;
+    if(marshalledStrings.length){
+      x.push();for(const transfer of marshalledStrings)this.nativeStringCopyBack(transfer);
+      for(const {owner} of marshalledStrings)this.clearStringStorage(owner);x.emit(0x58);
+    }
+    if(ansiResult)this.nativeExternalStringResult(ansiResult);
     for(const pin of callPins)this.releaseArrayPin(pin);
     if(callStrings.length){x.push();for(const string of callStrings)this.clearStringStorage(string);x.emit(0x58);}
     if(target.proc&&signature.kind==='function'&&key(signature.returnType)==='string')this.ownString();

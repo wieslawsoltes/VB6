@@ -3,9 +3,11 @@
 import http from 'node:http';
 import {randomBytes, timingSafeEqual} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import {nativeRequest, providerHeaders, providerInfo, retryAfter} from '../src/agents/providers.js';
+import {nativeRequest, providerHeaders, providerInfo, responseFailure} from '../src/agents/providers.js';
 import {AGENT_LIMIT_FIELDS, normalizeAgentLimits} from '../src/agents/limits.js';
 const KEY_NAMES = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', google: 'GEMINI_API_KEY'};
+// Return only a canonical classification, never the upstream body/message/request ID.
+const ERROR_CODES = Object.freeze({context: 'context_length_exceeded', quota: 'insufficient_quota', access: 'authentication_error', request: 'invalid_request_error', safety: 'content_policy_violation', rate: 'rate_limit_exceeded', server: 'server_error', cooldown: 'rate_limit_exceeded', provider: 'provider_error'});
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalThis.fetch} = {}) {
   if (typeof token !== 'string' || token.length < 32 || /[\r\n]/.test(token)) throw new Error('Relay token must contain at least 32 characters.');
@@ -25,7 +27,7 @@ export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalT
     if (!equal(req.headers.authorization, 'Bearer ' + token)) { res.writeHead(401).end(); return; }
     if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) { res.writeHead(415).end(); return; }
     if (active >= 4) { res.writeHead(429).end(); return; }
-    active++; const controller = new AbortController(); let timeout = setTimeout(() => controller.abort(), 120000);
+    active++; const controller = new AbortController(); let upstreamStarted = false, timeout = setTimeout(() => controller.abort(), 120000);
     const abort = () => controller.abort(); req.on('aborted', abort); res.on('close', abort);
     try {
       let size = 0; const chunks = [];
@@ -37,11 +39,19 @@ export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalT
       if (!['models', 'generate'].includes(data.operation)) throw new Error('Invalid operation.');
       if (data.operation === 'generate' && (!data.body || typeof data.body !== 'object' || Array.isArray(data.body))) throw new Error('Invalid request.');
       if (typeof (data.cursor ?? '') !== 'string' || (data.cursor || '').length > 2000) throw new Error('Invalid cursor.');
-      if (!keys[data.provider]) { res.writeHead(503).end(JSON.stringify({error: 'Provider API key is not configured on the relay.'})); return; }
+      if (!keys[data.provider]) { res.writeHead(503).end(JSON.stringify({error: {code: 'invalid_api_key'}})); return; }
       // The browser cannot select another destination or supply authorization headers.
       const request = nativeRequest(data.provider, data.body, {models: data.operation === 'models', cursor: data.cursor});
+      upstreamStarted = true;
       const upstream = await fetchImpl(request.url, {method: request.method, body: request.body, headers: providerHeaders(data.provider, keys[data.provider], false), redirect: 'error', signal: controller.signal});
-      if (!upstream.ok) { const delay = retryAfter(upstream.headers.get('retry-after')); if (delay) res.setHeader('Retry-After', String(Math.ceil(delay / 1000))); await upstream.body?.cancel(); res.writeHead(upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502).end(); return; }
+      if (!upstream.ok) {
+        const failure = await responseFailure(upstream, controller.signal);
+        const delay = failure.retryAt ? Math.max(0, failure.retryAt - Date.now()) : failure.retryAfterMs;
+        if (delay) res.setHeader('Retry-After', String(Math.ceil(delay / 1000)));
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502).end(JSON.stringify({error: {code: ERROR_CODES[failure.kind] || 'provider_error'}}));
+        return;
+      }
       res.setHeader('Content-Type', upstream.headers.get('content-type')?.includes('text/event-stream') ? 'text/event-stream' : 'application/json');
       res.writeHead(200); let bytes = 0;
       for await (const chunk of upstream.body) {
@@ -55,7 +65,7 @@ export function createAgentRelay({token, origins, keys = {}, fetchImpl = globalT
         });
       }
       res.end();
-    } catch { if (!res.headersSent) res.writeHead(400).end(JSON.stringify({error: 'Relay request failed.'})); else res.destroy(); }
+    } catch { if (!res.headersSent) res.writeHead(upstreamStarted ? 502 : 400).end(JSON.stringify({error: {code: upstreamStarted ? 'server_error' : 'invalid_request_error'}})); else res.destroy(); }
     finally { clearTimeout(timeout); controller.abort(); active--; req.off('aborted', abort); res.off('close', abort); }
   });
 }

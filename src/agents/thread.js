@@ -68,7 +68,7 @@ export class AgentThread {
         if (item && ['waiting', 'streaming'].includes(item.status)) this.change(item, {status: 'interrupted', note: 'Partial response — not a completed answer.'});
         message('notice', {status: 'error'});
       }
-    } else if ((['limit', 'retry', 'resume', 'complete', 'usage-warning'].includes(type) || type === 'permission' && ['deny', 'approve-run', 'revoke-tool'].includes(event.permission?.action))) message('notice', {status: type});
+    } else if ((['limit', 'retry', 'retrying', 'compacting', 'compacted', 'resume', 'complete', 'usage-warning'].includes(type) || type === 'permission' && ['deny', 'approve-run', 'revoke-tool'].includes(event.permission?.action))) message('notice', {status: type});
     else if (type === 'idle') {
       for (const item of [...this.entries]) if (this.index.has(item.id) && ['waiting', 'streaming', 'running', 'approval'].includes(item.status))
         this.change(item, {status: 'interrupted', note: item.kind === 'tool' ? 'Stopped before a confirmed result. Inspect the project before retrying.' : 'Partial response — not a completed answer.'});

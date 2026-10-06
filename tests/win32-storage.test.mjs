@@ -42,7 +42,7 @@ for(const code of [
   'Private Sub SetValue(ByRef n As Long)\nEnd Sub\nPublic Sub Main()\nDim a(2) As Long\nSetValue a\nEnd Sub',
   'Private Sub SetValue(ByRef n As String)\nEnd Sub\nPublic Sub Main()\nDim a As String * 5\nSetValue a\nEnd Sub',
   'Public Sub Main()\nErr.Raise 5, "custom source"\nEnd Sub',
-  'Public Sub Main()\nDim n As Long\nn=Err.LastDLLError\nEnd Sub'
+  'Public Sub Main()\nDim n As Long\nn=Err.HelpContext\nEnd Sub'
 ])test('unsupported native ABI/error extensions fail closed: '+code.split('\n')[0],()=>assert.throws(()=>build(code)));
 test('native String ownership uses Automation allocation and release, not fixed scratch buffers',()=>{
   const result=compileWin32(win32StorageFixtures()[0]);const imports=new Set(result.report.imports.map(i=>i.symbol));

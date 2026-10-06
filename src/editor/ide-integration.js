@@ -15,7 +15,7 @@ export function installEditorFeatures(ide){
     if(ide.runState!=='design'||!ide.activeModule)return originalEvent(object,event);
     const module=ide.activeModule,editor=ide.documents.editor(module);
     if(editor.readOnly)return;
-    const live={...module,code:editor.text},edit=handlerEdit(ide.project,live,editor.intelligence,object,event);
+    const live={...module,code:editor.text},edit=handlerEdit(ide.project,live,editor.intelligence,object,event,ide.controlRegistry);
     if(!edit){
       // A known metadata target must not fall through to the legacy generic
       // form handler generator when its requested signature is invalid.

@@ -5,6 +5,12 @@ export const AGENT_LIMIT_FIELDS = Object.freeze({
   maxTokens: {label: 'Output tokens per request', default: 32768, min: 256, max: 262144},
   tokenBudget: {label: 'Session token budget', default: 4000000, min: 1024, max: 100000000},
   maxContextBytes: {label: 'Request context bytes', default: 6000000, min: 65536, max: 16000000},
+  maxRetries: {label: 'Automatic generation retries', default: 3, min: 0, max: 10},
+  autoCompactTokens: {label: 'Auto-compact input token threshold (0 disables)', default: 64000, min: 0, max: 2000000},
+  contextWindowTokens: {label: 'Model context window tokens (0 unspecified)', default: 0, min: 0, max: 4000000},
+  compactKeepTurns: {label: 'Recent complete turns to retain', default: 2, min: 0, max: 16},
+  compactOutputTokens: {label: 'Checkpoint output tokens', default: 2048, min: 256, max: 8192},
+  toolResultBytes: {label: 'Tool result context bytes', default: 16000, min: 512, max: 120000},
   requestTimeoutMs: {label: 'Request timeout milliseconds', default: 600000, min: 10000, max: 1800000}
 });
 export const DEFAULT_AGENT_LIMITS = Object.freeze(Object.fromEntries(Object.entries(AGENT_LIMIT_FIELDS).map(([key, field]) => [key, field.default])));
