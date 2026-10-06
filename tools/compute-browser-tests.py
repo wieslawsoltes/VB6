@@ -58,8 +58,14 @@ try:
         url = f'http://127.0.0.1:{server.server_port}'
         page.goto(url + '/artifacts/vb6-compute/playground.html')
         page.add_script_tag(content=(ROOT / 'tests/compute-extended-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-application-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-browser.js').read_text())
         report = page.evaluate('runComputeBrowserTests()')
+        if report.get('available'):
+            extra = page.evaluate('runComputeApplicationBrowserTests()')
+            report['tests'].extend(extra['tests'])
+            for key in ['passed', 'failed', 'resourcesAfterTests']:
+                report[key] += extra[key]
         report['browser'] = browser.version
         report['pageErrors'] = page_errors
         (REPORTS / 'gpu.json').write_text(json.dumps(report, indent=2))

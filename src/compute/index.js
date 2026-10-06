@@ -13,3 +13,10 @@ import {ComputeRenderer} from '../../packages/vb6-compute/src/renderer.js';
 export {ComputeScene, ComputePath, ComputeRenderer};
 import {ComputeKernel} from '../../packages/vb6-compute/src/kernel.js';
 export {ComputeKernel};
+
+import {ComputeApplication} from '../../packages/vb6-compute/src/application.js';
+import {compileComputeApplication} from './application-compiler.js';
+export {ComputeApplication,compileComputeApplication};
+
+import {exportComputeHTML} from '../../packages/vb6-compute/src/export-html.js';
+export {exportComputeHTML};
