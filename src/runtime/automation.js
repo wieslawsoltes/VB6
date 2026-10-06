@@ -1,6 +1,6 @@
 /** Trusted host-installed Automation adapters. Projects never supply executable factories. */
 import {VBError} from '../language/lexer.js';
-import {Ref,Cell,MISSING} from './values.js';
+import {Ref,Cell,MISSING,unbox,readScalar} from './values.js';
 const objects=new WeakMap();
 const nameOK=n=>typeof n==='string'&&n.length<=255&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(n)&&!['constructor','prototype','caller','callee','arguments'].includes(n.toLowerCase());
 export const isAutomationObject=o=>!!o&&objects.has(o);
@@ -10,9 +10,10 @@ export function automationDefaultName(o){return state(o).defaultMember;}
 export async function automationInvoke(o,name,mode,args=[]){
   const {s,m}=member(o,name,mode);if(args.length>65)throw new VBError('Too many Automation arguments',450);
   const params=(mode===4||mode===8)?[...m.params,{name:'value'}]:m.params;if(args.length>params.length||params.some((p,i)=>!p.optional&&(i>=args.length||args[i]===MISSING)))throw new VBError('Wrong number of Automation arguments',450);
-  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(await arg.ref.get());}else values.push(arg);}
+  const refs=[],values=[];for(const [i,arg]of args.entries()){if(arg?.ref instanceof Ref||arg?.ref&&typeof arg.ref.get==='function'&&typeof arg.ref.set==='function'){refs.push([i,arg.ref]);values.push(typeof s.adapter.invokeScalar==='function'?await readScalar(arg.ref):unbox(await arg.ref.get()));}else values.push(typeof s.adapter.invokeScalar==='function'?arg:unbox(arg));}
+  const invoke=s.adapter.invokeScalar||s.adapter.invoke;
   let result;s.session.invocations++;
-  try{result=await s.adapter.invoke(m.name,mode,values,refs.map(([i])=>i));}finally{s.session.invocations--;}
+  try{result=await invoke.call(s.adapter,m.name,mode,values,refs.map(([i])=>i));}finally{s.session.invocations--;}
   // An adapter must return an explicit value and optional copyback array.
   if(s.closed||s.session.closed)throw new VBError('Automation session closed during invocation',91);
   if(!result||typeof result!=='object'||!Object.hasOwn(result,'value'))throw new VBError('Invalid Automation adapter response',440);
@@ -24,7 +25,7 @@ export function automationMember(o,name,readProperty=false){
   const {m}=member(o,name),mode=m.modes.includes(2)?2:m.modes.includes(1)?1:0;
   if(!mode)throw new VBError('Automation property is write-only',394);
   if(readProperty&&mode===2&&!m.params.length)return automationInvoke(o,m.name,mode,[]);
-  const fn=(...args)=>automationInvoke(o,m.name,mode,args);fn.vbRawArgs=true;fn.vbPreserveMissing=true;fn.vbParams=m.params;
+  const fn=(...args)=>automationInvoke(o,m.name,mode,args);fn.vbScalarInvoke=args=>automationInvoke(o,m.name,mode,args);fn.vbRawArgs=true;fn.vbPreserveMissing=true;fn.vbParams=m.params;
   return {__native:fn,__signature:{params:m.params},receiver:o};
 }
 export function automationReference(o,name,args=[],objectSet=false){
@@ -64,7 +65,7 @@ class AutomationSession {
 }
 
 /** Bounded enumeration snapshot, not an unrestricted native iterator lifetime. */
-export async function automationEnumerate(o){const s=state(o);if(typeof s.adapter.enumerate!=='function')throw new VBError('Automation object does not expose enumeration',451);const values=await s.adapter.enumerate();state(o);if(!Array.isArray(values)||values.length>10000)throw new VBError('Invalid Automation enumeration',7);return values;}
+export async function automationEnumerate(o){const s=state(o);if(typeof s.adapter.enumerate!=='function')throw new VBError('Automation object does not expose enumeration',451);const values=await (s.adapter.enumerateScalar||s.adapter.enumerate).call(s.adapter);state(o);if(!Array.isArray(values)||values.length>10000)throw new VBError('Invalid Automation enumeration',7);return values;}
 
 /** Subscribe through explicit event metadata, never through properties/prototypes. */
 export function automationSubscribe(object,sink){
@@ -85,6 +86,6 @@ async function deliverAutomationEvent(object,name,values,context){
       if(s.sinks.has(connection))await connection.sink(event.name,args.map((a,i)=>event.params[i].byRef?a:values[i]),{reentrant:context.reentrant===true&&s.session.invocations>0});
     }
     state(object);
-    return {args:await Promise.all(args.map((a,i)=>event.params[i].byRef?a.ref.get():values[i]))};
+    return {args:await Promise.all(args.map((a,i)=>event.params[i].byRef?(typeof s.adapter.invokeScalar==='function'?readScalar(a.ref):a.ref.get()):values[i]))};
   }finally{s.eventDepth--;}
 }

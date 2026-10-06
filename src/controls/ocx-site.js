@@ -15,6 +15,8 @@ export class OcxPropertyBag {
   #entries=new Map();
   constructor(contents){if(contents!==undefined)this.Contents=contents;}
   ReadProperty(name,defaultValue=undefined){const item=this.#entries.get(checkedName(name));return item?decodeAutomationValue(copy(item.value)):defaultValue;}
+  /** Scalar-aware counterpart for compiled/adapted controls; raw embedding reads remain compatible. */
+  ReadPropertyScalar(name,defaultValue=undefined){const item=this.#entries.get(checkedName(name));return item?decodeAutomationValue(copy(item.value),{preserveScalars:true}):defaultValue;}
   WriteProperty(name,value,defaultValue=undefined){
     const key=checkedName(name),wire=encodeAutomationValue(value),next=new Map(this.#entries);
     if(arguments.length>2&&JSON.stringify(wire)===JSON.stringify(encodeAutomationValue(defaultValue)))next.delete(key);

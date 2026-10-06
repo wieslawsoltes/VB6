@@ -166,7 +166,7 @@ namespace VB6Interop {
         string op=S(request,"op");
         if(EventTokens.Count>0&&op!="close"&&S(request,"eventToken")!=EventTokens.Peek())throw new UnauthorizedAccessException("Nested requests require the current native event token");
         RequestDepth++;try{response=D("id",id,"result",Handle(request));}finally{RequestDepth--;}
-      }catch(Exception error){while(error is TargetInvocationException&&error.InnerException!=null)error=error.InnerException;int hr=Marshal.GetHRForException(error);int number=(hr&unchecked((int)0xFFFF0000))==unchecked((int)0x800A0000)?hr&65535:hr==unchecked((int)0x80020003)?438:hr==unchecked((int)0x80020005)?13:440;response=D("id",id,"error",D("message",error.Message,"hresult",hr,"number",number));}
+      }catch(Exception error){while(error is TargetInvocationException&&error.InnerException!=null)error=error.InnerException;int hr=Marshal.GetHRForException(error);int number=(hr&unchecked((int)0xFFFF0000))==unchecked((int)0x800A0000)?hr&65535:hr==unchecked((int)0x80020003)?438:hr==unchecked((int)0x80020005)?13:440;var native=error as NativeDispatchException;response=D("id",id,"error",D("message",error.Message,"hresult",hr,"number",number,"source",native==null?null:native.Source,"helpFile",native==null?null:native.NativeHelpFile,"helpContext",native==null?0:native.NativeHelpContext));}
       try{WriteResponse(response);}catch{WriteResponse(D("id",id,"error",D("message","Automation response exceeds 1 MiB","number",7)));}
     }
   }

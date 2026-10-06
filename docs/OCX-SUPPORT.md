@@ -198,3 +198,13 @@ OCX resources or extracted binaries:
 - [IProvideClassInfo2](https://learn.microsoft.com/en-us/windows/win32/api/ocidl/nn-ocidl-iprovideclassinfo2)
 - [ISpecifyPropertyPages](https://learn.microsoft.com/en-us/windows/win32/api/ocidl/nn-ocidl-ispecifypropertypages)
 - [IPersistStream::Save](https://learn.microsoft.com/en-us/windows/win32/api/objidl/nf-objidl-ipersiststream-save)
+
+### Scalar-Variant interoperability
+
+The OCX integration retains typed native Automation from PR #44. Scalar-aware
+adapters carry Byte, Integer, Long, Single, Double and Boolean tags through event
+arguments and ByRef copyback; native HRESULT source/help information and per-client
+LCID are retained on reentrant calls. `OcxPropertyBag.ReadProperty` keeps the raw
+JavaScript embedding contract; `ReadPropertyScalar` returns preserved Variant
+subtypes for compiler-aware adapters. Wire snapshots retain those tags without
+changing opaque native FRX data.

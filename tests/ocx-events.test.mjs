@@ -56,3 +56,13 @@ test('disconnect during delivery skips removed handlers and additions wait until
 test('event subscriptions reject asynchronous cleanup contracts',()=>{
  const a=fixture();a.subscribe=async()=>()=>{};assert.throws(()=>new AutomationRegistry().createSession().adopt(a),e=>e.number===440);
 });
+
+
+test('scalar-aware event adapters preserve Boolean cancellation and numeric Variant subtypes',async()=>{
+ const {tagScalar,readScalar,scalarType,unbox}=await import('../src/runtime/values.js');
+ let fire;const adapter={metadata:{members:[],events:[{name:'Changing',params:[{name:'Reading'},{name:'Cancel',byRef:true}]}]},invoke(){},invokeScalar(){},release(){},subscribe(sink){fire=sink;return ()=>{};}};
+ const session=new AutomationRegistry().createSession(),object=session.adopt(adapter),seen=[];
+ const disconnect=automationSubscribe(object,async(name,args)=>{seen.push(scalarType(args[0]),scalarType(await readScalar(args[1].ref)));await args[1].ref.set(tagScalar(-1,'boolean'));});
+ try{const changed=await fire('Changing',[tagScalar(4,'single'),tagScalar(0,'boolean')]);assert.deepEqual(seen,['single','boolean']);assert.equal(scalarType(changed.args[0]),'single');assert.equal(scalarType(changed.args[1]),'boolean');assert.equal(unbox(changed.args[1]),-1);disconnect();const untouched=await fire('Changing',[tagScalar(4,'long'),tagScalar(0,'boolean')]);assert.equal(scalarType(untouched.args[0]),'long');assert.equal(scalarType(untouched.args[1]),'boolean');}
+ finally{await session.close();}
+});

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {NativeAutomationClient} from './native-automation.mjs';
 import {automationInvoke,automationSubscribe} from '../../src/runtime/automation.js';
+import {unbox,tagScalar,readScalar,scalarType} from '../../src/runtime/values.js';
 const architecture=process.env.VB6_COM_ARCH||'x86',report={architecture,status:'running',checks:[],licensedThirdPartyCertification:false};
 const client=new NativeAutomationClient({allowNativeCode:true,allowed:['Shell.Explorer.2'],controls:['Shell.Explorer.2'],architecture});
 let session;
@@ -15,9 +16,9 @@ try{
  const license=await client.licenseInfo('Shell.Explorer.2');assert.equal(typeof license.supported,'boolean');report.licensing=license;report.checks.push('license capabilities queried without extracting any key');
  let count=0,nested=false;const disconnect=automationSubscribe(object,async(name,args)=>{
    if(name.toLowerCase()!=='beforenavigate2')return;
-   count++;assert.equal(args.length,7);assert.ok(args[6]?.ref);await args[6].ref.set(-1);
+   count++;assert.equal(args.length,7);assert.ok(args[6]?.ref);assert.equal(scalarType(await readScalar(args[6].ref)),'boolean');await args[6].ref.set(tagScalar(-1,'boolean'));
    // Reenter the same STA while the OCX's outgoing call is waiting for cancellation.
-   const ready=await automationInvoke(object,'ReadyState',2,[]);assert.equal(typeof ready,'number');nested=true;
+   const ready=await automationInvoke(object,'ReadyState',2,[]);assert.equal(typeof unbox(ready),'number');assert.ok(['integer','long'].includes(scalarType(ready)));nested=true;
  });
  await automationInvoke(object,'Navigate2',1,['about:blank']);
  for(let i=0;i<40&&!count;i++)await new Promise(resolve=>setTimeout(resolve,50));

@@ -56,7 +56,7 @@ export class SourceEditor extends Signal {
     const next=String(value),change=hint||textChange(this.text,next),states=this.panes.map(p=>({pane:p,start:mapOffset(change,this.selectionBounds(p).start),end:mapOffset(change,this.selectionBounds(p).end)}));const indexed=updateSourceIndex(this.index,next,change);this.metrics.indexedLines+=indexed.scannedLines;this.selectorDirty ||= indexed.changedProcedures||/\b(?:WithEvents|Implements)\b/i.test(this.text.slice(this.text.lastIndexOf('\n',Math.max(0,change.start-1))+1,this.text.indexOf('\n',change.oldEnd)<0?this.text.length:this.text.indexOf('\n',change.oldEnd))+next.slice(next.lastIndexOf('\n',Math.max(0,change.start-1))+1,next.indexOf('\n',change.newEnd)<0?next.length:next.indexOf('\n',change.newEnd)));this.text=next;this.lastValue=next;this.index=indexed.index;this.lines=this.index.lines;this.lineStarts=this.index.starts;this.procedureIndex=this.index.procedures;
     for(const state of states){if(selection&&state.pane===this.activePane)Object.assign(state,selection);this.syncPane(state.pane,state.start,state.end);}
   }
-  setDocument(module,project){this.closeCompletion();this.closeInfo();const changed=this.module?.id!==module.id;this.module=module;this.project=project;this.root.style.setProperty('--editor-tab-width',String(project.settings.tabWidth||4));if(changed&&!this.appearance.fullModule)this.primary.mode='procedure';if(changed){this.selectedObject='(General)';this.objectEntries=null;this.objectSignature=null;}this.assignSource(module.code||'',changed?{start:0,end:0}:null);if(changed)for(const pane of this.panes){pane.input.scrollTop=pane.input.scrollLeft=0;}this.updateSelectors();this.paint();this.cursorChanged();}
+  setDocument(module,project){this.cancelCompositionAssistance();this.closeCompletion();this.closeInfo();const changed=this.module?.id!==module.id;this.module=module;this.project=project;this.root.style.setProperty('--editor-tab-width',String(project.settings.tabWidth||4));if(changed&&!this.appearance.fullModule)this.primary.mode='procedure';if(changed){this.selectedObject='(General)';this.objectEntries=null;this.objectSignature=null;}this.assignSource(module.code||'',changed?{start:0,end:0}:null);if(changed)for(const pane of this.panes){pane.input.scrollTop=pane.input.scrollLeft=0;}this.updateSelectors();this.paint();this.cursorChanged();}
   // Keep current main's identity-preserving designer refresh; typed declarations
   // add event/interface targets without resetting source, selection or split panes.
   refreshObjects(refreshEvents=true){
@@ -113,7 +113,7 @@ export class SourceEditor extends Signal {
     clearTimeout(this.infoTimer);if(this.appearance.autoQuickInfo&&!this.composing&&!this.acceptingCompletion)this.infoTimer=setTimeout(()=>this.showInfo('parameter',true),160);
   }
   prepareDocumentTransfer(){
-    if(this.disposed||this.transferState)return;this.closeCompletion();this.closeInfo();
+    if(this.disposed||this.transferState)return;this.cancelCompositionAssistance();this.closeCompletion();this.closeInfo();
     this.transferState={text:this.text,panes:this.panes.map(p=>({pane:p,selection:{...this.selectionBounds(p)},direction:p.input.selectionDirection,first:p.virtualizer.first,top:p.input.scrollTop,left:p.input.scrollLeft,rail:p.virtualizer.rail.scrollTop}))};
     // Adoption and unstyled layout can emit scroll/select events with zero geometry.
     for(const pane of this.panes)pane.virtualizer.syncing=true;
@@ -177,7 +177,7 @@ export class SourceEditor extends Signal {
     if(command==='format'){const offset=this.cursor().offset;this.setValue(formatCode(this.text,this.project.settings.tabWidth||4));const position=positionAt(this.index,Math.min(offset,this.text.length));this.goToLine(position.line,position.column);return;}
     if(command==='comment'||command==='uncomment')this.transformBlock(line=>command==='comment'?"'"+line:line.replace(/^(\s*)' ?/,'$1'));
   }
-  keydown(e){if(e.isComposing||this.composing)return;const ctrl=e.ctrlKey||e.metaKey;
+  keydown(e){if(e.isComposing||this.composing)return;this.resumeCompositionAssistance();const ctrl=e.ctrlKey||e.metaKey;
     if(this.completion&&!ctrl&&!e.altKey){
       if(['ArrowDown','ArrowUp','PageDown','PageUp','Home','End','Enter','Tab','Escape'].includes(e.key)){
         e.preventDefault();
@@ -268,14 +268,25 @@ export class SourceEditor extends Signal {
   }
   closeInfo(){this.info?.remove();this.info=null;clearTimeout(this.infoTimer);}
   definition(){const c=this.cursor(),text=this.input.value.slice(this.input.selectionStart,this.input.selectionEnd)||wordAt(this.text,c.offset).text;return this.intelligence.definition(this.project,{...this.module,code:this.text},c.line,this.text,c.offset,text);}
+  cancelCompositionAssistance(){clearTimeout(this.compositionTimer);this.compositionTimer=0;this.compositionResume=null;}
+  resumeCompositionAssistance(){
+    const pending=this.compositionResume;if(!pending)return;
+    this.cancelCompositionAssistance();
+    const {input,mode,module,project}=pending;
+    if(this.disposed||this.composing||this.module!==module||this.project!==project||this.input!==input||input.readOnly||input.ownerDocument.activeElement!==input)return;
+    if(mode)this.complete(mode);
+    if(this.appearance.autoQuickInfo)this.showInfo('parameter',true);
+  }
   bindAdvancedInput(pane){
     const input=pane.input;
     input.addEventListener('beforeinput',e=>{pane.beforeInput={start:input.selectionStart,end:input.selectionEnd,type:e.inputType,composing:e.isComposing};if(this.overwrite&&!e.isComposing&&e.inputType==='insertText'&&e.data&&input.selectionStart===input.selectionEnd&&!input.readOnly){const start=input.selectionStart,lineEnd=input.value.indexOf('\n',start),limit=lineEnd<0?input.value.length:lineEnd;const end=Math.min(limit,start+[...e.data].reduce((n,c)=>n+(input.value.codePointAt(start+n)>65535?2:1),0));e.preventDefault();this.activatePane(pane);this.replaceSelection(e.data,start,end);}});
-    input.addEventListener('compositionstart',()=>{clearTimeout(this.compositionTimer);this.compositionMode=this.completion?this.completionMode:null;this.composing=true;this.closeCompletion();this.closeInfo();});input.addEventListener('compositionend',()=>{
+    input.addEventListener('compositionstart',()=>{this.cancelCompositionAssistance();this.compositionMode=this.completion?this.completionMode:null;this.composing=true;this.closeCompletion();this.closeInfo();});input.addEventListener('compositionend',()=>{
       this.composing=false;const mode=this.compositionMode||(this.appearance.autoListMembers?'auto':null);this.compositionMode=null;this.cursorChanged();
-      // Firefox text insertion and IMEs can end composition after the final
-      // input event. Resume the hidden list only after committed text settles.
-      this.compositionTimer=setTimeout(()=>{if(this.disposed||this.composing||this.input!==input||input.ownerDocument.activeElement!==input)return;if(mode)this.complete(mode);if(this.appearance.autoQuickInfo)this.showInfo('parameter',true);},0);
+      // Usually resume after the committed input event. A following key can
+      // arrive before this timer (Firefox/IME): keydown drains the same task
+      // first so Tab commits and Escape cancels, without reopening afterward.
+      this.compositionResume={input,mode,module:this.module,project:this.project};
+      this.compositionTimer=setTimeout(()=>this.resumeCompositionAssistance(),0);
     });
     input.addEventListener('keydown',e=>{
       if(e.defaultPrevented||e.isComposing)return;const ctrl=e.ctrlKey||e.metaKey;
@@ -300,5 +311,5 @@ export class SourceEditor extends Signal {
   matches(){return this.findIndex.search(this.text,this.findInput.value,{matchCase:this.caseBox.checked,wholeWord:this.wholeBox.checked});}
   find(direction=1){this.matches();const bounds=this.selectionBounds(),match=this.findIndex.next(direction>0?bounds.end:bounds.start,direction);if(!match){this.findResult.textContent='No matches';return;}const pos=positionAt(this.index,match.start);this.goToLine(pos.line,pos.column);if(match.end>this.activePane.range.end&&!this.activePane.virtualizer?.active){this.setViewMode('module');this.goToLine(pos.line,pos.column);}this.selectGlobal(match.start,match.end);this.paint();this.findResult.textContent=(match.index+1)+' of '+match.count;}
   replace(all){if(this.input.readOnly)return;const matches=this.matches();if(all){this.setValue(replaceMatches(this.text,matches,this.replaceInput.value));this.findResult.textContent=matches.length+' replaced';}else{const bounds=this.selectionBounds(),selected=matches.find(m=>m.start===bounds.start&&m.end===bounds.end);if(selected)this.replaceGlobal(this.replaceInput.value,bounds.start,bounds.end);this.find();}}
-  dispose(){this.disposed=true;this.assistance?.dispose();this.findIndex.clear();(this.paintWindow||this.root.ownerDocument.defaultView).cancelAnimationFrame(this.paintFrame);this.closeInfo();this.highlightCache.clear();for(const pane of this.panes){pane.observer.disconnect();pane.virtualizer?.dispose();}this.closeCompletion();this.root.remove();}
+  dispose(){this.disposed=true;this.cancelCompositionAssistance();this.assistance?.dispose();this.findIndex.clear();(this.paintWindow||this.root.ownerDocument.defaultView).cancelAnimationFrame(this.paintFrame);this.closeInfo();this.highlightCache.clear();for(const pane of this.panes){pane.observer.disconnect();pane.virtualizer?.dispose();}this.closeCompletion();this.root.remove();}
 }
