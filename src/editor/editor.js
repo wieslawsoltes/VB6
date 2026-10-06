@@ -61,7 +61,7 @@ export class SourceEditor extends Signal {
   // add event/interface targets without resetting source, selection or split panes.
   refreshObjects(refreshEvents=true){
     if(!this.module)return false;
-    const live={...this.module,code:this.text},targets=declarationTargets(this.project,live,this.intelligence);
+    const live={...this.module,code:this.text},targets=declarationTargets(this.project,live,this.intelligence,this.controlRegistry);
     const entries=[{id:'$general',name:'(General)',type:''},...targets.map(t=>({id:t.id||t.kind+':'+t.name,name:t.name,type:t.type||t.kind,members:t.members}))];
     this.declarationTargets=targets;
     const signature=JSON.stringify(entries);if(signature===this.objectSignature){this.objects.value=this.selectedObject||'(General)';return false;}

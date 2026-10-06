@@ -24,6 +24,18 @@ async function until(test, label, timeout = 30000) {
   } while (Date.now() < end);
   throw new Error('Timed out: ' + label);
 }
+// A renderer can disappear while an evaluation is in flight. Bound every
+// evaluation so a lost Electron reply cannot bypass the smoke-test deadline.
+async function evaluateRenderer(target, source, userGesture = true, timeout = 15000) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => target.executeJavaScript(source, userGesture)),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Renderer evaluation timed out: ' + source.slice(0, 240))), timeout); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+exports.evaluate = evaluateRenderer;
 function createSmokeProbe({app, root, records, report, reportPath, log = text => console.log(text)}) {
   const listeners = [], observed = new WeakSet();
   report.events = [];
@@ -62,10 +74,10 @@ function createSmokeProbe({app, root, records, report, reportPath, log = text =>
   watch(root.webContents);
   for (const {window: win} of records.values()) watch(win.webContents);
   listen(app, 'web-contents-created', (_event, wc) => watch(wc));
-  const evaluate = async (target, text, userGesture = false) => {
+  const evaluate = async (target, text, userGesture = true) => {
     const label = (target === root.webContents ? 'controller: ' : 'child frame: ') + text.slice(0, 240);
     checkpoint('Evaluate ' + label);
-    try { return await withDeadline(() => target.executeJavaScript(text, userGesture), label); }
+    try { return await evaluateRenderer(target, text, userGesture); }
     catch (error) { throw new Error('Renderer evaluation failed: ' + label + '\n' + error.message); }
   };
   return {checkpoint, flush, evaluate, dispose() { for (const remove of listeners.splice(0)) remove(); }};
@@ -239,7 +251,14 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await wait(()=>records.size===3,'native InputBox window');
       const inputWindow=[...records.values()].find(r=>r.window!==w1&&r.window!==w2).window;
       await wait(()=>!w1.isEnabled()&&!w2.isEnabled()&&inputWindow.isEnabled(),'InputBox modality');
-      await evaluate(inputWindow.webContents, 'document.querySelector("input").value="Native input OK";document.querySelector("form").requestSubmit();void 0;',true);
+      // Submitting destroys the InputBox webContents. Execute through the
+      // surviving controller's shared DOM, not the renderer being destroyed:
+      // its evaluation reply can otherwise be lost after the submit handler.
+      await js(`(()=>{
+        const dialog=[...host.nativeWindows.dialogs.values()][0];
+        dialog.doc.querySelector('input').value='Native input OK';
+        dialog.doc.querySelector('form').requestSubmit();return true;
+      })()`);
       await wait(()=>js('inputResult==="Native input OK"'),'InputBox return');
       await wait(()=>records.size===2&&w1.isEnabled()&&w2.isEnabled(),'InputBox owner restoration');
       check('native InputBox returns edited text and restores owner windows',true);

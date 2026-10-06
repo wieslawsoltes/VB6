@@ -68,3 +68,34 @@ test('F5 and Immediate use the same approved loader without a transient direct s
   assert.match(desktop,/studio\.runtimeDocumentLoader = createNativeRuntimeDocumentLoader/);
   assert.doesNotMatch(desktop,/studio\.run\s*=/);
 });
+
+
+test('older approvals cannot overwrite a newer document prepared for the same frame',async()=>{
+  const first=defer(),second=defer(),s=setup(html=>html==='first'?first.promise:second.promise);
+  const old=s.load(s.frame,'first'),next=s.load(s.frame,'second');
+  second.resolve(url);await next;first.resolve('vb6://app/preview/'+'b'.repeat(32));await old;
+  assert.equal(s.frame.src,url);assert.deepEqual(s.stops,[]);assert.deepEqual(s.messages,[]);
+});
+test('older approval failures cannot stop a newer request on the same frame',async()=>{
+  const first=defer(),second=defer(),s=setup(html=>html==='first'?first.promise:second.promise);
+  const old=s.load(s.frame,'first'),next=s.load(s.frame,'second');
+  first.reject(Error('obsolete same-frame request'));await old;
+  assert.deepEqual(s.stops,[]);assert.deepEqual(s.messages,[]);
+  second.resolve(url);await next;assert.equal(s.frame.src,url);
+});
+test('native document preparation leaves sandbox and referrer policy unchanged',async()=>{
+  const s=setup(()=>url);s.frame.sandbox='allow-scripts allow-downloads allow-modals';s.frame.referrerPolicy='no-referrer';
+  const removed=[];s.frame.removeAttribute=name=>removed.push(name);
+  await s.load(s.frame,'source');assert.equal(s.frame.src,url);
+  assert.equal(s.frame.sandbox,'allow-scripts allow-downloads allow-modals');assert.equal(s.frame.referrerPolicy,'no-referrer');
+  assert.deepEqual(removed,['srcdoc']);
+});
+test('independent runtime frames can prepare documents concurrently without retiring each other',async()=>{
+  const first=defer(),second=defer(),errors=[];
+  const ide={runtimeDocumentLoader:createNativeRuntimeDocumentLoader({runtimeDocument:html=>html==='first'?first.promise:second.promise})};
+  const frames=[{isConnected:true,removeAttribute(){}},{isConnected:true,removeAttribute(){}}];
+  const load=(frame,html)=>loadRuntimeDocument(ide,frame,html,{isCurrent:()=>true,onError:error=>errors.push(error)});
+  const a=load(frames[0],'first'),b=load(frames[1],'second');
+  second.resolve(url);await b;first.resolve('vb6://app/preview/'+'b'.repeat(32));await a;
+  assert.equal(frames[0].src,'vb6://app/preview/'+'b'.repeat(32));assert.equal(frames[1].src,url);assert.deepEqual(errors,[]);
+});
