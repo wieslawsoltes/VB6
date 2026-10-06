@@ -1,126 +1,110 @@
 name: Validate
 on:
   push:
-    branches: [validation/application-theme-delivery]
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 jobs:
-  verify-theme-source:
-    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/validation/application-theme-delivery'
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    permissions:
-      contents: write
-    env:
-      BASE: e0af4dc59a0f797a3feb54de0f96fabeba23da37
-      SOURCE_TREE: 57f9757c136d57474d60a5ecde33f71da62b84b4
-      FINAL_TREE: 2b2f7e32e6f5e72097d335004e939d02c9eab13d
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Archive exact source for reproducible validation
+        run: git archive --format=zip HEAD -o /tmp/vb6-source.zip
+      - uses: actions/upload-artifact@v4
         with:
-          ref: e0af4dc59a0f797a3feb54de0f96fabeba23da37
-          fetch-depth: 0
+          name: source-${{ github.sha }}
+          path: /tmp/vb6-source.zip
+          retention-days: 7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Reconstruct reviewed UTF-8 sources with per-file and whole-tree verification
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: npm test
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Resolve browser executable
         run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$BASE"
-          test "$(git rev-parse HEAD^{tree})" = '99445cb18cde8498279c3221355663dcc8bb6ed3'
-          mkdir -p /tmp/theme-evidence
-          python - <<'PY'
-          import base64, hashlib, json, lzma, os, subprocess
-          from pathlib import Path, PurePosixPath
-          chunks = [
-            'e7c933d94f472f20030759017601a3f8f4f9ebdb',
-            '2ec1023fcf9d99909924518297dbfe6c38fbc39d',
-            'de3493bf82be24b75392899bb75da7cf18d176c0',
-            '283d654a456c3bd0eb3925305e0ac927b8706759',
-            '85143a736b4944bd7fe31589e4e883e282e48d42',
-            '7cee78187112f6e22a0f2a17d188196b330a60fd'
-          ]
-          encoded = ''
-          for sha in chunks:
-              reply = json.loads(subprocess.check_output(['gh', 'api', 'repos/wieslawsoltes/VB6/git/blobs/' + sha]))
-              assert reply['encoding'] == 'base64' and reply['sha'] == sha
-              content = base64.b64decode(reply['content'])
-              assert len(content) == 9040
-              assert hashlib.sha1(b'blob ' + str(len(content)).encode() + b'\0' + content).hexdigest() == sha
-              encoded += content.decode('ascii')
-          encoded += 'AgAAAAAEWVo='
-          assert len(encoded) == 54252
-          data = lzma.decompress(base64.b64decode(encoded, validate=True), memlimit=128*1024*1024)
-          assert len(data) == 137848
-          assert hashlib.sha256(data).hexdigest() == 'ced44bca28c2ef59b2f2c357642a6b038303c400af299ede8897062680b4dcd6'
-          changes = json.loads(data)
-          assert len(changes) == 52
-          seen = set()
-          for change in changes:
-              path = PurePosixPath(change['path'])
-              assert not path.is_absolute() and '..' not in path.parts and '.git' not in path.parts
-              assert str(path) not in seen
-              seen.add(str(path))
-              target = Path(path)
-              assert not target.is_symlink()
-              if change['before'] is None:
-                  assert not target.exists(), str(path)
-                  before = b''
-              else:
-                  before = target.read_bytes()
-                  assert hashlib.sha256(before).hexdigest() == change['before'], str(path)
-              text = before.decode('utf-8')
-              end = 0
-              for a, b, replacement in change['edits']:
-                  assert isinstance(a, int) and isinstance(b, int) and isinstance(replacement, str)
-                  assert end <= a <= b <= len(text), str(path)
-                  end = b
-              for a, b, replacement in reversed(change['edits']):
-                  text = text[:a] + replacement + text[b:]
-              after = text.encode('utf-8')
-              assert hashlib.sha256(after).hexdigest() == change['after'], str(path)
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_bytes(after)
-          subprocess.run(['git', 'add', '--', *sorted(seen)], check=True)
-          assert subprocess.check_output(['git', 'write-tree'], text=True).strip() == os.environ['SOURCE_TREE']
-          Path('/tmp/theme-evidence/source-files.json').write_text(json.dumps(sorted(seen), indent=2))
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
           PY
-      - name: Ordinary reproducible build and all tests without refreshing expectations
-        shell: bash
+      - name: Existing IDE and runtime integration regressions
         run: |
-          set -euo pipefail
-          npm run build | tee /tmp/theme-evidence/build.log
-          git add -- dist/studio.css dist/vb6-controls.css dist/vb6-native.js src/theme/palette.css src/theme/ide-palettes.css src/theme/application-palettes.css
-          test "$(git write-tree)" = "$FINAL_TREE"
-          node --test tests/*.test.mjs > /tmp/theme-evidence/node.log 2>&1
-          npm run verify:ide-artifacts | tee /tmp/theme-evidence/fingerprints.log
-          git diff --exit-code
-          test "$(git write-tree)" = "$FINAL_TREE"
-          test "$(find .github/workflows -maxdepth 1 -name '*.yml' | sort | tr '\n' ' ')" = '.github/workflows/pages.yml .github/workflows/validate.yml '
-      - name: Publish clean feature commit only; never main or delivery history
-        shell: bash
-        run: |
-          set -euo pipefail
-          target=refs/heads/feat/application-themes-icon-packs
-          if test -n "$(git ls-remote --heads origin "$target")"; then
-            echo 'Feature ref already exists; refusing to replace it.' >&2
-            exit 1
-          fi
-          git config user.name 'Wiesław Šoltés'
-          git config user.email 'wieslawsoltes@users.noreply.github.com'
-          result=$(git commit-tree "$FINAL_TREE" -p "$BASE" -m 'feat(theme): application-wide platform themes and matching IDE icon packs' -m 'Add independent application appearance settings, live runtime/designer/native-window propagation, scoped popup palettes, self-contained HTML exports, and complete original Fluent/macOS/Motif/CDE icon packs. Preserve authored RGB/fonts/geometry and Classic behavior. Keep normal Validate/Pages workflows and reviewed artifact verification. Source reconstructed and built to the exact locally tested tree; no delivery workflow or transport blobs enter feature history.')
-          git push origin "$result:$target"
-          printf '%s\n%s\n' "$result" "$FINAL_TREE" | tee /tmp/theme-evidence/revision.txt
-          git archive --format=zip "$result" -o /tmp/theme-evidence/application-theme-source.zip
-          cp dist/VB6-Studio-Web.html /tmp/theme-evidence/VB6-Application-Themes.html
-          printf 'Feature commit: `%s`\n\nVerified tree: `%s`\n' "$result" "$FINAL_TREE" >> "$GITHUB_STEP_SUMMARY"
+          python tools/browser-tests.py
+          python tools/browser-parity-tests.py
+          python tools/browser-features-04.py
+          python tools/recovery-browser-tests.py
+          python tools/browser-finalization-05.py
+          python tools/browser-boundaries-06.py
+      - name: Verify reproducible generated bundles
+        run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+  browser-windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Detached browser windows over HTTP and file origins
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:windows
+      - name: Optional IDE themes, runtime isolation and appearance persistence
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:themes:browser
+      - name: Download every sample from the IDE and reopen exact HTML bytes
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:sample-exports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: application-theme-source-verification
-          path: /tmp/theme-evidence
+          name: browser-windows-${{ matrix.browser }}
+          path: |
+            reports/browser-windows
+            reports/ide-themes
+            reports/win32-exports
+          if-no-files-found: ignore
           retention-days: 7
-          if-no-files-found: error
+  win32-system-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Record installed Windows calendar and formatting contracts
+        shell: pwsh
+        run: ./tools/win32-system-oracle.ps1
+      - name: Compare every native field to the standalone browser package
+        run: node tools/compare-win32-system.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-system-contracts
+          path: reports/win32-system
+          retention-days: 7
