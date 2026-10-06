@@ -1,3 +1,7 @@
+# Version 0.4.0: advanced GDI and painting
+
+Adds 80 registered exports (311 total): curved/polygon/path regions, FrameRgn, affine/mapping transforms, logical fonts and real memory-DC text, window shapes, update/paint lifecycles, and a reusable WebGPU raster presenter. See [ADVANCED-GDI.md](ADVANCED-GDI.md) for implementation contracts, measured curve differences, font/backend requirements and remaining native-specific semantics. The detailed 0.1–0.3 descriptions below describe the foundation and are superseded by the advanced guide where an old limitation has been implemented.
+
 # @vb6/win32-browser
 
 A zero-dependency, MIT-licensed JavaScript compatibility process for commonly used
@@ -19,8 +23,8 @@ npm run build
 npm run pack:win32-browser
 ```
 
-This produces `release/vb6-win32-browser-0.3.0.tgz`. Install that archive in another
-project with `npm install /path/to/vb6-win32-browser-0.3.0.tgz`, or copy
+This produces `release/vb6-win32-browser-0.4.0.tgz`. Install that archive in another
+project with `npm install /path/to/vb6-win32-browser-0.4.0.tgz`, or copy
 `packages/win32-browser/src/` as an independent ES-module library. For a script tag,
 copy `packages/win32-browser/dist/win32-browser.js`; its global is `Win32Compat`.
 The archive includes the source, browser bundle, license, and API documentation.
