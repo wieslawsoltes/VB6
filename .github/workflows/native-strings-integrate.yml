@@ -1,0 +1,49 @@
+name: Integrate reviewed native Strings with current scalar main
+on:
+  push:
+    branches: [feat/native-declare-strings]
+    paths: [.github/workflows/native-strings-integrate.yml]
+permissions:
+  contents: write
+concurrency:
+  group: native-strings-integrate
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve pinned scalar and Automation sources; rebuild only generated conflicts
+        run: |
+          set -euo pipefail
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          target=72dae4fa89e165f6f0dc0ba0aad5cb7615508ea3
+          git merge-base --is-ancestor 6aeeae789151397c58648cd9d99678105935979f "$target"
+          if ! git merge --no-commit --no-ff "$target"; then
+            python3 - <<'PY'
+          import subprocess
+          paths=[p for p in subprocess.check_output(['git','diff','--name-only','--diff-filter=U','-z']).decode().split('\0') if p]
+          if not paths: raise SystemExit('Merge failed without generated conflicts')
+          for p in paths:
+              if not (p.startswith('dist/') or p in ['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js']):
+                  raise SystemExit('Authored source conflict requires review: '+p)
+              subprocess.run(['git','checkout','--ours','--',p],check=True)
+              subprocess.run(['git','add','--',p],check=True)
+          PY
+          npm run build
+          npm test
+          node tools/win32-string-fixtures.mjs
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js packages/win32-browser/dist examples
+          git diff --cached --check
+          git commit -m 'merge: retain tagged scalar and Automation work in native Declare String export' -m 'Preserve pinned main 72dae4fa89e165f6f0dc0ba0aad5cb7615508ea3 without automatically resolving authored-source conflicts; regenerate combined IDE/runtime/compiler distributions and pass the full suite. Real Windows String execution remains a required PR gate.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-declare-strings

@@ -1,0 +1,40 @@
+name: Scalar conformance
+on:
+  pull_request:
+    paths: ['src/runtime/**', 'src/language/**', 'tests/scalar-*.test.mjs', 'tests/fixtures/scalar/**', 'tools/conformance/**', '.github/workflows/scalar-conformance.yml']
+  push:
+    branches: [main]
+    paths: ['src/runtime/**', 'src/language/**', 'tests/scalar-*.test.mjs', 'tests/fixtures/scalar/**', 'tools/conformance/**', '.github/workflows/scalar-conformance.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: scalar-conformance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-reference:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Scalar regression tests including retained native evidence
+        run: node --test tests/scalar-runtime.test.mjs tests/scalar-boundaries.test.mjs tests/scalar-conformance.test.mjs
+      - name: Prepare complete native operation corpus
+        run: node tools/conformance/check-scalars.mjs prepare reports/scalar-conformance/vectors.json
+      - name: Execute genuine Windows Automation conversions and operators
+        shell: powershell
+        run: tools/conformance/windows-oracle.ps1 -Vectors reports/scalar-conformance/vectors.json -Output reports/scalar-conformance/windows-oracle.json
+      - name: Compare runtime against fresh operating-system evidence
+        run: node tools/conformance/check-scalars.mjs check reports/scalar-conformance/vectors.json reports/scalar-conformance/windows-oracle.json reports/scalar-conformance/comparison.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scalar-conformance-${{ github.sha }}
+          path: reports/scalar-conformance/
+          if-no-files-found: error
+          retention-days: 14
