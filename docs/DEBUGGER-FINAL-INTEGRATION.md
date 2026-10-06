@@ -103,3 +103,15 @@ complete combined suite passes **3,007 tests**, with zero failed/skipped/cancell
 The final PR merge-gate comment identifies the tested source revision and real
 browser/Windows workflow outcomes after this reconciliation. Earlier source
 identifiers and 2,808-test counts above describe the preceding publication stage.
+
+## Native register artifact regression
+
+Review of the successful x64 CDB artifact from run `37438660513` exposed a
+phantom register: a disassembly memory operand's address suffix was accepted by
+the generic token parser. Register parsing now accepts only complete supported
+register tokens at whitespace boundaries, rejects malformed/oversized values,
+and preserves x86 segments/flags and x64 split hexadecimal words. Four new
+portable regressions include the reduced real output. The independent native
+smoke also checks every returned register key against its expected register set.
+The full Node suite after this correction passes **3,011 tests**, with no failures
+or skips; the final-head native/browser workflow rerun remains the merge gate.

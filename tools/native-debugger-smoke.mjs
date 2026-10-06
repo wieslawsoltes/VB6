@@ -64,7 +64,10 @@ try{
   record('native child process tracking',{processes:processes.processes});
   const threads=await launched.request('threads');assert.ok(threads.threads.length>=2);record('native thread enumeration',{threads:threads.threads.length});
   const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);assert.deepEqual({pid:launched.pid,processIndex:launched.processIndex,threadIndex:launched.threadIndex},stopContext);assert.ok(isBreakpointStop(launched,await launched.request('stack'),{pid:parentPid,symbol:'DebugTarget!DebugTick',id:bp.id}));record('cross-process native stack snapshots restore current context');
-  const registers=await launched.request('registers');assert.ok(registers.registers.rip||registers.registers.eip);record('native x86 or x64 register context',{registers:registers.registers});
+  const registers=await launched.request('registers');assert.ok(registers.registers.rip||registers.registers.eip);
+  const expectedRegisters=new Set(('eax ebx ecx edx esi edi eip esp ebp rax rbx rcx rdx rsi rdi rip rsp rbp r8 r9 r10 r11 r12 r13 r14 r15 iopl cs ss ds es fs gs efl').split(' '));
+  assert.ok(Object.keys(registers.registers).every(name=>expectedRegisters.has(name)),'Disassembly memory operands must not be reported as registers');
+  record('native x86 or x64 register context',{registers:registers.registers});
   const disassembly=await launched.request('disassemble');assert.match(disassembly.text,/DebugTick|[0-9a-f]{8}/i);record('native machine disassembly');
   const counter=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugCounter'});const memory=await launched.request('readMemory',{address:counter.address,count:4});assert.equal(memory.unreadableBytes,0);record('resolve exported data address and read native memory',{address:counter.address});
   const writePause=launched.pauseId;

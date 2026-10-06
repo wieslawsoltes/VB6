@@ -40,7 +40,14 @@ export function parseThreads(text) {
 }
 export function parseRegisters(text) {
   const registers = {};
-  for (const match of text.matchAll(/\b([a-z][a-z0-9]{1,10})=([0-9a-f`]+)\b/gi)) registers[match[1].toLowerCase()] = address(match[2].replaceAll('`', ''));
+  // CDB appends disassembly with memory operands after the register rows.
+  // A backtick/address boundary is not a register boundary. Accept only whole
+  // whitespace-delimited general-register tokens, never labels or memory data.
+  const general = /^(?:[re]?(?:ax|bx|cx|dx|si|di|bp|sp)|r(?:[89]|1[0-5])|[re]?ip|[re]?flags|efl|iopl|[cdefgs]s)$/i;
+  for (const match of text.matchAll(/(?:^|[ \t])([a-z][a-z0-9]{1,10})=([0-9a-f]+(?:`[0-9a-f]+)?)(?=\s|$)/gim)) {
+    const value = match[2].replace('`', '');
+    if (general.test(match[1]) && value.length <= 16) registers[match[1].toLowerCase()] = address(value);
+  }
   return registers;
 }
 export function parseMemory(text, start, count) {
