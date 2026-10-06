@@ -58,6 +58,7 @@ try:
         url = f'http://127.0.0.1:{server.server_port}'
         page.goto(url + '/artifacts/vb6-compute/playground.html')
         page.add_script_tag(content=(ROOT / 'tests/compute-extended-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-images-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-application-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-browser.js').read_text())
         report = page.evaluate('runComputeBrowserTests()')
@@ -80,6 +81,24 @@ try:
             page.locator('#dispose').click()
             page.wait_for_function("document.getElementById('status').textContent==='Disposed.'")
             report['playground'] = 'passed: compile, repeat, GPU presentation, dispose'
+        if report.get('available') and not report.get('failed'):
+            page.goto(url + '/artifacts/vb6-compute/events.html')
+            page.wait_for_function("globalThis.computeApplication && !globalThis.computeApplication.closed")
+            assert page.evaluate("async()=> (await computeApplication.program.readState())[0].globals['Module1.Clicks']") == 0
+            page.locator('#surface').click(position={'x': 202, 'y': 102})
+            page.evaluate('computeApplication.tail')
+            assert page.evaluate("async()=> (await computeApplication.program.readState())[0].globals['Module1.Clicks']") == 1
+            assert page.evaluate("async()=>{const p=await computeApplication.renderer.readPixels();return Array.from(p.slice((100*640+200)*4,(100*640+200)*4+4));}") == [240, 150, 50, 255]
+            page.locator('#surface').press('A')
+            page.evaluate('computeApplication.tail')
+            assert page.evaluate("async()=> (await computeApplication.program.readState())[0].globals['Module1.Clicks']") == 65
+            page.locator('#reset').click()
+            page.wait_for_function("document.getElementById('status').textContent==='Reset.'")
+            assert page.evaluate("async()=> (await computeApplication.program.readState())[0].globals['Module1.Clicks']") == 0
+            page.screenshot(path=str(REPORTS / 'events.png'), full_page=True)
+            page.locator('#dispose').click()
+            page.wait_for_function("document.getElementById('status').textContent==='Disposed.'")
+            report['exportedApplication'] = 'passed: exported boot, pointer/key input, pixel readback, reset, dispose'
         (REPORTS / 'gpu.json').write_text(json.dumps(report, indent=2))
         browser.close()
         assert report.get('available'), 'No WebGPU adapter: validation is not complete'

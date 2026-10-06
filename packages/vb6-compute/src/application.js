@@ -86,7 +86,14 @@ export class ComputeApplication {
     if(!this.hasTabIndex)c.setAttribute('tabindex','0');
     const listen=(name,fn,options)=>{c.addEventListener(name,fn,options);this.listeners.push(()=>c.removeEventListener(name,fn,options));};
     const modifiers=e=>(e.shiftKey?1:0)|(e.ctrlKey?2:0)|(e.altKey?4:0)|(e.metaKey?8:0);
-    const pointer=e=>{const rect=c.getBoundingClientRect();return {PointerX:rect.width?(e.clientX-rect.left)*this.program.width/rect.width:0,PointerY:rect.height?(e.clientY-rect.top)*this.program.height/rect.height:0,Buttons:e.buttons||0,PointerId:e.pointerId||0,Pressure:e.pressure||0,Modifiers:modifiers(e)};};
+    const pointer=e=>{
+      const rect=c.getBoundingClientRect(),style=globalThis.getComputedStyle(c);
+      const number=name=>parseFloat(style[name])||0;
+      const sx=rect.width/(c.offsetWidth||rect.width||1),sy=rect.height/(c.offsetHeight||rect.height||1);
+      const left=(number('borderLeftWidth')+number('paddingLeft'))*sx,top=(number('borderTopWidth')+number('paddingTop'))*sy;
+      const width=rect.width-left-(number('borderRightWidth')+number('paddingRight'))*sx,height=rect.height-top-(number('borderBottomWidth')+number('paddingBottom'))*sy;
+      return {PointerX:width>0?(e.clientX-rect.left-left)*this.program.width/width:0,PointerY:height>0?(e.clientY-rect.top-top)*this.program.height/height:0,Buttons:e.buttons||0,PointerId:e.pointerId||0,Pressure:e.pressure||0,Modifiers:modifiers(e)};
+    };
     for(const [name,event] of [['pointerdown','pointerDown'],['pointerup','pointerUp'],['pointercancel','pointerCancel']])if(Object.hasOwn(this.descriptor.events,event))listen(name,e=>{
       if(name==='pointerdown'){c.focus();try{c.setPointerCapture(e.pointerId);}catch{}}
       this.send(event,pointer(e));
@@ -109,6 +116,7 @@ export class ComputeApplication {
       try {
         this.frame=integer(this.frame+1,'frame',1,2147483647);
         await this.dispatch('frame',{Frame:this.frame,Elapsed:elapsed,DeltaTime:delta});
+        if(this.closed||!this.running||generation!==this.generation)return;
         if(this.timerInterval>0&&elapsed-this.lastTimer>=this.timerInterval){this.lastTimer=elapsed;await this.dispatch('timer',{Frame:this.frame,Elapsed:elapsed,DeltaTime:delta});}
       }catch(error){if(!this.closed)this.report(error);return;}
       // Schedule only after GPU work finishes: no growing animation backlog.

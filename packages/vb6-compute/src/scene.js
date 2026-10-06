@@ -1,3 +1,4 @@
+import {ComputeImage} from './image.js';
 import {ComputeError, COMMAND_WORDS, integer, finite} from './protocol.js';
 const identity=[1,0,0,1,0,0];
 function vector(value,length,name) {
@@ -18,7 +19,7 @@ export class ComputePath {
 }
 /** CPU encodes commands only; curve flattening, bounds, binning and pixels run in compute. */
 export class ComputeScene {
-  constructor(width,height){this.width=integer(width,'width',1,16384);this.height=integer(height,'height',1,16384);this.commands=[];this.curves=[];}
+  constructor(width,height){this.width=integer(width,'width',1,16384);this.height=integer(height,'height',1,16384);this.commands=[];this.curves=[];this.images=[];}
   add(kind,a,b,paint,options={}) {
     if(this.commands.length>=16384)throw new ComputeError('Scene command limit exceeded','GPU_LIMIT');
     const matrix=vector(options.transform||identity,6,'transform');
@@ -47,15 +48,34 @@ export class ComputeScene {
     else if(options.fillRule&&options.fillRule!=='nonzero')throw new ComputeError('Unknown fill rule','GPU_VALUE');
     this.curves.push(...curves);return this;
   }
+  image(image,x,y,width=image?.width,height=image?.height,options={}) {
+    if(!(image instanceof ComputeImage))throw new ComputeError('Expected ComputeImage','GPU_IMAGE');
+    if(finite(width)<=0||finite(height)<=0)throw new ComputeError('Image destination dimensions must be positive','GPU_IMAGE');
+    const source=vector(options.source||[0,0,image.width,image.height],4,'image source');
+    integer(source[0],'source x',0,image.width-1);integer(source[1],'source y',0,image.height-1);
+    integer(source[2],'source width',1,image.width-source[0]);integer(source[3],'source height',1,image.height-source[1]);
+    const filter=options.filter??'linear',opacity=options.opacity??1;
+    if(!['linear','nearest'].includes(filter))throw new ComputeError('Unknown image filter','GPU_IMAGE');
+    finite(opacity,'opacity');if(opacity<0||opacity>1)throw new ComputeError('Opacity must be in [0,1]','GPU_IMAGE');
+    const known=this.images.includes(image);
+    if(!known&&this.images.reduce((n,i)=>n+i.width*i.height,0)+image.width*image.height>16777216)throw new ComputeError('Scene image storage exceeds 64 MiB','GPU_LIMIT');
+    this.add(6,[finite(x),finite(y),x+width,y+height],[image.height,filter==='linear'?1:0,image.premultiplied?1:0],[1,1,1,opacity],{...options,fill:true});
+    if(!known)this.images.push(image);
+    const command=this.commands.at(-1);command.image=image;command.gradient=source;return this;
+  }
   encode() {
     const count=this.commands.length,commands=new ArrayBuffer(Math.max(1,count)*COMMAND_WORDS*4),u=new Uint32Array(commands),f=new Float32Array(commands);
+    const offsets=new Map();let imageWords=0;
+    for(const image of this.images){offsets.set(image,imageWords);imageWords+=image.width*image.height;}
+    const images=new Uint32Array(Math.max(1,imageWords));
+    for(const image of this.images){const pixels=image.copyPixels(),base=offsets.get(image);for(let i=0;i<pixels.length;i+=4)images[base+i/4]=(pixels[i]|(pixels[i+1]<<8)|(pixels[i+2]<<16)|(pixels[i+3]<<24))>>>0;}
     for(let i=0;i<count;i++){
-      const c=this.commands[i],offset=i*COMMAND_WORDS;u.set([c.kind,c.flags,c.offset,c.count],offset);
+      const c=this.commands[i],offset=i*COMMAND_WORDS;u.set([c.kind,c.flags,c.image?offsets.get(c.image):c.offset,c.image?c.image.width:c.count],offset);
       f.set(c.a,offset+4);f.set(c.b,offset+8);f.set(c.first,offset+12);f.set(c.second,offset+16);f.set(c.gradient,offset+20);
       f.set(c.matrix.slice(0,4),offset+24);f.set([...c.matrix.slice(4),c.paintKind,0],offset+28);f.set(c.clip,offset+32);
     }
     const curves=new ArrayBuffer(Math.max(1,this.curves.length)*48),cf=new Float32Array(curves),cu=new Uint32Array(curves);
     for(let i=0;i<this.curves.length;i++){const c=this.curves[i];cf.set(c.points,i*12);cu[i*12+8]=c.kind;}
-    return {commands,curves,count,curveCount:this.curves.length,width:this.width,height:this.height};
+    return {commands,curves,images:images.buffer,count,curveCount:this.curves.length,width:this.width,height:this.height};
   }
 }

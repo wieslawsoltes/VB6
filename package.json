@@ -48,7 +48,11 @@
     "test:interop:windows": "node tools/interop/test-native.mjs",
     "verify:classic": "node tools/verify-classic-roundtrip.mjs",
     "snapshot:native": "node tools/native-snapshot.mjs",
-    "test:classic-html": "python tools/browser-classic-html.py"
+    "test:classic-html": "python tools/browser-classic-html.py",
+    "build:compute": "node tools/build-compute.mjs",
+    "compile:compute": "node tools/compile-compute.mjs",
+    "test:compute": "node --test tests/compute*.test.mjs",
+    "test:compute:browser": "node tools/build-compute.mjs && python tools/compute-browser-tests.py"
   },
   "engines": {
     "node": ">=22"

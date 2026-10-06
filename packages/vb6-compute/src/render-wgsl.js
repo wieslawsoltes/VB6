@@ -1,8 +1,10 @@
+import {IMAGE_WGSL} from './image-wgsl.js';
 import {COMMAND_WGSL, MAX_CURVE_EDGES} from './protocol.js';
 /** Original implementation informed by Vello's coarse/fine compute architecture.
  * Fixed 32-edge curve subdivision and 4-sample AA are explicit quality bounds.
  */
 export const RENDER_WGSL = `${COMMAND_WGSL}
+${IMAGE_WGSL}
 struct Config { width:u32,height:u32,total:u32,capacity:u32,stride:u32,lanes:u32,tiles_x:u32,tiles_y:u32,tile_capacity:u32,curve_count:u32,samples:u32,pad:u32 }
 struct Curve { a:vec4<f32>,b:vec4<f32>,tags:vec4<u32> }
 @group(0) @binding(0) var<storage,read_write> commands:array<DrawCommand>;
@@ -68,7 +70,7 @@ fn distance_segment(p:vec2<f32>,a:vec2<f32>,b:vec2<f32>)->f32 {
 fn hit(c:DrawCommand,p:vec2<f32>)->bool {
   if(c.tags.x==1u) {return true;}
   let q=local(c,p);let fill=(c.tags.y&1u)!=0u;let half=c.b.x*0.5;
-  if(c.tags.x==2u) {
+  if(c.tags.x==2u || c.tags.x==6u) {
     let lo=min(c.a.xy,c.a.zw);let hi=max(c.a.xy,c.a.zw);
     if(fill) {return all(q>=lo) && all(q<hi);}
     return all(q>=lo-vec2<f32>(half)) && all(q<hi+vec2<f32>(half)) && !(all(q>=lo+vec2<f32>(half)) && all(q<hi-vec2<f32>(half)));
@@ -92,6 +94,7 @@ fn hit(c:DrawCommand,p:vec2<f32>)->bool {
   return false;
 }
 fn paint(c:DrawCommand,p:vec2<f32>)->vec4<f32> {
+  if(c.tags.x==6u) {return image_paint(c,local(c,p));}
   var color=c.color;
   if(c.offset.z==1.0) {let q=local(c,p);let v=c.paint.zw-c.paint.xy;let denom=dot(v,v);var t=0.0;if(denom>1e-20) {t=clamp(dot(q-c.paint.xy,v)/denom,0.0,1.0);}color=mix(c.color,c.color2,t);}
   return vec4<f32>(color.rgb*color.a,color.a);

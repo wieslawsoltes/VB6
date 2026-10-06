@@ -23,7 +23,7 @@ export class ComputeRenderer {
     this.layout=d.createBindGroupLayout({entries:[
       {binding:0,visibility:4,buffer:{type:'storage'}},{binding:1,visibility:4,buffer:{type:'read-only-storage'}},{binding:2,visibility:4,buffer:{type:'uniform'}},
       {binding:3,visibility:4,buffer:{type:'read-only-storage'}},{binding:4,visibility:4,buffer:{type:'storage'}},{binding:5,visibility:4,buffer:{type:'storage'}},
-      {binding:6,visibility:4,storageTexture:{access:'write-only',format:'rgba8unorm'}}]});
+      {binding:6,visibility:4,storageTexture:{access:'write-only',format:'rgba8unorm'}},{binding:7,visibility:4,buffer:{type:'read-only-storage'}}]});
     const module=await this.gpu.shader(RENDER_WGSL,'VB6 coarse/fine rasterizer'),layout=d.createPipelineLayout({bindGroupLayouts:[this.layout]});this.pipelines={};
     for(const entryPoint of ['flatten','prepare','coarse','fine'])this.pipelines[entryPoint]=await d.createComputePipelineAsync({layout,compute:{module,entryPoint}});
     if(this.canvas) {
@@ -48,9 +48,10 @@ export class ComputeRenderer {
         const commands=isProgram?source.draws:upload(encoded.commands,BUFFER_USAGE.STORAGE,'Scene commands');
         const states=isProgram?source.state:upload(new Uint32Array([0,0,0,encoded.count,0,0]),BUFFER_USAGE.STORAGE,'Scene state');
         const curves=upload(encoded?.curves||new Uint32Array(12),BUFFER_USAGE.STORAGE,'Encoded curves');
+        const images=upload(encoded?.images||new Uint32Array(1),BUFFER_USAGE.STORAGE,'RGBA image pixels');
         const edges=this.gpu.buffer(Math.max(1,curveCount)*MAX_CURVE_EDGES*16,BUFFER_USAGE.STORAGE,'Flattened curve edges');transient.push(edges);
         d.queue.writeBuffer(this.params,0,new Uint32Array([this.width,this.height,total,capacity,stride,count,this.tilesX,this.tilesY,this.tileCapacity,curveCount,this.samples,0]));
-        const bindGroup=d.createBindGroup({layout:this.layout,entries:[commands,states,this.params,curves,edges,this.tiles].map((buffer,binding)=>({binding,resource:{buffer}})).concat([{binding:6,resource:this.texture.createView()}])});
+        const bindGroup=d.createBindGroup({layout:this.layout,entries:[commands,states,this.params,curves,edges,this.tiles].map((buffer,binding)=>({binding,resource:{buffer}})).concat([{binding:6,resource:this.texture.createView()},{binding:7,resource:{buffer:images}}])});
         const encoder=d.createCommandEncoder();
         const pass=(name,x,y=1)=>{if(!x)return;const p=encoder.beginComputePass({label:'VB6 '+name});p.setPipeline(this.pipelines[name]);p.setBindGroup(0,bindGroup);p.dispatchWorkgroups(x,y);p.end();};
         pass('flatten',Math.ceil(curveCount*MAX_CURVE_EDGES/64));pass('prepare',Math.ceil(total/64));pass('coarse',Math.ceil(this.tilesX*this.tilesY/64));pass('fine',Math.ceil(this.width/8),Math.ceil(this.height/8));

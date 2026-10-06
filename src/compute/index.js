@@ -20,3 +20,6 @@ export {ComputeApplication,compileComputeApplication};
 
 import {exportComputeHTML} from '../../packages/vb6-compute/src/export-html.js';
 export {exportComputeHTML};
+
+import {ComputeImage} from '../../packages/vb6-compute/src/image.js';
+export {ComputeImage};

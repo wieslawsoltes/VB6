@@ -1,29 +1,27 @@
-# Compute backend checkpoint — 2026-10-06
+# Optional compute backend — 0.2 integration checkpoint
 
-PR #55 remains a draft and must not be merged at this checkpoint.
+PR #55 preserves the ordinary IDE and JavaScript/native backends. Its standalone
+experimental package is documented in `packages/vb6-compute/README.md`.
 
-The recovered compiler plus the GPU device/program/kernel wrappers, scene encoder,
-compute rasterizer implementation, standalone package builder and regression
-harnesses are preserved on the feature branch. Existing application backends and
-their generated distributions are not changed.
+The old reserved-WGSL renderer blocker was resolved by commit 842d459. Subsequent
+work added GPU dynamic arrays, GoSub/computed branches and bounded recursive
+continuation frames. CI run 37470387638 on cdcc683 passed 74 WebGPU scenarios,
+including numeric and rendered-pixel readbacks, with zero retained GPU resources.
+Main b6f623d was reconciled without changing that tested source tree.
 
-The local corrected working tree passed `npm run build`, all 3,121 root Node tests
-(including 98 compute tests), and the independent ESM/browser bundle build. This
-is host-side validation, NOT evidence that the shaders have executed successfully.
+The next integration adds typed event-driven applications, a standalone compiler
+CLI, escaped single-file HTML export, decoded RGBA image paints, canvas content-box
+input mapping and exported-application interaction tests. These stay optional and
+are not a claim of complete VB6 language, numeric, forms, typography or native-host
+compatibility. Current APIs and exact boundaries are in the package guide.
 
-A correction to `packages/vb6-compute/src/render-wgsl.js` could not be published:
-the GitHub tool repeatedly returned an undetermined safety-status block. That
-file in this checkpoint still contains reserved WGSL identifiers, while the
-corresponding protocol and runtime helper corrections were accepted. The reserved
-identifier regression is deliberately retained and is expected to fail on this
-remote checkpoint. It must not be skipped, removed, or treated as passing.
+The compute CI workflow retains exact source, per-scenario progress, numeric and
+pixel results, browser previews, and the independent package. Missing adapters,
+shader failures, resource leaks and source regressions fail validation. All existing
+assertions remain enabled. Local host tests and extracted-package checks are useful
+but do not substitute for the WebGPU suite; the managed local browser blocks
+localhost navigation, so GPU/browser evidence comes from the CI runner.
 
-Local managed Chromium rejected localhost/file navigation with
-ERR_BLOCKED_BY_ADMINISTRATOR. No local browser restriction was bypassed.
-The CI workflow collects independent numeric/pixel WebGPU diagnostics even after
-a host assertion fails; any failure still fails the job. Browser validation is
-not complete, and no physical GPU performance or cross-vendor claim is made.
-
-This implementation remains a typed-standard-module experimental subset, not the
-requested full VB6 language, object/control, host-service, typography and event
-runtime. See the package README for supported APIs and remaining boundaries.
+Before merge, inspect the latest PR-head workflow results rather than relying on
+historical counts in comments. No physical-GPU benchmark, native VB6 certification,
+or full feature-parity assertion is made by this checkpoint.

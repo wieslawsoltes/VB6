@@ -1,39 +1,76 @@
-# VB6 Compute — experimental optional backend
+# VB6 Compute 0.2 — optional experimental backend
 
-An independently built JavaScript package that compiles typed VB standard modules
-into WGSL and executes them on WebGPU. It does **not** replace the existing VB6
-JavaScript, browser-control, Electron, or Win32 runtimes. No GPU interpreter in
-JavaScript and no Canvas2D/fragment-shader rasterization is hidden behind this API.
+A standalone JavaScript compiler, WebGPU runtime and compute-only renderer.
+VB standard modules compile into WGSL. JavaScript schedules GPU work and collects
+host events; it does not interpret the VB handlers or rasterize their pixels.
+Existing IDE, JavaScript, browser-control, Electron and Win32 backends are unchanged.
+This package is an explicit opt-in, **not complete VB6 runtime compatibility**.
 
-**This is not complete VB6 runtime compatibility.** Unsupported language and host
-features fail compilation. The initial compiler supports Boolean, Byte, Integer,
-Long and Single storage, fixed arrays (one to four dimensions), acyclic Sub and
-Function calls, ByVal/ByRef aliases, named/optional arguments, branches, loops,
-Select Case, static locals, structured runtime errors and an instruction budget.
-Double is rejected by default. `precision: 'single'` explicitly permits f32
-approximation and emits a warning; it is not Double precision or full VB6 numeric
-certification. Programs have lane-private module state, **not** automatically
-parallelized shared VB globals. Use explicit shared atomic operations for exchange.
-
-## Build and standalone use
-
-From the repository root:
+## Build, compile and package
 
 ```sh
-node tools/build-compute.mjs
-node --test tests/compute.test.mjs
-python tools/compute-browser-tests.py
+npm run build:compute
+npm run test:compute
+npm run test:compute:browser
+npm run compile:compute -- sample.bas --out sample.wgsl
+npm run compile:compute -- sample.bas --out sample.json
+npm run compile:compute -- sample.bas --out sample.html
 cd artifacts/vb6-compute
 npm pack
 ```
 
-The build produces `index.js` (ESM, no global pollution), `vb6-compute.js` (browser
-`VB6Compute` global), a standalone `playground.html`, license and package metadata.
-The package includes its frontend, has no external runtime imports or npm
-dependencies, and does not require the IDE or repository to execute. Serve the
-playground over HTTPS or localhost in a WebGPU-capable browser. Missing adapters
-raise `GPU_UNAVAILABLE`; the package never silently falls back to CPU execution.
-No npm publication is performed.
+The independently installable `@vb6/compute` archive contains `index.js` (ESM with
+no global pollution), `vb6-compute.js` (the `VB6Compute` browser global), a Node CLI,
+`playground.html`, `events.html`, `events.bas` and this guide. There are no external
+runtime imports or npm dependencies. The build does not publish to npm. With the
+package installed, `vb6-compute --help` lists the compiler options.
+
+The CLI accepts `.bas`/`.vb` source, `.vb6web`/`.json` projects, or `-` for source
+from standard input. Output formats are WGSL, JSON artifacts, and single-file HTML.
+Repeated `--event load=Module1.Main --event pointerDown=Module1.OnPointer` bindings
+produce an event application. Without events, WGSL/JSON compile a plain entry Sub;
+HTML always compiles an application dispatcher. `--entry`, `--precision`,
+`--max-call-depth`, `--workgroup-size`, `--dynamic-array-capacity` and the state,
+framebuffer and fuel limits are explicit options. Existing output files require
+`--force`; input/output aliases are rejected and source errors do not truncate
+existing outputs. HTML exports escape titles and serialized data, embed their
+runtime, and require no CDN or external resource.
+
+Serve browser apps over HTTPS or localhost in a supported browser. No adapter
+raises `GPU_UNAVAILABLE`; the package does not silently fall back to CPU execution.
+
+## Compiler and numeric contract
+
+`compileCompute(sourceOrProject, options)` uses the existing shared frontend;
+`compileComputeIR(program, options)` accepts its compiled IR. Artifacts are JSON
+serializable and contain WGSL, a versioned storage ABI, globals, array layouts,
+procedure/source metadata and diagnostics. The entry is a parameterless Sub.
+
+Supported scalar storage is Boolean, Byte, Integer, Long and Single. Numeric
+operations include checked narrowing/arithmetic, division errors, ties-to-even
+integer conversion and VB Boolean values. Use `&` Long and `!` Single literals
+where their type matters. Strict mode rejects Double storage and operations that
+require Double promotion. `precision: 'single'` explicitly replaces these with f32
+and emits a warning; it is **not** exact Double emulation or VB6 numeric certification.
+
+Subs and Functions support ByVal/ByRef, aliased variables, optional/named arguments,
+return values, branches, loops, Select Case, static locals and error handlers.
+Bounded direct/mutual recursion uses resumable private GPU frames and a flat
+continuation dispatcher, avoiding recursive WGSL calls and exponential shader
+inlining. `maxCallDepth` defaults to 16 (range 1–64); exhausted calls report VB error
+28. `GoSub`/`Return`, computed `On ... GoTo/GoSub`, catchable user error codes,
+`On Error` and `Resume` are supported. GoSub depth defaults to 64. Fuel exhaustion
+and draw-capacity faults are fatal, not catchable ways to evade limits.
+
+Fixed and dynamic typed arrays support one to four dimensions. `ReDim`,
+`ReDim Preserve`, `Erase`, `LBound` and `UBound` execute on the GPU. Dynamic arrays
+reserve a bounded capacity per declaration (`dynamicArrayCapacity`, default 256
+cells); this is not an unbounded GPU heap. Preserve can resize only the final
+dimension and cannot change lower bounds/rank. Invalid resizes preserve old state.
+ByRef element aliases lock array shape during calls and release locks on error
+unwinding. Fixed Erase retains bounds and zeros cells; dynamic Erase deallocates.
+
+## Persistent program runtime
 
 ```js
 import {compileCompute, ComputeDevice, ComputeProgram, ComputeRenderer}
@@ -53,9 +90,9 @@ try {
     {width: 640, height: 480, fuel: 100000, capacity: 256});
   renderer = await ComputeRenderer.create(gpu,
     {width: 640, height: 480, canvas: document.querySelector('canvas')});
-  console.log(await program.run()); // typed globals, lane, VB error/line and steps
-  await renderer.render(program);   // GPU commands go directly to GPU rendering
-  await program.run({readback: false}); // persistent state, no CPU state transfer
+  console.log(await program.run());
+  await renderer.render(program);
+  await program.run({readback: false});
   await renderer.render(program);
 } finally {
   await renderer?.dispose();
@@ -64,95 +101,130 @@ try {
 }
 ```
 
-`compileCompute` accepts a source string or the existing project model, with
-`entry`, `moduleName`, `workgroupSize`, `maxStateWords` and `precision` options.
-`compileComputeIR` accepts the shared frontend's compiled program. Artifacts are
-JSON-serializable and retain their storage ABI, globals and runtime source locations.
+`count` is the number of isolated invocations, each with lane-private globals.
+This does **not** automatically parallelize normal shared VB module state.
+`writeGlobal(name, value, lane)`, `initializeArray(name, bounds, values, lane)`,
+`readState`, `run`, `reset`, `writeShared` and `readShared` serialize through the
+device. Arrays are flat with the first dimension varying fastest. Dynamic-array
+writes must match their current allocated length; readback includes runtime bounds.
 
-## Runtime and GPU memory
+Supply `sharedBuffer`/`sharedWords` to chain kernels without CPU readback. The
+buffer stays caller-owned and requires STORAGE usage; host writes/reset need
+COPY_DST and readback needs COPY_SRC. Reset does not clear borrowed shared memory
+unless explicitly requested with `clearShared: true`.
 
-`ComputeProgram.create(gpu, artifact, options)` allocates state, draw commands and
-shared words, validates device limits and compiles the WGSL. `count` is the number
-of isolated invocations. `writeGlobal(name, value, lane)` supports scalars and flat
-fixed arrays (first dimension varies fastest). `readState`, `run`, `reset`,
-`writeShared` and `readShared` are asynchronous and serialized across the device.
-Caller input arrays are copied before queueing. Integer host writes must already
-be in range; GPU conversions implement explicit checked narrowing and ties-to-even.
+Intrinsics include invocation/group indexes and counts, `ComputeWidth/Height/Time`,
+`ComputeLoadLong/Single`, `ComputeStoreLong/Single`, and
+`ComputeAtomicAdd/Sub/Exchange/And/Or/Xor/CompareExchange`. Atomic word operations
+wrap at 32 bits, unlike checked VB arithmetic, and have no implicit cross-workgroup
+barrier. `ComputeSin/Cos/Tan/Atan/Sqrt/Exp/Log/Min/Max` explicitly use f32 math.
 
-Supply `sharedBuffer` and `sharedWords` to chain kernels without readback. The
-buffer remains caller-owned and must have STORAGE usage. Host writes/reset need
-COPY_DST; readback needs COPY_SRC. Default `reset()` does not erase caller-owned
-shared memory. `reset({clearShared:true})` explicitly opts into clearing it.
+`run` normally reads source-located runtime error cells and throws on failures.
+`readback: false` submits without inspecting them; call `readState` explicitly as
+needed. Failed lanes are skipped by the renderer. Default per-lane fuel is 100,000;
+aggregate requested dispatch fuel is capped at 50 million. Resource limits are
+checked before allocation. Device loss and shader errors are reported explicitly.
 
-Intrinsic functions:
+## Event-driven compute applications
 
-- Invocation: `ComputeIndex`, `ComputeCount`, `ComputeLocalIndex`,
-  `ComputeGroupIndex`, `ComputeGroupCount`, `ComputeWorkgroupSize`,
-  `ComputeWidth`, `ComputeHeight`, `ComputeTime`, `ComputeSharedLength`.
-- Shared words: `ComputeLoadLong/Single`, `ComputeStoreLong/Single`,
-  `ComputeAtomicAdd/Sub/Exchange/And/Or/Xor/CompareExchange`.
-- f32 math: `ComputeSin/Cos/Tan/Atan/Sqrt/Exp/Log/Min/Max`.
-- GPU scene output: `ComputeClear(color)`, `ComputeRect(x,y,w,h,color)`,
-  `ComputeLine(x1,y1,x2,y2,width,color)`, `ComputeCircle(x,y,radius,color)`.
+`compileComputeApplication(sourceOrProject, {events, ...compilerOptions})` builds
+one dispatcher and one persistent storage layout for all handlers. Event bindings
+name public parameterless Subs: `load`, `frame`, `pointerDown`, `pointerMove`,
+`pointerUp`, `pointerCancel`, `keyDown`, `keyUp`, `wheel`, `timer`.
 
-Atomic operations are explicit 32-bit word operations with wraparound, not VB's
-checked scalar arithmetic. CompareExchange returns the previous value. Independent
-lanes have no implicit global barrier. Use separate dispatches or a raw WGSL kernel
-for inter-workgroup algorithms. Limits are checked before allocation; the default
-per-lane fuel is 100,000 and total dispatch fuel is capped at 50 million. Fatal fuel
-and draw-capacity faults cannot be swallowed by `On Error`. `run({readback:false})`
-submits work but does not return runtime error cells; inspect `readState()` when
-needed. The renderer skips failed lanes, rather than presenting partial commands.
+```js
+const descriptor = compileComputeApplication(source, {
+  events: {load: 'Main', pointerDown: 'OnPointer', keyDown: 'OnKey'}
+});
+const app = await ComputeApplication.create(descriptor, {
+  canvas, programOptions: {width: 640, height: 320},
+  onError: error => console.error(error)
+});
+await app.dispatch('pointerDown', {PointerX: 100, PointerY: 50});
+await app.reset();
+await app.dispose();
+```
 
-`ComputeKernel.create(gpu, {code, entryPoint, constants, layout})` exposes arbitrary
-WGSL compute shaders with inferred or explicit WebGPU layouts. `bind(index,
-entries, {dynamicOffsets})`, `dispatch(x,y,z)` and `dispatchIndirect(buffer,offset)`
-cover host binding and dispatch. Raw kernels can use workgroup memory, barriers,
-textures and atomics directly, subject to WebGPU validation. GPUDevice is available
-as `gpu.device` for advanced resource/query creation. Features must be requested
-explicitly through `ComputeDevice.request({requiredFeatures,requiredLimits})`.
+Handlers read typed fields from the reserved `ComputeInput` module: `PointerX/Y`,
+`Buttons`, `PointerId`, `Pressure`, `KeyCode`, Unicode `Character`, `Modifiers`,
+`WheelX/Y`, `WheelMode`, `Elapsed`, `DeltaTime`, `Frame`, `EventId`. Modifier bits
+are Shift=1, Ctrl=2, Alt=4, Meta=8. WheelMode preserves the browser's delta units.
+Canvas borders, padding and axis-aligned scaling are removed from pointer mapping;
+rotated/skewed CSS canvases are not mapped by this host adapter.
 
-## Compute rendering and Vello research
+DOM input collection, focus and frame scheduling are explicit host operations;
+VB handlers execute in compute. This is not a full classic forms/control runtime.
+The application owns listeners and scheduling, borrows an optional supplied GPU,
+and defaults to a bounded 128-event queue. Overflow is reported, not silently
+ignored. Inputs are immutable snapshots delivered in order. `start`/`stop` control
+animation; scheduling the next frame only after GPU completion prevents a growing
+backlog. `timerInterval` is in seconds and delivers at most one timer event per
+completed frame. Reset is serialized and reruns load. Empty drawing events do not
+erase the previous framebuffer. Default readback surfaces event errors; disabling
+it explicitly also disables this error/empty-draw inspection.
 
-This implementation was informed by the **original compute-centric Vello research
-renderer**, not the newer CPU-preprocessed Sparse Strips GPU renderer:
+`exportComputeHTML(descriptor, {runtimeSource, ...options})` is a pure exporter;
+pass the trusted `vb6-compute.js` bundle as runtimeSource. The CLI does this for you.
+The included `events.html` demonstrates pointer/keyboard handlers and reset/dispose.
+
+## Compute-only rendering and decoded images
+
+`ComputeScene` encodes rectangles, circles, round-segment strokes, lines,
+quadratic/cubic paths, nonzero/even-odd fills, solid/linear-gradient paints, affine
+transforms, alpha and rectangular device clips. `ComputePath` provides `moveTo`,
+`lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `closePath`. Open stroke contours are
+not implicitly closed. RGBA paints are in [0,1]; readPixels returns premultiplied
+RGBA8. VB drawing intrinsics are `ComputeClear(color)`,
+`ComputeRect(x,y,w,h,color)`, `ComputeLine(x1,y1,x2,y2,width,color)` and
+`ComputeCircle(x,y,radius,color)`; supported classic drawing syntax also lowers.
+
+`ComputeImage(width, height, rgbaBytes, {premultiplied: false})` copies decoded
+RGBA8 bytes into an immutable image. `scene.image(image, x, y, width, height,
+{source: [sx,sy,sw,sh], filter: 'linear', opacity: 1, transform, clip})` supports
+integer source cropping, nearest/bilinear filtering, mirroring/transforms and
+clipping. Image sampling, premultiplication and compositing execute in compute;
+PNG/JPEG decoding is a separate host responsibility. Bilinear interpolation uses
+premultiplied texels to avoid transparent fringes. Scene encoding deduplicates
+reused images and bounds image storage to 64 MiB. Images currently enter through
+ComputeScene, not through a VB LoadPicture implementation.
+
+Stages: encoded curves/commands → GPU curve flattening → GPU transformed bounds →
+ordered 16×16 tile bins → GPU coverage/compositing into an RGBA8 storage texture →
+texture copy to canvas. No render pipeline or fragment shader is used. Curves have
+fixed 32-edge subdivision; antialiasing uses 1 or 4 samples. Tile-list overflow
+uses an ordered scan rather than dropping geometry. Full stroke styles, adaptive
+curves and production sparse-strip performance remain outside this version.
+
+This original JavaScript/WGSL implementation is informed by Vello's original
+compute-centric research renderer, not a Rust port, Vello API clone, or performance
+or image-quality equivalence claim. The newer vello_gpu preprocesses paths on CPU
+and does not require compute shaders. Primary references:
 
 - https://github.com/linebender/vello#vello-compute-renderer
 - https://github.com/linebender/vello/tree/main/research
 - https://www.w3.org/TR/WGSL/
 - https://www.w3.org/TR/webgpu/
 
-The code is an original JavaScript/WGSL implementation, not a Rust Vello port,
-not Vello API parity and not a claim of matching Vello's performance or quality.
-Its stages are encoded curves/commands → compute curve flattening → compute
-transformed bounds → ordered 16×16 tile bins → compute coverage/compositing into
-an RGBA8 storage texture → texture copy to the canvas. There is no render pipeline.
+## Raw WebGPU kernels
 
-`ComputeScene` encodes rectangles, circles, round-segment strokes, straight lines,
-quadratic/cubic paths, nonzero/even-odd fills, solid/linear-gradient paints, affine
-transforms, alpha and rectangular device clips. `ComputePath` provides `moveTo`,
-`lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `closePath`. `scene.path(path, paint,
-{fill:false,strokeWidth:2})` strokes without implicitly closing open subpaths.
-RGBA color channels are in [0,1]. `readPixels()` returns premultiplied RGBA bytes.
+`ComputeKernel.create(gpu, {code, entryPoint, constants, layout})` exposes arbitrary
+WGSL with inferred/explicit layouts. `bind(index, entries, {dynamicOffsets})`,
+`dispatch(x,y,z)` and `dispatchIndirect(buffer,offset)` support buffers, textures,
+workgroup memory, barriers and atomics under WebGPU validation. Advanced resource
+and query APIs remain available through `gpu.device`. Required features/limits are
+requested explicitly through `ComputeDevice.request`. Raw kernels are caller code;
+the VB instruction budget does not instrument arbitrary WGSL.
 
-Curves currently use fixed **32-edge subdivision** and rasterization uses **1 or
-4 samples per pixel**, with round segment caps/joins rather than a full stroke
-style model. Tile-list overflow takes a correct ordered fallback scan rather than
-dropping commands. Scene/resource limits are explicit, but this is not yet a
-production sparse-strip renderer or a performance-certified backend.
+## Remaining compatibility boundaries
 
-## Compatibility still outside this backend
+Not implemented: Strings and tagged Variants, exact Double/Currency/Decimal/Date
+semantics, locale behavior, UDT/object/class/COM/OCX lifetimes, native Declare and
+filesystem/network services, full classic forms/controls/events, font parsing,
+text shaping/rasterization, advanced path clips/blends, and IDE/debugger/EXE target
+integration. These are not silently delegated to the existing runtime. The event
+adapter and HTML export are additions to the standalone compute package, not
+full application migration or the requested complete VB6 compatibility claim.
 
-Strings, tagged Variants, Currency/Decimal, exact Double emulation, Date/locale
-semantics, recursive calls, dynamic/ReDim arrays, UDT/object/class lifetimes,
-COM/OCX/Declare, filesystem/network/DOM services, full forms/controls/event runtime,
-text shaping/font parsing, image paints, advanced clipping/blending and IDE debugger
-integration are not implemented in GPU compute. Such services are not silently
-executed through the existing runtime. Classic graphics syntax follows the current
-shared frontend's supported syntax; the explicit Compute drawing intrinsics avoid
-its legacy graphics parser limitations. Full application migration requires these
-remaining features; existing backends continue to be the compatible path.
-
-Browser tests must obtain a real WebGPU adapter and validate numeric readbacks and
-rendered pixels. A software GPU adapter demonstrates shader execution and API
-correctness, not physical GPU speed or cross-vendor certification.
+Validation requires actual WebGPU numeric and pixel readbacks and exported-browser
+interaction tests. Missing adapters fail, not skip. Software-adapter execution
+verifies shader behavior, not physical-GPU speed or cross-vendor certification.
