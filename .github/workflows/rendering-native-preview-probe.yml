@@ -1,0 +1,58 @@
+name: Native preview readiness investigation
+on:
+  push:
+    branches: [diag/rendering-readiness]
+    paths: [.github/workflows/rendering-native-preview-probe.yml]
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --no-audit --no-fund
+        working-directory: desktop
+      - name: Attach diagnostics without relaxing navigation or CSP policy
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('desktop/smoke.cjs');s=p.read_text();marker='  const check = (name, value)'
+          assert marker in s
+          s=s.replace(marker,"""  report.navigation=[];report.console=[];
+            root.webContents.on('did-fail-load',(_event,errorCode,errorDescription,validatedURL,isMainFrame)=>report.navigation.push({event:'failed',errorCode,errorDescription,validatedURL,isMainFrame}));
+            root.webContents.on('did-frame-navigate',(_event,url,code,status,isMainFrame)=>report.navigation.push({event:'navigated',url,code,status,isMainFrame}));
+            root.webContents.on('will-frame-navigate',(event,details)=>report.navigation.push({event:'will-frame-navigate',url:details?.url??event.url,prevented:event.defaultPrevented}));
+            root.webContents.on('console-message',(_event,...args)=>{report.console.push(args.map(a=>typeof a==='object'?{message:a.message,level:a.level,sourceId:a.sourceId,lineNumber:a.lineNumber}:a));if(report.console.length>100)report.console.shift();});
+          """+marker)
+          marker='    report.error = error.stack || error.message;'
+          assert marker in s
+          s=s.replace(marker,marker+"""
+            try { report.frames=root.webContents.mainFrame.framesInSubtree.map(f=>({url:f.url,name:f.name,detached:f.detached}));
+              report.preview=await js('({state:vb6Studio.runState,frame:vb6Studio.runtimeFrame?.outerHTML.slice(0,2048),status:vb6Studio.statusText?.textContent,errors:globalThis.previewViolations})');
+            } catch(e) {report.diagnosticError=e.message;}
+          """)
+          s=s.replace("      await js('vb6Studio.run()');","""      await js('globalThis.previewViolations=[];document.addEventListener("securitypolicyviolation",e=>previewViolations.push({directive:e.effectiveDirective,uri:e.blockedURI,source:e.sourceFile,line:e.lineNumber}));');
+                await js('vb6Studio.run()');""")
+          p.write_text(s)
+          PY
+      - run: npm run build
+      - run: npm run build:windows -- --graphics auto --stage-only
+      - run: node tools/test-native-host.mjs .native-build/vb6-studio-x64
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-preview-readiness
+          path: |
+            validation/*.json
+            validation/*.log
+          retention-days: 7
