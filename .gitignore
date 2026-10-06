@@ -33,3 +33,7 @@ reports/classic-html/
 # Debugger compatibility browser evidence
 reports/debugger-boundaries/
 reports/native-debugger/
+
+# Optional standalone compute package output
+/artifacts/vb6-compute/
+reports/compute/

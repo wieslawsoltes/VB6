@@ -117,7 +117,7 @@ fn draw_shape(kind:u32,a:vec4<f32>,b:vec4<f32>,color:i32,fill:bool) {
   if((kind==4u && a.z<0.0) || b.x<0.0) {fail(5u);return;}
   if(vb_draws>=params.capacity) {fail(10002u);return;}
   let rgba=ole_color(color); if(vb_error!=0u) {return;}
-  var c:DrawCommand; c.meta=vec4<u32>(kind,select(0u,1u,fill),0u,0u);
+  var c:DrawCommand; c.tags=vec4<u32>(kind,select(0u,1u,fill),0u,0u);
   c.a=a;c.b=b;c.color=rgba;c.color2=rgba;c.matrix=vec4<f32>(1.0,0.0,0.0,1.0);
   c.clip=vec4<f32>(0.0,0.0,f32(params.width),f32(params.height));
   if(kind==1u) {c.bounds=c.clip;}

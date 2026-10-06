@@ -4,11 +4,11 @@ export const STATE_HEADER_WORDS = 6; // error, line, steps, draw count, procedur
 export const ARRAY_HEADER_WORDS = 14; // rank, length, four {lower, upper, stride} triples
 export const COMMAND_WORDS = 40;
 export const MAX_CURVE_EDGES = 32;
-export const BUFFER_USAGE = Object.freeze({ MAP_READ:1, COPY_SRC:4, COPY_DST:8, UNIFORM:64, STORAGE:128 });
+export const BUFFER_USAGE = Object.freeze({ MAP_READ:1, COPY_SRC:4, COPY_DST:8, UNIFORM:64, STORAGE:128, INDIRECT:256, QUERY_RESOLVE:512 });
 export const TEXTURE_USAGE = Object.freeze({ COPY_SRC:1, COPY_DST:2, TEXTURE_BINDING:4, STORAGE_BINDING:8, RENDER_ATTACHMENT:16 });
 export const COMMAND_WGSL = `
 struct DrawCommand {
-  meta: vec4<u32>,
+  tags: vec4<u32>,
   a: vec4<f32>,
   b: vec4<f32>,
   color: vec4<f32>,

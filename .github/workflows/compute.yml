@@ -1,9 +1,9 @@
 name: WebGPU compute backend
 on:
   push:
-    branches: [feature/vb6-webgpu-compute]
+    branches: [main, feature/vb6-webgpu-compute]
   pull_request:
-    paths: ['packages/vb6-compute/**', 'src/compute/**', 'tests/compute*', 'tools/*compute*', '.github/workflows/compute.yml']
+    paths: ['packages/vb6-compute/**', 'src/compute/**', 'src/language/**', 'src/runtime/values.js', 'tests/compute*', 'tools/*compute*', '.github/workflows/compute.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,3 +30,29 @@ jobs:
           retention-days: 7
       - name: Existing build and regressions
         run: npm run build && npm test
+      # Collect independent GPU diagnostics even after a host assertion fails.
+      # No failure is ignored: the job remains failed when any validation fails.
+      - name: Build independent compute package
+        if: ${{ !cancelled() }}
+        run: node tools/build-compute.mjs
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() }}
+        with:
+          python-version: '3.12'
+      - run: python -m pip install playwright
+        if: ${{ !cancelled() }}
+      - run: python -m playwright install --with-deps chromium
+        if: ${{ !cancelled() }}
+      - name: Require real WebGPU numeric and pixel readbacks
+        if: ${{ !cancelled() }}
+        run: python tools/compute-browser-tests.py
+      - name: Pack standalone module
+        run: cd artifacts/vb6-compute && npm pack
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compute-validation-${{ github.sha }}
+          path: |
+            reports/compute/
+            artifacts/vb6-compute/
+          retention-days: 7
