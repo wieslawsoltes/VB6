@@ -64,6 +64,8 @@ jobs:
           set -euo pipefail
           npm run build
           node tools/win32-api-inventory.mjs
+          git hash-object tests/icons.test.mjs
+          nl -ba tests/icons.test.mjs
           npm test | tee /tmp/services-integration-tests.txt
           npm run pack:win32-browser | tee /tmp/services-package-tests.txt
           git add -A
@@ -82,9 +84,30 @@ jobs:
           test "$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)" = "$EXPECTED_SHA"
           git push origin HEAD:refs/heads/feature/win32-common-services
           git archive --format=zip HEAD -o /tmp/vb6-services-source.zip
-          git bundle create /tmp/vb6-services-source.bundle HEAD refs/remotes/origin/main
           git rev-parse HEAD HEAD^{tree} > /tmp/services-revision.txt
+      - name: Retain exact source and diagnostic state even after failure
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git bundle create /tmp/vb6-services-source.bundle HEAD refs/remotes/origin/main
+          git status --short > /tmp/services-source-status.txt
+          git diff --binary HEAD > /tmp/services-working.patch
+          python3 - <<'PY'
+          import hashlib,json,subprocess,zipfile
+          from pathlib import Path
+          files=subprocess.check_output(['git','ls-files','-z','--cached','--others','--exclude-standard']).decode().split('\0')
+          with zipfile.ZipFile('/tmp/services-diagnostics.zip','w',zipfile.ZIP_DEFLATED) as z:
+              for name in sorted(set(files)):
+                  p=Path(name)
+                  if not name or not p.is_file() or name.startswith(('reports/','release/','.services-staging/')): continue
+                  z.write(p,name)
+          p=Path('tests/icons.test.mjs')
+          Path('/tmp/services-icons-test.txt').write_text(p.read_text())
+          print('Icon test bytes',p.stat().st_size,'SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: win32-services-integration
           path: |
@@ -93,5 +116,9 @@ jobs:
             /tmp/services-revision.txt
             /tmp/services-integration-tests.txt
             /tmp/services-package-tests.txt
+            /tmp/services-diagnostics.zip
+            /tmp/services-icons-test.txt
+            /tmp/services-source-status.txt
+            /tmp/services-working.patch
             release/vb6-win32-browser-*.tgz
           retention-days: 14
