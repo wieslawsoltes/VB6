@@ -1,3 +1,5 @@
+> **0.4.0 update:** Curved/polygon/path regions, affine transforms, memory-DC text and window painting are now implemented. The [advanced guide](ADVANCED-GDI.md) supersedes earlier unsupported-feature statements below and explicitly documents remaining native raster/font differences.
+
 # Regions, complex clipping and painting
 
 Version 0.3.0 adds **20 Win32 exports**, bringing the independently generated

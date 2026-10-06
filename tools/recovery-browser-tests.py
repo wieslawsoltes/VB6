@@ -32,8 +32,10 @@ def case(browser,name,fn):
     finally:
         if p:p.close()
 def startup(p):
-    info=p.evaluate('({docking:vb6Studio.docking.model.windows.size,bars:vb6Studio.commandBars.model.bars.length,debugWindows:vb6Studio.debuggerWindows.views.size,tools:!!vb6Studio.ideTools,editor:!!vb6Studio.editor.intelligence})')
-    check(info['docking']>=12 and info['bars']==4 and info['debugWindows']==8 and info['editor']);return info
+    info=p.evaluate('({docking:vb6Studio.docking.model.windows.size,bars:vb6Studio.commandBars.model.bars.length,debugWindows:[...vb6Studio.debuggerWindows.views.keys()],nativeWindow:vb6Studio.docking.model.windows.has("nativeDebugger"),tools:!!vb6Studio.ideTools,editor:!!vb6Studio.editor.intelligence})')
+    check(info['docking']>=12 and info['bars']==4 and info['editor']);
+    check(set(info['debugWindows'])=={'immediate','locals','watch','callStack','breakpoints','errors','output','evaluation','executingSource'},str(info));
+    check(info['nativeWindow'],'Native debugger must retain its separate dock window');return info
 def floating(p):
     p.evaluate('window.savedPanel=vb6Studio.projectPanel;vb6Studio.docking.float("project")')
     check(p.evaluate('vb6Studio.docking.group("project").edge')=='float')

@@ -8,3 +8,5 @@ import '../packages/win32-browser/test/regions.test.mjs';
 import '../packages/win32-browser/test/region-edges.test.mjs';
 
 import '../packages/win32-browser/test/bundle.test.mjs';
+
+import '../packages/win32-browser/test/advanced.test.mjs';

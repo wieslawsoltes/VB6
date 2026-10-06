@@ -6,6 +6,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {createNativeDebuggerBridge} from '../packages/native-debugger/src/bridge.mjs';
 import {CdbSession,findCdb,breakWindowsProcess} from '../packages/native-debugger/src/cdb-session.mjs';
+import {isBreakpointStop} from './native-debugger-stop.mjs';
 
 if(process.platform!=='win32')throw new Error('Run this test on Windows with Microsoft Debugging Tools installed.');
 const target=await fs.realpath(process.argv[2]||'reports/native-debugger/x64/DebugTarget.exe'),directory=path.dirname(target),cdbPath=await findCdb();
@@ -18,10 +19,10 @@ const record=(name,details={})=>{report.checks.push({name,passed:true,...details
 const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
 async function make(options){const session=new CdbSession({cdbPath,timeout:30000,breakProcess:async pid=>{report.breakRequests=(report.breakRequests||0)+1;await breakWindowsProcess(pid);}});sessions.push(session);session.on('output',e=>{report.output=((report.output||'')+e.text).slice(-200000);});await session.start(options);if(options.executable)owned.add(session.pid);return session;}
 async function hit(session,symbol,max=30){
-  const breakpoint=await session.request('setBreakpoint',{location:symbol,pauseId:session.pauseId});
+  const pid=session.pid,breakpoint=await session.request('setBreakpoint',{location:symbol,pauseId:session.pauseId});
   for(let i=0;i<max;i++){
     await session.request('continue',{pauseId:session.pauseId});await session.waitPaused();const stack=await session.request('stack');
-    if(stack.text.includes(symbol)){record('breakpoint '+symbol,{pauseId:session.pauseId});return breakpoint;}
+    if(isBreakpointStop(session,stack,{pid,symbol,id:breakpoint.id})){record('breakpoint '+symbol,{pauseId:session.pauseId});return breakpoint;}
   }
   throw new Error('Did not reach '+symbol+' after '+max+' debugger stops.');
 }
@@ -55,13 +56,14 @@ try{
   // Return to an actual source breakpoint rather than stepping a thread that
   // was only suspended while Windows delivered the child creation event.
   for(let n=0;n<30;n++){
-    if((await launched.request('stack')).text.includes('DebugTarget!DebugTick'))break;
+    if(isBreakpointStop(launched,await launched.request('stack'),{pid:parentPid,symbol:'DebugTarget!DebugTick',id:bp.id}))break;
     await launched.request('continue',{pauseId:launched.pauseId});await launched.waitPaused();
   }
-  assert.match((await launched.request('stack')).text,/DebugTarget!DebugTick/);
+  assert.ok(isBreakpointStop(launched,await launched.request('stack'),{pid:parentPid,symbol:'DebugTarget!DebugTick',id:bp.id}),'Parent must stop at the actual DebugTick breakpoint, not a caller frame');
+  const stopContext={pid:launched.pid,processIndex:launched.processIndex,threadIndex:launched.threadIndex};
   record('native child process tracking',{processes:processes.processes});
   const threads=await launched.request('threads');assert.ok(threads.threads.length>=2);record('native thread enumeration',{threads:threads.threads.length});
-  const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);record('cross-process native stack snapshots restore current context');
+  const before=launched.pauseId,all=await launched.request('allProcessStacks',{pauseId:before});assert.ok(all.processes.length>=2);assert.ok(all.processes.every(p=>p.text.length>0));assert.ok(launched.pauseId>before);assert.deepEqual({pid:launched.pid,processIndex:launched.processIndex,threadIndex:launched.threadIndex},stopContext);assert.ok(isBreakpointStop(launched,await launched.request('stack'),{pid:parentPid,symbol:'DebugTarget!DebugTick',id:bp.id}));record('cross-process native stack snapshots restore current context');
   const registers=await launched.request('registers');assert.ok(registers.registers.rip||registers.registers.eip);record('native x86 or x64 register context',{registers:registers.registers});
   const disassembly=await launched.request('disassemble');assert.match(disassembly.text,/DebugTick|[0-9a-f]{8}/i);record('native machine disassembly');
   const counter=await launched.request('resolveSymbol',{symbol:'DebugTarget!DebugCounter'});const memory=await launched.request('readMemory',{address:counter.address,count:4});assert.equal(memory.unreadableBytes,0);record('resolve exported data address and read native memory',{address:counter.address});
