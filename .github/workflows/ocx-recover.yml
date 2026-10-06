@@ -1,4 +1,4 @@
-name: OCX recovered source validation
+name: OCX final source integration
 on:
   push:
     branches: [feat/ocx-container-source]
@@ -8,93 +8,7 @@ concurrency:
   group: ocx-recover-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: python .ocx-restore/apply.py
-      - run: npm run build
-      - run: python .ocx-restore/apply.py --verify-tree
-      - run: npm test
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: ocx-recovery-diagnostics
-          include-hidden-files: true
-          path: .ocx-restore
-  native:
-    needs: prepare
-    runs-on: windows-latest
-    timeout-minutes: 12
-    strategy:
-      fail-fast: false
-      matrix:
-        architecture: [x86, x64]
-    env:
-      VB6_COM_ARCH: ${{ matrix.architecture }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python .ocx-restore/apply.py
-      - run: node tools/interop/test-container-contracts.mjs
-      - run: node tools/interop/test-native.mjs
-      - run: node tools/interop/test-activex.mjs
-      - run: node tools/interop/test-ocx.mjs
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ocx-recovered-native-${{ matrix.architecture }}
-          path: reports/native-interop
-          retention-days: 7
-  browser:
-    needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [chromium, firefox, webkit]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python .ocx-restore/apply.py
-      - run: npm run build
-      - run: python -m pip install playwright==1.57.0
-      - run: python -m playwright install --with-deps ${{ matrix.browser }}
-      - name: Actual classic IDE and VB source-control workflows
-        env:
-          VB6_BROWSER: ${{ matrix.browser }}
-        run: |
-          python tools/browser-ocx-tests.py
-          python tools/browser-ocx-source-lab.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ocx-recovered-browser-${{ matrix.browser }}
-          path: reports/ocx-browser
-          retention-days: 7
-  publish:
-    needs: [prepare, native, browser]
+  integrate:
     if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-container-source'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -107,27 +21,67 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: python .ocx-restore/apply.py
-      - run: npm run build
-      - run: python .ocx-restore/apply.py --verify-tree
-      - name: Commit validated source and remove data-only transport
+      - name: Retain concurrent native DATE and debugger fixes
         run: |
-          # Keep this workflow byte-for-byte; only the authorized connector
-          # removes it after publication. No workflow permission escalation.
-          git restore --staged .github/workflows/ocx-recover.yml
-          rm -rf .ocx-restore
-          git add -A
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'feat(ocx): container contracts, VB source controls and native persistence'
-          git bundle create ocx-recovered-publication.bundle HEAD
-          git rev-parse HEAD HEAD^{tree} > ocx-recovered-publication.txt
+          git merge --no-commit --no-ff 9bdf6edeff1cdef693eac5ce06137732b992ce8f
+          test -z "$(git diff --name-only --diff-filter=U)"
+      - name: Record completed native validation without extending certification
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('docs/OCX-CONTAINER-CONTRACTS.md')
+          text=p.read_text()
+          start=text.index('This follow-up is based on PR #52')
+          end=text.index('## What is connected to the IDE')
+          text=text[:start]+'''This follow-up recovers the source-control/container package originally based
+          on PR #52 and integrates it with main through
+          `9bdf6edeff1cdef693eac5ce06137732b992ce8f`. Portable controls, isolated VB
+          source execution and the Windows companion remain distinct execution paths.
+
+          **Validation boundary:** Recovery run [37504083327](https://github.com/wieslawsoltes/VB6/actions/runs/37504083327)
+          compiled and executed the new native code on Windows x86 and x64 and passed
+          actual Chromium, Firefox and WebKit navigation tests. The complete recovered
+          tree `9f80084591f51a94d6942afef12a044d6adaf46c` passed 3,760 Node tests.
+          The native fixture passed 25 contract checks per architecture, including real
+          COM CCW vtable calls, typed SAFEARRAY/property bags and ole32 structured storage.
+          Installed Shell.Explorer.2 active-object tests passed separately. Its stream
+          persistence still returned E_FAIL and is explicitly not round-trip certified.
+          Final PR checks must revalidate the combination with concurrent main changes.
+          This is not universal original VB6 OCX or proprietary component certification.
+
+          '''+text[end:]
+          text=text.replace('## Native Windows companion additions — pending Windows validation','## Native Windows companion additions')
+          text=text.replace('CI is configured for Chromium, Firefox and WebKit. The local delivery was tested\nwith inline Chromium only; origin and other-engine jobs must run on the follow-up\nPR. To reproduce that explicitly labelled local mode:', 'Recovery CI passed actual navigation in Chromium, Firefox and WebKit. The\noriginal local delivery used inline Chromium only; that mode is not substituted\nfor the mandatory PR navigation checks. To reproduce the labelled inline mode:')
+          text=text.replace('Before merge, also run existing native Automation/ActiveX/OCX tests, the full browser\nmatrix, and Windows packaged application/IDE smoke tests. No final-head GitHub CI,\nPR publication, or merge was performed for this patch in the read-only session.', 'The recovered native code, existing Automation/ActiveX/OCX suites and actual\nthree-browser matrix passed recovery CI. Final-head PR validation must additionally\npass the complete repository workflow set, including packaged Windows application\nand IDE smoke tests. Earlier recovery passes are not substitutes for final checks.')
+          text=text.replace('certification remain open. Native code newly authored here also needs compilation\nand execution before it can be called verified.', 'certification remain open. The native fixture is repository-owned; its Windows\npasses do not certify every vendor control or unsupported container contract.')
+          p.write_text(text)
+          PY
+      - run: npm run build
+      - name: Full combined regression suite
+        run: npm test
+      - name: Commit source while preserving workflow authority boundary
+        run: |
+          git add -A
+          git diff --cached --check
+          git rm --cached .github/workflows/ocx-recover.yml
+          git write-tree > ocx-final-source-tree.txt
+          # Only the authorized connector may restore the incoming workflow and
+          # remove this temporary workflow. The workflow token edits neither.
+          git restore --source=HEAD --staged --worktree .github/workflows
+          rm -f .github/workflows/native-date-transport.yml
+          git add -u
+          git commit -m 'merge(ocx): preserve concurrent native DATE and cancellable debugger fixes'
+          git bundle create ocx-final-integration.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > ocx-final-integration.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: ocx-recovered-publication
+          name: ocx-final-integration
           path: |
-            ocx-recovered-publication.bundle
-            ocx-recovered-publication.txt
+            ocx-final-integration.bundle
+            ocx-final-integration.txt
+            ocx-final-source-tree.txt
           retention-days: 7
       - name: Publish without rewriting branch history
         run: git push origin HEAD:refs/heads/feat/ocx-container-source
