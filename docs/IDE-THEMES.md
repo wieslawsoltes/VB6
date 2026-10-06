@@ -138,3 +138,23 @@ The design direction uses public platform guidance, not copied platform assets:
   and [Mica](https://learn.microsoft.com/en-us/windows/apps/design/style/mica).
 - Apple: [Materials](https://developer.apple.com/design/human-interface-guidelines/materials)
   and [Accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility).
+
+## Selected, pressed and accessible control states
+
+Filled primary buttons and selected template/data/anchor/review rows retain the
+selection foreground/background pair while hovered or pressed. Their keyboard
+focus indicator uses a contrasting inset ring; checkboxes and radio buttons use
+an outer ring, without changing layout measurements. Disabled primary commands
+use the disabled foreground rather than an enabled accent fill.
+
+In forced-colors mode, captions and selected labels use matched system colors in
+small, explicitly scoped regions so automatic text backplates cannot obscure the
+text. The rest of the document and authored forms keep browser color adjustment.
+Native select arrows replace gradient chevrons; caption and selected-row glyphs
+follow the system foreground. No custom RGB palette replaces the user's contrast
+colors. Chromium/Firefox coverage is capability-detected; engines which do not
+expose forced-colors report that fact instead of claiming it was exercised.
+
+The browser suite additionally checks primary-button focus contrast, pressed text,
+checked keyboard focus, disabled commands, all eight New Project selection states,
+keyboard selection, forced-color labels/select arrows, and unchanged project data.

@@ -12,6 +12,7 @@ if (sampleIds.some(id => typeof id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/
     new Set(sampleIds).size !== sampleIds.length) throw new Error('Invalid generated sample inventory');
 export const GENERATED_ARTIFACTS = Object.freeze([
   ...IDE_ARTIFACTS, 'dist/vb6-runtime.js', 'src/exporter/runtime-payload.js',
+  'dist/OCX-Source-Control-Lab.html',
   ...sampleIds.map(id => `dist/examples/${id}.html`)
 ]);
 const MANIFEST = 'tools/ide-artifacts.json';

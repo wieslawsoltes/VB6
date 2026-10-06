@@ -172,6 +172,86 @@ class Themes(unittest.TestCase):
         self.assertGreater(float(checkbox.evaluate('(e)=>parseFloat(getComputedStyle(e).outlineWidth)')),0)
         self.record('Keyboard Tab and Space',checkboxToggled=True,focusVisible=True)
         self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
+    def keyboard_focus(self, control):
+        control.focus()
+        self.page.keyboard.press('Shift+Tab');self.page.keyboard.press('Tab')
+        self.assertTrue(control.evaluate('(e)=>e===e.ownerDocument.activeElement&&e.matches(":focus-visible")'))
+    def color_contrast(self, control, foreground='color', background='backgroundColor'):
+        return control.evaluate(r'''(e,[fg,bg])=>{
+          const s=getComputedStyle(e),parse=c=>(c.match(/[\d.]+/g)||[]).slice(0,3).map(Number);
+          const luminance=c=>parse(c).map(n=>{n/=255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4;})
+            .reduce((n,v,i)=>n+v*[.2126,.7152,.0722][i],0);
+          const a=luminance(s[fg]),b=luminance(s[bg]);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+        }''',[foreground,background])
+    def test_filled_controls_and_template_selection(self):
+        before=self.page.evaluate('JSON.stringify(vb6Studio.project)')
+        self.direct_theme('fluent-dark',reduceMotion=True);self.options()
+        primary=self.page.locator('.ide-dialog .default-button')
+        checkbox=self.page.get_by_label('Follow system light/dark appearance',exact=True)
+        for theme in THEMES:
+            self.direct_theme(theme)
+            self.keyboard_focus(primary)
+            self.assertGreaterEqual(self.color_contrast(primary,'outlineColor'),3,theme+' primary focus contrast')
+            self.assertGreater(float(primary.evaluate('(e)=>parseFloat(getComputedStyle(e).outlineWidth)')),0)
+            # Space depresses a real primary button; release away from it so
+            # the settings dialog remains open without invoking its action.
+            self.page.keyboard.down('Space')
+            self.assertGreaterEqual(self.color_contrast(primary),4.5,theme+' pressed text contrast')
+            checkbox.focus();self.page.keyboard.up('Space')
+            self.keyboard_focus(checkbox)
+            was_checked=checkbox.is_checked();self.page.keyboard.press('Space')
+            self.assertNotEqual(checkbox.is_checked(),was_checked)
+            self.assertGreaterEqual(float(checkbox.evaluate('(e)=>parseFloat(getComputedStyle(e).outlineOffset)')),1)
+            primary.evaluate('(e)=>e.disabled=true')
+            self.assertEqual(primary.evaluate('(e)=>getComputedStyle(e).color'),self.page.locator('.ide-theme-note').evaluate('(e)=>{const p=e.ownerDocument.createElement("span");p.style.color="var(--vb-gray)";e.append(p);const c=getComputedStyle(p).color;p.remove();return c;}'))
+            primary.evaluate('(e)=>e.disabled=false')
+            self.record(theme,primaryFocusContrast=True,pressedTextContrast=True,checkedFocusOutside=True)
+        self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
+        self.command('new')
+        for theme in THEMES:
+            self.direct_theme(theme)
+            item=self.page.locator('.template-option.selected')
+            item.hover();self.keyboard_focus(item)
+            self.assertGreaterEqual(self.color_contrast(item),4.5,theme+' selected template')
+            self.assertGreaterEqual(self.color_contrast(item,'outlineColor'),3,theme+' selected template focus')
+            unselected=self.page.locator('.template-option:not(.selected)').first
+            self.assertNotEqual(item.evaluate('(e)=>getComputedStyle(e).backgroundColor'),unselected.evaluate('(e)=>getComputedStyle(e).backgroundColor'))
+            self.page.keyboard.press('ArrowRight')
+            self.assertEqual(self.page.locator('.template-option.selected[aria-selected="true"]').count(),1)
+            self.page.screenshot(path=str(REPORT/f'{theme}-template-selection.png'))
+            self.record(theme,templateSelection=True,keyboardSelection=True)
+        self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
+        self.assertEqual(self.page.evaluate('JSON.stringify(vb6Studio.project)'),before)
+    def test_forced_colors_preserve_labels_arrows_and_focus(self):
+        self.direct_theme('fluent-dark',reduceMotion=True);self.options()
+        self.page.emulate_media(forced_colors='active')
+        # WebKit does not expose forced-colors in all supported builds; test
+        # actual support rather than pretending emulation changed its palette.
+        supported=self.page.evaluate('matchMedia("(forced-colors: active)").matches')
+        if not supported:
+            self.record('forced-colors capability',supported=False)
+            return
+        for theme in THEMES:
+            self.direct_theme(theme)
+            primary=self.page.locator('.ide-dialog .default-button');self.keyboard_focus(primary)
+            for selector in ['.dialog-caption strong','.ide-theme-preview-title','.ide-theme-preview-selected','.ide-dialog .default-button']:
+                control=self.page.locator(selector)
+                self.assertEqual(control.evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'none',theme+' '+selector)
+            # The user owns the system palette. Verify its matched color pair,
+            # not a numeric contrast target that would reject custom OS colors.
+            self.assertTrue(primary.evaluate('''e=>{
+              const p=e.ownerDocument.createElement('span');p.style.cssText='forced-color-adjust:none;color:HighlightText;background:Highlight';
+              e.append(p);const expected=getComputedStyle(p),actual=getComputedStyle(e);
+              const matches=actual.color===expected.color&&actual.backgroundColor===expected.backgroundColor&&actual.outlineColor===expected.color;
+              p.remove();return matches;
+            }'''))
+            self.assertEqual(self.page.get_by_label('IDE theme',exact=True).evaluate('(e)=>getComputedStyle(e).appearance'),'auto')
+            self.assertEqual(self.page.locator('html').evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'auto')
+            self.assertEqual(self.page.locator('.designer-form').evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'auto')
+            self.page.screenshot(path=str(REPORT/f'{theme}-forced-colors-controls.png'))
+            self.record(theme,forcedColorLabelsReadable=True,nativeSelectArrow=True,systemColorPair=True,runtimeNotOptedOut=True)
+        self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
+        self.page.emulate_media(forced_colors='none')
     def test_detached_windows_receive_live_theme_and_return(self):
         self.set_theme('fluent-dark')
         with self.page.expect_popup() as opened:

@@ -74,6 +74,6 @@ test('fresh-checkout npm entry points build and verify before tests or serving',
 
 test('fingerprints include every authored sample and runtime exporter payload',async()=>{
   const {EXAMPLES}=await import('../src/project/examples.js');
-  assert.deepEqual(GENERATED_ARTIFACTS,[...IDE_ARTIFACTS,'dist/vb6-runtime.js','src/exporter/runtime-payload.js',...EXAMPLES.map(e=>`dist/examples/${e.id}.html`)]);
+  assert.deepEqual(GENERATED_ARTIFACTS,[...IDE_ARTIFACTS,'dist/vb6-runtime.js','src/exporter/runtime-payload.js','dist/OCX-Source-Control-Lab.html',...EXAMPLES.map(e=>`dist/examples/${e.id}.html`)]);
   assert.equal(new Set(GENERATED_ARTIFACTS).size,GENERATED_ARTIFACTS.length);
 });

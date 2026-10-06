@@ -155,13 +155,23 @@ export class VirtualMachine extends Signal {
     for(let i=0;i<nodes.length;i++){
       const param=event.params[i],type=param.storageType||param.type;
       const actual=param.byRef?await this.sourceArgument(nodes[i],frame):await this.evaluateScalar(nodes[i],frame);
-      if(param.byRef&&actual?.ref){
+      if(Array.isArray(param.bounds)){
+        // Arrays are declared element storage, not a scalar of the element type.
+        // Keep the original reference so ReDim and element edits copy back to VB.
+        const value=actual?.ref?await actual.ref.get():unbox(actual);
+        if(!param.byRef||!actual?.ref||!(value instanceof VBArray)||lower(value.type)!==lower(type))throw new VBError('ByRef array type mismatch',13);
+        args.push(actual);
+      }else if(param.byRef&&actual?.ref){
         if(Object.hasOwn(SCALAR_TYPES,lower(type))&&lower(actual.ref.type)!==lower(type))throw new VBError('ByRef argument type mismatch',13);
         args.push(actual);
       }else if(param.byRef)args.push({ref:new Cell(type,actual)});
       else args.push(storageScalar(actual,type));
     }
+    if(this.host.sourceEventEnabled?.(instance,name)===false)return;
     for(const sink of [...(this.eventSinks.get(instance)||[])]){if(!(this.eventSinks.get(instance)||[]).includes(sink))continue;const proc=sink.owner.module.procedures.get(lower(sink.prefix+'_'+name));if(proc)await this.callProcedure(sink.owner,proc,args,frame);}
+    // An explicitly installed source-control host shares the declared cells,
+    // so cancellable source events preserve the same ByRef storage as VB sinks.
+    await this.host.sourceEvent?.(instance,name,args);
     this.emit('event',{instance,name,args:args.map(a=>a?.ref?a.ref.get():a)});
   }
   async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluateScalar(lo,frame)):frame.module.optionBase,numeric(await this.evaluateScalar(hi,frame))]);return result;}

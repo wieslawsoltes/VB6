@@ -2606,3 +2606,61 @@ html[data-ide-reduce-motion="true"][data-ide-theme-family]:not([data-ide-theme-f
   html[data-ide-theme-family="macos26"] .document-title>.window-buttons>button {background:ButtonFace!important;border:1px solid ButtonText!important;color:ButtonText;}
   html[data-ide-theme-family="macos26"] .document-title>.window-buttons>button .icon {opacity:1;}
 }
+/* Keep selection visible on command-like rows as well as ordinary list rows.
+ * These states must beat the generic themed button hover/pressed cascade. */
+html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
+  & :is(.ide-dialog .default-button,.template-option.selected,.recent-project.selected,.recent-project:focus,
+    .data-tree-item[aria-selected="true"],.anchor-edge.selected,
+    .agent-review-lines .agent-diff-line[aria-pressed="true"],.system-color-list button[aria-selected="true"]):not(:disabled):not([aria-disabled="true"]) {
+    background:var(--vb-selection);color:var(--vb-selection-text);
+  }
+  & .ide-dialog .default-button:is(:disabled,[aria-disabled="true"]) {
+    background:var(--vb-face);color:var(--vb-gray);border-color:var(--vb-gray);filter:none;
+  }
+  /* An accent-colored inset ring disappears on an accent-colored control.
+   * Use a contrasting inner ring for filled buttons and an outer ring for
+   * small checks/radios. No extra border changes their measured size. */
+  & :is(.ide-dialog .default-button,.template-option.selected,.recent-project.selected,.recent-project:focus,
+    .data-tree-item[aria-selected="true"],.anchor-edge.selected,
+    .agent-review-lines .agent-diff-line[aria-pressed="true"],.system-color-list button[aria-selected="true"],
+    .classic-menu:not(.runtime-popup) .popup-menu-item.menu-selected):focus-visible {
+    outline:2px solid var(--vb-selection-text);outline-offset:-4px;
+  }
+  & input:is([type=checkbox],[type=radio]):focus-visible:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+    outline:2px solid var(--ide-focus);outline-offset:2px;
+  }
+}
+
+@media (forced-colors:active) {
+  html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
+    /* Preserve paired system colors, not the theme's RGB values. Automatic
+     * text backplates can otherwise paint Canvas behind HighlightText and
+     * erase captions/selected labels. Never opt out on the whole document. */
+    & :is(.app-title,.document-title,.tool-caption,.browser-window-caption,.dialog-caption,
+      .command-bar-floating .toolbar-grip,.ide-theme-preview-title,.ide-theme-preview-selected,
+      .ide-dialog .default-button,.tree-row.selected .tree-label,.property-row.active .property-name,
+      .property-row:focus-within .property-name,.completion-item.selected,.tool-list-row.selected,
+      .template-option.selected,.recent-project.selected,.recent-project:focus,.menu-editor-row.selected,
+      .data-tree-item[aria-selected="true"],.debug-stack-row.selected,.debug-value-tree:focus .debug-value-row.selected,
+      .anchor-edge.selected,.agent-review-lines .agent-diff-line[aria-pressed="true"],
+      .system-color-list button:is([aria-selected="true"],:focus,:hover),
+      .classic-menu:not(.runtime-popup) .popup-menu-item.menu-selected:not([aria-disabled="true"]),
+      .code-selection):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+      forced-color-adjust:none;
+    }
+    & :is(.app-title,.browser-window-caption) {background:Highlight;color:HighlightText;}
+    & .ide-dialog .default-button:hover:not(:disabled) {filter:none;}
+    /* Native arrows survive forced-colors, unlike CSS gradient chevrons. */
+    & select:is(:not([size]),[size="1"]):not([multiple]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+      appearance:auto;-webkit-appearance:auto;background-image:none;
+    }
+    & .pixel-icon:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+      --vb-icon-k:currentColor;--vb-icon-w:transparent;--vb-icon-f:transparent;
+      --vb-icon-s:currentColor;--vb-icon-d:currentColor;--vb-icon-n:currentColor;
+      --vb-icon-b:currentColor;--vb-icon-t:currentColor;--vb-icon-c:currentColor;
+      --vb-icon-g:currentColor;--vb-icon-l:currentColor;--vb-icon-o:currentColor;
+      --vb-icon-y:currentColor;--vb-icon-h:transparent;--vb-icon-r:currentColor;
+      --vb-icon-e:currentColor;--vb-icon-m:currentColor;
+    }
+  }
+}

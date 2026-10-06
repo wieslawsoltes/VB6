@@ -54,3 +54,6 @@ reports/compute/
 
 # Optional IDE-theme screenshots and browser evidence (CI artifacts).
 reports/ide-themes/
+
+# Source-derived OCX lab, verified by the same exact artifact manifest.
+/dist/OCX-Source-Control-Lab.html

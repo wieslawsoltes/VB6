@@ -1,6 +1,13 @@
+import {SourcePropertyPage} from '../controls/ocx-source-page.js';
+import {SourceUserControl} from '../controls/ocx-source.js';
 import {createWin32,Win32Browser,WIN32_CONSTANTS} from '../../packages/win32-browser/src/index.js';
 import {AutomationRegistry,automationSubscribe} from './automation.js';
 import {OcxPropertyBag,OcxControlSite,ocxControlSite} from '../controls/ocx-site.js';
+import {OcxAmbientProperties,OCX_AMBIENT_DISPIDS,ocxTransformCoords} from '../controls/ocx-ambient.js';
+import {OcxContainer,ocxContainerFor} from '../controls/ocx-container.js';
+import {OcxWindowlessSurface} from '../controls/ocx-windowless.js';
+import {OcxEventHub,ocxInterfaceId} from '../controls/ocx-events.js';
+import {OcxPropertyPageSession} from '../controls/ocx-pages.js';
 import {ControlAdapterRegistry} from '../controls/adapters.js';
 import {DataContext} from '../data/context.js';
 import {ADOConnection,ADOCommand} from '../data/connection.js';
@@ -23,4 +30,4 @@ import { VirtualFileSystem } from './filesystem.js';
 import { BrowserControl, BrowserForm } from '../controls/controls.js';
 import { GraphicsSurface } from '../graphics/surface.js';
 export async function mountApplication(project,container=document.body,options={}){const host=new ApplicationHost(project,container,options);if(options.nativeWindows!==false)installNativeHost(host);await host.start();return host;}
-export const RuntimeAPI={OcxPropertyBag,OcxControlSite,ocxControlSite,automationSubscribe,AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};
+export const RuntimeAPI={SourcePropertyPage,OcxAmbientProperties,OCX_AMBIENT_DISPIDS,ocxTransformCoords,OcxContainer,ocxContainerFor,OcxWindowlessSurface,OcxEventHub,ocxInterfaceId,OcxPropertyPageSession,SourceUserControl,OcxPropertyBag,OcxControlSite,ocxControlSite,automationSubscribe,AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Browser,WIN32_CONSTANTS,DataContext,ADOConnection,ADOCommand,ConnectedRecordset,DATA_CONSTANTS,installNativeHost,ResourceStore,readRES,writeRES,setResource,setResourceString,THEMES,applyTheme,colorValue,NOTHING,MISSING,VBErrorValue,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,serialToDate,dateToSerial,Cell,Ref,MemoryRecordset,RichTextDocument,parseRTF,writeRTF,ApplicationHost,VirtualMachine,compileProject,compileModule,parseExpression,VBArray,VBCollection,VBDictionary,VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox,FINANCIAL_FUNCTIONS,VirtualFileSystem,BrowserControl,BrowserForm,GraphicsSurface};

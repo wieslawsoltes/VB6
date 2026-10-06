@@ -36,6 +36,28 @@ try{
  assert.deepEqual(await client.setControlBounds(handle,420,310),{width:420,height:310});
  assert.equal((await client.setControlVisible(handle,false)).visible,false);assert.equal((await client.setControlVisible(handle,true)).visible,true);
  assert.equal((await client.setControlEnabled(handle,false)).enabled,false);await client.setControlEnabled(handle,true);report.checks.push('native bounds, visibility and enabled state');
+ const activation=await client.controlActivationInfo(handle);report.activation={...activation,status:activation.supported?'available':'interface-unavailable'};
+ if(activation.supported){
+   try{
+     assert.equal((await client.setControlFrameActive(handle,true)).active,true);
+     assert.equal((await client.setControlDocumentActive(handle,true)).active,true);
+     const key=await client.translateControlAccelerator(handle,{kind:'keyUp',code:0x10,scanCode:0x2a});
+     assert.ok(key.hresult===0||key.hresult===1);assert.equal(key.translated,key.hresult===0);
+     await client.withControlModal(handle,async()=>{
+       assert.equal((await client.controlActivationInfo(handle)).modalDepth,1);
+       await client.withControlModal(handle,async()=>assert.equal((await client.controlActivationInfo(handle)).modalDepth,2));
+       const suppressed=await client.translateControlAccelerator(handle,{kind:'keyDown',code:9});assert.equal(suppressed.suppressed,true);
+     });
+     assert.equal((await client.controlActivationInfo(handle)).modalDepth,0);
+     report.activation.status='passed';report.checks.push('installed OCX active-object accelerator, activation and nested modeless contracts');
+   }catch(error){
+     // A registered component may expose IOleInPlaceActiveObject but reject an
+     // optional method. Do not report native success or swallow other failures.
+     if((error.hresult>>>0)!==0x80004001)throw error;
+     report.activation={status:'component-method-not-implemented',hresult:error.hresult,certified:false};
+     assert.equal((await client.controlActivationInfo(handle)).modalDepth,0);
+   }
+ }
  const license=await client.licenseInfo('Shell.Explorer.2');assert.equal(typeof license.supported,'boolean');report.licensing=license;report.checks.push('license capabilities queried without extracting any key');
  let count=0,nested=false;const disconnect=automationSubscribe(object,async(name,args)=>{
    if(name.toLowerCase()!=='beforenavigate2')return;
