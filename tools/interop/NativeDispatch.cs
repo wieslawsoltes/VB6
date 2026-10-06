@@ -104,6 +104,20 @@ namespace VB6Interop {
       if(depth>16)throw new ArgumentException("Automation argument nesting exceeds limit");
       var wire=Map(encoded);string kind=S(wire,"t");
       if(kind=="nothing"){Marshal.WriteInt16(output,9);Marshal.WriteIntPtr(output,8,IntPtr.Zero);return;}
+      if(kind=="date"){
+        // DATE is an IEEE double, not a CLR DateTime. FromOADate/ToOADate
+        // rounds to milliseconds and normalizes negative fractional aliases.
+        // Keep the declared raw payload for IDispatch, ByRef and SAFEARRAYs.
+        // https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/date-data-type
+        // https://github.com/microsoft/referencesource/blob/main/mscorlib/system/datetime.cs
+        var payload=V(wire,"v");
+        if(!(payload is int||payload is long||payload is double||payload is decimal))throw new ArgumentException("DATE payload must be a JSON number");
+        double serial=Convert.ToDouble(payload,CultureInfo.InvariantCulture);
+        if(!(serial> -657435d&&serial<2958466d))throw new ArgumentException("DATE payload is outside the Automation range");
+        // Store all eight bytes at the VARIANT payload offset on both bitnesses.
+        Marshal.WriteInt64(output,8,BitConverter.DoubleToInt64Bits(serial));
+        Marshal.WriteInt16(output,7);return;
+      }
       if(kind!="array"){Marshal.GetNativeVariantForObject(Import(encoded,depth),output);return;}
       var bounds=A(V(wire,"bounds"));var data=A(V(wire,"v"));
       if(bounds.Length<1||bounds.Length>8)throw new ArgumentException("Invalid SAFEARRAY rank");

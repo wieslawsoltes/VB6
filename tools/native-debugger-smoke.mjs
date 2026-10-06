@@ -17,7 +17,7 @@ assert.ok(architecture,'Recognized target architecture');
 const report={platform:process.platform,architecture,hostArchitecture:process.arch,target,cdbPath,checks:[]},owned=new Set(),sessions=[];
 const record=(name,details={})=>{report.checks.push({name,passed:true,...details});console.log('PASS '+name);};
 const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
-async function make(options){const session=new CdbSession({cdbPath,timeout:30000,breakProcess:async pid=>{report.breakRequests=(report.breakRequests||0)+1;await breakWindowsProcess(pid);}});sessions.push(session);session.on('output',e=>{report.output=((report.output||'')+e.text).slice(-200000);});await session.start(options);if(options.executable)owned.add(session.pid);return session;}
+async function make(options){const session=new CdbSession({cdbPath,timeout:30000,breakProcess:async (pid,options)=>{report.breakRequests=(report.breakRequests||0)+1;const result=await breakWindowsProcess(pid,options);(report.breakHelpers??=[]).push(result);return result;}});sessions.push(session);session.on('output',e=>{report.output=((report.output||'')+e.text).slice(-200000);});await session.start(options);if(options.executable)owned.add(session.pid);return session;}
 async function hit(session,symbol,max=30){
   const pid=session.pid,breakpoint=await session.request('setBreakpoint',{location:symbol,pauseId:session.pauseId});
   for(let i=0;i<max;i++){
@@ -102,7 +102,15 @@ try{
   record('real hardware write watchpoint stops on a native data change',{id:dataBreakpoint.id,address:watched.address,reason:attached.lastStop});
   await attached.request('removeBreakpoint',{id:dataBreakpoint.id,pauseId:attached.pauseId});
   assert.equal(attached.snapshot().breakpoints.length,0);
-  await attached.request('continue',{pauseId:attached.pauseId});await attached.request('pause');assert.equal(attached.state,'paused');assert.ok(report.breakRequests>=1);record('break running native process through DebugBreakProcess');
+  for(let round=0;round<3;round++){
+    const helpers=report.breakHelpers?.length||0;
+    await attached.request('continue',{pauseId:attached.pauseId});await attached.request('pause');
+    assert.equal(attached.state,'paused');assert.equal(report.breakHelpers.length,helpers+1);
+    const helper=report.breakHelpers.at(-1);
+    assert.equal(helper.pid,outside.pid);assert.equal(helper.bitness,architecture==='x86'?32:64);
+    assert.equal(helper.phases.length,helper.routed?2:1);
+    record(round===0?'break running native process through DebugBreakProcess':'repeat acknowledged native break '+round,{helper});
+  }
   await attached.request('detach');assert.equal(alive(outside.pid),true);record('attached process survives debugger shutdown');
   // Exercise the same authenticated HTTP surface used by the browser, with a
   // real CDB session and real target. The test authorizes only its own fixture.
@@ -139,7 +147,7 @@ try{
   }finally{await bridge.close();}
   assert.equal(alive(outside.pid),true);record('closing the HTTP bridge detaches rather than terminates its target');
   report.passed=true;
-}catch(error){report.passed=false;report.error={message:error.message,stack:error.stack};throw error;}
+}catch(error){report.passed=false;report.error={message:error.message,stack:error.stack,code:error.code,killed:error.killed,signal:error.signal,phase:error.phase,elapsedMs:error.elapsedMs,breakPhases:error.breakPhases,stdout:String(error.stdout||'').slice(-8192),stderr:String(error.stderr||'').slice(-8192)};throw error;}
 finally{
   for(const session of sessions)await session.abort();
   for(const pid of owned)if(pid&&alive(pid))try{process.kill(pid);}catch{}

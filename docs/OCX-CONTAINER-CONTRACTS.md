@@ -1,16 +1,20 @@
 # OCX container contracts and VB-authored source controls
 
-This follow-up is based on PR #52, main commit
-`b6f623d5c9e55efd4f2da39c5b22e0a609427491` (tree
-`133c9719085b54dac5cb42b03ff74637c369abb7`). It extends the portable
-control SDK, classic property inspector, isolated VB source execution, and Windows
-companion. These are distinct execution paths, not interchangeable OCX formats.
+This follow-up recovers the source-control/container package originally based
+on PR #52 and integrates it with main through
+`9bdf6edeff1cdef693eac5ce06137732b992ce8f`. Portable controls, isolated VB
+source execution and the Windows companion remain distinct execution paths.
 
-**Validation boundary:** JavaScript behavior and the inline Chromium demo are
-locally tested. The new C# files, native persistence fixtures, and Windows workflow
-are authored but have not been compiled or executed in the delivery environment.
-Previous PR #52 Windows passes do not validate these new native changes. This is
-not a claim that all original VB6 OCX features or binary compatibility are complete.
+**Validation boundary:** Recovery run [37504083327](https://github.com/wieslawsoltes/VB6/actions/runs/37504083327)
+compiled and executed the new native code on Windows x86 and x64 and passed
+actual Chromium, Firefox and WebKit navigation tests. The complete recovered
+tree `9f80084591f51a94d6942afef12a044d6adaf46c` passed 3,760 Node tests.
+The native fixture passed 25 contract checks per architecture, including real
+COM CCW vtable calls, typed SAFEARRAY/property bags and ole32 structured storage.
+Installed Shell.Explorer.2 active-object tests passed separately. Its stream
+persistence still returned E_FAIL and is explicitly not round-trip certified.
+Final PR checks must revalidate the combination with concurrent main changes.
+This is not universal original VB6 OCX or proprietary component certification.
 
 ## What is connected to the IDE
 
@@ -202,7 +206,7 @@ object model, and not project-global state shared with the application's main VM
 The sample's gauge graphics are host Canvas2D drawing based on VB properties;
 its VB Paint callback is executed but does not implement every VB drawing method.
 
-## Native Windows companion additions — pending Windows validation
+## Native Windows companion additions
 
 The existing allowNativeCode grant, ProgID/control allowlists, architecture
 selection, kill-bit checks, supplied-key licensing and event-token gates remain.
@@ -274,9 +278,9 @@ python tools/browser-ocx-source-lab.py
 
 Browser scripts default to actual navigation, not inline substitution. The classic
 IDE script has 12 scenarios per origin; the source lab has 12 checks per origin.
-CI is configured for Chromium, Firefox and WebKit. The local delivery was tested
-with inline Chromium only; origin and other-engine jobs must run on the follow-up
-PR. To reproduce that explicitly labelled local mode:
+Recovery CI passed actual navigation in Chromium, Firefox and WebKit. The
+original local delivery used inline Chromium only; that mode is not substituted
+for the mandatory PR navigation checks. To reproduce the labelled inline mode:
 
 ```sh
 VB6_BROWSER=chromium VB6_CHROMIUM=/usr/bin/chromium VB6_OCX_ORIGINS=inline \
@@ -300,9 +304,10 @@ IErrorLog, bag hints/transactions and real ole32 structured storage. Fixtures us
 managed test components and do not certify proprietary OCXs or licensed controls.
 A non-Windows invocation fails rather than being reported as a native pass.
 
-Before merge, also run existing native Automation/ActiveX/OCX tests, the full browser
-matrix, and Windows packaged application/IDE smoke tests. No final-head GitHub CI,
-PR publication, or merge was performed for this patch in the read-only session.
+The recovered native code, existing Automation/ActiveX/OCX suites and actual
+three-browser matrix passed recovery CI. Final-head PR validation must additionally
+pass the complete repository workflow set, including packaged Windows application
+and IDE smoke tests. Earlier recovery passes are not substitutes for final checks.
 
 ## Remaining compatibility work
 
@@ -311,8 +316,8 @@ outgoing vtable interfaces; original binary `.ctl/.pag` OCX compilation and visu
 PropertyPage authoring; proprietary FRX/CTX decoding and object-valued native
 persistence; complete source UserControl object-model parity and automatic IDE
 registration; native OLE drag/data services; and component-specific/licensed-control
-certification remain open. Native code newly authored here also needs compilation
-and execution before it can be called verified.
+certification remain open. The native fixture is repository-owned; its Windows
+passes do not certify every vendor control or unsupported container contract.
 
 ## Primary interface references
 
