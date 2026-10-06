@@ -1,0 +1,7 @@
+diff --git a/tools/interop/OcxPersistence.cs b/tools/interop/OcxPersistence.cs
+index 5599c83..9d78370 100644
+--- a/tools/interop/OcxPersistence.cs
++++ b/tools/interop/OcxPersistence.cs
+@@ -112 +112 @@ namespace VB6Interop {
+-        try{CheckName(name);if(value==IntPtr.Zero)throw new ArgumentException("Missing property VARIANT");var wire=ExportNative(value,0,true);CheckWire(wire);var next=new Dictionary<string,Dictionary<string,object>>(entries,StringComparer.OrdinalIgnoreCase);next[name]=D("name",entries.ContainsKey(name)?entries[name]["name"]:name,"value",wire);if(next.Count>256)throw new ArgumentException("Too many OCX properties");CheckSize(next.Values.ToArray());entries.Clear();foreach(var p in next)entries.Add(p.Key,p.Value);return 0;}catch(Exception error){return Marshal.GetHRForException(error);}
++        try{CheckName(name);if(value==IntPtr.Zero)throw new ArgumentException("Missing property VARIANT");var wire=Json.DeserializeObject(Json.Serialize(ExportNative(value,0,true)));CheckWire(wire);var next=new Dictionary<string,Dictionary<string,object>>(entries,StringComparer.OrdinalIgnoreCase);next[name]=D("name",entries.ContainsKey(name)?entries[name]["name"]:name,"value",wire);if(next.Count>256)throw new ArgumentException("Too many OCX properties");CheckSize(next.Values.ToArray());entries.Clear();foreach(var p in next)entries.Add(p.Key,p.Value);return 0;}catch(Exception error){return Marshal.GetHRForException(error);}
