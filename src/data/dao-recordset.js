@@ -1,6 +1,6 @@
 import {dataDefault} from './defaults.js';
 import {assertData,after,dataList,sameValue} from './common.js';
-import {fieldValue} from './recordset.js';
+import {fieldValue,fieldScalarType} from './recordset.js';
 import {compileCriteria,compareData} from './criteria.js';
 import {DAO_TYPES} from './sql-parameters.js';
 
@@ -40,7 +40,7 @@ export class DAORecordset {
       get FieldSize(){const value=field.Value;return value==null?0:typeof value==='string'?value.length*2:value.length??(field.Type===3?2:field.Type===2?1:4);},
       GetChunk(offset,length){offset=Number(offset);length=Number(length);assertData(Number.isSafeInteger(offset)&&offset>=0&&Number.isSafeInteger(length)&&length>=0,'Invalid chunk range',5);const value=field.Value;if(value==null)return null;assertData(typeof value==='string'||value instanceof Uint8Array,'Chunk requires text or binary',3251);return value.slice(offset,offset+length);},
       AppendChunk(value){const old=field.Value;assertData(old==null||typeof old===typeof value,'Chunk type mismatch',13);if(typeof value==='string')field.Value=(old||'')+value;else{assertData(value instanceof Uint8Array&&(old==null||old instanceof Uint8Array),'Binary chunk requires bytes',13);const result=new Uint8Array((old?.length||0)+value.length);if(old)result.set(old);result.set(value,old?.length||0);field.Value=result;}}
-    };return dataDefault(field);
+    };return dataDefault(field,()=>fieldScalarType(DAO_TYPES[field.Type]||c.Type));
   }
   Edit(){this.require();assertData(this.Updatable,'Recordset is read-only',3027);this.CancelUpdate();assertData(!this._deleted,'Record is deleted',3167);const row=this.cursor.current();this._row=row;this._buffer=rowCopy(row);this._original=rowCopy(row);this._mode=1;}
   AddNew(){this.require();assertData(this.Updatable,'Recordset is read-only',3027);this.CancelUpdate();this._mode=2;this._buffer=Object.fromEntries(this.cursor.columns.map(c=>[c.Name,null]));this._row=null;this._original=null;this._deleted=false;}

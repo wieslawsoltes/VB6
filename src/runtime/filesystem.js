@@ -1,3 +1,4 @@
+import {readInputField} from './sequential-codec.js';
 import { VBError } from '../language/lexer.js';
 import {encodeANSI,decodeANSI} from './binary-codec.js';
 const MAX_FILE=20*1024*1024;
@@ -43,6 +44,12 @@ export class VirtualFileSystem {
   refresh(h){h.content=['binary','random'].includes(h.mode)?this.readBytes(h.path):this.read(h.path);return h;}
   print(number,text,newline=true){const h=this.handle(number);this.requireAccess(h,'write');if(!['output','append'].includes(h.mode))throw new VBError('Bad file mode',54);const addition=String(text)+(newline?'\r\n':'');this.assertUnlocked(h,h.position,h.position+addition.length);h.content+=addition;h.position=h.content.length;this.write(h.path,h.content);}
   lineInput(number){const h=this.refresh(this.handle(number));this.requireAccess(h,'read');if(h.mode!=='input')throw new VBError('Bad file mode',54);if(h.position>=h.content.length)throw new VBError('Input past end of file',62);let end=h.content.indexOf('\n',h.position);if(end<0)end=h.content.length;this.assertUnlocked(h,h.position,end);const s=h.content.slice(h.position,end).replace(/\r$/,'');h.position=Math.min(end+1,h.content.length);return s;}
+  inputValue(number,type='Variant'){
+    const h=this.refresh(this.handle(number));this.requireAccess(h,'read');
+    if(!['input','binary'].includes(h.mode))throw new VBError('Bad file mode',54);
+    const text=h.content instanceof Uint8Array?decodeANSI(h.content):h.content;
+    const result=readInputField(text,h.position,type);this.assertUnlocked(h,h.position,result.next);h.position=result.next;return result.value;
+  }
   input(number,count){const h=this.refresh(this.handle(number));this.requireAccess(h,'read');if(!['input','binary'].includes(h.mode))throw new VBError('Bad file mode',54);count=integer(count,0,MAX_FILE);if(h.position+count>h.content.length)throw new VBError('Input past end of file',62);this.assertUnlocked(h,h.position,h.position+count);const s=h.content.slice(h.position,h.position+count);h.position+=count;return s instanceof Uint8Array?decodeANSI(s):s;}
   eof(number){const h=this.refresh(this.handle(number));return h.position>=h.content.length?-1:0;}
   lof(number){return this.refresh(this.handle(number)).content.length;}

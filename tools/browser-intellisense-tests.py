@@ -138,7 +138,40 @@ def composition_resume(p):
     p.wait_for_function('vb6Studio.editor.completionItems.length===1&&vb6Studio.editor.completionItems[0]==="SelStart"&&!!vb6Studio.editor.completion')
     p.keyboard.press('Tab');check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelStart")'))
 
-CASES=[automatic,enter_and_undo,punctuation,suffix,with_split,constants,nested_info,literals,types,escape_options,accessibility,stale,large,data_tip,immediate,reference_import,frame_expression,composition_resume]
+def composition_commit_before_timer(p):
+    setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.');p.wait_for_selector('.completion-list')
+    # Do not yield to the timer: a fast Tab must commit the freshly composed
+    # prefix, not indent because composition temporarily hid the list.
+    result=p.evaluate("""()=>{const e=vb6Studio.editor,input=e.input;
+      input.dispatchEvent(new CompositionEvent('compositionstart'));
+      input.setRangeText('SelSt',input.selectionStart,input.selectionEnd,'end');
+      input.dispatchEvent(new InputEvent('input',{data:'SelSt',inputType:'insertCompositionText',isComposing:true,bubbles:true}));
+      input.dispatchEvent(new CompositionEvent('compositionend',{data:'SelSt'}));
+      input.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',code:'Tab',bubbles:true,cancelable:true}));
+      return {text:e.text,open:!!e.completion};}""")
+    check(result['text'].endswith('Text1.SelStart'),result);check(not result['open'],result)
+    p.wait_for_timeout(30);check(not p.locator('.completion-list').count(),'Composition timer reopened a committed list')
+    p.evaluate('vb6Studio.command("undo")');check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelSt")'))
+
+def composition_escape_before_timer(p):
+    setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.');p.wait_for_selector('.completion-list')
+    p.evaluate("""()=>{const e=vb6Studio.editor,input=e.input;
+      input.dispatchEvent(new CompositionEvent('compositionstart'));
+      input.dispatchEvent(new CompositionEvent('compositionend'));
+      input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    }""")
+    p.wait_for_timeout(30);check(not p.locator('.completion-list').count(),'Composition timer defeated Escape')
+
+def composition_document_change_before_timer(p):
+    setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.');p.wait_for_selector('.completion-list')
+    p.evaluate("""()=>{const e=vb6Studio.editor,input=e.input;
+      input.dispatchEvent(new CompositionEvent('compositionstart'));
+      input.dispatchEvent(new CompositionEvent('compositionend'));
+      e.setDocument({...e.module,id:'replacement',name:'Other',code:'Dim replacement As Long'},e.project);
+    }""")
+    p.wait_for_timeout(30);check(not p.locator('.completion-list').count(),'Composition timer crossed a document change')
+
+CASES=[composition_commit_before_timer,composition_escape_before_timer,composition_document_change_before_timer,automatic,enter_and_undo,punctuation,suffix,with_split,constants,nested_info,literals,types,escape_options,accessibility,stale,large,data_tip,immediate,reference_import,frame_expression,composition_resume]
 
 @contextmanager
 def deployment():

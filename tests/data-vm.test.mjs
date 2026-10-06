@@ -25,7 +25,7 @@ Debug.Print affected
 Set rs = cn.Execute("SELECT name FROM customers")
 Debug.Print rs.Fields("name").Value, rs.EOF
 cn.Close
-Debug.Print cn.State`),['-1','1','Ada 0','0']);
+Debug.Print cn.State`),['True','1','Ada 0','0']);
 });
 test('VB typed commands, DataEnvironment commands and DAO convenience use real SQLite',async()=>{
  assert.deepEqual(await run(`Dim cn As Object, cmd As ADODB.Command, rs As Object, db As Object
@@ -59,7 +59,7 @@ Err.Clear
 cn.Open "Local"
 cn.Execute "SELECT missing FROM missing"
 Debug.Print Err.Number <> 0
-cn.Close`),['3706','-1']);
+cn.Close`),['3706','True']);
 });
 test('native source sidecars restore named connections and virtual binary data without modifying pure classic projects',async()=>{
  const p=newProject('DataPortable');p.dataSources=config;const context=new DataContext(p),cn=context.connection();await cn.Open('Local');await cn.Execute('CREATE TABLE customers(id INTEGER PRIMARY KEY,name TEXT)');await cn.Execute("INSERT INTO customers VALUES(1,'Saved')");p.vfs=context.fs.snapshot();await context.close();

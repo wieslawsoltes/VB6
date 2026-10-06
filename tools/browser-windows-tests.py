@@ -408,7 +408,10 @@ class BrowserWindows(unittest.TestCase):
         self.count(2)
         self.js('window.savedProfile=vb6Studio.captureWindowLayout()')
         self.assertEqual(self.js('savedProfile.browserWindows.length'), 2)
-        self.js('vb6Studio.applyWindowLayout(savedProfile)')
+        # Registry removal precedes the browser's asynchronous close events.
+        # Arm both listeners before returning the live nodes to the owner.
+        with popup.expect_event('close'), props.expect_event('close'):
+            self.js('vb6Studio.applyWindowLayout(savedProfile)')
         self.count(0)
         self.assertTrue(popup.is_closed() and props.is_closed())
         self.assertEqual(self.js('vb6Studio.browserWindows.pending.size'), 2)

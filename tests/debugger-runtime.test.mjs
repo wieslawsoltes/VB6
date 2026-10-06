@@ -135,7 +135,7 @@ test('Immediate parses indexed member assignment and multiple colon statements',
 test('Immediate Set assignment calls Property Set and not Property Let',async()=>{
   const code='Sub Main()\nDim a As Box, b As Box\nSet a = New Box\nSet b = New Box\nStop\nDebug.Print a.Child Is b\nEnd Sub';
   const box={name:'Box',kind:'class',code:'Private value As Box\nPublic Property Set Child(ByVal item As Box)\nSet value = item\nEnd Property\nPublic Property Get Child() As Box\nSet Child = value\nEnd Property'};
-  const result=await run(async(e,vm)=>{await vm.immediate('Set a.Child = b');vm.resume();},create(code,{},[box]));assert.deepEqual(result.output,['-1']);
+  const result=await run(async(e,vm)=>{await vm.immediate('Set a.Child = b');vm.resume();},create(code,{},[box]));assert.deepEqual(result.output,['True']);
 });
 test('Immediate preserves colons inside string literals',async()=>{
   const result=await run(async(e,vm)=>{await vm.immediate('? "a:b": ? 3');vm.resume();},create('Sub Main()\nStop\nEnd Sub'));assert.deepEqual(result.output,['"a:b"','3']);
