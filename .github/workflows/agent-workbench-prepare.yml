@@ -1,0 +1,91 @@
+name: Publish verified agent workbench source
+on:
+  push:
+    branches: [feat/agent-change-review-queue]
+permissions:
+  contents: write
+concurrency:
+  group: agent-workbench-publication
+  cancel-in-progress: true
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/feat/agent-change-review-queue'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact tested source with before and after hash verification
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, subprocess
+          from pathlib import Path
+          data = base64.b64decode(''.join(Path('tools/.agent-workbench.part' + str(i)).read_text() for i in range(4)), validate=True)
+          assert hashlib.sha256(data).hexdigest() == '5382039b16e252d6d3613e4da95520d9f9f70591649fd11c24aa7e29c620028f'
+          change = json.loads(lzma.decompress(data))
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD^'], text=True).strip() == change['base'] == '6aeeae789151397c58648cd9d99678105935979f'
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip() != change['baseTree']
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD^^{tree}'], text=True).strip() == change['baseTree'] == 'a98380f8d57b5d83f1d629d4f59a9ac92e816c7c'
+          allowed = {'README.md', 'docs/CODING-AGENT-WORKBENCH.md', 'docs/coding-agents.md', 'src/agents/agent.js', 'src/agents/agents.css', 'src/agents/changes.js', 'src/agents/conversations.js', 'src/agents/followups.js', 'src/agents/studio.js', 'src/agents/workbench-view.js', 'tests/coding-agents-workbench.test.mjs', 'tools/coding-agents-browser-tests.py'}
+          assert {f['path'] for f in change['files']} == allowed and len(change['files']) == len(allowed)
+          for f in change['files']:
+              path = Path(f['path'])
+              if f['before'] is None:
+                  assert not path.exists(), str(path)
+              else:
+                  assert subprocess.check_output(['git', 'hash-object', str(path)], text=True).strip() == f['before'], str(path)
+          patch = change['patch'].encode()
+          subprocess.run(['git', 'apply', '--check', '--unidiff-zero', '-'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '--index', '--unidiff-zero', '-'], input=patch, check=True)
+          assert set(subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines()) == allowed
+          for f in change['files']:
+              assert hashlib.sha256(Path(f['path']).read_bytes()).hexdigest() == f['sha256'], f['path']
+              print(f['sha256'], f['path'])
+          PY
+      - name: Rebuild reproducible standalone IDE bundles
+        shell: bash
+        run: npm run build | tee agent-workbench-build.log
+      - name: Queue, change-review, permissions and agent protocol regressions
+        shell: bash
+        run: npm run test:agents | tee agent-workbench-tests.log
+      - name: Complete repository regression suite
+        shell: bash
+        run: npm test | tee agent-workbench-full-tests.log
+      - name: Remove publication helpers and verify the exact tested product tree
+        shell: bash
+        run: |
+          git add -- dist/studio.js dist/studio.css dist/VB6-Studio-Web.html
+          git rm -- .github/workflows/agent-workbench-prepare.yml tools/.agent-workbench.part0 tools/.agent-workbench.part1 tools/.agent-workbench.part2 tools/.agent-workbench.part3
+          git diff --cached --check
+          test "$(git write-tree)" = 836ac43226967b50be5ef27a96112591cb1e77fd
+          git diff --exit-code
+          test "$(git diff --cached --name-only 6aeeae789151397c58648cd9d99678105935979f | wc -l)" -eq 15
+      - name: Publish tested normal source to the feature branch only
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(agents): add local change review and queued follow-ups'
+          git push origin HEAD:feat/agent-change-review-queue
+          git rev-parse HEAD > head.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-workbench-source-validation
+          path: |
+            agent-workbench-build.log
+            agent-workbench-tests.log
+            agent-workbench-full-tests.log
+            head.txt
+            tree.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
