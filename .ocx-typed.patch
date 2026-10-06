@@ -1,0 +1,249 @@
+diff --git a/docs/OCX-SUPPORT.md b/docs/OCX-SUPPORT.md
+index 5b6e841..6077bf8 100644
+--- a/docs/OCX-SUPPORT.md
++++ b/docs/OCX-SUPPORT.md
+@@ -208,3 +208,19 @@ LCID are retained on reentrant calls. `OcxPropertyBag.ReadProperty` keeps the ra
+ JavaScript embedding contract; `ReadPropertyScalar` returns preserved Variant
+ subtypes for compiler-aware adapters. Wire snapshots retain those tags without
+ changing opaque native FRX data.
++
++
++### Declared event parameter types
++
++Event metadata now retains the declared Byte, Integer, Long, Single, Double,
++Currency, Decimal, Date, String, Boolean, Object or Variant type. The Windows
++companion resolves bounded TYPEDESC pointers, aliases and enum declarations; a
++Variant remains Variant regardless of the value currently stored in it. Typed
++ByRef cells use that declaration, so compiled `ByRef Cancel As Boolean` handlers
++work without relaxing the VM's ordinary ByRef type checks. Invalid types and
++case-insensitive duplicate event parameter names are rejected before subscription.
++The native OCX suite also exercises a compiled VB handler against the installed
++system control, rather than testing cancellation only from JavaScript.
++
++Type contracts: [TYPEDESC](https://learn.microsoft.com/en-us/windows/win32/api/oaidl/ns-oaidl-typedesc)
++and [VARENUM](https://learn.microsoft.com/en-us/windows/win32/api/wtypes/ne-wtypes-varenum).
+diff --git a/src/controls/adapters.js b/src/controls/adapters.js
+index b95bdab..e4477fe 100644
+--- a/src/controls/adapters.js
++++ b/src/controls/adapters.js
+@@ -16,7 +16,7 @@ function metadataFor(type,metadata={}){
+   });
+   const normalizedEvents=events.map(e=>{
+     if(!e||!nameOK(e.name)||eventNames.has(e.name.toLowerCase())||!Array.isArray(e.params||[])||(e.params||[]).length>64)throw new TypeError('Invalid control event');eventNames.add(e.name.toLowerCase());const paramsSeen=new Set();
+-    const params=(e.params||[]).map(p=>{if(!p||!nameOK(p.name)||paramsSeen.has(p.name.toLowerCase())||!['Variant','Integer','Long','Single','Double','String','Boolean','Object','Date','Currency','Decimal'].includes(p.type||'Variant'))throw new TypeError('Invalid event parameter');paramsSeen.add(p.name.toLowerCase());return Object.freeze({name:p.name,type:p.type||'Variant',byRef:!!p.byRef});});
++    const params=(e.params||[]).map(p=>{if(!p||!nameOK(p.name)||paramsSeen.has(p.name.toLowerCase())||!['Variant','Byte','Integer','Long','Single','Double','String','Boolean','Object','Date','Currency','Decimal'].includes(p.type||'Variant'))throw new TypeError('Invalid event parameter');paramsSeen.add(p.name.toLowerCase());return Object.freeze({name:p.name,type:p.type||'Variant',byRef:!!p.byRef});});
+     return Object.freeze({name:e.name,params:Object.freeze(params)});
+   });
+   const derived=type.split('.').filter(x=>/^[A-Za-z]/.test(x)).at(-1)?.replace(/[^A-Za-z0-9_]/g,'').slice(0,30)||'OcxControl',baseName=metadata.baseName??derived;
+diff --git a/src/runtime/automation.js b/src/runtime/automation.js
+index 41b7478..9a059d5 100644
+--- a/src/runtime/automation.js
++++ b/src/runtime/automation.js
+@@ -2,6 +2,7 @@
+ import {VBError} from '../language/lexer.js';
+ import {Ref,Cell,MISSING,unbox,readScalar} from './values.js';
+ const objects=new WeakMap();
++const eventTypes=new Map(['Variant','Byte','Integer','Long','Single','Double','Currency','Decimal','Date','String','Boolean','Object'].map(type=>[type.toLowerCase(),type]));
+ const nameOK=n=>typeof n==='string'&&n.length<=255&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(n)&&!['constructor','prototype','caller','callee','arguments'].includes(n.toLowerCase());
+ export const isAutomationObject=o=>!!o&&objects.has(o);
+ function state(o){const s=objects.get(o);if(!s||s.closed||s.session.closed)throw new VBError('Automation object has been released',91);return s;}
+@@ -49,7 +50,12 @@ class AutomationSession {
+     if(!Array.isArray(definitions)||definitions.length>256)throw new VBError('Invalid Automation event metadata',440);
+     for(const e of definitions){
+       if(!nameOK(e.name)||events.has(e.name.toLowerCase())||!Array.isArray(e.params)||e.params.length>64||e.params.some(p=>!nameOK(p.name)))throw new VBError('Invalid Automation event metadata',440);
+-      events.set(e.name.toLowerCase(),{name:e.name,params:e.params.map(p=>({name:p.name,byRef:!!p.byRef,type:'Variant'}))});
++      const names=new Set(),params=e.params.map(p=>{
++        const type=eventTypes.get(String(p.type??'Variant').toLowerCase());
++        if(!type||names.has(p.name.toLowerCase()))throw new VBError('Invalid Automation event parameter metadata',440);
++        names.add(p.name.toLowerCase());return {name:p.name,byRef:!!p.byRef,type};
++      });
++      events.set(e.name.toLowerCase(),{name:e.name,params});
+     }
+     const object=Object.freeze(Object.create(null)),s={session:this,adapter,members,defaultMember,events,sinks:new Set(),closed:false,unsubscribe:null,eventDepth:0};
+     objects.set(object,s);this.adapters.set(adapter,object);
+@@ -78,7 +84,7 @@ async function deliverAutomationEvent(object,name,values,context){
+   const s=state(object),event=s.events.get(String(name).toLowerCase());
+   if(!event||!Array.isArray(values)||values.length!==event.params.length)throw new VBError('Invalid Automation event payload',440);
+   if(s.eventDepth>=32)throw new VBError('Automation event recursion limit exceeded',28);
+-  const args=values.map((value,i)=>event.params[i].byRef?{ref:new Cell('Variant',value)}:value);
++  const args=values.map((value,i)=>event.params[i].byRef?{ref:new Cell(event.params[i].type,value)}:value);
+   s.eventDepth++;
+   try{
+     for(const connection of [...s.sinks]){
+diff --git a/tests/ocx-components.test.mjs b/tests/ocx-components.test.mjs
+index b23778e..35b4050 100644
+--- a/tests/ocx-components.test.mjs
++++ b/tests/ocx-components.test.mjs
+@@ -28,3 +28,10 @@ test('property bags retain every numeric subtype through explicit scalar reads',
+  for(const type of ['byte','integer','long','single','double','boolean']){assert.equal(scalarType(copy.ReadPropertyScalar(type)),type);assert.equal(typeof copy.ReadProperty(type),'number');}
+  assert.deepEqual(copy.Contents,bag.Contents);assert.equal(copy.ReadPropertyScalar('Missing',null),null);
+ });
++
++
++test('Byte control events retain the declaration in generated handlers',()=>{
++ const project=newProject(),module=project.modules.find(m=>m.form),model=createControl('Test.Byte','ByteControl1');module.form.controls.push(model);
++ const r=new ControlAdapterRegistry().register('Test.Byte',{runtime:adapter,metadata:{events:[{name:'Changed',params:[{name:'Value',type:'Byte',byRef:true}]}]}}),service={index:()=>({symbols:[],interfaces:[],procedures:[]})};
++ assert.match(handlerEdit(project,module,service,'ByteControl1','Changed',r).text,/Private Sub ByteControl1_Changed\(ByRef Value As Byte\)/);
++});
+diff --git a/tests/ocx-events.test.mjs b/tests/ocx-events.test.mjs
+index 76cc396..9e4d92e 100644
+--- a/tests/ocx-events.test.mjs
++++ b/tests/ocx-events.test.mjs
+@@ -66,3 +66,40 @@ test('scalar-aware event adapters preserve Boolean cancellation and numeric Vari
+  try{const changed=await fire('Changing',[tagScalar(4,'single'),tagScalar(0,'boolean')]);assert.deepEqual(seen,['single','boolean']);assert.equal(scalarType(changed.args[0]),'single');assert.equal(scalarType(changed.args[1]),'boolean');assert.equal(unbox(changed.args[1]),-1);disconnect();const untouched=await fire('Changing',[tagScalar(4,'long'),tagScalar(0,'boolean')]);assert.equal(scalarType(untouched.args[0]),'long');assert.equal(scalarType(untouched.args[1]),'boolean');}
+  finally{await session.close();}
+ });
++
++
++test('typed OCX WithEvents cancellation uses declared cells, not Variant-value inference',async()=>{
++ const registry=new AutomationRegistry().register('Test.TypedOcx',()=>{
++  let fire;return {metadata:{members:[{name:'Fire',params:[],modes:[1]}],events:[{name:'Changing',params:[{name:'Reading',type:'Long',byRef:true},{name:'Cancel',type:'bOoLeAn',byRef:true}]}]},
++   subscribe(sink){fire=sink;return ()=>{};},async invoke(){const result=await fire('Changing',[7,0],{reentrant:true});assert.deepEqual(result.args,[8,-1]);return {value:result.args[1],args:[]};},release(){}};
++ });
++ const code=`Private WithEvents Widget As Object
++Public Sub Exercise()
++ Set Widget = CreateObject("Test.TypedOcx")
++ Debug.Print Widget.Fire()
++End Sub
++Private Sub Widget_Changing(ByRef Reading As Long, ByRef Cancel As Boolean)
++ Debug.Print VarType(Reading)
++ Debug.Print VarType(Cancel)
++ Reading = Reading + 1
++ Cancel = True
++End Sub`;
++ const program=compileProject({name:'TypedEvents',startup:'Sub Main',modules:[{kind:'module',name:'M',code:'Sub Main()\nDim w As Worker\nSet w = New Worker\nw.Exercise\nEnd Sub'},{kind:'class',name:'Worker',code}]});
++ assert.deepEqual(program.diagnostics,[]);const output=[],vm=new VirtualMachine(program,{automation:registry,print:v=>output.push(v)});
++ try{await vm.start();assert.deepEqual(output,['3','11','-1']);}finally{vm.stop();await vm.automationClose;}
++});
++
++test('typed ByRef event storage enforces bounds and shares the declared type across sinks',async()=>{
++ let fire;const adapter={metadata:{members:[],events:[{name:'ByteChange',params:[{name:'Value',type:'Byte',byRef:true}]}]},invoke(){},invokeScalar(){},release(){},subscribe(sink){fire=sink;return ()=>{};}};
++ const session=new AutomationRegistry().createSession(),object=session.adopt(adapter);
++ const first=automationSubscribe(object,async(name,args)=>{assert.equal(args[0].ref.type,'Byte');assert.throws(()=>args[0].ref.set(256),e=>e.number===6);await args[0].ref.set(255);});
++ const second=automationSubscribe(object,async(name,args)=>{assert.equal(args[0].ref.type,'Byte');assert.equal(await args[0].ref.get(),255);});
++ try{const result=await fire('ByteChange',[0]);assert.equal(result.args[0].type,'byte');assert.equal(result.args[0].value,255);first();second();}finally{await session.close();}
++});
++
++test('event metadata rejects unsupported declared types and duplicate parameter names',()=>{
++ for(const params of [[{name:'Value',type:'Invalid'}],[{name:'Value',type:''}],[{name:'Value'},{name:'value'}]]){
++  const session=new AutomationRegistry().createSession();
++  assert.throws(()=>session.adopt({...fixture(),metadata:{members:[],events:[{name:'Changing',params}]}}),e=>e.number===440);
++ }
++});
+diff --git a/tools/interop/OcxSupport.cs b/tools/interop/OcxSupport.cs
+index 335833d..b3ee3ce 100644
+--- a/tools/interop/OcxSupport.cs
++++ b/tools/interop/OcxSupport.cs
+@@ -13,6 +13,7 @@ using System.Reflection.Emit;
+ using System.Runtime.InteropServices;
+ using System.Runtime.InteropServices.ComTypes;
+ using System.Windows.Forms;
++using TYPEDESC = System.Runtime.InteropServices.ComTypes.TYPEDESC;
+ using TYPEATTR = System.Runtime.InteropServices.ComTypes.TYPEATTR;
+ using FUNCDESC = System.Runtime.InteropServices.ComTypes.FUNCDESC;
+ using ELEMDESC = System.Runtime.InteropServices.ComTypes.ELEMDESC;
+@@ -59,6 +60,40 @@ namespace VB6Interop {
+       catch(COMException error){if(error.ErrorCode==unchecked((int)0x80004002)||error.ErrorCode==unchecked((int)0x80040111))return D("supported",false,"hresult",error.ErrorCode);throw;}
+       finally{if(factory!=null)Marshal.ReleaseComObject(factory);}
+     }
++    // Follow typelib pointers and aliases; never infer a ByRef declaration from
++    // the current value of a Variant. Unsupported aggregate types stay Variant.
++    // Microsoft TYPEDESC / VARENUM contracts, bounded against recursive aliases.
++    static string EventParameterType(ITypeInfo owner,TYPEDESC descriptor,int depth=0){
++      if(depth>=8)throw new NotSupportedException("OCX event type nesting exceeds 8");
++      int flags=(ushort)descriptor.vt;
++      if((flags&0x3000)!=0)return "Variant";
++      var kind=(VarEnum)(flags&0x0fff);
++      if(kind==VarEnum.VT_PTR){
++        if(descriptor.lpValue==IntPtr.Zero)throw new NotSupportedException("Invalid OCX event pointer type");
++        return EventParameterType(owner,(TYPEDESC)Marshal.PtrToStructure(descriptor.lpValue,typeof(TYPEDESC)),depth+1);
++      }
++      if(kind==VarEnum.VT_USERDEFINED){
++        ITypeInfo info=null;IntPtr pointer=IntPtr.Zero;
++        try{
++          owner.GetRefTypeInfo(unchecked((int)descriptor.lpValue.ToInt64()),out info);info.GetTypeAttr(out pointer);
++          var type=(TYPEATTR)Marshal.PtrToStructure(pointer,typeof(TYPEATTR));
++          if(type.typekind==TYPEKIND.TKIND_ALIAS)return EventParameterType(info,type.tdescAlias,depth+1);
++          if(type.typekind==TYPEKIND.TKIND_ENUM)return "Long";
++          if(type.typekind==TYPEKIND.TKIND_DISPATCH||type.typekind==TYPEKIND.TKIND_INTERFACE)return "Object";
++          return "Variant";
++        }finally{if(pointer!=IntPtr.Zero&&info!=null)info.ReleaseTypeAttr(pointer);if(info!=null)Marshal.ReleaseComObject(info);}
++      }
++      switch(kind){
++        case VarEnum.VT_UI1:return "Byte";case VarEnum.VT_I2:return "Integer";
++        case VarEnum.VT_I4:case VarEnum.VT_INT:return "Long";
++        case VarEnum.VT_R4:return "Single";case VarEnum.VT_R8:return "Double";
++        case VarEnum.VT_CY:return "Currency";case VarEnum.VT_DECIMAL:return "Decimal";
++        case VarEnum.VT_DATE:return "Date";case VarEnum.VT_BSTR:return "String";
++        case VarEnum.VT_BOOL:return "Boolean";
++        case VarEnum.VT_DISPATCH:case VarEnum.VT_UNKNOWN:return "Object";
++        default:return "Variant";
++      }
++    }
+     static Dictionary<string,object>[] DescribeEvents(object value){
+       ITypeInfo coclass=null,source=null;IntPtr attr=IntPtr.Zero;
+       try{
+@@ -86,7 +121,7 @@ namespace VB6Interop {
+               if((flags&PARAMFLAG.PARAMFLAG_FRETVAL)!=0){supported=false;break;}
+               string name=p+1<count?names[p+1]:null;if(name==null||!Name(name))name="arg"+p;
+               bool byref=e.tdesc.vt==(short)VarEnum.VT_PTR||(e.tdesc.vt&(short)VarEnum.VT_BYREF)!=0||(flags&PARAMFLAG.PARAMFLAG_FOUT)!=0;
+-              parameters.Add(D("name",name,"byRef",byref,"optional",false));
++              parameters.Add(D("name",name,"byRef",byref,"optional",false,"type",EventParameterType(source,e.tdesc)));
+             }
+             if(supported)result.Add(D("name",names[0],"iid",type.guid.ToString(),"dispid",fn.memid,"params",parameters.ToArray()));
+           }finally{if(ptr!=IntPtr.Zero)source.ReleaseFuncDesc(ptr);}
+diff --git a/tools/interop/test-ocx.mjs b/tools/interop/test-ocx.mjs
+index 43cf9f1..c93dd54 100644
+--- a/tools/interop/test-ocx.mjs
++++ b/tools/interop/test-ocx.mjs
+@@ -2,11 +2,34 @@
+ import assert from 'node:assert/strict';
+ import fs from 'node:fs/promises';
+ import {NativeAutomationClient} from './native-automation.mjs';
++import {VirtualMachine} from '../../src/runtime/vm.js';
++import {compileProject} from '../../src/language/compiler.js';
+ import {automationInvoke,automationSubscribe} from '../../src/runtime/automation.js';
+ import {unbox,tagScalar,readScalar,scalarType} from '../../src/runtime/values.js';
+ const architecture=process.env.VB6_COM_ARCH||'x86',report={architecture,status:'running',checks:[],licensedThirdPartyCertification:false};
+ const client=new NativeAutomationClient({allowNativeCode:true,allowed:['Shell.Explorer.2'],controls:['Shell.Explorer.2'],architecture});
+ let session;
++async function verifyCompiledCancellation(){
++ const native=new NativeAutomationClient({allowNativeCode:true,allowed:['Shell.Explorer.2'],controls:['Shell.Explorer.2'],architecture});
++ const code=`Private WithEvents Browser As Object
++Public Sub Exercise()
++ Set Browser = CreateObject("Shell.Explorer.2")
++ Browser.Navigate2 "about:blank"
++End Sub
++Private Sub Browser_BeforeNavigate2(ByVal pDisp As Object, ByRef URL As Variant, ByRef Flags As Variant, ByRef TargetFrameName As Variant, ByRef PostData As Variant, ByRef Headers As Variant, ByRef Cancel As Boolean)
++ Debug.Print VarType(Cancel)
++ Cancel = True
++ Debug.Print Cancel
++ Debug.Print VarType(Browser.ReadyState)
++End Sub`;
++ const program=compileProject({name:'NativeOcxEvents',startup:'Sub Main',modules:[{kind:'module',name:'MainModule',code:'Sub Main()\nDim w As Worker\nSet w = New Worker\nw.Exercise\nEnd Sub'},{kind:'class',name:'Worker',code}]});
++ assert.deepEqual(program.diagnostics,[]);const output=[],vm=new VirtualMachine(program,{automation:native.registry({hostControls:true}),print:value=>output.push(value)});
++ try{
++  await vm.start();for(let i=0;i<40&&output.length<3;i++)await new Promise(resolve=>setTimeout(resolve,50));
++  assert.notEqual(vm.state,'error',vm.lastError?.message);assert.deepEqual(output,['11','True','3']);
++  vm.stop();await vm.automationClose;assert.deepEqual(await native.request({op:'info'}),{objects:0,windows:0});
++ }finally{vm.stop();await vm.automationClose;await native.close();}
++}
+ try{
+  session=client.registry({hostControls:true}).createSession();const object=await session.create('Shell.Explorer.2'),handle=client.handleOf(object);
+  const info=await client.controlInfo(handle);assert.equal(info.visible,true);assert.ok(info.events>0);report.checks.push('real OCX activation, event discovery and connection points');
+@@ -26,12 +49,14 @@ try{
+  report.checks.push('native outgoing dispatch event and ByRef cancellation with reentrant property get');
+  disconnect();
+  const descriptor=client.adapters.get(handle).metadata;
++ const beforeNavigate=descriptor.events.find(e=>e.name.toLowerCase()==='beforenavigate2');assert.equal(beforeNavigate.params[6].type,'Boolean');assert.equal(beforeNavigate.params[1].type,'Variant');
+  if(descriptor.persistStream||descriptor.persistStreamInit){
+    try{const saved=await client.saveControlState(handle);assert.equal(typeof saved.data,'string');const loaded=await client.loadControlState(handle,saved.data);assert.ok(loaded.loadedBytes>=0);report.checks.push('native stream state save/load');report.persistence={status:'round-trip-passed'};}
+    catch(error){if((error.hresult>>>0)!==0x80004005)throw error;report.persistence={status:'rejected-by-system-component',hresult:error.hresult,roundTripCertified:false};assert.ok((await client.controlInfo(handle)).events>0);report.checks.push('component E_FAIL persistence result is surfaced; host remains usable');}
+  }
+  else report.persistence='The installed system control exposes no supported stream-persistence interface.';
+- await session.close();assert.deepEqual(await client.request({op:'info'}),{objects:0,windows:0});report.checks.push('event unadvise and window/object teardown');report.status='passed';
++ await session.close();assert.deepEqual(await client.request({op:'info'}),{objects:0,windows:0});report.checks.push('event unadvise and window/object teardown');
++ await verifyCompiledCancellation();report.checks.push('compiled VB WithEvents with ByRef Cancel As Boolean and reentrant typed IDispatch');report.status='passed';
+ }catch(error){report.error=error.stack||error.message;report.hresult=error.hresult;const hr=error.hresult>>>0;
+  if(hr===0x80040154||hr===0x80040112)report.status='skipped-unavailable-or-unlicensed';else{report.status='failed';process.exitCode=1;}
+ }finally{try{await session?.close();}catch{}await client.close();await fs.mkdir('reports/native-interop',{recursive:true});await fs.writeFile(`reports/native-interop/ocx-${architecture}.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));}

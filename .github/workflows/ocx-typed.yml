@@ -1,0 +1,94 @@
+name: OCX typed event validation
+on:
+  push:
+    branches: [feat/ocx-hosting-lifecycle]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-typed-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed typed event correction
+        run: |
+          echo 'dcf7220ab26ff2fa2816f8bb0da7f84cd5fb01547f8dd6723a06612c5f800bed  .ocx-typed.patch' | sha256sum --check
+          git apply --check .ocx-typed.patch
+          git apply .ocx-typed.patch
+      - run: npm run build
+      - run: npm test
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed typed event correction
+        shell: bash
+        run: |
+          echo 'dcf7220ab26ff2fa2816f8bb0da7f84cd5fb01547f8dd6723a06612c5f800bed  .ocx-typed.patch' | sha256sum --check
+          git apply --check .ocx-typed.patch
+          git apply .ocx-typed.patch
+      - run: node tools/interop/test-native.mjs
+      - run: node tools/interop/test-activex.mjs
+      - run: node tools/interop/test-ocx.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-typed-${{ matrix.architecture }}
+          path: reports/native-interop
+          retention-days: 7
+  publish:
+    needs: [portable, native]
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-hosting-lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Materialize validated source and generated bundles
+        run: |
+          echo 'dcf7220ab26ff2fa2816f8bb0da7f84cd5fb01547f8dd6723a06612c5f800bed  .ocx-typed.patch' | sha256sum --check
+          git apply .ocx-typed.patch
+          rm .ocx-typed.patch
+          npm run build
+          npm test
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -u
+          git diff --cached --exit-code -- .github/workflows
+          git commit -m 'fix(ocx): preserve declared event types for compiled ByRef handlers'
+          git bundle create ocx-typed-publication.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > ocx-typed-publication.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-typed-publication
+          path: |
+            ocx-typed-publication.bundle
+            ocx-typed-publication.txt
+          retention-days: 7
+      - run: git push origin HEAD:refs/heads/feat/ocx-hosting-lifecycle
