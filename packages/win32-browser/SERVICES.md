@@ -24,7 +24,11 @@ to Windows-1252, `W` to little-endian UTF-16; that is not a claim about the brow
 machine's native code page. Capacity units follow each API rather than one generic
 string convention. `StringFromGUID2` returns 39 including the terminator;
 `CryptBinaryToString` size queries include a terminator but successful output sizes
-exclude it. Pointer-returning path helpers return offsets into the same allocation.
+exclude it. `CryptBinaryToString` rejects NULL or zero-length binary input with
+error 87 and preserves caller buffers and capacities, including on size queries.
+The native fixture uses actual unmanaged input pointers and captures failure codes
+before inspecting initialized output; it does not treat stale data as a result.
+Pointer-returning path helpers return offsets into the same allocation.
 
 ## Cooperative waits
 

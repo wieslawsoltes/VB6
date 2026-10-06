@@ -9,7 +9,7 @@ export function installBinaryCodec(w){
   const aw=(name,arity,fn)=>registerAW(w,'crypt32',name,arity,fn,{notes:'Raw Base64 only. Supports size queries, CRLF/LF/no-wrap, strict validation and explicit byte counts. No certificate or encryption APIs.'});
   aw('CryptBinaryToString',5,(wide,input,count,flags,out,size)=>{
     count=integer(count,0,Math.floor(m.maxBytes/2));flags=unsigned(flags);if((flags&0x3fffffff)!==1)throw new Win32Error('Only Base64 encoding is supported',50);
-    if(!input)throw new Win32Error('A binary input pointer is required');
+    if(!input||count===0)throw new Win32Error('A nonempty binary input buffer is required');
     const bytes=m.bytes(input,count);let value='';
     for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2];value+=alphabet[a>>2]+alphabet[(a&3)<<4|(b??0)>>4]+(b===undefined?'=':alphabet[(b&15)<<2|(c??0)>>6])+(c===undefined?'=':alphabet[c&63]);}
     const eol=flags&0x40000000?'':flags&0x80000000?'\n':'\r\n';if(eol)value=(value.match(/.{1,64}/g)||[]).join(eol)+eol;

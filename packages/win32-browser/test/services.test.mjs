@@ -211,11 +211,12 @@ test('Windows-1252 NLS roundtrip preserves all 256 code units without substituti
   assert.equal(call('WideCharToMultiByte',1252,1024,wide,256,output,256,0,used),256);
   assert.deepEqual([...m.bytes(output,256)],[...m.bytes(input,256)]);assert.equal(m.readU32(used),0);
 });
-for(const wide of [false,true])test('Base64 '+(wide?'W':'A')+' distinguishes empty storage from a NULL input pointer',t=>{
+for(const wide of [false,true])test('Base64 '+(wide?'W':'A')+' rejects empty and NULL inputs without changing caller buffers',t=>{
   const {w,m}=setup(t),api=(...args)=>w.invoke('crypt32','CryptBinaryToString'+(wide?'W':'A'),args),input=m.alloc(1),output=m.alloc(32*(wide?2:1)),size=u32(m,0);
-  for(const [flags,text]of [[1,'\r\n'],[0x80000001,'\n'],[0x40000001,'']]){
-    assert.equal(api(input,0,flags,0,size),1);assert.equal(m.readU32(size),text.length+1);
-    m.writeU32(size,32);assert.equal(api(input,0,flags,output,size),1);assert.equal(m.string(output,wide),text);assert.equal(m.readU32(size),text.length);
+  for(const flags of [1,0x80000001,0x40000001]){
+    m.putString(output,'keep',32,wide);m.writeU32(size,77);
+    assert.equal(api(input,0,flags,0,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);
+    assert.equal(api(input,0,flags,output,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);assert.equal(m.string(output,wide),'keep');
   }
   m.putString(output,'keep',32,wide);m.writeU32(size,77);
   assert.equal(api(0,0,1,0,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);

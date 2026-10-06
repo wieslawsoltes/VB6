@@ -24,7 +24,8 @@ try{
  for(const suffix of ['A','W']){
   const wide=suffix==='W',step=wide?2:1;
   for(const [label,data,flags]of [['crlf',[0,255,1,254,2],1],['lf',[77],0x80000001],['nowrap',[77],0x40000001],['empty',[],1],['wrap',Array.from({length:51},(_,i)=>i),1]]){
-   const input=alloc(data),out=m.alloc(256*step),n=u32(0);call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,0,n);const query=m.readU32(n);m.writeU32(n,256);const ok=call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,out,n);results['base64-'+suffix+'-'+label]=[query,ok,m.readU32(n),m.string(out,wide)];
+   const input=alloc(data),out=m.alloc(256*step),n=u32(0);const queryOK=call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,0,n),queryError=queryOK?0:w.lastError,query=m.readU32(n);m.writeU32(n,256);const ok=call('crypt32','CryptBinaryToString'+suffix,input,data.length,flags,out,n),error=ok?0:w.lastError;results['base64-'+suffix+'-'+label]=[query,ok,m.readU32(n),m.string(out,wide)];
+   if(data.length===0)results['base64-'+suffix+'-empty-errors']=[queryOK,queryError,error];
   }
   {const n=u32(77),out=m.alloc(256*step);w.lastError=0;const query=call('crypt32','CryptBinaryToString'+suffix,0,0,1,0,n),queryError=query?0:w.lastError,q=m.readU32(n);m.writeU32(n,256);w.lastError=0;const ok=call('crypt32','CryptBinaryToString'+suffix,0,0,1,out,n);results['base64-'+suffix+'-null']=[query,queryError,q,ok,ok?0:w.lastError,m.readU32(n),m.string(out,wide)];}
   const input=m.allocString(' QcOp\r\n4oKs ',wide),out=m.alloc(32),n=u32(0),skip=u32(9),actual=u32(9);call('crypt32','CryptStringToBinary'+suffix,input,0,1,0,n,skip,actual);const query=m.readU32(n);m.writeU32(n,32);const ok=call('crypt32','CryptStringToBinary'+suffix,input,0,1,out,n,skip,actual);results['decode-'+suffix]=[query,ok,m.readU32(n),hex(out,m.readU32(n)),m.readU32(skip),m.readU32(actual)];

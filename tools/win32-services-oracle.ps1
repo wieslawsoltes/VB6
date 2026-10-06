@@ -8,8 +8,8 @@ using System.Runtime.InteropServices;
 public static class ServiceOracle {
  [DllImport("kernel32.dll",SetLastError=true)] static extern int MultiByteToWideChar(uint cp,uint flags,byte[] input,int count,IntPtr output,int capacity);
  [DllImport("kernel32.dll",SetLastError=true)] static extern int WideCharToMultiByte(uint cp,uint flags,[MarshalAs(UnmanagedType.LPWStr)]string input,int count,IntPtr output,int capacity,IntPtr def,IntPtr used);
- [DllImport("crypt32.dll",EntryPoint="CryptBinaryToStringA",SetLastError=true)] static extern int EncodeA(byte[] input,uint count,uint flags,IntPtr output,ref uint size);
- [DllImport("crypt32.dll",EntryPoint="CryptBinaryToStringW",SetLastError=true)] static extern int EncodeW(byte[] input,uint count,uint flags,IntPtr output,ref uint size);
+ [DllImport("crypt32.dll",EntryPoint="CryptBinaryToStringA",SetLastError=true)] static extern int EncodeA(IntPtr input,uint count,uint flags,IntPtr output,ref uint size);
+ [DllImport("crypt32.dll",EntryPoint="CryptBinaryToStringW",SetLastError=true)] static extern int EncodeW(IntPtr input,uint count,uint flags,IntPtr output,ref uint size);
  [DllImport("crypt32.dll",EntryPoint="CryptStringToBinaryA",SetLastError=true)] static extern int DecodeA([MarshalAs(UnmanagedType.LPStr)]string input,uint count,uint flags,IntPtr output,ref uint size,out uint skip,out uint actual);
  [DllImport("crypt32.dll",EntryPoint="CryptStringToBinaryW",SetLastError=true)] static extern int DecodeW([MarshalAs(UnmanagedType.LPWStr)]string input,uint count,uint flags,IntPtr output,ref uint size,out uint skip,out uint actual);
  [DllImport("shlwapi.dll",EntryPoint="PathCombineA")] static extern IntPtr CombineA(IntPtr output,[MarshalAs(UnmanagedType.LPStr)]string dir,[MarshalAs(UnmanagedType.LPStr)]string file);
@@ -72,10 +72,23 @@ public static class ServiceOracle {
   foreach(bool wide in new[]{false,true}){string suffix=wide?"W":"A";IntPtr output=Marshal.AllocHGlobal(520);try{
    byte[] longData=new byte[51];for(int i=0;i<51;i++)longData[i]=(byte)i;
    string[] labels={"crlf","lf","nowrap","empty","wrap"};byte[][] data={new byte[]{0,255,1,254,2},new byte[]{77},new byte[]{77},new byte[0],longData};uint[] flags={1,0x80000001,0x40000001,1,1};
-   // A managed zero-length array marshals as NULL. Use an allocated one-byte
-   // array with a zero count to match the JS probe's non-NULL empty buffer.
-   for(int i=0;i<labels.Length;i++){byte[] binary=data[i].Length==0?new byte[1]:data[i];uint n=0;int query=wide?EncodeW(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n);if(query==0)throw new InvalidOperationException("Base64 query failed: "+suffix+"/"+labels[i]+" error "+Marshal.GetLastWin32Error());uint q=n;n=256;Marshal.WriteInt32(output,0);int ok=wide?EncodeW(binary,(uint)data[i].Length,flags[i],output,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],output,ref n);if(ok==0)throw new InvalidOperationException("Base64 conversion failed: "+suffix+"/"+labels[i]+" error "+Marshal.GetLastWin32Error());result["base64-"+suffix+"-"+labels[i]]=new object[]{q,ok,n,Text(output,wide)};}
-   {uint n=77;int query=wide?EncodeW(null,0,1,IntPtr.Zero,ref n):EncodeA(null,0,1,IntPtr.Zero,ref n);int queryError=query==0?Marshal.GetLastWin32Error():0;uint q=n;n=256;Marshal.WriteInt32(output,0);int ok=wide?EncodeW(null,0,1,output,ref n):EncodeA(null,0,1,output,ref n);int error=ok==0?Marshal.GetLastWin32Error():0;result["base64-"+suffix+"-null"]=new object[]{query,queryError,q,ok,error,n,Text(output,wide)};}
+   // Use actual unmanaged storage for every size, including a non-NULL pointer
+   // with count zero. Record errors immediately and never reuse output from a
+   // preceding call. These calls do not depend on managed array marshalling.
+   for(int i=0;i<labels.Length;i++){
+    IntPtr binary=Marshal.AllocHGlobal(Math.Max(1,data[i].Length));
+    try{
+     if(data[i].Length>0)Marshal.Copy(data[i],0,binary,data[i].Length);
+     uint n=0;int query=wide?EncodeW(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],IntPtr.Zero,ref n);
+     int queryError=query==0?Marshal.GetLastWin32Error():0;uint q=n;n=256;Marshal.WriteInt32(output,0);
+     int ok=wide?EncodeW(binary,(uint)data[i].Length,flags[i],output,ref n):EncodeA(binary,(uint)data[i].Length,flags[i],output,ref n);
+     int error=ok==0?Marshal.GetLastWin32Error():0;
+     if(data[i].Length>0&&(query==0||ok==0))throw new InvalidOperationException("Base64 conversion failed: "+suffix+"/"+labels[i]+" query "+queryError+" output "+error);
+     result["base64-"+suffix+"-"+labels[i]]=new object[]{q,ok,n,Text(output,wide)};
+     if(data[i].Length==0)result["base64-"+suffix+"-empty-errors"]=new object[]{query,queryError,error};
+    }finally{Marshal.FreeHGlobal(binary);}
+   }
+   {uint n=77;int query=wide?EncodeW(IntPtr.Zero,0,1,IntPtr.Zero,ref n):EncodeA(IntPtr.Zero,0,1,IntPtr.Zero,ref n);int queryError=query==0?Marshal.GetLastWin32Error():0;uint q=n;n=256;Marshal.WriteInt32(output,0);int ok=wide?EncodeW(IntPtr.Zero,0,1,output,ref n):EncodeA(IntPtr.Zero,0,1,output,ref n);int error=ok==0?Marshal.GetLastWin32Error():0;result["base64-"+suffix+"-null"]=new object[]{query,queryError,q,ok,error,n,Text(output,wide)};}
    uint size=0,skip=9,actual=9;if(wide)DecodeW(" QcOp\r\n4oKs ",0,1,IntPtr.Zero,ref size,out skip,out actual);else DecodeA(" QcOp\r\n4oKs ",0,1,IntPtr.Zero,ref size,out skip,out actual);uint needed=size;size=32;int decoded=wide?DecodeW(" QcOp\r\n4oKs ",0,1,output,ref size,out skip,out actual):DecodeA(" QcOp\r\n4oKs ",0,1,output,ref size,out skip,out actual);result["decode-"+suffix]=new object[]{needed,decoded,size,Hex(output,(int)size),skip,actual};
    if(wide)CombineW(output,"C:\\one\\two","..\\file.txt");else CombineA(output,"C:\\one\\two","..\\file.txt");string combined=Text(output,wide);
    if(wide)CanonicalW(output,"C:\\one\\.\\two\\..\\x");else CanonicalA(output,"C:\\one\\.\\two\\..\\x");string canonical=Text(output,wide);
