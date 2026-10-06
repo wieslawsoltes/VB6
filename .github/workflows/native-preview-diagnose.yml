@@ -1,0 +1,75 @@
+name: Diagnose native preview navigation
+on:
+  push:
+    branches: [feat/native-declare-strings]
+    paths: [.github/workflows/native-preview-diagnose.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [detached, fresh]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f9039bf969d39c33c9bd668c3e3c744f12d9130b
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --no-audit --no-fund
+        working-directory: desktop
+      - name: Add test-only event and frame diagnostics to the pinned source
+        shell: bash
+        env:
+          PREVIEW_MODE: ${{ matrix.mode }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('desktop/smoke.cjs'); s=p.read_text()
+          marker='  const check = (name, value) =>'
+          assert s.count(marker)==1
+          extra='''  report.navigation = [];
+            for (const type of ['will-frame-navigate','did-start-navigation','did-frame-navigate','did-fail-load','did-fail-provisional-load','console-message']) {
+              root.webContents.on(type, (...args) => {
+                const entries = args.map(v => {
+                  if (v == null || ['string','number','boolean'].includes(typeof v)) return v;
+                  const r = {}; for (const k of ['url','message','level','sourceId','lineNumber','isMainFrame','defaultPrevented','errorCode','errorDescription']) try { if(v[k] !== undefined) r[k]=v[k]; } catch {}
+                  return r;
+                });
+                if(report.navigation.length < 100) report.navigation.push({type,entries});
+              });
+            }
+          '''
+          s=s.replace(marker,extra+marker)
+          marker='    report.error = error.stack || error.message;'
+          assert s.count(marker)==1
+          extra='''    try {
+                report.frames=root.webContents.mainFrame.framesInSubtree.map(f=>({url:f.url,name:f.name,detached:f.detached,id:f.frameTreeNodeId}));
+                report.preview=await js(`(()=>{const s=vb6Studio,f=s.runtimeFrame;return {runState:s.runState,frame:f&&{src:f.src,srcdoc:f.srcdoc.length,connected:f.isConnected,owner:f.ownerDocument.URL,html:f.outerHTML},frames:Array.from(document.querySelectorAll('iframe'),i=>({src:i.src,srcdoc:i.srcdoc.length,connected:i.isConnected,html:i.outerHTML.slice(0,300)})),status:s.statusLabel?.textContent,diagnostics:s.diagnostics,output:s.output,rootConnected:s.root.isConnected}})()`);
+              } catch (diagnosticError) { report.diagnosticError=diagnosticError.message; }
+          '''
+          s=s.replace(marker,extra+marker)
+          if os.environ['PREVIEW_MODE']=='fresh':
+              begin=s.index('      await js(\'vb6Studio.setWindowMode("hybrid");globalThis.paneBefore=')
+              end=s.index("      await js('vb6Studio.run()');",begin)
+              s=s[:begin]+s[end:]
+          p.write_text(s)
+          PY
+      - run: npm run build:windows -- --graphics auto --stage-only
+      - name: Run the unchanged preview and sandbox assertions
+        run: node tools/test-native-host.mjs .native-build/vb6-studio-x64
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-preview-diagnose-${{ matrix.mode }}
+          path: validation/vb6-studio-x64.host.*
+          retention-days: 7
