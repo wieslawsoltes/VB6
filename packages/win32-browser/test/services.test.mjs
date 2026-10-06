@@ -222,3 +222,85 @@ for(const wide of [false,true])test('Base64 '+(wide?'W':'A')+' rejects empty and
   assert.equal(api(0,0,1,0,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);
   assert.equal(api(0,0,1,output,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);assert.equal(m.string(output,wide),'keep');
 });
+
+test('task allocation owns its base and preserves bytes across grow/shrink',t=>{
+  const {w,m,call}=setup(t);const ole=(name,...args)=>w.invoke('ole32',name,args);
+  let p=ole('CoTaskMemAlloc',4);assert.ok(p);m.bytes(p,4).set([1,2,3,4]);
+  assert.equal(call('GlobalFree',p),p);assert.equal(w.lastError,5);
+  assert.equal(call('LocalFree',p),p);assert.equal(ole('CoTaskMemRealloc',p+1,8),0);
+  p=ole('CoTaskMemRealloc',p,8);assert.deepEqual([...m.bytes(p,4)],[1,2,3,4]);
+  p=ole('CoTaskMemRealloc',p,2);assert.deepEqual([...m.bytes(p,2)],[1,2]);
+  assert.equal(ole('CoTaskMemRealloc',p,0),0);assert.equal(m.used,0);
+  assert.equal(ole('CoTaskMemFree',0),undefined);
+});
+test('task failed realloc retains original allocation and foreign buffers',t=>{
+  const {w,m}=setup(t,{maxBytes:32});const ole=(name,...args)=>w.invoke('ole32',name,args);
+  const p=ole('CoTaskMemAlloc',16);m.bytes(p,16).fill(42);
+  assert.equal(ole('CoTaskMemRealloc',p,24),0);assert.equal(w.lastError,8);
+  assert.deepEqual([...m.bytes(p,16)],Array(16).fill(42));assert.equal(m.used,16);
+  const foreign=m.alloc(4);assert.equal(ole('CoTaskMemFree',foreign),0);assert.equal(w.lastError,6);assert.equal(m.size(foreign),4);
+  ole('CoTaskMemFree',p);m.free(foreign);assert.equal(m.used,0);
+});
+test('zero-size task allocations remain separately owned and disposable',t=>{
+  const {w,m}=setup(t);const a=w.invoke('ole32','CoTaskMemAlloc',[0]),b=w.invoke('ole32','CoTaskMemRealloc',[0,0]);
+  assert.ok(a&&b);assert.notEqual(a,b);w.invoke('ole32','CoTaskMemFree',[a]);w.invoke('ole32','CoTaskMemFree',[b]);assert.equal(m.used,0);
+});
+test('DuplicateHandle shares file cursors while restricting duplicate permissions',t=>{
+  const {w,m,call}=setup(t);w.fs.writeBytes('/dup',[10,20,30]);const original=call('CreateFileA','/dup',0xc0000000,3,0,3,0,0),out=u32(m,0),count=u32(m,0),data=m.alloc(3);
+  assert.equal(call('GetCurrentProcess'),-1);assert.equal(call('DuplicateHandle',-1,original,-1,out,0x80000000,0,0),1);const copy=m.readU32(out);
+  assert.equal(call('SetFilePointer',original,1,0,0),1);assert.equal(call('ReadFile',copy,data,1,count,0),1);assert.equal(m.bytes(data,1)[0],20);
+  assert.equal(call('SetFilePointer',original,0,0,1),2);assert.equal(call('WriteFile',copy,data,1,count,0),0);assert.equal(w.lastError,5);
+  assert.equal(call('CloseHandle',original),1);assert.equal(call('ReadFile',copy,data,1,count,0),1);assert.equal(m.bytes(data,1)[0],30);assert.equal(call('CloseHandle',copy),1);
+});
+test('duplicate named event survives source close and releases final name',t=>{
+  const {w,m,call}=setup(t);const original=call('CreateEventA',0,0,1,'Owned'),out=u32(m,0);
+  assert.equal(call('DuplicateHandle',-1,original,-1,out,0,0,C.DUPLICATE_SAME_ACCESS|C.DUPLICATE_CLOSE_SOURCE),1);const copy=m.readU32(out);
+  assert.equal(w.handles.has(original),false);assert.equal(call('WaitForSingleObject',copy,0),0);assert.equal(call('WaitForSingleObject',copy,0),258);
+  const opened=call('OpenEventA',C.SYNCHRONIZE,0,'Owned');assert.ok(opened);call('CloseHandle',copy);assert.ok(call('SetEvent',opened)===0);assert.equal(w.lastError,5);
+  call('CloseHandle',opened);assert.equal(call('OpenEventA',C.SYNCHRONIZE,0,'Owned'),0);assert.equal(w.lastError,2);
+});
+test('duplicate synchronization rights cannot escalate and pending waits share signals',async t=>{
+  const {w,m,call}=setup(t);const original=call('CreateEventA',0,1,0,'Restricted'),out=u32(m,0);
+  assert.equal(call('DuplicateHandle',-1,original,-1,out,C.SYNCHRONIZE,0,0),1);const copy=m.readU32(out),pending=call('WaitForSingleObject',copy,1000);
+  assert.equal(call('DuplicateHandle',-1,copy,-1,out,C.EVENT_ALL_ACCESS,0,0),0);assert.equal(w.lastError,5);
+  call('SetEvent',original);assert.equal(await pending,0);call('CloseHandle',original);call('CloseHandle',copy);
+});
+for(const reason of ['buffer','access','inherit','quota'])test('close-source duplicate on '+reason+' failure closes exactly once',t=>{
+  const {w,m,call}=setup(t);const original=call('CreateEventA',0,0,0,'Failure'),out=u32(m,99);const baseline=w.handles.entries.size-1;if(reason==='quota')w.handles.limit=w.handles.entries.size;
+  assert.equal(call('DuplicateHandle',-1,original,-1,reason==='buffer'?0:out,reason==='access'?0x80000000:0,reason==='inherit'?1:0,1),0);
+  assert.equal(w.handles.has(original),false);assert.equal(w.handles.entries.size,baseline);assert.equal(m.readU32(out),99);
+});
+test('close-only duplication and unsupported handle kinds do not grant process access',t=>{
+  const {w,m,call}=setup(t);const event=call('CreateEventA',0,0,0,0),out=u32(m,0),window=w.registerWindow({});
+  assert.equal(call('DuplicateHandle',12,event,-1,out,0,0,3),0);assert.equal(w.handles.has(event),true);
+  assert.equal(call('DuplicateHandle',-1,window,-1,out,0,0,3),0);assert.equal(w.handles.has(window),true);
+  assert.equal(call('DuplicateHandle',-1,event,0,0,0,0,1),1);assert.equal(w.handles.has(event),false);
+});
+test('64-bit file seek supports positions beyond EOF without allocating storage',t=>{
+  const {w,m,call}=setup(t,{maxFileBytes:128});w.fs.writeBytes('/seek',[1,2,3]);const file=call('CreateFileA','/seek',0xc0000000,3,0,3,0,0),pos=m.alloc(8),count=u32(m,0),data=bytes(m,[5]);
+  assert.equal(call('SetFilePointerEx',file,3,1,pos,0),1);assert.equal(m.view(pos,8).getBigInt64(0,true),0x100000003n);assert.equal(w.fs.readBytes('/seek').length,3);
+  assert.equal(call('ReadFile',file,data,1,count,0),1);assert.equal(m.readU32(count),0);
+  assert.equal(call('SetEndOfFile',file),0);assert.equal(w.lastError,8);assert.equal(w.fs.readBytes('/seek').length,3);
+  assert.equal(call('WriteFile',file,data,1,count,0),0);assert.equal(w.lastError,8);
+  assert.equal(call('SetFilePointerEx',file,-1,-1,pos,2),1);assert.equal(m.view(pos,8).getBigInt64(0,true),2n);
+  assert.equal(call('ReadFile',file,data,1,count,0),1);assert.equal(m.bytes(data,1)[0],3);call('CloseHandle',file);
+});
+test('failed large or negative seek preserves cursor and output',t=>{
+  const {w,m,call}=setup(t);w.fs.writeBytes('/seek',[1,2,3]);const file=call('CreateFileA','/seek',0x80000000,3,0,3,0,0),pos=m.alloc(8);m.view(pos,8).setBigInt64(0,99n,true);
+  for(const [low,high,out,method,error] of [[-1,-1,pos,0,131],[0,0x200000,pos,0,87],[0,0,pos,3,87],[1,0,pos+4,0,87]]){
+    assert.equal(call('SetFilePointerEx',file,low,high,out,method),0);assert.equal(w.lastError,error);assert.equal(m.view(pos,8).getBigInt64(0,true),99n);assert.equal(call('SetFilePointer',file,0,0,1),0);
+  }
+});
+for(const suffix of ['A','W'])test('file attribute metadata '+suffix+' validates exact layouts and atomic output',t=>{
+  const {w,m,call}=setup(t);w.fs.writeBytes('/file',[1,2,3]);const out=m.alloc(52);m.bytes(out,52).fill(0x55);
+  assert.equal(call('GetFileAttributesEx'+suffix,'/file',0,out),1);assert.equal(m.readU32(out),128);assert.equal(m.readU32(out+28),0);assert.equal(m.readU32(out+32),3);assert.equal(m.readU32(out+36),0x55555555);
+  const before=m.bytes(out,52).slice();assert.equal(call('GetFileAttributesEx'+suffix,'/missing',0,out),0);assert.deepEqual(m.bytes(out,52),before);
+  assert.equal(call('GetFileAttributesEx'+suffix,'/file',1,out),0);assert.deepEqual(m.bytes(out,52),before);
+  assert.equal(call('GetFileAttributesEx'+suffix,'/',0,out),1);assert.equal(m.readU32(out),16);assert.equal(m.readU32(out+32),0);
+});
+test('file handle metadata reports private disk without inventing OS identity',t=>{
+  const {w,m,call}=setup(t);w.fs.writeBytes('/file',[1,2,3]);const file=call('CreateFileA','/file',0,3,0,3,0,0),out=m.alloc(52);
+  assert.equal(call('GetFileType',file),C.FILE_TYPE_DISK);assert.equal(call('GetFileInformationByHandle',file,out),1);
+  assert.deepEqual([m.readU32(out),m.readU32(out+28),m.readU32(out+32),m.readU32(out+36),m.readU32(out+40),m.readU32(out+44),m.readU32(out+48)],[128,0,0,3,1,0,0]);
+  assert.equal(call('GetFileType',w.registerWindow({})),0);assert.equal(w.lastError,6);
+});

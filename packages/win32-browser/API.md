@@ -1,6 +1,6 @@
 # Win32 browser export inventory
 
-Version 0.5.0. 397 named exports, counting A/W variants and aliases.
+Version 0.5.0. 407 named exports, counting A/W variants and aliases.
 See README.md, GDI.md and REGIONS.md for per-family restrictions and the VB6 ABI boundary.
 Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalars.
 
@@ -185,6 +185,7 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | kernel32 | `CreateSemaphoreW` | 4 | emulated | Process-private events/semaphores. Positive waits yield a Promise; VB Declare awaits it. No threads, kernel objects, security descriptors or cross-process namespace. |
 | kernel32 | `DeleteFileA` | 1 | emulated |  |
 | kernel32 | `DeleteFileW` | 1 | emulated |  |
+| kernel32 | `DuplicateHandle` | 7 | emulated | Current compatibility instance only. File duplicates share the cursor; synchronization duplicates share the object. No OS process access or inheritance. |
 | kernel32 | `ExpandEnvironmentStringsA` | 3 | emulated | Single-pass expansion of process-private variables; unknown names are preserved. No host environment access. |
 | kernel32 | `ExpandEnvironmentStringsW` | 3 | emulated | Single-pass expansion of process-private variables; unknown names are preserved. No host environment access. |
 | kernel32 | `FillMemory` | 3 | emulated |  |
@@ -197,12 +198,17 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | kernel32 | `GetACP` | 0 | emulated | UTF-8 and process Windows-1252 only; bounded buffers, no host locale or best-fit table. |
 | kernel32 | `GetCurrentDirectoryA` | 2 | emulated |  |
 | kernel32 | `GetCurrentDirectoryW` | 2 | emulated |  |
+| kernel32 | `GetCurrentProcess` | 0 | emulated | Current compatibility instance only. File duplicates share the cursor; synchronization duplicates share the object. No OS process access or inheritance. |
 | kernel32 | `GetEnvironmentVariableA` | 3 | emulated |  |
 | kernel32 | `GetEnvironmentVariableW` | 3 | emulated |  |
 | kernel32 | `GetFileAttributesA` | 1 | emulated |  |
+| kernel32 | `GetFileAttributesExA` | 3 | emulated | Application-private filesystem only. Snapshot enumeration, no 8.3 aliases/reparse points; unavailable file timestamps are zero. |
+| kernel32 | `GetFileAttributesExW` | 3 | emulated | Application-private filesystem only. Snapshot enumeration, no 8.3 aliases/reparse points; unavailable file timestamps are zero. |
 | kernel32 | `GetFileAttributesW` | 1 | emulated |  |
+| kernel32 | `GetFileInformationByHandle` | 2 | emulated | Application-private filesystem only. Snapshot enumeration, no 8.3 aliases/reparse points; unavailable file timestamps are zero. BY_HANDLE_FILE_INFORMATION has zero timestamps/volume/file identifiers and one link. No host identity is invented. |
 | kernel32 | `GetFileSize` | 2 | emulated |  |
 | kernel32 | `GetFileSizeEx` | 2 | emulated | Application-private filesystem only. Snapshot enumeration, no 8.3 aliases/reparse points; unavailable file timestamps are zero. |
+| kernel32 | `GetFileType` | 1 | emulated | Current compatibility instance only. File duplicates share the cursor; synchronization duplicates share the object. No OS process access or inheritance. |
 | kernel32 | `GetFullPathNameA` | 4 | emulated | Application-private filesystem only. Snapshot enumeration, no 8.3 aliases/reparse points; unavailable file timestamps are zero. |
 | kernel32 | `GetFullPathNameW` | 4 | emulated | Application-private filesystem only. Snapshot enumeration, no 8.3 aliases/reparse points; unavailable file timestamps are zero. |
 | kernel32 | `GetLastError` | 0 | emulated |  |
@@ -269,6 +275,7 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | kernel32 | `SetEnvironmentVariableW` | 2 | emulated |  |
 | kernel32 | `SetEvent` | 1 | emulated | Process-private events/semaphores. Positive waits yield a Promise; VB Declare awaits it. No threads, kernel objects, security descriptors or cross-process namespace. |
 | kernel32 | `SetFilePointer` | 4 | emulated |  |
+| kernel32 | `SetFilePointerEx` | 5 | emulated | Split low/high signed LARGE_INTEGER input, 8-byte output. Exact virtual positions up to Number.MAX_SAFE_INTEGER; actual file allocations remain quota-bound. |
 | kernel32 | `SetLastError` | 1 | emulated |  |
 | kernel32 | `Sleep` | 1 | browser | Asynchronous cooperative delay; does not block the UI thread. |
 | kernel32 | `WaitForMultipleObjects` | 4 | emulated | Process-private events/semaphores. Positive waits yield a Promise; VB Declare awaits it. No threads, kernel objects, security descriptors or cross-process namespace. |
@@ -282,6 +289,9 @@ Arity counts 32-bit arguments; PtInRect expands a by-value POINT into two scalar
 | msimg32 | `TransparentBlt` | 11 | emulated | Color-key transfer; positive extents only. |
 | ole32 | `CLSIDFromString` | 2 | emulated | GUID values only. No COM activation, registry ProgID lookup or native allocation. |
 | ole32 | `CoCreateGuid` | 1 | browser | GUID values only. No COM activation, registry ProgID lookup or native allocation. Uses Web Crypto random values (version-4 UUID); never Math.random. |
+| ole32 | `CoTaskMemAlloc` | 1 | emulated | Owned bounded virtual task memory. NULL free is harmless; failed realloc retains its original allocation. No native COM heap. |
+| ole32 | `CoTaskMemFree` | 1 | emulated | Owned bounded virtual task memory. NULL free is harmless; failed realloc retains its original allocation. No native COM heap. |
+| ole32 | `CoTaskMemRealloc` | 2 | emulated | Owned bounded virtual task memory. NULL free is harmless; failed realloc retains its original allocation. No native COM heap. |
 | ole32 | `IIDFromString` | 2 | emulated | GUID values only. No COM activation, registry ProgID lookup or native allocation. |
 | ole32 | `StringFromGUID2` | 3 | emulated | GUID values only. No COM activation, registry ProgID lookup or native allocation. |
 | shell32 | `ShellExecuteA` | 6 | browser | Only explicitly enabled http/https/mailto navigation; no executable launch. |

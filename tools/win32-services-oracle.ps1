@@ -55,13 +55,73 @@ public static class ServiceOracle {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr CreateFileW(string path,uint access,uint share,IntPtr sa,uint disposition,uint flags,IntPtr template);
  [DllImport("kernel32.dll",SetLastError=true)] static extern int GetFileSizeEx(IntPtr h,out long size);
  [DllImport("kernel32.dll",SetLastError=true)] static extern int FlushFileBuffers(IntPtr h);
+ [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+ [DllImport("kernel32.dll",SetLastError=true)] static extern int DuplicateHandle(IntPtr sourceProcess,IntPtr source,IntPtr targetProcess,out IntPtr target,uint access,int inherit,uint options);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern int SetFilePointerEx(IntPtr file,long distance,out long position,uint method);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern uint GetFileType(IntPtr file);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern int GetFileInformationByHandle(IntPtr file,IntPtr output);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern int GetFileAttributesExW(string path,int level,IntPtr output);
+ [DllImport("ole32.dll")] static extern IntPtr CoTaskMemAlloc(UIntPtr size);
+ [DllImport("ole32.dll")] static extern IntPtr CoTaskMemRealloc(IntPtr memory,UIntPtr size);
+ [DllImport("ole32.dll")] static extern void CoTaskMemFree(IntPtr memory);
  static readonly Dictionary<string,object> result=new Dictionary<string,object>();
  static string Hex(IntPtr p,int count){byte[] b=new byte[count];Marshal.Copy(p,b,0,count);return BitConverter.ToString(b).Replace("-","");}
  static string Text(IntPtr p,bool wide){return wide?Marshal.PtrToStringUni(p):Marshal.PtrToStringAnsi(p);}
  static void Multi(string key,uint cp,uint flags,byte[] bytes,int count){IntPtr output=Marshal.AllocHGlobal(128);try{int q=MultiByteToWideChar(cp,flags,bytes,count,IntPtr.Zero,0),n=MultiByteToWideChar(cp,flags,bytes,count,output,64),error=n==0?Marshal.GetLastWin32Error():0;result[key]=new object[]{q,n,error,Hex(output,n*2)};}finally{Marshal.FreeHGlobal(output);}}
  static void Wide(string key,uint cp,uint flags,string text,int count){IntPtr output=Marshal.AllocHGlobal(128),used=Marshal.AllocHGlobal(4);Marshal.WriteInt32(used,0);try{IntPtr usedParam=cp==1252?used:IntPtr.Zero;int q=WideCharToMultiByte(cp,flags,text,count,IntPtr.Zero,0,IntPtr.Zero,usedParam),n=WideCharToMultiByte(cp,flags,text,count,output,128,IntPtr.Zero,usedParam),error=n==0?Marshal.GetLastWin32Error():0;result[key]=new object[]{q,n,error,Hex(output,n),cp==1252?Marshal.ReadInt32(used):0};}finally{Marshal.FreeHGlobal(output);Marshal.FreeHGlobal(used);}}
+ // Test ownership and offsets with real OS objects. Never allocate a sparse
+ // multi-gigabyte file: seeking beyond EOF is measured without writing there.
+ static void MemoryAndDuplicates(){
+  IntPtr p=CoTaskMemAlloc(new UIntPtr(4));if(p==IntPtr.Zero)throw new Exception("Task allocation failed");
+  try{
+   Marshal.Copy(new byte[]{1,2,3,4},0,p,4);
+   IntPtr next=CoTaskMemRealloc(p,new UIntPtr(8));if(next==IntPtr.Zero)throw new Exception("Task grow failed");p=next;
+   string grown=Hex(p,4);next=CoTaskMemRealloc(p,new UIntPtr(2));if(next==IntPtr.Zero)throw new Exception("Task shrink failed");p=next;
+   string shrunk=Hex(p,2);next=CoTaskMemRealloc(p,UIntPtr.Zero);p=next;
+   result["task-memory"]=new object[]{grown,shrunk,next==IntPtr.Zero};
+  }finally{CoTaskMemFree(p);CoTaskMemFree(IntPtr.Zero);}
+  IntPtr original=Event(IntPtr.Zero,0,1,IntPtr.Zero),copy=IntPtr.Zero;
+  if(original==IntPtr.Zero)throw new Exception("Event allocation failed");
+  try{
+   int duplicated=DuplicateHandle(GetCurrentProcess(),original,GetCurrentProcess(),out copy,0,0,2);
+   if(duplicated==0)throw new Exception("Event duplication failed");
+   result["duplicate-event-state"]=new object[]{duplicated,WaitForSingleObject(copy,0),WaitForSingleObject(original,0),SetEvent(original),WaitForSingleObject(copy,0)};
+   CloseHandle(original);original=IntPtr.Zero;
+   result["duplicate-event-lifetime"]=new object[]{SetEvent(copy),WaitForSingleObject(copy,0)};
+  }finally{if(original!=IntPtr.Zero)CloseHandle(original);if(copy!=IntPtr.Zero)CloseHandle(copy);}
+  original=Event(IntPtr.Zero,1,0,IntPtr.Zero);copy=IntPtr.Zero;
+  if(original==IntPtr.Zero)throw new Exception("Event allocation failed");
+  int moved=DuplicateHandle(GetCurrentProcess(),original,GetCurrentProcess(),out copy,0,0,3);
+  try{
+   if(moved==0)throw new Exception("Close-source duplicate failed");
+   uint missing=WaitForSingleObject(original,0);int error=Marshal.GetLastWin32Error();
+   result["duplicate-close-source"]=new object[]{moved,missing,error,SetEvent(copy),WaitForSingleObject(copy,0)};
+  }finally{if(copy!=IntPtr.Zero)CloseHandle(copy);}
+ }
+ static void FileDetails(string path,IntPtr file){
+  IntPtr copy=IntPtr.Zero,info=Marshal.AllocHGlobal(52);long position;
+  try{
+   int duplicate=DuplicateHandle(GetCurrentProcess(),file,GetCurrentProcess(),out copy,0,0,2);
+   if(duplicate==0)throw new Exception("File duplication failed");
+   int seek=SetFilePointerEx(file,2,out position,0),query=SetFilePointerEx(copy,0,out position,1);
+   result["duplicate-file-cursor"]=new object[]{duplicate,seek,query,position,GetFileType(copy)};
+   int big=SetFilePointerEx(copy,0x100000003L,out position,0);long size;int sizeOK=GetFileSizeEx(file,out size);
+   result["file-large-seek"]=new object[]{big,position,sizeOK,size};
+   if(SetFilePointerEx(file,0,out position,0)==0)throw new Exception("Reset seek failed");
+   int negative=SetFilePointerEx(file,-1,out position,1),negativeError=Marshal.GetLastWin32Error();
+   int unchanged=SetFilePointerEx(copy,0,out position,1);
+   result["file-negative-seek"]=new object[]{negative,negativeError,unchanged,position};
+   int ok=GetFileInformationByHandle(file,info);if(ok==0)throw new Exception("File metadata failed");
+   // Filesystem-specific ARCHIVE flags, timestamps, volume and file IDs are
+   // intentionally not compared with the browser's absent metadata fields.
+   result["file-handle-information"]=new object[]{ok,Marshal.ReadInt32(info,0)&16,Marshal.ReadInt32(info,32),Marshal.ReadInt32(info,36),Marshal.ReadInt32(info,40)};
+   ok=GetFileAttributesExW(path,0,info);if(ok==0)throw new Exception("Path metadata failed");
+   result["file-attributes-ex"]=new object[]{ok,Marshal.ReadInt32(info,0)&16,Marshal.ReadInt32(info,28),Marshal.ReadInt32(info,32)};
+  }finally{if(copy!=IntPtr.Zero)CloseHandle(copy);Marshal.FreeHGlobal(info);}
+ }
  public static object Run(){
   result.Clear();
+  MemoryAndDuplicates();
   Multi("utf8-terminated",65001,8,new byte[]{65,195,169,226,130,172,0},-1);
   Multi("utf8-astral",65001,8,new byte[]{65,240,159,152,128},5);
   Multi("utf8-bom",65001,8,new byte[]{239,187,191,65},4);
@@ -105,7 +165,7 @@ public static class ServiceOracle {
   string regName="Software\\VB6ServicesContract-"+Guid.NewGuid().ToString("N");IntPtr root=new IntPtr(unchecked((int)0x80000001)),key,child,regOut=Marshal.AllocHGlobal(128);
   int created=RegCreateKeyExW(root,regName,0,IntPtr.Zero,0,0xf003f,IntPtr.Zero,out key,IntPtr.Zero);if(created!=0)throw new Exception("RegCreateKeyEx: "+created);
   try{if(RegCreateKeyExW(key,"Child",0,IntPtr.Zero,0,0xf003f,IntPtr.Zero,out child,IntPtr.Zero)!=0)throw new Exception("RegCreate child failed");RegCloseKey(child);byte[] value=System.Text.Encoding.Unicode.GetBytes("café\0");if(RegSetValueExW(key,"Caption",0,1,value,10)!=0)throw new Exception("RegSetValue failed");uint subs,maxSub,count,maxName,maxData,n=64,dataSize=0,type;int info=RegQueryInfoKeyW(key,IntPtr.Zero,IntPtr.Zero,IntPtr.Zero,out subs,out maxSub,IntPtr.Zero,out count,out maxName,out maxData,IntPtr.Zero,IntPtr.Zero),enumerated=RegEnumValueW(key,0,regOut,ref n,IntPtr.Zero,out type,IntPtr.Zero,ref dataSize);result["registry"]=new object[]{info,subs,maxSub,count,maxName,maxData,enumerated,Text(regOut,true),n,type,dataSize};if(RegEnumKeyW(key,0,regOut,64)!=0)throw new Exception("RegEnumKey failed");result["registry-child"]=Text(regOut,true);}finally{RegDeleteKeyW(key,"Child");RegDeleteValueW(key,"Caption");RegCloseKey(key);RegDeleteKeyW(root,regName);Marshal.FreeHGlobal(regOut);}
-  string dir=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"VB6Services-"+Guid.NewGuid().ToString("N"));System.IO.Directory.CreateDirectory(dir);string fileName=System.IO.Path.Combine(dir,"sample.dat");IntPtr findData=Marshal.AllocHGlobal(592);try{System.IO.File.WriteAllBytes(fileName,new byte[]{65,66,67});IntPtr find=FindFirstFileW(System.IO.Path.Combine(dir,"*.dat"),findData);if(find==new IntPtr(-1))throw new Exception("FindFirstFile failed");try{string name=Marshal.PtrToStringUni(IntPtr.Add(findData,44));int high=Marshal.ReadInt32(findData,28),low=Marshal.ReadInt32(findData,32),next=FindNextFileW(find,findData),error=Marshal.GetLastWin32Error();result["files"]=new object[]{name,high,low,next,error};}finally{FindClose(find);}IntPtr file=CreateFileW(fileName,0xc0000000,0,IntPtr.Zero,3,0,IntPtr.Zero);if(file==new IntPtr(-1))throw new Exception("CreateFile failed");try{long size;int ok=GetFileSizeEx(file,out size);result["file-size-flush"]=new object[]{ok,size,FlushFileBuffers(file)};}finally{CloseHandle(file);}}finally{Marshal.FreeHGlobal(findData);System.IO.Directory.Delete(dir,true);}
+  string dir=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"VB6Services-"+Guid.NewGuid().ToString("N"));System.IO.Directory.CreateDirectory(dir);string fileName=System.IO.Path.Combine(dir,"sample.dat");IntPtr findData=Marshal.AllocHGlobal(592);try{System.IO.File.WriteAllBytes(fileName,new byte[]{65,66,67});IntPtr find=FindFirstFileW(System.IO.Path.Combine(dir,"*.dat"),findData);if(find==new IntPtr(-1))throw new Exception("FindFirstFile failed");try{string name=Marshal.PtrToStringUni(IntPtr.Add(findData,44));int high=Marshal.ReadInt32(findData,28),low=Marshal.ReadInt32(findData,32),next=FindNextFileW(find,findData),error=Marshal.GetLastWin32Error();result["files"]=new object[]{name,high,low,next,error};}finally{FindClose(find);}IntPtr file=CreateFileW(fileName,0xc0000000,0,IntPtr.Zero,3,0,IntPtr.Zero);if(file==new IntPtr(-1))throw new Exception("CreateFile failed");try{long size;int ok=GetFileSizeEx(file,out size);result["file-size-flush"]=new object[]{ok,size,FlushFileBuffers(file)};FileDetails(fileName,file);}finally{CloseHandle(file);}}finally{Marshal.FreeHGlobal(findData);System.IO.Directory.Delete(dir,true);}
   return result;
  }
 }

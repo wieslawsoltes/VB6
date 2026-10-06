@@ -1,6 +1,6 @@
 # Version 0.5.0: common services and six VB6 samples
 
-Adds 86 registered exports (397 total) across files/paths, Unicode, environment expansion, cooperative events/semaphores, GUIDs, Base64, registry enumeration, atoms and window properties. See [SERVICES.md](SERVICES.md) for contracts, runnable samples and private-browser boundaries. The existing GDI behavior and documented limitations are retained.
+Adds 96 registered exports (407 total) across files/paths, Unicode, environment expansion, cooperative events/semaphores, GUIDs, Base64, registry enumeration, atoms and window properties. See [SERVICES.md](SERVICES.md) for contracts, runnable samples and private-browser boundaries. The existing GDI behavior and documented limitations are retained.
 
 # Version 0.4.0: advanced GDI and painting
 
@@ -13,7 +13,7 @@ Win32 APIs. Use the ES module in a browser, module worker, or Node.js, or the
 self-contained browser bundle. No VB6 compiler, IDE, DOM framework, native DLL,
 server, or installation on the user's machine is required.
 
-**Version 0.5.0 is a compatibility subset, not complete Win32 emulation.** Its 397
+**Version 0.5.0 is a compatibility subset, not complete Win32 emulation.** Its 407
 registered export names include ANSI/Unicode variants and aliases. An export's
 presence does not imply support for every flag, message, structure, or operating
 system behavior. See [the exact API inventory](API.md) and the boundaries below.

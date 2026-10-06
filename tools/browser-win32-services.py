@@ -11,11 +11,11 @@ REPORT.mkdir(parents=True,exist_ok=True)
 OFFLINE=os.environ.get('VB6_OFFLINE')=='1'
 BROWSER=os.environ.get('BROWSER','chromium')
 SAMPLES={
- 'win32-files':['File: sample.txt','Size: 5','Matches: 1'],
+ 'win32-files':['File: sample.txt','Size: 5','Matches: 1','Shared cursor: 3'],
  'win32-text':['UTF-16 units: 3','Base64: QcOp4oKs','ANSI: Aé€'],
  'win32-sync':['Wait-any: 1','Before release: 258','Wait-all: 0'],
  'win32-registry':['Values: 1','Name: Caption','Bytes: 5'],
- 'win32-guid':['Parsed: {00112233-4455-6677-8899-AABBCCDDEEFF}','Version: 4'],
+ 'win32-guid':['Parsed: {00112233-4455-6677-8899-AABBCCDDEEFF}','Version: 4','Task memory: released'],
  'win32-properties':['Atom: VB6.Services.Tag','Stored: 42','Removed: 42']}
 class Quiet(SimpleHTTPRequestHandler):
  def log_message(self,*args): pass

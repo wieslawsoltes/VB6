@@ -11,6 +11,18 @@ const hex=(p,n)=>Buffer.from(m.bytes(p,n)).toString('hex').toUpperCase();
 function multi(name,cp,flags,data,count){const p=alloc(data),out=m.alloc(128),query=k('MultiByteToWideChar',cp,flags,p,count,0,0);w.lastError=0;const n=k('MultiByteToWideChar',cp,flags,p,count,out,64);results[name]=[query,n,n?0:w.lastError,hex(out,n*2)];}
 function wide(name,cp,flags,text,count){const p=m.allocString(text,true),out=m.alloc(128),used=u32(0),query=k('WideCharToMultiByte',cp,flags,p,count,0,0,0,cp===1252?used:0);w.lastError=0;const n=k('WideCharToMultiByte',cp,flags,p,count,out,128,0,cp===1252?used:0);results[name]=[query,n,n?0:w.lastError,hex(out,n),cp===1252?m.readU32(used):0];}
 try{
+ // Ownership and 64-bit offsets are compared separately from host identifiers.
+ const task=call('ole32','CoTaskMemAlloc',4);assert.ok(task);m.bytes(task,4).set([1,2,3,4]);
+ let resized=call('ole32','CoTaskMemRealloc',task,8);assert.ok(resized);const grown=hex(resized,4);
+ resized=call('ole32','CoTaskMemRealloc',resized,2);assert.ok(resized);const shrunk=hex(resized,2);
+ results['task-memory']=[grown,shrunk,call('ole32','CoTaskMemRealloc',resized,0)===0];call('ole32','CoTaskMemFree',0);
+ const duplicateOut=u32(0),processHandle=k('GetCurrentProcess');
+ let original=k('CreateEventA',0,0,1,0);const duplicated=k('DuplicateHandle',processHandle,original,processHandle,duplicateOut,0,0,2);assert.equal(duplicated,1);let copy=m.readU32(duplicateOut);
+ results['duplicate-event-state']=[duplicated,k('WaitForSingleObject',copy,0),k('WaitForSingleObject',original,0),k('SetEvent',original),k('WaitForSingleObject',copy,0)];
+ k('CloseHandle',original);results['duplicate-event-lifetime']=[k('SetEvent',copy),k('WaitForSingleObject',copy,0)];k('CloseHandle',copy);
+ original=k('CreateEventA',0,1,0,0);const moved=k('DuplicateHandle',processHandle,original,processHandle,duplicateOut,0,0,3);assert.equal(moved,1);copy=m.readU32(duplicateOut);
+ const missing=k('WaitForSingleObject',original,0)>>>0,closedError=w.lastError;
+ results['duplicate-close-source']=[moved,missing,closedError,k('SetEvent',copy),k('WaitForSingleObject',copy,0)];k('CloseHandle',copy);
  multi('utf8-terminated',65001,8,[65,195,169,226,130,172,0],-1);
  multi('utf8-astral',65001,8,[65,240,159,152,128],5);
  multi('utf8-bom',65001,8,[239,187,191,65],4);
@@ -52,7 +64,18 @@ try{
  results.registry=[info,m.readU32(subs),m.readU32(maxSub),m.readU32(count),m.readU32(maxName),m.readU32(maxData),enumerated,m.string(name,true),m.readU32(nameSize),m.readU32(type),m.readU32(dataSize)];
  reg('RegEnumKeyW',kh,0,name,64);results['registry-child']=m.string(name,true);reg('RegDeleteKeyW',kh,'Child');reg('RegDeleteValueW',kh,'Caption');reg('RegCloseKey',kh);reg('RegDeleteKeyW',0x80000001,keyName);}
  w.fs.directories.add('/contract');w.fs.writeBytes('/contract/sample.dat',[65,66,67]);const findData=m.alloc(592),find=k('FindFirstFileW','/contract/*.dat',findData);results.files=[m.string(findData+44,true),m.readU32(findData+28),m.readU32(findData+32),k('FindNextFileW',find,findData),w.lastError];k('FindClose',find);
- const file=k('CreateFileW','/contract/sample.dat',0xc0000000,0,0,3,0,0),size64=m.alloc(8);results['file-size-flush']=[k('GetFileSizeEx',file,size64),Number(m.view(size64,8).getBigInt64(0,true)),k('FlushFileBuffers',file)];k('CloseHandle',file);
+ const file=k('CreateFileW','/contract/sample.dat',0xc0000000,0,0,3,0,0),size64=m.alloc(8);results['file-size-flush']=[k('GetFileSizeEx',file,size64),Number(m.view(size64,8).getBigInt64(0,true)),k('FlushFileBuffers',file)];
+ const duplicatedFile=k('DuplicateHandle',processHandle,file,processHandle,duplicateOut,0,0,2);assert.equal(duplicatedFile,1);const fileCopy=m.readU32(duplicateOut),position=m.alloc(8),info=m.alloc(52);
+ const seek=k('SetFilePointerEx',file,2,0,position,0),query=k('SetFilePointerEx',fileCopy,0,0,position,1);
+ results['duplicate-file-cursor']=[duplicatedFile,seek,query,Number(m.view(position,8).getBigInt64(0,true)),k('GetFileType',fileCopy)];
+ const big=k('SetFilePointerEx',fileCopy,3,1,position,0),largePosition=Number(m.view(position,8).getBigInt64(0,true)),sizeOK=k('GetFileSizeEx',file,size64);
+ results['file-large-seek']=[big,largePosition,sizeOK,Number(m.view(size64,8).getBigInt64(0,true))];
+ assert.equal(k('SetFilePointerEx',file,0,0,position,0),1);
+ const negative=k('SetFilePointerEx',file,-1,-1,position,1),negativeError=w.lastError,unchanged=k('SetFilePointerEx',fileCopy,0,0,position,1);
+ results['file-negative-seek']=[negative,negativeError,unchanged,Number(m.view(position,8).getBigInt64(0,true))];
+ let infoOK=k('GetFileInformationByHandle',file,info);assert.equal(infoOK,1);results['file-handle-information']=[infoOK,m.readU32(info)&16,m.readU32(info+32),m.readU32(info+36),m.readU32(info+40)];
+ infoOK=k('GetFileAttributesExW','/contract/sample.dat',0,info);assert.equal(infoOK,1);results['file-attributes-ex']=[infoOK,m.readU32(info)&16,m.readU32(info+28),m.readU32(info+32)];
+ k('CloseHandle',fileCopy);k('CloseHandle',file);
  mkdirSync('reports/win32-services-native',{recursive:true});writeFileSync('reports/win32-services-native/browser.json',JSON.stringify(results,null,2)+'\n');
  if(process.argv[2]){
   const native=JSON.parse(readFileSync(process.argv[2],'utf8').replace(/^\uFEFF/,'')),differences=[];

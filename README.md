@@ -255,7 +255,11 @@ Native project support also includes explicit ZIP filename-codepage selection, p
 
 ### Common browser Win32 services
 
-`@vb6/win32-browser` 0.5.0 adds 86 exports (397 total) beyond graphics: file discovery, shell paths, UTF-8/Windows-1252 conversion, private environment expansion, cooperative events/semaphores, GUID values, Base64, registry enumeration, atoms and window properties. Six classic VB6 samples are included in the Examples menu and standalone HTML builds. See [service contracts, samples and isolation boundaries](packages/win32-browser/SERVICES.md). No native DLL execution or npm publication is implied.
+`@vb6/win32-browser` 0.5.0 adds 96 exports (407 total) beyond graphics: file discovery, shell paths, UTF-8/Windows-1252 conversion, private environment expansion, cooperative events/semaphores, GUID values, Base64, registry enumeration, atoms and window properties. Six classic VB6 samples are included in the Examples menu and standalone HTML builds. See [service contracts, samples and isolation boundaries](packages/win32-browser/SERVICES.md). No native DLL execution or npm publication is implied.
+
+## Scalar and Variant source compatibility
+
+The source VM preserves scalar subtype and typed-versus-Variant origin through expressions, calls, storage, debugger inspection and file operations. Checked conversions, promotion, safe ByRef temporaries and sequential Input are covered by source regressions and fresh Windows Automation differential checks. See [Scalar compatibility and evidence](docs/SCALAR-COMPATIBILITY.md) for APIs, reproduction commands and explicit native/locale/certification boundaries.
 
 ### Advanced browser Win32 GDI
 

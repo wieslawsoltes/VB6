@@ -56,6 +56,28 @@ export function installFileUtilities(w) {
     if(filePart)m.view(filePart,4);putComplete(m,out,value,capacity,wide);
     if(filePart){const index=value.lastIndexOf('\\')+1;m.writeU32(filePart,index===value.length?0:Number(out)+units(m,value.slice(0,index),wide)*(wide?2:1));}return n;
   });
+  // LARGE_INTEGER by value occupies two 32-bit Declare argument slots.
+  // https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-setfilepointerex
+  w.register('kernel32','SetFilePointerEx',(handle,low,high,out,method)=>{
+    const file=h.get(handle,'file');method=integer(method,0,2);
+    const distance=BigInt(integer(high,-0x80000000,0x7fffffff))*0x100000000n+BigInt(unsigned(low));
+    const base=method===0?0:method===1?file.position:fs.readBytes(file.path).length;
+    const next=BigInt(base)+distance;
+    if(next<0n)throw new Win32Error('Negative file position',131);
+    if(next>BigInt(Number.MAX_SAFE_INTEGER))throw new Win32Error('File position is not exactly representable');
+    if(out)m.view(out,8).setBigInt64(0,next,true);
+    file.position=Number(next);return 1;
+  },{arity:5,notes:'Split low/high signed LARGE_INTEGER input, 8-byte output. Exact virtual positions up to Number.MAX_SAFE_INTEGER; actual file allocations remain quota-bound.'});
+  const attributes=path=>fs.directories.has(path)?16:fs.exists(path)?128:(()=>{throw new Win32Error('File not found',2);})();
+  aw('GetFileAttributesEx',3,(wide,input,level,out)=>{
+    if(level!==0)throw new Win32Error('Only GetFileExInfoStandard is supported');
+    const path=pathOf(m.string(input,wide)),flags=attributes(path),size=flags===16?0:fs.readBytes(path).length;
+    const target=m.view(out,36);m.bytes(out,36).fill(0);target.setUint32(0,flags,true);target.setUint32(28,Math.floor(size/0x100000000),true);target.setUint32(32,size>>>0,true);return 1;
+  });
+  w.register('kernel32','GetFileInformationByHandle',(handle,out)=>{
+    const file=h.get(handle,'file'),size=fs.readBytes(file.path).length,target=m.view(out,52);
+    m.bytes(out,52).fill(0);target.setUint32(0,128,true);target.setUint32(36,size,true);target.setUint32(40,1,true);return 1;
+  },{arity:2,notes:notes+' BY_HANDLE_FILE_INFORMATION has zero timestamps/volume/file identifiers and one link. No host identity is invented.'});
   let sequence=1;
   aw('GetTempFileName',4,(wide,directory,prefix,unique,out)=>{
     const dir=pathOf(m.string(directory,wide));if(!fs.directories.has(dir))throw new Win32Error('Temporary directory not found',3);

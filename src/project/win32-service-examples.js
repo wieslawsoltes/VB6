@@ -3,7 +3,7 @@ import {newProject,createForm,createControl,newId} from './model.js';
 /** Original VB6 examples. All files, registry, atoms and synchronization names
  * are private to the app. No OS access, permissions or paid services required. */
 export const WIN32_SERVICE_SAMPLES=[
-{id:'win32-files',name:'Win32 Files and Paths',description:'FindFirstFile, private files, temporary names and shell paths',expected:['File: sample.txt','Size: 5','Matches: 1'],code:`Option Explicit
+{id:'win32-files',name:'Win32 Files and Paths',description:'FindFirstFile, private files, temporary names and shell paths',expected:['File: sample.txt','Size: 5','Matches: 1','Shared cursor: 3'],code:`Option Explicit
 Private Type FIND_DATA
     Attributes As Long
     Times(0 To 5) As Long
@@ -13,6 +13,15 @@ Private Type FIND_DATA
     FileName As String * 260
     AlternateName As String * 14
 End Type
+Private Type LARGE_PARTS
+    Low As Long
+    High As Long
+End Type
+Private Declare Function CreateFile Lib "kernel32" Alias "CreateFileA" (ByVal path As String, ByVal access As Long, ByVal share As Long, ByVal security As Long, ByVal disposition As Long, ByVal flags As Long, ByVal template As Long) As Long
+Private Declare Function CloseHandle Lib "kernel32" (ByVal handle As Long) As Long
+Private Declare Function GetCurrentProcess Lib "kernel32" () As Long
+Private Declare Function DuplicateHandle Lib "kernel32" (ByVal sourceProcess As Long, ByVal source As Long, ByVal targetProcess As Long, target As Long, ByVal access As Long, ByVal inherit As Long, ByVal options As Long) As Long
+Private Declare Function SetFilePointerEx Lib "kernel32" (ByVal handle As Long, ByVal low As Long, ByVal high As Long, position As LARGE_PARTS, ByVal method As Long) As Long
 Private Declare Function FindFirstFile Lib "kernel32" Alias "FindFirstFileA" (ByVal path As String, data As FIND_DATA) As Long
 Private Declare Function FindNextFile Lib "kernel32" Alias "FindNextFileA" (ByVal handle As Long, data As FIND_DATA) As Long
 Private Declare Function FindClose Lib "kernel32" (ByVal handle As Long) As Long
@@ -37,6 +46,26 @@ Public Function RunService(ByVal target As Long) As String
         result = result & "File: " & Left$(data.FileName, InStr(data.FileName, Chr$(0)) - 1) & vbCrLf & "Size: " & CStr(data.SizeLow) & vbCrLf
     Loop While FindNextFile(search, data) <> 0
     FindClose search
+    Dim handle As Long, duplicate As Long, position As LARGE_PARTS
+    handle = CreateFile(path, &H80000000, 3, 0, 3, 128, 0)
+    If handle = -1 Then Err.Raise 5
+    If DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), duplicate, 0, 0, 2) = 0 Then
+        CloseHandle handle
+        Err.Raise 5
+    End If
+    If SetFilePointerEx(handle, 3, 0, position, 0) = 0 Then
+        CloseHandle duplicate
+        CloseHandle handle
+        Err.Raise 5
+    End If
+    If SetFilePointerEx(duplicate, 0, 0, position, 1) = 0 Then
+        CloseHandle duplicate
+        CloseHandle handle
+        Err.Raise 5
+    End If
+    CloseHandle handle
+    CloseHandle duplicate
+    result = result & "Shared cursor: " & CStr(position.Low) & vbCrLf
     DeleteFile path
     temporary = String$(260, 0)
     If GetTempFileName("C:\\Temp", "svc", 0, temporary) = 0 Then Err.Raise 5
@@ -103,10 +132,14 @@ Public Function RunService(ByVal target As Long) As String
     RegDeleteKey -2147483647, "Software\\VB6ServicesSample"
 End Function
 `},
-{id:'win32-guid',name:'Win32 GUID Workbench',description:'GUID structure layout, parsing, formatting and secure generation',expected:['Parsed: {00112233-4455-6677-8899-AABBCCDDEEFF}','Version: 4'],code:`Option Explicit
+{id:'win32-guid',name:'Win32 GUID Workbench',description:'GUID structure layout, parsing, formatting and secure generation',expected:['Parsed: {00112233-4455-6677-8899-AABBCCDDEEFF}','Version: 4','Task memory: released'],code:`Option Explicit
 Private Declare Function CLSIDFromString Lib "ole32" (text As Any, guid As Any) As Long
 Private Declare Function StringFromGUID2 Lib "ole32" (guid As Any, text As Any, ByVal capacity As Long) As Long
 Private Declare Function CoCreateGuid Lib "ole32" (guid As Any) As Long
+Private Declare Function CoTaskMemAlloc Lib "ole32" (ByVal bytes As Long) As Long
+Private Declare Function CoTaskMemRealloc Lib "ole32" (ByVal address As Long, ByVal bytes As Long) As Long
+Private Declare Sub CoTaskMemFree Lib "ole32" (ByVal address As Long)
+Private Declare Sub CopyMemory Lib "kernel32" (destination As Any, source As Any, ByVal count As Long)
 Public Function RunService(ByVal target As Long) As String
     Dim text As String, input(0 To 38) As Integer, output(0 To 38) As Integer, guid(0 To 15) As Byte, i As Long, parsed As String
     text = "{00112233-4455-6677-8899-aabbccddeeff}"
@@ -119,7 +152,18 @@ Public Function RunService(ByVal target As Long) As String
         parsed = parsed & ChrW(output(i))
     Next i
     If CoCreateGuid(guid(0)) <> 0 Then Err.Raise 5
-    RunService = "Parsed: " & parsed & vbCrLf & "Version: " & CStr(guid(7) \\ 16)
+    Dim task As Long, resized As Long
+    task = CoTaskMemAlloc(16)
+    If task = 0 Then Err.Raise 7
+    CopyMemory ByVal task, guid(0), 16
+    resized = CoTaskMemRealloc(task, 32)
+    If resized = 0 Then
+        CoTaskMemFree task
+        Err.Raise 7
+    End If
+    CopyMemory guid(0), ByVal resized, 16
+    CoTaskMemFree resized
+    RunService = "Parsed: " & parsed & vbCrLf & "Version: " & CStr(guid(7) \\ 16) & vbCrLf & "Task memory: released"
 End Function
 `},
 {id:'win32-properties',name:'Win32 Window Properties',description:'Registered-window data tags, atoms, lookups and lifetime cleanup',expected:['Atom: VB6.Services.Tag','Stored: 42','Removed: 42'],code:`Option Explicit

@@ -67,8 +67,88 @@ class MemoryFileSystem {
 return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
 })();
 
-/* services-utils.js */
+/* handle-services.js */
 __modules[1]=(()=>{
+const {Win32Error,unsigned}=__modules[0];
+
+/** Process-private handle duplication. No OS process or thread authority.
+ * https://learn.microsoft.com/windows/win32/api/handleapi/nf-handleapi-duplicatehandle
+ * https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess
+ */
+const HANDLE_CONSTANTS=Object.freeze({DUPLICATE_CLOSE_SOURCE:1,DUPLICATE_SAME_ACCESS:2,FILE_TYPE_UNKNOWN:0,FILE_TYPE_DISK:1,FILE_BEGIN:0,FILE_CURRENT:1,FILE_END:2});
+function installHandleServices(w){
+  const h=w.handles,m=w.memory;
+  const add=(name,arity,fn,options={})=>w.register('kernel32',name,fn,{arity,notes:'Current compatibility instance only. File duplicates share the cursor; synchronization duplicates share the object. No OS process access or inheritance.',...options});
+  add('GetCurrentProcess',0,()=>-1);
+  add('DuplicateHandle',7,(sourceProcess,source,targetProcess,out,access,inherit,options)=>{
+    options=unsigned(options);
+    // Close-source applies even on an output/access/allocation failure, but only
+    // to handles belonging to the explicitly selected compatibility process.
+    if(unsigned(sourceProcess)!==0xffffffff)throw new Win32Error('Foreign process handle',6);
+    const entry=h.entries.get(Number(source));
+    if(!entry||!['file','sync'].includes(entry.type))throw new Win32Error('Unsupported source handle',6);
+    try{
+      if(options&~3)throw new Win32Error('Unsupported duplicate options');
+      if(!targetProcess&&(options&1))return 1;
+      if(unsigned(targetProcess)!==0xffffffff)throw new Win32Error('Foreign target process',6);
+      if(inherit)throw new Win32Error('Handle inheritance is unavailable',50);
+      // Win32's legacy NULL output intentionally leaks. Fail explicitly instead.
+      m.view(out,4);
+      let value=entry.value;
+      if(!(options&2)){
+        access=unsigned(access);
+        if(entry.type==='sync'){
+          if(access&~value.access)throw new Win32Error('Cannot increase granted access',5);
+          value={object:value.object,access};
+        }else{
+          const granted=(value.read?0x80000000:0)|(value.write?0x40000000:0);
+          if(access&~granted)throw new Win32Error('Cannot increase granted access',5);
+          // Forward only the shared file cursor; permissions remain per handle.
+          const original=value;
+          value={path:original.path,share:original.share,read:!!(access&0x80000000),write:!!(access&0x40000000),get position(){return original.position;},set position(n){original.position=n;}};
+        }
+      }
+      const duplicate=h.add(entry.type,value);
+      if(entry.type==='sync')value.object.refs++;
+      m.writeU32(out,duplicate);return 1;
+    }finally{
+      if(options&1)w.resolve('kernel32','CloseHandle').fn(source);
+    }
+  });
+  add('GetFileType',1,handle=>{h.get(handle,'file');return 1;});
+}
+
+return {HANDLE_CONSTANTS,installHandleServices};
+})();
+
+/* task-memory.js */
+__modules[2]=(()=>{
+const {Win32Error,integer}=__modules[0];
+
+/** Owned virtual COM task allocations, not COM activation or native pointers.
+ * https://learn.microsoft.com/windows/win32/api/combaseapi/nf-combaseapi-cotaskmemalloc
+ * https://learn.microsoft.com/windows/win32/api/combaseapi/nf-combaseapi-cotaskmemrealloc
+ */
+function installTaskMemory(w){
+  const m=w.memory;
+  const add=(name,arity,fn)=>w.register('ole32',name,fn,{arity,notes:'Owned bounded virtual task memory. NULL free is harmless; failed realloc retains its original allocation. No native COM heap.'});
+  const owned=p=>{const b=m.block(p,0);if(b.ptr!==Number(p)||b.owner!=='co-task-memory')throw new Win32Error('Expected a task allocation base',6);return b;};
+  const allocate=n=>{n=integer(n,0,m.maxBytes);const p=m.alloc(n);m.block(p).owner='co-task-memory';return p;};
+  add('CoTaskMemAlloc',1,allocate);
+  add('CoTaskMemFree',1,p=>{if(p){owned(p);m.free(p);}});
+  add('CoTaskMemRealloc',2,(p,n)=>{
+    n=integer(n,0,m.maxBytes);if(!p)return allocate(n);
+    const old=owned(p);if(!n){m.free(p);return 0;}
+    // Reserve before modifying/freeing the original; quotas are failure-atomic.
+    const next=allocate(n);m.bytes(next,Math.min(n,old.size)).set(old.bytes.subarray(0,n));m.free(p);return next;
+  });
+}
+
+return {installTaskMemory};
+})();
+
+/* services-utils.js */
+__modules[3]=(()=>{
 const {Win32Error,integer}=__modules[0];
 
 /** Register both Win32 string encodings without bringing in the VB6 runtime. */
@@ -93,9 +173,9 @@ return {registerAW,units,putComplete,rejectOverlap};
 })();
 
 /* user32-properties.js */
-__modules[2]=(()=>{
+__modules[4]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
-const {registerAW,units}=__modules[1];
+const {registerAW,units}=__modules[3];
 
 
 /** Process-private atom table and registered-window properties.
@@ -153,9 +233,9 @@ return {installWindowProperties};
 })();
 
 /* crypt32-codec.js */
-__modules[3]=(()=>{
+__modules[5]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
-const {registerAW,putComplete}=__modules[1];
+const {registerAW,putComplete}=__modules[3];
 
 
 const CRYPT_CONSTANTS=Object.freeze({CRYPT_STRING_BASE64:1,CRYPT_STRING_NOCRLF:0x40000000,CRYPT_STRING_NOCR:0x80000000,CRYPT_STRING_STRICT:0x20000000});
@@ -198,9 +278,9 @@ return {CRYPT_CONSTANTS,installBinaryCodec};
 })();
 
 /* ole32-guid.js */
-__modules[4]=(()=>{
+__modules[6]=(()=>{
 const {Win32Error,integer}=__modules[0];
-const {putComplete}=__modules[1];
+const {putComplete}=__modules[3];
 
 
 /** GUID byte order follows the Win32 GUID structure, not network byte order.
@@ -231,9 +311,9 @@ return {installGUID};
 })();
 
 /* shlwapi.js */
-__modules[5]=(()=>{
+__modules[7]=(()=>{
 const {Win32Error}=__modules[0];
-const {registerAW,units,putComplete}=__modules[1];
+const {registerAW,units,putComplete}=__modules[3];
 
 
 /** Lexical Windows path helpers. No shell, URL navigation or native filesystem.
@@ -281,9 +361,9 @@ return {installPathUtilities};
 })();
 
 /* kernel32-files.js */
-__modules[6]=(()=>{
+__modules[8]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
-const {registerAW,units,putComplete}=__modules[1];
+const {registerAW,units,putComplete}=__modules[3];
 
 
 /** File discovery in the existing app-private disk, not host disk discovery.
@@ -341,6 +421,28 @@ function installFileUtilities(w) {
     if(filePart)m.view(filePart,4);putComplete(m,out,value,capacity,wide);
     if(filePart){const index=value.lastIndexOf('\\')+1;m.writeU32(filePart,index===value.length?0:Number(out)+units(m,value.slice(0,index),wide)*(wide?2:1));}return n;
   });
+  // LARGE_INTEGER by value occupies two 32-bit Declare argument slots.
+  // https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-setfilepointerex
+  w.register('kernel32','SetFilePointerEx',(handle,low,high,out,method)=>{
+    const file=h.get(handle,'file');method=integer(method,0,2);
+    const distance=BigInt(integer(high,-0x80000000,0x7fffffff))*0x100000000n+BigInt(unsigned(low));
+    const base=method===0?0:method===1?file.position:fs.readBytes(file.path).length;
+    const next=BigInt(base)+distance;
+    if(next<0n)throw new Win32Error('Negative file position',131);
+    if(next>BigInt(Number.MAX_SAFE_INTEGER))throw new Win32Error('File position is not exactly representable');
+    if(out)m.view(out,8).setBigInt64(0,next,true);
+    file.position=Number(next);return 1;
+  },{arity:5,notes:'Split low/high signed LARGE_INTEGER input, 8-byte output. Exact virtual positions up to Number.MAX_SAFE_INTEGER; actual file allocations remain quota-bound.'});
+  const attributes=path=>fs.directories.has(path)?16:fs.exists(path)?128:(()=>{throw new Win32Error('File not found',2);})();
+  aw('GetFileAttributesEx',3,(wide,input,level,out)=>{
+    if(level!==0)throw new Win32Error('Only GetFileExInfoStandard is supported');
+    const path=pathOf(m.string(input,wide)),flags=attributes(path),size=flags===16?0:fs.readBytes(path).length;
+    const target=m.view(out,36);m.bytes(out,36).fill(0);target.setUint32(0,flags,true);target.setUint32(28,Math.floor(size/0x100000000),true);target.setUint32(32,size>>>0,true);return 1;
+  });
+  w.register('kernel32','GetFileInformationByHandle',(handle,out)=>{
+    const file=h.get(handle,'file'),size=fs.readBytes(file.path).length,target=m.view(out,52);
+    m.bytes(out,52).fill(0);target.setUint32(0,128,true);target.setUint32(36,size,true);target.setUint32(40,1,true);return 1;
+  },{arity:2,notes:notes+' BY_HANDLE_FILE_INFORMATION has zero timestamps/volume/file identifiers and one link. No host identity is invented.'});
   let sequence=1;
   aw('GetTempFileName',4,(wide,directory,prefix,unique,out)=>{
     const dir=pathOf(m.string(directory,wide));if(!fs.directories.has(dir))throw new Win32Error('Temporary directory not found',3);
@@ -361,9 +463,9 @@ return {installFileUtilities};
 })();
 
 /* kernel32-nls.js */
-__modules[7]=(()=>{
+__modules[9]=(()=>{
 const {Win32Error,integer,unsigned,decodeANSI}=__modules[0];
-const {registerAW,units,putComplete,rejectOverlap}=__modules[1];
+const {registerAW,units,putComplete,rejectOverlap}=__modules[3];
 
 
 // Reverse the process code page once; WideCharToMultiByte consumes UTF-16 units,
@@ -428,9 +530,9 @@ return {NLS_CONSTANTS,installNLS};
 })();
 
 /* kernel32-sync.js */
-__modules[8]=(()=>{
+__modules[10]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
-const {registerAW}=__modules[1];
+const {registerAW}=__modules[3];
 
 
 const SYNC_CONSTANTS=Object.freeze({WAIT_OBJECT_0:0,WAIT_TIMEOUT:258,WAIT_FAILED:0xffffffff,INFINITE:0xffffffff,MAXIMUM_WAIT_OBJECTS:64,SYNCHRONIZE:0x100000,EVENT_MODIFY_STATE:2,SEMAPHORE_MODIFY_STATE:2,EVENT_ALL_ACCESS:0x1f0003,SEMAPHORE_ALL_ACCESS:0x1f0003});
@@ -502,7 +604,7 @@ return {SYNC_CONSTANTS,installSynchronization};
 })();
 
 /* gpu-presenter.js */
-__modules[9]=(()=>{
+__modules[11]=(()=>{
 
 /** WebGPU presentation of a retained, CPU-readable GDI surface. Raster operations
  * remain synchronous in the compatibility engine; only presentation is GPU work.
@@ -556,7 +658,7 @@ return {GPURasterPresenter};
 })();
 
 /* gdi-transform.js */
-__modules[10]=(()=>{
+__modules[12]=(()=>{
 const {Win32Error,integer}=__modules[0];
 
 const TRANSFORM_CONSTANTS=Object.freeze({GM_COMPATIBLE:1,GM_ADVANCED:2,MWT_IDENTITY:1,MWT_LEFTMULTIPLY:2,MWT_RIGHTMULTIPLY:3,MM_TEXT:1,MM_LOMETRIC:2,MM_HIMETRIC:3,MM_LOENGLISH:4,MM_HIENGLISH:5,MM_TWIPS:6,MM_ISOTROPIC:7,MM_ANISOTROPIC:8});
@@ -598,9 +700,9 @@ return {TRANSFORM_CONSTANTS,IDENTITY,multiply,inverse,mapPoint,mapping,translate
 })();
 
 /* gdi-path.js */
-__modules[11]=(()=>{
+__modules[13]=(()=>{
 const {Win32Error,integer}=__modules[0];
-const {mapping,mapPoint,inverse,IDENTITY}=__modules[10];
+const {mapping,mapPoint,inverse,IDENTITY}=__modules[12];
 
 
 const PATH_CONSTANTS=Object.freeze({ALTERNATE:1,WINDING:2,PT_CLOSEFIGURE:1,PT_LINETO:2,PT_BEZIERTO:4,PT_MOVETO:6});
@@ -691,9 +793,9 @@ return {PATH_CONSTANTS,installPaths};
 })();
 
 /* gdi-text.js */
-__modules[12]=(()=>{
+__modules[14]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
-const {mapping,multiply,mapPoint,mapBounds}=__modules[10];
+const {mapping,multiply,mapPoint,mapBounds}=__modules[12];
 
 
 const TEXT_CONSTANTS=Object.freeze({OBJ_FONT:6,FW_NORMAL:400,FW_BOLD:700,ANSI_CHARSET:0,DEFAULT_CHARSET:1,TRANSPARENT:1,OPAQUE:2,TA_NOUPDATECP:0,TA_UPDATECP:1,TA_LEFT:0,TA_RIGHT:2,TA_CENTER:6,TA_TOP:0,TA_BOTTOM:8,TA_BASELINE:24,TA_RTLREADING:256,ETO_OPAQUE:2,ETO_CLIPPED:4,ETO_RTLREADING:128,ETO_PDY:8192,DT_CENTER:1,DT_RIGHT:2,DT_VCENTER:4,DT_BOTTOM:8,DT_WORDBREAK:16,DT_SINGLELINE:32,DT_EXPANDTABS:64,DT_CALCRECT:1024,DT_NOPREFIX:2048});
@@ -800,7 +902,7 @@ return {TEXT_CONSTANTS,installText};
 })();
 
 /* user32-paint.js */
-__modules[13]=(()=>{
+__modules[15]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 const PAINT_CONSTANTS=Object.freeze({WM_PAINT:15,WM_ERASEBKGND:20,RDW_INVALIDATE:1,RDW_INTERNALPAINT:2,RDW_ERASE:4,RDW_VALIDATE:8,RDW_NOINTERNALPAINT:16,RDW_NOERASE:32,RDW_NOCHILDREN:64,RDW_ALLCHILDREN:128,RDW_UPDATENOW:256,RDW_ERASENOW:512,RDW_FRAME:1024,RDW_NOFRAME:2048,DCX_WINDOW:1,DCX_CACHE:2,DCX_INTERSECTRGN:128,DCX_EXCLUDERGN:64});
@@ -906,7 +1008,7 @@ return {PAINT_CONSTANTS,installPainting};
 })();
 
 /* gdi-geometry.js */
-__modules[14]=(()=>{
+__modules[16]=(()=>{
 const {Win32Error,integer}=__modules[0];
 
 const point=n=>integer(n,-0x4000000,0x3ffffff);
@@ -1000,9 +1102,9 @@ return {polygonRegion,roundedRegion,transformRegion,frameRegion};
 })();
 
 /* gdi-region.js */
-__modules[15]=(()=>{
-const {polygonRegion,roundedRegion,transformRegion,frameRegion}=__modules[14];
-const {mapping,devicePoint,mapBounds,inverse,readTransform}=__modules[10];
+__modules[17]=(()=>{
+const {polygonRegion,roundedRegion,transformRegion,frameRegion}=__modules[16];
+const {mapping,devicePoint,mapBounds,inverse,readTransform}=__modules[12];
 const {Win32Error,integer}=__modules[0];
 
 
@@ -1200,8 +1302,8 @@ return {REGION_CONSTANTS,RegionStore,installRegions};
 })();
 
 /* gdi-bitmap.js */
-__modules[16]=(()=>{
-const {mapping,inverse,mapPoint,mapBounds,devicePoint,translatedOnly}=__modules[10];
+__modules[18]=(()=>{
+const {mapping,inverse,mapPoint,mapBounds,devicePoint,translatedOnly}=__modules[12];
 const {Win32Error,integer,unsigned}=__modules[0];
 
 
@@ -1302,7 +1404,7 @@ return {GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo,BitmapStore};
 })();
 
 /* clipboard.js */
-__modules[17]=(()=>{
+__modules[19]=(()=>{
 const {Win32Error,unsigned}=__modules[0];
 
 /** Synchronous, app-private clipboard. System clipboard synchronization is explicit. */
@@ -1334,7 +1436,7 @@ return {installClipboard};
 })();
 
 /* kernel32.js */
-__modules[18]=(()=>{
+__modules[20]=(()=>{
 const {ERROR,Win32Error,integer,unsigned}=__modules[0];
 
 function installKernel32(w){
@@ -1360,7 +1462,7 @@ function installKernel32(w){
     add(prefix+'Lock',1,handle=>{if(h.has(handle,'memory')){const a=h.get(handle,'memory');a.locks++;return a.ptr;}m.block(handle);return unsigned(handle);});
     add(prefix+'Unlock',1,handle=>{if(!h.has(handle,'memory')){m.block(handle);w.lastError=0;return 0;}const a=h.get(handle,'memory');if(!a.locks){w.lastError=158;return 0;}a.locks--;w.lastError=0;return a.locks?1:0;});
     add(prefix+'Size',1,handle=>m.size(h.has(handle,'memory')?h.get(handle,'memory').ptr:handle));
-    add(prefix+'Free',1,handle=>{if(!handle)return 0;const a=h.has(handle,'memory')?h.get(handle,'memory'):null;if(a?.clipboard){w.lastError=5;return handle;}if(a&&a.locks){w.lastError=158;return handle;}if(m.block(a?a.ptr:handle).owner==='gdi-bitmap'){w.lastError=5;return handle;}m.free(a?a.ptr:handle);if(a)h.close(handle,'memory');return 0;},{failure:args=>args[0]});
+    add(prefix+'Free',1,handle=>{if(!handle)return 0;const a=h.has(handle,'memory')?h.get(handle,'memory'):null;if(a?.clipboard){w.lastError=5;return handle;}if(a&&a.locks){w.lastError=158;return handle;}if(['gdi-bitmap','co-task-memory'].includes(m.block(a?a.ptr:handle).owner)){w.lastError=5;return handle;}m.free(a?a.ptr:handle);if(a)h.close(handle,'memory');return 0;},{failure:args=>args[0]});
   }
   aw('lstrlen',1,(wide,p)=>m.stringBytes(text(p,wide),wide).length/(wide?2:1));
   aw('lstrcpyn',3,(wide,dst,src,n)=>{m.putString(dst,text(src,wide),n,wide);return dst;});
@@ -1393,7 +1495,7 @@ function installKernel32(w){
   add('WriteFile',5,(handle,input,n,written,overlapped)=>{if(overlapped)throw new Win32Error('Overlapped I/O is not supported',50);n=integer(n,0,m.maxBytes);const f=h.get(handle,'file');if(!f.write)throw new Win32Error('Write access denied',5);m.writeU32(written,0);if(!n)return 1;const src=m.bytes(input,n).slice();const old=fs.readBytes(f.path),end=f.position+n;if(end>w.maxFileBytes)throw new Win32Error('File quota exceeded',8);const b=new Uint8Array(Math.max(old.length,end));b.set(old);b.set(src,f.position);fs.writeBytes(f.path,b);f.position=end;m.writeU32(written,n);return 1;});
   add('GetFileSize',2,(handle,high)=>{const n=fs.readBytes(h.get(handle,'file').path).length;if(high)m.writeU32(high,0);return n;},{failure:0xffffffff});
   add('SetFilePointer',4,(handle,low,high,method)=>{const f=h.get(handle,'file');integer(method,0,2);let offset=BigInt(integer(low,-2147483648,2147483647));if(high)offset=BigInt(m.readI32(high))*0x100000000n+BigInt(unsigned(low));const base=method===0?0:method===1?f.position:fs.readBytes(f.path).length;const next=BigInt(base)+offset;if(next<0||next>BigInt(w.maxFileBytes))throw new Win32Error('Invalid file position');if(high)m.writeU32(high,0);f.position=Number(next);w.lastError=0;return f.position;},{failure:0xffffffff});
-  add('SetEndOfFile',1,handle=>{const f=h.get(handle,'file');if(!f.write)throw new Win32Error('Write access denied',5);const b=new Uint8Array(f.position);b.set(fs.readBytes(f.path).subarray(0,f.position));fs.writeBytes(f.path,b);return 1;});
+  add('SetEndOfFile',1,handle=>{const f=h.get(handle,'file');if(!f.write)throw new Win32Error('Write access denied',5);if(f.position>w.maxFileBytes)throw new Win32Error('File quota exceeded',8);const b=new Uint8Array(f.position);b.set(fs.readBytes(f.path).subarray(0,f.position));fs.writeBytes(f.path,b);return 1;});
   aw('DeleteFile',1,(wide,p)=>{const path=pathOf(p,wide);assertMutable(path);fs.remove(path);return 1;});
   aw('CopyFile',3,(wide,a,b,fail)=>{a=pathOf(a,wide);b=pathOf(b,wide);if(a===b)throw new Win32Error('Source and destination are identical',87);ensureParent(b);if(fail&&fs.exists(b))throw new Win32Error('File exists',80);assertMutable(a);assertMutable(b);fs.writeBytes(b,fs.readBytes(a));return 1;});
   aw('MoveFile',2,(wide,a,b)=>{a=pathOf(a,wide);b=pathOf(b,wide);if(fs.exists(b))throw new Win32Error('File exists',183);ensureParent(b);assertMutable(a);assertMutable(b);const bytes=fs.readBytes(a);fs.writeBytes(b,bytes);fs.remove(a);return 1;});
@@ -1425,7 +1527,7 @@ return {installKernel32};
 })();
 
 /* user32.js */
-__modules[19]=(()=>{
+__modules[21]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 /** Registered windows only: never queries or controls unrelated page DOM. */
@@ -1509,7 +1611,7 @@ return {installUser32};
 })();
 
 /* advapi32.js */
-__modules[20]=(()=>{
+__modules[22]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[0];
 
 /** App-private registry: no machine registry is read or modified. */
@@ -1572,14 +1674,14 @@ return {installRegistry};
 })();
 
 /* gdi32.js */
-__modules[21]=(()=>{
-const {installTransforms,mapping,translatedOnly,IDENTITY}=__modules[10];
-const {installPaths}=__modules[11];
-const {installText}=__modules[12];
-const {installPainting}=__modules[13];
+__modules[23]=(()=>{
+const {installTransforms,mapping,translatedOnly,IDENTITY}=__modules[12];
+const {installPaths}=__modules[13];
+const {installText}=__modules[14];
+const {installPainting}=__modules[15];
 const {Win32Error,integer,unsigned}=__modules[0];
-const {RegionStore,installRegions}=__modules[15];
-const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[16];
+const {RegionStore,installRegions}=__modules[17];
+const {BitmapStore,GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo}=__modules[18];
 
 
 
@@ -1705,27 +1807,29 @@ return {colorRef,installGDI};
 })();
 
 /* index.js */
-__modules[22]=(()=>{
-const {installWindowProperties}=__modules[2];
-const {installBinaryCodec,CRYPT_CONSTANTS}=__modules[3];
-const {installGUID}=__modules[4];
-const {installPathUtilities}=__modules[5];
-const {installFileUtilities}=__modules[6];
-const {installNLS,NLS_CONSTANTS}=__modules[7];
-const {installSynchronization,SYNC_CONSTANTS}=__modules[8];
-const {GPURasterPresenter}=__modules[9];
-const {TRANSFORM_CONSTANTS}=__modules[10];
-const {PATH_CONSTANTS}=__modules[11];
-const {TEXT_CONSTANTS}=__modules[12];
-const {PAINT_CONSTANTS}=__modules[13];
-const {REGION_CONSTANTS,RegionStore}=__modules[15];
-const {GDI_CONSTANTS}=__modules[16];
-const {installClipboard}=__modules[17];
+__modules[24]=(()=>{
+const {installHandleServices,HANDLE_CONSTANTS}=__modules[1];
+const {installTaskMemory}=__modules[2];
+const {installWindowProperties}=__modules[4];
+const {installBinaryCodec,CRYPT_CONSTANTS}=__modules[5];
+const {installGUID}=__modules[6];
+const {installPathUtilities}=__modules[7];
+const {installFileUtilities}=__modules[8];
+const {installNLS,NLS_CONSTANTS}=__modules[9];
+const {installSynchronization,SYNC_CONSTANTS}=__modules[10];
+const {GPURasterPresenter}=__modules[11];
+const {TRANSFORM_CONSTANTS}=__modules[12];
+const {PATH_CONSTANTS}=__modules[13];
+const {TEXT_CONSTANTS}=__modules[14];
+const {PAINT_CONSTANTS}=__modules[15];
+const {REGION_CONSTANTS,RegionStore}=__modules[17];
+const {GDI_CONSTANTS}=__modules[18];
+const {installClipboard}=__modules[19];
 const {ERROR,Win32Error,Handles,Memory,MemoryFileSystem,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
-const {installKernel32}=__modules[18];
-const {installUser32}=__modules[19];
-const {installRegistry}=__modules[20];
-const {installGDI,colorRef}=__modules[21];
+const {installKernel32}=__modules[20];
+const {installUser32}=__modules[21];
+const {installRegistry}=__modules[22];
+const {installGDI,colorRef}=__modules[23];
 
 
 
@@ -1747,14 +1851,16 @@ const {installGDI,colorRef}=__modules[21];
 
 
 
-const WIN32_CONSTANTS=Object.freeze({...NLS_CONSTANTS,...SYNC_CONSTANTS,...CRYPT_CONSTANTS,...TRANSFORM_CONSTANTS,...PATH_CONSTANTS,...TEXT_CONSTANTS,...PAINT_CONSTANTS,...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
+
+
+const WIN32_CONSTANTS=Object.freeze({...HANDLE_CONSTANTS,...NLS_CONSTANTS,...SYNC_CONSTANTS,...CRYPT_CONSTANTS,...TRANSFORM_CONSTANTS,...PATH_CONSTANTS,...TEXT_CONSTANTS,...PAINT_CONSTANTS,...GDI_CONSTANTS,...REGION_CONSTANTS,INVALID_HANDLE_VALUE:-1,GENERIC_READ:0x80000000,GENERIC_WRITE:0x40000000,FILE_SHARE_READ:1,FILE_SHARE_WRITE:2,CREATE_NEW:1,CREATE_ALWAYS:2,OPEN_EXISTING:3,OPEN_ALWAYS:4,TRUNCATE_EXISTING:5,FILE_ATTRIBUTE_NORMAL:128,FILE_ATTRIBUTE_DIRECTORY:16,GMEM_FIXED:0,GMEM_MOVEABLE:2,GMEM_ZEROINIT:64,SW_HIDE:0,SW_SHOWNORMAL:1,SW_SHOW:5,SW_RESTORE:9,WM_SETTEXT:12,WM_GETTEXT:13,WM_GETTEXTLENGTH:14,HKEY_CURRENT_USER:0x80000001,KEY_READ:0x20019,KEY_WRITE:0x20006,KEY_ALL_ACCESS:0xf003f,REG_SZ:1,REG_EXPAND_SZ:2,REG_BINARY:3,REG_DWORD:4,REG_MULTI_SZ:7,REG_QWORD:11,CF_TEXT:1,CF_UNICODETEXT:13});
 function normalizeDLL(name){const dll=String(name).replace(/\\/g,'/').split('/').at(-1).replace(/\.dll$/i,'').toLowerCase();if(!/^[a-z0-9_.-]+$/.test(dll))throw new Win32Error('Invalid DLL name',126);return dll;}
 /** Reusable browser/worker/Node compatibility process; never loads native code. */
 class Win32Browser {
   constructor(options={}){
     this.options=options;this.memory=new Memory(options);this.handles=new Handles(options.maxHandles);this.fs=options.fs||new MemoryFileSystem();this.lastError=0;this.disposed=false;this.modules=new Map();this.timers=new Map();this.timerCallbacks=new Map();this.nextTimer=1;this.delays=new Set();this.clock=options.clock||(()=>globalThis.performance?.now?.()??Date.now());this.now=options.now||(()=>new Date());this.epoch=this.clock();this.maxFileBytes=integer(options.maxFileBytes??Math.min(20*1024*1024,this.memory.maxBytes),1,this.memory.maxBytes);this.environment=new Map(Object.entries(options.environment||{}).map(([k,v])=>[k.toUpperCase(),String(v)]));
     for(const name of ['/Windows','/Temp'])this.fs.directories.add(this.fs.normalize(name));
-    installKernel32(this);installUser32(this);installRegistry(this);installGDI(this);installClipboard(this);installFileUtilities(this);installNLS(this);installSynchronization(this);installPathUtilities(this);installGUID(this);installBinaryCodec(this);installWindowProperties(this);
+    installKernel32(this);installUser32(this);installRegistry(this);installGDI(this);installClipboard(this);installFileUtilities(this);installNLS(this);installSynchronization(this);installPathUtilities(this);installGUID(this);installBinaryCodec(this);installWindowProperties(this);installHandleServices(this);installTaskMemory(this);
     if(options.registry){for(const [path,record]of options.registry){if(!/^(HKCR|HKCU|HKLM|HKU|HKCC)(\\|$)/.test(path)||!Array.isArray(record.values))throw new Win32Error('Invalid registry snapshot');this.registry.set(path,{name:String(record.name),values:new Map(record.values)});}}
     this.register('shell32','ShellExecuteA',(handle,operation,file,parameters,directory,show)=>this.openURL(false,handle,operation,file,parameters,directory,show),{arity:6,failure:5,mode:'browser',notes:'Only explicitly enabled http/https/mailto navigation; no executable launch.'});
     this.register('shell32','ShellExecuteW',(handle,operation,file,parameters,directory,show)=>this.openURL(true,handle,operation,file,parameters,directory,show),{arity:6,failure:5,mode:'browser',notes:'Only explicitly enabled http/https/mailto navigation; no executable launch.'});
@@ -1776,5 +1882,5 @@ function createWin32(options={}){return new Win32Browser(options);}
 
 return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,GPURasterPresenter,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
-globalThis["Win32Compat"]=__modules[22];
+globalThis["Win32Compat"]=__modules[24];
 })();
