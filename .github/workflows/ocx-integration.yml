@@ -1,0 +1,25 @@
+name: OCX integration source
+on:
+  push:
+    branches: [feat/ocx-hosting-lifecycle]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record source refs for local integration
+        run: |
+          git bundle create ocx-integration.bundle refs/remotes/origin/main HEAD
+          git rev-parse refs/remotes/origin/main HEAD > ocx-integration.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-integration-source
+          path: |
+            ocx-integration.bundle
+            ocx-integration.txt
