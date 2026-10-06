@@ -41,14 +41,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply reviewed typed event correction
+      - name: Apply reviewed typed event correction from raw Git blobs
         shell: bash
         run: |
-          # Extract actual Git blob bytes, bypassing only checkout newline conversion.
-          git archive --format=tar HEAD | tar -xf -
-          echo 'dcf7220ab26ff2fa2816f8bb0da7f84cd5fb01547f8dd6723a06612c5f800bed  .ocx-typed.patch' | sha256sum --check
-          git apply --check .ocx-typed.patch
-          git apply .ocx-typed.patch
+          node --input-type=commonjs - <<'JS'
+          const {execFileSync}=require('node:child_process');
+          const fs=require('node:fs'),crypto=require('node:crypto'),assert=require('node:assert/strict');
+          const patch=execFileSync('git',['show','HEAD:.ocx-typed.patch']);
+          const digest=crypto.createHash('sha256').update(patch).digest('hex');
+          console.log('Canonical patch:',digest,'bytes:',patch.length);
+          assert.equal(digest,'dcf7220ab26ff2fa2816f8bb0da7f84cd5fb01547f8dd6723a06612c5f800bed');
+          fs.writeFileSync('.ocx-typed.patch',patch);
+          execFileSync('git',['apply','--check','--cached','.ocx-typed.patch'],{stdio:'inherit'});
+          execFileSync('git',['apply','--cached','.ocx-typed.patch'],{stdio:'inherit'});
+          const files=execFileSync('git',['diff','--cached','--name-only','-z']).toString('utf8').split('\0').filter(Boolean);
+          for(const file of files){
+            const data=execFileSync('git',['show',':'+file]);
+            fs.writeFileSync(file,data);
+            assert.deepEqual(fs.readFileSync(file),data);
+          }
+          console.log('Materialized exact indexed source files:',files.length);
+          JS
       - run: node tools/interop/test-native.mjs
       - run: node tools/interop/test-activex.mjs
       - run: node tools/interop/test-ocx.mjs
@@ -84,8 +97,8 @@ jobs:
           git add -u
           git diff --cached --exit-code -- .github/workflows
           git commit -m 'fix(ocx): preserve declared event types for compiled ByRef handlers'
-          git bundle create ocx-typed-publication.bundle HEAD
-          git rev-parse HEAD HEAD^{tree} > ocx-typed-publication.txt
+          git bundle create ocx-typed-publication.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} refs/remotes/origin/main > ocx-typed-publication.txt
       - uses: actions/upload-artifact@v4
         with:
           name: ocx-typed-publication
