@@ -1,0 +1,93 @@
+name: Integrate reviewed debugger and native String preview paths
+on:
+  push:
+    branches: [feat/native-declare-strings]
+    paths: [.github/workflows/native-strings-debugger-integrate.yml]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Merge pinned debugger source and apply the reviewed combined preview tests
+        run: |
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          target='2a45fce5f25b5f9e214acb82384119d00d7510cc'
+          subprocess.run(['git','merge-base','--is-ancestor','728a9201806a4d455113867d2778c3262666a05b',target],check=True)
+          result=subprocess.run(['git','merge','--no-commit','--no-ff',target])
+          approved={'desktop/studio.mjs':'7d46b3d7f4497fb2b7619404280b2aa440e346a1','src/ide/main.js':'4f02c60762a1c84ecb067e6a2de77d0d3b621c29','desktop/smoke.cjs':'7b221de34df4d11cd32620060cbc90b77e8ef52f'}
+          if result.returncode:
+              conflicts=[p for p in subprocess.check_output(['git','diff','--name-only','--diff-filter=U','-z']).decode().split('\0') if p]
+              if not conflicts:raise SystemExit('Merge failed without conflicts')
+              for p in conflicts:
+                  if p not in approved and not (p.startswith('dist/') or p in ['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js']):
+                      raise SystemExit('Unreviewed source conflict: '+p)
+              for p in conflicts:
+                  if p in approved:
+                      actual=subprocess.check_output(['git','rev-parse',target+':'+p],text=True).strip()
+                      assert actual==approved[p],p
+                      subprocess.run(['git','checkout',target,'--',p],check=True)
+                  else:
+                      subprocess.run(['git','checkout','--ours','--',p],check=True)
+                      subprocess.run(['git','add','--',p],check=True)
+          # Both branches independently replaced post-hoc srcdoc cancellation.
+          # Keep main's shared F5/Immediate loader and ALL its event tests, adding
+          # this branch's repeated-start, inline-CSP and navigation-trace checks.
+          p=Path('desktop/smoke.cjs');s=p.read_text()
+          assert sha(p.read_bytes())=='b4b8021bf64e9fe9538b1061f54131d00dfb916900a9b0b258420fbf7350c94f'
+          old='''      await js('vb6Studio.run()');
+                await previewFrame('vb6Studio.runtimeFrame');
+                check('IDE preview runs under document-specific CSP', true);
+                await js('vb6Studio.stop()');'''
+          new='''      report.previewNavigations=[];
+                const navigated=(event,url)=>report.previewNavigations.push(typeof url==='string'?url:event.url);
+                root.webContents.on('did-start-navigation',navigated);
+                try {
+                  const urls=new Set();
+                  for(let pass=1;pass<=2;pass++) {
+                    await js('vb6Studio.run()');
+                    const frame=await previewFrame('vb6Studio.runtimeFrame');
+                    check('IDE preview '+pass+' runs under document-specific CSP',true);
+                    check('native preview '+pass+' uses a fresh host document',!urls.has(frame.url));urls.add(frame.url);
+                    check('IDE preview '+pass+' rejects arbitrary inline scripts',await frame.executeJavaScript(`(async()=>{
+                      const script=document.createElement('script');script.textContent='globalThis.untrustedPreviewScript=true';document.body.append(script);
+                      await new Promise(resolve=>setTimeout(resolve,25));return !globalThis.untrustedPreviewScript;
+                    })()`));
+                    await js('vb6Studio.stop()');
+                  }
+                  check('desktop preview never starts or commits srcdoc',!report.previewNavigations.includes('about:srcdoc'));
+                } finally { root.webContents.removeListener('did-start-navigation',navigated); }'''
+          assert s.count(old)==1;s=s.replace(old,new)
+          old='    report.error = error.stack || error.message;'
+          extra='''    try {
+                report.frames=root.webContents.mainFrame.framesInSubtree.map(f=>({url:f.url,detached:f.detached,id:f.frameTreeNodeId}));
+                if(manifest.kind==='studio') report.preview=await js(`(()=>{const s=vb6Studio,f=s.runtimeFrame;return {runState:s.runState,frame:f&&{src:f.src,srcdoc:f.hasAttribute('srcdoc'),connected:f.isConnected},diagnostics:s.diagnostics};})()`);
+              } catch (diagnosticError) { report.diagnosticError=diagnosticError.message; }
+          '''
+          assert s.count(old)==1;s=s.replace(old,extra+old)
+          assert sha(s.encode())=='1e66fa653464035de85092197a4b760d07d2788544d65b4e688e5c3cf70c8b60'
+          p.write_text(s)
+          for p,digest in {'tests/native-preview.test.mjs':'025433ffc9deae19697f0a40652e0393ed72c233e2317cb7f4f5020bf9727ea6','docs/NATIVE-PREVIEW-LIFECYCLE.md':'e4f5dad5103bd364a98c9e626e9ad2367e823ae77c2862eded4f8ec3a2b442ad'}.items():
+              assert sha(Path(p).read_bytes())==digest,p
+          PY
+          npm run build
+          npm test
+          git add desktop/smoke.cjs dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js packages/win32-browser/dist examples
+          git diff --cached --check
+          git commit -m 'merge: retain native debugger and shared preview loading with Declare String export' -m 'Integrate pinned main 2a45fce5f25b5f9e214acb82384119d00d7510cc. Resolve the three reviewed authored conflicts by retaining its shared F5/Immediate loader, then restore stronger repeated-preview/CSP assertions and lifecycle integration tests. Preserve all native String, callback, debugger and Immediate contracts; rebuild combined distributions and pass the full suite.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-declare-strings

@@ -1,6 +1,8 @@
 # Native IDE preview lifecycle
 
-The IDE's document loader is selected before navigation. The normal browser IDE
+F5 and design-mode Immediate share the document loader from the concurrently
+merged debugger work. The loader is selected before navigation; the native
+String extension retains it rather than maintaining a competing F5-only hook. The normal browser IDE
 sets iframe srcdoc; the desktop host first registers the generated document over
 its root-only IPC bridge, then navigates the existing sandboxed frame directly to
 the returned `vb6://app/preview/<id>` URL. Only that host-issued URL shape is accepted.
@@ -18,7 +20,7 @@ A registration response applies only to the run and connected iframe that
 requested it. A late response or rejection for a stopped/replaced run cannot
 navigate another frame or stop its execution. An active registration error stops
 without waiting for a snapshot from a frame that never started; an obsolete error
-does not overwrite a newer run's status. `nativePreviewReady` describes host
+does not overwrite a newer run's status. The shared loader Promise describes host
 registration, **not** successful runtime execution. Native smoke checks separately
 wait for actual frame navigation and the runtime application object.
 
