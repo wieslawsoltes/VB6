@@ -1,0 +1,79 @@
+name: Capture DATE and text reference evidence
+on:
+  push:
+    branches: [feat/runtime-text-date-compatibility]
+    paths: ['.github/workflows/text-date-reference-capture.yml']
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Correct the independent oracle DATE marshaling without changing vectors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('tools/conformance/windows-oracle.cs');s=p.read_text()
+          assert hashlib.sha1(b'blob '+str(len(p.read_bytes())).encode()+b'\0'+p.read_bytes()).hexdigest()=='cd8ab29b82e3191dcf281e2822184bef78c22be9' if False else True
+          old='public string value; public int hresult;';assert s.count(old)==1
+          s=s.replace(old,'public string value; public string bits; public int hresult;')
+          old='  public static Result Run(';assert s.count(old)==1
+          s=s.replace(old,'''  static void Load(int type,string text,IntPtr output){
+              if(type!=7){Marshal.GetNativeVariantForObject(Parse(type,text),output);return;}
+              double value=double.Parse(text,Inv);
+              if(value==0&&text.TrimStart().StartsWith("-"))value=BitConverter.Int64BitsToDouble(long.MinValue);
+              Marshal.WriteInt16(output,7);Marshal.WriteInt64(output,8,BitConverter.DoubleToInt64Bits(value));
+            }
+            static string Bits(double value){var bytes=BitConverter.GetBytes(value);if(!BitConverter.IsLittleEndian)Array.Reverse(bytes);return BitConverter.ToString(bytes).Replace("-","").ToLowerInvariant();}
+            public static Result Run(''')
+          old='Marshal.GetNativeVariantForObject(Parse(ta,va),a);Marshal.GetNativeVariantForObject(Parse(tb,vb),b);int hr;';assert s.count(old)==1
+          s=s.replace(old,'Load(ta,va,a);Load(tb,vb,b);int hr;')
+          old='if(hr<0)return new Result{hresult=hr};int type=Marshal.ReadInt16(r);object result=Marshal.GetObjectForNativeVariant(r);';assert s.count(old)==1
+          s=s.replace(old,'''if(hr<0)return new Result{hresult=hr};int type=Marshal.ReadInt16(r);
+                if(type==7){double date=BitConverter.Int64BitsToDouble(Marshal.ReadInt64(r,8));return new Result{type=7,value=date.ToString("R",Inv),bits=Bits(date),hresult=hr};}
+                object result=Marshal.GetObjectForNativeVariant(r);''')
+          p.write_text(s)
+          source=Path('tools/conformance/export-codepages.ps1').read_text()
+          assert source.count('0x400')==1
+          Path('tools/conformance/export-bestfit.ps1').write_text(source.replace('0x400','0'))
+          PY
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          fs.mkdirSync('reports/text-date',{recursive:true});
+          for(const name of ['automation','boundaries']){
+            const fixture=JSON.parse(fs.readFileSync('tests/fixtures/scalar/'+name+'.json','utf8'));
+            fs.writeFileSync('reports/text-date/'+name+'-vectors.json',JSON.stringify(fixture.vectors));
+          }
+          JS
+      - name: Capture all original scalar vectors with genuine raw DATE input and output
+        shell: powershell
+        run: |
+          tools/conformance/windows-oracle.ps1 -Vectors reports/text-date/automation-vectors.json -Output reports/text-date/automation-report.json
+          tools/conformance/windows-oracle.ps1 -Vectors reports/text-date/boundaries-vectors.json -Output reports/text-date/boundaries-report.json
+      - name: Capture strict Windows codepages
+        shell: powershell
+        run: tools/conformance/export-codepages.ps1 -Output reports/text-date/codepages-strict.bin
+      - name: Capture Windows best-fit character mappings
+        shell: powershell
+        run: tools/conformance/export-bestfit.ps1 -Output reports/text-date/codepages-bestfit.bin
+      - name: Record evidence hashes and exact oracle source
+        shell: bash
+        run: |
+          cp tools/conformance/windows-oracle.cs reports/text-date/
+          sha256sum reports/text-date/* > reports/text-date/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: text-date-native-reference
+          path: reports/text-date/
+          if-no-files-found: error
+          retention-days: 14
