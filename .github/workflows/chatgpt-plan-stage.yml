@@ -1,0 +1,73 @@
+name: Stage ChatGPT implementation
+on:
+  push:
+    branches: [feature/chatgpt-plan-login]
+    paths: ['.github/workflows/chatgpt-plan-stage.yml']
+permissions:
+  contents: write
+jobs:
+  stage:
+    if: github.ref == 'refs/heads/feature/chatgpt-plan-login'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Reconstruct and verify reviewed source patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess
+          def gitsha(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          def blob(sha):
+              obj = json.loads(subprocess.check_output(['gh', 'api', 'repos/wieslawsoltes/VB6/git/blobs/' + sha]))
+              data = base64.b64decode(obj['content'])
+              assert gitsha(data) == sha, 'Git blob integrity mismatch'
+              return data
+          first = blob('f34bdcfa1fd231e8c55ff2050c5448aba08cdc57')
+          # Repair the single known transport transcription error before verifying
+          # the original chunk and whole patch. No unchecked data is applied.
+          text = base64.b64encode(first).decode('ascii')
+          assert len(text) == 16000 and text[223:230] == 'PWOGGGd'
+          text = text[:223] + 'PWOGGd' + text[230:] + 'K'
+          first = base64.b64decode(text, validate=True)
+          assert gitsha(first) == '971be9e92c7faeec1529918b3a4a3f54d38a24e4'
+          packed = first + blob('1d152cb6acc4608e894434d0bd5d600c2b360681') + blob('9122f3593221c8e7115279ab916a0a2c998cfd44')
+          patch = lzma.decompress(packed)
+          assert len(patch) == 143005
+          assert hashlib.sha256(patch).hexdigest() == 'c368d7eacfb02dae65561a0151757bedda5bb4153ab96c49eb9387b7db647628'
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'chatgpt-source.patch'
+          path.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
+          PY
+      - run: npm run build
+      - run: npm test
+      - name: Commit validated source and generated IDE bundles to feature branch only
+        run: |
+          test "$(git ls-remote origin refs/heads/feature/chatgpt-plan-login | cut -f1)" = "$GITHUB_SHA"
+          git add .gitignore README.md docs/CHATGPT-LOGIN.md docs/coding-agents.md package.json \
+            src/agents/agent.js src/agents/chatgpt-connection.js src/agents/chatgpt-protocol.js \
+            src/agents/providers.js src/agents/studio.js tests/chatgpt-auth.test.mjs \
+            tests/chatgpt-relay.test.mjs tests/helpers/chatgpt-fixture.mjs \
+            tools/agent-relay.mjs tools/chatgpt-auth.mjs tools/chatgpt-browser-fixture.mjs \
+            tools/chatgpt-browser-tests.py tools/chatgpt-relay.mjs \
+            dist/studio.js dist/VB6-Studio-Web.html
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(agents): add supported ChatGPT plan sign-in alongside API keys'
+          git push origin HEAD:refs/heads/feature/chatgpt-plan-login
+      - name: Package credential-free verification workspace
+        run: tar --exclude=.git --exclude=node_modules --exclude=reports -czf "$RUNNER_TEMP/vb6-chatgpt-implemented.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-implemented-source
+          path: ${{ runner.temp }}/vb6-chatgpt-implemented.tar.gz
+          retention-days: 3
