@@ -1,3 +1,5 @@
+import {layoutSidecarPath,encodeLayoutSidecar,stripLayoutDesignerProperties} from '../layout/project-sidecar.js';
+import {LAYOUT_KEYS,layoutKey} from '../layout/contract.js';
 import {serializeVBW,nativeWindowStatePath} from './native-window-state.js';
 import {dataSidecarPath,encodeDataSidecar} from '../data/project-sidecar.js';
 import {importNativeFiles,parseNativeProject,patchNativeProject,workspaceFiles,normalizedEntries,listProjectEntries,parseVBG,workspaceProjects,selectWorkspaceProject} from './native-project.js';
@@ -34,7 +36,7 @@ export function parseFRM(text,fileName='Form1.frm'){
 export function serializeFRM(module,strict=false){
   const lines=module.nativeHeaders?.length?[...module.nativeHeaders]:['VERSION 5.00'],form=module.form;
   const write=(node,depth)=>{const grouped=new Set();const collect=g=>{for(const e of g.entries||[])grouped.add(e.key);for(const child of g.groups||[])collect(child);};for(const g of node.propertyGroups||[])collect(g);const indent='   '.repeat(depth),type=node.originalType||(['Form','MDIForm','Menu','PictureBox','Label','TextBox','Frame','CommandButton','CheckBox','OptionButton','ComboBox','ListBox','HScrollBar','VScrollBar','Timer','DriveListBox','DirListBox','FileListBox','Shape','Line','Image','Data','OLE'].includes(node.type)?'VB.'+node.type:node.type);lines.push(`${indent}Begin ${type} ${node.name}`);
-    for(const [key,value]of Object.entries(node.properties||{})){if(key==='Name'||['FontName','FontSize','FontWeight','FontBold','FontItalic','FontUnderline','FontStrikethrough','FontCharset'].includes(key)||grouped.has(key)||['List','GridData','Nodes','Columns','Items','Tabs','Panels','Buttons'].includes(key)&&!value?.resource||typeof value==='object'&&!value?.resource)continue;lines.push(`${indent}   ${key.padEnd(16)}=   ${serializeVBValue(value)}`);}
+    for(const [key,value]of Object.entries(node.properties||{})){if(layoutKey(key)||key==='Name'||['FontName','FontSize','FontWeight','FontBold','FontItalic','FontUnderline','FontStrikethrough','FontCharset'].includes(key)||grouped.has(key)||['List','GridData','Nodes','Columns','Items','Tabs','Panels','Buttons'].includes(key)&&!value?.resource||typeof value==='object'&&!value?.resource)continue;lines.push(`${indent}   ${key.padEnd(16)}=   ${serializeVBValue(value)}`);}
     const writeGroup=(g,level)=>{const tab='   '.repeat(level);lines.push(`${tab}BeginProperty ${g.name}${g.suffix||''}`);for(const e of g.entries){const value=node.properties[e.key];if(value!==undefined)lines.push(`${tab}   ${e.name.padEnd(16)}=   ${serializeVBValue(e.key==='FontWeight'&&node.properties.FontBold!==undefined?(node.properties.FontBold?700:400):value)}`);}for(const child of g.groups)writeGroup(child,level+1);lines.push(tab+'EndProperty');};
     const groups=node.propertyGroups||[];for(const group of groups)writeGroup(group,depth+1);
     if(node.properties.FontName&&!groups.some(g=>g.name.toLowerCase()==='font')){lines.push(`${indent}   BeginProperty Font`,`${indent}      Name            =   ${serializeVBValue(node.properties.FontName)}`,`${indent}      Size            =   ${node.properties.FontSize||8.25}`,`${indent}      Charset         =   ${node.properties.FontCharset||0}`,`${indent}      Weight          =   ${node.properties.FontBold?700:400}`,`${indent}      Underline       =   ${node.properties.FontUnderline||0}`,`${indent}      Italic          =   ${node.properties.FontItalic||0}`,`${indent}      Strikethrough   =   ${node.properties.FontStrikethrough||0}`,`${indent}   EndProperty`);}
@@ -57,6 +59,8 @@ function singleSourceFiles(project,options={}){
   const prepared=prepareResources(project),files=Object.assign(Object.create(null),prepared.files),seen=new Set(Object.keys(files).map(p=>p.toLowerCase()));
   const put=(path,value)=>{path=cleanProjectPath(path);const key=path.toLowerCase();if(seen.has(key))throw new VBError('Native output path collision: '+path,1002);seen.add(key);files[path]=value;};
   const owner=project.nativeProject?.path||project.name+'.vbp';
+  const layout=encodeLayoutSidecar(project);if(layout)put(layoutSidecarPath(owner),layout);
+  for(const m of prepared.modules)if(m.form){for(const node of [m.form,...m.form.controls])for(const key of LAYOUT_KEYS)delete node.properties[key];if(m.nativeSource)m.nativeSource={...m.nativeSource,text:stripLayoutDesignerProperties(m.nativeSource.text),canonical:stripLayoutDesignerProperties(m.nativeSource.canonical)};}
   const sidecar=encodeDataSidecar(project);if(sidecar)put(dataSidecarPath(owner),sidecar);
   if(project.resources)put(project.resources.fileName,writeRES(project.resources));
   put(owner,encodeNativeText(serializeVBP({...project,modules:prepared.modules}),project.nativeProject?.document,options.encoding));

@@ -13,6 +13,7 @@
     }
   ],
   "settings": {
+    "anchoring": false,
     "snapToGrid": true,
     "gridSize": 120,
     "showGrid": true,

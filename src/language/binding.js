@@ -1,3 +1,4 @@
+import {LAYOUT_CONSTANTS,LAYOUT_ENUMS} from '../layout/contract.js';
 import {VBError} from './errors.js';
 import {lower} from '../core/core.js';
 import {VB_CONSTANTS} from '../runtime/constants.js';
@@ -6,9 +7,9 @@ import {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,
 /** Side-effect-free project constant binding. Cached parsed modules keep their
  * ASTs: binding maps are rebuilt on every cross-module validation, so editing a
  * dependency cannot leave worker diagnostics or execution with old values. */
-export function bindConstants(modules) {
+export function bindConstants(modules,settings={}) {
   const diagnostics=[], scopes=new Map(), cache=new Map(), active=new Set();
-  const intrinsic=new Map(Object.entries(VB_CONSTANTS).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
+  const intrinsic=new Map(Object.entries({...VB_CONSTANTS,...(settings.anchoring===true?LAYOUT_CONSTANTS:{})}).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
   let steps=0;
   const report=(e,m,line)=>diagnostics.push({severity:'error',number:e.number||1002,message:e.message,source:e.source||m.name,line:e.line||line||1,column:1});
   const fail=message=>{throw new VBError(message,1002);};
@@ -37,7 +38,7 @@ export function bindConstants(modules) {
     const key=lower(name),own=Object.values(m.enums).find(e=>lower(e.name)===key);
     if(own)return {m,e:own};
     const matches=[];for(const other of modules.values())if(other!==m)for(const e of Object.values(other.enums))if(e.scope!=='private'&&lower(e.name)===key)matches.push({m:other,e});
-    if(matches.length>1)fail('Ambiguous enum type: '+name);return matches[0];
+    if(matches.length>1)fail('Ambiguous enum type: '+name);if(matches.length)return matches[0];if(settings.anchoring===true&&LAYOUT_ENUMS[key]&&!modules.has(key))return {m,e:{name,members:Object.keys(LAYOUT_ENUMS[key])},layout:true};
   }
   function evaluate(node,m,p,depth=0){
     if(!node||++steps>100000||depth>256)fail('Constant expression complexity limit exceeded');
@@ -55,7 +56,7 @@ export function bindConstants(modules) {
         const owner=modules.get(lower(node.object.name));
         if(owner){const entry=scopes.get(owner).globals.get(lower(node.name));if(!entry?.d.constant||owner!==m&&entry.d.scope==='private')fail('Constant is not accessible: '+node.name);return bind(entry);}
         const type=enumDefinition(node.object.name,m);
-        if(type&&type.e.members.some(n=>lower(n)===lower(node.name)))return bind(scopes.get(type.m).globals.get(lower(node.name)));
+        if(type&&type.e.members.some(n=>lower(n)===lower(node.name)))return type.layout?intrinsic.get(lower(node.name)):bind(scopes.get(type.m).globals.get(lower(node.name)));
         fail('Constant member not defined: '+node.name);break;
       }
       default:fail('Constant expression cannot invoke functions, allocate objects, or read variables');
@@ -68,7 +69,7 @@ export function bindConstants(modules) {
     active.add(entry);
     try{
       const {m,p,d}=entry;let value=evaluate(d.initial,m,p);
-      const type=d.explicitType||lower(d.type)!=='variant'?d.type:scalarType(value)||'Double';
+      let type=d.explicitType||lower(d.type)!=='variant'?d.type:scalarType(value)||'Double';if(enumDefinition(type,m))type='Long';
       if(!['byte','integer','long','single','double','currency','date','string','boolean','variant'].includes(lower(type)))fail('Invalid constant type: '+type);
       value=storageScalar(value,type);d.constantType=type;cache.set(entry,value);
       (p?p.constantBindings:m.constantBindings).set(lower(d.name),unbox(value));
@@ -96,6 +97,7 @@ export function bindConstants(modules) {
       const values=Object.create(null);for(const n of e.members)values[lower(n)]=owner.constantBindings.get(lower(n));
       m.enumBindings.set(key,Object.freeze({__vbEnum:true,owner:owner.name,values:Object.freeze(values)}));
     }
+    if(settings.anchoring===true)for(const [key,entries]of Object.entries(LAYOUT_ENUMS))if(!m.enumBindings.has(key)&&!modules.has(key))m.enumBindings.set(key,Object.freeze({__vbEnum:true,owner:'VB6.Layout',values:Object.freeze(Object.fromEntries(Object.entries(entries).map(([k,v])=>[lower(k),v])))}));
     const storage=d=>{delete d.storageType;try{if(enumDefinition(d.type,m))d.storageType='Long';}catch(e){report(e,m,d.line);}};
     for(const d of m.declarations)storage(d);
     for(const fields of Object.values(m.types))for(const d of fields)storage(d);

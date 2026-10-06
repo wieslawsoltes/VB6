@@ -286,3 +286,7 @@ memory limits, stale-workspace protection and non-Git boundaries.
 ## ChatGPT account or API-key coding agents
 
 The OpenAI connection now offers **ChatGPT account — ChatGPT plan usage** alongside the existing API-key mode. The supported local/open-source OAuth flow runs through the protected local agent relay; no Codex credential copying or API-key fallback is used. Account selection, sign-in/consent, model discovery, streaming IDE tools, refresh and sign-out retain the classic IDE appearance and permission checks. See [ChatGPT sign-in setup, security and preview limitations](docs/CHATGPT-LOGIN.md). Live-account entitlement/inference validation is separate from the deterministic test fixtures.
+
+## Optional anchoring and automatic layout
+
+Enable **Tools → Options → General → Layout Extensions → Enable anchoring and automatic layout (this project)** to expose Windows Forms-style edge anchoring, docking and flow layout in the classic designer, Properties, code and exports. The extension is **off and hidden by default**. The reusable, dependency-free `@vb6/auto-layout` package includes ES module/browser builds and TypeScript declarations. See [the layout guide](docs/anchoring-layout.md) and [standalone package](packages/auto-layout/README.md) for semantics, export compatibility and validation.

@@ -1048,6 +1048,12 @@ body{font-family:var(--vb-font);font-size:11px;color:var(--vb-text)}
 .gutter-line.has-bookmark{box-shadow:inset 3px 0 var(--vb-selection)}.bookmark-symbol{display:block;margin:auto;width:8px;height:10px;border:1px solid var(--vb-selection);background:var(--vb-selection);clip-path:polygon(0 0,100% 0,100% 100%,50% 70%,0 100%)}
 @media(max-width:620px){.object-columns{grid-template-columns:minmax(80px,35%) 4px minmax(90px,1fr)}.object-toolbar button{font-size:10px;padding:1px 3px}.object-search{flex-wrap:wrap}.object-search label{font-size:10px}.object-definition{height:80px}.project-search-fields{flex-wrap:wrap}.project-search-fields label:first-child{flex-basis:55%}.project-replace-row label{flex-direction:column;align-items:stretch}.project-search-options{font-size:10px;gap:3px}}
 
+/* Optional anchoring editor; classic theme tokens keep it native to the IDE. */
+.anchor-diagram{display:grid;grid-template:36px 60px 36px / 75px 1fr 75px;gap:8px;padding:12px;border:2px inset var(--vb-button-face,#c0c0c0);margin:8px 0}
+.anchor-top{grid-area:1/2}.anchor-bottom{grid-area:3/2}.anchor-left{grid-area:2/1}.anchor-right{grid-area:2/3}.anchor-control{grid-area:2/2;display:flex;align-items:center;justify-content:center;border:2px outset var(--vb-button-face,#c0c0c0)}
+.anchor-edge.selected{background:var(--vb-selection,#000080);color:var(--vb-selection-text,#fff)}.anchor-presets{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.anchor-summary{display:block;min-height:18px}
+.designer-anchor-guide{position:absolute;border-top:1px dashed var(--vb-selection,#000080);border-left:1px dashed var(--vb-selection,#000080);pointer-events:none;opacity:.65}
+
 .source-info{position:absolute;z-index:30;max-width:min(620px,100%);max-height:90px;overflow:auto;padding:4px 6px;border:1px solid var(--vb-dark);box-shadow:1px 1px var(--vb-shadow);background:var(--vb-info);color:var(--vb-info-text);font:12px/17px Tahoma,Arial,sans-serif;white-space:pre-wrap;user-select:text}
 .source-info strong{font-weight:700}
 .source-editor .completion-list{width:240px;max-height:190px;padding:0;overflow:auto;box-sizing:border-box}
