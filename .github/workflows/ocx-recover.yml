@@ -1,0 +1,133 @@
+name: OCX recovered source validation
+on:
+  push:
+    branches: [feat/ocx-container-source]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-recover-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python .ocx-restore/apply.py
+      - run: npm run build
+      - run: python .ocx-restore/apply.py --verify-tree
+      - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ocx-recovery-diagnostics
+          include-hidden-files: true
+          path: .ocx-restore
+  native:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python .ocx-restore/apply.py
+      - run: node tools/interop/test-container-contracts.mjs
+      - run: node tools/interop/test-native.mjs
+      - run: node tools/interop/test-activex.mjs
+      - run: node tools/interop/test-ocx.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-recovered-native-${{ matrix.architecture }}
+          path: reports/native-interop
+          retention-days: 7
+  browser:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python .ocx-restore/apply.py
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Actual classic IDE and VB source-control workflows
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: |
+          python tools/browser-ocx-tests.py
+          python tools/browser-ocx-source-lab.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-recovered-browser-${{ matrix.browser }}
+          path: reports/ocx-browser
+          retention-days: 7
+  publish:
+    needs: [prepare, native, browser]
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-container-source'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python .ocx-restore/apply.py
+      - run: npm run build
+      - run: python .ocx-restore/apply.py --verify-tree
+      - name: Commit validated source and remove data-only transport
+        run: |
+          # Keep this workflow byte-for-byte; only the authorized connector
+          # removes it after publication. No workflow permission escalation.
+          git restore --staged .github/workflows/ocx-recover.yml
+          rm -rf .ocx-restore
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(ocx): container contracts, VB source controls and native persistence'
+          git bundle create ocx-recovered-publication.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > ocx-recovered-publication.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-recovered-publication
+          path: |
+            ocx-recovered-publication.bundle
+            ocx-recovered-publication.txt
+          retention-days: 7
+      - name: Publish without rewriting branch history
+        run: git push origin HEAD:refs/heads/feat/ocx-container-source
