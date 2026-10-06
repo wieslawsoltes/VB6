@@ -1,0 +1,10 @@
+{
+  "name": "@vb6/native-debugger",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Permission-gated Windows CDB debugger sessions and browser bridge",
+  "license": "MIT",
+  "engines": {"node": ">=22"},
+  "exports": {".": "./src/cdb-session.mjs", "./bridge": "./src/bridge.mjs", "./protocol": "./src/protocol.mjs"},
+  "files": ["src", "README.md"]
+}

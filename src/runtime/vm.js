@@ -9,6 +9,7 @@ import {hasDataDefault,hasDataMember,dataDefaultType} from '../data/defaults.js'
 import {defaultIdentifierType} from '../language/default-types.js';
 import {DebugInspector} from './debug-inspector.js';
 import {planLiveEdit,nextStatementIndex} from './live-edit.js';
+import {planVersionedEdit} from './versioned-edit.js';
 import {encodeVariable,decodeVariable,makeRecord} from './binary-codec.js';
 import { Signal, lower, VERSION } from '../core/core.js';
 import { VBError, splitTop, tokenize } from '../language/lexer.js';
@@ -86,6 +87,17 @@ export class VirtualMachine extends Signal {
     this.immediatePreparation=(async()=>{try{await this.initialize();if(this.state==='stopped')throw new StopExecution();this.setState('idle');return this;}catch(error){this.stop();throw error;}})();
     return this.immediatePreparation;
   }
+  /** Enable event-driven design execution only after an explicit debugger action.
+   * Preparing the session still never executes project startup. */
+  configureImmediateEvents(enabled){
+    if(typeof enabled!=='boolean'||!this.immediateContext||!this.options.debuggerEnabled)throw new VBError('A prepared design-mode debugger session is required',5);
+    if(this.debugEvaluation||this.stack.length||!['idle','running'].includes(this.state))throw new VBError('Finish the current handler or Reset before changing Immediate event delivery',5);
+    this.immediateEvents=enabled;
+    if(!enabled){for(const event of this.eventQueue)event.resolve?.();this.eventQueue=[];}
+    this.setState(enabled?'running':'idle');
+    if(enabled)queueMicrotask(()=>this.processEvents());
+    return {enabled,state:this.state,startupExecuted:false};
+  }
   async initialize() {
     if(!this.program.valid)throw new VBError(this.program.diagnostics.map(d=>`${d.source}:${d.line}: ${d.message}`).join('\n'),1002);
     for(const module of this.program.modules.values())if(module.kind!=='class')this.instances.set(lower(module.name),new VBInstance(module));
@@ -145,7 +157,7 @@ export class VirtualMachine extends Signal {
   }
   async attachForm(instance){if(this.host.createForm){instance.formObject=await this.host.createForm(structuredClone(instance.module.form),instance,this);for(const [name,control]of instance.formObject.controlMap||[])instance.fields.set(lower(name),new Cell('Object',control));this.formInstances.add(instance);}}
   formProcedure(instance,event){return instance.module.procedures.get((instance.module.form?.type==='MDIForm'?'mdiform_':'form_')+event);}
-  async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){instance.loaded=true;await instance.formObject.initializeDataBindings?.();const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
+  async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){if(this.immediateContext&&this.immediateEvents&&!instance.designInitialized){instance.designInitialized=true;const init=this.formProcedure(instance,'initialize');if(init)await this.callProcedure(instance,init,[]);}instance.loaded=true;await instance.formObject.initializeDataBindings?.();const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
   async showForm(instance,modal=false){
     if(this.immediateContext)this.host.debugInteraction?.();
     if(modal&&(instance.module.form?.type==='MDIForm'||Number(instance.module.form?.properties?.MDIChild)))throw new VBError('MDI forms and child forms cannot be shown modally',401);
@@ -498,14 +510,16 @@ export class VirtualMachine extends Signal {
     if(this.breakpoints.size||this.stepMode||this.runTarget||this.watchpoints.length||this.pauseRequested)await this.debugger.checkpoint(ins,frame);
     const now=performance.now();if(now-this.lastYield>=this.options.sliceMilliseconds){await new Promise(resolve=>setTimeout(resolve,0));this.lastYield=performance.now();if(this.state==='stopped')throw new StopExecution();}
   }
-  applyEdits(project){
+  applyEdits(project,{policy='strict'}={}){
+    if(!['strict','versioned'].includes(policy))throw new VBError('Invalid live-edit policy',5);
     if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before editing code',5);
     if(this.state!=='paused'&&!(this.state==='running'&&!this.stack.length))throw new VBError('Pause execution before applying code changes',5);
-    const next=compileProject(project),plan=planLiveEdit(this.program,next,this.stack),invalidated=[];
+    const next=compileProject(project),plan=policy==='versioned'?planVersionedEdit(this.program,next,this.stack,this.codeRevision||0):planLiveEdit(this.program,next,this.stack),invalidated=[];
     // Procedure objects retain their identity: pending events, property references,
     // class instances and suspended caller frames all observe the committed code.
     for(const {oldProc,newProc}of plan.updates)Object.assign(oldProc,newProc);
     for(const {frame,...update}of plan.frameUpdates)Object.assign(frame,update);
+    for(const {module,name}of plan.removedProcedures||[])module.procedures.delete(name);
     for(const frame of this.stack.slice(0,-1)){frame.activePc=frame.pc-1;frame.activeInstruction=frame.proc.code[frame.activePc];}
     for(const [key,module]of this.program.modules){const replacement=next.modules.get(key);for(const [name,proc]of replacement.procedures)if(!module.procedures.has(name))module.procedures.set(name,proc);module.source=replacement.source;}
     const breakpoints=[];for(const bp of this.breakpoints.values()){const mapped=plan.lineMap.get(lower(bp.module)+':'+bp.line);if(mapped===undefined)invalidated.push(bp);else breakpoints.push({...bp,line:mapped});}
@@ -513,12 +527,13 @@ export class VirtualMachine extends Signal {
     this.program.settings=next.settings;this.program.sourceProject=structuredClone(project);this.codeRevision=(this.codeRevision||0)+1;
     this.emit('breakpoints',breakpoints);
     if(this.state==='paused'){this.debugPauseId++;const frame=this.currentFrame,ins=frame.proc.code[frame.pc];frame.lastLine=ins?.line??null;frame.lastPc=frame.pc;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:'code-edit',pauseId:this.debugPauseId});}
-    const result={revision:this.codeRevision,breakpoints,invalidatedBreakpoints:invalidated,updatedProcedures:plan.updates.length};
+    const result={revision:this.codeRevision,breakpoints,invalidatedBreakpoints:invalidated,updatedProcedures:plan.updates.length,retainedFrames:plan.retainedFrames||[]};
     this.emit('codeChanged',result);return result;
   }
   setNextStatement(module,line,column=null){
     if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before moving execution',5);
     const frame=this.currentFrame;if(this.state!=='paused'||!frame)throw new VBError('Set Next Statement is available only in break mode',5);
+    if(frame.pinnedSource!==undefined)throw new VBError('This invocation is executing a retained source revision; step it or let it return before redirecting from edited source',5);
     if(lower(module)!==lower(frame.module.name))throw new VBError('The next statement must remain in the active procedure',5);
     frame.pc=nextStatementIndex(frame,Number(line),column);frame.debugRedirect=true;frame.lastPc=frame.pc;frame.lastLine=frame.proc.code[frame.pc].line;
     this.debugPauseId++;this.emit('pause',{instruction:frame.proc.code[frame.pc],frame,stack:[...this.stack],reason:'set-next',pauseId:this.debugPauseId});
@@ -628,12 +643,12 @@ export class VirtualMachine extends Signal {
     this.eventQueue.push(event);this.processEvents();return event.promise;
   }
   dispatch(module,name,args=[],{coalesce=false}={}){
-    if(this.state==='stopped'||this.state==='error'||this.immediateContext)return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
+    if(this.state==='stopped'||this.state==='error'||(this.immediateContext&&!this.immediateEvents))return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
     if(coalesce&&this.eventQueue.some(e=>e.key===key))return Promise.resolve();if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest event discarded.');return Promise.resolve();}
     return new Promise((resolve,reject)=>{this.eventQueue.push({instance,proc,args,key,resolve,reject});this.processEvents();});
   }
   async runQueuedEvent(event){try{event.resolve(await(event.action?event.action():this.callProcedure(event.instance,event.proc,event.args)));}catch(error){if(!(error instanceof StopExecution))this.reportError(error);event.resolve(undefined);}}
-  async processEvents(){if(this.processing||this.stack.length||this.state==='paused'||this.debugEvaluation||this.immediateContext)return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
+  async processEvents(){if(this.processing||this.stack.length||this.state==='paused'||this.debugEvaluation||(this.immediateContext&&!this.immediateEvents))return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
   async immediate(text,options={}){
     if(this.state==='paused')return this.evaluateExplicit(text,{...options,immediate:true});
     if(!['ready','idle','running'].includes(this.state)||this.stack.length)throw new VBError('Pause execution before using the Immediate window',5);
@@ -661,7 +676,10 @@ export class VirtualMachine extends Signal {
         if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);
         await ref.set(objectSet?value:await this.defaultValue(value));
       }else{
-        value=await this.evaluateScalar(parseCall(statement.replace(/^Call\s+/i,''),{explicit:/^Call\s+/i.test(statement)}),frame);if(value!==undefined)this.output(describe(value));
+        value=await this.evaluateScalar(parseCall(statement.replace(/^Call\s+/i,''),{explicit:/^Call\s+/i.test(statement)}),frame);
+        // A tagged Empty result is still a void command. Explicit ?/Print above
+        // displays Empty; an ordinary Sub/host call must not add a phantom line.
+        if(unbox(value)!==undefined)this.output(describe(value));
       }
     }
     return value;

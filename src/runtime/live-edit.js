@@ -1,5 +1,5 @@
 import {statementIndex} from './debug-control.js';
-import {instructionMap,linearInstruction,instructionKey} from './instruction-map.js';
+import {instructionMap,linearInstruction,instructionKey,uniqueInstructionLines} from './instruction-map.js';
 import {VBError} from '../language/lexer.js';
 const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
 const executionSettings=settings=>{const {errorTrapping,...rest}=settings||{};return rest;};
@@ -12,6 +12,24 @@ function instructionShape(ins){
   return rest;
 }
 export function sameActiveLayout(a,b){return a.length===b.length&&a.every((ins,i)=>json(instructionShape(ins))===json(instructionShape(b[i])));}
+/** Static locals outlive the procedure invocation. Ordinary stack versioning
+ * cannot reinterpret their existing Cells, including those in inactive methods.
+ * New slots are safe; removing or changing an existing storage layout is not.
+ */
+export function validateStaticStorage(oldModule,newModule){
+  const declarations=proc=>{
+    const slots=new Map();
+    for(const ins of proc?.code||[])if(ins.op==='dim'&&(ins.static||proc.static))for(const declaration of ins.decls){
+      const {initial,...layout}=declaration;
+      slots.set(declaration.name.toLowerCase(),json(layout));
+    }
+    return slots;
+  };
+  for(const [name,oldProc]of oldModule.procedures){
+    const before=declarations(oldProc),after=declarations(newModule.procedures.get(name));
+    for(const [key,layout]of before)if(after.get(key)!==layout)throw new VBError('Restart required: static local storage changed: '+oldModule.name+'.'+oldProc.name+'.'+key,5);
+  }
+}
 /** Validate the entire patch before touching any live object, frame or bytecode. */
 export function planLiveEdit(current,next,stack){
   if(!next.valid){const d=next.diagnostics[0];throw new VBError('Code changes were not applied: '+d.message,d.number,d.source,d.line);}
@@ -20,6 +38,7 @@ export function planLiveEdit(current,next,stack){
   const updates=[],lineMap=new Map(),frameUpdates=[],active=new Set(stack.map(f=>f.proc));
   for(const [key,oldModule]of current.modules){
     const newModule=next.modules.get(key);
+    validateStaticStorage(oldModule,newModule);
     if(json(moduleShape(oldModule))!==json(moduleShape(newModule)))throw new VBError('Restart required: module declarations, types, events, forms, or options changed in '+oldModule.name,5);
     for(const [name,oldProc]of oldModule.procedures){
       const newProc=newModule.procedures.get(name);
@@ -38,7 +57,7 @@ export function planLiveEdit(current,next,stack){
         for(const [oldIndex,newIndex]of mapping)if(oldProc.code[oldIndex]&&newProc.code[newIndex]&&!oldProc.code[oldIndex].implicit)lineMap.set(key+':'+oldProc.code[oldIndex].line,newProc.code[newIndex].line);
       }
       else if(same)oldProc.code.forEach((ins,i)=>{if(!ins.implicit)lineMap.set(key+':'+ins.line,newProc.code[i].line);});
-      else for(const ins of oldProc.code.filter(i=>!i.implicit)){const comparable=instructionKey(ins),matches=newProc.code.filter(n=>instructionKey(n)===comparable);if(matches.length===1)lineMap.set(key+':'+ins.line,matches[0].line);}
+      else for(const [line,mapped]of uniqueInstructionLines(oldProc.code,newProc.code))lineMap.set(key+':'+line,mapped);
       updates.push({oldProc,newProc});
     }
   }
