@@ -113,13 +113,17 @@ test('retries: completed mutation followed by server failure is never replayed; 
   assert.equal(f.agent.usage.calls, 1); assert.equal(f.agent.usage.tokens, 27); assert.ok(!visible(f.agent).includes('PRIVATE-SECRET'));
 });
 test('retries: bounded exhaustion offers Continue, preserves history, and honors Retry-After on that fresh run', async t => {
+  // Model elapsed time explicitly. A real scheduler need not resume this test
+  // within 10 ms when the full repository suite is running concurrently.
+  let now = Date.now(); t.mock.method(Date, 'now', () => now);
   const f = fixture(t); let n = 0;
   await assert.rejects(run(f, 'openai', async () => { n++; throw new ProviderTransportError('Unavailable', {retryable: true, retryAfterMs: 5000}); }, {maxRetries: 2}));
   assert.equal(n, 3); assert.equal(f.agent.canResume, true); assert.equal(f.agent.blocked, false);
   assert.equal(f.agent.history.length, 1); assert.equal(f.agent.usage.requests, 3); assert.equal(f.agent.unreportedRequests, 3);
-  assert.equal(f.waits.length, 2); assert.ok(f.waits.every(ms => ms >= 4990));
+  assert.deepEqual(f.waits, [5000, 5000]);
+  now += 1250; // A manually confirmed Continue must honor only the remaining cooldown.
   await f.agent.resume({transport: async (_, {receive}) => receive(packet('openai'))});
-  assert.equal(f.waits.length, 3); assert.ok(f.waits[2] >= 4990); assert.equal(f.agent.usage.requests, 4); assert.equal(f.agent.history.filter(x => x.role === 'user').length, 1);
+  assert.equal(f.waits.length, 3); assert.equal(f.waits[2], 3750); assert.equal(f.agent.usage.requests, 4); assert.equal(f.agent.history.filter(x => x.role === 'user').length, 1);
 });
 test('retries: per-run request cap wins over retry count and a missing usage attempt is accounted', async t => {
   const f = fixture(t); let n = 0;

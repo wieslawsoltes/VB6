@@ -5,7 +5,7 @@ export class AgentFollowups {
   constructor({maxItems = 16, maxCharacters = 200000, getWorkspace} = {}) {
     if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 100 || !Number.isSafeInteger(maxCharacters) || maxCharacters < 1 || maxCharacters > 1000000) throw new Error('Invalid follow-up queue limits.');
     if (getWorkspace !== undefined && typeof getWorkspace !== 'function') throw new Error('Invalid follow-up workspace reader.');
-    this.getWorkspace = getWorkspace; this.maxItems = maxItems; this.maxCharacters = maxCharacters; this.items = []; this.revision = 0; this.sequence = 0;
+    this.getWorkspace = getWorkspace; this.maxItems = maxItems; this.maxCharacters = maxCharacters; this.items = []; this.revision = 0; this.sequence = 0; this.selectedId = '';
   }
   get characters() { return this.items.reduce((sum, item) => sum + item.text.length, 0); }
   validate(text, replaced = 0) {
@@ -44,5 +44,5 @@ export class AgentFollowups {
   }
   matches(item) { return this.items.some(current => current.id === item.id && current.version === item.version && current.text === item.text); }
   list() { return this.items.slice(); }
-  clear() { this.items = []; this.revision++; }
+  clear() { this.items = []; this.selectedId = ''; this.revision++; }
 }
