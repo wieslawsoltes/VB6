@@ -1,0 +1,7 @@
+diff --git a/tools/interop/AutomationHost.cs b/tools/interop/AutomationHost.cs
+index f880504..4020c2f 100644
+--- a/tools/interop/AutomationHost.cs
++++ b/tools/interop/AutomationHost.cs
+@@ -49 +49 @@ namespace VB6Interop {
+-    public readonly List<EventConnection> Events=new List<EventConnection>(); public int EventDepth; public bool DesignMode;
++    public readonly List<EventConnection> Events=new List<EventConnection>(); public int EventDepth; public bool DesignMode=false;
