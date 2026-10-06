@@ -103,7 +103,7 @@ with sync_playwright() as pw:
             check('typed Optional and named calls export without rewriting source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
             check('call-argument File Make EXE equals Node output', downloaded.suggested_filename == 'AotCalls.exe' and (OUT / 'AotCalls.exe').read_bytes() == (calls_dir / 'AotCalls.exe').read_bytes())
             check('call export has no network or page errors', not errors and not requests)
-        for folder, name in [('interval-contract', 'AotIntervalContract'), ('large-arrays', 'AotLargeArrays'), ('callbacks', 'AotCallbacks'), ('string-interop', 'AotStringInterop'), ('string-interop', 'AotWin32Strings')]:
+        for folder, name in [('interval-contract', 'AotIntervalContract'), ('large-arrays', 'AotLargeArrays'), ('callbacks', 'AotCallbacks'), ('string-interop', 'AotStringInterop'), ('string-interop', 'AotWin32Strings'), ('string-interop', 'AotStringOwnership')]:
             extra = ROOT / 'validation' / folder
             if not (extra / f'{name}.vb6web').exists():
                 continue
@@ -132,7 +132,7 @@ with sync_playwright() as pw:
             fixtures.extend((calls_dir, name) for name in ('AotCalls', 'AotCallProperties'))
         if date_dir.exists():
             fixtures.extend((date_dir, name) for name in ('AotDates', 'AotDateABI', 'AotDateCalls') if (date_dir / f'{name}.vb6web').exists())
-        for folder, name in [('interval-contract','AotIntervalContract'), ('large-arrays','AotLargeArrays'), ('callbacks','AotCallbacks'), ('callbacks','AotCallbackThreadGuard'), ('string-interop','AotStringInterop'), ('string-interop','AotWin32Strings')]:
+        for folder, name in [('interval-contract','AotIntervalContract'), ('large-arrays','AotLargeArrays'), ('callbacks','AotCallbacks'), ('callbacks','AotCallbackThreadGuard'), ('string-interop','AotStringInterop'), ('string-interop','AotWin32Strings'), ('string-interop','AotStringOwnership')]:
             extra = ROOT / 'validation' / folder
             if (extra / f'{name}.vb6web').exists():
                 fixtures.append((extra, name))

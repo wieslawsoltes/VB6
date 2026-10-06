@@ -60,3 +60,22 @@ long __stdcall PrivateBytes(void) {
  if(!GetProcessMemoryInfo(GetCurrentProcess(),(PROCESS_MEMORY_COUNTERS*)&counters,sizeof(counters)))return -1;
  return (long)counters.PrivateUsage;
 }
+
+/* Ownership edge cases are separate from unsafe/malformed DLL contracts. Every
+ * replacement is a fresh byte-BSTR, and each old owner is released exactly once. */
+long __stdcall AliasBuffers(BSTR first,BSTR second) {
+ if(!first || !second || first==second || SysStringByteLen(first)<1 || SysStringByteLen(second)<1)return -1;
+ ((char*)first)[0]='A';((char*)second)[0]='B';return 1;
+}
+void __stdcall AliasOwners(BSTR *first,BSTR *second) {
+ BSTR a,b;
+ if(first==second || (*first && *first==*second))ExitProcess(238);
+ a=SysAllocStringByteLen("first",5);b=SysAllocStringByteLen("second",6);
+ if(!a || !b)ExitProcess(239);
+ SysFreeString(*first);SysFreeString(*second);*first=a;*second=b;SetLastError(17800);
+}
+void __stdcall PartialOutputs(BSTR *first,BSTR *second) {
+ BSTR a=SysAllocStringByteLen("committed",9),b=ReturnString(3);
+ if(!a || !b)ExitProcess(240);
+ SysFreeString(*first);SysFreeString(*second);*first=a;*second=b;SetLastError(17801);
+}

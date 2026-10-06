@@ -6696,7 +6696,6 @@ const nativeStorageMethods = {
       if(name==='strptr'){
         const variable=this.variable(args[0]);
         if(variable){if(variable.nativeBounds&&!variable.elementOf)this.fail('StrPtr requires a String element, not an array');const pin=this.address(variable);x.emit(0x8b,0x00);this.releaseArrayPin(pin);}
-        else if(args[0].kind==='id'&&key(args[0].name)==='vbnullstring')x.value(0);
         else this.expression(args[0]);
         return true;
       }

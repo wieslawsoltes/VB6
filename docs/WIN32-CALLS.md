@@ -116,10 +116,10 @@ Private Sub Example()
 End Sub
 ```
 
-This is intentionally limited to an external **ByRef Long** declaration. It is
-The external ByRef String override is now implemented separately under
-[the ANSI byte-BSTR marshalling contract](WIN32-STRING-INTEROP.md). This remains
-not a general reinterpret-cast for Currency, Double, arrays, records,
+The numeric override is limited to an external **ByRef Long** declaration.
+The external ByRef String override is implemented separately under
+[the ANSI byte-BSTR marshalling contract](WIN32-STRING-INTEROP.md). Neither is
+a general reinterpret-cast for Currency, Double, arrays, records,
 callbacks or project procedures. For project ByRef value copies, use parentheses.
 As with all native Declare calls, the author's signature must match the real API;
 incorrect native pointers/calling conventions are not sandboxed or repaired.

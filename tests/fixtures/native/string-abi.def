@@ -17,3 +17,6 @@ EXPORTS
  Order=_Order@12
  CheckEncoding=_CheckEncoding@12
  PrivateBytes=_PrivateBytes@0
+ AliasBuffers=_AliasBuffers@8
+ AliasOwners=_AliasOwners@8
+ PartialOutputs=_PartialOutputs@8

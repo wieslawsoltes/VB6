@@ -23,13 +23,23 @@ try {
  if($LASTEXITCODE -ne 0){throw 'Independent C String oracle compilation failed'}
 } finally {Pop-Location}
 Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class StringOracleEnvironment {
  [DllImport("kernel32.dll")] public static extern uint GetACP();
+ delegate bool EnumProc(IntPtr h,IntPtr p);
+ [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback,IntPtr p);
+ [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent,EnumProc callback,IntPtr p);
+ [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint id);
+ [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW",CharSet=CharSet.Unicode)] static extern IntPtr TextMessage(IntPtr h,uint msg,IntPtr length,StringBuilder text,uint flags,uint timeout,out UIntPtr result);
+ static string Text(IntPtr h) {var text=new StringBuilder(2048);UIntPtr result;TextMessage(h,13,(IntPtr)text.Capacity,text,2,200,out result);return text.ToString();}
+ public static string Diagnostics(int id) {var result=new List<string>();EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==id){result.Add(Text(h));EnumChildWindows(h,(c,q)=>{result.Add(Text(c));return true;},IntPtr.Zero);}return true;},IntPtr.Zero);return string.Join(" | ",result);}
 }
 '@
 $results=@()
-foreach($entry in @(@('AotStringInterop','string-interop-build.json'),@('AotWin32Strings','system-strings-build.json'))) {
+foreach($entry in @(@('AotStringInterop','string-interop-build.json'),@('AotWin32Strings','system-strings-build.json'),@('AotStringOwnership','string-ownership-build.json'))) {
  $program=$entry[0]
  $plan=Get-Content (Join-Path $out $entry[1]) -Raw | ConvertFrom-Json
  $report=[ordered]@{ok=$false;program=$program;expectedExit=0;assertions=$plan.checks;platform=[Environment]::OSVersion.VersionString;hostArchitecture=$env:PROCESSOR_ARCHITECTURE;executableArchitecture='x86';ansiCodePage=[StringOracleEnvironment]::GetACP();dependencies=@()}
@@ -51,7 +61,7 @@ foreach($entry in @(@('AotStringInterop','string-interop-build.json'),@('AotWin3
   $process.StartInfo.UseShellExecute=$false;$process.EnableRaisingEvents=$true
   if(-not $process.Start()){throw 'String executable launch failed'}
   $null=$process.Handle
-  if(-not $process.WaitForExit(60000)){throw 'String execution timed out'}
+  if(-not $process.WaitForExit(60000)){throw ('String execution timed out: '+[StringOracleEnvironment]::Diagnostics($process.Id))}
   $report.exitCode=$process.ExitCode
   if($report.exitCode -ne 0){
    $detail=if($report.exitCode -gt 0 -and $report.exitCode -le $plan.checks.Count){$plan.checks[$report.exitCode-1]}else{'Unexpected native String failure'}

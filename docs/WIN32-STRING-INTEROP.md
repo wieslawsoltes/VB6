@@ -101,6 +101,15 @@ bounded to **4,194,304 bytes** to accommodate Windows ACP configurations includi
 UTF-8. These checks do not sandbox native writes or validate arbitrary pointers.
 The optional maxArrayBytes setting is not a cumulative String or process budget.
 
+## Ownership edge cases
+
+The native ownership suite also checks aliased output arguments with named-order
+reordering, grouped private copies, a successful first output followed by a
+rejected oversized second output, and repeated failure cleanup. These are explicit
+marshaler contracts, not a claim that every original VB6 alias behavior is identical.
+An authored constant named `vbNullString` retains its lexical binding even inside
+`StrPtr`; only the actual intrinsic maps to a null pointer.
+
 ## Independent validation
 
 `node tools/win32-string-fixtures.mjs` generates two programs:
@@ -112,8 +121,11 @@ The optional maxArrayBytes setting is not a cumulative String or process budget.
 - **AotWin32Strings** calls real kernel32 ANSI and explicit Unicode APIs without
   a test DLL, including environment input/output and module file-name buffers.
 
+`node tools/win32-string-edge-fixture.mjs` additionally emits **AotStringOwnership**
+for the ownership/binding edge cases. Its test DLL is also explicitly declared.
+
 `tools/test-win32-string-interop.ps1` builds only the independent oracle DLL using
-installed MSVC, runs both JavaScript-generated EXEs in separate temporary folders,
+installed MSVC, runs all three JavaScript-generated EXEs in separate temporary folders,
 checks their hashes and exit codes, and records the actual ANSI code page. The
 compiler and SDK do not require MSVC or that oracle. CI also reruns the existing
 scalar callback ABI suite and verifies Node/IDE/SDK/Blob-worker byte equality.
