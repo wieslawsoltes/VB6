@@ -2,14 +2,14 @@ name: Text code-page reference
 on:
   push:
     branches: [feat/runtime-text-compatibility]
-    paths: ['.github/workflows/text-codepage-reference.yml','tools/conformance/export-text-nls.ps1','tools/conformance/text-edge-reference.ps1']
+    paths: ['.github/workflows/text-codepage-reference.yml','tools/conformance/export-text-nls.ps1','tools/conformance/text-edge-reference.ps1','tools/conformance/script-text-reference.ps1']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   windows-reference:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,6 +23,9 @@ jobs:
       - name: Capture malformed input, supplementary characters and combined transformations
         shell: powershell
         run: tools/conformance/text-edge-reference.ps1 -Output reports/text-codepages/windows-text-edges.json
+      - name: Capture Script Host byte-string operations independently
+        shell: powershell
+        run: tools/conformance/script-text-reference.ps1 -Output reports/text-codepages/windows-script-text.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
