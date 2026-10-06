@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Merge reviewed main and reject handwritten conflicts
+      - name: Merge reviewed main with exact documentation resolution
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -35,10 +35,15 @@ jobs:
           result=subprocess.run(['git','merge','--no-ff','--no-commit',main]);assert result.returncode in (0,1)
           conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
           generated=lambda p:p.startswith('dist/') or p.startswith('examples/') or p in ('src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js')
-          assert all(generated(p) for p in conflicts),f'Unreviewed source conflicts: {conflicts}'
+          assert all(p=='README.md' or generated(p) for p in conflicts),f'Unreviewed source conflicts: {conflicts}'
           if conflicts:
               subprocess.run(['git','checkout','--ours','--',*conflicts],check=True)
               subprocess.run(['git','add','--',*conflicts],check=True)
+          upstream=subprocess.check_output(['git','show',main+':README.md'],text=True)
+          marker='### Advanced browser Win32 GDI';assert upstream.count(marker)==1
+          path=Path('README.md');source=path.read_text();assert marker not in source
+          path.write_text(source.rstrip()+'\n\n'+marker+upstream.split(marker,1)[1])
+          subprocess.run(['git','add','README.md'],check=True)
           for path in ('packages/win32-browser','src/graphics/surface.js','src/runtime/win32.js'):
               assert not git('diff','--cached','--name-only',main,'--',path),path
           for path in ('tools/interop','src/runtime/automation.js','src/runtime/automation-wire.js','src/runtime/values.js','src/runtime/vm.js','src/language'):
@@ -57,6 +62,12 @@ jobs:
           git commit -m 'Merge current Win32 geometry without losing scalar metadata or native transport'
           npm run build
           git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Require the independently tested complete product tree
+        run: |
+          export GIT_INDEX_FILE="$RUNNER_TEMP/compat-index"
+          git read-tree HEAD
+          git rm --cached -- .github/workflows/compatibility-main-refresh.yml
+          test "$(git write-tree)" = 982bce2ddeb8d363fb1f091c6aa4c5b877195cdb
       - name: Publish only feature branch without forcing
         env:
           GH_TOKEN: ${{ github.token }}
