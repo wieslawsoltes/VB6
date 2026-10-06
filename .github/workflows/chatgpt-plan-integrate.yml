@@ -1,0 +1,54 @@
+name: Integrate ChatGPT branch
+on:
+  push:
+    branches: [feature/chatgpt-plan-login]
+    paths: ['.github/workflows/chatgpt-plan-integrate.yml']
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/feature/chatgpt-plan-login'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merge inspected main source, regenerate only generated conflicts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          git cat-file -e b6f623d5c9e55efd4f2da39c5b22e0a609427491^{commit}
+          git merge --no-commit --no-ff b6f623d5c9e55efd4f2da39c5b22e0a609427491 || true
+          python3 - <<'PY'
+          import subprocess
+          paths = subprocess.check_output(['git','diff','--name-only','--diff-filter=U'], text=True).splitlines()
+          allowed = {'dist/studio.js','dist/VB6-Studio-Web.html'}
+          assert set(paths) <= allowed, 'Unexpected source conflict: ' + repr(paths)
+          for path in paths:
+              subprocess.run(['git','checkout','--ours','--',path], check=True)
+              subprocess.run(['git','add','--',path], check=True)
+          PY
+          npm run build
+          git add dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+          git diff --cached --check
+      - run: npm test
+      - name: Push merge to feature branch only
+        run: |
+          test "$(git ls-remote origin refs/heads/feature/chatgpt-plan-login | cut -f1)" = "$GITHUB_SHA"
+          git commit -m 'Merge main OCX updates and rebuild ChatGPT-enabled IDE bundles'
+          git push origin HEAD:refs/heads/feature/chatgpt-plan-login
+      - name: Package verified integration source
+        if: success()
+        run: tar --exclude=.git --exclude=node_modules --exclude=reports -czf "$RUNNER_TEMP/vb6-chatgpt-integrated.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: chatgpt-integrated-source
+          path: ${{ runner.temp }}/vb6-chatgpt-integrated.tar.gz
+          retention-days: 3
