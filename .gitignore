@@ -37,6 +37,13 @@ reports/native-debugger/
 # ChatGPT connection fixtures; retained as CI artifacts.
 reports/chatgpt-login/
 
-# Deterministic IDE outputs: checked against tools/ide-artifacts.json on every build.
+# Deterministic IDE/runtime/sample outputs: exact fingerprints checked on every build.
 /dist/studio.js
 /dist/VB6-Studio-Web.html
+
+# Optional layout validation and native fixture artifacts.
+reports/layout/
+
+/dist/vb6-runtime.js
+/dist/examples/*.html
+/src/exporter/runtime-payload.js

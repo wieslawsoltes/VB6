@@ -1,3 +1,5 @@
+import {layoutBindingSnapshot,validateLayoutMembers} from '../layout/language-gate.js';
+import {validateLayout} from '../layout/contract.js';
 import {bindConstants} from './binding.js';
 import {defaultIdentifierType,addDefaultTypes} from './default-types.js';
 import {validateInterfaces} from './interfaces.js';
@@ -163,7 +165,7 @@ class ProcedureCompiler {
 }
 
 export function compileModule(input) {
-  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:{},types:{},diagnostics:[],source:input.code||'',form:input.form||null};
+  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:{},types:{},diagnostics:[],source:input.code||'',form:input.form||null,layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
   const allLines=logicalLines(preprocess(module.source,input.conditionalConstants||{},module.name));
   const lines=allLines.filter(e=>{if(/^Attribute\s+/i.test(e.text)){module.attributes.push(e.text);return false;}return true;});let current=null,body=[],enumState=null,typeState=null;
   for(const entry of lines){let {text,line}=entry,m;
@@ -209,14 +211,15 @@ export function compileModule(input) {
 }
 export function compileProject(project) {
   const modules=new Map(),diagnostics=[];
+  try{validateLayout(project,false);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||380,source:error.source||project.name,line:1,column:1});}
   for(const input of project.modules||[]){try{const module=compileModule({...input,conditionalConstants:project.settings?.conditionalConstants||{}});const key=lower(module.name);if(modules.has(key))throw new VBError(`Duplicate module name: ${module.name}`,1002,module.name,1);modules.set(key,module);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||1002,source:error.source||input.name,line:error.line||1,column:error.column||1});}}
-  diagnostics.push(...validateCompiledModules(modules));
+  diagnostics.push(...validateCompiledModules(modules,project.settings));
   return {name:project.name,startup:project.startup,modules,diagnostics,valid:!diagnostics.length,settings:project.settings||{},sourceProject:project};
 }
 
 /** Cross-module constraints shared by execution and background diagnostics. */
-export function validateCompiledModules(modules) {
-  const diagnostics=bindConstants(modules);
+export function validateCompiledModules(modules,settings={}) {
+  const diagnostics=[...bindConstants(modules,settings),...validateLayoutMembers(modules,settings)];
   const recordNames=new Set([...modules.values()].flatMap(m=>Object.keys(m.types).map(lower)));
   for(const module of modules.values())for(const proc of module.procedures.values())for(const param of proc.params)if(!param.byRef&&!param.paramArray&&(recordNames.has(lower(param.type))||param.bounds!==null))diagnostics.push({severity:'error',message:recordNames.has(lower(param.type))?'User-defined type may not be passed ByVal':'Array argument must be ByRef',number:1002,source:module.name,line:proc.line,column:1});
   const parents=[...modules.values()].filter(m=>m.form?.type==='MDIForm');

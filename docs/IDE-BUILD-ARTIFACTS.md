@@ -1,27 +1,33 @@
-# Reproducible IDE build artifacts
+# Reproducible IDE, runtime and sample build artifacts
 
-`dist/studio.js` and `dist/VB6-Studio-Web.html` are generated outputs, not authored sources. They are no longer tracked as multi-megabyte snapshots. This prevents unrelated source changes from producing repeated generated-code merge conflicts; no repository-writing CI helper is required.
+The complete IDE bundles, runtime bundle, embedded exporter payload and generated sample HTML applications are **build artifacts**, not authored sources. They are not tracked as multi-megabyte snapshots. All readable source modules and editable example projects remain in Git. This prevents unrelated source changes from causing repeated generated-code conflicts without introducing a repository-writing CI helper.
 
 ## Run and download
 
-From a source checkout or source-only ZIP, run `npm run build` before opening the standalone HTML. No npm installation is needed for this build. `npm run serve`, `npm test` and `npm run test:agents` also build and verify first. This preserves the existing CI jobs that start with tests rather than a separate build step. The resulting filenames, standalone format, browser behavior and classic styling are unchanged.
+Run `npm run build` in a source checkout or source-only ZIP before opening `dist/VB6-Studio-Web.html`. No npm installation is needed for this build. `npm run serve`, `npm test` and `npm run test:agents` also build and verify first, preserving the existing test-before-build CI entry points. The resulting filenames, standalone format, browser behavior and classic styling are unchanged. Direct imports of the exporter require this initial build because its embedded runtime payload is generated.
 
-The ordinary **Project compatibility** workflow uploads both outputs under `dist/` in its `project-compatibility-<revision>` artifact. Its separate source-archive job downloads that artifact and rebuilds/tests it without a Git checkout. The existing GitHub Pages build generates and deploys the complete `dist/` directory. Browser release archives and native application staging still include the actual built files. GitHub's automatic source ZIP is source, not a prebuilt browser release.
+The ordinary **Project compatibility** workflow uploads the complete `dist/` and source payloads in `project-compatibility-<revision>`. Its separate source-archive job downloads that artifact and rebuilds/tests without a Git checkout. The existing GitHub Pages build generates and deploys the complete `dist/` directory. Browser release archives and native application staging include the actual built files. GitHub's automatic source ZIP is source, not a prebuilt browser release.
 
 ## Exact verification, not unchecked regeneration
 
-`tools/ide-artifacts.json` is the versioned expectation: exactly two paths, each with a byte count and SHA-256. Every normal `npm run build` verifies both generated files and fails if the manifest is absent, malformed, incomplete or mismatched. Missing, non-regular and changed outputs fail. A separate `npm run verify:ide-artifacts` checks existing outputs without regenerating them.
+Version 2 of `tools/ide-artifacts.json` records a byte count and SHA-256 for every required output:
 
-Normal builds do **not** refresh their expected fingerprints. After intentionally changing IDE sources, run `npm run build:update-ide-artifacts`, inspect the source and manifest diff, run tests, and commit the manifest with the source. The explicit update command is rejected when `CI` is set. CI only builds, verifies and uploads; it cannot silently bless drift. This is reproducibility checking, not a publisher signature or certification of unreviewed source.
+- `dist/studio.js` and `dist/VB6-Studio-Web.html`;
+- `dist/vb6-runtime.js` and `src/exporter/runtime-payload.js`;
+- every `dist/examples/<id>.html` in the authored `EXAMPLES` catalog.
 
-All other committed generated outputs retain their existing `git diff --exit-code` checks. The new manifest check replaces that check only for these two untracked bundles. No UI, runtime, native, browser or security assertion is removed.
+The expected inventory is derived independently from source: the fixed four paths and validated unique sample IDs. It is not accepted from arbitrary manifest entries. Every normal build fails if expectations are absent, malformed, incomplete, extra or mismatched. Missing, non-regular, truncated and changed outputs fail. `npm run verify:ide-artifacts` checks existing artifacts without regenerating them; its name is retained for compatibility, but it verifies the full inventory. The small verifier can load before generated payloads exist, so a clean source-only build does not need an older runtime to bootstrap.
+
+Normal builds do **not** refresh expected fingerprints. After intentionally changing sources, run `npm run build:update-ide-artifacts`, inspect the source and manifest diff, test, and commit both. This explicit update operation is rejected when `CI` is set. CI only builds, verifies and uploads; it cannot silently bless drift. These hashes establish reproducibility, not publisher identity or correctness of unreviewed code.
+
+All other committed generated outputs, including the independent Win32/auto-layout packages, native compiler bundle, CSS and editable sample projects, retain their existing `git diff --exit-code` checks. The manifest replaces that check only for the named untracked artifacts. No UI, runtime, native, browser, license or security assertion is removed. Negative tests cover every required artifact and strict inventory validation.
 
 ## Merge workflow
 
-Merge authored sources normally, rebuild with the explicit update command, review the two fingerprints, and commit. Do not select an old standalone bundle from either side. A stale manifest intentionally fails ordinary validation until the combined source has been rebuilt and its expectation reviewed.
+Merge authored sources normally, rebuild with the explicit update command, review the resulting fingerprints and commit. Do not select old generated output from either side. A stale manifest intentionally fails normal validation until the combined source has been rebuilt and its expectation reviewed. Both anchoring and common Win32 services remain in the combined runtime and example applications.
 
 ## Windows checkouts
 
-`.gitattributes` pins JavaScript, CSS, HTML and JSON inputs to LF even when Git's `core.autocrlf` is true. Native VB source and resource formats are not covered by these rules. Without this checkout policy, a text-normalized Git diff could previously appear clean while raw generated bytes differed between Windows and POSIX. The manifest deliberately rejects those differences; it does not normalize or ignore them at verification time.
+`.gitattributes` pins JavaScript, CSS, HTML and JSON inputs to LF even when Git's `core.autocrlf` is true. Native VB source and resource formats are not covered. A text-normalized Git diff could previously appear clean while raw generated bytes differed between Windows and POSIX. Verification deliberately rejects rather than normalizes such differences.
 
-The exact `LICENSES/98.css.txt` notice is also pinned to LF because the unchanged license-integrity regression compares it with the verbatim notice embedded in CSS. A full Windows-style checkout test caught this separate mismatch; the notice text and assertion are preserved, not normalized or removed.
+The exact `LICENSES/98.css.txt` notice is also LF because the unchanged license-integrity regression compares it with the verbatim notice embedded in CSS. Full Windows-style checkout testing caught this separate mismatch. The notice text and strict assertion are preserved, not normalized or removed.
