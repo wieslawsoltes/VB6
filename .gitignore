@@ -34,5 +34,8 @@ reports/classic-html/
 reports/debugger-boundaries/
 reports/native-debugger/
 
+# ChatGPT connection fixtures; retained as CI artifacts.
+reports/chatgpt-login/
+
 # Optional layout validation and native fixture artifacts.
 reports/layout/

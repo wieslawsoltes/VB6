@@ -52,7 +52,9 @@
     "test:layout": "node --test --test-concurrency=4 tests/layout-*.test.mjs",
     "test:layout:browser": "python tools/browser-layout-tests.py",
     "bench:layout": "node tools/bench-layout.mjs",
-    "pack:layout": "node tools/pack-layout.mjs"
+    "pack:layout": "node tools/pack-layout.mjs",
+    "test:chatgpt": "node --test tests/chatgpt-auth.test.mjs tests/chatgpt-relay.test.mjs",
+    "test:chatgpt:browser": "python tools/chatgpt-browser-tests.py"
   },
   "engines": {
     "node": ">=22"

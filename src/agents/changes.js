@@ -41,10 +41,10 @@ export function compareAgentReview(before, after) {
   return Object.freeze({before, after, sameWorkspace, changes: Object.freeze(changes)});
 }
 export class AgentChangeReview {
-  constructor() { this.first = null; this.last = null; this.thread = null; this.revision = 0; this.feedbackText = ''; this.feedbackKey = ''; }
+  constructor() { this.first = null; this.last = null; this.thread = null; this.revision = 0; this.feedbackText = ''; this.feedbackKey = ''; this.feedbackTarget = null; this.view = {}; }
   begin(project, epoch, thread) {
     const snapshot = captureAgentReview(project, epoch);
-    if (this.thread !== thread) { this.first = null; this.last = null; this.thread = thread; }
+    if (this.thread !== thread) { this.first = null; this.last = null; this.thread = thread; this.feedbackText = ''; this.feedbackKey = ''; this.feedbackTarget = null; this.view = {}; }
     if (!this.first) this.first = snapshot;
     this.last = snapshot; this.revision++;
   }
@@ -53,7 +53,7 @@ export class AgentChangeReview {
     const before = scope === 'task' ? this.first : this.last;
     return before ? compareAgentReview(before, captureAgentReview(project, epoch)) : null;
   }
-  clear() { this.first = this.last = this.thread = null; this.feedbackText = ''; this.feedbackKey = ''; this.revision++; }
+  clear() { this.first = this.last = this.thread = null; this.feedbackText = ''; this.feedbackKey = ''; this.feedbackTarget = null; this.view = {}; this.revision++; }
 }
 
 /** Pure source-only restoration. Caller must check busy state/revision after local consent. */
