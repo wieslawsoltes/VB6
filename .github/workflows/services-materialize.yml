@@ -17,6 +17,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Record and verify the exact publication starting point
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > /tmp/services-original-head.txt
+          expected=$(cat /tmp/services-original-head.txt)
+          actual=$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)
+          printf 'Checked out: %s\nBranch tip: %s\n' "$expected" "$actual"
+          test "$actual" = "$expected"
       - name: Recover checksum-verified authored services implementation
         shell: bash
         run: |
@@ -89,11 +98,12 @@ jobs:
           git diff --exit-code
       - name: Publish only to the unchanged feature branch
         shell: bash
-        env:
-          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)" = "$EXPECTED_SHA"
+          expected=$(cat /tmp/services-original-head.txt)
+          actual=$(git ls-remote origin refs/heads/feature/win32-common-services | cut -f1)
+          printf 'Expected starting head: %s\nCurrent branch tip: %s\n' "$expected" "$actual"
+          test "$actual" = "$expected"
           git push origin HEAD:refs/heads/feature/win32-common-services
           git archive --format=zip HEAD -o /tmp/vb6-services-source.zip
           git rev-parse HEAD HEAD^{tree} > /tmp/services-revision.txt
