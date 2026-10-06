@@ -83,8 +83,9 @@ before changing live storage; byte counts need not be multiples of element width
 It is not a cumulative process-memory budget or a bound on separate String data. Procedure workspace remains limited to
 512 KiB. Reversed bounds are errors, not zero-element arrays. Unsupported element
 types, undeclared ReDim targets, ByVal whole arrays, array returns, fixed-length
-String whole-array arguments and fixed-length String scalar ByRef copy-back are
-not implemented. Native Declare array/SAFEARRAY signatures remain rejected;
+String whole-array arguments and fixed-length String scalar ByRef copy-back to
+project procedures are not implemented. External Declare String element and fixed
+String copy-back follow [the separate marshalling contract](WIN32-STRING-INTEROP.md). Native Declare array/SAFEARRAY signatures remain rejected;
 project-to-project whole-array parameters are an internal compiler ABI.
 
 Array dimensions and element type must not be modified through raw native pointers.
