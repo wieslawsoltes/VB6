@@ -1,6 +1,6 @@
 import {clone} from '../core/core.js';
 import {normalizeProject, createControl} from '../project/model.js';
-import {normalizeAppearance} from '../theme/theme.js';
+import {normalizeIdeAppearance as normalizeAppearance} from '../theme/ide-appearance.js';
 import {snapshotEditorView, restoreEditorView} from '../editor/view-state.js';
 import {COMMANDS, CommandBarLayout} from '../ide/command-bar-model.js';
 import {normalizeWindowProfile} from '../ide/window-profile.js';

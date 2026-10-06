@@ -223,3 +223,17 @@ test('agent: debug step and continue reject running state rather than reporting 
   for(const command of ['continue','run','stepInto','stepOver','stepOut'])await assert.rejects(f.write('debug.command',{command}),/Pause before/);
   assert.equal(f.ide.lastCommand,undefined);await f.write('debug.command',{command:'pause'});assert.equal(f.ide.lastCommand,'pause');
 });
+
+test('agent: workspace theme changes retain IDE-only preferences and require normal authority',async t=>{
+ const f=fixture(t);let applied=0;f.ide.applyAppearance=()=>{applied++;};
+ const project=clone(f.ide.project);
+ await f.write('workspace.configure',{appearance:{theme:'macos26-dark',followSystemTheme:true,reduceTransparency:true,reduceMotion:true}});
+ assert.equal(f.ide.appearance.theme,'macos26-dark');assert.equal(f.ide.appearance.followSystemTheme,true);
+ await f.write('workspace.configure',{appearance:{editorSize:16}});
+ assert.equal(f.ide.appearance.theme,'macos26-dark');assert.equal(f.ide.appearance.reduceTransparency,true);assert.equal(f.ide.appearance.reduceMotion,true);assert.equal(applied,2);
+ assert.deepEqual(f.ide.project,project);assert.equal(f.adapter.permissions.grant,null);
+ await assert.rejects(f.write('workspace.configure',{appearance:{allowAllTools:true}}),/Unknown appearance option/);
+ await assert.rejects(f.write('workspace.configure',{appearance:{theme:'fluent'},expectedRevision:999999}),/changed/);
+ const denied=fixture(t,{approve:async()=>false});denied.ide.applyAppearance=()=>assert.fail('denied appearance must not be applied');
+ await assert.rejects(denied.write('workspace.configure',{appearance:{theme:'x11'}}),/declined/);
+});

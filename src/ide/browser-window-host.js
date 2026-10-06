@@ -2,6 +2,7 @@ import {registerUIDocument,uiDocument} from '../core/window-context.js';
 import {browserBounds, normalizeBrowserWindows} from './browser-window-state.js';
 import {ClassicTooltips} from '../theme/tooltip.js';
 import {closeMenu} from '../theme/menu.js';
+import {IDE_THEME_ATTRIBUTES,copyIdeThemeAttributes} from '../theme/ide-appearance.js';
 
 /** Same-origin live-DOM host. The owner remains the sole project/runtime authority.
  * Opening is synchronous: callers must invoke detach from a user gesture. */
@@ -24,7 +25,7 @@ export class BrowserWindowHost {
     this.themeObserver = new owner.MutationObserver(() => this.syncTheme());
     this.themeObserver.observe(this.themeRoot, {attributes: true, attributeFilter: ['class', 'style', 'data-vb-theme']});
     this.rootThemeObserver = new owner.MutationObserver(() => this.syncTheme());
-    this.rootThemeObserver.observe(this.document.documentElement, {attributes: true, attributeFilter: ['data-vb-theme']});
+    this.rootThemeObserver.observe(this.document.documentElement, {attributes: true, attributeFilter: IDE_THEME_ATTRIBUTES});
     this.styleObserver = new owner.MutationObserver(records => {
       // Source edits update document.title frequently; never reparse all styles for those.
       const styleNode = node => node.nodeType === 1 && node.matches('style,link');
@@ -153,7 +154,7 @@ export class BrowserWindowHost {
     record.stylesReady = Promise.all(ready);
   }
   copyTheme(record) {
-    record.doc.documentElement.dataset.vbTheme = this.document.documentElement.dataset.vbTheme || 'classic';
+    copyIdeThemeAttributes(this.document.documentElement, record.doc.documentElement);
     record.root.className = this.themeRoot.className + ' browser-window-root';
     record.root.style.cssText = this.themeRoot.style.cssText;
     record.doc.dispatchEvent(new this.owner.CustomEvent('vb-theme-change', {detail: {theme: record.doc.documentElement.dataset.vbTheme}}));

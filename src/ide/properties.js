@@ -3,7 +3,7 @@ import {anchorDialog} from '../layout/designer-tools.js';
 import {formatAnchor,parseAnchor} from '../../packages/auto-layout/src/index.js';
 import {el} from '../core/core.js';
 import {CONTROL_DEFAULTS} from '../project/model.js';
-import {cssColor} from '../theme/theme.js';
+import {colorValue} from '../theme/theme.js';
 import {modal,alertDialog,resizeHandle,icon} from './ui.js';
 import {oleHex,parsePropertyNumber,showColorPalette,fontDialog} from './property-editors.js';
 const BOOLS=new Set('MDIChild Enabled Visible TabStop FontBold FontItalic FontUnderline FontStrikethru Locked MultiLine Default Cancel Sorted Stretch AutoRedraw KeyPreview FullRowSelect GridLines CancelError ControlBox MinButton MaxButton Moveable NegotiateMenus'.split(' '));
@@ -60,10 +60,10 @@ export class PropertyInspector {
     let field;if(choices){field=el('select',{'aria-label':label});if(mixed)field.append(el('option',{value:''},''));for(const choice of choices)field.append(el('option',{value:choice.value},choice.label));field.value=mixed?'':String(BOOLS.has(key)?Number(value)?-1:0:value);if(field.selectedIndex<0){field.append(el('option',{value:String(value)},String(value)));field.value=String(value);}}
     else field=el('input',{'aria-label':label,value:format(),readonly:propertyReadOnly||isObject||key==='Kind'||key==='Font',spellcheck:false});
     field.dataset.property=key;if(mixed)field.setAttribute('aria-description','Multiple different values');
-    if(isColor)wrap.append(el('span',{class:'color-swatch',style:{background:mixed?'transparent':cssColor(value)}}));
+    if(isColor)wrap.append(el('span',{class:'color-swatch',style:{background:mixed?'transparent':colorValue(value,'#c0c0c0',this.ide.project.settings.theme)}}));
     const editFont=async()=>{const values=await fontDialog(target.properties||{});if(values)this.apply(values);};
     const editText=async()=>{const input=el('textarea',{'aria-label':'Property text',class:'property-text-dialog',value:Array.isArray(value)?value.join('\n'):String(value??'')});const accepted=await modal(label+' - '+target.name,{content:el('div',{},el('p',{},Array.isArray(value)?'Enter one item per line.':'Edit the property value.'),input)});if(accepted)this.ide.setProperty(key,Array.isArray(value)?input.value.split('\n'):input.value);};
-    const palette=()=>showColorPalette(wrap,value,n=>this.ide.setProperty(key,n));
+    const palette=()=>showColorPalette(wrap,value,n=>this.ide.setProperty(key,n),this.ide.project.settings.theme||'classic');
     const editAnchor=async()=>{const result=await anchorDialog(value,'Anchor - '+(this.targets.length>1?'Multiple Controls':target.name));if(result!==null)this.ide.setProperty('Anchor',result);};
     const editor=propertyReadOnly?null:key==='Anchor'?editAnchor:key==='Font'?editFont:isColor?palette:Array.isArray(value)||['Text','Caption','Tag','ToolTipText'].includes(key)?editText:null;
     if(editor){const button=el('button',{class:'property-edit-button',title:'Edit '+label,'aria-label':'Edit '+label,onclick:editor},isColor?icon('arrow-down',12):'…');wrap.append(field,button);field.addEventListener('keydown',e=>{if(e.altKey&&e.key==='ArrowDown'){e.preventDefault();e.stopPropagation();editor();}});}else wrap.append(field);
