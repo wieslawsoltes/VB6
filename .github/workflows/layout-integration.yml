@@ -1,50 +1,86 @@
-name: Layout integration source snapshots
+name: Publish verified layout integration
 on:
   push:
     branches: [feat/optional-anchoring-layout]
-    paths: ['.github/workflows/layout-integration.yml']
+    paths: ['.github/layout-integrate.br', '.github/workflows/layout-integration.yml']
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: layout-integration-publication
+  cancel-in-progress: false
 jobs:
-  snapshot:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/optional-anchoring-layout'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Read pinned base and main source objects
+      - name: Read pinned concurrent main source
+        run: git fetch --no-tags --depth=1 origin 5ad8ea7815877347230dda6e5254ada4181aa61c
+      - name: Verify all baselines and exact integration results before writing
         run: |
-          git fetch --no-tags --depth=1 origin bd4f9cfbb753cf18cdc78d89744f31789a6e5b28 5ad8ea7815877347230dda6e5254ada4181aa61c
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import path from 'node:path';
           import {execFileSync} from 'node:child_process';
           import {createHash} from 'node:crypto';
-          const base='bd4f9cfbb753cf18cdc78d89744f31789a6e5b28',main='5ad8ea7815877347230dda6e5254ada4181aa61c';
-          const git=(...a)=>execFileSync('git',a,{maxBuffer:100*1024*1024});
-          const root=path.join(process.env.RUNNER_TEMP,'layout-integration'),files=[];
+          import {brotliDecompressSync} from 'node:zlib';
           const hash=b=>createHash('sha256').update(b).digest('hex');
-          for(const p of git('diff','--name-only','-z',base,main).toString().split('\0').filter(Boolean)) {
-            if(p.startsWith('dist/')||p.startsWith('examples/')||/^packages\/[^/]+\/dist\//.test(p)||['src/exporter/runtime-payload.js','src/editor/diagnostics-payload.js'].includes(p))continue;
-            if(path.isAbsolute(p)||p.split('/').includes('..'))throw Error('Unsafe path');
-            const record={path:p};
-            for(const [name,ref]of [['base',base],['main',main]]) {
-              let bytes;try{bytes=git('show',ref+':'+p);}catch{record[name]=null;continue;}
-              const target=path.join(root,name,p);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);
-              record[name]={sha256:hash(bytes),blob:git('rev-parse',ref+':'+p).toString().trim()};
+          const raw=brotliDecompressSync(fs.readFileSync('.github/layout-integrate.br'));
+          if(hash(raw)!=='2a4aa42c0543bb667d067b28a7c1a428604b5c88274562c62c5b5c4b8e76f514')throw Error('Manifest hash mismatch');
+          const m=JSON.parse(raw),main='5ad8ea7815877347230dda6e5254ada4181aa61c';
+          if(m.version!==1||m.main!==main||m.files.length!==44)throw Error('Invalid manifest');
+          const prepared=[],seen=new Set();
+          for(const f of m.files){
+            if(typeof f.path!=='string'||path.isAbsolute(f.path)||f.path.includes('\\')||f.path.split('/').some(p=>!p||p==='..'||p==='.'||p==='.git')||f.path.startsWith('.github/')||seen.has(f.path))throw Error('Unsafe or duplicate path');
+            seen.add(f.path);const exists=fs.existsSync(f.path);let old=exists?fs.readFileSync(f.path):Buffer.alloc(0);
+            if(f.base===null?exists:!exists||hash(old)!==f.base)throw Error('Changed source baseline: '+f.path);
+            if(f.source){
+              const blob=execFileSync('git',['rev-parse',main+':'+f.path]).toString().trim();
+              if(blob!==f.source)throw Error('Pinned source object mismatch: '+f.path);
+              old=execFileSync('git',['show',main+':'+f.path],{maxBuffer:20*1024*1024});
+            }else{
+              if(!Array.isArray(f.edits))throw Error('Missing edits');
+              let end=-1;for(const [at,len,text]of f.edits){if(!Number.isInteger(at)||!Number.isInteger(len)||at<0||len<0||at<end||at+len>old.length||typeof text!=='string')throw Error('Invalid edit: '+f.path);end=at+len;}
+              for(const [at,len,text]of [...f.edits].reverse())old=Buffer.concat([old.subarray(0,at),Buffer.from(text,'utf8'),old.subarray(at+len)]);
             }
-            files.push(record);
+            if(hash(old)!==f.sha)throw Error('Result hash mismatch: '+f.path);
+            prepared.push([f.path,old]);
           }
-          fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify({base,main,files},null,2));
-          console.log('Captured '+files.length+' changed source paths without credentials or generated bundles.');
+          for(const [file,bytes]of prepared){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}
+          fs.unlinkSync('.github/layout-integrate.br');
+          console.log('Verified and integrated '+prepared.length+' source paths.');
           JS
+      - run: npm run build
+      - name: Full integrated regression suite
+        run: |
+          node --test --test-concurrency=4 tests/*.test.mjs > "$RUNNER_TEMP/layout-tests.log" 2>&1 || { tail -100 "$RUNNER_TEMP/layout-tests.log"; exit 1; }
+          tail -15 "$RUNNER_TEMP/layout-tests.log"
+      - run: npm run pack:layout
+      - name: Commit source without changing workflow files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(layout): preserve concurrent OCX and agent workbench integration'
+          git archive --format=tar HEAD > "$RUNNER_TEMP/layout-source.tar"
+          git push origin HEAD:refs/heads/feat/optional-anchoring-layout > "$RUNNER_TEMP/layout-publication.log" 2>&1 || { cat "$RUNNER_TEMP/layout-publication.log"; exit 1; }
+          cat "$RUNNER_TEMP/layout-publication.log"
+          git rev-parse HEAD > "$RUNNER_TEMP/layout-head.txt"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: layout-integration-sources
-          path: ${{ runner.temp }}/layout-integration
-          include-hidden-files: true
+          name: layout-integrated-source
+          path: |
+            ${{ runner.temp }}/layout-source.tar
+            ${{ runner.temp }}/layout-publication.log
+            ${{ runner.temp }}/layout-tests.log
+            ${{ runner.temp }}/layout-head.txt
+            release/vb6-auto-layout-*.tgz
           retention-days: 3
