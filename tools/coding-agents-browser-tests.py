@@ -811,11 +811,15 @@ def review_feedback(page,mode):
 
 def review_last_run(page,mode):
     requests,original=make_review_change(page)
+    check(page.evaluate("""() => { const panel=vb6Studio.documents.tools.get('tool:coding-agents'), view=panel.workbench, refresh=view.refreshChanges; let calls=0;
+      view.refreshChanges=function(){calls++;return refresh.call(this);};
+      try {panel.syncTask();return calls;} finally {view.refreshChanges=refresh;}
+    }""")==1, 'Task synchronization must capture the current review only once')
     page.get_by_label('Agent task',exact=True).fill('Explain only.');page.get_by_label('Task permission profile',exact=True).select_option('readonly');start(page);finish(page)
     tab(page,'Changes');check(page.get_by_label('Changed project documents',exact=True).locator('option').count()==1)
     page.get_by_label('Review change scope',exact=True).select_option('run');check(page.get_by_label('Changed project documents',exact=True).locator('option').count()==0)
     page.get_by_label('Review change scope',exact=True).select_option('task');check(page.get_by_label('Changed project documents',exact=True).locator('option').count()==1)
-    return {'taskAndLastRunCheckpoints':True}
+    return {'taskAndLastRunCheckpoints':True,'oneReviewRefreshPerTaskSwitch':True}
 
 
 def case(browser,mode,name,fn):

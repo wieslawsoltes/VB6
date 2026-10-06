@@ -20934,7 +20934,7 @@ class AgentPanel {
     if (agent.provider) this.provider.value = agent.provider;
     if (agent.model) this.model.value = agent.model;
     this.prompt.value = task.draft; this.showLimits(task.limits); this.showPermissions(task.permissions); this.taskName.value = task.title;
-    this.status.textContent = 'Selected ' + task.title + (agent.matchesWorkspace() ? ' — ' + agent.state : ' — previous project session; start a new task.'); this.refresh(); this.workbench.refreshChanges(); this.workbench.refreshChanges();
+    this.status.textContent = 'Selected ' + task.title + (agent.matchesWorkspace() ? ' — ' + agent.state : ' — previous project session; start a new task.'); this.refresh(); this.workbench.refreshChanges();
   }
   async deleteTask() {
     if (this.pending || this.api.conversations.busy) return;
