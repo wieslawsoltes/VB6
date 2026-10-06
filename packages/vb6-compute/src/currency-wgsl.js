@@ -56,13 +56,15 @@ fn cy_to_i(a:vec2<u32>)->i32 {
   if((q.y|q.z|q.w)!=0u || q.x>select(2147483647u,2147483648u,negative)) {fail(6u);return 0i;}
   return bitcast<i32>(select(q.x,0u-q.x,negative));
 }
+// Automation converts the signed integer to binary64 first, then divides by
+// 10,000. Preserve both rounding points (VarR8FromCy), not a single rational
+// rounding; the latter differs by one ULP for large Currency magnitudes.
 fn cy_to_d(a:vec2<u32>)->vec2<u32> {
   if(!array_charge(12u)) {return vec2<u32>(0u);}let m=cy_mag(a);if(u64_zero(m)) {return vec2<u32>(0u);}
-  var e=u64_top(m)-13i;let scale=vec2<u32>(10000u,0u);
-  if(e>=0i) {if(u64_less(m,u64_shl(scale,u32(e)))) {e-=1i;}}
-  else {if(u64_less(u64_shl(m,u32(-e)),scale)) {e-=1i;}}
-  let divided=u128_div_small(u128_shl(vec4<u32>(m,0u,0u),u32(55i-e)),10000u);var bits=divided.quotient.xy;
-  if(divided.remainder!=0u) {bits.x|=1u;}return d_round(a.y&0x80000000u,e+1023i,bits);
+  let top=u64_top(m);var bits=vec2<u32>(0u);
+  if(top>55i) {bits=u64_jam(m,u32(top-55i));}else {bits=u64_shl(m,u32(55i-top));}
+  let integer_value=d_round(a.y&0x80000000u,top+1023i,bits);
+  return d_div(integer_value,d_from_i(10000i));
 }
 fn cy_fix(a:vec2<u32>)->vec2<u32> {
   let q=u128_div_small(vec4<u32>(cy_mag(a),0u,0u),10000u).quotient.xy;
