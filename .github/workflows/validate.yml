@@ -1,7 +1,7 @@
 name: Validate
 on:
   push:
-    branches: [main]
+    branches: [main, feature/win32-system-services]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -16,11 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Archive exact source for reproducible validation
-        run: git archive --format=zip HEAD -o /tmp/vb6-source.zip
+        run: |
+          git archive --format=zip HEAD -o /tmp/vb6-source.zip
+          git fetch --no-tags origin 287475b6bf2e55cd0beda733264b501a897661a3
+          git archive --format=zip 287475b6bf2e55cd0beda733264b501a897661a3 -o /tmp/current-main.zip
       - uses: actions/upload-artifact@v4
         with:
           name: source-${{ github.sha }}
-          path: /tmp/vb6-source.zip
+          path: |
+            /tmp/vb6-source.zip
+            /tmp/current-main.zip
           retention-days: 7
       - uses: actions/setup-node@v4
         with:
