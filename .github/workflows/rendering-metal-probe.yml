@@ -1,0 +1,70 @@
+name: Rendering Metal adapter investigation
+on:
+  push:
+    branches: [diag/rendering-readiness]
+    paths: [.github/workflows/rendering-metal-probe.yml]
+permissions:
+  contents: read
+jobs:
+  metal:
+    # One bounded diagnostic, not a new recurring hardware runner requirement.
+    # https://docs.github.com/en/actions/reference/runners/larger-runners
+    runs-on: macos-26-xlarge
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7f2c1777c5143e9c7973c7d1cc5426cffd1f5f0f
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install playwright==1.57.0 Pillow
+      - run: python -m playwright install chromium
+      - name: Record the actual adapter without forcing a software backend
+        run: |
+          mkdir -p reports/metal
+          system_profiler SPDisplaysDataType -json > reports/metal/displays.json
+          git rev-parse HEAD > reports/metal/source.txt
+          cat > /tmp/metal.py <<'PY'
+          import functools,http.server,threading,json,io
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          from PIL import Image,ImageChops
+          out=Path('reports/metal');results={}
+          class Quiet(http.server.SimpleHTTPRequestHandler):
+              def log_message(self,*args):pass
+          server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Quiet,directory=Path.cwd()))
+          threading.Thread(target=server.serve_forever,daemon=True).start()
+          try:
+              with sync_playwright() as p:
+                  browser=p.chromium.launch(headless=False,args=['--enable-gpu'])
+                  page=browser.new_page(viewport={'width':1280,'height':800},device_scale_factor=2)
+                  errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                  page.goto(f'http://127.0.0.1:{server.server_port}/dist/VB6-Studio-Web.html')
+                  page.wait_for_function('!!window.vb6Studio?.rendering');page.evaluate('vb6Studio.rendering.ready')
+                  results['initial']=page.evaluate('vb6Studio.rendering.diagnostics()')
+                  results['userAgent']=page.evaluate('navigator.userAgent')
+                  adapter=results['initial'].get('adapter') or {}
+                  results['hardwareCandidate']=results['initial']['active']=='webgpu' and adapter.get('isFallbackAdapter') is False and 'apple' in json.dumps(adapter).lower()
+                  results['forcedScene']=page.evaluate('''async()=>{const r=vb6Studio.rendering,samples=[];for(let i=0;i<120;i++){await new Promise(requestAnimationFrame);const start=performance.now();r.renderNow({force:true});samples.push({cpuMs:performance.now()-start,last:{...r.metrics.last}});}return {samples,diagnostics:r.diagnostics()};}''')
+                  results['comparisons']=[]
+                  for turn in range(4):
+                      for backend in (['html','webgpu'] if turn%2==0 else ['webgpu','html']):
+                          page.evaluate('backend=>vb6Studio.setRenderingPolicy({backend,fallbacks:["html"]})',backend)
+                          active=page.evaluate('vb6Studio.rendering.backend')
+                          if active!=backend:
+                              results['comparisons'].append({'backend':backend,'active':active,'unavailable':True});continue
+                          data=page.evaluate('''async()=>{const r=vb6Studio.rendering,intervals=[],work=[],changes=[],label=vb6Studio.statusText;let previous;for(let i=0;i<180;i++){const stamp=await new Promise(requestAnimationFrame);if(previous!==undefined)intervals.push(stamp-previous);previous=stamp;const start=performance.now();if(label)label.textContent='Rendering measurement '+(i%10);work.push(performance.now()-start);}return {intervals,updateCpu:work,diagnostics:r.diagnostics()};}''')
+                          data.update(backend=backend,turn=turn);results['comparisons'].append(data)
+                  results['errors']=errors
+                  page.screenshot(path=str(out/'ide.png'));browser.close()
+          finally:
+              (out/'report.json').write_text(json.dumps(results,indent=2));server.shutdown()
+          PY
+          python /tmp/metal.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rendering-metal-baseline
+          path: reports/metal
+          retention-days: 7
