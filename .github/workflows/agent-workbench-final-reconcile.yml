@@ -1,0 +1,213 @@
+name: Reconcile agent workbench with approved native previews
+on:
+  push:
+    branches: [feat/agent-change-review-queue]
+    paths: [.github/workflows/agent-workbench-final-reconcile.yml]
+permissions:
+  contents: write
+concurrency:
+  group: agent-workbench-final-reconcile
+  cancel-in-progress: true
+jobs:
+  reconcile:
+    if: github.ref == 'refs/heads/feat/agent-change-review-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify reviewed source and merge current native debugger main
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = ff3ac636b19864aec793105f8f41f428fee6fd2b
+          test "$(git rev-parse HEAD^^{tree})" = afaf74b6abd4c7648638bd9e7adb0bb950ad5cb2
+          test "$(git rev-parse 2a45fce5f25b5f9e214acb82384119d00d7510cc^{tree})" = 2f1d225632544078efa06e6be006de92ae07a2e6
+          git rev-parse HEAD > publication-base.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          import subprocess
+          result = subprocess.run(['git','merge','--no-commit','--no-ff','2a45fce5f25b5f9e214acb82384119d00d7510cc'])
+          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert result.returncode == 1 and conflicts == {'desktop/smoke.cjs','dist/VB6-Studio-Web.html','dist/studio.js'}, sorted(conflicts)
+          subprocess.run(['git','checkout','--ours','--','dist/VB6-Studio-Web.html','dist/studio.js'],check=True)
+          PY
+      - name: Combine both native smoke assertions and add reviewed browser regressions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, hashlib, subprocess
+          p = Path('desktop/smoke.cjs'); s = p.read_text(); count = 0
+          def resolve(m):
+              global count
+              count += 1; a,b = m.group(1),m.group(2)
+              if 'const probe = createSmokeProbe' in a and 'const previewFrame = async' in b:
+                  marker = '  // Match the current document URL'
+                  assert marker in b
+                  return a + '  };\n' + b[b.index(marker):]
+              assert 'await previewFrame(' in b and "'preview frame'" in a
+              return b
+          s = re.sub(r'^<<<<<<< [^\n]*\n(.*?)^=======\n(.*?)^>>>>>>> [^\n]*\n',resolve,s,flags=re.M|re.S)
+          assert count == 2, count
+          prefix,body = s.split('exports.run = ',1)
+          body = body.replace('await until(', 'await wait(')
+          body = re.sub(r'(\w+(?:\.webContents)?)\.executeJavaScript\(',r'evaluate(\1, ',body)
+          s = prefix + 'exports.run = ' + body
+          assert s.count('executeJavaScript(') == 1
+          old = "      await js('vb6Studio.run()');"
+          new = """      await js(`globalThis.previewSrcdocWrites=0;globalThis.previewObserver=new MutationObserver(records=>{
+                  previewSrcdocWrites+=records.filter(record=>record.attributeName==='srcdoc').length;
+                });previewObserver.observe(vb6Studio.root,{attributes:true,subtree:true,attributeFilter:['srcdoc']});void 0;`);
+          """
+          assert s.count(old) == 1
+          s = s.replace(old,new+old.lstrip())
+          old = "await js(`!${expression}.hasAttribute('srcdoc')`)"
+          assert s.count(old) == 1
+          s = s.replace(old,"await js(`previewSrcdocWrites===0 && !${expression}.hasAttribute('srcdoc')`)")
+          old = "      check('native Immediate Reset releases its frame', await js('vb6Studio.runState===\"design\" && !vb6Studio.runtimeFrame && !vb6Studio.designImmediate.frame'));"
+          assert s.count(old) == 1
+          s = s.replace(old,old+"\n      await js('previewObserver.disconnect();delete globalThis.previewObserver;void 0;');")
+          p.write_text(s)
+          # Keep the newly merged loader and event-mode implementation; this PR
+          # adds transport lifecycle tests, not a competing runtime loader.
+          p = Path('tools/coding-agents-browser-tests.py')
+          assert subprocess.check_output(['git','hash-object',str(p)],text=True).strip() == '6bb1b64a40c546659f97df2357f0b5db94796a3e'
+          s = p.read_text()
+          new = '''
+          def hosted_preview(page,mode):
+              # A generic embedding-host double, not a substitute for genuine Electron CI.
+              page.evaluate("""() => {
+                globalThis.previewURLs=[];globalThis.previewWrites=0;
+                globalThis.previewObserver=new MutationObserver(records=>previewWrites+=records.filter(r=>r.attributeName==='srcdoc').length);
+                previewObserver.observe(vb6Studio.root,{subtree:true,attributes:true,attributeFilter:['srcdoc']});
+                vb6Studio.runtimeDocumentLoader=html=>{const url=URL.createObjectURL(new Blob([html],{type:'text/html'}));previewURLs.push(url);return Promise.resolve(url);};
+                vb6Studio.run();
+              }""")
+              runtime=page.get_by_title('Running Visual Basic application',exact=True).element_handle().content_frame()
+              runtime.wait_for_function('!!globalThis.vb6Application')
+              check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame.hasAttribute("srcdoc") && vb6Studio.runtimeFrame.contentDocument===null'))
+              check(runtime.evaluate('typeof vb6Native === "undefined" && typeof require === "undefined"'))
+              page.evaluate('vb6Studio.stop()')
+              result=page.evaluate('vb6Studio.designImmediate.execute("? 6 * 7")')
+              check(result.get('value')=='42')
+              check(page.evaluate('previewWrites===0 && !vb6Studio.runtimeFrame && vb6Studio.runState==="design" && !vb6Studio.designImmediate.frame.hasAttribute("srcdoc")'))
+              page.evaluate('vb6Studio.designImmediate.reset();previewObserver.disconnect();previewURLs.forEach(url=>URL.revokeObjectURL(url));delete vb6Studio.runtimeDocumentLoader;void 0;')
+              return {'hostHookForRunAndImmediate':True,'noSrcdocNavigation':True,'opaqueSandbox':True,'nativeBridgeAbsent':True}
+
+
+          def hosted_preview_stale(page,mode):
+              page.evaluate("""() => {
+                globalThis.pendingPreviews=[];
+                vb6Studio.runtimeDocumentLoader=html=>new Promise((resolve,reject)=>pendingPreviews.push({html,resolve,reject}));
+                vb6Studio.run();globalThis.oldPreview=vb6Studio.runtimeFrame;
+              }""")
+              check(page.evaluate('pendingPreviews.length===1 && !oldPreview.hasAttribute("srcdoc") && !oldPreview.hasAttribute("src")'))
+              page.evaluate('vb6Studio.stop(false)')
+              page.evaluate('vb6Studio.run();globalThis.currentPreview=vb6Studio.runtimeFrame;pendingPreviews[0].reject(new Error("old host failure"));void 0;')
+              check(page.evaluate('vb6Studio.runtimeFrame===currentPreview && vb6Studio.runState==="running" && !oldPreview.hasAttribute("src")'))
+              # A same-ID workspace replacement also invalidates a delayed successful handle.
+              page.evaluate('vb6Studio.loadProject(structuredClone(vb6Studio.project));pendingPreviews[1].resolve("about:blank#stale");void 0;')
+              check(page.evaluate('!vb6Studio.runtimeFrame && vb6Studio.runState==="design" && !currentPreview.hasAttribute("src")'))
+              page.evaluate('delete vb6Studio.runtimeDocumentLoader;void 0;')
+              return {'lateFailureCannotStopNewRun':True,'sameIDReloadCannotNavigateOldFrame':True}
+
+
+          def hosted_preview_failure(page,mode):
+              page.evaluate('vb6Studio.runtimeDocumentLoader=()=>Promise.reject(new Error("fixture host rejection"));vb6Studio.run();void 0;')
+              page.wait_for_function('vb6Studio.runState==="design" && !vb6Studio.runtimeFrame')
+              check(page.evaluate('vb6Studio.statusMessage.textContent.includes("fixture host rejection")'))
+              result=page.evaluate('(async()=>{try{await vb6Studio.designImmediate.execute("? 1");return "unexpected success";}catch(error){return error.message;}})()')
+              check('fixture host rejection' in result)
+              check(page.evaluate('!vb6Studio.designImmediate.frame && !vb6Studio.designImmediate.busy && vb6Studio.runState==="design"'))
+              page.evaluate('delete vb6Studio.runtimeDocumentLoader;void 0;')
+              return {'runFailureVisible':True,'immediateFailureVisible':True,'noInsecureFallback':True}
+
+          '''
+          old = '\ndef case(browser,mode,name,fn):'
+          assert s.count(old) == 1
+          s = s.replace(old,new+old)
+          old = "('review-last-run',review_last_run)]"
+          assert s.count(old) == 1
+          s = s.replace(old,"('review-last-run',review_last_run),('hosted-preview',hosted_preview),('hosted-preview-stale',hosted_preview_stale),('hosted-preview-failure',hosted_preview_failure)]")
+          p.write_text(s)
+          p = Path('docs/CODING-AGENT-WORKBENCH.md')
+          assert subprocess.check_output(['git','hash-object',str(p)],text=True).strip() == '3acd2477e083fe1412468d2f3a6a6e3555567fcc'
+          p.write_text(p.read_text()+'''
+          ## Desktop preview integration
+
+          Run and design-mode Immediate use the shared opaque-frame document loader
+          merged from debugger PR #42; this workbench integration preserves that implementation.
+          The desktop host supplies a `vb6://app/preview/` handle before any runtime HTML is
+          assigned to the iframe. Desktop frames never temporarily navigate through `srcdoc`,
+          which inherits the controller's restrictive script policy. The native host still
+          serves per-document script hashes; no `unsafe-inline`, same-origin sandbox flag,
+          Node integration, or broader IPC permission is added.
+
+          A delayed document reply cannot load a stopped/reset/replaced runtime. Host
+          rejections are displayed, and the frame is discarded instead of falling back to
+          inline execution. Browser builds retain their existing sandboxed `srcdoc` path.
+          The same loader serves debugger/runtime operations invoked through agent tools;
+          this changes document transport, not the selected permission profile.
+
+          The native smoke harness checks actual Run and Immediate execution, the absence
+          of `srcdoc` writes, opaque sandboxing, and lack of native bridge access. Browser
+          regressions cover the generic host hook, delayed replies across Stop and same-ID
+          project reload, and failed initialization. Generic browser-host doubles are not
+          represented as native Windows certification.
+          ''')
+          expected = {
+              'desktop/smoke.cjs':'987dc455c3f23fcc5529f262199cd94f9850679915207823aaeb07a9e0ef639d',
+              'docs/CODING-AGENT-WORKBENCH.md':'973e0c5410d6d815ea375035d9051533ae20c9076c2847cca85aa3ca0d1174e1',
+              'tools/coding-agents-browser-tests.py':'7f8a8cb6a8f9f39762a537fe30da697c2f79ba9d0e5d60c3f4980af0f95c5b4d'
+          }
+          for name,digest in expected.items():
+              actual = hashlib.sha256(Path(name).read_bytes()).hexdigest()
+              assert actual == digest, (name,actual,digest)
+              print(actual,name)
+          subprocess.run(['git','add','--',*expected],check=True)
+          PY
+      - name: Build combined distributions and run complete regression suites
+        shell: bash
+        run: |
+          npm run build | tee workbench-build.log
+          node --check desktop/smoke.cjs
+          node --test tests/native-smoke-harness.test.mjs tests/runtime-document.test.mjs | tee workbench-native-contracts.log
+          npm run test:agents | tee workbench-agent-tests.log
+          npm test | tee workbench-full-tests.log
+      - name: Remove publisher and verify independently reproduced final tree
+        shell: bash
+        run: |
+          git add -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples packages/win32-browser/dist
+          git rm -- .github/workflows/agent-workbench-final-reconcile.yml
+          git diff --cached --check
+          test "$(git write-tree)" = 286d1dff2e386cd2c8fd5444754587235998a0f7
+          git commit -m 'fix(agents): finish workbench integration with approved native previews'
+      - name: Publish tested source and evidence
+        shell: bash
+        run: |
+          test "$(git ls-remote origin refs/heads/feat/agent-change-review-queue | cut -f1)" = "$(cat publication-base.txt)"
+          git push origin HEAD:feat/agent-change-review-queue
+          git rev-parse HEAD > head.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-workbench-final-preview-integration
+          path: |
+            workbench-build.log
+            workbench-native-contracts.log
+            workbench-agent-tests.log
+            workbench-full-tests.log
+            publication-base.txt
+            head.txt
+            tree.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
