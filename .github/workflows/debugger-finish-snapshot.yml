@@ -1,0 +1,26 @@
+name: Debugger final integration snapshot
+on:
+  push:
+    branches: [feat/debugger-compatibility-boundaries]
+    paths: ['.github/workflows/debugger-finish-snapshot.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    if: github.repository == 'wieslawsoltes/VB6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve exact source and integration history
+        run: |
+          git bundle create /tmp/debugger-finish.bundle --all
+          git rev-parse HEAD origin/main > /tmp/debugger-finish.refs
+          sha256sum /tmp/debugger-finish.bundle > /tmp/debugger-finish.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debugger-finish-source
+          path: /tmp/debugger-finish.*
+          retention-days: 7
