@@ -25,41 +25,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply reviewed integration and native compiler correction
+      - name: Apply complete reviewed native dispatch correction
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python - <<'PY'
           from pathlib import Path
-          import subprocess
+          import hashlib,subprocess
           git=lambda *a: subprocess.check_output(['git',*a],text=True).strip()
-          feature='108f476f07dd968930daf975d67151b5af364437'
-          main='f4ee8d47bed69ae26b65d20637b8f5f8da13d815'
-          assert git('diff','--name-only',feature,'HEAD')=='.github/workflows/compatibility-finalize.yml'
+          base='49512c8ba5f1b078d87f25d75aecc244f9f0969a'
+          assert git('diff','--name-only',base,'HEAD')=='.github/workflows/compatibility-finalize.yml'
           assert not git('status','--porcelain')
-          result=subprocess.run(['git','merge','--no-ff','--no-commit',main]);assert result.returncode in (0,1)
-          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
-          assert set(conflicts)<={'dist/VB6-Studio-Web.html','dist/studio.js'},conflicts
-          if conflicts:
-              subprocess.run(['git','checkout','--ours','--',*conflicts],check=True)
-              subprocess.run(['git','add','--',*conflicts],check=True)
-          path=Path('tools/interop/AutomationHost.cs')
-          assert git('hash-object',str(path))=='74e42bd1072e397abd2b055e69104d992bc2fe37'
-          old='var result=InvokeDirect(target,member,mode,lcid,encoded,byref,schema);\n      Application.DoEvents();return result;'
-          new='var invocationResult=InvokeDirect(target,member,mode,lcid,encoded,byref,schema);\n      Application.DoEvents();return invocationResult;'
-          source=path.read_text();assert source.count(old)==1;path.write_text(source.replace(old,new))
-          assert git('hash-object',str(path))=='b1aa6182045872379c50ada7d13f88f7d5e848ea'
+          patch=Path('.compat-review/native-dispatch.patch').read_bytes()
+          assert hashlib.sha256(patch).hexdigest()=='641f883b1b1bbefe810dc15ddf6fa9995157254f04330df4091349a49f7c70b9'
+          subprocess.run(['git','apply','--index','--unidiff-zero','-'],input=patch,check=True)
+          expected={'tests/native-automation-scalars.test.mjs','tools/interop/AutomationHost.cs','tools/interop/NativeDispatch.cs','tools/interop/NativeEnumeration.cs','tools/interop/automation-host.ps1','tools/interop/native-automation.mjs','tools/interop/test-native.mjs'}
+          assert set(git('diff','--cached','--name-only').splitlines())==expected
           PY
       - name: Rebuild and test complete combined source
         run: |
           set -o pipefail
           mkdir -p compatibility-final-evidence
+          node --check tools/interop/test-native.mjs
           npm run build 2>&1 | tee compatibility-final-evidence/build.log
           npm test 2>&1 | tee compatibility-final-evidence/node.log
-          git rm -- .github/workflows/compat-native-integrate.yml .github/workflows/compatibility-review-snapshot.yml
-          git add -- tools/interop/AutomationHost.cs dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git rm -- .compat-review/native-dispatch.patch
+          git add -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
           git diff --cached --check
-          git commit -m 'fix(interop): restore native host compilation and integrate current agent thread source'
+          git commit -m 'fix(interop): marshal native member IDs and preserve typed IEnumVARIANT values'
           npm run build
           git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
       - name: Compare with independently tested product tree
@@ -67,7 +60,7 @@ jobs:
           export GIT_INDEX_FILE="$RUNNER_TEMP/compat-product-index"
           git read-tree HEAD
           git rm --cached -- .github/workflows/compatibility-finalize.yml
-          test "$(git write-tree)" = 26e6b67e65b928fd79ca2d0d4123fd909d978ae5
+          test "$(git write-tree)" = 541c227088fb91feaaf2dcfaef6620a87e0caf2f
       - name: Publish only reviewed feature branch
         id: publish
         env:
