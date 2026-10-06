@@ -1,0 +1,26 @@
+name: Native String review snapshot
+on:
+  push:
+    branches: [feat/native-declare-strings]
+    paths: [.github/workflows/native-strings-review.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: |
+          git bundle create /tmp/native-strings-review.bundle HEAD refs/remotes/origin/main
+          git archive HEAD --output=/tmp/native-strings-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-strings-review
+          path: |
+            /tmp/native-strings-review.bundle
+            /tmp/native-strings-source.zip
+          retention-days: 2
