@@ -1,0 +1,29 @@
+name: Character intrinsic conformance
+on:
+  push:
+    branches: [feat/character-intrinsics]
+    paths: ['tools/conformance/character-reference.ps1', '.github/workflows/character-intrinsics.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: character-intrinsics-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-reference:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Execute original probes through installed x86 Windows Script Host
+        shell: powershell
+        run: ./tools/conformance/character-reference.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: character-reference-${{ github.sha }}
+          path: reports/characters/
+          if-no-files-found: error
+          retention-days: 14
