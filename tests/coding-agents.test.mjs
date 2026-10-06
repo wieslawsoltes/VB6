@@ -220,13 +220,14 @@ test('agents: Stop cancels pending approval; late approval cannot apply', async 
   while (!allow) await tick(); f.agent.stop(); allow(true); await assert.rejects(pending); assert.equal(f.ide.project.modules[0].code, original);
 });
 test('agents: tool batch/request/token/context limits are explicit and enforced', async t => {
-  const f = fixture(t); await assert.rejects(run(f.agent, once('openai', [{name: 'vb6_project_get'}, {name: 'vb6_project_get'}]), {maxCalls: 1}), /Tool-call limit/);
+  const f = fixture(t); assert.equal((await run(f.agent, once('openai', [{name: 'vb6_project_get'}, {name: 'vb6_project_get'}]), {maxCalls: 1})).status, 'limit');
+  assert.match(f.agent.limit.message, /Tool-call limit/); assert.equal(f.agent.canResume, true);
   assert.equal(f.agent.transcript.some(event => event.type === 'tool'), false); f.agent.reset();
   assert.equal((await run(f.agent, once('openai', [{name: 'vb6_project_get'}]), {maxTurns: 1})).status, 'limit'); f.agent.reset();
   const tokens = await run(f.agent, async (_, {receive}) => { const packet = response('openai', [{name: 'vb6_project_get'}]); packet.response.usage.total_tokens = 2000; receive(packet); }, {tokenBudget: 1024}); assert.equal(tokens.status, 'limit'); f.agent.reset();
   for (const option of [{maxCalls: 0}, {maxTurns: 1.5}, {maxTokens: 10}, {tokenBudget: 1}]) await assert.rejects(run(f.agent, once(), option), /Invalid agent limit/);
   f.agent.history = [{role: 'user', content: 'x'.repeat(1600000)}]; f.agent.provider = 'openai'; f.agent.model = 'test-model'; f.agent.projectId = f.ide.project.id; f.agent.epoch = f.adapter.authorityEpoch;
-  await assert.rejects(run(f.agent, once(), {maxContextBytes: 1500000}), /context limit/);
+  assert.equal((await run(f.agent, once(), {maxContextBytes: 1500000})).status, 'limit'); assert.equal(f.agent.limit.kind, 'context');
 });
 test('agents: provider/model/project changes require a new native conversation', async t => {
   const f = fixture(t); await run(f.agent, once());
