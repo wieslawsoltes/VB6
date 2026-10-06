@@ -15,6 +15,14 @@ export const NATIVE_ARRAY_MAX_BYTES = 0x7ffffff8;
 export const NATIVE_ARRAY_MAX_RANK = 60;
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
 
+/** Optional stricter host budget; it cannot relax checked x86 size arithmetic. */
+export function nativeArrayLimit(value, fail = message => { throw new Error(message); }) {
+  if(value === undefined)return NATIVE_ARRAY_MAX_BYTES;
+  if(!Number.isSafeInteger(value) || value < 1 || value > NATIVE_ARRAY_MAX_BYTES)
+    fail('maxArrayBytes must be an integer from 1 to ' + NATIVE_ARRAY_MAX_BYTES);
+  return value;
+}
+
 export const nativeArrayMethods = {
   arrayWorkspace(bytes, name = 'array-work') {
     const c = this.context, variable = {name:this.x.unique(name), type:'Long', nativeBytes:bytes};
@@ -111,7 +119,7 @@ export const nativeArrayMethods = {
 /** Runtime helpers preserve EBX/ESI/EDI and return HRESULT failures through the
  * existing VB error frame, never through a native Windows callback stack. */
 export function emitNativeArrayHelpers(compiler) {
-  const x=compiler.x;
+  const x=compiler.x, maxBytes=compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES;
   const checked=x.unique();
   x.label(A+'check').test().branch('ns',checked).compare(0x8002000b).branch('e','error:9')
     .compare(0x8002000d).branch('e','error:10').compare(0x8007000e).branch('e','error:7').jump('error:5').label(checked).emit(0xc3);
@@ -128,7 +136,7 @@ export function emitNativeArrayHelpers(compiler) {
   x.label(A+'count').enter().value(arg(8)).test().branch('e','error:9')
     .emit(0x0f,0xb7,0x38,0x8d,0x70,16,0xbb).imm(1).label(countLoop).emit(0x85,0xff).branch('e',countDone)
     .emit(0x0f,0xaf,0x1e).branch('o','error:7').emit(0x83,0xc6,8,0x4f).jump(countLoop)
-    .label(countDone).emit(0x89,0xd8).compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7').leave(4);
+    .label(countDone).emit(0x89,0xd8).compare(maxBytes).branch('g','error:7').leave(4);
 
   for(const upper of [false,true]) {
     x.label(A+(upper?'upper':'lower')).enter(4).value(arg(8)).emit(0x8b,0x00).test().branch('e','error:9')
@@ -146,12 +154,12 @@ export function emitNativeArrayHelpers(compiler) {
   x.label(noOld).value(arg(16)).compare(1).branch('l','error:9').compare(NATIVE_ARRAY_MAX_RANK).branch('g','error:9')
     .emit(0x89,0xc7).value(arg(20)).emit(0x89,0xc6).value(1);save(x,-16);
   x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
-    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7');save(x,-16);
+    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(maxBytes).branch('g','error:7');save(x,-16);
   x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
   x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
-    .value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/4).branch('g','error:7').jump(limitDone);
-  x.label(halfLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/2).branch('g','error:7').jump(limitDone);
-  x.label(doubleLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/8).branch('g','error:7').jump(limitDone);
+    .value(arg(-16)).compare(Math.floor(maxBytes/4)).branch('g','error:7').jump(limitDone);
+  x.label(halfLimit).value(arg(-16)).compare(Math.floor(maxBytes/2)).branch('g','error:7').jump(limitDone);
+  x.label(doubleLimit).value(arg(-16)).compare(Math.floor(maxBytes/8)).branch('g','error:7').jump(limitDone);
   x.label(byteLimit).label(limitDone).value(0);save(x,-12);
   x.value(arg(-4)).test().branch('e',create).value(arg(24)).test().branch('e',create);
   x.api(DLL,'SafeArrayGetDim',[arg(-4)]).emit(0x3b,0x45,16).branch('ne','error:9');

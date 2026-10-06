@@ -2149,7 +2149,8 @@ const nativeNumericMethods = {
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
     plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(node.kind==='byval'){this.numeric(node.expr);}
+      if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
+      else if(node.kind==='byval'){this.numeric(node.expr);}
       else if(p.bounds!==null&&p.bounds!==undefined){
         if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
         const a=this.variable(node);
@@ -2381,8 +2382,88 @@ const nativeCallMethods={
 return {planNativeArguments,nativeCallMethods};
 })();
 
-/* currency.js */
+/* callbacks.js */
 __modules[26]=(()=>{
+
+/** Original x86 stdcall callback thunks. No executable heap or native compiler.
+ * Contract: https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/addressof-operator
+ * Callbacks execute on the application's original thread. Foreign-thread entry
+ * fails closed before accessing process-global VB error/owner state.
+ */
+const key = value => String(value).toLowerCase();
+const types = new Set(['byte','integer','long','boolean','single','double','currency','date']);
+const real = new Set(['single','double','date']);
+const E = 'native:error:';
+const state = ['frame','pending','number','description','source','erl'];
+const arg = argument => ({argument});
+const mem = memory => ({memory});
+const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
+
+const nativeCallbackMethods = {
+  nativeCallbackArgument(parameter, node) {
+    if (parameter.byRef || key(parameter.type) !== 'long' || parameter.bounds != null)
+      this.fail('AddressOf requires a scalar ByVal Long function-pointer parameter');
+    const parts = node.name.split('.');
+    if (parts.length > 2) this.fail('Native AddressOf requires a standard-module procedure in this project');
+    const callee = parts.length === 1 ? {kind:'id', name:parts[0]} :
+      {kind:'member', object:{kind:'id', name:parts[0]}, name:parts[1]};
+    if (this.variable(callee)) this.fail('AddressOf cannot reference a variable');
+    const target = this.resolveProcedure(callee), signature = target?.proc;
+    if (!signature || target.module.module.kind !== 'module' || target.module.nativeInternal)
+      this.fail('Native AddressOf requires an authored Sub or Function in a standard module');
+    if (!['sub','function'].includes(signature.kind) ||
+        signature.kind === 'function' && !types.has(key(signature.returnType)) ||
+        signature.params.some(p => p.optional || p.paramArray || p.bounds != null || !types.has(key(p.type))))
+      this.fail('Native callbacks require fixed scalar numeric/Date parameters and returns; String, arrays, Optional and ParamArray are not supported');
+    if (!this.nativeCallbacks) {
+      this.nativeCallbacks = new Map();
+      this.slot('native:callback:thread');
+    }
+    let callback = this.nativeCallbacks.get(target.label);
+    if (!callback) {
+      callback = {target, label:'native:callback:' + this.nativeCallbacks.size};
+      this.nativeCallbacks.set(target.label,callback);
+    }
+    this.x.value(callback.label);
+  }
+};
+
+function emitNativeCallbackHelpers(c) {
+  if (!c.nativeCallbacks?.size) return;
+  const x = c.x;
+  for (const {target,label} of c.nativeCallbacks.values()) {
+    const signature = target.proc, type = key(signature.returnType), ownThread = x.unique();
+    x.label(label).enter(36);
+    x.api('kernel32.dll','GetCurrentThreadId').emit(0x3b,0x05).addr('native:callback:thread').branch('e',ownThread);
+    // The current backend's globals and VB error frames are single-threaded.
+    // Never run application callbacks from another native thread or race its state.
+    x.api('kernel32.dll','ExitProcess',[5]).label(ownThread);
+    state.forEach((name,i) => { x.value(mem(E+name)); save(x,-4*(i+1)); });
+    x.emit(0xd9,0x7d,0xdc); // fnstcw [ebp-36]; preserve the foreign caller's x87 CW.
+    x.value(0).store(E+'frame').call(E+'clear');
+    // Preserve the external stdcall argument byte layout. The authored procedure
+    // handles exact-width loads, owned locals, cleanup and numeric return ABI.
+    for (let offset=target.argumentBytes+4; offset>=8; offset-=4) x.push(arg(offset));
+    x.call(target.label);
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x5d,0xe0); // fstp qword [ebp-32]
+    else { save(x,-32); x.emit(0x89,0x55,0xe4); } // EAX, EDX
+    // Unhandled callback errors cannot jump across the suspended external stack.
+    // Use the ordinary fatal diagnostic after the authored frame has cleaned up;
+    // On Error inside the callback remains fully functional.
+    x.emit(0x83,0x3d).addr(E+'pending').emit(0).branch('ne',E+'fatal');
+    state.forEach((name,i) => x.value(arg(-4*(i+1))).store(E+name));
+    x.emit(0xd9,0x6d,0xdc); // fldcw [ebp-36]
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x45,0xe0);
+    else x.value(arg(-32)).emit(0x8b,0x55,0xe4);
+    x.leave(target.argumentBytes);
+  }
+}
+
+return {nativeCallbackMethods,emitNativeCallbackHelpers};
+})();
+
+/* currency.js */
+__modules[27]=(()=>{
 const {VBCurrency}=__modules[6];
 /** Native CY values are signed 64-bit integers scaled by 10,000. Expressions
  * return an immutable snapshot address in EAX; ABI returns use EDX:EAX. Never
@@ -2560,7 +2641,7 @@ return {nativeCurrencyMethods,emitNativeCurrencyHelpers};
 })();
 
 /* dates.js */
-__modules[27]=(()=>{
+__modules[28]=(()=>{
 const {dateToSerial}=__modules[1];
 /** Native Automation DATE: civil date/time in eight bytes, not a JS timestamp.
  * Values use immutable Double snapshots; semantic Date type and range checking
@@ -2757,7 +2838,7 @@ return {nativeDateMethods,emitNativeDateHelpers};
 })();
 
 /* date-intervals.js */
-__modules[28]=(()=>{
+__modules[29]=(()=>{
 const {compileProject}=__modules[20];
 /** Native calendar intervals. The arithmetic routines below are original private
  * compiler support code, lowered by our JavaScript frontend and x86 emitter. They
@@ -3001,7 +3082,7 @@ return {NATIVE_DATE_CONSTANTS,nativeDateIntervalMethods,emitNativeDateIntervalHe
 })();
 
 /* control-arrays.js */
-__modules[29]=(()=>{
+__modules[30]=(()=>{
 
 /** Statically designed control arrays, including Index event arguments. Each
  * element retains its own native HWND and ID; no flattened duplicate names. */
@@ -3079,7 +3160,7 @@ return {nativeControlArrayMethods};
 })();
 
 /* arrays.js */
-__modules[30]=(()=>{
+__modules[31]=(()=>{
 
 /** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
  * passes a descriptor slot by reference; it is never exposed to browser code. */
@@ -3097,6 +3178,14 @@ const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5
 const NATIVE_ARRAY_MAX_BYTES = 0x7ffffff8;
 const NATIVE_ARRAY_MAX_RANK = 60;
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
+
+/** Optional stricter host budget; it cannot relax checked x86 size arithmetic. */
+function nativeArrayLimit(value, fail = message => { throw new Error(message); }) {
+  if(value === undefined)return NATIVE_ARRAY_MAX_BYTES;
+  if(!Number.isSafeInteger(value) || value < 1 || value > NATIVE_ARRAY_MAX_BYTES)
+    fail('maxArrayBytes must be an integer from 1 to ' + NATIVE_ARRAY_MAX_BYTES);
+  return value;
+}
 
 const nativeArrayMethods = {
   arrayWorkspace(bytes, name = 'array-work') {
@@ -3194,7 +3283,7 @@ const nativeArrayMethods = {
 /** Runtime helpers preserve EBX/ESI/EDI and return HRESULT failures through the
  * existing VB error frame, never through a native Windows callback stack. */
 function emitNativeArrayHelpers(compiler) {
-  const x=compiler.x;
+  const x=compiler.x, maxBytes=compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES;
   const checked=x.unique();
   x.label(A+'check').test().branch('ns',checked).compare(0x8002000b).branch('e','error:9')
     .compare(0x8002000d).branch('e','error:10').compare(0x8007000e).branch('e','error:7').jump('error:5').label(checked).emit(0xc3);
@@ -3211,7 +3300,7 @@ function emitNativeArrayHelpers(compiler) {
   x.label(A+'count').enter().value(arg(8)).test().branch('e','error:9')
     .emit(0x0f,0xb7,0x38,0x8d,0x70,16,0xbb).imm(1).label(countLoop).emit(0x85,0xff).branch('e',countDone)
     .emit(0x0f,0xaf,0x1e).branch('o','error:7').emit(0x83,0xc6,8,0x4f).jump(countLoop)
-    .label(countDone).emit(0x89,0xd8).compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7').leave(4);
+    .label(countDone).emit(0x89,0xd8).compare(maxBytes).branch('g','error:7').leave(4);
 
   for(const upper of [false,true]) {
     x.label(A+(upper?'upper':'lower')).enter(4).value(arg(8)).emit(0x8b,0x00).test().branch('e','error:9')
@@ -3229,12 +3318,12 @@ function emitNativeArrayHelpers(compiler) {
   x.label(noOld).value(arg(16)).compare(1).branch('l','error:9').compare(NATIVE_ARRAY_MAX_RANK).branch('g','error:9')
     .emit(0x89,0xc7).value(arg(20)).emit(0x89,0xc6).value(1);save(x,-16);
   x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
-    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(NATIVE_ARRAY_MAX_BYTES).branch('g','error:7');save(x,-16);
+    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(maxBytes).branch('g','error:7');save(x,-16);
   x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
   x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
-    .value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/4).branch('g','error:7').jump(limitDone);
-  x.label(halfLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/2).branch('g','error:7').jump(limitDone);
-  x.label(doubleLimit).value(arg(-16)).compare(NATIVE_ARRAY_MAX_BYTES/8).branch('g','error:7').jump(limitDone);
+    .value(arg(-16)).compare(Math.floor(maxBytes/4)).branch('g','error:7').jump(limitDone);
+  x.label(halfLimit).value(arg(-16)).compare(Math.floor(maxBytes/2)).branch('g','error:7').jump(limitDone);
+  x.label(doubleLimit).value(arg(-16)).compare(Math.floor(maxBytes/8)).branch('g','error:7').jump(limitDone);
   x.label(byteLimit).label(limitDone).value(0);save(x,-12);
   x.value(arg(-4)).test().branch('e',create).value(arg(24)).test().branch('e',create);
   x.api(DLL,'SafeArrayGetDim',[arg(-4)]).emit(0x3b,0x45,16).branch('ne','error:9');
@@ -3284,12 +3373,12 @@ function emitNativeArrayHelpers(compiler) {
   x.label(copyDone).value(0).leave(8);
 }
 
-return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayMethods,emitNativeArrayHelpers};
+return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers};
 })();
 
 /* storage.js */
-__modules[31]=(()=>{
-const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[30];
+__modules[32]=(()=>{
+const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[31];
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
 
 const key = value => String(value).toLowerCase();
@@ -3336,7 +3425,7 @@ function storageLayout(compiler, decl, module, proc) {
       if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
       const stride = count * elementBytes;
       count *= upper - lower + 1;
-      if (!Number.isSafeInteger(count) || count * elementBytes > NATIVE_ARRAY_MAX_BYTES) compiler.fail('Native fixed array exceeds checked x86 backing-address range', module);
+      if (!Number.isSafeInteger(count) || count * elementBytes > (compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES)) compiler.fail('Native fixed array exceeds checked x86 backing-address range or configured budget', module);
       return {lower, upper, stride};
     });
   }
@@ -3461,7 +3550,7 @@ return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHe
 })();
 
 /* errors.js */
-__modules[32]=(()=>{
+__modules[33]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -3602,21 +3691,23 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[33]=(()=>{
+__modules[34]=(()=>{
 const {normalizeProject}=__modules[13];
 const {compileProject, parseParameters}=__modules[20];
 const {PE32Image, BinarySection}=__modules[21];
 const {X86}=__modules[22];
 const {nativeBindingMethods}=__modules[23];
 const {nativeCallMethods}=__modules[25];
-const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[26];
-const {nativeDateMethods,emitNativeDateHelpers}=__modules[27];
-const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[28];
+const {nativeCallbackMethods,emitNativeCallbackHelpers}=__modules[26];
+const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[27];
+const {nativeDateMethods,emitNativeDateHelpers}=__modules[28];
+const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[29];
 const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[24];
-const {nativeControlArrayMethods}=__modules[29];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[31];
-const {nativeArrayMethods,emitNativeArrayHelpers}=__modules[30];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[32];
+const {nativeControlArrayMethods}=__modules[30];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[32];
+const {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers}=__modules[31];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[33];
+
 
 
 
@@ -3662,7 +3753,8 @@ function extractNativeDeclarations(module) {
 }
 
 class NativeCompiler {
-  constructor(project) {
+  constructor(project, options = {}) {
+    this.maxArrayBytes=nativeArrayLimit(options.maxArrayBytes, message=>this.fail(message));
     this.project = normalizeProject(project); this.externals = new Map();
     if (this.project.dataSources?.connections?.length || this.project.modules.some(m => m.form?.controls?.some(c => c.properties?.DataSource || c.properties?.DataMember || /^(?:Data|Adodc)$/i.test(c.type)))) this.fail('Data-source providers and data-bound controls require the HTML or Electron desktop target; freestanding PE32 AOT does not implement the data runtime');
     if (project.resources?.entries?.length) this.fail('Native resource lowering is not yet implemented; use the classic or desktop target');
@@ -4248,9 +4340,11 @@ class NativeCompiler {
   build() {
     for (const module of this.modules.values()) for (const proc of module.procedures.values()) this.procedure(proc);
     for (const module of this.modules.values()) if (module.form) this.form(module);
+    emitNativeCallbackHelpers(this);
     this.helpers(); this.context = null; this.instruction = null;
     const x = this.x, loop = x.unique(), dispatch = x.unique(), quit = x.unique();
     x.label('entry').api('kernel32.dll','GetModuleHandleW',[0]).store('instance');
+    if(this.nativeCallbacks?.size)x.api('kernel32.dll','GetCurrentThreadId').store('native:callback:thread');
     for (const module of this.modules.values()) if (module.form) {
       x.value(mem('instance')).store(module.wc,16).api('user32.dll','LoadCursorW',[0,32512]).store(module.wc,24);
       x.api('user32.dll','RegisterClassW',[module.wc]).test().branch('e','error:7');
@@ -4271,23 +4365,23 @@ class NativeCompiler {
     x.label(dispatch).api('user32.dll','TranslateMessage',['msg']).api('user32.dll','DispatchMessageW',['msg']).jump(loop).label(quit).api('kernel32.dll','ExitProcess',[0]);
     this.image.manifest('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo><dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="x86" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency></assembly>');
     const linked = this.image.finish('entry');
-    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
+    return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,arrayLimits:{maxBytes:this.maxArrayBytes,maxRank:60},runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),callbacks:[...(this.nativeCallbacks?.values()||[])].map(({target,label})=>({module:target.module.name,procedure:target.proc.name,rva:linked.symbols[label],argumentBytes:target.argumentBytes,thread:'application',convention:'stdcall'})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
+Object.assign(NativeCompiler.prototype,nativeCallbackMethods,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
 function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');
   if (!project || !Array.isArray(project.modules) || project.modules.length > 128) throw new NativeCompileError('Native project must contain at most 128 modules');
-  return new NativeCompiler(project).build();
+  return new NativeCompiler(project,options).build();
 }
 
 return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[34]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[33];
+__modules[35]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[34];
 const {PE32Image, BinarySection, PE32_BASE}=__modules[21];
 const {X86}=__modules[22];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
@@ -4297,5 +4391,5 @@ const {X86}=__modules[22];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[34];
+globalThis["VB6Native"]=__modules[35];
 })();

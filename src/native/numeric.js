@@ -134,7 +134,8 @@ export const nativeNumericMethods = {
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
     plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(node.kind==='byval'){this.numeric(node.expr);}
+      if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
+      else if(node.kind==='byval'){this.numeric(node.expr);}
       else if(p.bounds!==null&&p.bounds!==undefined){
         if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
         const a=this.variable(node);

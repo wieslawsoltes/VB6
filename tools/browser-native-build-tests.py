@@ -103,6 +103,20 @@ with sync_playwright() as pw:
             check('typed Optional and named calls export without rewriting source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
             check('call-argument File Make EXE equals Node output', downloaded.suggested_filename == 'AotCalls.exe' and (OUT / 'AotCalls.exe').read_bytes() == (calls_dir / 'AotCalls.exe').read_bytes())
             check('call export has no network or page errors', not errors and not requests)
+        for folder, name in [('interval-contract', 'AotIntervalContract'), ('large-arrays', 'AotLargeArrays'), ('callbacks', 'AotCallbacks')]:
+            extra = ROOT / 'validation' / folder
+            if not (extra / f'{name}.vb6web').exists():
+                continue
+            original = json.loads((extra / f'{name}.vb6web').read_text())
+            page.evaluate('p => vb6Studio.loadProject(p)', original)
+            before = page.evaluate('JSON.stringify(vb6Studio.project.modules)')
+            with page.expect_download() as pending:
+                page.evaluate('vb6Studio.command("exportWin32")')
+            downloaded = pending.value
+            downloaded.save_as(OUT / f'{name}.exe')
+            check(f'{name}: Make EXE preserves source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
+            check(f'{name}: Make EXE equals Node', (OUT / f'{name}.exe').read_bytes() == (extra / f'{name}.exe').read_bytes())
+            check(f'{name}: no page/network errors', not errors and not requests)
         page.close()
         page = browser.new_page()
         page.add_script_tag(content=SDK)
@@ -118,6 +132,10 @@ with sync_playwright() as pw:
             fixtures.extend((calls_dir, name) for name in ('AotCalls', 'AotCallProperties'))
         if date_dir.exists():
             fixtures.extend((date_dir, name) for name in ('AotDates', 'AotDateABI', 'AotDateCalls') if (date_dir / f'{name}.vb6web').exists())
+        for folder, name in [('interval-contract','AotIntervalContract'), ('large-arrays','AotLargeArrays'), ('callbacks','AotCallbacks'), ('callbacks','AotCallbackThreadGuard')]:
+            extra = ROOT / 'validation' / folder
+            if (extra / f'{name}.vb6web').exists():
+                fixtures.append((extra, name))
         for fixture_dir, fixture_name in fixtures:
             fixture_project = json.loads((fixture_dir / f'{fixture_name}.vb6web').read_text())
             fixture_expected = (fixture_dir / f'{fixture_name}.exe').read_bytes()

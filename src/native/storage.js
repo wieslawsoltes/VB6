@@ -44,7 +44,7 @@ export function storageLayout(compiler, decl, module, proc) {
       if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
       const stride = count * elementBytes;
       count *= upper - lower + 1;
-      if (!Number.isSafeInteger(count) || count * elementBytes > NATIVE_ARRAY_MAX_BYTES) compiler.fail('Native fixed array exceeds checked x86 backing-address range', module);
+      if (!Number.isSafeInteger(count) || count * elementBytes > (compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES)) compiler.fail('Native fixed array exceeds checked x86 backing-address range or configured budget', module);
       return {lower, upper, stride};
     });
   }

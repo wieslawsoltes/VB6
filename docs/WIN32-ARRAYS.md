@@ -26,11 +26,11 @@ Public Sub Main()
 End Sub
 ```
 
-Element types are Byte, Integer, Boolean, Long, Single, Double, Currency and String. Single
+Element types are Byte, Integer, Boolean, Long, Single, Double, Currency, Date and String. Single
 and Double elements occupy four and eight bytes respectively. Floating element
 reads produce value snapshots and Single stores round to Single precision; see
 [Native numeric storage](WIN32-NUMERIC.md). Currency uses eight-byte VT_CY elements and exact scaled-bit snapshots; see [Native Currency](WIN32-CURRENCY.md). Dynamic arrays begin unallocated.
-`ReDim` accepts one through eight dimensions with runtime signed 32-bit bounds and
+`ReDim` accepts one through sixty dimensions with runtime signed 32-bit bounds and
 Option Base for omitted lower bounds. ReDim without Preserve creates
 zero/empty-initialized storage and can change rank. ReDim Preserve retains existing
 elements and allows only the final dimension's upper bound to change. All lower
@@ -69,8 +69,18 @@ current descriptor.
 
 ## Limits and excluded forms
 
-Backing data is limited to one MiB per array, excluding the separately bounded
-BSTR contents. Rank is limited to eight. Procedure workspace remains limited to
+The former one-MiB backing quota is removed. The checked x86 per-array ceiling
+is 2,147,483,640 bytes, excluding separately owned BSTR contents and descriptor
+metadata. This is an address-arithmetic ceiling, not a promise that Windows can
+allocate that much contiguous memory. Rank is limited to sixty. Failed dimension,
+product, width or allocation checks preserve an existing destination descriptor.
+
+Hosts can request a stricter per-array limit with
+`compileWin32(project, {maxArrayBytes: 1048576})`, or the repository CLI option
+`--max-array-bytes 1048576`. The option must be a positive integer no greater than
+the x86 ceiling. It checks both fixed declarations and dynamic allocation/Preserve
+before changing live storage; byte counts need not be multiples of element width.
+It is not a cumulative process-memory budget or a bound on separate String data. Procedure workspace remains limited to
 512 KiB. Reversed bounds are errors, not zero-element arrays. Unsupported element
 types, undeclared ReDim targets, ByVal whole arrays, array returns, fixed-length
 String whole-array arguments and fixed-length String scalar ByRef copy-back are
