@@ -33,3 +33,6 @@ reports/classic-html/
 # Debugger compatibility browser evidence
 reports/debugger-boundaries/
 reports/native-debugger/
+
+# ChatGPT connection fixtures; retained as CI artifacts.
+reports/chatgpt-login/
