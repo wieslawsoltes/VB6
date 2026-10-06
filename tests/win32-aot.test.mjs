@@ -62,7 +62,7 @@ test('Declare parsing preserves source lines, scope, aliases and exact numeric A
   assert.equal(extractNativeDeclarations({name:'M',code:'Declare Function F Lib "x.dll" Alias "#42" (ByVal x As Long) As Integer'}).declarations.get('f').symbol,42);
 });
 for(const code of [
-  'Private Declare Function F Lib "x" (ByVal s As String) As Long',
+  'Private Declare Function F Lib "x" (ByVal s As Object) As Long',
   'Private Declare Function F Lib "x" (x() As Long) As Long',
   'Private Declare Function F Lib "../x" () As Long'
 ])test('unsupported native Declare fails without producing a plausible executable: '+code,()=>assert.throws(()=>extractNativeDeclarations({name:'M',code})));

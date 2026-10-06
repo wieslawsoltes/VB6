@@ -64,8 +64,8 @@ export const nativeCallMethods={
         if(!target.nativeDefaults?.has(key(p.name)))this.fail('Native optional default is unavailable: '+p.name);
         entry.node={kind:'literal',value:target.nativeDefaults.get(key(p.name))};
       }
-      if(entry.node.kind==='byval'&&(target.proc||!p.byRef||key(p.type)!=='long'||p.bounds!==null&&p.bounds!==undefined))
-        this.fail('Call-site ByVal requires an external scalar Long parameter declared ByRef; use parentheses for a project ByRef value');
+      if(entry.node.kind==='byval'&&(target.proc||!p.byRef||!['long','string'].includes(key(p.type))||p.bounds!==null&&p.bounds!==undefined))
+        this.fail('Call-site ByVal requires an external scalar Long or String parameter declared ByRef; use parentheses for a project ByRef value');
     }
     return plan;
   },

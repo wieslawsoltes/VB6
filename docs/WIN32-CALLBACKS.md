@@ -19,8 +19,8 @@ Private Function Visit(ByVal hwnd As Long, ByVal data As Long) As Long
 End Function
 ```
 
-The current Declare reader requires each declaration on a **single line**; the
-example is wrapped for readability. Invoke it with
+The Declare reader supports physical line continuations while preserving source
+positions. Invoke the example with
 `result = EnumWindows(AddressOf Visit, 0)`.
 
 ## ABI and ownership
@@ -36,7 +36,7 @@ return through ST(0), and Currency returns through EDX:EAX.
 The wrapper preserves EBX/ESI/EDI/EBP, its stack layout and the caller's x87 control
 word. Nested callbacks on the application thread are supported. A callback gets
 an independent VB error-frame boundary: its handled errors do not overwrite a
-suspended caller's Err state. Its owned local Strings/arrays are cleaned by the
+suspended caller's Err state, including its LastDLLError snapshot. Its owned local Strings/arrays are cleaned by the
 normal procedure lifecycle. Unhandled callback errors use the ordinary fatal
 native diagnostic rather than jumping across the suspended DLL/Windows stack.
 Handle expected callback errors inside that procedure with On Error.

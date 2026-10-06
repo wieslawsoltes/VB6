@@ -2,63 +2,100 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {loadRuntimeDocument} from '../src/ide/runtime-document.js';
-import {installNativePreview} from '../desktop/studio.mjs';
-
-const url = 'vb6://app/preview/' + '1'.repeat(32);
-function deferred() { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return {promise,resolve,reject}; }
-function fixture(prepare) {
-  const writes=[],stops=[],messages=[];
-  const frame={isConnected:true,sandbox:'allow-scripts allow-downloads allow-modals',referrerPolicy:'no-referrer',set src(value){writes.push(['src',value]);},set srcdoc(value){writes.push(['srcdoc',value]);}};
-  const studio={runtimeFrame:frame,async stop(capture){stops.push(capture);this.runtimeFrame=null;},status(message){messages.push(message);}};
-  installNativePreview(studio,{runtimeDocument:prepare});
-  return {studio,frame,writes,stops,messages};
+import {createNativeRuntimeDocumentLoader} from '../desktop/runtime-document.mjs';
+const url = 'vb6://app/preview/' + 'a'.repeat(32);
+const defer=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
+function setup(runtimeDocument) {
+  const requests=[],stops=[],messages=[];
+  const frame={isConnected:true,src:'',removeAttribute:()=>{},set srcdoc(_) {throw Error('Native preview must never start srcdoc');}};
+  const studio={runtimeFrame:frame,stop:capture=>{stops.push(capture);studio.runtimeFrame=null;},status:message=>messages.push(message)};
+  studio.runtimeDocumentLoader=createNativeRuntimeDocumentLoader({runtimeDocument:html=>{requests.push(html);return runtimeDocument(html);}});
+  const load=(frame,html)=>loadRuntimeDocument(studio,frame,html,{
+    isCurrent:()=>studio.runtimeFrame===frame,
+    onError:error=>{studio.stop(false);studio.status(error.message);}
+  });
+  return {studio,frame,load,requests,stops,messages};
 }
-test('ordinary browser preview retains its srcdoc transport',()=>{
-  const frame={};loadRuntimeDocument({},frame,'<html>browser</html>');assert.equal(frame.srcdoc,'<html>browser</html>');assert.equal(frame.src,undefined);
+
+test('combined native preview adapters register before navigating without a srcdoc attempt',async()=>{
+  const request=defer(),s=setup(()=>request.promise),html='<html><script>test()</script></html>';
+  const ready=s.load(s.frame,html);
+  assert.equal(s.frame.src,'');assert.deepEqual(s.requests,[html]);
+  request.resolve(url);await ready;assert.equal(s.frame.src,url);
+  assert.deepEqual(s.stops,[]);assert.deepEqual(s.messages,[]);
 });
-test('native preview prepares first, navigates once, and leaves sandbox attributes unchanged',async()=>{
-  const reply=deferred(),calls=[],s=fixture(html=>{calls.push(html);return reply.promise;});
-  const pending=loadRuntimeDocument(s.studio,s.frame,'<html>native</html>');await Promise.resolve();
-  assert.deepEqual(calls,['<html>native</html>']);assert.deepEqual(s.writes,[]);
-  reply.resolve(url);assert.equal(await pending,true);assert.deepEqual(s.writes,[['src',url]]);
-  assert.equal(s.frame.sandbox,'allow-scripts allow-downloads allow-modals');assert.equal(s.frame.referrerPolicy,'no-referrer');assert.deepEqual(s.stops,[]);
+test('combined loader cannot navigate a frame removed while host approval was pending',async()=>{
+  const request=defer(),s=setup(()=>request.promise);
+  const ready=s.load(s.frame,'old');s.frame.isConnected=false;s.studio.runtimeFrame=null;
+  request.resolve(url);await ready;assert.equal(s.frame.src,'');
 });
-test('stopped and detached native preview requests cannot navigate',async()=>{
-  for (const detach of [false,true]) {
-    const reply=deferred(),s=fixture(()=>reply.promise),pending=loadRuntimeDocument(s.studio,s.frame,'document');
-    if(detach)s.frame.isConnected=false;else s.studio.runtimeFrame=null;
-    reply.resolve(url);assert.equal(await pending,false);assert.deepEqual(s.writes,[]);assert.deepEqual(s.stops,[]);
+test('old native registration cannot replace a newer run document',async()=>{
+  const first=defer(),second=defer(),s=setup(html=>html==='first'?first.promise:second.promise);
+  const old=s.load(s.frame,'first');const newer={isConnected:true,src:'',removeAttribute:()=>{}};s.studio.runtimeFrame=newer;
+  const next=s.load(newer,'second');second.resolve(url);await next;
+  first.resolve('vb6://app/preview/'+'b'.repeat(32));await old;
+  assert.equal(s.frame.src,'');assert.equal(newer.src,url);
+});
+test('rejected old approval cannot stop or report failure against a newer native run',async()=>{
+  const request=defer(),s=setup(()=>request.promise);
+  const ready=s.load(s.frame,'old');s.studio.runtimeFrame={isConnected:true,src:''};
+  request.reject(Error('obsolete'));await ready;assert.deepEqual(s.stops,[]);assert.deepEqual(s.messages,[]);
+});
+for(const bad of ['https://example.com/', 'vb6://evil/preview/'+'a'.repeat(32), 'vb6://app/index.html', 'vb6://app/preview/'+'a'.repeat(32)+'#x', null])
+  test('combined native preview adapters reject unexpected URL '+bad,async()=>{
+    const s=setup(()=>bad);await s.load(s.frame,'source');
+    assert.equal(s.frame.src,'');assert.deepEqual(s.stops,[false]);assert.match(s.messages[0],/invalid preview URL/i);
+  });
+test('synchronous native bridge failure is caught without an unhandled rejection',async()=>{
+  const s=setup(()=>{throw Error('transport down');});
+  await s.load(s.frame,'source');assert.deepEqual(s.stops,[false]);assert.match(s.messages[0],/transport down/);
+});
+test('asynchronous native rejection reports only while that run remains current',async()=>{
+  const request=defer(),s=setup(()=>request.promise);
+  const ready=s.load(s.frame,'current');request.reject(Error('registration failed'));
+  await ready;assert.deepEqual(s.stops,[false]);assert.match(s.messages[0],/registration failed/);
+});
+test('retired native sessions do not invoke the host bridge',()=>{
+  const s=setup(()=>{throw Error('must not be called');});s.studio.runtimeFrame=null;
+  assert.equal(s.load(s.frame,'old'),undefined);assert.deepEqual(s.requests,[]);
+});
+test('F5 and Immediate use the same approved loader without a transient direct srcdoc assignment',async()=>{
+  for(const [path,pattern] of [['../src/ide/main.js',/loadRuntimeDocument\(this,frame,/],['../src/ide/design-immediate.js',/loadRuntimeDocument\(this.ide,frame,/]]) {
+    const source=await fs.readFile(new URL(path,import.meta.url),'utf8');
+    assert.match(source,pattern);assert.doesNotMatch(source,/this\.(?:runtimeFrame|frame)\.srcdoc\s*=/);
   }
+  const desktop=await fs.readFile(new URL('../desktop/studio.mjs',import.meta.url),'utf8');
+  assert.match(desktop,/studio\.runtimeDocumentLoader = createNativeRuntimeDocumentLoader/);
+  assert.doesNotMatch(desktop,/studio\.run\s*=/);
 });
-test('a late native response cannot replace a restarted preview or a newer request for the same frame',async()=>{
-  for (const sameFrame of [false,true]) {
-    const replies=[deferred(),deferred()];let index=0;const s=fixture(()=>replies[index++].promise);
-    const first=loadRuntimeDocument(s.studio,s.frame,'first');await Promise.resolve();
-    const next=sameFrame?s.frame:{...s.frame,set src(value){s.writes.push(['next',value]);}};s.studio.runtimeFrame=next;
-    const second=loadRuntimeDocument(s.studio,next,'second');await Promise.resolve();
-    replies[1].resolve(url);assert.equal(await second,true);replies[0].resolve('vb6://app/preview/'+'2'.repeat(32));
-    assert.equal(await first,false);assert.deepEqual(s.writes,[[sameFrame?'src':'next',url]]);
-  }
+
+
+test('older approvals cannot overwrite a newer document prepared for the same frame',async()=>{
+  const first=defer(),second=defer(),s=setup(html=>html==='first'?first.promise:second.promise);
+  const old=s.load(s.frame,'first'),next=s.load(s.frame,'second');
+  second.resolve(url);await next;first.resolve('vb6://app/preview/'+'b'.repeat(32));await old;
+  assert.equal(s.frame.src,url);assert.deepEqual(s.stops,[]);assert.deepEqual(s.messages,[]);
 });
-test('late native errors cannot stop a restarted preview',async()=>{
-  const replies=[deferred(),deferred()];let index=0;const s=fixture(()=>replies[index++].promise);
-  const first=loadRuntimeDocument(s.studio,s.frame,'first');await Promise.resolve();
-  s.studio.runtimeFrame={isConnected:true};const second=loadRuntimeDocument(s.studio,s.studio.runtimeFrame,'second');await Promise.resolve();
-  replies[0].reject(new Error('old failure'));assert.equal(await first,false);assert.deepEqual(s.stops,[]);assert.deepEqual(s.messages,[]);
-  replies[1].resolve(url);assert.equal(await second,true);
+test('older approval failures cannot stop a newer request on the same frame',async()=>{
+  const first=defer(),second=defer(),s=setup(html=>html==='first'?first.promise:second.promise);
+  const old=s.load(s.frame,'first'),next=s.load(s.frame,'second');
+  first.reject(Error('obsolete same-frame request'));await old;
+  assert.deepEqual(s.stops,[]);assert.deepEqual(s.messages,[]);
+  second.resolve(url);await next;assert.equal(s.frame.src,url);
 });
-test('native preparation failures and invalid URLs fail closed without snapshot waits or srcdoc fallback',async()=>{
-  const invalid=['https://example.test','vb6://evil/preview/'+'1'.repeat(32),'vb6://app/index.html',url+'?x',null];
-  for (const prepare of [()=>{throw new Error('bridge failure');},...invalid.map(value=>()=>value)]) {
-    const s=fixture(prepare);assert.equal(await loadRuntimeDocument(s.studio,s.frame,'document'),false);
-    assert.deepEqual(s.writes,[]);assert.deepEqual(s.stops,[false]);assert.match(s.messages[0],/^Native preview failed: /);
-    assert.equal(s.frame.sandbox,'allow-scripts allow-downloads allow-modals');
-  }
+test('native document preparation leaves sandbox and referrer policy unchanged',async()=>{
+  const s=setup(()=>url);s.frame.sandbox='allow-scripts allow-downloads allow-modals';s.frame.referrerPolicy='no-referrer';
+  const removed=[];s.frame.removeAttribute=name=>removed.push(name);
+  await s.load(s.frame,'source');assert.equal(s.frame.src,url);
+  assert.equal(s.frame.sandbox,'allow-scripts allow-downloads allow-modals');assert.equal(s.frame.referrerPolicy,'no-referrer');
+  assert.deepEqual(removed,['srcdoc']);
 });
-test('the actual IDE run path selects its transport before assigning a document',async()=>{
-  const source=await fs.readFile(new URL('../src/ide/main.js',import.meta.url),'utf8');
-  assert.match(source,/loadRuntimeDocument\(this,this\.runtimeFrame,exportApplication\(this\.project,/);
-  assert.doesNotMatch(source,/this\.runtimeFrame\.srcdoc\s*=/);
-  const native=await fs.readFile(new URL('../desktop/studio.mjs',import.meta.url),'utf8');
-  assert.doesNotMatch(native,/removeAttribute\(['"]srcdoc/);assert.doesNotMatch(native,/studio\.run\s*=/);
+test('independent runtime frames can prepare documents concurrently without retiring each other',async()=>{
+  const first=defer(),second=defer(),errors=[];
+  const ide={runtimeDocumentLoader:createNativeRuntimeDocumentLoader({runtimeDocument:html=>html==='first'?first.promise:second.promise})};
+  const frames=[{isConnected:true,removeAttribute(){}},{isConnected:true,removeAttribute(){}}];
+  const load=(frame,html)=>loadRuntimeDocument(ide,frame,html,{isCurrent:()=>true,onError:error=>errors.push(error)});
+  const a=load(frames[0],'first'),b=load(frames[1],'second');
+  second.resolve(url);await b;first.resolve('vb6://app/preview/'+'b'.repeat(32));await a;
+  assert.equal(frames[0].src,'vb6://app/preview/'+'b'.repeat(32));assert.equal(frames[1].src,url);assert.deepEqual(errors,[]);
 });

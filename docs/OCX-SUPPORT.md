@@ -235,3 +235,12 @@ cannot navigate a detached/stopped frame or interfere with a newer run. Invalid
 preview URLs fail closed; the existing sandbox, document CSP, and native IPC
 sender checks are unchanged. Node transport regressions and the native IDE smoke
 assert this distinction; timeout reports include bounded frame/state diagnostics.
+
+
+The shared loader is also used by native design-mode Immediate and its promotion
+into event debugging. Session guards prevent stale responses from a retired run;
+per-frame request guards additionally prevent an older approval or failure from
+overwriting or stopping a newer document request on the same active iframe.
+Independent frames do not cancel one another. Preview loading does not change
+sandbox permissions, CSP, or native IPC authorization. The native smoke covers
+F5/Reset/restart and Immediate/event-mode promotion through this shared path.

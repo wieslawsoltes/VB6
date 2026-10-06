@@ -2284,8 +2284,520 @@ const nativeBindingMethods = {
 return {nativeBindingMethods};
 })();
 
-/* numeric.js */
+/* arrays.js */
 __modules[24]=(()=>{
+
+/** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
+ * passes a descriptor slot by reference; it is never exposed to browser code. */
+const key = value => String(value).toLowerCase();
+const A = 'native:array:';
+const DLL = 'oleaut32.dll';
+const arg = argument => ({argument});
+const addr = address => ({address});
+const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
+// The old one-MiB quota was a compiler policy, not a SAFEARRAY limit. Keep
+// signed x86 count/offset arithmetic checked; actual allocation is OS-limited.
+// Eight-byte alignment makes all typed element quotas exact integers.
+// https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraycreate
+// https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/too-many-dimensions
+const NATIVE_ARRAY_MAX_BYTES = 0x7ffffff8;
+const NATIVE_ARRAY_MAX_RANK = 60;
+const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
+
+/** Optional stricter host budget; it cannot relax checked x86 size arithmetic. */
+function nativeArrayLimit(value, fail = message => { throw new Error(message); }) {
+  if(value === undefined)return NATIVE_ARRAY_MAX_BYTES;
+  if(!Number.isSafeInteger(value) || value < 1 || value > NATIVE_ARRAY_MAX_BYTES)
+    fail('maxArrayBytes must be an integer from 1 to ' + NATIVE_ARRAY_MAX_BYTES);
+  return value;
+}
+
+const nativeArrayMethods = {
+  arrayWorkspace(bytes, name = 'array-work') {
+    const c = this.context, variable = {name:this.x.unique(name), type:'Long', nativeBytes:bytes};
+    if(c?.proc?.name) {
+      c.size += bytes;
+      if(c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
+      variable.offset = -c.size;
+    } else {variable.label = variable.name; this.allocateStorage(variable);}
+    return variable;
+  },
+  arrayPin() {
+    const pin = this.arrayWorkspace(4,'array-pin');
+    if(this.context?.proc?.name)this.context.arrayPins.push(pin);
+    return pin;
+  },
+  releaseArrayPin(pin) {
+    if(!pin)return;
+    const x=this.x;x.push();this.rawStorageAddress(pin);x.push().call(A+'unpin').emit(0x58);
+  },
+  arrayRef(variable) {
+    this.rawStorageAddress(variable);
+    this.x.emit(0x8b,0x00).test().branch('e','error:9');
+  },
+  elementAddress(variable) {
+    const x=this.x, array=variable.elementOf, rank=variable.indices.length;
+    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..60');
+    const indices=this.arrayWorkspace(rank*4), out=this.arrayWorkspace(4), pin=this.arrayPin();
+    // Evaluate every subscript exactly once, left-to-right, before dereferencing
+    // the current descriptor. A subscript expression may itself resize the array.
+    variable.indices.forEach((node,i)=>{
+      this.numeric(node);x.push();this.rawStorageAddress(indices);x.emit(0x5a,0x89,0x90).imm(i*4);
+    });
+    this.arrayRef(array);x.emit(0x89,0xc3,0x53).invoke(DLL,'SafeArrayGetDim').compare(rank).branch('ne','error:9');
+    x.emit(0x53).invoke(DLL,'SafeArrayLock').call(A+'check');
+    // Publish ownership before a fallible index lookup. Recovery and procedure
+    // exit release this pin even when another argument or the callee throws.
+    this.rawStorageAddress(pin);x.emit(0x89,0x18);
+    this.rawStorageAddress(out);x.push();this.rawStorageAddress(indices);x.push().emit(0x53).invoke(DLL,'SafeArrayPtrOfIndex').call(A+'check');
+    this.rawStorageAddress(out);x.emit(0x8b,0x00);
+    return pin;
+  },
+  initializeArrayStorage(variable) {
+    if(!variable.nativeArray || variable.parameter || variable.nativeDynamic)return;
+    const x=this.x, done=x.unique(), label=x.unique('fixed-bounds');
+    this.ro.align(4).label(label);
+    for(const bound of variable.nativeBounds)this.ro.u32(bound.upper-bound.lower+1).u32(bound.lower);
+    this.rawStorageAddress(variable);x.emit(0x83,0x38,0).branch('ne',done);
+    x.push(variable.fixedLength || 0).push(0).push(label).push(variable.nativeBounds.length).push(VT[key(variable.type)]);
+    this.rawStorageAddress(variable);x.push().call(A+'redim');
+    this.arrayRef(variable);x.emit(0x66,0x83,0x48,2,0x10).label(done); // FADF_FIXEDSIZE
+  },
+  destroyArrayStorage(variable) {
+    this.rawStorageAddress(variable);this.x.push().call(A+'destroy');
+  },
+  redimArrayStorage(decl, preserve) {
+    const x=this.x, variable=this.variable({kind:'id',name:decl.name});
+    if(!variable?.nativeArray || variable.elementOf)this.fail('ReDim requires a declared native array: '+decl.name);
+    if(!variable.nativeDynamic)this.fail('ReDim cannot resize a fixed native array: '+decl.name);
+    if(decl.explicitType && key(decl.type)!==key(variable.type))this.fail('ReDim cannot change a typed array element type');
+    if(decl.fixedLength && decl.fixedLength!==variable.fixedLength)this.fail('ReDim cannot change a fixed String element length');
+    const rank=decl.bounds?.length;
+    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to 60 dimensions');
+    const bounds=this.arrayWorkspace(rank*8);
+    // Keep a stable slot address, not a stale SAFEARRAY pointer, across bound expressions.
+    this.rawStorageAddress(variable);x.push();
+    for(let i=0;i<rank;i++) {
+      this.numeric(decl.bounds[i][0] || {kind:'literal',value:this.context.module.module.optionBase || 0});x.push();
+      this.numeric(decl.bounds[i][1]);x.emit(0x5b,0x39,0xd8).branch('l','error:9').emit(0x29,0xd8).branch('o','error:7').emit(0x40).branch('o','error:7');
+      x.push();this.rawStorageAddress(bounds);x.emit(0x5a,0x89,0x90).imm(i*8).emit(0x89,0x98).imm(i*8+4);
+    }
+    x.emit(0x5b).push(variable.fixedLength || 0).push(preserve?1:0);
+    this.rawStorageAddress(bounds);x.push().push(rank).push(VT[key(variable.type)]).emit(0x53).call(A+'redim');
+  },
+  arrayBoundCall(node, upper) {
+    if(node.args.length<1||node.args.length>2)this.fail('LBound/UBound expects an array and optional dimension');
+    const variable=this.variable(node.args[0]);
+    if(!variable?.nativeArray||variable.elementOf)this.fail('LBound/UBound requires a native array');
+    this.rawStorageAddress(variable);this.x.push();this.numeric(node.args[1] || {kind:'literal',value:1});
+    this.x.emit(0x5b).push().emit(0x53).call(A+(upper?'upper':'lower'));
+  },
+  eraseStorage(node) {
+    const variable=this.variable(node);
+    if(!variable?.nativeArray||variable.elementOf)this.fail('Native Erase requires an array');
+    this.x.push(variable.fixedLength || 0);this.rawStorageAddress(variable);this.x.push().call(A+'erase');
+  },
+  assignArrayStorage(variable, node) {
+    const source=this.variable(node);
+    if(!variable.nativeDynamic)this.fail('Whole-array assignment requires a dynamic destination');
+    if(!source?.nativeArray || source.elementOf || key(variable.type)!==key(source.type) || (variable.fixedLength||0)!==(source.fixedLength||0))this.fail('Array assignment requires identical declared element types and fixed String lengths');
+    this.rawStorageAddress(variable);this.x.push();this.rawStorageAddress(source);this.x.emit(0x5b).push().emit(0x53).call(A+'copy');
+  }
+};
+
+/** Runtime helpers preserve EBX/ESI/EDI and return HRESULT failures through the
+ * existing VB error frame, never through a native Windows callback stack. */
+function emitNativeArrayHelpers(compiler) {
+  const x=compiler.x, maxBytes=compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES;
+  const checked=x.unique();
+  x.label(A+'check').test().branch('ns',checked).compare(0x8002000b).branch('e','error:9')
+    .compare(0x8002000d).branch('e','error:10').compare(0x8007000e).branch('e','error:7').jump('error:5').label(checked).emit(0xc3);
+
+  const unpinned=x.unique();
+  x.label(A+'unpin').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',unpinned)
+    .push().invoke(DLL,'SafeArrayUnlock').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(unpinned).value(0).leave(4);
+  const destroyed=x.unique();
+  x.label(A+'destroy').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',destroyed)
+    .push().invoke(DLL,'SafeArrayDestroy').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(destroyed).value(0).leave(4);
+
+  // Product of counts is independent of SAFEARRAY's reversed dimension storage.
+  const countLoop=x.unique(), countDone=x.unique();
+  x.label(A+'count').enter().value(arg(8)).test().branch('e','error:9')
+    .emit(0x0f,0xb7,0x38,0x8d,0x70,16,0xbb).imm(1).label(countLoop).emit(0x85,0xff).branch('e',countDone)
+    .emit(0x0f,0xaf,0x1e).branch('o','error:7').emit(0x83,0xc6,8,0x4f).jump(countLoop)
+    .label(countDone).emit(0x89,0xd8).compare(maxBytes).branch('g','error:7').leave(4);
+
+  for(const upper of [false,true]) {
+    x.label(A+(upper?'upper':'lower')).enter(4).value(arg(8)).emit(0x8b,0x00).test().branch('e','error:9')
+      .emit(0x89,0xc3).value(arg(12)).compare(1).branch('l','error:9');
+    x.emit(0x53).invoke(DLL,'SafeArrayGetDim').emit(0x39,0x45,12).branch('g','error:9');
+    x.push(addr(-4)).push(arg(12)).emit(0x53).invoke(DLL,upper?'SafeArrayGetUBound':'SafeArrayGetLBound').call(A+'check').value(arg(-4)).leave(8);
+  }
+
+  // redim(slot, vt, rank, bounds-in-declaration-order, preserve, fixedStringLength)
+  const noOld=x.unique(), counts=x.unique(), counted=x.unique(), byteLimit=x.unique(), halfLimit=x.unique(), doubleLimit=x.unique(), limitDone=x.unique();
+  const create=x.unique(), validate=x.unique(), preserveNow=x.unique(), success=x.unique(), publish=x.unique(), finish=x.unique();
+  x.label(A+'redim').enter(24).value(arg(8)).emit(0x89,0xc3,0x8b,0x00);save(x,-4);
+  x.test().branch('e',noOld).emit(0x66,0xf7,0x40,2,0x10,0).branch('ne','error:10')
+    .emit(0x83,0x78,8,0).branch('ne','error:10');
+  x.label(noOld).value(arg(16)).compare(1).branch('l','error:9').compare(NATIVE_ARRAY_MAX_RANK).branch('g','error:9')
+    .emit(0x89,0xc7).value(arg(20)).emit(0x89,0xc6).value(1);save(x,-16);
+  x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
+    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(maxBytes).branch('g','error:7');save(x,-16);
+  x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
+  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
+    .value(arg(-16)).compare(Math.floor(maxBytes/4)).branch('g','error:7').jump(limitDone);
+  x.label(halfLimit).value(arg(-16)).compare(Math.floor(maxBytes/2)).branch('g','error:7').jump(limitDone);
+  x.label(doubleLimit).value(arg(-16)).compare(Math.floor(maxBytes/8)).branch('g','error:7').jump(limitDone);
+  x.label(byteLimit).label(limitDone).value(0);save(x,-12);
+  x.value(arg(-4)).test().branch('e',create).value(arg(24)).test().branch('e',create);
+  x.api(DLL,'SafeArrayGetDim',[arg(-4)]).emit(0x3b,0x45,16).branch('ne','error:9');
+  x.push(arg(-4)).call(A+'count');save(x,-12);
+  x.value(arg(20)).emit(0x89,0xc6,0xbf).imm(1).label(validate);
+  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetLBound').call(A+'check');
+  x.value(arg(-20)).emit(0x3b,0x46,4).branch('ne','error:9').emit(0x3b,0x7d,16).branch('e',preserveNow);
+  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetUBound').call(A+'check')
+    .emit(0x8b,0x06,0x03,0x46,4,0x48,0x3b,0x45,0xec).branch('ne','error:9')
+    .emit(0x83,0xc6,8,0x47).jump(validate);
+  x.label(preserveNow).emit(0x56).push(arg(-4)).invoke(DLL,'SafeArrayRedim').call(A+'check').jump(success);
+  x.label(create).api(DLL,'SafeArrayCreate',[arg(12),arg(16),arg(20)]).test().branch('e','error:7');save(x,-8);
+  x.value(arg(-4)).test().branch('e',publish).push().invoke(DLL,'SafeArrayDestroy').test().branch('ns',publish);
+  // Do not leak the new allocation or overwrite the old owner if destruction fails.
+  x.push().push(arg(-8)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
+  x.label(publish).value(arg(-8)).emit(0x89,0x03).value(0);save(x,-12);
+  x.label(success).value(arg(28)).test().branch('e',finish);
+  x.value(arg(-16)).emit(0x2b,0x45,0xf4).test().branch('le',finish).emit(0x89,0xc7);
+  x.value(arg(-12)).emit(0xc1,0xe0,2,0x8b,0x13,0x03,0x42,12,0x89,0xc6)
+    .push(arg(28)).emit(0x57,0x56).call('native:string:initialize-fixed');
+  x.label(finish).value(0).leave(24);
+
+  // Erase a dynamic array destroys its descriptor. Fixed arrays keep their shape
+  // and storage; BSTR elements are released, never zeroed without being freed.
+  const eraseDone=x.unique(), reset=x.unique(), numeric=x.unique();
+  x.label(A+'erase').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',eraseDone)
+    .emit(0x89,0xc6,0x83,0x7e,8,0).branch('ne','error:10')
+    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne',reset).push(arg(8)).call(A+'destroy').jump(eraseDone);
+  x.label(reset).emit(0x56).call(A+'count').emit(0x89,0xc7,0x66,0xf7,0x46,2,0,1).branch('e',numeric)
+    .emit(0x57,0xff,0x76,12).call('native:string:clear');
+  x.value(arg(12)).test().branch('e',eraseDone).push().emit(0x57,0xff,0x76,12).call('native:string:initialize-fixed').jump(eraseDone);
+  x.label(numeric).emit(0x89,0xf8,0x0f,0xaf,0x46,4,0x89,0xc1,0x8b,0x7e,12,0x31,0xc0,0xfc,0xf3,0xaa)
+    .label(eraseDone).value(0).leave(8);
+
+  // SafeArrayCopy deep-copies BSTRs. Validate and allocate before changing the
+  // destination. Copying a fixed array into a dynamic one must not copy fixedness.
+  const copyUnlocked=x.unique(), copyEmpty=x.unique(), copyDone=x.unique(), copyPublish=x.unique();
+  x.label(A+'copy').enter(8).value(arg(8)).emit(0x89,0xc3,0x8b,0x00,0x89,0xc6).test().branch('e',copyUnlocked)
+    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne','error:10').emit(0x83,0x7e,8,0).branch('ne','error:10');
+  x.label(copyUnlocked).value(arg(12)).emit(0x8b,0x00).test().branch('e',copyEmpty).emit(0x39,0xf0).branch('e',copyDone).emit(0x89,0xc7);
+  x.value(0);save(x,-4);x.push(addr(-4)).emit(0x57).invoke(DLL,'SafeArrayCopy').call(A+'check');
+  x.value(arg(-4)).emit(0x66,0x83,0x60,2,0xef,0x85,0xf6).branch('e',copyPublish)
+    .emit(0x56).invoke(DLL,'SafeArrayDestroy').test().branch('ns',copyPublish);
+  x.push().push(arg(-4)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
+  x.label(copyPublish).value(arg(-4)).emit(0x89,0x03).jump(copyDone);
+  x.label(copyEmpty).emit(0x53).call(A+'destroy');
+  x.label(copyDone).value(0).leave(8);
+}
+
+return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers};
+})();
+
+/* storage.js */
+__modules[25]=(()=>{
+const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[24];
+/** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
+
+const key = value => String(value).toLowerCase();
+const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency', 'date']);
+const MAX_NATIVE_STRING = 1024 * 1024;
+
+function boundValue(compiler, node, module, proc) {
+  if (node === null) return module.optionBase;
+  if (node.kind === 'group') return boundValue(compiler, node.expr, module, proc);
+  if (node.kind === 'literal' && Number.isInteger(node.value)) return node.value;
+  if (node.kind === 'id') {
+    for (const map of [proc?.constantBindings, module.constantBindings, module.importedConstantBindings, module.globalEnumMembers]) {
+      if (map?.has(key(node.name))) return Number(map.get(key(node.name)));
+    }
+  }
+  if (node.kind === 'unary') {
+    const n = boundValue(compiler, node.expr, module, proc);
+    if (node.op === '-') return -n;
+    if (node.op === '+') return n;
+  }
+  if (node.kind === 'binary') {
+    const a = boundValue(compiler, node.left, module, proc), b = boundValue(compiler, node.right, module, proc);
+    if (node.op === '+') return a + b;
+    if (node.op === '-') return a - b;
+    if (node.op === '*') return a * b;
+    if (node.op === '\\' && b) return Math.trunc(a / b);
+  }
+  compiler.fail('Native fixed-array bounds must be integral constant expressions', module);
+}
+
+function storageLayout(compiler, decl, module, proc) {
+  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency, Date or String: ' + decl.name, module);
+  if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
+  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency','date'].includes(key(decl.type)) ? 8 : 4;
+  decl.nativeElementBytes = elementBytes;
+  let count = 1;
+  if (decl.bounds !== null && decl.bounds !== undefined) {
+    decl.nativeArray = true;
+    decl.nativeDynamic = !decl.bounds.length;
+    if (decl.parameter && (!decl.byRef || decl.bounds.length)) compiler.fail('Native array parameters must be unsized and ByRef', module);
+    if (decl.bounds.length > NATIVE_ARRAY_MAX_RANK) compiler.fail('Native fixed arrays support at most 60 dimensions', module);
+    decl.nativeBounds = decl.bounds.map(([low, high]) => {
+      const lower = boundValue(compiler, low, module, proc), upper = boundValue(compiler, high, module, proc);
+      if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
+      const stride = count * elementBytes;
+      count *= upper - lower + 1;
+      if (!Number.isSafeInteger(count) || count * elementBytes > (compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES)) compiler.fail('Native fixed array exceeds checked x86 backing-address range or configured budget', module);
+      return {lower, upper, stride};
+    });
+  }
+  decl.nativeCount = decl.nativeDynamic ? 0 : count;
+  decl.nativeDataBytes = decl.nativeDynamic ? 0 : count * elementBytes;
+  // Arrays own a SAFEARRAY pointer; backing storage is allocated by OleAut32.
+  decl.nativeBytes = decl.nativeArray ? 4 : Math.ceil(count * elementBytes / 4) * 4;
+  return decl;
+}
+
+const nativeStorageMethods = {
+  allocateStorage(variable) {
+    this.data.align(4).label(variable.label).zero(variable.nativeBytes || 4);
+  },
+  temporaryString() {
+    const c = this.context;
+    const variable = {name: this.x.unique('string-temp'), type: 'String', nativeCount: 1, nativeBytes: 4, temporary: true};
+    if (c?.proc?.name) {
+      c.size += 4;
+      if (c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
+      variable.offset = -c.size;
+      (c.stringTemps ||= []).push(variable);
+    } else { variable.label = variable.name; this.allocateStorage(variable); }
+    return variable;
+  },
+  /** Adopt a freshly allocated BSTR in EAX. Each source expression has its own slot. */
+  ownString() {
+    const variable = this.temporaryString(), x = this.x;
+    x.push(); this.address(variable); x.emit(0x89, 0xc3, 0x5f, 0xff, 0x33).invoke('oleaut32.dll', 'SysFreeString').emit(0x89, 0x3b, 0x89, 0xf8);
+    return variable;
+  },
+  stringPointer() {
+    const ready = this.x.unique(); this.x.test().branch('ne', ready).value(this.string('')).label(ready);
+  },
+  storageExpression(variable, node) {
+    if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
+    if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') {if(this.type(node)==='string')this.expression(node);else this.textExpression(node);} else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
+  },
+  rawStorageAddress(variable) {
+    if (variable.owner?.form) this.x.call(variable.owner.initialize);
+    if (variable.label) this.x.value(variable.label);
+    else if (variable.parameter && variable.byRef) this.x.value({argument: variable.offset});
+    else this.x.local(variable.offset);
+  },
+  zeroStorage(variable) {
+    this.rawStorageAddress(variable);
+    this.x.emit(0x89, 0xc7, 0xb9).imm((variable.nativeBytes || 4) / 4).emit(0x31, 0xc0, 0xfc, 0xf3, 0xab);
+  },
+  clearStringStorage(variable) {
+    if (variable.nativeArray) return this.destroyArrayStorage(variable);
+    this.x.push(variable.nativeCount || 1); this.rawStorageAddress(variable); this.x.push().call('native:string:clear');
+  },
+  initializeFixedString(variable) {
+    if (variable.nativeArray) return this.initializeArrayStorage(variable);
+    if (key(variable.type) !== 'string' || !variable.fixedLength || (variable.parameter||variable.ownedParameter)) return;
+    const x = this.x;
+    x.push(variable.fixedLength).push(variable.nativeCount || 1); this.rawStorageAddress(variable); x.push().call('native:string:initialize-fixed');
+  },
+  stringBuiltin(node, name) {
+    const x = this.x, args = node.args;
+    if (name === 'space') {
+      if (args.length !== 1) this.fail('Space expects one argument');
+      this.numeric(args[0]); x.push().call('native:string:space'); this.ownString(); return true;
+    }
+    if (['len','lenb','ascw','strptr'].includes(name)) {
+      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
+      if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
+      if(name==='strptr'){
+        const variable=this.variable(args[0]);
+        if(variable){if(variable.nativeBounds&&!variable.elementOf)this.fail('StrPtr requires a String element, not an array');const pin=this.address(variable);x.emit(0x8b,0x00);this.releaseArrayPin(pin);}
+        else this.expression(args[0]);
+        return true;
+      }
+      this.expression(args[0]);
+      if (name === 'ascw') { x.push().push().invoke('oleaut32.dll','SysStringLen').test().branch('e','error:5').emit(0x58,0x0f,0xbf,0x00); }
+      else { x.push().invoke('oleaut32.dll','SysStringLen'); if (name === 'lenb') x.emit(0xd1,0xe0); }
+      return true;
+    }
+    if (['left','right','mid','chrw'].includes(name)) {
+      if (name === 'chrw') {
+        if (args.length !== 1) this.fail('ChrW expects one argument'); this.numeric(args[0]); x.push().call('native:string:chrw');
+      } else {
+        if (args.length < 2 || args.length > (name === 'mid' ? 3 : 2)) this.fail(name + ' argument count mismatch');
+        this.textExpression(args[0]); x.push(); this.numeric(args[1]); x.push();
+        if (name === 'mid') { this.numeric(args[2] || {kind:'literal',value:MAX_NATIVE_STRING}); x.emit(0x5b,0x59).push().emit(0x53,0x51).call('native:string:mid'); }
+        else x.emit(0x5b,0x59,0x53,0x51).call('native:string:'+name);
+      }
+      this.ownString(); return true;
+    }
+    return false;
+  }
+};
+
+function emitNativeStorageHelpers(compiler) {
+  const x = compiler.x, api = 'oleaut32.dll';
+  // https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/space-function
+  x.label('native:string:space').enter().value({argument:8}).test().branch('s','error:5')
+    .compare(MAX_NATIVE_STRING).branch('a','error:7').push().push(0).invoke(api,'SysAllocStringLen')
+    .test().branch('e','error:7').emit(0x89,0xc3,0x89,0xc7).value({argument:8}).emit(0x89,0xc1)
+    .value(32).emit(0xfc,0xf3,0x66,0xab,0x89,0xd8).leave(4);
+  x.label('native:string:numeric-text').enter().api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api('kernel32.dll','lstrlenW',[{argument:8}]).emit(0x39,0xd8).branch('ne','error:13').value({argument:8}).leave(4);
+  const copyNonNull=x.unique();
+  x.label('native:string:copy').enter().value({argument:8}).test().branch('ne',copyNonNull).leave(4).label(copyNonNull).api(api,'SysStringLen',[{argument:8}]).compare(MAX_NATIVE_STRING).branch('g','error:7').push().push({argument:8}).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
+  x.label('native:string:assign').enter().push({argument:12}).call('native:string:copy').emit(0x89,0xc7).value({argument:8}).emit(0x89,0xc3,0xff,0x33).invoke(api,'SysFreeString').emit(0x89,0x3b,0x89,0xf8).leave(8);
+  x.label('native:string:from-int').enter(4).value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrFromI4',[{argument:8},0x400,0,{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(4);
+  x.label('native:string:concat').enter(4).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api(api,'SysStringLen',[{argument:12}]).emit(0x01,0xd8).compare(MAX_NATIVE_STRING).branch('g','error:7').value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrCat',[{argument:8},{argument:12},{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(8);
+  // Compare UTF-16 code units with explicit lengths, including embedded NULs.
+  const loop=x.unique(), equal=x.unique(), less=x.unique(), greater=x.unique(), compareLengths=x.unique(), done=x.unique();
+  x.label('native:string:compare').enter(8).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0x45,0xfc).api(api,'SysStringLen',[{argument:12}]).emit(0x89,0x45,0xf8).value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7,0x31,0xdb);
+  x.label(loop).emit(0x3b,0x5d,0xfc).branch('ge',compareLengths).emit(0x3b,0x5d,0xf8).branch('ge',compareLengths).emit(0x0f,0xb7,0x04,0x5e,0x0f,0xb7,0x14,0x5f,0x39,0xd0).branch('b',less).branch('ne',greater).emit(0x43).jump(loop);
+  x.label(compareLengths).value({argument:-4}).emit(0x3b,0x45,0xf8).branch('l',less).branch('g',greater).label(equal).value(0).jump(done).label(less).value(-1).jump(done).label(greater).value(1).label(done).leave(8);
+  const clearLoop=x.unique(), clearDone=x.unique();
+  x.label('native:string:clear').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(clearLoop).emit(0x85,0xff).branch('e',clearDone).emit(0xff,0x36).invoke(api,'SysFreeString').emit(0xc7,0x06,0,0,0,0,0x83,0xc6,4,0x4f).jump(clearLoop).label(clearDone).value(0).leave(8);
+  // Allocate exactly the requested fixed width; pad with spaces and copy a bounded prefix.
+  const widthOK=x.unique(), fill=x.unique(), copyDone=x.unique();
+  x.label('native:string:fixed').enter().value({argument:12}).compare(1).branch('l','error:5').compare(65535).branch('g','error:5').emit(0x89,0xc3).push().push(0).invoke(api,'SysAllocStringLen').test().branch('e','error:7').emit(0x89,0xc6,0x89,0xc7,0x89,0xd9,0xb8).imm(32).emit(0xfc,0xf3,0x66,0xab).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xd8).branch('le',widthOK).emit(0x89,0xd8).label(widthOK).emit(0x89,0xc1,0x89,0xf7).value({argument:8}).emit(0x56,0x89,0xc6,0xfc,0xf3,0x66,0xa5,0x58).leave(8);
+  const initLoop=x.unique(), initDone=x.unique();
+  x.label('native:string:initialize-fixed').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(initLoop).emit(0x85,0xff).branch('e',initDone).push({argument:16}).push(0).call('native:string:fixed').emit(0x89,0xc3,0xff,0x36).invoke(api,'SysFreeString').emit(0x89,0x1e,0x83,0xc6,4,0x4f).jump(initLoop).label(initDone).value(0).leave(12);
+  for (const side of ['left','right']) {
+    const countOK=x.unique();
+    x.label('native:string:'+side).enter().value({argument:12}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc3).branch('le',countOK).emit(0x89,0xc3).label(countOK);
+    if (side==='right') x.emit(0x29,0xd8,0x01,0xc0).emit(0x03,0x45,8); else x.value({argument:8});
+    x.emit(0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(8);
+  }
+  const startOK=x.unique(), lengthOK=x.unique(), sliceEmpty=x.unique(), sliceEnd=x.unique();
+  x.label('native:string:mid').enter().value({argument:12}).compare(1).branch('l','error:5').emit(0x48,0x89,0xc6).value({argument:16}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc6).branch('ge',sliceEmpty).emit(0x29,0xf0,0x39,0xc3).branch('le',lengthOK).emit(0x89,0xc3).label(lengthOK).value({argument:8}).emit(0x8d,0x04,0x70,0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').jump(sliceEnd).label(sliceEmpty).api(api,'SysAllocStringLen',[0,0]).test().branch('e','error:7').label(sliceEnd).leave(12);
+  x.label('native:string:chrw').enter().value({argument:8}).compare(-32768).branch('l','error:5').compare(65535).branch('g','error:5').push(1).local(8).push().invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
+}
+
+return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers};
+})();
+
+/* string-interop.js */
+__modules[26]=(()=>{
+const {MAX_NATIVE_STRING}=__modules[25];
+/** Native Declare strings: ANSI byte-BSTR temporaries, never writable .rdata.
+ * Original implementation of the Microsoft VB5 DLL contract, section 5:
+ * https://classicvb.net/tips/vb5dll/ (Microsoft's paper, republished with permission).
+ * Allocation/conversion contracts:
+ * https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-sysallocstringbytelen
+ * https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-widechartomultibyte
+ * https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/lastdllerror-property
+ */
+
+const key = value => String(value).toLowerCase();
+const I = 'native:interop:', OLE = 'oleaut32.dll', KERNEL = 'kernel32.dll';
+const arg = argument => ({argument});
+const save = (x, offset) => x.emit(0x89, 0x85).imm(offset);
+// CP_ACP can be UTF-8 on modern Windows. Query actual byte lengths, never assume
+// one byte per UTF-16 unit. This bounds temporary storage, not foreign DLL writes.
+const MAX_NATIVE_ANSI_BYTES = MAX_NATIVE_STRING * 4;
+
+const nativeStringInteropMethods = {
+  nativeNullString(node) {
+    if (node.kind === 'group') return this.nativeNullString(node.expr);
+    return node.kind === 'id' && key(node.name) === 'vbnullstring' &&
+      !this.variable(node) && !this.nativeConstant(node) && !this.nativeFunctionType(node);
+  },
+  captureNativeDllError() {
+    // Called after ST(0) has been spilled, before any allocation or conversion.
+    // GetLastError's volatile EAX/EDX cannot overwrite the DLL's return value.
+    this.x.emit(0x50,0x52).api(KERNEL,'GetLastError').store('native:error:lastdllerror').emit(0x5a,0x58);
+  },
+  nativeConvertString(owner, helper) {
+    this.nativeStringInterop = true;
+    const x = this.x;
+    x.push(); this.rawStorageAddress(owner);
+    x.emit(0x59).push().emit(0x51).call(I + helper);
+  },
+  nativeExternalStringArgument(parameter, expression) {
+    const byval = expression.kind === 'byval', node = byval ? expression.expr : expression;
+    const variable = this.variable(node), forced = node.kind === 'group';
+    if (variable?.nativeArray && !variable.elementOf)
+      this.fail('Native Declare String arguments must be scalar values or String array elements');
+    if (parameter.byRef && !byval && !forced && variable && key(variable.type) !== 'string')
+      this.fail('ByRef native String argument must have the exact declared type');
+    const owner = this.temporaryString(), x = this.x;
+    let destination = null, pin = null;
+    if (variable && key(variable.type) === 'string' && !forced) {
+      // Capture the destination address/subscript once, before later arguments.
+      // An array-element pin spans argument evaluation, foreign reentry and copy-back.
+      destination = this.arrayWorkspace(4,'dll-string-destination');
+      pin = this.address(variable); x.push(); this.rawStorageAddress(destination);
+      x.emit(0x59,0x89,0x08,0x8b,0x01);
+    } else if (this.type(node) === 'string') this.expression(node);
+    else this.textExpression(node);
+    this.nativeConvertString(owner,'to-ansi');
+    if (parameter.byRef && !byval) this.rawStorageAddress(owner);
+    return {owner,destination,pin,fixedLength:variable?.fixedLength || 0};
+  },
+  nativeStringCopyBack({owner,destination,fixedLength}) {
+    if (!destination) return;
+    const wide = this.temporaryString(), x = this.x;
+    this.rawStorageAddress(owner); x.emit(0x8b,0x00);
+    this.nativeConvertString(wide,'to-unicode');
+    if (fixedLength) {
+      x.emit(0x89,0xc3).push(fixedLength).emit(0x53).call('native:string:fixed');
+      this.ownString();
+    }
+    // The original owner is replaced only after decoding/allocation succeeds.
+    // The stored destination, not a second evaluation of its subscript, is used.
+    x.push(); this.rawStorageAddress(destination); x.emit(0x8b,0x00).push().call('native:string:assign');
+  },
+  nativeExternalStringResult(ansiOwner) {
+    const wide = this.temporaryString(), x = this.x;
+    this.nativeConvertString(wide,'to-unicode');
+    x.push(); this.clearStringStorage(ansiOwner); x.emit(0x58);
+  }
+};
+
+/** Both helpers receive (source BSTR, destination owner-slot pointer). Newly
+ * allocated memory is adopted immediately, before a conversion can raise an
+ * error. The caller's ordinary statement/error cleanup owns every byte-BSTR. */
+function emitNativeStringInteropHelpers(c) {
+  if (!c.nativeStringInterop) return;
+  const x = c.x;
+  for (const ansi of [true,false]) {
+    const empty = x.unique(), allocate = x.unique(), done = x.unique(), nil = x.unique();
+    x.label(I + (ansi ? 'to-ansi' : 'to-unicode')).enter(8);
+    x.value(arg(12)).emit(0x89,0xc6,0xff,0x36).invoke(OLE,'SysFreeString').emit(0xc7,0x06,0,0,0,0);
+    x.value(arg(8)).test().branch('e',nil);
+    x.api(OLE,ansi ? 'SysStringLen' : 'SysStringByteLen',[arg(8)])
+      .compare(ansi ? MAX_NATIVE_STRING : MAX_NATIVE_ANSI_BYTES).branch('a','error:7');
+    save(x,-4); x.test().branch('e',empty);
+    if (ansi) x.api(KERNEL,'WideCharToMultiByte',[0,0,arg(8),arg(-4),0,0,0,0]);
+    else x.api(KERNEL,'MultiByteToWideChar',[0,0,arg(8),arg(-4),0,0]);
+    x.test().branch('e','error:5').compare(ansi ? MAX_NATIVE_ANSI_BYTES : MAX_NATIVE_STRING)
+      .branch('a','error:7').jump(allocate);
+    x.label(empty).value(0).label(allocate); save(x,-8);
+    x.api(OLE,ansi ? 'SysAllocStringByteLen' : 'SysAllocStringLen',[0,arg(-8)])
+      .test().branch('e','error:7').emit(0x89,0xc3);
+    x.value(arg(12)).emit(0x89,0x18); // Adopt BEFORE conversion can fail.
+    x.value(arg(-4)).test().branch('e',done);
+    if (ansi) x.push(0).push(0);
+    x.push(arg(-8)).emit(0x53).push(arg(-4)).push(arg(8)).push(0).push(0)
+      .invoke(KERNEL,ansi ? 'WideCharToMultiByte' : 'MultiByteToWideChar');
+    x.test().branch('e','error:5');
+    x.label(done).emit(0x89,0xd8).leave(8);
+    x.label(nil).value(0).leave(8);
+  }
+}
+
+return {MAX_NATIVE_ANSI_BYTES,nativeStringInteropMethods,emitNativeStringInteropHelpers};
+})();
+
+/* numeric.js */
+__modules[27]=(()=>{
 
 /** Native Single/Double lowering. Floating expressions return an immutable Double
  * snapshot address in EAX; only ABI returns use ST(0). No live FPU values span
@@ -2418,12 +2930,15 @@ const nativeNumericMethods = {
     return false;
   },
   nativeTypedCall(target,plan) {
-    const x=this.x,signature=target.proc||target,callPins=[],callStrings=[],slots=new Array(signature.params.length);
+    const x=this.x,signature=target.proc||target,callPins=[],callStrings=[],marshalledStrings=[],slots=new Array(signature.params.length);
     // Stage in the caller's frame: arguments are evaluated exactly once in source
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
     plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
+      if(!target.proc && key(p.type)==='string'){
+        const transfer=this.nativeExternalStringArgument(p,node);marshalledStrings.push(transfer);
+        if(transfer.pin)callPins.push(transfer.pin);
+      }else if(node.kind==='addressOf'){this.nativeCallbackArgument(p,node);}
       else if(node.kind==='byval'){this.numeric(node.expr);}
       else if(p.bounds!==null&&p.bounds!==undefined){
         if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
@@ -2442,13 +2957,21 @@ const nativeNumericMethods = {
     for(const slot of [...slots].reverse()){this.rawStorageAddress(slot);if(slot.nativeBytes===8)x.emit(0xff,0x70,4);x.emit(0xff,0x30);}
     if(target.proc)x.call(target.label);else x.invoke(target.dll,target.symbol);
     if(signature.kind==='function'&&key(signature.returnType)==='currency'){
-      this.captureCurrencyReturn();if(target.proc)this.checkNativeError();
+      this.captureCurrencyReturn();if(!target.proc)this.captureNativeDllError();if(target.proc)this.checkNativeError();
     }else if(signature.kind==='function'&&REAL_TYPES.has(key(signature.returnType))){
       const out=this.floatWorkspace();this.rawStorageAddress(out);x.emit(0xdd,0x18); // Pop ABI result before any helper/error check.
+      if(!target.proc)this.captureNativeDllError();
       if(target.proc)this.checkNativeError();x.call(N+'finite');
       if(key(signature.returnType)==='single')this.roundSingle();
       if(key(signature.returnType)==='date')x.call('native:date:validate');
-    }else if(target.proc)this.checkNativeError();
+    }else if(target.proc)this.checkNativeError();else this.captureNativeDllError();
+    // String returns transfer ownership of an ANSI byte-BSTR, not an arbitrary LPSTR.
+    const ansiResult=!target.proc&&signature.kind==='function'&&key(signature.returnType)==='string'?this.ownString():null;
+    if(marshalledStrings.length){
+      x.push();for(const transfer of marshalledStrings)this.nativeStringCopyBack(transfer);
+      for(const {owner} of marshalledStrings)this.clearStringStorage(owner);x.emit(0x58);
+    }
+    if(ansiResult)this.nativeExternalStringResult(ansiResult);
     for(const pin of callPins)this.releaseArrayPin(pin);
     if(callStrings.length){x.push();for(const string of callStrings)this.clearStringStorage(string);x.emit(0x58);}
     if(target.proc&&signature.kind==='function'&&key(signature.returnType)==='string')this.ownString();
@@ -2560,9 +3083,9 @@ return {FLOAT_TYPES,REAL_TYPES,nativeParameterBytes,nativeNumericMethods,emitNat
 })();
 
 /* calls.js */
-__modules[25]=(()=>{
+__modules[28]=(()=>{
 const {coerce, defaultValue}=__modules[6];
-const {nativeParameterBytes}=__modules[24];
+const {nativeParameterBytes}=__modules[27];
 /** Early-bound native calls: separate source evaluation order from stdcall slot
  * order, and never expose a literal/read-only snapshot as writable ByRef storage. */
 
@@ -2629,8 +3152,8 @@ const nativeCallMethods={
         if(!target.nativeDefaults?.has(key(p.name)))this.fail('Native optional default is unavailable: '+p.name);
         entry.node={kind:'literal',value:target.nativeDefaults.get(key(p.name))};
       }
-      if(entry.node.kind==='byval'&&(target.proc||!p.byRef||key(p.type)!=='long'||p.bounds!==null&&p.bounds!==undefined))
-        this.fail('Call-site ByVal requires an external scalar Long parameter declared ByRef; use parentheses for a project ByRef value');
+      if(entry.node.kind==='byval'&&(target.proc||!p.byRef||!['long','string'].includes(key(p.type))||p.bounds!==null&&p.bounds!==undefined))
+        this.fail('Call-site ByVal requires an external scalar Long or String parameter declared ByRef; use parentheses for a project ByRef value');
     }
     return plan;
   },
@@ -2657,7 +3180,7 @@ return {planNativeArguments,nativeCallMethods};
 })();
 
 /* callbacks.js */
-__modules[26]=(()=>{
+__modules[29]=(()=>{
 
 /** Original x86 stdcall callback thunks. No executable heap or native compiler.
  * Contract: https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/addressof-operator
@@ -2668,7 +3191,7 @@ const key = value => String(value).toLowerCase();
 const types = new Set(['byte','integer','long','boolean','single','double','currency','date']);
 const real = new Set(['single','double','date']);
 const E = 'native:error:';
-const state = ['frame','pending','number','description','source','erl'];
+const state = ['frame','pending','number','description','source','erl','lastdllerror'];
 const arg = argument => ({argument});
 const mem = memory => ({memory});
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
@@ -2707,28 +3230,28 @@ function emitNativeCallbackHelpers(c) {
   const x = c.x;
   for (const {target,label} of c.nativeCallbacks.values()) {
     const signature = target.proc, type = key(signature.returnType), ownThread = x.unique();
-    x.label(label).enter(36);
+    x.label(label).enter(40);
     x.api('kernel32.dll','GetCurrentThreadId').emit(0x3b,0x05).addr('native:callback:thread').branch('e',ownThread);
     // The current backend's globals and VB error frames are single-threaded.
     // Never run application callbacks from another native thread or race its state.
     x.api('kernel32.dll','ExitProcess',[5]).label(ownThread);
     state.forEach((name,i) => { x.value(mem(E+name)); save(x,-4*(i+1)); });
-    x.emit(0xd9,0x7d,0xdc); // fnstcw [ebp-36]; preserve the foreign caller's x87 CW.
+    x.emit(0xd9,0x7d,0xd8); // fnstcw [ebp-40]; preserve the foreign caller's x87 CW.
     x.value(0).store(E+'frame').call(E+'clear');
     // Preserve the external stdcall argument byte layout. The authored procedure
     // handles exact-width loads, owned locals, cleanup and numeric return ABI.
     for (let offset=target.argumentBytes+4; offset>=8; offset-=4) x.push(arg(offset));
     x.call(target.label);
-    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x5d,0xe0); // fstp qword [ebp-32]
-    else { save(x,-32); x.emit(0x89,0x55,0xe4); } // EAX, EDX
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x5d,0xdc); // fstp qword [ebp-36]
+    else { save(x,-36); x.emit(0x89,0x55,0xe0); } // EAX, EDX
     // Unhandled callback errors cannot jump across the suspended external stack.
     // Use the ordinary fatal diagnostic after the authored frame has cleaned up;
     // On Error inside the callback remains fully functional.
     x.emit(0x83,0x3d).addr(E+'pending').emit(0).branch('ne',E+'fatal');
     state.forEach((name,i) => x.value(arg(-4*(i+1))).store(E+name));
-    x.emit(0xd9,0x6d,0xdc); // fldcw [ebp-36]
-    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x45,0xe0);
-    else x.value(arg(-32)).emit(0x8b,0x55,0xe4);
+    x.emit(0xd9,0x6d,0xd8); // fldcw [ebp-40]
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x45,0xdc);
+    else x.value(arg(-36)).emit(0x8b,0x55,0xe0);
     x.leave(target.argumentBytes);
   }
 }
@@ -2737,7 +3260,7 @@ return {nativeCallbackMethods,emitNativeCallbackHelpers};
 })();
 
 /* currency.js */
-__modules[27]=(()=>{
+__modules[30]=(()=>{
 const {VBCurrency}=__modules[6];
 /** Native CY values are signed 64-bit integers scaled by 10,000. Expressions
  * return an immutable snapshot address in EAX; ABI returns use EDX:EAX. Never
@@ -2915,7 +3438,7 @@ return {nativeCurrencyMethods,emitNativeCurrencyHelpers};
 })();
 
 /* dates.js */
-__modules[28]=(()=>{
+__modules[31]=(()=>{
 const {dateToSerial}=__modules[1];
 /** Native Automation DATE: civil date/time in eight bytes, not a JS timestamp.
  * Values use immutable Double snapshots; semantic Date type and range checking
@@ -3112,7 +3635,7 @@ return {nativeDateMethods,emitNativeDateHelpers};
 })();
 
 /* date-intervals.js */
-__modules[29]=(()=>{
+__modules[32]=(()=>{
 const {compileProject}=__modules[20];
 /** Native calendar intervals. The arithmetic routines below are original private
  * compiler support code, lowered by our JavaScript frontend and x86 emitter. They
@@ -3356,7 +3879,7 @@ return {NATIVE_DATE_CONSTANTS,nativeDateIntervalMethods,emitNativeDateIntervalHe
 })();
 
 /* control-arrays.js */
-__modules[30]=(()=>{
+__modules[33]=(()=>{
 
 /** Statically designed control arrays, including Index event arguments. Each
  * element retains its own native HWND and ID; no flattened duplicate names. */
@@ -3433,398 +3956,8 @@ const nativeControlArrayMethods={
 return {nativeControlArrayMethods};
 })();
 
-/* arrays.js */
-__modules[31]=(()=>{
-
-/** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
- * passes a descriptor slot by reference; it is never exposed to browser code. */
-const key = value => String(value).toLowerCase();
-const A = 'native:array:';
-const DLL = 'oleaut32.dll';
-const arg = argument => ({argument});
-const addr = address => ({address});
-const VT = {byte:17, integer:2, long:3, boolean:11, string:8, single:4, double:5, currency:6, date:7};
-// The old one-MiB quota was a compiler policy, not a SAFEARRAY limit. Keep
-// signed x86 count/offset arithmetic checked; actual allocation is OS-limited.
-// Eight-byte alignment makes all typed element quotas exact integers.
-// https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraycreate
-// https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/too-many-dimensions
-const NATIVE_ARRAY_MAX_BYTES = 0x7ffffff8;
-const NATIVE_ARRAY_MAX_RANK = 60;
-const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
-
-/** Optional stricter host budget; it cannot relax checked x86 size arithmetic. */
-function nativeArrayLimit(value, fail = message => { throw new Error(message); }) {
-  if(value === undefined)return NATIVE_ARRAY_MAX_BYTES;
-  if(!Number.isSafeInteger(value) || value < 1 || value > NATIVE_ARRAY_MAX_BYTES)
-    fail('maxArrayBytes must be an integer from 1 to ' + NATIVE_ARRAY_MAX_BYTES);
-  return value;
-}
-
-const nativeArrayMethods = {
-  arrayWorkspace(bytes, name = 'array-work') {
-    const c = this.context, variable = {name:this.x.unique(name), type:'Long', nativeBytes:bytes};
-    if(c?.proc?.name) {
-      c.size += bytes;
-      if(c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
-      variable.offset = -c.size;
-    } else {variable.label = variable.name; this.allocateStorage(variable);}
-    return variable;
-  },
-  arrayPin() {
-    const pin = this.arrayWorkspace(4,'array-pin');
-    if(this.context?.proc?.name)this.context.arrayPins.push(pin);
-    return pin;
-  },
-  releaseArrayPin(pin) {
-    if(!pin)return;
-    const x=this.x;x.push();this.rawStorageAddress(pin);x.push().call(A+'unpin').emit(0x58);
-  },
-  arrayRef(variable) {
-    this.rawStorageAddress(variable);
-    this.x.emit(0x8b,0x00).test().branch('e','error:9');
-  },
-  elementAddress(variable) {
-    const x=this.x, array=variable.elementOf, rank=variable.indices.length;
-    if(rank < 1 || rank > NATIVE_ARRAY_MAX_RANK)this.fail('Native array rank must be 1..60');
-    const indices=this.arrayWorkspace(rank*4), out=this.arrayWorkspace(4), pin=this.arrayPin();
-    // Evaluate every subscript exactly once, left-to-right, before dereferencing
-    // the current descriptor. A subscript expression may itself resize the array.
-    variable.indices.forEach((node,i)=>{
-      this.numeric(node);x.push();this.rawStorageAddress(indices);x.emit(0x5a,0x89,0x90).imm(i*4);
-    });
-    this.arrayRef(array);x.emit(0x89,0xc3,0x53).invoke(DLL,'SafeArrayGetDim').compare(rank).branch('ne','error:9');
-    x.emit(0x53).invoke(DLL,'SafeArrayLock').call(A+'check');
-    // Publish ownership before a fallible index lookup. Recovery and procedure
-    // exit release this pin even when another argument or the callee throws.
-    this.rawStorageAddress(pin);x.emit(0x89,0x18);
-    this.rawStorageAddress(out);x.push();this.rawStorageAddress(indices);x.push().emit(0x53).invoke(DLL,'SafeArrayPtrOfIndex').call(A+'check');
-    this.rawStorageAddress(out);x.emit(0x8b,0x00);
-    return pin;
-  },
-  initializeArrayStorage(variable) {
-    if(!variable.nativeArray || variable.parameter || variable.nativeDynamic)return;
-    const x=this.x, done=x.unique(), label=x.unique('fixed-bounds');
-    this.ro.align(4).label(label);
-    for(const bound of variable.nativeBounds)this.ro.u32(bound.upper-bound.lower+1).u32(bound.lower);
-    this.rawStorageAddress(variable);x.emit(0x83,0x38,0).branch('ne',done);
-    x.push(variable.fixedLength || 0).push(0).push(label).push(variable.nativeBounds.length).push(VT[key(variable.type)]);
-    this.rawStorageAddress(variable);x.push().call(A+'redim');
-    this.arrayRef(variable);x.emit(0x66,0x83,0x48,2,0x10).label(done); // FADF_FIXEDSIZE
-  },
-  destroyArrayStorage(variable) {
-    this.rawStorageAddress(variable);this.x.push().call(A+'destroy');
-  },
-  redimArrayStorage(decl, preserve) {
-    const x=this.x, variable=this.variable({kind:'id',name:decl.name});
-    if(!variable?.nativeArray || variable.elementOf)this.fail('ReDim requires a declared native array: '+decl.name);
-    if(!variable.nativeDynamic)this.fail('ReDim cannot resize a fixed native array: '+decl.name);
-    if(decl.explicitType && key(decl.type)!==key(variable.type))this.fail('ReDim cannot change a typed array element type');
-    if(decl.fixedLength && decl.fixedLength!==variable.fixedLength)this.fail('ReDim cannot change a fixed String element length');
-    const rank=decl.bounds?.length;
-    if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to 60 dimensions');
-    const bounds=this.arrayWorkspace(rank*8);
-    // Keep a stable slot address, not a stale SAFEARRAY pointer, across bound expressions.
-    this.rawStorageAddress(variable);x.push();
-    for(let i=0;i<rank;i++) {
-      this.numeric(decl.bounds[i][0] || {kind:'literal',value:this.context.module.module.optionBase || 0});x.push();
-      this.numeric(decl.bounds[i][1]);x.emit(0x5b,0x39,0xd8).branch('l','error:9').emit(0x29,0xd8).branch('o','error:7').emit(0x40).branch('o','error:7');
-      x.push();this.rawStorageAddress(bounds);x.emit(0x5a,0x89,0x90).imm(i*8).emit(0x89,0x98).imm(i*8+4);
-    }
-    x.emit(0x5b).push(variable.fixedLength || 0).push(preserve?1:0);
-    this.rawStorageAddress(bounds);x.push().push(rank).push(VT[key(variable.type)]).emit(0x53).call(A+'redim');
-  },
-  arrayBoundCall(node, upper) {
-    if(node.args.length<1||node.args.length>2)this.fail('LBound/UBound expects an array and optional dimension');
-    const variable=this.variable(node.args[0]);
-    if(!variable?.nativeArray||variable.elementOf)this.fail('LBound/UBound requires a native array');
-    this.rawStorageAddress(variable);this.x.push();this.numeric(node.args[1] || {kind:'literal',value:1});
-    this.x.emit(0x5b).push().emit(0x53).call(A+(upper?'upper':'lower'));
-  },
-  eraseStorage(node) {
-    const variable=this.variable(node);
-    if(!variable?.nativeArray||variable.elementOf)this.fail('Native Erase requires an array');
-    this.x.push(variable.fixedLength || 0);this.rawStorageAddress(variable);this.x.push().call(A+'erase');
-  },
-  assignArrayStorage(variable, node) {
-    const source=this.variable(node);
-    if(!variable.nativeDynamic)this.fail('Whole-array assignment requires a dynamic destination');
-    if(!source?.nativeArray || source.elementOf || key(variable.type)!==key(source.type) || (variable.fixedLength||0)!==(source.fixedLength||0))this.fail('Array assignment requires identical declared element types and fixed String lengths');
-    this.rawStorageAddress(variable);this.x.push();this.rawStorageAddress(source);this.x.emit(0x5b).push().emit(0x53).call(A+'copy');
-  }
-};
-
-/** Runtime helpers preserve EBX/ESI/EDI and return HRESULT failures through the
- * existing VB error frame, never through a native Windows callback stack. */
-function emitNativeArrayHelpers(compiler) {
-  const x=compiler.x, maxBytes=compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES;
-  const checked=x.unique();
-  x.label(A+'check').test().branch('ns',checked).compare(0x8002000b).branch('e','error:9')
-    .compare(0x8002000d).branch('e','error:10').compare(0x8007000e).branch('e','error:7').jump('error:5').label(checked).emit(0xc3);
-
-  const unpinned=x.unique();
-  x.label(A+'unpin').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',unpinned)
-    .push().invoke(DLL,'SafeArrayUnlock').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(unpinned).value(0).leave(4);
-  const destroyed=x.unique();
-  x.label(A+'destroy').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',destroyed)
-    .push().invoke(DLL,'SafeArrayDestroy').call(A+'check').emit(0xc7,0x03,0,0,0,0).label(destroyed).value(0).leave(4);
-
-  // Product of counts is independent of SAFEARRAY's reversed dimension storage.
-  const countLoop=x.unique(), countDone=x.unique();
-  x.label(A+'count').enter().value(arg(8)).test().branch('e','error:9')
-    .emit(0x0f,0xb7,0x38,0x8d,0x70,16,0xbb).imm(1).label(countLoop).emit(0x85,0xff).branch('e',countDone)
-    .emit(0x0f,0xaf,0x1e).branch('o','error:7').emit(0x83,0xc6,8,0x4f).jump(countLoop)
-    .label(countDone).emit(0x89,0xd8).compare(maxBytes).branch('g','error:7').leave(4);
-
-  for(const upper of [false,true]) {
-    x.label(A+(upper?'upper':'lower')).enter(4).value(arg(8)).emit(0x8b,0x00).test().branch('e','error:9')
-      .emit(0x89,0xc3).value(arg(12)).compare(1).branch('l','error:9');
-    x.emit(0x53).invoke(DLL,'SafeArrayGetDim').emit(0x39,0x45,12).branch('g','error:9');
-    x.push(addr(-4)).push(arg(12)).emit(0x53).invoke(DLL,upper?'SafeArrayGetUBound':'SafeArrayGetLBound').call(A+'check').value(arg(-4)).leave(8);
-  }
-
-  // redim(slot, vt, rank, bounds-in-declaration-order, preserve, fixedStringLength)
-  const noOld=x.unique(), counts=x.unique(), counted=x.unique(), byteLimit=x.unique(), halfLimit=x.unique(), doubleLimit=x.unique(), limitDone=x.unique();
-  const create=x.unique(), validate=x.unique(), preserveNow=x.unique(), success=x.unique(), publish=x.unique(), finish=x.unique();
-  x.label(A+'redim').enter(24).value(arg(8)).emit(0x89,0xc3,0x8b,0x00);save(x,-4);
-  x.test().branch('e',noOld).emit(0x66,0xf7,0x40,2,0x10,0).branch('ne','error:10')
-    .emit(0x83,0x78,8,0).branch('ne','error:10');
-  x.label(noOld).value(arg(16)).compare(1).branch('l','error:9').compare(NATIVE_ARRAY_MAX_RANK).branch('g','error:9')
-    .emit(0x89,0xc7).value(arg(20)).emit(0x89,0xc6).value(1);save(x,-16);
-  x.label(counts).emit(0x85,0xff).branch('e',counted).emit(0x8b,0x06).compare(1).branch('l','error:9')
-    .emit(0x0f,0xaf,0x45,0xf0).branch('o','error:7').compare(maxBytes).branch('g','error:7');save(x,-16);
-  x.emit(0x83,0xc6,8,0x4f).jump(counts).label(counted);
-  x.value(arg(12)).compare(17).branch('e',byteLimit).compare(2).branch('e',halfLimit).compare(11).branch('e',halfLimit).compare(5).branch('e',doubleLimit).compare(6).branch('e',doubleLimit).compare(7).branch('e',doubleLimit)
-    .value(arg(-16)).compare(Math.floor(maxBytes/4)).branch('g','error:7').jump(limitDone);
-  x.label(halfLimit).value(arg(-16)).compare(Math.floor(maxBytes/2)).branch('g','error:7').jump(limitDone);
-  x.label(doubleLimit).value(arg(-16)).compare(Math.floor(maxBytes/8)).branch('g','error:7').jump(limitDone);
-  x.label(byteLimit).label(limitDone).value(0);save(x,-12);
-  x.value(arg(-4)).test().branch('e',create).value(arg(24)).test().branch('e',create);
-  x.api(DLL,'SafeArrayGetDim',[arg(-4)]).emit(0x3b,0x45,16).branch('ne','error:9');
-  x.push(arg(-4)).call(A+'count');save(x,-12);
-  x.value(arg(20)).emit(0x89,0xc6,0xbf).imm(1).label(validate);
-  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetLBound').call(A+'check');
-  x.value(arg(-20)).emit(0x3b,0x46,4).branch('ne','error:9').emit(0x3b,0x7d,16).branch('e',preserveNow);
-  x.push(addr(-20)).emit(0x57).push(arg(-4)).invoke(DLL,'SafeArrayGetUBound').call(A+'check')
-    .emit(0x8b,0x06,0x03,0x46,4,0x48,0x3b,0x45,0xec).branch('ne','error:9')
-    .emit(0x83,0xc6,8,0x47).jump(validate);
-  x.label(preserveNow).emit(0x56).push(arg(-4)).invoke(DLL,'SafeArrayRedim').call(A+'check').jump(success);
-  x.label(create).api(DLL,'SafeArrayCreate',[arg(12),arg(16),arg(20)]).test().branch('e','error:7');save(x,-8);
-  x.value(arg(-4)).test().branch('e',publish).push().invoke(DLL,'SafeArrayDestroy').test().branch('ns',publish);
-  // Do not leak the new allocation or overwrite the old owner if destruction fails.
-  x.push().push(arg(-8)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
-  x.label(publish).value(arg(-8)).emit(0x89,0x03).value(0);save(x,-12);
-  x.label(success).value(arg(28)).test().branch('e',finish);
-  x.value(arg(-16)).emit(0x2b,0x45,0xf4).test().branch('le',finish).emit(0x89,0xc7);
-  x.value(arg(-12)).emit(0xc1,0xe0,2,0x8b,0x13,0x03,0x42,12,0x89,0xc6)
-    .push(arg(28)).emit(0x57,0x56).call('native:string:initialize-fixed');
-  x.label(finish).value(0).leave(24);
-
-  // Erase a dynamic array destroys its descriptor. Fixed arrays keep their shape
-  // and storage; BSTR elements are released, never zeroed without being freed.
-  const eraseDone=x.unique(), reset=x.unique(), numeric=x.unique();
-  x.label(A+'erase').enter().value(arg(8)).emit(0x89,0xc3,0x8b,0x00).test().branch('e',eraseDone)
-    .emit(0x89,0xc6,0x83,0x7e,8,0).branch('ne','error:10')
-    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne',reset).push(arg(8)).call(A+'destroy').jump(eraseDone);
-  x.label(reset).emit(0x56).call(A+'count').emit(0x89,0xc7,0x66,0xf7,0x46,2,0,1).branch('e',numeric)
-    .emit(0x57,0xff,0x76,12).call('native:string:clear');
-  x.value(arg(12)).test().branch('e',eraseDone).push().emit(0x57,0xff,0x76,12).call('native:string:initialize-fixed').jump(eraseDone);
-  x.label(numeric).emit(0x89,0xf8,0x0f,0xaf,0x46,4,0x89,0xc1,0x8b,0x7e,12,0x31,0xc0,0xfc,0xf3,0xaa)
-    .label(eraseDone).value(0).leave(8);
-
-  // SafeArrayCopy deep-copies BSTRs. Validate and allocate before changing the
-  // destination. Copying a fixed array into a dynamic one must not copy fixedness.
-  const copyUnlocked=x.unique(), copyEmpty=x.unique(), copyDone=x.unique(), copyPublish=x.unique();
-  x.label(A+'copy').enter(8).value(arg(8)).emit(0x89,0xc3,0x8b,0x00,0x89,0xc6).test().branch('e',copyUnlocked)
-    .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne','error:10').emit(0x83,0x7e,8,0).branch('ne','error:10');
-  x.label(copyUnlocked).value(arg(12)).emit(0x8b,0x00).test().branch('e',copyEmpty).emit(0x39,0xf0).branch('e',copyDone).emit(0x89,0xc7);
-  x.value(0);save(x,-4);x.push(addr(-4)).emit(0x57).invoke(DLL,'SafeArrayCopy').call(A+'check');
-  x.value(arg(-4)).emit(0x66,0x83,0x60,2,0xef,0x85,0xf6).branch('e',copyPublish)
-    .emit(0x56).invoke(DLL,'SafeArrayDestroy').test().branch('ns',copyPublish);
-  x.push().push(arg(-4)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');
-  x.label(copyPublish).value(arg(-4)).emit(0x89,0x03).jump(copyDone);
-  x.label(copyEmpty).emit(0x53).call(A+'destroy');
-  x.label(copyDone).value(0).leave(8);
-}
-
-return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers};
-})();
-
-/* storage.js */
-__modules[32]=(()=>{
-const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[31];
-/** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
-
-const key = value => String(value).toLowerCase();
-const types = new Set(['byte', 'integer', 'long', 'boolean', 'string', 'single', 'double', 'currency', 'date']);
-const MAX_NATIVE_STRING = 1024 * 1024;
-
-function boundValue(compiler, node, module, proc) {
-  if (node === null) return module.optionBase;
-  if (node.kind === 'group') return boundValue(compiler, node.expr, module, proc);
-  if (node.kind === 'literal' && Number.isInteger(node.value)) return node.value;
-  if (node.kind === 'id') {
-    for (const map of [proc?.constantBindings, module.constantBindings, module.importedConstantBindings, module.globalEnumMembers]) {
-      if (map?.has(key(node.name))) return Number(map.get(key(node.name)));
-    }
-  }
-  if (node.kind === 'unary') {
-    const n = boundValue(compiler, node.expr, module, proc);
-    if (node.op === '-') return -n;
-    if (node.op === '+') return n;
-  }
-  if (node.kind === 'binary') {
-    const a = boundValue(compiler, node.left, module, proc), b = boundValue(compiler, node.right, module, proc);
-    if (node.op === '+') return a + b;
-    if (node.op === '-') return a - b;
-    if (node.op === '*') return a * b;
-    if (node.op === '\\' && b) return Math.trunc(a / b);
-  }
-  compiler.fail('Native fixed-array bounds must be integral constant expressions', module);
-}
-
-function storageLayout(compiler, decl, module, proc) {
-  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency, Date or String: ' + decl.name, module);
-  if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
-  const elementBytes = key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency','date'].includes(key(decl.type)) ? 8 : 4;
-  decl.nativeElementBytes = elementBytes;
-  let count = 1;
-  if (decl.bounds !== null && decl.bounds !== undefined) {
-    decl.nativeArray = true;
-    decl.nativeDynamic = !decl.bounds.length;
-    if (decl.parameter && (!decl.byRef || decl.bounds.length)) compiler.fail('Native array parameters must be unsized and ByRef', module);
-    if (decl.bounds.length > NATIVE_ARRAY_MAX_RANK) compiler.fail('Native fixed arrays support at most 60 dimensions', module);
-    decl.nativeBounds = decl.bounds.map(([low, high]) => {
-      const lower = boundValue(compiler, low, module, proc), upper = boundValue(compiler, high, module, proc);
-      if (![lower, upper].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647) || upper < lower) compiler.fail('Invalid native array bounds: ' + decl.name, module);
-      const stride = count * elementBytes;
-      count *= upper - lower + 1;
-      if (!Number.isSafeInteger(count) || count * elementBytes > (compiler.maxArrayBytes ?? NATIVE_ARRAY_MAX_BYTES)) compiler.fail('Native fixed array exceeds checked x86 backing-address range or configured budget', module);
-      return {lower, upper, stride};
-    });
-  }
-  decl.nativeCount = decl.nativeDynamic ? 0 : count;
-  decl.nativeDataBytes = decl.nativeDynamic ? 0 : count * elementBytes;
-  // Arrays own a SAFEARRAY pointer; backing storage is allocated by OleAut32.
-  decl.nativeBytes = decl.nativeArray ? 4 : Math.ceil(count * elementBytes / 4) * 4;
-  return decl;
-}
-
-const nativeStorageMethods = {
-  allocateStorage(variable) {
-    this.data.align(4).label(variable.label).zero(variable.nativeBytes || 4);
-  },
-  temporaryString() {
-    const c = this.context;
-    const variable = {name: this.x.unique('string-temp'), type: 'String', nativeCount: 1, nativeBytes: 4, temporary: true};
-    if (c?.proc?.name) {
-      c.size += 4;
-      if (c.size > 512 * 1024) this.fail('Native procedure workspace exceeds 512 KiB');
-      variable.offset = -c.size;
-      (c.stringTemps ||= []).push(variable);
-    } else { variable.label = variable.name; this.allocateStorage(variable); }
-    return variable;
-  },
-  /** Adopt a freshly allocated BSTR in EAX. Each source expression has its own slot. */
-  ownString() {
-    const variable = this.temporaryString(), x = this.x;
-    x.push(); this.address(variable); x.emit(0x89, 0xc3, 0x5f, 0xff, 0x33).invoke('oleaut32.dll', 'SysFreeString').emit(0x89, 0x3b, 0x89, 0xf8);
-    return variable;
-  },
-  stringPointer() {
-    const ready = this.x.unique(); this.x.test().branch('ne', ready).value(this.string('')).label(ready);
-  },
-  storageExpression(variable, node) {
-    if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
-    if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
-  },
-  rawStorageAddress(variable) {
-    if (variable.owner?.form) this.x.call(variable.owner.initialize);
-    if (variable.label) this.x.value(variable.label);
-    else if (variable.parameter && variable.byRef) this.x.value({argument: variable.offset});
-    else this.x.local(variable.offset);
-  },
-  zeroStorage(variable) {
-    this.rawStorageAddress(variable);
-    this.x.emit(0x89, 0xc7, 0xb9).imm((variable.nativeBytes || 4) / 4).emit(0x31, 0xc0, 0xfc, 0xf3, 0xab);
-  },
-  clearStringStorage(variable) {
-    if (variable.nativeArray) return this.destroyArrayStorage(variable);
-    this.x.push(variable.nativeCount || 1); this.rawStorageAddress(variable); this.x.push().call('native:string:clear');
-  },
-  initializeFixedString(variable) {
-    if (variable.nativeArray) return this.initializeArrayStorage(variable);
-    if (key(variable.type) !== 'string' || !variable.fixedLength || (variable.parameter||variable.ownedParameter)) return;
-    const x = this.x;
-    x.push(variable.fixedLength).push(variable.nativeCount || 1); this.rawStorageAddress(variable); x.push().call('native:string:initialize-fixed');
-  },
-  stringBuiltin(node, name) {
-    const x = this.x, args = node.args;
-    if (['len','lenb','ascw','strptr'].includes(name)) {
-      if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
-      if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
-      if(name==='strptr'){
-        const variable=this.variable(args[0]);
-        if(variable){if(variable.nativeBounds&&!variable.elementOf)this.fail('StrPtr requires a String element, not an array');const pin=this.address(variable);x.emit(0x8b,0x00);this.releaseArrayPin(pin);}
-        else if(args[0].kind==='id'&&key(args[0].name)==='vbnullstring')x.value(0);
-        else this.expression(args[0]);
-        return true;
-      }
-      this.expression(args[0]);
-      if (name === 'ascw') { x.push().push().invoke('oleaut32.dll','SysStringLen').test().branch('e','error:5').emit(0x58,0x0f,0xbf,0x00); }
-      else { x.push().invoke('oleaut32.dll','SysStringLen'); if (name === 'lenb') x.emit(0xd1,0xe0); }
-      return true;
-    }
-    if (['left','right','mid','chrw'].includes(name)) {
-      if (name === 'chrw') {
-        if (args.length !== 1) this.fail('ChrW expects one argument'); this.numeric(args[0]); x.push().call('native:string:chrw');
-      } else {
-        if (args.length < 2 || args.length > (name === 'mid' ? 3 : 2)) this.fail(name + ' argument count mismatch');
-        this.textExpression(args[0]); x.push(); this.numeric(args[1]); x.push();
-        if (name === 'mid') { this.numeric(args[2] || {kind:'literal',value:MAX_NATIVE_STRING}); x.emit(0x5b,0x59).push().emit(0x53,0x51).call('native:string:mid'); }
-        else x.emit(0x5b,0x59,0x53,0x51).call('native:string:'+name);
-      }
-      this.ownString(); return true;
-    }
-    return false;
-  }
-};
-
-function emitNativeStorageHelpers(compiler) {
-  const x = compiler.x, api = 'oleaut32.dll';
-  x.label('native:string:numeric-text').enter().api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api('kernel32.dll','lstrlenW',[{argument:8}]).emit(0x39,0xd8).branch('ne','error:13').value({argument:8}).leave(4);
-  x.label('native:string:copy').enter().api(api,'SysStringLen',[{argument:8}]).compare(MAX_NATIVE_STRING).branch('g','error:7').push().push({argument:8}).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
-  x.label('native:string:assign').enter().push({argument:12}).call('native:string:copy').emit(0x89,0xc7).value({argument:8}).emit(0x89,0xc3,0xff,0x33).invoke(api,'SysFreeString').emit(0x89,0x3b,0x89,0xf8).leave(8);
-  x.label('native:string:from-int').enter(4).value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrFromI4',[{argument:8},0x400,0,{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(4);
-  x.label('native:string:concat').enter(4).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api(api,'SysStringLen',[{argument:12}]).emit(0x01,0xd8).compare(MAX_NATIVE_STRING).branch('g','error:7').value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrCat',[{argument:8},{argument:12},{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(8);
-  // Compare UTF-16 code units with explicit lengths, including embedded NULs.
-  const loop=x.unique(), equal=x.unique(), less=x.unique(), greater=x.unique(), compareLengths=x.unique(), done=x.unique();
-  x.label('native:string:compare').enter(8).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0x45,0xfc).api(api,'SysStringLen',[{argument:12}]).emit(0x89,0x45,0xf8).value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7,0x31,0xdb);
-  x.label(loop).emit(0x3b,0x5d,0xfc).branch('ge',compareLengths).emit(0x3b,0x5d,0xf8).branch('ge',compareLengths).emit(0x0f,0xb7,0x04,0x5e,0x0f,0xb7,0x14,0x5f,0x39,0xd0).branch('b',less).branch('ne',greater).emit(0x43).jump(loop);
-  x.label(compareLengths).value({argument:-4}).emit(0x3b,0x45,0xf8).branch('l',less).branch('g',greater).label(equal).value(0).jump(done).label(less).value(-1).jump(done).label(greater).value(1).label(done).leave(8);
-  const clearLoop=x.unique(), clearDone=x.unique();
-  x.label('native:string:clear').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(clearLoop).emit(0x85,0xff).branch('e',clearDone).emit(0xff,0x36).invoke(api,'SysFreeString').emit(0xc7,0x06,0,0,0,0,0x83,0xc6,4,0x4f).jump(clearLoop).label(clearDone).value(0).leave(8);
-  // Allocate exactly the requested fixed width; pad with spaces and copy a bounded prefix.
-  const widthOK=x.unique(), fill=x.unique(), copyDone=x.unique();
-  x.label('native:string:fixed').enter().value({argument:12}).compare(1).branch('l','error:5').compare(65535).branch('g','error:5').emit(0x89,0xc3).push().push(0).invoke(api,'SysAllocStringLen').test().branch('e','error:7').emit(0x89,0xc6,0x89,0xc7,0x89,0xd9,0xb8).imm(32).emit(0xfc,0xf3,0x66,0xab).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xd8).branch('le',widthOK).emit(0x89,0xd8).label(widthOK).emit(0x89,0xc1,0x89,0xf7).value({argument:8}).emit(0x56,0x89,0xc6,0xfc,0xf3,0x66,0xa5,0x58).leave(8);
-  const initLoop=x.unique(), initDone=x.unique();
-  x.label('native:string:initialize-fixed').enter().value({argument:8}).emit(0x89,0xc6).value({argument:12}).emit(0x89,0xc7).label(initLoop).emit(0x85,0xff).branch('e',initDone).push({argument:16}).push(0).call('native:string:fixed').emit(0x89,0xc3,0xff,0x36).invoke(api,'SysFreeString').emit(0x89,0x1e,0x83,0xc6,4,0x4f).jump(initLoop).label(initDone).value(0).leave(12);
-  for (const side of ['left','right']) {
-    const countOK=x.unique();
-    x.label('native:string:'+side).enter().value({argument:12}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc3).branch('le',countOK).emit(0x89,0xc3).label(countOK);
-    if (side==='right') x.emit(0x29,0xd8,0x01,0xc0).emit(0x03,0x45,8); else x.value({argument:8});
-    x.emit(0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(8);
-  }
-  const startOK=x.unique(), lengthOK=x.unique(), sliceEmpty=x.unique(), sliceEnd=x.unique();
-  x.label('native:string:mid').enter().value({argument:12}).compare(1).branch('l','error:5').emit(0x48,0x89,0xc6).value({argument:16}).test().branch('s','error:5').emit(0x89,0xc3).api(api,'SysStringLen',[{argument:8}]).emit(0x39,0xc6).branch('ge',sliceEmpty).emit(0x29,0xf0,0x39,0xc3).branch('le',lengthOK).emit(0x89,0xc3).label(lengthOK).value({argument:8}).emit(0x8d,0x04,0x70,0x53,0x50).invoke(api,'SysAllocStringLen').test().branch('e','error:7').jump(sliceEnd).label(sliceEmpty).api(api,'SysAllocStringLen',[0,0]).test().branch('e','error:7').label(sliceEnd).leave(12);
-  x.label('native:string:chrw').enter().value({argument:8}).compare(-32768).branch('l','error:5').compare(65535).branch('g','error:5').push(1).local(8).push().invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
-}
-
-return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers};
-})();
-
 /* errors.js */
-__modules[33]=(()=>{
+__modules[34]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -3840,17 +3973,17 @@ const localImmediate = (x, offset, value) => { x.value(value);localStore(x,offse
 
 const nativeErrorMethods = {
   prepareErrors() {
-    for (const name of ['frame','pending','number','description','source','erl']) this.slot(E+name);
+    for (const name of ['frame','pending','number','description','source','erl','lastdllerror']) this.slot(E+name);
   },
   errorProperty(node) {
     if(node.kind!=='member'||node.object.kind!=='id'||key(node.object.name)!=='err')return null;
     const name=key(node.name);
-    if(!['number','description','source'].includes(name))this.fail('Native Err property is not implemented: '+node.name);
+    if(!['number','description','source','lastdllerror'].includes(name))this.fail('Native Err property is not implemented: '+node.name);
     return name;
   },
   errorExpression(node) {
     const property=this.errorProperty(node),x=this.x;
-    if(property){x.value(mem(E+property));if(property!=='number'){x.push().call('native:string:copy');this.ownString();}return true;}
+    if(property){x.value(mem(E+property));if(!['number','lastdllerror'].includes(property)){x.push().call('native:string:copy');this.ownString();}return true;}
     if(node.kind==='id'&&key(node.name)==='erl'){x.value(mem(E+'erl'));return true;}
     return false;
   },
@@ -3965,22 +4098,26 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[34]=(()=>{
+__modules[35]=(()=>{
 const {normalizeProject}=__modules[13];
 const {compileProject, parseParameters}=__modules[20];
+const {tokenize}=__modules[2];
 const {PE32Image, BinarySection}=__modules[21];
 const {X86}=__modules[22];
 const {nativeBindingMethods}=__modules[23];
-const {nativeCallMethods}=__modules[25];
-const {nativeCallbackMethods,emitNativeCallbackHelpers}=__modules[26];
-const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[27];
-const {nativeDateMethods,emitNativeDateHelpers}=__modules[28];
-const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[29];
-const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[24];
-const {nativeControlArrayMethods}=__modules[30];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[32];
-const {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers}=__modules[31];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[33];
+const {nativeStringInteropMethods,emitNativeStringInteropHelpers}=__modules[26];
+const {nativeCallMethods}=__modules[28];
+const {nativeCallbackMethods,emitNativeCallbackHelpers}=__modules[29];
+const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[30];
+const {nativeDateMethods,emitNativeDateHelpers}=__modules[31];
+const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[32];
+const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[27];
+const {nativeControlArrayMethods}=__modules[33];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[25];
+const {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers}=__modules[24];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[34];
+
+
 
 
 
@@ -4002,7 +4139,7 @@ const mem = memory => ({memory});
 const INT_TYPES = new Set(['long', 'integer', 'byte', 'boolean']);
 const CLASSES = {CommandButton:'BUTTON', Label:'STATIC', TextBox:'EDIT', CheckBox:'BUTTON', OptionButton:'BUTTON', Frame:'BUTTON', ListBox:'LISTBOX', ComboBox:'COMBOBOX', Timer:null};
 const BOOL_CONDITIONS = {'=':0x94, '<>':0x95, '<':0x9c, '<=':0x9e, '>':0x9f, '>=':0x9d};
-const CONSTANTS = {...NATIVE_DATE_CONSTANTS,vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullstring:''};
+const CONSTANTS = {...NATIVE_DATE_CONSTANTS,vbtrue:-1,vbfalse:0,vbnormal:0,vbminimized:1,vbmaximized:2,vbmodal:1,vbmodeless:0,vbokonly:0,vbokcancel:1,vbyesno:4,vbyesnocancel:3,vbinformation:64,vbexclamation:48,vbcritical:16,vbquestion:32,vbok:1,vbcancel:2,vbyes:6,vbno:7,vbcrlf:'\r\n',vbnewline:'\r\n',vbtab:'\t',vbnullchar:'\0',vbnullstring:''};
 class NativeCompileError extends Error {
   constructor(message, source = '', line = 0) { super(`${source ? source + ':' + line + ': ' : ''}${message}`); this.name = 'NativeCompileError'; this.diagnostics = [{severity:'error',source,line,message}]; }
 }
@@ -4010,20 +4147,40 @@ class NativeCompileError extends Error {
 /** Native declarations are stripped only for this backend; the browser VM remains sandboxed. */
 function extractNativeDeclarations(module) {
   const declarations = new Map();
-  const code = module.code.split(/\r?\n/).map((line, index) => {
-    if (!/^\s*(?:Public\s+|Private\s+)?Declare\b/i.test(line)) return line;
+  const lines = module.code.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    if (!/^\s*(?:Public\s+|Private\s+)?Declare\b/i.test(lines[index])) continue;
+    const start = index, pieces = [];
+    // Token offsets distinguish a continuation from underscores inside names,
+    // aliases, strings or comments. Blank every consumed physical line so the
+    // language frontend and exported source map keep authored line numbers.
+    try {
+      while (true) {
+        const raw = lines[index], tokens = tokenize(raw), last = tokens.at(-2);
+        const continued = last?.type === 'id' && last.value === '_' &&
+          last.start > 0 && /\s/.test(raw[last.start - 1]);
+        pieces.push(raw.slice(0,continued ? last.start : tokens.at(-1).start));
+        if (!continued) break;
+        if (++index >= lines.length) throw new Error('Unfinished native Declare continuation');
+      }
+    } catch (error) { throw new NativeCompileError(error.message,module.name,start + 1); }
+    const line = pieces.join(' ');
     const m = line.match(/^\s*(?:(Public|Private)\s+)?Declare\s+(Function|Sub)\s+(\w+)\s+Lib\s+"([\w.-]+)"(?:\s+Alias\s+"([\w?@$#]+)")?\s*\((.*)\)\s*(?:As\s+(\w+))?\s*(?:'.*)?$/i);
-    if (!m) throw new NativeCompileError('Unsupported native Declare syntax; use a single-line stdcall declaration', module.name, index + 1);
+    if (!m) throw new NativeCompileError('Unsupported native Declare syntax; use a scalar stdcall declaration', module.name, start + 1);
     const dll = /\.dll$/i.test(m[4]) ? m[4] : m[4] + '.dll', name = key(m[3]);
-    const params = parseParameters(m[6]);
-    if (declarations.has(name)) throw new NativeCompileError('Duplicate native declaration: ' + m[3], module.name, index + 1);
-    if (params.some(p => !INT_TYPES.has(key(p.type)) && !REAL_TYPES.has(key(p.type)) && key(p.type)!=='currency' || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !REAL_TYPES.has(key(m[7])) && key(m[7])!=='currency')) {
-      throw new NativeCompileError('Native Declare supports Byte/Integer/Long/Boolean/Single/Double/Currency/Date parameters and returns; use StrPtr for explicit Unicode pointers', module.name, index + 1);
+    let params;
+    try { params = parseParameters(m[6]); }
+    catch (error) { throw new NativeCompileError(error.message,module.name,start + 1); }
+    if(params.reduce((sum,p)=>sum+nativeParameterBytes(p),0)>65532)
+      throw new NativeCompileError('Native Declare argument area exceeds the x86 stdcall return limit',module.name,start + 1);
+    if (declarations.has(name)) throw new NativeCompileError('Duplicate native declaration: ' + m[3], module.name, start + 1);
+    if (params.some(p => !INT_TYPES.has(key(p.type)) && !REAL_TYPES.has(key(p.type)) && !['currency','string'].includes(key(p.type)) || p.bounds !== null || p.optional || p.paramArray) || (key(m[2]) === 'function' && !INT_TYPES.has(key(m[7])) && !REAL_TYPES.has(key(m[7])) && !['currency','string'].includes(key(m[7])))) {
+      throw new NativeCompileError('Native Declare supports scalar Byte/Integer/Long/Boolean/Single/Double/Currency/Date/String parameters and returns; arrays and records require separate ABI support', module.name, start + 1);
     }
-    declarations.set(name, {name:m[3],kind:key(m[2]),scope:key(m[1] || 'public'),params,returnType:m[7] || 'Long',dll,symbol:/^#\d+$/.test(m[5] || '') ? Number(m[5].slice(1)) : m[5] || m[3],line:index + 1});
-    return ''; // Keep line numbers stable.
-  }).join('\n');
-  return {declarations, code};
+    declarations.set(name, {name:m[3],kind:key(m[2]),scope:key(m[1] || 'public'),params,returnType:m[7] || 'Long',dll,symbol:/^#\d+$/.test(m[5] || '') ? Number(m[5].slice(1)) : m[5] || m[3],line:start + 1});
+    for(let physical=start;physical<=index;physical++)lines[physical]='';
+  }
+  return {declarations, code:lines.join('\n')};
 }
 
 class NativeCompiler {
@@ -4166,11 +4323,11 @@ class NativeCompiler {
     const currencyType=this.currencyType(node);if(currencyType)return currencyType;
     const numericType=this.numericType(node);if(numericType)return numericType;
     if (node.kind === 'group') return this.type(node.expr);
-    const errorProperty=this.errorProperty(node);if(errorProperty)return errorProperty==='number'?'long':'string';
+    const errorProperty=this.errorProperty(node);if(errorProperty)return ['number','lastdllerror'].includes(errorProperty)?'long':'string';
     const variable=this.variable(node);if(variable)return key(variable.type);
     if(node.kind==='call'){
       const name=node.callee.kind==='id'?key(node.callee.name).replace(/\$$/,''):'';
-      if(['cstr','left','right','mid','chrw'].includes(name))return 'string';
+      if(['cstr','left','right','mid','chrw','space'].includes(name))return 'string';
       const result=this.nativeFunctionType(node);if(result)return result;
     }
     if(node.kind==='id'||node.kind==='member'){const result=this.nativeFunctionType(node);if(result)return result;}
@@ -4187,6 +4344,7 @@ class NativeCompiler {
   expression(node) {
     if (!node) this.fail('Missing expression'); const x = this.x;
     const bound=this.nativeConstant(node);if(bound)return this.emitNativeConstant(bound);
+    if(this.nativeNullString(node)){x.value(0);return;}
     if(this.dateOperation(node))return;
     if(this.currencyOperation(node))return;
     if(this.numericExpression(node))return;
@@ -4614,6 +4772,7 @@ class NativeCompiler {
   build() {
     for (const module of this.modules.values()) for (const proc of module.procedures.values()) this.procedure(proc);
     for (const module of this.modules.values()) if (module.form) this.form(module);
+    emitNativeStringInteropHelpers(this);
     emitNativeCallbackHelpers(this);
     this.helpers(); this.context = null; this.instruction = null;
     const x = this.x, loop = x.unique(), dispatch = x.unique(), quit = x.unique();
@@ -4642,7 +4801,7 @@ class NativeCompiler {
     return {bytes:linked.bytes,report:{target:'win32-aot',architecture:'x86',format:'PE32',extraction:false,arrayLimits:{maxBytes:this.maxArrayBytes,maxRank:60},runtime:'Win32 system DLLs; no embedded JavaScript engine or VB6 runtime',graphics:'native Windows controls / GDI, not WebGPU',size:linked.bytes.length,imports:linked.imports,sections:linked.sections,sourceMap:this.sourceMap.map(s => ({...s,rva:linked.symbols[s.symbol]})),callbacks:[...(this.nativeCallbacks?.values()||[])].map(({target,label})=>({module:target.module.name,procedure:target.proc.name,rva:linked.symbols[label],argumentBytes:target.argumentBytes,thread:'application',convention:'stdcall'})),limits:['Typed integer/Single/Double/Currency/Date/String storage, fixed/dynamic arrays and error recovery; unsupported VB constructs fail compilation.','Native controls use Windows theme/font metrics, not pixel-identical VB6 styling.','WebGPU remains a separate Electron target.']}};
   }
 }
-Object.assign(NativeCompiler.prototype,nativeCallbackMethods,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
+Object.assign(NativeCompiler.prototype,nativeStringInteropMethods,nativeCallbackMethods,nativeCallMethods,nativeBindingMethods,nativeStorageMethods,nativeErrorMethods,nativeArrayMethods,nativeNumericMethods,nativeControlArrayMethods,nativeCurrencyMethods,nativeDateMethods,nativeDateIntervalMethods);
 function compileWin32(project, options = {}) {
   if (options.graphics && options.graphics !== 'gdi') throw new NativeCompileError('The freestanding Win32 target uses native controls/GDI; use the desktop target for WebGPU');
   if (options.arch && options.arch !== 'x86') throw new NativeCompileError('The freestanding compiler currently emits x86 PE32');
@@ -4654,8 +4813,8 @@ return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[35]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[34];
+__modules[36]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[35];
 const {PE32Image, BinarySection, PE32_BASE}=__modules[21];
 const {X86}=__modules[22];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
@@ -4665,5 +4824,5 @@ const {X86}=__modules[22];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[35];
+globalThis["VB6Native"]=__modules[36];
 })();
