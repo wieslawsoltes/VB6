@@ -92,6 +92,8 @@ globalThis.runComputeBrowserTests=async function() {
   await runComputeExtendedTests({gpu,test,equal,ok});
   await runComputeStringTests({gpu,test,equal,ok});
   await runComputeDoubleTests({gpu,test,equal,ok});
+  await runComputeCurrencyTests({gpu,test,equal,ok});
+  await runComputeDateTests({gpu,test,equal,ok});
   const resources=gpu.resources.size;
   await gpu.dispose();
   return {available:true,adapter:{vendor:info.vendor,architecture:info.architecture,device:info.device,description:info.description},tests,passed:tests.filter(t=>t.passed).length,failed:tests.filter(t=>!t.passed).length,resourcesAfterTests:resources};

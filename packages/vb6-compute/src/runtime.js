@@ -1,10 +1,12 @@
+import {encodeDate,decodeDate,validateDateStorage} from './date-layout.js';
+import {encodeCurrency,decodeCurrency,validateCurrencyStorage} from './currency-layout.js';
 import {encodeDouble,decodeDouble,validateDoubleStorage} from './double-layout.js';
 import {ComputeError, COMPUTE_ABI, STATE_HEADER_WORDS, ARRAY_HEADER_WORDS, COMMAND_WORDS, BUFFER_USAGE, integer, finite} from './protocol.js';
 import {encodeStringBlock,decodeStringBlock,validateStringStorage} from './string-layout.js';
 import {ComputeDevice} from './device.js';
 import {readArrayLayout, arrayHeader} from './array-layout.js';
 
-const types=new Set(['byte','integer','long','boolean','single','double','string']);
+const types=new Set(['byte','integer','long','boolean','single','double','currency','date','string']);
 export function validateArtifact(artifact) {
   if(artifact?.abi!==COMPUTE_ABI||artifact.target!=='webgpu-compute'||artifact.entryPoint!=='main'||typeof artifact.wgsl!=='string')throw new ComputeError('Unsupported compute artifact','GPU_ABI');
   integer(artifact.stateWords,'stateWords',0,65536);integer(artifact.workgroupSize,'workgroupSize',1,256);
@@ -21,6 +23,10 @@ export function validateArtifact(artifact) {
       if(artifact.stringABI!==1||s.stringStorage?.capacity>artifact.maxStringLength)throw new ComputeError('Invalid string ABI or capacity','GPU_ABI');
       occupied.push(validateStringStorage(artifact,s));
     }else if(s.stringStorage)throw new ComputeError('String storage attached to a numeric field','GPU_ABI');
+    if(s.type==='date'){if(artifact.dateABI!==1)throw new ComputeError('Invalid Date ABI','GPU_ABI');occupied.push(validateDateStorage(artifact,s));}
+    else if(s.dateStorage)throw new ComputeError('Unexpected Date storage','GPU_ABI');
+    if(s.type==='currency'){if(artifact.currencyABI!==1)throw new ComputeError('Invalid Currency ABI','GPU_ABI');occupied.push(validateCurrencyStorage(artifact,s));}
+    else if(s.currencyStorage)throw new ComputeError('Unexpected Currency storage','GPU_ABI');
     if(s.type==='double'){if(artifact.doubleABI!==1)throw new ComputeError('Invalid Double ABI','GPU_ABI');occupied.push(validateDoubleStorage(artifact,s));}
     else if(s.doubleStorage)throw new ComputeError('Unexpected Double storage','GPU_ABI');
     if(s.array) {
@@ -76,13 +82,13 @@ export function decodeState(artifact,buffer,count=1) {
         for(let i=0;i<count;i++)if(words[offset+i]!==s.stringStorage.offset+i*s.stringStorage.stride)
           throw new ComputeError('Corrupt GPU String reference: '+name,'GPU_ABI');
       }
-      if(s.type==='double'){
+      if(['double','currency','date'].includes(s.type)){
         const count=s.array?s.capacity:1;
-        for(let i=0;i<count;i++)if(words[offset+i]!==s.doubleStorage.offset+i*2)throw new ComputeError('Corrupt GPU Double reference: '+name,'GPU_ABI');
+        for(let i=0;i<count;i++)if(words[offset+i]!==(s.doubleStorage||s.currencyStorage||s.dateStorage).offset+i*2)throw new ComputeError('Corrupt GPU Double reference: '+name,'GPU_ABI');
       }
-      const readDouble=i=>{const p=base+STATE_HEADER_WORDS+s.doubleStorage.offset+i*2;return decodeDouble(words[p],words[p+1]);};
-      if(s.array){const layout=readArrayLayout(words,base+STATE_HEADER_WORDS+s.offset,s);arrays[name]=layout;globals[name]=s.type==='double'?Array.from({length:layout.length},(_,i)=>readDouble(i)):s.type==='string'?Array.from({length:layout.length},(_,i)=>decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset+i*s.stringStorage.stride,s.stringStorage)):Array.from(words.subarray(offset,offset+layout.length),v=>decodeScalar(v,s.type));}
-      else globals[name]=s.type==='double'?readDouble(0):s.type==='string'?decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset,s.stringStorage):decodeScalar(words[offset],s.type);
+      const readDouble=i=>{const p=base+STATE_HEADER_WORDS+(s.doubleStorage||s.currencyStorage||s.dateStorage).offset+i*2;return (s.type==='date'?decodeDate:s.type==='currency'?decodeCurrency:decodeDouble)(words[p],words[p+1]);};
+      if(s.array){const layout=readArrayLayout(words,base+STATE_HEADER_WORDS+s.offset,s);arrays[name]=layout;globals[name]=['double','currency','date'].includes(s.type)?Array.from({length:layout.length},(_,i)=>readDouble(i)):s.type==='string'?Array.from({length:layout.length},(_,i)=>decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset+i*s.stringStorage.stride,s.stringStorage)):Array.from(words.subarray(offset,offset+layout.length),v=>decodeScalar(v,s.type));}
+      else globals[name]=['double','currency','date'].includes(s.type)?readDouble(0):s.type==='string'?decodeStringBlock(words,base+STATE_HEADER_WORDS+s.stringStorage.offset,s.stringStorage):decodeScalar(words[offset],s.type);
     }
     const source=artifact.sources.find(s=>s.id===words[base+4]);
     lanes.push({lane,error:words[base],line:words[base+1],steps:words[base+2],drawCount:words[base+3],source:source?.module,procedure:source?.procedure,depth:source?.depth,fatal:words[base+5]!==0,globals,arrays});
@@ -121,7 +127,7 @@ export class ComputeProgram {
     this.state=make(this.initial.byteLength,usage,'VB6 lane states');
     this.draws=make(this.count*this.capacity*COMMAND_WORDS*4,usage,'VB6 GPU draw commands');
     this.shared=this.sharedBuffer||make(this.sharedWords*4,usage,'VB6 atomic shared memory');
-    this.params=make(32,BUFFER_USAGE.UNIFORM|BUFFER_USAGE.COPY_DST,'VB6 dispatch parameters');
+    this.params=make(48,BUFFER_USAGE.UNIFORM|BUFFER_USAGE.COPY_DST,'VB6 dispatch parameters');
     d.queue.writeBuffer(this.state,0,this.initial);
     this.layout=d.createBindGroupLayout({entries:[
       {binding:0,visibility:4,buffer:{type:'storage'}},{binding:1,visibility:4,buffer:{type:'storage'}},
@@ -135,7 +141,7 @@ export class ComputeProgram {
     if(s.array&&(!Array.isArray(value)&&!ArrayBuffer.isView(value)))throw new ComputeError('Expected an array of values','GPU_VALUE');
     const values=s.array?Array.from(value):[value];
     if(s.array&&values.length>s.capacity)throw new ComputeError('Array input exceeds capacity','GPU_VALUE');
-    const words=s.type==='double'?new Uint32Array(values.flatMap(encodeDouble)):s.type==='string'?stringPayload(values,s.stringStorage):new Uint32Array(values.map(v=>encodeScalar(v,s.type)));
+    const words=['double','currency','date'].includes(s.type)?new Uint32Array(values.flatMap(s.type==='date'?encodeDate:s.type==='currency'?encodeCurrency:encodeDouble)):s.type==='string'?stringPayload(values,s.stringStorage):new Uint32Array(values.map(v=>encodeScalar(v,s.type)));
     if(s.array&&!s.dynamic&&values.length!==s.length)throw new ComputeError('Array input length must equal '+s.length,'GPU_VALUE');
     const base=(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.offset)*4;
     return this.gpu.operation(async d=>{
@@ -145,23 +151,23 @@ export class ComputeProgram {
         const layout=readArrayLayout(header,0,s);
         if(!layout.allocated||layout.length!==values.length)throw new ComputeError('Dynamic array must be allocated with matching length','GPU_VALUE');
       }
-      const destination=s.type==='double'?(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.doubleStorage.offset)*4:s.type==='string'?(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.stringStorage.offset)*4:base+(s.array?ARRAY_HEADER_WORDS*4:0);
+      const destination=['double','currency','date'].includes(s.type)?(lane*this.artifact.stateStride+STATE_HEADER_WORDS+(s.doubleStorage||s.currencyStorage||s.dateStorage).offset)*4:s.type==='string'?(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.stringStorage.offset)*4:base+(s.array?ARRAY_HEADER_WORDS*4:0);
       if(words.length)d.queue.writeBuffer(this.state,destination,words);
     });
   }
   initializeArray(name,bounds,values=null,lane=0) {
     this.check();integer(lane,'lane',0,this.count-1);const s=field(this.artifact,name);
     if(!s.array||!s.dynamic)throw new ComputeError('initializeArray requires a dynamic array','GPU_TYPE');
-    const header=arrayHeader(bounds,s.capacity),data=['string','double'].includes(s.type)?new Uint32Array(this.artifact.initialState.slice(s.offset,s.offset+s.words)):new Uint32Array(s.words);data.set(header);
+    const header=arrayHeader(bounds,s.capacity),data=['string','double','currency','date'].includes(s.type)?new Uint32Array(this.artifact.initialState.slice(s.offset,s.offset+s.words)):new Uint32Array(s.words);data.set(header);
     let strings=s.type==='string'?new Array(s.capacity).fill(''):null;
     if(values!==null){
       if((!Array.isArray(values)&&!ArrayBuffer.isView(values))||values.length!==header[1])throw new ComputeError('Array input length does not match bounds','GPU_VALUE');
       if(strings)Array.from(values).forEach((v,i)=>strings[i]=v);
-      else if(s.type!=='double')data.set(Array.from(values,v=>encodeScalar(v,s.type)),ARRAY_HEADER_WORDS);
+      else if(!['double','currency','date'].includes(s.type))data.set(Array.from(values,v=>encodeScalar(v,s.type)),ARRAY_HEADER_WORDS);
     }
-    const payload=strings?stringPayload(strings,s.stringStorage):s.type==='double'?new Uint32Array(Array.from({length:s.capacity},(_,i)=>values&&i<values.length?values[i]:0).flatMap(encodeDouble)):null;
+    const payload=strings?stringPayload(strings,s.stringStorage):['double','currency','date'].includes(s.type)?new Uint32Array(Array.from({length:s.capacity},(_,i)=>values&&i<values.length?values[i]:0).flatMap(s.type==='date'?encodeDate:s.type==='currency'?encodeCurrency:encodeDouble)):null;
     const offset=(lane*this.artifact.stateStride+STATE_HEADER_WORDS+s.offset)*4;
-    return this.gpu.operation(d=>{this.check();d.queue.writeBuffer(this.state,offset,data);if(payload)d.queue.writeBuffer(this.state,(lane*this.artifact.stateStride+STATE_HEADER_WORDS+(s.stringStorage||s.doubleStorage).offset)*4,payload);});
+    return this.gpu.operation(d=>{this.check();d.queue.writeBuffer(this.state,offset,data);if(payload)d.queue.writeBuffer(this.state,(lane*this.artifact.stateStride+STATE_HEADER_WORDS+(s.stringStorage||s.doubleStorage||s.currencyStorage||s.dateStorage).offset)*4,payload);});
   }
   writeShared(values,offset=0) {
     this.check();if(!(this.shared.usage&BUFFER_USAGE.COPY_DST))throw new ComputeError('Shared writes require COPY_DST usage','GPU_BINDING');if(!Array.isArray(values)&&!ArrayBuffer.isView(values))throw new ComputeError('Expected shared word array','GPU_VALUE');
@@ -170,10 +176,10 @@ export class ComputeProgram {
     return this.gpu.operation(d=>{this.check();if(words.length)d.queue.writeBuffer(this.shared,offset*4,words);});
   }
   reset({clearShared=!this.sharedBuffer}={}) {this.check();if(clearShared&&!(this.shared.usage&BUFFER_USAGE.COPY_DST))throw new ComputeError('Shared reset requires COPY_DST usage','GPU_BINDING');return this.gpu.operation(d=>{this.check();d.queue.writeBuffer(this.state,0,this.initial);const e=d.createCommandEncoder();if(clearShared)e.clearBuffer(this.shared,0,this.sharedWords*4);d.queue.submit([e.finish()]);});}
-  run({time=0,fuel=this.fuel,readback=true,throwOnError=true}={}) {
+  run({time=0,now,fuel=this.fuel,readback=true,throwOnError=true}={}) {
     this.check();finite(time,'time');integer(fuel,'fuel',1,10000000);if(fuel*this.count>50000000)throw new ComputeError('Aggregate dispatch fuel exceeds 50 million instructions; reduce count or per-lane fuel','GPU_LIMIT');
     return this.gpu.operation(async d=>{
-      this.check();const data=new ArrayBuffer(32),u=new Uint32Array(data);u.set([this.count,fuel,this.capacity,this.width,this.height,0,this.sharedWords,0]);new Float32Array(data)[5]=time;
+      this.check();const data=new ArrayBuffer(48),u=new Uint32Array(data);u.set([this.count,fuel,this.capacity,this.width,this.height,0,this.sharedWords,0]);new Float32Array(data)[5]=time;if(this.artifact.dateABI)u.set(encodeDate(now??new Date()),8);
       d.queue.writeBuffer(this.params,0,data);
       const encoder=d.createCommandEncoder(),pass=encoder.beginComputePass({label:'VB6 execution'});pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.dispatchWorkgroups(Math.ceil(this.count/this.artifact.workgroupSize));pass.end();d.queue.submit([encoder.finish()]);
       if(!readback)return {submitted:true,count:this.count};

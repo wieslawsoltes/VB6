@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {compileCompute} from '../src/compute/index.js';
+import {createInitialState,decodeState,validateArtifact} from '../packages/vb6-compute/src/runtime.js';
+import {encodeDate,decodeDate,dateSerialValue} from '../packages/vb6-compute/src/date-layout.js';
+const source=body=>`Public result As Date\nPublic n As Long\nSub Main()\n${body}\nEnd Sub`;
+for(const n of [0,-0,-657434,-657434.5,2958465.99999,-0.5,45351.25])test('OLE Date wire '+n,()=>assert.ok(Object.is(decodeDate(...encodeDate(n)),n)));
+for(const n of [NaN,Infinity,-657435,2958466,'2026-10-06'])test('reject invalid OLE serial '+n,()=>assert.throws(()=>encodeDate(n)));
+for(const body of ['result=#2024-02-29#','result=CDate(-1.5#)','result=DateSerial(2024,2,29)','result=TimeSerial(12,30,59)','n=Year(result)','n=Month(result)','n=Day(result)','n=Hour(result)','n=Minute(result)','n=Second(result)','n=Weekday(result,2)','result=DateAdd("m",1,result)','n=DateDiff("d",result,DateSerial(2026,1,1))','n=DatePart("ww",result,2,2)','result=Now','result=Date','result=Time','n=CLng(Timer)','result=DateValue(result)','result=TimeValue(result)'])test('Date WGSL lowering '+body,()=>{const a=compileCompute(source(body));validateArtifact(a);assert.equal(a.globals[0].type,'date');assert.equal(a.calendar,'gregorian');assert.match(a.wgsl,/fn dt_parts/);});
+test('Date literal captures civil date without f32 truncation',()=>{const a=compileCompute(source('result=#2024-02-29 12:30:15#'));assert.match(a.wgsl,/vec2<u32>/);});
+test('Date arrays use canonical two-word values',()=>{const a=compileCompute('Public a(1 To 2) As Date\nSub Main()\nEnd Sub');assert.deepEqual(decodeState(a,createInitialState(a).buffer)[0].globals['Module1.a'],[0,0]);});
+test('Date descriptors cannot alias scalar storage',()=>{const a=compileCompute(source(''));a.globals[0].dateStorage.offset=0;assert.throws(()=>validateArtifact(a));});
+test('unsupported calendars and dynamic interval coercion fail explicitly',()=>{assert.throws(()=>compileCompute(source(''),{calendar:'hijri'}),e=>e.code==='GPU_CALENDAR');assert.throws(()=>compileCompute(source('Dim s As String\nn=DatePart(s,result)')),e=>e.code==='GPU_DATE_INTERVAL');});
+test('two-digit year window is recorded in artifact',()=>assert.equal(compileCompute(source('result=DateSerial(30,1,1)'),{twoDigitYearMax:2039}).twoDigitYearMax,2039));
+test('host date conversion captures civil time',()=>{const d=new Date(0);d.setFullYear(1899,11,29);d.setHours(18,0,0,0);assert.equal(dateSerialValue(d),-1.75);});

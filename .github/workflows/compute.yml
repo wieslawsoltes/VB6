@@ -11,7 +11,23 @@ concurrency:
   group: compute-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  native-oracle:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Native Automation numeric reference
+        shell: pwsh
+        run: ./tools/compute-native-oracle.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compute-native-oracle-${{ github.sha }}
+          path: reports/compute/oracle/
+          retention-days: 7
   validate:
+    needs: native-oracle
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -43,6 +59,10 @@ jobs:
         if: ${{ !cancelled() }}
       - run: python -m playwright install --with-deps chromium
         if: ${{ !cancelled() }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: compute-native-oracle-${{ github.sha }}
+          path: reports/compute/oracle/
       - name: Require real WebGPU numeric and pixel readbacks
         if: ${{ !cancelled() }}
         run: python tools/compute-browser-tests.py

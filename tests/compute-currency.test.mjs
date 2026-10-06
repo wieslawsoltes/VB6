@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {compileCompute} from '../src/compute/index.js';
+import {createInitialState,decodeState,validateArtifact} from '../packages/vb6-compute/src/runtime.js';
+import {encodeCurrency,decodeCurrency,currencyRaw} from '../packages/vb6-compute/src/currency-layout.js';
+const src=body=>`Public a As Currency\nPublic b As Currency\nPublic result As Currency\nSub Main()\n${body}\nEnd Sub`;
+for(const value of ['0.0000','0.0001','-0.0001','922337203685477.5807','-922337203685477.5808','1.2345','-1.2345'])test('Currency exact wire '+value,()=>assert.equal(decodeCurrency(...encodeCurrency(value)),value));
+for(const [value,raw] of [['0.00005',0n],['0.00015',2n],['0.00025',2n],['-0.00015',-2n],['1.23455',12346n],['1e-4',1n]])test('decimal Currency literal ties '+value,()=>assert.equal(currencyRaw(value),raw));
+for(const value of ['922337203685477.5808','-922337203685477.5809',1e15,NaN,Infinity,null,'garbage','1e5000'])test('Currency input rejection '+value,()=>assert.throws(()=>encodeCurrency(value)));
+for(const body of ['result=922337203685477.5807@','result=-922337203685477.5808@','result=a+b','result=a-b','result=a*b','result=CCur(1.2345#)','result=Abs(a)','result=Int(a)','result=Fix(a)','If a Then result=b','For a=1@ To 5@\nresult=result+a\nNext','Select Case a\nCase 1@ To 2@\nresult=42@\nEnd Select'])test('Currency WGSL lowering '+body,()=>{const a=compileCompute(src(body));validateArtifact(a);assert.equal(a.globals[0].type,'currency');assert.match(a.wgsl,/fn cy_mul/);});
+test('Currency scalar readback avoids Number loss',()=>{const a=compileCompute(src('')),state=createInitialState(a),s=a.globals[0];state.set(encodeCurrency('922337203685477.5807'),6+s.currencyStorage.offset);assert.equal(decodeState(a,state.buffer)[0].globals['Module1.a'],'922337203685477.5807');});
+test('Currency arrays preserve canonical slots',()=>{const a=compileCompute('Public a(1 To 2) As Currency\nSub Main()\nEnd Sub');assert.deepEqual(decodeState(a,createInitialState(a).buffer)[0].globals['Module1.a'],['0.0000','0.0000']);});
+test('Currency storage tampering is diagnosed',()=>{const a=compileCompute(src(''));a.initialState[a.globals[0].offset]=0;assert.throws(()=>validateArtifact(a));});
+test('Currency ByRef returns use vector frames',()=>{const a=compileCompute(src('result=Twice(a)')+'\nFunction Twice(ByVal x As Currency) As Currency\nTwice=x*2@\nEnd Function');assert.match(a.wgsl,/arg0:vec2<u32>/);});
+test('Currency division promotes to Double',()=>{const a=compileCompute('Public x As Double\nSub Main()\nx=1@/3@\nEnd Sub');assert.match(a.wgsl,/cy_to_d/);assert.match(a.wgsl,/d_div/);});

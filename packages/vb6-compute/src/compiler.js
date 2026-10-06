@@ -1,3 +1,8 @@
+import {dateWGSL} from './date-wgsl.js';
+import {attachDate,dateLiteral} from './date-layout.js';
+import {createDateLowering} from './date-lowering.js';
+import {CURRENCY_WGSL} from './currency-wgsl.js';
+import {attachCurrency,currencyLiteral} from './currency-layout.js';
 import {DOUBLE_WGSL} from './double-wgsl.js';
 import {attachDouble,doubleLiteral} from './double-layout.js';
 import {ComputeError, COMPUTE_ABI, STATE_HEADER_WORDS, ARRAY_HEADER_WORDS, integer, shaderLiteral} from './protocol.js';
@@ -7,17 +12,18 @@ import {stringsWGSL} from './strings-wgsl.js';
 import {createStringLowering} from './string-lowering.js';
 import {emitCallFrame,emitDispatcher} from './call-dispatch.js';
 const key = s => String(s).toLowerCase().replace(/[$%&!#@]$/, '');
-const scalarTypes = new Set(['boolean','byte','integer','long','single','double','string']);
+const scalarTypes = new Set(['boolean','byte','integer','long','single','double','currency','date','string']);
 const comparisons = {'=':'==','<>':'!=','<':'<','>':'>','<=':'<=','>=':'>='};
 const bits = {and:'&',or:'|',xor:'^',eqv:'^',imp:'|'};
 const colorConstants = {vbblack:0,vbred:255,vbgreen:65280,vbblue:16711680,vbwhite:16777215,vbyellow:65535,vbmagenta:16711935,vbcyan:16776960,vbtrue:-1,vbfalse:0};
-const zero = type => type==='double'?'vec2<u32>(0u)':type==='single'?'0.0f':'0i';
-const store = type => type==='string'?'put_s':type==='double'?'put_d':type==='single'?'put_f':'put_i';
+const isWide = type => type==='double'||type==='currency'||type==='date';
+const zero = type => isWide(type)?'vec2<u32>(0u)':type==='single'?'0.0f':'0i';
+const store = type => type==='date'?'dt_put':type==='string'?'put_s':isWide(type)?'put_d':type==='single'?'put_f':'put_i';
 const stringConstants={vbnullstring:'',vbcrlf:'\r\n',vbnewline:'\r\n',vbcr:'\r',vblf:'\n',vbtab:'\t',vbnullchar:'\0',vbback:'\b',vbformfeed:'\f',vbverticaltab:'\v'};
-const wgtype = type => type==='double'?'vec2<u32>':type==='single'?'f32':'i32';
-const load = type => type==='double'?'get_d':type==='single'?'get_f':'get_i';
-const truth = v => v.type==='double'?`d_nonzero(${v.code})`:`(${v.code}!=${zero(v.type)})`;
-const relation = (a,op,b,type) => type==='double'?`d_cmp(${a},${b})${op}0i`:`${a}${op}${b}`;
+const wgtype = type => isWide(type)?'vec2<u32>':type==='single'?'f32':'i32';
+const load = type => isWide(type)?'get_d':type==='single'?'get_f':'get_i';
+const truth = v => v.type==='currency'?`!u64_zero(${v.code})`:['double','date'].includes(v.type)?`d_nonzero(${v.code})`:`(${v.code}!=${zero(v.type)})`;
+const relation = (a,op,b,type) => isWide(type)?`${type==='currency'?'cy_cmp':'d_cmp'}(${a},${b})${op}0i`:`${a}${op}${b}`;
 
 /** Lowers the shared VB compiler IR to actual WGSL, not JavaScript execution.
  * Every invocation owns its state. A bounded PC loop preserves VB control flow.
@@ -33,9 +39,11 @@ export function compileComputeIR(program, options={}) {
   const dynamicArrayCapacity=integer(options.dynamicArrayCapacity??256,'dynamicArrayCapacity',1,65536);
   const maxCallDepth=integer(options.maxCallDepth??16,'maxCallDepth',1,64);
   const maxStringLength=integer(options.maxStringLength??256,'maxStringLength',1,4096);
+  const twoDigitYearMax=integer(options.twoDigitYearMax??2029,'twoDigitYearMax',1999,9999);
+  if(options.calendar&&options.calendar!=='gregorian')throw new ComputeError('Only Gregorian calendar is implemented','GPU_CALENDAR');
   const gosubStackDepth=integer(options.gosubStackDepth??64,'gosubStackDepth',1,1024);
   const warnings=[], globals=new Map(), procedures=new Map(), compiled=new Map(), active=new Set();
-  const initial=[], exports=[], sources=[],doubleArrays=[]; let current=null,requiresShared=false,hasDouble=false;
+  const initial=[], exports=[], sources=[],doubleArrays=[]; let current=null,requiresShared=false,hasDouble=false,hasCurrency=false,hasDate=false;
   const error=(message,code='GPU_UNSUPPORTED',line=current?.line||1)=>{
     throw new ComputeError(message,code,{source:current?.module?.name,line,procedure:current?.proc?.name});
   };
@@ -44,8 +52,8 @@ export function compileComputeIR(program, options={}) {
   const typeOf=(type)=>{
     const t=key(type||'Variant');
     if(t==='double'&&precision==='single'){warn('Explicit single-precision mode replaces Double values and operations with f32; this is not VB6 Double parity.');return 'single';}
-    if(t==='double')hasDouble=true;
-    if(!scalarTypes.has(t))error(`Type ${type||'Variant'} is not supported by the typed compute target. Use Boolean, Byte, Integer, Long, Single or String.`,'GPU_TYPE');
+    if(t==='date'){hasDate=true;hasDouble=true;}if(t==='double')hasDouble=true;if(t==='currency'){hasCurrency=true;hasDouble=true;}
+    if(!scalarTypes.has(t))error(`Type ${type||'Variant'} is not supported by the typed compute target. Use Boolean, Byte, Integer, Long, Single, Double, Currency, Date or String.`,'GPU_TYPE');
     return t;
   };
   const getConstant=(name,module,proc)=>{
@@ -86,7 +94,7 @@ export function compileComputeIR(program, options={}) {
       for(let d=0;d<4;d++)initial.push(...(bounds[d]?[bounds[d][0]>>>0,bounds[d][1]>>>0,strides[d]]:[0,0,0]));
       initial.push(capacity,dynamic?1:0,...new Array(capacity).fill(0));
       const symbol={name:decl.name,type,offset,address:`${offset}u`,array:true,dynamic,bounds,length,capacity,words:ARRAY_HEADER_WORDS+capacity};
-      if(type==='double'){attachDouble(initial,symbol);doubleArrays.push(symbol);}
+      if(isWide(type)){({double:attachDouble,currency:attachCurrency,date:attachDate}[type])(initial,symbol);doubleArrays.push(symbol);}
       return done(type==='string'?arena.attach(symbol,decl):symbol);
     }
     if(type==='string'){
@@ -96,6 +104,8 @@ export function compileComputeIR(program, options={}) {
         const block=encodeStringBlock(value,symbol.stringStorage);block.forEach((w,i)=>initial[symbol.stringStorage.offset+i]=w);}
       return done(symbol);
     }
+    if(type==='date'){initial.push(0);const n=decl.initial;const value=!n?0:n.kind==='date'?new Date(n.value):n.kind==='id'?getConstant(n.name,module,proc)?.value:constNumber(n,module,proc);return done(attachDate(initial,{name:decl.name,type,offset,address:`${offset}u`,array:false,words:1},value));}
+    if(type==='currency'){initial.push(0);const n=decl.initial;let value=0;if(n){if(n.kind==='currency')value=n.value;else if(n.kind==='unary'&&n.op==='-'&&n.expr.kind==='currency')value='-'+n.expr.value;else if(n.kind==='id')value=getConstant(n.name,module,proc)?.value;else value=constNumber(n,module,proc);}return done(attachCurrency(initial,{name:decl.name,type,offset,address:`${offset}u`,array:false,words:1},value));}
     if(type==='double'){initial.push(0);return done(attachDouble(initial,{name:decl.name,type,offset,address:`${offset}u`,array:false,words:1},decl.initial?constNumber(decl.initial,module,proc):0));}
     let value=decl.initial?constNumber(decl.initial,module,proc):0;
     if(!Number.isFinite(value))error('Non-finite initial value','GPU_VALUE');
@@ -146,7 +156,7 @@ export function compileComputeIR(program, options={}) {
       if(p.byRef) {locals.set(key(p.name),{name:p.name,type,array,address:`arg${i}`,parameter:true});params.push(`arg${i}:u32`);}
       else {if(array)error('Array arguments must be ByRef');const s=allocate({...p,initial:null,bounds:null},module,proc);locals.set(key(p.name),s);params.push(`arg${i}:${wgtype(type)}`);reset.push(`${store(type)}(${s.address},arg${i});`);}
     }
-    if(resultType!=='void') {const s=allocate({name:proc.name,type:resultType,bounds:null},module,proc);locals.set(key(proc.name),s);reset.push(s.type==='string'?`str_reset(${s.address});`:s.type==='double'?`put_d(${s.address},vec2<u32>(0u));`:`mem[${s.address}]=0u;`);}
+    if(resultType!=='void') {const s=allocate({name:proc.name,type:resultType,bounds:null},module,proc);locals.set(key(proc.name),s);reset.push(s.type==='string'?`str_reset(${s.address});`:isWide(s.type)?`put_d(${s.address},vec2<u32>(0u));`:`mem[${s.address}]=0u;`);}
     for(const ins of proc.code)if(ins.op==='dim')for(const d of ins.decls)if(!d.constant){
       const staticKey=info.rootId+':'+key(d.name),isStatic=proc.static||ins.static;
       let s=isStatic?staticLocals.get(staticKey):null;
@@ -154,7 +164,7 @@ export function compileComputeIR(program, options={}) {
       locals.set(key(d.name),s);
       if(!proc.static&&!ins.static){
         if(s.array)reset.push(`array_erase(${s.address});`);
-        else reset.push(s.type==='string'?`str_reset(${s.address});`:s.type==='double'?`put_d(${s.address},vec2<u32>(0u));`:`mem[${s.address}]=0u;`);
+        else reset.push(s.type==='string'?`str_reset(${s.address});`:isWide(s.type)?`put_d(${s.address},vec2<u32>(0u));`:`mem[${s.address}]=0u;`);
       }
     }
     const out=line=>lines.push('        '+line);
@@ -162,7 +172,11 @@ export function compileComputeIR(program, options={}) {
     const convert=(value,to)=>{
       if(to==='void'||value.type==='void')error('Sub cannot be used as a value','GPU_TYPE');
       if(to==='string')return strings.toString(value).code;
+      if(to==='date'){hasDate=hasDouble=true;return value.type==='date'?value.code:`dt_valid(${convert(value,'double')})`;}
+      if(value.type==='date')return convert({...value,type:'double'},to);
       if(value.type==='string')error('String-to-number/Boolean coercion requires a locale-aware conversion target','GPU_CONVERSION');
+      if(to==='currency'){hasCurrency=hasDouble=true;return value.type==='currency'?value.code:value.type==='double'?`cy_from_d(${value.code})`:value.type==='single'?`cy_from_d(d_from_f(${value.code}))`:`cy_from_i(${value.code})`;}
+      if(value.type==='currency'){if(to==='double'){hasDouble=true;return `cy_to_d(${value.code})`;}if(to==='single')return `d_to_f(cy_to_d(${value.code}))`;if(to==='boolean')return `select(0i,-1i,!u64_zero(${value.code}))`;return convert({code:`cy_to_i(${value.code})`,type:'long'},to);}
       if(to==='double'){hasDouble=true;return value.type==='double'?value.code:`${value.type==='single'?'d_from_f':'d_from_i'}(${value.code})`;}
       if(to==='single')return value.type==='double'?`d_to_f(${value.code})`:value.type==='single'?value.code:`f32(${value.code})`;
       let v=value.type==='double'?`d_to_i(${value.code})`:value.type==='single'?`to_i(${value.code})`:value.code;
@@ -184,8 +198,9 @@ export function compileComputeIR(program, options={}) {
         const owner=program.modules.get(key(node.object.name));if(owner)return symbol(node.name,owner);
       }return null;
     }
+    const dates=createDateLowering({expr,convert,bind,error,enable:()=>{hasDate=hasDouble=true;}});
     const strings=createStringLowering({arena,expr,bind,out,error,module,nodeSymbol});
-    const literal=(value,type)=>typeOf(type)==='string'?bind(arena.literal(value),'string',false):bind(typeOf(type)==='double'?doubleLiteral(value):shaderLiteral(value,typeOf(type)),typeOf(type));
+    const literal=(value,type)=>typeOf(type)==='string'?bind(arena.literal(value),'string',false):bind(typeOf(type)==='date'?dateLiteral(value):typeOf(type)==='currency'?currencyLiteral(value):typeOf(type)==='double'?doubleLiteral(value):shaderLiteral(value,typeOf(type)),typeOf(type));
     function address(node){
       const s=nodeSymbol(node);if(s)return s;
       if(node?.kind==='call'){
@@ -205,25 +220,31 @@ export function compileComputeIR(program, options={}) {
       error('Dynamic dispatch requires the host runtime','GPU_HOST_CALL');
     }
     function arithmeticType(a,b,op){
+      if(['+','-'].includes(op)&&[a,b].includes('date'))return op==='-'&&a==='date'&&b==='date'?'double':'date';
+      if(a==='date')a='double';if(b==='date')b='double';
       if(op==='^')return typeOf('Double');
       if(Object.hasOwn(bits,op)&&a==='boolean'&&b==='boolean')return 'boolean';
       if(Object.hasOwn(bits,op)||op==='\\'||op==='mod')return a==='byte'&&b==='byte'?'byte':[a,b].every(t=>['byte','integer','boolean'].includes(t))?'integer':'long';
       a=a==='boolean'?'integer':a;b=b==='boolean'?'integer':b;
       if(op==='/')return [a,b].includes('single')&&[a,b].every(t=>['single','byte','integer'].includes(t))?'single':typeOf('Double');
       if([a,b].includes('single')&&[a,b].includes('long'))return typeOf('Double');
+      if([a,b].includes('currency'))return op==='*'&&[a,b].some(t=>['single','double'].includes(t))?typeOf('Double'):'currency';
       const order=['byte','integer','long','single','double'];return order[Math.max(order.indexOf(a),order.indexOf(b))];
     }
     function expr(node){
       if(!node)error('Missing expression','GPU_EXPRESSION');
       if(node.kind==='group')return expr(node.expr);
+      if(node.kind==='date')return literal(node.value,'date');
+      if(node.kind==='currency')return literal(node.value,'currency');
       if(node.kind==='literal'){if(typeof node.value!=='number'&&typeof node.value!=='string')error('Null requires tagged Variant storage','GPU_TYPE');return literal(node.value,typeof node.value==='string'?'string':node.valueType||'long');}
       if(node.kind==='unary'){
+        if(node.op==='-'&&node.expr.kind==='currency')return literal('-'+node.expr.value,'currency');
         if(node.op==='-'&&node.expr.kind==='literal'&&typeof node.expr.value==='number'&&node.expr.valueType!=='boolean'){
           const n=node.expr,v=-n.value,t=n.numberSuffix?n.valueType:n.valueType==='long'&&v>=-32768&&v<=32767?'integer':n.valueType==='double'&&v===-2147483648?'long':n.valueType;return literal(v,t);
         }
         const a=expr(node.expr);if(a.type==='string')error('String unary coercion is not implemented','GPU_CONVERSION');let type=a.type,code=a.code;
-        if(node.op==='not'){if(type==='single'||type==='double')type='long';code=`~${convert(a,'long')}`;if(type==='byte')code=`(${code})&255i`;}
-        else {if(['byte','boolean'].includes(type))type='integer';if(node.op==='-')code=type==='double'?`d_neg(${code})`:type==='single'?`checked_f(-${code})`:`sub_i(0i,${code})`;}
+        if(node.op==='not'){if(type==='single'||isWide(type))type='long';code=`~${convert(a,'long')}`;if(type==='byte')code=`(${code})&255i`;}
+        else {if(['byte','boolean'].includes(type))type='integer';if(node.op==='-')code=type==='currency'?`cy_neg(${code})`:type==='date'?`dt_valid(d_neg(${code}))`:type==='double'?`d_neg(${code})`:type==='single'?`checked_f(-${code})`:`sub_i(0i,${code})`;}
         return bind(convert({code,type},type),type);
       }
       if(node.kind==='binary'){
@@ -234,14 +255,16 @@ export function compileComputeIR(program, options={}) {
           return bind(`select(0i,-1i,str_compare(${a.code},${b.code},${strings.compareMode()})${comparisons[op]}0i)`,'boolean');
         }
         if(comparisons[op]){
-          const type=[a.type,b.type].includes('double')?'double':[a.type,b.type].includes('single')?([a.type,b.type].includes('long')?typeOf('Double'):'single'):'long';
+          const type=[a.type,b.type].includes('date')?'double':[a.type,b.type].includes('currency')?'currency':[a.type,b.type].some(t=>['double','date'].includes(t))?'double':[a.type,b.type].includes('single')?([a.type,b.type].includes('long')?typeOf('Double'):'single'):'long';
           return bind(`select(0i,-1i,${relation(convert(a,type),comparisons[op],convert(b,type),type)})`,'boolean');
         }
         if(!['+','-','*','/','\\','mod','^',...Object.keys(bits)].includes(op))error('Unsupported compute operator: '+op);
-        const type=arithmeticType(a.type,b.type,op);let x=convert(a,['double','single'].includes(type)?type:'long'),y=convert(b,['double','single'].includes(type)?type:'long'),code;
+        const type=arithmeticType(a.type,b.type,op);let x=convert(a,['double','currency','date','single'].includes(type)?type:'long'),y=convert(b,['double','currency','date','single'].includes(type)?type:'long'),code;
         if(Object.hasOwn(bits,op)){code=`(${op==='imp'?'~':''}${x}${bits[op]}${y})`;if(op==='eqv')code='~'+code;if(type==='byte')code=`(${code})&255i`;}
         else if(op==='\\'||op==='mod')code=`${op==='mod'?'mod_i':'div_i'}(${x},${y})`;
         else if(op==='^'){if(type==='double')error('Binary64 exponentiation is not implemented; use an explicit compute f32 operation','GPU_DOUBLE_MATH');code=`checked_f(pow(${x},${y}))`;}
+        else if(type==='currency')code=`${{'+':'cy_add','-':'cy_sub','*':'cy_mul'}[op]}(${x},${y})`;
+        else if(type==='date')code=`dt_valid(${{'+':'d_add','-':'d_sub'}[op]}(${x},${y}))`;
         else if(type==='double')code=`${{'+':'d_add','-':'d_sub','*':'d_mul','/':'d_div'}[op]}(${x},${y})`;
         else if(type==='single')code=op==='/'?`div_f(${x},${y})`:`checked_f(${x}${op}${y})`;
         else code=`${{'+':'add_i','-':'sub_i','*':'mul_i'}[op]}(${x},${y})`;
@@ -265,6 +288,7 @@ export function compileComputeIR(program, options={}) {
     function call(node){
       const name=namedCallee(node.callee),n=key(name),args=node.args;
       const expect=(count)=>{if(args.length!==count)error(`${name} expects ${count} arguments`,'GPU_ARGUMENT');};
+      const dateCall=dates.call(n,args);if(dateCall)return dateCall;
       const stringCall=strings.call(n,args);if(stringCall)return stringCall;
       if(['computeindex','computecount','computewidth','computeheight','computetime'].includes(n)){
         expect(0);return bind({computeindex:'i32(vb_lane)',computecount:'i32(params.count)',computewidth:'i32(params.width)',computeheight:'i32(params.height)',computetime:'params.time'}[n],n==='computetime'?'single':'long');
@@ -283,8 +307,8 @@ export function compileComputeIR(program, options={}) {
         const op={computeatomicadd:0,computeatomicsub:1,computeatomicexchange:2,computeatomicand:3,computeatomicor:4,computeatomicxor:5}[n];
         return bind(`bitcast<i32>(shared_atomic(${index},${value},${op}u))`,'long');
       }
-      if(['cbyte','cint','clng','csng','cbool','cdbl'].includes(n)){
-        expect(1);const t=typeOf({cbyte:'Byte',cint:'Integer',clng:'Long',csng:'Single',cbool:'Boolean',cdbl:'Double'}[n]);
+      if(['cbyte','cint','clng','csng','cbool','cdbl','ccur','cdate'].includes(n)){
+        expect(1);const t=typeOf({cbyte:'Byte',cint:'Integer',clng:'Long',csng:'Single',cbool:'Boolean',cdbl:'Double',ccur:'Currency',cdate:'Date'}[n]);
         // Explicit literal conversion can be folded without implementing runtime f64.
         if(n==='csng'){try{return literal(Math.fround(constNumber(args[0],module,proc)),'single');}catch(e){if(e.code!=='GPU_CONSTANT')throw e;}}
         const value=expr(args[0]);return bind(convert(value,t),t);
@@ -297,7 +321,8 @@ export function compileComputeIR(program, options={}) {
       if(n==='rgb'){expect(3);const a=args.map(a=>convert(expr(a),'long'));return bind(`rgb(${a.join(',')})`,'long');}
       if(['abs','sgn','int','fix'].includes(n)){
         expect(1);const a=expr(args[0]);if(a.type==='string')error('Numeric function does not accept String','GPU_CONVERSION');const t=n==='sgn'?'integer':a.type==='boolean'?'integer':a.type;let code;
-        if(a.type==='double')return bind(n==='sgn'?`d_cmp(${a.code},vec2<u32>(0u))`:`${{abs:'d_abs',int:'d_floor',fix:'d_fix'}[n]}(${a.code})`,n==='sgn'?'integer':'double');
+        if(a.type==='currency')return bind(n==='sgn'?`cy_cmp(${a.code},vec2<u32>(0u))`:`${{abs:'cy_abs',int:'cy_floor',fix:'cy_fix'}[n]}(${a.code})`,n==='sgn'?'integer':'currency');
+        if(a.type==='double'||a.type==='date')return bind(n==='sgn'?`d_cmp(${a.code},vec2<u32>(0u))`:`${{abs:'d_abs',int:'d_floor',fix:'d_fix'}[n]}(${a.code})`,n==='sgn'?'integer':'double');
         if(n==='sgn')code=`select(select(0i,1i,${a.code}>${zero(a.type)}),-1i,${a.code}<${zero(a.type)})`;
         else if(n==='abs')code=a.type==='single'?`abs(${a.code})`:`select(${a.code},sub_i(0i,min(${a.code},0i)),${a.code}<0i)`;
         else code=a.type==='single'?`${n==='fix'?'trunc':'floor'}(${a.code})`:a.code;
@@ -341,7 +366,7 @@ export function compileComputeIR(program, options={}) {
       for(let i=0;i<callee.proc.params.length;i++){
         const p=callee.proc.params[i];if(bindings.get(i)==null){
           if(!p.optional||!callee.proc.defaultBindings?.has(key(p.name)))error('Missing required argument: '+p.name,'GPU_ARGUMENT');
-          const pt=typeOf(p.storageType||p.type),defaultValue=callee.proc.defaultBindings.get(key(p.name)),value=pt==='string'?arena.literal(defaultValue):pt==='double'?doubleLiteral(defaultValue):shaderLiteral(defaultValue,pt);
+          const pt=typeOf(p.storageType||p.type),defaultValue=callee.proc.defaultBindings.get(key(p.name)),value=pt==='string'?arena.literal(defaultValue):pt==='date'?dateLiteral(defaultValue):pt==='currency'?currencyLiteral(defaultValue):pt==='double'?doubleLiteral(defaultValue):shaderLiteral(defaultValue,pt);
           if(p.byRef){const s=allocate({name:'$optional',type:pt,bounds:null},module,proc);out(`${store(pt)}(${s.address},${value});`);bindings.set(i,s.address);}else bindings.set(i,value);
         }evaluated.push(bindings.get(i));
       }
@@ -417,7 +442,7 @@ export function compileComputeIR(program, options={}) {
           next=`pc=select(${ins.target}u,${pc+1}u,select(${relation(value,'>=',l.end,l.type)},${relation(value,'<=',l.end,l.type)},${relation(l.step,'>=',zero(l.type),l.type)}));`;break;
         }
         case 'forNext':{
-          const l=loops.get(ins.id),old=`${load(l.type)}(${l.address})`,sum=l.type==='double'?`d_add(${old},${l.step})`:l.type==='single'?`checked_f(${old}+${l.step})`:`add_i(${old},${l.step})`;
+          const l=loops.get(ins.id),old=`${load(l.type)}(${l.address})`,sum=l.type==='currency'?`cy_add(${old},${l.step})`:['double','date'].includes(l.type)?`d_add(${old},${l.step})`:l.type==='single'?`checked_f(${old}+${l.step})`:`add_i(${old},${l.step})`;
           out(`${store(l.type)}(${l.address},${convert({code:sum,type:l.type},l.type)});`);
           next=`pc=select(${pc+1}u,${ins.target}u,select(${relation(old,'>=',l.end,l.type)},${relation(old,'<=',l.end,l.type)},${relation(l.step,'>=',zero(l.type),l.type)}));`;break;
         }
@@ -452,7 +477,7 @@ export function compileComputeIR(program, options={}) {
   compileProcedure(entry);
   if(initial.length>maxStateWords)error(`State requires ${initial.length} words; limit is ${maxStateWords}`,'GPU_LIMIT');
   const words=initial.length,stride=STATE_HEADER_WORDS+words;
-  const source=runtimeWGSL(words,arena.used||doubleArrays.length?stringsWGSL(arena.arrays,doubleArrays):'')+'\n'+(hasDouble?DOUBLE_WGSL:'')+'\n'+[...compiled.values()].join('\n')+`
+  const source=runtimeWGSL(words,arena.used||doubleArrays.length?stringsWGSL(arena.arrays,doubleArrays):'')+'\n'+(hasDouble?DOUBLE_WGSL:'')+'\n'+(hasCurrency?CURRENCY_WGSL:'')+'\n'+(hasDate?dateWGSL({twoDigitYearMax}):'')+'\n'+[...compiled.values()].join('\n')+`
 @compute @workgroup_size(${workgroupSize})
 fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   if(invocation.x>=params.count) {return;}
@@ -465,6 +490,6 @@ fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   for(var i=0u;i<${words}u;i+=1u) {state[base+${STATE_HEADER_WORDS}u+i]=mem[i];}
 }`;
   if(source.length>4*1024*1024)error('Generated WGSL exceeds 4 MiB; reduce maxCallDepth or split the module','GPU_LIMIT');
-  return {abi:COMPUTE_ABI,doubleABI:1,...(arena.used?{stringABI:1,maxStringLength}:{}),dynamicArrayCapacity,gosubStackDepth,maxCallDepth,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
+  return {abi:COMPUTE_ABI,doubleABI:1,currencyABI:1,...(hasDate?{dateABI:1,calendar:'gregorian',twoDigitYearMax}:{}),...(arena.used?{stringABI:1,maxStringLength}:{}),dynamicArrayCapacity,gosubStackDepth,maxCallDepth,target:'webgpu-compute',precision,requiresShared,entry:entry.module.name+'.'+entry.proc.name,entryPoint:'main',workgroupSize,
     stateWords:words,stateStride:stride,initialState:initial,globals:exports,sources:sources.sort((a,b)=>a.id-b.id),diagnostics:warnings,wgsl:source};
 }

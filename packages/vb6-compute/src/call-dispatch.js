@@ -6,7 +6,7 @@
 export function emitCallFrame({id,params,resultType,reset=[],declarations=[],blocks=[],result='0i',limit=false}) {
   const fields=new Map([['pc','u32'],['caller','u32'],['done','bool'],['error_mode','u32'],['handler','u32'],['handler_active','bool'],['error_pc','u32'],['statement_pc','u32']]);
   for(const p of params){const [name,type]=p.split(':');fields.set(name,type);}
-  if(resultType!=='void')fields.set('result',resultType==='double'?'vec2<u32>':resultType==='single'?'f32':'i32');
+  if(resultType!=='void')fields.set('result',['double','currency','date'].includes(resultType)?'vec2<u32>':resultType==='single'?'f32':'i32');
   const init=[];
   for(const declaration of declarations){
     const re=/var\s+(\w+)(?::([^;=]+))?(?:=([^;]+))?;/g;let m;
@@ -17,7 +17,7 @@ export function emitCallFrame({id,params,resultType,reset=[],declarations=[],blo
     if(!type)type=name.startsWith('lock')?'bool':'u32';fields.set(name,type);return name+'=';
   });}
   const cases=[];let continuation=blocks.length;
-  const leave=resultType==='void'?'':`frame_${id}.result=${resultType==='double'?'vec2<u32>(0u)':resultType==='single'?'0.0f':'0i'};`;
+  const leave=resultType==='void'?'':`frame_${id}.result=${['double','currency','date'].includes(resultType)?'vec2<u32>(0u)':resultType==='single'?'0.0f':'0i'};`;
   const abort=`${leave}vb_current=frame_${id}.caller;return;`;
   for(const block of blocks){
     let label=block.pc,code=`statement_pc=${block.pc}u;\nif(!tick(${block.line}u,${id}u)) {${abort}}\n`;
