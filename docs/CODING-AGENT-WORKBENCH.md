@@ -165,3 +165,19 @@ of `srcdoc` writes, opaque sandboxing, and lack of native bridge access. Browser
 regressions cover the generic host hook, delayed replies across Stop and same-ID
 project reload, and failed initialization. Generic browser-host doubles are not
 represented as native Windows certification.
+
+## Recovery and context compaction integration
+
+The recovery controls and automatic/manual context compaction remain available
+alongside Changes and Queue. A manual context checkpoint does not advance either
+source-review baseline, consume queued messages, upload the composer draft or
+grant tools. A confirmed new run/Continue still captures the latest-run baseline.
+
+The local `/compact` command is handled only when sending directly from the
+composer. Sending a selected queued message never reads the unrelated composer
+draft as a command. Queue entries are literal messages, including `/compact` if
+explicitly queued; the normal start confirmation previews that text. Use the
+**Compact context** button for a separate, tool-free context checkpoint.
+
+See [recovery and compaction](CODING-AGENT-RECOVERY.md) for retry accounting,
+complete-turn retention, model-context limits and fallible checkpoint boundaries.

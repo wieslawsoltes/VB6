@@ -168,3 +168,42 @@ test('queue: unsent first-task messages are bound to workspace even before nativ
   assert.equal(q.inCurrentWorkspace(item),false); assert.equal(manager.agent.history.length,0);
   q.edit(item.id,'edited but not retargeted',item.version); assert.equal(q.inCurrentWorkspace(q.get(item.id)),false);
 });
+
+function reviewPacket(provider, text) {
+  if (provider === 'openai') return {status: 'completed', output: [{type: 'message', role: 'assistant', content: [{type: 'output_text', text}]}], usage: {total_tokens: 10}};
+  if (provider === 'anthropic') return {content: [{type: 'text', text}], stop_reason: 'end_turn', usage: {input_tokens: 8, output_tokens: 2}};
+  return {candidates: [{content: {role: 'model', parts: [{text}]}, finishReason: 'STOP'}], usageMetadata: {totalTokenCount: 10}};
+}
+for (const provider of ['openai', 'anthropic', 'google']) for (const failure of [false, true]) {
+  test(`review/compaction: ${provider} ${failure ? 'failed' : 'successful'} checkpoint preserves local review, queue and draft`, async t => {
+    const {ide, manager, adapter} = fixture(t), task = manager.active;
+    const options = {...config, provider, autoCompactTokens: 0, compactKeepTurns: 0, maxRetries: 0,
+      transport: async (_, {receive}) => receive(reviewPacket(provider, 'Historical inspection. '.repeat(2000)))};
+    await task.agent.run(options);
+    ide.project.modules[0].code += "\n' First manual change";
+    await task.agent.run({...options, prompt: 'Inspect again.'});
+    const {first, last, revision} = task.review, queue = task.followups.add('LOCAL-QUEUED-DO-NOT-SUMMARIZE');
+    task.draft = 'LOCAL-DRAFT-DO-NOT-SUMMARIZE';
+    ide.project.modules[0].code += "\n' Later manual change";
+    const currentSource = ide.project.modules[0].code, usage = {...task.agent.usage}, history = structuredClone(task.agent.history);
+    assert.notEqual(first, last);
+    let summaries = 0;
+    await task.agent.compact({...options, transport: async (body, {receive}) => {
+      summaries++;
+      assert.ok(!body.tools?.length);
+      assert.ok(!JSON.stringify(body).includes('LOCAL-QUEUED-DO-NOT-SUMMARIZE'));
+      assert.ok(!JSON.stringify(body).includes('LOCAL-DRAFT-DO-NOT-SUMMARIZE'));
+      if (failure) throw new Error('Checkpoint fixture failure');
+      receive(reviewPacket(provider, 'Historical inspection only. Re-read current source before editing.'));
+    }});
+    assert.equal(summaries, 1);
+    assert.equal(task.review.first, first); assert.equal(task.review.last, last); assert.equal(task.review.revision, revision);
+    assert.equal(task.followups.get(queue.id), queue); assert.equal(task.draft, 'LOCAL-DRAFT-DO-NOT-SUMMARIZE');
+    assert.equal(task.review.compare(ide.project, adapter.workspaceEpoch, 'run').changes[0].before.text, last.documents[0].text);
+    assert.equal(ide.project.modules[0].code, currentSource); assert.equal(ide.history.undoStack.length, 0);
+    assert.equal(task.agent.usage.requests, usage.requests + 1); assert.equal(task.agent.usage.calls, usage.calls);
+    assert.equal(task.agent.compactions, failure ? 0 : 1); assert.equal(task.agent.permissionSession.active, false);
+    if (failure) assert.deepEqual(task.agent.history, history);
+    else assert.ok(task.agent.usage.tokens > usage.tokens);
+  });
+}

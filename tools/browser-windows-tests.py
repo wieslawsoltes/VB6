@@ -435,6 +435,27 @@ class BrowserWindows(unittest.TestCase):
         self.assertEqual(self.js('vb6Studio.browserWindows.pending.size'), 0)
 
     @unittest.skipIf(os.environ.get('VB6_TEST_TRANSPORT') == 'memory', 'Needs real navigation; exercised in HTTP CI')
+    def test_diagnostics_cancellation_during_worker_start_keeps_latest_check(self):
+        self.code()
+        self.js('''() => {
+          const s=vb6Studio.syntaxDiagnostics;
+          window.diagnosticResponsesBefore=s.metrics.responses;
+          for(let i=0;i<25;i++) {
+            s.cancel(); s.schedule(vb6Studio.project,0); s.start(); s.cancel();
+          }
+          s.schedule(vb6Studio.project,0); s.start();
+        }''')
+        self.page.wait_for_function('''() => {
+          const s=vb6Studio.syntaxDiagnostics;
+          return !s.pending && !s.busy && s.metrics.responses > diagnosticResponsesBefore;
+        }''')
+        self.assertEqual(self.js('vb6Studio.syntaxDiagnostics.mode'), 'worker')
+        self.assertFalse(self.js('vb6Studio.syntaxDiagnostics.workerUnavailable'))
+        self.assertTrue(self.js('vb6Studio.syntaxDiagnostics.worker !== null'))
+        # tearDown still rejects every uncaught page error, including worker load
+        # failures. No error-string filter or relaxed assertion is introduced.
+
+    @unittest.skipIf(os.environ.get('VB6_TEST_TRANSPORT') == 'memory', 'Needs real navigation; exercised in HTTP CI')
     def test_reload_owner_offers_restore_without_popups(self):
         self.code()
         popup = self.document()

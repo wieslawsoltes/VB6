@@ -35,7 +35,7 @@ function fixture(t, approve = async () => true) {
   t.after(() => { agent.stop(); adapter.dispose(); });
   return {ide, adapter, agent};
 }
-const run = (agent, provider, transport, options = {}) => agent.run({provider, model: 'test-model', prompt: 'Fix this project.', transport, ...options});
+const run = (agent, provider, transport, options = {}) => agent.run({provider, model: 'test-model', prompt: 'Fix this project.', transport, autoCompactTokens: 0, ...options});
 const publicState = agent => JSON.stringify({thread: agent.thread.snapshot(), transcript: agent.transcript});
 const edit = (f, text = "' one edit\n") => ({name: 'vb6_code_edit', args: {expectedRevision: f.adapter.revision, edits: [{module: 'Form1', start: 0, end: 0, text, expectedText: ''}]}});
 

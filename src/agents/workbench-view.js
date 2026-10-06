@@ -16,7 +16,7 @@ export class AgentWorkbenchView {
     this.queuePreview = el('pre', {class: 'agent-log', tabindex: 0, 'aria-label': 'Queued message preview'});
     this.queueList.onchange = () => this.queueSelection();
     this.queueAdd = button('Queue draft', () => this.queueDraft());
-    this.queueSend = button('Send selected message…', () => this.panel.start(false, this.queueList.value));
+    this.queueSend = button('Send selected message…', () => this.panel.start(false, false, this.queueList.value));
     this.queueEdit = button('Edit selected message…', () => this.editQueued());
     this.queueRemove = button('Remove selected message', () => this.act(() => { this.task.followups.remove(this.queueList.value); this.updateQueue(true); }));
     this.queueUp = button('Move up', () => this.act(() => { this.task.followups.move(this.queueList.value, -1); this.updateQueue(true); }));
