@@ -1,0 +1,44 @@
+name: Native DATE transport
+on:
+  pull_request:
+    paths: ['tools/interop/**', '.github/workflows/native-date-transport.yml']
+  push:
+    branches: [main, fix/native-date-wire-precision]
+    paths: ['tools/interop/**', '.github/workflows/native-date-transport.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-date-transport-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Raw DATE arguments, arrays, copyback and native enumeration
+        run: node tools/interop/test-date-transport.mjs
+      - name: Existing typed native Automation contracts
+        if: always()
+        run: node tools/interop/test-native.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-date-transport-${{ matrix.architecture }}
+          path: |
+            reports/native-date-transport/
+            reports/native-interop/
+          retention-days: 14
+          if-no-files-found: error

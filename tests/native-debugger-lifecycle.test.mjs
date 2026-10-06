@@ -9,21 +9,23 @@ import {createNativeDebuggerBridge} from '../packages/native-debugger/src/bridge
 const delay=()=>new Promise(r=>setImmediate(r));
 
 test('native break helper resolves system PowerShell and routes WOW64 through x86 API caller',async()=>{
-  let captured;
-  await breakWindowsProcess(1234,{platform:'win32',environment:{SystemRoot:'C:\\Windows'},architecture:'x64',execute:async(...args)=>{captured=args;}});
-  const [file,args,options]=captured;
+  const calls=[];
+  await breakWindowsProcess(1234,{platform:'win32',environment:{SystemRoot:'C:\\Windows'},architecture:'x64',execute:async(...args)=>{calls.push(args);return {stdout:calls.length===1?'VB6_BREAK_ROUTE:1234:01dc010203040506':'VB6_BREAK_DONE:1234:01dc010203040506:32'};}});
+  assert.equal(calls.length,2);
+  const [file,args,options]=calls[0];
   assert.equal(file,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
   assert.deepEqual(args.slice(0,3),['-NoProfile','-NonInteractive','-Command']);
-  assert.match(args[3],/IsWow64Process\(\$h,\[ref\]\$wow64\)/);
-  assert.match(args[3],/\[IntPtr\]::Size -eq 8 -and \$wow64/);
-  assert.match(args[3],/SysWOW64\\WindowsPowerShell\\v1\.0\\powershell\.exe/);
-  assert.match(args[3],/OpenProcess\(0x1F0FFF,\$false,1234\)/);
-  assert.match(args[3],/CloseHandle\(\$h\)/);
-  assert.equal(options.shell,undefined);
+  assert.match(args[3],/IsWow64Process\(handle,out wow64\)/);
+  assert.match(args[3],/IntPtr.Size==8 && wow64/);
+  assert.equal(calls[1][0],'C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.match(args[3],/OpenProcess\(0x1F0FFF,false,pid\)/);
+  assert.match(args[3],/Request\(1234,\$null\)/);
+  assert.match(args[3],/CloseHandle\(handle\)/);
+  assert.equal(options.shell,false);
 });
 test('32-bit Node uses Sysnative for architecture discovery on a 64-bit Windows host',async()=>{
   let file;
-  await breakWindowsProcess(42,{platform:'win32',environment:{SystemRoot:'D:\\Windows',PROCESSOR_ARCHITEW6432:'AMD64'},architecture:'ia32',execute:async f=>{file=f;}});
+  await breakWindowsProcess(42,{platform:'win32',environment:{SystemRoot:'D:\\Windows',PROCESSOR_ARCHITEW6432:'AMD64'},architecture:'ia32',execute:async f=>{file=f;return {stdout:'VB6_BREAK_DONE:42:01dc010203040506:64'};}});
   assert.equal(file,'D:\\Windows\\Sysnative\\WindowsPowerShell\\v1.0\\powershell.exe');
 });
 test('native break helper rejects untrusted PID text before starting PowerShell and propagates denial',async()=>{
