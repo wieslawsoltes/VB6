@@ -1,9 +1,0 @@
-{
-  "name": "boundaries",
-  "exitCode": 0,
-  "seconds": 39.194,
-  "log": "reports/release-06/boundaries.log",
-  "passed": 38,
-  "failed": 0,
-  "report": "reports/boundaries-06/browser-boundaries-06.json"
-}

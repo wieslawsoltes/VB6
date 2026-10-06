@@ -9,12 +9,15 @@ PREFIX=f'VB6-Studio-Web-{VERSION}'
 DIRS={'.github','LICENSES','desktop','packages','src','tools','tests','docs','examples','dist','reports'}
 ROOT_FILES={'.gitattributes','README.md','RELEASE-NOTES.md','THIRD-PARTY-NOTICES.md','LICENSE','package.json','.gitignore'}
 EXCLUDED={'reports/saved-project.vb6web','reports/exported-app.html','reports/features-04/runtime-export.html'}
+REQUIRED_REPORTS = ('reports/README.md', 'reports/boundaries-06/browser-boundaries-06.json', 'reports/boundaries-06/explicit-evaluation.png', 'reports/boundaries-06/mdi-runtime.png', 'reports/boundaries-06/resource-editor.png', 'reports/browser-features-04.json', 'reports/browser-features-04.md', 'reports/browser-visual-tests.json', 'reports/browser-visual-tests.md', 'reports/features-04/bookmarks-split.png', 'reports/features-04/object-browser-classic.png', 'reports/features-04/project-search.png', 'reports/features-04/runtime-workbench.png', 'reports/finalization-05/browser-finalization-05.json', 'reports/finalization-05/browser-finalization-05.md', 'reports/finalization-05/large-editor-completion.png', 'reports/finalization-05/paused-data-tip.png', 'reports/finalization-05/workspace-restored.png', 'reports/release-validation.json', 'reports/screenshots/ide-designer.png', 'reports/screenshots/richtext-editor.png', 'reports/visual/classic-designer.png', 'reports/visual/contrast-code.png', 'reports/visual/split-procedure-views.png')
+
 def digest(data:bytes)->str:return hashlib.sha256(data).hexdigest()
 def files():
     for p in sorted(ROOT.rglob('*')):
         if not p.is_file():continue
         rel=p.relative_to(ROOT)
         if rel.parts[0] not in DIRS and str(rel) not in ROOT_FILES:continue
+        if rel.parts[0]=='reports' and rel.as_posix()!='reports/README.md':continue
         if any(part in {'.git','node_modules','__pycache__','.native-build'} for part in rel.parts):continue
         if p.suffix in {'.pyc','.sqlite'} or rel.as_posix() in EXCLUDED:continue
         if p.name in {'.env','server-profiles.local.json'} or p.name.startswith('.env.'):continue
@@ -33,9 +36,15 @@ def archive(path:Path,entries:dict[str,bytes]):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--out',type=Path,default=ROOT.parent/'release');parser.add_argument('--git-bundle',action='store_true');options=parser.parse_args();out=options.out.resolve();out.mkdir(parents=True,exist_ok=True)
     if not (ROOT/'dist/VB6-Studio-Web.html').exists():raise SystemExit('Run npm run build and validation first.')
-    validation=json.loads((ROOT/'reports/release-validation-06.json').read_text())
-    if validation.get('version')!=VERSION or not validation.get('passed'):
+    validation_path=ROOT/'reports/release-validation.json'
+    if not validation_path.is_file():
+        raise SystemExit('Fresh release evidence is missing. Run python tools/validate-release.py first.')
+    validation=json.loads(validation_path.read_text())
+    if validation.get('version')!=VERSION or validation.get('passed') is not True:
         raise RuntimeError('A passing integrated validation report for this version is required.')
+    missing=[name for name in REQUIRED_REPORTS if not (ROOT/name).is_file()]
+    if missing:
+        raise SystemExit('Regenerate release evidence with python tools/validate-release.py; missing: '+', '.join(missing))
     notices={rel.as_posix():p.read_bytes() for rel,p in files() if rel.parts[0]=='LICENSES'}
     source={f'{PREFIX}/{rel.as_posix()}':p.read_bytes() for rel,p in files()}
     manifest=''.join(f'{digest(data)}  {name[len(PREFIX)+1:]}\n' for name,data in sorted(source.items()))
@@ -66,17 +75,17 @@ def main():
     visual={f'screenshots/{p.name}':p.read_bytes() for p in sorted((ROOT/'reports/visual').glob('*.png'))}
     for rel in ['docs/VISUAL-AUDIT.md','reports/browser-visual-tests.json','reports/browser-visual-tests.md','tests/visual-goldens.json']:visual[rel]=(ROOT/rel).read_bytes()
     visual.update({f'features/{p.name}':p.read_bytes() for p in sorted((ROOT/'reports/features-04').glob('*.png'))})
-    for rel in ['reports/browser-features-04.json','reports/browser-features-04.md','reports/visual-review-06.json']:visual[rel]=(ROOT/rel).read_bytes()
+    for rel in ['reports/browser-features-04.json','reports/browser-features-04.md']:visual[rel]=(ROOT/rel).read_bytes()
     visual.update({f'finalization/{p.name}':p.read_bytes() for p in sorted((ROOT/'reports/finalization-05').glob('*.png'))})
     visual.update({f'recovered-tools/{p.name}':p.read_bytes() for p in sorted((ROOT/'reports/recovery').glob('*.png'))})
-    for rel in ['reports/finalization-05/browser-finalization-05.json','reports/finalization-05/browser-finalization-05.md','reports/release-validation-06.json']:
+    for rel in ['reports/finalization-05/browser-finalization-05.json','reports/finalization-05/browser-finalization-05.md','reports/release-validation.json']:
         visual[rel]=(ROOT/rel).read_bytes()
     visual.update({f'boundaries/{p.name}':p.read_bytes() for p in sorted((ROOT/'reports/boundaries-06').glob('*.png')) if not p.name.startswith('failed-')})
     visual['reports/boundaries-06/browser-boundaries-06.json']=(ROOT/'reports/boundaries-06/browser-boundaries-06.json').read_bytes()
     archive(out/f'{PREFIX}-Visual-Review.zip',visual)
     for source,name in [('workspace-restored.png','workspace-preview.png'),('paused-data-tip.png','debugger-preview.png'),('large-editor-completion.png','editor-preview.png')]:
         shutil.copyfile(ROOT/'reports/finalization-05'/source,out/f'{PREFIX}-{name}')
-    shutil.copyfile(ROOT/'reports/release-validation-06.json',out/f'{PREFIX}-Validation.json')
+    shutil.copyfile(ROOT/'reports/release-validation.json',out/f'{PREFIX}-Validation.json')
     if options.git_bundle:
         subprocess.run(['git','bundle','create',str(out/f'{PREFIX}-history.bundle'),'--all'],cwd=ROOT,check=True)
         subprocess.run(['git','bundle','verify',str(out/f'{PREFIX}-history.bundle')],cwd=ROOT,check=True)

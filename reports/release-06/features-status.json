@@ -1,9 +1,0 @@
-{
-  "name": "features",
-  "exitCode": 0,
-  "seconds": 34.902,
-  "log": "reports/release-06/features.log",
-  "passed": 30,
-  "failed": 0,
-  "report": "reports/browser-features-04.json"
-}

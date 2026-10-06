@@ -43,6 +43,10 @@ jobs:
             reports/layout/benchmark.json
             reports/auto-layout/benchmark.json
           retention-days: 7
+      - name: Report retention and packaging regressions
+        run: |
+          python tools/test-report-retention.py
+          python tools/test-package-notices.py
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps chromium
       - name: Resolve browser executable
@@ -62,6 +66,13 @@ jobs:
           python tools/browser-boundaries-06.py
       - name: Verify reproducible generated bundles
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-validation-reports
+          path: reports
+          if-no-files-found: ignore
+          retention-days: 7
   browser-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 15

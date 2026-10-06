@@ -1,9 +1,0 @@
-{
-  "name": "recovery",
-  "exitCode": 0,
-  "seconds": 25.112,
-  "log": "reports/release-06/recovery.log",
-  "passed": 20,
-  "failed": 0,
-  "report": "reports/recovery/recovery-browser.json"
-}

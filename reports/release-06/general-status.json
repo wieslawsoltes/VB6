@@ -1,9 +1,0 @@
-{
-  "name": "general",
-  "exitCode": 0,
-  "seconds": 37.659,
-  "log": "reports/release-06/general.log",
-  "passed": 36,
-  "failed": 0,
-  "report": "reports/browser-tests.json"
-}

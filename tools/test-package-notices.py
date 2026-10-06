@@ -31,8 +31,14 @@ class PackageNotices(unittest.TestCase):
                 'package.json': json.dumps({'version': '0.6.0'}).encode(),
                 'LICENSES/98.css.txt': notice,
                 'LICENSES/nested/example.txt': b'Test-only nested notice\n',
-                'reports/release-validation-06.json': json.dumps({'version': '0.6.0', 'passed': True}).encode(),
+                'packages/example/README.md': b'Package porting contract\n',
+                'packages/example/src/index.js': b'export const example = true;\n',
+                'reports/release-validation.json': json.dumps({'version': '0.6.0', 'passed': True}).encode(),
             }
+            fixtures['reports/README.md'] = b'# Durable porting index\n'
+            fixtures['reports/private-run/temporary.log'] = b'Generated output\n'
+            for name in getattr(module, 'REQUIRED_REPORTS', ()):
+                fixtures.setdefault(name, b'Synthetic packaging-only evidence\n')
             for name in ['LICENSE', 'THIRD-PARTY-NOTICES.md',
                          'dist/VB6-Studio-Web.html', 'dist/vb6-runtime.js', 'dist/vb6-controls.css',
                          'dist/examples/richtext.html', 'dist/examples/mdi.html',
@@ -64,6 +70,11 @@ class PackageNotices(unittest.TestCase):
                         self.assertEqual(z.read(names[0]), fixtures[suffix])
                     manifests = [name for name in z.namelist() if name.endswith('SOURCE-SHA256SUMS.txt')]
                     if manifests:
+                        report_names = [name.split('/', 1)[1] for name in z.namelist() if '/reports/' in name]
+                        self.assertEqual(report_names, ['reports/README.md'])
+                        prefix = manifests[0].removesuffix('SOURCE-SHA256SUMS.txt')
+                        for package_path in ('packages/example/README.md', 'packages/example/src/index.js'):
+                            self.assertEqual(z.read(prefix + package_path), fixtures[package_path])
                         self.assertIn(b'LICENSES/98.css.txt', z.read(manifests[0]))
                     self.assertIsNone(z.testzip())
 
