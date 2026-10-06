@@ -651,11 +651,154 @@
    box-shadow:none!important;text-shadow:none!important;
  }
 }
+
+/* Issue #39: original, font-independent 10px caption masks and classic chrome.
+ * Artwork is authored here; no native executable resources or fonts are bundled.
+ * Use integer CSS pixels instead of clipping/scaling the general 16px icon atlas.
+ * The staircase technique and its attribution remain in bevels.css (PR #36).
+ */
+:root, [data-vb-theme] {
+ --vb-caption-close:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%2210%22 viewBox=%220 0 10 10%22%3E%3Cpath d=%22M1 1h2v1h-2zM7 1h2v1h-2zM2 2h2v1h-2zM6 2h2v1h-2zM3 3h4v1h-4zM4 4h2v1h-2zM3 5h4v1h-4zM2 6h2v1h-2zM6 6h2v1h-2zM1 7h2v1h-2zM7 7h2v1h-2z%22/%3E%3C/svg%3E");
+ --vb-caption-maximize:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%2210%22 viewBox=%220 0 10 10%22%3E%3Cpath d=%22M0 1h10v1h-10zM0 2h10v1h-10zM0 3h1v1h-1zM9 3h1v1h-1zM0 4h1v1h-1zM9 4h1v1h-1zM0 5h1v1h-1zM9 5h1v1h-1zM0 6h1v1h-1zM9 6h1v1h-1zM0 7h1v1h-1zM9 7h1v1h-1zM0 8h10v1h-10z%22/%3E%3C/svg%3E");
+ --vb-caption-minimize:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%2210%22 viewBox=%220 0 10 10%22%3E%3Cpath d=%22M1 7h7v1h-7zM1 8h7v1h-7z%22/%3E%3C/svg%3E");
+ --vb-caption-restore:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%2210%22 viewBox=%220 0 10 10%22%3E%3Cpath d=%22M3 0h7v1h-7zM3 1h7v1h-7zM3 2h1v1h-1zM9 2h1v1h-1zM0 3h8v1h-8zM9 3h1v1h-1zM0 4h10v1h-10zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h1v1h-1zM7 7h1v1h-1zM0 8h8v1h-8z%22/%3E%3C/svg%3E");
+ --vb-caption-detach:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%2210%22 viewBox=%220 0 10 10%22%3E%3Cpath d=%22M4 1h5v1h-5zM7 2h2v1h-2zM6 3h1v1h-1zM8 3h1v1h-1zM5 4h1v1h-1zM8 4h1v1h-1zM4 5h1v1h-1zM8 5h1v1h-1zM3 6h1v1h-1zM2 7h1v1h-1z%22/%3E%3C/svg%3E");
+ --vb-caption-help:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%2210%22 viewBox=%220 0 10 10%22%3E%3Cpath d=%22M3 0h4v1h-4zM2 1h2v1h-2zM6 1h2v1h-2zM6 2h2v1h-2zM5 3h2v1h-2zM4 4h2v1h-2zM4 5h2v1h-2zM4 7h2v1h-2zM4 8h2v1h-2z%22/%3E%3C/svg%3E");
+}
+
+/* One selection owner per menu. A previously focused item and a stationary
+   pointer must not each create an independent highlight. MenuSession supplies
+   menu-selected for both keyboard and pointer navigation, including submenus. */
+.classic-menu .popup-menu-item:not(.menu-selected):not([aria-disabled=true]) {
+ background:transparent;color:var(--vb-text);outline:0;
+}
+.classic-menu .popup-menu-item.menu-selected:not([aria-disabled=true]) {
+ background:var(--vb-selection);color:var(--vb-selection-text);outline:0;
+}
+
+/* Keep existing caption dimensions/ARIA/handlers; substitute only the artwork.
+   The 10px glyph leaves a full two-pixel bevel clear even in 14px tool buttons. */
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) {
+ position:relative;padding:0!important;display:inline-flex;align-items:center;justify-content:center;
+}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) > .icon:is([data-icon=close],[data-icon=maximize],[data-icon=minimize],[data-icon=restore]) {
+ width:10px!important;height:10px!important;position:relative;overflow:visible;
+}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) > .icon:is([data-icon=close],[data-icon=maximize],[data-icon=minimize],[data-icon=restore]) > svg {display:none}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) > .icon:is([data-icon=close],[data-icon=maximize],[data-icon=minimize],[data-icon=restore])::after {
+ content:'';display:block;width:10px;height:10px;background:var(--vb-text);
+ mask:var(--vb-caption-mask) center / 10px 10px no-repeat;
+ -webkit-mask:var(--vb-caption-mask) center / 10px 10px no-repeat;
+}
+.icon[data-icon=close] {--vb-caption-mask:var(--vb-caption-close)}
+.icon[data-icon=maximize] {--vb-caption-mask:var(--vb-caption-maximize)}
+.icon[data-icon=minimize] {--vb-caption-mask:var(--vb-caption-minimize)}
+.icon[data-icon=restore] {--vb-caption-mask:var(--vb-caption-restore)}
+/* The floating-toolbar button is 15px: center on whole CSS pixels rather
+   than putting its mask at 2.5px. Preserve its 15px outside dimensions. */
+/* Preserve the real toolbar caption position, outside its command flex flow. */
+.command-bar-floating .command-floating-close {position:absolute}
+.command-floating-close > .icon {position:absolute!important;left:2px;top:2px}
+@media (forced-colors:none) {
+ .command-floating-close {border:0;box-shadow:var(--vb-bevel-raised)}
+ .command-floating-close:active:not(:disabled) {box-shadow:var(--vb-bevel-pressed)}
+}
+/* Browser-detach and the application Help caption are not general atlas icons. */
+:is(.window-buttons,.tool-caption) button[data-browser-detach],.app-title button[title="About this application"] {
+ font-size:0;line-height:0;
+}
+:is(.window-buttons,.tool-caption) button[data-browser-detach]::after,.app-title button[title="About this application"]::after {
+ content:'';display:block;width:10px;height:10px;background:var(--vb-text);
+ mask:var(--vb-caption-mask) center / 10px 10px no-repeat;
+ -webkit-mask:var(--vb-caption-mask) center / 10px 10px no-repeat;
+}
+button[data-browser-detach] {--vb-caption-mask:var(--vb-caption-detach)}
+.app-title button[title="About this application"] {--vb-caption-mask:var(--vb-caption-help)}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):active:not(:disabled):not([aria-disabled=true]) > .icon,
+:is(.window-buttons,.tool-caption) button[data-browser-detach]:active:not(:disabled)::after,
+.app-title button[title="About this application"]:active:not(:disabled)::after {transform:translate(1px,1px)}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):is(:disabled,[aria-disabled=true]) > .icon::after,
+:is(.window-buttons,.tool-caption) button[data-browser-detach]:disabled::after,
+.app-title button[title="About this application"]:disabled::after {background:var(--vb-gray)}
+/* A separate offset mask paints the embossed highlight. A filter on the masked
+   element is itself clipped by the mask and silently loses the highlight. */
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):is(:disabled,[aria-disabled=true]) > .icon::before,
+:is(.window-buttons,.tool-caption) button[data-browser-detach]:disabled::before,
+.app-title button[title="About this application"]:disabled::before {
+ content:'';position:absolute;width:10px;height:10px;left:1px;top:1px;background:var(--vb-light);
+ mask:var(--vb-caption-mask) center / 10px 10px no-repeat;
+ -webkit-mask:var(--vb-caption-mask) center / 10px 10px no-repeat;
+}
+:is(.window-buttons,.tool-caption) button[data-browser-detach]:disabled::before,
+.app-title button[title="About this application"]:disabled::before {left:calc(50% - 4px);top:calc(50% - 4px)}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) > .icon::after {position:relative}
+.vb-dialog .vb-window-button:disabled {opacity:1}
+
+@media (forced-colors:none) {
+ /* Extend the PR #36 staircase to the remaining IDE frames without changing
+    border metrics, resize hit targets, child origins or designer coordinates. */
+ .mdi-window,.dock-group,.ide-shell {
+  border-color:transparent;
+  background-image:var(--vb-bevel-raised-image);
+  background-origin:border-box;background-clip:border-box;background-repeat:no-repeat;
+  background-size:1px 100%,100% 1px,1px 100%,100% 1px,2px 100%,100% 2px,2px 100%,100% 2px;
+  background-position:right top,left bottom,left top,left top,right top,left bottom,left top,left top;
+  box-shadow:none;
+ }
+ /* Complete the right/left toolbar edge. Keep the existing one-pixel top and
+    bottom borders in layout so a fitting standard toolbar remains 29px high. */
+ .ide-shell .command-bar:not(.command-bar-floating) {
+  background-image:linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-light),var(--vb-light));
+  background-position:right top,left top;background-size:1px 100%,1px 100%;background-repeat:no-repeat;
+ }
+ /* An active tab joins its page instead of painting a second dividing line.
+    Position from the padding box past the tab's existing 1px bottom border.
+    Cover only the grid's 1px top edge, never its first data row or hit target. */
+ .property-tabs .active::after {content:'';position:absolute;left:0;right:0;bottom:-2px;height:1px;background:var(--vb-face);pointer-events:none}
+ /* The native select remains a select: preserve its popup, IME and keyboard
+    behavior while painting all four inset edges inside its authored bounds. */
+ .code-selectors select,.property-object,.toolbox-filter,.toolbar-select {
+  /* WebKit paints native menulist chrome over author shadows. Suppress only
+     that paint, not the select element, native popup, keyboard or change events.
+     The local four-row arrow and button use theme colors and integral pixels. */
+  appearance:none;-webkit-appearance:none;
+  border:0;box-shadow:var(--vb-bevel-sunken);padding-left:4px;padding-right:19px;
+  background-color:var(--vb-window);background-clip:padding-box;
+  background-image:linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-text),var(--vb-text)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-face),var(--vb-face));
+  background-size:7px 1px,5px 1px,3px 1px,1px 1px,1px calc(100% - 4px),15px 1px,1px calc(100% - 4px),15px 1px,15px calc(100% - 4px);
+  background-position:right 6px top 8px,right 7px top 9px,right 8px top 10px,right 9px top 11px,right 2px top 2px,right 2px bottom 2px,right 16px top 2px,right 2px top 2px,right 2px top 2px;
+  background-repeat:no-repeat;
+ }
+}
+/* 21px select + 1px top + 2px bottom + 1px separator = the existing 25px row.
+   Previously 2 + 21 + 2 + 1 overflowed the row and clipped the bottom bevel. */
+.code-selectors {padding:1px 2px 2px;flex-shrink:0}
+/* Match the horizontal grip's preferred width to its 6px flex basis. Gecko
+   and WebKit otherwise size the wrapping bar using its inherited 4px width,
+   leaving the final zoom control two pixels short and forcing an extra row. */
+.ide-shell .command-bar:not(.command-bar-vertical):not(.command-bar-floating) > .toolbar-grip {width:6px}
+.command-bar .toolbar-select {width:76px;min-width:76px}
+/* Classic toolbars wrap whole buttons when constrained, rather than acquiring
+   the report's horizontal scrollbar. No command becomes pointer-inaccessible.
+   Real vertical toolbars retain their vertical scrolling behavior. */
+.ide-shell .command-bar:not(.command-bar-vertical):not(.command-bar-floating) {
+ flex-wrap:wrap;overflow-x:clip;overflow-y:visible;row-gap:2px;
+}
+@media (forced-colors:active) {
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) > .icon::before,
+ :is(.window-buttons,.tool-caption) button[data-browser-detach]::before,.app-title button[title="About this application"]::before {display:none}
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) > .icon::after,
+ :is(.window-buttons,.tool-caption) button[data-browser-detach]::after,.app-title button[title="About this application"]::after {
+  background:ButtonText;filter:none;forced-color-adjust:none;
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):disabled > .icon::after,
+ :is(.window-buttons,.tool-caption) button[data-browser-detach]:disabled::after {background:GrayText}
+}
 </style></head><body><div id="app"></div><script id="vb6-project" type="application/json">{"schema":1,"id":"example_sqlite-customers_1","name":"SQLiteCustomers","description":"Embedded SQLite: editable records, parameterized commands and transactions. The database stays with the app; no server or CDN is needed.","startup":"frmData","modules":[{"id":"example_sqlite-customers_2","name":"frmData","kind":"form","code":"Option Explicit\nPrivate cn As ADODB.Connection\nPrivate rs As ADODB.Recordset\nPrivate Sub Form_Load()\n    cmdLoad_Click\nEnd Sub\nPrivate Sub cmdLoad_Click()\n    On Error GoTo Failed\n    If cn Is Nothing Then\n        Set cn = New ADODB.Connection\n        cn.Open \"Local\"\n        cn.Execute \"CREATE TABLE IF NOT EXISTS customers(id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)\"\n        Set rs = cn.Execute(\"SELECT COUNT(*) AS total FROM customers\")\n        If rs.Fields(\"total\").Value = 0 Then\n            cn.BeginTrans\n            cn.Execute \"INSERT INTO customers(name,email) VALUES('Ada Lovelace','ada@example.test'),('Grace Hopper','grace@example.test')\"\n            cn.CommitTrans\n        End If\n    End If\n    If Not rs Is Nothing Then\n        If rs.State = adStateOpen Then rs.Close\n    End If\n    Set rs = New ADODB.Recordset\n    rs.Open \"customers\", cn, adOpenStatic, adLockOptimistic, adCmdTable\n    Set Data1.Recordset = rs\n    grdCustomers.ColWidth(0) = 900\n    grdCustomers.ColWidth(1) = 2850\n    grdCustomers.ColWidth(2) = 3450\n    If grdCustomers.Cols \u003e 3 Then grdCustomers.ColWidth(3) = 1500\n    lblStatus.Caption = CStr(rs.RecordCount) \u0026 \" records loaded\"\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" \u0026 CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub cmdSave_Click()\n    On Error GoTo Failed\n    rs.Update\n    lblStatus.Caption = \"Ready\"\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" \u0026 CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub cmdNew_Click()\n    On Error GoTo Failed\n    rs.AddNew\n    rs.Fields(\"name\").Value = \"New customer\"\n    rs.Update\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" \u0026 CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub cmdDelete_Click()\n    On Error GoTo Failed\n    If Not rs.EOF Then rs.Delete\n    Exit Sub\nFailed:\n    lblStatus.Caption = \"Error \" \u0026 CStr(Err.Number)\n    MsgBox Err.Description, vbExclamation, \"Data Source\"\nEnd Sub\nPrivate Sub Form_Unload(Cancel As Integer)\n    If Not cn Is Nothing Then cn.Close\nEnd Sub\n","form":{"id":"example_sqlite-customers_3","name":"frmData","type":"Form","properties":{"Name":"frmData","Caption":"SQLite Customers","ClientWidth":10200,"ClientHeight":6900,"Width":9120,"Height":6450,"Left":300,"Top":300,"StartUpPosition":2,"BorderStyle":2,"BackColor":-2147483633,"ForeColor":-2147483640,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ScaleMode":1,"KeyPreview":0,"Visible":-1,"Enabled":-1},"controls":[{"id":"example_sqlite-customers_4","name":"lblTitle","type":"Label","parent":null,"properties":{"Name":"lblTitle","Left":240,"Top":180,"Width":9600,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":12,"FontBold":-1,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"SQLite Customers","BackStyle":0,"Alignment":0}},{"id":"example_sqlite-customers_5","name":"lblNote","type":"Label","parent":null,"properties":{"Name":"lblNote","Left":240,"Top":645,"Width":9600,"Height":600,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Embedded SQLite: editable records, parameterized commands and transactions. The database stays with the app; no server or CDN is needed.","BackStyle":0,"Alignment":0}},{"id":"example_sqlite-customers_6","name":"grdCustomers","type":"DataGrid","parent":null,"properties":{"Name":"grdCustomers","Left":240,"Top":1350,"Width":9600,"Height":3540,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Rows":5,"Cols":3,"DataSource":"Data1"}},{"id":"example_sqlite-customers_7","name":"Data1","type":"Adodc","parent":null,"properties":{"Name":"Data1","Left":240,"Top":5040,"Width":9600,"Height":390,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Customers","ConnectionString":"","RecordSource":"","CommandType":1,"CursorType":3,"LockType":3,"ReadOnly":0}},{"id":"example_sqlite-customers_8","name":"lblName","type":"Label","parent":null,"properties":{"Name":"lblName","Left":240,"Top":5610,"Width":1050,"Height":330,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"\u0026Name:","BackStyle":0,"Alignment":0}},{"id":"example_sqlite-customers_9","name":"txtName","type":"TextBox","parent":null,"properties":{"Name":"txtName","Left":1275,"Top":5550,"Width":3825,"Height":360,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483643,"ToolTipText":"","Tag":"","Text":"","MultiLine":0,"ScrollBars":0,"MaxLength":0,"PasswordChar":"","Locked":0,"Alignment":0,"DataSource":"Data1","DataField":"name"}},{"id":"example_sqlite-customers_10","name":"cmdLoad","type":"CommandButton","parent":null,"properties":{"Name":"cmdLoad","Left":240,"Top":6180,"Width":1500,"Height":405,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"\u0026Reload","Default":0,"Cancel":0}},{"id":"example_sqlite-customers_11","name":"cmdSave","type":"CommandButton","parent":null,"properties":{"Name":"cmdSave","Left":1890,"Top":6180,"Width":1500,"Height":405,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"\u0026Save","Default":0,"Cancel":0}},{"id":"example_sqlite-customers_12","name":"cmdNew","type":"CommandButton","parent":null,"properties":{"Name":"cmdNew","Left":3540,"Top":6180,"Width":1500,"Height":405,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"\u0026Add New","Default":0,"Cancel":0}},{"id":"example_sqlite-customers_13","name":"cmdDelete","type":"CommandButton","parent":null,"properties":{"Name":"cmdDelete","Left":5190,"Top":6180,"Width":1500,"Height":405,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":-1,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"\u0026Delete","Default":0,"Cancel":0}},{"id":"example_sqlite-customers_14","name":"lblStatus","type":"Label","parent":null,"properties":{"Name":"lblStatus","Left":6900,"Top":6255,"Width":2940,"Height":300,"Visible":-1,"Enabled":-1,"TabIndex":0,"TabStop":0,"FontName":"MS Sans Serif","FontSize":8.25,"FontBold":0,"FontItalic":0,"ForeColor":-2147483640,"BackColor":-2147483633,"ToolTipText":"","Tag":"","Caption":"Ready","BackStyle":0,"Alignment":0}}],"menus":[]}}],"settings":{"snapToGrid":true,"gridSize":120,"showGrid":true,"renderer":"auto","tabWidth":4,"requireVariableDeclaration":true},"references":[],"assets":{},"vfs":{"files":{},"directories":["/"]},"appSettings":{},"dataSources":{"version":1,"connections":[{"name":"Local","provider":"sqlite","database":"/customers.sqlite"}],"commands":[{"name":"Customers","connection":"Local","type":2,"text":"customers","parameters":[]},{"name":"FindCustomer","connection":"Local","type":1,"text":"SELECT id,name,email FROM customers WHERE name LIKE ?","parameters":[{"name":"Name","type":202,"value":"%"}]}]}}</script><script>/* VB6 Studio Web 0.5.0 - MIT. Generated from modular sources. */
 (()=>{'use strict';
 const __modules=[];
 
-/* ../../packages/win32-browser/src/gpu-presenter.js */
+/* ..\..\packages\win32-browser\src\gpu-presenter.js */
 __modules[0]=(()=>{
 
 /** WebGPU presentation of a retained, CPU-readable GDI surface. Raster operations
@@ -709,7 +852,7 @@ class GPURasterPresenter {
 return {GPURasterPresenter};
 })();
 
-/* ../../packages/win32-browser/src/core.js */
+/* ..\..\packages\win32-browser\src\core.js */
 __modules[1]=(()=>{
 
 /** MIT. A bounded, process-private 32-bit address and handle space. */
@@ -774,7 +917,7 @@ class MemoryFileSystem {
 return {ERROR,Win32Error,integer,unsigned,Handles,encodeANSI,decodeANSI,Memory,MemoryFileSystem};
 })();
 
-/* ../../packages/win32-browser/src/gdi-transform.js */
+/* ..\..\packages\win32-browser\src\gdi-transform.js */
 __modules[2]=(()=>{
 const {Win32Error,integer}=__modules[1];
 
@@ -816,7 +959,7 @@ function installTransforms(w,{dc,add}){
 return {TRANSFORM_CONSTANTS,IDENTITY,multiply,inverse,mapPoint,mapping,translatedOnly,devicePoint,mapBounds,readTransform,installTransforms};
 })();
 
-/* ../../packages/win32-browser/src/gdi-path.js */
+/* ..\..\packages\win32-browser\src\gdi-path.js */
 __modules[3]=(()=>{
 const {Win32Error,integer}=__modules[1];
 const {mapping,mapPoint,inverse,IDENTITY}=__modules[2];
@@ -909,7 +1052,7 @@ function installPaths(w,{dc,bitmaps,regions,add,style}){
 return {PATH_CONSTANTS,installPaths};
 })();
 
-/* ../../packages/win32-browser/src/gdi-text.js */
+/* ..\..\packages\win32-browser\src\gdi-text.js */
 __modules[4]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 const {mapping,multiply,mapPoint,mapBounds}=__modules[2];
@@ -1018,7 +1161,7 @@ function installText(w,{dc,bitmaps,regions,add,stock,stocks}){
 return {TEXT_CONSTANTS,installText};
 })();
 
-/* ../../packages/win32-browser/src/user32-paint.js */
+/* ..\..\packages\win32-browser\src\user32-paint.js */
 __modules[5]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 
@@ -1124,7 +1267,7 @@ function installPainting(w,{dc,bitmaps,regions}){
 return {PAINT_CONSTANTS,installPainting};
 })();
 
-/* ../../packages/win32-browser/src/gdi-geometry.js */
+/* ..\..\packages\win32-browser\src\gdi-geometry.js */
 __modules[6]=(()=>{
 const {Win32Error,integer}=__modules[1];
 
@@ -1218,7 +1361,7 @@ function frameRegion(store,region,x,y){
 return {polygonRegion,roundedRegion,transformRegion,frameRegion};
 })();
 
-/* ../../packages/win32-browser/src/gdi-region.js */
+/* ..\..\packages\win32-browser\src\gdi-region.js */
 __modules[7]=(()=>{
 const {polygonRegion,roundedRegion,transformRegion,frameRegion}=__modules[6];
 const {mapping,devicePoint,mapBounds,inverse,readTransform}=__modules[2];
@@ -1418,7 +1561,7 @@ function installRegions(w,{dc,bitmaps,regions,add}){
 return {REGION_CONSTANTS,RegionStore,installRegions};
 })();
 
-/* ../../packages/win32-browser/src/gdi-bitmap.js */
+/* ..\..\packages\win32-browser\src\gdi-bitmap.js */
 __modules[8]=(()=>{
 const {mapping,inverse,mapPoint,mapBounds,devicePoint,translatedOnly}=__modules[2];
 const {Win32Error,integer,unsigned}=__modules[1];
@@ -1520,7 +1663,7 @@ class BitmapStore {
 return {GDI_CONSTANTS,coord,intersect,rgbBytes,rgbValue,ropInfo,BitmapStore};
 })();
 
-/* ../../packages/win32-browser/src/clipboard.js */
+/* ..\..\packages\win32-browser\src\clipboard.js */
 __modules[9]=(()=>{
 const {Win32Error,unsigned}=__modules[1];
 
@@ -1552,7 +1695,7 @@ function installClipboard(w){
 return {installClipboard};
 })();
 
-/* ../../packages/win32-browser/src/kernel32.js */
+/* ..\..\packages\win32-browser\src\kernel32.js */
 __modules[10]=(()=>{
 const {ERROR,Win32Error,integer,unsigned}=__modules[1];
 
@@ -1643,7 +1786,7 @@ function installProfiles(w,aw){
 return {installKernel32};
 })();
 
-/* ../../packages/win32-browser/src/user32.js */
+/* ..\..\packages\win32-browser\src\user32.js */
 __modules[11]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 
@@ -1727,7 +1870,7 @@ function installRectangles(w,add){
 return {installUser32};
 })();
 
-/* ../../packages/win32-browser/src/advapi32.js */
+/* ..\..\packages\win32-browser\src\advapi32.js */
 __modules[12]=(()=>{
 const {Win32Error,integer,unsigned}=__modules[1];
 
@@ -1755,7 +1898,7 @@ function installRegistry(w){
 return {installRegistry};
 })();
 
-/* ../../packages/win32-browser/src/gdi32.js */
+/* ..\..\packages\win32-browser\src\gdi32.js */
 __modules[13]=(()=>{
 const {installTransforms,mapping,translatedOnly,IDENTITY}=__modules[2];
 const {installPaths}=__modules[3];
@@ -1888,7 +2031,7 @@ function installGDI(w){
 return {colorRef,installGDI};
 })();
 
-/* ../../packages/win32-browser/src/index.js */
+/* ..\..\packages\win32-browser\src\index.js */
 __modules[14]=(()=>{
 const {GPURasterPresenter}=__modules[0];
 const {TRANSFORM_CONSTANTS}=__modules[2];
@@ -1947,7 +2090,7 @@ function createWin32(options={}){return new Win32Browser(options);}
 return {WIN32_CONSTANTS,normalizeDLL,Win32Browser,createWin32,GPURasterPresenter,RegionStore,ERROR,Win32Error,Memory,MemoryFileSystem,encodeANSI,decodeANSI,colorRef};
 })();
 
-/* ../language/errors.js */
+/* ..\language\errors.js */
 __modules[15]=(()=>{
 
 class VBError extends Error {
@@ -2036,7 +2179,7 @@ function weekdayName(day,abbreviate=0,first=1){day=integer(day);if(day<1||day>7)
 return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDiff,datePart,dateSerial,timeSerial,weekday,monthName,weekdayName};
 })();
 
-/* ../language/lexer.js */
+/* ..\language\lexer.js */
 __modules[17]=(()=>{
 const {asDate}=__modules[16];
 const {VBError}=__modules[15];
@@ -2208,7 +2351,7 @@ class VBDecimal {
 return {VBDecimal};
 })();
 
-/* ../core/window-context.js */
+/* ..\core\window-context.js */
 __modules[19]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
@@ -2240,7 +2383,7 @@ function hasUIDialog() {
 return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
-/* ../core/core.js */
+/* ..\core\core.js */
 __modules[20]=(()=>{
 const {uiDocument}=__modules[19];
 
@@ -2805,7 +2948,7 @@ async function automationEnumerate(o){const s=state(o);if(typeof s.adapter.enume
 return {isAutomationObject,automationDefaultName,automationInvoke,automationMember,automationReference,AutomationRegistry,automationEnumerate};
 })();
 
-/* ../controls/adapters.js */
+/* ..\controls\adapters.js */
 __modules[23]=(()=>{
 
 /** Host code only. Native project data cannot register code or fetch plug-ins. */
@@ -2830,7 +2973,7 @@ class ControlAdapterRegistry {
 return {ControlAdapterRegistry};
 })();
 
-/* ../data/common.js */
+/* ..\data\common.js */
 __modules[24]=(()=>{
 const {VBError}=__modules[17];
 const {VBArray, VBCurrency, VBDecimal}=__modules[21];
@@ -3010,7 +3153,7 @@ function resultFromRows(rows,fields){
 return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,quoteIdentifier,sameValue,parseConnectionString,connectionConfiguration,assertPublicConfiguration,normalizeDataSources,safeHttpURL,pathValue,columnType,resultFromRows};
 })();
 
-/* ../data/defaults.js */
+/* ..\data\defaults.js */
 __modules[25]=(()=>{
 
 // Registration is private to trusted library objects; a forged __type never grants a default property.
@@ -3029,7 +3172,7 @@ function hasDataMember(object,name) { return members.get(object)?.has(String(nam
 return {dataDefault,dataDefaultType,hasDataDefault,dataMembers,hasDataMember};
 })();
 
-/* ../data/collection.js */
+/* ..\data\collection.js */
 __modules[26]=(()=>{
 const {assertData}=__modules[24];
 
@@ -3052,7 +3195,7 @@ NamedCollection.prototype.Append.vbRawArgs=true;
 return {DataCollection,NamedCollection};
 })();
 
-/* ../data/recordset.js */
+/* ..\data\recordset.js */
 __modules[27]=(()=>{
 const {dataDefault}=__modules[25];
 const {VBError}=__modules[17];
@@ -3179,7 +3322,7 @@ class DisconnectedRecordset {
 return {fieldScalarType,fieldValue,DisconnectedRecordset};
 })();
 
-/* ../data/provider-recordset.js */
+/* ..\data\provider-recordset.js */
 __modules[28]=(()=>{
 const {DisconnectedRecordset,fieldValue}=__modules[27];
 const {assertData,after,DATA_LIMITS,sameValue}=__modules[24];
@@ -3298,7 +3441,7 @@ class ProviderRecordset extends DisconnectedRecordset {
 return {ProviderRecordset};
 })();
 
-/* ../data/connected-recordset.js */
+/* ..\data\connected-recordset.js */
 __modules[29]=(()=>{
 const {VBDecimal,VBCurrency,coerce}=__modules[21];
 const {ProviderRecordset}=__modules[28];
@@ -3531,7 +3674,7 @@ class ConnectedRecordset extends ProviderRecordset {
 return {ConnectedRecordset};
 })();
 
-/* ../data/sql-parameters.js */
+/* ..\data\sql-parameters.js */
 __modules[30]=(()=>{
 const {assertData}=__modules[24];
 
@@ -3609,7 +3752,7 @@ function simpleSelect(source) {
 return {sqlTokens,DAO_TYPES,parameterPlan,simpleSelect};
 })();
 
-/* ../data/criteria.js */
+/* ..\data\criteria.js */
 __modules[31]=(()=>{
 const {VBDecimal,VBCurrency}=__modules[21];
 const {assertData}=__modules[24];
@@ -3679,7 +3822,7 @@ function compileCriteria(text,columns){
 return {compareData,compileCriteria};
 })();
 
-/* ../data/dao-recordset.js */
+/* ..\data\dao-recordset.js */
 __modules[32]=(()=>{
 const {dataDefault}=__modules[25];
 const {assertData,after,dataList,sameValue}=__modules[24];
@@ -3788,7 +3931,7 @@ class DAORecordset {
 return {DAORecordset};
 })();
 
-/* ../data/rdo.js */
+/* ..\data\rdo.js */
 __modules[33]=(()=>{
 const {assertData,DATA_LIMITS,quoteIdentifier}=__modules[24];
 const {dataDefault,dataMembers}=__modules[25];
@@ -3972,7 +4115,7 @@ for(const [prototype,method,names,required] of [
 return {RDO_TYPES,RDO_CONSTANTS,RDOParameter,RDOQuery,RDOResultset,RDOConnection,RDOEnvironment,RDOEngine};
 })();
 
-/* ../data/vendor/sqlite.js */
+/* ..\data\vendor\sqlite.js */
 __modules[34]=(()=>{
 
 // Generated by tools/vendor-sqlite.mjs. sql.js 1.14.2 (MIT); SQLite public domain.
@@ -4169,7 +4312,7 @@ function initializeSQLite(){return initSqlJs({wasmBinary:Uint8Array.from(atob(em
 return {initializeSQLite};
 })();
 
-/* ../data/dao.js */
+/* ..\data\dao.js */
 __modules[35]=(()=>{
 const {dataDefault}=__modules[25];
 const {assertData,after,quoteIdentifier,connectionConfiguration,DATA_LIMITS}=__modules[24];
@@ -4364,7 +4507,7 @@ class DAOEngine {
 return {DAOField,DAOIndex,DAOTableDef,DAOParameter,DAOQueryDef,DAODatabase,DAOWorkspace,DAOEngine};
 })();
 
-/* ../data/sqlite.js */
+/* ..\data\sqlite.js */
 __modules[36]=(()=>{
 const {initializeSQLite}=__modules[34];
 const {assertData,dataError,DATA_LIMITS,quoteIdentifier,sqlValue,columnType}=__modules[24];
@@ -4500,7 +4643,7 @@ class SQLiteProvider {
 return {SQLiteProvider};
 })();
 
-/* ../data/wire.js */
+/* ..\data\wire.js */
 __modules[37]=(()=>{
 const {VBCurrency,VBDecimal}=__modules[21];
 const {assertData}=__modules[24];
@@ -4539,7 +4682,7 @@ function decodeResult(result){assertData(Array.isArray(result.columns)&&Array.is
 return {encodeCell,decodeCell,encodeResult,decodeResult};
 })();
 
-/* ../data/http.js */
+/* ..\data\http.js */
 __modules[38]=(()=>{
 const {encodeCell,decodeResult}=__modules[37];
 const {assertData,dataError,DATA_LIMITS,safeHttpURL,pathValue,resultFromRows,sqlValue}=__modules[24];
@@ -4681,7 +4824,7 @@ class GatewayProvider extends HTTPProvider {
 return {HTTPProvider,GatewayProvider};
 })();
 
-/* ../data/files.js */
+/* ..\data\files.js */
 __modules[39]=(()=>{
 const {assertData,DATA_LIMITS,resultFromRows,sameValue,pathValue}=__modules[24];
 const {fieldValue}=__modules[27];
@@ -4736,7 +4879,7 @@ class FileDataProvider {
 return {parseCSV,writeCSV,FileDataProvider};
 })();
 
-/* ../data/connection.js */
+/* ..\data\connection.js */
 __modules[40]=(()=>{
 const {dataDefault}=__modules[25];
 const {assertData,dataError,connectionConfiguration,dataList,after}=__modules[24];
@@ -5069,7 +5212,7 @@ class VirtualFileSystem {
 return {VirtualFileSystem};
 })();
 
-/* ../data/context.js */
+/* ..\data\context.js */
 __modules[44]=(()=>{
 const {RDOEngine,RDOConnection,RDOQuery,RDO_CONSTANTS}=__modules[33];
 const {DAOEngine}=__modules[35];
@@ -5341,7 +5484,7 @@ const FINANCIAL_FUNCTIONS = Object.freeze({FV,PV,PMT,IPMT,PPMT,NPER,RATE,NPV,IRR
 return {FinancialError,FV,PV,PMT,IPMT,PPMT,NPER,NPV,RATE,IRR,MIRR,SLN,SYD,DDB,FINANCIAL_SIGNATURES,FINANCIAL_FUNCTIONS};
 })();
 
-/* ../theme/theme.js */
+/* ..\theme\theme.js */
 __modules[46]=(()=>{
 
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
@@ -5398,7 +5541,7 @@ function normalizeAppearance(value={}) {
 return {THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,colorValue,cssColor,fontFamily,DEFAULT_APPEARANCE,normalizeAppearance};
 })();
 
-/* ../graphics/surface.js */
+/* ..\graphics\surface.js */
 __modules[47]=(()=>{
 const {GPURasterPresenter}=__modules[0];
 const { colorValue, getTheme }=__modules[46];
@@ -5771,7 +5914,7 @@ function installNativeHost(host, bridge = globalThis.vb6Native) {
 return {installNativeHost};
 })();
 
-/* ../project/binary-assets.js */
+/* ..\project\binary-assets.js */
 __modules[49]=(()=>{
 const {VBError}=__modules[17];
 
@@ -5783,7 +5926,7 @@ function toBase64(bytes){if(bytes.length>MAX_RESOURCE_BYTES)fail('resource excee
 return {fromBase64,toBase64};
 })();
 
-/* ../project/native-text.js */
+/* ..\project\native-text.js */
 __modules[50]=(()=>{
 const {decodeANSI,encodeANSI}=__modules[42];
 const {VBError}=__modules[17];
@@ -5850,7 +5993,7 @@ function encodeNativeText(text,document={encoding:'windows-1252',bom:false},over
 return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferredEOL,unquote,nativePathValue,quote,commentAt,replaceLineValue,decodeNativeBytes,decodeNativeText,encodeNativeText};
 })();
 
-/* ../project/frx.js */
+/* ..\project\frx.js */
 __modules[51]=(()=>{
 const {VBError}=__modules[17];
 const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[50];
@@ -5955,7 +6098,7 @@ function prepareResources(project){
 return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPath,fromBase64,toBase64,resourceOffset,readFRXRecord,writeFRXRecord,rasterDataURL,rasterBytes,hydrateResources,prepareResources};
 })();
 
-/* ../project/res.js */
+/* ..\project\res.js */
 __modules[52]=(()=>{
 const {VBError}=__modules[17];
 const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[51];
@@ -6454,7 +6597,7 @@ function createLibrary(vm) {
 return {MemoryRecordset,createLibrary,VB_CONSTANTS};
 })();
 
-/* ../controls/rtf.js */
+/* ..\controls\rtf.js */
 __modules[61]=(()=>{
 const {VBError}=__modules[17];
 const {decodeANSI}=__modules[42];
@@ -6565,7 +6708,7 @@ class RichTextDocument {
 return {RTF_LIMITS,RICH_DEFAULTS,richText,parseRTF,writeRTF,RichTextDocument};
 })();
 
-/* ../controls/input.js */
+/* ..\controls\input.js */
 __modules[62]=(()=>{
 const {Cell,truth}=__modules[21];
 const {lower}=__modules[20];
@@ -6681,7 +6824,7 @@ function ownsInputEvent(control,event){return ownerOf(event.target)===control&&a
 return {shiftMask,mouseButton,pointerMouseEvent,virtualKey,characterKey,acceptsInput,inputScaleFactor,mouseCoordinates,bindMouseInput,bindKeyboardInput,ownsInputEvent};
 })();
 
-/* ../controls/form-window.js */
+/* ..\controls\form-window.js */
 __modules[63]=(()=>{
 const {el}=__modules[20];
 
@@ -6707,7 +6850,7 @@ function installFormWindow(form){
 return {installFormWindow};
 })();
 
-/* ../controls/native-widgets.js */
+/* ..\controls\native-widgets.js */
 __modules[64]=(()=>{
 const {el}=__modules[20];
 const {getTheme}=__modules[46];
@@ -6783,7 +6926,7 @@ class ClassicCombo {
 return {stepperValue,ClassicUpDown,ClassicCombo};
 })();
 
-/* ../controls/scrollbar.js */
+/* ..\controls\scrollbar.js */
 __modules[65]=(()=>{
 const {el}=__modules[20];
 
@@ -6824,7 +6967,7 @@ class ClassicScrollbar {
 return {scrollbarGeometry,ClassicScrollbar};
 })();
 
-/* ../theme/icon-art.js */
+/* ..\theme\icon-art.js */
 __modules[66]=(()=>{
 
 /** Authored classic IDE pixel artwork, not extracted Microsoft resources.
@@ -6983,7 +7126,7 @@ const CONTROL_ART=Object.freeze(controls);
 return {ICON_PALETTE,ICON_ART,CONTROL_ART};
 })();
 
-/* ../theme/icons.js */
+/* ..\theme\icons.js */
 __modules[67]=(()=>{
 const {ICON_ART,CONTROL_ART,ICON_PALETTE}=__modules[66];
 /** Offline, font-independent classic glyph renderer, shared by IDE and runtime. */
@@ -7011,7 +7154,7 @@ function controlIcon(type){return make(type,16,true);}
 return {ICON_NAMES,CONTROL_ICON_TYPES,hasIcon,hasControlIcon,iconSVG,icon,controlIcon};
 })();
 
-/* ../theme/menu.js */
+/* ..\theme\menu.js */
 __modules[68]=(()=>{
 const {uiDocument}=__modules[19];
 const {el}=__modules[20];
@@ -7058,7 +7201,7 @@ class MenuSession {
       row.append(mark,label,el('span',{class:'menu-shortcut'},item.shortcut||''),el('span',{class:'menu-arrow'},item.items?icon('arrow-right'):null));
       const entry={row,item,enabled,level:depth};state.rows.push(entry);
       row.addEventListener('click',()=>this.activate(state,entry));
-      row.addEventListener('pointerenter',()=>{if(!enabled)return;this.select(state,state.rows.indexOf(entry),false);clearTimeout(this.timer);this.timer=setTimeout(()=>{if(active===this&&entry.item.items)this.submenu(state,entry,false);else this.trim(depth+1);},180);});
+      row.addEventListener('pointerenter',()=>{if(!enabled)return;this.select(state,state.rows.indexOf(entry),true);clearTimeout(this.timer);this.timer=setTimeout(()=>{if(active===this&&entry.item.items)this.submenu(state,entry,false);else this.trim(depth+1);},180);});
       node.append(row);
     }
     node.addEventListener('keydown',e=>this.keydown(state,e));
@@ -7100,7 +7243,7 @@ function showMenu(items,x,y,onCommand,options={}){closeMenu(false);active=new Me
 return {mnemonicText,menuIsOpen,closeMenu,showMenu};
 })();
 
-/* ../controls/richtext.js */
+/* ..\controls\richtext.js */
 __modules[69]=(()=>{
 const {parseRTF,RichTextDocument,richText}=__modules[61];
 const {VBError}=__modules[17];
@@ -7191,7 +7334,7 @@ const RICH_SELECTION_PROPERTIES=Object.freeze(Object.keys(FIELDS));
 return {RichTextController,RICH_SELECTION_PROPERTIES};
 })();
 
-/* ../project/model.js */
+/* ..\project\model.js */
 __modules[70]=(()=>{
 const {normalizeDataSources}=__modules[24];
 const { clone, lower, safeName }=__modules[20];
@@ -7262,7 +7405,7 @@ function projectStats(project){return {modules:project.modules.length,forms:proj
 return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_DEFAULTS,createControl,createForm,newProject,normalizeProject,uniqueName,findModule,projectStats};
 })();
 
-/* ../controls/collections.js */
+/* ..\controls\collections.js */
 __modules[71]=(()=>{
 const { VBError }=__modules[17];
 const { lower }=__modules[20];
@@ -7310,7 +7453,7 @@ class ControlArray {
 return {ControlCollection,TreeNodes,ListItems,ColumnHeaders,ToolbarButtons,StatusPanels,TabItems,ImageItems,ControlArray};
 })();
 
-/* ../controls/controls.js */
+/* ..\controls\controls.js */
 __modules[72]=(()=>{
 const {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor}=__modules[62];
 const {installFormWindow}=__modules[63];
@@ -7836,7 +7979,7 @@ class RuntimeMDI {
 return {arrangeMDIRects,RuntimeMDI};
 })();
 
-/* ../controls/dialog.js */
+/* ..\controls\dialog.js */
 __modules[75]=(()=>{
 const {el}=__modules[20];
 const {icon}=__modules[67];
@@ -7873,7 +8016,7 @@ function runtimeDialog(host,title,body,buttons,input=null,options={}){
 return {messageBoxOptions,runtimeDialog};
 })();
 
-/* ../language/binding.js */
+/* ..\language\binding.js */
 __modules[76]=(()=>{
 const {VBError}=__modules[15];
 const {lower}=__modules[20];
@@ -7991,7 +8134,7 @@ function bindConstants(modules) {
 return {bindConstants};
 })();
 
-/* ../language/default-types.js */
+/* ..\language\default-types.js */
 __modules[77]=(()=>{
 const {VBError}=__modules[17];
 
@@ -8018,7 +8161,7 @@ function defaultIdentifierType(name,table={}){
 return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
-/* ../language/interfaces.js */
+/* ..\language\interfaces.js */
 __modules[78]=(()=>{
 const {lower}=__modules[20];
 
@@ -8062,7 +8205,7 @@ function validateInterfaces(modules){
 return {validateInterfaces};
 })();
 
-/* ../language/expression.js */
+/* ..\language\expression.js */
 __modules[79]=(()=>{
 const { tokenize, VBError }=__modules[17];
 
@@ -8166,7 +8309,7 @@ function numericLiteralValue(token){
 return {ExpressionParser,parseExpression,parseCall};
 })();
 
-/* ../language/conditional.js */
+/* ..\language\conditional.js */
 __modules[80]=(()=>{
 const { VBError }=__modules[17];
 const { parseExpression }=__modules[79];
@@ -8208,7 +8351,7 @@ function preprocess(source, constants = {}, sourceName = '') {
 return {preprocess};
 })();
 
-/* ../language/compiler.js */
+/* ..\language\compiler.js */
 __modules[81]=(()=>{
 const {bindConstants}=__modules[76];
 const {defaultIdentifierType,addDefaultTypes}=__modules[77];
