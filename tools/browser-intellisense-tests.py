@@ -30,7 +30,11 @@ def shot(p,name):p.screenshot(path=str(OUT/('intellisense-'+os.environ.get('VB6_
 def automatic(p):
     setup(p,'Private Sub Form_Load()\n    Text1',[{'name':'Text1','type':'TextBox'}]);put(p,'.')
     p.wait_for_selector('.completion-list');check('SelStart' in names(p),names(p));check('Nodes' not in names(p))
-    put(p,'SelSt');check(names(p)==['SelStart'],names(p));p.keyboard.press('Tab')
+    put(p,'SelSt')
+    # Firefox may acknowledge text insertion before the input-driven list
+    # refresh completes. Observe the exact filtered state, not two racy reads.
+    p.wait_for_function('!!vb6Studio.editor.completion && vb6Studio.editor.completionItems.length===1 && vb6Studio.editor.completionItems[0]==="SelStart"')
+    check(names(p)==['SelStart'],names(p));p.keyboard.press('Tab')
     check(p.evaluate('vb6Studio.editor.text.endsWith("Text1.SelStart")'))
     check(not p.locator('.completion-list').count())
 
