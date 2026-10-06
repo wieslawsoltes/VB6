@@ -1,7 +1,7 @@
 import {COMMAND_WGSL} from './protocol.js';
 import {ARRAY_WGSL} from './arrays-wgsl.js';
 /** Helpers deliberately use explicit error cells: WGSL has no exceptions. */
-export function runtimeWGSL(words) {
+export function runtimeWGSL(words,stringHelpers='') {
   return `${COMMAND_WGSL}
 struct RunParams { count:u32, fuel:u32, capacity:u32, width:u32, height:u32, time:f32, shared_words:u32, pad1:u32 }
 @group(0) @binding(0) var<storage,read_write> state:array<u32>;
@@ -94,6 +94,10 @@ fn shared_cas(index:i32,compare:u32,value:u32)->u32 {
   }
 }
 ${ARRAY_WGSL}
+${stringHelpers||`fn array_clear(base:u32,start:u32,stop:u32)->bool {
+  if(!array_charge(stop-start)) {return false;}
+  for(var i=start;i<stop;i+=1u) {mem[base+ARRAY_DATA+i]=0u;}return true;
+}`}
 fn rgb(r:i32,g:i32,b:i32)->i32 {
   if(r<0 || g<0 || b<0) {fail(5u);return 0;}
   return min(r,255)|(min(g,255)<<8u)|(min(b,255)<<16u);

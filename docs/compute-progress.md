@@ -1,27 +1,24 @@
-# Optional compute backend — 0.2 integration checkpoint
+# Optional compute backend — GPU Strings increment
 
-PR #55 preserves the ordinary IDE and JavaScript/native backends. Its standalone
-experimental package is documented in `packages/vb6-compute/README.md`.
+PR #55 merged the experimental 0.2 backend. The next increment adds bounded
+UTF-16 String storage and operations to the separately built package. The existing
+IDE, JavaScript runtime and native backends are unchanged.
 
-The old reserved-WGSL renderer blocker was resolved by commit 842d459. Subsequent
-work added GPU dynamic arrays, GoSub/computed branches and bounded recursive
-continuation frames. CI run 37470387638 on cdcc683 passed 74 WebGPU scenarios,
-including numeric and rendered-pixel readbacks, with zero retained GPU resources.
-Main b6f623d was reconciled without changing that tested source tree.
+Variable/fixed Strings, fixed/dynamic String arrays, copy-preserving procedure
+calls, common String intrinsics, binary comparisons, Mid assignment and LSet/RSet
+are implemented in WGSL. Host writes/readbacks preserve UTF-16 units and canonical
+storage descriptors. Per-character operations consume the same fatal execution
+fuel as other compute work. The package guide documents capacities, the String
+ABI extension and unsupported locale/code-page/Variant operations.
 
-The next integration adds typed event-driven applications, a standalone compiler
-CLI, escaped single-file HTML export, decoded RGBA image paints, canvas content-box
-input mapping and exported-application interaction tests. These stay optional and
-are not a claim of complete VB6 language, numeric, forms, typography or native-host
-compatibility. Current APIs and exact boundaries are in the package guide.
+Validation uses shared independent String fixtures in host lowering tests and
+actual WebGPU execution. Existing numeric/array/recursive/rendering/image/event
+checks remain enabled. The String playground example validates readback results
+and persistent reruns alongside the existing exported-application checks. An
+extracted npm package must compile the example through the independent CLI.
 
-The compute CI workflow retains exact source, per-scenario progress, numeric and
-pixel results, browser previews, and the independent package. Missing adapters,
-shader failures, resource leaks and source regressions fail validation. All existing
-assertions remain enabled. Local host tests and extracted-package checks are useful
-but do not substitute for the WebGPU suite; the managed local browser blocks
-localhost navigation, so GPU/browser evidence comes from the CI runner.
-
-Before merge, inspect the latest PR-head workflow results rather than relying on
-historical counts in comments. No physical-GPU benchmark, native VB6 certification,
-or full feature-parity assertion is made by this checkpoint.
+Inspect the final-head CI result and artifact when evaluating readiness; host
+compilation alone is not GPU execution evidence. The software WebGPU adapter is
+not a physical-GPU performance certification. Exact broader numeric, Variant,
+object/native-host, forms, typography and IDE/debugger/EXE integration remain
+future compatibility work, not claimed features of this increment.

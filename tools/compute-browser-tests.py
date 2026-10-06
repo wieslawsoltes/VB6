@@ -60,6 +60,7 @@ try:
         page.add_script_tag(content=(ROOT / 'tests/compute-extended-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-images-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-application-browser.js').read_text())
+        page.add_script_tag(content=(ROOT / 'tests/compute-strings-browser.js').read_text())
         page.add_script_tag(content=(ROOT / 'tests/compute-browser.js').read_text())
         report = page.evaluate('runComputeBrowserTests()')
         if report.get('available'):
@@ -81,6 +82,20 @@ try:
             page.locator('#dispose').click()
             page.wait_for_function("document.getElementById('status').textContent==='Disposed.'")
             report['playground'] = 'passed: compile, repeat, GPU presentation, dispose'
+            page.locator('#example').select_option('strings')
+            page.locator('#run').click()
+            page.wait_for_function("document.getElementById('status').textContent.includes('Module1.ResultText')")
+            state = json.loads(page.locator('#status').inner_text())[0]['globals']
+            assert state['Module1.ResultText'] == 'Zażółć | GPU | Run 1'
+            assert state['Module1.SourceText'] == 'Zażółć\x00😀'
+            assert state['Module1.UnitCount'] == 9
+            assert state['Module1.FixedCode'] == 'VB6     '
+            page.locator('#again').click()
+            page.wait_for_function("document.getElementById('status').textContent.includes('Run 2')")
+            page.screenshot(path=str(REPORTS / 'strings.png'), full_page=True)
+            page.locator('#dispose').click()
+            page.wait_for_function("document.getElementById('status').textContent==='Disposed.'")
+            report['stringPlayground'] = 'passed: UTF-16 String/array results, persistent rerun, drawing, dispose'
         if report.get('available') and not report.get('failed'):
             page.goto(url + '/artifacts/vb6-compute/events.html')
             page.wait_for_function("globalThis.computeApplication && !globalThis.computeApplication.closed")

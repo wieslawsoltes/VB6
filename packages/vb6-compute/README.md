@@ -1,4 +1,4 @@
-# VB6 Compute 0.2 — optional experimental backend
+# VB6 Compute 0.3 — optional experimental backend
 
 A standalone JavaScript compiler, WebGPU runtime and compute-only renderer.
 VB standard modules compile into WGSL. JavaScript schedules GPU work and collects
@@ -21,7 +21,7 @@ npm pack
 
 The independently installable `@vb6/compute` archive contains `index.js` (ESM with
 no global pollution), `vb6-compute.js` (the `VB6Compute` browser global), a Node CLI,
-`playground.html`, `events.html`, `events.bas` and this guide. There are no external
+`playground.html`, `events.html`, `events.bas`, `strings.bas` and this guide. There are no external
 runtime imports or npm dependencies. The build does not publish to npm. With the
 package installed, `vb6-compute --help` lists the compiler options.
 
@@ -30,7 +30,8 @@ from standard input. Output formats are WGSL, JSON artifacts, and single-file HT
 Repeated `--event load=Module1.Main --event pointerDown=Module1.OnPointer` bindings
 produce an event application. Without events, WGSL/JSON compile a plain entry Sub;
 HTML always compiles an application dispatcher. `--entry`, `--precision`,
-`--max-call-depth`, `--workgroup-size`, `--dynamic-array-capacity` and the state,
+`--max-call-depth`, `--max-string-length`, `--workgroup-size`,
+`--dynamic-array-capacity` and the state,
 framebuffer and fuel limits are explicit options. Existing output files require
 `--force`; input/output aliases are rejected and source errors do not truncate
 existing outputs. HTML exports escape titles and serialized data, embed their
@@ -46,7 +47,7 @@ raises `GPU_UNAVAILABLE`; the package does not silently fall back to CPU executi
 serializable and contain WGSL, a versioned storage ABI, globals, array layouts,
 procedure/source metadata and diagnostics. The entry is a parameterless Sub.
 
-Supported scalar storage is Boolean, Byte, Integer, Long and Single. Numeric
+Supported scalar storage is Boolean, Byte, Integer, Long, Single and String. Numeric
 operations include checked narrowing/arithmetic, division errors, ties-to-even
 integer conversion and VB Boolean values. Use `&` Long and `!` Single literals
 where their type matters. Strict mode rejects Double storage and operations that
@@ -69,6 +70,81 @@ cells); this is not an unbounded GPU heap. Preserve can resize only the final
 dimension and cannot change lower bounds/rank. Invalid resizes preserve old state.
 ByRef element aliases lock array shape during calls and release locks on error
 unwinding. Fixed Erase retains bounds and zeros cells; dynamic Erase deallocates.
+
+## GPU UTF-16 Strings
+
+Variable-length and fixed-length (`As String * N`) Strings now execute in WGSL.
+Each String cell points to a compiler-owned bounded block containing length,
+capacity, fixed-length metadata and UTF-16 code units. These are **not native BSTR
+pointers**. Embedded NULs, supplementary-character surrogate pairs and isolated
+surrogate units survive host input, execution and readback without sanitization.
+`Len` counts UTF-16 units; `LenB` returns twice that count for String inputs.
+
+String assignment copies into the destination's stable block. ByVal parameters,
+parenthesized ByRef temporaries, function results and intermediate values preserve
+copy semantics, including multiple calls in one expression and bounded recursive
+calls. Explicit ByRef aliases still refer to the same variable. Automatic locals
+reset per call, statics persist, and fixed Strings pad/truncate on assignment.
+String arrays support fixed/dynamic multidimensional storage, ReDim/Preserve,
+Erase and ByRef access. Fixed String array elements are space-padded on Erase;
+dynamic arrays deallocate their shape without losing their backing descriptors.
+
+Supported operations include `&`, String+String, binary relational operators and
+String Select Case; `Len/LenB`, `Left/Right/Mid`, `Trim/LTrim/RTrim`, `StrReverse`,
+`Space`, `String` with a String character argument, `ChrW/AscW`, `StrComp`,
+`InStr/InStrRev`, `Replace` and one-dimensional String-array `Join`. `$` aliases
+are supported where the shared frontend accepts them. Mid assignment replaces
+characters without extending the destination; LSet/RSet use its current length.
+`CStr` formats integers/Booleans, and `Str` formats integers with the positive sign
+space. Integer/Boolean values can also be concatenated or assigned to Strings.
+Built-in String calls currently accept positional arguments and optional holes;
+user-defined procedures retain named/optional argument support.
+
+Comparison defaults to `Option Compare Binary`. An explicit `vbBinaryCompare`
+works in Text modules. Locale-dependent comparison is **not** approximated as
+ASCII case folding: unsupported defaults are diagnosed at compile time and dynamic
+unsupported compare modes raise error 5. Trim removes U+0020 spaces only.
+ANSI/code-page Chr/Asc, numeric-character String, case mapping, Like/Split,
+floating-point formatting, String-to-number coercion, Null/Variant behavior and
+the full String library remain outside this release. Use `ChrW` for explicit
+UTF-16 characters. String computation does not add font shaping or glyph rendering.
+
+`maxStringLength` / CLI `--max-string-length` defaults to **256 UTF-16 units**,
+range 1–4096. It bounds variable values, intermediate results and fixed declarations.
+Exceeding it at runtime raises catchable VB error **14**; failed String assignments
+retain the destination. A too-long source literal or fixed declaration is rejected
+by the compiler. These limits also apply when a longer RHS could ultimately be
+truncated into a fixed destination; this is a bounded target, not an unlimited heap.
+
+String dynamic arrays reserve **16 elements by default** to avoid multiplying the
+numeric default of 256 by large per-element String blocks. Explicit
+`dynamicArrayCapacity` overrides both defaults. Each element reserves
+`maxStringLength + 3` u32 words (or `fixedLength + 3` for fixed Strings), in addition
+to its handle and array header. Snapshots and per-call-depth scratch also count
+against `maxStateWords`. Reduce capacities or call depth when a program exceeds
+that compile-time budget. No new GPU memory is allocated on each loop iteration
+or dispatch: reserved blocks are reused and persistent state remains lane-private.
+
+Character scanning/copying consumes the same execution fuel as VB statements.
+Fuel faults remain fatal even under On Error, whereas capacity and argument errors
+are catchable. Host `writeGlobal` accepts strings/String arrays and
+`initializeArray` accepts initial String values; inputs are copied/validated before
+queueing. Readback returns JavaScript strings and validates descriptor lengths and
+UTF-16 units. String artifacts carry `stringABI: 1`; legacy numeric artifacts are
+still supported without this extension.
+
+```sh
+npm run compile:compute -- packages/vb6-compute/examples/strings.bas --out strings.json --max-string-length 64
+```
+
+The playground's **UTF-16 String processing** example shows diagnostic String and
+array readbacks plus GPU-drawn code-unit bars. The bars are not shaped text.
+
+Fixed-length String values may be read, assigned, passed ByVal, or passed as a
+parenthesized temporary. Direct fixed-length scalar/array arguments to ByRef String
+parameters produce `GPU_FIXED_STRING_BYREF`: native temporary/copy-back semantics
+are not yet implemented or certified. Use an explicit variable-length temporary
+and assignment back when required. Variable-length ByRef aliasing is supported.
 
 ## Persistent program runtime
 
@@ -202,6 +278,9 @@ and does not require compute shaders. Primary references:
 
 - https://github.com/linebender/vello#vello-compute-renderer
 - https://github.com/linebender/vello/tree/main/research
+- https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/mid-statement
+- https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/replace-function
+- https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/chr-function
 - https://www.w3.org/TR/WGSL/
 - https://www.w3.org/TR/webgpu/
 
@@ -217,7 +296,8 @@ the VB instruction budget does not instrument arbitrary WGSL.
 
 ## Remaining compatibility boundaries
 
-Not implemented: Strings and tagged Variants, exact Double/Currency/Decimal/Date
+Not implemented: the remaining String/code-page/locale library, tagged Variants,
+exact Double/Currency/Decimal/Date
 semantics, locale behavior, UDT/object/class/COM/OCX lifetimes, native Declare and
 filesystem/network services, full classic forms/controls/events, font parsing,
 text shaping/rasterization, advanced path clips/blends, and IDE/debugger/EXE target

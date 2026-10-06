@@ -9,6 +9,7 @@ Inputs: .bas/.vb source, .vb6web/.json project, or - for standard input.
   --precision strict|single    Explicit f32 approximation only when selected
   --workgroup-size N           1..256
   --max-call-depth N           1..64
+  --max-string-length N        1..4096 UTF-16 units per String (default 256)
   --dynamic-array-capacity N   Fixed per-array GPU capacity
   --width N --height N         HTML surface size
   --count N --capacity N --fuel N
@@ -17,7 +18,7 @@ Inputs: .bas/.vb source, .vb6web/.json project, or - for standard input.
 Unsupported VB features are diagnosed; no CPU execution fallback is emitted.
 `;
 export function parseComputeCLI(args) {
-  const config={compiler:{},export:{},events:{},force:false},names={entry:['compiler','entry'],precision:['compiler','precision'],'workgroup-size':['compiler','workgroupSize'],'max-call-depth':['compiler','maxCallDepth'],'dynamic-array-capacity':['compiler','dynamicArrayCapacity'],'max-state-words':['compiler','maxStateWords'],'gosub-stack-depth':['compiler','gosubStackDepth'],width:['export','width'],height:['export','height'],count:['export','count'],capacity:['export','capacity'],fuel:['export','fuel'],'timer-interval':['export','timerInterval'],title:['export','title']};
+  const config={compiler:{},export:{},events:{},force:false},names={entry:['compiler','entry'],precision:['compiler','precision'],'workgroup-size':['compiler','workgroupSize'],'max-call-depth':['compiler','maxCallDepth'],'max-string-length':['compiler','maxStringLength'],'dynamic-array-capacity':['compiler','dynamicArrayCapacity'],'max-state-words':['compiler','maxStateWords'],'gosub-stack-depth':['compiler','gosubStackDepth'],width:['export','width'],height:['export','height'],count:['export','count'],capacity:['export','capacity'],fuel:['export','fuel'],'timer-interval':['export','timerInterval'],title:['export','title']};
   const strings=new Set(['entry','precision','title']),seen=new Set();
   for(let i=0;i<args.length;i++) {
     const arg=args[i];

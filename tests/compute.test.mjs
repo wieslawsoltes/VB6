@@ -20,8 +20,8 @@ for(const [name,code] of Object.entries({
   shared:'result = ComputeAtomicAdd(0&, 1&)',bounds:'Dim a(1 To 4) As Long\na(2) = 42&\nresult = a(2)',
   asserts:'Debug.Assert 1& = 1&',minmax:'result = CLng(ComputeMin(42!, 50!))',bankers:'result = CInt(42.5!)'
 }))test('WGSL lowering: '+name,()=>{const a=compile(code);validateArtifact(a);assert.match(a.wgsl,/@compute @workgroup_size\(64\)/);assert.match(a.wgsl,/fn main/);assert.ok(a.sources.some(s=>s.procedure==='Main'));});
-for(const type of ['Boolean','Byte','Integer','Long','Single'])test('supported typed storage: '+type,()=>{const a=compileCompute(`Public value As ${type}\nSub Main()\nEnd Sub`);assert.equal(a.globals[0].type,type.toLowerCase());});
-for(const type of ['Variant','String','Object','Double','Currency','Date'])test('unsupported storage is diagnosed: '+type,()=>assert.throws(()=>compileCompute(`Public value As ${type}\nSub Main()\nEnd Sub`),e=>e.code==='GPU_TYPE'));
+for(const type of ['Boolean','Byte','Integer','Long','Single','String'])test('supported typed storage: '+type,()=>{const a=compileCompute(`Public value As ${type}\nSub Main()\nEnd Sub`);assert.equal(a.globals[0].type,type.toLowerCase());});
+for(const type of ['Variant','Object','Double','Currency','Date'])test('unsupported storage is diagnosed: '+type,()=>assert.throws(()=>compileCompute(`Public value As ${type}\nSub Main()\nEnd Sub`),e=>e.code==='GPU_TYPE'));
 for(const [name,code] of Object.entries({print:'Debug.Print 42&',host:'MsgBox "hello"',undeclared:'missing = 42&',dynamicDispatch:'CreateObject("ADODB.Connection")',file:'Open "file" For Output As #1'}))test('fail closed: '+name,()=>assert.throws(()=>compile(code),e=>/^GPU_/.test(e.code)));
 test('strict Double promotion cannot silently become Single',()=>assert.throws(()=>compile('result = CLng(1& / 2&)'),e=>e.code==='GPU_TYPE'));
 test('single approximation is explicit and leaves a warning',()=>{const a=compileCompute(source('result = CLng(1& / 2&)'),{precision:'single'});assert.equal(a.precision,'single');assert.ok(a.diagnostics.some(d=>d.code==='GPU_PRECISION'));});
