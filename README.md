@@ -280,3 +280,7 @@ supports editing/reordering and explicit fresh-confirmation dispatch without
 replacing unsent composer drafts or inheriting Full-access grants. Nothing sends
 automatically. See [the workbench guide](docs/CODING-AGENT-WORKBENCH.md) for
 coverage, memory limits, stale-workspace protection and non-Git boundaries.
+
+## ChatGPT account or API-key coding agents
+
+The OpenAI connection now offers **ChatGPT account — ChatGPT plan usage** alongside the existing API-key mode. The supported local/open-source OAuth flow runs through the protected local agent relay; no Codex credential copying or API-key fallback is used. Account selection, sign-in/consent, model discovery, streaming IDE tools, refresh and sign-out retain the classic IDE appearance and permission checks. See [ChatGPT sign-in setup, security and preview limitations](docs/CHATGPT-LOGIN.md). Live-account entitlement/inference validation is separate from the deterministic test fixtures.

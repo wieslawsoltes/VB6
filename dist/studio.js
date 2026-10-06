@@ -18805,29 +18805,42 @@ class McpPanel {
 return {installMcp};
 })();
 
-/* ..\agents\review.js */
+/* ..\agents\chatgpt-protocol.js */
 __modules[170]=(()=>{
-const {findModule}=__modules[43];
-const {sourceEdits}=__modules[163];
 
-
-/** Build review data from the same pure edit implementation used for the undo transaction. */
-function operationReview(project, request) {
-  const changes = [], args = request.arguments;
-  if (request.name === 'vb6.code.edit') {
-    const candidate = sourceEdits(project, args.edits);
-    for (const module of project.modules) {
-      const after = findModule(candidate, module.id);
-      if (after && module.code !== after.code) changes.push({module: module.name, before: module.code, after: after.code});
-    }
-  } else if (request.name === 'vb6.module.write') {
-    const module = findModule(project, args.module);
-    if (module) changes.push({module: module.name, before: module.code, after: args.code});
+/** ChatGPT-plan Responses preview profile. API-key requests are intentionally untouched.
+ * https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+ */
+function chatGPTRequest(body) {
+  if (!body || !Array.isArray(body.input) || body.input.some(item => item?.role === 'system')) throw new Error('ChatGPT mode requires array input and developer instructions.');
+  if (typeof body.model !== 'string' || !/^[\w.-]{1,150}$/.test(body.model)) throw new Error('Invalid ChatGPT model.');
+  const tools = body.tools || [];
+  if (!Array.isArray(tools) || tools.some(tool => tool?.type !== 'function' || !/^[\w-]{1,64}$/.test(tool.name))) throw new Error('ChatGPT mode supports registered local function tools only.');
+  const input = structuredClone(body.input);
+  for (const item of input) if (item.type === 'function_call') {
+    if (item.namespace && item.namespace !== 'vb6') throw new Error('Unrecognized ChatGPT tool namespace.');
+    item.namespace = 'vb6';
   }
-  return {request, changes};
+  // Explicit allowlist: never forward unsupported output caps, server state, hosted tools or billing overrides.
+  return {model: body.model, instructions: typeof body.instructions === 'string' ? body.instructions : '', input,
+    store: false, stream: true, parallel_tool_calls: false, include: ['reasoning.encrypted_content'],
+    tools: tools.length ? [{type: 'namespace', name: 'vb6', description: 'Permission-gated tools in the user’s VB6 Studio project. No host shell or credential access.',
+      tools: tools.map(({name, description, parameters}) => ({type: 'function', name, description, parameters, strict: false}))}] : []};
+}
+function chatGPTModels(value) {
+  if (!value || !Array.isArray(value.models)) throw new Error('Invalid ChatGPT model catalog.');
+  const seen = new Set();
+  return value.models.filter(model => model?.visibility === 'list' && typeof model.slug === 'string' && /^[\w.-]{1,150}$/.test(model.slug) && !seen.has(model.slug) && seen.add(model.slug))
+    .map(model => ({id: model.slug, label: typeof model.display_name === 'string' ? model.display_name.slice(0, 256) : model.slug}));
+}
+/** Reject namespace spoofing before the shared collector can dispatch a registered local tool. */
+function validateChatGPTEvent(event) {
+  const items = [...(event?.response?.output || []), ...(event?.output || []), ...(event?.item ? [event.item] : [])];
+  for (const item of items) if (item?.type === 'function_call' && item.namespace !== 'vb6') throw new Error('ChatGPT returned an unrecognized tool namespace. No tools were executed.');
+  return event;
 }
 
-return {operationReview};
+return {chatGPTRequest,chatGPTModels,validateChatGPTEvent};
 })();
 
 /* ..\agents\limits.js */
@@ -18882,7 +18895,9 @@ return {AGENT_LIMIT_FIELDS,DEFAULT_AGENT_LIMITS,AGENT_LIMIT_PRESETS,normalizeAge
 
 /* ..\agents\providers.js */
 __modules[172]=(()=>{
+const {validateChatGPTEvent}=__modules[170];
 const {normalizeAgentLimits}=__modules[171];
+
 
 /** Native provider protocols. No SDK, remote script, credential persistence or arbitrary endpoints. */
 const PROVIDERS = Object.freeze({
@@ -18967,6 +18982,11 @@ function providerFailure(data = {}, status = 0, retryAfterMs = 0) {
   const has = allowed => codes.some(code => typeof code === 'string' && allowed.includes(code));
   let kind = status >= 400 && status < 500 && ![408, 429].includes(status) ? 'request' : 'provider', retryable = [408, 429, 500, 502, 503, 504, 529].includes(status), hint = 'The provider could not complete this turn.';
   const contextMessage = typeof value.message === 'string' && /^(?:prompt is too long:|this model.s maximum context length is|the input token count .*exceeds the maximum)/i.test(value.message.slice(0, 500));
+  if (has(['subscription_sharing_usage_limit_exceeded'])) return new ProviderTransportError('ChatGPT plan usage limit reached. Review ChatGPT Settings → Usage. API billing will not be used automatically.', {status, kind: 'quota'});
+  if (has(['subscription_sharing_user_not_eligible', 'chatpass_v2_scope_not_authorized', 'chatpass_v2_invalid_authorization_context', 'chatgpt_consent_required'])) return new ProviderTransportError('ChatGPT plan use is not authorized for this account/workspace. Review sign-in consent and policy. No billing fallback.', {status, kind: 'access'});
+  if (has(['chatgpt_sign_in_required', 'chatgpt_session_expired', 'subscription_sharing_invalid_user', 'chatgpt_invalid_client'])) return new ProviderTransportError('Sign in to the selected ChatGPT account again in Connection. API billing will not be used automatically.', {status, kind: 'access'});
+  if (has(['chatgpt_relay_disabled'])) return new ProviderTransportError('ChatGPT sign-in is not enabled in this relay. Start the updated local relay with ChatGPT support.', {status, kind: 'access'});
+  if (has(['subscription_sharing_unsupported_capability', 'subscription_sharing_route_not_supported'])) return new ProviderTransportError('ChatGPT plan preview does not support this request capability or route. Review the integration; no automatic retry or billing fallback.', {status, kind: 'request'});
   // Explicit safety codes are terminal regardless of HTTP status or message heuristics.
   if (has(['content_policy_violation', 'safety_violation', 'refusal'])) { kind = 'safety'; retryable = false; hint = 'Provider safety policy rejected this request. No automatic alternative will be attempted.'; }
   else if (has(['context_length_exceeded', 'context_window_exceeded', 'prompt_too_long', 'request_too_large']) || contextMessage) { kind = 'context'; retryable = false; hint = 'Provider context window exceeded; compact the conversation or lower context/output settings.'; }
@@ -19004,27 +19024,29 @@ function retryAfter(value, now = Date.now()) {
   const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - now;
   return Number.isFinite(ms) ? Math.max(0, Math.min(300000, Math.ceil(ms))) : 0;
 }
-function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch, requestTimeoutMs} = {}) {
+function createTransport({provider, apiKey = '', relay = '', relayToken = '', fetchImpl = globalThis.fetch, requestTimeoutMs, authMode = 'api-key', accountId = ''} = {}) {
   providerInfo(provider);
+  if (!['api-key', 'chatgpt'].includes(authMode)) throw new Error('Invalid authentication mode.');
+  if (authMode === 'chatgpt' && (provider !== 'openai' || !relay || typeof accountId !== 'string' || !accountId || accountId.length > 128)) throw new Error('ChatGPT mode requires OpenAI, a local relay and a signed-in account.');
   const timeoutMs = normalizeAgentLimits({requestTimeoutMs}).requestTimeoutMs;
   const origin = relay ? relayURL(relay) : '';
   if (origin && (!relayToken || /[\r\n]/.test(relayToken))) throw new Error('Enter the relay access token.');
   // Snapshot secrets in a closure; never expose them through the returned interface.
   const headers = origin ? {'Content-Type': 'application/json', Authorization: 'Bearer ' + relayToken} : providerHeaders(provider, apiKey);
-  return async (body, {signal, receive = () => {}, models = false, cursor = ''} = {}) => {
+  const transport = async (body, {signal, receive = () => {}, models = false, cursor = ''} = {}) => {
     const timer = AbortSignal.timeout(models ? Math.min(timeoutMs, 120000) : timeoutMs), combined = AbortSignal.any([signal, timer].filter(Boolean));
     const native = nativeRequest(provider, body, {models, cursor});
     let response;
     try {
       response = await fetchImpl(origin ? origin + '/agent' : native.url, {method: origin ? 'POST' : native.method, headers, credentials: 'omit', redirect: 'error', cache: 'no-store', signal: combined,
-        body: origin ? JSON.stringify({provider, operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
+        body: origin ? JSON.stringify({provider, ...(authMode === 'chatgpt' ? {authMode, accountId} : {}), operation: models ? 'models' : 'generate', cursor, requestTimeoutMs: models ? Math.min(timeoutMs, 120000) : timeoutMs, body: models ? undefined : body}) : native.body});
     } catch {
       signal?.throwIfAborted();
       throw new ProviderTransportError(timer.aborted ? 'Provider request timed out. Retrying may incur additional charges.' : 'Provider connection failed. Check the connection, browser CORS/local-network permission, or use the local relay.', {retryable: true});
     }
     try {
       if (!response.ok) throw await responseFailure(response, combined);
-      await readEvents(response, receive, {signal: combined});
+      await readEvents(response, authMode === 'chatgpt' && !models ? data => receive(validateChatGPTEvent(data)) : receive, {signal: combined});
     }
     catch (error) {
       signal?.throwIfAborted();
@@ -19032,11 +19054,14 @@ function createTransport({provider, apiKey = '', relay = '', relayToken = '', fe
       throw error;
     }
   };
+  Object.defineProperty(transport, 'capabilities', {value: Object.freeze({outputTokenLimit: authMode !== 'chatgpt'})});
+  return transport;
 }
-async function listModels(transport, provider, signal) {
+async function listModels(transport, provider, signal, {details = false} = {}) {
   const ids = new Set(); let cursor = '';
   for (let page = 0; page < 20; page++) {
     let result; await transport(null, {models: true, cursor, signal, receive: data => { result = data; }});
+    if (result?.chatgpt === true) return details ? result.data : result.data.map(item => item.id);
     for (const item of result?.data || result?.models || []) {
       if (provider === 'google' && !item.supportedGenerationMethods?.includes('generateContent')) continue;
       const id = item.id || item.name?.replace(/^models\//, ''); if (id) ids.add(id);
@@ -19044,7 +19069,7 @@ async function listModels(transport, provider, signal) {
     const next = provider === 'google' ? result?.nextPageToken : result?.has_more ? result.last_id : '';
     if (!next || next === cursor) break; cursor = next;
   }
-  return [...ids].sort();
+  return details ? [...ids].sort().map(id => ({id, label: id})) : [...ids].sort();
 }
 function toolCatalog(tools) {
   const names = new Map();
@@ -19169,8 +19194,166 @@ function appendTurn(provider, history, result, outputs) {
 return {PROVIDERS,providerInfo,modelId,relayURL,nativeRequest,providerHeaders,readEvents,ProviderTransportError,providerFailure,responseFailure,ProviderOutputLimitError,retryAfter,createTransport,listModels,toolCatalog,requestBody,userMessage,responseCollector,appendTurn};
 })();
 
-/* ..\agents\recovery.js */
+/* ..\agents\chatgpt-connection.js */
 __modules[173]=(()=>{
+const {el}=__modules[6];
+const {relayURL, readEvents}=__modules[172];
+/** Classic-IDE connection controls. Only the relay bearer enters browser memory, never OAuth tokens. */
+
+
+const field = (label, control) => el('label', {class: 'agent-field'}, el('span', {}, label), control);
+const button = (label, action) => el('button', {type: 'button', onclick: action}, label);
+const errors = {
+  chatgpt_login_in_progress: 'A sign-in is already pending in this relay. Refresh status or cancel it first.',
+  chatgpt_relay_disabled: 'Start the updated local relay with ChatGPT enabled (VB6_CHATGPT_ENABLED must not be 0).',
+  chatgpt_invalid_client: 'OpenAI rejected this client registration. Review the registration and sign in again.',
+  chatgpt_connection_failed: 'Cannot reach OpenAI from the relay. Check the connection and try again.',
+  chatgpt_unknown_account: 'Choose a ChatGPT account from this relay, or sign in to add one.'
+};
+async function chatGPTControl({relay, relayToken, operation, accountId, loginId, consent = false, signal, fetchImpl = globalThis.fetch}) {
+  const origin = relayURL(relay);
+  if (!relayToken || /[\r\n]/.test(relayToken)) throw new Error('Enter the local relay access token in Connection. This is not a provider API key.');
+  let response;
+  try { response = await fetchImpl(origin + '/agent/chatgpt', {method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error',
+    headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + relayToken}, body: JSON.stringify({operation, accountId, loginId, consent}), signal: AbortSignal.any([signal, AbortSignal.timeout(90000)].filter(Boolean))}); }
+  catch { signal?.throwIfAborted(); throw new Error('Cannot reach the ChatGPT relay. Check its URL, allowed IDE origin and browser local-network permission.'); }
+  let value;
+  try { await readEvents(response, data => { value = data; }, {signal, maxBytes: 262144}); }
+  catch (error) { signal?.throwIfAborted(); if (response.ok) throw error; }
+  if (!response.ok) throw new Error(errors[value?.error?.code] || (response.status === 401 ? 'The relay access token is missing or invalid.' : response.status === 404 ? 'This relay does not support ChatGPT sign-in. Restart it with the updated source.' : 'ChatGPT connection operation failed. Check the account, relay and OpenAI availability.'));
+  return value;
+}
+class ChatGPTConnection {
+  constructor(panel) {
+    this.panel = panel; this.snapshot = null; this.busy = false; this.controller = null; this.disposed = false;
+    this.mode = el('select', {'aria-label': 'OpenAI authentication'}, el('option', {value: 'api-key'}, 'API key — API billing'), el('option', {value: 'chatgpt'}, 'ChatGPT account — ChatGPT plan usage'));
+    this.accounts = el('select', {'aria-label': 'ChatGPT account'}, el('option', {value: ''}, '(Sign in to add an account)'));
+    this.message = el('p', {role: 'status', 'aria-label': 'ChatGPT connection status'}, 'ChatGPT sign-in uses your local relay. No API key is needed.');
+    this.login = button('Sign in with ChatGPT', () => this.action('login'));
+    this.reconsent = button('Enable plan usage…', () => this.action('login', true));
+    this.check = button('Refresh account status', () => this.action('status'));
+    this.logout = button('Sign out', () => this.action('logout'));
+    this.cancel = button('Cancel sign-in', () => this.cancelLogin());
+    this.link = el('a', {target: '_blank', rel: 'noopener noreferrer', hidden: true}, 'Open ChatGPT sign-in');
+    this.details = el('fieldset', {}, el('legend', {}, 'ChatGPT account'), field('Account:', this.accounts), this.message,
+      el('div', {class: 'agent-actions'}, this.login, this.reconsent, this.check, this.logout, this.cancel), this.link,
+      el('p', {}, 'Sign in and approve plan usage in the OpenAI window. Your eligible ChatGPT allowance and app/workspace limits apply; this is not unlimited API access. No automatic fallback to API-key billing.'),
+      el('p', {}, 'The local relay owns sign-in and refresh tokens. By default they remain only in relay memory; restart requires sign-in again. Clear Credentials clears browser-to-relay access, not your ChatGPT session; use Sign out to revoke it.'),
+      el('p', {}, 'This preview does not accept a per-request output-token cap. Session usage, request/tool limits, timeouts and existing IDE permissions still apply, but a single request may exceed the remaining budget.'),
+      el('a', {href: 'https://chatgpt.com/#settings/Usage', target: '_blank', rel: 'noopener noreferrer'}, 'ChatGPT Settings → Usage'));
+    this.root = el('div', {}, field('Authentication:', this.mode), this.details);
+    this.mode.onchange = () => { this.resetCatalog(); this.render(); if (this.enabled && this.panel.token.value && !this.snapshot) void this.action('status'); };
+    this.accounts.onchange = () => { this.resetCatalog(); this.render(); };
+    for (const control of [panel.relay, panel.token]) control.addEventListener('input', () => { this.snapshot = null; this.accounts.replaceChildren(el('option', {value: ''}, '(Refresh account status)')); this.resetCatalog(); this.render(); });
+  }
+  get enabled() { return this.panel.provider.value === 'openai' && this.mode.value === 'chatgpt'; }
+  get selected() { return this.snapshot?.accounts?.find(a => a.id === this.accounts.value); }
+  resetCatalog() { this.panel.model.value = ''; this.panel.models.replaceChildren(el('option', {value: ''}, '(Refresh models)')); }
+  options() {
+    if (!this.enabled) return {authMode: 'api-key'};
+    if (!this.selected?.signedIn || !this.selected.planEnabled) throw new Error('Sign in with ChatGPT and enable plan usage in Connection before running or discovering models.');
+    return {authMode: 'chatgpt', accountId: this.selected.id};
+  }
+  binding() { return this.enabled ? JSON.stringify(['chatgpt', relayURL(this.panel.relay.value), this.selected?.id || '']) : 'api-key'; }
+  description() { return this.enabled ? 'ChatGPT plan usage — ' + (this.selected?.label || 'no account') + '. No automatic API billing fallback. Per-request output cap is not supported by this preview.' : 'API-key billing. Provider API charges may apply.'; }
+  render(busy = !!this.panel.pending || this.panel.api.agent.busy) {
+    this.root.hidden = this.panel.provider.value !== 'openai'; this.details.hidden = !this.enabled;
+    if (this.enabled) { this.panel.connection.value = 'relay'; this.panel.connection.onchange?.(); }
+    for (const control of [this.mode, this.accounts, this.login, this.reconsent, this.check]) control.disabled = busy || this.busy;
+    this.panel.connection.disabled = busy || this.busy || this.enabled;
+    this.logout.disabled = busy || this.busy || !this.selected?.signedIn;
+    this.reconsent.disabled ||= !this.selected || this.selected.planEnabled;
+    this.cancel.disabled = !(this.busy || this.snapshot?.login === 'pending');
+    if (this.panel.outputTokens) {
+      const input = this.panel.outputTokens;
+      input.disabled = busy || this.busy;
+      input.setAttribute('aria-label', this.enabled ? 'ChatGPT output reserve (not a provider cap)' : 'Maximum output tokens');
+      input.title = this.enabled ? 'Local context-planning reserve only. OpenAI does not accept a hard output cap in ChatGPT-plan mode.' : '';
+      const label = input.parentElement?.querySelector('span');
+      if (label) label.textContent = this.enabled ? 'Output reserve (not a cap):' : 'Output tokens/request:';
+    }
+  }
+  apply(value) {
+    if (!value || !Array.isArray(value.accounts) || value.accounts.length > 16 || value.accounts.some(a => typeof a.id !== 'string' || typeof a.label !== 'string')) throw new Error('Invalid ChatGPT relay status.');
+    const before = this.accounts.value;
+    this.snapshot = value;
+    this.accounts.replaceChildren(el('option', {value: ''}, '(Add a ChatGPT account)'), ...value.accounts.map(a => el('option', {value: a.id}, a.label + (a.signedIn ? a.planEnabled ? ' — plan enabled' : ' — plan consent required' : ' — signed out'))));
+    this.accounts.value = value.accounts.some(a => a.id === before) ? before : value.accounts.findLast(a => a.signedIn)?.id || value.accounts.at(-1)?.id || '';
+    const labels = {pending: 'Waiting for OpenAI sign-in and consent…', complete: 'Sign-in verified.', 'consent-required': 'Signed in, but ChatGPT plan permission was not granted. Use Enable plan usage or explicitly select API-key mode.', failed: 'Sign-in could not be verified. Retry sign-in.', declined: 'Sign-in was declined; no account was replaced.', expired: 'Sign-in timed out. Try again.', cancelled: 'Sign-in cancelled.'};
+    this.message.textContent = (labels[value.login] || 'Account status refreshed.') + (value.storage === 'owner-only-file' ? ' This relay remembers tokens in its owner-only local file.' : ' OAuth tokens are held only in relay memory.');
+    this.render();
+  }
+  async action(operation, consent = false) {
+    if (this.busy || this.panel.pending || this.panel.api.agent.busy || this.disposed) return;
+    // Open synchronously for browser popup policies, then sever opener before navigation.
+    let popup;
+    if (operation === 'login') { popup = this.panel.root.ownerDocument.defaultView.open('about:blank', '_blank'); if (popup) popup.opener = null; }
+    const controller = new AbortController(); this.controller = controller; this.busy = true; this.panel.refresh();
+    const loginId = operation === 'login' ? Array.from(crypto.getRandomValues(new Uint8Array(24)), x => x.toString(16).padStart(2, '0')).join('') : undefined;
+    if (loginId) this.loginId = loginId;
+    const config = {loginId, relay: this.panel.relay.value, relayToken: this.panel.token.value, accountId: this.accounts.value || undefined};
+    try {
+      if (operation === 'login' && !this.snapshot) { const current = await chatGPTControl({...config, operation: 'status', signal: controller.signal}); controller.signal.throwIfAborted(); this.apply(current); config.accountId = this.accounts.value || undefined; }
+      const value = await chatGPTControl({...config, operation, consent, signal: controller.signal});
+      controller.signal.throwIfAborted(); this.apply(value);
+      if (operation === 'logout') { this.resetCatalog(); this.message.textContent = value.revoked ? 'Signed out; renewable session revoked. Registration retained for future sign-in.' : 'Signed out locally. Remote revocation was not confirmed; disconnect this app in ChatGPT settings.'; }
+      if (operation === 'login') {
+        const url = new URL(value.authorizationUrl);
+        if (url.origin !== 'https://auth.openai.com' || url.pathname !== '/api/accounts/authorize' || url.username || url.password || url.hash) throw new Error('The relay returned an invalid sign-in address.');
+        this.link.href = url.href; this.link.hidden = false;
+        if (popup && !popup.closed) popup.location.replace(url.href);
+        const initialIds = new Set(value.accounts.map(a => a.id));
+        for (let i = 0; i < 420; i++) {
+          await new Promise((resolve, reject) => { const abort = () => { clearTimeout(timer); reject(new DOMException('Cancelled', 'AbortError')); }, timer = setTimeout(() => { controller.signal.removeEventListener('abort', abort); resolve(); }, 1500); controller.signal.addEventListener('abort', abort, {once: true}); if (controller.signal.aborted) abort(); });
+          const current = await chatGPTControl({...config, operation: 'status', signal: controller.signal}); controller.signal.throwIfAborted(); this.apply(current);
+          if (current.login !== 'pending') {
+            const added = current.accounts.find(a => !initialIds.has(a.id) && a.signedIn); if (added) this.accounts.value = added.id;
+            this.resetCatalog(); break;
+          }
+        }
+      }
+    } catch (error) { popup?.close(); if (!this.disposed) this.message.textContent = error.name === 'AbortError' ? 'Sign-in cancelled.' : error.message; }
+    finally { if (this.controller === controller) this.controller = null; if (this.loginId === loginId) this.loginId = ''; this.busy = false; this.link.hidden = true; this.link.removeAttribute('href'); if (!this.disposed) this.panel.refresh(); }
+  }
+  async cancelLogin() {
+    const loginId = this.loginId || (this.snapshot?.login === 'pending' ? this.snapshot.loginId : '');
+    this.controller?.abort(); if (!loginId) return;
+    try { const value = await chatGPTControl({relay: this.panel.relay.value, relayToken: this.panel.token.value, operation: 'cancel', loginId}); if (!this.disposed) this.apply(value); }
+    catch { if (!this.disposed) this.message.textContent = 'Local wait cancelled. Could not contact relay to cancel sign-in; its pending login expires automatically.'; }
+  }
+  dispose() { this.disposed = true; if (this.busy) void this.cancelLogin(); this.controller?.abort(); }
+}
+
+return {chatGPTControl,ChatGPTConnection};
+})();
+
+/* ..\agents\review.js */
+__modules[174]=(()=>{
+const {findModule}=__modules[43];
+const {sourceEdits}=__modules[163];
+
+
+/** Build review data from the same pure edit implementation used for the undo transaction. */
+function operationReview(project, request) {
+  const changes = [], args = request.arguments;
+  if (request.name === 'vb6.code.edit') {
+    const candidate = sourceEdits(project, args.edits);
+    for (const module of project.modules) {
+      const after = findModule(candidate, module.id);
+      if (after && module.code !== after.code) changes.push({module: module.name, before: module.code, after: after.code});
+    }
+  } else if (request.name === 'vb6.module.write') {
+    const module = findModule(project, args.module);
+    if (module) changes.push({module: module.name, before: module.code, after: args.code});
+  }
+  return {request, changes};
+}
+
+return {operationReview};
+})();
+
+/* ..\agents\recovery.js */
+__modules[175]=(()=>{
 
 /** Browser-local recovery policy. Only generation requests are retried, never IDE tools. */
 function retryDelay(attempt, retryAfterMs = 0, random = Math.random) {
@@ -19195,7 +19378,7 @@ return {retryDelay,abortableDelay,AgentRunPause};
 })();
 
 /* ..\agents\context.js */
-__modules[174]=(()=>{
+__modules[176]=(()=>{
 const {userMessage}=__modules[172];
 
 const encoder = new TextEncoder();
@@ -19261,7 +19444,7 @@ return {contextBytes,estimatedInputTokens,COMPACTION_INSTRUCTIONS,publicHistory,
 })();
 
 /* ..\agents\task-tools.js */
-__modules[175]=(()=>{
+__modules[177]=(()=>{
 const {McpError, validateArguments, awaitAbort, checkAbort}=__modules[155];
 
 const text = maxLength => ({type: 'string', minLength: 1, maxLength});
@@ -19318,7 +19501,7 @@ return {taskTools};
 })();
 
 /* ..\agents\thread.js */
-__modules[176]=(()=>{
+__modules[178]=(()=>{
 
 /** Public, bounded presentation state. Opaque native provider histories never enter this model. */
 class AgentThread {
@@ -19405,7 +19588,7 @@ return {AgentThread};
 })();
 
 /* ..\agents\permissions.js */
-__modules[177]=(()=>{
+__modules[179]=(()=>{
 const {AGENT_SCOPES, agentScope}=__modules[156];
 const {McpError, awaitAbort, checkAbort}=__modules[155];
 
@@ -19565,14 +19748,14 @@ return {AGENT_PERMISSION_PROFILES,permissionEffects,isInspectionTool,normalizePe
 })();
 
 /* ..\agents\agent.js */
-__modules[178]=(()=>{
+__modules[180]=(()=>{
 const {toolCatalog, requestBody, responseCollector, appendTurn, userMessage, providerInfo, modelId, ProviderTransportError, ProviderOutputLimitError}=__modules[172];
-const {retryDelay, abortableDelay, AgentRunPause}=__modules[173];
-const {estimatedInputTokens, COMPACTION_INSTRUCTIONS, compactionPrompt, compactedCandidates}=__modules[174];
-const {taskTools}=__modules[175];
+const {retryDelay, abortableDelay, AgentRunPause}=__modules[175];
+const {estimatedInputTokens, COMPACTION_INSTRUCTIONS, compactionPrompt, compactedCandidates}=__modules[176];
+const {taskTools}=__modules[177];
 const {normalizeAgentLimits}=__modules[171];
-const {AgentThread}=__modules[176];
-const {AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[177];
+const {AgentThread}=__modules[178];
+const {AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[179];
 
 
 
@@ -19652,10 +19835,11 @@ class CodingAgent {
     if (mode === 'full' && fullAccessConfirmed !== true) throw new Error('Full IDE access requires explicit local confirmation for every run.');
     providerInfo(provider); model = modelId(model);
     const config = normalizeAgentLimits({...this.limits, ...Object.fromEntries(Object.entries({maxTurns, maxCalls, maxTokens, tokenBudget, maxContextBytes, requestTimeoutMs, maxRetries, autoCompactTokens, contextWindowTokens, compactKeepTurns, compactOutputTokens, toolResultBytes}).filter(([, value]) => value !== undefined))});
+    const outputTokenLimit = transport.capabilities?.outputTokenLimit !== false;
     const limits = {turns: config.maxTurns, calls: config.maxCalls, output: config.maxTokens, tokens: config.tokenBudget, context: config.maxContextBytes};
     // A follow-up or Continue does not silently replenish the session's allowance.
     if (this.budgetUsed + 256 > limits.tokens) throw new Error('Session token budget reached. Increase the session budget in Permissions before continuing, or start a new task.');
-    if (continuation && !compactOnly && this.truncatedOutput && Math.min(limits.output, limits.tokens - this.budgetUsed) <= this.truncatedOutput)
+    if (continuation && !compactOnly && outputTokenLimit && this.truncatedOutput && Math.min(limits.output, limits.tokens - this.budgetUsed) <= this.truncatedOutput)
       throw new Error('Increase the output tokens per request and, if needed, the session token budget before retrying this truncated turn.');
     const projectId = this.adapter.snapshot().id;
     if (this.history.length && (this.provider !== provider || this.model !== model || !this.matchesWorkspace())) throw new Error('Start a new task when changing provider, model or reloading the project.');
@@ -19846,7 +20030,8 @@ class CodingAgent {
     } catch (error) {
       if (error instanceof AgentRunPause && !signal?.aborted) return pause(error.kind, error.message, error.details);
       if (error instanceof ProviderOutputLimitError && ['request', 'validation'].includes(phase) && !signal?.aborted) {
-        this.truncatedOutput = attemptedOutput;
+        this.truncatedOutput = outputTokenLimit ? attemptedOutput : 0;
+        if (!outputTokenLimit) return pause('output', 'The provider stopped this incomplete reply at its output limit. No partial tools ran. This authentication mode does not support increasing a provider output cap. Review Continue for an explicit retry, compact completed context, or start a smaller task. Prior usage is retained.', {attemptedOutput, outputTokenLimit: false});
         return pause('output', 'Output token limit reached. The partial reply is not complete and no partial tools ran. Increase Output tokens per request in Permissions, then review Continue to retry the pending request. Prior usage is retained; retrying may incur charges.', {attemptedOutput});
       }
       this.pendingTurn = null;
@@ -19868,7 +20053,7 @@ return {AGENT_INSTRUCTIONS,CodingAgent};
 })();
 
 /* ..\agents\followups.js */
-__modules[179]=(()=>{
+__modules[181]=(()=>{
 
 // Original local queue inspired by Codex Queue vs Steer (reviewed 2026-10-06):
 // https://developers.openai.com/blog/mastering-codex-remote-for-engineering
@@ -19923,7 +20108,7 @@ return {AgentFollowups};
 })();
 
 /* ..\agents\changes.js */
-__modules[180]=(()=>{
+__modules[182]=(()=>{
 
 // Local project review, inspired by the Codex review pane (reviewed 2026-10-06):
 // https://developers.openai.com/codex/app/review/
@@ -20060,12 +20245,12 @@ return {captureAgentReview,compareAgentReview,AgentChangeReview,restoreReviewedS
 })();
 
 /* ..\agents\conversations.js */
-__modules[181]=(()=>{
-const {CodingAgent}=__modules[178];
-const {AgentFollowups}=__modules[179];
-const {AgentChangeReview}=__modules[180];
+__modules[183]=(()=>{
+const {CodingAgent}=__modules[180];
+const {AgentFollowups}=__modules[181];
+const {AgentChangeReview}=__modules[182];
 const {normalizeAgentLimits}=__modules[171];
-const {normalizeAgentPermissions}=__modules[177];
+const {normalizeAgentPermissions}=__modules[179];
 
 
 
@@ -20144,7 +20329,7 @@ return {AgentConversations};
 })();
 
 /* ..\agents\thread-view.js */
-__modules[182]=(()=>{
+__modules[184]=(()=>{
 const {el}=__modules[6];
 
 // Weak keys release view preferences with the in-memory task; never serialize them.
@@ -20349,9 +20534,9 @@ return {AgentThreadView};
 })();
 
 /* ..\agents\workbench-view.js */
-__modules[183]=(()=>{
+__modules[185]=(()=>{
 const {el, download, clone}=__modules[6];
-const {agentLineDiff, agentReviewPatch, restoreReviewedSource}=__modules[180];
+const {agentLineDiff, agentReviewPatch, restoreReviewedSource}=__modules[182];
 
 
 const button = (text, run) => el('button', {type: 'button', onclick: run}, text);
@@ -20547,19 +20732,21 @@ return {AgentWorkbenchView};
 })();
 
 /* ..\agents\studio.js */
-__modules[184]=(()=>{
+__modules[186]=(()=>{
+const {ChatGPTConnection}=__modules[173];
 const {el, download}=__modules[6];
 const {modal, tabbedPages, icon}=__modules[16];
-const {operationReview}=__modules[170];
+const {operationReview}=__modules[174];
 const {createIdeAdapter}=__modules[166];
 const {AGENT_SCOPES}=__modules[156];
-const {CodingAgent}=__modules[178];
-const {AgentConversations}=__modules[181];
-const {AgentThreadView}=__modules[182];
-const {AgentWorkbenchView}=__modules[183];
-const {AGENT_PERMISSION_PROFILES, AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[177];
+const {CodingAgent}=__modules[180];
+const {AgentConversations}=__modules[183];
+const {AgentThreadView}=__modules[184];
+const {AgentWorkbenchView}=__modules[185];
+const {AGENT_PERMISSION_PROFILES, AgentPermissionSession, normalizeAgentPermissions, normalizePermissionConstraints, permissionSummary}=__modules[179];
 const {AGENT_LIMIT_FIELDS, AGENT_LIMIT_PRESETS, normalizeAgentLimits, loadAgentLimits, saveAgentLimits}=__modules[171];
 const {PROVIDERS, createTransport, listModels, modelId}=__modules[172];
+
 
 
 
@@ -20701,7 +20888,7 @@ class AgentPanel {
     this.exampleSelect = examples;
     this.contextStatus = el('div', {class: 'agent-context', 'aria-label': 'Task context usage'});
     this.recoveryText = el('p');
-    this.recoverySettings = button('Review limits…', () => { if (this.api.agent.failure?.kind === 'access') { this.pages.select('connection'); this.keyInput.focus(); return; } this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
+    this.recoverySettings = button('Review limits…', () => { if (this.api.agent.failure?.kind === 'access') { this.pages.select('connection'); (this.chatgpt?.enabled ? this.chatgpt.login : this.keyInput).focus(); return; } this.pages.select('permissions'); const control = ({output: this.outputTokens, context: this.contextLimit, calls: this.callLimit, requests: this.turns})[this.api.agent.limit?.kind] || this.budget; control.focus(); control.select(); });
     this.recoveryContinue = button('Resume task', () => this.start(true), 'run');
     this.recovery = el('div', {class: 'agent-limit-recovery', hidden: true, role: 'status'}, this.recoveryText,
       el('div', {class: 'agent-actions'}, this.recoverySettings, this.recoveryContinue));
@@ -20723,13 +20910,14 @@ class AgentPanel {
     this.token = input('Agent relay token', {type: 'password', autocomplete: 'off', spellcheck: 'false'});
     this.browserConsent = input('Accept browser key exposure', {type: 'checkbox'});
     this.refreshModels = button('Refresh Models', () => this.discover());
-    this.clearKey = button('Clear Credentials', () => { this.keyInput.value = ''; this.token.value = ''; this.status.textContent = 'Credentials cleared.'; });
-    this.provider.onchange = () => { this.keyInput.value = ''; this.model.value = ''; this.models.replaceChildren(el('option', {value: ''}, '(Refresh models)')); };
+    this.clearKey = button('Clear Credentials', () => { this.keyInput.value = ''; this.token.value = ''; this.chatgpt.snapshot = null; this.chatgpt.accounts.replaceChildren(el('option', {value: ''}, '(Refresh account status)')); this.status.textContent = 'Browser credentials cleared. Use ChatGPT Sign out to revoke its relay session.'; });
+    this.provider.onchange = () => { this.chatgpt?.render(); this.keyInput.value = ''; this.model.value = ''; this.models.replaceChildren(el('option', {value: ''}, '(Refresh models)')); };
     const direct = group('Direct API', field('API key:', this.keyInput), field('Personal use only:', this.browserConsent), el('p', {}, 'The key is exposed to this page and browser extensions. It is held only until this window closes or the page reloads; it is never saved in the project or browser storage. Enable the checkbox to accept this risk.'));
-    const relay = group('Local relay', field('Relay URL:', this.relay), field('Access token:', this.token), el('p', {}, 'Start tools/agent-relay.mjs with provider API keys in environment variables. Only the local access token enters the browser. The relay must explicitly allow this IDE origin.'));
+    const relay = group('Local relay', field('Relay URL:', this.relay), field('Access token:', this.token), el('p', {}, 'Start tools/agent-relay.mjs. For API-key mode use provider keys in environment variables; ChatGPT mode uses the Sign in button below. Only the local access token enters the browser. The relay must explicitly allow this IDE origin.'));
     const toggle = () => { direct.hidden = this.connection.value !== 'direct'; relay.hidden = this.connection.value !== 'relay'; }; this.connection.onchange = toggle; toggle();
-    return el('div', {class: 'agent-page'}, field('Provider:', this.provider), field('Connection:', this.connection), relay, direct,
-      group('Model', field('Available models:', this.models), field('Model ID:', this.model), el('div', {class: 'agent-actions'}, this.refreshModels, this.clearKey), el('p', {}, 'Model availability and tool support depend on your account. API usage is billed by the selected provider. No keys or requests are included in exported applications.')));
+    this.chatgpt = new ChatGPTConnection(this); this.chatgpt.render();
+    return el('div', {class: 'agent-page'}, field('Provider:', this.provider), field('Connection:', this.connection), relay, direct, this.chatgpt.root,
+      group('Model', field('Available models:', this.models), field('Model ID:', this.model), el('div', {class: 'agent-actions'}, this.refreshModels, this.clearKey), el('p', {}, 'Model availability and tool support depend on your account. API-key usage is billed by the selected provider. ChatGPT mode uses your eligible plan allowance. No keys or requests are included in exported applications.')));
   }
   permissionsPage() {
     this.mode = choices('Agent permission mode', Object.entries(AGENT_PERMISSION_PROFILES));
@@ -20802,12 +20990,12 @@ class AgentPanel {
     if (Object.hasOwn(this.toolRules, selected)) this.ruleList.value = selected;
   }
   profileChanged() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     this.approvalPolicy.value = ['readonly', 'plan', 'full'].includes(this.mode.value) ? 'never' : 'on-request';
     this.updatePermissions();
   }
   updatePermissions() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     try {
       const config = this.readPermissions(), host = this.api.agent.permissionConstraints;
       if (!host.allowedModes.includes(config.mode) || config.permissionMinutes > host.maxMinutes) throw new Error('These permissions exceed the host policy.');
@@ -20888,14 +21076,15 @@ class AgentPanel {
   activityPage() { this.activity = el('pre', {class: 'agent-log agent-activity', tabindex: 0, 'aria-label': 'Coding agent activity'}); return el('div', {class: 'agent-page'}, this.activity); }
   transport() {
     if (this.connection.value === 'direct' && !this.browserConsent.checked) throw new Error('Accept browser key exposure in Connection, or use the local relay.');
-    return this.transportFactory({provider: this.provider.value, apiKey: this.keyInput.value, relay: this.connection.value === 'relay' ? this.relay.value : '', relayToken: this.token.value, requestTimeoutMs: this.readLimits().requestTimeoutMs});
+    const auth = this.chatgpt.options();
+    return this.transportFactory({...auth, provider: this.provider.value, apiKey: this.keyInput.value, relay: this.connection.value === 'relay' ? this.relay.value : '', relayToken: this.token.value, requestTimeoutMs: this.readLimits().requestTimeoutMs});
   }
   async discover() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     this.pending = new AbortController(); this.refresh(); this.status.textContent = 'Reading provider model catalog…';
     try {
-      const models = await listModels(this.transport(), this.provider.value, this.pending.signal);
-      this.models.replaceChildren(el('option', {value: ''}, '(Choose a model)'), ...models.map(id => el('option', {value: id}, id)));
+      const models = await listModels(this.transport(), this.provider.value, this.pending.signal, {details: true});
+      this.models.replaceChildren(el('option', {value: ''}, '(Choose a model)'), ...models.map(item => el('option', {value: item.id}, item.label)));
       this.status.textContent = models.length + ' models returned. Choose one supporting function calls.';
     } catch (error) { this.status.textContent = error.message; }
     finally { this.pending = null; this.refresh(); }
@@ -20903,7 +21092,7 @@ class AgentPanel {
   async start(continuation = false, compactOnly = false, queuedId = null) {
     // A draft /compact command must never replace a separately selected queue item.
     if (!continuation && !queuedId && this.prompt.value.trim() === '/compact') compactOnly = true;
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     const setup = new AbortController(); this.pending = setup; this.refresh();
     try {
       const task = this.api.conversations.active, queued = queuedId ? task.followups.get(queuedId) : null;
@@ -20913,6 +21102,8 @@ class AgentPanel {
       if (!continuation && !compactOnly && !prompt.trim()) throw new Error('Enter a task on the Task tab.');
       if (compactOnly && (!this.api.agent.canCompact || provider !== this.api.agent.provider || model !== this.api.agent.model)) throw new Error('Choose the task’s original provider/model and a task with completed context to compact.');
       if (continuation && (!this.api.agent.canResume || provider !== this.api.agent.provider || model !== this.api.agent.model)) throw new Error("Choose the task's original provider/model and a resumable task, or start a new task.");
+      const binding = this.chatgpt.binding();
+      if ((continuation || compactOnly || this.api.agent.historyBytes) && this.api.conversations.active.authBinding && this.api.conversations.active.authBinding !== binding) throw new Error('This task belongs to another billing mode or ChatGPT account. Restore its connection, or create a new task with reviewed context.');
       const transport = this.transport(), permissions = this.readPermissions(), {mode, scopes} = permissions;
       if (!this.api.agent.permissionConstraints.allowedModes.includes(mode) || permissions.permissionMinutes > this.api.agent.permissionConstraints.maxMinutes) throw new Error('These permissions exceed the host policy.');
       const fullConfirmation = input('Confirm Full IDE access for this run', {type: 'checkbox'});
@@ -20924,8 +21115,8 @@ class AgentPanel {
         ...(queued ? [el('p', {}, 'Send the selected queued message to task ' + task.title + '? The unsent composer draft is not included.'), el('pre', {class: 'agent-log'}, prompt.slice(0, 4000) + (prompt.length > 4000 ? '\n[Preview shortened; cancel to edit the full queued message.]' : ''))] : []),
         ...(compactOnly ? [el('p', {}, 'Request a checkpoint of this task’s public history from the same provider. No IDE tools will execute. Existing context is replaced only after a valid summary; the public thread and cumulative budget remain. Summaries may lose detail.')] : []),
         el('p', {}, 'Recovery: up to ' + limits.maxRetries + ' automatic retries per generation request. Checkpoints and retry attempts consume this run’s request and session allowances.'),
-        el('p', {}, 'This may incur API charges. Review source for secrets before continuing. Read access includes project files and debugger data.'),
-        el('p', {}, 'Session allowance: ' + limits.tokenBudget.toLocaleString('en-US') + ' tokens; ' + this.api.agent.budgetUsed.toLocaleString('en-US') + ' already accounted. Output cap: ' + limits.maxTokens.toLocaleString('en-US') + ' per request. This run allows ' + limits.maxTurns + ' requests and ' + limits.maxCalls + ' tool calls. Larger limits may substantially increase costs.'),
+        el('p', {}, this.chatgpt.description() + ' Review source for secrets before continuing. Read access includes project files and debugger data.'),
+        el('p', {}, 'Session allowance: ' + limits.tokenBudget.toLocaleString('en-US') + ' tokens; ' + this.api.agent.budgetUsed.toLocaleString('en-US') + ' already accounted. ' + (this.chatgpt.enabled ? 'No per-request output cap in ChatGPT preview. ' : 'Output cap: ' + limits.maxTokens.toLocaleString('en-US') + ' per request. ') + 'This run allows ' + limits.maxTurns + ' requests and ' + limits.maxCalls + ' tool calls. Larger limits may substantially increase costs.'),
         ...(continuation ? [el('p', {}, this.api.agent.pendingTurn ? 'Continue first processes the validated deferred batch without requesting it again. No operation in that batch has executed. Original arguments are retained; stale revisions are rejected, never automatically rewritten. Current permission choices still apply.' : 'Continue sends the pending request with prior completed tool results, not a duplicate task prompt. Run limits and permissions are reviewed again. A failed or truncated request may already have incurred charges.'), el('p', {}, this.api.agent.failure?.retryAfterMs ? 'Provider suggested retry delay: ' + Math.ceil(this.api.agent.failure.retryAfterMs / 1000) + ' seconds. Continue will honor any remaining delay.' : '')] : []),
         el('p', {}, permissionSummary(permissions)),
         el('p', {}, mode === 'full' ? 'FULL IDE ACCESS: project edits/deletions, runtime execution and debugger evaluation may occur without further approval. Running project code may use its configured networks, data sources or native integrations. This cannot be undone by Stop. This does not add arbitrary host shell/disk access or bypass provider/browser security.' : mode === 'scoped' ? 'Delegated scopes: ' + (scopes.join(', ') || '(none)') + '. Other effects use the approval policy.' : ['readonly', 'plan'].includes(mode) ? 'Read-only boundary: no project edits or execution. Plan mode produces a proposal, not automatic implementation.' : mode === 'autoedit' ? 'Automatically edit non-destructive code, designer, virtual files, public data definitions and workspace. Ask before execution, project replacement and destructive effects.' : 'Each change or execution requires approval unless an explicit allow rule applies.'),
@@ -20937,6 +21128,8 @@ class AgentPanel {
       if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');
       this.pending = null; this.api.conversations.active.limits = limits; this.api.conversations.defaultLimits = saveAgentLimits(limits);
       this.api.conversations.active.permissions = permissions;
+      this.api.conversations.active.authBinding = binding;
+      this.api.conversations.active.authDescription = this.chatgpt.description();
       const options = {provider, model, prompt, transport, ...permissions, fullAccessConfirmed: mode === 'full' && fullConfirmation.checked, ...limits};
       this.sendingQueued = queued ? {task, item: queued} : null;
       const run = compactOnly ? this.api.agent.compact(options) : continuation ? this.api.agent.resume(options) : this.api.agent.run(options);
@@ -20945,9 +21138,9 @@ class AgentPanel {
     } catch (error) { this.status.textContent = error.name === 'AbortError' ? 'Agent cancelled.' : error.message; }
     finally { this.sendingQueued = null; if (this.pending === setup) this.pending = null; this.refresh(); }
   }
-  cancel() { this.pending?.abort(); this.api.agent.stop(); }
+  cancel() { if (this.chatgpt?.busy) void this.chatgpt.cancelLogin(); this.pending?.abort(); this.api.agent.stop(); }
   newTask() {
-    if (this.pending || this.api.agent.busy) return;
+    if (this.pending || this.api.agent.busy || this.chatgpt?.busy) return;
     try { this.api.conversations.active.draft = this.prompt.value; this.api.conversations.create(); this.syncTask(); } catch (error) { this.status.textContent = error.message; }
   }
   event(event) {
@@ -20978,7 +21171,7 @@ class AgentPanel {
     this.revokeTool.disabled = !lease?.active || !lease.approvedTools.length;
     this.budgetMeter.max = budget; this.budgetMeter.value = Math.min(budget, used); this.budgetMeter.setAttribute('aria-valuetext', Math.min(100, Math.round(used / budget * 100)) + '% of session budget accounted');
     this.recovery.hidden = !agent.canResume;
-    this.recoveryText.textContent = agent.limit?.message || ({access: 'Check provider credentials and model access in Connection, then Continue. No automatic retry; completed edits are retained.', quota: 'Provider quota/billing needs attention. Retry with Continue after the provider account is ready; prior context and usage are retained.', request: 'The provider rejected request settings. Review the model/output limits before Continue, or create a new task to change models.'})[agent.failure?.kind] || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
+    this.recoveryText.textContent = agent.limit?.message || ({access: this.chatgpt.enabled ? 'Refresh ChatGPT account status or sign in again in Connection, then Continue. API billing is never used automatically; completed edits are retained.' : 'Check provider credentials and model access in Connection, then Continue. No automatic retry; completed edits are retained.', quota: 'Provider quota/billing needs attention. Retry with Continue after the provider account is ready; prior context and usage are retained.', request: 'The provider rejected request settings. Review the model/output limits before Continue, or create a new task to change models.'})[agent.failure?.kind] || (agent.state === 'retry' ? 'The provider request was interrupted. Review the connection and budget before a manual retry. Completed edits will not be replayed.' : '');
     if (agent.limit?.required) this.recoveryText.textContent += ' Required for this batch/request: ' + agent.limit.required.toLocaleString('en-US') + (agent.limit.kind === 'context' ? ' bytes.' : ' tool calls.');
     this.threadView.update(agent.thread, {taskId: task.id, busy: agent.busy});
     const planStamp = task.id + ':' + agent.plan.revision;
@@ -20990,33 +21183,34 @@ class AgentPanel {
     if (this.tasksStamp !== stamp) { this.tasksStamp = stamp; this.taskList.replaceChildren(...tasks.map(item => el('option', {value: item.id}, item.title + ' — ' + (item.currentWorkspace ? item.state : 'previous project')))); }
     this.taskList.value = task.id;
     if (this.displayedTask !== task.id) { this.displayedTask = task.id; this.taskName.value = task.title; }
-    this.taskDetails.textContent = 'Task: ' + task.title + '\nProvider/model: ' + (agent.provider ? agent.provider + ' / ' + agent.model : '(not started)') + '\nState: ' + agent.state + '\nProject session: ' + (agent.matchesWorkspace() ? 'current' : 'changed — cannot resume') + '\nContext is memory-only; no signatures, tool history or grants are copied by New Task with Context.';
+    this.taskDetails.textContent = 'Task: ' + task.title + '\nProvider/model: ' + (agent.provider ? agent.provider + ' / ' + agent.model : '(not started)') + '\nBilling: ' + (task.authDescription || '(not started)') + '\nState: ' + agent.state + '\nProject session: ' + (agent.matchesWorkspace() ? 'current' : 'changed — cannot resume') + '\nContext is memory-only; no signatures, tool history or grants are copied by New Task with Context.';
 
     const activityStamp = task.id + ':' + (entries.at(-1)?.id || 0);
     if (this.activityStamp !== activityStamp) { this.activityStamp = activityStamp; this.activity.textContent = entries.filter(event => !['user', 'assistant', 'question', 'answer'].includes(event.type)).map(event => event.time.slice(11, 19) + ' ' + event.type + ': ' + event.text + (event.arguments ? '\n' + JSON.stringify(event.arguments, null, 2) : '') + (event.result ? '\n' + JSON.stringify(event.result, null, 2) : '')).join('\n').slice(-200000); }
   }
   refresh(render = true) {
-    const busy = !!this.pending || this.api.agent.busy;
+    const busy = !!this.pending || this.api.agent.busy || !!this.chatgpt?.busy;
     this.revokeButton.disabled = !busy;
     this.compactButton.disabled = busy || !this.api.agent.canCompact;
     this.sendButton.disabled = busy || !!this.api.agent.pendingTurn; this.composerStop.disabled = !busy;
     this.recoveryContinue.disabled = busy || !this.api.agent.canResume; this.recoverySettings.disabled = busy;
     this.runButton.disabled = busy || !!this.api.agent.pendingTurn; this.continueButton.disabled = busy || !this.api.agent.canResume; this.stopButton.disabled = !busy; this.newButton.disabled = busy;
     for (const control of [this.provider, this.connection, this.model, this.models, this.keyInput, this.relay, this.token, this.browserConsent, this.refreshModels, this.clearKey, this.mode, this.quickMode, this.approvalPolicy, this.permissionMinutes, this.ruleTool, this.ruleAction, this.ruleAdd, this.ruleRemove, this.ruleList, this.resetPermissions, ...this.scopeRules.map(item => item.node), this.turns, this.outputTokens, this.budget, this.callLimit, this.contextLimit, this.requestTimeout, ...this.recoveryLimits.map(item => item.node), this.limitPreset, this.exampleSelect, this.taskList, this.taskName, this.renameButton, this.deleteButton, this.handoffButton, ...this.scopeInputs.map(item => item.node)]) control.disabled = busy;
+    this.chatgpt?.render(!!this.pending || this.api.agent.busy);
     if (render) this.render();
     this.workbench.update();
   }
-  dispose() { this.api.conversations.active.draft = this.prompt.value; this.cancel(); this.keyInput.value = ''; this.token.value = ''; this.unlisten?.(); if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame); this.threadView.dispose(); }
+  dispose() { this.chatgpt?.dispose(); this.api.conversations.active.draft = this.prompt.value; this.cancel(); this.keyInput.value = ''; this.token.value = ''; this.unlisten?.(); if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame); this.threadView.dispose(); }
 }
 
 return {installCodingAgents};
 })();
 
 /* studio-entry.js */
-__modules[185]=(()=>{
+__modules[187]=(()=>{
 const {VB6Studio, StudioAPI}=__modules[153];
 const {installMcp}=__modules[169];
-const {installCodingAgents}=__modules[184];
+const {installCodingAgents}=__modules[186];
 
 
 
@@ -21025,5 +21219,5 @@ if (globalThis.vb6Studio) installCodingAgents(globalThis.vb6Studio, StudioAPI);
 
 return {VB6Studio,StudioAPI,installMcp};
 })();
-globalThis["VB6Studio"]=__modules[185];
+globalThis["VB6Studio"]=__modules[187];
 })();
