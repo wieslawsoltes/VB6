@@ -7832,7 +7832,7 @@ class RuntimeDebugger {
     const instruction=top?frame.proc.code[frame.pc]:frame.activeInstruction;
     return instruction||frame.activeInstruction||frame.proc.code.at(-1)||{source:frame.module.name,procedure:frame.proc.name,line:frame.proc.line};
   }
-  stack(){return this.vm.stack.map((frame,index)=>{const ins=this.location(frame,index===this.vm.stack.length-1);return {index,id:frame.debugId,module:frame.module.name,procedure:frame.proc.name,line:ins.line,column:ins.column,endColumn:ins.endColumn,depth:frame.depth};});}
+  stack(){return this.vm.stack.map((frame,index)=>{const ins=this.location(frame,index===this.vm.stack.length-1);return {index,id:frame.debugId,module:frame.module.name,procedure:frame.proc.name,line:ins.line,column:ins.column,endColumn:ins.endColumn,depth:frame.depth,...(frame.pinnedSource===undefined?{}:{sourceText:frame.pinnedSource,revision:frame.pinnedRevision,retained:true})};});}
   async suspend(instruction,frame,reason,details={}){
     const vm=this.vm;
     if(vm.debugEvaluation)return;
@@ -7849,14 +7849,14 @@ class RuntimeDebugger {
   async checkpoint(ins,frame){
     const visible=isSequencePoint(ins);if(!visible&&!(ins?.op==='return'&&ins.implicit))return;
     const vm=this.vm,lineChanged=frame.lastLine!==ins.line||frame.pc<=frame.lastPc;
-    const bp=vm.breakpoints.get(lower(ins.source)+':'+ins.line);
+    const bp=frame.pinnedSource===undefined?vm.breakpoints.get(lower(ins.source)+':'+ins.line):null;
     let reason=null,details={};
     if(visible&&lineChanged&&bp&&bp.enabled!==false){
       try{if(!bp.condition||truth(vm.debugInspector.node(vm.debugInspector.parse(bp.condition),frame,{count:0},0)))reason='breakpoint';}
       catch(error){reason='breakpoint-condition';details.conditionError=error.message;}
     }
     if(visible&&vm.stepMode&&(vm.stepMode.mode==='into'||vm.stepMode.mode==='over'&&frame.depth<=vm.stepMode.depth||vm.stepMode.mode==='out'&&frame.depth<vm.stepMode.depth))reason ||= 'step';
-    if(visible&&vm.runTarget&&lower(ins.source)===lower(vm.runTarget.module)&&ins.line===vm.runTarget.line&&(!vm.runTarget.column||ins.column===vm.runTarget.column))reason ||= 'run-to-cursor';
+    if(visible&&frame.pinnedSource===undefined&&vm.runTarget&&lower(ins.source)===lower(vm.runTarget.module)&&ins.line===vm.runTarget.line&&(!vm.runTarget.column||ins.column===vm.runTarget.column))reason ||= 'run-to-cursor';
     for(const watch of vm.watchpoints){
       // Procedure watches observe each live invocation, including a suspended
       // caller modified ByRef by a callee. Module watches retain one baseline
@@ -8169,13 +8169,23 @@ function instructionMap(oldCode,newCode,shape){
  return map;
 }
 
-return {instructionKey,linearInstruction,instructionMap};
+/** Index each new instruction once. Ambiguous duplicates deliberately remain
+ * unmapped; a large inactive/retained procedure must not require an O(n*m) scan.
+ */
+function uniqueInstructionLines(oldCode,newCode){
+  const unique=new Map(),lines=new Map();
+  for(const instruction of newCode){const key=instructionKey(instruction);unique.set(key,unique.has(key)?null:instruction);}
+  for(const instruction of oldCode){if(instruction.implicit)continue;const match=unique.get(instructionKey(instruction));if(match)lines.set(instruction.line,match.line);}
+  return lines;
+}
+
+return {instructionKey,linearInstruction,instructionMap,uniqueInstructionLines};
 })();
 
 /* live-edit.js */
 __modules[87]=(()=>{
 const {statementIndex}=__modules[82];
-const {instructionMap,linearInstruction,instructionKey}=__modules[86];
+const {instructionMap,linearInstruction,instructionKey,uniqueInstructionLines}=__modules[86];
 const {VBError}=__modules[17];
 
 
@@ -8191,6 +8201,24 @@ function instructionShape(ins){
   return rest;
 }
 function sameActiveLayout(a,b){return a.length===b.length&&a.every((ins,i)=>json(instructionShape(ins))===json(instructionShape(b[i])));}
+/** Static locals outlive the procedure invocation. Ordinary stack versioning
+ * cannot reinterpret their existing Cells, including those in inactive methods.
+ * New slots are safe; removing or changing an existing storage layout is not.
+ */
+function validateStaticStorage(oldModule,newModule){
+  const declarations=proc=>{
+    const slots=new Map();
+    for(const ins of proc?.code||[])if(ins.op==='dim'&&(ins.static||proc.static))for(const declaration of ins.decls){
+      const {initial,...layout}=declaration;
+      slots.set(declaration.name.toLowerCase(),json(layout));
+    }
+    return slots;
+  };
+  for(const [name,oldProc]of oldModule.procedures){
+    const before=declarations(oldProc),after=declarations(newModule.procedures.get(name));
+    for(const [key,layout]of before)if(after.get(key)!==layout)throw new VBError('Restart required: static local storage changed: '+oldModule.name+'.'+oldProc.name+'.'+key,5);
+  }
+}
 /** Validate the entire patch before touching any live object, frame or bytecode. */
 function planLiveEdit(current,next,stack){
   if(!next.valid){const d=next.diagnostics[0];throw new VBError('Code changes were not applied: '+d.message,d.number,d.source,d.line);}
@@ -8199,6 +8227,7 @@ function planLiveEdit(current,next,stack){
   const updates=[],lineMap=new Map(),frameUpdates=[],active=new Set(stack.map(f=>f.proc));
   for(const [key,oldModule]of current.modules){
     const newModule=next.modules.get(key);
+    validateStaticStorage(oldModule,newModule);
     if(json(moduleShape(oldModule))!==json(moduleShape(newModule)))throw new VBError('Restart required: module declarations, types, events, forms, or options changed in '+oldModule.name,5);
     for(const [name,oldProc]of oldModule.procedures){
       const newProc=newModule.procedures.get(name);
@@ -8217,7 +8246,7 @@ function planLiveEdit(current,next,stack){
         for(const [oldIndex,newIndex]of mapping)if(oldProc.code[oldIndex]&&newProc.code[newIndex]&&!oldProc.code[oldIndex].implicit)lineMap.set(key+':'+oldProc.code[oldIndex].line,newProc.code[newIndex].line);
       }
       else if(same)oldProc.code.forEach((ins,i)=>{if(!ins.implicit)lineMap.set(key+':'+ins.line,newProc.code[i].line);});
-      else for(const ins of oldProc.code.filter(i=>!i.implicit)){const comparable=instructionKey(ins),matches=newProc.code.filter(n=>instructionKey(n)===comparable);if(matches.length===1)lineMap.set(key+':'+ins.line,matches[0].line);}
+      else for(const [line,mapped]of uniqueInstructionLines(oldProc.code,newProc.code))lineMap.set(key+':'+line,mapped);
       updates.push({oldProc,newProc});
     }
   }
@@ -8234,11 +8263,61 @@ function nextStatementIndex(frame,line,column=null){
   return target;
 }
 
-return {sameActiveLayout,planLiveEdit,nextStatementIndex};
+return {sameActiveLayout,validateStaticStorage,planLiveEdit,nextStatementIndex};
+})();
+
+/* versioned-edit.js */
+__modules[88]=(()=>{
+const {VBError}=__modules[17];
+const {uniqueInstructionLines}=__modules[86];
+const {planLiveEdit,validateStaticStorage}=__modules[87];
+
+
+
+const json=value=>JSON.stringify(value,(_,v)=>v instanceof Map?[...v]:v);
+const shape=m=>({kind:m.kind,interfaces:m.interfaces,defaultTypes:m.defaultTypes,defaultMember:m.defaultMember,declarations:m.declarations,types:m.types,events:m.events,enums:m.enums,form:m.form,optionExplicit:m.optionExplicit,optionBase:m.optionBase,optionCompare:m.optionCompare});
+const execution=s=>{const {errorTrapping,...rest}=s||{};return rest;};
+/** Prefer in-place Edit and Continue. If an active statement/control region or
+ * signature cannot be migrated, retain its invocation's code revision and apply
+ * the new procedure graph to future calls. Never invent a new PC, recreate a
+ * ByRef cell, replay a completed expression, or unwind a suspended error handler.
+ * Changing object/module storage is still a separate operation: versioning code
+ * must not silently reset fields or invalidate already-exported native callbacks.
+ */
+function planVersionedEdit(current,next,stack,revision=0){
+  if(!stack.some(f=>f.pinnedSource!==undefined)){
+    try{return planLiveEdit(current,next,stack);}catch(error){if(!(error instanceof VBError))throw error;}
+  }
+  if(!next.valid){const d=next.diagnostics[0];throw new VBError('Code changes were not applied: '+d.message,d.number,d.source,d.line);}
+  if(json([...current.modules.keys()])!==json([...next.modules.keys()]))throw new VBError('Restart required: changing the module set also changes live storage',5);
+  if(current.startup!==next.startup||json(execution(current.settings))!==json(execution(next.settings)))throw new VBError('Restart required: project execution settings changed',5);
+  const updates=[],frameUpdates=[],lineMap=new Map(),removedProcedures=[],retainedFrames=[];
+  // Finish every validation and snapshot before returning a commit plan.
+  for(const [key,oldModule]of current.modules){
+    const newModule=next.modules.get(key);
+    validateStaticStorage(oldModule,newModule);
+    if(json(shape(oldModule))!==json(shape(newModule)))throw new VBError('Restart required: live module/object storage changed in '+oldModule.name,5);
+    for(const [name,oldProc]of oldModule.procedures){
+      const newProc=newModule.procedures.get(name);
+      if(!newProc){removedProcedures.push({module:oldModule,name});continue;}
+      updates.push({oldProc,newProc});
+      for(const [line,mapped]of uniqueInstructionLines(oldProc.code||[],newProc.code||[]))lineMap.set(key+':'+line,mapped);
+    }
+  }
+  for(const frame of stack){
+    const source=frame.pinnedSource??frame.module.source;
+    const oldRevision=frame.pinnedRevision??revision;
+    frameUpdates.push({frame,proc:{...frame.proc},pinnedSource:source,pinnedRevision:oldRevision});
+    retainedFrames.push({id:frame.debugId,module:frame.module.name,procedure:frame.proc.name,revision:oldRevision});
+  }
+  return {updates,frameUpdates,lineMap,removedProcedures,retainedFrames};
+}
+
+return {planVersionedEdit};
 })();
 
 /* vm.js */
-__modules[88]=(()=>{
+__modules[89]=(()=>{
 const {VBScalar,SCALAR_TYPES,printScalar,unbox,tagScalar,scalarType,storageScalar,readScalar,literalScalar,signedLiteralScalar}=__modules[21];
 const {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements}=__modules[82];
 const {VBWin32Bridge}=__modules[83];
@@ -8250,6 +8329,7 @@ const {hasDataDefault,hasDataMember,dataDefaultType}=__modules[25];
 const {defaultIdentifierType}=__modules[77];
 const {DebugInspector}=__modules[85];
 const {planLiveEdit,nextStatementIndex}=__modules[87];
+const {planVersionedEdit}=__modules[88];
 const {encodeVariable,decodeVariable,makeRecord}=__modules[42];
 const { Signal, lower, VERSION }=__modules[20];
 const { VBError, splitTop, tokenize }=__modules[17];
@@ -8258,6 +8338,7 @@ const { compileProject }=__modules[81];
 const { NOTHING, MISSING, objectIdentity, objectSupports, VBErrorValue, LazyCell, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency, VBDecimal, cloneValue, coerce, defaultValue, numeric, truth, vbString, unary, binary, describe }=__modules[21];
 const { VirtualFileSystem }=__modules[43];
 const { createLibrary, MemoryRecordset }=__modules[60];
+
 
 
 
@@ -8345,6 +8426,17 @@ class VirtualMachine extends Signal {
     this.immediatePreparation=(async()=>{try{await this.initialize();if(this.state==='stopped')throw new StopExecution();this.setState('idle');return this;}catch(error){this.stop();throw error;}})();
     return this.immediatePreparation;
   }
+  /** Enable event-driven design execution only after an explicit debugger action.
+   * Preparing the session still never executes project startup. */
+  configureImmediateEvents(enabled){
+    if(typeof enabled!=='boolean'||!this.immediateContext||!this.options.debuggerEnabled)throw new VBError('A prepared design-mode debugger session is required',5);
+    if(this.debugEvaluation||this.stack.length||!['idle','running'].includes(this.state))throw new VBError('Finish the current handler or Reset before changing Immediate event delivery',5);
+    this.immediateEvents=enabled;
+    if(!enabled){for(const event of this.eventQueue)event.resolve?.();this.eventQueue=[];}
+    this.setState(enabled?'running':'idle');
+    if(enabled)queueMicrotask(()=>this.processEvents());
+    return {enabled,state:this.state,startupExecuted:false};
+  }
   async initialize() {
     if(!this.program.valid)throw new VBError(this.program.diagnostics.map(d=>`${d.source}:${d.line}: ${d.message}`).join('\n'),1002);
     for(const module of this.program.modules.values())if(module.kind!=='class')this.instances.set(lower(module.name),new VBInstance(module));
@@ -8404,7 +8496,7 @@ class VirtualMachine extends Signal {
   }
   async attachForm(instance){if(this.host.createForm){instance.formObject=await this.host.createForm(structuredClone(instance.module.form),instance,this);for(const [name,control]of instance.formObject.controlMap||[])instance.fields.set(lower(name),new Cell('Object',control));this.formInstances.add(instance);}}
   formProcedure(instance,event){return instance.module.procedures.get((instance.module.form?.type==='MDIForm'?'mdiform_':'form_')+event);}
-  async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){instance.loaded=true;await instance.formObject.initializeDataBindings?.();const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
+  async loadForm(instance){if(!instance?.__vbInstance||!instance.formObject)throw new VBError('Object does not support this property or method',438);if(!instance.loaded){if(this.immediateContext&&this.immediateEvents&&!instance.designInitialized){instance.designInitialized=true;const init=this.formProcedure(instance,'initialize');if(init)await this.callProcedure(instance,init,[]);}instance.loaded=true;await instance.formObject.initializeDataBindings?.();const load=this.formProcedure(instance,'load');if(load)await this.callProcedure(instance,load,[]);}}
   async showForm(instance,modal=false){
     if(this.immediateContext)this.host.debugInteraction?.();
     if(modal&&(instance.module.form?.type==='MDIForm'||Number(instance.module.form?.properties?.MDIChild)))throw new VBError('MDI forms and child forms cannot be shown modally',401);
@@ -8757,14 +8849,16 @@ class VirtualMachine extends Signal {
     if(this.breakpoints.size||this.stepMode||this.runTarget||this.watchpoints.length||this.pauseRequested)await this.debugger.checkpoint(ins,frame);
     const now=performance.now();if(now-this.lastYield>=this.options.sliceMilliseconds){await new Promise(resolve=>setTimeout(resolve,0));this.lastYield=performance.now();if(this.state==='stopped')throw new StopExecution();}
   }
-  applyEdits(project){
+  applyEdits(project,{policy='strict'}={}){
+    if(!['strict','versioned'].includes(policy))throw new VBError('Invalid live-edit policy',5);
     if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before editing code',5);
     if(this.state!=='paused'&&!(this.state==='running'&&!this.stack.length))throw new VBError('Pause execution before applying code changes',5);
-    const next=compileProject(project),plan=planLiveEdit(this.program,next,this.stack),invalidated=[];
+    const next=compileProject(project),plan=policy==='versioned'?planVersionedEdit(this.program,next,this.stack,this.codeRevision||0):planLiveEdit(this.program,next,this.stack),invalidated=[];
     // Procedure objects retain their identity: pending events, property references,
     // class instances and suspended caller frames all observe the committed code.
     for(const {oldProc,newProc}of plan.updates)Object.assign(oldProc,newProc);
     for(const {frame,...update}of plan.frameUpdates)Object.assign(frame,update);
+    for(const {module,name}of plan.removedProcedures||[])module.procedures.delete(name);
     for(const frame of this.stack.slice(0,-1)){frame.activePc=frame.pc-1;frame.activeInstruction=frame.proc.code[frame.activePc];}
     for(const [key,module]of this.program.modules){const replacement=next.modules.get(key);for(const [name,proc]of replacement.procedures)if(!module.procedures.has(name))module.procedures.set(name,proc);module.source=replacement.source;}
     const breakpoints=[];for(const bp of this.breakpoints.values()){const mapped=plan.lineMap.get(lower(bp.module)+':'+bp.line);if(mapped===undefined)invalidated.push(bp);else breakpoints.push({...bp,line:mapped});}
@@ -8772,12 +8866,13 @@ class VirtualMachine extends Signal {
     this.program.settings=next.settings;this.program.sourceProject=structuredClone(project);this.codeRevision=(this.codeRevision||0)+1;
     this.emit('breakpoints',breakpoints);
     if(this.state==='paused'){this.debugPauseId++;const frame=this.currentFrame,ins=frame.proc.code[frame.pc];frame.lastLine=ins?.line??null;frame.lastPc=frame.pc;this.emit('pause',{instruction:ins,frame,stack:[...this.stack],reason:'code-edit',pauseId:this.debugPauseId});}
-    const result={revision:this.codeRevision,breakpoints,invalidatedBreakpoints:invalidated,updatedProcedures:plan.updates.length};
+    const result={revision:this.codeRevision,breakpoints,invalidatedBreakpoints:invalidated,updatedProcedures:plan.updates.length,retainedFrames:plan.retainedFrames||[]};
     this.emit('codeChanged',result);return result;
   }
   setNextStatement(module,line,column=null){
     if(this.debugEvaluation)throw new VBError('Finish or cancel debugger evaluation before moving execution',5);
     const frame=this.currentFrame;if(this.state!=='paused'||!frame)throw new VBError('Set Next Statement is available only in break mode',5);
+    if(frame.pinnedSource!==undefined)throw new VBError('This invocation is executing a retained source revision; step it or let it return before redirecting from edited source',5);
     if(lower(module)!==lower(frame.module.name))throw new VBError('The next statement must remain in the active procedure',5);
     frame.pc=nextStatementIndex(frame,Number(line),column);frame.debugRedirect=true;frame.lastPc=frame.pc;frame.lastLine=frame.proc.code[frame.pc].line;
     this.debugPauseId++;this.emit('pause',{instruction:frame.proc.code[frame.pc],frame,stack:[...this.stack],reason:'set-next',pauseId:this.debugPauseId});
@@ -8887,12 +8982,12 @@ class VirtualMachine extends Signal {
     this.eventQueue.push(event);this.processEvents();return event.promise;
   }
   dispatch(module,name,args=[],{coalesce=false}={}){
-    if(this.state==='stopped'||this.state==='error'||this.immediateContext)return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
+    if(this.state==='stopped'||this.state==='error'||(this.immediateContext&&!this.immediateEvents))return Promise.resolve();const instance=typeof module==='string'?this.instances.get(lower(module)):module;const proc=instance?.module.procedures.get(lower(name));if(!proc)return Promise.resolve();const key=lower(instance.module.name)+'.'+lower(name);
     if(coalesce&&this.eventQueue.some(e=>e.key===key))return Promise.resolve();if(this.eventQueue.length>=1000){this.output('Event queue limit reached; newest event discarded.');return Promise.resolve();}
     return new Promise((resolve,reject)=>{this.eventQueue.push({instance,proc,args,key,resolve,reject});this.processEvents();});
   }
   async runQueuedEvent(event){try{event.resolve(await(event.action?event.action():this.callProcedure(event.instance,event.proc,event.args)));}catch(error){if(!(error instanceof StopExecution))this.reportError(error);event.resolve(undefined);}}
-  async processEvents(){if(this.processing||this.stack.length||this.state==='paused'||this.debugEvaluation||this.immediateContext)return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
+  async processEvents(){if(this.processing||this.stack.length||this.state==='paused'||this.debugEvaluation||(this.immediateContext&&!this.immediateEvents))return;this.processing=true;try{while(this.eventQueue.length&&this.state!=='stopped'&&this.state!=='error'&&this.state!=='paused')await this.runQueuedEvent(this.eventQueue.shift());}finally{this.processing=false;}}
   async immediate(text,options={}){
     if(this.state==='paused')return this.evaluateExplicit(text,{...options,immediate:true});
     if(!['ready','idle','running'].includes(this.state)||this.stack.length)throw new VBError('Pause execution before using the Immediate window',5);
@@ -8920,7 +9015,10 @@ class VirtualMachine extends Signal {
         if(ref.isArray&&(await ref.get()) instanceof VBArray&&!(await ref.get()).dynamic)throw new VBError('Cannot assign to a fixed-size array',10);
         await ref.set(objectSet?value:await this.defaultValue(value));
       }else{
-        value=await this.evaluateScalar(parseCall(statement.replace(/^Call\s+/i,''),{explicit:/^Call\s+/i.test(statement)}),frame);if(value!==undefined)this.output(describe(value));
+        value=await this.evaluateScalar(parseCall(statement.replace(/^Call\s+/i,''),{explicit:/^Call\s+/i.test(statement)}),frame);
+        // A tagged Empty result is still a void command. Explicit ?/Print above
+        // displays Empty; an ordinary Sub/host call must not add a phantom line.
+        if(unbox(value)!==undefined)this.output(describe(value));
       }
     }
     return value;
@@ -8959,7 +9057,7 @@ return {VBInstance,VirtualMachine};
 })();
 
 /* host.js */
-__modules[89]=(()=>{
+__modules[90]=(()=>{
 const {RuntimeAgentControl}=__modules[73];
 const {RuntimeMDI}=__modules[74];
 const {runtimeDialog,messageBoxOptions}=__modules[75];
@@ -8968,7 +9066,7 @@ const { icon }=__modules[67];
 const {rasterDataURL}=__modules[51];
 const { el, download, lower, clone }=__modules[20];
 const { compileProject }=__modules[81];
-const { VirtualMachine }=__modules[88];
+const { VirtualMachine }=__modules[89];
 const { VirtualFileSystem }=__modules[43];
 const { describe }=__modules[21];
 const { BrowserForm }=__modules[72];
@@ -9014,7 +9112,8 @@ class ApplicationHost {
       case 'debugAssign':this.send('commandResult',{id:data.id,ok:true,result:{entry:vm.assignDebug(String(data.expression),String(data.value),{frameIndex:data.frameIndex??null,pauseId:data.pauseId}),locals:vm.debugLocals({frameIndex:data.frameIndex??null})}});break;
       case 'runToCursor':this.send('commandResult',{id:data.id,ok:true,result:vm.runToCursor(String(data.module),Number(data.line),data.column??null)});break;
       case 'watchpoints':vm.setWatchpoints(data.watches||[]);break;
-      case 'applyEdits':{const result=vm.applyEdits(data.project);this.project=clone(data.project);this.send('commandResult',{id:data.id,ok:true,result});break;}case 'setNextStatement':{const result=vm.setNextStatement(data.module,Number(data.line),data.column??null);this.send('commandResult',{id:data.id,ok:true,result});break;}case 'pause':vm.pause();break;case 'resume':vm.resume(data.mode||'continue');break;case 'stop':vm.stop();break;case 'breakpoints':vm.replaceBreakpoints(data.breakpoints||[]);break;case 'immediate':{const value=await vm.immediate(String(data.text),{frameIndex:data.frameIndex??null,pauseId:data.pauseId});this.send('immediate',{id:data.id,value:describe(value),locals:vm.locals()});break;}case 'watch':{const values=[];for(const text of (data.expressions||[]).slice(0,100)){try{const result=vm.inspectDebug(text,{frameIndex:data.frameIndex??null,limit:1});values.push({...result,expression:text});}catch(error){values.push({expression:text,value:'<'+error.message+'>'});}}this.send('watches',{values});break;}case 'snapshot':this.send('snapshot',{vfs:this.fs.snapshot(),settings:this.settings});break;}}catch(error){if(data.command==='immediate')this.send('output',{text:'Error: '+error.message,newline:true});else if(data.id)this.send('commandResult',{id:data.id,ok:false,error:{message:error.message,number:error.number,source:error.source,line:error.line}});else this.send('output',{text:'Error: '+error.message,newline:true});}}
+      case 'immediateEvents':{const result=vm.configureImmediateEvents(data.enabled);this.send('commandResult',{id:data.id,ok:true,result});break;}
+      case 'applyEdits':{const result=vm.applyEdits(data.project,{policy:data.policy||'strict'});this.project=clone(data.project);this.send('commandResult',{id:data.id,ok:true,result});break;}case 'setNextStatement':{const result=vm.setNextStatement(data.module,Number(data.line),data.column??null);this.send('commandResult',{id:data.id,ok:true,result});break;}case 'pause':vm.pause();break;case 'resume':vm.resume(data.mode||'continue');break;case 'stop':vm.stop();break;case 'breakpoints':vm.replaceBreakpoints(data.breakpoints||[]);break;case 'immediate':{const value=await vm.immediate(String(data.text),{frameIndex:data.frameIndex??null,pauseId:data.pauseId});this.send('immediate',{id:data.id,value:describe(value),locals:vm.locals()});break;}case 'watch':{const values=[];for(const text of (data.expressions||[]).slice(0,100)){try{const result=vm.inspectDebug(text,{frameIndex:data.frameIndex??null,limit:1});values.push({...result,expression:text});}catch(error){values.push({expression:text,value:'<'+error.message+'>'});}}this.send('watches',{values});break;}case 'snapshot':this.send('snapshot',{vfs:this.fs.snapshot(),settings:this.settings});break;}}catch(error){if(data.command==='immediate')this.send('output',{text:'Error: '+error.message,newline:true});else if(data.id)this.send('commandResult',{id:data.id,ok:false,error:{message:error.message,number:error.number,source:error.source,line:error.line}});else this.send('output',{text:'Error: '+error.message,newline:true});}}
   modal(title,body,buttons=[{caption:'OK',value:1}],input=null,options={}){if(this.options.immediateContext)this.send('interaction');const result=runtimeDialog(this,title,body,buttons,input,options),dialog=this.dialogs.at(-1);if(this.vm?.debugEvaluation&&dialog)this.vm.debugEvaluation.dialogs.add(dialog);return result;}
   msgBox(text,style=0,title=this.project.name){const options=messageBoxOptions(style);return this.modal(title,text,options.buttons,null,options);}
   inputBox(text,title=this.project.name,def=''){return this.modal(title,text,[{caption:'OK',value:1},{caption:'Cancel',value:''}],String(def));}
@@ -9029,7 +9128,7 @@ return {ApplicationHost};
 })();
 
 /* entry.js */
-__modules[90]=(()=>{
+__modules[91]=(()=>{
 const {createWin32,Win32Browser,WIN32_CONSTANTS}=__modules[14];
 const {AutomationRegistry}=__modules[22];
 const {ControlAdapterRegistry}=__modules[23];
@@ -9044,8 +9143,8 @@ const {readRES,writeRES,setResource,setResourceString}=__modules[52];
 const {THEMES,applyTheme,colorValue}=__modules[46];
 const {MemoryRecordset}=__modules[60];
 const {RichTextDocument,parseRTF,writeRTF}=__modules[61];
-const { ApplicationHost }=__modules[89];
-const { VirtualMachine }=__modules[88];
+const { ApplicationHost }=__modules[90];
+const { VirtualMachine }=__modules[89];
 const { compileProject, compileModule }=__modules[81];
 const { parseExpression }=__modules[79];
 const { NOTHING, MISSING, VBErrorValue, Cell, Ref, VBArray, VBCollection, VBDictionary, VBCurrency,VBDecimal,VBScalar,tagScalar,scalarType,unbox }=__modules[21];
@@ -9081,5 +9180,5 @@ const RuntimeAPI={AutomationRegistry,ControlAdapterRegistry,createWin32,Win32Bro
 
 return {mountApplication,RuntimeAPI};
 })();
-globalThis["VB6Runtime"]=__modules[90];
+globalThis["VB6Runtime"]=__modules[91];
 })();

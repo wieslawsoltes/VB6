@@ -29,6 +29,10 @@ export function installDiagnostics(ide) {
     return command(id,...args);
   };
   const menu=ide.menu.bind(ide);ide.menu=name=>{const items=menu(name);if(name==='Debug')items.push(null,{id:'nextDiagnostic',label:'Next Source Error',enabled:!!ide.diagnostics.length},{id:'previousDiagnostic',label:'Previous Source Error',enabled:!!ide.diagnostics.length});return items;};
-  ide.on('stop',queue);globalThis.addEventListener?.('pagehide',()=>scheduler.cancel());
+  ide.on('stop',queue);
+  // Pane return/late editor events must not restart worker creation in a dying
+  // document. A back-forward-cache restoration may resume with fresh source.
+  globalThis.addEventListener?.('pagehide',()=>scheduler.suspend());
+  globalThis.addEventListener?.('pageshow',()=>{scheduler.resume();queue();});
   return scheduler;
 }

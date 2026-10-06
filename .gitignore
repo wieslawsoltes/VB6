@@ -29,3 +29,7 @@ reports/coding-agents/
 
 # Classic HTML pixel fixtures and benchmark evidence
 reports/classic-html/
+
+# Debugger compatibility browser evidence
+reports/debugger-boundaries/
+reports/native-debugger/

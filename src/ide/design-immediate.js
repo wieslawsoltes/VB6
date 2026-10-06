@@ -1,3 +1,4 @@
+import {loadRuntimeDocument} from './runtime-document.js';
 import {el} from '../core/core.js';
 import {newId} from '../project/model.js';
 import {exportApplication} from '../exporter/exporter.js';
@@ -21,7 +22,7 @@ export class DesignImmediateSession {
     this.window=el('div',{class:'runtime-window minimized design-immediate-window'});
     this.window.append(el('div',{class:'tool-caption'},icon('immediate'),el('strong',{},this.ide.project.name+' — Immediate'),
       el('button',{class:'runtime-caption-button',title:'Minimize Immediate application',onclick:()=>this.window?.classList.toggle('minimized')},icon('minimize',12)),
-      el('button',{class:'runtime-caption-button',title:'Reset Immediate session',onclick:()=>this.reset()},icon('close',12))),this.frame);
+      el('button',{class:'runtime-caption-button',title:'Reset Immediate session',onclick:()=>this.promoted?this.ide.stop():this.reset()},icon('close',12))),this.frame);
     this.ready=new Promise((resolve,reject)=>{
       this.readyReject=reject;
       this.readyTimer=setTimeout(()=>{reject(new Error('Immediate runtime did not initialize'));this.reset();},10000);
@@ -29,6 +30,7 @@ export class DesignImmediateSession {
         const data=event.data;
         if(event.source!==this.frame?.contentWindow||data?.channel!=='vb6-runtime'||data.token!==this.token)return;
         if(data.type==='ready'){clearTimeout(this.readyTimer);this.readyReject=null;resolve();}
+        else if(this.promoted&&data.type!=='commandResult')return;
         else if(data.type==='error'){reject(new Error(data.error?.message||'Immediate runtime failed'));this.reset();}
         else if(data.type==='output')this.append(data.text);
         else if(data.type==='interaction')this.window?.classList.remove('minimized');
@@ -41,7 +43,13 @@ export class DesignImmediateSession {
       };
       window.addEventListener('message',this.listener);
     });
-    this.ide.root.append(this.window);this.frame.srcdoc=html;return this.ready;
+    this.ide.root.append(this.window);
+    const frame=this.frame,generation=this.generation,ready=this.ready;
+    loadRuntimeDocument(this.ide,frame,html,{
+      isCurrent:()=>this.frame===frame&&this.generation===generation&&this.token===token,
+      onError:error=>{this.readyReject?.(error);this.reset();}
+    });
+    return ready;
   }
   async execute(text,{module=this.ide.activeModule?.name??null,instructionLimit=100000,timeLimit=5000}={}){
     if(this.ide.runState!=='design')throw new Error('The IDE is no longer in design mode');
@@ -59,9 +67,31 @@ export class DesignImmediateSession {
       });
     }finally{if(generation===this.generation)this.busy=false;}
   }
+  /** Promote the same isolated frame to the normal IDE debugging transport.
+   * Source handlers gain the existing F8, Locals, watches and error UI; no IDE
+   * capabilities or browser-origin access are granted to the application. */
+  async enableEvents(){
+    const ide=this.ide;
+    if(ide.runState!=='design'||this.busy)throw new Error('Finish the Immediate command before enabling events');
+    const snapshot=JSON.stringify(ide.project);
+    if(this.snapshot&&this.snapshot!==snapshot)this.reset();
+    const generation=this.generation;await this.ensure(snapshot);
+    if(generation!==this.generation||ide.runState!=='design')throw new Error('Immediate session changed');
+    this.promoted=true;ide.runtimeFrame=this.frame;ide.runtimeWindow=this.window;ide.bridgeToken=this.token;
+    ide.pendingEdits=false;ide.runState='running';ide.locals=[];ide.stack=[];ide.watchValues=[];
+    ide.documents.readOnly();ide.inspector.setReadOnly(true);ide.renderToolbox();ide.updateTitle();ide.updateCommandState();
+    ide.debuggerWindows.sentWatchpoints=null;ide.updateWatches();
+    ide.sendRuntime('breakpoints',{breakpoints:ide.breakpoints});
+    try{await ide.requestRuntime('immediateEvents',{enabled:true});}
+    catch(error){ide.stop(false);throw error;}
+    this.window?.classList.remove('minimized');ide.showDebug('Immediate');
+    ide.status('Immediate events enabled — no Sub Main or startup form was run. Reset before starting the project normally.');
+    ide.emit('run',{project:ide.project,immediateContext:true});
+    return {enabled:true};
+  }
   cancel(){this.send('cancelEvaluation');}
   reset(){
-    this.generation++;this.send('stop');this.window?.remove();
+    this.generation++;this.promoted=false;this.send('stop');this.window?.remove();
     if(this.listener)window.removeEventListener('message',this.listener);
     clearTimeout(this.readyTimer);this.readyReject?.(new Error('Immediate session reset'));
     for(const request of this.pending.values()){clearTimeout(request.timer);request.reject(new Error('Immediate session reset'));}
