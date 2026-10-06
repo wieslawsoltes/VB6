@@ -53,7 +53,9 @@
     "test:classic-html": "python tools/browser-classic-html.py",
     "build:update-ide-artifacts": "node tools/build.mjs --update-ide-manifest",
     "verify:ide-artifacts": "node tools/ide-artifacts.mjs",
-    "preserve": "npm run build"
+    "preserve": "npm run build",
+    "pretest": "npm run build",
+    "pretest:agents": "npm run build"
   },
   "engines": {
     "node": ">=22"

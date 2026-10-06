@@ -4,7 +4,7 @@
 
 ## Run and download
 
-From a source checkout or source-only ZIP, run `npm run build` before opening the standalone HTML. No npm installation is needed for this build. `npm run serve` also builds and verifies first. The resulting filenames, standalone format, browser behavior and classic styling are unchanged.
+From a source checkout or source-only ZIP, run `npm run build` before opening the standalone HTML. No npm installation is needed for this build. `npm run serve`, `npm test` and `npm run test:agents` also build and verify first. This preserves the existing CI jobs that start with tests rather than a separate build step. The resulting filenames, standalone format, browser behavior and classic styling are unchanged.
 
 The ordinary **Project compatibility** workflow uploads both outputs under `dist/` in its `project-compatibility-<revision>` artifact. Its separate source-archive job downloads that artifact and rebuilds/tests it without a Git checkout. The existing GitHub Pages build generates and deploys the complete `dist/` directory. Browser release archives and native application staging still include the actual built files. GitHub's automatic source ZIP is source, not a prebuilt browser release.
 
