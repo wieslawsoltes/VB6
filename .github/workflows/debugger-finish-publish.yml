@@ -63,6 +63,8 @@ jobs:
               path.write_text(text)
           print('Verified and restored',len(updates),'files from locally committed continuation')
           PY
+      - name: Build current distributions used by native staging tests
+        run: npm run build
       - name: Complete Node suite
         run: |
           set -o pipefail
