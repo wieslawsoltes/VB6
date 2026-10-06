@@ -1,0 +1,90 @@
+name: Integrate reviewed agent workbench and smoke diagnostics
+on:
+  push:
+    branches: [feat/agent-change-review-queue]
+    paths: [.github/workflows/agent-workbench-final-integrate.yml]
+permissions:
+  contents: write
+concurrency:
+  group: agent-workbench-final-integration
+  cancel-in-progress: true
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/feat/agent-change-review-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify candidate and integrate current main
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = 0d987f69f549ef07a9005bf286efc10773bbbd96
+          test "$(git rev-parse HEAD^^{tree})" = 60ecbf51241c6f7091239b3aca2c1eac25f8c069
+          test "$(git hash-object desktop/smoke.cjs)" = badf3dbecc615ef56d2827dc9e345c69f19d5f73
+          test "$(git hash-object tests/native-smoke-harness.test.mjs)" = 0e24b6df909f74f194d8b44a9162992082427390
+          test "$(git rev-parse 728a9201806a4d455113867d2778c3262666a05b^{tree})" = af7437bf915d05e607cc652544cb5417536372ea
+          git rev-parse HEAD > publication-base.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          import subprocess
+          result = subprocess.run(['git','merge','--no-commit','--no-ff','728a9201806a4d455113867d2778c3262666a05b'])
+          if result.returncode:
+              paths = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+              assert result.returncode == 1 and paths and paths <= {'dist/VB6-Studio-Web.html','dist/studio.js','dist/studio.css'}, sorted(paths)
+              subprocess.run(['git','checkout','--ours','--',*sorted(paths)],check=True)
+              subprocess.run(['git','add','--',*sorted(paths)],check=True)
+          PY
+      - name: Rebuild all distributions from combined source
+        shell: bash
+        run: npm run build | tee agent-workbench-build.log
+      - name: Test the actual combined source
+        shell: bash
+        run: |
+          node --check desktop/smoke.cjs
+          node --test tests/native-smoke-harness.test.mjs | tee native-harness-tests.log
+          npm run test:agents | tee agent-workbench-tests.log
+          npm test | tee agent-workbench-full-tests.log
+      - name: Remove temporary integration and verify the final feature diff
+        shell: bash
+        run: |
+          git add -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples packages/win32-browser/dist
+          git rm -- .github/workflows/agent-workbench-final-integrate.yml
+          git diff --cached --check
+          python3 - <<'PY'
+          import subprocess
+          paths = set(subprocess.check_output(['git','diff','--cached','--name-only','728a9201806a4d455113867d2778c3262666a05b'],text=True).splitlines())
+          allowed = {'README.md','dist/VB6-Studio-Web.html','dist/studio.js','dist/studio.css','docs/CODING-AGENT-WORKBENCH.md','docs/coding-agents.md','src/agents/agent.js','src/agents/agents.css','src/agents/changes.js','src/agents/conversations.js','src/agents/followups.js','src/agents/studio.js','src/agents/workbench-view.js','tests/coding-agents-workbench.test.mjs','tools/coding-agents-browser-tests.py','desktop/smoke.cjs','tests/native-smoke-harness.test.mjs'}
+          assert paths == allowed, sorted(paths ^ allowed)
+          print('\n'.join(sorted(paths)))
+          PY
+          git commit -m 'build(agents): preserve current classic UI and validate native smoke diagnostics'
+      - name: Publish tested feature branch only
+        shell: bash
+        run: |
+          test "$(git ls-remote origin refs/heads/feat/agent-change-review-queue | cut -f1)" = "$(cat publication-base.txt)"
+          git push origin HEAD:feat/agent-change-review-queue
+          git rev-parse HEAD > head.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git ls-files -z | xargs -0 sha256sum > tracked-SHA256SUMS.txt
+          git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-workbench-current-main-validation
+          path: |
+            agent-workbench-build.log
+            native-harness-tests.log
+            agent-workbench-tests.log
+            agent-workbench-full-tests.log
+            publication-base.txt
+            head.txt
+            tree.txt
+            tracked-SHA256SUMS.txt
+            source.tar.gz
+          retention-days: 7
