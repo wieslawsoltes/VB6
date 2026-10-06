@@ -2,13 +2,24 @@
 import {ChatGPTAuthError, CHATGPT_RESOURCE} from './chatgpt-auth.mjs';
 import {chatGPTModels, chatGPTRequest} from '../src/agents/chatgpt-protocol.js';
 import {readEvents} from '../src/agents/providers.js';
-export async function chatGPTControl(auth, data) {
+export async function chatGPTControl(auth, data, {openBrowser, signal} = {}) {
   if (!auth) throw new ChatGPTAuthError('chatgpt_relay_disabled', 503);
   const id = data.accountId;
   if (id !== undefined && (typeof id !== 'string' || id.length > 128)) throw new ChatGPTAuthError('chatgpt_unknown_account', 400);
   switch (data.operation) {
     case 'status': return auth.status();
-    case 'login': return auth.start({accountId: id || '', consent: data.consent === true, ...(data.loginId ? {loginId: data.loginId} : {})});
+    case 'login': {
+      if (data.openBrowser !== undefined && typeof data.openBrowser !== 'boolean') throw new ChatGPTAuthError('chatgpt_invalid_operation', 400);
+      const result = await auth.start({accountId: id || '', consent: data.consent === true, ...(data.loginId ? {loginId: data.loginId} : {})});
+      if (!data.openBrowser) return result;
+      // URL comes ONLY from our pending PKCE attempt, never a browser-supplied URL.
+      let browser = 'unavailable';
+      if (openBrowser && !signal?.aborted && auth.status().loginId === result.loginId) {
+        try { browser = await openBrowser(result.authorizationUrl, {signal}) ? 'launched' : 'failed'; }
+        catch { browser = 'failed'; }
+      }
+      return {...result, browser};
+    }
     case 'cancel': if (typeof data.loginId !== 'string' || !/^[A-Za-z0-9_-]{20,128}$/.test(data.loginId)) throw new ChatGPTAuthError('chatgpt_invalid_login_id', 400); return auth.cancel(data.loginId);
     case 'logout': return auth.logout(id);
     default: throw new ChatGPTAuthError('chatgpt_invalid_operation', 400);
