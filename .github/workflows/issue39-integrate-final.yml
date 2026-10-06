@@ -1,0 +1,92 @@
+name: Issue 39 guarded final integration
+on:
+  push:
+    branches: [fix/issue-39-visual-fidelity]
+    paths: [.github/workflows/issue39-integrate-final.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: issue39-guarded-final-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/fix/issue-39-visual-fidelity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPECTED_PARENT: 2fcb15256758155b0d842e696cd1eb15bb975017
+      MAIN_SHA: 6aeeae789151397c58648cd9d99678105935979f
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Guard the reviewed inputs and merge handwritten sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/issue39-integration
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          git fetch origin main fix/issue-39-visual-fidelity
+          test "$(git rev-parse origin/fix/issue-39-visual-fidelity)" = "$GITHUB_SHA"
+          git cat-file -e "$MAIN_SHA^{commit}"
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          printf 'PR head: %s\nMain input: %s\n' "$GITHUB_SHA" "$MAIN_SHA" | tee /tmp/issue39-integration/inputs.txt
+          if ! git merge --no-commit --no-ff "$MAIN_SHA"; then
+            git diff --name-only --diff-filter=U | tee /tmp/issue39-integration/conflicts.txt
+            git diff --cc > /tmp/issue39-integration/conflicts.diff
+            python - <<'PY'
+          import subprocess
+          paths = subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=U', '-z']).decode().split('\0')
+          handwritten = [p for p in paths if p and not (p.startswith('dist/') or p.startswith('packages/win32-browser/dist/'))]
+          if handwritten:
+              raise SystemExit('Handwritten conflicts require review; no publication: ' + ', '.join(handwritten))
+          for path in filter(None, paths):
+              if subprocess.run(['git', 'cat-file', '-e', ':2:' + path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                  subprocess.run(['git', 'checkout', '--ours', '--', path], check=True)
+                  subprocess.run(['git', 'add', '--', path], check=True)
+              else:
+                  subprocess.run(['git', 'rm', '--', path], check=True)
+          PY
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
+      - name: Full Node suite and regenerate all distribution files
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee /tmp/issue39-integration/node-tests.log
+          npm run build 2>&1 | tee /tmp/issue39-integration/build.log
+          git add dist packages/win32-browser/dist
+          npm run build
+          git diff --exit-code -- dist packages/win32-browser/dist
+          git diff --cached --check
+      - name: Publish only the verified merge to this PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin fix/issue-39-visual-fidelity
+          test "$(git rev-parse origin/fix/issue-39-visual-fidelity)" = "$GITHUB_SHA"
+          git commit -m 'merge: integrate current main and regenerate issue 39 distributions'
+          git push origin HEAD:refs/heads/fix/issue-39-visual-fidelity
+          git rev-parse HEAD | tee /tmp/issue39-integration/published-sha.txt
+      - name: Record exact source and diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p /tmp/issue39-integration
+          git status --short > /tmp/issue39-integration/git-status.txt
+          git log -8 --oneline > /tmp/issue39-integration/history.txt
+          git ls-tree -r HEAD > /tmp/issue39-integration/tree.txt
+          git archive --format=zip HEAD > /tmp/issue39-integration/source.zip
+          git diff > /tmp/issue39-integration/unstaged.diff
+          git diff --cached > /tmp/issue39-integration/staged.diff
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue39-guarded-integration-${{ github.run_id }}
+          path: /tmp/issue39-integration
+          retention-days: 7
