@@ -1,0 +1,48 @@
+name: ChatGPT browser handoff verification
+on:
+  push:
+    branches: [validation/chatgpt-browser-handoff]
+    paths: ['.github/workflows/chatgpt-handoff-verify.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 860a55e0ce48338851270e50f505577d2dd8ecfc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: git diff --exit-code
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install ${{ matrix.browser }}
+      - name: Visible dialog, native mouse and Enter links, real loopback callbacks
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:chatgpt:browser
+      - name: Require real navigation and complete fixtures without skipped cases
+        run: |
+          python - <<'PY'
+          import json
+          for name, count in [('results.json',40),('signin-errors.json',80)]:
+              with open('reports/chatgpt-login/'+name) as f: result=json.load(f)
+              assert result['opaqueBrowserHarness'] is False
+              assert result['count']==count==len(result['checks'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: handoff-macos-${{ matrix.browser }}
+          path: reports/chatgpt-login
+          retention-days: 7
