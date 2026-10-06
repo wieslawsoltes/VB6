@@ -24,7 +24,7 @@ jobs:
         run: |
           node --input-type=commonjs - <<'JS'
           const fs=require('node:fs'),assert=require('node:assert/strict');
-          const file='desktop/smoke.cjs';let source=fs.readFileSync(file,'utf8');
+          const file='desktop/smoke.cjs';let source=fs.readFileSync(file,'utf8').replace(/\r\n?/g,'\n');
           const anchor='  try {\n    await until';assert(source.includes(anchor));
           source=source.replace(anchor,`  report.navigation=[];report.console=[];
             const record=(array,value)=>{array.push(value);if(array.length>80)array.shift();};
