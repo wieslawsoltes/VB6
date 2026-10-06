@@ -392,3 +392,7 @@ supports editing/reordering and explicit fresh-confirmation dispatch without
 replacing unsent composer drafts or inheriting Full-access grants. Nothing sends
 automatically. See [the workbench guide](CODING-AGENT-WORKBENCH.md) for
 coverage, memory limits, stale-workspace protection and non-Git boundaries.
+
+## ChatGPT account mode
+
+OpenAI can also use **ChatGPT account — ChatGPT plan usage** through the local relay, without an API key. This is an explicit alternative to API billing, not a fallback. For sign-in, consent, accounts, model discovery, storage, supported deployment and output-limit differences, see [CHATGPT-LOGIN.md](CHATGPT-LOGIN.md).

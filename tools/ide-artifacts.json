@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "files": {
+    "dist/studio.js": {
+      "bytes": 5126519,
+      "sha256": "e1cf149c3ac4016f36975ebb9c3b29d54799783d8544eacdfd2b38344cef291f"
+    },
+    "dist/VB6-Studio-Web.html": {
+      "bytes": 5278249,
+      "sha256": "816c771b1c49194311fa8c887205844b6122ae5ee37b5de5d287e7243902cb9e"
+    }
+  }
+}

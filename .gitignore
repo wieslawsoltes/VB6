@@ -33,3 +33,10 @@ reports/classic-html/
 # Debugger compatibility browser evidence
 reports/debugger-boundaries/
 reports/native-debugger/
+
+# ChatGPT connection fixtures; retained as CI artifacts.
+reports/chatgpt-login/
+
+# Deterministic IDE outputs: checked against tools/ide-artifacts.json on every build.
+/dist/studio.js
+/dist/VB6-Studio-Web.html

@@ -24,7 +24,7 @@ See [IntelliSense commands, reference descriptors, safety and validation](docs/I
 
 ## Run
 
-The complete IDE is `dist/VB6-Studio-Web.html`. It is designed to open directly in a browser. Browser origin policies can restrict local files, clipboard or persistent storage. A local static server is the alternative:
+After `npm run build`, the complete IDE is `dist/VB6-Studio-Web.html`. The two generated IDE bundles are build artifacts rather than checked-in snapshots; every build checks their exact bytes against `tools/ide-artifacts.json`. The Project compatibility CI artifact and GitHub Pages build contain both files. See [IDE build artifacts](docs/IDE-BUILD-ARTIFACTS.md). It is designed to open directly in a browser. Browser origin policies can restrict local files, clipboard or persistent storage. A local static server is the alternative:
 
 ```sh
 npm run serve
@@ -282,5 +282,11 @@ line-targeted feedback and revision-checked source-only restoration through norm
 Undo. **Queue message** stores follow-ups locally while generation runs; Queue
 supports editing/reordering and explicit fresh-confirmation dispatch without
 replacing unsent composer drafts or inheriting Full-access grants. Nothing sends
-automatically. See [the workbench guide](docs/CODING-AGENT-WORKBENCH.md) for
-coverage, memory limits, stale-workspace protection and non-Git boundaries.
+automatically. The Changes tab also supports individually restoring changed source
+blocks with normal Undo, explicit stale-review warnings, and task-local review/queue
+selections. See [the workbench guide](docs/CODING-AGENT-WORKBENCH.md) for coverage,
+memory limits, stale-workspace protection and non-Git boundaries.
+
+## ChatGPT account or API-key coding agents
+
+The OpenAI connection now offers **ChatGPT account — ChatGPT plan usage** alongside the existing API-key mode. The supported local/open-source OAuth flow runs through the protected local agent relay; no Codex credential copying or API-key fallback is used. Account selection, sign-in/consent, model discovery, streaming IDE tools, refresh and sign-out retain the classic IDE appearance and permission checks. See [ChatGPT sign-in setup, security and preview limitations](docs/CHATGPT-LOGIN.md). Live-account entitlement/inference validation is separate from the deterministic test fixtures.

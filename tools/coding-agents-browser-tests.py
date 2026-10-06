@@ -996,6 +996,148 @@ def queued_command_isolation(page,mode):
     return {'draftCommandDoesNotHijackQueue':True,'queuedTextNotLocalCommand':True,'cancelPreservesQueue':True,'draftPreserved':True}
 
 
+def two_review_blocks(page,mode):
+    page.evaluate("vb6Studio.project.modules[0].code=\"Option Explicit\\n' first\\n' keep\\n' second\\n' end\\n\";vb6Studio.markDirty();")
+    requests=mock(page,'openai',lambda i,b:([],'Read only checkpoint.'))
+    configure(page,mode='readonly');start(page);finish(page)
+    page.evaluate("vb6Studio.project.modules[0].code=vb6Studio.project.modules[0].code.replace('first','FIRST').replace('second','SECOND');vb6Studio.markDirty();")
+    tab(page,'Changes')
+    return requests
+
+
+def review_selective_restore(page,mode):
+    requests=two_review_blocks(page,mode)
+    check(page.get_by_label('Selected change block',exact=True).inner_text()=='Change 1 of 2')
+    page.get_by_role('button',name='Next change',exact=True).click()
+    check(page.get_by_label('Selected change block',exact=True).inner_text()=='Change 2 of 2')
+    page.get_by_role('button',name='Restore selected change…',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Restore Selected Change',exact=True)
+    check('Only this changed block' in dialog.inner_text())
+    page.screenshot(path=str(REPORTS/f'{mode}-selective-restore.png'))
+    dialog.get_by_role('button',name='Cancel',exact=True).click()
+    check('SECOND' in page.evaluate('vb6Studio.project.modules[0].code'))
+    page.get_by_role('button',name='Restore selected change…',exact=True).click()
+    page.get_by_role('dialog',name='AI Coding Agent — Restore Selected Change',exact=True).get_by_role('button',name='Restore Change',exact=True).click()
+    source=page.evaluate('vb6Studio.project.modules[0].code')
+    check("' FIRST" in source and "' second" in source and 'SECOND' not in source)
+    check(page.evaluate("vb6Studio.history.undoStack.at(-1).label.startsWith('Restore reviewed change')"))
+    page.evaluate("vb6Studio.command('undo')");check('SECOND' in page.evaluate('vb6Studio.project.modules[0].code'))
+    check(len(requests)==1)
+    return {'singleBlockRestore':True,'otherChangesKept':True,'cancelAndUndo':True,'noProviderRequest':True}
+
+
+def review_selective_stale(page,mode):
+    requests=two_review_blocks(page,mode)
+    page.get_by_role('button',name='Restore selected change…',exact=True).click()
+    page.evaluate("vb6Studio.project.modules[0].code += \"' concurrent\\n\";vb6Studio.markDirty();")
+    page.get_by_role('dialog',name='AI Coding Agent — Restore Selected Change',exact=True).get_by_role('button',name='Restore Change',exact=True).click()
+    source=page.evaluate('vb6Studio.project.modules[0].code');check('concurrent' in source and 'FIRST' in source and 'SECOND' in source)
+    page.wait_for_function("!vb6Studio.documents.tools.get('tool:coding-agents').workbench.stale.hidden")
+    check(page.get_by_role('button',name='Restore selected change…',exact=True).is_disabled())
+    check(page.get_by_role('button',name='Restore source…',exact=True).is_disabled())
+    page.get_by_role('button',name='Refresh changes',exact=True).click()
+    check(page.get_by_label('Change review freshness',exact=True).is_hidden())
+    check(len(requests)==1)
+    return {'postConsentRevisionRefused':True,'staleButtonsDisabled':True,'refreshRestoresReview':True}
+
+
+def review_target_retention(page,mode):
+    requests=two_review_blocks(page,mode)
+    page.locator('.agent-diff-line[data-kind="+"]').last.click()
+    page.get_by_label('Change review feedback',exact=True).fill('Only improve the second comment.')
+    page.get_by_label('Change diff layout',exact=True).select_option('split')
+    tab(page,'Task');tab(page,'Changes')
+    check(page.get_by_label('Change diff layout',exact=True).input_value()=='split')
+    check(page.get_by_label('Change review feedback',exact=True).input_value()=='Only improve the second comment.')
+    page.evaluate("vb6Studio.documents.closeTool('tool:coding-agents');vb6Studio.command('codingAgents');")
+    tab(page,'Changes')
+    check(page.get_by_label('Change diff layout',exact=True).input_value()=='split')
+    page.get_by_role('button',name='Queue review feedback',exact=True).click();tab(page,'Queue')
+    text=page.get_by_label('Queued message preview',exact=True).inner_text()
+    check('current line 4' in text and 'SECOND' in text and 'Only improve' in text)
+    check(len(requests)==1)
+    return {'lineTargetSurvivesRefreshAndReopen':True,'draftAndLayoutRetained':True,'noAutoSend':True}
+
+
+def review_freshness_without_recapture(page,mode):
+    requests=two_review_blocks(page,mode)
+    page.locator('.agent-diff-line[data-kind="+"]').last.click()
+    page.get_by_label('Change review feedback',exact=True).fill('Saved feedback.')
+    page.evaluate("""() => {
+      const r=vb6Studio.codingAgents.conversations.active.review;globalThis.reviewRecaptures=0;
+      const compare=r.compare;r.compare=function(...args){reviewRecaptures++;return compare.apply(this,args);};
+      vb6Studio.project.modules[0].code += "' newer\\n";vb6Studio.markDirty();
+    }""")
+    page.wait_for_function("!vb6Studio.documents.tools.get('tool:coding-agents').workbench.stale.hidden")
+    check(page.evaluate('reviewRecaptures')==0)
+    check(page.get_by_role('button',name='Queue review feedback',exact=True).is_disabled())
+    check(page.get_by_label('Change review feedback',exact=True).input_value()=='Saved feedback.')
+    page.get_by_role('button',name='Refresh changes',exact=True).click()
+    check(page.evaluate('reviewRecaptures')==1)
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.review.feedbackTarget') is None)
+    check(page.get_by_label('Change review feedback',exact=True).input_value()=='Saved feedback.')
+    page.get_by_role('button',name='Queue review feedback',exact=True).click();tab(page,'Queue')
+    check('current line' not in page.get_by_label('Queued message preview',exact=True).inner_text())
+    check(len(requests)==1)
+    return {'coalescedInvalidationNoCapture':True,'draftKept':True,'staleLineTargetCleared':True}
+
+
+def review_task_preferences(page,mode):
+    requests=two_review_blocks(page,mode)
+    first=page.evaluate('vb6Studio.codingAgents.conversations.activeId')
+    page.get_by_label('Review change scope',exact=True).select_option('run')
+    page.get_by_label('Change diff layout',exact=True).select_option('split')
+    page.get_by_label('Change review feedback',exact=True).fill('Task one review.')
+    page.get_by_role('button',name='New Task',exact=True).click();tab(page,'Changes')
+    check(page.get_by_label('Review change scope',exact=True).input_value()=='task')
+    check(page.get_by_label('Change diff layout',exact=True).input_value()=='unified')
+    check(page.get_by_label('Change review feedback',exact=True).input_value()=='')
+    tab(page,'Tasks');page.get_by_label('Agent tasks',exact=True).select_option(first);tab(page,'Changes')
+    check(page.get_by_label('Review change scope',exact=True).input_value()=='run')
+    check(page.get_by_label('Change diff layout',exact=True).input_value()=='split')
+    check(page.get_by_label('Change review feedback',exact=True).input_value()=='Task one review.')
+    check(len(requests)==1)
+    return {'taskLocalScopeLayoutAndDraft':True,'newTaskNoInheritedState':True}
+
+
+def queue_selection_retention(page,mode):
+    first=page.evaluate("""() => {
+      const task=vb6Studio.codingAgents.conversations.active;
+      task.followups.add('First queued message');task.followups.add('Second queued message');
+      vb6Studio.documents.tools.get('tool:coding-agents').refresh();return task.id;
+    }""")
+    tab(page,'Queue');page.get_by_label('Queued agent messages',exact=True).select_option(index=1)
+    chosen=page.get_by_label('Queued agent messages',exact=True).input_value()
+    page.get_by_role('button',name='New Task',exact=True).click();tab(page,'Tasks');page.get_by_label('Agent tasks',exact=True).select_option(first)
+    tab(page,'Queue');check(page.get_by_label('Queued agent messages',exact=True).input_value()==chosen)
+    page.evaluate("vb6Studio.documents.closeTool('tool:coding-agents');vb6Studio.command('codingAgents');")
+    tab(page,'Queue');check(page.get_by_label('Queued agent messages',exact=True).input_value()==chosen)
+    check('Second queued message' in page.get_by_label('Queued message preview',exact=True).inner_text())
+    page.get_by_role('button',name='Remove selected message',exact=True).click()
+    check('First queued message' in page.get_by_label('Queued message preview',exact=True).inner_text())
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.requests')==0)
+    page.screenshot(path=str(REPORTS/f'{mode}-queue-selection.png'))
+    return {'selectionRetainedAcrossTasksAndReopen':True,'removedSelectionFallsBack':True,'noProviderRequest':True}
+
+
+def review_scroll_retention(page,mode):
+    page.evaluate("vb6Studio.project.modules[0].code=Array.from({length:600},(_,i)=>\"' old \"+i+'\\n').join('');vb6Studio.markDirty();")
+    requests=mock(page,'openai',lambda i,b:([],'Checkpoint.'))
+    configure(page,mode='readonly');start(page);finish(page)
+    page.evaluate("vb6Studio.project.modules[0].code=vb6Studio.project.modules[0].code.replaceAll('old','new');vb6Studio.markDirty();")
+    tab(page,'Changes');page.get_by_role('button',name='Show more diff lines',exact=True).click()
+    check(page.locator('.agent-diff-line').count()==1000)
+    page.get_by_label('Project change diff',exact=True).evaluate("e=>{e.scrollTop=400;e.dispatchEvent(new Event('scroll'));}")
+    tab(page,'Task');tab(page,'Changes')
+    page.wait_for_function("Math.abs(vb6Studio.documents.tools.get('tool:coding-agents').workbench.diff.scrollTop-400)<2")
+    page.evaluate("vb6Studio.documents.closeTool('tool:coding-agents');vb6Studio.command('codingAgents');")
+    tab(page,'Changes')
+    check(page.locator('.agent-diff-line').count()==1000)
+    page.wait_for_function("Math.abs(vb6Studio.documents.tools.get('tool:coding-agents').workbench.diff.scrollTop-400)<2")
+    check(len(requests)==1)
+    return {'diffScrollAndExpandedWindowRetained':True,'panelReopen':True}
+
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -1021,7 +1163,7 @@ try:
                 case(browser,mode,provider+'-context-compaction',lambda page,mode,provider=provider:context_compaction(page,mode,provider))
                 case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))
                 case(browser,mode,provider+'-queued-followups',lambda page,mode,provider=provider:queued_followups(page,mode,provider))
-            for name,fn in [('queued-command-isolation',queued_command_isolation),('queue-while-running',queue_while_running),('queue-permission-confirmation',queue_permission_confirmation),('queue-task-lifecycle',queue_task_lifecycle),('review-restore',review_restore),('review-stale-reload',review_stale_and_reload),('review-feedback',review_feedback),('review-last-run',review_last_run),('hosted-preview',hosted_preview),('hosted-preview-stale',hosted_preview_stale),('hosted-preview-failure',hosted_preview_failure),('automatic-retry',automatic_retry),('stop-backoff',stop_backoff),('compact-command',lambda page,mode:context_compaction(page,mode,'openai',True)),('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan)]:case(browser,mode,name,fn)
+            for name,fn in [('review-scroll-retention',review_scroll_retention),('review-selective-restore',review_selective_restore),('review-selective-stale',review_selective_stale),('review-target-retention',review_target_retention),('review-freshness',review_freshness_without_recapture),('review-task-preferences',review_task_preferences),('queue-selection-retention',queue_selection_retention),('queued-command-isolation',queued_command_isolation),('queue-while-running',queue_while_running),('queue-permission-confirmation',queue_permission_confirmation),('queue-task-lifecycle',queue_task_lifecycle),('review-restore',review_restore),('review-stale-reload',review_stale_and_reload),('review-feedback',review_feedback),('review-last-run',review_last_run),('hosted-preview',hosted_preview),('hosted-preview-stale',hosted_preview_stale),('hosted-preview-failure',hosted_preview_failure),('automatic-retry',automatic_retry),('stop-backoff',stop_backoff),('compact-command',lambda page,mode:context_compaction(page,mode,'openai',True)),('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()

@@ -1,0 +1,21 @@
+# Reproducible IDE build artifacts
+
+`dist/studio.js` and `dist/VB6-Studio-Web.html` are generated outputs, not authored sources. They are no longer tracked as multi-megabyte snapshots. This prevents unrelated source changes from producing repeated generated-code merge conflicts; no repository-writing CI helper is required.
+
+## Run and download
+
+From a source checkout or source-only ZIP, run `npm run build` before opening the standalone HTML. No npm installation is needed for this build. `npm run serve` also builds and verifies first. The resulting filenames, standalone format, browser behavior and classic styling are unchanged.
+
+The ordinary **Project compatibility** workflow uploads both outputs under `dist/` in its `project-compatibility-<revision>` artifact. Its separate source-archive job downloads that artifact and rebuilds/tests it without a Git checkout. The existing GitHub Pages build generates and deploys the complete `dist/` directory. Browser release archives and native application staging still include the actual built files. GitHub's automatic source ZIP is source, not a prebuilt browser release.
+
+## Exact verification, not unchecked regeneration
+
+`tools/ide-artifacts.json` is the versioned expectation: exactly two paths, each with a byte count and SHA-256. Every normal `npm run build` verifies both generated files and fails if the manifest is absent, malformed, incomplete or mismatched. Missing, non-regular and changed outputs fail. A separate `npm run verify:ide-artifacts` checks existing outputs without regenerating them.
+
+Normal builds do **not** refresh their expected fingerprints. After intentionally changing IDE sources, run `npm run build:update-ide-artifacts`, inspect the source and manifest diff, run tests, and commit the manifest with the source. The explicit update command is rejected when `CI` is set. CI only builds, verifies and uploads; it cannot silently bless drift. This is reproducibility checking, not a publisher signature or certification of unreviewed source.
+
+All other committed generated outputs retain their existing `git diff --exit-code` checks. The new manifest check replaces that check only for these two untracked bundles. No UI, runtime, native, browser or security assertion is removed.
+
+## Merge workflow
+
+Merge authored sources normally, rebuild with the explicit update command, review the two fingerprints, and commit. Do not select an old standalone bundle from either side. A stale manifest intentionally fails ordinary validation until the combined source has been rebuilt and its expectation reviewed.
