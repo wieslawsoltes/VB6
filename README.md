@@ -24,7 +24,7 @@ See [IntelliSense commands, reference descriptors, safety and validation](docs/I
 
 ## Run
 
-The complete IDE is `dist/VB6-Studio-Web.html`. It is designed to open directly in a browser. Browser origin policies can restrict local files, clipboard or persistent storage. A local static server is the alternative:
+After `npm run build`, the complete IDE is `dist/VB6-Studio-Web.html`. The generated IDE/runtime bundles, embedded runtime payload and sample HTML apps are build artifacts rather than checked-in snapshots; every build checks their exact bytes against `tools/ide-artifacts.json`. The Project compatibility CI artifact and GitHub Pages build contain the complete built applications. See [IDE build artifacts](docs/IDE-BUILD-ARTIFACTS.md). It is designed to open directly in a browser. Browser origin policies can restrict local files, clipboard or persistent storage. A local static server is the alternative:
 
 ```sh
 npm run serve
@@ -261,6 +261,10 @@ builds and tests a standalone `.tgz` after `npm run build`; it does not publish 
 ### Native workspace and interoperability
 
 Native project support also includes explicit ZIP filename-codepage selection, preserved/restored VBW document windows, recoverable folder-save journals, exclusive immutable ZIP snapshots, trusted custom-control/Automation adapter registries, an opt-in x86/x64 Windows stdio host, and a separately licensed compiler round-trip harness. Native activation is never granted by opening a project. See [native workspace and interoperability](docs/NATIVE-WORKSPACE-INTEROP.md) for commands, deployment contracts, tests, and remaining boundaries.
+
+### Common browser Win32 services
+
+`@vb6/win32-browser` 0.5.0 adds 96 exports (407 total) beyond graphics: file discovery, shell paths, UTF-8/Windows-1252 conversion, private environment expansion, cooperative events/semaphores, GUID values, Base64, registry enumeration, atoms and window properties. Six classic VB6 samples are included in the Examples menu and standalone HTML builds. See [service contracts, samples and isolation boundaries](packages/win32-browser/SERVICES.md). No native DLL execution or npm publication is implied.
 
 ## Scalar and Variant source compatibility
 

@@ -15,6 +15,9 @@ class Quiet(SimpleHTTPRequestHandler):
 server=ThreadingHTTPServer(('127.0.0.1',0),partial(Quiet,directory=str(ROOT)))
 threading.Thread(target=server.serve_forever,daemon=True).start()
 base=f'http://127.0.0.1:{server.server_port}';results=[]
+# Package/SDK probes need an origin, not the IDE and its diagnostics workers.
+# Full IDE lifecycle coverage remains in the compatibility/services suites.
+PROBE_HOST='/tests/fixtures/win32-boundaries-host.html'
 def check(ok,message):
     if not ok: raise AssertionError(message)
 GPU_PROBE=r'''async()=>{
@@ -100,7 +103,7 @@ try:
     page.on('pageerror',lambda e:errors.append(str(e)))
     if GPU:
         check(not OFFLINE,'GPU validation requires secure HTTP origin; do not mark offline results GPU-certified')
-        page.goto(base+'/dist/index.html');results.append(page.evaluate(GPU_PROBE))
+        page.goto(base+PROBE_HOST);results.append(page.evaluate(GPU_PROBE))
         page.goto(base+'/dist/examples/win32.html');page.wait_for_function('vb6Application?.vm?.state === "running"')
         page.wait_for_function('document.querySelector(\'[data-control="txtValue"] input\')?.value === "Hello from kernel32 and user32!"')
         page.locator('[data-control="cmdAdvanced"]').click()
@@ -120,7 +123,7 @@ try:
         context=browser.new_context(device_scale_factor=scale);probe=context.new_page()
         probe.on('pageerror',lambda e:errors.append(str(e)))
         if OFFLINE: probe.set_content('<!doctype html><body>')
-        else: probe.goto(base+'/dist/index.html')
+        else: probe.goto(base+PROBE_HOST)
         probe.add_script_tag(content=(ROOT/'dist/win32-browser.js').read_text());probe.add_script_tag(content=(ROOT/'tests/fixtures/win32-advanced-browser.js').read_text())
         result=probe.evaluate('runWin32BoundaryProbe(Win32Compat)');results.extend({**r,'scale':scale} for r in result['results']);context.close()
       for mode in ['http','file']:
@@ -135,10 +138,10 @@ try:
         results.append({'case':'vb6-paths-fonts-export-'+mode,'passed':True});page.screenshot(path=str(REPORT/('export-'+mode+'.png')))
       if OFFLINE:
         page.set_content('<!doctype html><body>');page.add_script_tag(content=(ROOT/'dist/vb6-runtime.js').read_text())
-      else: page.goto(base+'/dist/index.html')
+      else: page.goto(base+PROBE_HOST)
       project=json.loads((ROOT/'examples/win32.vb6web').read_text());results.append(page.evaluate(PAINT_PROBE,project))
       if not OFFLINE:
-        page.goto(base+'/dist/index.html')
+        page.goto(base+PROBE_HOST)
         worker=page.evaluate(r'''()=>new Promise((resolve,reject)=>{
           const code=`import {createWin32} from '${location.origin}/packages/win32-browser/src/index.js';const w=createWin32();try{const g=(n,...a)=>w.invoke('gdi32',n,a),d=g('CreateCompatibleDC',0),b=g('CreateBitmap',128,32,1,32,0),old=g('SelectObject',d,b);g('SetTextColor',d,16777215);const rendered=g('TextOutW',d,0,0,'Worker',6),entry=w.handles.get(b,'bitmap'),data=w.memory.bytes(entry.ptr,entry.size);const visible=data.some((x,i)=>i%4!==3&&x);g('SelectObject',d,old);g('DeleteObject',b);g('DeleteDC',d);postMessage({rendered,visible,memory:w.memory.used});}finally{w.dispose();}`;
           const url=URL.createObjectURL(new Blob([code],{type:'text/javascript'})),worker=new Worker(url,{type:'module'});

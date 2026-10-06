@@ -1,11 +1,12 @@
 {
   "name": "@vb6/win32-browser",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Isolated Win32 API compatibility for JavaScript browser applications",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./examples/common-services": "./examples/common-services.mjs"
   },
   "files": [
     "src",
@@ -15,7 +16,10 @@
     "LICENSE",
     "GDI.md",
     "REGIONS.md",
-    "ADVANCED-GDI.md"
+    "ADVANCED-GDI.md",
+    "SERVICES.md",
+    "examples",
+    "JAVASCRIPT-SAMPLE.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs"

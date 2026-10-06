@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "id": "example_win32-files_1",
+  "name": "Win32 Files and Paths",
+  "description": "FindFirstFile, private files, temporary names and shell paths",
+  "startup": "frmServices",
+  "modules": [
+    {
+      "id": "example_win32-files_2",
+      "name": "frmServices",
+      "kind": "form",
+      "code": "Option Explicit\nPrivate completedRuns As Long\nPrivate Sub Form_Load()\n    lblStatus.Caption = \"Ready\"\nEnd Sub\nPrivate Sub cmdRun_Click()\n    On Error GoTo Failed\n    txtOutput.Text = RunService(Me.hWnd)\n    completedRuns = completedRuns + 1\n    lblStatus.Caption = \"Completed \" & CStr(completedRuns)\n    Exit Sub\nFailed:\n    txtOutput.Text = \"Error \" & CStr(Err.Number) & \": \" & Err.Description & \" (Win32 \" & CStr(Err.LastDLLError) & \")\"\nEnd Sub\n",
+      "form": {
+        "id": "example_win32-files_3",
+        "name": "frmServices",
+        "type": "Form",
+        "properties": {
+          "Name": "frmServices",
+          "Caption": "Win32 Files and Paths",
+          "ClientWidth": 8100,
+          "ClientHeight": 4200,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "example_win32-files_4",
+            "name": "lblStatus",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblStatus",
+              "Left": 2940,
+              "Top": 960,
+              "Width": 4500,
+              "Height": 330,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Starting...",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-files_5",
+            "name": "lblDescription",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblDescription",
+              "Left": 240,
+              "Top": 180,
+              "Width": 7650,
+              "Height": 600,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "FindFirstFile, private files, temporary names and shell paths",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-files_6",
+            "name": "cmdRun",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "cmdRun",
+              "Left": 240,
+              "Top": 870,
+              "Width": 2460,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "&Run API sample",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_win32-files_7",
+            "name": "txtOutput",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "txtOutput",
+              "Left": 240,
+              "Top": 1500,
+              "Width": 7620,
+              "Height": 1860,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "Click Run API sample. All state is application-private.",
+              "MultiLine": -1,
+              "ScrollBars": 2,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": -1,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_win32-files_8",
+            "name": "lblBoundary",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "lblBoundary",
+              "Left": 240,
+              "Top": 3600,
+              "Width": 7620,
+              "Height": 360,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "No access to host files, registry, other apps or native DLLs.",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    },
+    {
+      "id": "example_win32-files_9",
+      "name": "Services",
+      "kind": "module",
+      "code": "Option Explicit\nPrivate Type FIND_DATA\n    Attributes As Long\n    Times(0 To 5) As Long\n    SizeHigh As Long\n    SizeLow As Long\n    Reserved(0 To 1) As Long\n    FileName As String * 260\n    AlternateName As String * 14\nEnd Type\nPrivate Type LARGE_PARTS\n    Low As Long\n    High As Long\nEnd Type\nPrivate Declare Function CreateFile Lib \"kernel32\" Alias \"CreateFileA\" (ByVal path As String, ByVal access As Long, ByVal share As Long, ByVal security As Long, ByVal disposition As Long, ByVal flags As Long, ByVal template As Long) As Long\nPrivate Declare Function CloseHandle Lib \"kernel32\" (ByVal handle As Long) As Long\nPrivate Declare Function GetCurrentProcess Lib \"kernel32\" () As Long\nPrivate Declare Function DuplicateHandle Lib \"kernel32\" (ByVal sourceProcess As Long, ByVal source As Long, ByVal targetProcess As Long, target As Long, ByVal access As Long, ByVal inherit As Long, ByVal options As Long) As Long\nPrivate Declare Function SetFilePointerEx Lib \"kernel32\" (ByVal handle As Long, ByVal low As Long, ByVal high As Long, position As LARGE_PARTS, ByVal method As Long) As Long\nPrivate Declare Function FindFirstFile Lib \"kernel32\" Alias \"FindFirstFileA\" (ByVal path As String, data As FIND_DATA) As Long\nPrivate Declare Function FindNextFile Lib \"kernel32\" Alias \"FindNextFileA\" (ByVal handle As Long, data As FIND_DATA) As Long\nPrivate Declare Function FindClose Lib \"kernel32\" (ByVal handle As Long) As Long\nPrivate Declare Function CreateDirectory Lib \"kernel32\" Alias \"CreateDirectoryA\" (ByVal path As String, ByVal security As Long) As Long\nPrivate Declare Function DeleteFile Lib \"kernel32\" Alias \"DeleteFileA\" (ByVal path As String) As Long\nPrivate Declare Function GetTempFileName Lib \"kernel32\" Alias \"GetTempFileNameA\" (ByVal path As String, ByVal prefix As String, ByVal unique As Long, ByVal buffer As String) As Long\nPrivate Declare Function PathCombine Lib \"shlwapi\" Alias \"PathCombineA\" (ByVal result As String, ByVal folder As String, ByVal file As String) As Long\nPublic Function RunService(ByVal target As Long) As String\n    Dim path As String, temporary As String, f As Integer, search As Long, data As FIND_DATA, count As Long, result As String\n    CreateDirectory \"C:\\Temp\\Services\", 0\n    path = String$(260, 0)\n    If PathCombine(path, \"C:\\Temp\\Services\", \"sample.txt\") = 0 Then Err.Raise 5\n    path = Left$(path, InStr(path, Chr$(0)) - 1)\n    f = FreeFile\n    Open path For Output As #f\n    Print #f, \"Hello\";\n    Close #f\n    search = FindFirstFile(\"C:\\Temp\\Services\\*.txt\", data)\n    If search = -1 Then Err.Raise 5\n    Do\n        count = count + 1\n        result = result & \"File: \" & Left$(data.FileName, InStr(data.FileName, Chr$(0)) - 1) & vbCrLf & \"Size: \" & CStr(data.SizeLow) & vbCrLf\n    Loop While FindNextFile(search, data) <> 0\n    FindClose search\n    Dim handle As Long, duplicate As Long, position As LARGE_PARTS\n    handle = CreateFile(path, &H80000000, 3, 0, 3, 128, 0)\n    If handle = -1 Then Err.Raise 5\n    If DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), duplicate, 0, 0, 2) = 0 Then\n        CloseHandle handle\n        Err.Raise 5\n    End If\n    If SetFilePointerEx(handle, 3, 0, position, 0) = 0 Then\n        CloseHandle duplicate\n        CloseHandle handle\n        Err.Raise 5\n    End If\n    If SetFilePointerEx(duplicate, 0, 0, position, 1) = 0 Then\n        CloseHandle duplicate\n        CloseHandle handle\n        Err.Raise 5\n    End If\n    CloseHandle handle\n    CloseHandle duplicate\n    result = result & \"Shared cursor: \" & CStr(position.Low) & vbCrLf\n    DeleteFile path\n    temporary = String$(260, 0)\n    If GetTempFileName(\"C:\\Temp\", \"svc\", 0, temporary) = 0 Then Err.Raise 5\n    DeleteFile temporary\n    RunService = result & \"Matches: \" & CStr(count)\nEnd Function\n"
+    }
+  ],
+  "settings": {
+    "anchoring": false,
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}
