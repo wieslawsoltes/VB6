@@ -1,0 +1,144 @@
+name: Rendering readiness investigation
+on:
+  push:
+    branches: [diag/rendering-readiness]
+    paths: [.github/workflows/rendering-readiness-probe.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  failures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Summarize exact previous candidate failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,concurrent.futures,re
+          from pathlib import Path
+          base='https://api.github.com/repos/wieslawsoltes/VB6'
+          runs=[37381232953,37381232889,37381232985,37381232875,37381233020,37381232923,37381232816,37381232989,37381233237,37381233064,37381233022]
+          out=Path('reports/readiness-failures');out.mkdir(parents=True,exist_ok=True)
+          def get(url):
+              req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              return urllib.request.urlopen(req,timeout=60).read()
+          def scan(run):
+              result=[]
+              for job in json.loads(get(base+'/actions/runs/'+str(run)+'/jobs?per_page=100'))['jobs']:
+                  if job['conclusion']!='failure':continue
+                  text=get(base+'/actions/jobs/'+str(job['id'])+'/logs').decode('utf-8-sig',errors='replace')
+                  (out/(str(job['id'])+'.log')).write_text(text)
+                  lines=text.splitlines();hits=[]
+                  for i,line in enumerate(lines):
+                      if re.search(r'(?:FAIL:|FAIL |FAILED|AssertionError|Error:|Traceback|##\[error\]|not ok |\bFAIL\b)',line):
+                          hits.extend(lines[max(0,i-1):min(len(lines),i+5)])
+                  result.append({'run':run,'job':job['name'],'id':job['id'],'failedSteps':[s['name'] for s in job['steps'] if s['conclusion']=='failure'],'errors':list(dict.fromkeys(hits))[-160:]})
+              return result
+          data=[]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+              for r in pool.map(scan,runs):data.extend(r)
+          (out/'summary.json').write_text(json.dumps(data,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: readiness-failures
+          path: reports/readiness-failures
+          retention-days: 7
+  browser:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            os: ubuntu-22.04
+          - browser: webkit
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0 Pillow
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - run: sudo apt-get update && sudo apt-get install -y libvulkan1 mesa-vulkan-drivers xvfb xauth
+      - name: Inspect native observation and unchanged renderer transitions
+        env:
+          ENGINE: ${{ matrix.browser }}
+        run: |
+          cat > /tmp/probe.py <<'PY'
+          import functools,http.server,threading,json,os,io
+          from pathlib import Path
+          from PIL import Image,ImageChops
+          from playwright.sync_api import sync_playwright
+          root=Path.cwd();out=root/'reports/readiness';out.mkdir(parents=True,exist_ok=True)
+          class Quiet(http.server.SimpleHTTPRequestHandler):
+              def log_message(self,*args):pass
+          server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Quiet,directory=root));threading.Thread(target=server.serve_forever,daemon=True).start()
+          init=r'''mode=>{
+            window.probe={callbacks:[],errors:[],mode};const tracked=new Map(),Native=window.ResizeObserver;
+            const box=n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height]};
+            const label=n=>n.localName+'#'+n.id+'.'+String(n.className).slice(0,160);
+            window.addEventListener('error',e=>probe.errors.push({message:e.message,callbacks:probe.callbacks.slice(-8)}));
+            window.ResizeObserver=class extends Native{
+              constructor(callback){const stack=new Error().stack;super((entries,observer)=>{
+                if(mode==='no-renderer-ro'&&stack.includes('observe@'))return;
+                const run=()=>{const before=new Map([...tracked.keys()].filter(n=>n.isConnected).map(n=>[n,box(n)]));callback(entries,observer);const changes=[];
+                  for(const [n,r] of before){const after=box(n);if(JSON.stringify(r)!==JSON.stringify(after))changes.push({node:label(n),before:r,after});}
+                  probe.callbacks.push({stack,entries:entries.map(e=>label(e.target)),changes});if(probe.callbacks.length>200)probe.callbacks.shift();};
+                if(mode==='defer-all')requestAnimationFrame(run);else run();
+              });}
+              observe(n,options){tracked.set(n,true);return super.observe(n,options)}
+              unobserve(n){tracked.delete(n);return super.unobserve(n)}
+            };
+            if(mode==='html')localStorage.setItem('vb6-studio-web.rendering.v1',JSON.stringify({backend:'html'}));
+          }'''
+          results=[]
+          def delta(a,b):
+              a=Image.open(io.BytesIO(a)).convert('RGB');b=Image.open(io.BytesIO(b)).convert('RGB');d=ImageChops.difference(a,b)
+              return {'pixels':sum(x!=(0,0,0) for x in d.getdata()),'bbox':d.getbbox()}
+          try:
+            with sync_playwright() as pw:
+              engine=os.environ['ENGINE'];opts={}
+              if engine=='chromium':opts={'args':['--no-sandbox','--enable-gpu','--ignore-gpu-blocklist','--enable-unsafe-webgpu','--enable-unsafe-swiftshader','--enable-features=Vulkan','--use-angle=swiftshader','--use-vulkan=swiftshader']}
+              browser=getattr(pw,engine).launch(**opts)
+              modes=['normal','html','defer-all','no-renderer-ro'] if engine=='webkit' else ['normal','html','root-isolated','body-composited','stable-canvas']
+              for mode in modes:
+                for repeat in range(2):
+                  context=browser.new_context(viewport={'width':1280,'height':800},device_scale_factor=1.5 if engine=='chromium' else 1)
+                  context.add_init_script('('+init+')('+json.dumps(mode)+')');page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                  page.goto(f'http://127.0.0.1:{server.server_port}/dist/VB6-Studio-Web.html');page.wait_for_function('window.vb6Studio?.rendering');page.evaluate('vb6Studio.rendering.ready')
+                  if mode=='body-composited':page.add_style_tag(content='body { transform:translateZ(0); }')
+                  if mode=='root-isolated':page.add_style_tag(content='body { isolation:isolate; }')
+                  if mode=='stable-canvas':page.evaluate('''()=>{const c=document.createElement('canvas');c.style.cssText='position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2147482999;contain:strict';document.documentElement.append(c);c.getContext('2d').clearRect(0,0,300,150);}''')
+                  page.evaluate('vb6Studio.setRenderingPolicy({backend:"html"})');page.evaluate('async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
+                  prefix=f'{mode}-{repeat}';baseline=page.screenshot();(out/(prefix+'-html.png')).write_bytes(baseline);comparisons=[]
+                  for switch in range(4):
+                    page.wait_for_timeout(150);native=page.screenshot();page.evaluate('vb6Studio.setRenderingPolicy({backend:"canvas2d",fallbacks:["html"],text:"native"})');page.wait_for_timeout(150)
+                    image=page.screenshot();comp=delta(baseline,image);comparisons.append({'switch':switch,'html':delta(baseline,native),'canvas':comp})
+                    if comp['pixels']:
+                      (out/(prefix+'-canvas.png')).write_bytes(image)
+                      if page.evaluate('vb6Studio.rendering.backend')=='canvas2d':
+                        page.evaluate('vb6Studio.rendering.canvas.style.visibility="hidden"');page.wait_for_timeout(100);comparisons[-1]['hidden']=delta(baseline,page.screenshot())
+                    page.evaluate('vb6Studio.setRenderingPolicy({backend:"html"})')
+                  info=page.evaluate('({probe,root:vb6Studio.root.className,body:document.body.className})');results.append({'mode':mode,'repeat':repeat,'errors':errors,'comparisons':comparisons,'info':info});context.close()
+              browser.close()
+          finally:
+            (out/'report.json').write_text(json.dumps(results,indent=2));server.shutdown()
+          PY
+          xvfb-run -a python /tmp/probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: readiness-${{ matrix.browser }}
+          path: reports/readiness
+          retention-days: 7
