@@ -97,6 +97,8 @@ export class ChatGPTConnection {
     this.cancel = button('Cancel sign-in', () => this.cancelLogin());
     // A real user-clicked link, not a blank window retargeted after asynchronous I/O.
     this.link = el('a', {target: '_blank', rel: 'noopener noreferrer', tabindex: 0, hidden: true}, 'Open ChatGPT sign-in');
+    // The shared dialog's Enter shortcut must not swallow native keyboard link activation.
+    this.link.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopPropagation(); });
     this.loginURL = el('input', {type: 'text', readOnly: true, hidden: true, 'aria-label': 'ChatGPT sign-in link', style: {width: '100%'}});
     this.copyLink = button('Copy sign-in link', () => this.copySignInLink()); this.copyLink.hidden = true;
     this.portal = el('div', {}, this.message,

@@ -69,7 +69,10 @@ try:
                 page.get_by_role('button', name='Sign in with ChatGPT', exact=True).click()
                 page.get_by_role('dialog', name='ChatGPT sign-in', exact=True).wait_for()
                 with context.expect_page() as popup_info:
-                    page.get_by_role('link', name='Open ChatGPT sign-in', exact=True).click()
+                    link = page.get_by_role('link', name='Open ChatGPT sign-in', exact=True)
+                    if filename == 'index.html':
+                        link.focus(); link.press('Enter')
+                    else: link.click()
                 popup = popup_info.value
                 popup.get_by_role('link', name='Approve fixture consent').wait_for()
                 check(popup.evaluate('window.opener === null'), filename + ': OAuth popup has no opener')
