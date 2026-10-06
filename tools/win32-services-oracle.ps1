@@ -64,6 +64,7 @@ public static class ServiceOracle {
  [DllImport("ole32.dll")] static extern IntPtr CoTaskMemAlloc(UIntPtr size);
  [DllImport("ole32.dll")] static extern IntPtr CoTaskMemRealloc(IntPtr memory,UIntPtr size);
  [DllImport("ole32.dll")] static extern void CoTaskMemFree(IntPtr memory);
+ public static readonly Dictionary<string,object> HandleDiagnostics=new Dictionary<string,object>();
  static readonly Dictionary<string,object> result=new Dictionary<string,object>();
  static string Hex(IntPtr p,int count){byte[] b=new byte[count];Marshal.Copy(p,b,0,count);return BitConverter.ToString(b).Replace("-","");}
  static string Text(IntPtr p,bool wide){return wide?Marshal.PtrToStringUni(p):Marshal.PtrToStringAnsi(p);}
@@ -94,8 +95,15 @@ public static class ServiceOracle {
   int moved=DuplicateHandle(GetCurrentProcess(),original,GetCurrentProcess(),out copy,0,0,3);
   try{
    if(moved==0)throw new Exception("Close-source duplicate failed");
-   uint missing=WaitForSingleObject(original,0);int error=Marshal.GetLastWin32Error();
-   result["duplicate-close-source"]=new object[]{moved,missing,error,SetEvent(copy),WaitForSingleObject(copy,0)};
+   uint missing=WaitForSingleObject(original,0);int error=missing==uint.MaxValue?Marshal.GetLastWin32Error():0;
+   // Handle numbers can be recycled, including for the returned duplicate.
+   // Preserve raw evidence, but compare lifetime rather than numeric identity.
+   HandleDiagnostics["close-source"]=new object[]{original.ToInt64(),copy.ToInt64(),original==copy,missing,error};
+   result["duplicate-close-source"]=new object[]{moved,original==copy||(missing==uint.MaxValue&&error==6),SetEvent(copy),WaitForSingleObject(copy,0)};
+   IntPtr ignored;int closed=DuplicateHandle(GetCurrentProcess(),copy,IntPtr.Zero,out ignored,0,0,1);
+   if(closed==0)throw new Exception("Close-only duplicate failed");
+   uint afterClose=WaitForSingleObject(copy,0);int closeError=afterClose==uint.MaxValue?Marshal.GetLastWin32Error():0;copy=IntPtr.Zero;
+   result["duplicate-close-only"]=new object[]{closed,afterClose,closeError};
   }finally{if(copy!=IntPtr.Zero)CloseHandle(copy);}
  }
  static void FileDetails(string path,IntPtr file){
@@ -120,7 +128,7 @@ public static class ServiceOracle {
   }finally{if(copy!=IntPtr.Zero)CloseHandle(copy);Marshal.FreeHGlobal(info);}
  }
  public static object Run(){
-  result.Clear();
+  result.Clear();HandleDiagnostics.Clear();
   MemoryAndDuplicates();
   Multi("utf8-terminated",65001,8,new byte[]{65,195,169,226,130,172,0},-1);
   Multi("utf8-astral",65001,8,new byte[]{65,240,159,152,128},5);
@@ -171,3 +179,4 @@ public static class ServiceOracle {
 }
 '@
 [ServiceOracle]::Run() | ConvertTo-Json -Depth 16 | Set-Content -Encoding utf8 reports/win32-services-native/windows.json
+[ServiceOracle]::HandleDiagnostics | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 reports/win32-services-native/handle-diagnostics.json

@@ -22,7 +22,11 @@ try{
  k('CloseHandle',original);results['duplicate-event-lifetime']=[k('SetEvent',copy),k('WaitForSingleObject',copy,0)];k('CloseHandle',copy);
  original=k('CreateEventA',0,1,0,0);const moved=k('DuplicateHandle',processHandle,original,processHandle,duplicateOut,0,0,3);assert.equal(moved,1);copy=m.readU32(duplicateOut);
  const missing=k('WaitForSingleObject',original,0)>>>0,closedError=w.lastError;
- results['duplicate-close-source']=[moved,missing,closedError,k('SetEvent',copy),k('WaitForSingleObject',copy,0)];k('CloseHandle',copy);
+ // Windows may recycle the closed source's numeric value for the duplicate.
+ // Compare object lifetime; the independent probe separately retains raw IDs.
+ results['duplicate-close-source']=[moved,original===copy||(missing===0xffffffff&&closedError===6),k('SetEvent',copy),k('WaitForSingleObject',copy,0)];
+ const closed=k('DuplicateHandle',processHandle,copy,0,0,0,0,1),afterClose=k('WaitForSingleObject',copy,0)>>>0;
+ results['duplicate-close-only']=[closed,afterClose,w.lastError];
  multi('utf8-terminated',65001,8,[65,195,169,226,130,172,0],-1);
  multi('utf8-astral',65001,8,[65,240,159,152,128],5);
  multi('utf8-bom',65001,8,[239,187,191,65],4);
