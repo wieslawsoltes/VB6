@@ -6,3 +6,6 @@
 *.css text eol=lf
 *.html text eol=lf
 *.json text eol=lf
+
+# The exact third-party notice is embedded verbatim in the LF CSS source.
+/LICENSES/98.css.txt text eol=lf
