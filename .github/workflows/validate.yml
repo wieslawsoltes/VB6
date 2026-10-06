@@ -15,6 +15,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Archive exact validation input
+        run: git archive --format=tar.gz HEAD -o "$RUNNER_TEMP/validation-source.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-source
+          path: ${{ runner.temp }}/validation-source.tar.gz
+          retention-days: 3
       - uses: actions/setup-node@v4
         with:
           node-version: 22
