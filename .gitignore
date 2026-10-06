@@ -63,3 +63,6 @@ reports/ide-themes/
 /packages/win32-browser/dist/win32-browser.js
 reports/win32-exports/
 reports/win32-system/
+
+# Application-theme/icon-pack browser fixtures and evidence (CI artifacts).
+reports/application-themes/

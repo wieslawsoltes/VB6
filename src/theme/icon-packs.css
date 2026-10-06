@@ -1,0 +1,25 @@
+/* Pack visibility is inherited and explicitly rebound at theme boundaries.
+ * Switching never walks/replaces icon DOM, so focus, selection and event handlers
+ * survive in current, lazy-created and detached IDE/application surfaces. */
+.pixel-icon {color:inherit;}
+.theme-icon-layer {pointer-events:none;}
+:is(.menu-selected,.selected,.active,[aria-selected="true"]) > .pixel-icon,
+:is(.menu-selected,.selected,[aria-selected="true"]) .theme-icon-layer {--vb-pack-ink:currentColor;--vb-pack-fill:currentColor;}
+:is(button:disabled,[aria-disabled="true"],.disabled) .theme-icon-layer {--vb-pack-ink:var(--vb-gray);--vb-pack-fill:var(--vb-gray);}
+.icon[data-icon=close] {--vb-caption-mask:var(--vb-pack-caption-close,var(--vb-caption-close));}
+.icon[data-icon=maximize] {--vb-caption-mask:var(--vb-pack-caption-maximize,var(--vb-caption-maximize));}
+.icon[data-icon=minimize] {--vb-caption-mask:var(--vb-pack-caption-minimize,var(--vb-caption-minimize));}
+.icon[data-icon=restore] {--vb-caption-mask:var(--vb-pack-caption-restore,var(--vb-caption-restore));}
+button[data-browser-detach] {--vb-caption-mask:var(--vb-pack-caption-detach,var(--vb-caption-detach));}
+.app-title button[title="About this application"] {--vb-caption-mask:var(--vb-pack-caption-help,var(--vb-caption-help));}
+/* Font-free supplemental chrome indicators; original Classic text is retained. */
+.theme-indicator {display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;pointer-events:none;}
+.theme-indicator>.indicator-classic {display:var(--vb-icon-classic-display,inline);}
+.theme-indicator>.indicator-modern {display:var(--vb-modern-icon-display,none);align-items:center;justify-content:center;}
+.theme-indicator .pixel-icon {max-width:100%;max-height:100%;}
+@media(forced-colors:active) {
+ .theme-icon-layer {--vb-pack-ink:ButtonText;--vb-pack-fill:ButtonText;forced-color-adjust:none;}
+ :is(.menu-selected,.selected,[aria-selected="true"]) .theme-icon-layer {--vb-pack-ink:HighlightText;--vb-pack-fill:HighlightText;}
+ :is(button:disabled,[aria-disabled="true"],.disabled) .theme-icon-layer {--vb-pack-ink:GrayText;--vb-pack-fill:GrayText;}
+ .theme-icon-layer [transform] {display:none;}
+}

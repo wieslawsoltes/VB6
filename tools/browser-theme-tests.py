@@ -158,7 +158,7 @@ class Themes(unittest.TestCase):
         self.options()
         for theme in THEMES:
             self.page.get_by_label('IDE theme',exact=True).select_option(theme)
-            self.assertEqual(self.page.get_by_label('Application theme',exact=True).locator('option').count(),3)
+            self.assertEqual(self.page.get_by_label('Application theme',exact=True).locator('option').count(),11)
         checkbox=self.page.get_by_label('Follow system light/dark appearance',exact=True)
         # Programmatic focus retains pointer modality in Firefox. Exercise real
         # keyboard navigation, not engine-specific :focus-visible heuristics.

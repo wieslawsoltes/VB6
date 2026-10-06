@@ -75,6 +75,10 @@ jobs:
         env:
           VB6_BROWSER: ${{ matrix.browser }}
         run: npm run test:themes:browser
+      - name: Application themes, control state and complete matching icon packs
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: npm run test:application-themes:browser
       - name: Download every sample from the IDE and reopen exact HTML bytes
         env:
           VB6_BROWSER: ${{ matrix.browser }}
@@ -86,6 +90,7 @@ jobs:
           path: |
             reports/browser-windows
             reports/ide-themes
+            reports/application-themes/${{ matrix.browser }}
             reports/win32-exports
           if-no-files-found: ignore
           retention-days: 7

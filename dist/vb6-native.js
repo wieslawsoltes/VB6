@@ -2,8 +2,171 @@
 (()=>{'use strict';
 const __modules=[];
 
-/* ..\..\packages\auto-layout\src\index.js */
+/* ..\theme\platform-themes.js */
 __modules[0]=(()=>{
+
+/** Shared immutable platform palettes. Original browser-rendered artwork and colors;
+ * no native toolkit, proprietary font or OS resource dependencies. */
+const freeze = value => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
+};
+const light = {
+  face:'#f3f3f3',light:'#ffffff',highlight:'#e8e8e8',shadow:'#8a8a8a',dark:'#505050',
+  text:'#1a1a1a',title:'#f3f3f3',titleEnd:'#f3f3f3',titleText:'#1a1a1a',
+  inactive:'#ededed',inactiveEnd:'#ededed',inactiveText:'#616161',
+  window:'#ffffff',windowText:'#1a1a1a',selection:'#0067b8',selectionText:'#ffffff',
+  workspace:'#e4e7eb',desktop:'#d9e2ec',gray:'#646464',info:'#ffffff',infoText:'#1a1a1a',
+  link:'#005a9e',keyword:'#003e9c',comment:'#256327',breakpoint:'#a4262c',execution:'#ffe58a'
+};
+const dark = {
+  face:'#202020',light:'#545454',highlight:'#383838',shadow:'#8a8a8a',dark:'#b4b4b4',
+  text:'#f5f5f5',title:'#282828',titleEnd:'#282828',titleText:'#f5f5f5',
+  inactive:'#252525',inactiveEnd:'#252525',inactiveText:'#b4b4b4',
+  window:'#191919',windowText:'#f5f5f5',selection:'#80caff',selectionText:'#102331',
+  workspace:'#141414',desktop:'#182630',gray:'#ababab',info:'#303030',infoText:'#f5f5f5',
+  link:'#80caff',keyword:'#8dc8ff',comment:'#9ccc8a',breakpoint:'#a4262c',execution:'#ffe58a'
+};
+const lightTokens = {
+  font:'"Segoe UI Variable", "Segoe UI", system-ui, sans-serif',size:'12px',radius:'4px',windowRadius:'8px',
+  border:'#8a8a8a',separator:'#d6d6d6',control:'#ffffff',hover:'#e5edf5',pressed:'#d4e3ef',focus:'#0067b8',
+  surface:'#fafafa',gutter:'#f5f5f5',gutterText:'#626262',error:'#b42318',string:'#8f2424',
+  shadow:'0 6px 20px #00000026, 0 1px 3px #00000020',controlShadow:'0 1px 1px #00000012',
+  pressedShadow:'inset 0 1px 2px #00000016',material:'#f3f3f3',scrim:'#00000030',
+  thumb:'#777777',success:'#256327',warning:'#805200',executionText:'#161616'
+};
+const darkTokens = {
+  ...lightTokens,border:'#888888',separator:'#484848',control:'#303030',hover:'#393f46',pressed:'#414d59',
+  focus:'#80caff',surface:'#252525',gutter:'#232323',gutterText:'#b4b4b4',error:'#ffb4ab',string:'#f1ada4',
+  shadow:'0 8px 24px #00000066, 0 1px 3px #00000066',controlShadow:'0 1px 1px #00000055',
+  pressedShadow:'inset 0 1px 2px #00000055',material:'#202020',scrim:'#00000066',thumb:'#adadad',
+  success:'#9ccc8a',warning:'#ffd58a'
+};
+const profile = (id,name,family,scheme,colors,tokens) => ({id,name,family,scheme,colors,tokens});
+const PLATFORM_THEMES = freeze({
+  fluent:profile('fluent','Fluent WinUI 3 — Light','fluent','light',light,lightTokens),
+  'fluent-dark':profile('fluent-dark','Fluent WinUI 3 — Dark','fluent','dark',dark,darkTokens),
+  macos26:profile('macos26','macOS 26 — Light','macos26','light',{
+    ...light,face:'#ececf0',title:'#ececf0',titleEnd:'#ececf0',text:'#1d1d1f',titleText:'#1d1d1f',
+    windowText:'#1d1d1f',selection:'#005ec4',workspace:'#dfe1e9',desktop:'#d9ddeb',link:'#0057b8',
+    keyword:'#7136a8',comment:'#386738'
+  },{...lightTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',radius:'6px',windowRadius:'12px',
+    focus:'#005ec4',surface:'#f7f7fa',hover:'#e0e7f4',pressed:'#ccd9ef',material:'color-mix(in srgb, #ececf0 92%, transparent)',
+    controlShadow:'0 1px 2px #0000001f, inset 0 1px #ffffffcc',shadow:'0 12px 32px #20203833, 0 1px 4px #00000026'}),
+  'macos26-dark':profile('macos26-dark','macOS 26 — Dark','macos26','dark',{
+    ...dark,face:'#2b2b30',title:'#303036',titleEnd:'#303036',window:'#1e1e23',selection:'#8bc2ff',
+    selectionText:'#102235',workspace:'#17171c',desktop:'#222535',link:'#91c6ff',keyword:'#dbadff',comment:'#9cd69c'
+  },{...darkTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',radius:'6px',windowRadius:'12px',
+    focus:'#8bc2ff',surface:'#303036',hover:'#41434e',pressed:'#4c5263',material:'color-mix(in srgb, #2b2b30 94%, transparent)',
+    controlShadow:'0 1px 2px #00000066, inset 0 1px #ffffff12'}),
+  x11:profile('x11','X11 Motif — Light','x11','light',{
+    ...light,face:'#bdbdb3',light:'#f2f2e8',highlight:'#d6d6cc',shadow:'#66665c',dark:'#35352d',
+    title:'#526872',titleEnd:'#526872',titleText:'#ffffff',inactive:'#a5a59a',inactiveEnd:'#a5a59a',inactiveText:'#292922',
+    window:'#fffff4',selection:'#365762',selectionText:'#ffffff',workspace:'#777970',desktop:'#526872',
+    gray:'#505047',info:'#ffffdf',link:'#1d477f',keyword:'#233b83',comment:'#285e2d'
+  },{...lightTokens,font:'"Liberation Sans", "DejaVu Sans", Arial, sans-serif',size:'11px',radius:'0px',windowRadius:'0px',
+    border:'#66665c',separator:'#929287',control:'#bdbdb3',surface:'#bdbdb3',hover:'#cecec4',pressed:'#a6a69c',
+    focus:'#233b83',gutter:'#e7e7db',gutterText:'#44443d',thumb:'#bdbdb3',material:'#bdbdb3',shadow:'3px 3px 0 #00000066',
+    controlShadow:'inset 1px 1px #f2f2e8, inset -1px -1px #66665c',pressedShadow:'inset 1px 1px #66665c, inset -1px -1px #f2f2e8'}),
+  'x11-dark':profile('x11-dark','X11 Motif — Dark','x11','dark',{
+    ...dark,face:'#343c3e',light:'#858f90',highlight:'#576265',shadow:'#99a4a6',dark:'#b5bfc0',
+    title:'#385861',titleEnd:'#385861',titleText:'#ffffff',inactive:'#343c3e',inactiveEnd:'#343c3e',
+    window:'#202729',windowText:'#f4f4e9',selection:'#b6d5dd',selectionText:'#192528',workspace:'#1c2527',desktop:'#273f47'
+  },{...darkTokens,font:'"Liberation Sans", "DejaVu Sans", Arial, sans-serif',size:'11px',radius:'0px',windowRadius:'0px',
+    border:'#99a4a6',separator:'#5a686b',control:'#343c3e',surface:'#343c3e',hover:'#48575c',pressed:'#263033',
+    focus:'#b6d5dd',gutter:'#2d3537',gutterText:'#bcc4c4',thumb:'#75878c',material:'#343c3e',shadow:'3px 3px 0 #00000099',
+    controlShadow:'inset 1px 1px #858f90, inset -1px -1px #151d20',pressedShadow:'inset 1px 1px #151d20, inset -1px -1px #858f90'}),
+  'x11-cde':profile('x11-cde','X11 CDE — Light','x11','light',{
+    ...light,face:'#aebfbe',light:'#e4eeee',highlight:'#ccdad8',shadow:'#546d6c',dark:'#2b4141',
+    title:'#365d66',titleEnd:'#365d66',titleText:'#ffffff',inactive:'#8caaa9',inactiveEnd:'#8caaa9',inactiveText:'#1d3332',
+    window:'#f8faef',selection:'#365d66',workspace:'#617d7d',desktop:'#45757b',gray:'#425757',info:'#fffbdc'
+  },{...lightTokens,font:'"Liberation Sans", "DejaVu Sans", Arial, sans-serif',size:'11px',radius:'0px',windowRadius:'0px',
+    border:'#546d6c',separator:'#7e9996',control:'#aebfbe',surface:'#aebfbe',hover:'#c7d5d2',pressed:'#94adaa',
+    focus:'#224b6a',gutter:'#dde7df',gutterText:'#405453',thumb:'#aebfbe',material:'#aebfbe',shadow:'3px 3px 0 #00000066',
+    controlShadow:'inset 1px 1px #e4eeee, inset -1px -1px #546d6c',pressedShadow:'inset 1px 1px #546d6c, inset -1px -1px #e4eeee'}),
+  'x11-cde-dark':profile('x11-cde-dark','X11 CDE — Dark','x11','dark',{
+    ...dark,face:'#2e4547',light:'#79989b',highlight:'#446367',shadow:'#91aeb0',dark:'#c2d4d5',
+    title:'#365d66',titleEnd:'#365d66',titleText:'#ffffff',inactive:'#2e4547',inactiveEnd:'#2e4547',
+    window:'#1b2b2d',selection:'#b6d9d7',selectionText:'#172b2a',workspace:'#172527',desktop:'#20474b'
+  },{...darkTokens,font:'"Liberation Sans", "DejaVu Sans", Arial, sans-serif',size:'11px',radius:'0px',windowRadius:'0px',
+    border:'#91aeb0',separator:'#527476',control:'#2e4547',surface:'#2e4547',hover:'#3e6164',pressed:'#253b3d',
+    focus:'#b6d9d7',gutter:'#273d3f',gutterText:'#bfd1d0',thumb:'#79989b',material:'#2e4547',shadow:'3px 3px 0 #00000099',
+    controlShadow:'inset 1px 1px #79989b, inset -1px -1px #152b2d',pressedShadow:'inset 1px 1px #152b2d, inset -1px -1px #79989b'})
+});
+
+return {PLATFORM_THEMES};
+})();
+
+/* ..\theme\theme.js */
+__modules[1]=(()=>{
+const {PLATFORM_THEMES}=__modules[0];
+
+/** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
+ * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
+ */
+const classic = {
+  face:'#c0c0c0', light:'#ffffff', highlight:'#dfdfdf', shadow:'#808080', dark:'#000000',
+  text:'#000000', title:'#000080', titleEnd:'#000080', titleText:'#ffffff',
+  inactive:'#808080', inactiveEnd:'#808080', inactiveText:'#c0c0c0',
+  window:'#ffffff', windowText:'#000000', selection:'#000080', selectionText:'#ffffff',
+  workspace:'#808080', desktop:'#008080', gray:'#808080', info:'#ffffe1', infoText:'#000000',
+  link:'#0000ff', keyword:'#000080', comment:'#008000', breakpoint:'#800000', execution:'#ffff00'
+};
+const profile = (id, name, colors) => Object.freeze({id, name, colors:Object.freeze(colors)});
+const CLASSIC_THEMES = Object.freeze({
+  classic:profile('classic','Windows Classic',classic),
+  standard:profile('standard','Windows Standard (2000)',{...classic,face:'#d4d0c8',highlight:'#e9e7e3',dark:'#404040',title:'#0a246a',titleEnd:'#a6caf0',inactiveEnd:'#c0c0c0',selection:'#0a246a'}),
+  contrast:profile('contrast','High Contrast Black',{...classic,face:'#000000',light:'#ffffff',highlight:'#ffffff',shadow:'#c0c0c0',dark:'#ffffff',text:'#ffffff',inactive:'#000000',inactiveEnd:'#000000',inactiveText:'#ffffff',window:'#000000',windowText:'#ffffff',selection:'#800080',selectionText:'#ffffff',workspace:'#000000',desktop:'#000000',gray:'#00ff00',info:'#000000',infoText:'#ffffff',link:'#ffff00',keyword:'#00ffff',comment:'#00ff00',breakpoint:'#ff0000'})
+});
+const THEMES = Object.freeze({...CLASSIC_THEMES,...PLATFORM_THEMES});
+// Win32 GetSysColor indices. Reserved index 25 falls back to the button face.
+const SYSTEM_ROLES = Object.freeze(['face','desktop','title','inactive','face','window','dark','text','windowText','titleText','face','face','workspace','selection','selectionText','face','shadow','gray','text','inactiveText','light','dark','highlight','infoText','info','face','link','titleEnd','inactiveEnd','selection','face']);
+const SYSTEM_COLOR_NAMES = Object.freeze(['Scroll Bars','Desktop','Active Title Bar','Inactive Title Bar','Menu Bar','Window Background','Window Frame','Menu Text','Window Text','Title Bar Text','Active Border','Inactive Border','Application Workspace','Highlight','Highlight Text','Button Face','Button Shadow','Gray Text','Button Text','Inactive Caption Text','3D Highlight','3D Dark Shadow','3D Light','Info Text','Info Background']);
+function themeId(id) { return typeof id==='string' && Object.hasOwn(THEMES,id) ? id : 'classic'; }
+function getTheme(element) {
+  return THEMES[themeId(typeof element === 'string' ? element : element?.closest?.('[data-vb-theme]')?.dataset.vbTheme || element?.ownerDocument?.documentElement?.dataset.vbTheme)];
+}
+function applyTheme(element, id) {
+  const value=themeId(id),profile=THEMES[value];
+  const attributes={'data-vb-theme':value,'data-vb-theme-family':profile.family||'classic',
+    'data-vb-theme-scheme':profile.scheme||(value==='contrast'?'dark':'light')};
+  let changed=false;
+  for(const [name,next] of Object.entries(attributes))if(element.getAttribute(name)!==next){element.setAttribute(name,next);changed=true;}
+  if(changed){const EventClass=element.ownerDocument?.defaultView?.CustomEvent||CustomEvent;
+    element.dispatchEvent(new EventClass('vb-theme-change',{bubbles:true,detail:{theme:value}}));}
+  return value;
+}
+function colorValue(value, fallback='#c0c0c0', theme='classic') {
+  if(typeof value==='string' && /^(#[\da-f]{3,8}|rgba?\(|hsla?\()/i.test(value))return value;
+  const n=Number(value);if(!Number.isFinite(n))return fallback;
+  const bits=n>>>0;
+  if(bits & 0x80000000) return (THEMES[themeId(theme)].colors[SYSTEM_ROLES[bits&0xff]]) || fallback;
+  return '#'+[bits&255,(bits>>>8)&255,(bits>>>16)&255].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+function cssColor(value,fallback='#c0c0c0') {
+  const bits=Number(value)>>>0;
+  return Number.isFinite(Number(value)) && bits&0x80000000 && SYSTEM_ROLES[bits&255]
+    ? `var(--vb-sys-${bits&255}, ${colorValue(value,fallback)})` : colorValue(value,fallback);
+}
+function fontFamily(name='MS Sans Serif') {
+  if(/^MS Sans Serif$/i.test(name))return '"MS Sans Serif", Tahoma, Arial, sans-serif';
+  if(/^MS Serif$/i.test(name))return '"MS Serif", "Times New Roman", serif';
+  // A quoted family cannot escape the declaration or turn into a URL.
+  return '"'+String(name).replace(/["\\\n\r]/g,'')+'", Tahoma, Arial, sans-serif';
+}
+const DEFAULT_APPEARANCE = Object.freeze({theme:'classic',windowMode:'hybrid',documentTabs:false,debugTabs:false,editorFont:'Courier New',editorSize:13,tooltips:true,procedureSeparators:true,autoIndent:true,autoListMembers:true,autoQuickInfo:true,autoDataTips:true,fullModule:true,margin:true,dragText:true,autoSyntaxCheck:true,requireVariableDeclaration:true,notifyStateLoss:false,largeToolbarIcons:false});
+function normalizeAppearance(value={}) {
+  return {...DEFAULT_APPEARANCE,windowMode:value.windowMode==='mdi'?'mdi':'hybrid',autoSyntaxCheck:value.autoSyntaxCheck!==false,requireVariableDeclaration:value.requireVariableDeclaration!==false,notifyStateLoss:value.notifyStateLoss===true,largeToolbarIcons:value.largeToolbarIcons===true,autoQuickInfo:value.autoQuickInfo!==false,autoDataTips:value.autoDataTips!==false,fullModule:value.fullModule!==false,margin:value.margin!==false,dragText:value.dragText!==false,codeColors:Object.fromEntries(Object.entries(value.codeColors||{}).filter(([key,color])=>['text','background','keyword','comment','selection','selectionText','breakpoint','execution'].includes(key)&&/^#[0-9a-f]{6}$/i.test(color))),theme:themeId(value.theme),documentTabs:value.documentTabs===true,debugTabs:value.debugTabs===true,editorFont:['Courier New','Consolas','monospace'].includes(value.editorFont)?value.editorFont:'Courier New',editorSize:[11,12,13,14,16,18,20].includes(Number(value.editorSize))?Number(value.editorSize):13,tooltips:value.tooltips!==false,procedureSeparators:value.procedureSeparators!==false,autoIndent:value.autoIndent!==false,autoListMembers:value.autoListMembers!==false};
+}
+
+return {CLASSIC_THEMES,THEMES,SYSTEM_ROLES,SYSTEM_COLOR_NAMES,themeId,getTheme,applyTheme,colorValue,cssColor,fontFamily,DEFAULT_APPEARANCE,normalizeAppearance};
+})();
+
+/* ..\..\packages\auto-layout\src\index.js */
+__modules[2]=(()=>{
 
 /**
  * Renderer-independent layout in arbitrary logical units. No DOM, global state,
@@ -315,7 +478,7 @@ return {AnchorStyles,DockStyle,LayoutMode,parseAnchor,formatAnchor,parseDock,par
 })();
 
 /* ..\language\errors.js */
-__modules[1]=(()=>{
+__modules[3]=(()=>{
 
 class VBError extends Error {
   constructor(message, number = 5, source = null, line = 0, column = 0) { super(message); this.name = 'VBError'; this.number = number; this.source = source; this.line = line; this.column = column; }
@@ -325,8 +488,8 @@ return {VBError};
 })();
 
 /* ..\runtime\calendar.js */
-__modules[2]=(()=>{
-const {VBError}=__modules[1];
+__modules[4]=(()=>{
+const {VBError}=__modules[3];
 /** Gregorian/OLE DATE support. Numeric dates encode civil time, not UTC instants.
  * System-default week settings deliberately use the documented invariant defaults
  * (Sunday / week containing January 1); no Windows NLS API is available here.
@@ -404,9 +567,9 @@ return {validateDate,dateOrdinal,dateToSerial,serialToDate,asDate,dateAdd,dateDi
 })();
 
 /* ..\language\lexer.js */
-__modules[3]=(()=>{
-const {asDate}=__modules[2];
-const {VBError}=__modules[1];
+__modules[5]=(()=>{
+const {asDate}=__modules[4];
+const {VBError}=__modules[3];
 
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 
@@ -498,9 +661,9 @@ return {tokenize,splitTop,logicalLines,VBError};
 })();
 
 /* ..\layout\contract.js */
-__modules[4]=(()=>{
-const {AnchorStyles, DockStyle, LayoutMode, parseAnchor, parseDock, parseLayoutMode}=__modules[0];
-const {VBError}=__modules[3];
+__modules[6]=(()=>{
+const {AnchorStyles, DockStyle, LayoutMode, parseAnchor, parseDock, parseLayoutMode}=__modules[2];
+const {VBError}=__modules[5];
 
 
 // Project-scoped language extension. Never mutate the classic control catalog or
@@ -563,8 +726,8 @@ return {LAYOUT_DEFAULTS,LAYOUT_KEYS,LAYOUT_CONSTANTS,layoutEnabled,layoutEligibl
 })();
 
 /* ..\layout\language-gate.js */
-__modules[5]=(()=>{
-const {layoutEnabled,layoutDefaults,layoutKey}=__modules[4];
+__modules[7]=(()=>{
+const {layoutEnabled,layoutDefaults,layoutKey}=__modules[6];
 
 const lower=s=>String(s).toLowerCase();
 const methods=new Set(['performlayout','suspendlayout','resumelayout']);
@@ -613,7 +776,7 @@ return {layoutBindingSnapshot,validateLayoutMembers};
 })();
 
 /* ..\core\window-context.js */
-__modules[6]=(()=>{
+__modules[8]=(()=>{
 
 /** Documents belonging to one live IDE session. No global DOM monkey-patching. */
 const documents = new Set();
@@ -645,8 +808,8 @@ return {registerUIDocument,uiDocuments,uiDocument,hasUIDialog};
 })();
 
 /* ..\core\core.js */
-__modules[7]=(()=>{
-const {uiDocument}=__modules[6];
+__modules[9]=(()=>{
+const {uiDocument}=__modules[8];
 
 /** Small framework-independent primitives shared by the IDE and runtime. */
 class Signal {
@@ -708,7 +871,7 @@ return {Signal,History,clone,lower,escapeHTML,debounce,download,el,safeName,VERS
 })();
 
 /* ..\runtime\constants.js */
-__modules[8]=(()=>{
+__modules[10]=(()=>{
 
 /** Shared immutable compiler/runtime intrinsic constants. */
 const VB_CONSTANTS = {
@@ -735,8 +898,8 @@ return {VB_CONSTANTS};
 })();
 
 /* ..\runtime\decimal.js */
-__modules[9]=(()=>{
-const {VBError}=__modules[1];
+__modules[11]=(()=>{
+const {VBError}=__modules[3];
 
 const MAX=(1n<<96n)-1n;
 const abs=n=>n<0n?-n:n;
@@ -813,11 +976,11 @@ return {VBDecimal};
 })();
 
 /* ..\runtime\values.js */
-__modules[10]=(()=>{
-const {VBDecimal}=__modules[9];
-const {asDate,dateToSerial}=__modules[2];
-const { VBError }=__modules[3];
-const { lower }=__modules[7];
+__modules[12]=(()=>{
+const {VBDecimal}=__modules[11];
+const {asDate,dateToSerial}=__modules[4];
+const { VBError }=__modules[5];
+const { lower }=__modules[9];
 
 
 function bankersRound(n) { if(!Number.isFinite(n))throw new VBError('Overflow',6);const floor=Math.floor(n), f=n-floor;return f===0.5?(floor%2===0?floor:floor+1):Math.round(n); }
@@ -1254,12 +1417,12 @@ return {bankersRound,NOTHING,MISSING,VBErrorValue,explicitErrorValue,VBScalar,SC
 })();
 
 /* ..\language\binding.js */
-__modules[11]=(()=>{
-const {LAYOUT_CONSTANTS,LAYOUT_ENUMS}=__modules[4];
-const {VBError}=__modules[1];
-const {lower}=__modules[7];
-const {VB_CONSTANTS}=__modules[8];
-const {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,storageScalar,signedLiteralScalar}=__modules[10];
+__modules[13]=(()=>{
+const {LAYOUT_CONSTANTS,LAYOUT_ENUMS}=__modules[6];
+const {VBError}=__modules[3];
+const {lower}=__modules[9];
+const {VB_CONSTANTS}=__modules[10];
+const {VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,storageScalar,signedLiteralScalar}=__modules[12];
 
 
 
@@ -1375,8 +1538,8 @@ return {bindConstants};
 })();
 
 /* ..\language\default-types.js */
-__modules[12]=(()=>{
-const {VBError}=__modules[3];
+__modules[14]=(()=>{
+const {VBError}=__modules[5];
 
 /** VB6 module-scoped default types. Later VB.NET-only integer types are not accepted. */
 const DEFAULT_TYPE_NAMES=Object.freeze({defbool:'Boolean',defbyte:'Byte',defint:'Integer',deflng:'Long',defcur:'Currency',defsng:'Single',defdbl:'Double',defdate:'Date',defstr:'String',defobj:'Object',defvar:'Variant'});
@@ -1402,8 +1565,8 @@ return {DEFAULT_TYPE_NAMES,addDefaultTypes,defaultIdentifierType};
 })();
 
 /* ..\language\interfaces.js */
-__modules[13]=(()=>{
-const {lower}=__modules[7];
+__modules[15]=(()=>{
+const {lower}=__modules[9];
 
 const json=x=>JSON.stringify(x);
 function shape(p){return {kind:p.kind,accessor:p.accessor,type:lower(p.returnType),params:p.params.map(a=>({type:lower(a.type),byRef:a.byRef,optional:a.optional,paramArray:a.paramArray,array:a.bounds!==null,initial:a.initial}))};}
@@ -1446,8 +1609,8 @@ return {validateInterfaces};
 })();
 
 /* ..\language\expression.js */
-__modules[14]=(()=>{
-const { tokenize, VBError }=__modules[3];
+__modules[16]=(()=>{
+const { tokenize, VBError }=__modules[5];
 
 const PRECEDENCE = {imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14};
 class ExpressionParser {
@@ -1550,10 +1713,10 @@ return {ExpressionParser,parseExpression,parseCall};
 })();
 
 /* ..\language\conditional.js */
-__modules[15]=(()=>{
-const { VBError }=__modules[3];
-const { parseExpression }=__modules[14];
-const { binary, unary, truth }=__modules[10];
+__modules[17]=(()=>{
+const { VBError }=__modules[5];
+const { parseExpression }=__modules[16];
+const { binary, unary, truth }=__modules[12];
 
 
 
@@ -1592,16 +1755,16 @@ return {preprocess};
 })();
 
 /* ..\language\compiler.js */
-__modules[16]=(()=>{
-const {layoutBindingSnapshot,validateLayoutMembers}=__modules[5];
-const {validateLayout}=__modules[4];
-const {bindConstants}=__modules[11];
-const {defaultIdentifierType,addDefaultTypes}=__modules[12];
-const {validateInterfaces}=__modules[13];
-const { preprocess }=__modules[15];
-const { VBError, logicalLines, splitTop, tokenize }=__modules[3];
-const { parseExpression, parseCall }=__modules[14];
-const { lower }=__modules[7];
+__modules[18]=(()=>{
+const {layoutBindingSnapshot,validateLayoutMembers}=__modules[7];
+const {validateLayout}=__modules[6];
+const {bindConstants}=__modules[13];
+const {defaultIdentifierType,addDefaultTypes}=__modules[14];
+const {validateInterfaces}=__modules[15];
+const { preprocess }=__modules[17];
+const { VBError, logicalLines, splitTop, tokenize }=__modules[5];
+const { parseExpression, parseCall }=__modules[16];
+const { lower }=__modules[9];
 
 
 
@@ -1836,9 +1999,9 @@ return {parseDeclarations,parseParameters,compileModule,compileProject,validateC
 })();
 
 /* ..\layout\model.js */
-__modules[17]=(()=>{
-const {LayoutEngine}=__modules[0];
-const {layoutEligible}=__modules[4];
+__modules[19]=(()=>{
+const {LayoutEngine}=__modules[2];
+const {layoutEligible}=__modules[6];
 
 
 const formSize = form => ({width:Number(form.properties.ClientWidth??form.properties.Width??0),height:Number(form.properties.ClientHeight??form.properties.Height??0)});
@@ -1890,7 +2053,7 @@ return {formSize,layoutNode,parentIds,layoutOptions,formNodes,arrangeFormEdit};
 })();
 
 /* layout-core.js */
-__modules[18]=(()=>{
+__modules[20]=(()=>{
 
 /** Private native layout kernel, independently lowered by our existing VB-to-x86
  * compiler. Geometry remains Double until the final HWND pixel conversion.
@@ -2210,10 +2373,10 @@ return {NATIVE_LAYOUT_COLUMNS,NATIVE_LAYOUT_FIELDS,nativeLayoutCoreSource};
 })();
 
 /* layout-seed.js */
-__modules[19]=(()=>{
-const {LayoutEngine}=__modules[0];
-const {formNodes,layoutOptions,formSize}=__modules[17];
-const {NATIVE_LAYOUT_COLUMNS}=__modules[18];
+__modules[21]=(()=>{
+const {LayoutEngine}=__modules[2];
+const {formNodes,layoutOptions,formSize}=__modules[19];
+const {NATIVE_LAYOUT_COLUMNS}=__modules[20];
 
 
 
@@ -2241,11 +2404,11 @@ return {nativeLayoutSeed};
 })();
 
 /* layout.js */
-__modules[20]=(()=>{
-const {compileProject}=__modules[16];
-const {layoutEnabled,layoutEligible,layoutDefaults,LAYOUT_CONSTANTS}=__modules[4];
-const {nativeLayoutSeed}=__modules[19];
-const {nativeLayoutCoreSource,NATIVE_LAYOUT_COLUMNS,NATIVE_LAYOUT_FIELDS}=__modules[18];
+__modules[22]=(()=>{
+const {compileProject}=__modules[18];
+const {layoutEnabled,layoutEligible,layoutDefaults,LAYOUT_CONSTANTS}=__modules[6];
+const {nativeLayoutSeed}=__modules[21];
+const {nativeLayoutCoreSource,NATIVE_LAYOUT_COLUMNS,NATIVE_LAYOUT_FIELDS}=__modules[20];
 
 
 
@@ -2359,10 +2522,80 @@ const nativeLayoutMethods={
 return {nativeLayoutMethods};
 })();
 
+/* ..\theme\application-appearance.js */
+__modules[23]=(()=>{
+const {THEMES,themeId,applyTheme}=__modules[1];
+/** Project-owned application appearance. One listener per host/designer, no
+ * DOM rebuild, external resources, per-control observers or implicit persistence. */
+
+const APPLICATION_THEME_ATTRIBUTES=Object.freeze(['data-vb-theme','data-vb-theme-family',
+  'data-vb-theme-scheme','data-vb-reduce-transparency','data-vb-reduce-motion']);
+function normalizeApplicationAppearance(value={}) {
+  if(!value||typeof value!=='object'||Array.isArray(value))value={};
+  const options=value.themeOptions&&typeof value.themeOptions==='object'&&!Array.isArray(value.themeOptions)?value.themeOptions:{};
+  return {theme:themeId(value.theme),themeOptions:{followSystemTheme:options.followSystemTheme===true,
+    reduceTransparency:options.reduceTransparency===true,reduceMotion:options.reduceMotion===true}};
+}
+function resolveApplicationTheme(value={},prefersDark=false) {
+  const a=normalizeApplicationAppearance(value),profile=THEMES[a.theme];
+  if(!profile.family||!a.themeOptions.followSystemTheme)return profile;
+  return THEMES[a.theme.replace(/-dark$/,'')+(prefersDark?'-dark':'')];
+}
+function copyApplicationTheme(source,target) {
+  for(const name of APPLICATION_THEME_ATTRIBUTES){const value=source.getAttribute(name);
+    if(value===null)target.removeAttribute(name);else if(target.getAttribute(name)!==value)target.setAttribute(name,value);}
+}
+/** Transient body-mounted portals keep their opener's local appearance, even
+ * when two applications in one document use different palettes. Release on close. */
+function bindApplicationTheme(source,target) {
+  const origin=source?.closest?.('[data-vb-theme]')||source?.ownerDocument?.documentElement;
+  if(!origin)return ()=>{};
+  const update=()=>copyApplicationTheme(origin,target);
+  update();origin.addEventListener('vb-theme-change',update);
+  return ()=>origin.removeEventListener('vb-theme-change',update);
+}
+class ApplicationThemeController {
+  constructor(root,{onChange=()=>{}}={}) {
+    this.root=root;this.view=root.ownerDocument?.defaultView;this.onChange=onChange;
+    this.appearance=normalizeApplicationAppearance();this.disposed=false;
+    this.media=this.view?.matchMedia?.('(prefers-color-scheme: dark)');
+    this.onScheme=()=>this.apply(this.appearance);
+    this.onPageShow=e=>{if(e.persisted)this.apply(this.appearance);};
+    this.onPageHide=e=>{if(!e.persisted)this.dispose();};
+    this.media?.addEventListener?.('change',this.onScheme);
+    this.view?.addEventListener?.('pageshow',this.onPageShow);
+    this.view?.addEventListener?.('pagehide',this.onPageHide);
+  }
+  apply(value) {
+    if(this.disposed)return THEMES[themeId(this.root.getAttribute('data-vb-theme'))];
+    this.appearance=normalizeApplicationAppearance(value);
+    const profile=resolveApplicationTheme(this.appearance,!!this.media?.matches);
+    let optionsChanged=false;
+    for(const [key,name] of [['reduceTransparency','data-vb-reduce-transparency'],['reduceMotion','data-vb-reduce-motion']]){
+      const next=String(this.appearance.themeOptions[key]);
+      if(this.root.getAttribute(name)!==next){this.root.setAttribute(name,next);optionsChanged=true;}
+    }
+    const previous=this.root.getAttribute('data-vb-theme');applyTheme(this.root,profile.id);
+    if(optionsChanged&&previous===profile.id){const EventClass=this.view?.CustomEvent||CustomEvent;
+      this.root.dispatchEvent(new EventClass('vb-theme-change',{bubbles:true,detail:{theme:profile.id}}));}
+    if(previous!==profile.id||optionsChanged)this.onChange(profile,this.appearance);
+    return profile;
+  }
+  dispose() {
+    if(this.disposed)return;this.disposed=true;
+    this.media?.removeEventListener?.('change',this.onScheme);
+    this.view?.removeEventListener?.('pageshow',this.onPageShow);
+    this.view?.removeEventListener?.('pagehide',this.onPageHide);
+  }
+}
+
+return {APPLICATION_THEME_ATTRIBUTES,normalizeApplicationAppearance,resolveApplicationTheme,copyApplicationTheme,bindApplicationTheme,ApplicationThemeController};
+})();
+
 /* ..\data\common.js */
-__modules[21]=(()=>{
-const {VBError}=__modules[3];
-const {VBArray, VBCurrency, VBDecimal}=__modules[10];
+__modules[24]=(()=>{
+const {VBError}=__modules[5];
+const {VBArray, VBCurrency, VBDecimal}=__modules[12];
 
 
 const DATA_LIMITS = Object.freeze({rows:100000, cells:1000000, bytes:20*1024*1024, pages:100});
@@ -2540,9 +2773,9 @@ return {DATA_LIMITS,DATA_CONSTANTS,dataError,assertData,after,dataList,sqlValue,
 })();
 
 /* ..\runtime\binary-codec.js */
-__modules[22]=(()=>{
-const {VBError}=__modules[3];
-const {VBScalar,SCALAR_TYPES,scalarType,tagScalar,unbox,VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[10];
+__modules[25]=(()=>{
+const {VBError}=__modules[5];
+const {VBScalar,SCALAR_TYPES,scalarType,tagScalar,unbox,VBArray,VBCurrency,VBDecimal,VBErrorValue,NOTHING,coerce,numeric,vbString,Cell,makeRecord : buildRecord}=__modules[12];
 
 
 // Classic VB files use an ANSI code page. This browser runtime explicitly uses
@@ -2639,8 +2872,8 @@ return {encodeANSI,decodeANSI,makeRecord,recordLength,encodeVariable,decodeVaria
 })();
 
 /* ..\project\binary-assets.js */
-__modules[23]=(()=>{
-const {VBError}=__modules[3];
+__modules[26]=(()=>{
+const {VBError}=__modules[5];
 
 const MAX_RESOURCE_BYTES=20*1024*1024;
 const fail=message=>{throw new VBError(message,1002);};
@@ -2651,10 +2884,10 @@ return {fromBase64,toBase64};
 })();
 
 /* ..\project\native-text.js */
-__modules[24]=(()=>{
-const {decodeANSI,encodeANSI}=__modules[22];
-const {VBError}=__modules[3];
-const {fromBase64,toBase64}=__modules[23];
+__modules[27]=(()=>{
+const {decodeANSI,encodeANSI}=__modules[25];
+const {VBError}=__modules[5];
+const {fromBase64,toBase64}=__modules[26];
 /** Native project text: preserve bytes, BOMs and line endings; never replace unmappable characters. */
 
 
@@ -2718,9 +2951,9 @@ return {NATIVE_ENCODINGS,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferre
 })();
 
 /* ..\project\frx.js */
-__modules[25]=(()=>{
-const {VBError}=__modules[3];
-const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[24];
+__modules[28]=(()=>{
+const {VBError}=__modules[5];
+const {decodeNativeBytes,encodeNativeText,bytesOf}=__modules[27];
 /** Bounded FRX records; no COM deserialization, native code, or remote resource loads. */
 
 
@@ -2823,9 +3056,9 @@ return {MAX_RESOURCE_BYTES,cleanProjectPath,relativeProjectPath,resolveProjectPa
 })();
 
 /* ..\project\res.js */
-__modules[26]=(()=>{
-const {VBError}=__modules[3];
-const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[25];
+__modules[29]=(()=>{
+const {VBError}=__modules[5];
+const {cleanProjectPath,fromBase64,toBase64,MAX_RESOURCE_BYTES}=__modules[28];
 /** Windows 32-bit .res containers. Payloads remain opaque unless explicitly edited. */
 
 
@@ -2917,12 +3150,14 @@ return {RESOURCE_TYPES,resourceKey,normalizeResources,readRES,writeRES,decodeStr
 })();
 
 /* ..\project\model.js */
-__modules[27]=(()=>{
-const {validateLayout}=__modules[4];
-const {normalizeDataSources}=__modules[21];
-const { clone, lower, safeName }=__modules[7];
-const {normalizeResources}=__modules[26];
-const { VBError }=__modules[3];
+__modules[30]=(()=>{
+const {normalizeApplicationAppearance}=__modules[23];
+const {validateLayout}=__modules[6];
+const {normalizeDataSources}=__modules[24];
+const { clone, lower, safeName }=__modules[9];
+const {normalizeResources}=__modules[29];
+const { VBError }=__modules[5];
+
 
 
 
@@ -2977,6 +3212,7 @@ function normalizeProject(value){
   }
   if(!Number.isInteger(Number(project.settings.tabWidth))||Number(project.settings.tabWidth)<1||Number(project.settings.tabWidth)>32)project.settings.tabWidth=4;else project.settings.tabWidth=Number(project.settings.tabWidth);
   const grid=Number(project.settings.gridSize);project.settings.gridSize=Number.isFinite(grid)?Math.max(15,Math.min(1200,grid)):120;
+  if(Object.hasOwn(project.settings,'theme')||Object.hasOwn(project.settings,'themeOptions')){const appearance=normalizeApplicationAppearance(project.settings);project.settings.theme=appearance.theme;if(Object.hasOwn(project.settings,'themeOptions'))project.settings.themeOptions=appearance.themeOptions;}
   project.settings.renderer=project.settings.renderer==='canvas2d'?'canvas2d':'auto';
   if(project.dataSources)project.dataSources=normalizeDataSources(project.dataSources);
   if(project.resources)project.resources=normalizeResources(project.resources);
@@ -2991,7 +3227,7 @@ return {PROJECT_SCHEMA,newId,BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,CONTROL_
 })();
 
 /* pe32.js */
-__modules[28]=(()=>{
+__modules[31]=(()=>{
 
 /** Deterministic PE32 linker. Browser-safe: no Node, native compiler, or binary template. */
 const PE32_BASE = 0x400000;
@@ -3112,7 +3348,7 @@ return {PE32_BASE,BinarySection,PE32Image};
 })();
 
 /* x86.js */
-__modules[29]=(()=>{
+__modules[32]=(()=>{
 
 /** Small checked x86 assembler for the native VB backend (stdcall, 32-bit registers). */
 class X86 {
@@ -3156,8 +3392,8 @@ return {X86};
 })();
 
 /* bindings.js */
-__modules[30]=(()=>{
-const {VBCurrency}=__modules[10];
+__modules[33]=(()=>{
+const {VBCurrency}=__modules[12];
 /** Resolve compile-time values with their declaration types intact. The source
  * binder has already evaluated these expressions without executing user code.
  * Keep lexical visibility separate from the machine representation in EAX. */
@@ -3247,7 +3483,7 @@ return {nativeBindingMethods};
 })();
 
 /* arrays.js */
-__modules[31]=(()=>{
+__modules[34]=(()=>{
 
 /** Owned SAFEARRAY storage for fixed/dynamic native arrays. The internal array ABI
  * passes a descriptor slot by reference; it is never exposed to browser code. */
@@ -3464,8 +3700,8 @@ return {NATIVE_ARRAY_MAX_BYTES,NATIVE_ARRAY_MAX_RANK,nativeArrayLimit,nativeArra
 })();
 
 /* storage.js */
-__modules[32]=(()=>{
-const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[31];
+__modules[35]=(()=>{
+const {NATIVE_ARRAY_MAX_BYTES, NATIVE_ARRAY_MAX_RANK}=__modules[34];
 /** Native storage lowering. BSTR ownership is explicit; no JS or VB runtime is embedded. */
 
 const key = value => String(value).toLowerCase();
@@ -3646,8 +3882,8 @@ return {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHe
 })();
 
 /* string-interop.js */
-__modules[33]=(()=>{
-const {MAX_NATIVE_STRING}=__modules[32];
+__modules[36]=(()=>{
+const {MAX_NATIVE_STRING}=__modules[35];
 /** Native Declare strings: ANSI byte-BSTR temporaries, never writable .rdata.
  * Original implementation of the Microsoft VB5 DLL contract, section 5:
  * https://classicvb.net/tips/vb5dll/ (Microsoft's paper, republished with permission).
@@ -3759,7 +3995,7 @@ return {MAX_NATIVE_ANSI_BYTES,nativeStringInteropMethods,emitNativeStringInterop
 })();
 
 /* numeric.js */
-__modules[34]=(()=>{
+__modules[37]=(()=>{
 
 /** Native Single/Double lowering. Floating expressions return an immutable Double
  * snapshot address in EAX; only ABI returns use ST(0). No live FPU values span
@@ -4045,9 +4281,9 @@ return {FLOAT_TYPES,REAL_TYPES,nativeParameterBytes,nativeNumericMethods,emitNat
 })();
 
 /* calls.js */
-__modules[35]=(()=>{
-const {coerce, defaultValue}=__modules[10];
-const {nativeParameterBytes}=__modules[34];
+__modules[38]=(()=>{
+const {coerce, defaultValue}=__modules[12];
+const {nativeParameterBytes}=__modules[37];
 /** Early-bound native calls: separate source evaluation order from stdcall slot
  * order, and never expose a literal/read-only snapshot as writable ByRef storage. */
 
@@ -4142,7 +4378,7 @@ return {planNativeArguments,nativeCallMethods};
 })();
 
 /* callbacks.js */
-__modules[36]=(()=>{
+__modules[39]=(()=>{
 
 /** Original x86 stdcall callback thunks. No executable heap or native compiler.
  * Contract: https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/addressof-operator
@@ -4222,8 +4458,8 @@ return {nativeCallbackMethods,emitNativeCallbackHelpers};
 })();
 
 /* currency.js */
-__modules[37]=(()=>{
-const {VBCurrency}=__modules[10];
+__modules[40]=(()=>{
+const {VBCurrency}=__modules[12];
 /** Native CY values are signed 64-bit integers scaled by 10,000. Expressions
  * return an immutable snapshot address in EAX; ABI returns use EDX:EAX. Never
  * route Currency storage, literals or same-type arithmetic through Double. */
@@ -4400,8 +4636,8 @@ return {nativeCurrencyMethods,emitNativeCurrencyHelpers};
 })();
 
 /* dates.js */
-__modules[38]=(()=>{
-const {dateToSerial}=__modules[2];
+__modules[41]=(()=>{
+const {dateToSerial}=__modules[4];
 /** Native Automation DATE: civil date/time in eight bytes, not a JS timestamp.
  * Values use immutable Double snapshots; semantic Date type and range checking
  * stay distinct from their physical representation and the foreign ST(0) ABI. */
@@ -4597,8 +4833,8 @@ return {nativeDateMethods,emitNativeDateHelpers};
 })();
 
 /* date-intervals.js */
-__modules[39]=(()=>{
-const {compileProject}=__modules[16];
+__modules[42]=(()=>{
+const {compileProject}=__modules[18];
 /** Native calendar intervals. The arithmetic routines below are original private
  * compiler support code, lowered by our JavaScript frontend and x86 emitter. They
  * never invoke a VB compiler, Script Host, CLR, or an embedded JavaScript engine.
@@ -4841,7 +5077,7 @@ return {NATIVE_DATE_CONSTANTS,nativeDateIntervalMethods,emitNativeDateIntervalHe
 })();
 
 /* control-arrays.js */
-__modules[40]=(()=>{
+__modules[43]=(()=>{
 
 /** Statically designed control arrays, including Index event arguments. Each
  * element retains its own native HWND and ID; no flattened duplicate names. */
@@ -4919,7 +5155,7 @@ return {nativeControlArrayMethods};
 })();
 
 /* errors.js */
-__modules[41]=(()=>{
+__modules[44]=(()=>{
 
 /** Structured native VB error frames. Windows callback boundaries never unwind across user32. */
 const NATIVE_ERROR_FRAME_BYTES = 48;
@@ -5060,25 +5296,27 @@ return {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers};
 })();
 
 /* compiler.js */
-__modules[42]=(()=>{
-const {nativeLayoutMethods}=__modules[20];
-const {normalizeProject}=__modules[27];
-const {compileProject, parseParameters}=__modules[16];
-const {tokenize}=__modules[3];
-const {PE32Image, BinarySection}=__modules[28];
-const {X86}=__modules[29];
-const {nativeBindingMethods}=__modules[30];
-const {nativeStringInteropMethods,emitNativeStringInteropHelpers}=__modules[33];
-const {nativeCallMethods}=__modules[35];
-const {nativeCallbackMethods,emitNativeCallbackHelpers}=__modules[36];
-const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[37];
-const {nativeDateMethods,emitNativeDateHelpers}=__modules[38];
-const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[39];
-const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[34];
-const {nativeControlArrayMethods}=__modules[40];
-const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[32];
-const {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers}=__modules[31];
-const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[41];
+__modules[45]=(()=>{
+const {THEMES}=__modules[1];
+const {nativeLayoutMethods}=__modules[22];
+const {normalizeProject}=__modules[30];
+const {compileProject, parseParameters}=__modules[18];
+const {tokenize}=__modules[5];
+const {PE32Image, BinarySection}=__modules[31];
+const {X86}=__modules[32];
+const {nativeBindingMethods}=__modules[33];
+const {nativeStringInteropMethods,emitNativeStringInteropHelpers}=__modules[36];
+const {nativeCallMethods}=__modules[38];
+const {nativeCallbackMethods,emitNativeCallbackHelpers}=__modules[39];
+const {nativeCurrencyMethods,emitNativeCurrencyHelpers}=__modules[40];
+const {nativeDateMethods,emitNativeDateHelpers}=__modules[41];
+const {nativeDateIntervalMethods,emitNativeDateIntervalHelpers,NATIVE_DATE_CONSTANTS}=__modules[42];
+const {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameterBytes}=__modules[37];
+const {nativeControlArrayMethods}=__modules[43];
+const {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers}=__modules[35];
+const {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers}=__modules[34];
+const {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers}=__modules[44];
+
 
 
 
@@ -5151,6 +5389,7 @@ class NativeCompiler {
   constructor(project, options = {}) {
     this.maxArrayBytes=nativeArrayLimit(options.maxArrayBytes, message=>this.fail(message));
     this.project = normalizeProject(project); this.externals = new Map();
+    if(THEMES[this.project.settings.theme]?.family) this.fail('Optional application theme '+this.project.settings.theme+' requires the HTML or Electron desktop target; native Win32 AOT uses system-managed controls. Choose a classic application theme for this target.');
     if (this.project.dataSources?.connections?.length || this.project.modules.some(m => m.form?.controls?.some(c => c.properties?.DataSource || c.properties?.DataMember || /^(?:Data|Adodc)$/i.test(c.type)))) this.fail('Data-source providers and data-bound controls require the HTML or Electron desktop target; freestanding PE32 AOT does not implement the data runtime');
     if (project.resources?.entries?.length) this.fail('Native resource lowering is not yet implemented; use the classic or desktop target');
     const targetType = project.nativeProject?.entries?.find(e => key(e.key) === 'type')?.value;
@@ -5785,10 +6024,10 @@ return {NativeCompileError,extractNativeDeclarations,compileWin32};
 })();
 
 /* entry.js */
-__modules[43]=(()=>{
-const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[42];
-const {PE32Image, BinarySection, PE32_BASE}=__modules[28];
-const {X86}=__modules[29];
+__modules[46]=(()=>{
+const {compileWin32, NativeCompileError, extractNativeDeclarations}=__modules[45];
+const {PE32Image, BinarySection, PE32_BASE}=__modules[31];
+const {X86}=__modules[32];
 /** Standalone browser/worker SDK: no Node, DOM, compiler service or binary template. */
 
 
@@ -5796,5 +6035,5 @@ const {X86}=__modules[29];
 
 return {compileWin32,NativeCompileError,extractNativeDeclarations,PE32Image,BinarySection,PE32_BASE,X86};
 })();
-globalThis["VB6Native"]=__modules[43];
+globalThis["VB6Native"]=__modules[46];
 })();

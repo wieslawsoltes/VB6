@@ -1,3 +1,4 @@
+import {THEMES} from '../theme/theme.js';
 import {nativeLayoutMethods} from './layout.js';
 import {normalizeProject} from '../project/model.js';
 import {compileProject, parseParameters} from '../language/compiler.js';
@@ -71,6 +72,7 @@ class NativeCompiler {
   constructor(project, options = {}) {
     this.maxArrayBytes=nativeArrayLimit(options.maxArrayBytes, message=>this.fail(message));
     this.project = normalizeProject(project); this.externals = new Map();
+    if(THEMES[this.project.settings.theme]?.family) this.fail('Optional application theme '+this.project.settings.theme+' requires the HTML or Electron desktop target; native Win32 AOT uses system-managed controls. Choose a classic application theme for this target.');
     if (this.project.dataSources?.connections?.length || this.project.modules.some(m => m.form?.controls?.some(c => c.properties?.DataSource || c.properties?.DataMember || /^(?:Data|Adodc)$/i.test(c.type)))) this.fail('Data-source providers and data-bound controls require the HTML or Electron desktop target; freestanding PE32 AOT does not implement the data runtime');
     if (project.resources?.entries?.length) this.fail('Native resource lowering is not yet implemented; use the classic or desktop target');
     const targetType = project.nativeProject?.entries?.find(e => key(e.key) === 'type')?.value;

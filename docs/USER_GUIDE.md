@@ -107,7 +107,7 @@ Resize docking areas using divider bars. Double-click supported tool-window capt
 
 A code window has Procedure View and Full Module View buttons at its lower edge. Drag the split grip down, double-click it, or use its keyboard action to open a second pane; each pane scrolls independently. The object/procedure selectors follow the active pane. Closing the split retains the shared module. Edits and breakpoints in Procedure View still use the full module's source locations.
 
-Choose Tools → Options → General for Windows Classic, Windows Standard (2000), or High Contrast Black. IDE and application themes can differ. The application theme is included in exported HTML. An explicit RGB BackColor remains the chosen color; a system BackColor changes with the theme. Editor Format changes the local code font and size. Docking controls panel visibility and optional document/debug tabs.
+Choose Tools → Options → General → Appearance for Windows Classic, Windows Standard (2000), High Contrast Black, or Fluent WinUI 3/macOS 26/X11 Motif/X11 CDE in light and dark variants. IDE and application themes can differ. The application theme is included in exported HTML. An explicit RGB BackColor remains the chosen color; a system BackColor changes with the theme. Editor Format changes the local code font and size. Docking controls panel visibility and optional document/debug tabs.
 
 In Properties, use Alphabetic or Categorized tabs, arrow keys and F2 to edit a value. Escape cancels an uncommitted edit; Enter commits it. Color fields open with Alt+Down and offer System and Palette tabs. Expand Font for subproperties or use the font editor. Drag or keyboard-adjust the name/value splitter. Browser font fallback means a requested face may not exist on the current machine.
 
@@ -158,3 +158,5 @@ Toolbars are configurable through the toolbar/customization commands. In-page fl
 ### In-page MDI window setting
 
 Under **Tools → Options → Docking**, set **IDE window mode** to **In-page MDI only** to keep all IDE panes inside the page. Move, resize, minimize, maximize, cascade, tile, and cycle document windows as before. **MDI with optional browser windows** keeps MDI available while also allowing individual panes to detach. You can also switch from **Window → Window Mode**. Switching to MDI returns live panes without closing documents; switching back never automatically opens popups. The preference is saved with the workspace and is not changed by named layouts or project switching.
+
+Application appearance has its own preview, system light/dark matching and reduced effects. Matching built-in icon packs follow the local IDE/application choice automatically. See [Application themes](APPLICATION-THEMES.md) and [Theme icon packs](THEME-ICON-PACKS.md) for settings, runtime switching, export and native-platform boundaries.

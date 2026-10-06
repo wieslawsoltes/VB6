@@ -212,7 +212,7 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
   /* Reset inherited typography at the existing project-theme boundary. */
   & .designer-scroll[data-vb-theme] {
     --vb-font:"MS Sans Serif",Tahoma,Arial,sans-serif;--vb-size:11px;--vb-caption-height:18px;--vb-scrollbar:16px;
-    font:11px/normal "MS Sans Serif",Tahoma,Arial,sans-serif;color:var(--vb-text);color-scheme:light;
+    font:11px/normal "MS Sans Serif",Tahoma,Arial,sans-serif;color:var(--vb-text);color-scheme:var(--vb-app-color-scheme,light);
     scrollbar-color:auto;background:var(--ide-surface);
   }
   & .designer-scroll[data-vb-theme="contrast"] {color-scheme:dark;}
@@ -367,3 +367,5 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
     }
   }
 }
+
+.application-theme-note {font-size:11px;line-height:1.4;margin:6px 0;color:var(--vb-gray);}

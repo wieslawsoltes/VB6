@@ -70,6 +70,8 @@ Windows Classic, Windows Standard (2000), and High Contrast Black remain availab
 
 **Tools → Options → General → Appearance → IDE theme** also offers **Fluent WinUI 3**, **macOS 26**, **X11 Motif** and **X11 CDE**, each in light and dark variants. Classic VB6 remains the default. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
 
+**Application Theme** offers the same eight optional variants, independently saved with the project and embedded in exported HTML/Electron apps. Designer previews, running forms, MDI children, dialogs, popup lists, controls and drawing system colors update without a theme-only VM/control restart. Authored RGB, fonts, images and geometry remain intact. Each family includes a complete matching original icon pack—111 command names and 40 toolbox types—throughout the IDE, lazy-created and detached windows, and built-in application UI. Classic artwork remains unchanged. See [Application themes](docs/APPLICATION-THEMES.md) and [Matching icon packs](docs/THEME-ICON-PACKS.md).
+
 ### Optional anchoring and automatic layout
 
 Enable **Tools → Options → General → Layout Extensions → Enable anchoring and automatic layout (this project)** to expose Windows Forms-style edge anchoring, docking and flow layout in the classic designer, Properties, code and exports. The extension is **off and hidden by default**.

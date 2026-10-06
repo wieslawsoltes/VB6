@@ -1,3 +1,4 @@
+import {bindApplicationTheme} from '../theme/application-appearance.js';
 import {el} from '../core/core.js';
 import {getTheme} from '../theme/theme.js';
 
@@ -41,7 +42,7 @@ export class ClassicCombo {
   open(simple=false){if(this.popup||(!simple&&(this.design||this.input.disabled)))return;
     const document=this.node.ownerDocument,window=document.defaultView;
     const p=this.properties();this.popupSimple=simple;this.preview=Number(p.ListIndex);this.savedIndex=this.preview;
-    this.popup=el('div',{id:this.id,class:'vb-combo-popup'+(simple?' simple-list':''),role:'listbox','aria-label':this.node.dataset.control+' items','data-vb-theme':getTheme(this.node).id});this.spacer=el('div',{class:'vb-combo-spacer'});this.popup.append(this.spacer);
+    this.popup=el('div',{id:this.id,class:'vb-combo-popup'+(simple?' simple-list':''),role:'listbox','aria-label':this.node.dataset.control+' items','data-vb-theme':getTheme(this.node).id});this.releaseTheme=bindApplicationTheme(this.node,this.popup);this.spacer=el('div',{class:'vb-combo-spacer'});this.popup.append(this.spacer);
     Object.assign(this.popup.style,{font:getComputedStyle(this.input).font});(simple?this.node:document.body).append(this.popup);this.input.setAttribute('aria-controls',this.id);this.input.setAttribute('aria-expanded','true');this.popupAbort=new window.AbortController();const signal=this.popupAbort.signal;
     this.popup.addEventListener('scroll',()=>this.paint(),{signal});this.popup.addEventListener('pointerdown',e=>e.preventDefault(),{signal});
     document.addEventListener('pointerdown',e=>{if(!simple&&!this.node.contains(e.target)&&!this.popup?.contains(e.target))this.close(false);},{signal,capture:true});window.addEventListener('resize',()=>simple?this.layout():this.close(),{signal});
@@ -56,7 +57,7 @@ export class ClassicCombo {
   }
   reveal(){if(!this.popup||this.preview<0)return;const y=this.preview*(this.rowHeight||15),h=this.popup.clientHeight;if(y<this.popup.scrollTop)this.popup.scrollTop=y;else if(y+this.rowHeight>this.popup.scrollTop+h)this.popup.scrollTop=y+this.rowHeight-h;}
   choose(index){if(this.design||this.input.disabled||index<0||index>=this.items().length)return;this.preview=index;this.onSelect(index);if(!this.popupSimple)this.close();else {this.reveal();this.paint();}this.input.focus();}
-  close(focus=true){if(!this.popup)return;this.popupAbort.abort();this.popup.remove();this.popup=this.spacer=null;this.input.setAttribute('aria-expanded','false');this.input.removeAttribute('aria-activedescendant');this.input.removeAttribute('aria-controls');if(focus&&this.input.isConnected)this.input.focus();}
+  close(focus=true){if(!this.popup)return;this.releaseTheme?.();this.releaseTheme=null;this.popupAbort.abort();this.popup.remove();this.popup=this.spacer=null;this.input.setAttribute('aria-expanded','false');this.input.removeAttribute('aria-activedescendant');this.input.removeAttribute('aria-controls');if(focus&&this.input.isConnected)this.input.focus();}
   keydown(e){if(this.design||this.input.disabled)return;const key=e.key,simple=Number(this.properties().Style)===1;
     if(key==='F4'||e.altKey&&key==='ArrowDown'){e.preventDefault();e.stopPropagation();if(!simple){this.popup?this.close():this.open();}return;}
     if(this.popup&&(key==='Escape'||e.altKey&&key==='ArrowUp')){e.preventDefault();e.stopPropagation();if(!simple)this.close();return;}

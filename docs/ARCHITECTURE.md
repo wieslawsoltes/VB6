@@ -32,7 +32,7 @@ Runtime `controls/scrollbar.js`, `native-widgets.js` and `dialog.js` implement t
 
 Application theme is stored in `project.settings.theme`; IDE appearance is separate. System colors resolve against the nearest theme scope. Explicit RGB values are not rewritten during a theme switch. Graphics surfaces resolve system colors to actual RGB for their renderer instead of assuming the classic palette.
 
-For SDK consumers, `RuntimeAPI.THEMES`, `RuntimeAPI.applyTheme(element, id)` and `RuntimeAPI.colorValue(oleColor, fallback, themeId)` expose the shared profiles and color resolver. A host's theme should be chosen through its project/settings before starting; arbitrary changes to `data-vb-theme` alone do not substitute for host lifecycle/graphics invalidation.
+For SDK consumers, `RuntimeAPI.THEMES`, `RuntimeAPI.applyTheme(element, id)` and `RuntimeAPI.colorValue(oleColor, fallback, themeId)` expose the shared profiles and color resolver. Choose a host's initial theme through project/settings or mount options. `host.setTheme(id, themeOptions)` updates its local appearance without a VM restart; `RuntimeAPI.ApplicationThemeController` supports custom hosts and system-preference tracking. Arbitrary attribute writes alone do not substitute for lifecycle/graphics invalidation. See [application themes](APPLICATION-THEMES.md) and [the complete matching icon packs](THEME-ICON-PACKS.md).
 
 ## Runtime embedding
 

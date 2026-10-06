@@ -1,8 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {THEMES,SYSTEM_ROLES,colorValue,cssColor,fontFamily,normalizeAppearance,themeId} from '../src/theme/theme.js';
+import {CLASSIC_THEMES,THEMES,SYSTEM_ROLES,colorValue,cssColor,fontFamily,normalizeAppearance,themeId} from '../src/theme/theme.js';
 import {CONTROL_ICON_TYPES} from '../src/theme/icons.js';
 import {BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES} from '../src/project/model.js';
-test('three named deterministic palettes; no unsafe theme identifiers',()=>{assert.deepEqual(Object.keys(THEMES),['classic','standard','contrast']);assert.equal(themeId('__proto__'),'classic');assert.equal(themeId('standard'),'standard');});
+test('three classic and eight optional deterministic palettes; no unsafe theme identifiers',()=>{assert.deepEqual(Object.keys(CLASSIC_THEMES),['classic','standard','contrast']);assert.equal(themeId('__proto__'),'classic');assert.equal(themeId('standard'),'standard');});
 test('Win32 system colors resolve all 31 slots in each palette',()=>{for(const id of Object.keys(THEMES))for(let i=0;i<31;i++)assert.match(colorValue((0x80000000+i)|0,'missing',id),/^#[0-9a-f]{6}$/);assert.equal(SYSTEM_ROLES[15],'face');assert.equal(SYSTEM_ROLES[5],'window');});
 test('signed and unsigned OLE system colors resolve identically',()=>{assert.equal(colorValue(-2147483633,'','classic'),'#c0c0c0');assert.equal(colorValue(0x8000000f,'','standard'),'#d4d0c8');assert.equal(colorValue(-2147483643,'','contrast'),'#000000');});
 test('authored RGB literals do not change between themes',()=>{for(const id of Object.keys(THEMES)){assert.equal(colorValue(255,'',id),'#ff0000');assert.equal(colorValue(0x123456,'',id),'#563412');assert.equal(colorValue('#fedcba','',id),'#fedcba');}});

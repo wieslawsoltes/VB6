@@ -1,3 +1,4 @@
+import {normalizeApplicationAppearance} from '../theme/application-appearance.js';
 import {validateLayout} from '../layout/contract.js';
 import {normalizeDataSources} from '../data/common.js';
 import { clone, lower, safeName } from '../core/core.js';
@@ -52,6 +53,7 @@ export function normalizeProject(value){
   }
   if(!Number.isInteger(Number(project.settings.tabWidth))||Number(project.settings.tabWidth)<1||Number(project.settings.tabWidth)>32)project.settings.tabWidth=4;else project.settings.tabWidth=Number(project.settings.tabWidth);
   const grid=Number(project.settings.gridSize);project.settings.gridSize=Number.isFinite(grid)?Math.max(15,Math.min(1200,grid)):120;
+  if(Object.hasOwn(project.settings,'theme')||Object.hasOwn(project.settings,'themeOptions')){const appearance=normalizeApplicationAppearance(project.settings);project.settings.theme=appearance.theme;if(Object.hasOwn(project.settings,'themeOptions'))project.settings.themeOptions=appearance.themeOptions;}
   project.settings.renderer=project.settings.renderer==='canvas2d'?'canvas2d':'auto';
   if(project.dataSources)project.dataSources=normalizeDataSources(project.dataSources);
   if(project.resources)project.resources=normalizeResources(project.resources);
