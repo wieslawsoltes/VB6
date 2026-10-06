@@ -32,7 +32,7 @@ test('fixed arrays cannot be resized',()=>assert.throws(()=>compileCompute('Publ
 test('typed ReDim cannot change type',()=>assert.throws(()=>compileCompute(source('ReDim a(5) As Single')),e=>e.code==='GPU_TYPE'));
 test('ByRef element call emits a balanced temporary lock',()=>{
   const a=compileCompute(source('ReDim a(2)\nMutate a(0)')+'\nSub Mutate(ByRef x As Long)\nx=42&\nEnd Sub');
-  assert.match(a.wgsl,/let lock\d+=array_lock\(/);assert.match(a.wgsl,/if\(lock\d+\) \{array_unlock\(/);
+  assert.match(a.wgsl,/frame_1.lock\d+=array_lock\(/);assert.match(a.wgsl,/if\(frame_1.lock\d+\) \{array_unlock\(/);
 });
 test('resource limits are configured at compilation',()=>{
   assert.throws(()=>compileCompute(source(''),{dynamicArrayCapacity:100000}));
@@ -59,3 +59,10 @@ test('recursive automatic storage gets separate frames',()=>{
   const a=compileCompute('Sub Main()\nDim n As Long\nMain\nEnd Sub',{maxCallDepth:4});assert.equal(a.stateWords,4);
 });
 test('excessive call depth is rejected',()=>assert.throws(()=>compileCompute('Sub Main()\nEnd Sub',{maxCallDepth:65})));
+
+test('branching recursion uses one dispatch arm per frame, never nested WGSL procedure calls',()=>{
+  const a=compileCompute('Sub Main()\nMain\nMain\nEnd Sub',{maxCallDepth:10});
+  assert.doesNotMatch(a.wgsl,/proc_\d+\(/);
+  assert.equal([...a.wgsl.matchAll(/step_\d+\(\);/g)].length,11);
+  assert.ok(a.wgsl.length<100000);
+});

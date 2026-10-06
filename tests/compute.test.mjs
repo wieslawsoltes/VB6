@@ -28,8 +28,8 @@ test('single approximation is explicit and leaves a warning',()=>{const a=compil
 test('invalid precision is rejected',()=>assert.throws(()=>compileCompute(source(''),{precision:'fast'})));
 test('fixed arrays preserve nonzero and negative lower bounds',()=>{const a=compileCompute('Public a(-2 To 2, 3 To 4) As Integer\nSub Main()\na(0, 4) = 42\nEnd Sub');assert.deepEqual(a.globals[0].bounds,[[-2,2],[3,4]]);assert.equal(a.globals[0].length,10);assert.equal(a.initialState[4],1);assert.equal(a.initialState[7],5);});
 test('Option Base 1 applies to implicit bounds',()=>{const a=compileCompute('Option Base 1\nPublic a(4) As Long\nSub Main()\nEnd Sub');assert.deepEqual(a.globals[0].bounds,[[1,4]]);});
-test('ByRef parameters use addresses and preserve aliases',()=>{const a=compileCompute(source('Bump result')+'\nSub Bump(ByRef n As Long)\nn=n+1&\nEnd Sub');assert.match(a.wgsl,/fn proc_3\(arg0:u32\)/);});
-test('ByVal function returns compile into WGSL functions',()=>{const a=compileCompute(source('result = Twice(21&)')+'\nFunction Twice(ByVal n As Long) As Long\nTwice=n*2&\nEnd Function');assert.match(a.wgsl,/fn proc_3\(arg0:i32\)->i32/);});
+test('ByRef parameters use addresses and preserve aliases',()=>{const a=compileCompute(source('Bump result')+'\nSub Bump(ByRef n As Long)\nn=n+1&\nEnd Sub');assert.match(a.wgsl,/arg0:u32/);});
+test('ByVal function returns compile into WGSL functions',()=>{const a=compileCompute(source('result = Twice(21&)')+'\nFunction Twice(ByVal n As Long) As Long\nTwice=n*2&\nEnd Function');assert.match(a.wgsl,/arg0:i32,result:i32/);});
 test('ByRef type mismatch is diagnosed',()=>assert.throws(()=>compileCompute(source('Bump result')+'\nSub Bump(ByRef n As Integer)\nEnd Sub'),e=>e.code==='GPU_ARGUMENT'));
 test('ByRef explicit expression allocates a temporary',()=>assert.doesNotThrow(()=>compileCompute(source('Bump (result)')+'\nSub Bump(ByRef n As Integer)\nEnd Sub')));
 test('form modules do not silently fall back to host runtime',()=>assert.throws(()=>compileCompute({modules:[{name:'Form1',kind:'form',code:'Sub Main()\nEnd Sub'}]}),e=>e.code==='GPU_HOST_MODULE'));

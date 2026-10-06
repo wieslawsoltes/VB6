@@ -3,6 +3,9 @@ import functools
 import http.server
 import json
 import os
+import signal
+import subprocess
+import sys
 from pathlib import Path
 import threading
 from playwright.sync_api import sync_playwright
@@ -10,6 +13,28 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = ROOT / 'reports' / 'compute'
 REPORTS.mkdir(parents=True, exist_ok=True)
+
+# page.evaluate has no Playwright timeout for an unresolved JS promise. Run the
+# entire browser process tree with a hard deadline; preserve per-test evidence.
+if '--worker' not in sys.argv:
+    process = subprocess.Popen([sys.executable, __file__, '--worker'], start_new_session=True)
+    try:
+        code = process.wait(timeout=300)
+    except subprocess.TimeoutExpired:
+        (REPORTS / 'timeout.json').write_text(json.dumps({'passed': False, 'reason': 'Browser suite exceeded 300 seconds'}))
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        code = 1
+    sys.exit(code)
+
+progress = []
+def browser_console(message):
+    text = message.text
+    if text.startswith('COMPUTE_PROGRESS:'):
+        event = json.loads(text[len('COMPUTE_PROGRESS:'):])
+        progress.append(event)
+        (REPORTS / 'progress.json').write_text(json.dumps(progress, indent=2))
+        print(text, flush=True)
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
@@ -29,6 +54,7 @@ try:
         page.set_default_timeout(90000)
         page_errors = []
         page.on('pageerror', lambda e: page_errors.append(str(e)))
+        page.on('console', browser_console)
         url = f'http://127.0.0.1:{server.server_port}'
         page.goto(url + '/artifacts/vb6-compute/playground.html')
         page.add_script_tag(content=(ROOT / 'tests/compute-extended-browser.js').read_text())

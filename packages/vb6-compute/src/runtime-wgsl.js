@@ -9,6 +9,7 @@ struct RunParams { count:u32, fuel:u32, capacity:u32, width:u32, height:u32, tim
 @group(0) @binding(2) var<uniform> params:RunParams;
 @group(0) @binding(3) var<storage,read_write> shared_data:array<atomic<u32>>;
 var<private> mem:array<u32,${Math.max(1,words)}>;
+var<private> vb_current:u32;
 var<private> vb_error:u32;
 var<private> vb_line:u32;
 var<private> vb_error_line:u32;

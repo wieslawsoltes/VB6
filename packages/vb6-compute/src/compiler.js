@@ -1,5 +1,6 @@
 import {ComputeError, COMPUTE_ABI, STATE_HEADER_WORDS, ARRAY_HEADER_WORDS, integer, shaderLiteral} from './protocol.js';
 import {runtimeWGSL} from './runtime-wgsl.js';
+import {emitCallFrame,emitDispatcher} from './call-dispatch.js';
 const key = s => String(s).toLowerCase().replace(/[$%&!#@]$/, '');
 const scalarTypes = new Set(['boolean','byte','integer','long','single']);
 const comparisons = {'=':'==','<>':'!=','<':'<','>':'>','<=':'<=','>=':'>='};
@@ -10,7 +11,7 @@ const wgtype = type => type==='single'?'f32':'i32';
 
 /** Lowers the shared VB compiler IR to actual WGSL, not JavaScript execution.
  * Every invocation owns its state. A bounded PC loop preserves VB control flow.
- * Depth-specialized WGSL functions implement bounded calls and recursion with ByRef aliases.
+ * Continuation frames implement bounded calls and recursion with ByRef aliases.
  */
 export function compileComputeIR(program, options={}) {
   if(!program?.valid || !(program.modules instanceof Map))
@@ -108,8 +109,8 @@ export function compileComputeIR(program, options={}) {
     const locals=new Map(),reset=[],params=[],lines=[],loops=new Map(),temps=new Map();let serial=0;
     const resultType=proc.kind==='sub'?'void':typeOf(proc.storageReturnType||proc.returnType);
     if(info.depth>=maxCallDepth){
-      const signature=proc.params.map((p,i)=>`arg${i}:${p.byRef?'u32':wgtype(typeOf(p.storageType||p.type))}`).join(',');
-      compiled.set(id,`fn proc_${id}(${signature})${resultType==='void'?'':'->'+wgtype(resultType)} {fail(28u);${resultType==='void'?'return;':`return ${zero(resultType)};`}}`);
+      const signature=proc.params.map((p,i)=>`arg${i}:${p.byRef?'u32':wgtype(typeOf(p.storageType||p.type))}`);
+      compiled.set(id,emitCallFrame({id,params:signature,resultType,limit:true}));
       active.delete(id);sources.push({id,module:module.name,procedure:proc.name,line:proc.line,depth:info.depth});return;
     }
     for(let i=0;i<proc.params.length;i++){
@@ -302,13 +303,12 @@ export function compileComputeIR(program, options={}) {
         }evaluated.push(bindings.get(i));
       }
       const saved=current;compileProcedure(callee);current=saved;
-      const code=`proc_${callee.id}(${evaluated.join(',')})`,type=callee.proc.kind==='sub'?'void':typeOf(callee.proc.storageReturnType||callee.proc.returnType);
-      let value;if(type==='void'){out(code+';');value={code:'',type};}else value=bind(code,type);
+      const type=callee.proc.kind==='sub'?'void':typeOf(callee.proc.storageReturnType||callee.proc.returnType);
+      lines.push({callee:callee.id,args:evaluated});
+      const value=type==='void'?{code:'',type}:bind(`frame_${callee.id}.result`,type);
       for(const lock of locks)out(`if(${lock.token}) {array_unlock(${lock.base});}`);
       out(`vb_line=${current.line}u;vb_source=${id}u;`);return value;
     }
-    const ret=resultType==='void'?'return;':`return ${resultType==='single'?'get_f':'get_i'}(${locals.get(key(proc.name)).address});`;
-    const defaultRet=resultType==='void'?'return;':`return ${zero(resultType)};`;
     // Loop state is private to this activation; start/end/step are evaluated once.
     const declarations=[];
     if(proc.code.some(ins=>ins.op==='gosub'||ins.op==='gosubReturn'||ins.gosub))declarations.push(`var gosub_stack:array<u32,${gosubStackDepth}>;var gosub_sp=0u;`);
@@ -390,31 +390,10 @@ export function compileComputeIR(program, options={}) {
         case 'lineNumber':break;
         default:error('Instruction '+ins.op+' is not implemented in the compute target','GPU_INSTRUCTION');
       }
-      blocks.push(`      case ${pc}u: {\n        if(!tick(${ins.line||proc.line}u,${id}u)) {${defaultRet}}\n${lines.join('\n')}\n        ${next}\n      }`);
+      blocks.push({pc,line:ins.line||proc.line,operations:[...lines],next});
     }
-    const body=`fn proc_${id}(${params.join(',')})${resultType==='void'?'':'->'+wgtype(resultType)} {
-  if(vb_error!=0u || vb_halt) {${defaultRet}}
-  vb_line=${proc.line}u;vb_source=${id}u;
-  ${reset.join('\n  ')}
-  ${declarations.join('\n  ')}
-  var pc=0u;var done=false;var error_mode=0u;var handler=0u;var handler_active=false;var error_pc=0u;
-  loop {
-    let previous_pc=pc;
-    switch pc {
-${blocks.join('\n')}
-      default: {done=true;}
-    }
-    if(vb_error!=0u) {
-      // Resource-limit faults are fatal; error handlers cannot evade the budget.
-      if(error_mode==0u || handler_active || vb_fatal) {${defaultRet}}
-      vb_last_error=vb_error;vb_error=0u;error_pc=previous_pc;done=false;
-      if(error_mode==1u) {pc=previous_pc+1u;} else {handler_active=true;pc=handler;}
-    }
-    if(vb_halt) {${defaultRet}}
-    if(done) {break;}
-  }
-  ${ret}
-}`;
+    const result=resultType==='void'?'':`${resultType==='single'?'get_f':'get_i'}(${locals.get(key(proc.name)).address})`;
+    const body=emitCallFrame({id,params,resultType,reset:[`vb_line=${proc.line}u;vb_source=${id}u;`,...reset],declarations,blocks,result});
     compiled.set(id,body);active.delete(id);sources.push({id,module:module.name,procedure:proc.name,line:proc.line,depth:info.depth});
   }
   compileProcedure(entry);
@@ -427,7 +406,7 @@ fn main(@builtin(global_invocation_id) invocation:vec3<u32>) {
   vb_lane=invocation.x;vb_error=0u;vb_steps=0u;vb_draws=0u;vb_last_error=0u;vb_halt=false;vb_fatal=false;
   let base=vb_lane*${stride}u;
   for(var i=0u;i<${words}u;i+=1u) {mem[i]=state[base+${STATE_HEADER_WORDS}u+i];}
-  proc_${entry.id}();
+  ${emitDispatcher([...compiled.keys()],entry.id)}
   state[base]=vb_error;state[base+1u]=select(0u,vb_error_line,vb_error!=0u);state[base+2u]=vb_steps;
   state[base+3u]=vb_draws;state[base+4u]=select(0u,vb_error_source,vb_error!=0u);state[base+5u]=select(0u,1u,vb_fatal);
   for(var i=0u;i<${words}u;i+=1u) {state[base+${STATE_HEADER_WORDS}u+i]=mem[i];}

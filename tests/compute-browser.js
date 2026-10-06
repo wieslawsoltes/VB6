@@ -4,7 +4,13 @@ globalThis.runComputeBrowserTests=async function() {
   const tests=[];let gpu;
   const equal=(a,b)=>{if(JSON.stringify(a)!==JSON.stringify(b))throw new Error(`Expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);};
   const ok=(value,message='Assertion failed')=>{if(!value)throw new Error(message);};
-  const test=async(name,fn)=>{const start=performance.now();try{await fn();tests.push({name,passed:true,ms:performance.now()-start});}catch(error){tests.push({name,passed:false,error:error.message,code:error.code,stack:error.stack});}};
+  const test=async(name,fn)=>{
+    console.log('COMPUTE_PROGRESS:'+JSON.stringify({phase:'start',name}));
+    const start=performance.now();
+    try{await fn();tests.push({name,passed:true,ms:performance.now()-start});}
+    catch(error){tests.push({name,passed:false,error:error.message,code:error.code,stack:error.stack});}
+    console.log('COMPUTE_PROGRESS:'+JSON.stringify({phase:'finish',...tests.at(-1)}));
+  };
   const make=body=>`Option Explicit\nPublic result As Long\nSub Main()\n${body}\nEnd Sub`;
   const run=async(code,options={},runOptions={})=>{const p=await ComputeProgram.create(gpu,compileCompute(code),options);try{return await p.run(runOptions);}finally{await p.dispose();}};
   const value=lanes=>lanes[0].globals['Module1.result'];
