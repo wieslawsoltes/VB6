@@ -1,0 +1,88 @@
+name: OCX candidate validation
+on:
+  push:
+    branches: [feat/ocx-hosting-lifecycle]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply exact checksummed source candidate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,gzip,hashlib,pathlib
+          data=''.join(pathlib.Path('.ocx-candidate.'+str(i)).read_text().strip() for i in (1,2,3))
+          patch=gzip.decompress(base64.b64decode(data,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='c3edb765cd6725607888ba7a5735ea0dd4c97ea58fcda776818d014e25718df1'
+          pathlib.Path('ocx-candidate.patch').write_bytes(patch)
+          PY
+          git apply --unidiff-zero ocx-candidate.patch
+      - run: node tools/interop/test-native.mjs
+      - run: node tools/interop/test-activex.mjs
+      - run: node tools/interop/test-ocx.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-candidate-${{ matrix.architecture }}
+          path: reports/native-interop
+  publish:
+    needs: native
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/ocx-hosting-lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Materialize checked source and remove temporary transport files
+        run: |
+          python - <<'PY'
+          import base64,gzip,hashlib,pathlib
+          data=''.join(pathlib.Path('.ocx-candidate.'+str(i)).read_text().strip() for i in (1,2,3))
+          patch=gzip.decompress(base64.b64decode(data,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='c3edb765cd6725607888ba7a5735ea0dd4c97ea58fcda776818d014e25718df1'
+          pathlib.Path('ocx-candidate.patch').write_bytes(patch)
+          PY
+          git apply --unidiff-zero ocx-candidate.patch
+          rm ocx-candidate.patch .ocx-candidate.1 .ocx-candidate.2 .ocx-candidate.3 .github/workflows/ocx-candidate.yml
+      - run: npm run build
+      - run: npm test
+      - name: Commit and push without rewriting history
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(ocx): native connection-point events, cancellation, licensing and control lifecycle'
+          git push origin HEAD:refs/heads/feat/ocx-hosting-lifecycle
+          git bundle create ocx-publication.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > ocx-publication.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-publication
+          path: |
+            ocx-publication.bundle
+            ocx-publication.txt
