@@ -7,7 +7,7 @@ const key = value => String(value).toLowerCase();
 const types = new Set(['byte','integer','long','boolean','single','double','currency','date']);
 const real = new Set(['single','double','date']);
 const E = 'native:error:';
-const state = ['frame','pending','number','description','source','erl'];
+const state = ['frame','pending','number','description','source','erl','lastdllerror'];
 const arg = argument => ({argument});
 const mem = memory => ({memory});
 const save = (x, offset) => x.emit(0x89,0x85).imm(offset);
@@ -46,28 +46,28 @@ export function emitNativeCallbackHelpers(c) {
   const x = c.x;
   for (const {target,label} of c.nativeCallbacks.values()) {
     const signature = target.proc, type = key(signature.returnType), ownThread = x.unique();
-    x.label(label).enter(36);
+    x.label(label).enter(40);
     x.api('kernel32.dll','GetCurrentThreadId').emit(0x3b,0x05).addr('native:callback:thread').branch('e',ownThread);
     // The current backend's globals and VB error frames are single-threaded.
     // Never run application callbacks from another native thread or race its state.
     x.api('kernel32.dll','ExitProcess',[5]).label(ownThread);
     state.forEach((name,i) => { x.value(mem(E+name)); save(x,-4*(i+1)); });
-    x.emit(0xd9,0x7d,0xdc); // fnstcw [ebp-36]; preserve the foreign caller's x87 CW.
+    x.emit(0xd9,0x7d,0xd8); // fnstcw [ebp-40]; preserve the foreign caller's x87 CW.
     x.value(0).store(E+'frame').call(E+'clear');
     // Preserve the external stdcall argument byte layout. The authored procedure
     // handles exact-width loads, owned locals, cleanup and numeric return ABI.
     for (let offset=target.argumentBytes+4; offset>=8; offset-=4) x.push(arg(offset));
     x.call(target.label);
-    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x5d,0xe0); // fstp qword [ebp-32]
-    else { save(x,-32); x.emit(0x89,0x55,0xe4); } // EAX, EDX
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x5d,0xdc); // fstp qword [ebp-36]
+    else { save(x,-36); x.emit(0x89,0x55,0xe0); } // EAX, EDX
     // Unhandled callback errors cannot jump across the suspended external stack.
     // Use the ordinary fatal diagnostic after the authored frame has cleaned up;
     // On Error inside the callback remains fully functional.
     x.emit(0x83,0x3d).addr(E+'pending').emit(0).branch('ne',E+'fatal');
     state.forEach((name,i) => x.value(arg(-4*(i+1))).store(E+name));
-    x.emit(0xd9,0x6d,0xdc); // fldcw [ebp-36]
-    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x45,0xe0);
-    else x.value(arg(-32)).emit(0x8b,0x55,0xe4);
+    x.emit(0xd9,0x6d,0xd8); // fldcw [ebp-40]
+    if (signature.kind === 'function' && real.has(type)) x.emit(0xdd,0x45,0xdc);
+    else x.value(arg(-36)).emit(0x8b,0x55,0xe0);
     x.leave(target.argumentBytes);
   }
 }

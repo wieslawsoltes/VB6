@@ -28,7 +28,7 @@ function createSmokeProbe({app, root, records, report, reportPath, log = text =>
   const listeners = [], observed = new WeakSet();
   report.events = [];
   const frameState = wc => {
-    try { return wc.mainFrame.framesInSubtree.map(frame => ({url: frame.url, name: frame.name, detached: frame.detached})); }
+    try { return wc.mainFrame.framesInSubtree.map(frame => ({url: frame.url, name: frame.name, detached: frame.detached, id: frame.frameTreeNodeId})); }
     catch (error) { return [{error: String(error.message).slice(0, 500)}]; }
   };
   const flush = () => {
@@ -145,10 +145,24 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js(`globalThis.previewSrcdocWrites=0;globalThis.previewObserver=new MutationObserver(records=>{
         previewSrcdocWrites+=records.filter(record=>record.attributeName==='srcdoc').length;
       });previewObserver.observe(vb6Studio.root,{attributes:true,subtree:true,attributeFilter:['srcdoc']});void 0;`);
-      await js('vb6Studio.run()');
-      await previewFrame('vb6Studio.runtimeFrame');
-      check('IDE preview runs under document-specific CSP', true);
-      await js('vb6Studio.stop()');
+      report.previewNavigations=[];
+      const navigated=(event,url)=>report.previewNavigations.push(typeof url==='string'?url:event.url);
+      root.webContents.on('did-start-navigation',navigated);
+      try {
+        const urls=new Set();
+        for(let pass=1;pass<=2;pass++) {
+          await js('vb6Studio.run()');
+          const frame=await previewFrame('vb6Studio.runtimeFrame');
+          check('IDE preview '+pass+' runs under document-specific CSP',true);
+          check('native preview '+pass+' uses a fresh host document',!urls.has(frame.url));urls.add(frame.url);
+          check('IDE preview '+pass+' rejects arbitrary inline scripts',await evaluate(frame, `(async()=>{
+            const script=document.createElement('script');script.textContent='globalThis.untrustedPreviewScript=true';document.body.append(script);
+            await new Promise(resolve=>setTimeout(resolve,25));return !globalThis.untrustedPreviewScript;
+          })()`));
+          await js('vb6Studio.stop()');
+        }
+        check('desktop preview never starts or commits srcdoc',!report.previewNavigations.includes('about:srcdoc'));
+      } finally { root.webContents.removeListener('did-start-navigation',navigated); }
 
       // The design-only session does not call run(). It must use the same
       // document-specific CSP before it can be promoted to event debugging.
@@ -296,6 +310,10 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
     if (reportPath) fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
     app.quit();
   } catch (error) {
+    try {
+      report.frames=root.webContents.mainFrame.framesInSubtree.map(f=>({url:f.url,detached:f.detached,id:f.frameTreeNodeId}));
+      if(manifest.kind==='studio') report.preview=await js(`(()=>{const s=vb6Studio,f=s.runtimeFrame;return {runState:s.runState,frame:f&&{src:f.src,srcdoc:f.hasAttribute('srcdoc'),connected:f.isConnected},diagnostics:s.diagnostics};})()`);
+    } catch (diagnosticError) { report.diagnosticError=diagnosticError.message; }
     report.error = error.stack || error.message;
     if (reportPath) fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
     probe.flush();

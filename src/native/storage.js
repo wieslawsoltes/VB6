@@ -81,7 +81,7 @@ export const nativeStorageMethods = {
   },
   storageExpression(variable, node) {
     if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
-    if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') this.textExpression(node); else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
+    if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') {if(this.type(node)==='string')this.expression(node);else this.textExpression(node);} else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
   },
   rawStorageAddress(variable) {
     if (variable.owner?.form) this.x.call(variable.owner.initialize);
@@ -105,13 +105,16 @@ export const nativeStorageMethods = {
   },
   stringBuiltin(node, name) {
     const x = this.x, args = node.args;
+    if (name === 'space') {
+      if (args.length !== 1) this.fail('Space expects one argument');
+      this.numeric(args[0]); x.push().call('native:string:space'); this.ownString(); return true;
+    }
     if (['len','lenb','ascw','strptr'].includes(name)) {
       if(args.length===1&&['len','lenb'].includes(name)&&this.type(args[0])!=='string'){const size={byte:1,integer:2,boolean:2,long:4,single:4,double:8,currency:8,date:8}[this.type(args[0])];if(!size)this.fail(name+' requires a supported value');this.expression(args[0]);x.value(size);return true;}
       if (args.length !== 1 || this.type(args[0]) !== 'string') this.fail(name + ' expects one String argument');
       if(name==='strptr'){
         const variable=this.variable(args[0]);
         if(variable){if(variable.nativeBounds&&!variable.elementOf)this.fail('StrPtr requires a String element, not an array');const pin=this.address(variable);x.emit(0x8b,0x00);this.releaseArrayPin(pin);}
-        else if(args[0].kind==='id'&&key(args[0].name)==='vbnullstring')x.value(0);
         else this.expression(args[0]);
         return true;
       }
@@ -137,8 +140,14 @@ export const nativeStorageMethods = {
 
 export function emitNativeStorageHelpers(compiler) {
   const x = compiler.x, api = 'oleaut32.dll';
+  // https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/space-function
+  x.label('native:string:space').enter().value({argument:8}).test().branch('s','error:5')
+    .compare(MAX_NATIVE_STRING).branch('a','error:7').push().push(0).invoke(api,'SysAllocStringLen')
+    .test().branch('e','error:7').emit(0x89,0xc3,0x89,0xc7).value({argument:8}).emit(0x89,0xc1)
+    .value(32).emit(0xfc,0xf3,0x66,0xab,0x89,0xd8).leave(4);
   x.label('native:string:numeric-text').enter().api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api('kernel32.dll','lstrlenW',[{argument:8}]).emit(0x39,0xd8).branch('ne','error:13').value({argument:8}).leave(4);
-  x.label('native:string:copy').enter().api(api,'SysStringLen',[{argument:8}]).compare(MAX_NATIVE_STRING).branch('g','error:7').push().push({argument:8}).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
+  const copyNonNull=x.unique();
+  x.label('native:string:copy').enter().value({argument:8}).test().branch('ne',copyNonNull).leave(4).label(copyNonNull).api(api,'SysStringLen',[{argument:8}]).compare(MAX_NATIVE_STRING).branch('g','error:7').push().push({argument:8}).invoke(api,'SysAllocStringLen').test().branch('e','error:7').leave(4);
   x.label('native:string:assign').enter().push({argument:12}).call('native:string:copy').emit(0x89,0xc7).value({argument:8}).emit(0x89,0xc3,0xff,0x33).invoke(api,'SysFreeString').emit(0x89,0x3b,0x89,0xf8).leave(8);
   x.label('native:string:from-int').enter(4).value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrFromI4',[{argument:8},0x400,0,{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(4);
   x.label('native:string:concat').enter(4).api(api,'SysStringLen',[{argument:8}]).emit(0x89,0xc3).api(api,'SysStringLen',[{argument:12}]).emit(0x01,0xd8).compare(MAX_NATIVE_STRING).branch('g','error:7').value(0).emit(0x89,0x45,0xfc).api(api,'VarBstrCat',[{argument:8},{argument:12},{address:-4}]).test().branch('s','error:7').value({argument:-4}).leave(8);

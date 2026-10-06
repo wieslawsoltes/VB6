@@ -103,15 +103,18 @@ with sync_playwright() as pw:
             check('typed Optional and named calls export without rewriting source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
             check('call-argument File Make EXE equals Node output', downloaded.suggested_filename == 'AotCalls.exe' and (OUT / 'AotCalls.exe').read_bytes() == (calls_dir / 'AotCalls.exe').read_bytes())
             check('call export has no network or page errors', not errors and not requests)
-        for folder, name in [('interval-contract', 'AotIntervalContract'), ('large-arrays', 'AotLargeArrays'), ('callbacks', 'AotCallbacks')]:
+        for folder, name in [('interval-contract', 'AotIntervalContract'), ('large-arrays', 'AotLargeArrays'), ('callbacks', 'AotCallbacks'), ('string-interop', 'AotStringInterop'), ('string-interop', 'AotWin32Strings'), ('string-interop', 'AotStringOwnership')]:
             extra = ROOT / 'validation' / folder
             if not (extra / f'{name}.vb6web').exists():
                 continue
             original = json.loads((extra / f'{name}.vb6web').read_text())
             page.evaluate('p => vb6Studio.loadProject(p)', original)
             before = page.evaluate('JSON.stringify(vb6Studio.project.modules)')
+            # Exercise the user path rather than issuing an unbounded burst of
+            # script-only downloads (which Chromium may throttle per frame).
+            page.get_by_role('menubar', name='Main menu').get_by_role('menuitem', name='File', exact=True).click()
             with page.expect_download() as pending:
-                page.evaluate('vb6Studio.command("exportWin32")')
+                page.locator('.classic-menu [data-command="exportWin32"]').click()
             downloaded = pending.value
             downloaded.save_as(OUT / f'{name}.exe')
             check(f'{name}: Make EXE preserves source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
@@ -132,7 +135,7 @@ with sync_playwright() as pw:
             fixtures.extend((calls_dir, name) for name in ('AotCalls', 'AotCallProperties'))
         if date_dir.exists():
             fixtures.extend((date_dir, name) for name in ('AotDates', 'AotDateABI', 'AotDateCalls') if (date_dir / f'{name}.vb6web').exists())
-        for folder, name in [('interval-contract','AotIntervalContract'), ('large-arrays','AotLargeArrays'), ('callbacks','AotCallbacks'), ('callbacks','AotCallbackThreadGuard')]:
+        for folder, name in [('interval-contract','AotIntervalContract'), ('large-arrays','AotLargeArrays'), ('callbacks','AotCallbacks'), ('callbacks','AotCallbackThreadGuard'), ('string-interop','AotStringInterop'), ('string-interop','AotWin32Strings'), ('string-interop','AotStringOwnership')]:
             extra = ROOT / 'validation' / folder
             if (extra / f'{name}.vb6web').exists():
                 fixtures.append((extra, name))
