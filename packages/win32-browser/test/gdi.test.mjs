@@ -211,8 +211,8 @@ test('software primitives draw into DIBs with clipping and maintain current poin
   api(w,'SelectObject',s.dc,api(w,'CreatePen',0,1,0xff));api(w,'MoveToEx',s.dc,0,7,0);assert.equal(api(w,'LineTo',s.dc,7,7),1);assert.equal(pixel(w,s,3,7),0xff);assert.equal(pixel(w,s,7,7),0);api(w,'GetCurrentPositionEx',s.dc,p);assert.equal(w.memory.readI32(p),7);
   api(w,'IntersectClipRect',s.dc,2,2,5,5);assert.equal(api(w,'Ellipse',s.dc,0,0,7,7),1);assert.equal(api(w,'PtVisible',s.dc,3,3),1);assert.equal(api(w,'PtVisible',s.dc,6,6),0);
 });
-test('unsupported software fonts, mapping and scaling modes fail rather than fake success',t=>{
-  const w=process(t),s=surface(w);fail(w,'TextOutA',[s.dc,0,0,'hello',5],50);fail(w,'SetMapMode',[s.dc,8],50);fail(w,'SetStretchBltMode',[s.dc,4],50);assert.equal(api(w,'GetMapMode',s.dc),1);
+test('fonts require a host backend, mapping modes are implemented, and unsupported scaling fails',t=>{
+  const w=process(t),s=surface(w);fail(w,'TextOutA',[s.dc,0,0,'hello',5],50);assert.equal(api(w,'SetMapMode',s.dc,8),1);assert.equal(api(w,'GetMapMode',s.dc),8);fail(w,'SetMapMode',[s.dc,9],87);fail(w,'SetStretchBltMode',[s.dc,4],50);
 });
 test('registered raster window receives blits and can be used as a readback source',t=>{
   const w=process(t),s=surface(w),win=windowSurface(w),dest=surface(w);pixel(w,s,1,1,0x123456);

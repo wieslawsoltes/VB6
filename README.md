@@ -250,3 +250,7 @@ Native project support also includes explicit ZIP filename-codepage selection, p
 ## Scalar and Variant source compatibility
 
 The source VM preserves scalar subtype and typed-versus-Variant origin through expressions, calls, storage, debugger inspection and file operations. Checked conversions, promotion, safe ByRef temporaries and sequential Input are covered by source regressions and fresh Windows Automation differential checks. See [Scalar compatibility and evidence](docs/SCALAR-COMPATIBILITY.md) for APIs, reproduction commands and explicit native/locale/certification boundaries.
+
+### Advanced browser Win32 GDI
+
+`@vb6/win32-browser` 0.4.0 exposes 311 Win32 export names and adds curved/polygon/path regions, transforms, memory-DC fonts, owned window shapes and paint/update lifecycles. GDI rasters can now use the reusable WebGPU texture presenter with an explicit Canvas2D fallback. The classic Win32 API Workbench includes a **Paths and text** example. See [advanced contracts and measured compatibility boundaries](packages/win32-browser/ADVANCED-GDI.md). No full native raster/font certification or npm registry publication is claimed.

@@ -1,0 +1,78 @@
+name: Win32 advanced GDI
+on:
+  push:
+    branches: [main, feature/win32-gdi-boundaries]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: win32-boundaries-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Real font pixels, shaped hit testing, paint callbacks and HTTP/file exports
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: python tools/browser-win32-boundaries.py
+      - name: Require every release scenario without skips
+        run: |
+          python - <<'PY'
+          import json
+          result=json.load(open('reports/win32-boundaries/results.json'))
+          assert len(result)==20 and all(r.get('passed') is True and not r.get('skipped') for r in result),result
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-boundaries-${{ matrix.browser }}
+          path: reports/win32-boundaries
+          retention-days: 14
+  gpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: WebGPU pipeline, texture caching, resize, disposal and displayed-pixel readback
+        env:
+          VB6_BROWSER: chromium
+          VB6_REQUIRE_GPU: '1'
+        run: python tools/browser-win32-boundaries.py
+      - name: Require actual GPU execution without capability skips
+        run: |
+          python - <<'PY'
+          import json
+          result=json.load(open('reports/win32-boundaries/results.json'))
+          assert len(result)==2 and all(r.get('passed') is True and not r.get('skipped') for r in result),result
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-boundaries-webgpu
+          path: reports/win32-boundaries
+          retention-days: 14

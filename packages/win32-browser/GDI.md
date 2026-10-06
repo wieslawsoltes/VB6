@@ -1,3 +1,5 @@
+> **0.4.0 update:** Curved/polygon/path regions, affine transforms, memory-DC text and window painting are now implemented. The [advanced guide](ADVANCED-GDI.md) supersedes earlier unsupported-feature statements below and explicitly documents remaining native raster/font differences.
+
 # GDI bitmaps and memory device contexts
 
 Version 0.2.0 added 41 named exports (211 at that release), including `msimg32` and its
