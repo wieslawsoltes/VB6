@@ -1,0 +1,19 @@
+LIBRARY vb6-string-probe
+EXPORTS
+ EmptyKind=_EmptyKind@4
+ Embedded=_Embedded@4
+ WriteBuffer=_WriteBuffer@4
+ ResizeString=_ResizeString@4
+ ClearString=_ClearString@4
+ ReturnString=_ReturnString@4
+ ReturnDouble=_ReturnDouble@12
+ ReturnSingle=_ReturnSingle@8
+ ReturnCurrency=_ReturnCurrency@12
+ ReturnInteger=_ReturnInteger@4
+ ReturnByte=_ReturnByte@4
+ ReturnBoolean=_ReturnBoolean@4
+ Reenter=_Reenter@8
+ CallCount=_CallCount@0
+ Order=_Order@12
+ CheckEncoding=_CheckEncoding@12
+ PrivateBytes=_PrivateBytes@0

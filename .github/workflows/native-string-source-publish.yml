@@ -1,0 +1,35 @@
+name: Publish reviewed native String sources
+on:
+  push:
+    branches: [feat/native-declare-strings]
+    paths: [.github/workflows/native-string-source-publish.yml]
+permissions:
+  contents: write
+concurrency:
+  group: native-string-source-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python3 tools/.apply-native-string-review.py
+      - run: npm run build && npm test
+      - run: node tools/win32-string-fixtures.mjs
+      - name: Publish readable sources and rebuilt IDE and SDK
+        run: |
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          git rm tools/.apply-native-string-review.py
+          git add src docs tests tools dist
+          git diff --cached --check
+          git commit -m 'feat(native): ANSI Declare Strings, LastDLLError and source-preserving continuations' -m 'Verify every source preimage/postimage, rebuild distributions and pass the full Node suite. Native execution is a separate required gate; no full VB6 ABI or locale certification is claimed.'
+          npm run build
+          git diff --exit-code
+          git push origin HEAD:refs/heads/feat/native-declare-strings
