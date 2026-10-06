@@ -167,7 +167,8 @@ function installBinaryCodec(w){
   const aw=(name,arity,fn)=>registerAW(w,'crypt32',name,arity,fn,{notes:'Raw Base64 only. Supports size queries, CRLF/LF/no-wrap, strict validation and explicit byte counts. No certificate or encryption APIs.'});
   aw('CryptBinaryToString',5,(wide,input,count,flags,out,size)=>{
     count=integer(count,0,Math.floor(m.maxBytes/2));flags=unsigned(flags);if((flags&0x3fffffff)!==1)throw new Win32Error('Only Base64 encoding is supported',50);
-    const bytes=count?m.bytes(input,count):new Uint8Array();let value='';
+    if(!input)throw new Win32Error('A binary input pointer is required');
+    const bytes=m.bytes(input,count);let value='';
     for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2];value+=alphabet[a>>2]+alphabet[(a&3)<<4|(b??0)>>4]+(b===undefined?'=':alphabet[(b&15)<<2|(c??0)>>6])+(c===undefined?'=':alphabet[c&63]);}
     const eol=flags&0x40000000?'':flags&0x80000000?'\n':'\r\n';if(eol)value=(value.match(/.{1,64}/g)||[]).join(eol)+eol;
     const capacity=m.readU32(size),needed=value.length+1;
@@ -361,9 +362,13 @@ return {installFileUtilities};
 
 /* kernel32-nls.js */
 __modules[7]=(()=>{
-const {Win32Error,integer,unsigned,encodeANSI,decodeANSI}=__modules[0];
+const {Win32Error,integer,unsigned,decodeANSI}=__modules[0];
 const {registerAW,units,putComplete,rejectOverlap}=__modules[1];
 
+
+// Reverse the process code page once; WideCharToMultiByte consumes UTF-16 units,
+// including one default byte for each half of an unrepresentable surrogate pair.
+const ANSI_CODE_UNITS=new Map(Array.from({length:256},(_,value)=>[decodeANSI(Uint8Array.of(value)).charCodeAt(0),value]));
 
 const NLS_CONSTANTS=Object.freeze({CP_ACP:0,CP_UTF8:65001,MB_PRECOMPOSED:1,MB_COMPOSITE:2,MB_ERR_INVALID_CHARS:8,WC_ERR_INVALID_CHARS:128,WC_NO_BEST_FIT_CHARS:1024});
 /** Original implementation of documented buffer contracts:
@@ -406,8 +411,8 @@ function installNLS(w) {
     else {
       const replacement=defaultChar?m.bytes(defaultChar,1)[0]:63;
       if(usedDefault)m.view(usedDefault,4);
-      result=encodeANSI(text);let i=0;
-      for(const character of text){if(decodeANSI(result.subarray(i,i+1))!==character){result[i]=replacement;used=true;}i++;}
+      result=new Uint8Array(text.length);
+      for(let i=0;i<text.length;i++){const byte=ANSI_CODE_UNITS.get(text.charCodeAt(i));if(byte===undefined){result[i]=replacement;used=true;}else result[i]=byte;}
     }
     rejectOverlap(input,bytes.length,out,Number(capacity));
     const length=output(out,capacity,result,false);if(usedDefault)m.writeU32(usedDefault,used?1:0);return length;

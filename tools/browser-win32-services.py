@@ -87,8 +87,14 @@ try:
   else:
    result=page.evaluate('''probe=>new Promise((resolve,reject)=>{const source="import * as api from '"+location.origin+"/packages/win32-browser/src/index.js';("+probe+")(api).then(result=>postMessage(result));";const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'})),worker=new Worker(url,{type:'module'});const finish=()=>{worker.terminate();URL.revokeObjectURL(url);};worker.onmessage=e=>{finish();resolve(e.data);};worker.onerror=e=>{finish();reject(new Error(e.message));};})''',PROBE)
    check(result==expected,'Module worker probe failed');results.append({'case':'module-worker-services','passed':True})
-   result=page.evaluate('''async()=>{const api=await import('/src/runtime/entry.js'),project=await(await fetch('/examples/win32-text.vb6web')).json();document.body.replaceChildren();const host=await api.mountApplication(project,document.body,{persist:false});try{await host.vm.dispatch(host.forms[0].instance,'cmdRun_Click',[]);return document.querySelector('[data-control="txtOutput"] textarea').value;}finally{host.dispose();}}''')
-   check(all(part in result for part in SAMPLES['win32-text']),'SDK sample failed');results.append({'case':'runtime-sdk-services','passed':True})
+   page.evaluate('''async()=>{const api=await import('/src/runtime/entry.js'),project=await(await fetch('/examples/win32-text.vb6web')).json();document.body.replaceChildren();globalThis.vb6Application=await api.mountApplication(project,document.body,{persist:false});}''')
+   # Property setters batch DOM updates through requestAnimationFrame. Reuse the
+   # real UI/status and queue-drain assertions instead of reading stale DOM in
+   # the same microtask as dispatch, and verify SDK cleanup over repeated runs.
+   try:
+    output=verify(page,'win32-text')
+    results.append({'case':'runtime-sdk-services','passed':True,'output':output})
+   finally:page.evaluate('()=>{vb6Application.dispose();delete globalThis.vb6Application;}')
   check(not errors,str(errors));browser.close()
 except Exception as error:
  results.append({'case':'execution','passed':False,'error':str(error)})

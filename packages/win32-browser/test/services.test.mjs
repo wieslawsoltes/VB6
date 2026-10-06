@@ -190,3 +190,34 @@ test('Base64 validation handles large input linearly without regexp recursion',t
   assert.equal(w.invoke('crypt32','CryptStringToBinaryA',[input,131072,1,out,size,0,0]),1);
   assert.deepEqual([...m.bytes(out,3)],[65,66,67]);assert.equal(m.readU32(size),98304);
 });
+
+
+test('ANSI conversion substitutes per UTF-16 unit without losing following text',t=>{
+  const {w,m,call}=setup(t),out=m.alloc(64),used=u32(m,0),replacement=bytes(m,[33]);
+  for(const [text,expected]of [['A😀é',[65,33,33,233]],['\ud800A\udc00',[33,65,33]],['😀😀',[33,33,33,33]]]){
+    const source=m.allocString(text,true);
+    assert.equal(call('WideCharToMultiByte',1252,1024,source,text.length,0,0,replacement,used),expected.length);
+    assert.equal(m.readU32(used),1);
+    assert.equal(call('WideCharToMultiByte',1252,1024,source,text.length,out,64,replacement,used),expected.length);
+    assert.deepEqual([...m.bytes(out,expected.length)],expected);
+    m.bytes(out,64).fill(17);m.writeU32(used,55);
+    assert.equal(call('WideCharToMultiByte',1252,1024,source,text.length,out,expected.length-1,replacement,used),0);
+    assert.equal(w.lastError,122);assert.deepEqual([...m.bytes(out,64)],Array(64).fill(17));assert.equal(m.readU32(used),55);
+  }
+});
+test('Windows-1252 NLS roundtrip preserves all 256 code units without substitution',t=>{
+  const {m,call}=setup(t),input=bytes(m,Array.from({length:256},(_,i)=>i)),wide=m.alloc(512),output=m.alloc(256),used=u32(m,99);
+  assert.equal(call('MultiByteToWideChar',1252,0,input,256,wide,256),256);
+  assert.equal(call('WideCharToMultiByte',1252,1024,wide,256,output,256,0,used),256);
+  assert.deepEqual([...m.bytes(output,256)],[...m.bytes(input,256)]);assert.equal(m.readU32(used),0);
+});
+for(const wide of [false,true])test('Base64 '+(wide?'W':'A')+' distinguishes empty storage from a NULL input pointer',t=>{
+  const {w,m}=setup(t),api=(...args)=>w.invoke('crypt32','CryptBinaryToString'+(wide?'W':'A'),args),input=m.alloc(1),output=m.alloc(32*(wide?2:1)),size=u32(m,0);
+  for(const [flags,text]of [[1,'\r\n'],[0x80000001,'\n'],[0x40000001,'']]){
+    assert.equal(api(input,0,flags,0,size),1);assert.equal(m.readU32(size),text.length+1);
+    m.writeU32(size,32);assert.equal(api(input,0,flags,output,size),1);assert.equal(m.string(output,wide),text);assert.equal(m.readU32(size),text.length);
+  }
+  m.putString(output,'keep',32,wide);m.writeU32(size,77);
+  assert.equal(api(0,0,1,0,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);
+  assert.equal(api(0,0,1,output,size),0);assert.equal(w.lastError,87);assert.equal(m.readU32(size),77);assert.equal(m.string(output,wide),'keep');
+});

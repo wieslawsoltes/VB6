@@ -1,5 +1,9 @@
-import {Win32Error,integer,unsigned,encodeANSI,decodeANSI} from './core.js';
+import {Win32Error,integer,unsigned,decodeANSI} from './core.js';
 import {registerAW,units,putComplete,rejectOverlap} from './services-utils.js';
+
+// Reverse the process code page once; WideCharToMultiByte consumes UTF-16 units,
+// including one default byte for each half of an unrepresentable surrogate pair.
+const ANSI_CODE_UNITS=new Map(Array.from({length:256},(_,value)=>[decodeANSI(Uint8Array.of(value)).charCodeAt(0),value]));
 
 export const NLS_CONSTANTS=Object.freeze({CP_ACP:0,CP_UTF8:65001,MB_PRECOMPOSED:1,MB_COMPOSITE:2,MB_ERR_INVALID_CHARS:8,WC_ERR_INVALID_CHARS:128,WC_NO_BEST_FIT_CHARS:1024});
 /** Original implementation of documented buffer contracts:
@@ -42,8 +46,8 @@ export function installNLS(w) {
     else {
       const replacement=defaultChar?m.bytes(defaultChar,1)[0]:63;
       if(usedDefault)m.view(usedDefault,4);
-      result=encodeANSI(text);let i=0;
-      for(const character of text){if(decodeANSI(result.subarray(i,i+1))!==character){result[i]=replacement;used=true;}i++;}
+      result=new Uint8Array(text.length);
+      for(let i=0;i<text.length;i++){const byte=ANSI_CODE_UNITS.get(text.charCodeAt(i));if(byte===undefined){result[i]=replacement;used=true;}else result[i]=byte;}
     }
     rejectOverlap(input,bytes.length,out,Number(capacity));
     const length=output(out,capacity,result,false);if(usedDefault)m.writeU32(usedDefault,used?1:0);return length;
