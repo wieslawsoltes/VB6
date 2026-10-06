@@ -220,20 +220,38 @@ revision safeguards remain in force. Historical results are not assumed current.
 
 Confirmed output-token stops, request-context limits and fully validated but unexecuted oversized tool batches now pause without losing the task. The Task tab provides **Review limits…** and **Resume task**. See [limit recovery](CODING-AGENT-THREADS.md#limit-recovery) for exact no-replay, stale-revision and provider-specific rules.
 
-There are **no automatic retries**. HTTP 408, 429, 500, 502, 503, 504 and 529, and
-pre-response connection failures and request timeouts (including timed-out
-streaming responses), allow a manual Continue. A bounded
-provider `Retry-After` suggestion is shown (at most five minutes); it schedules
-nothing. The local relay forwards only this sanitized retry metadata, not error
-bodies or arbitrary provider headers. An earlier request may already have been
-processed/billed. Authentication/validation failures, cancellation, denied
-operations, malformed native responses, unspecified incomplete responses and uncertain tool batches remain blocked and
-require a new task. The engine never retries a possibly half-applied batch.
+Transient generation failures now receive up to **three automatic retries**
+(configurable from zero to ten): recognized temporary HTTP/SSE failures, network
+errors, timeouts and a stream that ends before a valid terminal event. Delays use
+bounded exponential backoff and jitter. Every attempt consumes the request and
+cumulative usage allowances. Completed IDE operations are never replayed. Stop,
+revocation, project replacement and lease expiry cancel requests and backoff;
+a retry does not extend authority. Exhausted retries preserve the task for an
+explicit Continue. A provider cooldown is not shortened: a long `Retry-After`
+pauses until a later reviewed run rather than extending permissions.
+
+Authentication, quota and supported-setting errors are **not** automatically
+retried, but allow manual configuration repair and Continue with intact context.
+Valid provider failure events without a useful code also require an explicit
+Continue. Safety rejections, malformed protocol data, denial, cancellation and
+uncertain tool batches remain blocked. No partially applied batch is retried.
+The relay returns only an allowlisted canonical error classification and numeric
+retry advice, never raw provider error messages, bodies or request IDs.
+
+**Compact context** and the locally handled **`/compact`** command create a
+paid, tool-free public checkpoint without running IDE operations. Automatic
+compaction is independently configurable and enabled by default. The original
+goal and latest request are retained verbatim; recent native turns remain whole.
+Summary generation and candidate validation occur before replacing history;
+failure leaves the old history and unexecuted batch intact. Checkpoints can lose
+older detail, so new edits must inspect live state. See
+[recovery and context compaction](CODING-AGENT-RECOVERY.md) for settings, accounting,
+protocol guarantees and the deliberately narrower scope than Codex CLI.
 
 The new Extended default allows 128 provider requests and 1,024 tool calls per run,
 32,768 output tokens per request, and a cumulative **4,000,000-token task budget**.
 The Large preset allows 20,000,000 tokens; the configurable application ceiling is
-100,000,000. All six limits, including context bytes and request timeout, are
+100,000,000. All limits, including context bytes, request timeout, retries and compaction, are
 independently editable on Permissions. Only validated numeric preferences can
 persist in browser storage; tasks, keys, connection settings and grants do not.
 Continue requires a new user decision and resets per-run request/tool allowances,
@@ -250,8 +268,9 @@ Generation requests default to ten minutes and can be configured up to thirty;
 model discovery remains capped at two minutes. Longer generation timeouts do not
 extend the separately selected permission lease (ten minutes by default).
 
-The task status displays native context size in KiB, not a model-specific token
-estimate. The request-context default is 6 MB, configurable up to 16 MB; provider
+The task status displays native context size in KiB, last reported input tokens
+when available, and checkpoint count. Compaction planning uses a labelled
+UTF-8/JSON estimate rather than a model-specific tokenizer. The request-context default is 6 MB, configurable up to 16 MB; provider
 responses remain capped at 8 MiB. The public thread keeps at most 1,200 entries
 and four million accounted characters, while the separate activity audit keeps
 500 entries/approximately 512 KB. Thread previews are capped at 262,144 characters
@@ -259,7 +278,10 @@ per public field. Omissions and truncation are explicit. Individual activity tex
 clipped with an explicit marker. Before executing a tool batch the engine reserves
 space for bounded, explicitly marked tool results. Large results require smaller
 ranges/pages. **Native reasoning/signatures are never truncated or rewritten.**
-When that native context cannot fit, start a task with reviewed public context.
+When native context cannot fit, compact complete older turns or review context
+and output settings; New Task with Context remains a manual fallback. Opaque
+native reasoning/signatures are excluded from the public summary, while retained
+recent turns keep their original native blocks.
 An oversized response/call batch or malformed stream never executes partial calls.
 Returned tool batches are executed sequentially against the real revision checks.
 

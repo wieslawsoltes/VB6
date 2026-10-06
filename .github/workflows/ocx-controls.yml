@@ -1,0 +1,43 @@
+name: OCX control integration
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ocx-controls-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: git diff --exit-code -- dist src/exporter/runtime-payload.js
+      - run: node --test tests/ocx-*.test.mjs
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Classic toolbox, properties, pages, typed events and persistence
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: python tools/browser-ocx-tests.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocx-browser-${{ matrix.browser }}
+          path: reports/ocx-browser
+          retention-days: 7

@@ -98,7 +98,7 @@ the BSTR; the caller releases the resulting allocation after the call, or during
 error cleanup if argument evaluation or the callee fails. String function results
 are retained independently before these temporary references are destroyed.
 Fixed-length String sources can be read into an explicitly grouped value copy,
-but native fixed-length String **copy-back** is still unsupported. Parenthesized
+but fixed-length String **copy-back to project procedures** is still unsupported. Parenthesized
 whole-array values are rejected instead of silently aliasing their source.
 
 ## Explicit native pointer/value overrides
@@ -116,8 +116,10 @@ Private Sub Example()
 End Sub
 ```
 
-This is intentionally limited to an external **ByRef Long** declaration. It is
-not a general reinterpret-cast for Currency, Double, String, arrays, records,
+The numeric override is limited to an external **ByRef Long** declaration.
+The external ByRef String override is implemented separately under
+[the ANSI byte-BSTR marshalling contract](WIN32-STRING-INTEROP.md). Neither is
+a general reinterpret-cast for Currency, Double, arrays, records,
 callbacks or project procedures. For project ByRef value copies, use parentheses.
 As with all native Declare calls, the author's signature must match the real API;
 incorrect native pointers/calling conventions are not sandboxed or repaired.

@@ -314,7 +314,8 @@ def request_retry(page,mode):
         if index==2:return {'http_status':429,'retry_after':2}
         check(any(item.get('type')=='function_call_output' for item in body['input']))
         return [],'Recovered.'
-    requests=mock(page,'openai',strategy);configure(page);start(page)
+    requests=mock(page,'openai',strategy);configure(page)
+    tab(page,'Permissions');page.get_by_label('Automatic generation retries',exact=True).fill('0');tab(page,'Task');start(page)
     page.get_by_role('dialog',name='AI Coding Agent — Review Operation',exact=True).get_by_role('button',name='Allow once',exact=True).click();finish(page)
     check(page.evaluate('vb6Studio.codingAgents.agent.state')=='retry');check(len(requests)==2)
     check(not page.evaluate('vb6Studio.codingAgents.adapter.enabled'))
@@ -676,6 +677,68 @@ def permission_plan(page,mode):
     return {'planInstructions':True,'nonMutatingCatalog':True}
 
 
+def automatic_retry(page, mode):
+    original=page.evaluate('vb6Studio.project.modules[0].code')
+    def strategy(index, body):
+        if index==1:return [{'name':'vb6_code_edit','arguments':{'expectedRevision':source_revision('openai',body),'edits':[{'module':'Form1','start':0,'end':0,'text':"' auto retry once\n",'expectedText':''}]}}], 'Edit once.'
+        if index==2:return {'http_status':503,'retry_after':1}
+        return [], 'Recovered automatically without replaying the edit.'
+    requests=mock(page,'openai',strategy);configure(page,mode='autoedit');start(page);finish(page)
+    check(len(requests)==3);check(page.evaluate("vb6Studio.codingAgents.agent.state==='completed'"))
+    check(page.evaluate('vb6Studio.project.modules[0].code')=="' auto retry once\n"+original)
+    check(page.evaluate('vb6Studio.history.undoStack.length')==1)
+    check(page.evaluate("vb6Studio.codingAgents.agent.thread.entries.some(e=>e.status==='retrying')"))
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.requests')==3)
+    check(not page.evaluate('vb6Studio.codingAgents.agent.permissionSession.active'))
+    page.screenshot(path=str(REPORTS/f'{mode}-automatic-recovery.png'))
+    return {'automaticRetry':True,'confirmedEditNotReplayed':True,'permissionLeaseEnded':True}
+
+
+def context_compaction(page, mode, provider='openai', slash=False):
+    normals=0;summaries=0
+    def strategy(index, body):
+        nonlocal normals,summaries
+        if not body.get('tools'):
+            summaries+=1
+            check('not-a-real-key-private' not in json.dumps(body));check('opaque-test-signature' not in json.dumps(body))
+            check(not body.get('tool_choice'))
+            return [], 'Confirmed: read the project. No modifications. Preserve the original task and inspect live state before any edit.'
+        normals+=1
+        if normals==1:return [{'name':'vb6_project_get'}], 'Confirmed project inspection. '*1800
+        check('Context checkpoint' in json.dumps(body))
+        return [], 'Continued from the checkpoint; no operations replayed.'
+    requests=mock(page,provider,strategy);configure(page,provider,mode='readonly')
+    tab(page,'Permissions');page.get_by_label('Maximum agent requests',exact=True).fill('1');tab(page,'Task');start(page);finish(page)
+    before=page.evaluate('vb6Studio.codingAgents.agent.historyBytes')
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.calls')==1)
+    page.get_by_label('Agent task',exact=True).fill('/compact' if slash else 'Unsent draft must remain local.')
+    if slash:page.get_by_label('Agent task',exact=True).press('Enter')
+    else:page.get_by_role('button',name='Compact context',exact=True).click()
+    dialog=page.get_by_role('dialog',name='AI Coding Agent — Compact Context',exact=True)
+    check('No IDE tools will execute' in dialog.inner_text());dialog.get_by_role('button',name='Compact Context',exact=True).click();finish(page)
+    check(summaries==1 and normals==1);check(page.evaluate('vb6Studio.codingAgents.agent.compactions')==1)
+    check(page.evaluate('vb6Studio.codingAgents.agent.historyBytes')<before)
+    check(page.evaluate('vb6Studio.codingAgents.agent.usage.calls')==1)
+    check(page.get_by_label('Agent task',exact=True).input_value()==('' if slash else 'Unsent draft must remain local.'))
+    check('Unsent draft must remain local.' not in json.dumps(requests));check('/compact' not in json.dumps(requests))
+    page.locator('.agent-panel').get_by_role('button',name='Continue',exact=True).click()
+    page.get_by_role('dialog',name='AI Coding Agent — Continue Task',exact=True).get_by_role('button',name='Continue Task',exact=True).click();finish(page)
+    check(summaries==1 and normals==2);check(page.evaluate('vb6Studio.codingAgents.agent.usage.tokens')==369)
+    check(page.evaluate("vb6Studio.codingAgents.agent.state==='completed'"))
+    check('compactions' in page.get_by_label('Task context usage',exact=True).inner_text())
+    page.screenshot(path=str(REPORTS/f'{mode}-{provider}-context-compaction.png'))
+    return {'toolFreeCheckpoint':True,'wholeTaskRetained':True,'cumulativeUsage':True,'draftNotSent':True,'slashCommand':slash}
+
+
+def stop_backoff(page, mode):
+    requests=mock(page,'openai',lambda i,b:{'http_status':503,'retry_after':30});configure(page,mode='readonly');start(page)
+    page.wait_for_function("vb6Studio.codingAgents.agent.thread.entries.some(e=>e.status==='retrying')")
+    page.locator('.agent-panel').get_by_role('button',name='Stop',exact=True).click();finish(page)
+    page.wait_for_timeout(100);check(len(requests)==1);check(page.evaluate("vb6Studio.codingAgents.agent.state==='blocked'"))
+    check(not page.evaluate('vb6Studio.codingAgents.agent.permissionSession.active'))
+    return {'backoffCancelled':True,'noLateRequest':True}
+
+
 def case(browser,mode,name,fn):
     context=None;started=time.perf_counter()
     try:
@@ -698,8 +761,9 @@ try:
             for provider in ['openai','anthropic','google']:
                 case(browser,mode,provider,lambda page,mode,provider=provider:provider_workflow(page,mode,provider))
                 case(browser,mode,provider+'-plan-question',lambda page,mode,provider=provider:plan_question(page,mode,provider))
+                case(browser,mode,provider+'-context-compaction',lambda page,mode,provider=provider:context_compaction(page,mode,provider))
                 case(browser,mode,provider+'-output-recovery',lambda page,mode,provider=provider:output_recovery(page,mode,provider))
-            for name,fn in [('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan)]:case(browser,mode,name,fn)
+            for name,fn in [('automatic-retry',automatic_retry),('stop-backoff',stop_backoff),('compact-command',lambda page,mode:context_compaction(page,mode,'openai',True)),('denied',denied),('readonly',readonly),('scoped',scoped),('stopped',stopped),('lifecycle',lifecycle),('tasks',task_switching),('limited-resume',limited_resume),('request-retry',request_retry),('question-cancel',question_cancel),('live-thread',live_thread),('thread-reading',thread_reading),('thread-formatting',thread_formatting),('budget-preferences',budget_preferences),('composer-keyboard',composer_keyboard),('thread-catch-up',thread_catch_up),('thread-return',thread_return),('thread-pruning-anchor',thread_pruning_anchor),('batch-recovery',batch_recovery),('permission-full',permission_full),('permission-autoedit',permission_autoedit),('permission-deny',permission_rule_denial),('permission-never',permission_never_ask),('permission-approve-run',permission_approve_run),('permission-tasks',permission_task_profiles),('permission-revoke',permission_revoke),('permission-plan',permission_plan)]:case(browser,mode,name,fn)
         browser.close()
 finally:
     server.shutdown();server.server_close()

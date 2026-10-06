@@ -103,16 +103,38 @@ with sync_playwright() as pw:
             check('typed Optional and named calls export without rewriting source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
             check('call-argument File Make EXE equals Node output', downloaded.suggested_filename == 'AotCalls.exe' and (OUT / 'AotCalls.exe').read_bytes() == (calls_dir / 'AotCalls.exe').read_bytes())
             check('call export has no network or page errors', not errors and not requests)
-        for folder, name in [('interval-contract', 'AotIntervalContract'), ('large-arrays', 'AotLargeArrays'), ('callbacks', 'AotCallbacks')]:
+        for folder, name in [('interval-contract', 'AotIntervalContract'), ('large-arrays', 'AotLargeArrays'), ('callbacks', 'AotCallbacks'), ('string-interop', 'AotStringInterop'), ('string-interop', 'AotWin32Strings'), ('string-interop', 'AotStringOwnership')]:
             extra = ROOT / 'validation' / folder
             if not (extra / f'{name}.vb6web').exists():
                 continue
+            # Isolate each export in a fresh document. Chromium limits bursts
+            # of downloads from one frame even when the menu click is real;
+            # the fixture matrix must not depend on the runner's speed.
+            page.close()
+            page = browser.new_page(accept_downloads=True, viewport={'width': 1440, 'height': 960})
+            page.set_default_timeout(15000)
+            page.on('request', lambda request: requests.append(request.url) if request.url.startswith(('https:', 'http:')) else None)
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text())
+            page.wait_for_function('!!globalThis.vb6Studio?.project')
             original = json.loads((extra / f'{name}.vb6web').read_text())
             page.evaluate('p => vb6Studio.loadProject(p)', original)
             before = page.evaluate('JSON.stringify(vb6Studio.project.modules)')
-            with page.expect_download() as pending:
-                page.evaluate('vb6Studio.command("exportWin32")')
-            downloaded = pending.value
+            # Exercise the user path rather than issuing an unbounded burst of
+            # script-only downloads (which Chromium may throttle per frame).
+            page.get_by_role('menubar', name='Main menu').get_by_role('menuitem', name='File', exact=True).click()
+            try:
+                with page.expect_download() as pending:
+                    page.locator('.classic-menu [data-command="exportWin32"]').click()
+                downloaded = pending.value
+            except Exception:
+                (OUT / f'{name}-failure.json').write_text(json.dumps({
+                    'build': page.evaluate('vb6Studio.lastNativeBuild || null'),
+                    'output': page.evaluate('vb6Studio.output'),
+                    'pageErrors': errors, 'requests': requests,
+                }, indent=2))
+                page.screenshot(path=str(OUT / f'{name}-failure.png'))
+                raise
             downloaded.save_as(OUT / f'{name}.exe')
             check(f'{name}: Make EXE preserves source', before == page.evaluate('JSON.stringify(vb6Studio.project.modules)'))
             check(f'{name}: Make EXE equals Node', (OUT / f'{name}.exe').read_bytes() == (extra / f'{name}.exe').read_bytes())
@@ -132,7 +154,7 @@ with sync_playwright() as pw:
             fixtures.extend((calls_dir, name) for name in ('AotCalls', 'AotCallProperties'))
         if date_dir.exists():
             fixtures.extend((date_dir, name) for name in ('AotDates', 'AotDateABI', 'AotDateCalls') if (date_dir / f'{name}.vb6web').exists())
-        for folder, name in [('interval-contract','AotIntervalContract'), ('large-arrays','AotLargeArrays'), ('callbacks','AotCallbacks'), ('callbacks','AotCallbackThreadGuard')]:
+        for folder, name in [('interval-contract','AotIntervalContract'), ('large-arrays','AotLargeArrays'), ('callbacks','AotCallbacks'), ('callbacks','AotCallbackThreadGuard'), ('string-interop','AotStringInterop'), ('string-interop','AotWin32Strings'), ('string-interop','AotStringOwnership')]:
             extra = ROOT / 'validation' / folder
             if (extra / f'{name}.vb6web').exists():
                 fixtures.append((extra, name))

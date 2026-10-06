@@ -4,7 +4,15 @@ import {modal,alertDialog} from './ui.js';
 import {inspectNativeSaveRecovery,recoverNativeDirectory} from '../project/native-save-recovery.js';
 export function installNativeWorkspace(ide){
   // Called only by trusted embedding code, never from a project or MCP tool.
-  ide.installControlAdapters=registry=>{if(ide.runState!=='design')throw Error('Stop execution before installing control adapters');if(!registry||typeof registry.create!=='function')throw TypeError('Trusted control adapter registry required');ide.controlRegistry=registry;for(const designer of ide.documents.designers.values()){designer.options.controlRegistry=registry;designer.render();}};
+  ide.installControlAdapters=registry=>{if(ide.runState!=='design')throw Error('Stop execution before installing control adapters');if(!registry||typeof registry.create!=='function')throw TypeError('Trusted control adapter registry required');ide.controlRegistry=registry;for(const designer of ide.documents.designers.values()){designer.options.controlRegistry=registry;designer.render();}for(const editor of ide.documents.editors.values()){editor.controlRegistry=registry;editor.refreshObjects();}ide.renderToolbox();ide.inspector.render();};
+  ide.showControlPropertyPages=async()=>{
+    if(ide.runState!=='design')throw new Error('Stop execution before editing component properties');
+    const selected=ide.designer.selected();if(selected.length!==1)throw new Error('Select one component');
+    const model=selected[0],revision=ide.visualRevision,project=ide.project,registry=ide.controlRegistry;
+    const changes=await registry.editProperties(model,{owner:ide.root.ownerDocument,ide});if(!changes)return false;
+    if(ide.runState!=='design'||ide.project!==project||ide.visualRevision!==revision||ide.controlRegistry!==registry||ide.designer.selected().length!==1||ide.designer.selected()[0]!==model)throw new Error('Component selection or project changed while property pages were open');
+    ide.setProperties(changes);return true;
+  };
   ide.restoreNativeWindows=()=>{
     const state=ide.project.nativeWindowState;if(ide.runState!=='design'||!state||!state.current&&!state.records?.some(r=>!r.ambiguous))return false;
     const states=nativeDocumentWindows(ide.project).slice(0,128); // never spawn OS windows from imported files
