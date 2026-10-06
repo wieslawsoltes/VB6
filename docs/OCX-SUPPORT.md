@@ -5,6 +5,16 @@ editor. There are two execution paths, not a Windows DLL loader inside JavaScrip
 trusted browser control adapters, and the explicitly granted Windows Automation
 companion. This implementation is **not certification of every original VB6 OCX**.
 
+## Container-contract follow-up
+
+See [OCX-CONTAINER-CONTRACTS.md](OCX-CONTAINER-CONTRACTS.md) for the added
+portable lifecycle/container/windowless APIs, multi-selection property pages,
+actual VB-authored source execution, executable lab, and extended native APIs.
+The guide explicitly separates local JavaScript/inline Chromium passes from
+**new native C# code that has not been compiled or run in this delivery**.
+The historical Windows evidence below describes PR #52, not certification of the
+new native code. Universal original VB6 OCX compatibility is not complete.
+
 ## Classic IDE integration
 
 `ControlAdapterRegistry` accepts trusted runtime/designer factories plus immutable
@@ -84,8 +94,9 @@ case-insensitive; matching default values can be omitted. Updates are transactio
 Native object handles are rejected. Limits are 256 properties and 1 MiB of encoded
 UTF-8 state. Lifecycle hooks are synchronous by contract.
 
-Portable source control events use the existing browser-control event queue. They
-do not claim the synchronous native connection-point cancellation contract below.
+Ordinary portable adapter events use the existing browser-control event queue.
+The separate `SourceUserControl` runner awaits typed VB event callbacks with shared
+ByRef cells; that does not imply binary COM execution inside the browser.
 
 ## Native Windows OCX path
 
@@ -133,7 +144,9 @@ into a paused debugger are rejected rather than silently executing user code.
 The Windows host discovers the **default outgoing IDispatch event interface**,
 advises connection points, creates typed event delegates, marshals arguments and
 copies ByRef changes back before returning to the control. The root adapter is
-automatically advised when event metadata is available. Arbitrary outgoing vtable
+automatically advised when event metadata is available. The follow-up additionally
+implements explicit selection of discovered outgoing IDispatch interfaces by IID,
+with native execution still pending validation. Arbitrary outgoing vtable
 interfaces and automatic subscription to every returned child COM object are not
 implemented. Event metadata is bounded to 256 events and 64 parameters; nesting,
 queues, payload sizes and timeouts are bounded. Timed-out native operations are not
@@ -145,7 +158,8 @@ Host-only operations include `controlInfo`, `showPropertyPages`,
 The property-page method invokes the installed control's own native pages.
 Windows preview controls live in separate native windows, **not inside browser DOM**.
 Stream persistence uses the existing bounded `IPersistStream` / `IPersistStreamInit`
-path. A control can expose an interface but reject a save or load; its HRESULT is
+path. The follow-up adds explicit property-bag and structured-storage host paths;
+these new C# paths and their fixtures are authored but not Windows-validated here. A control can expose an interface but reject a save or load; its HRESULT is
 reported, not replaced by invented state. These methods are host APIs, not an
 unrestricted Automation surface available to VB programs.
 
@@ -160,12 +174,14 @@ No proprietary licensed-control fixture is included or certified.
 
 The existing importer/exporter continues to preserve unsupported native OCX/FRX
 bytes opaquely. The portable bag is **not** the native VB6 PropertyBag/FRX binary
-format. Complete proprietary property decoding, storage/property-bag COM persistence,
-windowless/in-place OLE hosting, every ambient interface and accelerator/focus rule,
-all outgoing interfaces, native UserControl/PropertyPage authoring and universal
-VB6 binary compatibility remain outside the verified implementation. Portable pages
-and native pages are distinct paths. Full native design-mode ambient behavior and
-in-browser native-window embedding are not claimed.
+format. Complete proprietary property decoding, native windowless/in-place OLE hosting,
+every ambient interface and accelerator/focus rule, arbitrary outgoing vtable
+interfaces, native binary UserControl/PropertyPage compilation and universal VB6
+binary compatibility remain outside the verified implementation. The follow-up
+provides portable container behavior and an isolated VB source runner, not all of
+these native contracts. Its new native property-bag/storage persistence and design
+site changes require Windows validation. Portable pages and native pages are
+distinct paths; in-browser native-window embedding is not claimed.
 
 ## Validation
 
@@ -173,7 +189,7 @@ Run `npm run build && npm test` for portable regressions. The OCX-specific Node
 suites cover compiled WithEvents/ByRef handling, sink lifecycle, invalid metadata,
 property bags, trusted metadata, pages and typed editor handlers.
 
-`python tools/browser-ocx-tests.py` exercises six classic IDE workflows on modular
+`python tools/browser-ocx-tests.py` now exercises twelve classic IDE/SDK workflows on modular
 HTTP, standalone HTTP and standalone file origins. CI runs Chromium, Firefox and
 WebKit. `VB6_OCX_ORIGINS=inline` is an additional local harness mode, not a substitute
 for those navigation tests. Screenshots and JSON results go to
@@ -244,3 +260,12 @@ overwriting or stopping a newer document request on the same active iframe.
 Independent frames do not cancel one another. Preview loading does not change
 sandbox permissions, CSP, or native IPC authorization. The native smoke covers
 F5/Reset/restart and Immediate/event-mode promotion through this shared path.
+
+
+## Native active-object communication
+
+The native client now exposes explicit accelerator translation, frame/document
+activation notifications and balanced modeless-dialog scopes. See
+[OCX-ACTIVE-OBJECT.md](OCX-ACTIVE-OBJECT.md) for the API, HRESULT handling,
+owned-window restrictions and Windows contract tests. This does not replace
+AxHost's native message loop or add native windowless OLE containment.

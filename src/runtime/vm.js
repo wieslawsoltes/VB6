@@ -161,7 +161,11 @@ export class VirtualMachine extends Signal {
       }else if(param.byRef)args.push({ref:new Cell(type,actual)});
       else args.push(storageScalar(actual,type));
     }
+    if(this.host.sourceEventEnabled?.(instance,name)===false)return;
     for(const sink of [...(this.eventSinks.get(instance)||[])]){if(!(this.eventSinks.get(instance)||[]).includes(sink))continue;const proc=sink.owner.module.procedures.get(lower(sink.prefix+'_'+name));if(proc)await this.callProcedure(sink.owner,proc,args,frame);}
+    // An explicitly installed source-control host shares the declared cells,
+    // so cancellable source events preserve the same ByRef storage as VB sinks.
+    await this.host.sourceEvent?.(instance,name,args);
     this.emit('event',{instance,name,args:args.map(a=>a?.ref?a.ref.get():a)});
   }
   async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluateScalar(lo,frame)):frame.module.optionBase,numeric(await this.evaluateScalar(hi,frame))]);return result;}

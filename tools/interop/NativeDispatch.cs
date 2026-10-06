@@ -47,12 +47,12 @@ namespace VB6Interop {
       if(type==27&&desc.lpValue!=IntPtr.Zero)return (ushort)(8192|ParameterType((TYPEDESC)Marshal.PtrToStructure(desc.lpValue,typeof(TYPEDESC)),depth+1));
       return new ushort[]{2,3,4,5,6,7,8,9,10,11,12,14,17}.Contains(type)?type:(ushort)12;
     }
-    static object ExportNative(IntPtr value,int depth=0){
+    static object ExportNative(IntPtr value,int depth=0,bool persistent=false){
       if(depth>16)throw new NotSupportedException("Automation result nesting limit exceeded");
       ushort vt=(ushort)Marshal.ReadInt16(value);
-      if((vt&0x4000)!=0){var copy=NewVariant();try{Marshal.ThrowExceptionForHR(VariantCopyInd(copy,value));return ExportNative(copy,depth+1);}finally{FreeVariant(copy);}}
+      if((vt&0x4000)!=0){var copy=NewVariant();try{Marshal.ThrowExceptionForHR(VariantCopyInd(copy,value));return ExportNative(copy,depth+1,persistent);}finally{FreeVariant(copy);}}
       var data=IntPtr.Add(value,8);
-      if((vt&8192)!=0)return ExportNativeArray(Marshal.ReadIntPtr(data),(ushort)(vt&4095),depth+1);
+      if((vt&8192)!=0)return ExportNativeArray(Marshal.ReadIntPtr(data),(ushort)(vt&4095),depth+1,persistent);
       switch(vt){
         case 0:return D("t","empty");case 1:return D("t","null");
         case 2:return D("t","number","vt",2,"v",Marshal.ReadInt16(data));
@@ -62,7 +62,7 @@ namespace VB6Interop {
         case 6:return D("t","currency","v",(Marshal.ReadInt64(data)/10000m).ToString(CultureInfo.InvariantCulture));
         case 7:return D("t","date","v",(double)Marshal.PtrToStructure(data,typeof(double)));
         case 8:{var p=Marshal.ReadIntPtr(data);var text=p==IntPtr.Zero?"":Marshal.PtrToStringBSTR(p);if(text.Length>500000)throw new NotSupportedException("Automation string exceeds limit");return D("t","string","v",text);}
-        case 9:case 13:if(Marshal.ReadIntPtr(data)==IntPtr.Zero)return D("t","nothing");return Export(Marshal.GetObjectForNativeVariant(value),depth+1);
+        case 9:case 13:if(Marshal.ReadIntPtr(data)==IntPtr.Zero)return D("t","nothing");if(persistent)throw new UnauthorizedAccessException("Native objects are not persistent data");return Export(Marshal.GetObjectForNativeVariant(value),depth+1);
         case 10:{int code=Marshal.ReadInt32(data);return code==unchecked((int)0x80020004)?D("t","missing"):D("t","error","v",code);}
         case 11:return D("t","boolean","v",Marshal.ReadInt16(data)!=0);
         case 14:return D("t","decimal","v",((decimal)Marshal.GetObjectForNativeVariant(value)).ToString(CultureInfo.InvariantCulture));
@@ -70,7 +70,7 @@ namespace VB6Interop {
         default:throw new NotSupportedException("Unsupported native result VARTYPE: "+vt);
       }
     }
-    static object ExportNativeArray(IntPtr array,ushort elementType,int depth){
+    static object ExportNativeArray(IntPtr array,ushort elementType,int depth,bool persistent=false){
       if(depth>16||array==IntPtr.Zero)throw new NotSupportedException("Invalid native SAFEARRAY");
       uint rank=SafeArrayGetDim(array);if(rank<1||rank>8)throw new NotSupportedException("Invalid native SAFEARRAY rank");
       if(!new ushort[]{2,3,4,5,6,7,8,9,10,11,12,14,17}.Contains(elementType))throw new NotSupportedException("Unsupported SAFEARRAY element VARTYPE");
@@ -88,12 +88,15 @@ namespace VB6Interop {
           // DECIMAL overlays the complete VARIANT, unlike other typed payloads.
           Marshal.ThrowExceptionForHR(SafeArrayGetElement(array,indices,elementType==12||elementType==14?item:IntPtr.Add(item,8)));
           if(elementType==14)Marshal.WriteInt16(item,14);
-          values.Add(ExportNative(item,depth+1));
+          values.Add(ExportNative(item,depth+1,persistent));
         }finally{FreeVariant(item);}
         // Explicit coordinate enumeration; never assume native storage order.
         for(int i=indices.Length-1;i>=0;i--){if(indices[i]<bounds[i][1]){indices[i]++;break;}indices[i]=bounds[i][0];}
       }
-      return D("t","array","elementType",elementType==9||elementType==10?12:elementType,"bounds",bounds,"v",values);
+      // The result must be consumable internally without a JSON serialize/parse
+      // detour (property bags immediately validate and re-import this wire data).
+      // int[] bounds and List<object> values are not the object[] accepted by A().
+      return D("t","array","elementType",elementType==9||elementType==10?12:elementType,"bounds",bounds.Select(pair=>new object[]{pair[0],pair[1]}).ToArray(),"v",values.ToArray());
     }
     // Write explicit wire descriptors directly. Passing object[] to the CLR
     // marshaler would collapse Currency to Decimal and Nothing to Empty.

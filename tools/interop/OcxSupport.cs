@@ -95,43 +95,52 @@ namespace VB6Interop {
       }
     }
     static Dictionary<string,object>[] DescribeEvents(object value){
-      ITypeInfo coclass=null,source=null;IntPtr attr=IntPtr.Zero;
+      var sources=DescribeEventInterfaces(value);var source=sources.FirstOrDefault(item=>Convert.ToBoolean(item["isDefault"]));
+      return source==null?new Dictionary<string,object>[0]:(Dictionary<string,object>[])source["events"];
+    }
+    static Dictionary<string,object>[] DescribeEventInterfaces(object value){
+      ITypeInfo coclass=null;IntPtr pointer=IntPtr.Zero;
       try{
         var provider=value as ProvideClassInfo;if(provider==null)return new Dictionary<string,object>[0];
-        provider.GetClassInfo(out coclass);coclass.GetTypeAttr(out attr);var type=(TYPEATTR)Marshal.PtrToStructure(attr,typeof(TYPEATTR));coclass.ReleaseTypeAttr(attr);attr=IntPtr.Zero;
-        if(type.cImplTypes>256)throw new NotSupportedException("Too many component interfaces");
-        for(int i=0;i<type.cImplTypes;i++){
-          IMPLTYPEFLAGS flags;coclass.GetImplTypeFlags(i,out flags);
-          if((flags&(IMPLTYPEFLAGS.IMPLTYPEFLAG_FSOURCE|IMPLTYPEFLAGS.IMPLTYPEFLAG_FDEFAULT))!=(IMPLTYPEFLAGS.IMPLTYPEFLAG_FSOURCE|IMPLTYPEFLAGS.IMPLTYPEFLAG_FDEFAULT))continue;
-          int reference;coclass.GetRefTypeOfImplType(i,out reference);coclass.GetRefTypeInfo(reference,out source);break;
-        }
-        if(source==null)return new Dictionary<string,object>[0];
-        source.GetTypeAttr(out attr);type=(TYPEATTR)Marshal.PtrToStructure(attr,typeof(TYPEATTR));
-        if(type.typekind!=TYPEKIND.TKIND_DISPATCH||type.cFuncs>256)return new Dictionary<string,object>[0];
-        var result=new List<Dictionary<string,object>>();var namesSeen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for(int i=0;i<type.cFuncs;i++){
-          IntPtr ptr=IntPtr.Zero;try{
-            source.GetFuncDesc(i,out ptr);var fn=(FUNCDESC)Marshal.PtrToStructure(ptr,typeof(FUNCDESC));
-            if((fn.wFuncFlags&1)!=0||fn.cParams>64)continue;
-            var names=new string[fn.cParams+1];int count;source.GetNames(fn.memid,names,names.Length,out count);
-            if(names[0]==null||!Name(names[0])||!namesSeen.Add(names[0]))continue;
-            var parameters=new List<object>();int size=Marshal.SizeOf(typeof(ELEMDESC));bool supported=true;
-            for(int p=0;p<fn.cParams;p++){
-              var e=(ELEMDESC)Marshal.PtrToStructure(IntPtr.Add(fn.lprgelemdescParam,p*size),typeof(ELEMDESC));var flags=e.desc.paramdesc.wParamFlags;
-              if((flags&PARAMFLAG.PARAMFLAG_FRETVAL)!=0){supported=false;break;}
-              string name=p+1<count?names[p+1]:null;if(name==null||!Name(name))name="arg"+p;
-              bool byref=e.tdesc.vt==(short)VarEnum.VT_PTR||(e.tdesc.vt&(short)VarEnum.VT_BYREF)!=0||(flags&PARAMFLAG.PARAMFLAG_FOUT)!=0;
-              parameters.Add(D("name",name,"byRef",byref,"optional",false,"type",EventParameterType(source,e.tdesc)));
-            }
-            if(supported)result.Add(D("name",names[0],"iid",type.guid.ToString(),"dispid",fn.memid,"params",parameters.ToArray()));
-          }finally{if(ptr!=IntPtr.Zero)source.ReleaseFuncDesc(ptr);}
+        provider.GetClassInfo(out coclass);coclass.GetTypeAttr(out pointer);var attr=(TYPEATTR)Marshal.PtrToStructure(pointer,typeof(TYPEATTR));coclass.ReleaseTypeAttr(pointer);pointer=IntPtr.Zero;
+        if(attr.cImplTypes>256)throw new NotSupportedException("Too many component interfaces");var result=new List<Dictionary<string,object>>();
+        for(int i=0;i<attr.cImplTypes;i++){
+          IMPLTYPEFLAGS flags;coclass.GetImplTypeFlags(i,out flags);if((flags&IMPLTYPEFLAGS.IMPLTYPEFLAG_FSOURCE)==0)continue;
+          if(result.Count>=32)throw new NotSupportedException("Too many outgoing OCX interfaces");
+          ITypeInfo source=null;IntPtr sourcePointer=IntPtr.Zero;
+          try{
+            int reference;coclass.GetRefTypeOfImplType(i,out reference);coclass.GetRefTypeInfo(reference,out source);source.GetTypeAttr(out sourcePointer);var type=(TYPEATTR)Marshal.PtrToStructure(sourcePointer,typeof(TYPEATTR));
+            string name,description,help;int context;source.GetDocumentation(-1,out name,out description,out context,out help);
+            bool supported=type.typekind==TYPEKIND.TKIND_DISPATCH;
+            result.Add(D("iid",type.guid.ToString(),"name",name,"isDefault",(flags&IMPLTYPEFLAGS.IMPLTYPEFLAG_FDEFAULT)!=0,"supported",supported,"events",supported?DescribeDispatchEvents(source,type):new Dictionary<string,object>[0],"reason",supported?null:"Outgoing vtable interfaces require a matching native ABI sink"));
+          }finally{if(sourcePointer!=IntPtr.Zero&&source!=null)source.ReleaseTypeAttr(sourcePointer);if(source!=null)Marshal.ReleaseComObject(source);}
         }
         return result.ToArray();
       }catch(InvalidCastException){return new Dictionary<string,object>[0];}
-      finally{if(attr!=IntPtr.Zero&&source!=null)source.ReleaseTypeAttr(attr);if(source!=null)Marshal.ReleaseComObject(source);if(coclass!=null)Marshal.ReleaseComObject(coclass);}
+      finally{if(pointer!=IntPtr.Zero&&coclass!=null)coclass.ReleaseTypeAttr(pointer);if(coclass!=null)Marshal.ReleaseComObject(coclass);}
+    }
+    static Dictionary<string,object>[] DescribeDispatchEvents(ITypeInfo source,TYPEATTR type){
+      if(type.cFuncs>256)throw new NotSupportedException("Too many outgoing events");var result=new List<Dictionary<string,object>>();var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+      for(int i=0;i<type.cFuncs;i++){
+        IntPtr pointer=IntPtr.Zero;
+        try{
+          source.GetFuncDesc(i,out pointer);var fn=(FUNCDESC)Marshal.PtrToStructure(pointer,typeof(FUNCDESC));
+          if((fn.wFuncFlags&1)!=0||fn.cParams>64)continue;var names=new string[fn.cParams+1];int count;source.GetNames(fn.memid,names,names.Length,out count);
+          if(names[0]==null||!Name(names[0])||!seen.Add(names[0]))continue;
+          var parameters=new List<object>();bool supported=true;int size=Marshal.SizeOf(typeof(ELEMDESC));
+          for(int p=0;p<fn.cParams;p++){
+            var element=(ELEMDESC)Marshal.PtrToStructure(IntPtr.Add(fn.lprgelemdescParam,p*size),typeof(ELEMDESC));var flags=element.desc.paramdesc.wParamFlags;
+            if((flags&PARAMFLAG.PARAMFLAG_FRETVAL)!=0){supported=false;break;}string name=p+1<count?names[p+1]:null;if(name==null||!Name(name))name="arg"+p;
+            bool byref=element.tdesc.vt==(short)VarEnum.VT_PTR||(element.tdesc.vt&(short)VarEnum.VT_BYREF)!=0||(flags&PARAMFLAG.PARAMFLAG_FOUT)!=0;
+            parameters.Add(D("name",name,"byRef",byref,"optional",false,"type",EventParameterType(source,element.tdesc)));
+          }
+          if(supported)result.Add(D("name",names[0],"iid",type.guid.ToString(),"dispid",fn.memid,"params",parameters.ToArray()));
+        }finally{if(pointer!=IntPtr.Zero)source.ReleaseFuncDesc(pointer);}
+      }return result.ToArray();
     }
     static Type EventDelegate(bool[] byref){
       string signature=string.Join("",byref.Select(b=>b?"R":"V"));Type type;if(EventDelegates.TryGetValue(signature,out type))return type;
+      if(EventDelegates.Count>=512)throw new NotSupportedException("OCX delegate signature limit reached");
       var builder=EventModule.DefineType("Event"+EventDelegates.Count,TypeAttributes.Public|TypeAttributes.Sealed,typeof(MulticastDelegate));
       builder.DefineConstructor(MethodAttributes.Public|MethodAttributes.HideBySig|MethodAttributes.RTSpecialName,CallingConventions.Standard,new[]{typeof(object),typeof(IntPtr)}).SetImplementationFlags(MethodImplAttributes.Runtime|MethodImplAttributes.Managed);
       builder.DefineMethod("Invoke",MethodAttributes.Public|MethodAttributes.HideBySig|MethodAttributes.NewSlot|MethodAttributes.Virtual,typeof(void),byref.Select(b=>b?typeof(object).MakeByRefType():typeof(object)).ToArray()).SetImplementationFlags(MethodImplAttributes.Runtime|MethodImplAttributes.Managed);
@@ -142,25 +151,27 @@ namespace VB6Interop {
       var inputs=byref.Select((b,i)=>Expression.Parameter(b?typeof(object).MakeByRefType():typeof(object),"arg"+i)).ToArray();
       var array=Expression.Variable(typeof(object[]),"values");var statements=new List<Expression>();
       statements.Add(Expression.Assign(array,Expression.NewArrayInit(typeof(object),inputs.Select(p=>Expression.Convert(p,typeof(object))))));
-      statements.Add(Expression.Assign(array,Expression.Call(typeof(AutomationHost).GetMethod("RaiseComEvent",BindingFlags.Static|BindingFlags.NonPublic),Expression.Constant(id),Expression.Constant(S(schema,"name")),array)));
+      statements.Add(Expression.Assign(array,Expression.Call(typeof(AutomationHost).GetMethod("RaiseComEvent",BindingFlags.Static|BindingFlags.NonPublic),Expression.Constant(id),Expression.Constant(S(schema,"name")),array,Expression.Constant(S(schema,"iid")),Expression.Constant("event"))));
       for(int i=0;i<inputs.Length;i++)if(byref[i])statements.Add(Expression.Assign(inputs[i],Expression.ArrayIndex(array,Expression.Constant(i))));
       statements.Add(Expression.Empty());return Expression.Lambda(EventDelegate(byref),Expression.Block(new[]{array},statements),inputs).Compile();
     }
-    static object Advise(string id,Entry target){
-      if(target.Events.Count>0)return D("events",target.Events.Count);
-      try{foreach(var schema in (Dictionary<string,object>[])target.Metadata["events"]){
-        var connection=new EventConnection {Iid=new Guid(S(schema,"iid")),Dispid=N(schema,"dispid"),Handler=MakeEventDelegate(id,schema)};
-        ComEventsHelper.Combine(target.Value,connection.Iid,connection.Dispid,connection.Handler);target.Events.Add(connection);
-      }return D("events",target.Events.Count);}catch{Unadvise(target);throw;}
+    static object Advise(string id,Entry target,string iid=null){
+      var schemas=(Dictionary<string,object>[])target.Metadata["events"];
+      if(iid!=null){Guid parsed;if(!Guid.TryParse(iid,out parsed))throw new ArgumentException("Invalid event interface IID");var source=((Dictionary<string,object>[])target.Metadata["eventInterfaces"]).FirstOrDefault(item=>S(item,"iid")==parsed.ToString());if(source==null||!Convert.ToBoolean(source["supported"]))throw new NotSupportedException("Unknown or unsupported outgoing OCX interface");schemas=(Dictionary<string,object>[])source["events"];}
+      var added=new List<EventConnection>();
+      try{foreach(var schema in schemas){var guid=new Guid(S(schema,"iid"));int dispid=N(schema,"dispid");if(target.Events.Any(item=>item.Iid==guid&&item.Dispid==dispid))continue;
+        var connection=new EventConnection{Iid=guid,Dispid=dispid,Handler=MakeEventDelegate(id,schema)};ComEventsHelper.Combine(target.Value,connection.Iid,connection.Dispid,connection.Handler);target.Events.Add(connection);added.Add(connection);
+      }return D("events",target.Events.Count);}catch{foreach(var connection in added){try{ComEventsHelper.Remove(target.Value,connection.Iid,connection.Dispid,connection.Handler);}catch{}target.Events.Remove(connection);}throw;}
     }
-    static void Unadvise(Entry target){
-      foreach(var connection in target.Events.ToArray())try{ComEventsHelper.Remove(target.Value,connection.Iid,connection.Dispid,connection.Handler);}catch{}target.Events.Clear();
+    static void Unadvise(Entry target,string iid=null){
+      Guid selected=Guid.Empty;if(iid!=null&&!Guid.TryParse(iid,out selected))throw new ArgumentException("Invalid event interface IID");
+      foreach(var connection in target.Events.ToArray()){if(iid!=null&&connection.Iid!=selected)continue;try{ComEventsHelper.Remove(target.Value,connection.Iid,connection.Dispid,connection.Handler);}catch{}target.Events.Remove(connection);}
     }
-    static object[] RaiseComEvent(string handle,string name,object[] args){
+    static object[] RaiseComEvent(string handle,string name,object[] args,string iid=null,string kind="event"){
       if(Quitting)return args;if(EventTokens.Count>=16)throw new InvalidOperationException("Native event nesting exceeds 16");
-      var target=ObjectAt(handle);string token="e"+(++EventSequence);var reply=new EventReply();EventReplies.Add(token,reply);EventTokens.Push(token);target.EventDepth++;
+      var target=ObjectAt(handle);if(kind=="event"&&(target.DesignMode||target.FreezeDepth>0))return args;string token="e"+(++EventSequence);var reply=new EventReply();EventReplies.Add(token,reply);EventTokens.Push(token);target.EventDepth++;
       try{
-        WriteResponse(D("event",D("token",token,"handle",handle,"name",name,"args",args.Select(v=>Export(v)).ToArray(),"reentrant",RequestDepth>0)));
+        WriteResponse(D("event",D("token",token,"handle",handle,"name",name,"iid",iid,"kind",kind,"args",args.Select(v=>Export(v)).ToArray(),"reentrant",RequestDepth>0)));
         var clock=Stopwatch.StartNew();
         while(!reply.Complete&&!Quitting){
           if(clock.ElapsedMilliseconds>120000)throw new TimeoutException("Native event handler did not complete");

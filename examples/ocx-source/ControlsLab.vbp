@@ -1,0 +1,7 @@
+Type=Control
+UserControl=Gauge.ctl
+Name="ControlsLab"
+Startup="(None)"
+MajorVer=1
+MinorVer=0
+RevisionVer=0

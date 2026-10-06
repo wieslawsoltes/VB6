@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VB6 Source Control Lab</title>
+<style>
+:root{font-family:Tahoma,Arial,sans-serif;font-size:13px;background:#008080;color:#111}*{box-sizing:border-box}body{margin:24px}.window{max-width:1120px;margin:auto;background:#c0c0c0;border:2px outset #eee;box-shadow:2px 2px #222}.title{background:#000080;color:white;font-weight:bold;padding:7px 10px}.menu{padding:7px 12px;border-bottom:1px solid #888}main{padding:16px;display:grid;grid-template-columns:minmax(310px,1fr) minmax(310px,1fr);gap:16px}fieldset{border:2px groove #eee;margin:0 0 14px;padding:12px}legend{padding:0 5px}button{font:inherit;border:2px outset #eee;background:#c0c0c0;padding:5px 14px;min-height:30px}button:active{border-style:inset}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px dotted #000;outline-offset:2px}input[type=number]{width:76px}input,textarea{font:inherit;border:2px inset #eee;background:white;padding:5px}textarea,pre{width:100%;font:12px/1.5 Consolas,monospace;white-space:pre-wrap;overflow:auto}textarea{min-height:135px}pre{background:white;border:2px inset #eee;margin:0;max-height:420px;padding:9px}label{display:inline-flex;gap:6px;align-items:center;margin:5px 10px 5px 0}.row{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px}canvas{display:block;border:1px solid #777;background:#eee;max-width:100%;touch-action:none}#readout{font-size:22px;font-weight:bold;margin:8px 0}.status{border:2px inset #ddd;padding:6px 10px;display:flex;gap:16px;flex-wrap:wrap}p{line-height:1.5;margin:0 0 10px}.note{font-size:12px}#events{height:145px}#stateFlag{min-width:150px}@media(max-width:760px){body{margin:8px}main{grid-template-columns:1fr;padding:10px}}
+</style></head><body><div class="window"><header class="title">VB6 Source Control Lab — Gauge.ctl</header><div class="menu">Portable UserControl source execution · property procedures · events · persistence</div>
+<main><section><fieldset><legend>Control instance</legend><div id="readout" aria-live="polite">Starting…</div><canvas id="surface" aria-label="Gauge. Click to set a value between zero and one hundred." tabindex="0"></canvas><p class="note">The VB source controls values, validation, events, and persistence. A trusted Canvas2D adapter paints the gauge.</p><div class="row"><label>Value <input id="value" type="number" min="0" max="100" value="25"></label><button id="apply">Apply</button><button id="increment">Step up</button></div><label><input id="cancel" type="checkbox">Cancel outgoing Changing events</label><label><input id="freeze" type="checkbox">Freeze outgoing events</label></fieldset>
+<fieldset><legend>Design and ambient properties</legend><label><input id="consent" type="checkbox">Allow design-time VB execution</label><div class="row"><button id="design">Enter design mode</button><button id="locale">Toggle locale 1033 / 1045</button></div><p class="note">Design mode requires the explicit consent above. In this mode, outgoing events and incoming mouse input are suppressed; painting remains available.</p></fieldset>
+<fieldset><legend>Portable property bag</legend><div class="row"><button id="save">Save state</button><button id="load">Load state</button></div><textarea id="state" aria-label="Portable control state" spellcheck="false"></textarea><p class="note">This JSON is data-only portable state, not a native FRX/CTX binary.</p></fieldset>
+</section><section><fieldset><legend>Gauge.ctl source</legend><pre id="source"></pre></fieldset><fieldset><legend>Events and errors</legend><pre id="events" role="log" aria-live="polite"></pre></fieldset></section></main><footer class="status"><span id="stateFlag">Initializing</span><span id="modeFlag">Runtime</span><span>Native OCX DLL loading is not part of this browser demo.</span></footer></div>
+<!--RUNTIME-->
+<script>
+const PROJECT=/*PROJECT*/null;
+const CTL_SOURCE=/*CTL_SOURCE*/'';
+const A=VB6Runtime.RuntimeAPI,$=id=>document.getElementById(id),logLines=[];
+function log(text){logLines.push(String(text));if(logLines.length>100)logLines.shift();$('events').textContent=logLines.join('\n');$('events').scrollTop=$('events').scrollHeight;}
+$('source').textContent=CTL_SOURCE;
+let control,siteAdapter,surface,container,currentValue=25,design=false,chain=Promise.resolve();
+const schedule=action=>{chain=chain.then(action).catch(error=>log('Error: '+error.message));return chain;};
+async function update(){currentValue=await control.get('Value');$('value').value=currentValue;surface.invalidate();surface.flush();$('stateFlag').textContent=(control.Dirty?'Modified':'Saved / initial')+' · revision '+control.Revision;$('modeFlag').textContent=(design?'Design':'Runtime')+' · Locale '+control.Ambient.LocaleID;await control.dispatchControlEvent('Paint');}
+async function start(){
+  const readout={get Caption(){return $('readout').textContent;},set Caption(text){$('readout').textContent=String(text);}};
+  control=await A.SourceUserControl.create(PROJECT,'Gauge',{controls:{Readout:readout}});
+  control.subscribe(async(name,args,context)=>{if(name==='Changing'){const proposed=A.unbox(args[0]);log('Changing('+proposed+') · previous '+await context.get('Value'));if($('cancel').checked){args[1].ref.set(-1);log('Cancelled by the host.');}}else log(name);});
+  container=new A.OcxContainer();
+  const registry=new A.ControlAdapterRegistry().register('Lab.SourceGauge',{lifecycle:true,runtime:model=>({__control:true,model,props:model.properties,node:document.createElement('span'),refresh(){},dispose(){},event(name,args){return schedule(async()=>{await control.dispatchControlEvent(name,args);await update();});},ocxLifecycle:{paint(ctx){ctx.fillStyle='#e6e6e6';ctx.fillRect(0,0,300,100);ctx.fillStyle='#000080';ctx.fillRect(0,0,currentValue*3,100);ctx.fillStyle=currentValue>50?'white':'black';ctx.font='bold 26px Tahoma, sans-serif';ctx.fillText(currentValue+'%',120,61);}}})});
+  siteAdapter=registry.create({id:'source-gauge',name:'Gauge1',type:'Lab.SourceGauge',properties:{Width:4500,Height:1500,Visible:-1,Enabled:-1}},{container});
+  surface=new A.OcxWindowlessSurface(container,$('surface'),{onError:error=>log(error.message)});surface.resize(300,100,Math.min(devicePixelRatio||1,2));
+  $('apply').onclick=()=>schedule(async()=>{await control.set('Value',Number($('value').value));await update();});
+  $('increment').onclick=()=>schedule(async()=>{await control.invoke('StepUp');await update();});
+  $('save').onclick=()=>schedule(async()=>{$('state').value=JSON.stringify(await control.save(),null,2);log('Saved portable state.');await update();});
+  $('load').onclick=()=>schedule(async()=>{await control.load(JSON.parse($('state').value));log('Loaded portable state.');await update();});
+  $('freeze').onchange=()=>{const freeze=$('freeze').checked;return schedule(async()=>{control.freezeEvents(freeze);log(freeze?'Outgoing events frozen.':'Outgoing events resumed.');});};
+  $('design').onclick=()=>schedule(async()=>{const next=!design;await control.setDesignMode(next,{allowDesignCode:$('consent').checked});design=next;$('design').textContent=design?'Leave design mode':'Enter design mode';await update();});
+  $('locale').onclick=()=>schedule(async()=>{await control.setAmbient({LocaleID:control.Ambient.LocaleID===1033?1045:1033});await update();});
+  await update();$('state').value=JSON.stringify(await control.save(),null,2);log('Source control initialized.');
+  window.ocxLab={get control(){return control;},get ready(){return chain;},async close(){await chain;surface.close();container.close();await control.close();}};
+}
+start().catch(error=>{$('stateFlag').textContent='Initialization failed';log(error.message);});
+</script></body></html>

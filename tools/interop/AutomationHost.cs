@@ -39,13 +39,17 @@ namespace VB6Interop {
   }
   sealed class ControlHost : AxHost {
     readonly string licenseKey;
-    public ControlHost(Guid clsid,string key=null) : base(clsid.ToString(), 2) { licenseKey=key; }
+    public bool HostDesignMode;
+    public ControlHost(Guid clsid,string key=null,bool design=false) : base(clsid.ToString(), 2) { licenseKey=key;HostDesignMode=design;Site=new OcxComponentSite(this,design); }
     protected override object CreateInstanceCore(Guid clsid) { return licenseKey==null?base.CreateInstanceCore(clsid):AutomationHost.CreateLicensed(clsid,licenseKey); }
     public object Instance { get { return GetOcx(); } }
   }
   sealed class Entry {
     public object Value; public long Identity; public Form Window; public ControlHost Control;
     public Dictionary<string,object> Metadata;
+    public int ModalDepth=0;public bool ActiveOperation=false;public bool? FrameActive=null,DocumentActive=null;
+    public int FreezeDepth=0;public OcxPropertyConnection PropertyConnection;public System.Drawing.Font OwnedFont;
+    public readonly List<object> PersistenceResources=new List<object>();
     public readonly List<EventConnection> Events=new List<EventConnection>(); public int EventDepth; public bool DesignMode=false;
   }
   public static partial class AutomationHost {
@@ -100,7 +104,7 @@ namespace VB6Interop {
             if(fn.memid==0)defaultMember=name;
           } finally { if(ptr!=IntPtr.Zero)info.ReleaseFuncDesc(ptr); }
         }
-        return D("members",members.Values.ToArray(),"defaultMember",defaultMember,"guid",type.guid.ToString(),"enumerable",value is IEnumerable,"persistStream",value is PersistStream,"persistStreamInit",value is PersistStreamInit,"events",DescribeEvents(value));
+        return D("members",members.Values.ToArray(),"defaultMember",defaultMember,"guid",type.guid.ToString(),"enumerable",value is IEnumerable,"persistStream",value is PersistStream,"persistStreamInit",value is PersistStreamInit,"events",DescribeEvents(value),"eventInterfaces",DescribeEventInterfaces(value));
       } finally { if(attr!=IntPtr.Zero&&info!=null)info.ReleaseTypeAttr(attr);if(info!=null&&Marshal.IsComObject(info))Marshal.ReleaseComObject(info); }
     }
     static object Export(object value,int depth=0) {
@@ -154,17 +158,28 @@ namespace VB6Interop {
       }
     }
     static void Release(string id) {
-      var e=ObjectAt(id);if(e.EventDepth>0)throw new InvalidOperationException("Cannot release the source of an active native event");Unadvise(e);Objects.Remove(id);Identities.Remove(e.Identity);
-      try {if(e.Window!=null)e.Window.Dispose();else if(Marshal.IsComObject(e.Value))Marshal.FinalReleaseComObject(e.Value);}finally{e.Value=null;}
+      var entry=ObjectAt(id);if(entry.ActiveOperation)throw new InvalidOperationException("Cannot release a control during an activation operation");if(entry.EventDepth>0)throw new InvalidOperationException("Cannot release the source of an active native event");
+      var errors=new List<Exception>();
+      try{Unadvise(entry);}catch(Exception error){errors.Add(error);}
+      try{StopObserving(entry);}catch(Exception error){errors.Add(error);}
+      try{RestoreOcxModeless(entry);}catch(Exception error){errors.Add(error);}
+      Objects.Remove(id);Identities.Remove(entry.Identity);
+      try{if(entry.Window!=null)entry.Window.Dispose();else if(Marshal.IsComObject(entry.Value))Marshal.FinalReleaseComObject(entry.Value);}catch(Exception error){errors.Add(error);}
+      finally{
+        entry.Value=null;
+        foreach(var resource in entry.PersistenceResources)try{if(Marshal.IsComObject(resource))Marshal.ReleaseComObject(resource);}catch(Exception error){errors.Add(error);}
+        entry.PersistenceResources.Clear();try{if(entry.OwnedFont!=null)entry.OwnedFont.Dispose();}catch(Exception error){errors.Add(error);}entry.OwnedFont=null;
+      }
+      if(errors.Count>0)throw new AggregateException("OCX released with cleanup failures",errors);
     }
     static object Persistence(Entry entry,Dictionary<string,object> request) {
       var streamInit=entry.Value as PersistStreamInit;var stream=entry.Value as PersistStream;if(streamInit==null&&stream==null)throw new NotSupportedException("Component has no supported stream-persistence interface");
-      IStream memory=null;Marshal.ThrowExceptionForHR(CreateStreamOnHGlobal(IntPtr.Zero,true,out memory));
+      IStream memory=null;Marshal.ThrowExceptionForHR(CreateStreamOnHGlobal(IntPtr.Zero,true,out memory));IntPtr transferred=Marshal.AllocCoTaskMem(4);
       try {
-        if(S(request,"op")=="loadState") {var data=Convert.FromBase64String(S(request,"data"));if(data.Length>512*1024)throw new ArgumentException("Persistence input exceeds 512 KiB");memory.Write(data,data.Length,IntPtr.Zero);memory.Seek(0,0,IntPtr.Zero);if(streamInit!=null)streamInit.Load(memory);else stream.Load(memory);return D("loadedBytes",data.Length);}
+        if(S(request,"op")=="loadState") {var data=PersistenceBytes(request);Marshal.WriteInt32(transferred,0);memory.Write(data,data.Length,transferred);if(Marshal.ReadInt32(transferred)!=data.Length)throw new System.IO.IOException("Truncated stream input");memory.Seek(0,0,IntPtr.Zero);if(streamInit!=null)streamInit.Load(memory);else stream.Load(memory);return D("format","stream","loadedBytes",data.Length);}
         if(streamInit!=null)streamInit.Save(memory,false);else stream.Save(memory,false);
-        System.Runtime.InteropServices.ComTypes.STATSTG stat;memory.Stat(out stat,1);if(stat.cbSize<0||stat.cbSize>512*1024)throw new NotSupportedException("Persistence output exceeds 512 KiB");var output=new byte[(int)stat.cbSize];memory.Seek(0,0,IntPtr.Zero);memory.Read(output,output.Length,IntPtr.Zero);return D("data",Convert.ToBase64String(output));
-      } finally { if(memory!=null)Marshal.ReleaseComObject(memory); }
+        System.Runtime.InteropServices.ComTypes.STATSTG stat;memory.Stat(out stat,1);if(stat.cbSize<0||stat.cbSize>512*1024)throw new NotSupportedException("Persistence output exceeds 512 KiB");var output=new byte[(int)stat.cbSize];memory.Seek(0,0,IntPtr.Zero);Marshal.WriteInt32(transferred,0);memory.Read(output,output.Length,transferred);if(Marshal.ReadInt32(transferred)!=output.Length)throw new System.IO.IOException("Truncated stream output");return D("format","stream","data",Convert.ToBase64String(output));
+      } finally {Marshal.FreeCoTaskMem(transferred);if(memory!=null)Marshal.ReleaseComObject(memory); }
     }
     static object Handle(Dictionary<string,object> request) {
       string op=S(request,"op");
@@ -181,17 +196,21 @@ namespace VB6Interop {
         string progId=S(request,"progId");if(!Allowed.Contains(progId))throw new UnauthorizedAccessException("ProgID is not allowed: "+progId);bool preview=Convert.ToBoolean(V(request,"preview",false));if(preview&&!Controls.Contains(progId))throw new UnauthorizedAccessException("Native control preview was not granted");
         var type=Type.GetTypeFromProgID(progId,true);CheckKillbit(type.GUID);object value=null;Form window=null;ControlHost control=null;
         try {
-          if(preview){window=new Form {Text="VB6 native component — "+progId,Width=640,Height=480};control=new ControlHost(type.GUID,V(request,"licenseKey") as string) {Dock=DockStyle.Fill};((System.ComponentModel.ISupportInitialize)control).BeginInit();window.Controls.Add(control);((System.ComponentModel.ISupportInitialize)control).EndInit();window.Show();Application.DoEvents();value=control.Instance;}
+          if(preview){window=new Form {Text="VB6 native component — "+progId,Width=640,Height=480};control=new ControlHost(type.GUID,V(request,"licenseKey") as string,Convert.ToBoolean(V(request,"designMode",false))) {Dock=DockStyle.Fill};((System.ComponentModel.ISupportInitialize)control).BeginInit();window.Controls.Add(control);((System.ComponentModel.ISupportInitialize)control).EndInit();window.Show();Application.DoEvents();value=control.Instance;}
           else value=V(request,"licenseKey")==null?Activator.CreateInstance(type):CreateLicensed(type.GUID,S(request,"licenseKey"));
-          var result=Map(Export(value));var entry=ObjectAt(S(result,"id"));entry.Window=window;entry.Control=control;return result;
+          var result=Map(Export(value));var entry=ObjectAt(S(result,"id"));entry.Window=window;entry.Control=control;entry.DesignMode=control!=null&&control.HostDesignMode;return result;
         }catch{if(window!=null)window.Dispose();else if(value!=null&&Marshal.IsComObject(value))Marshal.FinalReleaseComObject(value);throw;}
       }
       var target=ObjectAt(S(request,"handle"));
       if(op=="release"){Release(S(request,"handle"));return D("released",true);}
       if(op=="advise")return Advise(S(request,"handle"),target);
+      if(op=="eventInterfaces")return target.Metadata["eventInterfaces"];
+      if(op=="adviseInterface")return Advise(S(request,"handle"),target,S(request,"iid"));
+      if(op=="unadviseInterface"){Unadvise(target,S(request,"iid"));return D("unadvised",true);}
+      if(new[]{"observeProperties","stopObservingProperties","controlDesignMode","controlFreezeEvents","controlKeyboardInfo","controlMnemonic","controlAmbient","controlActivationInfo","controlTranslateAccelerator","controlFrameActivate","controlDocumentActivate","controlModalScope"}.Contains(op))return ExtendedControlOperation(S(request,"handle"),target,request);
       if(op=="unadvise"){Unadvise(target);return D("events",0);}
       if(new[]{"controlInfo","showPropertyPages","setControlBounds","controlVisible","controlEnabled","controlFocus"}.Contains(op))return ControlOperation(target,request);
-      if(op=="loadState"||op=="saveState")return Persistence(target,request);
+      if(op=="loadState"||op=="saveState"||op=="persistenceInfo")return PersistOcx(target,request);
       if(op=="enumerate")return EnumerateNative(target,N(request,"lcid",1033));
       if(op!="call")throw new ArgumentException("Unknown Automation operation");
       string member=S(request,"member");int mode=N(request,"mode"),lcid=N(request,"lcid",1033);if(!Name(member)||!new[]{1,2,4,8}.Contains(mode))throw new ArgumentException("Invalid Automation invocation");
