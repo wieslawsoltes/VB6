@@ -17,8 +17,16 @@ namespace VB6Interop {
   public static partial class AutomationHost {
     const int BrowsingNotImplemented=unchecked((int)0x80004001);
     const int BrowsingUnexpected=unchecked((int)0x8000FFFF);
+    [DllImport("oleaut32.dll",EntryPoint="SetErrorInfo")]
+    static extern int SetBrowsingErrorInfo(uint reserved,IntPtr errorInfo);
+    static void BeginBrowsingCall() {
+      // IErrorInfo belongs to a logical thread, not to a particular COM object.
+      // Clear an unconsumed previous failure before calling the next provider,
+      // then retain any fresh diagnostic produced by that provider.
+      Marshal.ThrowExceptionForHR(SetBrowsingErrorInfo(0,IntPtr.Zero),new IntPtr(-1));
+    }
     static bool BrowsingSucceeded(int hr) {
-      if(hr==BrowsingNotImplemented)return false;
+      if(hr==BrowsingNotImplemented){BeginBrowsingCall();return false;}
       if(hr<0)Marshal.ThrowExceptionForHR(hr);
       if(hr!=0)throw new COMException("Unexpected IPerPropertyBrowsing success code",BrowsingUnexpected);
       return true;
@@ -46,14 +54,14 @@ namespace VB6Interop {
     static Dictionary<string,object> ReadPropertyBrowsing(object value,int dispid) {
       var browser=value as OcxPerPropertyBrowsing;
       if(browser==null)return D("supported",false);
-      string display=null;IntPtr text;int hr=browser.GetDisplayString(dispid,out text);
+      string display=null;IntPtr text;BeginBrowsingCall();int hr=browser.GetDisplayString(dispid,out text);
       bool hasDisplay=BrowsingSucceeded(hr);
       if(hasDisplay)try{display=BrowsingString(text,true);}finally{Marshal.FreeBSTR(text);}
-      Guid page;bool hasPage=BrowsingSucceeded(browser.MapPropertyToPage(dispid,out page));
+      Guid page;BeginBrowsingCall();bool hasPage=BrowsingSucceeded(browser.MapPropertyToPage(dispid,out page));
       OcxCountedArray strings,cookies;
       // On failure the SDK explicitly leaves counted-array outputs undefined.
       // Never inspect/free those undefined pointers after E_NOTIMPL or failure.
-      bool hasChoices=BrowsingSucceeded(browser.GetPredefinedStrings(dispid,out strings,out cookies));
+      BeginBrowsingCall();bool hasChoices=BrowsingSucceeded(browser.GetPredefinedStrings(dispid,out strings,out cookies));
       var choices=new List<object>();
       if(hasChoices)try {
         if(strings.Count!=cookies.Count)throw new COMException("Mismatched OCX labels and cookies",BrowsingUnexpected);
@@ -66,7 +74,7 @@ namespace VB6Interop {
           var variant=NewVariant();
           try {
             // A list with an unresolvable choice is not a complete editor model.
-            if(!BrowsingSucceeded(browser.GetPredefinedValue(dispid,cookie,variant)))throw new NotSupportedException("OCX advertises a predefined choice without its value");
+            BeginBrowsingCall();if(!BrowsingSucceeded(browser.GetPredefinedValue(dispid,cookie,variant)))throw new NotSupportedException("OCX advertises a predefined choice without its value");
             // Never adopt new native object handles through a metadata query.
             object wire=ExportNative(variant,0,true);
             var choice=D("label",label,"cookie",cookie,"value",wire);
@@ -85,7 +93,7 @@ namespace VB6Interop {
       var member=((Dictionary<string,object>[])entry.Metadata["members"]).FirstOrDefault(m=>string.Equals((string)m["name"],name,StringComparison.OrdinalIgnoreCase));
       if(member==null||!((List<int>)member["modes"]).Any(mode=>mode==2||mode==4||mode==8))throw new UnauthorizedAccessException("Property is not present in exposed Automation metadata");
       var ids=new int[1];var empty=Guid.Empty;
-      Marshal.ThrowExceptionForHR(((DispatchInvoke)entry.Value).GetIDsOfNames(ref empty,new[]{name},1,(uint)lcid,ids));
+      BeginBrowsingCall();Marshal.ThrowExceptionForHR(((DispatchInvoke)entry.Value).GetIDsOfNames(ref empty,new[]{name},1,(uint)lcid,ids));
       return ids[0];
     }
     static object BrowseControlProperty(Entry entry,Dictionary<string,object> request) {

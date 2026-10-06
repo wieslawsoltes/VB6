@@ -24,6 +24,9 @@ unsigned DWORD range. Returned client snapshots are detached and immutable.
 Each optional capability is explicit: a missing interface yields
 `{supported:false}`; individual `E_NOTIMPL` results set the corresponding
 `displaySupported`, `pageSupported` or `predefinedSupported` flag to false.
+Each native call first clears unconsumed thread-local `IErrorInfo`; a fresh
+provider diagnostic remains available for the current failure. This prevents an
+earlier property-bag rejection from replacing a later unrelated HRESULT.
 An advertised choice without a resolvable value is an error, not a partially
 successful list. Unexpected positive HRESULTs and native failures propagate.
 The helper does not invoke setters, change selection, open a property page or
@@ -55,6 +58,9 @@ This is a native SDK/transport feature, not full automatic classic property-grid
 integration, native PropertyPage authoring or licensed-control certification.
 
 ## Primary contracts
+
+- https://learn.microsoft.com/windows/win32/api/oleauto/nf-oleauto-seterrorinfo
+- https://learn.microsoft.com/dotnet/api/system.runtime.interopservices.marshal.throwexceptionforhr
 
 - Microsoft Windows SDK `ocidl.h`, `IPerPropertyBrowsing` vtable and counted arrays:
   https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/ocidl.h

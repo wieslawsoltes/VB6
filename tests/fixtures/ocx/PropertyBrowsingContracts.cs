@@ -8,15 +8,17 @@ namespace VB6Interop {
     [ComVisible(true),ClassInterface(ClassInterfaceType.None)]
     public sealed class PropertyBrowsingFixture:OcxPerPropertyBrowsing {
       public int DisplayResult=0,PageResult=0,ListResult=0,ValueResult=0;
+      public bool PublishErrorInfo=false;
+      int Result(int code){return PublishErrorInfo&&code<0?Marshal.GetHRForException(new COMException("Current browsing diagnostic",code)):code;}
       public string Display="Choice\0with embedded NUL",Label="Choice";
       public int Count=2;public bool Mismatch=false,NullLabel=false,ObjectValue=false;
       public int LastDispid=0;public uint LastCookie=0;
       public object[] Values={D("t","number","vt",2,"v",7),D("t","date","v",44000.500000001)};
-      public int GetDisplayString(int id,out IntPtr text){LastDispid=id;text=DisplayResult==0?Marshal.StringToBSTR(Display):IntPtr.Zero;return DisplayResult;}
-      public int MapPropertyToPage(int id,out Guid page){LastDispid=id;page=PageResult==0?new Guid("559A7BCE-8F46-4C42-9C1E-E19D015DA019"):Guid.Empty;return PageResult;}
+      public int GetDisplayString(int id,out IntPtr text){LastDispid=id;text=DisplayResult==0?Marshal.StringToBSTR(Display):IntPtr.Zero;return Result(DisplayResult);}
+      public int MapPropertyToPage(int id,out Guid page){LastDispid=id;page=PageResult==0?new Guid("559A7BCE-8F46-4C42-9C1E-E19D015DA019"):Guid.Empty;return Result(PageResult);}
       public int GetPredefinedStrings(int id,out OcxCountedArray strings,out OcxCountedArray cookies){
         LastDispid=id;
-        if(ListResult!=0){strings=new OcxCountedArray{Count=uint.MaxValue,Values=new IntPtr(1)};cookies=strings;return ListResult;}
+        if(ListResult!=0){strings=new OcxCountedArray{Count=uint.MaxValue,Values=new IntPtr(1)};cookies=strings;return Result(ListResult);}
         strings=new OcxCountedArray{Count=(uint)Count,Values=Count==0?IntPtr.Zero:ZeroMemory(Count*IntPtr.Size)};
         cookies=new OcxCountedArray{Count=(uint)(Count+(Mismatch?1:0)),Values=Count==0?IntPtr.Zero:ZeroMemory(Count*4)};
         for(int i=0;i<Count;i++){
@@ -26,7 +28,7 @@ namespace VB6Interop {
         return 0;
       }
       public int GetPredefinedValue(int id,uint cookie,IntPtr value){
-        LastDispid=id;LastCookie=cookie;if(ValueResult!=0)return ValueResult;
+        LastDispid=id;LastCookie=cookie;if(ValueResult!=0)return Result(ValueResult);
         if(ObjectValue){Marshal.WriteInt16(value,13);Marshal.WriteIntPtr(value,8,Marshal.GetIUnknownForObject(new object()));}
         else ImportNative(Values[cookie==uint.MaxValue?0:(int)cookie%Values.Length],value);
         return 0;
@@ -63,9 +65,18 @@ namespace VB6Interop {
       checks.Add("optional per-property support differs from a supported empty list and ignores undefined failure outputs");
       foreach(string stage in new[]{"display","page","list","value"})foreach(int error in new[]{unchecked((int)0x80004005),1}){
         fake=new PropertyBrowsingFixture();if(stage=="display")fake.DisplayResult=error;if(stage=="page")fake.PageResult=error;if(stage=="list")fake.ListResult=error;if(stage=="value")fake.ValueResult=error;
+        Marshal.GetHRForException(new ArgumentException("Unrelated prior property failure"));
         bool failed=false;try{ReadPropertyBrowsing(fake,0);}catch(COMException actual){failed=true;Require(actual.ErrorCode==(error<0?error:BrowsingUnexpected),"exact browsing HRESULT");}Require(failed,"browsing failure must propagate");
       }
       checks.Add("all four per-property HRESULT failures and unexpected positive results propagate");
+      foreach(string stage in new[]{"display","page","list","value"}){
+        fake=new PropertyBrowsingFixture{PublishErrorInfo=true};int failure=unchecked((int)0x80004005);
+        if(stage=="display")fake.DisplayResult=failure;if(stage=="page")fake.PageResult=failure;if(stage=="list")fake.ListResult=failure;if(stage=="value")fake.ValueResult=failure;
+        Marshal.GetHRForException(new ArgumentException("Stale caller error"));bool failed=false;
+        try{ReadPropertyBrowsing(fake,0);}catch(COMException actual){failed=true;Require(actual.ErrorCode==failure&&actual.Message=="Current browsing diagnostic","fresh provider IErrorInfo retained");}
+        Require(failed,"fresh diagnostic must surface");
+      }
+      checks.Add("stale logical-thread IErrorInfo cannot replace current HRESULTs; fresh provider diagnostics are retained");
       ExpectFailure(()=>ReadPropertyBrowsing(new PropertyBrowsingFixture{ValueResult=BrowsingNotImplemented},0),"listed choice requires its value");
       ExpectFailure(()=>ReadPropertyBrowsing(new PropertyBrowsingFixture{Mismatch=true},0),"mismatched counted arrays");
       ExpectFailure(()=>ReadPropertyBrowsing(new PropertyBrowsingFixture{Count=257},0),"over-limit choice list");
