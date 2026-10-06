@@ -1,0 +1,126 @@
+name: Finalize compatibility integration
+on:
+  push:
+    branches: [feat/variant-scalar-compatibility]
+    paths: ['.github/workflows/compatibility-finalize.yml']
+permissions:
+  contents: read
+concurrency:
+  group: compatibility-reviewed-publish
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/variant-scalar-compatibility'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed integration and native compiler correction
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          git=lambda *a: subprocess.check_output(['git',*a],text=True).strip()
+          feature='108f476f07dd968930daf975d67151b5af364437'
+          main='f4ee8d47bed69ae26b65d20637b8f5f8da13d815'
+          assert git('diff','--name-only',feature,'HEAD')=='.github/workflows/compatibility-finalize.yml'
+          assert not git('status','--porcelain')
+          result=subprocess.run(['git','merge','--no-ff','--no-commit',main]);assert result.returncode in (0,1)
+          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
+          assert set(conflicts)<={'dist/VB6-Studio-Web.html','dist/studio.js'},conflicts
+          if conflicts:
+              subprocess.run(['git','checkout','--ours','--',*conflicts],check=True)
+              subprocess.run(['git','add','--',*conflicts],check=True)
+          path=Path('tools/interop/AutomationHost.cs')
+          assert git('hash-object',str(path))=='74e42bd1072e397abd2b055e69104d992bc2fe37'
+          old='var result=InvokeDirect(target,member,mode,lcid,encoded,byref,schema);\n      Application.DoEvents();return result;'
+          new='var invocationResult=InvokeDirect(target,member,mode,lcid,encoded,byref,schema);\n      Application.DoEvents();return invocationResult;'
+          source=path.read_text();assert source.count(old)==1;path.write_text(source.replace(old,new))
+          assert git('hash-object',str(path))=='b1aa6182045872379c50ada7d13f88f7d5e848ea'
+          PY
+      - name: Rebuild and test complete combined source
+        run: |
+          set -o pipefail
+          mkdir -p compatibility-final-evidence
+          npm run build 2>&1 | tee compatibility-final-evidence/build.log
+          npm test 2>&1 | tee compatibility-final-evidence/node.log
+          git rm -- .github/workflows/compat-native-integrate.yml .github/workflows/compatibility-review-snapshot.yml
+          git add -- tools/interop/AutomationHost.cs dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+          git diff --cached --check
+          git commit -m 'fix(interop): restore native host compilation and integrate current agent thread source'
+          npm run build
+          git diff --exit-code -- dist examples src/exporter/runtime-payload.js src/editor/diagnostics-payload.js
+      - name: Compare with independently tested product tree
+        run: |
+          export GIT_INDEX_FILE="$RUNNER_TEMP/compat-product-index"
+          git read-tree HEAD
+          git rm --cached -- .github/workflows/compatibility-finalize.yml
+          test "$(git write-tree)" = 26e6b67e65b928fd79ca2d0d4123fd909d978ae5
+      - name: Publish only reviewed feature branch
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/compat-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in *Username*) printf '%s\n' x-access-token ;; *) printf '%s\n' "$GH_TOKEN" ;; esac
+          SH
+          chmod 700 "$RUNNER_TEMP/compat-askpass"
+          trap 'rm -f "$RUNNER_TEMP/compat-askpass"' EXIT
+          GIT_ASKPASS="$RUNNER_TEMP/compat-askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/feat/variant-scalar-compatibility
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Preserve source and outcomes
+        if: always()
+        run: |
+          mkdir -p compatibility-final-evidence
+          git rev-parse HEAD > compatibility-final-evidence/head.txt
+          git diff --cached > compatibility-final-evidence/staged.diff
+          git archive --format=zip --prefix=VB6/ HEAD -o compatibility-final-evidence/source.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compatibility-final-source
+          path: compatibility-final-evidence/
+          retention-days: 14
+  windows:
+    needs: integrate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.head }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Genuine native VARIANT and SAFEARRAY execution
+        run: node tools/interop/test-native.mjs
+      - name: Independent ActiveX lifecycle
+        if: always()
+        run: node tools/interop/test-activex.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compatibility-final-native-${{ matrix.arch }}
+          path: reports/native-interop/
+          retention-days: 14
