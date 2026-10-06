@@ -1,0 +1,107 @@
+name: Refresh verified layout integration
+on:
+  push:
+    branches: [feat/optional-anchoring-layout]
+    paths: ['.github/workflows/layout-main-refresh.yml']
+permissions:
+  contents: write
+concurrency:
+  group: layout-main-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/optional-anchoring-layout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch reviewed concurrent revisions
+        run: git fetch --no-tags --depth=1 origin 5ad8ea7815877347230dda6e5254ada4181aa61c 2ee166a43145432538de88bb36c575c08e70ec84
+      - name: Integrate only verified disjoint sources and merge additive documentation/scripts
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';import path from 'node:path';import {execFileSync} from 'node:child_process';import {isDeepStrictEqual as same} from 'node:util';import {createHash} from 'node:crypto';
+          const base='5ad8ea7815877347230dda6e5254ada4181aa61c',main='2ee166a43145432538de88bb36c575c08e70ec84';
+          const git=(...a)=>execFileSync('git',a,{maxBuffer:40*1024*1024});
+          const read=(ref,p)=>{try{return git('show',ref+':'+p);}catch{return null;}};
+          const hash=b=>b===null?null:createHash('sha256').update(b).digest('hex');
+          const changed=git('diff','--name-only','-z',base,main).toString().split('\0').filter(Boolean);
+          const expected=['.github/workflows/chatgpt-plan-login.yml','.gitignore','README.md','dist/VB6-Studio-Web.html','dist/studio.js','docs/CHATGPT-LOGIN.md','docs/coding-agents.md','package.json','src/agents/agent.js','src/agents/chatgpt-connection.js','src/agents/chatgpt-protocol.js','src/agents/providers.js','src/agents/studio.js','tests/chatgpt-auth.test.mjs','tests/chatgpt-relay.test.mjs','tests/helpers/chatgpt-fixture.mjs','tools/agent-relay.mjs','tools/chatgpt-auth.mjs','tools/chatgpt-browser-fixture.mjs','tools/chatgpt-browser-tests.py','tools/chatgpt-relay.mjs'];
+          if(!same([...changed].sort(),expected.sort()))throw Error('Unexpected concurrent diff');
+          const prepared=[],records=[];
+          function mergeJSON(b,o,t,key=''){
+            if(same(o,t)||same(t,b))return o;if(same(o,b))return t;
+            if(!b||!o||!t||typeof b!=='object'||typeof o!=='object'||typeof t!=='object'||[b,o,t].some(Array.isArray))throw Error('Conflicting package field '+key);
+            const result={};for(const k of new Set([...Object.keys(b),...Object.keys(o),...Object.keys(t)])){const v=mergeJSON(b[k],o[k],t[k],key+'.'+k);if(v!==undefined)result[k]=v;}return result;
+          }
+          for(const p of changed){
+            if(p.startsWith('.github/')||p.startsWith('dist/'))continue;
+            const b=read(base,p),t=read(main,p),o=fs.existsSync(p)?fs.readFileSync(p):null;let result;
+            if(p==='README.md'){
+              if(!b||!o||!t||!o.subarray(0,b.length).equals(b)||!t.subarray(0,b.length).equals(b))throw Error('README change is not independently additive');
+              result=Buffer.concat([o,t.subarray(b.length)]);
+            }else if(p==='package.json'){
+              result=Buffer.from(JSON.stringify(mergeJSON(JSON.parse(b),JSON.parse(o),JSON.parse(t)),null,2)+'\n');
+            }else{
+              if(hash(o)!==hash(b)||t===null)throw Error('Overlapping source requires review: '+p);
+              result=t;
+            }
+            prepared.push([p,result]);records.push({path:p,base:hash(b),before:hash(o),after:hash(result)});
+          }
+          if(prepared.length!==18)throw Error('Unexpected source count');
+          for(const [p,b]of prepared){fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);}
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP,'layout-refresh-state.json'),JSON.stringify({base,main,files:records,workflowBlob:git('rev-parse',main+':.github/workflows/chatgpt-plan-login.yml').toString().trim()},null,2));
+          console.log('Integrated 18 verified source paths; retained all anchoring sources.');
+          JS
+      - run: npm run build
+      - name: Full Node regression suite
+        run: |
+          node --test --test-concurrency=4 tests/*.test.mjs > "$RUNNER_TEMP/layout-tests.log" 2>&1 || { tail -100 "$RUNNER_TEMP/layout-tests.log"; exit 1; }
+          tail -15 "$RUNNER_TEMP/layout-tests.log"
+      - run: npm run pack:layout
+      - run: node tools/win32-layout-fixtures.mjs
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium firefox webkit
+      - name: Resolve Chromium executable
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PY
+      - name: All three real-origin layout browser suites
+        run: |
+          for browser in chromium firefox webkit; do
+            VB6_BROWSER="$browser" python tools/browser-layout-tests.py
+          done
+      - name: Publish validated ordinary sources without modifying workflows
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(layout): retain concurrent account-login sources and validate optional layout'
+          git archive --format=tar HEAD > "$RUNNER_TEMP/layout-source.tar"
+          git push origin HEAD:refs/heads/feat/optional-anchoring-layout > "$RUNNER_TEMP/layout-publication.log" 2>&1 || { cat "$RUNNER_TEMP/layout-publication.log"; exit 1; }
+          git rev-parse HEAD > "$RUNNER_TEMP/layout-head.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: layout-refreshed-source-and-tests
+          path: |
+            ${{ runner.temp }}/layout-source.tar
+            ${{ runner.temp }}/layout-head.txt
+            ${{ runner.temp }}/layout-refresh-state.json
+            ${{ runner.temp }}/layout-tests.log
+            ${{ runner.temp }}/layout-publication.log
+            reports/layout
+            release/vb6-auto-layout-*.tgz
+          retention-days: 3
