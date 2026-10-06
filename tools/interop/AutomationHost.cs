@@ -192,8 +192,8 @@ namespace VB6Interop {
       var encoded=A(V(request,"args",new object[0]));if(encoded.Length>65)throw new ArgumentException("Too many Automation arguments");
       var byref=A(V(request,"byRef",new object[0]));
       if(lcid<0||lcid>0xfffff)throw new ArgumentException("Invalid LCID");
-      var result=InvokeDirect(target,member,mode,lcid,encoded,byref,schema);
-      Application.DoEvents();return result;
+      var invocationResult=InvokeDirect(target,member,mode,lcid,encoded,byref,schema);
+      Application.DoEvents();return invocationResult;
     }
     public static void Run() {
       if(System.Threading.Thread.CurrentThread.GetApartmentState()!=System.Threading.ApartmentState.STA)throw new InvalidOperationException("Automation host requires STA");
