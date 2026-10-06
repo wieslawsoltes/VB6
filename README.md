@@ -278,5 +278,7 @@ line-targeted feedback and revision-checked source-only restoration through norm
 Undo. **Queue message** stores follow-ups locally while generation runs; Queue
 supports editing/reordering and explicit fresh-confirmation dispatch without
 replacing unsent composer drafts or inheriting Full-access grants. Nothing sends
-automatically. See [the workbench guide](docs/CODING-AGENT-WORKBENCH.md) for
-coverage, memory limits, stale-workspace protection and non-Git boundaries.
+automatically. The Changes tab also supports individually restoring changed source
+blocks with normal Undo, explicit stale-review warnings, and task-local review/queue
+selections. See [the workbench guide](docs/CODING-AGENT-WORKBENCH.md) for coverage,
+memory limits, stale-workspace protection and non-Git boundaries.

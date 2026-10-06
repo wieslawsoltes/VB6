@@ -445,5 +445,5 @@ class AgentPanel {
     if (render) this.render();
     this.workbench.update();
   }
-  dispose() { this.api.conversations.active.draft = this.prompt.value; this.cancel(); this.keyInput.value = ''; this.token.value = ''; this.unlisten?.(); if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame); this.threadView.dispose(); }
+  dispose() { this.api.conversations.active.draft = this.prompt.value; this.cancel(); this.keyInput.value = ''; this.token.value = ''; this.unlisten?.(); if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame); this.threadView.dispose(); this.workbench.dispose(); }
 }
