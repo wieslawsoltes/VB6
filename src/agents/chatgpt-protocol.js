@@ -29,3 +29,12 @@ export function validateChatGPTEvent(event) {
   for (const item of items) if (item?.type === 'function_call' && item.namespace !== 'vb6') throw new Error('ChatGPT returned an unrecognized tool namespace. No tools were executed.');
   return event;
 }
+
+/** Shared allowlist for browser links and the no-shell OS launcher. Never a general URL opener. */
+export function chatGPTLoginURL(value) {
+  if (typeof value !== 'string' || value.length > 16384 || /[\x00-\x20"<>`]/.test(value)) throw new Error('Invalid sign-in address.');
+  let url; try { url = new URL(value); } catch { throw new Error('Invalid sign-in address.'); }
+  if (url.origin !== 'https://auth.openai.com' || url.pathname !== '/api/accounts/authorize' || url.username || url.password || url.hash ||
+      ['access_token', 'refresh_token', 'id_token', 'id_token_hint', 'client_secret'].some(key => url.searchParams.has(key))) throw new Error('Invalid sign-in address.');
+  return url.href;
+}

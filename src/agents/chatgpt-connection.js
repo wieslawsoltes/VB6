@@ -1,5 +1,7 @@
 /** Classic-IDE connection controls. Only the relay bearer enters browser memory, never OAuth tokens. */
 import {el} from '../core/core.js';
+import {modal} from '../ide/ui.js';
+import {chatGPTLoginURL} from './chatgpt-protocol.js';
 import {relayURL, readEvents} from './providers.js';
 const field = (label, control) => el('label', {class: 'agent-field'}, el('span', {}, label), control);
 const button = (label, action) => el('button', {type: 'button', onclick: action}, label);
@@ -30,14 +32,11 @@ export function chatGPTSetup(href) {
     powershell: '$env:VB6_AGENT_ORIGINS = ' + ps + '; npm run agent:relay'};
 }
 export function chatGPTAuthorizationURL(value) {
-  let url;
-  try { if (typeof value !== 'string' || value.length > 16384) throw new Error(); url = new URL(value); } catch { throw new ConnectionError('The relay returned an invalid sign-in address. Update the relay and try again.'); }
-  if (url.origin !== 'https://auth.openai.com' || url.pathname !== '/api/accounts/authorize' || url.username || url.password || url.hash ||
-      ['access_token', 'refresh_token', 'id_token', 'id_token_hint', 'client_secret'].some(key => url.searchParams.has(key)))
-    throw new ConnectionError('The relay returned an invalid sign-in address. Update the relay and try again.');
-  return url.href;
+  try { return chatGPTLoginURL(value); }
+  catch { throw new ConnectionError('The relay returned an invalid sign-in address. Update the relay and try again.'); }
 }
-export async function chatGPTControl({relay, relayToken, operation, accountId, loginId, consent = false, signal, fetchImpl = globalThis.fetch,
+
+export async function chatGPTControl({relay, relayToken, operation, accountId, loginId, consent = false, signal, openBrowser = false, fetchImpl = globalThis.fetch,
   timeoutMs = ['login', 'logout'].includes(operation) ? 45000 : 8000}) {
   const config = relayConfig(relay, relayToken);
   const timeout = AbortSignal.timeout(Math.max(1, Math.min(90000, Math.trunc(Number(timeoutMs)) || 8000)));
@@ -46,7 +45,7 @@ export async function chatGPTControl({relay, relayToken, operation, accountId, l
     combined.throwIfAborted();
     let response;
     try { response = await fetchImpl(config.relay + '/agent/chatgpt', {method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error',
-      headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + config.relayToken}, body: JSON.stringify({operation, accountId, loginId, consent}), signal: combined}); }
+      headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + config.relayToken}, body: JSON.stringify({operation, accountId, loginId, consent, ...(openBrowser ? {openBrowser: true} : {})}), signal: combined}); }
     catch { throw new ConnectionError('Cannot reach the local ChatGPT relay. Start it using the setup command below, check Relay URL, and allow local-network access in the browser. The relay must allow this exact IDE origin.'); }
     combined.throwIfAborted();
     let value;
@@ -70,7 +69,6 @@ export async function chatGPTControl({relay, relayToken, operation, accountId, l
     throw error instanceof ConnectionError ? error : new ConnectionError('ChatGPT connection could not be completed. Check the relay setup and try again.');
   }
 }
-function closePopup(popup) { try { popup?.close(); } catch {} }
 function waitForPoll(signal) {
   return new Promise((resolve, reject) => {
     const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(new DOMException('Cancelled', 'AbortError')); };
@@ -86,20 +84,28 @@ export class ChatGPTConnection {
     this.message = el('p', {role: 'status', 'aria-live': 'polite', 'aria-label': 'ChatGPT connection status'}, 'Start the local relay and enter its access token above, then sign in. No OpenAI API key is needed.');
     const setup = chatGPTSetup(globalThis.location?.href);
     this.setup = el('details', {'aria-label': 'ChatGPT relay setup'}, el('summary', {}, 'Set up the local ChatGPT relay'),
-      el('p', {}, 'A browser page cannot start the relay on your computer. With Node.js 22+, run one of these commands in your VB6 repository checkout. GitHub Pages also needs this local process.'),
-      el('strong', {}, 'macOS / Linux terminal'), el('pre', {tabindex: 0, style: {whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}, setup.posix),
-      el('strong', {}, 'Windows PowerShell'), el('pre', {tabindex: 0, style: {whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}, setup.powershell),
+      el('p', {}, 'A browser page cannot start the relay on your computer. With Node.js 22+, run one of these commands in your VB6 repository checkout to start the relay AND open sign-in in your system browser. GitHub Pages also needs this local process.'),
+      el('strong', {}, 'macOS / Linux terminal'), el('pre', {tabindex: 0, style: {whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}, setup.posix + ' -- --sign-in'),
+      el('strong', {}, 'Windows PowerShell'), el('pre', {tabindex: 0, style: {whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}, setup.powershell + ' -- --sign-in'),
       el('p', {}, 'Paste the printed local access token into Access token above. Allow local-network access when your browser asks. No provider API key, wildcard origin or public relay is needed.'),
       el('p', {}, 'For a downloaded HTML file or the packaged desktop IDE, use the browser IDE: run npm run build and npm run serve, then open http://127.0.0.1:8080. The file and desktop origins are not allowed by this relay.'));
     this.setup.open = !panel.token.value;
-    this.login = button('Sign in with ChatGPT', () => this.action('login'));
-    this.reconsent = button('Enable plan usage…', () => this.action('login', true));
+    this.login = button('Sign in with ChatGPT', () => this.beginLogin());
+    this.reconsent = button('Enable plan usage…', () => this.beginLogin(true));
     this.check = button('Refresh account status', () => this.action('status'));
     this.logout = button('Sign out', () => this.action('logout'));
     this.cancel = button('Cancel sign-in', () => this.cancelLogin());
-    this.link = el('a', {target: '_blank', rel: 'noopener noreferrer', hidden: true}, 'Open ChatGPT sign-in');
-    this.details = el('fieldset', {}, el('legend', {}, 'ChatGPT account'), field('Account:', this.accounts), this.message,
-      el('div', {class: 'agent-actions'}, this.login, this.reconsent, this.check, this.logout, this.cancel), this.link, this.setup,
+    // A real user-clicked link, not a blank window retargeted after asynchronous I/O.
+    this.link = el('a', {target: '_blank', rel: 'noopener noreferrer', tabindex: 0, hidden: true}, 'Open ChatGPT sign-in');
+    // The shared dialog's Enter shortcut must not swallow native keyboard link activation.
+    this.link.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopPropagation(); });
+    this.loginURL = el('input', {type: 'text', readOnly: true, hidden: true, 'aria-label': 'ChatGPT sign-in link', style: {width: '100%'}});
+    this.copyLink = button('Copy sign-in link', () => this.copySignInLink()); this.copyLink.hidden = true;
+    this.portal = el('div', {}, this.message,
+      el('div', {class: 'agent-actions'}, this.login, this.reconsent, this.check, this.logout, this.cancel),
+      this.link, this.loginURL, this.copyLink, this.setup);
+    this.portalHome = el('div', {}, this.portal);
+    this.details = el('fieldset', {}, el('legend', {}, 'ChatGPT account'), field('Account:', this.accounts), this.portalHome,
       el('p', {}, 'Sign in and approve plan usage in the OpenAI window. Your eligible ChatGPT allowance and app/workspace limits apply; this is not unlimited API access. No automatic fallback to API-key billing.'),
       el('p', {}, 'The local relay owns sign-in and refresh tokens. By default they remain only in relay memory; restart requires sign-in again. Clear Credentials clears browser-to-relay access, not your ChatGPT session; use Sign out to revoke it.'),
       el('p', {}, 'This preview does not accept a per-request output-token cap. Session usage, request/tool limits, timeouts and existing IDE permissions still apply, but a single request may exceed the remaining budget.'),
@@ -111,6 +117,48 @@ export class ChatGPTConnection {
     this.accounts.onchange = () => { this.resetCatalog(); this.render(); };
     for (const control of [panel.relay, panel.token]) control.addEventListener('input', () => { if (this.busy) this.controller?.abort(); this.clearLogin(); this.snapshot = null; this.accounts.replaceChildren(el('option', {value: ''}, '(Refresh account status)')); this.resetCatalog(); this.render(); });
   }
+  beginLogin(consent = false) {
+    // Always show visible first-run/setup UI, even with no token or blocked popups.
+    try { this.showSignIn(); } catch { this.notify('The sign-in dialog could not open. Reopen AI Coding Agents, or use the --sign-in relay command below.', true); }
+    return this.action('login', consent);
+  }
+  showSignIn() {
+    if (this.signInDialog || this.disposed) return;
+    const relay = el('input', {'aria-label': 'Sign-in relay URL', value: this.panel.relay.value});
+    const token = el('input', {type: 'password', autocomplete: 'off', 'aria-label': 'Sign-in relay access token', value: this.panel.token.value});
+    this.signInInputs = [relay, token];
+    [this.panel.relay, this.panel.token].forEach((target, i) => {
+      const input = this.signInInputs[i];
+      input.addEventListener('input', () => {
+        target.value = input.value;
+        target.dispatchEvent(new target.ownerDocument.defaultView.Event('input', {bubbles: true}));
+      });
+    });
+    const content = el('div', {class: 'agent-page'},
+      el('p', {}, 'Browser handoff v2 — the local relay opens your system browser. If no browser opens, use Open ChatGPT sign-in or copy the link below. Keep this IDE open.'),
+      field('Local relay URL:', relay), field('Local relay access token:', token),
+      el('p', {}, 'This token pairs the IDE with the relay on your computer. It is not an OpenAI API key or your ChatGPT password.'), this.portal);
+    this.signInDialog = true;
+    void modal('ChatGPT sign-in', {width: 700, content,
+      buttons: [{label: 'Back to IDE', value: false}],
+      onReady: ({dialog, finish}) => { this.finishSignIn = finish; dialog.style.maxHeight = '90vh'; dialog.style.overflow = 'auto'; }
+    }).catch(() => this.notify('The sign-in dialog could not open. Use the --sign-in relay command below.', true)).finally(() => {
+      this.portalHome.append(this.portal); token.value = '';
+      this.signInInputs = null; this.signInDialog = false; this.finishSignIn = null;
+    });
+    this.render();
+  }
+  async copySignInLink() {
+    if (this.link.hidden || !this.link.hasAttribute('href')) return;
+    const value = chatGPTAuthorizationURL(this.link.href);
+    try {
+      await this.panel.root.ownerDocument.defaultView.navigator.clipboard.writeText(value);
+      this.notify('Sign-in link copied. Open it in a browser on this computer; keep the IDE open.');
+    } catch {
+      this.loginURL.focus(); this.loginURL.select();
+      this.notify('Select and copy the sign-in link above, then paste it into your browser address bar.');
+    }
+  }
   notify(text, error = false) {
     this.message.textContent = text;
     this.message.setAttribute('role', error ? 'alert' : 'status');
@@ -120,6 +168,7 @@ export class ChatGPTConnection {
   clearLogin() {
     this.loginId = ''; this.loginConfig = null; this.manualLogin = false;
     this.link.hidden = true; this.link.removeAttribute('href');
+    this.loginURL.hidden = true; this.loginURL.value = ''; this.copyLink.hidden = true; this.browserLaunch = '';
   }
   get enabled() { return this.panel.provider.value === 'openai' && this.mode.value === 'chatgpt'; }
   get selected() { return this.snapshot?.accounts?.find(a => a.id === this.accounts.value); }
@@ -141,6 +190,7 @@ export class ChatGPTConnection {
     this.login.disabled ||= !!this.loginId || this.snapshot?.login === 'pending';
     this.cancel.disabled = this.cancelling || !(this.busy || this.loginId || this.snapshot?.login === 'pending');
     this.details.setAttribute('aria-busy', String(this.busy));
+    for (const input of this.signInInputs || []) input.disabled = busy || this.busy;
     if (this.panel.outputTokens) {
       const input = this.panel.outputTokens;
       input.disabled = busy || this.busy;
@@ -158,16 +208,16 @@ export class ChatGPTConnection {
     this.accounts.value = value.accounts.some(a => a.id === before) ? before : value.accounts.findLast(a => a.signedIn)?.id || value.accounts.at(-1)?.id || '';
     const labels = {pending: 'Waiting for OpenAI sign-in and consent…', complete: 'Sign-in verified.', 'consent-required': 'Signed in, but ChatGPT plan permission was not granted. Use Enable plan usage or explicitly select API-key mode.', failed: 'Sign-in could not be verified. Retry sign-in.', declined: 'Sign-in was declined; no account was replaced.', expired: 'Sign-in timed out. Try again.', cancelled: 'Sign-in cancelled.'};
     if (value.login !== 'pending') this.clearLogin();
-    this.notify((value.login === 'pending' && this.manualLogin ? 'The browser could not open sign-in automatically. Click Open ChatGPT sign-in below; keep this IDE open.' : labels[value.login] || 'Account status refreshed.') + (value.storage === 'owner-only-file' ? ' This relay remembers tokens in its owner-only local file.' : ' OAuth tokens are held only in relay memory.'));
+    this.notify((value.login === 'pending' && this.manualLogin ? (this.browserLaunch === 'launched' ? 'Sign-in handed to your system browser. If no window appeared, click Open ChatGPT sign-in or copy the link below; keep this IDE open.' : 'Click Open ChatGPT sign-in below to open the OpenAI page, or copy the link into your browser. No automatic popup is required.') : labels[value.login] || 'Account status refreshed.') + (value.storage === 'owner-only-file' ? ' This relay remembers tokens in its owner-only local file.' : ' OAuth tokens are held only in relay memory.'));
     if (value.accounts.some(a => a.signedIn)) this.setup.open = false;
     this.render();
   }
   async action(operation, consent = false) {
     if (this.disposed) return;
     if (this.busy || this.panel.pending || this.panel.api.agent.busy) { this.notify('Finish or stop the current operation before changing ChatGPT sign-in.'); return; }
-    let popup, controller, config, authorizationReady = false;
+    let controller, config;
     try {
-      // Everything that can throw, including popup access and secure randomness, is inside this guard.
+      // No window.open call: all preparation happens in a visible dialog; the relay owns OS launch.
       this.notify(operation === 'login' ? 'Checking local relay setup…' : operation === 'logout' ? 'Signing out and revoking the session…' : 'Checking local relay account status…');
       const setup = chatGPTSetup(globalThis.location?.href);
       if (setup.unsupported) throw new ConnectionError('ChatGPT sign-in needs the browser IDE served over HTTP(S), not a file or packaged desktop origin. Run npm run build and npm run serve, then open http://127.0.0.1:8080 and connect the local relay.');
@@ -177,14 +227,6 @@ export class ChatGPTConnection {
       if (operation === 'login') {
         if (typeof globalThis.crypto?.getRandomValues !== 'function') throw new ConnectionError('This browser cannot create secure sign-in state. Use an up-to-date browser and reopen the served IDE.');
         config.loginId = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(24)), x => x.toString(16).padStart(2, '0')).join('');
-        // Reserve a window synchronously while the click has user activation. Popup denial is recoverable.
-        try {
-          popup = this.panel.root.ownerDocument.defaultView.open('about:blank', '_blank');
-          if (popup) {
-            popup.opener = null;
-            try { popup.document.title = 'VB6 — Preparing ChatGPT sign-in'; popup.document.body.textContent = 'Preparing ChatGPT sign-in. Return to the VB6 Connection tab for progress or relay setup errors.'; } catch {}
-          }
-        } catch { closePopup(popup); popup = null; }
         if (!this.snapshot) {
           this.notify('Connecting to the local relay…');
           const current = await chatGPTControl({...config, operation: 'status', signal: controller.signal});
@@ -194,16 +236,17 @@ export class ChatGPTConnection {
         this.loginId = config.loginId; this.loginConfig = {...config};
         this.notify('Preparing OpenAI browser sign-in through the local relay…');
       }
-      const value = await chatGPTControl({...config, operation, consent, signal: controller.signal});
+      const value = await chatGPTControl({...config, operation, consent, openBrowser: operation === 'login', signal: controller.signal});
       controller.signal.throwIfAborted(); this.apply(value);
       if (operation === 'logout') {
         this.resetCatalog(); this.notify(value.revoked ? 'Signed out; renewable session revoked. Registration retained for future sign-in.' : 'Signed out locally. Remote revocation was not confirmed; disconnect this app in ChatGPT settings.');
       }
       if (operation === 'login') {
         const url = chatGPTAuthorizationURL(value.authorizationUrl);
-        this.link.href = url; this.link.hidden = false; authorizationReady = true; this.manualLogin = true;
-        try { if (popup && !popup.closed) { popup.location.replace(url); this.manualLogin = false; } } catch { closePopup(popup); }
-        this.apply(value); // Display the fallback instruction as soon as navigation fails, not at the next poll.
+        this.link.href = url; this.link.hidden = false; this.manualLogin = true;
+        this.loginURL.value = url; this.loginURL.hidden = false; this.copyLink.hidden = false;
+        this.browserLaunch = value.browser === 'launched' ? 'launched' : 'unavailable';
+        this.apply(value); // Always expose a real hyperlink, even if the system launcher reports success.
         const initialIds = new Set(value.accounts.map(a => a.id));
         let complete = false;
         for (let i = 0; i < 420; i++) {
@@ -212,13 +255,14 @@ export class ChatGPTConnection {
           controller.signal.throwIfAborted(); this.apply(current);
           if (current.login !== 'pending') {
             const added = current.accounts.find(a => !initialIds.has(a.id) && a.signedIn); if (added) this.accounts.value = added.id;
-            this.resetCatalog(); complete = true; break;
+            this.resetCatalog(); complete = true;
+            if (current.login === 'complete') this.finishSignIn?.(true);
+            break;
           }
         }
         if (!complete) throw new ConnectionError('The sign-in wait expired. Refresh account status or cancel the pending sign-in before trying again.');
       }
     } catch (error) {
-      if (!authorizationReady) closePopup(popup);
       if (!this.disposed && !this.cancelling) this.notify(error?.name === 'AbortError' ? 'ChatGPT operation cancelled.' :
         error instanceof ConnectionError ? error.message : 'ChatGPT sign-in could not start. Check the local relay setup and browser permissions, then try again.', error?.name !== 'AbortError');
       // A valid login page survives a failed status poll. Never report success or start a second login.
@@ -247,5 +291,5 @@ export class ChatGPTConnection {
       if (!this.disposed) { try { this.panel.refresh(); } catch {} }
     }
   }
-  dispose() { this.disposed = true; if (this.busy || this.loginId) void this.cancelLogin(); this.controller?.abort(); }
+  dispose() { this.finishSignIn?.(false); this.disposed = true; if (this.busy || this.loginId) void this.cancelLogin(); this.controller?.abort(); }
 }

@@ -48,10 +48,10 @@ FIXTURE = r'''() => {
       if (f.mode === 'stall-fetch') return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), {once: true}));
       if (f.mode === 'stall-body') return new Response(new ReadableStream({start(c) { c.enqueue(new TextEncoder().encode('{')); }, cancel() { f.bodyCancelled = true; }}));
       if (data.operation === 'cancel') { f.cancelled = true; f.started = false; }
-      if (data.operation === 'login') { f.started = true; f.loginId = data.loginId; }
+      if (data.operation === 'login') { f.started = true; f.loginId = data.loginId; f.launchRequested = data.openBrowser === true; }
       return Response.json({accounts: f.complete ? [{id: 'account-fixture', label: 'Fixture account', signedIn: true, planEnabled: true}] : [],
         login: f.complete ? 'complete' : f.started ? 'pending' : f.cancelled ? 'cancelled' : 'idle', loginId: f.started ? f.loginId : '', storage: 'memory-only',
-        ...(data.operation === 'login' ? {authorizationUrl: f.mode === 'bad-url' ? 'https://evil.invalid/?secret=hidden' : 'https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client&state=fixture'} : {})});
+        ...(data.operation === 'login' ? {browser: f.mode === 'system-launch' ? 'launched' : 'unavailable', authorizationUrl: f.mode === 'bad-url' ? 'https://evil.invalid/?secret=hidden' : 'https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client&state=fixture'} : {})});
     };
   };
 }'''
@@ -73,6 +73,8 @@ try:
             page.evaluate("() => { vb6Studio.command('codingAgents'); vb6Studio.documents.tools.get('tool:coding-agents').pages.select('connection'); }")
             page.evaluate(FIXTURE)
             def reset(mode='ok', popup='ok'):
+                if page.get_by_role('dialog', name='ChatGPT sign-in', exact=True).count():
+                    page.get_by_role('button', name='Back to IDE', exact=True).click()
                 page.wait_for_function("!fixturePanel.chatgpt.busy")
                 page.evaluate('([mode, popup]) => fixtureReset(mode, popup)', [mode, popup])
             def idle(): page.wait_for_function('!fixturePanel.chatgpt.busy')
@@ -83,11 +85,28 @@ try:
             reset()
             page.get_by_label('Agent relay token', exact=True).fill('')
             login(); idle()
-            check('paste its local access token' in status(), filename + ': missing token has explicit first-run instructions')
+            check(page.get_by_role('dialog', name='ChatGPT sign-in', exact=True).is_visible() and 'paste its local access token' in status(), filename + ': missing token has explicit first-run instructions')
             check(page.evaluate('signinFixture.requests.length === 0 && signinFixture.popups.length === 0'), filename + ': missing token does not open a blank tab or contact a provider')
             check(page.evaluate('fixturePanel.chatgpt.setup.open') and 'ChatGPT:' in page.locator('.agent-status').inner_text(), filename + ': setup and footer expose the error even in a scrolled panel')
             check(page.get_by_label('ChatGPT connection status', exact=True).get_attribute('role') == 'alert', filename + ': sign-in errors are accessible alerts')
             page.screenshot(path=str(REPORTS/(filename.replace('.html', '') + '-signin-setup.png')))
+            # Finish first-run pairing inside the dialog, not by searching for fields behind it.
+            page.get_by_label('Sign-in relay access token', exact=True).fill('local-relay-browser-fixture-token-123456789')
+            login()
+            page.get_by_role('link', name='Open ChatGPT sign-in', exact=True).wait_for()
+            check(page.evaluate('signinFixture.launchRequested && signinFixture.popups.length === 0'), filename + ': first-run dialog pairs relay and requests OS launch without window.open')
+            cancel()
+            reset('system-launch', 'throw'); login()
+            page.get_by_role('link', name='Open ChatGPT sign-in', exact=True).wait_for()
+            check('handed to your system browser' in status() and page.evaluate('signinFixture.launchRequested'), filename + ': OS launch is reported as handoff, not authentication success')
+            check(page.get_by_label('ChatGPT sign-in link', exact=True).input_value().startswith('https://auth.openai.com/'), filename + ': selectable URL remains available even after launcher success')
+            page.evaluate("Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async()=>{throw new Error('clipboard denied');}}})")
+            page.get_by_role('button', name='Copy sign-in link', exact=True).click()
+            page.wait_for_function("fixturePanel.chatgpt.message.textContent.includes('Select and copy')")
+            check(page.get_by_label('ChatGPT sign-in link', exact=True).evaluate('(e) => document.activeElement===e && e.selectionStart===0 && e.selectionEnd===e.value.length'), filename + ': clipboard denial selects the complete fallback URL')
+            page.get_by_role('button', name='Back to IDE', exact=True).click()
+            check(page.get_by_role('link', name='Open ChatGPT sign-in', exact=True).is_visible() and page.evaluate('!!fixturePanel.chatgpt.loginId'), filename + ': closing dialog preserves pending sign-in in Connection')
+            cancel()
             reset()
             page.get_by_label('OpenAI authentication', exact=True).select_option('api-key')
             page.get_by_label('OpenAI authentication', exact=True).select_option('chatgpt')
@@ -103,7 +122,7 @@ try:
             page.get_by_role('button', name='Refresh account status', exact=True).click(); idle()
             check('VB6_CHATGPT_ENABLED' in status(), filename + ': disabled relay explains how to enable sign-in')
             reset('network', 'close-throws'); login(); idle()
-            check('Cannot reach the local ChatGPT relay' in status() and page.evaluate('signinFixture.popups[0].closed'), filename + ': missing relay and popup-close exceptions cannot disappear silently')
+            check('Cannot reach the local ChatGPT relay' in status() and page.evaluate('signinFixture.popups.length === 0') and page.get_by_role('dialog', name='ChatGPT sign-in', exact=True).is_visible(), filename + ': missing relay stays in a visible dialog without a disposable blank popup')
             reset('stall-body')
             page.get_by_role('button', name='Refresh account status', exact=True).click()
             check('Checking local relay account status' in status(), filename + ': immediate progress appears before slow I/O')
@@ -112,7 +131,7 @@ try:
             for popup_mode in ['throw', 'null', 'opener-throws', 'navigation-throws', 'closed']:
                 reset('ok', popup_mode); login()
                 page.get_by_role('link', name='Open ChatGPT sign-in', exact=True).wait_for()
-                check('could not open sign-in automatically' in status(), filename + ': ' + popup_mode + ' preserves a visible manual login link')
+                check('No automatic popup is required' in status() and page.evaluate('signinFixture.popups.length === 0'), filename + ': ' + popup_mode + ' cannot prevent the visible dialog and native link')
                 if popup_mode == 'throw' and not args.opaque:
                     with context.expect_page() as info:
                         page.get_by_role('link', name='Open ChatGPT sign-in', exact=True).click()
@@ -139,6 +158,7 @@ try:
             login(); idle()
             check('could not start' in status() and not page.evaluate('!!fixturePanel.chatgpt.controller'), filename + ': setup exceptions are caught and do not strand the busy state')
             reset('poll-failure', 'null'); login(); idle()
+            page.get_by_role('button', name='Back to IDE', exact=True).click()
             page.get_by_role('button', name='Clear Credentials', exact=True).click()
             check(page.evaluate("fixturePanel.token.value === '' && !fixturePanel.chatgpt.loginConfig && !fixturePanel.chatgpt.link.hasAttribute('href')"), filename + ': clearing credentials also removes retry state and the login URL')
             check(not errors, filename + ': all failure paths have no unhandled browser exceptions')
