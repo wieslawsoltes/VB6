@@ -38,6 +38,7 @@ jobs:
               subprocess.run(['git','checkout','--ours','--',p],check=True)
               subprocess.run(['git','add','--',p],check=True)
           PY
+          fi
           npm run build
           npm test
           node tools/win32-string-fixtures.mjs
