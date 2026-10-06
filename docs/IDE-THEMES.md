@@ -152,8 +152,11 @@ small, explicitly scoped regions so automatic text backplates cannot obscure the
 text. The rest of the document and authored forms keep browser color adjustment.
 Native select arrows replace gradient chevrons; caption and selected-row glyphs
 follow the system foreground. No custom RGB palette replaces the user's contrast
-colors. Chromium/Firefox coverage is capability-detected; engines which do not
-expose forced-colors report that fact instead of claiming it was exercised.
+colors. Media emulation and the `forced-color-adjust` CSS property are detected
+independently. Engines exposing the media query without the adjustment property
+still run the system-color-pair, native-select-arrow and keyboard-focus checks;
+the report explicitly marks adjustment coverage as unavailable. An engine without
+forced-colors media emulation reports an explicit skip, not a successful paint test.
 
 The browser suite additionally checks primary-button focus contrast, pressed text,
 checked keyboard focus, disabled commands, all eight New Project selection states,

@@ -225,18 +225,22 @@ class Themes(unittest.TestCase):
     def test_forced_colors_preserve_labels_arrows_and_focus(self):
         self.direct_theme('fluent-dark',reduceMotion=True);self.options()
         self.page.emulate_media(forced_colors='active')
-        # WebKit does not expose forced-colors in all supported builds; test
-        # actual support rather than pretending emulation changed its palette.
-        supported=self.page.evaluate('matchMedia("(forced-colors: active)").matches')
-        if not supported:
-            self.record('forced-colors capability',supported=False)
-            return
+        # Media emulation and the adjustment CSS property are independent:
+        # WebKit 2227 exposes the media query but not forced-color-adjust.
+        capabilities=self.page.evaluate('''()=>({
+          media:matchMedia('(forced-colors: active)').matches,
+          adjustment:CSS.supports('forced-color-adjust','none')
+        })''')
+        self.record('forced-colors capability',**capabilities)
+        if not capabilities['media']:
+            self.skipTest('This engine does not expose forced-colors media emulation')
         for theme in THEMES:
             self.direct_theme(theme)
             primary=self.page.locator('.ide-dialog .default-button');self.keyboard_focus(primary)
-            for selector in ['.dialog-caption strong','.ide-theme-preview-title','.ide-theme-preview-selected','.ide-dialog .default-button']:
-                control=self.page.locator(selector)
-                self.assertEqual(control.evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'none',theme+' '+selector)
+            if capabilities['adjustment']:
+                for selector in ['.dialog-caption strong','.ide-theme-preview-title','.ide-theme-preview-selected','.ide-dialog .default-button']:
+                    control=self.page.locator(selector)
+                    self.assertEqual(control.evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'none',theme+' '+selector)
             # The user owns the system palette. Verify its matched color pair,
             # not a numeric contrast target that would reject custom OS colors.
             self.assertTrue(primary.evaluate('''e=>{
@@ -246,10 +250,13 @@ class Themes(unittest.TestCase):
               p.remove();return matches;
             }'''))
             self.assertEqual(self.page.get_by_label('IDE theme',exact=True).evaluate('(e)=>getComputedStyle(e).appearance'),'auto')
-            self.assertEqual(self.page.locator('html').evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'auto')
-            self.assertEqual(self.page.locator('.designer-form').evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'auto')
+            if capabilities['adjustment']:
+                self.assertEqual(self.page.locator('html').evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'auto')
+                self.assertEqual(self.page.locator('.designer-form').evaluate('(e)=>getComputedStyle(e).forcedColorAdjust'),'auto')
             self.page.screenshot(path=str(REPORT/f'{theme}-forced-colors-controls.png'))
-            self.record(theme,forcedColorLabelsReadable=True,nativeSelectArrow=True,systemColorPair=True,runtimeNotOptedOut=True)
+            self.record(theme,forcedColorAdjustSupported=capabilities['adjustment'],
+                        nativeSelectArrow=True,systemColorPair=True,
+                        runtimeAdjustmentVerified=capabilities['adjustment'])
         self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
         self.page.emulate_media(forced_colors='none')
     def test_detached_windows_receive_live_theme_and_return(self):
