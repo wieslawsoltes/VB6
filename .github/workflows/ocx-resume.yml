@@ -1,0 +1,26 @@
+name: OCX integration snapshot
+on:
+  push:
+    branches: [feat/ocx-hosting-lifecycle]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Capture exact branch and main for conflict-aware integration
+        run: |
+          git bundle create ocx-resume.bundle HEAD refs/remotes/origin/main
+          git rev-parse HEAD HEAD^{tree} refs/remotes/origin/main > ocx-resume.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocx-resume-source
+          path: |
+            ocx-resume.bundle
+            ocx-resume.txt
+          retention-days: 7
