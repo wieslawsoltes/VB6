@@ -85,8 +85,12 @@ with sync_playwright() as playwright:
         # Source: https://github.com/GoogleChrome/chrome-launcher/blob/main/docs/chrome-flags-for-tools.md#rendering--gpu
         launch_flags += ['--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--use-vulkan=swiftshader', '--disable-partial-raster', '--run-all-compositor-stages-before-draw']
     launch_flags += shlex.split(os.environ.get('RENDERING_BROWSER_FLAGS', ''))
-    browser = playwright.chromium.launch(executable_path=executable, headless=not args.headed, args=launch_flags)
-    METRICS.update(requiredBackends=REQUIRED, browser=browser.version, platform=platform.platform(), flags=launch_flags, physicalHardwareQualified=False, headed=args.headed, softwareGpuRequested=args.software_gpu, fixtureTransport="http" if URL else "set_content")
+    # Playwright's headless profile adds --hide-scrollbars. Remove only that
+    # presentation shortcut: native scrollbar geometry and input must be tested
+    # in BOTH modes, rather than passing pixels with all scrollbars absent.
+    # https://playwright.dev/python/docs/api/class-browsertype#browser-type-launch-option-ignore-default-args
+    browser = playwright.chromium.launch(executable_path=executable, headless=not args.headed, args=launch_flags, ignore_default_args=['--hide-scrollbars'])
+    METRICS.update(requiredBackends=REQUIRED, browser=browser.version, platform=platform.platform(), flags=launch_flags, physicalHardwareQualified=False, headed=args.headed, softwareGpuRequested=args.software_gpu, fixtureTransport="http" if URL else "set_content", ignoredDefaultBrowserArgs=["--hide-scrollbars"])
 
     def backend_execution():
         page = new_page(browser)
@@ -253,7 +257,7 @@ with sync_playwright() as playwright:
         check(result=={'same':True,'alive':True,'disposed':True,'canvases':0}, str(result));page.close();return result
     case('shared-document reference counts and idempotent cleanup', reference_counts)
 
-    def stable_render_capture(page, name, backend):
+    def stable_render_capture(page, name, backend, renderer="vb6Studio.rendering"):
         # Stabilize each backend independently, without looking at the expected
         # pixels. The HTML baseline remains fixed throughout comparison. Font-ready
         # and two rAF callbacks alone do not await asynchronous native raster /
@@ -264,7 +268,7 @@ with sync_playwright() as playwright:
         import hashlib
         previous = None; consecutive = 0; samples = []
         for attempt in range(30):
-            check(page.evaluate('vb6Studio.rendering.backend') == backend, 'Capture used an unexpected renderer')
+            check(page.evaluate(renderer+'.backend') == backend, 'Capture used an unexpected renderer')
             page.evaluate('async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
             # Read-only fixture: do not mutate every input's inline caret-color
             # on each capture. Playwright's default hide/restore cycle caused
@@ -402,6 +406,60 @@ with sync_playwright() as playwright:
         check(not page.errors, str(page.errors));page.close()
         return {'comparisons':comparisons, 'authoredProjectUnchanged':True, 'undoUnchanged':True}
     case('optional IDE themes preserve exact HTML pixels and independent project state', optional_ide_themes)
+
+    def designer_scrollbar_input():
+        page = new_page(browser, dpr=1.25, ide=True)
+        page.evaluate('vb6Studio.setRenderingPolicy({backend:"html"})')
+        page.evaluate("""()=>{
+          const n=document.createElement('div');n.id='native-scrollbar-fixture';
+          n.className='designer-scroll';n.dataset.vbTheme='classic';n.dataset.vbThemeFamily='classic';n.tabIndex=0;
+          n.style.cssText='position:fixed;left:32px;top:32px;width:240px;height:180px;max-width:none;max-height:none;flex:none;overflow:scroll;padding:0;z-index:500000';
+          const content=document.createElement('div');content.style.cssText='width:800px;height:600px';n.append(content);document.body.append(n);
+        }""")
+        dimensions = """()=>{const n=document.querySelector('#native-scrollbar-fixture'),r=n.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,cw:n.clientWidth,ch:n.clientHeight,sw:n.scrollWidth,sh:n.scrollHeight}}"""
+        geometry = page.evaluate(dimensions)
+        check(geometry['w']-geometry['cw']==16 and geometry['h']-geometry['ch']==16, 'Native scrollbar gutters changed: '+str(geometry))
+        paint = page.locator('#native-scrollbar-fixture').evaluate("""n=>{const s=getComputedStyle(n,'::-webkit-scrollbar-thumb');return {shadow:s.boxShadow,image:s.backgroundImage,border:s.borderTopWidth}}""")
+        check(paint['shadow']=='none' and paint['border']=='0px' and paint['image'].count('linear-gradient(')==8,'Classic scrollbar did not use filled bevel layers: '+str(paint))
+        # Real browser wheel, native increment button and native thumb drag. No
+        # JS scrollbar implementation, event swallowing or invisible hit regions.
+        page.mouse.move(geometry['x']+70,geometry['y']+60);page.mouse.wheel(80,80)
+        page.wait_for_function("(()=>{const n=document.querySelector('#native-scrollbar-fixture');return n.scrollLeft>0&&n.scrollTop>0})()")
+        page.evaluate("document.querySelector('#native-scrollbar-fixture').scrollTo(0,0)")
+        page.mouse.click(geometry['x']+geometry['cw']-8,geometry['y']+geometry['h']-8)
+        page.wait_for_function("document.querySelector('#native-scrollbar-fixture').scrollLeft>0")
+        page.evaluate("document.querySelector('#native-scrollbar-fixture').scrollTo(0,0)")
+        page.wait_for_timeout(100)
+        page.mouse.move(geometry['x']+35,geometry['y']+geometry['h']-8);page.mouse.down()
+        # Give the native scrollbar drag loop a display frame to acquire the
+        # thumb before dispatching moves, as a physical press would.
+        page.wait_for_timeout(150)
+        page.mouse.move(geometry['x']+80,geometry['y']+geometry['h']-8,steps=8)
+        page.wait_for_timeout(150);page.mouse.up()
+        page.wait_for_function("document.querySelector('#native-scrollbar-fixture').scrollLeft>0")
+        check(page.evaluate(dimensions)==geometry,'Paint or input changed the scrollport geometry')
+        # The same native scrollport remains reachable through the pointer-
+        # transparent rendering layer. Compare complete screenshots after scrolling.
+        page.mouse.move(4,4)
+        reference=stable_html_reference(page,'native-scrollbar-input')
+        comparisons=[]
+        for backend in list(dict.fromkeys(['canvas2d']+REQUIRED)):
+            page.evaluate('b=>vb6Studio.setRenderingPolicy({backend:b,fallbacks:["html"]})',backend)
+            check(page.evaluate('vb6Studio.rendering.backend')==backend,'Scrollbar test accepted fallback')
+            image=stable_render_capture(page,'native-scrollbar-input-'+backend,backend)
+            comparison=pixels(reference,image);comparisons.append(dict(backend=backend,**comparison))
+            check(comparison['changedPixels']==0,'Native scrollport pixels differ: '+str(comparison))
+        page.evaluate('vb6Studio.setRenderingPolicy({backend:"html"})')
+        page.locator('#native-scrollbar-fixture').evaluate("n=>n.dataset.vbThemeFamily='fluent'")
+        excluded=page.locator('#native-scrollbar-fixture').evaluate("n=>getComputedStyle(n,'::-webkit-scrollbar-thumb').backgroundImage")
+        check(excluded.count('linear-gradient(')!=8,'Classic-only scrollbar rule leaked to a modern theme')
+        page.locator('#native-scrollbar-fixture').evaluate("n=>n.dataset.vbThemeFamily='classic'")
+        page.emulate_media(forced_colors='active')
+        forced=page.locator('#native-scrollbar-fixture').evaluate("n=>getComputedStyle(n,'::-webkit-scrollbar-thumb').backgroundImage")
+        check(forced.count('linear-gradient(')!=8,'Forced colors retained author-only scrollbar strips')
+        check(not page.errors,str(page.errors));page.close()
+        return {'geometry':geometry,'nativeWheel':True,'nativeArrow':True,'nativeThumbDrag':True,'comparisons':comparisons,'modernAndForcedColorsExcluded':True}
+    case('classic designer native scrollbar geometry, input and exact backend pixels',designer_scrollbar_input)
 
     def mnemonic_stability():
         # Native automatic underline coverage used to drift even when the GPU
@@ -639,12 +697,15 @@ with sync_playwright() as playwright:
                 if phase=='selection': page.evaluate("controls[1].input.focus();controls[1].input.setSelectionRange(0,7);undefined")
                 page.evaluate('fixtureRenderer.setOptions({backend:"html"})')
                 page.evaluate('async()=>{await document.fonts.ready;for(let i=0;i<5;i++)await new Promise(requestAnimationFrame)}')
-                baseline=page.screenshot()
-                page.evaluate('backend=>fixtureRenderer.setOptions({backend,fallbacks:["html"]})',backend)
-                page.evaluate('async()=>{for(let i=0;i<5;i++)await new Promise(requestAnimationFrame)}')
-                check(page.evaluate('fixtureRenderer.backend')==backend,'Control-state backend fell back')
-                image=page.screenshot();comparison=pixels(baseline,image)
                 label=f'controls-{theme}-{dpr}-{mobile}-{phase}'
+                # The controls fixture needs the same independent presentation
+                # prerequisite as the IDE. Keep caret/selection pixels untouched;
+                # the default screenshot hide/restore cycle mutates input styles.
+                baseline=stable_render_capture(page,label+'-native','html','fixtureRenderer')
+                page.evaluate('backend=>fixtureRenderer.setOptions({backend,fallbacks:["html"]})',backend)
+                check(page.evaluate('fixtureRenderer.backend')==backend,'Control-state backend fell back')
+                image=stable_render_capture(page,label+'-paint',backend,'fixtureRenderer')
+                comparison=pixels(baseline,image)
                 (OUT/(label+'-html.png')).write_bytes(baseline);(OUT/(label+'-'+backend+'.png')).write_bytes(image)
                 comparisons.append(dict(phase=phase,**comparison))
                 check(comparison['changedPixels']==0,'Control-state pixels differ: '+label+': '+str(comparison))

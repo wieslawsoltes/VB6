@@ -143,3 +143,53 @@
    background-image:none;
  }
 }
+
+/* Classic designer scrollbars remain native controls. Paint their bevels and
+   arrows with opaque, axis-aligned strips rather than inset shadows/diagonal
+   gradients, whose fractional native-tile coverage varied between identical
+   headed captures. Do not change scrollbar dimensions, scrolling, hit targets,
+   project colors, modern theme chrome, or the operating-system forced colors.
+   Original strip-arrow construction; staircase colors reuse the attributed
+   98.css technique above. Layer order/geometry semantics:
+   https://www.w3.org/TR/css-backgrounds-3/#layering
+   Native scrollbar parts: https://developer.chrome.com/docs/css-ui/scrollbar-styling
+*/
+@media (forced-colors: none) {
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-thumb,
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button {
+   border:0;box-shadow:none;
+   --vb-scrollbar-edges:var(--vb-bevel-raised-image);
+   --vb-scrollbar-edge-sizes:1px 100%,100% 1px,1px 100%,100% 1px,2px 100%,100% 2px,2px 100%,100% 2px;
+   --vb-scrollbar-edge-positions:right top,left bottom,left top,left top,right top,left bottom,left top,left top;
+   background-image:var(--vb-scrollbar-edges);
+   background-size:var(--vb-scrollbar-edge-sizes);
+   background-position:var(--vb-scrollbar-edge-positions);
+   background-origin:border-box;background-clip:border-box;background-repeat:no-repeat;
+ }
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button {
+   --vb-scrollbar-arrow:linear-gradient(var(--vb-text),var(--vb-text));
+   background-image:var(--vb-scrollbar-arrow),var(--vb-scrollbar-arrow),var(--vb-scrollbar-arrow),var(--vb-scrollbar-arrow),var(--vb-scrollbar-edges);
+ }
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button:active {
+   --vb-scrollbar-edges:linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-light),var(--vb-light)),linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-dark),var(--vb-dark)),linear-gradient(var(--vb-highlight),var(--vb-highlight)),linear-gradient(var(--vb-highlight),var(--vb-highlight)),linear-gradient(var(--vb-shadow),var(--vb-shadow)),linear-gradient(var(--vb-shadow),var(--vb-shadow));
+ }
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button:disabled {
+   --vb-scrollbar-arrow:linear-gradient(var(--vb-gray),var(--vb-gray));
+ }
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button:vertical:decrement {
+   background-size:1px 1px,3px 1px,5px 1px,7px 1px,var(--vb-scrollbar-edge-sizes);
+   background-position:7px 5px,6px 6px,5px 7px,4px 8px,var(--vb-scrollbar-edge-positions);
+ }
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button:vertical:increment {
+   background-size:7px 1px,5px 1px,3px 1px,1px 1px,var(--vb-scrollbar-edge-sizes);
+   background-position:4px 6px,5px 7px,6px 8px,7px 9px,var(--vb-scrollbar-edge-positions);
+ }
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button:horizontal:decrement {
+   background-size:1px 1px,1px 3px,1px 5px,1px 7px,var(--vb-scrollbar-edge-sizes);
+   background-position:5px 7px,6px 6px,7px 5px,8px 4px,var(--vb-scrollbar-edge-positions);
+ }
+ .designer-scroll[data-vb-theme-family="classic"]::-webkit-scrollbar-button:single-button:horizontal:increment {
+   background-size:1px 7px,1px 5px,1px 3px,1px 1px,var(--vb-scrollbar-edge-sizes);
+   background-position:6px 4px,7px 5px,8px 6px,9px 7px,var(--vb-scrollbar-edge-positions);
+ }
+}

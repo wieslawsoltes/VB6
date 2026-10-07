@@ -15,10 +15,11 @@ native. Transparent holes expose those browser pixels; fractional border strips
 retain native rasterization where CSS and GPU rounding differ. GPU-atlas text is
 experimental, not a substitute for native editing.
 
-Strict software-GPU framebuffer and IDE comparisons have passed. **This does not
-certify complete native VB6 parity, GPU-only rendering, physical-device performance
-or a whole-IDE speedup.** See [RENDERING-VALIDATION.md](RENDERING-VALIDATION.md) for
-measured results, source revisions and remaining gates.
+Acceptance checks compare the selected renderer with fixed HTML references.
+Revision-specific results belong in CI artifacts and the pull request. **These
+checks do not certify complete native VB6 parity, GPU-only rendering, physical-
+device performance or a whole-IDE speedup.** See [source attribution](RENDERING-SOURCES.md)
+for implementation references; each change must pass the current-source gates below.
 
 ## Classic Options dialog
 
@@ -111,7 +112,11 @@ styles are resampled and frames scheduled as needed. Rendering returns to idle
 when they complete. CSSOM rule edits and programmatic animation APIs now wake rendering through
 realm-scoped subscriptions which are removed in HTML mode. Pre-captured native
 references and direct indexed adopted-sheet array edits require
-`renderer.invalidateStyles()`. See [RENDERING-RELEASE.md](RENDERING-RELEASE.md).
+`renderer.invalidateStyles()`. Observers preserve native return values, promises,
+exceptions and declaration identity. The last subscriber restores only its own
+wrappers, preserving later getter/setter changes made by another integration.
+Closed shadow roots created before observation require `data-vb-native-render`
+on their host; observed shadow hosts remain native-painted.
 
 Each scene build is compared exactly with the retained immutable snapshot,
 including command order, clips, colors, texture identities and dimensions. No
@@ -147,9 +152,12 @@ Tests require Python Playwright and Pillow. `CHROMIUM_PATH` selects the browser;
 may use `set_content` and reports unavailable GPUs as skipped. Strict mode serves
 localhost and fails unless the selected API actually draws. Software-driver flags
 are test-only, not production configuration or physical-device qualification.
+The harness removes Playwright's default `--hide-scrollbars` switch so headless
+runs verify real scrollbar gutters and interactions instead of omitting them;
+this excluded default is recorded in the report.
 
-The permanent workflow separately tests WebGPU and WebGL2 in headed and headless
-configurations. It covers direct framebuffer readback, presentation screenshots,
+The rendering jobs in the existing **Validate** workflow test WebGPU and WebGL2
+in headed and headless configurations; **Pages** remains the deployment workflow. It covers direct framebuffer readback, presentation screenshots,
 exact primitive/clip/texture pixels at DPR 1/1.25/1.5/2/3/4 and exact existing-HTML
 IDE comparisons at DPR 1/1.25/1.5/2. **The IDE fixture gate requires zero changed
 pixels**, not an error budget. Other cases cover Options behavior, fallback/loss,
@@ -169,3 +177,78 @@ returns bounded per-backend CPU submission samples, actual adapter identity and
 optional WebGPU render-pass timestamps, leaving project/preferences/DOM unchanged.
 No normal frame pays the cost of diagnostic queries or readbacks. This is not an
 HTML compositor comparison or a whole-IDE performance certification.
+
+## Deferred resize registration and presentation readiness
+
+`renderNow()` may run synchronously inside a caller's ResizeObserver callback.
+It paints immediately but defers registration of newly encountered elements to
+one owning-window task after resize delivery, not a microtask inside that loop.
+The task snapshots the latest targets, unobserves departed nodes and avoids work
+for identical sets. Task identity plus backend generation reject stale callbacks.
+HTML mode, first-frame failure and disposal cancel the task and clear references.
+MDI resize callbacks similarly coalesce into an owning-window animation frame;
+explicit reflow cancels a pending frame. Valid callback handle zero is cancellable.
+
+A resolved renderer/options promise confirms paint submission, not operating-
+system presentation. Screenshot tests therefore capture each backend independently
+until three consecutive frames are identical, with a bounded attempt limit. The
+fixed HTML reference is never replaced with renderer output. A stable wrong image
+and an image that never stabilizes both fail; do not mask pixels, accept a tolerance,
+or retry comparison until an expected image appears. The capture/comparator unit
+tests independently cover stability, sparse changes and backend identity.
+
+Persisted pagehide suspends rather than releases Studio ownership; final pagehide
+releases it. Detached documents own their contexts and receive live settings.
+The native runtime-document loader chooses registered-URL navigation before
+assigning a source; it rejects stale asynchronous replies without weakening iframe
+sandbox, CSP or native-bridge permissions. See [preview lifecycle](NATIVE-PREVIEW-LIFECYCLE.md).
+
+## Extending and testing the renderer
+
+Keep same-backend no-op settings from resetting the atlas or resubmitting unchanged
+pixels. Changed text/snapping settings must submit updated paint before their
+promise resolves. Textures separately track source identity, dimensions and revision;
+replacing a canvas at the same dimensions must not retain stale pixels or repack
+unchanged geometry. Duplicate hover notifications with an unchanged target do not
+invalidate paint, but application event delivery is never intercepted.
+
+Focused checks remain available in `tests/rendering-*.test.mjs` and the browser
+harness. Run `python tools/test_rendering_pixels.py` and
+`python tools/test_rendering_capture.py`, then the required backend suite and
+`python tools/verify-rendering-report.py reports/rendering/report.json --backend webgpu`
+(or `webgl2`). Unavailable backends may be explicit skips only in restricted local
+runs, not required-backend CI. Keep every distinct case in the report validator.
+The required suite includes control states, input selection, fractional DPI,
+optional themes, mobile viewports, detached ownership, startup/loss recovery,
+standalone execution, resize/animation wakeups and retained-resource checks.
+
+Source-only builds use reviewed output sizes and SHA-256 fingerprints. CI verifies
+these expectations and does not refresh them. Regenerate them explicitly while
+reviewing a source change, then repeat an ordinary build and require no differences.
+See [build artifacts](IDE-BUILD-ARTIFACTS.md). Keep run-specific screenshots, native
+adapter measurements and validation logs out of source documentation; retain them
+as CI artifacts instead of creating dated continuation guides.
+
+
+## Classic designer scrollbars
+
+The designer keeps browser-native scrollbar mechanics. For a **classic-family
+application canvas**, its thumb and button bevels are painted as opaque background
+strips; the four directional arrows use four rectangular steps rather than
+antialiased diagonal gradients. This changes only paint: dimensions, hit targets,
+scroll extents, native wheel/button/drag behavior and project colors are retained.
+Modern application-theme scrollbars are excluded. Operating-system forced colors
+retain the existing native paint instead of depending on author background layers.
+
+The dedicated scrollbar browser case checks actual gutter dimensions, native
+wheel/button/thumb interaction, complete HTML-to-backend screenshot equality,
+and the modern/forced-color exclusions. The optional-theme case separately checks
+all current theme paths, including legacy X11 migration. A stable CSS-only scene
+is a prerequisite for comparison, not evidence that the overlay painted native
+scrollbar pixels. Keep the native-island distinction in reports.
+
+The strip construction and its CSS background-layer references are documented
+beside the implementation in `src/theme/bevels.css`. It reuses the attributed
+classic bevel colors without adding font assets, DOM nodes or a JavaScript scroll
+implementation. Recheck platform/browser coverage after changes to native chrome;
+software-adapter evidence cannot certify every operating-system rasterizer.

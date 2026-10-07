@@ -80,3 +80,14 @@ https://www.w3.org/TR/web-animations-1/. Closed shadow host treatment follows th
 encapsulation contract in https://dom.spec.whatwg.org/#dom-element-attachshadow.
 The local benchmark's optional GPU pass timestamps follow
 https://www.w3.org/TR/webgpu/#timestamp-query and are not CPU-clock estimates.
+
+
+## Native designer scrollbar paint
+
+The classic designer's rectangular scrollbar strips and step arrows are original
+code in `src/theme/bevels.css`, reusing its attributed bevel palette. Layer order,
+size and placement follow CSS Backgrounds Level 3 (linked above); native scrollbar
+parts are described in Chrome's [Scrollbar styling](https://developer.chrome.com/docs/css-ui/scrollbar-styling)
+guide. The code leaves native scrolling and nonclassic/forced-color rendering
+alone. These references explain the mechanism; they do not constitute a claim of
+universal pixel or physical-GPU performance equivalence.

@@ -35,6 +35,8 @@ These guides describe the implemented system, not complete native VB6 parity.
 - [Auto Layout designer](auto-layout-designer.md): opt-in panel, canvas interaction,
   shared solver and export boundaries.
 - [Detached browser windows](BROWSER-WINDOWS.md).
+- [UI rendering backends](RENDERING.md): settings, native islands, lifecycle,
+  performance measurement and strict acceptance; [rendering source attribution](RENDERING-SOURCES.md).
 - [IDE themes](IDE-THEMES.md), [application themes](APPLICATION-THEMES.md) and
   [matching icon packs](THEME-ICON-PACKS.md).
 - [Classic icons](ICON-AUDIT.md), [classic HTML rendering and attribution](CLASSIC-HTML-RENDERING.md)
@@ -43,12 +45,15 @@ These guides describe the implemented system, not complete native VB6 parity.
 ## Windows compilation and native services
 
 - [Windows build targets](WINDOWS-BUILDS.md), [target validation](NATIVE-VALIDATION.md),
+  [native compiler and optimizer](native-compiler-optimization.md),
   [direct Win32 AOT](WIN32-AOT.md) and [export troubleshooting](WIN32-EXPORT-TROUBLESHOOTING.md).
 - AOT language/ABI contracts: [numeric storage](WIN32-NUMERIC.md),
   [Currency](WIN32-CURRENCY.md), [Date](WIN32-DATES.md),
   [calendar intervals](WIN32-CALENDAR-INTERVALS.md), [arrays](WIN32-ARRAYS.md),
   [calls](WIN32-CALLS.md), [bindings](WIN32-BINDINGS.md),
   [callbacks](WIN32-CALLBACKS.md) and [String interop](WIN32-STRING-INTEROP.md).
+- [COM/OLE services and reusable packages](COM-OLE.md): portable contracts, VB GetObject,
+  native data/storage services, ownership, explicit permissions and support boundaries.
 - Native Automation: [startup/deadlines](NATIVE-AUTOMATION-STARTUP.md),
   [typed scalars](NATIVE-SCALAR-INTEROP.md) and [DATE transport](NATIVE-DATE-TRANSPORT.md).
 - OCX: [setup and support](OCX-SUPPORT.md), [container contracts](OCX-CONTAINER-CONTRACTS.md),
@@ -69,6 +74,9 @@ These guides describe the implemented system, not complete native VB6 parity.
 Package READMEs own their API, installation and compatibility details:
 [automatic layout](../packages/auto-layout/README.md),
 [Win32 browser compatibility](../packages/win32-browser/README.md),
+[portable COM/OLE](../packages/com-ole/README.md),
+[Automation values and adapters](../packages/automation/README.md),
+[native COM/OLE companion](../packages/native-automation/README.md),
 [native debugger](../packages/native-debugger/README.md) and
 [optional compute compiler/runtime](../packages/vb6-compute/README.md).
 

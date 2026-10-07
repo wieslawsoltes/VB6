@@ -32,13 +32,13 @@ class CaptureTests(unittest.TestCase):
         exec(compile(module, str(Path(__file__)), 'exec'), self.namespace)
         self.capture = self.namespace['stable_render_capture']
 
-    def page(self, images, backend='html'):
+    def page(self, images, backend='html', renderer='vb6Studio.rendering'):
         class Page:
             calls = []
             index = 0
 
             def evaluate(self, expression):
-                if expression == 'vb6Studio.rendering.backend':
+                if expression == renderer + '.backend':
                     return backend
                 return None
 
@@ -71,6 +71,15 @@ class CaptureTests(unittest.TestCase):
         report = json.loads((self.output / 'unstable-reference.json').read_text())
         self.assertEqual(len(report['samples']), 30)
         self.assertEqual(report['stableCaptures'], 1)
+
+    def test_standalone_control_fixture_checks_its_actual_backend(self):
+        page = self.page([b'control-pixels'], backend='webgl2', renderer='fixtureRenderer')
+        self.assertEqual(self.capture(page, 'controls', 'webgl2', 'fixtureRenderer'), b'control-pixels')
+        self.assertEqual(page.calls, [{'caret': 'initial'}] * 3)
+        fallback = self.page([b'wrong'], renderer='fixtureRenderer')
+        with self.assertRaisesRegex(AssertionError, 'unexpected renderer'):
+            self.capture(fallback, 'controls-fallback', 'webgl2', 'fixtureRenderer')
+        self.assertEqual(fallback.calls, [])
 
     def test_backend_fallback_cannot_satisfy_capture(self):
         page = self.page([b'frame'], backend='html')

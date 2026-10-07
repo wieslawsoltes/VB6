@@ -35,3 +35,22 @@ test('checkbox staircase preserves border layout and leaves radio circles untouc
   assert.doesNotMatch(rule,/(?:^|[;\s])(?:border|border-width|padding|width|height)\s*:/);
   assert.match(css,/--vb-bevel-sunken-image:/);
 });
+
+
+test('classic designer scrollbar strips preserve native mechanics and other themes',()=>{
+  const css=read('src/theme/bevels.css');
+  const rules=css.slice(css.indexOf('/* Classic designer scrollbars remain native controls.'));
+  assert.match(rules,/@media \(forced-colors: none\)/);
+  assert.match(rules,/https:\/\/www.w3.org\/TR\/css-backgrounds-3\/#layering/);
+  const selectors=[...rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([,selector])=>selector.includes('::-webkit-scrollbar'));
+  assert.equal(selectors.length,8);
+  for(const [,selector,body] of selectors){
+    for(const part of selector.trim().split(','))assert.ok(part.trim().startsWith('.designer-scroll[data-vb-theme-family="classic"]::'),part);
+    assert.doesNotMatch(body,/(?:^|[;\s])(?:width|height|display|overflow|position|padding|scrollbar-width|scrollbar-color)\s*:/);
+    assert.doesNotMatch(body,/(?:45deg|135deg|inset|url\(|!important)/);
+  }
+  assert.match(rules,/scrollbar-button:single-button:active/);
+  assert.match(rules,/scrollbar-button:single-button:disabled/);
+  for(const axis of ['vertical','horizontal'])for(const end of ['increment','decrement'])
+    assert.ok(rules.includes(`scrollbar-button:single-button:${axis}:${end}`));
+});

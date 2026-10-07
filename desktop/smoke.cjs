@@ -238,6 +238,22 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       check('one native window for startup form', records.size === 1);
       check('form adopted into native window', await js('f1.node.ownerDocument !== document && f1.node.ownerDocument.defaultView === f1.nativeWindow.win'));
       const id1 = await js('f1.nativeWindow.id'), w1 = records.get(id1).window;
+      report.captionMode = await js('f1.nativeWindow.captionMode');
+      check('advertised native application-caption capability',await js('vb6Native.capabilities.applicationCaptions===true'));
+      const originalHandle=w1.getNativeWindowHandle(), originalClient=await js('[f1.props.ClientWidth,f1.props.ClientHeight]');
+      await js('globalThis.captionVM=host.vm;globalThis.captionControls=f1.controls.slice();void 0;');
+      for(const theme of ['classic','standard','contrast','fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark']) {
+        await js(`host.setTheme(${JSON.stringify(theme)});void 0;`);
+        check(theme+' native caption matches selected app appearance',await js(`(()=>{
+          const d=f1.node.ownerDocument,s=d.defaultView.getComputedStyle(f1.titleBar);
+          return d.documentElement.dataset.vbTheme===${JSON.stringify(theme)} &&
+            (f1.nativeWindow.captionMode==='application'?s.display!=='none':s.display==='none');
+        })()`));
+        check(theme+' retains native HWND, VM, controls and authored client size',
+          w1.getNativeWindowHandle().equals(originalHandle) && await js(`host.vm===captionVM && captionControls.every((c,i)=>c===f1.controls[i]) && JSON.stringify([f1.props.ClientWidth,f1.props.ClientHeight])===${JSON.stringify(JSON.stringify(originalClient))}`));
+        if(reportPath)fs.writeFileSync(reportPath+'.'+theme+'.png',(await withDeadline(()=>w1.webContents.capturePage(),'caption client capture',15000)).toPNG());
+      }
+      await js('host.setTheme("classic");void 0;');
       await evaluate(w1.webContents, 'document.querySelector("[data-control=Command1]").click(); void 0;', true);
       await wait(() => js('f1.controls[1].Text === "Native event OK"'), 'native control click');
       check('native DOM click dispatches into shared VM', true);
@@ -258,7 +274,7 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await js(`(()=>{
         const dialog=[...host.nativeWindows.dialogs.values()][0];
         dialog.doc.querySelector('input').value='Native input OK';
-        dialog.doc.querySelector('form').requestSubmit();return true;
+        dialog.doc.querySelector('.vb-dialog-actions .vb-default-button').click();return true;
       })()`);
       await wait(()=>js('inputResult==="Native input OK"'),'InputBox return');
       await wait(()=>records.size===2&&w1.isEnabled()&&w2.isEnabled(),'InputBox owner restoration');
@@ -272,6 +288,8 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await wait(() => !w1.isMinimized(), 'restore from VB');
       await js('f1.WindowState = 2; void 0;');
       await wait(() => w1.isMaximized(), 'maximize from VB');
+      await wait(()=>js('f1.maxButton.getAttribute("aria-label")==="Restore"'),'native caption Restore state');
+      check('native maximize exposes Restore on the themed maximize action',await js('f1.maxButton.getAttribute("aria-label")==="Restore" && f1.maxButton.dataset.captionAction==="maximize"'));
       await js('f1.WindowState = 0; void 0;');
       await wait(() => !w1.isMaximized(), 'unmaximize from VB');
       check('VB WindowState controls native minimize/maximize/restore', true);
@@ -279,8 +297,9 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
       await wait(() => w1.getTitle() === 'Updated native caption', 'caption sync');
       check('VB caption updates native title', true);
       w1.setContentSize(720, 460);
-      await wait(() => js('Math.abs(f1.props.ClientWidth / 15 - 720) <= 2'), 'resize sync');
-      check('native resizing updates VB twips', true);
+      const expectedClient=report.captionMode==='application'?[712,434]:[720,460];
+      await wait(() => js(`Math.abs(f1.props.ClientWidth/15-${expectedClient[0]})<=2 && Math.abs(f1.props.ClientHeight/15-${expectedClient[1]})<=2`), 'resize sync');
+      check('native resizing updates exact VB client twips excluding frame and caption',await js('Math.abs(f1.props.ClientWidth/15-f1.content.clientWidth)<=2 && Math.abs(f1.props.ClientHeight/15-f1.content.clientHeight)<=2'));
       await js('globalThis.endModal = host.beginModal(f2); void 0;');
       await wait(() => !w1.isEnabled() && w2.isEnabled(), 'modal owner disabling');
       check('modal disables other windows', true);
