@@ -12,6 +12,8 @@ These guides describe the implemented system, not complete native VB6 parity.
 - [Build artifacts](IDE-BUILD-ARTIFACTS.md): source-only builds, exact fingerprints
   and safe regeneration when integrating changes.
 - [Testing](TESTING.md): setup, reproducible checks and validation boundaries.
+- [Build tools](../tools/README.md) and [test scope](../tests/README.md): maintained
+  entry points, fixtures and cleanup rules.
 - [Compatibility](COMPATIBILITY.md) and [user guide](USER_GUIDE.md): supported
   behavior, deliberate limits and workflows to preserve.
 
@@ -83,6 +85,8 @@ history and pull requests retain change provenance; CI artifacts retain
 revision-specific logs and measurements. A historical pass is not validation of
 a later revision. Preserve useful contracts in their owning guide before
 removing a superseded document, and update links and packaging inputs together.
+The [porting index](../reports/README.md) links maintained compatibility trackers;
+generated run evidence does not belong in the source documentation.
 
 ## Compatibility reference sources
 

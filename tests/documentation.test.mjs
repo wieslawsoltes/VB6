@@ -26,10 +26,12 @@ function localTargets(file) {
 }
 
 const guides = markdownFiles(docs);
+const navigation = ['README.md', 'tools/README.md', 'tests/README.md', 'reports/README.md']
+  .map(path => resolve(root, path));
 
-test('maintained documentation and root README have existing local link targets', () => {
+test('maintained documentation and maintenance indexes have existing local link targets', () => {
   const broken = [];
-  for (const file of [resolve(root, 'README.md'), ...guides]) {
+  for (const file of [...navigation, ...guides]) {
     for (const {target, path} of localTargets(file)) {
       if (!existsSync(path)) broken.push(`${relative(root, file)} -> ${target}`);
     }
@@ -43,10 +45,18 @@ test('documentation index covers every maintained guide', () => {
   assert.deepEqual(missing, [], 'Link substantial new guides from docs/README.md.');
 });
 
-test('testing guide uses defined root npm scripts', () => {
+test('maintained guides use defined root npm scripts', () => {
   const {scripts} = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
-  const text = readFileSync(resolve(docs, 'TESTING.md'), 'utf8');
-  const commands = new Set([...text.matchAll(/\bnpm run ([a-z\d:_-]+)/gi)].map(match => match[1]));
-  assert.ok(commands.size > 0, 'The testing guide should document runnable commands.');
-  assert.deepEqual([...commands].filter(command => !Object.hasOwn(scripts, command)), []);
+  const missing = [];
+  let count = 0;
+  for (const file of [...navigation, ...guides]) {
+    const text = readFileSync(file, 'utf8');
+    const commands = new Set([...text.matchAll(/\bnpm run ([a-z\d:_-]+)/gi)].map(match => match[1]));
+    count += commands.size;
+    for (const command of commands) {
+      if (!Object.hasOwn(scripts, command)) missing.push(`${relative(root, file)} -> npm run ${command}`);
+    }
+  }
+  assert.ok(count > 0, 'Maintained guides should document runnable commands.');
+  assert.deepEqual(missing, [], 'Update documented root commands when npm scripts change.');
 });
