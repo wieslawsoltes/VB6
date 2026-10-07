@@ -15,7 +15,7 @@ for(const [id,pack] of Object.entries(ICON_PACKS)){
  });
 }
 test('Classic output retains the original pixel serializer; auto output exposes complete CSS-selected layers',()=>{
- for(const name of ICON_NAMES){const old=iconSVG(name);assert.match(old,/shape-rendering="crispEdges"/);assert.doesNotMatch(old,/theme-icon-layer/);const auto=iconSVG(name,16,false,'auto');assert.equal((auto.match(/class="theme-icon-layer"/g)||[]).length,4);assert.match(auto,/--vb-icon-classic-display,inline/);}
+ for(const name of ICON_NAMES){const old=iconSVG(name);assert.match(old,/shape-rendering="crispEdges"/);assert.doesNotMatch(old,/theme-icon-layer/);const auto=iconSVG(name,16,false,'auto');assert.equal((auto.match(/class="theme-icon-layer"/g)||[]).length,3);assert.match(auto,/--vb-icon-classic-display,inline/);}
  for(const theme of ['classic','standard','contrast']){assert.equal(iconPackForTheme(theme),'classic');const css=iconPackTokens(THEMES[theme]);assert.match(css,/--vb-icon-classic-display: inline/);assert.match(css,/--vb-pack-caption-close: initial/);}
 });
 test('unsafe and missing icon names never enter markup or masquerade as another command',()=>{

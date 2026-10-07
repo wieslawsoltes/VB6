@@ -9,8 +9,7 @@ pixel artwork. Optional families use original vector artwork:
 | --- | --- | --- |
 | Fluent WinUI 3 | `fluent` | Fine monoline strokes, rounded joints |
 | macOS 26 | `macos26` | Rounded, heavier strokes with restrained duotone fill |
-| X11 Motif | `x11` | Square geometry and relief outlines |
-| X11 CDE | `x11-cde` | Colored relief geometry with a distinct stroke weight |
+| X11 | `x11` | Square geometry and Motif-style relief outlines |
 
 Light and dark variants share their family's geometry and resolve ink/fill from
 their own semantic palette. This is not recoloring the old pixel atlas. All
@@ -101,7 +100,7 @@ Node tests verify complete keys, immutable maps, intentional aliasing only,
 per-family differences, safe unknown-name handling, bounded SVG shapes, original
 Classic serialization, caption masks, nested token resets and the absence of
 external images, fonts or scripts. Browser contact sheets cover all 151 glyphs
-in all eight appearances, selected/disabled/selected-disabled states, and
+in all six optional appearances, selected/disabled/selected-disabled states, and
 12/16/24/32/48/64-pixel vector sizes. Additional tests switch existing and newly
 opened IDE tools and real detached windows without replacing icon controls.
 
@@ -109,3 +108,8 @@ The artwork is part of this project's MIT-licensed original implementation.
 There are no bundled Segoe/SF font files, SF Symbols, extracted Microsoft icons,
 or Apple platform artwork. The family labels describe visual design direction,
 not an official platform asset pack, endorsement, or native pixel certification.
+
+The legacy explicit pack ID `x11-cde` resolves to `x11` for compatibility. Only
+three optional packs are generated and embedded. Caption artwork is distinct
+from general command artwork: macOS maximize/restore use expansion/contraction
+marks; X11 uses Motif-like square buttons; Classic bitmap masks are retained.

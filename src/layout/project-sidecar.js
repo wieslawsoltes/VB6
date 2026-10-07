@@ -31,7 +31,7 @@ export function decodeLayoutSidecar(bytes) {
       if(++count>100000)fail('node limit exceeded');
       if(typeof n?.name!=='string'||!/^[A-Za-z_]\w*$/.test(n.name)||typeof n.form!=='boolean'||n.index!==null&&(!Number.isInteger(n.index)||n.index<0||n.index>32767)||!n.properties||Array.isArray(n.properties)||typeof n.properties!=='object')fail('invalid node');
       const id=(n.form?'form:':'control:')+n.name.toLowerCase()+'#'+(n.index??'');if(nodes.has(id))fail('duplicate node');nodes.add(id);
-      for(const [key,v]of Object.entries(n.properties))if(!LAYOUT_KEYS.includes(key)||typeof v!=='number'&&typeof v!=='string'||typeof v==='string'&&v.length>128)fail('invalid property '+key);
+      for(const [key,v]of Object.entries(n.properties))if(!LAYOUT_KEYS.includes(key)||typeof v!=='number'&&typeof v!=='string'||typeof v==='string'&&v.length>(key==='LayoutGridColumns'||key==='LayoutGridRows'?4096:128))fail('invalid property '+key);
     }
   }
   return value;

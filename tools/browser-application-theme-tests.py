@@ -17,7 +17,7 @@ ENGINE=os.environ.get('VB6_BROWSER','chromium')
 MEMORY=os.environ.get('VB6_TEST_TRANSPORT')=='memory'
 REPORT=ROOT/'reports'/'application-themes'/ENGINE
 FIXTURE=ROOT/'reports'/'application-themes'/'fixtures'
-THEMES=['fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark','x11-cde','x11-cde-dark']
+THEMES=['fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark']
 BOUNDS='''()=>{const root=vb6Application.forms[0].node,r=root.getBoundingClientRect();return [...root.querySelectorAll('.vb-control')].map(e=>{const b=e.getBoundingClientRect(),s=getComputedStyle(e);return [e.dataset.control,...[b.x-r.x,b.y-r.y,b.width,b.height].map(n=>Math.round(n*100)/100),s.fontFamily,s.fontSize,s.fontWeight];});}'''
 class Handler(http.server.SimpleHTTPRequestHandler):
  def log_message(self,*args):pass
@@ -50,7 +50,8 @@ class ApplicationThemes(unittest.TestCase):
  def load(self,path,page=None):
   page=page or self.page
   if MEMORY:
-   page.evaluate('()=>{globalThis.vb6Application?.dispose();delete globalThis.vb6Application;}')
+   # set_content keeps the JS realm; mimic navigation for the idempotent exporter.
+   page.evaluate('()=>{globalThis.vb6Application?.dispose();delete globalThis.vb6Application;delete globalThis.vb6ApplicationReady;delete globalThis.vb6ApplicationStatus;}')
    page.set_content(path.read_text())
   else:page.goto(self.base+str(path.relative_to(ROOT)))
  def record(self,case,**detail):self.results.append({'test':self._testMethodName,'case':case,'engine':ENGINE,'transport':'memory' if MEMORY else 'http/file',**detail})
@@ -107,7 +108,7 @@ class ApplicationThemes(unittest.TestCase):
    self.theme(theme);self.assertEqual(popup.get_attribute('data-vb-theme'),theme)
    self.assertEqual(self.css('.vb-combo-popup:not(.simple-list)','backgroundColor'),self.rgb(self.palettes[theme]['colors']['window']))
   popup.get_by_text('Beta',exact=True).click();self.assertEqual(self.page.locator('[data-control="ComboBox1"] input').input_value(),'Beta')
-  self.record('menus and lists stay live across eight themes and commit selection')
+  self.record('menus and lists stay live across all platform themes and commit selection')
  def test_dialog_palette_icons_focus_and_button_results(self):
   self.page.evaluate('()=>{void vb6Application.msgBox("Theme dialog",65,"Theme check").then(value=>window.dialogResult=value);}')
   dialog=self.page.get_by_role('dialog',name='Theme check');self.assertTrue(dialog.is_visible())
@@ -125,10 +126,10 @@ class ApplicationThemes(unittest.TestCase):
   for theme in THEMES:
    self.theme(theme);self.assertEqual(button.evaluate('e=>({color:getComputedStyle(e).color,shadow:getComputedStyle(e).boxShadow,round:getComputedStyle(e).borderRadius})'),classic)
    self.assertEqual(self.active_pack(nested),[])
-  self.page.evaluate('nested.controller.apply({theme:"fluent"})');self.assertEqual(self.page.locator('#app').get_attribute('data-vb-theme'),'x11-cde-dark');self.assertEqual(set(self.active_pack(nested)),{'fluent'})
+  self.page.evaluate('nested.controller.apply({theme:"fluent"})');self.assertEqual(self.page.locator('#app').get_attribute('data-vb-theme'),'x11-dark');self.assertEqual(set(self.active_pack(nested)),{'fluent'})
   self.page.evaluate('nested.form.dispose();nested.controller.dispose();nested.node.remove()');self.record('nested Classic restores styles and icons without affecting parent')
  def test_system_preferences_and_effect_reduction(self):
-  for theme in ['fluent','macos26','x11','x11-cde']:
+  for theme in ['fluent','macos26','x11']:
    self.theme(theme,{'followSystemTheme':True});self.page.emulate_media(color_scheme='dark');self.page.wait_for_function('t=>document.querySelector("#app").dataset.vbTheme===t',arg=theme+'-dark')
    self.assertEqual(self.page.evaluate('vb6Application.themeController.appearance.theme'),theme)
    self.page.emulate_media(color_scheme='light');self.page.wait_for_function('t=>document.querySelector("#app").dataset.vbTheme===t',arg=theme)
@@ -172,7 +173,7 @@ class ApplicationThemes(unittest.TestCase):
   self.page.wait_for_function('vb6Application.mdi.children.filter(c=>c.shown).length===3')
   self.page.evaluate('vb6Application.mdi.arrange(1)')
   self.assertTrue(self.page.evaluate('vb6Application.mdi.children.filter(c=>c.shown).every(c=>c.node.getBoundingClientRect().width>60&&c.node.getBoundingClientRect().height>30)'))
-  self.assertEqual(set(self.active_pack(self.page.locator('.vb-mdi-child').last)),{'x11-cde'})
+  self.assertEqual(set(self.active_pack(self.page.locator('.vb-mdi-child').last)),{'x11'})
   self.page.screenshot(path=str(REPORT/'mdi-themed-children.png'))
  def open_ide(self):
   page=self.context.new_page();self.load(ROOT/'dist'/'VB6-Studio-Web.html',page);page.wait_for_function('typeof vb6Studio==="object"');return page
@@ -243,10 +244,64 @@ class ApplicationThemes(unittest.TestCase):
  @unittest.skipIf(MEMORY,'Real origin storage/reload requires HTTP; covered by CI')
  def test_project_application_appearance_persists_in_saved_workspace(self):
   ide=self.open_ide();ide.evaluate('p=>{vb6Studio.loadProject(p);vb6Studio.project.settings.theme="x11-cde-dark";vb6Studio.project.settings.themeOptions={followSystemTheme:false,reduceMotion:true,reduceTransparency:false};vb6Studio.persist();}',self.project)
-  ide.reload();ide.wait_for_function('vb6Studio.project.settings.theme==="x11-cde-dark"');self.assertTrue(ide.evaluate('vb6Studio.project.settings.themeOptions.reduceMotion'));self.record('workspace reload retains project theme')
+  ide.reload();ide.wait_for_function('vb6Studio.project.settings.theme==="x11-dark"');self.assertTrue(ide.evaluate('vb6Studio.project.settings.themeOptions.reduceMotion'));self.record('workspace reload migrates legacy CDE and retains effect preferences')
  @unittest.skipIf(MEMORY,'Standalone file navigation requires real file origin; covered by CI')
  def test_standalone_file_export_contains_all_themes_without_network(self):
   self.page.goto((FIXTURE/'gallery.html').as_uri());self.page.wait_for_function('typeof vb6Application==="object"')
   for theme in THEMES:self.theme(theme);self.assertEqual(self.page.locator('#app').get_attribute('data-vb-theme'),theme)
-  self.record('file startup and eight runtime palettes')
+  self.record('file startup and six runtime palettes')
+ def test_caption_geometry_actions_and_restore_identity(self):
+  title=self.page.locator('.vb-form-title').first
+  close=title.locator('[data-caption-action="close"]');mini=title.locator('[data-caption-action="minimize"]');maxi=title.locator('[data-caption-action="maximize"]')
+  self.theme('classic');self.assertEqual(mini.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[16,14])
+  for theme in ['macos26','macos26-dark']:
+   self.theme(theme);self.page.evaluate('document.activeElement?.blur()');self.page.mouse.move(1400,1650)
+   for button,color in [(close,'rgb(255, 95, 87)'),(mini,'rgb(254, 188, 46)'),(maxi,'rgb(40, 200, 64)')]:
+    self.assertEqual(button.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[13,13]);self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),color)
+    self.assertEqual(button.locator('.icon').evaluate('e=>getComputedStyle(e).opacity'),'0')
+   self.assertLess(close.bounding_box()['x'],mini.bounding_box()['x']);self.assertLess(mini.bounding_box()['x'],maxi.bounding_box()['x'])
+   mini.click();self.assertEqual(mini.get_attribute('aria-label'),'Restore');self.assertEqual(mini.get_attribute('data-caption-action'),'minimize')
+   self.assertEqual(mini.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(254, 188, 46)');mini.click()
+   maxi.click();self.assertEqual(maxi.get_attribute('aria-label'),'Restore');self.assertEqual(maxi.get_attribute('data-caption-action'),'maximize')
+   self.assertEqual(maxi.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(40, 200, 64)');maxi.click()
+   self.page.mouse.move(1400,1650);self.page.screenshot(path=str(REPORT/(theme+'-caption-refinement.png')))
+   self.record(theme,captionPixels=[13,13],closeMinimizeMaximizeOrder=True,restoreActionIdentity=True)
+ def test_fluent_caption_hover_pressed_and_keyboard_ink(self):
+  for theme in ['fluent','fluent-dark']:
+   self.theme(theme);close=self.page.locator('.vb-form-title [data-caption-action="close"]').first
+   close.hover();self.assertEqual(close.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(196, 43, 28)')
+   self.assertEqual(close.evaluate('e=>getComputedStyle(e).color'),'rgb(255, 255, 255)')
+   self.assertEqual(close.locator('.icon').evaluate('e=>getComputedStyle(e,"::after").backgroundColor'),'rgb(255, 255, 255)')
+   self.page.mouse.down();self.assertEqual(close.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(169, 34, 22)')
+   self.page.mouse.move(1400,1650);self.page.mouse.up()
+   close.focus();self.page.keyboard.press('Tab');self.page.keyboard.press('Shift+Tab')
+   self.assertTrue(close.evaluate('e=>e.matches(":focus-visible")'));self.assertEqual(close.evaluate('e=>getComputedStyle(e).outlineStyle'),'solid')
+   self.record(theme,whiteCloseGlyphOnRedHover=True,pressedFeedback=True,keyboardFocus=True)
+ def test_chrome_flags_and_inactive_controls_do_not_reappear(self):
+  self.theme('macos26');title=self.page.locator('.vb-form-title').first
+  self.page.evaluate('()=>{const f=vb6Application.forms[0];f.props.MinButton=0;f.props.MaxButton=0;f.refresh();}')
+  for action in ['minimize','maximize']:
+   button=title.locator('[data-caption-action="'+action+'"]');self.assertTrue(button.is_disabled())
+   self.assertNotIn(button.evaluate('e=>getComputedStyle(e).backgroundColor'),['rgb(254, 188, 46)','rgb(40, 200, 64)'])
+  for border in [3,4,5]:
+   self.page.evaluate('b=>{const f=vb6Application.forms[0];f.props.BorderStyle=b;f.refresh();}',border)
+   self.assertFalse(title.locator('[data-caption-action="minimize"]').is_visible());self.assertFalse(title.locator('[data-caption-action="maximize"]').is_visible())
+  self.page.evaluate('()=>{const f=vb6Application.forms[0];f.props.ControlBox=0;f.refresh();}')
+  self.assertFalse(title.locator('[data-caption-action="close"]').is_visible());self.record('disabled, fixed dialog, tool window and ControlBox chrome flags')
+ def test_composite_edges_and_scrollbar_tokens_are_platform_local(self):
+  baseline=self.page.evaluate(BOUNDS)
+  for theme in ['classic',*THEMES]:
+   self.theme(theme);self.assertEqual(self.page.evaluate(BOUNDS),baseline)
+   edges=self.page.locator('.vb-tree').first.evaluate('e=>{const s=getComputedStyle(e);return [s.borderTopColor,s.borderRightColor,s.borderTopWidth];}')
+   self.assertEqual(edges[2],'2px')
+   if theme=='classic' or theme.startswith('x11'):self.assertNotEqual(edges[0],edges[1])
+   else:self.assertEqual(edges[0],edges[1])
+   root=self.page.locator('#app');self.assertEqual(root.evaluate('e=>getComputedStyle(e).getPropertyValue("--detail-scrollbar-radius").trim()'),'0px' if theme=='classic' or theme.startswith('x11') else '8px')
+   self.record(theme,compositeBoundsUnchanged=True,platformEdges=True)
+ def test_legacy_x11_runtime_theme_uses_canonical_palette_and_caption(self):
+  for legacy,current in [('x11-cde','x11'),('x11-cde-dark','x11-dark')]:
+   self.theme(legacy);self.assertEqual(self.page.locator('#app').get_attribute('data-vb-theme'),current)
+   self.assertEqual(set(self.active_pack(self.page.locator('.vb-tree').first)),{'x11'})
+   self.assertEqual(self.css('.vb-form-title','backgroundColor'),self.rgb(self.palettes[current]['colors']['title']))
+   self.record(legacy,canonical=current,captionContrast=True)
 if __name__=='__main__':unittest.main(verbosity=2)

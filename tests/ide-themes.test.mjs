@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import {IDE_THEMES,OPTIONAL_IDE_THEMES,IDE_THEME_ATTRIBUTES,ideThemeId,normalizeIdeAppearance,resolveIdeTheme,IdeThemeController,copyIdeThemeAttributes} from '../src/theme/ide-appearance.js';
 import {CLASSIC_THEMES,THEMES,SYSTEM_ROLES,themeId,colorValue} from '../src/theme/theme.js';
 import {renderIdeThemePalettes} from '../tools/ide-theme-css.mjs';
-const ids=['fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark','x11-cde','x11-cde-dark'];
+const ids=['fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark'];
 const luminance=hex=>hex.slice(1).match(/../g).map(v=>parseInt(v,16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((a,v,i)=>a+v*[.2126,.7152,.0722][i],0);
 const contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
 class Root extends EventTarget {constructor(){super();this.attributes=new Map();this.writes=0;}getAttribute(n){return this.attributes.get(n)??null;}setAttribute(n,v){this.writes++;this.attributes.set(n,v);}removeAttribute(n){this.attributes.delete(n);}}
@@ -14,7 +14,7 @@ test('optional IDE profiles share complete immutable application palettes, not s
  assert.deepEqual(Object.keys(OPTIONAL_IDE_THEMES),ids);
  assert.deepEqual(Object.keys(CLASSIC_THEMES),['classic','standard','contrast']);
  assert.deepEqual(Object.keys(THEMES),[...Object.keys(CLASSIC_THEMES),...ids]);
- assert.equal(Object.keys(IDE_THEMES).length,11);
+ assert.equal(Object.keys(IDE_THEMES).length,9);
  for(const [id,profile] of Object.entries(OPTIONAL_IDE_THEMES)){
   assert.equal(id,profile.id);assert.ok(Object.isFrozen(profile));assert.ok(Object.isFrozen(profile.colors));assert.ok(Object.isFrozen(profile.tokens));
   assert.deepEqual(Object.keys(profile.colors),Object.keys(THEMES.classic.colors));
@@ -70,7 +70,7 @@ test('root controller makes bounded changes, dispatches events, follows the OS a
 });
 test('detached windows copy all theme attributes and remove obsolete values',()=>{
  const doc=environment(),controller=new IdeThemeController(doc),target=new Root();
- controller.apply({theme:'x11-cde-dark',reduceMotion:true});copyIdeThemeAttributes(doc.documentElement,target);
+ controller.apply({theme:'x11-dark',reduceMotion:true});copyIdeThemeAttributes(doc.documentElement,target);
  for(const name of IDE_THEME_ATTRIBUTES) assert.equal(target.getAttribute(name),doc.documentElement.getAttribute(name));
  const writes=target.writes;copyIdeThemeAttributes(doc.documentElement,target);assert.equal(target.writes,writes);
  doc.documentElement.removeAttribute('data-ide-theme');copyIdeThemeAttributes(doc.documentElement,target);assert.equal(target.getAttribute('data-ide-theme'),null);

@@ -1,5 +1,5 @@
 import {compileProject} from '../language/compiler.js';
-import {layoutEnabled,layoutEligible,layoutDefaults,LAYOUT_CONSTANTS} from '../layout/contract.js';
+import {layoutEnabled,layoutEligible,layoutDefaults,layoutKey,LAYOUT_CONSTANTS} from '../layout/contract.js';
 import {nativeLayoutSeed} from './layout-seed.js';
 import {nativeLayoutCoreSource,NATIVE_LAYOUT_COLUMNS,NATIVE_LAYOUT_FIELDS} from './layout-core.js';
 const key=s=>String(s).toLowerCase(),lit=value=>({kind:'literal',value});
@@ -27,6 +27,7 @@ export const nativeLayoutMethods={
     if(object.form){if(['width','clientwidth'].includes(property))return 8;if(['height','clientheight'].includes(property))return 9;const allowed=layoutDefaults(object.form);if(!Object.keys(allowed).some(k=>key(k)===property))return undefined;}
     else if(!layoutEligible(object.model))return undefined;
     if(property==='visible')return undefined;
+    if(layoutKey(property)&&fields[property]===undefined)this.fail(property+': advanced auto layout requires the HTML/Electron target');
     return fields[property];
   },
   layoutType(node){
@@ -50,6 +51,7 @@ export const nativeLayoutMethods={
   getLayoutProperty(object,property){const field=this.layoutField(object,property);if(field===undefined)return false;this.ensure(object);this.invokeLayout('getvalue',[this.layoutNodeExpression(object),lit(field)]);if(enums.has(property))this.floatToInteger();return true;},
   setLayoutProperty(object,property,expr){
     const field=this.layoutField(object,property);if(field===undefined&&!(this.layoutModule&&!object.form&&layoutEligible(object.model)&&property==='visible'))return false;
+    const value=this.constant(expr);if(property==='layoutmode'&&value>3||property==='layoutgap'&&value<0||property==='layoutalign'&&value===4)this.fail(property+': advanced auto layout requires the HTML/Electron target');
     this.invokeLayout('setvalue',[this.layoutNodeExpression(object),lit(field??24),expr]);return true;
   },
   layoutMethod(object,method,args){

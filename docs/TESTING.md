@@ -80,13 +80,15 @@ python tools/browser-boundaries-06.py
 
 Historical suffixes in tool names do not make their current regression coverage
 obsolete. Keep tests that exercise existing behavior. The active browser matrix
-also exercises detached windows, IDE/application themes and exact downloaded
-sample and modular deployment exports. Run it locally in a POSIX shell with:
+also exercises detached windows, IDE/application themes, opt-in layout editing,
+and exact downloaded sample and modular deployment exports. Run it locally in a POSIX shell with:
 
 ```sh
 for engine in chromium firefox webkit; do
   VB6_BROWSER="$engine" npm run test:windows
   VB6_BROWSER="$engine" npm run test:themes:browser
+  VB6_BROWSER="$engine" npm run test:layout:browser
+  VB6_BROWSER="$engine" npm run test:layout:designer
   VB6_BROWSER="$engine" npm run test:application-themes:browser
   VB6_BROWSER="$engine" npm run test:sample-exports
   VB6_BROWSER="$engine" npm run test:exporter:browser
@@ -120,7 +122,7 @@ entry points, not a claim that every suite runs in CI:
 | Browser Win32 package | `npm run test:win32-browser` | `npm run test:win32-browser:browser`; [package contracts](../packages/win32-browser/README.md) |
 | Agents and sign-in | `npm run test:agents`; `npm run test:chatgpt` | `npm run test:agents:browser`; `npm run test:chatgpt:browser` |
 | MCP server | `npm run test:mcp` | `npm run test:mcp:browser`; `npm run test:mcp:agent` |
-| Layout extensions | `npm run test:layout` | `npm run test:layout:browser`; `npm run bench:layout` |
+| Layout extensions | `npm run test:layout`; `npm run pack:layout` | `npm run test:layout:browser`; `npm run test:layout:designer`; `npm run bench:layout`; [designer contracts](auto-layout-designer.md) |
 | Compute compiler/runtime | `npm run test:compute` | `npm run test:compute:browser`; [compute package](../packages/vb6-compute/README.md) |
 
 [Application export](APPLICATION-EXPORT.md) documents modular output, startup,

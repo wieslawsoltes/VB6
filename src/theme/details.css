@@ -1,0 +1,134 @@
+/* Shared fidelity refinements. Only browser-owned chrome is styled. Every paint
+ * token is rebound locally; no theme ancestor selector leaks across an app root.
+ * Existing title heights, form client coordinates and resize targets are kept.
+ */
+:is(.app-title,.document-title,.dialog-caption,.vb-form-title,.browser-window-caption) {
+ font-weight:var(--detail-caption-weight,700);
+}
+:is(.app-title-text,.document-title>strong,.dialog-caption>strong,.vb-form-title>.caption) {
+ text-align:var(--detail-title-align,start);min-width:0;
+}
+:is(.app-title,.document-title)>.window-buttons {
+ order:var(--detail-controls-order,0);gap:var(--detail-controls-gap,2px);align-items:center;flex:none;
+}
+.vb-form-title {gap:var(--detail-controls-gap,2px);}
+.vb-form-title>.vb-form-icon {display:var(--detail-system-icon-display,inline-flex);}
+/* Keep the functional document system-menu button, including on macOS. */
+.document-title>.mdi-system-menu {flex:none;}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) {
+ color:var(--detail-button-ink,var(--vb-text));text-shadow:none;
+ border-radius:var(--detail-button-radius,0)!important;
+}
+:is(.window-buttons button,.vb-form-title>.vb-window-button) {
+ width:var(--detail-button-width,16px)!important;min-width:var(--detail-button-width,16px)!important;
+}
+:is(.document-title>.window-buttons button,.vb-form-title>.vb-window-button) {
+ height:var(--detail-button-height,14px)!important;min-height:var(--detail-button-height,14px)!important;
+}
+.tool-caption>button {width:var(--detail-compact-width,14px)!important;min-width:var(--detail-compact-width,14px)!important;height:var(--detail-compact-height,14px)!important;min-height:var(--detail-compact-height,14px)!important;}
+.caption-close {width:var(--detail-button-width,16px)!important;min-width:var(--detail-button-width,16px)!important;height:var(--detail-button-height,16px)!important;min-height:var(--detail-button-height,16px)!important;}
+/* Attribute identity survives maximize/minimize -> Restore; glyph identity alone
+ * cannot distinguish the two restored commands. Legacy close-only hosts work too.
+ */
+:is(.window-buttons button,.vb-window-button,.tool-caption button,.caption-close,.command-floating-close):is([data-caption-action="close"],:has(>.icon[data-icon="close"])) {
+ --caption-rest:var(--detail-close-background);--caption-hover:var(--detail-close-hover);
+ --caption-pressed:var(--detail-close-pressed);--caption-hover-ink:var(--detail-close-hover-ink);
+ --caption-ink:var(--detail-action-ink);--caption-radius:var(--detail-action-radius);
+ --caption-shadow:var(--detail-action-shadow);--caption-glyph-opacity:var(--detail-action-glyph-opacity);
+ order:var(--detail-close-order,0);margin-inline-start:var(--detail-close-gap,2px);
+}
+:is(.window-buttons button,.vb-window-button,.tool-caption button):is([data-caption-action="minimize"],:has(>.icon[data-icon="minimize"])) {
+ --caption-rest:var(--detail-minimize-background);--caption-ink:var(--detail-action-ink);
+ --caption-radius:var(--detail-action-radius);--caption-shadow:var(--detail-action-shadow);
+ --caption-glyph-opacity:var(--detail-action-glyph-opacity);order:var(--detail-minimize-order,0);
+}
+:is(.window-buttons button,.vb-window-button):is([data-caption-action="maximize"],[aria-label="Maximize document"],[aria-label="Restore document"]:not([data-caption-action="minimize"])) {
+ --caption-rest:var(--detail-maximize-background);--caption-ink:var(--detail-action-ink);
+ --caption-radius:var(--detail-action-radius);--caption-shadow:var(--detail-action-shadow);
+ --caption-glyph-opacity:var(--detail-action-glyph-opacity);order:var(--detail-maximize-order,0);
+}
+@media(forced-colors:none) {
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) {
+  background:var(--caption-rest,var(--detail-button-background,var(--vb-face)))!important;
+  color:var(--caption-ink,var(--detail-button-ink,var(--vb-text)))!important;
+  border:var(--detail-button-border,0)!important;
+  border-radius:var(--caption-radius,var(--detail-button-radius,0))!important;
+  box-shadow:var(--caption-shadow,var(--detail-button-shadow,var(--vb-bevel-raised)))!important;
+  padding:0!important;filter:none;
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):hover:not(:disabled):not([aria-disabled=true]) {
+  background:var(--caption-hover,var(--caption-rest,var(--detail-button-hover,var(--vb-face))))!important;
+  color:var(--caption-hover-ink,var(--caption-ink,var(--detail-button-ink,var(--vb-text))))!important;
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):active:not(:disabled):not([aria-disabled=true]) {
+  background:var(--caption-pressed,var(--detail-button-pressed,var(--vb-face)))!important;
+  box-shadow:var(--detail-pressed-shadow,var(--vb-bevel-pressed))!important;
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):is(:disabled,[aria-disabled=true]) {
+  background:var(--detail-disabled-background,var(--vb-face))!important;color:var(--detail-disabled-ink,var(--vb-gray))!important;
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close)>.icon::after {
+  background:currentColor!important;
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close)>.icon {
+  opacity:var(--caption-visible,var(--caption-glyph-opacity,1));
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):is(:disabled,[aria-disabled=true])>.icon::before {
+  display:var(--detail-emboss-display,block);
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):active:not(:disabled):not([aria-disabled=true])>.icon,
+ :is(.window-buttons,.tool-caption) button[data-browser-detach]:active:not(:disabled)::after {
+  transform:translate(var(--detail-button-shift,1px),var(--detail-button-shift,1px));
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):focus-visible {
+  outline:var(--detail-focus-width,1px) var(--detail-focus-style,dotted) var(--detail-focus-color,var(--vb-text));outline-offset:1px;
+ }
+}
+/* Show real glyphs when discovering a caption with a pointer or keyboard.
+ * No fabricated OS Close/Minimize actions on the browser's application header.
+ */
+:is(.window-buttons,.vb-form-title,.tool-caption):is(:hover,:focus-within) {--caption-visible:1;}
+:is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close)[hidden] {display:none!important;}
+.vb-form-title>.vb-window-button:last-child {margin-inline-start:var(--detail-close-gap,2px);}
+/* Buttons remain functional and legible when a form/document loses activation. */
+:is(.vb-inactive>.vb-form-title,.mdi-window:not(.mdi-active)>.document-title) {
+ --detail-close-background:var(--detail-disabled-background);--detail-minimize-background:var(--detail-disabled-background);
+ --detail-maximize-background:var(--detail-disabled-background);
+}
+/* Consistent menus, disabled embossing, default/focus indicators, and check marks.
+ * No broad button background rule overrides authored BackColor/ForeColor.
+ */
+.classic-menu .menu-separator {border-bottom:var(--detail-menu-separator,1px solid var(--vb-light));}
+.classic-menu .popup-menu-item {border-radius:var(--detail-menu-radius,0);}
+.classic-menu .popup-menu-item.menu-selected:not([aria-disabled=true]) {box-shadow:var(--detail-menu-selected-shadow,none);}
+:where(.ide-shell,.ide-dialog,.vb-form,.vb-dialog) input[type=checkbox]:checked:not(:indeterminate)::after {
+ clip-path:var(--detail-check-clip);height:8px;
+}
+.vb-command.default-button {outline-color:var(--detail-focus-color,var(--vb-text));}
+.vb-command:focus::after {border-style:var(--detail-focus-style,dotted);}
+.vb-dialog-actions :is(button:focus-visible,.vb-default-button) {
+ outline:var(--detail-focus-width,1px) var(--detail-focus-style,dotted) var(--detail-focus-color,var(--vb-text));outline-offset:1px;
+}
+/* Restore square raised X11 scrollbars; optional skins no longer inherit the
+ * Classic checker track or Chromium's default arrows from another theme. */
+@media(forced-colors:none) {
+ *::-webkit-scrollbar {width:var(--detail-scrollbar-size,16px);height:var(--detail-scrollbar-size,16px);}
+ *::-webkit-scrollbar-track {background:var(--detail-scrollbar-track,var(--vb-face));}
+ *::-webkit-scrollbar-thumb {
+  background:var(--detail-scrollbar-thumb,var(--vb-face));border:var(--detail-scrollbar-border,0);
+  border-radius:var(--detail-scrollbar-radius,0);box-shadow:var(--detail-scrollbar-shadow,var(--vb-bevel-raised));
+ }
+ *::-webkit-scrollbar-button:single-button {display:var(--detail-scrollbar-buttons,block);}
+}
+@media(forced-colors:active) {
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close) {
+  forced-color-adjust:none;background:ButtonFace!important;color:ButtonText!important;border:1px solid ButtonText!important;
+  box-shadow:none!important;
+ }
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close)>.icon {opacity:1;}
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close)>.icon::after {background:currentColor!important;}
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close)>.icon::before {display:none!important;}
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):is(:disabled,[aria-disabled=true]) {color:GrayText!important;}
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):focus-visible,
+ .vb-dialog-actions :is(button:focus-visible,.vb-default-button) {outline:2px solid Highlight;outline-offset:1px;}
+}

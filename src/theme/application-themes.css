@@ -21,6 +21,7 @@
 .vb-command:focus::after {border-color:var(--app-focus,var(--vb-text));border-radius:var(--app-radius,0);}
 .vb-frame {border-color:var(--app-border,var(--vb-shadow));border-radius:var(--app-radius,0);}
 .vb-picture,.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-radius:var(--app-radius,0);}
+.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-color:var(--app-composite-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
 .vb-tree-toggle {border-radius:var(--app-radius,0);border-color:var(--app-border,var(--vb-shadow));}
 .vb-check input {border-radius:var(--app-radius,0);}
 .vb-check input[type=radio] {border-radius:var(--app-radio-radius,50%);}
@@ -71,7 +72,7 @@
  .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]),.vb-control textarea,.vb-control select,.vb-dialog input:not([type=checkbox]):not([type=radio]) {box-shadow:var(--app-input-shadow,var(--vb-bevel-sunken));}
  .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,.vb-control textarea:focus-visible,.vb-control select:focus-visible {box-shadow:var(--app-hover-shadow,var(--vb-bevel-sunken));}
  .vb-control :is(input,textarea):read-only {outline-color:var(--app-border,var(--vb-shadow));}
- .vb-form ::-webkit-scrollbar-thumb,.vb-dialog ::-webkit-scrollbar-thumb,.vb-combo-popup::-webkit-scrollbar-thumb {border-radius:var(--app-radius,0);background:var(--app-thumb,var(--vb-face));box-shadow:var(--app-control-shadow,var(--vb-bevel-raised));}
+ .vb-form ::-webkit-scrollbar-thumb,.vb-dialog ::-webkit-scrollbar-thumb,.vb-combo-popup::-webkit-scrollbar-thumb {border-radius:var(--detail-scrollbar-radius,0);border:var(--detail-scrollbar-border,0);background:var(--detail-scrollbar-thumb,var(--vb-face));box-shadow:var(--detail-scrollbar-shadow,var(--vb-bevel-raised));}
 }
 /* Only optional palettes use material effects. They do not alter content or
  * authored fonts/images. No backdrop blur is applied to editor or drawing data. */

@@ -1,3 +1,6 @@
+import {parseDeclarations,parseParameters,parseProcedureHeader} from './declarations.js';
+import {parseIfHeader,inlineElse} from './statement-syntax.js';
+import {findKeyword,statementParts} from './source-scanner.js';
 import {layoutBindingSnapshot,validateLayoutMembers} from '../layout/language-gate.js';
 import {validateLayout} from '../layout/contract.js';
 import {bindConstants} from './binding.js';
@@ -10,42 +13,11 @@ import { lower } from '../core/core.js';
 
 const E = text => parseExpression(text);
 const suffixType = defaultIdentifierType;
-export function parseDeclarations(text, isConst = false, defaultTypes = {}) {
-  return splitTop(text).map(part => {
-    const withEvents=/^WithEvents\s+/i.test(part);part=part.replace(/^WithEvents\s+/i,'');
-    const m=part.match(/^([A-Za-z_]\w*[$%&!#@]?)(?:\s*\((.*?)\))?\s*(?:As\s+(New\s+)?([\w.]+)(?:\s*\*\s*(\d+))?)?\s*(?:=\s*(.+))?$/i);
-    if(!m)throw new VBError(`Invalid declaration: ${part}`,1002);
-    if(isConst&&(!m[6]||m[2]!==undefined||m[3]||m[5]))throw new VBError('Constant expression required',1002);
-    if(/^Decimal$/i.test(m[4]||''))throw new VBError('Decimal is a Variant subtype; use CDec instead of As Decimal',1002);
-    const bounds=m[2]===undefined?null:m[2].trim()===''?[]:splitTop(m[2]).map(b=>{const r=b.split(/\s+To\s+/i);return r.length===2?[E(r[0]),E(r[1])]:[null,E(r[0])];});
-    if(withEvents&&(bounds!==null||m[3]||isConst))throw new VBError('WithEvents cannot be combined with arrays, New, or Const',1002);
-    return {withEvents,name:m[1],type:m[4]||suffixType(m[1],defaultTypes),explicitType:!!m[4]||/[$%&!#@]$/.test(m[1]),autoNew:!!m[3],fixedLength:m[5]?Number(m[5]):null,bounds,constant:isConst,initial:m[6]?E(m[6]):null};
-  });
-}
-export function parseParameters(text,defaultTypes={}) {
-  if(!text.trim())return [];
-  const params=splitTop(text).map(part=>{
-    let optional=false,byRef=true,paramArray=false;const modifiers=new Set();
-    while(true){const m=part.match(/^(Optional|ByVal|ByRef|ParamArray)\b\s*/i);if(!m)break;
-      const key=lower(m[1]);if(modifiers.has(key)||(['byval','byref'].includes(key)&&[...modifiers].some(v=>['byval','byref'].includes(v))))throw new VBError('Invalid parameter modifier',1002);
-      modifiers.add(key);if(key==='optional')optional=true;if(key==='byval')byRef=false;if(key==='paramarray'){paramArray=true;byRef=false;}part=part.slice(m[0].length);
-    }
-    const decl=parseDeclarations(part,false,defaultTypes)[0];return {...decl,optional,byRef,paramArray};
-  });
-  let optionalSeen=false;const names=new Set();
-  for(let i=0;i<params.length;i++){const p=params[i],key=lower(p.name);if(names.has(key))throw new VBError('Duplicate parameter: '+p.name,1002);names.add(key);
-    if(p.paramArray){if(i!==params.length-1||p.optional||p.bounds?.length!==0||lower(p.type)!=='variant'||p.initial)throw new VBError('ParamArray must be the final Variant array parameter',1002);}
-    else if(optionalSeen&&!p.optional)throw new VBError('Required parameter cannot follow Optional parameter',1002);
-    if(p.initial&&!p.optional)throw new VBError('Default value requires Optional',1002);
-    if(p.autoNew||p.fixedLength)throw new VBError('Invalid procedure parameter declaration',1002);
-    optionalSeen ||= p.optional;
-  }
-  return params;
-}
+export {parseDeclarations,parseParameters};
 
 const DEBUG_SOURCE_LINES=new WeakMap();
 class ProcedureCompiler {
-  constructor(proc,module) { this.proc=proc;this.module=module;this.code=[];this.blocks=[];this.labels=new Map();this.patches=[];this.temp=0;this.debugStatement=null;this.debugColumns=new Map();if(!DEBUG_SOURCE_LINES.has(module))DEBUG_SOURCE_LINES.set(module,module.source.replace(/\r\n?/g,'\n').split('\n'));this.sourceLines=DEBUG_SOURCE_LINES.get(module); }
+  constructor(proc,module) { this.proc=proc;this.module=module;this.code=[];this.blocks=[];this.labels=new Map();this.patches=[];this.temp=0;this.debugStatement=null;this.statementDepth=0;this.debugColumns=new Map();if(!DEBUG_SOURCE_LINES.has(module))DEBUG_SOURCE_LINES.set(module,module.source.replace(/\r\n?/g,'\n').split('\n'));this.sourceLines=DEBUG_SOURCE_LINES.get(module); }
   emit(op,data={},line=0){
     const index=this.code.length,statement=this.debugStatement;
     // A VB statement may lower to several instructions. Only its first visible
@@ -69,6 +41,8 @@ class ProcedureCompiler {
   }
   label(name,line){const key=/^\d+$/.test(name)?String(Number(name)):lower(name);if(this.labels.has(key))throw new VBError(`Duplicate label: ${name}`,1002,this.module.name,line);this.labels.set(key,this.code.length);if(/^\d+$/.test(name)){const number=Number(name);if(number>65535)throw new VBError('Line number must be between 0 and 65535',1002,this.module.name,line);this.emit('lineNumber',{number,implicit:true},line);}}
   statement(original,line,column=null) {
+    if(this.statementDepth>=128)throw new VBError('Statement nesting limit exceeded',1002,this.module.name,line);
+    this.statementDepth++;
     const previous=this.debugStatement,text=original.trim(),source=this.sourceLines[line-1]||'';
     const offset=column===null?source.indexOf(text,this.debugColumns.get(line)||0):column-1;
     // Continued statements keep their physical starting line; do not invent a
@@ -76,43 +50,43 @@ class ProcedureCompiler {
     const found=offset>=0&&source.slice(offset,offset+text.length)===text;
     this.debugStatement={emitted:false,column:found?offset+1:null,endColumn:found?offset+text.length+1:null};
     if(column===null&&found)this.debugColumns.set(line,offset+text.length);
-    try{return this.compileStatement(original,line);}finally{this.debugStatement=previous;}
+    try{return this.compileStatement(original,line);}finally{this.debugStatement=previous;this.statementDepth--;}
   }
   compileStatement(original,line) {
     let text=original.trim(),m;
     if(!text||/^Rem\b/i.test(text))return;
     if(/^\d+$/.test(text)){const index=this.jump(null,line);this.patches.push({index,label:text});return;}
-    if((m=text.match(/^If\s+(.+?)\s+Then\s*(.*)$/i))) {
-      const index=this.emit('branch',{test:E(m[1]),target:null},line);
-      if(m[2]){
-        const p=new RegExp('\\bElse\\b','ig');let match,at=-1,quoted=false;
-        // Use tokens to distinguish an Else keyword from string contents.
-        const ts=tokenize(m[2]);const et=ts.find(t=>t.type==='id'&&lower(t.value)==='else');if(et)at=et.start;
-        const yes=at<0?m[2]:m[2].slice(0,at), no=at<0?'':m[2].slice(at+4);
-        const origin=this.debugStatement.column,bodyOffset=text.length-m[2].length;
+    if(/^If\b/i.test(text)) {
+      const header=parseIfHeader(text),index=this.emit('branch',{test:E(header.condition),target:null},line);
+      if(header.body){
+        const delimiter=inlineElse(header.body),at=delimiter?.start??-1;
+        const yes=at<0?header.body:header.body.slice(0,at),no=at<0?'':header.body.slice(delimiter.end);
+        const origin=this.debugStatement.column,bodyOffset=header.bodyStart;
         if(origin)this.code[index].endColumn=origin+bodyOffset;
-        const compileParts=(body,offset)=>{let cursor=0;for(const s of splitTop(body,':')){const at=body.indexOf(s,cursor);this.statement(s,line,origin===null?null:origin+offset+at);cursor=at+s.length;}};
+        const compileParts=(body,offset)=>{for(const part of statementParts(body))this.statement(part.text,line,origin===null?null:origin+offset+part.start);};
+        const blocks=this.blocks.length;
         compileParts(yes,bodyOffset);
-        if(no){const end=this.jump(null,line,true);this.patch(index,this.code.length);compileParts(no,bodyOffset+at+4);this.patch(end,this.code.length);}else this.patch(index,this.code.length);
-      }else this.blocks.push({type:'If',pending:index,ends:[]});
+        if(at>=0){const end=this.jump(null,line,true);this.patch(index,this.code.length);compileParts(no,bodyOffset+delimiter.end);this.patch(end,this.code.length);}else this.patch(index,this.code.length);
+        if(this.blocks.length!==blocks)throw new VBError('Block statement is not permitted within a single-line If',1002);
+      }else this.blocks.push({type:'If',pending:index,ends:[],hadElse:false});
       return;
     }
-    if((m=text.match(/^ElseIf\s+(.+?)\s+Then$/i))){const b=this.block('If',line);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=this.emit('branch',{test:E(m[1]),target:null},line);return;}
-    if(/^Else$/i.test(text)){const b=this.block('If',line);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=null;return;}
+    if(/^ElseIf\b/i.test(text)){const b=this.block('If',line);if(b.hadElse)throw new VBError('ElseIf cannot follow Else',1002);const header=parseIfHeader(text);if(header.body)throw new VBError('Unexpected statement after ElseIf Then',1002);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=this.emit('branch',{test:E(header.condition),target:null},line);return;}
+    if(/^Else$/i.test(text)){const b=this.block('If',line);if(b.hadElse)throw new VBError('Duplicate Else',1002);b.hadElse=true;b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=null;return;}
     if(/^End\s*If$/i.test(text)){const b=this.block('If',line);if(b.pending!=null)this.patch(b.pending,this.code.length);for(const i of b.ends)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^For\s+Each\s+(\w+)\s+In\s+(.+)$/i))){const id=`$each${this.temp++}`,index=this.emit('eachInit',{name:m[1],expr:E(m[2]),id,target:null},line);this.blocks.push({type:'For',kind:'each',id,index,start:this.code.length,name:m[1],exits:[]});return;}
     if((m=text.match(/^For\s+([\w.$%&!#@]+)\s*=\s*(.+?)\s+To\s+(.+?)(?:\s+Step\s+(.+))?$/i))){const id=`$for${this.temp++}`,index=this.emit('forInit',{name:m[1],start:E(m[2]),end:E(m[3]),step:E(m[4]||'1'),id,target:null},line);this.blocks.push({type:'For',kind:'numeric',id,index,start:this.code.length,name:m[1],exits:[]});return;}
     if((m=text.match(/^Next(?:\s+(.+))?$/i))){const names=m[1]?splitTop(m[1]):[''];for(const name of names){const b=this.block('For',line);if(name&&lower(name)!==lower(b.name))throw new VBError('Next control variable does not match For',1002);this.emit(b.kind==='each'?'eachNext':'forNext',{id:b.id,target:b.start},line);this.patch(b.index,this.code.length);for(const i of b.exits)this.patch(i,this.code.length);this.blocks.pop();}return;}
     if((m=text.match(/^Do(?:\s+(While|Until)\s+(.+))?$/i))){const b={type:'Do',start:this.code.length,exits:[]};if(m[1])b.test=this.emit('branch',{test:E(m[2]),invert:/until/i.test(m[1]),target:null},line);this.blocks.push(b);return;}
-    if((m=text.match(/^Loop(?:\s+(While|Until)\s+(.+))?$/i))){const b=this.block('Do',line);if(m[1]){const end=this.emit('branch',{test:E(m[2]),invert:/until/i.test(m[1]),target:null},line);this.jump(b.start,line);this.patch(end,this.code.length);}else this.jump(b.start,line);if(b.test!=null)this.patch(b.test,this.code.length);for(const i of b.exits)this.patch(i,this.code.length);this.blocks.pop();return;}
+    if((m=text.match(/^Loop(?:\s+(While|Until)\s+(.+))?$/i))){const b=this.block('Do',line);if(m[1]&&b.test!=null)throw new VBError('Do and Loop cannot both specify a condition',1002);if(m[1]){const end=this.emit('branch',{test:E(m[2]),invert:/until/i.test(m[1]),target:null},line);this.jump(b.start,line);this.patch(end,this.code.length);}else this.jump(b.start,line);if(b.test!=null)this.patch(b.test,this.code.length);for(const i of b.exits)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^While\s+(.+)$/i))){const start=this.code.length,test=this.emit('branch',{test:E(m[1]),target:null},line);this.blocks.push({type:'While',start,test,exits:[]});return;}
     if(/^Wend$/i.test(text)){const b=this.block('While',line);this.jump(b.start,line);this.patch(b.test,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^Select\s+Case\s+(.+)$/i))){const id=`$select${this.temp++}`;this.emit('temp',{id,expr:E(m[1])},line);this.blocks.push({type:'Select',id,pending:null,ends:[],hasCase:false});return;}
-    if((m=text.match(/^Case\s+(.+)$/i))){const b=this.block('Select',line);if(b.hasCase)b.ends.push(this.jump(null,line,true));if(b.pending!=null)this.patch(b.pending,this.code.length);b.hasCase=true;if(/^Else$/i.test(m[1]))b.pending=null;else {const cases=splitTop(m[1]).map(s=>{const r=s.match(/^(.+)\s+To\s+(.+)$/i),c=s.match(/^Is\s*(<=|>=|<>|=|<|>)\s*(.+)$/i);return r?{kind:'range',low:E(r[1]),high:E(r[2])}:c?{kind:'compare',op:c[1],expr:E(c[2])}:{kind:'value',expr:E(s)};});b.pending=this.emit('case',{id:b.id,cases,target:null},line);}return;}
+    if((m=text.match(/^Case\s+(.+)$/i))){const b=this.block('Select',line);if(b.hadElse)throw new VBError('Case cannot follow Case Else',1002);if(b.hasCase)b.ends.push(this.jump(null,line,true));if(b.pending!=null)this.patch(b.pending,this.code.length);b.hasCase=true;if(/^Else$/i.test(m[1])){b.pending=null;b.hadElse=true;}else {const cases=splitTop(m[1]).map(s=>{const to=findKeyword(s,'to'),r=to?[s,s.slice(0,to.start),s.slice(to.end)]:null,c=s.match(/^Is\s*(<=|>=|<>|=|<|>)\s*(.+)$/i);return r?{kind:'range',low:E(r[1]),high:E(r[2])}:c?{kind:'compare',op:c[1],expr:E(c[2])}:{kind:'value',expr:E(s)};});b.pending=this.emit('case',{id:b.id,cases,target:null},line);}return;}
     if(/^End\s+Select$/i.test(text)){const b=this.block('Select',line);if(b.pending!=null)this.patch(b.pending,this.code.length);for(const i of b.ends)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^With\s+(.+)$/i))){this.emit('withPush',{expr:E(m[1])},line);this.blocks.push({type:'With'});return;}
     if(/^End\s+With$/i.test(text)){this.block('With',line);this.emit('withPop',{},line);this.blocks.pop();return;}
-    if((m=text.match(/^Exit\s+(Sub|Function|Property|For|Do)\b/i))){if(/^(Sub|Function|Property)$/i.test(m[1]))this.emit('return',{},line);else{const type=m[1].toLowerCase()==='for'?'For':'Do',b=[...this.blocks].reverse().find(b=>b.type===type);if(!b)throw new VBError(`Exit ${m[1]} outside block`,1002);const inner=this.blocks.slice(this.blocks.indexOf(b)+1).filter(x=>x.type==='With').length;if(inner)this.emit('withUnwind',{count:inner},line);b.exits.push(this.jump(null,line));}return;}
+    if((m=text.match(/^Exit\s+(Sub|Function|Property|For|Do)$/i))){if(/^(Sub|Function|Property)$/i.test(m[1])){if(lower(m[1])!==this.proc.kind)throw new VBError('Exit '+m[1]+' does not match enclosing procedure',1002);this.emit('return',{},line);}else{const type=m[1].toLowerCase()==='for'?'For':'Do',b=[...this.blocks].reverse().find(b=>b.type===type);if(!b)throw new VBError(`Exit ${m[1]} outside block`,1002);const inner=this.blocks.slice(this.blocks.indexOf(b)+1).filter(x=>x.type==='With').length;if(inner)this.emit('withUnwind',{count:inner},line);b.exits.push(this.jump(null,line));}return;}
     if((m=text.match(/^(Dim|Static|Private|Public)\s+(.+)$/i))){this.emit('dim',{decls:parseDeclarations(m[2],false,this.module.defaultTypes).map(d=>{if(d.withEvents)throw new VBError('WithEvents is valid only at class or form module level',1002);return d;}),static:/static/i.test(m[1])},line);return;}
     if((m=text.match(/^Const\s+(.+)$/i))){this.emit('dim',{decls:parseDeclarations(m[1],true,this.module.defaultTypes)},line);return;}
     if((m=text.match(/^ReDim\s+(Preserve\s+)?(.+)$/i))){this.emit('redim',{decls:parseDeclarations(m[2],false,this.module.defaultTypes),preserve:!!m[1]},line);return;}
@@ -139,8 +113,8 @@ class ProcedureCompiler {
     if((m=text.match(/^(Get|Put)\s+#?([^,]+),\s*([^,]*),\s*(.+)$/i))){const target=E(m[4]);if(!['id','member','call'].includes(target.kind))throw new VBError('Get/Put requires a variable',1002);this.emit('fileRecord',{action:m[1].toLowerCase(),handle:E(m[2]),position:m[3].trim()?E(m[3]):null,target},line);return;}
     if((m=text.match(/^Seek\s+#?([^,]+),\s*(.+)$/i))){this.emit('fileSeek',{handle:E(m[1]),position:E(m[2])},line);return;}
     if((m=text.match(/^(Lock|Unlock)\s+#?([^,]+)(?:,\s*(.+?)(?:\s+To\s+(.+))?)?$/i))){this.emit('fileLock',{unlock:/unlock/i.test(m[1]),handle:E(m[2]),start:m[3]?E(m[3]):null,end:m[4]?E(m[4]):null},line);return;}
-    if((m=text.match(/^FileCopy\s+(.+?),\s*(.+)$/i))){this.emit('fileCopy',{sourcePath:E(m[1]),destination:E(m[2])},line);return;}
-    if((m=text.match(/^Name\s+(.+?)\s+As\s+(.+)$/i))){this.emit('fileRename',{sourcePath:E(m[1]),destination:E(m[2])},line);return;}
+    if((m=text.match(/^FileCopy\s+(.+)$/i))){const parts=splitTop(m[1]);if(parts.length!==2)throw new VBError('FileCopy requires source and destination',1002);this.emit('fileCopy',{sourcePath:E(parts[0]),destination:E(parts[1])},line);return;}
+    if(/^Name\s+/i.test(text)&&!/^Name\s*[=(.!]/i.test(text)){const as=findKeyword(text,'as',4);if(!as)throw new VBError('Expected As in Name statement',1002);this.emit('fileRename',{sourcePath:E(text.slice(4,as.start)),destination:E(text.slice(as.end))},line);return;}
     if((m=text.match(/^Close(?:\s+(.+))?$/i))){this.emit('fileClose',{handles:m[1]?splitTop(m[1]).map(s=>E(s.replace(/^#/,''))):[]},line);return;}
     if((m=text.match(/^(Print|Write)\s+#([^,]+),?\s*(.*)$/i))){this.emit('filePrint',{handle:E(m[2]),exprs:splitTop(m[3],/Write/i.test(m[1])?',':';').filter(Boolean).map(E),csv:/Write/i.test(m[1]),newline:!m[3].endsWith(';')},line);return;}
     if((m=text.match(/^(Line\s+Input|Input)\s+#([^,]+),\s*(.+)$/i))){this.emit('fileInput',{handle:E(m[2]),targets:splitTop(m[3]).map(E),whole:/Line/i.test(m[1])},line);return;}
@@ -154,7 +128,7 @@ class ProcedureCompiler {
       const tokens=tokenize(text);let level=0,equal;for(const t of tokens){if(t.value==='(')level++;else if(t.value===')')level--;else if(t.value==='='&&level===0){equal=t;break;}}
       if(equal){const call=E(text.slice(0,equal.start));if(call.kind!=='call'||call.args.length<2||call.args.length>3||!['id','member','call'].includes(call.args[0].kind)||call.args.some(a=>['missing','named'].includes(a.kind)))throw new VBError('Invalid Mid assignment',1002);this.emit('stringMid',{target:call.args[0],start:call.args[1],length:call.args[2],expr:E(text.slice(equal.end))},line);return;}
     }
-    if(/^(Declare|Implements|Get\s+#|Put\s+#|SetAttr|FileCopy|Name\s+.+\s+As|#If|#Else|#End)/i.test(text))throw new VBError(`Unsupported statement: ${text.split(/\s/)[0]}`,445);
+    if(/^(Declare|Implements|Get\s+#|Put\s+#|SetAttr|FileCopy|#If|#Else|#End)/i.test(text))throw new VBError(`Unsupported statement: ${text.split(/\s/)[0]}`,445);
     text=text.replace(/^(Let|Set)\s+/i,'');
     const ts=tokenize(text);let depth=0,eq=null;
     for(const t of ts){if(t.value==='(')depth++;else if(t.value===')')depth--;else if(t.value==='='&&depth===0){eq=t;break;}}
@@ -177,7 +151,7 @@ export function compileModule(input) {
       if((m=text.match(/^Implements\s+([A-Za-z_]\w*)$/i))){if(module.kind==='module')throw new VBError('Implements is valid only in a class or form module',1002);if(module.interfaces.some(i=>lower(i.name)===lower(m[1])))throw new VBError('Duplicate implemented interface: '+m[1],1002);module.interfaces.push({name:m[1],line});continue;}
       if((m=text.match(/^Option\s+(Explicit|Base\s+[01]|Compare\s+(?:Text|Binary))$/i))){if(/^Explicit/i.test(m[1]))module.optionExplicit=true;else if(/^Base/i.test(m[1]))module.optionBase=Number(m[1].at(-1));else module.optionCompare=m[1].split(/\s+/)[1].toLowerCase();continue;}
       if(/^(Attribute\s+VB_|VERSION\s+|BEGIN$|END$|MultiUse\s*=|Persistable\s*=|DataBindingBehavior\s*=|DataSourceBehavior\s*=|MTSTransactionMode\s*=)/i.test(text))continue;
-      if((m=text.match(/^(?:(Public\s+Static|Private\s+Static|Friend\s+Static|Public|Private|Friend|Static)\s+)?(Sub|Function|Property\s+(Get|Let|Set))\s+([A-Za-z_]\w*[$%&!#@]?)\s*\((.*)\)\s*(?:As\s+(\w+))?$/i))){const kind=/^Property/i.test(m[2])?'property':m[2].toLowerCase();current={name:m[4],kind,accessor:m[3]?.toLowerCase(),scope:(m[1]?.toLowerCase().split(/\s+/)[0]==='static'?'public':m[1]?.toLowerCase().split(/\s+/)[0])||'public',static:/static/i.test(m[1]||''),params:parseParameters(m[5],module.defaultTypes),returnType:m[6]||suffixType(m[4],module.defaultTypes),line,source:module.name};continue;}
+      const header=parseProcedureHeader(text,module.defaultTypes);if(header){if(header.scope==='friend'&&module.kind==='module')throw new VBError('Friend procedures are valid only in object modules',1002);current={...header,line,source:module.name};continue;}
       if((m=text.match(/^(?:(Public|Private|Global)\s+)?Const\s+(.+)$/i))){module.declarations.push(...parseDeclarations(m[2],true,module.defaultTypes).map(d=>({...d,line,scope:lower(m[1]||'private')})));continue;}
       if((m=text.match(/^(?:Public|Private|Global|Dim)\s+(.+)$/i))){if(/^(Enum|Type|Event|Declare)\b/i.test(m[1])){/* handled below */}else{module.declarations.push(...parseDeclarations(m[1],false,module.defaultTypes).map(d=>{if(d.withEvents&&module.kind==='module')throw new VBError('WithEvents is valid only in class and form modules',1002);return {...d,line,scope:/^(Public|Global)\b/i.test(text)?'public':'private'};}));continue;}}
       if((m=text.match(/^(?:(Public|Private)\s+)?Enum\s+(\w+)$/i))){if(Object.keys(module.enums).some(n=>lower(n)===lower(m[2])))throw new VBError('Ambiguous enum name: '+m[2],1002);enumState={name:m[2],scope:lower(m[1]||'public'),previous:null};module.enums[m[2]]={name:m[2],scope:enumState.scope,members:[]};continue;}

@@ -17,6 +17,7 @@ These guides describe the implemented system, not complete native VB6 parity.
 
 ## Language, runtime and project files
 
+- [Language frontend](LANGUAGE-FRONTEND.md): scanning, declarations and diagnostics.
 - [Compiler/runtime](COMPILER-RUNTIME.md) and [scalar/Variant semantics](SCALAR-COMPATIBILITY.md).
 - [Source debugger](DEBUGGER.md), [extended debugger contracts](DEBUGGER-COMPATIBILITY.md),
   [native break lifecycle](NATIVE-DEBUGGER-BREAK-LIFECYCLE.md) and
@@ -29,6 +30,8 @@ These guides describe the implemented system, not complete native VB6 parity.
 ## IDE, appearance and rendering
 
 - [IntelliSense](INTELLISENSE.md) and [resolution/reference contracts](INTELLISENSE-COMPATIBILITY.md).
+- [Auto Layout designer](auto-layout-designer.md): opt-in panel, canvas interaction,
+  shared solver and export boundaries.
 - [Detached browser windows](BROWSER-WINDOWS.md).
 - [IDE themes](IDE-THEMES.md), [application themes](APPLICATION-THEMES.md) and
   [matching icon packs](THEME-ICON-PACKS.md).

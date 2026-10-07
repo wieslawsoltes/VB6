@@ -74,5 +74,5 @@ test('property updates preserve graph buffers and child baselines; failures are 
  const e=new LayoutEngine([{id:1,bounds:{x:0,y:0,width:100,height:100}},{id:2,parent:1,bounds:{x:10,y:10,width:20,height:20},anchor:10}],{width:200,height:200}),result=e.arrange(),rects=result.rects,graph=e.children;
  e.update(1,{bounds:{width:150}}).arrange();assert.equal(e.arrange(),result);assert.equal(e.rects,rects);assert.equal(e.children,graph);assert.equal(e.getBounds(2).x,60);assert.equal(result.changedCount,0);
  assert.throws(()=>e.update(1,{minWidth:900,maxWidth:800}));e.arrange();assert.equal(e.getBounds(1).width,150);
- e.configure({layout:'Horizontal',gap:5}).arrange();assert.equal(e.rects,rects);assert.throws(()=>e.configure({gap:-1}));assert.equal(e.options.gap,5);
+ e.configure({layout:'Horizontal',gap:5}).arrange();assert.equal(e.rects,rects);assert.throws(()=>e.configure({gap:NaN}));assert.equal(e.options.gap,5);
 });

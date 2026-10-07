@@ -11,12 +11,11 @@ workspaces. No account, network request, additional font, or dependency is neede
 | --- | --- | --- |
 | Fluent WinUI 3 | `fluent` | `fluent-dark` |
 | macOS 26 | `macos26` | `macos26-dark` |
-| X11 Motif | `x11` | `x11-dark` |
-| X11 CDE | `x11-cde` | `x11-cde-dark` |
+| X11 | `x11` | `x11-dark` |
 
 Windows Classic, Windows Standard (2000), and High Contrast Black remain
 available as before. X11 itself is a windowing protocol rather than a single
-visual design: Motif and CDE are explicit X11-style choices, not a claim to
+visual design: the single X11 family uses a restrained Motif-style look, not a claim to
 reproduce every Linux desktop or window-manager theme.
 
 **Follow system light/dark appearance** resolves the selected optional family to
@@ -59,7 +58,7 @@ light/dark resolution; returning them to the IDE retains their view state.
 ## Application and native-platform boundaries
 
 **IDE theme does not change Application theme.** Applications now offer the same
-eight optional variants alongside the three Classic palettes, with independent
+six optional variants alongside the three Classic palettes, with independent
 project-owned settings. See [application themes](APPLICATION-THEMES.md). Authored forms and controls
 retain their VB6 fonts, colors, sizes and relative coordinates. Property color
 swatches resolve system colors using the application palette even when the
@@ -95,7 +94,7 @@ SF Symbols or proprietary artwork are redistributed.
   selected theme. MCP configuration continues to require the ordinary permission
   and revision checks; this does not expose any new permission-control route.
 
-The shared `THEMES` registry now contains all eleven profiles. Application and
+The shared `THEMES` registry now contains all nine profiles. Application and
 IDE component skins and preference controllers remain independently scoped.
 The build includes application skins and matching icon packs in runtime outputs
 as well as the IDE, and verifies the same fingerprint manifest as other changes. To author new output fingerprints locally,
@@ -122,7 +121,7 @@ light/dark pairs, bounded updates, BFCache/listener lifetime, detached attribute
 deterministic generation and IDE/application isolation. MCP tests cover theme preference
 preservation and normal authority/revision rejection.
 
-The browser suite exercises all eight choices through Options, transactional
+The browser suite exercises all six optional choices through Options, transactional
 Cancel, authored form/descendant computed styles and geometry, unchanged project
 and undo state, workspace persistence/reload, standalone file startup, all family
 system pairs, reduced effects/forced colors, source overlay transparency and
@@ -164,3 +163,43 @@ forced-colors media emulation reports an explicit skip, not a successful paint t
 The browser suite additionally checks primary-button focus contrast, pressed text,
 checked keyboard focus, disabled commands, all eight New Project selection states,
 keyboard selection, forced-color labels/select arrows, and unchanged project data.
+
+## Fidelity and compatibility maintenance
+
+The canonical Linux family is **X11**, with light and dark appearances. Existing
+`x11-cde` and `x11-cde-dark` preferences normalize to `x11` and `x11-dark` when
+loaded; they are not additional menu choices or duplicated icon packs. Effect
+preferences and the independent application theme survive migration.
+
+Shared `details.css` paint is parameterized by `theme-detail-css.mjs` and rebound
+at every IDE, preview, popup and application boundary. This keeps Classic app
+forms Classic inside a modern IDE, and the reverse. It changes no authored
+client/control bounds, fonts, images, RGB colors, control identity or VM state.
+
+Classic retains its bitmap caption masks, squared raised/sunken edges, compact
+metrics and disabled embossing, with a stepped checkbox mark and consistent
+default/focus cues. Fluent captions use flat hit areas and distinct close hover
+and pressed colors. macOS captions use left-hand red/yellow/green controls,
+13-pixel document/form buttons and 12-pixel tool buttons, with glyph discovery
+on hover or keyboard focus. X11 keeps square relief, Motif-style minimize and
+maximize glyphs, centered captions and squared scrollbars. Light/dark, inactive,
+disabled, hidden and forced-color states use the same shared rules.
+
+Caption buttons carry `data-caption-action` so a minimized window's **Restore**
+command remains the minimize control, not the maximize control merely because
+they share a restore glyph. Hidden ControlBox/MinButton/MaxButton and tool-window
+constraints still come from the original window model. Browser headers expose
+only actions the application can actually perform; no fake OS close buttons
+are added. Native detached-window outer decorations remain OS/browser owned.
+
+These are compact browser-rendered platform interpretations, not native toolkit
+or pixel-equivalence certification. Platform guidance informs paint and state
+treatment, while the existing VB6 layout and authored client coordinates take
+precedence over enlarging the UI to modern native metrics. Reference guidance:
+[Microsoft title-bar design](https://learn.microsoft.com/en-us/windows/apps/design/basics/titlebar-design)
+and [Oracle Motif/CDE window-manager architecture](https://docs.oracle.com/cd/E19683-01/806-7495/archov-7/index.html).
+
+`tests/theme-details.test.mjs` covers canonical migration, icon compatibility and
+complete token resets. The existing three-engine IDE/application browser suites
+now also cover caption geometry, restore identity, modern composite edges,
+scrollbar isolation, disabled/hidden controls and keyboard/forced-color ink.

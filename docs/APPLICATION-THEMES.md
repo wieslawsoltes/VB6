@@ -11,8 +11,7 @@ default for new projects and for older projects without an appearance setting.
 | --- | --- | --- |
 | Fluent WinUI 3 | `fluent` | `fluent-dark` |
 | macOS 26 | `macos26` | `macos26-dark` |
-| X11 Motif | `x11` | `x11-dark` |
-| X11 CDE | `x11-cde` | `x11-cde-dark` |
+| X11 | `x11` | `x11-dark` |
 
 `classic`, `standard` (Windows Standard 2000), and `contrast` (High Contrast
 Black) are still supported. The selected family also supplies matching built-in
@@ -110,7 +109,7 @@ const host = await VB6Runtime.mountApplication(project, container, {
 });
 
 // Session-only change: no VM restart or implicit project/storage mutation.
-host.setTheme('x11-cde-dark', { reduceMotion: true });
+host.setTheme('x11-dark', { reduceMotion: true });
 ```
 
 `host.setTheme(id, options)` returns the resolved profile. Omitting `options`
@@ -172,7 +171,7 @@ VB6_BROWSER=webkit npm run test:application-themes:browser
 ```
 
 The browser harness builds an owned gallery covering the 39 non-Pointer control
-types and uses the existing MDI example. It exercises all eight palettes, saved
+types and uses the existing MDI example. It exercises all six optional palettes, saved
 export startup, authored RGB/fonts/geometry, values and selection, real VB Click
 execution, late-created drawing controls, independent/nested boundaries, popup
 and dialog behavior, MDI identity and new children, system scheme/effect options,
@@ -189,3 +188,18 @@ These are original browser-rendered platform interpretations. They are not
 native WinUI/AppKit/Motif bindings, copied platform artwork, every X11 window
 manager, or a pixel-for-pixel native-platform certification. Arbitrary vendor
 shadow-DOM/custom/native control artwork can require its own adapter styling.
+
+## Caption and control fidelity
+
+Application chrome uses the same locally reset detail tokens as the IDE. Classic
+geometry and authored content remain unchanged. Fluent/macOS tree, list, grid
+and rich-text borders no longer inherit Classic directional relief; X11 retains
+that relief. X11 captions use the active title color rather than a light material
+behind light title text. Caption controls preserve action identity across
+minimize/maximize/restore, and honor disabled/hidden form flags.
+
+Legacy `x11-cde`/`x11-cde-dark` project preferences migrate to `x11`/`x11-dark`,
+including normalized project saves, standalone exports, runtime theme changes,
+system-color resolution and explicit legacy icon-pack requests. Existing files
+need no manual edit. Classic/Standard/High Contrast remain distinct profiles.
+See [the fidelity maintenance contract](IDE-THEMES.md#fidelity-and-compatibility-maintenance).

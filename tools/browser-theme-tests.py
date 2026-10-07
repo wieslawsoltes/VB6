@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ENGINE = os.environ.get('VB6_BROWSER', 'chromium')
 MEMORY = os.environ.get('VB6_TEST_TRANSPORT') == 'memory'
 REPORT = ROOT / 'reports' / 'ide-themes' / ENGINE
-THEMES = ['fluent', 'fluent-dark', 'macos26', 'macos26-dark', 'x11', 'x11-dark', 'x11-cde', 'x11-cde-dark']
+THEMES = ['fluent', 'fluent-dark', 'macos26', 'macos26-dark', 'x11', 'x11-dark']
 # Ignore absolute position: IDE caption metrics can change. Authored form/control
 # sizes, relative coordinates, visual properties and runtime palettes must not.
 SNAPSHOT = '''() => {
@@ -113,7 +113,7 @@ class Themes(unittest.TestCase):
         self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'fluent-dark')
         self.record('Cancel and saved workspace restore')
     def test_system_appearance_accessibility_and_classic_restore(self):
-        for base in ['fluent','macos26','x11','x11-cde']:
+        for base in ['fluent','macos26','x11']:
             self.direct_theme(base,followSystemTheme=True)
             self.page.emulate_media(color_scheme='dark')
             self.page.wait_for_function('t=>document.documentElement.dataset.ideTheme===t',arg=base+'-dark')
@@ -131,7 +131,7 @@ class Themes(unittest.TestCase):
         self.page.emulate_media(forced_colors='none',reduced_motion='no-preference')
         self.set_theme('contrast');self.set_theme('classic')
         self.assertEqual(self.page.locator('html').get_attribute('data-vb-theme'),'classic')
-        self.record('Four OS-scheme pairs, reduced effects, forced colors and classic restore')
+        self.record('Three OS-scheme pairs, reduced effects, forced colors and classic restore')
     def test_editor_menus_property_palettes_and_controls(self):
         self.page.evaluate('()=>{vb6Studio.openDocument(vb6Studio.activeModule.id,"code");vb6Studio.appearance.codeColors={keyword:"#b1c8fa"};}')
         for theme in THEMES:
@@ -158,7 +158,7 @@ class Themes(unittest.TestCase):
         self.options()
         for theme in THEMES:
             self.page.get_by_label('IDE theme',exact=True).select_option(theme)
-            self.assertEqual(self.page.get_by_label('Application theme',exact=True).locator('option').count(),11)
+            self.assertEqual(self.page.get_by_label('Application theme',exact=True).locator('option').count(),9)
         checkbox=self.page.get_by_label('Follow system light/dark appearance',exact=True)
         # Programmatic focus retains pointer modality in Firefox. Exercise real
         # keyboard navigation, not engine-specific :focus-visible heuristics.
@@ -312,7 +312,7 @@ class Themes(unittest.TestCase):
 
     def test_narrow_options(self):
         self.page.set_viewport_size({'width':600,'height':600})
-        for theme in ['fluent-dark','macos26','x11-cde']:
+        for theme in ['fluent-dark','macos26','x11']:
             self.direct_theme(theme)
             self.options()
             self.page.get_by_label('IDE theme',exact=True).select_option(theme)
@@ -331,6 +331,50 @@ class Themes(unittest.TestCase):
         self.set_theme('macos26-dark')
         self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'macos26-dark')
         self.record('standalone file:// Options')
+
+    def test_caption_fidelity_and_classic_form_isolation(self):
+        baseline=self.page.evaluate(SNAPSHOT)
+        for theme in ['macos26','macos26-dark']:
+            self.direct_theme(theme)
+            close=self.page.locator('.document-title [data-caption-action="close"]').first
+            # Wait for the real theme transition, not a timer-dependent intermediate color.
+            self.page.wait_for_function('''()=>getComputedStyle(document.querySelector('.document-title [data-caption-action="close"]')).backgroundColor==="rgb(255, 95, 87)"''')
+            self.assertEqual(close.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[13,13])
+            self.assertEqual(close.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(255, 95, 87)')
+            tool=self.page.locator('.tool-caption>button:has(>.icon[data-icon="close"])').first
+            self.assertEqual(tool.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[12,12])
+            self.assertTrue(self.page.locator('.mdi-system-menu').first.is_visible())
+            self.assertEqual(self.page.evaluate(SNAPSHOT),baseline)
+            self.page.screenshot(path=str(REPORT/(theme+'-caption-refinement.png')))
+            self.record(theme,captionPixels=[13,13],toolCaptionPixels=[12,12],systemMenuRetained=True,classicAppUntouched=True)
+        self.direct_theme('classic')
+        self.assertEqual(self.page.locator('.document-title [data-caption-action="close"]').first.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[16,14])
+    def test_x11_consolidated_options_and_legacy_preference(self):
+        for legacy,current in [('x11-cde','x11'),('x11-cde-dark','x11-dark')]:
+            self.direct_theme(legacy)
+            self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),current)
+            self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme-family'),'x11')
+            self.options()
+            for label in ['IDE theme','Application theme']:
+                values=self.page.get_by_label(label,exact=True).locator('option').evaluate_all('nodes=>nodes.map(e=>e.value)')
+                self.assertEqual(len(values),9);self.assertNotIn('x11-cde',values);self.assertNotIn('x11-cde-dark',values)
+            self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
+            self.record(legacy,canonical=current,singleLinuxFamily=True)
+    def test_scrollbar_detail_tokens_reset_in_classic_designer(self):
+        for theme in THEMES:
+            self.direct_theme(theme)
+            detail=self.page.locator('html').evaluate('e=>{const s=getComputedStyle(e);return [s.getPropertyValue("--detail-scrollbar-radius").trim(),s.getPropertyValue("--detail-scrollbar-buttons").trim()];}')
+            self.assertEqual(detail,['0px','block'] if theme.startswith('x11') else ['8px','none'])
+            nested=self.page.locator('.designer-scroll').evaluate('e=>getComputedStyle(e).getPropertyValue("--detail-scrollbar-radius").trim()')
+            self.assertEqual(nested,'0px');self.record(theme,scrollbarTokensLocal=True)
+    def test_forced_color_caption_ink_and_discoverable_mac_glyphs(self):
+        self.direct_theme('macos26-dark');self.page.mouse.move(1400,950)
+        close=self.page.locator('.document-title [data-caption-action="close"]').first
+        close.focus();self.assertEqual(close.locator('.icon').evaluate('e=>getComputedStyle(e).opacity'),'1')
+        self.page.emulate_media(forced_colors='active')
+        paint=close.evaluate('e=>{const s=getComputedStyle(e);return [s.color,s.backgroundColor,getComputedStyle(e.querySelector(".icon"),"::after").backgroundColor];}')
+        self.assertNotEqual(paint[0],paint[1]);self.assertEqual(paint[0],paint[2])
+        self.page.screenshot(path=str(REPORT/'caption-forced-colors.png'));self.record('macOS focus discovery and system-color caption contrast')
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

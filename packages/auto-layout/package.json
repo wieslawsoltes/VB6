@@ -1,8 +1,8 @@
 {
   "name": "@vb6/auto-layout",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Dependency-free parent-local anchoring, docking and bounded flex layout",
+  "description": "Dependency-free anchoring, intrinsic stack/wrap and two-dimensional grid layout",
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
