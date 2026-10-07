@@ -2,7 +2,7 @@
  * has the original classic fallback and resets at nested theme boundaries.
  * Authored geometry, RGB/pictures, VB fonts and runtime input semantics stay put. */
 .vb-form,.vb-dialog {border-radius:var(--app-window-radius,0);}
-.vb-form-title {font-family:var(--app-font,inherit);font-weight:var(--app-caption-weight,bold);background:var(--app-caption-background,linear-gradient(90deg,var(--vb-title),var(--vb-title-end)));}
+.vb-form-title {font-family:var(--app-font,var(--vb-font));font-weight:var(--app-caption-weight,bold);background:var(--app-caption-background,linear-gradient(90deg,var(--vb-title),var(--vb-title-end)));}
 .vb-inactive>.vb-form-title {background:linear-gradient(90deg,var(--vb-inactive),var(--vb-inactive-end));color:var(--vb-inactive-text);}
 .vb-form-menu,.vb-dialog {font-family:var(--app-font,var(--vb-font));}
 .vb-form-menu button,.vb-tab-button,.vb-toolbar button,.vb-data button,.vb-month button {border-radius:var(--app-radius,0)!important;}
@@ -87,3 +87,25 @@
 }
 
 .application-theme-preview {margin:8px 0;contain:layout style;isolation:isolate;}
+
+/* App chrome is independent of IDE metrics. Symmetric title gutters avoid the
+ * off-centre macOS/X11 caption caused by placing controls on just one side.
+ * Only captions use system typography; authored content fonts stay untouched.
+ */
+[data-vb-theme] {--app-title-position:static;--app-title-inset:auto;--app-caption-size:11px;--app-caption-line:16px;--app-title-spacer:none;--app-title-spacer-order:0;--app-title-icon-order:0;}
+[data-vb-theme-family="macos26"],[data-vb-theme-family="x11"] {--app-title-position:absolute;--app-title-inset:30px;--app-title-spacer:"";}
+[data-vb-theme-family="x11"] {--app-title-spacer-order:-1;--app-title-icon-order:-2;}
+.vb-form-title {position:relative;flex-shrink:0;font-size:var(--app-caption-size,11px);line-height:var(--app-caption-line,16px);}
+.vb-form-title:has(>[data-caption-action="minimize"]:not([hidden])),.vb-form-title:has(>[data-caption-action="maximize"]:not([hidden])) {--app-title-inset:54px;}
+.vb-form-title:has(>[data-caption-action="minimize"]:not([hidden])):has(>[data-caption-action="maximize"]:not([hidden])) {--app-title-inset:76px;}
+.vb-form-title>.caption {position:var(--app-title-position,static);inset-inline:var(--app-title-inset,auto);margin-inline:2px;pointer-events:none;}
+.vb-form-title::after {content:var(--app-title-spacer,none);flex:1;order:var(--app-title-spacer-order,0);}
+.vb-form-title>.vb-form-icon {order:var(--app-title-icon-order,0);}
+.vb-form-title>.vb-window-button {flex-shrink:0;}
+.vb-dialog-actions button {font-family:var(--app-font,var(--vb-font));}
+.vb-dialog .vb-window-button:disabled {opacity:1;}
+/* Inactive optional captions are opaque; no bright active material shines through. */
+.vb-inactive>.vb-form-title {backdrop-filter:none;}
+@media(forced-colors:active) {
+ .vb-form-title,.vb-inactive>.vb-form-title {forced-color-adjust:none;color:CanvasText;background:Canvas;}
+}

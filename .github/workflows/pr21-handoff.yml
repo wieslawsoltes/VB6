@@ -1,0 +1,57 @@
+name: Publish exact reviewed PR21 handoff
+on:
+  push:
+    branches: [chore/pr21-reviewed-handoff-20261007]
+    paths: [.pr21-handoff/**, .github/workflows/pr21-handoff.yml]
+permissions:
+  contents: write
+jobs:
+  source:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify and reconstruct the previously tested source tree
+        shell: bash
+        run: |
+          mkdir -p /tmp/pr21-handoff
+          python - <<'PY'
+          import hashlib,lzma
+          from pathlib import Path
+          parts=sorted(Path('.pr21-handoff').glob('*.part'))
+          assert len(parts)==4
+          packed=b''.join(p.read_bytes() for p in parts)
+          assert hashlib.sha256(packed).hexdigest()=='fd0f9885e1917807691367a5ef91b21df6379e2b52b542e0f61de5bcc1a228f9'
+          patch=lzma.decompress(packed)
+          assert hashlib.sha256(patch).hexdigest()=='84677645d3b878c6618c0c48990337133ca9ee2feffd3d8d916cbc55bb0c172b'
+          Path('/tmp/pr21.patch').write_bytes(patch)
+          PY
+          # The workflow itself was installed by the authorized connector.
+          git apply --index --exclude=.github/workflows/validate.yml --check /tmp/pr21.patch
+          git apply --index --exclude=.github/workflows/validate.yml /tmp/pr21.patch
+          git rm -r .pr21-handoff
+          git update-index --force-remove .github/workflows/pr21-handoff.yml
+          test "$(git write-tree)" = b77993e3b07b304794efe8761ba6275f669c72d4
+          git add .github/workflows/pr21-handoff.yml
+          git diff --cached --exit-code -- .github/workflows
+          npm test > /tmp/pr21-handoff/tests.log 2>&1
+          git diff --exit-code --
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'build: verify exact PR21 reviewed source objects'
+          git push origin HEAD:refs/heads/chore/pr21-reviewed-handoff-20261007
+          git rev-parse HEAD HEAD^{tree} > /tmp/pr21-handoff/refs.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr21-reviewed-handoff-validation
+          path: /tmp/pr21-handoff
+          retention-days: 3

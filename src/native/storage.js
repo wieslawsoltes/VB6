@@ -80,10 +80,14 @@ export const nativeStorageMethods = {
     const ready = this.x.unique(); this.x.test().branch('ne', ready).value(this.string('')).label(ready);
   },
   storageExpression(variable, node) {
+    if(variable.recordFieldArray)this.fail('Native record array field requires indices');
+    if(variable.nativeRecord)return this.recordExpression(variable,node);
     if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
     if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') {if(this.type(node)==='string')this.expression(node);else this.textExpression(node);} else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
   },
   rawStorageAddress(variable) {
+    this.withGuard(variable.nativeWithActive);
+    if(variable.recordOf)return this.recordAddress(variable);
     if (variable.owner?.form) this.x.call(variable.owner.initialize);
     if (variable.label) this.x.value(variable.label);
     else if (variable.parameter && variable.byRef) this.x.value({argument: variable.offset});

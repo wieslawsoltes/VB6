@@ -71,8 +71,9 @@ test('Currency suffix and DefCur storage retain the Currency ABI',()=>{
   const b=compile('Dim amount\namount = 0.0001@','DefCur A-C');
   assert.ok(b.bytes.length);
 });
-test('native type queries reject untyped numeric literals instead of inventing VB subtype metadata',()=>{
-  for(const expression of ['VarType(1)','TypeName(1.5)'])assert.throws(()=>compile('Dim result As String\nresult = CStr('+expression+')'),/explicitly typed/);
+test('native type queries use retained literal metadata',()=>{
+  for(const expression of ['VarType(1)','VarType(1&)','VarType(1!)','TypeName(1.5)'])assert.ok(compile('Dim result As String\nresult = CStr('+expression+')').bytes.length);
+  assert.throws(()=>compile('Dim tag As Long\ntag = VarType(Nothing)'),/supported|not available|not lowered/);
 });
 
 // Native Windows is the behavioral oracle; these regressions keep the fixture
@@ -94,7 +95,7 @@ test('native type queries classify Boolean literals and comparison results seman
   for(const value of [bool,comparison,{kind:'group',expr:comparison},{kind:'unary',op:'not',expr:comparison},{kind:'binary',op:'and',left:bool,right:comparison}])assert.equal(c.nativeQueryType(value),'boolean');
   assert.equal(c.nativeQueryType({kind:'binary',op:'and',left:bool,right:{kind:'literal',value:1}}),'long');
 });
-test('native Boolean type-query fixtures compile without weakening numeric-literal diagnostics',()=>{
+test('native Boolean and literal type-query fixtures compile with semantic types',()=>{
   compile('Dim tag As Long, name As String\ntag = VarType(CBool(True))\nname = TypeName(1@ < 2@)\ntag = VarType(Not (1@ < 2@))');
-  assert.throws(()=>compile('Dim tag As Long\ntag = VarType(1)'),/explicitly typed/);
+  assert.ok(compile('Dim tag As Long\ntag = VarType(1)').bytes.length);
 });

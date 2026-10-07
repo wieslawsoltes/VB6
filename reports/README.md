@@ -14,10 +14,10 @@ suite is not proof of complete native VB6 compatibility.
 | Application export | [Exporter contracts, deployment formats and compatibility limits](../docs/APPLICATION-EXPORT.md) |
 | Native compiler and Windows builds | [Win32 AOT](../docs/WIN32-AOT.md), [Windows build targets](../docs/WINDOWS-BUILDS.md) |
 | Win32 browser API | [Standalone package and API boundaries](../packages/win32-browser/README.md) |
-| Compute backend | [Porting progress](../docs/compute-progress.md), [standalone compute contracts](../packages/vb6-compute/README.md) |
-| Native project interchange | [Compatibility review](../docs/NATIVE-COMPATIBILITY-REVIEW.md), [project formats](../docs/NATIVE-PROJECTS.md) |
+| Compute backend | [Standalone compute contracts and remaining work](../packages/vb6-compute/README.md) |
+| Native project interchange | [Project formats and interchange contracts](../docs/NATIVE-PROJECTS.md), [workspace interoperability](../docs/NATIVE-WORKSPACE-INTEROP.md) |
 | COM and OCX | [OCX support and limits](../docs/OCX-SUPPORT.md), [container contracts](../docs/OCX-CONTAINER-CONTRACTS.md), [scalar interoperability](../docs/NATIVE-SCALAR-INTEROP.md) |
-| Data providers | [Data sources](../docs/DATA-SOURCES.md), [compatibility continuation](../docs/DATA-COMPAT-CONTINUATION.md) |
+| Data providers | [Data sources, provider contracts and compatibility limits](../docs/DATA-SOURCES.md) |
 | Debugging and live editing | [Debugger compatibility](../docs/DEBUGGER-COMPATIBILITY.md) |
 | Editor language services | [IntelliSense compatibility](../docs/INTELLISENSE-COMPATIBILITY.md) |
 | Forms, controls and rendering | [Visual audit and remaining differences](../docs/VISUAL-AUDIT.md), [classic HTML rendering](../docs/CLASSIC-HTML-RENDERING.md), [optional layout](../docs/anchoring-layout.md) |

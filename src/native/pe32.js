@@ -1,3 +1,5 @@
+import {pruneNativeProcedures} from './reachability.js';
+import {optimizeNativeSections,nativeOptimizationLevel} from './optimizer.js';
 /** Deterministic PE32 linker. Browser-safe: no Node, native compiler, or binary template. */
 export const PE32_BASE = 0x400000;
 const align = (n, a) => Math.ceil(n / a) * a;
@@ -10,7 +12,10 @@ export class BinarySection {
   zero(n) { if (!Number.isInteger(n) || n < 0 || n > 16 * 1024 * 1024) throw new Error('Invalid section allocation'); for (let i = 0; i < n; i++) this.bytes.push(0); return this; }
   align(n) { return this.zero(align(this.length, n) - this.length); }
   label(name) { if (this.labels.has(name)) throw new Error('Duplicate label: ' + name); this.labels.set(name, this.length); return this; }
-  reference(label, kind = 'va', addend = 0) { this.fixups.push({ offset: this.length, label, kind, addend }); return this.u32(0); }
+  reference(label, kind = 'va', addend = 0) {
+    if (typeof label !== 'string' || !label || !['va','rva','rel','rel8'].includes(kind) || !Number.isSafeInteger(addend) || addend < -2147483648 || addend > 4294967295) throw new Error('Invalid native relocation');
+    this.fixups.push({ offset: this.length, label, kind, addend }); return kind === 'rel8' ? this.emit(0) : this.u32(0);
+  }
   ascii(text) { if (!/^[\x20-\x7e]*$/.test(text)) throw new Error('Expected ASCII'); return this.emit(...new TextEncoder().encode(text), 0); }
   utf16(text) { for (let i = 0; i < text.length; i++) this.u16(text.charCodeAt(i)); return this.u16(0); }
 }
@@ -36,9 +41,13 @@ export class PE32Image {
     for (const byte of body) r.emit(byte);
     this.directories.set(2, { label: 'resource-root', size: r.length });
   }
-  finish(entry, { subsystem = 2 } = {}) {
+  finish(entry, { subsystem = 2, optimization = 0, pruneUnusedProcedures = false } = {}) {
     if (this.finished) throw new Error('PE image already linked');
     if (!this.imports.size || ![2, 3].includes(subsystem)) throw new Error('Invalid PE executable');
+    if(typeof pruneUnusedProcedures!=='boolean')throw new Error('pruneUnusedProcedures must be Boolean');
+    if(pruneUnusedProcedures&&nativeOptimizationLevel(optimization)!==2)throw new Error('Unused-procedure pruning requires optimization 2');
+    const reachability=pruneUnusedProcedures?pruneNativeProcedures(this.sections,[entry]):{};
+    const optimizationReport = {...optimizeNativeSections(this.sections, optimization),...reachability};
     const idata = this.section('.idata', 0xc0000040), groups = new Map();
     for (const item of this.imports.values()) { if (!groups.has(item.dll)) groups.set(item.dll, []); groups.get(item.dll).push(item); }
     idata.label('imports');
@@ -104,11 +113,20 @@ export class PE32Image {
         let value = target + fixup.addend;
         if (fixup.kind === 'va') value += PE32_BASE;
         else if (fixup.kind === 'rel') value -= section.rva + fixup.offset + 4;
+        else if (fixup.kind === 'rel8') value -= section.rva + fixup.offset + 1;
         else if (fixup.kind !== 'rva') throw new Error('Unknown relocation type');
-        dword(section.fileOffset + fixup.offset, value);
+        const width = fixup.kind === 'rel8' ? 1 : 4;
+        if (!Number.isInteger(fixup.offset) || fixup.offset < 0 || fixup.offset + width > section.length) throw new Error('Native relocation is outside its section');
+        if (fixup.kind === 'rel8') {
+          if (value < -128 || value > 127) throw new Error('Native short branch is out of range');
+          image[section.fileOffset + fixup.offset] = value & 255;
+        } else {
+          if (!Number.isSafeInteger(value) || (fixup.kind === 'rel' ? value < -2147483648 || value > 2147483647 : value < 0 || value > 4294967295)) throw new Error('Native relocation value is out of range');
+          dword(section.fileOffset + fixup.offset, value);
+        }
       }
     }
     this.finished = true;
-    return { bytes: image, symbols: Object.fromEntries(symbols), sections: this.sections.map(s => ({ name: s.name, rva: s.rva, offset: s.fileOffset, size: s.length, rawSize: s.rawSize, flags: s.flags })), imports: [...this.imports.values()].map(({dll, symbol}) => ({dll, symbol})) };
+    return { bytes: image, optimization: optimizationReport, symbols: Object.fromEntries(symbols), sections: this.sections.map(s => ({ name: s.name, rva: s.rva, offset: s.fileOffset, size: s.length, rawSize: s.rawSize, flags: s.flags })), imports: [...this.imports.values()].map(({dll, symbol}) => ({dll, symbol})) };
   }
 }

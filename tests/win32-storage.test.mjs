@@ -30,12 +30,9 @@ for(const [name,code]of [
   ['string length zero','Dim a As String * 0'],
   ['string length too large','Dim a As String * 65536'],
   ['string length negative','Dim a As String * -1'],
-  ['text compare without locale lowering','Option Compare Text'],
 ]){
   test('native compiler diagnoses '+name,()=>{
-    const body=name.startsWith('text compare')?'Dim a As String\na="A"\nIf a="a" Then a="b"':code;
-    const prefix=name.startsWith('text compare')?code+'\n':'';
-    assert.throws(()=>build(prefix+'Public Sub Main()\n'+body+'\nEnd Sub'));
+    assert.throws(()=>build('Public Sub Main()\n'+code+'\nEnd Sub'));
   });
 }
 for(const code of [
@@ -64,4 +61,14 @@ test('native error recovery preserves stable source mappings and deterministic b
 test('native forms support stored strings, arrays and fixed String initialization',()=>{
   const p=newProject();p.modules[0].code='Private names(2) As String\nPrivate title As String * 4\nPrivate Sub Form_Load()\nnames(1)="one"\nCaption=title & names(1)\nEnd Sub';
   assert.ok(compileWin32(p).bytes.length);
+});
+
+test('Option Compare Text lowers through length-aware Windows collation',()=>{
+  const code='Option Compare Text\nSub Main()\nDim a As String\na="A"\nIf a="a" Then a="b"\nEnd Sub';
+  const result=build(code);assert.ok(result.report.imports.some(i=>i.symbol==='CompareStringW'));assert.deepEqual(result.bytes,build(code).bytes);
+});
+
+test('native Option Compare Text uses the installed Windows NLS comparison path',()=>{
+  const result=build('Option Compare Text\nPublic Sub Main()\nDim a As String\na="A"\nIf a="a" Then a="b"\nEnd Sub');
+  assert.ok(result.report.imports.some(i=>i.symbol==='CompareStringW'));
 });

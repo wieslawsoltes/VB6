@@ -78,8 +78,8 @@ export function logicalLines(source) {
     s=(carry+s).trim();carry='';if(!s)continue;
     const numbered=s.match(/^(\d+)(?=\s|:|$)\s*:?\s*/);
     if(numbered){out.push({text:numbered[1],line:lineStart,label:true});s=s.slice(numbered[0].length);if(!s)continue;}
-    const named=s.match(/^([A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)\s*:(?!=)\s*/);
-    if(named){out.push({text:named[1],line:lineStart,label:true});s=s.slice(named[0].length);if(!s)continue;}
+    const named=s.match(/^(\[[^\]]+\]|[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)\s*:(?!=)\s*/);
+    if(named){out.push({text:named[1].replace(/^\[|\]$/g,''),line:lineStart,label:true});s=s.slice(named[0].length);if(!s)continue;}
     for(const part of statementParts(s))out.push({text:part.text,line:lineStart});
   }
   if(carry)throw new VBError('Unfinished line continuation',1002,null,lineStart);

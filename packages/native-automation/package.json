@@ -1,0 +1,11 @@
+{
+  "name": "@vb6/native-automation",
+  "version": "0.1.0",
+  "description": "Opt-in Windows STA COM Automation, ActiveX containment and native OLE data/storage companion",
+  "type": "module",
+  "exports": {".": "./index.js"},
+  "files": ["index.js", "src", "tools/interop", "README.md", "LICENSE"],
+  "dependencies": {"@vb6/automation": "0.1.0", "@vb6/com-ole": "0.1.0"},
+  "license": "MIT",
+  "engines": {"node": ">=22"}
+}

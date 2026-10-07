@@ -4,16 +4,17 @@ import {cpus} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const options={root:path.resolve(import.meta.dirname,'..'),modules:240,locals:30,samples:7,warmup:3,tokens:100000};
+const options={root:path.resolve(import.meta.dirname,'..'),modules:240,locals:30,samples:7,warmup:3,tokens:100000,parses:10000};
 try {
   for(let i=2;i<process.argv.length;i+=2){
     const key=process.argv[i].replace(/^--/,''),value=process.argv[i+1];
-    if(!Object.hasOwn(options,key)||value===undefined)throw new Error('Usage: node tools/bench-language.mjs [--root checkout] [--modules 240] [--locals 30] [--samples 7] [--warmup 3] [--tokens 100000]');
+    if(!Object.hasOwn(options,key)||value===undefined)throw new Error('Usage: node tools/bench-language.mjs [--root checkout] [--modules 240] [--locals 30] [--samples 7] [--warmup 3] [--tokens 100000] [--parses 10000]');
     if(key==='root')options.root=path.resolve(value);
     else {const n=Number(value);if(!Number.isSafeInteger(n)||n<1||n>1000000)throw new Error('Benchmark counts must be integers from 1 to 1000000');options[key]=n;}
   }
   const load=file=>import(pathToFileURL(path.join(options.root,'src/language',file)).href);
-  const {compileProject}=await load('compiler.js'),{tokenize}=await load('lexer.js');
+  const {compileProject,parseParameters}=await load('compiler.js'),{tokenize}=await load('lexer.js');
+  const {parseCall}=await load('expression.js');
   const {ProjectDiagnosticCache,diagnosticSnapshot}=await load('diagnostics.js');
   const project={name:'LanguageBenchmark',modules:Array.from({length:options.modules},(_,i)=>({id:'m'+i,name:'M'+i,kind:'module',code:`Private Const Value = 3\nSub Work()\n${Array.from({length:options.locals},(_,j)=>`Dim n${j} As Long`).join('\n')}\nEnd Sub`}))};
   const assertValid=result=>{if(result.diagnostics?.length)throw new Error(JSON.stringify(result.diagnostics));return result;};
@@ -26,10 +27,15 @@ try {
     return {medianMs:sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2,minMs:sorted[0],maxMs:sorted.at(-1),samplesMs:samples};
   };
   const source='  item$ & "a""b" & F(1.25e3, a, &HFF, otherName) + .125';
+  const parameters='ByVal value As Long, ByRef text As String, numbers() As Double, Optional locale As Long = 1033';
+  const call='obj.Member(value, F(1, 2), text)';
+  if(parseParameters(parameters).length!==4||parseCall(call,{explicit:true}).args.length!==3)throw new Error('Invalid parser benchmark fixture');
   const results={
     compileProject:measure(()=>assertValid(compileProject(project))),
     warmDiagnostics:measure(()=>assertValid(cache.check(diagnosticSnapshot(project)))),
-    tokenize:measure(()=>{for(let i=0;i<options.tokens;i++)tokenize(source);})
+    tokenize:measure(()=>{for(let i=0;i<options.tokens;i++)tokenize(source);}),
+    parseParameters:measure(()=>{for(let i=0;i<options.parses;i++)parseParameters(parameters);}),
+    parseCall:measure(()=>{for(let i=0;i<options.parses;i++)parseCall(call,{explicit:true});})
   };
   console.log(JSON.stringify({node:process.version,platform:process.platform,arch:process.arch,cpu:cpus()[0]?.model,options,results},null,2));
 }catch(error){console.error(error.message);process.exitCode=1;}

@@ -54,8 +54,39 @@ Recognized `.vbw` records restore in-page code/designer document windows, while 
 
 Run `npm test` for the complete regression suite, `npm run test:project-files` for focused interchange/filesystem tests, and `npm run test:project-browser` after `npm run build` for real browser import, editing and download workflows against HTTP and standalone `file://` builds. Set `VB6_BROWSER=firefox` or `webkit` for those engines. Directory integration uses real origin-private filesystem handles over HTTP; it does not automate an OS folder picker. `VB6_TEST_TRANSPORT=memory` is an explicitly separate sandbox smoke mode and does not certify HTTP or file-origin behavior.
 
-Regression fixtures cover native byte preservation, groups, encodings, attributes, resources, membership, folder conflicts, recovery journals, workspace state and malformed input. See [the native compatibility review](NATIVE-COMPATIBILITY-REVIEW.md) and [workspace validation checkpoints](NATIVE-WORKSPACE-VALIDATION.md). No proprietary Windows VB6 IDE is bundled. The licensed compile/reopen harness requires an actual owner-run licensed installation; successful staging or a skipped job is not certification.
+Regression fixtures cover native byte preservation, groups, encodings, attributes, resources, membership, folder conflicts, recovery journals, workspace state and malformed input. See [workspace and host contracts](NATIVE-WORKSPACE-INTEROP.md) and [validation procedures](TESTING.md). No proprietary Windows VB6 IDE is bundled. The licensed compile/reopen harness requires an actual owner-run licensed installation; successful staging or a skipped job is not certification.
 
 ## Workspace and optional host interoperability
 
 See [Native workspace and interoperability](NATIVE-WORKSPACE-INTEROP.md) for explicit unmarked ZIP filename encodings, VBW document-window restoration/capture, staged recoverable folder saves, an immutable ZIP publication alternative, trusted JavaScript component factories, opt-in Windows Automation/ActiveX, and the owner-run licensed VB6 oracle. These additions preserve opaque content and do not imply automatic native-code grants or universal binary compatibility.
+
+## Interchange maintenance notes
+
+The logical declaration mapper is not a compiler and does not evaluate
+conditional expressions. Preserve imported textual branch/accessor ownership;
+reject edits whose metadata owner becomes ambiguous. Unknown attributes can
+still be preserved on a no-op save. Manifest path parsing must preserve leading
+or embedded apostrophes in unquoted VBP/VBG filenames while accepting
+whitespace-delimited manifest comments.
+
+Older browser snapshots without a resource-reference record use retained VBP
+membership paths when available. Without either that path or an original source
+path, an unknown original resource directory cannot be reconstructed. Do not
+invent a relocation or silently drop an opaque companion.
+
+Keep ZIP interoperability checks independent of the implementation: fixtures
+use independent CRC/DEFLATE construction and Python `zipfile` inspection of
+actual browser downloads. Cover local/central header agreement, Unicode Path
+CRC, legacy filename encodings, bounded ZIP64, descriptors, overlaps and
+preflight before decompression. Preserve dirty state and conflict checks on all
+folder-save dependencies, including byte-unchanged files. Save-recovery tests
+must recalculate dirty state after disk restoration, not only inspect a
+transient flag.
+
+Format references: [PKWARE APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
+(records/descriptors, ZIP64, Unicode Path and character encoding), Microsoft's
+[logical-line guidance](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/too-many-line-continuations)
+and Rubberduck's [VB_Attribute conventions](https://github.com/rubberduck-vba/Rubberduck/wiki/VB_Attribute-Annotations).
+These explain interchange conventions; they are not a licensed VB6 compiler or
+IDE oracle. Native Automation checks and consent are documented in the
+[workspace guide](NATIVE-WORKSPACE-INTEROP.md).

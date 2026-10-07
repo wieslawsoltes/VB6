@@ -3,6 +3,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {compileWin32} from '../src/native/compiler.js';
+import {nativeGoSubLimit} from '../src/native/control-flow.js';
 import {readProject,productName} from './build-windows.mjs';
 export async function buildWin32(options) {
   if (!options.project) throw new Error('--project is required');
@@ -19,16 +20,18 @@ export async function buildWin32(options) {
   return {filename,...result.report,sha256};
 }
 export function parseWin32Options(args) {
-  const options = {}, fields = {'--project':'project','--out':'out','--name':'name','--source-root':'sourceRoot','--arch':'arch','--graphics':'graphics','--max-array-bytes':'maxArrayBytes'};
+  const options = {}, fields = {'--project':'project','--out':'out','--name':'name','--source-root':'sourceRoot','--arch':'arch','--graphics':'graphics','--max-array-bytes':'maxArrayBytes','--optimization':'optimization','--max-gosub-depth':'maxGoSubDepth'};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--help') options.help = true;
-    else if (fields[args[i]]) { if (!args[i+1] || args[i+1].startsWith('--')) throw new Error('Missing value for '+args[i]); options[fields[args[i]]] = args[++i]; }
+    else if(args[i]==='--prune-unused-procedures')options.pruneUnusedProcedures=true;
+    else if (Object.hasOwn(fields,args[i])) { if (!args[i+1] || args[i+1].startsWith('--')) throw new Error('Missing value for '+args[i]); options[fields[args[i]]] = args[++i]; }
     else throw new Error('Unknown Win32 option: '+args[i]);
   }
   if(options.maxArrayBytes!==undefined){if(!/^[0-9]+$/.test(options.maxArrayBytes))throw new Error('--max-array-bytes requires a positive integer');options.maxArrayBytes=Number(options.maxArrayBytes);}
+  if(options.maxGoSubDepth!==undefined){if(!/^[0-9]+$/.test(options.maxGoSubDepth))throw new Error('--max-gosub-depth requires an integer from 1 to 65536');options.maxGoSubDepth=nativeGoSubLimit(Number(options.maxGoSubDepth));}
   return options;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  try { const options = parseWin32Options(process.argv.slice(2)); if (options.help) console.log('Build a no-extraction x86 Windows EXE in JavaScript:\n  npm run build:win32 -- --project file.vb6web|file.vbp [--out directory] [--name Name] [--max-array-bytes bytes]\nNative controls/GDI; Byte/Integer/Long/Boolean, Single/Double, Currency, Date, Strings and typed arrays. Unsupported features produce diagnostics, not an executable.'); else console.log(JSON.stringify(await buildWin32(options),null,2)); }
+  try { const options = parseWin32Options(process.argv.slice(2)); if (options.help) console.log('Build a no-extraction x86 Windows EXE in JavaScript:\n  npm run build:win32 -- --project file.vb6web|file.vbp [--out directory] [--name Name] [--max-array-bytes bytes] [--optimization 0|1|2] [--max-gosub-depth 1..65536] [--prune-unused-procedures]\nNative controls/GDI; Byte/Integer/Long/Boolean, Single/Double, Currency, Date, Strings and typed arrays, POD records, GoSub and record With. Unsupported features produce diagnostics, not an executable.'); else console.log(JSON.stringify(await buildWin32(options),null,2)); }
   catch(error) { console.error(error.message); process.exitCode = 1; }
 }

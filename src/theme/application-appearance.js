@@ -7,7 +7,8 @@ export function normalizeApplicationAppearance(value={}) {
   if(!value||typeof value!=='object'||Array.isArray(value))value={};
   const options=value.themeOptions&&typeof value.themeOptions==='object'&&!Array.isArray(value.themeOptions)?value.themeOptions:{};
   return {theme:themeId(value.theme),themeOptions:{followSystemTheme:options.followSystemTheme===true,
-    reduceTransparency:options.reduceTransparency===true,reduceMotion:options.reduceMotion===true}};
+    reduceTransparency:options.reduceTransparency===true,reduceMotion:options.reduceMotion===true,
+    ...(options.systemCaption===true?{systemCaption:true}:{})}};
 }
 export function resolveApplicationTheme(value={},prefersDark=false) {
   const a=normalizeApplicationAppearance(value),profile=THEMES[a.theme];

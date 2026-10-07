@@ -3,7 +3,7 @@ const { app, BrowserWindow, protocol, ipcMain, screen, Menu, dialog, session } =
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { ORIGIN, MAX_WINDOWS, dataOrigins, dataCSP, dataRequestAllowed, integer, text, trustedURL, assetPath, clampBounds, windowOptions, menuTemplate } = require('./policy.cjs');
+const { ORIGIN, MAX_WINDOWS, dataOrigins, dataCSP, dataRequestAllowed, integer, text, trustedURL, assetPath, clampBounds, windowOptions, windowColor, menuTemplate } = require('./policy.cjs');
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
 const allowedDataOrigins = dataOrigins(manifest.dataOrigins || []);
 const CSP = dataCSP(allowedDataOrigins);
@@ -108,6 +108,13 @@ ipcMain.handle('vb6:window-command', (event, id, command, value) => {
     case 'hide': win.hide(); break;
     case 'focus': win.focus(); break;
     case 'title': win.setTitle(text(value)); break;
+    case 'appearance': win.setBackgroundColor(windowColor(value)); break;
+    case 'chrome': {
+      const options = windowOptions(value, screen.getAllDisplays());
+      win.setResizable(options.resizable); win.setMinimizable(options.minimizable);
+      win.setMaximizable(options.maximizable); win.setClosable(options.closable);
+      win.setFullScreenable(options.fullscreenable); break;
+    }
     case 'bounds': { const b = clampBounds(value, screen.getAllDisplays()); win.setPosition(b.x, b.y); win.setContentSize(b.width, b.height); break; }
     case 'state': {
       const state = integer(value, 0, 0, 2);

@@ -24,6 +24,7 @@ export const nativeNumericMethods = {
   },
   floatWorkspace() { const v=this.arrayWorkspace(8,'number-temp');v.type='Double';return v; },
   numericType(node) {
+    if(node.kind==='literal'&&FLOAT_TYPES.has(node.valueType))return node.valueType;
     if(node.kind==='literal'&&typeof node.value==='number'&&(!Number.isInteger(node.value)||node.value>2147483647||node.value< -2147483648))return 'double';
     if(node.kind==='unary'&&['+','-'].includes(node.op)){const type=this.type(node.expr);return FLOAT_TYPES.has(type)?type:null;}
     if(node.kind==='binary'){
@@ -41,7 +42,8 @@ export const nativeNumericMethods = {
       const name=key(node.callee.name).replace(/\$$/,'');
       if(['cdbl','val','sqr','round'].includes(name))return 'double';
       if(name==='csng')return 'single';
-      if(['abs','fix','int'].includes(name)&&node.args.length===1)return this.type(node.args[0]);
+      if(name==='sgn')return 'integer';
+      if(['abs','fix','int'].includes(name)&&node.args.length===1){const type=this.type(node.args[0]);return type==='boolean'?'integer':type;}
       return {cint:'integer',cbyte:'byte',cbool:'boolean',clng:'long'}[name]||null;
     }
     return null;
@@ -71,7 +73,7 @@ export const nativeNumericMethods = {
   truth(node) {this.expression(node);if(this.type(node)==='currency')this.x.push().call('native:currency:boolean');else if(REAL_TYPES.has(this.type(node)))this.x.push().call(N+'boolean');else if(this.type(node)==='string')this.fail('Use CBool to convert native text to Boolean');},
   numericExpression(node) {
     const x=this.x;
-    if(node.kind==='literal'&&REAL_TYPES.has(this.type(node))){x.value(this.floatLiteral(node.value));return true;}
+    if(node.kind==='literal'&&REAL_TYPES.has(this.type(node))){x.value(this.floatLiteral(this.type(node)==='single'?Math.fround(node.value):node.value));return true;}
     if(node.kind==='unary'&&['+','-'].includes(node.op)&&REAL_TYPES.has(this.type(node))){
       this.floatExpression(node.expr);if(node.op==='-')this.floatUnary('negate');return true;
     }

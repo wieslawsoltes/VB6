@@ -67,7 +67,7 @@ for(const code of [
   'Private Declare Function F Lib "../x" () As Long'
 ])test('unsupported native Declare fails without producing a plausible executable: '+code,()=>assert.throws(()=>extractNativeDeclarations({name:'M',code})));
 for(const [name,code] of [
-  ['unsupported record storage','Private Type Point\n x As Long\nEnd Type\nDim n As Point'],['ByVal array parameters','Private Sub F(ByVal n() As Long)\nEnd Sub'],
+  ['unsupported managed record storage','Private Type Point\n x As String\nEnd Type\nDim n As Point'],['ByVal array parameters','Private Sub F(ByVal n() As Long)\nEnd Sub'],
   ['unsupported Decimal storage','Private Sub Form_Load()\n Dim n As Decimal\nEnd Sub'],
 
   ['unsupported event','Private Sub Form_KeyDown(KeyCode As Integer, Shift As Integer)\nEnd Sub'],

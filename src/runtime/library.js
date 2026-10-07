@@ -1,5 +1,6 @@
 import {LAYOUT_CONSTANTS} from '../layout/contract.js';
 import {installScalarLibrary} from './scalar-library.js';
+import {installComLibrary} from './com-library.js';
 import {errorDescription} from './error-messages.js';
 import {stringLibrary} from './strings.js';
 import {financialLibrary} from './financial-library.js';
@@ -59,7 +60,7 @@ export function createLibrary(vm) {
     RGB:(r,g,b)=>Math.min(255,Math.max(0,Math.trunc(numeric(r))))+(Math.min(255,Math.max(0,Math.trunc(numeric(g))))<<8)+(Math.min(255,Math.max(0,Math.trunc(numeric(b))))<<16),QBColor:n=>{const colors=[0,8388608,32768,8421376,128,8388736,32896,12632256,8421504,16711680,65280,16776960,255,16711935,65535,16777215];if(n<0||n>15)throw new VBError('Invalid procedure call',5);return colors[n];},
     MsgBox:(text,style=0,title)=>vm.host.msgBox?.(vbString(text),Number(style),title===undefined?vm.program.name:vbString(title))??1,InputBox:(text,title,def='')=>vm.host.inputBox?.(vbString(text),title===undefined?vm.program.name:vbString(title),vbString(def))??'',DoEvents:()=>vm.doEvents(),
     CallByName:(object,name,callType,...args)=>vm.callByName(object,vbString(name),coerce(callType,'Long'),args,vm.currentFrame),
-    CreateObject:name=>vm.createObject(vbString(name)),GetObject:()=>{throw new VBError('GetObject cannot attach to native COM objects in a browser',429);},
+    CreateObject:name=>vm.createObject(vbString(name)),
     FreeFile:(range=0)=>vm.fs.freeFile(range),EOF:n=>vm.fs.eof(n),LOF:n=>vm.fs.lof(n),Loc:n=>vm.fs.loc(n),Seek:(n,pos)=>vm.fs.seek(n,pos),Input:(n,h)=>vm.fs.input(h,numeric(n)),FileLen:p=>vm.fs.read(p).length,Kill:p=>vm.fs.remove(p),Reset:()=>vm.fs.close(),CurDir:()=>vm.fs.cwd,ChDir:p=>{p=vm.fs.normalize(p);if(!vm.fs.directories.has(p))throw new VBError('Path not found',76);vm.fs.cwd=p;},MkDir:p=>{vm.fs.directories.add(vm.fs.normalize(p));vm.fs.dirty=true;},RmDir:p=>{p=vm.fs.normalize(p);if([...vm.fs.files.keys()].some(k=>k.startsWith(p+'/')))throw new VBError('Path/file access error',75);vm.fs.directories.delete(p);},
     Dir:pattern=>{if(pattern!==undefined){const p=vm.fs.normalize(pattern),regex=new RegExp('^'+p.replace(/[.+?^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*').replace(/\\\?/g,'.')+'$','i');dirList=[...vm.fs.files.keys()].filter(f=>regex.test(f)).map(f=>f.split('/').at(-1));dirIndex=0;}return dirList[dirIndex++]||'';},
     SaveSetting:(app,section,key,value)=>vm.saveSetting(app,section,key,value),GetSetting:(app,section,key,def='')=>vm.getSetting(app,section,key,def),DeleteSetting:(app,section,key)=>vm.deleteSetting(app,section,key),
@@ -72,5 +73,5 @@ export function createLibrary(vm) {
   for(const name of ['Error','Left','Right','Mid','Trim','LTrim','RTrim','UCase','LCase','Space','String','Chr','ChrW','Str','Hex','Oct','Format','Input','Dir','Environ','Command']){
     const base=functions[name],fn=(...args)=>{const result=base(...args);if(result===null)throw new VBError('Invalid use of Null',94);return result;};fn.vbParams=base.vbParams;map.set(lower(name)+'$',fn);
   }
-  return installScalarLibrary(map,vm);
+  return installComLibrary(installScalarLibrary(map,vm),vm);
 }

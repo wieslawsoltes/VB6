@@ -1,5 +1,7 @@
-import {parseDeclarations,parseParameters,parseProcedureHeader} from './declarations.js';
+import {parseDeclarations,parseParameters,parseProcedureHeader,parseTypeFields} from './declarations.js';
+import {parseModuleHeader,parseEnumMember} from './module-syntax.js';
 import {parseIfHeader,inlineElse} from './statement-syntax.js';
+import {parseForHeader,loopVariable,parseLabel,parseComputedBranch,parseFileStatement} from './statement-headers.js';
 import {findKeyword,statementParts} from './source-scanner.js';
 import {layoutBindingSnapshot,validateLayoutMembers} from '../layout/language-gate.js';
 import {validateLayout} from '../layout/contract.js';
@@ -16,6 +18,7 @@ const suffixType = defaultIdentifierType;
 export {parseDeclarations,parseParameters};
 
 const DEBUG_SOURCE_LINES=new WeakMap();
+const PROCEDURE_END={sub:/^End\s+Sub$/i,function:/^End\s+Function$/i,property:/^End\s+Property$/i};
 class ProcedureCompiler {
   constructor(proc,module) { this.proc=proc;this.module=module;this.code=[];this.blocks=[];this.labels=new Map();this.patches=[];this.temp=0;this.debugStatement=null;this.statementDepth=0;this.debugColumns=new Map();if(!DEBUG_SOURCE_LINES.has(module))DEBUG_SOURCE_LINES.set(module,module.source.replace(/\r\n?/g,'\n').split('\n'));this.sourceLines=DEBUG_SOURCE_LINES.get(module); }
   emit(op,data={},line=0){
@@ -74,9 +77,13 @@ class ProcedureCompiler {
     if(/^ElseIf\b/i.test(text)){const b=this.block('If',line);if(b.hadElse)throw new VBError('ElseIf cannot follow Else',1002);const header=parseIfHeader(text);if(header.body)throw new VBError('Unexpected statement after ElseIf Then',1002);b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=this.emit('branch',{test:E(header.condition),target:null},line);return;}
     if(/^Else$/i.test(text)){const b=this.block('If',line);if(b.hadElse)throw new VBError('Duplicate Else',1002);b.hadElse=true;b.ends.push(this.jump(null,line,true));this.patch(b.pending,this.code.length);b.pending=null;return;}
     if(/^End\s*If$/i.test(text)){const b=this.block('If',line);if(b.pending!=null)this.patch(b.pending,this.code.length);for(const i of b.ends)this.patch(i,this.code.length);this.blocks.pop();return;}
-    if((m=text.match(/^For\s+Each\s+(\w+)\s+In\s+(.+)$/i))){const id=`$each${this.temp++}`,index=this.emit('eachInit',{name:m[1],expr:E(m[2]),id,target:null},line);this.blocks.push({type:'For',kind:'each',id,index,start:this.code.length,name:m[1],exits:[]});return;}
-    if((m=text.match(/^For\s+([\w.$%&!#@]+)\s*=\s*(.+?)\s+To\s+(.+?)(?:\s+Step\s+(.+))?$/i))){const id=`$for${this.temp++}`,index=this.emit('forInit',{name:m[1],start:E(m[2]),end:E(m[3]),step:E(m[4]||'1'),id,target:null},line);this.blocks.push({type:'For',kind:'numeric',id,index,start:this.code.length,name:m[1],exits:[]});return;}
-    if((m=text.match(/^Next(?:\s+(.+))?$/i))){const names=m[1]?splitTop(m[1]):[''];for(const name of names){const b=this.block('For',line);if(name&&lower(name)!==lower(b.name))throw new VBError('Next control variable does not match For',1002);this.emit(b.kind==='each'?'eachNext':'forNext',{id:b.id,target:b.start},line);this.patch(b.index,this.code.length);for(const i of b.exits)this.patch(i,this.code.length);this.blocks.pop();}return;}
+    if(/^For\s+/i.test(text)){
+      const header=parseForHeader(text);if(this.blocks.some(b=>b.type==='For'&&b.identity===header.identity))throw new VBError('For control variable already in use',1002);
+      const {kind,identity,...data}=header,id=`$${kind==='each'?'each':'for'}${this.temp++}`;
+      const index=this.emit(kind==='each'?'eachInit':'forInit',{...data,id,target:null},line);
+      this.blocks.push({type:'For',kind,id,index,start:this.code.length,name:header.name,identity,exits:[]});return;
+    }
+    if((m=text.match(/^Next(?:\s+(.+))?$/i))){const names=m[1]?splitTop(m[1]):[''];for(const name of names){const b=this.block('For',line);if(name&&loopVariable(name).identity!==b.identity)throw new VBError('Next control variable does not match For',1002);this.emit(b.kind==='each'?'eachNext':'forNext',{id:b.id,target:b.start},line);this.patch(b.index,this.code.length);for(const i of b.exits)this.patch(i,this.code.length);this.blocks.pop();}return;}
     if((m=text.match(/^Do(?:\s+(While|Until)\s+(.+))?$/i))){const b={type:'Do',start:this.code.length,exits:[]};if(m[1])b.test=this.emit('branch',{test:E(m[2]),invert:/until/i.test(m[1]),target:null},line);this.blocks.push(b);return;}
     if((m=text.match(/^Loop(?:\s+(While|Until)\s+(.+))?$/i))){const b=this.block('Do',line);if(m[1]&&b.test!=null)throw new VBError('Do and Loop cannot both specify a condition',1002);if(m[1]){const end=this.emit('branch',{test:E(m[2]),invert:/until/i.test(m[1]),target:null},line);this.jump(b.start,line);this.patch(end,this.code.length);}else this.jump(b.start,line);if(b.test!=null)this.patch(b.test,this.code.length);for(const i of b.exits)this.patch(i,this.code.length);this.blocks.pop();return;}
     if((m=text.match(/^While\s+(.+)$/i))){const start=this.code.length,test=this.emit('branch',{test:E(m[1]),target:null},line);this.blocks.push({type:'While',start,test,exits:[]});return;}
@@ -91,33 +98,27 @@ class ProcedureCompiler {
     if((m=text.match(/^Const\s+(.+)$/i))){this.emit('dim',{decls:parseDeclarations(m[1],true,this.module.defaultTypes)},line);return;}
     if((m=text.match(/^ReDim\s+(Preserve\s+)?(.+)$/i))){this.emit('redim',{decls:parseDeclarations(m[2],false,this.module.defaultTypes),preserve:!!m[1]},line);return;}
     if((m=text.match(/^Erase\s+(.+)$/i))){this.emit('erase',{exprs:splitTop(m[1]).map(E)},line);return;}
-    if((m=text.match(/^On\s+Error\s+(.+)$/i))){if(/^Resume\s+Next$/i.test(m[1]))this.emit('onError',{mode:'next'},line);else{const g=m[1].match(/^GoTo\s+(\w+)$/i);if(!g)throw new VBError('Invalid On Error statement',1002);const index=this.emit('onError',{mode:g[1]==='0'?'off':'goto',target:null},line);if(g[1]!=='0')this.patches.push({index,label:g[1]});}return;}
+    if((m=text.match(/^On\s+Error\s+(.+)$/i))){
+      if(/^Resume\s+Next$/i.test(m[1]))this.emit('onError',{mode:'next'},line);
+      else{const g=m[1].match(/^GoTo\s+(.+)$/i);if(!g)throw new VBError('Invalid On Error statement',1002);const label=parseLabel(g[1]),off=/^0+$/.test(label),index=this.emit('onError',{mode:off?'off':'goto',target:null},line);if(!off)this.patches.push({index,label});}return;
+    }
     if(/^On\s+/i.test(text)){
-      const tokens=tokenize(text),branch=tokens.find(t=>t.type==='id'&&/^(GoTo|GoSub)$/i.test(t.value));
-      if(!branch)throw new VBError('Expected GoTo or GoSub',1002);
-      const labels=splitTop(text.slice(branch.end));
-      if(!labels.length||labels.some(v=>! /^(?:[A-Za-z_]\w*|\d+)$/.test(v)))throw new VBError('Expected a list of line labels',1002);
-      const index=this.emit('computedJump',{expr:E(text.slice(tokens[0].end,branch.start)),gosub:/gosub/i.test(branch.value),targets:labels.map(()=>null)},line);
+      const {expr,gosub,labels}=parseComputedBranch(text),index=this.emit('computedJump',{expr,gosub,targets:labels.map(()=>null)},line);
       labels.forEach((label,slot)=>this.patches.push({index,label,slot}));return;
     }
     if((m=text.match(/^Error\s+(.+)$/i))){this.emit('raiseError',{expr:E(m[1])},line);return;}
-    if((m=text.match(/^Resume(?:\s+(\w+))?$/i))){const index=this.emit('resume',{mode:!m[1]||m[1]==='0'?'retry':/^Next$/i.test(m[1])?'next':'goto',target:null},line);if(m[1]&&m[1]!=='0'&&!/^Next$/i.test(m[1]))this.patches.push({index,label:m[1]});return;}
-    if((m=text.match(/^Go(To|Sub)\s+(\w+)$/i))){const index=this.emit(/sub/i.test(m[1])?'gosub':'jump',{target:null},line);this.patches.push({index,label:m[2]});return;}
+    if((m=text.match(/^Resume(?:\s+(.+))?$/i))){const mode=!m[1]||/^0+$/.test(m[1])?'retry':/^Next$/i.test(m[1])?'next':'goto',index=this.emit('resume',{mode,target:null},line);if(mode==='goto')this.patches.push({index,label:parseLabel(m[1])});return;}
+    if((m=text.match(/^Go(To|Sub)\s+(.+)$/i))){const index=this.emit(/sub/i.test(m[1])?'gosub':'jump',{target:null},line);this.patches.push({index,label:parseLabel(m[2])});return;}
     if(/^Return$/i.test(text)){this.emit('gosubReturn',{},line);return;}
     if((m=text.match(/^Debug\.Print\s*(.*)$/i))){this.emit('print',{exprs:splitTop(m[1].replace(/;\s*$/,'').replace(/;(?=(?:[^"\n]*"[^"\n]*")*[^"\n]*$)/g,',')).filter(Boolean).map(E),newline:!m[1].endsWith(';')},line);return;}
     if((m=text.match(/^Debug\.Assert\s+(.+)$/i))){this.emit('assert',{expr:E(m[1])},line);return;}
     if(/^Stop$/i.test(text)){this.emit('stop',{},line);return;}
     if(/^End$/i.test(text)){this.emit('end',{},line);return;}
     if((m=text.match(/^(Load|Unload)\s+(.+)$/i))){this.emit('form',{action:m[1].toLowerCase(),expr:E(m[2])},line);return;}
-    if((m=text.match(/^Open\s+(.+?)\s+For\s+(Input|Output|Append|Binary|Random)(?:\s+Access\s+(Read\s+Write|Read|Write))?(?:\s+(Shared|Lock\s+Read\s+Write|Lock\s+Read|Lock\s+Write))?\s+As\s+#?(.+?)(?:\s+Len\s*=\s*(.+))?$/i))){this.emit('fileOpen',{path:E(m[1]),mode:m[2].toLowerCase(),access:m[3]?.toLowerCase(),sharing:m[4]?.toLowerCase(),handle:E(m[5]),recordLength:m[6]?E(m[6]):null},line);return;}
-    if((m=text.match(/^(Get|Put)\s+#?([^,]+),\s*([^,]*),\s*(.+)$/i))){const target=E(m[4]);if(!['id','member','call'].includes(target.kind))throw new VBError('Get/Put requires a variable',1002);this.emit('fileRecord',{action:m[1].toLowerCase(),handle:E(m[2]),position:m[3].trim()?E(m[3]):null,target},line);return;}
-    if((m=text.match(/^Seek\s+#?([^,]+),\s*(.+)$/i))){this.emit('fileSeek',{handle:E(m[1]),position:E(m[2])},line);return;}
-    if((m=text.match(/^(Lock|Unlock)\s+#?([^,]+)(?:,\s*(.+?)(?:\s+To\s+(.+))?)?$/i))){this.emit('fileLock',{unlock:/unlock/i.test(m[1]),handle:E(m[2]),start:m[3]?E(m[3]):null,end:m[4]?E(m[4]):null},line);return;}
+    const fileStatement=parseFileStatement(text);if(fileStatement){const {op,...data}=fileStatement;this.emit(op,data,line);return;}
     if((m=text.match(/^FileCopy\s+(.+)$/i))){const parts=splitTop(m[1]);if(parts.length!==2)throw new VBError('FileCopy requires source and destination',1002);this.emit('fileCopy',{sourcePath:E(parts[0]),destination:E(parts[1])},line);return;}
     if(/^Name\s+/i.test(text)&&!/^Name\s*[=(.!]/i.test(text)){const as=findKeyword(text,'as',4);if(!as)throw new VBError('Expected As in Name statement',1002);this.emit('fileRename',{sourcePath:E(text.slice(4,as.start)),destination:E(text.slice(as.end))},line);return;}
     if((m=text.match(/^Close(?:\s+(.+))?$/i))){this.emit('fileClose',{handles:m[1]?splitTop(m[1]).map(s=>E(s.replace(/^#/,''))):[]},line);return;}
-    if((m=text.match(/^(Print|Write)\s+#([^,]+),?\s*(.*)$/i))){this.emit('filePrint',{handle:E(m[2]),exprs:splitTop(m[3],/Write/i.test(m[1])?',':';').filter(Boolean).map(E),csv:/Write/i.test(m[1]),newline:!m[3].endsWith(';')},line);return;}
-    if((m=text.match(/^(Line\s+Input|Input)\s+#([^,]+),\s*(.+)$/i))){this.emit('fileInput',{handle:E(m[2]),targets:splitTop(m[3]).map(E),whole:/Line/i.test(m[1])},line);return;}
     // VB graphics syntax: Picture1.Line (x1,y1)-(x2,y2), color, BF
     if((m=text.match(/^(?:(.+)\.)?Line\s*\(([^,]+),([^\)]+)\)\s*-\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*([^,]+))?(?:\s*,\s*(B|BF))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:m[7]?'rect':'line',coords:[m[2],m[3],m[4],m[5]].map(E),color:E(m[6]||'0'),fill:/bf/i.test(m[7]||'')},line);return;}
     if((m=text.match(/^(?:(.+)\.)?PSet\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'pixel',coords:[E(m[2]),E(m[3])],color:E(m[4]||'0')},line);return;}
@@ -139,33 +140,58 @@ class ProcedureCompiler {
 }
 
 export function compileModule(input) {
-  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:{},types:{},diagnostics:[],source:input.code||'',form:input.form||null,layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
+  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:Object.create(null),types:Object.create(null),diagnostics:[],source:input.code||'',form:input.form||null,layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
   const allLines=logicalLines(preprocess(module.source,input.conditionalConstants||{},module.name));
   const lines=allLines.filter(e=>{if(/^Attribute\s+/i.test(e.text)){module.attributes.push(e.text);return false;}return true;});let current=null,body=[],enumState=null,typeState=null;
+  const typeNames=new Set();
   for(const entry of lines){let {text,line}=entry,m;
     try {
-      if(current){if(/^Def(?:Bool|Byte|Int|Lng|Cur|Sng|Dbl|Date|Str|Obj|Var)\b/i.test(text))throw new VBError('Default-type declarations are valid only at module level',1002);if(new RegExp(`^End\\s+${current.kind==='property'?'Property':current.kind}$`,'i').test(text)){current.code=new ProcedureCompiler(current,module).compile(body);const key=lower(current.name)+(current.kind==='property'?':'+current.accessor:'');if(module.procedures.has(key))throw new VBError(`Ambiguous name detected: ${current.name}`,1002);module.procedures.set(key,current);current=null;body=[];}else body.push(entry);continue;}
-      if(enumState){if(/^End\s+Enum$/i.test(text)){if(!enumState.previous)throw new VBError('Enum requires at least one member',1002);enumState=null;continue;}const e=text.match(/^(\w+)(?:\s*=\s*(.+))?$/);if(!e)throw new VBError('Invalid Enum member',1002);const value=e[2]?E(e[2]):enumState.previous?{kind:'binary',op:'+',left:{kind:'id',name:enumState.previous},right:{kind:'literal',value:1}}:{kind:'literal',value:0};module.declarations.push({name:e[1],line,type:'Long',explicitType:true,constant:true,scope:enumState.scope,enumName:enumState.name,initial:value,bounds:null});module.enums[enumState.name].members.push(e[1]);enumState.previous=e[1];continue;}
-      if(typeState){if(/^End\s+Type$/i.test(text)){typeState=null;continue;}if(splitTop(text).some(t=>! /\bAs\s+/i.test(t)))throw new VBError('User-defined type members require an explicit As type',1002);module.types[typeState].push(...parseDeclarations(text));continue;}
+      if(current){if(/^Def(?:Bool|Byte|Int|Lng|Cur|Sng|Dbl|Date|Str|Obj|Var)\b/i.test(text))throw new VBError('Default-type declarations are valid only at module level',1002);if(PROCEDURE_END[current.kind].test(text)){current.code=new ProcedureCompiler(current,module).compile(body);const key=lower(current.name)+(current.kind==='property'?':'+current.accessor:'');if(module.procedures.has(key))throw new VBError(`Ambiguous name detected: ${current.name}`,1002);module.procedures.set(key,current);current=null;body=[];}else body.push(entry);continue;}
+      if(enumState){
+        if(/^End\s+Enum$/i.test(text)){if(!enumState.previous)throw new VBError('Enum requires at least one member',1002);enumState=null;continue;}
+        if(entry.label)throw new VBError('Labels are not allowed in Enum declarations',1002);
+        const member=parseEnumMember(text,enumState.previous);
+        module.declarations.push({...member,line,type:'Long',explicitType:true,constant:true,scope:enumState.scope,enumName:enumState.name,bounds:null});
+        module.enums[enumState.name].members.push(member.name);enumState.previous=member.name;continue;
+      }
+      if(typeState){
+        if(/^End\s+Type$/i.test(text)){if(!typeState.names.size)throw new VBError('Type requires at least one member',1002);typeState=null;continue;}
+        if(entry.label)throw new VBError('Labels are not allowed in Type declarations',1002);
+        for(const field of parseTypeFields(text)){
+          const key=lower(field.name);if(typeState.names.has(key))throw new VBError('Duplicate type member: '+field.name,1002);
+          typeState.names.add(key);module.types[typeState.name].push({...field,line});
+        }
+        continue;
+      }
       if(/^Def\w+\b/i.test(text)){addDefaultTypes(module.defaultTypes,text);continue;}
-      if((m=text.match(/^Implements\s+([A-Za-z_]\w*)$/i))){if(module.kind==='module')throw new VBError('Implements is valid only in a class or form module',1002);if(module.interfaces.some(i=>lower(i.name)===lower(m[1])))throw new VBError('Duplicate implemented interface: '+m[1],1002);module.interfaces.push({name:m[1],line});continue;}
       if((m=text.match(/^Option\s+(Explicit|Base\s+[01]|Compare\s+(?:Text|Binary))$/i))){if(/^Explicit/i.test(m[1]))module.optionExplicit=true;else if(/^Base/i.test(m[1]))module.optionBase=Number(m[1].at(-1));else module.optionCompare=m[1].split(/\s+/)[1].toLowerCase();continue;}
       if(/^(Attribute\s+VB_|VERSION\s+|BEGIN$|END$|MultiUse\s*=|Persistable\s*=|DataBindingBehavior\s*=|DataSourceBehavior\s*=|MTSTransactionMode\s*=)/i.test(text))continue;
       const header=parseProcedureHeader(text,module.defaultTypes);if(header){if(header.scope==='friend'&&module.kind==='module')throw new VBError('Friend procedures are valid only in object modules',1002);current={...header,line,source:module.name};continue;}
       if((m=text.match(/^(?:(Public|Private|Global)\s+)?Const\s+(.+)$/i))){module.declarations.push(...parseDeclarations(m[2],true,module.defaultTypes).map(d=>({...d,line,scope:lower(m[1]||'private')})));continue;}
       if((m=text.match(/^(?:Public|Private|Global|Dim)\s+(.+)$/i))){if(/^(Enum|Type|Event|Declare)\b/i.test(m[1])){/* handled below */}else{module.declarations.push(...parseDeclarations(m[1],false,module.defaultTypes).map(d=>{if(d.withEvents&&module.kind==='module')throw new VBError('WithEvents is valid only in class and form modules',1002);return {...d,line,scope:/^(Public|Global)\b/i.test(text)?'public':'private'};}));continue;}}
-      if((m=text.match(/^(?:(Public|Private)\s+)?Enum\s+(\w+)$/i))){if(Object.keys(module.enums).some(n=>lower(n)===lower(m[2])))throw new VBError('Ambiguous enum name: '+m[2],1002);enumState={name:m[2],scope:lower(m[1]||'public'),previous:null};module.enums[m[2]]={name:m[2],scope:enumState.scope,members:[]};continue;}
-      if((m=text.match(/^(?:Public\s+|Private\s+)?Type\s+(\w+)$/i))){typeState=m[1];module.types[typeState]=[];continue;}
-      if((m=text.match(/^(?:Public\s+|Private\s+)?Event\s+(\w+)\s*\((.*)\)$/i))){if(module.kind==='module')throw new VBError('Events can be declared only in class and form modules',1002);module.events ||= new Map();const key=lower(m[1]);if(module.events.has(key))throw new VBError('Ambiguous event name: '+m[1],1002);module.events.set(key,{name:m[1],line,scope:/^Private\b/i.test(text)?'private':'public',params:parseParameters(m[2],module.defaultTypes)});continue;}
       if(/^Option\s+Private\s+Module$/i.test(text))continue;
-      if(/^(?:Public\s+|Private\s+)?Declare\b/i.test(text)){
-        const d=text.match(/^(?:(Public|Private)\s+)?Declare\s+(Function|Sub)\s+([A-Za-z_]\w*[$%&!#@]?)\s+Lib\s+"([^"\r\n]+)"\s*(?:Alias\s+"([^"\r\n]+)"\s*)?\((.*)\)\s*(?:As\s+(\w+))?$/i);
-        if(!d)throw new VBError('Invalid Declare statement',1002);
-        const name=d[3],key=lower(name);if(module.procedures.has(key))throw new VBError('Ambiguous procedure name: '+name,1002);
-        const params=parseParameters(d[6],module.defaultTypes);
-        if(params.some(p=>p.optional||p.paramArray||p.autoNew))throw new VBError('Declare parameters cannot be Optional, ParamArray or As New',1002);
-        if(lower(d[2])==='sub'&&d[7])throw new VBError('Declare Sub cannot have a return type',1002);
-        module.procedures.set(key,{name,kind:lower(d[2]),scope:lower(d[1]||'public'),params,returnType:d[7]||suffixType(name,module.defaultTypes),line,source:module.name,code:[],external:{library:d[4],entry:d[5]||name}});continue;
+      const definition=parseModuleHeader(text,module.defaultTypes);
+      if(definition){
+        const key=lower(definition.name);
+        if(definition.kind==='implements'){
+          if(module.kind==='module')throw new VBError('Implements is valid only in a class or form module',1002);
+          if(module.interfaces.some(i=>lower(i.name)===key))throw new VBError('Duplicate implemented interface: '+definition.name,1002);
+          module.interfaces.push({name:definition.name,line});
+        }else if(definition.kind==='enum'||definition.kind==='type'){
+          if(typeNames.has(key))throw new VBError('Ambiguous type name: '+definition.name,1002);typeNames.add(key);
+          if(definition.kind==='enum'){
+            enumState={name:definition.name,scope:definition.scope,previous:null};
+            module.enums[definition.name]={name:definition.name,scope:definition.scope,members:[]};
+          }else{typeState={name:definition.name,names:new Set()};module.types[definition.name]=[];}
+        }else if(definition.kind==='event'){
+          if(module.kind==='module')throw new VBError('Events can be declared only in class and form modules',1002);
+          module.events ||= new Map();if(module.events.has(key))throw new VBError('Ambiguous event name: '+definition.name,1002);
+          module.events.set(key,{name:definition.name,line,scope:definition.scope,params:definition.params});
+        }else{
+          if(module.procedures.has(key))throw new VBError('Ambiguous procedure name: '+definition.name,1002);
+          module.procedures.set(key,{name:definition.name,kind:definition.procedureKind,scope:definition.scope,params:definition.params,returnType:definition.returnType,line,source:module.name,code:[],external:definition.external});
+        }
+        continue;
       }
       throw new VBError(`Invalid statement outside procedure: ${text}`,1002);
     }catch(error){if(error instanceof VBError){error.source ||= module.name;error.line ||= line;}throw error;}
@@ -174,8 +200,8 @@ export function compileModule(input) {
   if(current)throw new VBError(`Expected End ${current.kind}`,1002,module.name,current.line);
   if(enumState||typeState)throw new VBError('Unterminated type declaration',1002,module.name,lines.at(-1)?.line);
   for(const attribute of module.attributes){
-    const a=String(attribute).match(/^Attribute\s+(\w+)\.VB_UserMemId\s*=\s*(-?\d+)$/i);
-    if(a&&Number(a[2])===0){const key=lower(a[1]),proc=module.procedures.get(key+':get')||module.procedures.get(key);
+    const a=String(attribute).match(/^Attribute\s+(\[[^\]]+\]|[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)\.VB_UserMemId\s*=\s*(-?\d+)$/i);
+    if(a&&Number(a[2])===0){const key=lower(a[1].replace(/^\[|\]$/g,'')),proc=module.procedures.get(key+':get')||module.procedures.get(key);
       if(!proc||proc.scope!=='public'||!['function','property'].includes(proc.kind))throw new VBError('Default member must be a Public Function or Property Get',1002,module.name,proc?.line||1);
       if(module.defaultMember&&module.defaultMember!==key)throw new VBError('Only one default member is permitted',1002,module.name,proc.line);
       module.defaultMember=key;

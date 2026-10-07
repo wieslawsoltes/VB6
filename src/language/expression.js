@@ -1,6 +1,33 @@
 import { tokenize, VBError } from './lexer.js';
 const PRECEDENCE = Object.freeze({imp:1,eqv:2,xor:3,or:4,and:5,'=':7,'<>':7,'<':7,'>':7,'<=':7,'>=':7,is:7,like:7,'&':8,'+':9,'-':9,mod:10,'\\':11,'*':12,'/':12,'^':14});
 export const MAX_EXPRESSION_NESTING = 256;
+export const MAX_EXPRESSION_NODES = 100000;
+
+/** Iterative validation also bounds left-associated operators and postfix chains,
+ * which consume little parser recursion but otherwise overflow recursive users.
+ * Only large token streams take this path; ordinary expressions need no walk. */
+function checkExpressionTree(root,column) {
+  const stack=[root,1];let count=0;
+  while(stack.length){
+    const depth=stack.pop(),node=stack.pop();
+    if(depth>MAX_EXPRESSION_NESTING)throw new VBError('Expression tree depth limit exceeded',1002,null,0,column);
+    if(++count>MAX_EXPRESSION_NODES)throw new VBError('Expression node count limit exceeded',1002,null,0,column);
+    const child=value=>stack.push(value,depth+1);
+    switch(node.kind){
+      case 'binary':child(node.left);child(node.right);break;
+      case 'member':child(node.object);break;
+      case 'call':child(node.callee);for(const arg of node.args)child(arg);break;
+      case 'group':case 'unary':case 'named':case 'byval':case 'typeof':child(node.expr);break;
+    }
+  }
+  return root;
+}
+function sameCallee(left,right) {
+  while(left.kind==='member'&&right.kind==='member'){
+    if(left.name!==right.name)return false;left=left.object;right=right.object;
+  }
+  return left.kind===right.kind&&(left.kind==='with'||left.kind==='id'&&left.name===right.name);
+}
 export class ExpressionParser {
   constructor(text) { this.text=text; this.tokens=tokenize(text); this.i=0; this.depth=0; }
   peek() { return this.tokens[Math.min(this.i,this.tokens.length-1)]; }
@@ -66,7 +93,8 @@ export class ExpressionParser {
     }
     return node;
   }
-  parse() { const node=this.expression();if(this.peek().type!=='eof')throw new VBError(`Unexpected '${this.peek().raw}' in expression`,1002,null,0,this.peek().start+1);return node; }
+  finish(node) { return this.tokens.length>MAX_EXPRESSION_NESTING?checkExpressionTree(node,this.peek().start+1):node; }
+  parse() { const node=this.expression();if(this.peek().type!=='eof')throw new VBError(`Unexpected '${this.peek().raw}' in expression`,1002,null,0,this.peek().start+1);return this.finish(node); }
 }
 export const parseExpression = text => new ExpressionParser(text.trim()).parse();
 export function parseCall(text,{explicit=false}={}) {
@@ -75,20 +103,21 @@ export function parseCall(text,{explicit=false}={}) {
   else if(callee.type==='id') node={kind:'id',name:callee.value};
   else throw new VBError('Expected procedure name',1002);
   while(p.match('.'))node={kind:'member',object:node,name:p.memberName()};
-  if(p.peek().type==='eof') return {kind:'call',callee:node,args:[]};
+  if(p.peek().type==='eof') return p.finish({kind:'call',callee:node,args:[]});
   const rest=text.slice(p.peek().start).trim();
   if(rest.startsWith('(')) {
-    let expression;try{expression=parseExpression(text);}catch(error){if(explicit)throw error;}
+    const argumentStart=p.i;let expression;
+    try{p.i=0;expression=p.parse();}catch(error){if(explicit)throw error;p.i=argumentStart;}
     if(expression){
       // Without Call the parentheses around a single argument are an
       // expression grouping, forcing a temporary even for a ByRef formal.
-      if(!explicit&&expression.kind==='call'&&expression.args.length===1&&JSON.stringify(expression.callee)===JSON.stringify(node))expression.args[0]={kind:'group',expr:expression.args[0]};
-      return expression;
+      if(!explicit&&expression.kind==='call'&&expression.args.length===1&&sameCallee(expression.callee,node))expression.args[0]={kind:'group',expr:expression.args[0]};
+      return p.finish(expression);
     }
   }
   const args=[];do{args.push(p.argument());}while(p.match(','));
   if(p.peek().type!=='eof')throw new VBError(`Unexpected '${p.peek().raw}' in argument list`,1002);
-  return {kind:'call',callee:node,args};
+  return p.finish({kind:'call',callee:node,args});
 }
 
 function numericLiteralType(token){

@@ -1,8 +1,17 @@
+import {validateLanguageSemantics} from './semantic-checks.js';
 import {LAYOUT_CONSTANTS,LAYOUT_ENUMS} from '../layout/contract.js';
 import {VBError} from './errors.js';
 import {lower} from '../core/core.js';
 import {VB_CONSTANTS} from '../runtime/constants.js';
 import {NOTHING,VBCurrency,coerce,unary,binary,unbox,tagScalar,literalScalar,scalarType,storageScalar,signedLiteralScalar} from '../runtime/values.js';
+
+// Source constants contain only scalar primitives; the tagged values are frozen.
+// Neither map escapes the binder. Keep layout-enabled and classic names isolated.
+const intrinsicTables=new Map();
+function intrinsicTable(layout) {
+  if(!intrinsicTables.has(layout))intrinsicTables.set(layout,new Map(Object.entries({...VB_CONSTANTS,...(layout?LAYOUT_CONSTANTS:{})}).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)])));
+  return intrinsicTables.get(layout);
+}
 
 /** Side-effect-free project constant binding. Cached parsed modules keep their
  * ASTs: binding maps are rebuilt on every cross-module validation, so editing a
@@ -13,7 +22,7 @@ export function bindConstants(modules,settings={}) {
   const recordTypes=new Set([...modules.values()].flatMap(m=>Object.keys(m.types).flatMap(n=>[lower(n),lower(m.name)+'.'+lower(n)])));
   const scalarTypes=new Set(['byte','integer','long','single','double','currency','date','string','boolean','variant','decimal','any']);
   const append=(map,key,value)=>{const list=map.get(key);if(list)list.push(value);else map.set(key,[value]);};
-  const intrinsic=new Map(Object.entries({...VB_CONSTANTS,...(settings.anchoring===true?LAYOUT_CONSTANTS:{})}).map(([k,v])=>[lower(k),typeof v==='number'?tagScalar(v,v>=-32768&&v<=32767?'integer':'long'):tagScalar(v)]));
+  const intrinsic=intrinsicTable(settings.anchoring===true);
   let steps=0;
   const report=(e,m,line)=>diagnostics.push({severity:'error',number:e.number||1002,message:e.message,source:e.source||m.name,line:e.line||line||1,column:1});
   const fail=message=>{throw new VBError(message,1002);};
@@ -132,5 +141,6 @@ export function bindConstants(modules,settings={}) {
       for(const ins of p.code)if(ins.op==='dim'||ins.op==='redim')for(const d of ins.decls)storage(d,p,ins.line);
     }
   }
+  diagnostics.push(...validateLanguageSemantics(modules,scopes,recordTypes));
   return diagnostics;
 }

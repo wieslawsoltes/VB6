@@ -2,9 +2,11 @@
 """Exercise real ZIP writers with an isolated, explicitly synthetic release.
 No production validation report is synthesized or modified by this regression.
 """
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
@@ -69,13 +71,22 @@ class PackageNotices(unittest.TestCase):
                         self.assertEqual(len(names), 1, (script, archive.name, suffix))
                         self.assertEqual(z.read(names[0]), fixtures[suffix])
                     manifests = [name for name in z.namelist() if name.endswith('SOURCE-SHA256SUMS.txt')]
-                    if manifests:
+                    if archive.name.endswith('-Source.zip'):
+                        self.assertEqual(len(manifests), 1)
                         report_names = [name.split('/', 1)[1] for name in z.namelist() if '/reports/' in name]
                         self.assertEqual(report_names, ['reports/README.md'])
                         prefix = manifests[0].removesuffix('SOURCE-SHA256SUMS.txt')
                         for package_path in ('packages/example/README.md', 'packages/example/src/index.js'):
                             self.assertEqual(z.read(prefix + package_path), fixtures[package_path])
-                        self.assertIn(b'LICENSES/98.css.txt', z.read(manifests[0]))
+                        manifest = manifests[0]
+                        entries = {}
+                        for line in z.read(manifest).decode().splitlines():
+                            checksum, name = line.split('  ', 1)
+                            self.assertNotIn(name, entries)
+                            entries[name] = checksum
+                            self.assertEqual(checksum, hashlib.sha256(z.read(prefix + name)).hexdigest())
+                        self.assertEqual({prefix + name for name in entries}, set(z.namelist()) - {manifest})
+                        self.assertIn('LICENSES/98.css.txt', entries)
                     self.assertIsNone(z.testzip())
 
     def test_source_inventory_retains_build_inputs_not_local_dependencies(self):
@@ -110,6 +121,23 @@ class PackageNotices(unittest.TestCase):
             with zipfile.ZipFile(archive) as z:
                 self.assertEqual(set(z.namelist()), required)
                 self.assertIsNone(z.testzip())
+
+    def test_release_documentation_inputs_exist_and_copy_exactly(self):
+        spec = importlib.util.spec_from_file_location('release_docs_under_test', TOOLS / 'package-release.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        copies = module.documentation_copies()
+        self.assertTrue(copies)
+        self.assertEqual(len(copies), len(set(copies.values())))
+        with tempfile.TemporaryDirectory() as temp:
+            for source, name in copies.items():
+                with self.subTest(source=source):
+                    self.assertTrue(source.is_file(), f'Missing maintained release document: {source}')
+                    self.assertEqual(Path(name).name, name)
+                    self.assertTrue(source.read_bytes())
+                    destination = Path(temp) / name
+                    shutil.copyfile(source, destination)
+                    self.assertEqual(destination.read_bytes(), source.read_bytes())
 
 if __name__ == '__main__':
     unittest.main()

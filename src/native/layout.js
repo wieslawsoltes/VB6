@@ -37,7 +37,7 @@ export const nativeLayoutMethods={
     const object=node.kind==='member'?this.object(node.object):node.kind==='id'&&!this.variable(node)?this.context?.module:null;
     const property=key(node.name);return this.layoutField(object,property)!==undefined?(enums.has(property)?'long':'double'):null;
   },
-  layoutNodeExpression(object){return object.indexed?{kind:'layoutIndex',object}:lit(object.layoutIndex);},
+  layoutNodeExpression(object){return (object.indexed||object.boundIndex)?{kind:'layoutIndex',object}:lit(object.layoutIndex);},
   layoutExpression(node){
     if(node.kind==='layoutSlot'){this.rawStorageAddress(node.slot);this.x.emit(0x8b,0x00);return true;}
     if(node.kind==='layoutIndex'){

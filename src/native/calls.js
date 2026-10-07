@@ -64,13 +64,16 @@ export const nativeCallMethods={
         if(!target.nativeDefaults?.has(key(p.name)))this.fail('Native optional default is unavailable: '+p.name);
         entry.node={kind:'literal',value:target.nativeDefaults.get(key(p.name))};
       }
-      if(entry.node.kind==='byval'&&(target.proc||!p.byRef||!['long','string'].includes(key(p.type))||p.bounds!==null&&p.bounds!==undefined))
-        this.fail('Call-site ByVal requires an external scalar Long or String parameter declared ByRef; use parentheses for a project ByRef value');
+      if(entry.node.kind==='byval'&&(target.proc||!p.byRef||!['long','string','any'].includes(key(p.type))||p.bounds!==null&&p.bounds!==undefined))
+        this.fail('Call-site ByVal requires an external scalar Long, As Any or String parameter declared ByRef; use parentheses for a project ByRef value');
     }
     return plan;
   },
   nativeReferenceArgument(parameter,node,omitted=false) {
     const forced=omitted||node.kind==='group',variable=this.variable(node);
+    if(parameter.nativeRecord)return this.recordReferenceArgument(parameter,node,forced);
+    if(key(parameter.type)==='any')return this.anyReferenceArgument(node);
+    if(variable?.nativeRecord||variable?.recordFieldArray)this.fail('ByRef native argument must have the exact declared type');
     if(!forced&&variable) {
       if(variable.nativeArray&&!variable.elementOf||key(variable.type)!==key(parameter.type))
         this.fail('ByRef native argument must be a scalar of the exact declared type');

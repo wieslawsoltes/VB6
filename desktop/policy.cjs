@@ -56,13 +56,19 @@ function clampBounds(value = {}, displays = [{ workArea: { x: 0, y: 0, width: 19
   y = Math.max(area.y, Math.min(y, area.y + area.height - height));
   return { x, y, width, height };
 }
+function windowColor(value = '#c0c0c0') {
+  if (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value)) throw new TypeError('Invalid window color');
+  return value;
+}
 function windowOptions(value = {}, displays) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Expected window options');
   const border = integer(value.borderStyle, 2, 0, 5);
+  const captionMode = value.captionMode ?? 'system';
+  if (!['system','application'].includes(captionMode)) throw new TypeError('Invalid caption mode');
   return { ...clampBounds(value, displays), title: text(value.title, 'VB6'), show: false, useContentSize: true,
-    frame: border !== 0, resizable: border === 2 || border === 5, minimizable: value.minButton !== false && border < 3,
+    frame: border !== 0 && captionMode === 'system', resizable: border === 2 || border === 5, minimizable: value.minButton !== false && border < 3,
     maximizable: value.maxButton !== false && border === 2, closable: value.controlBox !== false,
-    skipTaskbar: border >= 4, fullscreenable: border === 2, backgroundColor: '#c0c0c0' };
+    skipTaskbar: border >= 4, fullscreenable: border === 2, backgroundColor: windowColor(value.backgroundColor) };
 }
 function menuTemplate(items, onSelect, budget = { count: 0 }, depth = 0) {
   if (!Array.isArray(items) || depth > 8) throw new TypeError('Invalid menu');
@@ -77,4 +83,4 @@ function menuTemplate(items, onSelect, budget = { count: 0 }, depth = 0) {
     return entry;
   });
 }
-module.exports = { ORIGIN, MAX_WINDOWS, CSP, dataOrigins, dataCSP, dataRequestAllowed, integer, text, trustedURL, assetPath, clampBounds, windowOptions, menuTemplate };
+module.exports = { ORIGIN, MAX_WINDOWS, CSP, dataOrigins, dataCSP, dataRequestAllowed, integer, text, trustedURL, assetPath, clampBounds, windowOptions, windowColor, menuTemplate };

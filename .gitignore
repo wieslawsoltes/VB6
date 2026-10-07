@@ -40,3 +40,9 @@ server-profiles.local.json
 /dist/vb6-native.js
 /src/editor/diagnostics-payload.js
 /dist/studio.css
+
+# Reusable COM/Automation tarballs and their generated manifest.
+/artifacts/com-ole/
+
+# Source-derived application styles, verified by the same exact fingerprint inventory.
+/dist/vb6-controls.css

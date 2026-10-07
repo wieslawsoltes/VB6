@@ -33,14 +33,38 @@ export function automationReference(o,name,args=[],objectSet=false){
   member(o,name,objectSet?8:4);return new Ref(()=>automationInvoke(o,name,2,args),v=>automationInvoke(o,name,objectSet?8:4,[...args,v]));
 }
 export class AutomationRegistry {
-  #factories=new Map();
-  register(progId,factory){if(!nameOK(progId)||typeof factory!=='function')throw new TypeError('A valid ProgID and trusted factory are required');const key=progId.toLowerCase();if(this.#factories.has(key))throw Error('Automation ProgID already registered');this.#factories.set(key,factory);return this;}
-  createSession(){return new AutomationSession(new Map(this.#factories));}
+  #factories=new Map();#active=new Map();#monikers=new Map();
+  #register(map,progId,factory){if(!nameOK(progId)||typeof factory!=='function')throw new TypeError('A valid ProgID and trusted factory are required');const key=progId.toLowerCase();if(map.has(key))throw Error('Automation ProgID already registered');if(map.size>=256)throw RangeError('Automation registration limit');map.set(key,factory);return this;}
+  register(progId,factory){return this.#register(this.#factories,progId,factory);}
+  registerActive(progId,resolver){return this.#register(this.#active,progId,resolver);}
+  /** Exact host-installed capability names. Never interpreted as URLs, files or script monikers. */
+  registerMoniker(displayName,resolver,{className=null}={}){
+    if(typeof displayName!=='string'||!displayName.length||displayName.length>4096||displayName.includes('\0')||typeof resolver!=='function'||className!==null&&!nameOK(className))throw TypeError('An exact moniker and trusted resolver are required');
+    if(this.#monikers.has(displayName)||this.#monikers.size>=256)throw RangeError('Duplicate or excessive moniker registration');
+    this.#monikers.set(displayName,Object.freeze({resolver,className:className?.toLowerCase()||null}));return this;
+  }
+  createSession(){return new AutomationSession(new Map(this.#factories),new Map(this.#active),new Map(this.#monikers));}
 }
 class AutomationSession {
-  constructor(factories){this.factories=factories;this.adapters=new Map();this.closed=false;this.pending=new Set();this.invocations=0;}
+  constructor(factories,active,monikers){this.factories=factories;this.active=active;this.monikers=monikers;this.adapters=new Map();this.closed=false;this.pending=new Set();this.invocations=0;}
   has(name){return !this.closed&&this.factories.has(String(name).toLowerCase());}
-  async create(name){if(this.closed)throw new VBError('Automation session closed',91);const factory=this.factories.get(String(name).toLowerCase());if(!factory)throw new VBError('Automation ProgID not registered',429);const pending=Promise.resolve().then(()=>factory(this));this.pending.add(pending);let adapter;try{adapter=await pending;return this.adopt(adapter);}catch(error){try{await adapter?.release?.();}catch{}throw error;}finally{this.pending.delete(pending);}}
+  #resolve(factory){
+    if(this.closed)return Promise.reject(new VBError('Automation session closed',91));
+    if(!factory)return Promise.reject(new VBError('Automation class or object binding not registered',429));
+    // Track acquisition AND orphan cleanup: close must not finish while a late factory still owns an object.
+    const task=Promise.resolve().then(async()=>{if(this.closed)throw new VBError('Automation session closed',91);let adapter;try{adapter=await factory(this);return this.adopt(adapter);}catch(error){if(adapter&&!this.adapters.has(adapter))try{await adapter.release?.();}catch{}throw error;}});
+    this.pending.add(task);task.then(()=>this.pending.delete(task),()=>this.pending.delete(task));return task;
+  }
+  create(name){return this.#resolve(this.factories.get(String(name).toLowerCase()));}
+  getObject(path=MISSING,className=MISSING){
+    if(this.closed)return Promise.reject(new VBError('Automation session closed',91));
+    if(path!==MISSING&&(typeof path!=='string'||path.length>4096||path.includes('\0'))||className!==MISSING&&!nameOK(className))return Promise.reject(new VBError('Invalid GetObject arguments',5));
+    const name=className===MISSING?null:className.toLowerCase();
+    if(path===MISSING)return this.#resolve(name?this.active.get(name):null);
+    if(path==='')return this.#resolve(name?this.factories.get(name):null);
+    const binding=this.monikers.get(path);
+    return this.#resolve(binding&&(!name||binding.className===name)?binding.resolver:null);
+  }
   adopt(adapter){
     if(this.closed)throw new VBError('Automation session closed',91);if(this.adapters.has(adapter))return this.adapters.get(adapter);
     if(!adapter||typeof adapter.invoke!=='function'||typeof adapter.release!=='function'||!Array.isArray(adapter.metadata?.members)||adapter.metadata.members.length>1024||this.adapters.size>=128)throw new VBError('Invalid or excessive Automation adapter',440);

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Never expose ipcRenderer, Node, filesystem paths, or a general-purpose invoke API.
 if (process.isMainFrame) contextBridge.exposeInMainWorld('vb6Native', Object.freeze({
   version: 1,
+  capabilities: Object.freeze({ applicationCaptions: true }),
   info: () => ipcRenderer.invoke('vb6:info'),
   runtimeDocument: html => ipcRenderer.invoke('vb6:runtime-document', html),
   prepareWindow: options => {

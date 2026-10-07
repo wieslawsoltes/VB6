@@ -132,9 +132,26 @@ listener immediately. They do not adopt whichever IDE/application happened to
 last set the document's theme.
 
 Electron's adopted browser form windows copy the owning host's appearance and
-receive live palette/effect updates. Their OS-managed frame, native MsgBox and
-file-picker UI remain under the operating system. HTML/Electron are the targets
-for these skins. Direct Win32 AOT explicitly diagnoses an optional browser-only
+receive live palette/effect updates. Updated desktop hosts draw the caption in the
+application theme by default, including Classic, Fluent, macOS and X11. Caption
+buttons invoke real native minimize/maximize/restore/close commands. Native
+movement, resize, activation, QueryUnload cancellation and owner modality remain
+under the desktop host's control. The themed caption and frame are excluded from
+VB ClientWidth/ClientHeight, rather than shrinking or inflating authored content.
+
+**Tools → Options → General → Application: use operating-system captions in desktop
+exports** stores the boolean `settings.themeOptions.systemCaption`. When enabled,
+the OS draws the outer caption and the application does not draw a second one.
+This option is applied when a window is first created; changing it does not replace
+an existing HWND, DOM control or running VM. Restart the exported application to
+change all existing windows. Older v1 hosts without the application-caption
+capability also use OS captions. Browsers ignore this desktop-only option.
+
+Desktop MsgBox and InputBox now reuse the application dialog view, including
+matching caption/buttons, palette changes, accessible popup-document keyboard
+focus, and VB button/cancel values. OS-caption mode keeps the dialog interior
+app-themed beneath the OS frame. Native file pickers, popup menus and vendor OCX
+surfaces remain system-managed. HTML/Electron are the targets for these skins. Direct Win32 AOT explicitly diagnoses an optional browser-only
 application theme instead of silently pretending to render it with native
 controls; choose a classic application theme for that target. The separately
 licensed original VB6 toolchain does not implement these browser skins.
@@ -166,6 +183,7 @@ npm run build
 npm test
 npm run test:application-themes
 npm run test:application-themes:browser
+python tools/browser-native-caption-tests.py
 VB6_BROWSER=firefox npm run test:application-themes:browser
 VB6_BROWSER=webkit npm run test:application-themes:browser
 ```
@@ -203,3 +221,21 @@ including normalized project saves, standalone exports, runtime theme changes,
 system-color resolution and explicit legacy icon-pack requests. Existing files
 need no manual edit. Classic/Standard/High Contrast remain distinct profiles.
 See [the fidelity maintenance contract](IDE-THEMES.md#fidelity-and-compatibility-maintenance).
+
+### Desktop caption validation
+
+`tools/browser-native-caption-tests.py` exercises real popup DOM in each browser
+with an explicitly simulated IPC bridge; it verifies app/system caption ownership,
+all nine palettes, client dimensions, centered titles, activation/Restore state,
+close cancellation, and themed dialog focus. It is not an Electron certification.
+The existing Validate Windows job also stages the same application fixture twice
+with Electron: application captions and OS captions. `desktop/smoke.cjs` checks
+real HWND identity, theme changes without runtime/control reconstruction,
+minimize/maximize/restore, native client resize, modal InputBox results and
+QueryUnload, alongside its existing security and graphics checks. These Windows
+checks do not certify native macOS/Linux behavior or pixel equivalence.
+
+`dist/vb6-controls.css`, like the IDE CSS and runtime bundles, is generated during
+build and verified against a mandatory, locally reviewed SHA-256/length entry in
+`tools/ide-artifacts.json`. Edit the source styles, not the derivative. CI never
+refreshes its own expected fingerprints.

@@ -1,0 +1,13 @@
+import {HRESULT,ComError,unsignedHRESULT,signedHRESULT,FAILED,SUCCEEDED,checkHRESULT,guid,IID} from './contracts.js';
+import {ComObject,ComEnumerator,ConnectionPoint,sameComIdentity} from './identity.js';
+import {ComClassFactory,ComClassRegistry,DisplayNameMoniker,RunningObjectTable,ROTFLAGS_REGISTRATIONKEEPSALIVE} from './activation.js';
+export {HRESULT,ComError,unsignedHRESULT,signedHRESULT,FAILED,SUCCEEDED,checkHRESULT,guid,IID,ComObject,ComEnumerator,ConnectionPoint,sameComIdentity,ComClassFactory,ComClassRegistry,DisplayNameMoniker,RunningObjectTable,ROTFLAGS_REGISTRATIONKEEPSALIVE};
+import {DISPATCH,DISPID,COM_MISSING,ComByRef,DispatchObject} from './dispatch.js';
+export {DISPATCH,DISPID,COM_MISSING,ComByRef,DispatchObject};
+import {MemoryStream} from './stream.js';
+import {StgMedium,ReleaseStgMedium,TYMED,DVASPECT,DATADIR,ADVF,CF,formatEtc,ClipboardFormats} from './medium.js';
+import {OleDataObject} from './data-object.js';
+import {OleClipboard} from './clipboard.js';
+import {DROPEFFECT,MK,DropSource,DropTarget,OleDragSession} from './drag-drop.js';
+export {MemoryStream,StgMedium,ReleaseStgMedium,TYMED,DVASPECT,DATADIR,ADVF,CF,formatEtc,ClipboardFormats,OleDataObject,OleClipboard,DROPEFFECT,MK,DropSource,DropTarget,OleDragSession};
+export const ComOle=Object.freeze({HRESULT,ComError,unsignedHRESULT,signedHRESULT,FAILED,SUCCEEDED,checkHRESULT,guid,IID,ComObject,ComEnumerator,ConnectionPoint,sameComIdentity,ComClassFactory,ComClassRegistry,DisplayNameMoniker,RunningObjectTable,ROTFLAGS_REGISTRATIONKEEPSALIVE,DISPATCH,DISPID,COM_MISSING,ComByRef,DispatchObject,MemoryStream,StgMedium,ReleaseStgMedium,TYMED,DVASPECT,DATADIR,ADVF,CF,formatEtc,ClipboardFormats,OleDataObject,OleClipboard,DROPEFFECT,MK,DropSource,DropTarget,OleDragSession});

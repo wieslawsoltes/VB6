@@ -1,0 +1,18 @@
+{
+  "name": "@vb6/automation",
+  "version": "0.1.0",
+  "description": "Standalone VB-compatible Automation registry, tagged values, wire codec and portable COM bridge",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./values": "./src/runtime/values.js",
+    "./wire": "./src/runtime/automation-wire.js",
+    "./com": "./src/runtime/com-automation.js",
+    "./internal/*": "./*"
+  },
+  "files": ["index.js", "src", "README.md", "LICENSE"],
+  "dependencies": {"@vb6/com-ole": "0.1.0"},
+  "license": "MIT",
+  "engines": {"node": ">=22"},
+  "sideEffects": false
+}

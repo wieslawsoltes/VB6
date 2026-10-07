@@ -3,7 +3,7 @@ import {el} from '../core/core.js';
 export function installFormWindow(form){
   if(form.design)return;form.titleBar.tabIndex=0;let cancelInteraction=null;
   const start=(event,edge='move')=>{
-    if(event.button!==0||event.target.closest('button')||form.savedBounds||form.minimized&&edge!=='move'||edge!=='move'&&Number(form.props.BorderStyle??2)!==2&&Number(form.props.BorderStyle)!==5)return;
+    if(form.nativeWindow?.id||event.button!==0||event.target.closest('button')||form.savedBounds||form.minimized&&edge!=='move'||edge!=='move'&&Number(form.props.BorderStyle??2)!==2&&Number(form.props.BorderStyle)!==5)return;
     cancelInteraction?.();event.preventDefault();event.stopPropagation();const handle=event.currentTarget,original={Left:form.props.Left,Top:form.props.Top,ClientWidth:form.props.ClientWidth,ClientHeight:form.props.ClientHeight},moved=form.movedByUser,rect=form.node.getBoundingClientRect(),scale=rect.width/Math.max(1,form.node.offsetWidth)||1,startX=event.clientX,startY=event.clientY;
     form.movedByUser=true;handle.setPointerCapture(event.pointerId);let done=false;
     const apply=e=>{const dx=(e.clientX-startX)/scale,dy=(e.clientY-startY)/scale,area=form.node.parentElement,left=Number(original.Left||0)/15,top=Number(original.Top||0)/15,width=Number(original.ClientWidth||6000)/15,height=Number(original.ClientHeight||4500)/15;
@@ -13,7 +13,7 @@ export function installFormWindow(form){
     const finish=(cancel=false)=>{if(done)return;done=true;handle.removeEventListener('pointermove',apply);handle.removeEventListener('pointerup',up);handle.removeEventListener('pointercancel',abandon);handle.removeEventListener('lostpointercapture',abandon);document.removeEventListener('keydown',key,true);if(handle.hasPointerCapture?.(event.pointerId))handle.releasePointerCapture(event.pointerId);if(cancel){Object.assign(form.props,original);form.movedByUser=moved;form.refresh();form.mdiController?.layout();}else if(edge!=='move')form.event('Resize');cancelInteraction=null;};
     const up=()=>finish(false),abandon=()=>finish(true),key=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish(true);}};cancelInteraction=abandon;handle.addEventListener('pointermove',apply);handle.addEventListener('pointerup',up);handle.addEventListener('pointercancel',abandon);handle.addEventListener('lostpointercapture',abandon);document.addEventListener('keydown',key,true);
   };
-  form.titleBar.addEventListener('pointerdown',e=>start(e));form.titleBar.addEventListener('dblclick',e=>{if(!e.target.closest('button')&&form.props.MaxButton!==0&&Number(form.props.BorderStyle??2)===2)form.toggleMaximize();});
+  form.titleBar.addEventListener('pointerdown',e=>start(e));form.titleBar.addEventListener('dblclick',e=>{if(!form.nativeWindow?.id&&!e.target.closest('button')&&form.props.MaxButton!==0&&Number(form.props.BorderStyle??2)===2)form.toggleMaximize();});
   for(const edge of ['n','s','e','w','ne','nw','se','sw']){const grip=el('div',{class:'vb-form-grip vb-form-grip-'+edge,'aria-hidden':'true'});grip.addEventListener('pointerdown',e=>start(e,edge));form.node.append(grip);}
   form.cancelWindowInteraction=()=>cancelInteraction?.();
 }

@@ -45,7 +45,7 @@ namespace VB6Interop {
     public object Instance { get { return GetOcx(); } }
   }
   sealed class Entry {
-    public object Value; public long Identity; public Form Window; public ControlHost Control;
+    public object Value; public long Identity; public Form Window; public ControlHost Control; public Guid? ActivationClassId;
     public Dictionary<string,object> Metadata;
     public int ModalDepth=0;public bool ActiveOperation=false;public bool? FrameActive=null,DocumentActive=null;
     public int FreezeDepth=0;public OcxPropertyConnection PropertyConnection;public System.Drawing.Font OwnedFont;
@@ -160,6 +160,7 @@ namespace VB6Interop {
     static void Release(string id) {
       var entry=ObjectAt(id);if(entry.ActiveOperation)throw new InvalidOperationException("Cannot release a control during an activation operation");if(entry.EventDepth>0)throw new InvalidOperationException("Cannot release the source of an active native event");
       var errors=new List<Exception>();
+      try{ReleaseComOleResources(id);}catch(Exception error){errors.Add(error);}
       try{Unadvise(entry);}catch(Exception error){errors.Add(error);}
       try{StopObserving(entry);}catch(Exception error){errors.Add(error);}
       try{RestoreOcxModeless(entry);}catch(Exception error){errors.Add(error);}
@@ -184,10 +185,14 @@ namespace VB6Interop {
     static object Handle(Dictionary<string,object> request) {
       string op=S(request,"op");
       if(op=="init") {
-        if(Initialized)throw new InvalidOperationException("Session already initialized");var allowed=A(V(request,"allowed"));var controls=A(V(request,"controls",new object[0]));if(allowed.Length==0||allowed.Length>64)throw new ArgumentException("Provide 1..64 explicit ProgIDs");
-        foreach(var item in allowed){var p=item as string;if(p==null||!Name(p))throw new ArgumentException("Invalid ProgID");Allowed.Add(p);}foreach(var item in controls){var p=item as string;if(p==null||!Allowed.Contains(p))throw new ArgumentException("Control activation requires an explicit grant");Controls.Add(p);}Initialized=true;return D("version",1,"bitness",IntPtr.Size*8,"apartment",System.Threading.Thread.CurrentThread.GetApartmentState().ToString());
+        if(Initialized)throw new InvalidOperationException("Session already initialized");var allowed=A(V(request,"allowed"));var controls=A(V(request,"controls",new object[0]));if(allowed.Length>64||controls.Length>64)throw new ArgumentException("Provide at most 64 explicit ProgIDs");
+        var allowedSet=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var controlSet=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach(var item in allowed){var p=item as string;if(p==null||!Name(p)||!allowedSet.Add(p))throw new ArgumentException("Invalid or duplicate ProgID");}
+        foreach(var item in controls){var p=item as string;if(p==null||!allowedSet.Contains(p)||!controlSet.Add(p))throw new ArgumentException("Control activation requires a distinct explicit grant");}
+        InitializeComOle(request,allowedSet);Allowed.UnionWith(allowedSet);Controls.UnionWith(controlSet);Initialized=true;return D("version",1,"bitness",IntPtr.Size*8,"apartment",System.Threading.Thread.CurrentThread.GetApartmentState().ToString());
       }
       if(!Initialized)throw new UnauthorizedAccessException("Initialize an explicitly granted session first");
+      object serviceResult;if(TryComOle(request,out serviceResult))return serviceResult;
       if(op=="info"){Application.DoEvents();return D("objects",Objects.Count,"windows",Objects.Values.Count(e=>e.Window!=null&&!e.Window.IsDisposed));}
       if(op=="close"){Quitting=true;return D("closed",true);}
       if(op=="eventReturn")return EventReturn(request);
@@ -198,7 +203,7 @@ namespace VB6Interop {
         try {
           if(preview){window=new Form {Text="VB6 native component — "+progId,Width=640,Height=480};control=new ControlHost(type.GUID,V(request,"licenseKey") as string,Convert.ToBoolean(V(request,"designMode",false))) {Dock=DockStyle.Fill};((System.ComponentModel.ISupportInitialize)control).BeginInit();window.Controls.Add(control);((System.ComponentModel.ISupportInitialize)control).EndInit();window.Show();Application.DoEvents();value=control.Instance;}
           else value=V(request,"licenseKey")==null?Activator.CreateInstance(type):CreateLicensed(type.GUID,S(request,"licenseKey"));
-          var result=Map(Export(value));var entry=ObjectAt(S(result,"id"));entry.Window=window;entry.Control=control;entry.DesignMode=control!=null&&control.HostDesignMode;return result;
+          var result=Map(Export(value));var entry=ObjectAt(S(result,"id"));entry.Window=window;entry.Control=control;entry.ActivationClassId=type.GUID;entry.DesignMode=control!=null&&control.HostDesignMode;return result;
         }catch{if(window!=null)window.Dispose();else if(value!=null&&Marshal.IsComObject(value))Marshal.FinalReleaseComObject(value);throw;}
       }
       var target=ObjectAt(S(request,"handle"));
@@ -234,7 +239,7 @@ namespace VB6Interop {
         reader.IsBackground=true;reader.Start();
         while(!Quitting){string line;if(!requests.TryTake(out line,25)){Application.DoEvents();if(requests.IsCompleted)break;continue;}ProcessRequest(line);}
 
-      } finally {foreach(var id in Objects.Keys.ToArray())try{Release(id);}catch{} }
+      } finally {try{foreach(var id in Objects.Keys.ToArray())try{Release(id);}catch(Exception error){Console.Error.WriteLine(error.Message);}}finally{CloseComOle();} }
     }
   }
 }

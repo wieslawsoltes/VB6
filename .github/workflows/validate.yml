@@ -30,11 +30,21 @@ jobs:
           python-version: '3.12'
       - run: npm run build
       - name: Complete Node suite with preserved failure output
-        shell: bash
         run: |
           set -o pipefail
-          mkdir -p reports/node
-          npm test 2>&1 | tee reports/node/tests.log
+          mkdir -p reports/core-validation
+          npm test 2>&1 | tee reports/core-validation/node-tests.log
+      - name: Verify checked IA-32 encodings against GNU assembler
+        run: |
+          node tools/verify-x86-encodings.mjs
+          node tools/test-x86-cpu.mjs
+      - name: Independently installed COM and Automation packages
+        run: node tools/test-com-ole-packages.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: com-ole-packages
+          path: artifacts/com-ole
+          retention-days: 7
       - name: Independently extracted layout package and labelled solver benchmarks
         run: |
           npm run pack:layout
@@ -96,6 +106,10 @@ jobs:
       - run: npm run build
       - run: python -m pip install playwright==1.57.0
       - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Portable COM/OLE source and bundled runtime contracts
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: python tools/browser-com-ole-tests.py
       - name: Detached browser windows over HTTP and file origins
         env:
           VB6_BROWSER: ${{ matrix.browser }}
@@ -124,6 +138,10 @@ jobs:
         env:
           VB6_BROWSER: ${{ matrix.browser }}
         run: npm run test:application-themes:browser
+      - name: Application caption popups, OS-state bridge and themed dialog focus
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+        run: python tools/browser-native-caption-tests.py
       - name: Download every sample from the IDE and reopen exact HTML bytes
         env:
           VB6_BROWSER: ${{ matrix.browser }}
@@ -144,11 +162,12 @@ jobs:
             reports/layout
             reports/auto-layout
             reports/exporter
+            reports/com-ole
           if-no-files-found: ignore
           retention-days: 7
   win32-system-contracts:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -161,6 +180,31 @@ jobs:
           powershell -NoProfile -File tools/test-winforms-anchors.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./tools/test-win32-layout.ps1
+      - name: Build actual Electron hosts with application and operating-system captions
+        shell: pwsh
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix desktop ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/native-fixtures.mjs
+          node tools/build-windows.mjs --project validation/NativeSmoke.vb6web --name CaptionSmoke --graphics canvas2d --stage-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/test-native-host.mjs .native-build/captionsmoke-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --input-type=module -e "import fs from 'node:fs';const f='validation/NativeSmoke.vb6web',p=JSON.parse(fs.readFileSync(f));p.settings.themeOptions={systemCaption:true};fs.writeFileSync(f,JSON.stringify(p));"
+          node tools/build-windows.mjs --project validation/NativeSmoke.vb6web --name OSCaptionSmoke --graphics canvas2d --stage-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/test-native-host.mjs .native-build/oscaptionsmoke-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: application-native-caption-hosts
+          path: |
+            validation/*captionsmoke-x64.host.json*
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Record installed Windows calendar and formatting contracts
         shell: pwsh
         run: ./tools/win32-system-oracle.ps1
@@ -173,6 +217,60 @@ jobs:
           path: |
             reports/win32-system
             reports/layout/native
+          retention-days: 7
+
+  native-com-ole:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86, x64]
+    env:
+      VB6_COM_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Real system Automation and typed VARIANT regression
+        if: ${{ !cancelled() }}
+        run: node tools/interop/test-native.mjs
+      - name: Native COM identity, OLE data, advisories and compound files
+        if: ${{ !cancelled() }}
+        run: node tools/interop/test-com-ole.mjs
+      - name: Native OCX container and OLE contract fixtures
+        if: ${{ !cancelled() }}
+        run: node tools/interop/test-container-contracts.mjs
+      - name: Offline installed native package consumer
+        if: ${{ !cancelled() }}
+        run: node tools/test-com-ole-packages.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-com-ole-${{ matrix.architecture }}
+          path: reports/native-interop
+          if-no-files-found: warn
+          retention-days: 7
+
+  native-compiler:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build self-checking native executables at every optimization level
+        run: node tools/win32-optimizer-fixtures.mjs
+      - name: Execute x86 compiler and assembler fixtures on Windows
+        shell: pwsh
+        run: ./tools/test-win32-optimizer.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-optimizer-execution
+          path: reports/native-optimizer
           retention-days: 7
   rendering-qualification:
     # WebGPU is the default UI backend: keep its regressions in the existing
@@ -223,37 +321,3 @@ jobs:
           name: rendering-themes-${{ matrix.backend }}-${{ matrix.display }}
           path: reports/rendering
           retention-days: 14
-  prior-failure-diagnostics:
-    if: github.head_ref == 'feat/webgpu-ui-rendering'
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    permissions:
-      actions: read
-      checks: read
-    steps:
-      - name: Recover bounded assertion diagnostics from the failed candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p /tmp/pr21-failure
-          gh api repos/wieslawsoltes/VB6/check-runs/112656456967/annotations > /tmp/pr21-failure/annotations.json
-          gh api repos/wieslawsoltes/VB6/actions/jobs/112656456967/logs > /tmp/pr21-failure/tests.log
-          python3 - <<'PY'
-          from pathlib import Path
-          import json
-          p=Path('/tmp/pr21-failure')
-          lines=(p/'tests.log').read_text().splitlines()
-          selected=set()
-          for i,line in enumerate(lines):
-              if 'not ok ' in line or 'AssertionError' in line or 'ERR_ASSERTION' in line:
-                  selected.update(range(max(0,i-4),min(len(lines),i+50)))
-          (p/'failures.txt').write_text('\n'.join(lines[i] for i in sorted(selected)))
-          print((p/'annotations.json').read_text())
-          print((p/'failures.txt').read_text()[:16000])
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pr21-prior-failure
-          path: /tmp/pr21-failure
-          retention-days: 7

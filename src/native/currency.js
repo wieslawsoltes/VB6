@@ -106,9 +106,8 @@ export const nativeCurrencyMethods = {
     if(['vartype','typename'].includes(name)) {
       if(args.length!==1)this.fail(name+' expects one argument');
       let query=args[0];while(query.kind==='group')query=query.expr;
-      // Unsuffixed numeric literal metadata is not retained by this frontend.
-      // Do not mistake the AOT's Long working representation for VB's subtype.
-      if(query.kind==='literal'&&typeof query.value==='number')this.fail('Native '+name+' needs an explicitly typed value; use a typed variable or conversion');
+      // Authored literal and scalar expression metadata preserve their VB subtype.
+
       const variable=this.variable(query),array=variable?.nativeArray&&!variable.elementOf;
       const type=array?key(variable.type):this.nativeQueryType(query);
       const descriptor={byte:[17,'Byte'],integer:[2,'Integer'],long:[3,'Long'],boolean:[11,'Boolean'],single:[4,'Single'],double:[5,'Double'],date:[7,'Date'],currency:[6,'Currency'],string:[8,'String']}[type];

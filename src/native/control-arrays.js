@@ -59,7 +59,7 @@ export const nativeControlArrayMethods={
   },
   controlArrayProperty(object,property){
     if(object.controlArray){const indices=[...object.entries.keys()];if(!['count','lbound','ubound'].includes(property))this.fail('Control array requires an Index: '+object.name);this.x.value(property==='count'?indices.length:property==='lbound'?Math.min(...indices):Math.max(...indices));return true;}
-    if(property==='index'&&object.model?.properties.Index!==undefined){if(object.indexed){this.ensure(object);const v=object.indexSlot;this.x.value(v.label?{memory:v.label}:{argument:v.offset});}else this.x.value(object.model.properties.Index);return true;}
+    if(property==='index'&&object.model?.properties.Index!==undefined){if(object.indexed||object.boundIndex){this.ensure(object);const v=object.indexSlot;this.x.value(v.label?{memory:v.label}:{argument:v.offset});}else this.x.value(object.model.properties.Index);return true;}
     return false;
   },
   controlHandler(module,control,event){

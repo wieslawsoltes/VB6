@@ -28,10 +28,10 @@ export class NativeAutomationClient {
   constructor({allowed=[],controls=[],architecture='x86',timeout=15000,startupTimeout=60000,lcid=1033,allowNativeCode=false,licenseKeys={}}={}){
     if(!allowNativeCode)throw Error('Explicit allowNativeCode consent is required; COM/OCX code has full user authority');
     if(!['x86','x64'].includes(architecture)||!Number.isInteger(timeout)||timeout<100||timeout>120000||!Number.isInteger(startupTimeout)||startupTimeout<100||startupTimeout>120000)throw Error('Invalid native host options');
-    if(!Array.isArray(allowed)||!allowed.length||allowed.length>64||allowed.some(n=>typeof n!=='string'||!(/^[A-Za-z][A-Za-z0-9_.]{0,254}$/).test(n))||!Array.isArray(controls)||controls.some(n=>!allowed.includes(n)))throw Error('Explicit bounded ProgID and control allowlists are required');
+    if(!Array.isArray(allowed)||allowed.length>64||allowed.some(n=>typeof n!=='string'||!(/^[A-Za-z][A-Za-z0-9_.]{0,254}$/).test(n))||!Array.isArray(controls)||controls.some(n=>!allowed.includes(n)))throw Error('Explicit bounded ProgID and control allowlists are required');
     if(!licenseKeys||typeof licenseKeys!=='object'||Array.isArray(licenseKeys)||Object.keys(licenseKeys).length>64||Object.entries(licenseKeys).some(([name,key])=>!allowed.some(p=>p.toLowerCase()===name.toLowerCase())||typeof key!=='string'||!key.length||key.length>16384))throw Error('License keys must belong to explicitly allowed components');
     if(!Number.isInteger(lcid)||lcid<0||lcid>0xfffff)throw Error('Invalid Automation locale identifier');
-    this.interfaceHubs=new Map();this.propertyObservers=new Map();
+    this.interfaceHubs=new Map();this.propertyObservers=new Map();this.releases=new Map();
     this.lcid=lcid;this.licenseKeys=new Map(Object.entries(licenseKeys).map(([n,k])=>[n.toLowerCase(),k]));this.eventHandlers=new Map();this.activeEvents=new Set();
     this.allowed=[...allowed];this.controls=[...controls];this.architecture=architecture;this.timeout=timeout;this.startupTimeout=startupTimeout;this.initialized=false;this.stderr='';this.sequence=0;this.queued=0;this.pending=new Map();this.queue=Promise.resolve();this.closed=false;this.objectIds=new WeakMap();this.adapters=new Map();
   }
@@ -69,16 +69,23 @@ export class NativeAutomationClient {
   }
   diagnostics(){return {architecture:this.architecture,initialized:this.initialized,closed:this.closed,pending:this.pending.size,timeoutMs:this.timeout,startupTimeoutMs:this.startupTimeout,stderr:this.stderr};}
   request(message){const callback=eventContext.getStore();if(callback?.client===this&&this.activeEvents.has(callback.token))return this.send({...message,eventToken:callback.token});if(this.queued>=128)return Promise.reject(Error('Native request queue is full'));this.queued++;const run=this.queue.then(async()=>{await this.start();return this.send(message);}).finally(()=>{this.queued--;});this.queue=run.catch(()=>{});return run;}
-  registry({hostControls=false,designMode=false}={}){if(typeof designMode!=='boolean')throw TypeError('Expected Boolean design mode');const registry=new AutomationRegistry();for(const name of this.allowed)registry.register(name,async session=>{if(this.session&&this.session!==session)throw Error('Use a separate native client for each VM session');this.session=session;const wire=await this.request({op:'create',progId:name,designMode,preview:hostControls&&this.controls.some(p=>p.toLowerCase()===name.toLowerCase()),licenseKey:this.licenseKeys.get(name.toLowerCase())});try{const adapter=this.adapter(wire,session);if(wire.metadata?.events?.length)await this.request({op:'advise',handle:wire.id});return adapter;}catch(error){this.adapters.delete(wire.id);if(!this.closed)await this.request({op:'release',handle:wire.id}).catch(()=>{});throw error;}});return registry;}
+  registry({hostControls=false,designMode=false}={}){if(typeof designMode!=='boolean')throw TypeError('Expected Boolean design mode');const registry=new AutomationRegistry();for(const name of this.allowed)registry.register(name,async session=>{if(this.session&&this.session!==session)throw Error('Use a separate native client for each VM session');this.session=session;const wire=await this.request({op:'create',progId:name,designMode,preview:hostControls&&this.controls.some(p=>p.toLowerCase()===name.toLowerCase()),licenseKey:this.licenseKeys.get(name.toLowerCase())});try{const adapter=this.adapter(wire,session);if(wire.metadata?.events?.length)await this.request({op:'advise',handle:wire.id});return adapter;}catch(error){await this.releaseHandle(wire.id).catch(()=>{});throw error;}});return registry;}
   adapter(wire,session){
-    if(this.adapters.has(wire.id))return this.adapters.get(wire.id);const client=this;
+    if(this.releases.has(wire.id))throw new VBError('Native Automation object has been released',91);if(this.adapters.has(wire.id))return this.adapters.get(wire.id);const client=this;
     const decode=(w,preserveScalars=false)=>decodeAutomationValue(w,{preserveScalars,object:child=>{const adapter=client.adapter(child,session),o=session.adopt(adapter);client.objectIds.set(o,child.id);return o;}});
     const invoke=async(member,mode,args,byRef=[],preserveScalars=false)=>{const result=await client.request({op:'call',handle:wire.id,member,mode,lcid:client.lcid,byRef,args:args.map(v=>encodeAutomationValue(v,{objectId:o=>client.objectIds.get(o)}))});return {value:decode(result.value,preserveScalars),args:result.args.map(value=>decode(value,preserveScalars))};};
-    const adapter={metadata:wire.metadata,subscribe(handler){client.eventHandlers.set(wire.id,{handler,decode:value=>decode(value,true)});return ()=>client.eventHandlers.delete(wire.id);},invoke:(...args)=>invoke(...args),invokeScalar:(member,mode,args,byRef)=>invoke(member,mode,args,byRef,true),async release(){client.interfaceHubs.get(wire.id)?.hub.close();client.interfaceHubs.delete(wire.id);client.propertyObservers.delete(wire.id);client.eventHandlers.delete(wire.id);if(!client.closed)await client.request({op:'release',handle:wire.id});client.adapters.delete(wire.id);}};
+    const adapter={metadata:wire.metadata,subscribe(handler){client.eventHandlers.set(wire.id,{handler,decode:value=>decode(value,true)});return ()=>client.eventHandlers.delete(wire.id);},invoke:(...args)=>invoke(...args),invokeScalar:(member,mode,args,byRef)=>invoke(member,mode,args,byRef,true),release(){return client.releaseHandle(wire.id);}};
     if(wire.metadata?.enumerable){const enumerate=async preserve=>{const values=await client.request({op:'enumerate',handle:wire.id,lcid:client.lcid});return values.map(value=>decode(value,preserve));};adapter.enumerate=()=>enumerate(false);adapter.enumerateScalar=()=>enumerate(true);}
     this.adapters.set(wire.id,adapter);
     // Map the root immediately as well as objects returned by member calls.
-    try{const object=session.adopt(adapter);this.objectIds.set(object,wire.id);return adapter;}catch(error){this.adapters.delete(wire.id);if(!this.closed)this.request({op:'release',handle:wire.id}).catch(()=>{});throw error;}
+    try{const object=session.adopt(adapter);this.objectIds.set(object,wire.id);return adapter;}catch(error){this.releaseHandle(wire.id).catch(()=>{});throw error;}
+  }
+  /** Exactly-once cleanup shared by root factories, nested decoding, and VM Stop. */
+  releaseHandle(handle){
+    if(typeof handle!=='string'||!/^o[1-9]\d*$/.test(handle))throw TypeError('Invalid native handle');
+    if(this.releases.has(handle))return this.releases.get(handle);
+    this.interfaceHubs.get(handle)?.hub.close();this.interfaceHubs.delete(handle);this.propertyObservers.delete(handle);this.eventHandlers.delete(handle);this.adapters.delete(handle);
+    const pending=this.closed?Promise.resolve():this.request({op:'release',handle});this.releases.set(handle,pending);return pending;
   }
   /** Called only for unsolicited messages from this explicitly granted child. */
   receiveEvent(event){

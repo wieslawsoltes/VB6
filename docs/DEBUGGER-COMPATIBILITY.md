@@ -53,11 +53,11 @@ No raw CDB command, extension-loading interface or shell command is exposed over
 
 ## Validation and equivalence
 
-`tests/debugger-boundaries.test.mjs` tests source event delivery and versioned state preservation. `tests/native-debugger*.test.mjs` covers native protocol/transport and browser client contracts. `tools/browser-debugger-boundaries.py` runs twelve cases on modular HTTP, standalone HTTP and standalone file origins in each CI browser (36 per engine); its native UI cases explicitly use a transport fixture and are not evidence of native-engine execution.
+`tests/debugger-boundaries.test.mjs` tests source event delivery and versioned state preservation. `tests/native-debugger*.test.mjs` covers native protocol/transport and browser client contracts. `tools/browser-debugger-boundaries.py` exercises modular HTTP, standalone HTTP and standalone file origins with a selectable browser engine; its native UI cases explicitly use a transport fixture and are not evidence of native-engine execution.
 
 `tools/native-debugger-smoke.mjs` runs separately on Windows with compiled x86/x64 EXE and DLL fixtures and matching symbols. It verifies actual CDB behavior and fails rather than skipping when a required engine, target or operation is unavailable. Its fixture initializes COM but is not a licensed Microsoft VB6 compiler/debugger oracle.
 
-Native VB6 P-code interpreter debugging, arbitrary live storage migration, exact native fonts/pixels and exhaustive licensed VB6 debugger certification are not implemented or certified by these tests. Existing historical validation reports describe their own commits; use the PR's final-head workflow results for this continuation.
+Native VB6 P-code interpreter debugging, arbitrary live storage migration, exact native fonts/pixels and exhaustive licensed VB6 debugger certification are not implemented or certified by these tests. Record the commands and results for the final combined revision in the PR; the checked-in workflow determines which checks run automatically.
 
 ## Microsoft references
 
@@ -77,7 +77,7 @@ VB6_BROWSER=firefox python tools/browser-debugger-boundaries.py
 VB6_BROWSER=webkit python tools/browser-debugger-boundaries.py
 ```
 
-`VB6_DEBUGGER_ORIGINS=inline` runs the twelve cases with `set_content` only and must not be reported as deployment-origin validation. The native UI transport fixture deliberately reorders a command response and a newer stop event, while the Windows matrix independently runs the real authenticated HTTP bridge against CDB and compiled x86/x64 targets. Reports identify the target architecture from the PE header separately from the Node host architecture. A failure to take an evidence screenshot does not suppress the original failing case or the JSON report.
+`VB6_DEBUGGER_ORIGINS=inline` runs the twelve cases with `set_content` only and must not be reported as deployment-origin validation. The native UI transport fixture deliberately reorders a command response and a newer stop event, while the separate Windows smoke exercises the real authenticated HTTP bridge against CDB and compiled x86/x64 targets. Reports identify the target architecture from the PE header separately from the Node host architecture. A failure to take an evidence screenshot does not suppress the original failing case or the JSON report.
 
 Additional native command reference: [ba — Break on Access](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/ba--break-on-access-).
 
@@ -100,4 +100,5 @@ no-startup event promotion, an actual button handler, sandbox/bridge isolation a
 Reset. It locates the exact active preview URL and reports the current status,
 frame URL and recent output when initialization fails. The browser embedding
 fixture is not a substitute for running this smoke under Electron on Windows.
-See [the continuation validation record](DEBUGGER-CONTINUATION-VALIDATION.md).
+See [preview lifecycle](NATIVE-PREVIEW-LIFECYCLE.md) and
+[validation procedures](TESTING.md) for maintenance and evidence requirements.

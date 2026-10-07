@@ -1,0 +1,25 @@
+{
+  "name": "@vb6/com-ole",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dependency-free portable COM identity, activation, Automation dispatch and OLE data transfer contracts",
+  "exports": {
+    ".": "./src/index.js",
+    "./com": "./src/com.js",
+    "./ole": "./src/ole.js"
+  },
+  "files": [
+    "src",
+    "test",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  }
+}
