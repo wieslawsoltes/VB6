@@ -1,0 +1,38 @@
+name: PR21 native raster diagnosis
+on:
+  push:
+    branches: [chore/pr21-reviewed-handoff-20261007]
+    paths: [tools/pr21-native-raster-probe.py, .github/workflows/pr21-native-probe.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0 Pillow
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y libvulkan1 mesa-vulkan-drivers xvfb xauth
+      - name: Preserve exact executable for local reproduction
+        run: tar -C "$HOME/.cache/ms-playwright/chromium-1200" -cf /tmp/chromium1200.tar chrome-linux64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr21-ci-browser
+          path: /tmp/chromium1200.tar
+          compression-level: 1
+          retention-days: 1
+      - run: xvfb-run -a python tools/pr21-native-raster-probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr21-native-raster-diagnosis
+          path: reports/pr21-native-probe
+          retention-days: 3
