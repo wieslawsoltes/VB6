@@ -83,3 +83,25 @@ jobs:
           path: reports/xaml
           if-no-files-found: ignore
           retention-days: 7
+  advanced-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build
+      - name: Install pinned optional editor dependencies
+        run: npm install --prefix packages/advanced-editor --ignore-scripts --no-audit --no-fund
+      - name: Build self-hosted editor vendor assets
+        run: node tools/build-advanced-editor.mjs --vendor-only
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: advanced-editor-distribution
+          path: |
+            dist/advanced-editor
+            packages/advanced-editor/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
