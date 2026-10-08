@@ -6,6 +6,7 @@ export class LspTextDocument {
   update(text, version) {
     if (typeof text !== 'string' || !Number.isSafeInteger(version)) throw new TypeError('Invalid document snapshot.');
     this.text = text; this.version = version; this.lineStarts = [0]; this.lineEnds = [];
+    this.scannedCharacters = (this.scannedCharacters || 0) + text.length;
     for (let i = 0; i < text.length; i++) {
       if (text[i] === '\r' || text[i] === '\n') {
         this.lineEnds.push(i);
@@ -30,19 +31,36 @@ export class LspTextDocument {
     return Math.min(this.lineEnds[line], this.lineStarts[line] + character);
   }
   range(start, end = start) { return { start: this.positionAt(start), end: this.positionAt(end) }; }
+  fork() { return Object.assign(Object.create(LspTextDocument.prototype), this); }
   applyChanges(changes, version) {
     if (!Number.isSafeInteger(version) || version <= this.version) throw new RpcError(RPC_CONTENT_MODIFIED, 'Document version did not advance.');
-    const next = new LspTextDocument(this.uri, this.languageId, this.text, this.version);
+    if (!Array.isArray(changes)) throw new RpcError(-32602, 'Expected an array of text changes.');
+    const next = this.fork();
     for (const change of changes) {
       if (typeof change.text !== 'string') throw new RpcError(-32602, 'Text changes require a string.');
       if (!change.range) next.update(change.text, version);
       else {
         const start = next.offsetAt(change.range.start, true), end = next.offsetAt(change.range.end, true);
         if (end < start || (change.rangeLength !== undefined && change.rangeLength !== end - start)) throw new RpcError(-32602, 'Invalid text change range.');
-        next.update(next.text.slice(0, start) + change.text + next.text.slice(end), version);
+        // Include adjacent physical lines because inserted CR/LF can merge with
+        // an existing line ending. Scan only this region, not the full module.
+        const first = Math.max(0, change.range.start.line - 1);
+        const last = Math.min(next.lineStarts.length - 1, change.range.end.line + 1);
+        const from = next.lineStarts[first], to = next.lineStarts[last + 1] ?? next.text.length;
+        const fragment = next.text.slice(from, start) + change.text + next.text.slice(end, to);
+        const local = new LspTextDocument(this.uri, this.languageId, fragment, version);
+        const delta = change.text.length - (end - start), suffix = last + 1 < next.lineStarts.length;
+        const starts = local.lineStarts.slice(0, suffix ? -1 : undefined).map(n => n + from);
+        const ends = local.lineEnds.slice(0, suffix ? -1 : undefined).map(n => n + from);
+        next.lineStarts = [...next.lineStarts.slice(0, first), ...starts, ...next.lineStarts.slice(last + 1).map(n => n + delta)];
+        next.lineEnds = [...next.lineEnds.slice(0, first), ...ends, ...next.lineEnds.slice(last + 1).map(n => n + delta)];
+        next.text = next.text.slice(0, start) + change.text + next.text.slice(end);
+        next.scannedCharacters += fragment.length;
       }
     }
-    return this.update(next.text, version);
+    next.version = version;
+    Object.assign(this, next);
+    return this;
   }
 }
 
