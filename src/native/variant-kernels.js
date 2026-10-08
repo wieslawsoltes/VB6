@@ -1,3 +1,4 @@
+import {emitNativeVariantArraySnapshot} from './variant-array-snapshots.js';
 import {emitNativeParamArrayHelpers} from './param-arrays.js';
 /** Native Automation VARIANT kernels. Every externally visible write commits
  * from a complete owned temporary; a failed allocation/coercion preserves the
@@ -17,6 +18,7 @@ export function emitNativeVariantHelpers(c){
  if(used.has('divide'))emitNativeVariantDivision(x);
  if(used.has('assign'))emitNativeVariantReferences(x);
  if(used.has('paramarray'))emitNativeParamArrayHelpers(c);
+ if(used.has('array-copy'))emitNativeVariantArraySnapshot(c);
  const checked=x.unique();x.label(P+'check').test().branch('ns',checked);
  for(const [hr,error]of [[0x8002000a,6],[0x8007000e,7],[0x8002000b,9],[0x8002000d,10],[0x80020012,11],[0x80070057,5],[0x80020004,449]])x.compare(hr).branch('e','error:'+error);
  x.jump('error:13').label(checked).ret();

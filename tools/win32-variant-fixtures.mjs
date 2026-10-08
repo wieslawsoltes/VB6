@@ -1,3 +1,4 @@
+import {appendParamArrayReferenceChecks,NATIVE_PARAMARRAY_REFERENCE_PROCEDURES} from './win32-paramarray-reference-fixtures.mjs';
 /** Scalar VARIANT conformance in actual generated PE32 applications.
  * These programs use OleAut32, not the JavaScript runtime or a mock interpreter.
  */
@@ -80,6 +81,7 @@ export function nativeVariantFixture(){
  appendVariantDivisionChecks(add,check);
  appendVariantReferenceChecks(add,check);
  appendParamArrayChecks(add,check);
+ appendParamArrayReferenceChecks(add,check);
  add('ExitProcess 0\nUnexpected:\nExitProcess 10000+Err.Number');
  const project=newProject('AotVariants');project.startup='Sub Main';project.modules=[{id:'m',name:'Entry',kind:'module',code:`Option Explicit
 Private sequence As Long
@@ -169,5 +171,5 @@ Public Function TextVariantEqual() As Boolean
  Dim v As Variant,w As Variant
  v="AbC":w="aBc"
  TextVariantEqual=v=w
-End Function`}];project.modules[0].code+='\n'+NATIVE_VARIANT_REFERENCE_PROCEDURES+'\n'+NATIVE_PARAMARRAY_PROCEDURES;project.modules.push({...NATIVE_PARAMARRAY_BASE_MODULE});return {project,checks};
+End Function`}];project.modules[0].code+='\n'+NATIVE_VARIANT_REFERENCE_PROCEDURES+'\n'+NATIVE_PARAMARRAY_PROCEDURES+'\n'+NATIVE_PARAMARRAY_REFERENCE_PROCEDURES;project.modules.push({...NATIVE_PARAMARRAY_BASE_MODULE});return {project,checks};
 }

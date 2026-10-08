@@ -114,7 +114,8 @@ export const nativeArrayMethods = {
     const source=this.variable(node);
     if(!variable.nativeDynamic)this.fail('Whole-array assignment requires a dynamic destination');
     if(!source?.nativeArray || source.elementOf || key(variable.type)!==key(source.type) || (variable.fixedLength||0)!==(source.fixedLength||0))this.fail('Array assignment requires identical declared element types and fixed String lengths');
-    this.rawStorageAddress(variable);this.x.push();this.rawStorageAddress(source);this.x.emit(0x5b).push().emit(0x53).call(A+'copy');
+    const variants=key(variable.type)==='variant';if(variants)this.useVariant('array-copy');
+    this.rawStorageAddress(variable);this.x.push();this.rawStorageAddress(source);this.x.emit(0x5b).push().emit(0x53).call(A+(variants?'copy-variants':'copy'));
   }
 };
 
@@ -207,10 +208,19 @@ export function emitNativeArrayHelpers(compiler) {
   // SafeArrayCopy deep-copies BSTRs. Validate and allocate before changing the
   // destination. Copying a fixed array into a dynamic one must not copy fixedness.
   const copyUnlocked=x.unique(), copyEmpty=x.unique(), copyDone=x.unique(), copyPublish=x.unique();
-  x.label(A+'copy').enter(8).value(arg(8)).emit(0x89,0xc3,0x8b,0x00,0x89,0xc6).test().branch('e',copyUnlocked)
+  const detach=compiler.nativeVariantsUsed?.has('array-copy'),copyStart=x.unique();
+  if(detach)x.label(A+'copy-variants').value(1).jump(copyStart);
+  x.label(A+'copy');if(detach)x.value(0);
+  x.label(copyStart).enter(12);if(detach)save(x,-12);
+  x.value(arg(8)).emit(0x89,0xc3,0x8b,0x00,0x89,0xc6).test().branch('e',copyUnlocked)
     .emit(0x66,0xf7,0x46,2,0x10,0).branch('ne','error:10').emit(0x83,0x7e,8,0).branch('ne','error:10');
   x.label(copyUnlocked).value(arg(12)).emit(0x8b,0x00).test().branch('e',copyEmpty).emit(0x39,0xf0).branch('e',copyDone).emit(0x89,0xc7);
   x.value(0);save(x,-4);x.push(addr(-4)).emit(0x57).invoke(DLL,'SafeArrayCopy').call(A+'check');
+  if(detach){
+    const detached=x.unique();x.value(arg(-12)).test().branch('e',detached);
+    x.push(arg(-4)).call('native:variant:array-detach').test().branch('ns',detached);
+    x.push().push(arg(-4)).invoke(DLL,'SafeArrayDestroy').popOperand('eax').call('native:variant:check').label(detached);
+  }
   x.value(arg(-4)).emit(0x66,0x83,0x60,2,0xef,0x85,0xf6).branch('e',copyPublish)
     .emit(0x56).invoke(DLL,'SafeArrayDestroy').test().branch('ns',copyPublish);
   x.push().push(arg(-4)).invoke(DLL,'SafeArrayDestroy').emit(0x58).call(A+'check');

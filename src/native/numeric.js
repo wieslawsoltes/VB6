@@ -143,12 +143,12 @@ export const nativeNumericMethods = {
     return false;
   },
   nativeTypedCall(target,plan) {
-    const x=this.x,signature=target.proc||target,callPins=[],callStrings=[],marshalledStrings=[],slots=new Array(signature.params.length);
+    const x=this.x,signature=target.proc||target,callPins=[],callStrings=[],callVariants=[],marshalledStrings=[],slots=new Array(signature.params.length);
     // Stage in the caller's frame: arguments are evaluated exactly once in source
     // order, even with mixed 4/8-byte ABI slots, recursion and array reallocation.
     plan.order.forEach(({node,index:i,omitted})=>{
       const p=signature.params[i],slot=this.arrayWorkspace(nativeParameterBytes(p),'call-argument');
-      if(p.paramArray){lowerNativeParamArray(this,node.args);}
+      if(p.paramArray){const {owner,pins}=lowerNativeParamArray(this,node.args);callVariants.push(owner);callPins.push(...pins);}
       else if(!target.proc && key(p.type)==='string'){
         const transfer=this.nativeExternalStringArgument(p,node);marshalledStrings.push(transfer);
         if(transfer.pin)callPins.push(transfer.pin);
@@ -189,6 +189,7 @@ export const nativeNumericMethods = {
       for(const {owner} of marshalledStrings)this.clearStringStorage(owner);x.emit(0x58);
     }
     if(ansiResult)this.nativeExternalStringResult(ansiResult);
+    if(callVariants.length){x.push();for(const owner of callVariants)this.clearVariantStorage(owner);x.popOperand('eax');}
     for(const pin of callPins)this.releaseArrayPin(pin);
     if(callStrings.length){x.push();for(const string of callStrings)this.clearStringStorage(string);x.emit(0x58);}
     if(target.proc&&signature.kind==='function'&&key(signature.returnType)==='string')this.ownString();
