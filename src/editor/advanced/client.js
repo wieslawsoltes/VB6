@@ -94,9 +94,9 @@ export function matchesDocumentSelector(selector,document) {
  * connect externally and the transaction that applies workspace edits. */
 export class LanguageClient {
   constructor(transport, {rootUri=null,folders=[],configuration={},applyEdit=async()=>({applied:false,failureReason:'Workspace edits are not enabled.'}),showMessage=()=>null,onError=()=>{}}={}) {
-    this.peer=new JsonRpcPeer(transport,{onError});this.rootUri=rootUri;this.folders=folders;this.configuration=configuration;
+    this.peer=new JsonRpcPeer(transport,{onError,onClose:reason=>{if(this.state!=='closed'){this.state='closed';this.emit('closed',reason);}}});this.rootUri=rootUri;this.folders=folders;this.configuration=configuration;
     this.documents=new Map();this.opened=new Set();this.registrations=new Map();this.listeners=new Map();this.capabilities={};this.state='new';
-    this.peer.onRequest('workspace/configuration',p=>(p.items||[]).map(item=>item.section?item.section.split('.').reduce((v,k)=>v?.[k],this.configuration)??null:this.configuration));
+    this.peer.onRequest('workspace/configuration',p=>(p.items||[]).map(item=>item.section?item.section.split('.').reduce((v,k)=>v&&Object.hasOwn(v,k)?v[k]:undefined,this.configuration)??null:this.configuration));
     this.peer.onRequest('workspace/workspaceFolders',()=>this.folders.length?this.folders:null);
     this.peer.onRequest('workspace/applyEdit',async p=>{
       try { return await applyEdit(p.edit,p.label); } catch(error) { return {applied:false,failureReason:error.message}; }
@@ -162,10 +162,13 @@ export class LanguageClient {
     if(kind===1||kind===2)this.peer.notify('textDocument/didChange',{textDocument:{uri,version},contentChanges:kind===1?[{text:document.text}]:changes});
     return document;
   }
-  save(uri,reason=1) {
+  willSave(uri,reason=1) {
+    const document=this.documents.get(uri);if(!document||this.state!=='ready')return;
+    if(this.capabilities.textDocumentSync?.willSave)this.peer.notify('textDocument/willSave',{textDocument:{uri},reason});
+  }
+  save(uri) {
     const document=this.documents.get(uri);if(!document||this.state!=='ready')return;
     const sync=this.capabilities.textDocumentSync;
-    if(sync?.willSave)this.peer.notify('textDocument/willSave',{textDocument:{uri},reason});
     if(sync?.save)this.peer.notify('textDocument/didSave',{textDocument:{uri},...(sync.save.includeText?{text:document.text}:{})});
   }
   close(uri) {
