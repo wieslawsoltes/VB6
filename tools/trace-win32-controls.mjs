@@ -1,3 +1,4 @@
+import {traceNativeSurfaceDeletion} from './trace-win32-surface.mjs';
 /** Failure-only instrumentation of the same native fixture. The original EXE's
  * result remains authoritative; these checkpoints only localize crashes/errors. */
 import fs from 'node:fs';
@@ -29,6 +30,7 @@ export function traceControlFixture(project){
     if(line.includes('Rich.Text=Plain.Text'))values.push('NativeTrace "RTF=" & s','NativeTrace "Actual=" & Rich.Text & ", expected=" & Plain.Text','NativeTrace "Lengths=" & CStr(Len(Rich.Text)) & "," & CStr(Len(Plain.Text))');
     return [marker,...values,line];
   }).join('\n').replace('Option Explicit','Option Explicit\n'+api)+'\n'+routine+'\n';
+  if(project.name==='AotControlSurfaces')traceNativeSurfaceDeletion(module);
   if(project.name==='AotControlItemObjects'){
     // Preserve the authoritative input sequence. Only the failure-only copy
     // records the native coordinates and message that reached COMCTL32.
