@@ -33,7 +33,6 @@ export const nativeFlowMethods={
     return binding;
   },
   nativeFlowInstruction(ins,context,index) {
-    if(this.nativeSurfaceInstruction(ins))return true;
     if(nativeFileInstruction(this,ins))return true;
     if(ins.op==='assign'&&this.nativeListAssignment(ins.target,ins.expr))return true;
     if(ins.op==='expr'&&ins.expr.kind==='member'&&String(ins.expr.name).toLowerCase()==='clear'){

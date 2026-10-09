@@ -53,9 +53,11 @@ export const nativePrivateKernelMethods={
     const target=this.privateNativeProcedure(kernel,name);
     this.nativeTypedCall(target,this.nativeCallPlan(target,args));
   },
-  nativeKernelValue(value){return {kind:'nativeKernelValue',value};},
+  nativeKernelValue(value,valueType='long'){return {kind:'nativeKernelValue',value,valueType};},
+  nativeKernelStorage(storage){return {kind:'nativeKernelStorage',storage};},
   emitPrivateNativeKernels(){
-    for(const kernel of this.privateNativeKernels||[]){
+    const previous=this.context,instruction=this.instruction;
+    try{for(const kernel of this.privateNativeKernels||[]){
       // Emitting a host can discover another root. Iterate to a fixed point;
       // normal recursive VB calls are handled by dependency closure, not inlining.
       for(;;){
@@ -66,6 +68,6 @@ export const nativePrivateKernelMethods={
           if(kernel.hosts[name])kernel.hosts[name](this,proc);else this.procedure(proc);
         }
       }
-    }
+    }}finally{this.context=previous;this.instruction=instruction;}
   }
 };

@@ -12,7 +12,7 @@ export const nativeCompilerProcedureMethods={
       this.typeCache=new WeakMap();
       const ins = this.instruction = code[i]; x.label(context.label + ':' + i).call(context.label+':clear-strings');this.errorCheckpoint(context,i,ins);
       if(!context.module.nativeInternal)this.sourceMap.push({symbol:context.label + ':' + i,source:ins.source,line:ins.line,procedure:ins.procedure});
-      if(this.errorInstruction(ins,context)||this.nativeFlowInstruction(ins,context,i))continue;
+      if(this.errorInstruction(ins,context)||this.surfaceInstruction(ins)||this.nativeFlowInstruction(ins,context,i))continue;
       if (ins.op === 'dim') { for (const decl of ins.decls) if (!decl.constant && decl.initial) { this.storageExpression(context.locals.get(key(decl.name)),decl.initial); this.store(context.locals.get(key(decl.name))); } }
       else if (ins.op === 'assign') {
         if(ins.objectSet){

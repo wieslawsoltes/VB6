@@ -31,7 +31,7 @@ export function nativePrintImage(c,instruction,column){
   const x=c.x,out=c.temporaryString(),position=c.arrayWorkspace(4,'print-column');
   c.clearStringStorage(out);x.value(column).mov(slot(position),'eax');
   let plan;
-  try{plan=instruction.outputList===undefined?{items:instruction.exprs.map(expr=>({kind:'value',expr})),newline:instruction.newline}:parseNativePrintList(instruction.outputList);}
+  try{plan=instruction.nativePrintPlan||(instruction.outputList===undefined?{items:instruction.exprs.map(expr=>({kind:'value',expr})),newline:instruction.newline}:parseNativePrintList(instruction.outputList));}
   catch(error){c.fail(error.message);}
   c.nativePrintUsed=true;
   const append=()=>{

@@ -1,0 +1,51 @@
+name: Agent transcript rendering
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  transcript:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [webgpu, webgl2]
+        display: [headless, headed]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build && npm run test:rendering
+      - run: python -m pip install playwright==1.63.0 Pillow
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y libvulkan1 mesa-vulkan-drivers xvfb xauth
+      - run: python tools/rendering_browser.py --display ${{ matrix.display }} >> "$GITHUB_ENV"
+      - name: Actual GPU transcript, marker pixels and hidden-content invariants
+        env:
+          DISPLAY_MODE: ${{ matrix.display }}
+          REQUIRED_BACKEND: ${{ matrix.backend }}
+          # Same explicit software-driver correctness profile as Validate;
+          # these flags never ship in the IDE or claim physical-GPU performance.
+          RENDERING_BROWSER_FLAGS: --enable-gpu --ignore-gpu-blocklist --enable-features=Vulkan --use-webgpu-adapter=swiftshader --disable-vulkan-surface --disable-gpu-rasterization
+        run: |
+          args=()
+          if [ "$DISPLAY_MODE" = headed ]; then args+=(--headed); fi
+          xvfb-run -a python tools/browser-rendering-agent-thread.py --require-$REQUIRED_BACKEND --software-gpu "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-transcript-${{ matrix.backend }}-${{ matrix.display }}
+          path: reports/rendering/agent-thread
+          if-no-files-found: error
+          retention-days: 14

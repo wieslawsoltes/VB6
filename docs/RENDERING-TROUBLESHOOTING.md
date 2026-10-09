@@ -69,6 +69,49 @@ alpha, transparent holes, image revisions and fractional-DPI clipping retain
 their original raster operations. Exceptions restore the saved clipping state.
 `clipChanges` and `fillStyleChanges` report per-frame state changes, not GPU time.
 
+## Stray tool-result labels or torn text in the coding-agent view
+
+Closed tool-result disclosures must not contribute any GPU paint or native
+clear rectangles. Chromium can return nonzero element and text-range geometry
+for their hidden bodies: a nonempty rectangle is not evidence that content is
+painted. Traversing those bodies produced stray **Arguments** / **Result** labels
+and strips through later messages, especially with the optional GPU text atlas.
+
+The scene adapter now visits only the first direct `summary` of closed `details`
+and reads the current `open` state before using cached child order. Its native
+overflow-bounds walk follows the same paint tree, so a themed/rounded ancestor
+cannot expose hidden results or spend its bounds budget on thousands of hidden
+nodes. `content-visibility:hidden` boxes retain their own paint, not their child
+paint. Open tool bodies still use the selected renderer. Disclosure headings,
+markers and the synthesized default summary remain browser-painted native
+islands; keyboard expansion, selection and input stay on the original DOM.
+
+After updating, reload the IDE (save/export the current project and transcript
+first; agent task history is memory-only). WebGPU can remain selected. This is
+a scene-visibility fix, not a browser GPU-driver or font-setting workaround.
+
+The regression harness mounts the actual `AgentThreadView` and `AgentThread` with
+synthetic public events, without contacting a provider or editing a project:
+
+```sh
+python tools/browser-rendering-agent-thread.py --require-webgpu --software-gpu
+python tools/browser-rendering-agent-thread.py --require-webgl2 --software-gpu
+python tools/browser-rendering-agent-thread.py --offline
+```
+
+The dedicated **Agent transcript rendering** workflow checks both GPU backends
+in headed and headless Chromium, using native and atlas text at 100%, 125%, 150%
+and 200% pixel ratios. It covers scrolling, narrow reflow, live streaming, retained
+reader position, Jump to latest, pointer/keyboard and synchronous disclosure
+changes, and nested large results inside native rounded ancestors. Removing and
+restoring non-painted tool bodies must change zero displayed pixels, and a DOM
+scene audit must record zero hidden geometry/text reads. Open and closed summary
+pixels are compared with native HTML. Captures must stabilize independently of
+the expected image; there are no pixel masks or widened tolerances. Reports and
+screenshots are in `reports/rendering/agent-thread`. Required backends fail on
+fallback, including with `--offline`. Software-driver execution is not physical
+hardware certification; the existing full Validate matrix remains unchanged.
+
 ## Acquisition invariants
 
 WebGPU tries high-performance, browser-default, low-power and finally a

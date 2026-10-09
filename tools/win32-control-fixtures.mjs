@@ -1,3 +1,6 @@
+import {nativeSurfaceLifetimeFixture} from './win32-surface-lifetime-fixture.mjs';
+import {nativeSurfacePictureFixture} from './win32-surface-picture-fixture.mjs';
+import {nativeSurfaceDrawingFixtures} from './win32-surface-drawing-fixtures.mjs';
 import {nativeSurfaceFixture} from './win32-surface-fixture.mjs';
 import {nativeErrorArgumentFixture} from './win32-error-arguments-fixture.mjs';
 import {nativeMathControlFixture} from './win32-math-fixture.mjs';
@@ -257,7 +260,7 @@ Private Declare Function DeleteFileW Lib "kernel32" (ByVal path As Long) As Long
  selectionChanges=selectionChanges+1
 End Sub`);
 }
-export function nativeControlFixtures(){return [nativeSurfaceFixture(fixture),nativeErrorArgumentFixture(fixture),nativeMathControlFixture(fixture),nativeRecordStringFixture(fixture),nativeFileControlFixture(fixture),nativeListControlFixture(fixture),commonItemControlFixture(fixture),rangeControlFixture(),contentControlFixture(),editControlFixture(),fileControlFixture(),drawingControlFixture(),richTextControlFixture(),...advancedNativeControlFixtures(fixture),...gridControlFixtures(),...gridEditControlFixtures(),chartControlFixture(),...tabControlFixtures()];}
+export function nativeControlFixtures(){return [nativeSurfacePictureFixture(fixture),...nativeSurfaceDrawingFixtures(fixture),nativeSurfaceFixture(fixture),nativeSurfaceLifetimeFixture(fixture),nativeErrorArgumentFixture(fixture),nativeMathControlFixture(fixture),nativeRecordStringFixture(fixture),nativeFileControlFixture(fixture),nativeListControlFixture(fixture),commonItemControlFixture(fixture),rangeControlFixture(),contentControlFixture(),editControlFixture(),fileControlFixture(),drawingControlFixture(),richTextControlFixture(),...advancedNativeControlFixtures(fixture),...gridControlFixtures(),...gridEditControlFixtures(),chartControlFixture(),...tabControlFixtures()];}
 export function buildControlFixtures(directory='reports/native-controls'){
   fs.mkdirSync(directory,{recursive:true});const builds=[];
   for(const {project,checks}of nativeControlFixtures())for(const optimization of [0,1,2]){

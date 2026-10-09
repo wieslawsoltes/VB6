@@ -47,6 +47,7 @@ Private Type BIH
  colors As Long
  important As Long
 End Type
+Private Declare Function UpdateWindow Lib "user32" (ByVal hwnd As Long) As Long
 Private Declare Function IsWindow Lib "user32" (ByVal hwnd As Long) As Long
 Private Declare Function GetDC Lib "user32" (ByVal hwnd As Long) As Long
 Private Declare Function ReleaseDC Lib "user32" (ByVal hwnd As Long, ByVal dc As Long) As Long
@@ -96,16 +97,22 @@ Private Sub SurfaceRelease(s As Surface)
  s.height=0
 End Sub
 Private Function PixelState(ByVal dc As Long) As Long
- Dim saved As Long,n As Long
+ Dim saved As Long,n As Long,code As Long
  saved=SaveDC(dc)
  If saved=0 Then Error 7
- n=SetGraphicsMode(dc,2)
- n=ModifyWorldTransform(dc,0,1)
- n=SetMapMode(dc,1)
- n=SetWindowOrgEx(dc,0,0,0)
- n=SetViewportOrgEx(dc,0,0,0)
- n=SelectClipRgn(dc,0)
+ On Error GoTo Failed
+ If SetGraphicsMode(dc,2)=0 Then Error 5
+ If ModifyWorldTransform(dc,0,1)=0 Then Error 5
+ If SetMapMode(dc,1)=0 Then Error 5
+ If SetWindowOrgEx(dc,0,0,0)=0 Then Error 5
+ If SetViewportOrgEx(dc,0,0,0)=0 Then Error 5
+ If SelectClipRgn(dc,0)=0 Then Error 5
  PixelState=saved
+ Exit Function
+Failed:
+ code=Err.Number
+ n=RestoreDC(dc,saved)
+ Error code
 End Function
 Private Sub SurfaceBackground(s As Surface, ByVal dc As Long, ByVal width As Long, ByVal height As Long)
  Dim bounds As RECT,brush As Long,n As Long,saved As Long,code As Long
@@ -126,14 +133,21 @@ Cleanup:
  If brush<>0 Then n=DeleteObject(brush)
  If code<>0 Then Error code
 End Sub
+Private Sub SurfaceInstallFont(s As Surface)
+ Dim n As Long
+ If s.dc<>0 And s.font<>0 Then n=SelectObject(s.dc,s.font)
+End Sub
 Private Function SurfaceDC(s As Surface) As Long
  Dim bounds As RECT,info As BIH,w As Long,h As Long,bits As Long
- Dim dc As Long,bitmap As Long,original As Long,n As Long,saved As Long,code As Long
+ Dim dc As Long,bitmap As Long,original As Long,n As Long,saved As Long,code As Long,created As Boolean
  If s.hwnd=0 Then Error 91
  If IsWindow(s.hwnd)=0 Then Error 91
  If s.redraw=0 Then
-  If s.dc=0 Then s.dc=GetDC(s.hwnd)
-  If s.dc=0 Then Error 7
+  If s.dc=0 Then
+   s.dc=GetDC(s.hwnd)
+   If s.dc=0 Then Error 7
+   SurfaceInstallFont s
+  End If
   SurfaceDC=s.dc
   Exit Function
  End If
@@ -171,21 +185,23 @@ Private Function SurfaceDC(s As Surface) As Long
   n=RestoreDC(s.dc,saved)
   saved=0
   n=SelectObject(dc,original)
+  If n=0 Or n=-1 Then Error 7
   n=SelectObject(s.dc,bitmap)
   If n=0 Or n=-1 Then Error 7
   n=DeleteObject(s.bitmap)
   n=DeleteDC(dc)
   dc=0
  Else
-  If s.font<>0 Then n=SelectObject(dc,s.font)
   s.dc=dc
   s.original=original
+  created=True
   dc=0
  End If
  s.bitmap=bitmap
  s.width=w
  s.height=h
  bitmap=0
+ If created Then SurfaceInstallFont s
  SurfaceDC=s.dc
  Exit Function
 Failed:
@@ -213,6 +229,7 @@ Private Sub SurfacePaint(s As Surface, ByVal target As Long)
  Dim dc As Long,bounds As RECT,saved As Long,n As Long,code As Long
  If s.hwnd=0 Then Exit Sub
  If GetClientRect(s.hwnd,bounds)=0 Then Exit Sub
+ If bounds.right<=0 Or bounds.bottom<=0 Then Exit Sub
  If s.redraw=0 Then
   SurfaceBackground s,target,bounds.right,bounds.bottom
   Exit Sub
@@ -229,40 +246,112 @@ Cleanup:
  If saved<>0 Then n=RestoreDC(dc,saved)
  If code<>0 Then Error code
 End Sub
-Private Function SurfaceExtent(s As Surface, ByVal axis As Long) As Double
- Dim bounds As RECT,value As Long
- If s.hwnd=0 Then Error 91
- If GetClientRect(s.hwnd,bounds)=0 Then Error 5
- If axis=0 Then value=bounds.right Else value=bounds.bottom
- If s.scale=1 Then value=value*15
- SurfaceExtent=value
-End Function
-Private Sub SurfaceRedraw(s As Surface, ByVal value As Boolean)
- Dim replacement As Surface,dc As Long,n As Long
- If s.redraw=value Then Exit Sub
- replacement=s
- replacement.dc=0
- replacement.bitmap=0
- replacement.original=0
- replacement.width=0
- replacement.height=0
- replacement.redraw=value
- dc=SurfaceDC(replacement)
- SurfaceRelease s
- s=replacement
- n=InvalidateRect(s.hwnd,0,0)
-End Sub
+
 Private Type PAINTSTRUCT
- dc As Long
+ hdc As Long
  erase As Long
  bounds As RECT
  restore As Long
  update As Long
  reserved(0 To 31) As Byte
 End Type
-Private Declare Function BeginPaint Lib "user32" (ByVal hwnd As Long,paint As PAINTSTRUCT) As Long
-Private Declare Function EndPaint Lib "user32" (ByVal hwnd As Long,paint As PAINTSTRUCT) As Long
-Private Sub SurfaceWindowPaint(s As Surface)
+Private Declare Function BeginPaint Lib "user32" (ByVal hwnd As Long, paint As PAINTSTRUCT) As Long
+Private Declare Function EndPaint Lib "user32" (ByVal hwnd As Long, paint As PAINTSTRUCT) As Long
+Private Sub SurfaceValidate(s As Surface, ByVal epoch As Long)
+ If s.epoch<>epoch Or s.hwnd=0 Then Error 91
+ If IsWindow(s.hwnd)=0 Then Error 91
+End Sub
+Private Function SurfaceHDC(s As Surface, ByVal epoch As Long) As Long
+ Dim n As Long
+ SurfaceValidate s,epoch
+ SurfaceHDC=SurfaceDC(s)
+ If s.redraw<>0 And s.painting=0 Then n=InvalidateRect(s.hwnd,0,0)
+End Function
+Private Sub SurfaceRefresh(s As Surface, ByVal epoch As Long)
+ Dim n As Long
+ SurfaceValidate s,epoch
+ n=InvalidateRect(s.hwnd,0,0)
+ n=UpdateWindow(s.hwnd)
+End Sub
+Private Sub SurfaceCls(s As Surface, ByVal epoch As Long)
+ SurfaceValidate s,epoch
+ SurfaceClear s
+End Sub
+Private Function SurfaceSize(s As Surface, ByVal epoch As Long, ByVal vertical As Boolean) As Double
+ Dim bounds As RECT,n As Long
+ SurfaceValidate s,epoch
+ If GetClientRect(s.hwnd,bounds)=0 Then Error 5
+ If vertical Then n=bounds.bottom Else n=bounds.right
+ If s.scale=1 Then
+  SurfaceSize=n*15
+ Else
+  SurfaceSize=n
+ End If
+End Function
+Private Sub SurfaceDestroy(s As Surface)
+ If s.hwnd=0 Then Exit Sub
+ SurfaceRelease s
+ s.hwnd=0
+ If s.epoch<&H7FFFFFFF Then s.epoch=s.epoch+1
+End Sub
+Private Sub SurfaceBackgroundChanged(s As Surface)
+ Dim bounds As RECT,dc As Long,n As Long
+ If s.hwnd=0 Then Exit Sub
+ dc=SurfaceDC(s)
+ If GetClientRect(s.hwnd,bounds)=0 Then Error 5
+ If s.redraw<>0 Then
+  SurfaceBackground s,dc,s.width,s.height
+ Else
+  SurfaceBackground s,dc,bounds.right,bounds.bottom
+ End If
+ n=InvalidateRect(s.hwnd,0,0)
+End Sub
+Private Sub SurfaceSet(s As Surface, ByVal epoch As Long, ByVal field As Long, ByVal value As Double)
+ Dim n As Long,flag As Long
+ SurfaceValidate s,epoch
+ Select Case field
+ Case 0
+  If value<>0 Then flag=-1
+  If flag=s.redraw Then Exit Sub
+  SurfaceRelease s
+  s.redraw=flag
+  SurfaceBackgroundChanged s
+ Case 1
+  n=CLng(value)
+  If n<>1 And n<>3 Then Error 380
+  s.scale=n
+ Case 2
+  s.back=CLng(value)
+  SurfaceBackgroundChanged s
+ Case 3
+  s.fore=CLng(value)
+ Case 4
+  s.x=CSng(value)
+ Case 5
+  s.y=CSng(value)
+ Case 6
+  n=CLng(value)
+  If n<1 Or n>32767 Then Error 380
+  s.penWidth=n
+ Case 7
+  n=CLng(value)
+  If n<0 Or n>6 Then Error 380
+  s.penStyle=n
+ Case 8
+  n=CLng(value)
+  If n<1 Or n>16 Then Error 380
+  s.drawMode=n
+ Case 9
+  s.fillColor=CLng(value)
+ Case 10
+  n=CLng(value)
+  If n<0 Or n>7 Then Error 380
+  s.fillStyle=n
+ Case Else
+  Error 438
+ End Select
+End Sub
+Private Sub SurfacePaintWindow(s As Surface)
  Dim paint As PAINTSTRUCT,dc As Long,n As Long,code As Long,hwnd As Long
  hwnd=s.hwnd
  dc=BeginPaint(hwnd,paint)

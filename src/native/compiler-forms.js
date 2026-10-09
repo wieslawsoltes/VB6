@@ -44,7 +44,7 @@ export const nativeCompilerFormMethods={
     const x = this.x, prefix = module.form.type === 'MDIForm' ? 'MDIForm_' : 'Form_', p = module.form.properties;
     const done = x.unique(), wnd = 'wndproc:' + module.name, wc = 'wndclass:' + module.name;
     const style = this.formStyle(module), ex = Number(p.BorderStyle) >= 4 ? 0x80 : 0;
-    this.data.align(4).label(wc).u32(3).reference(wnd).u32(0).u32(0).u32(0).u32(0).u32(0).u32(16).u32(0).reference(module.className);
+    this.data.align(4).label(wc).u32(module.nativeSurface?0x23:3).reference(wnd).u32(0).u32(0).u32(0).u32(0).u32(0).u32(16).u32(0).reference(module.className);
     module.wc = wc;
     const initialized=x.unique();
     // Initialize a default form instance once, before window creation. Reentrant UI
@@ -114,7 +114,7 @@ export const nativeCompilerFormMethods={
     const x = this.x, fallback = x.unique(), zero = x.unique(), exit = x.unique(), close = x.unique(), destroy = x.unique(), command = x.unique(), timer = x.unique(), size = x.unique(), focus = x.unique();
     x.label(wnd).enter(64);this.enterCallbackBoundary(-12);
     x.value({argument:12}).compare(2).branch('e',destroy).compare(0x10).branch('e',close);
-    this.nativeSurfaceWindowMessages(module,fallback,zero,exit);
+    this.nativeSurfaceWindowMessages(module,exit);
     this.nativeFormPictureMessage(module,fallback,exit);this.nativeControlPaintMessages(module,fallback,exit);
     x.value(mem(module.loaded)).test().branch('e',fallback);
     this.gridEditNotifications(module,zero,exit);this.gridNotificationMessages(module,zero,fallback);
@@ -149,8 +149,7 @@ export const nativeCompilerFormMethods={
     }
     this.handler(module,prefix + 'Unload',[{ref:-4}]); x.emit(0x83,0x7d,0xfc,0).branch('ne',zero);
     if(module.form.properties.MDIChild)x.api('user32.dll','SendMessageW',[mem(this.mdi.client),0x221,{argument:8},0]);else x.api('user32.dll','DestroyWindow',[{argument:8}]);x.jump(zero);
-    x.label(destroy);this.disposeNativeSurface(module);for(const control of module.controls.values())this.disposeNativeSurface(control);
-    x.value(mem(module.handle)).test().branch('e',zero).value(0).store(module.handle).store(module.loaded).store(module.initialized).store(module.client).store(module.menu);
+    x.label(destroy);this.disposeNativeSurface(module);for(const c of module.controls.values())this.disposeNativeSurface(c);x.value(mem(module.handle)).test().branch('e',zero).value(0).store(module.handle).store(module.loaded).store(module.initialized).store(module.client).store(module.menu);
     for (const control of module.controls.values()) x.store(control.handle);
     for(const variable of module.globals.values())if(key(variable.type)==='variant'&&!variable.nativeArray)this.clearVariantStorage({...variable,owner:null});
     this.disposeNativePictures(module);this.disposeNativeControls(module);

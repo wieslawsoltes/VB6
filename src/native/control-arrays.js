@@ -9,7 +9,7 @@ export const nativeControlArrayMethods={
     const font={name,size,weight:p.FontBold?700:400,italic:p.FontItalic?1:0,underline:p.FontUnderline?1:0,strike:p.FontStrikethrough||p.FontStrikethru?1:0};
     const cache=this.nativeFonts ||= new Map(),id=JSON.stringify(font);
     if(!cache.has(id))cache.set(id,this.slot('font:'+cache.size));
-    const slot=cache.get(id),ready=x.unique(),created=x.unique();
+    const slot=cache.get(id);control.nativeFontHandle=slot;const ready=x.unique(),created=x.unique();
     x.value({memory:slot}).test().branch('ne',ready);
     x.api('user32.dll','GetDC',[0]).emit(0x89,0xc3).push(90).emit(0x53).invoke('gdi32.dll','GetDeviceCaps').emit(0x89,0xc6);
     x.emit(0x53).push(0).invoke('user32.dll','ReleaseDC');

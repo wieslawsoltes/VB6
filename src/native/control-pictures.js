@@ -109,7 +109,8 @@ export const nativePictureMethods={
   if(object.nativeImageItem&&property==='picture')return this.setNativeImageItemPicture(object,node);
   if(!this.nativePictureOwner(object)||!['picture','icon'].includes(property)||property==='icon'&&!object.form)return false;
   this.needNativePicture('retain');this.nativePictureExpression(node);const x=this.x;x.push();this.nativePictureAddress(object,property);x.popOperand('edi').mov('ebx',m('eax')).mov(m('eax'),'edi').pushOperand('ebx').call(P+'release');
-  if(property==='icon')this.applyNativeFormIcon(object);else {this.resetNativeSurfacePicture(object);x.api(U,'InvalidateRect',[this.controlHandleRef(object),0,1]);}return true;
+  if(property==='picture')this.nativeSurfacePictureChanged(object);
+  if(property==='icon')this.applyNativeFormIcon(object);else x.api(U,'InvalidateRect',[this.controlHandleRef(object),0,1]);return true;
  },
  disposeNativePictures(object){
   if(!this.nativePictureFeatures?.size)return;

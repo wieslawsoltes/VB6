@@ -26,10 +26,10 @@ test('surface demand discovers nested lexical With bindings without executing or
 });
 test('private drawing kernel cannot collide with or capture an authored module',()=>{
  const p=project('Dim n As Long\nn=Canvas.hDC\nCanvas.Cls');
- p.modules.push({id:'private-name',kind:'module',name:'NativeSurfaceKernel',code:'Public Function SurfaceDC() As Long\nSurfaceDC=7\nEnd Function'});
- const a=compileWin32(p);assert.ok(a.report.records.some(r=>r.name==='nativesurfacekernel1.surface'));
- assert.ok(a.report.sourceMap.some(s=>s.source==='NativeSurfaceKernel'&&s.procedure==='SurfaceDC'));
- assert.ok(!a.report.sourceMap.some(s=>s.source==='NativeSurfaceKernel1'));
+ p.modules.push({id:'private-name',kind:'module',name:'NativeDrawingSurface',code:'Public Function SurfaceDC() As Long\nSurfaceDC=7\nEnd Function'});
+ const a=compileWin32(p);assert.ok(a.report.records.some(r=>r.name==='nativedrawingsurface1.surface'));
+ assert.ok(a.report.sourceMap.some(s=>s.source==='NativeDrawingSurface'&&s.procedure==='SurfaceDC'));
+ assert.ok(!a.report.sourceMap.some(s=>s.source==='NativeDrawingSurface1'));
 });
 test('record With stays distinct from drawing receivers during demand discovery',()=>{
  const p=project('Dim r As R,n As Long\nWith r\n .CurrentX=12\n n=.CurrentX\nEnd With\nn=Canvas.hDC');
