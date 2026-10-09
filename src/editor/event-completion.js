@@ -1,3 +1,4 @@
+import {isWebBrowser,WEB_BROWSER_EVENTS} from '../controls/webbrowser-contract.js';
 import {validParameterList} from './signature-syntax.js';
 import {CONTROL_EVENTS,DEFAULT_EVENTS,NONVISUAL_TYPES} from '../controls/controls.js';
 import {defaultEventSignature} from './language-service.js';
@@ -17,7 +18,7 @@ export function declarationTargets(project,module,service,controlRegistry=null){
     for(const control of controls.values()){
       const names=NONVISUAL_TYPES.has(control.type)?(control.type==='Timer'?['Timer']:[]):[DEFAULT_EVENTS[control.type]||'Click',...CONTROL_EVENTS];
       const extra=control.properties?.Index!==undefined?['Index As Integer']:[];
-      const custom=controlRegistry?.describe?.(control.type)?.events;
+      const custom=controlRegistry?.describe?.(control.type)?.events||(isWebBrowser(control.type)?WEB_BROWSER_EVENTS:null);
       result.push({id:control.id||'control:'+control.name,name:control.name,type:control.type,kind:'events',members:custom?.length?custom.map(e=>({name:e.name,kind:'event',type:'Void',params:[...extra,...e.params.map(p=>(p.byRef?'ByRef ':'ByVal ')+p.name+(p.array?'()':'')+' As '+p.type)]})):[...new Set(names)].map(name=>event(control.type,name,extra))});
     }
     const menus=new Map((module.form.menus||[]).filter(m=>m.name).map(m=>[symbolKey(m.name),m]));

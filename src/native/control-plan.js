@@ -62,6 +62,8 @@ export function nativeControlEvents(type) {
   if(NATIVE_DATE_CONTROLS.has(type))events.push('change');
   if(NATIVE_TAB_CONTROLS.has(type))events.push('click');
   if(['TreeView','ListView','StatusBar'].includes(type))events.push('click','dblclick');
+  if(type==='TreeView')events.push('nodeclick');
+  if(type==='ListView')events.push('itemclick');
   if(NATIVE_GRID_TYPES.has(type))events.push('rowcolchange','selchange','scroll','click','dblclick','beforecolupdate','aftercolupdate','validate');
   return [...new Set(events)];
 }

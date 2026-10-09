@@ -1,3 +1,4 @@
+import {splitPrintList} from './print-list.js';
 import {parseDeclarations,parseParameters,parseProcedureHeader,parseTypeFields} from './declarations.js';
 import {parseModuleHeader,parseEnumMember} from './module-syntax.js';
 import {parseIfHeader,inlineElse} from './statement-syntax.js';
@@ -110,7 +111,7 @@ class ProcedureCompiler {
     if((m=text.match(/^Resume(?:\s+(.+))?$/i))){const mode=!m[1]||/^0+$/.test(m[1])?'retry':/^Next$/i.test(m[1])?'next':'goto',index=this.emit('resume',{mode,target:null},line);if(mode==='goto')this.patches.push({index,label:parseLabel(m[1])});return;}
     if((m=text.match(/^Go(To|Sub)\s+(.+)$/i))){const index=this.emit(/sub/i.test(m[1])?'gosub':'jump',{target:null},line);this.patches.push({index,label:parseLabel(m[2])});return;}
     if(/^Return$/i.test(text)){this.emit('gosubReturn',{},line);return;}
-    if((m=text.match(/^Debug\.Print\s*(.*)$/i))){this.emit('print',{exprs:splitTop(m[1].replace(/;\s*$/,'').replace(/;(?=(?:[^"\n]*"[^"\n]*")*[^"\n]*$)/g,',')).filter(Boolean).map(E),newline:!m[1].endsWith(';')},line);return;}
+    if((m=text.match(/^Debug\.Print\s*(.*)$/i))){const list=splitPrintList(m[1]);this.emit('print',{outputList:m[1],exprs:list.parts.filter(p=>p.text).map(p=>E(p.text)),newline:list.newline},line);return;}
     if((m=text.match(/^Debug\.Assert\s+(.+)$/i))){this.emit('assert',{expr:E(m[1])},line);return;}
     if(/^Stop$/i.test(text)){this.emit('stop',{},line);return;}
     if(/^End$/i.test(text)){this.emit('end',{},line);return;}
@@ -203,7 +204,7 @@ export function compileModule(input) {
     const a=String(attribute).match(/^Attribute\s+(\[[^\]]+\]|[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)\.VB_UserMemId\s*=\s*(-?\d+)$/i);
     if(a&&Number(a[2])===0){const key=lower(a[1].replace(/^\[|\]$/g,'')),proc=module.procedures.get(key+':get')||module.procedures.get(key);
       if(!proc||proc.scope!=='public'||!['function','property'].includes(proc.kind))throw new VBError('Default member must be a Public Function or Property Get',1002,module.name,proc?.line||1);
-      if(module.defaultMember&&module.defaultMember!==key)throw new VBError('Only one default member is permitted',1002,module.name,proc.line);
+      if(module.defaultMember&&module.defaultMember!==key)throw new VBError('Only one default member is permitted per object module',1002,module.name,proc.line);
       module.defaultMember=key;
     }
   }

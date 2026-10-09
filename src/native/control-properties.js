@@ -1,3 +1,4 @@
+import {nativeItemType} from './control-items.js';
 import {nativeMetadataType,getNativeMetadataProperty,setNativeMetadataProperty} from './control-metadata.js';
 import {NATIVE_RANGE_CONTROLS,NATIVE_SCROLL_CONTROLS,NATIVE_DATE_CONTROLS,NATIVE_TAB_CONTROLS,NATIVE_DRAW_CONTROLS} from './control-plan.js';
 const mem=memory=>({memory}),lit=value=>({kind:'literal',value}),key=s=>String(s).toLowerCase();
@@ -6,6 +7,8 @@ const colorFields={backcolor:32,forecolor:36,fillcolor:40,fillstyle:44,shape:48,
 const editable=new Set(['TextBox','RichTextBox']);
 export const nativeControlPropertyMethods={
   nativeControlType(node){
+    const listType=this.nativeListType(node);if(listType)return listType;
+    const itemType=nativeItemType(this,node);if(itemType)return itemType;
     const metadata=nativeMetadataType(this,node);if(metadata)return metadata;
     const gridType=this.nativeTabTextType(node)||this.gridType(node)||this.chartType(node);if(gridType)return gridType;
     if(node.kind==='call'&&node.callee.kind==='id'&&String(node.callee.name).toLowerCase()==='loadresstring')return 'string';
@@ -26,6 +29,7 @@ export const nativeControlPropertyMethods={
     return rect;
   },
   getNativeControlProperty(object,property){
+    if(this.nativeListProperty(object,property))return true;
     if(getNativeMetadataProperty(this,object,property))return true;
     if(property==='tabcaption'&&this.nativeTabText(object,null))return true;
     if(this.nativeTabVisibility(object,property))return true;
@@ -80,6 +84,8 @@ export const nativeControlPropertyMethods={
     return false;
   },
   setNativeControlProperty(object,property,expr){
+    if(object.nativeItem)this.fail('Native common-control item properties are currently read-only');
+    if(this.nativeListProperty(object,property,expr))return true;
     if(setNativeMetadataProperty(this,object,property,expr))return true;
     if(property==='tabcaption'&&this.nativeTabText(object,null,expr,true))return true;
     if(this.nativeTabVisibility(object,property,expr))return true;
@@ -133,6 +139,8 @@ export const nativeControlPropertyMethods={
     return false;
   },
   nativeControlMethod(object,method,args){
+    if(object.nativeItem)this.fail('Native common-control item method is not lowered: '+method);
+    if(this.nativeListMethod(object,method,args))return true;
     if(this.nativeTabTextMethod(object,method,args)||this.nativeGridMethod(object,method,args))return true;
     if(this.nativeImageListMethod(object,method,args)||this.nativeDialogMethod(object,method,args)||this.nativeRichTextMethod(object,method,args)||this.nativeCollectionMethod(object,method,args)||this.nativeFileMethod(object,method,args))return true;
     const type=object.model?.type,x=this.x;

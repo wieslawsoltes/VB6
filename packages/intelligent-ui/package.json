@@ -1,0 +1,60 @@
+{
+  "name": "@vb6/intelligent-ui",
+  "version": "0.1.0",
+  "description": "Dependency-free streaming declarative UI compiler, bounded runtime and keyed renderer",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./compiler": {
+      "types": "./src/compiler.d.ts",
+      "import": "./src/compiler.js",
+      "default": "./src/compiler.js"
+    },
+    "./runtime": {
+      "types": "./src/runtime.d.ts",
+      "import": "./src/runtime.js",
+      "default": "./src/runtime.js"
+    },
+    "./renderer": {
+      "types": "./src/renderer.d.ts",
+      "import": "./src/renderer.js",
+      "default": "./src/renderer.js"
+    },
+    "./mcp": {
+      "types": "./src/mcp.d.ts",
+      "import": "./src/mcp.js",
+      "default": "./src/mcp.js"
+    },
+    "./styles.css": "./src/styles.css",
+    "./host": {
+      "types": "./src/host.d.ts",
+      "import": "./src/app-host.js",
+      "default": "./src/app-host.js"
+    },
+    "./references": {
+      "types": "./src/references.d.ts",
+      "import": "./src/references.js",
+      "default": "./src/references.js"
+    }
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md",
+    "LICENSE",
+    "test",
+    "examples"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "types": "./src/index.d.ts"
+}

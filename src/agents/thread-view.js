@@ -1,6 +1,8 @@
 import {el} from '../core/core.js';
 // Weak keys release view preferences with the in-memory task; never serialize them.
 const readingStates = new WeakMap();
+let richFactory=null;
+export function configureThreadUI(factory){richFactory=factory;}
 const STATES = {waiting: 'Waiting for response…', streaming: 'Responding…', running: 'Running…', approval: 'Waiting for your approval', complete: 'Completed', error: 'Failed', denied: 'Denied', interrupted: 'Interrupted'};
 const write = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 async function copyText(root, text, announce) {
@@ -123,6 +125,7 @@ export class AgentThreadView {
     record.version = item.revision; record.node.dataset.status = item.status;
     write(record.label, item.kind === 'tool' ? item.text : item.label || ({assistant: 'Agent', question: 'Agent question', plan: 'Task plan', notice: 'Status'})[item.kind] || 'You');
     write(record.state, STATES[item.status] || '');
+    const interactive=item.kind==='assistant'&&this.rich?.renderAssistant(item,record);
     if (item.kind === 'tool') {
       if (record.arguments !== item.arguments) {
         if (!record.args) { record.args = el('pre', {tabindex: 0}); record.body.append(el('strong', {}, 'Arguments'), record.args); }
@@ -132,6 +135,8 @@ export class AgentThreadView {
         if (!record.output) { record.output = el('pre', {tabindex: 0}); record.body.append(el('strong', {}, 'Result'), record.output); }
         write(record.output, item.result || ''); record.result = item.result;
       }
+      this.rich?.renderTool(item,record);
+    } else if(interactive){record.stream=null;record.formatted=true;record.body.classList.remove('is-streaming');
     } else if (item.kind === 'assistant' && ['waiting', 'streaming'].includes(item.status)) {
       if (!record.stream) { record.body.replaceChildren(); record.stream = record.body.ownerDocument.createTextNode(''); record.body.append(record.stream); record.text = ''; }
       if (item.text.startsWith(record.text)) record.stream.appendData(item.text.slice(record.text.length)); else record.stream.data = item.text;
@@ -149,9 +154,10 @@ export class AgentThreadView {
   }
   update(thread, options = {}) {
     if (!thread) return;
+    if(!this.rich&&richFactory)this.rich=richFactory(this,(node,text)=>markdown(node,text,this.root,this.announce));
     const switched = this.thread !== thread || this.taskId !== options.taskId;
     if (switched) {
-      this.remember();
+      this.remember();this.rich?.clear();
       const saved = readingStates.get(thread);
       this.taskId = options.taskId; this.nodes.clear(); this.list.replaceChildren();
       this.follow = saved?.follow ?? true; this.visibleEnd = saved?.visibleEnd ?? null;
@@ -176,7 +182,7 @@ export class AgentThreadView {
     for (const id of this.expanded) if (!existing.has(id)) this.expanded.delete(id);
     for (const [id, record] of this.nodes) if (!retained.has(id)) {
       if (existing.has(id) && record.node.open) this.expanded.add(id);
-      record.node.remove(); this.nodes.delete(id);
+      this.rich?.remove(id);record.node.remove(); this.nodes.delete(id);
     }
     let previous = null;
     for (const item of items) {
@@ -194,5 +200,5 @@ export class AgentThreadView {
     }
     this.remember();
   }
-  dispose() { this.remember(); this.resize?.disconnect(); this.nodes.clear(); }
+  dispose() { this.rich?.dispose();this.remember(); this.resize?.disconnect(); this.nodes.clear(); }
 }

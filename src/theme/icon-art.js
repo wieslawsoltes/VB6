@@ -141,6 +141,7 @@ ctl('Toolbar',p().bevel(0,3,16,11).bevel(1,5,5,7).bevel(6,5,5,7).line(13,5,13,11
 ctl('StatusBar',form().frame(1,10,14,5,'s','f').line(6,11,6,13,'s').line(11,11,11,13,'s').dot(13,13));
 const tab=()=>p().bevel(0,5,16,11).bevel(0,1,7,6).bevel(7,2,7,4).rect(1,5,5,2,'f').line(2,3,4,3);
 ctl('TabStrip',tab());ctl('SSTab',tab().frame(3,8,10,5,'s','w').rect(4,9,4,3,'n'));
+ctl('WebBrowser',p().oval(1,1,14,14,'n','c').oval(5,1,6,14,'n','c').line(1,7,14,7,'n').line(3,4,12,4,'n').line(3,11,12,11,'n'));
 ctl('RichTextBox',page(false).text('R',5,5,'n').line(5,11,11,11,'r').line(5,13,9,13));
 ctl('MSFlexGrid',grid());ctl('MSHFlexGrid',grid().rect(2,3,12,3,'t').rect(2,7,3,6,'w').line(3,7,3,11,'s').line(3,11,6,11,'s').frame(2,7,3,3,'s','w'));
 ctl('DataGrid',grid().rect(2,7,12,3,'n').line(2,7,4,8,'w').line(4,8,2,9,'w'));

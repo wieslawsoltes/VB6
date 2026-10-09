@@ -33,6 +33,7 @@ export function prepareClassicDesigner(project) {
         p.ClientTop ??= (p.Top || 0) + Math.max(0, (p.Height ?? p.ClientHeight) - p.ClientHeight - border);
         for (const key of ['Width','Height','Left','Top']) delete p[key];
       }
+      if (node.type === 'WebBrowser') omit([...font,'ForeColor','BackColor','URL','HomeURL','SearchURL','DocumentText','Zoom','AddressBar','MenuBar','StatusBar','ToolBar','FullScreen','TheaterMode','Resizable']);
       if (node.type === 'CommandButton') omit(['ForeColor']);
       if (node.type === 'Label' || node.type === 'Frame') omit(['TabStop']);
       if (node.type === 'Timer') {

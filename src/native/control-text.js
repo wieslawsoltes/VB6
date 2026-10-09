@@ -1,5 +1,7 @@
+import {emitNativeListHelpers} from './control-lists.js';
 /** Bounded dynamic HWND text reads. The compiler-owned BSTR is adopted before
  * invoking Windows, so error cleanup owns it even during reentrant callbacks. */
+import {emitNativeItemTextHelpers} from './control-items.js';
 import {MAX_NATIVE_STRING} from './storage.js';
 const arg=argument=>({argument});
 export const nativeControlTextMethods={
@@ -14,6 +16,7 @@ export const nativeControlTextMethods={
     this.rawStorageAddress(out);x.push().push(this.controlHandleRef(object)).call('native:control:get-selection');
   },
   emitNativeControlTextHelpers(){
+    emitNativeItemTextHelpers(this);emitNativeListHelpers(this);
     if(this.nativeRichSelectionRead){
       const x=this.x,ready=x.unique();
       // CHARRANGE uses RichEdit's logical positions, not offsets into the CRLF

@@ -1,9 +1,11 @@
+import {VB_CONSTANTS} from '../runtime/constants.js';
 /** Resolve compile-time values with their declaration types intact. The source
  * binder has already evaluated these expressions without executing user code.
  * Keep lexical visibility separate from the machine representation in EAX. */
 import {VBCurrency} from '../runtime/values.js';
 const key = value => String(value).toLowerCase();
 const declarations = new WeakMap();
+const intrinsics=new Map(Object.entries(VB_CONSTANTS).filter(([name])=>key(name)!=='vbnullstring').map(([name,value])=>[key(name),{value,type:typeof value==='string'?'string':'long'}]));
 const supported = new Set(['byte','integer','long','boolean','single','double','currency','date','string']);
 function scopeDeclarations(scope) {
   let result = declarations.get(scope);
@@ -48,7 +50,7 @@ export const nativeBindingMethods = {
         if (d?.constant && d.scope !== 'private' && (m.module.kind === 'module' || d.enumName)) matches.push(m.module);
       }
       if (matches.length > 1) this.fail('Ambiguous native constant: '+node.name);
-      return matches.length ? descriptor(this,matches[0],name) : null;
+      return matches.length ? descriptor(this,matches[0],name) : this.resolveProcedure(node) ? null : intrinsics.get(name) || null;
     }
     if (node.kind !== 'member' || node.object.kind !== 'id') return null;
     const name = key(node.name), namespace = key(node.object.name), m = this.modules.get(namespace);

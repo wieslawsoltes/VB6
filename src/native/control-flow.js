@@ -1,5 +1,7 @@
+import {nativeFileInstruction} from './files.js';
 /** Native intra-procedure control flow. GoSub uses a bounded per-activation
  * return stack separate from ESP, so error unwinding cannot corrupt returns. */
+import {bindNativeItem} from './control-items.js';
 import {mem32} from './x86-operands.js';
 const slot=v=>mem32({base:'ebp',displacement:v.offset});
 const memory=slot;
@@ -31,6 +33,13 @@ export const nativeFlowMethods={
     return binding;
   },
   nativeFlowInstruction(ins,context,index) {
+    if(nativeFileInstruction(this,ins))return true;
+    if(ins.op==='assign'&&this.nativeListAssignment(ins.target,ins.expr))return true;
+    if(ins.op==='expr'&&ins.expr.kind==='member'&&String(ins.expr.name).toLowerCase()==='clear'){
+      const object=this.object(ins.expr.object);
+      if(object?.nativeCollection){this.nativeCollectionMethod(object,'clear',[]);return true;}
+      if(this.nativeListMethod(object,'clear',[]))return true;
+    }
     const x=this.x,next=context.label+':'+(index+1);
     if(ins.op==='branch'){
       if(!this.optimizedNativeBranch(ins.test,context.label+':'+ins.target,!!ins.invert)){
@@ -70,7 +79,9 @@ export const nativeFlowMethods={
       }else{
         const object=this.object(ins.expr);
         if(!object||object.controlArray)this.fail('Native With requires an addressable POD record, form or indexed/scalar intrinsic control');
-        if(object.nativeImageItem){
+        if(object.nativeItem){
+          binding={active,object:{...bindNativeItem(this,object),nativeWithActive:active}};
+        }else if(object.nativeImageItem){
           this.nativeImageItemAddress(object);x.cmp(mem32({base:'eax',displacement:16}),0x7fffffff).branch('ae','error:6').inc(mem32({base:'eax',displacement:16}));
           const variable=this.ownNativePointer('native:imagelist:free-node',true);
           binding={active,reference:{variable,release:'native:imagelist:free-node'},object:{...object,boundImageItem:variable,nativeWithActive:active}};

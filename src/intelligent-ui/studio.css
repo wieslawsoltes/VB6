@@ -1,0 +1,5 @@
+.iui-workbench{height:100%;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:8px;box-sizing:border-box;background:var(--vb-face,#c0c0c0);color:var(--vb-window-text,#000)}
+.iui-workbench>.agent-toolbar{flex-wrap:wrap;flex-shrink:0}.iui-workbench>textarea{min-height:150px;flex:0 0 170px;resize:vertical;font:12px/1.4 monospace;white-space:pre;tab-size:2}
+.iui-workbench>p{margin:0}.iui-playground-preview,.iui-gallery-item{padding:8px;border:1px solid var(--vb-shadow,#808080);background:var(--vb-window,#fff);color:var(--vb-window-text,#000)}
+.iui-gallery{display:grid;gap:12px}.iui-gallery-item h4{margin:0 0 6px}.agent-intelligent-result{margin:8px 0;white-space:normal}.agent-message-body .iui-root{white-space:normal}
+.iui-vb6-control{min-width:80px}.iui-vb6-control>.vb-control{position:relative!important;left:0!important;top:0!important;width:100%}

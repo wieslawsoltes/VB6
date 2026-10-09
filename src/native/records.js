@@ -1,7 +1,9 @@
+import {nativeRecordStringMethods} from './record-strings.js';
 /** Native POD records for 32-bit VB/Win32 ABI. Managed fields and SAFEARRAY(VT_RECORD)
  * are rejected: a byte copy must never masquerade as COM record ownership.
  * Fields use natural scalar widths with a maximum four-byte alignment.
  */
+import {nativeEventItemStorage} from './control-items.js';
 import {foldNativeInteger} from './optimizer.js';
 const key=v=>String(v).toLowerCase();
 const align=(n,a)=>Math.ceil(n/a)*a;
@@ -41,13 +43,17 @@ export class NativeRecordLayouts {
     if(this.active.has(definition.id))this.reject('Recursive native record layout: '+definition.name);
     this.active.add(definition.id);
     try {
-      let size=0,fileSize=0,alignment=1;const fields=new Map();
+      let size=0,ansiSize=0,fileSize=0,alignment=1,ansiAlignment=1,hasFixedStrings=false;const fields=new Map();
       for(const field of definition.fields) {
         if(fields.has(key(field.name)))this.reject('Duplicate native record field: '+field.name);
-        const type=key(field.storageType||field.type),bytes=Object.hasOwn(scalarBytes,type)?scalarBytes[type]:0;
+        const type=key(field.storageType||field.type),fixed=type==='string'&&field.fixedLength!=null;
+        if(fixed&&(!Number.isInteger(field.fixedLength)||field.fixedLength<1||field.fixedLength>65535))this.reject('Invalid fixed String length: '+field.name);
+        const bytes=fixed?field.fixedLength*2:Object.hasOwn(scalarBytes,type)?scalarBytes[type]:0;
         const nested=bytes?null:this.resolve(field.type,definition.module);
-        if(!bytes&&!nested||field.autoNew||field.withEvents||field.fixedLength!=null)this.reject('Native POD records do not support managed or fixed String fields: '+field.name+' As '+field.type);
-        const elementBytes=bytes||nested.size,fieldAlignment=bytes?Math.min(bytes,4):nested.alignment;
+        if(!bytes&&!nested||field.autoNew||field.withEvents)this.reject('Native POD records do not support managed fields: '+field.name+' As '+field.type);
+        const elementBytes=bytes||nested.size,fieldAlignment=fixed?2:bytes?Math.min(bytes,4):nested.alignment;
+        const ansiElementBytes=fixed?field.fixedLength:bytes||nested.ansiSize,fieldAnsiAlignment=fixed?1:bytes?Math.min(bytes,4):nested.ansiAlignment;
+        hasFixedStrings ||= fixed||!!nested?.hasFixedStrings;
         let count=1;const bounds=[];
         if(field.bounds!=null){
           if(!field.bounds.length||field.bounds.length>60)this.reject('Native record fields require fixed-size arrays of at most 60 dimensions');
@@ -56,19 +62,22 @@ export class NativeRecordLayouts {
             count*=upper-lower+1;if(!Number.isSafeInteger(count)||count*elementBytes>LIMIT)this.reject('Native record exceeds 512 KiB');bounds.push({lower,upper,stride});}
         }
         size=align(size,fieldAlignment);alignment=Math.max(alignment,fieldAlignment);
-        fields.set(key(field.name),{...field,type:field.storageType||field.type,nativeRecord:nested,recordOffset:size,inlineBounds:bounds,recordFieldArray:bounds.length>0,nativeElementBytes:elementBytes,nativeCount:count,nativeBytes:elementBytes*count});
-        size+=elementBytes*count;fileSize+=(bytes||nested.fileSize)*count;
+        ansiSize=align(ansiSize,fieldAnsiAlignment);ansiAlignment=Math.max(ansiAlignment,fieldAnsiAlignment);
+        fields.set(key(field.name),{...field,type:field.storageType||field.type,nativeRecord:nested,recordOffset:size,ansiOffset:ansiSize,ansiElementBytes,nativeInlineString:fixed,inlineBounds:bounds,recordFieldArray:bounds.length>0,nativeElementBytes:elementBytes,nativeCount:count,nativeBytes:elementBytes*count});
+        size+=elementBytes*count;ansiSize+=ansiElementBytes*count;fileSize+=(fixed?field.fixedLength:bytes||nested.fileSize)*count;
         if(size>LIMIT)this.reject('Native record exceeds 512 KiB');
       }
       if(!fields.size)this.reject('Native record must have at least one field: '+definition.name);
-      const result={id:definition.id,name:definition.name,size:align(size,alignment),fileSize,alignment,fields};
+      const result={id:definition.id,name:definition.name,size:align(size,alignment),ansiSize:align(ansiSize,ansiAlignment),fileSize,alignment,ansiAlignment,hasFixedStrings,fields};
       this.layouts.set(definition.id,result);return result;
     } finally {this.active.delete(definition.id);}
   }
 }
 
 export const nativeRecordMethods={
+  ...nativeRecordStringMethods,
   recordStorage(decl,module) {
+    const item=nativeEventItemStorage(this,decl,module,this.preparingProcedure);if(item)return item;
     const layout=this.recordLayouts.resolve(decl.type,module);
     if(!layout)return null;
     if(decl.bounds!=null)this.fail('Native arrays of records require SAFEARRAY record ownership and are not yet lowered',module);
@@ -120,6 +129,9 @@ export const nativeRecordMethods={
     this.address(source);this.copyRecordTo(temp);this.rawStorageAddress(temp);
   },
   recordReferenceArgument(parameter,node,forced) {
+    if(this.nativeRecordTransfers&&parameter.nativeRecord.hasFixedStrings){
+      this.nativeRecordTransfers.push(this.nativeExternalRecordArgument(parameter,node));return {};
+    }
     const variable=this.variable(node);
     if(!variable?.nativeRecord||variable.nativeRecord.id!==parameter.nativeRecord.id||variable.recordFieldArray)this.fail('ByRef native record argument requires the exact declared record type');
     if(!forced){this.address(variable);return {};}
@@ -127,6 +139,9 @@ export const nativeRecordMethods={
     this.address(variable);this.copyRecordTo(temporary);this.rawStorageAddress(temporary);return {temporary};
   },
   anyReferenceArgument(node) {
+    if(this.nativeRecordTransfers&&this.variable(node)?.nativeRecord?.hasFixedStrings){
+      this.nativeRecordTransfers.push(this.nativeExternalRecordArgument({type:'Any'},node));return {};
+    }
     const variable=this.variable(node);
     if(!variable||node.kind==='group'||variable.recordFieldArray||variable.nativeArray&&!variable.elementOf||key(variable.type)==='string')this.fail('Declare As Any requires addressable numeric/record storage or explicit ByVal pointer; use typed String marshaling for text');
     return {pin:this.address(variable)};

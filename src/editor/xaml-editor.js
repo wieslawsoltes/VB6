@@ -6,7 +6,7 @@ import {XamlLanguageService,SourceText,applyTextEdits} from '../../packages/xaml
  * accessibility, clipboard, selection, scrolling and keyboard text input. */
 export class XamlEditor {
   constructor({uri,schema,onEdit,onSelect,onCommand,onError}={}) {
-    this.uri=uri;this.service=new XamlLanguageService({schema});this.version=0;this.text='';this.composing=false;this.closed=false;
+    this.uri=uri;this.service=new XamlLanguageService({schema});this.version=0;this.text='';this.composing=false;this.closed=false;this.paintFrame=null;
     this.onEdit=onEdit;this.onSelect=onSelect;this.onCommand=onCommand;this.onError=onError??(()=>{});this.disposables=[];
     this.root=el('section',{class:'xaml-editor','aria-label':'XAML form editor'});
     this.toolbar=el('div',{class:'xaml-toolbar',role:'toolbar','aria-label':'XAML editing actions'});
@@ -31,11 +31,11 @@ export class XamlEditor {
     this.listen(this.input,'compositionstart',()=>this.composing=true);
     this.listen(this.input,'compositionend',()=>{this.composing=false;this.commitInput();});
     this.listen(this.input,'input',()=>{if(!this.composing)this.commitInput();});
-    this.listen(this.input,'scroll',()=>this.paint());
+    this.listen(this.input,'scroll',()=>this.schedulePaint());
     this.listen(this.input,'keydown',e=>this.keydown(e));
     this.listen(this.input,'keyup',()=>this.cursor());this.listen(this.input,'click',()=>this.cursor());this.listen(this.input,'select',()=>this.cursor());
     this.listen(this.input,'blur',()=>{this.hideCompletion();this.info.hidden=true;});
-    this.resize=new ResizeObserver(()=>this.paint());this.resize.observe(this.viewport);
+    this.resize=new ResizeObserver(()=>this.schedulePaint());this.resize.observe(this.viewport);
     this.setAppearance({editorSize:13,editorFont:'monospace'});
   }
   listen(node,event,listener){node.addEventListener(event,listener);this.disposables.push(()=>node.removeEventListener(event,listener));}
@@ -80,6 +80,17 @@ export class XamlEditor {
   reveal(start,end=start,focus=true) {
     if(!this.source)return;start=Math.max(0,Math.min(this.text.length,start));end=Math.max(start,Math.min(this.text.length,end));
     this.input.setSelectionRange(start,end);const line=this.source.positionAt(start).line;this.input.scrollTop=Math.max(0,(line-3)*this.lineHeight);this.paint();if(focus)this.input.focus();
+  }
+  // Do not write highlighted DOM inside ResizeObserver delivery. Showing the
+  // find/hover UI changes viewport size; schedule the latest viewport once in
+  // the next frame instead of producing another same-frame layout notification.
+  // https://www.w3.org/TR/resize-observer/#html-processing-model-event-loop
+  schedulePaint() {
+    if(this.closed||this.paintFrame!==null)return;
+    this.paintWindow=this.root.ownerDocument.defaultView;
+    this.paintFrame=this.paintWindow.requestAnimationFrame(()=>{
+      this.paintFrame=null;if(!this.closed)this.paint();
+    });
   }
   paint() {
     if(!this.source||this.closed)return;
@@ -160,6 +171,6 @@ export class XamlEditor {
     }
     this.hideCompletion();
   }
-  dispose(){if(this.closed)return;this.closed=true;this.resize.disconnect();this.disposables.forEach(d=>d());this.service.closeDocument(this.uri);this.root.remove();}
+  dispose(){if(this.closed)return;this.closed=true;this.resize.disconnect();if(this.paintFrame!==null){this.paintWindow.cancelAnimationFrame(this.paintFrame);this.paintFrame=null;}this.disposables.forEach(d=>d());this.service.closeDocument(this.uri);this.root.remove();}
 }
 XamlEditor.sequence=0;

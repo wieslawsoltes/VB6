@@ -47,25 +47,27 @@ export const nativeStringInteropMethods = {
       // An array-element pin spans argument evaluation, foreign reentry and copy-back.
       destination = this.arrayWorkspace(4,'dll-string-destination');
       pin = this.address(variable); x.push(); this.rawStorageAddress(destination);
-      x.emit(0x59,0x89,0x08,0x8b,0x01);
+      x.emit(0x59,0x89,0x08);
+      if(variable.nativeInlineString){x.push(variable.fixedLength).pushOperand('ecx').invoke(OLE,'SysAllocStringLen').test().branch('e','error:7');this.ownString();}
+      else x.emit(0x8b,0x01);
     } else if (this.type(node) === 'string') this.expression(node);
     else this.textExpression(node);
     this.nativeConvertString(owner,'to-ansi');
     if (parameter.byRef && !byval) this.rawStorageAddress(owner);
-    return {owner,destination,pin,fixedLength:variable?.fixedLength || 0};
+    return {owner,destination,pin,fixedLength:variable?.fixedLength || 0,inline:!!variable?.nativeInlineString};
   },
-  nativeStringCopyBack({owner,destination,fixedLength}) {
+  nativeStringCopyBack({owner,destination,fixedLength,inline}) {
     if (!destination) return;
     const wide = this.temporaryString(), x = this.x;
     this.rawStorageAddress(owner); x.emit(0x8b,0x00);
     this.nativeConvertString(wide,'to-unicode');
-    if (fixedLength) {
+    if (fixedLength&&!inline) {
       x.emit(0x89,0xc3).push(fixedLength).emit(0x53).call('native:string:fixed');
       this.ownString();
     }
     // The original owner is replaced only after decoding/allocation succeeds.
     // The stored destination, not a second evaluation of its subscript, is used.
-    x.push(); this.rawStorageAddress(destination); x.emit(0x8b,0x00).push().call('native:string:assign');
+    x.push(); this.rawStorageAddress(destination); x.emit(0x8b,0x00);if(inline)x.pushOperand(fixedLength).push().call('native:record:assign-fixed');else x.push().call('native:string:assign');
   },
   nativeExternalStringResult(ansiOwner) {
     const wide = this.temporaryString(), x = this.x;

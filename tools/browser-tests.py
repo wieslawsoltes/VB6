@@ -227,11 +227,25 @@ def runtime_tests(browser):
 
     def all_controls():
         page=open_fixture(browser,'controls')
-        check(page.evaluate('vb6Application.forms[0].controls.length')==38)
-        check(page.evaluate('vb6Application.vm.lastError === null || vb6Application.vm.lastError === undefined'))
-        healthy(page);page.close()
-        return {'offeredTypes':FIXTURES['types']}
-    case('All 38 offered browser control types initialize without script errors',all_controls)
+        try:
+            # Follow the public catalog, not a frozen count. Compare identities
+            # as well as count so missing/duplicate/substituted controls fail.
+            expected=[{'name':c['name'],'type':c['type']} for c in FIXTURES['controls']['modules'][0]['form']['controls']]
+            check([c['type'] for c in expected]==FIXTURES['types'], 'Control fixture does not cover the public catalog')
+            check(len(set(FIXTURES['types']))==len(expected), 'Duplicate control type in the public catalog')
+            actual=page.evaluate('vb6Application.forms[0].controls.map(c=>({name:c.model.name,type:c.model.type}))')
+            check(actual==expected, f'Runtime controls differ from the catalog: expected {expected}, received {actual}')
+            check(page.evaluate('vb6Application.forms[0].controls.every(c=>c.node.isConnected)'), 'A runtime control is detached')
+            # The newly offered browser must be the real adapter, not a generic
+            # placeholder. Its owned blank page initializes without networking.
+            check('WebBrowser' in FIXTURES['types'], 'WebBrowser missing from the public catalog')
+            page.wait_for_function('''()=>{const c=vb6Application.forms[0].controlMap.get("cwebbrowser");return c?.webBrowser && c.ReadyState===4 && c.DocumentAvailable===-1;}''')
+            check(page.evaluate('vb6Application.vm.lastError === null || vb6Application.vm.lastError === undefined'))
+            healthy(page)
+            return {'offeredTypes':FIXTURES['types'],'initializedControls':len(actual)}
+        finally:
+            page.close()
+    case('All offered browser control types initialize with exact catalog identities',all_controls)
 
     def boundary():
         page=open_example(browser,'controls')

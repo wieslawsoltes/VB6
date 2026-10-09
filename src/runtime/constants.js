@@ -1,5 +1,7 @@
+import {WEB_BROWSER_CONSTANTS} from '../controls/webbrowser-contract.js';
 /** Shared immutable compiler/runtime intrinsic constants. */
 export const VB_CONSTANTS = {
+  ...WEB_BROWSER_CONSTANTS,
   vbTrue:-1,vbFalse:0,vbCr:'\r',vbLf:'\n',vbCrLf:'\r\n',vbNewLine:'\r\n',vbTab:'\t',vbNullChar:'\0',vbNullString:'',vbBack:'\b',vbFormFeed:'\f',vbVerticalTab:'\v',
   vbBlack:0,vbRed:255,vbGreen:65280,vbYellow:65535,vbBlue:16711680,vbMagenta:16711935,vbCyan:16776960,vbWhite:16777215,
   vbButtonFace:-2147483633,vbWindowBackground:-2147483643,vbWindowText:-2147483640,vbButtonText:-2147483630,

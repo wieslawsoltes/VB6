@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Intelligent UI — standalone demo</title><link rel="stylesheet" href="../dist/intelligent-ui.css">
+<style>body{max-width:900px;margin:32px auto;padding:16px;font:15px/1.5 system-ui}pre{white-space:pre-wrap}</style>
+<body><h1>Streaming Intelligent UI</h1><p>This standalone package does not load the VB6 IDE or a model provider. Interactions calculate locally; actions are displayed below for host review.</p><main id="view"></main><pre id="actions" role="status"></pre>
+<script src="../dist/intelligent-ui.js"></script><script>
+const surface = new IntelligentUI.UISurface(document.getElementById('view'), {onAction: action => { document.getElementById('actions').textContent = 'Host review required:\n' + JSON.stringify(action,null,2); }});
+surface.update('{@body const [seats,setSeats] = DIL.useState(8)}<column gap={3} padding={3} border={true}><title>Team estimate</title><slider label="Seats" min={1} max={40} step={1} value={seats} onChange={v => setSeats(v)} /><metric label="Monthly total" value={seats*29} unit="USD" /><button onClick={() => GenUI.issueNewTurn("Explain "+seats+" seats")}>Request explanation</button></column>');
+addEventListener('pagehide', () => surface.dispose());
+</script></body></html>

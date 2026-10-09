@@ -1,5 +1,6 @@
 /** Win32 notifications and optional subclass thunks. Every thunk is scoped to an
  * actual HWND; indexed controls keep their authored Index and native parent. */
+import {nativeItemClick} from './control-items.js';
 import {NATIVE_SCROLL_CONTROLS,NATIVE_RANGE_CONTROLS,NATIVE_TAB_CONTROLS,NATIVE_DATE_CONTROLS,NATIVE_INPUT_EVENTS} from './control-plan.js';
 const mem=memory=>({memory}),arg=argument=>({argument}),key=value=>String(value).toLowerCase();
 const save=(x,offset)=>x.emit(0x89,0x45,offset&255);
@@ -88,7 +89,7 @@ export const nativeControlEventMethods={
         x.label(low).value({memory:control.state,addend:control.model.properties.Wrap?4:0}).jump(apply).label(high).value({memory:control.state,addend:control.model.properties.Wrap?0:4});
         x.label(apply);save(x,-20);const same=x.unique();x.emit(0x3b,0x05).addr(control.state,8).branch('e',same).store(control.state,8).push().push(0).push(0x471).push(mem(control.handle)).invoke('user32.dll','SendMessageW');this.controlHandler(module,control,'Change');x.label(same).value(1).jump(exit); // position already applied; veto default double application.
       }else{
-        for(const [code,event]of [[-2,'Click'],[-3,'DblClick']]){const another=x.unique();x.compare(code).branch('ne',another);this.controlHandler(module,control,event);x.jump(zero).label(another);}
+        for(const [code,event]of [[-2,'Click'],[-3,'DblClick']]){const another=x.unique();x.compare(code).branch('ne',another);if(code===-2)nativeItemClick(this,module,control,zero);this.controlHandler(module,control,event);x.jump(zero).label(another);}
       }
       x.label(next);
     }

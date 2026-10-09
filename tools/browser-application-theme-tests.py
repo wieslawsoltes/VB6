@@ -27,6 +27,7 @@ class ApplicationThemes(unittest.TestCase):
   subprocess.run(['node','tools/build-theme-fixtures.mjs'],cwd=ROOT,check=True)
   REPORT.mkdir(parents=True,exist_ok=True);cls.results=[]
   cls.project=json.loads((FIXTURE/'gallery.json').read_text());cls.palettes=json.loads((FIXTURE/'palettes.json').read_text())
+  cls.glyphs=json.loads((FIXTURE/'icon-catalog.json').read_text())
   cls.server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(ROOT)))
   threading.Thread(target=cls.server.serve_forever,daemon=True).start();cls.base=f'http://127.0.0.1:{cls.server.server_port}/'
   cls.pw=sync_playwright().start();options={}
@@ -228,10 +229,17 @@ class ApplicationThemes(unittest.TestCase):
    self.record(theme,detachedIcons=True)
   popup.screenshot(path=str(REPORT/'detached-themed-icons.png'));popup.close();ide.wait_for_function('vb6Studio.browserWindows.windows.size===0')
  def test_icon_contact_sheets_complete_selected_disabled_and_large(self):
-  self.load(FIXTURE/'icons.html');self.assertEqual(self.page.locator('.glyph').count(),151)
+  self.load(FIXTURE/'icons.html')
+  # Match the complete current source catalog, not an obsolete fixed total.
+  expected=[glyph['name'] for glyph in self.glyphs]
+  self.assertEqual(self.page.locator('.glyph label').all_text_contents(),expected)
+  self.assertIn({'name':'WebBrowser','control':True},self.glyphs)
+  browser_icon=self.page.locator('.glyph .pixel-icon[data-name="WebBrowser"]')
+  self.assertEqual(browser_icon.count(),1)
   for theme in THEMES:
    self.page.evaluate('t=>document.documentElement.setAttribute("data-vb-theme",t)',theme)
-   layers=self.active_pack(self.page.locator('main'));self.assertEqual(len(layers),151);self.assertEqual(set(layers),{theme.removesuffix('-dark')})
+   layers=self.active_pack(self.page.locator('main'));self.assertEqual(len(layers),len(expected));self.assertEqual(set(layers),{theme.removesuffix('-dark')})
+   self.assertEqual(self.active_pack(browser_icon),[theme.removesuffix('-dark')])
    self.page.locator('.glyph').nth(2).evaluate('e=>e.setAttribute("aria-disabled","true")')
    self.page.locator('.glyph').nth(3).evaluate('e=>e.classList.add("selected")')
    self.page.locator('.glyph').nth(4).evaluate('e=>{e.classList.add("selected");e.setAttribute("aria-disabled","true");}')
@@ -240,7 +248,7 @@ class ApplicationThemes(unittest.TestCase):
     self.assertEqual(painted,self.rgb(color),theme+' icon state '+str(index))
    for scaled in self.page.locator('.scaled').all():
     size=int(scaled.get_attribute('data-size'));self.assertEqual(scaled.locator('svg').evaluate('e=>[e.getBoundingClientRect().width,e.getBoundingClientRect().height]'),[size,size])
-   self.page.screenshot(path=str(REPORT/(theme+'-icon-pack.png')));self.record(theme,completeIcons=151,vectorSizes=[12,16,24,32,48,64],selectedDisabledColor=True)
+   self.page.screenshot(path=str(REPORT/(theme+'-icon-pack.png')));self.record(theme,completeIcons=len(expected),vectorSizes=[12,16,24,32,48,64],selectedDisabledColor=True)
  @unittest.skipIf(MEMORY,'Real origin storage/reload requires HTTP; covered by CI')
  def test_project_application_appearance_persists_in_saved_workspace(self):
   ide=self.open_ide();ide.evaluate('p=>{vb6Studio.loadProject(p);vb6Studio.project.settings.theme="x11-cde-dark";vb6Studio.project.settings.themeOptions={followSystemTheme:false,reduceMotion:true,reduceTransparency:false};vb6Studio.persist();}',self.project)

@@ -1,3 +1,4 @@
+import {splitPrintList} from './print-list.js';
 import {VBError} from './errors.js';
 import {DeclarationCursor} from './declaration-cursor.js';
 import {parseExpression} from './expression.js';
@@ -112,7 +113,8 @@ export function parseFileStatement(text) {
   if((first=/^(Print|Write)\s+#/i.exec(text))){
     const body=text.slice(first[0].length),comma=topOperator(body,','),csv=/^write$/i.test(first[1]);
     const output=comma?body.slice(comma.end).trim():'';
-    return {op:'filePrint',handle:handle(comma?body.slice(0,comma.start):body),exprs:splitTop(output,csv?',':';').filter(Boolean).map(E),csv,newline:!output.endsWith(';')};
+    const list=csv?null:splitPrintList(output);
+    return {op:'filePrint',outputList:output,handle:handle(comma?body.slice(0,comma.start):body),exprs:(csv?splitTop(output).filter(Boolean):list.parts.filter(p=>p.text).map(p=>p.text)).map(E),csv,newline:csv?!output.endsWith(';'):list.newline};
   }
   if((first=/^(Line\s+Input|Input)\s+#/i.exec(text))){
     const body=text.slice(first[0].length),comma=topOperator(body,',');if(!comma)fail('Input requires file number and variable');

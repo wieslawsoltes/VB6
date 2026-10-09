@@ -1,3 +1,4 @@
+import {nativeListMethods,prepareNativeList,createNativeList} from './control-lists.js';
 import {initializeNativeObjectTag,disposeNativeStandaloneTags} from './control-metadata.js';
 import {nativeTabPageMethods} from './control-tabs.js';
 import {nativeChartMethods} from './control-chart.js';
@@ -21,7 +22,7 @@ import {nativeRichTextMethods} from './control-richtext.js';
 const mem=memory=>({memory}),key=s=>String(s).toLowerCase();
 export const NATIVE_CONTROL_STATE=Object.freeze({min:0,max:4,value:8,smallchange:12,largechange:16,tickfrequency:20,tab:24,tag:28,backcolor:32,forecolor:36,fillcolor:40,fillstyle:44,shape:48,bordercolor:52,borderwidth:56,borderstyle:60,brush:64,backstyle:68,font:72});
 export const nativeControlMethods={
-  ...nativeTabPageMethods,...nativeChartMethods,...nativeGridMethods,...nativeImageListMethods,...nativePictureMethods,...nativeDialogMethods,...nativeSelectionFormatMethods,...nativeControlTextMethods,...nativeRichTextMethods,...nativeControlFontMethods,...nativeControlFileMethods,...nativeControlCollectionMethods,...nativeControlPropertyMethods,...nativeControlEventMethods,...nativeControlDrawingMethods,
+  ...nativeListMethods,...nativeTabPageMethods,...nativeChartMethods,...nativeGridMethods,...nativeImageListMethods,...nativePictureMethods,...nativeDialogMethods,...nativeSelectionFormatMethods,...nativeControlTextMethods,...nativeRichTextMethods,...nativeControlFontMethods,...nativeControlFileMethods,...nativeControlCollectionMethods,...nativeControlPropertyMethods,...nativeControlEventMethods,...nativeControlDrawingMethods,
   nativeControlEvents,nativeCommandEvents,
   nativeControlDescriptor(model,module){
     const descriptor=NATIVE_CONTROL_CATALOG[model.type];
@@ -59,7 +60,7 @@ export const nativeControlMethods={
       if(tabs.length>32767||!Number.isInteger(Number(p.Tab??0))||Number(p.Tab??0)<0||Number(p.Tab??0)>=tabs.length)this.fail('Invalid native tab count or selected Tab: '+model.name,module);
       control.tabs=tabs;
     }
-    this.prepareNativeControlCollections(control);
+    this.prepareNativeControlCollections(control);prepareNativeList(this,control);
     if(p.ToolTipText)control.tooltip=String(p.ToolTipText);
     control.events=events;
   },
@@ -97,8 +98,7 @@ export const nativeControlMethods={
       }
       if(['CheckBox','OptionButton'].includes(type))send(0xf1,type==='OptionButton'?(p.Value?1:0):Number(p.Value||0));
       if(['ListBox','ComboBox'].includes(type)) {
-        for(const item of p.List||[])send(type==='ListBox'?0x180:0x143,0,this.string(item));
-        if(p.ListIndex!==undefined){if(type==='ListBox'&&p.MultiSelect){send(0x183,1,Number(p.ListIndex));send(0x19e,Number(p.ListIndex),0);}else send(type==='ListBox'?0x186:0x14e,Number(p.ListIndex));}
+        createNativeList(this,control);
       }
       if(NATIVE_SCROLL_CONTROLS.has(type)) {
         x.api('user32.dll','SetScrollRange',[mem(control.handle),2,Number(p.Min??0),Number(p.Max??32767),1]);

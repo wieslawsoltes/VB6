@@ -42,6 +42,14 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: npm run build
+      - name: Initialize .NET before parallel conformance tests
+        # First-use NuGet migrations create a process-shared mutex directory.
+        # Initialize once so concurrent fixtures cannot race mkdir with EEXIST.
+        # Keep all compilation/execution assertions and concurrency unchanged.
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+          DOTNET_NOLOGO: '1'
+        run: dotnet new console --dry-run --no-restore --output "${{ runner.temp }}/vb6-dotnet-init"
       - name: Require real .NET compilation and execution
         run: npm run test:migration
         env:

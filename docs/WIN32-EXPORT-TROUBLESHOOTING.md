@@ -27,3 +27,17 @@ Downloaded source archives include `LICENSE`, `THIRD-PARTY-NOTICES.md` and the s
 The browser VM, direct native compiler and classic VB6 compiler integration are separate targets. A program that runs in the browser is not automatically supported by the typed native compiler. Preserve the full diagnostic, module/procedure and source when reporting another failure. Unsupported features should produce diagnostics rather than an apparently successful EXE with missing behavior.
 
 The direct compiler emits no-extraction PE32/x86 applications with native Windows controls/GDI. It is not the Electron/WebGPU target and does not provide all VB6 types, controls, COM/OCX, callback/structure ABIs or HTML/Electron database providers. See [native compiler contract](WIN32-AOT.md), [array contract](WIN32-ARRAYS.md), and [target selection](WINDOWS-BUILDS.md). Windows DLL imports require their original matching ABI and are not sandboxed. Run only trusted generated applications.
+
+
+## Audit every bundled sample without hiding unsupported features
+
+```sh
+node tools/check-win32-samples.mjs reports/native-samples.json
+python tools/browser-win32-export-audit.py --output reports/native-export-browser
+```
+
+The source audit tries every catalog sample at O0/O1/O2. The browser audit verifies the reviewed bundle fingerprints, compares source-compiler bytes with the standalone SDK and Blob worker at all three levels, and clicks the actual File > Make Win32 EXE menu item at the IDE's default optimization level. Every successful download must exactly match the independently generated source-compiler SHA-256. Failed samples must show the same diagnostics and must not download any executable. Neither audit modifies sample modules or runs the resulting EXEs.
+
+The browser audit requires the existing Playwright Python dependency and Chromium. Set `CHROMIUM_PATH` for a non-default Chromium installation. It also includes the native math and custom-error fixtures to cover features not exercised by every sample. Its JSON report separates `interfacesAgree` (the same compilation/download result everywhere) from `allSamplesExport` (full sample coverage). Exit status **0** requires all samples to export, **1** means at least one sample is still unsupported, and **2** means an audit mismatch or infrastructure failure. Agreement on an unsupported feature is not counted as a successful native export.
+
+These checks verify compiler/export plumbing, not actual Win32 behavior. The independent Windows fixture execution in `tools/test-win32-controls.ps1` is still required before claiming a native runtime pass.

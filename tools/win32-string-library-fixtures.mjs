@@ -1,3 +1,4 @@
+import {extendNativeFormatFixture} from './win32-format-intrinsics-fixture.mjs';
 import {extendNativeStringArrayFixture,nativeStringArrayPolicyModule} from './win32-string-array-fixtures.mjs';
 import {newProject} from '../src/project/model.js';
 /** Counted string library contracts; actual execution is a separate Windows gate. */
@@ -60,6 +61,7 @@ export function nativeStringLibraryFixture(){
  add('Err.Clear\nOn Error GoTo 0\ns=Replace(String$(524288,"a"),"a","bb")');check('Len(s)=1048576 And Left$(s,1)="b" And Right$(s,1)="b"','Replace accepts the exact native BSTR length budget');
  add('For i=1 To 1000\ns=Replace(Replace("aabbaabb","aa","X"),"bb","Y")\nNext');check('s="XYXY"','nested replacement ownership survives repeated allocations');
  check('TextPolicy()="XXa" And TextSearch()=2','caller Option Compare and explicit binary overrides are kept across modules');
+ extendNativeFormatFixture({add,check});
  const arrays=extendNativeStringArrayFixture({add,check});
  add('ExitProcess 0');
  const project=newProject('AotStringLibrary');project.startup='Sub Main';project.modules=[{id:'m',name:'Entry',kind:'module',code:`Option Explicit

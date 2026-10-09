@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path $Directory).Path
 $plans = Get-Content (Join-Path $root 'builds.json') -Raw | ConvertFrom-Json
 $expected = @()
-foreach ($family in @('AotControlRanges','AotControlContent','AotControlEditing','AotControlFiles','AotControlDrawing','AotControlRichText','AotControlRichMethods','AotControlSelectionFormats','AotControlPictureResources','AotControlImageCollections','AotControlDialogState','AotControlMSFlexGrid','AotControlMSHFlexGrid','AotControlDataGrid','AotControlMSFlexGridEditing','AotControlMSHFlexGridEditing','AotControlDataGridEditing','AotControlChart','AotControlTabPages','AotControlTabPagesLayout')) {
+foreach ($family in @('AotControlRichErrors','AotControlMath','AotControlFixedRecords','AotControlSequentialFiles','AotControlLists','AotControlItemObjects','AotControlRanges','AotControlContent','AotControlEditing','AotControlFiles','AotControlDrawing','AotControlRichText','AotControlRichMethods','AotControlSelectionFormats','AotControlPictureResources','AotControlImageCollections','AotControlDialogState','AotControlMSFlexGrid','AotControlMSHFlexGrid','AotControlDataGrid','AotControlMSFlexGridEditing','AotControlMSHFlexGridEditing','AotControlDataGridEditing','AotControlChart','AotControlTabPages','AotControlTabPagesLayout')) {
   foreach ($level in 0..2) {$expected += "$family-O$level"}
 }
 if ($plans.Count -ne $expected.Count -or (Compare-Object ($plans.name | Sort-Object) ($expected | Sort-Object))) {throw 'Incomplete or duplicated native fixture/optimization matrix'}

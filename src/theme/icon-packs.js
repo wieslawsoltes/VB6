@@ -128,6 +128,7 @@ ctl('Toolbar',R(1.5,4,13,8),R(3,6,3,4,true),R(7.5,6,3,4,true),L(12.5,5.5,12.5,10
 ctl('StatusBar',window(),P('M2 10h12m-8 0v3m4-3v3'));
 ctl('TabStrip',P('M1.5 6V2H7v4h7.5v8h-13z',true),P('M7 3h6v3M2 6h5'));
 ctl('SSTab',P('M1.5 6V2H7v4h7.5v8h-13z',true),P('M7 3h6v3M2 6h5'),R(4,9,7,3));
+ctl('WebBrowser',C(8,8,6.5,true),P('M8 1.5q-6 6.5 0 13m0-13q6 6.5 0 13M1.5 8h13M3 4.5h10M3 11.5h10'));
 ctl('RichTextBox',page(),P('M5 6h5M5 8h4M5 11h6M6 6v3m-1 0h2'));
 ctl('MSFlexGrid',grid());ctl('MSHFlexGrid',grid(),P('M3 7v5h2M3 9h2'));
 ctl('DataGrid',grid(),P('m2.5 7.5 2 1.5-2 1.5',true));
