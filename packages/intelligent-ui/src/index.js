@@ -1,3 +1,6 @@
+import {normalizeContentBlocks, normalizeModelContext, contentSummary, base64Bytes, prepareDownloads, UIModelContextStore, CONTENT_TYPES} from './content.js';
+import {AppDisplayController, DISPLAY_MODES} from './display-mode.js';
+export {normalizeContentBlocks, normalizeModelContext, contentSummary, base64Bytes, prepareDownloads, UIModelContextStore, CONTENT_TYPES, AppDisplayController, DISPLAY_MODES};
 import {BREAKPOINTS, normalizeViewport} from './viewport.js';
 import {McpAppHost, normalizeAppCsp, appProxyUrl} from './app-host.js';
 import {createAppBlockFactory, appBlockDocument} from './app-block.js';

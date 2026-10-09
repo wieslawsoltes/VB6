@@ -2,24 +2,24 @@
   "version": 2,
   "files": {
     "dist/studio.js": {
-      "bytes": 8734398,
-      "sha256": "c43d80902134ed1d32c28d593e3e33557b65ee3cb234f4a2c62b29ce324cb5ed"
+      "bytes": 8767155,
+      "sha256": "019b233b8f86bb99cfffafa2d0f62f91bd4c26eb206e204365a0513d428d71b4"
     },
     "dist/VB6-Studio-Web.html": {
-      "bytes": 9075566,
-      "sha256": "810a06f33958040712a29621a530664d889cbd60d6b5db5c1421abcea9309085"
+      "bytes": 9108323,
+      "sha256": "73127d20dbf1fec4746cfd978d9ee8606d921fcb01a7ef9d962830872da32577"
     },
     "dist/intelligent-ui-sandbox.html": {
-      "bytes": 21365,
-      "sha256": "245cc9c7e04f7d2ebde52e5e55286cb12a8965915824665d3c2568a8954d1d66"
+      "bytes": 35657,
+      "sha256": "a92f7b728fbc3c8bc390726a975e47f1aa4c36658219b9d0225a4e923b61644c"
     },
     "packages/intelligent-ui/dist/intelligent-ui-sandbox.html": {
-      "bytes": 21365,
-      "sha256": "245cc9c7e04f7d2ebde52e5e55286cb12a8965915824665d3c2568a8954d1d66"
+      "bytes": 35657,
+      "sha256": "a92f7b728fbc3c8bc390726a975e47f1aa4c36658219b9d0225a4e923b61644c"
     },
     "dist/intelligent-ui.js": {
-      "bytes": 135494,
-      "sha256": "697e2259795d6589a5de6d90aacde7ab729e794c478483af9681afea6b19185e"
+      "bytes": 153558,
+      "sha256": "1897dcd3e9901c81ade350ee3bc3d2fd8017e5d576e2929f168b08ee66d02c76"
     },
     "dist/intelligent-ui-worker.js": {
       "bytes": 54512,
@@ -30,16 +30,16 @@
       "sha256": "2f62235a0a8080c626e64515397abd2dc9ef0f194cb0f75c8d77c4b790788d90"
     },
     "dist/intelligent-ui-mcp.html": {
-      "bytes": 140256,
-      "sha256": "0f26971d94894997ce9e406c1daf3ff61e83b5d5c979652a1c6ccc6862cbfaf9"
+      "bytes": 158320,
+      "sha256": "ef546518a42221cb6d0582bfcb1ea5a6df1762af026b1e80296cce45340fbe22"
     },
     "src/intelligent-ui/payload.js": {
-      "bytes": 197123,
-      "sha256": "92738576f18ad74f1aff8080dee48f28caf47d5f1d3839a24ec511d1b773e849"
+      "bytes": 215411,
+      "sha256": "2cdf2bb674d402259821ea9537504b1f89084592016ccd3fb0581008d421d194"
     },
     "packages/intelligent-ui/dist/intelligent-ui.js": {
-      "bytes": 135494,
-      "sha256": "697e2259795d6589a5de6d90aacde7ab729e794c478483af9681afea6b19185e"
+      "bytes": 153558,
+      "sha256": "1897dcd3e9901c81ade350ee3bc3d2fd8017e5d576e2929f168b08ee66d02c76"
     },
     "packages/intelligent-ui/dist/intelligent-ui-worker.js": {
       "bytes": 54512,
@@ -50,8 +50,8 @@
       "sha256": "2f62235a0a8080c626e64515397abd2dc9ef0f194cb0f75c8d77c4b790788d90"
     },
     "packages/intelligent-ui/dist/intelligent-ui-mcp.html": {
-      "bytes": 140256,
-      "sha256": "0f26971d94894997ce9e406c1daf3ff61e83b5d5c979652a1c6ccc6862cbfaf9"
+      "bytes": 158320,
+      "sha256": "ef546518a42221cb6d0582bfcb1ea5a6df1762af026b1e80296cce45340fbe22"
     },
     "dist/win32-browser.js": {
       "bytes": 212919,
