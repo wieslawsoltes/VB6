@@ -8,8 +8,8 @@ const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const validId = value => typeof value === 'string' || Number.isSafeInteger(value);
 
 export class JsonRpcPeer {
-  constructor(transport, { timeout = 30000, maxPending = 256, maxMessageLength = 16 * 1024 * 1024, onError = () => {} } = {}) {
-    this.transport = transport; this.timeout = timeout; this.maxPending = maxPending; this.maxMessageLength = maxMessageLength; this.onError = onError;
+  constructor(transport, { timeout = 30000, maxPending = 256, maxMessageLength = 16 * 1024 * 1024, onError = () => {}, onClose = () => {} } = {}) {
+    this.transport = transport; this.timeout = timeout; this.maxPending = maxPending; this.maxMessageLength = maxMessageLength; this.onError = onError; this.onClose = onClose;
     this.sequence = 0; this.pending = new Map(); this.incoming = new Map(); this.requests = new Map(); this.notifications = new Map(); this.closed = false;
     this.unlisten = transport.listen(message => this.receive(message), error => this.close(error || new Error('Language-server connection closed.')));
   }
@@ -110,7 +110,7 @@ export class JsonRpcPeer {
     for (const finish of [...this.pending.values()]) finish(reason);
     for (const controller of this.incoming.values()) controller.abort();
     this.incoming.clear(); this.requests.clear(); this.notifications.clear();
-    this.unlisten?.(); this.transport.close?.();
+    try { this.unlisten?.(); this.transport.close?.(); } finally { this.onClose(reason); }
   }
 }
 

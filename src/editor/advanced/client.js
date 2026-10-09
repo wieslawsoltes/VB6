@@ -94,7 +94,7 @@ export function matchesDocumentSelector(selector,document) {
  * connect externally and the transaction that applies workspace edits. */
 export class LanguageClient {
   constructor(transport, {rootUri=null,folders=[],configuration={},applyEdit=async()=>({applied:false,failureReason:'Workspace edits are not enabled.'}),showMessage=()=>null,onError=()=>{}}={}) {
-    this.peer=new JsonRpcPeer(transport,{onError,onClose:reason=>{if(this.state!=='closed'){this.state='closed';this.emit('closed',reason);}}});this.rootUri=rootUri;this.folders=folders;this.configuration=configuration;
+    this.peer=new JsonRpcPeer(transport,{onError,onClose:reason=>{this.dispose(reason)}});this.rootUri=rootUri;this.folders=folders;this.configuration=configuration;
     this.documents=new Map();this.opened=new Set();this.registrations=new Map();this.listeners=new Map();this.capabilities={};this.state='new';
     this.peer.onRequest('workspace/configuration',p=>(p.items||[]).map(item=>item.section?item.section.split('.').reduce((v,k)=>v&&Object.hasOwn(v,k)?v[k]:undefined,this.configuration)??null:this.configuration));
     this.peer.onRequest('workspace/workspaceFolders',()=>this.folders.length?this.folders:null);
@@ -190,5 +190,5 @@ export class LanguageClient {
     this.state='stopping';
     try {await this.peer.request('shutdown',null,{timeout:1500});this.peer.notify('exit');}finally{this.dispose();}
   }
-  dispose() {if(this.state==='closed')return;this.state='closed';this.peer.close();this.documents.clear();this.opened.clear();this.registrations.clear();this.emit('closed');this.listeners.clear();}
+  dispose(reason) {if(this.disposed)return;this.disposed=true;this.state='closed';this.peer.close();this.documents.clear();this.opened.clear();this.registrations.clear();this.emit('closed',reason);this.listeners.clear();}
 }
