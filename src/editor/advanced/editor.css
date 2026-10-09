@@ -1,0 +1,26 @@
+/* All enhanced chrome is scoped. Classic editor remains byte-for-byte styled
+   as before until a successfully initialized advanced surface is mounted. */
+.source-editor.advanced-editor-active > .code-split-area,
+.source-editor.advanced-editor-active > .editor-find,
+.xaml-editor.advanced-editor-active > .xaml-viewport,
+.xaml-editor.advanced-editor-active > .xaml-find { display: none !important; }
+.advanced-editor-surface { flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; overflow: hidden; width: 100%; }
+.advanced-editor-surface > .monaco-editor { position: absolute; inset: 0; }
+.advanced-editor-active .monaco-editor .advanced-breakpoint { background: #b91c1c; border: 1px solid #7f1d1d; border-radius: 50%; width: 11px !important; height: 11px !important; margin: 3px; box-sizing: border-box; }
+.advanced-editor-active .monaco-editor .advanced-breakpoint.disabled { background: transparent; }
+.advanced-editor-active .monaco-editor .advanced-bookmark { border-left: 3px solid #2563eb; margin-left: 2px; }
+.advanced-editor-active .monaco-editor .advanced-execution-line { background: #eab30840; }
+.advanced-editor-active .monaco-editor .advanced-execution-arrow::before { content: '➜'; color: #ca8a04; font-size: 16px; }
+.advanced-editor-options input[type=checkbox] { vertical-align: middle; }
+@media (forced-colors: active) {
+  .advanced-editor-active .monaco-editor .advanced-breakpoint { background: Highlight; border-color: Highlight; }
+  .advanced-editor-active .monaco-editor .advanced-bookmark { border-color: LinkText; }
+}
+.advanced-peek { border: 1px solid var(--vb-selection, #000080); background: var(--vb-window, #fff); color: var(--vb-window-text, #000); box-sizing: border-box; display: flex; flex-direction: column; font: 12px Tahoma, sans-serif; }
+.advanced-peek-header { display: flex; align-items: center; gap: 6px; padding: 3px 6px; flex: 0 0 29px; box-sizing: border-box; background: var(--vb-face, #c0c0c0); }
+.advanced-peek-header strong { flex: 1; }
+.advanced-peek-body { flex: 1; min-height: 0; display: flex; }
+.advanced-peek-locations { flex: 0 0 210px; max-width: 40%; overflow: auto; border-right: 1px solid var(--vb-selection, #000080); }
+.advanced-peek-locations button { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 6px; }
+.advanced-peek-locations [aria-selected=true] { background: var(--vb-selection, #000080); color: var(--vb-selection-text, #fff); }
+.advanced-peek-preview { flex: 1; min-width: 0; position: relative; }
