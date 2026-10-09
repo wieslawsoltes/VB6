@@ -9,7 +9,7 @@ export const LSP_PROVIDERS = Object.freeze({
   'textDocument/definition':'definitionProvider', 'textDocument/typeDefinition':'typeDefinitionProvider',
   'textDocument/implementation':'implementationProvider', 'textDocument/references':'referencesProvider',
   'textDocument/documentHighlight':'documentHighlightProvider', 'textDocument/documentSymbol':'documentSymbolProvider',
-  'workspace/symbol':'workspaceSymbolProvider', 'textDocument/codeAction':'codeActionProvider',
+  'workspace/symbol':'workspaceSymbolProvider', 'workspace/executeCommand':'executeCommandProvider', 'textDocument/codeAction':'codeActionProvider',
   'textDocument/codeLens':'codeLensProvider', 'textDocument/documentLink':'documentLinkProvider',
   'textDocument/documentColor':'colorProvider', 'textDocument/formatting':'documentFormattingProvider',
   'textDocument/rangeFormatting':'documentRangeFormattingProvider', 'textDocument/onTypeFormatting':'documentOnTypeFormattingProvider',
@@ -27,6 +27,7 @@ export function languageClientCapabilities() {
   return {
     general:{positionEncodings:['utf-16']},
     workspace:{applyEdit:true,workspaceEdit:{documentChanges:true,failureHandling:'transactional',changeAnnotationSupport:{groupsOnLabel:true}},workspaceFolders:true,configuration:true,
+      executeCommand:dynamic,
       symbol:{...dynamic,symbolKind:{valueSet:Array.from({length:26},(_,i)=>i+1)}},
       semanticTokens:{refreshSupport:true},inlayHint:{refreshSupport:true},codeLens:{refreshSupport:true},diagnostics:{refreshSupport:true}},
     textDocument:{
@@ -97,7 +98,7 @@ export function matchesDocumentSelector(selector,document) {
 export class LanguageClient {
   constructor(transport, {rootUri=null,folders=[],configuration={},applyEdit=async()=>({applied:false,failureReason:'Workspace edits are not enabled.'}),showMessage=()=>null,onError=()=>{}}={}) {
     this.peer=new JsonRpcPeer(transport,{onError,onClose:reason=>{this.dispose(reason)}});this.rootUri=rootUri;this.folders=folders;this.configuration=configuration;
-    this.documents=new Map();this.opened=new Set();this.registrations=new Map();this.listeners=new Map();this.capabilities={};this.state='new';
+    this.revision=0;this.responseRevisions=new WeakMap();this.documents=new Map();this.opened=new Set();this.registrations=new Map();this.listeners=new Map();this.capabilities={};this.state='new';
     this.peer.onRequest('workspace/configuration',p=>(p.items||[]).map(item=>item.section?item.section.split('.').reduce((v,k)=>v&&Object.hasOwn(v,k)?v[k]:undefined,this.configuration)??null:this.configuration));
     this.peer.onRequest('workspace/workspaceFolders',()=>this.folders.length?this.folders:null);
     this.peer.onRequest('workspace/applyEdit',async p=>{
@@ -142,7 +143,8 @@ export class LanguageClient {
       const selector=r.registerOptions?.documentSelector;
       if(!document||matchesDocumentSelector(selector,document))return r.registerOptions||true;
     }
-    return this.capabilities[LSP_PROVIDERS[method]]||false;
+    const value=this.capabilities[LSP_PROVIDERS[method]];
+    return value&&(!document||matchesDocumentSelector(value.documentSelector,document))?value:false;
   }
   syncOpen(document) {
     const sync=this.capabilities.textDocumentSync;
@@ -153,13 +155,13 @@ export class LanguageClient {
   requireReady() {if(this.state!=='ready'||this.peer.closed)throw new Error('Language server is not ready.');}
   open(uri,languageId,text,version=1) {
     this.requireReady();if(this.documents.has(uri))throw new Error('Document is already open: '+uri);
-    const document=new LspTextDocument(uri,languageId,text,version);this.documents.set(uri,document);
+    const document=new LspTextDocument(uri,languageId,text,version);this.documents.set(uri,document);++this.revision;
     this.syncOpen(document);this.emit('document',{kind:'open',uri,document});
     return document;
   }
   change(uri,changes,version) {
     this.requireReady();const document=this.documents.get(uri);if(!document)throw new Error('Document is not open: '+uri);
-    document.applyChanges(changes,version);
+    document.applyChanges(changes,version);++this.revision;
     const sync=this.capabilities.textDocumentSync,kind=this.capability('textDocument/didChange',document)?.syncKind??(typeof sync==='number'?sync:sync?.change);
     if(kind===1||kind===2)this.peer.notify('textDocument/didChange',{textDocument:{uri,version},contentChanges:kind===1?[{text:document.text}]:changes});
     this.emit('document',{kind:'change',uri,document});return document;
@@ -174,14 +176,22 @@ export class LanguageClient {
     if(save)this.peer.notify('textDocument/didSave',{textDocument:{uri},...(save.includeText?{text:document.text}:{})});
   }
   close(uri) {
-    const document=this.documents.get(uri);if(!document)return;this.documents.delete(uri);
-    const wasOpen=this.opened.delete(uri),sync=this.capabilities.textDocumentSync;
-    if(this.state==='ready'&&!this.peer.closed&&(wasOpen||typeof sync==='number'&&sync!==0||sync?.openClose||this.capability('textDocument/didClose',document)))this.peer.notify('textDocument/didClose',{textDocument:{uri}});
+    const document=this.documents.get(uri);if(!document)return;this.documents.delete(uri);++this.revision;
+    this.opened.delete(uri);const sync=this.capabilities.textDocumentSync;
+    if(this.state==='ready'&&!this.peer.closed&&(typeof sync==='number'&&sync!==0||sync?.openClose||this.capability('textDocument/didClose',document)))this.peer.notify('textDocument/didClose',{textDocument:{uri}});
     this.emit('document',{kind:'close',uri,document});this.emit('diagnostics',{uri,diagnostics:[]});
   }
-  async request(method,params,{signal,allowStale=false,...options}={}) {
+  responseIsCurrent(value) {return !value||typeof value!=='object'||!this.responseRevisions.has(value)||this.responseRevisions.get(value)===this.revision;}
+  rememberResponse(value,revision) {
+    if(!value||typeof value!=='object')return;this.responseRevisions.set(value,revision);
+    if(Array.isArray(value))for(const item of value)this.rememberResponse(item,revision);
+    else if(value.edit)this.rememberResponse(value.edit,revision);
+  }
+  async request(method,params,{signal,allowStale=false,workspace=['textDocument/rename','textDocument/codeAction','codeAction/resolve'].includes(method),...options}={}) {
     this.requireReady();const uri=params?.textDocument?.uri,document=uri?this.documents.get(uri):null,version=document?.version;
-    const value=await this.peer.request(method,params,{signal,...options});
+    const revision=this.revision,value=await this.peer.request(method,params,{signal,...options});
+    if(!allowStale&&workspace&&revision!==this.revision)throw new RpcError(RPC_CONTENT_MODIFIED,'The workspace changed while the language server was processing the request.');
+    if(workspace)this.rememberResponse(value,revision);
     if(!allowStale&&uri&&(this.documents.get(uri)!==document||document?.version!==version))throw new RpcError(RPC_CONTENT_MODIFIED,'The document changed while the language server was processing the request.');
     return value;
   }
@@ -192,5 +202,5 @@ export class LanguageClient {
     this.state='stopping';
     try {await this.peer.request('shutdown',null,{timeout:1500});this.peer.notify('exit');}finally{this.dispose();}
   }
-  dispose(reason) {if(this.disposed)return;this.disposed=true;this.state='closed';this.peer.close();this.documents.clear();this.opened.clear();this.registrations.clear();this.emit('closed',reason);this.listeners.clear();}
+  dispose(reason) {if(this.disposed)return;this.disposed=true;this.state='closed';this.peer.close();this.documents.clear();++this.revision;this.responseRevisions=new WeakMap();this.opened.clear();this.registrations.clear();this.emit('closed',reason);this.listeners.clear();}
 }

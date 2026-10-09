@@ -48,3 +48,36 @@ test('capabilities advertise supported presentations, not unavailable editor API
   assert.equal(c.textDocument.callHierarchy,undefined);assert.equal(c.textDocument.typeHierarchy,undefined);assert.equal(c.textDocument.inlineValue,undefined);
   assert.equal(c.workspace.workspaceEdit.resourceOperations,undefined);
 });
+
+test('multi-file edits cannot use a response computed before another file changed',async t=>{
+  const {client,server}=await session(t);const other=uri.replace('Module1','Other');
+  client.open(uri,'vb6','a');client.open(other,'vb6','b');let finish,started;
+  const ready=new Promise(resolve=>started=resolve);
+  server.onRequest('textDocument/rename',()=>new Promise(resolve=>{finish=resolve;started();}));
+  const result=client.request('textDocument/rename',{textDocument:{uri},newName:'c'});await ready;
+  client.change(other,[{text:'changed'}],2);finish({changes:{[other]:[]}});
+  await assert.rejects(result,{code:-32801});
+});
+test('cached code-action edits become stale when any workspace document changes',async t=>{
+  const {client,server}=await session(t);client.open(uri,'vb6','a');
+  server.onRequest('textDocument/codeAction',()=>[{title:'Fix',edit:{changes:{[uri]:[]}}}]);
+  const [action]=await client.request('textDocument/codeAction',{textDocument:{uri}});
+  assert.equal(client.responseIsCurrent(action.edit),true);
+  client.open(uri+'.other','vb6','new dependency');
+  assert.equal(client.responseIsCurrent(action),false);assert.equal(client.responseIsCurrent(action.edit),false);
+  assert.equal(client.responseIsCurrent({changes:{[uri]:[]}}),true); // server-initiated edits still require host consent
+});
+test('static diagnostic selectors and dynamic command registration are negotiated',async t=>{
+  const {client,server}=await session(t,{diagnosticProvider:{documentSelector:[{language:'xaml'}]}});
+  const document=client.open(uri,'vb6','a');assert.equal(client.capability('textDocument/diagnostic',document),false);
+  await server.request('client/registerCapability',{registrations:[{id:'cmd',method:'workspace/executeCommand',registerOptions:{commands:['test.run']}}]});
+  assert.deepEqual(client.capability('workspace/executeCommand').commands,['test.run']);
+  await server.request('client/unregisterCapability',{unregisterations:[{id:'cmd',method:'workspace/executeCommand'}]});
+  assert.equal(client.capability('workspace/executeCommand'),false);
+});
+test('a didOpen registration does not invent a didClose subscription',async t=>{
+  const {client,server}=await session(t,{}),seen=[];
+  server.onNotification('textDocument/didClose',p=>seen.push(p));
+  await server.request('client/registerCapability',{registrations:[{id:'open',method:'textDocument/didOpen',registerOptions:{documentSelector:[{language:'vb6'}]}}]});
+  client.open(uri,'vb6','a');client.close(uri);await client.request('barrier',{});assert.deepEqual(seen,[]);
+});

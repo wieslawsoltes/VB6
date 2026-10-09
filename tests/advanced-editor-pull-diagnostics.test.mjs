@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MessageChannel} from 'node:worker_threads';
-import {JsonRpcPeer,messagePortTransport} from '../src/editor/advanced/rpc.js';
+import {JsonRpcPeer,messagePortTransport,RpcError} from '../src/editor/advanced/rpc.js';
 import {LanguageClient} from '../src/editor/advanced/client.js';
 import {PullDiagnostics} from '../src/editor/advanced/pull-diagnostics.js';
 
@@ -63,4 +63,24 @@ test('servers without diagnostic capability receive no pulls',async t=>{
 test('malformed unchanged reports are diagnosed instead of clearing current markers',async t=>{
   const f=await fixture(t,()=>({kind:'unchanged',resultId:'missing'}));f.client.open(uri,'vb6','a');await until(()=>f.errors.length>0);
   assert.match(f.errors[0].message,/previous result/);assert.equal(f.published.length,0);
+});
+
+test('opening a new dependency cancels old diagnostics and invalidates existing files',async t=>{
+  const calls=[],f=await fixture(t,(p,{signal})=>new Promise(resolve=>calls.push({p,signal,resolve})));
+  f.client.open(uri,'vb6','a');await until(()=>calls.length===1);
+  f.client.open(relatedUri,'vb6','b');await until(()=>calls[0].signal.aborted&&calls.length>=3);
+  calls[0].resolve({kind:'full',items:[marker]});
+  for(const call of calls.slice(1))call.resolve({kind:'full',items:[]});
+  await until(()=>f.published.length===2);assert.ok(f.published.every(p=>p.diagnostics.length===0));
+});
+test('server-cancelled diagnostics retry with a bounded backoff when requested',async t=>{
+  let calls=0;const f=await fixture(t,()=>{if(++calls<3)throw new RpcError(-32802,'Indexing',{retriggerRequest:true});return {kind:'full',resultId:'ready',items:[marker]};});
+  f.client.open(uri,'vb6','a');await until(()=>f.published.length===1);
+  assert.equal(calls,3);assert.equal(f.pull.states.get(uri).retries,0);assert.deepEqual(f.errors,[]);
+});
+test('perpetual diagnostic cancellation stops retrying and resumes on explicit refresh',async t=>{
+  let calls=0;const f=await fixture(t,()=>{++calls;throw new RpcError(-32802,'Indexing',{retriggerRequest:true});});
+  f.client.open(uri,'vb6','a');await until(()=>f.errors.length===1);assert.equal(calls,4);
+  await new Promise(resolve=>setTimeout(resolve,100));assert.equal(calls,4);
+  await f.server.request('workspace/diagnostic/refresh');await until(()=>calls===5);
 });

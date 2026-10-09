@@ -8,7 +8,7 @@ export class PullDiagnostics {
     this.listeners=[
       client.on('document',event=>{
         if(event.kind==='close'){this.remove(event.uri);this.invalidateDependents();return;}
-        if(event.kind==='change')this.invalidateDependents(event.uri);
+        this.invalidateDependents(event.uri);
         this.schedule(event.uri);
       }),
       client.on('refresh',name=>{if(name==='diagnostic')this.refresh();}),
@@ -23,9 +23,10 @@ export class PullDiagnostics {
   invalidateDependents(except) {
     for(const [uri]of this.client.documents)if(uri!==except&&this.supported(uri)?.interFileDependencies)this.schedule(uri);
   }
-  schedule(uri,delay=this.delay) {
+  schedule(uri,delay=this.delay,retry=false) {
     if(this.disposed||!this.supported(uri))return;
     let state=this.states.get(uri);if(!state)this.states.set(uri,state={generation:0,result:null});
+    if(!retry)state.retries=0;
     ++state.generation;clearTimeout(state.timer);state.abort?.abort();this.queue.delete(uri);
     state.timer=setTimeout(()=>{state.timer=null;if(!this.disposed&&this.states.get(uri)===state){this.queue.add(uri);this.drain();}},delay);
   }
@@ -53,7 +54,7 @@ export class PullDiagnostics {
       const current=()=>!this.disposed&&!abort.signal.aborted&&this.states.get(uri)===state&&generation===state.generation&&this.client.documents.get(uri)===document&&document.version===version;
       this.client.request('textDocument/diagnostic',{textDocument:{uri},...(capability.identifier?{identifier:capability.identifier}:{}),...(state.result?.resultId?{previousResultId:state.result.resultId}:{})},{signal:abort.signal}).then(report=>{
         if(!current())return;
-        if(capability.interFileDependencies&&[...snapshots].some(([key,s])=>this.client.documents.get(key)!==s.document||s.document.version!==s.version))return;
+        if(capability.interFileDependencies&&(snapshots.size!==this.client.documents.size||[...snapshots].some(([key,s])=>this.client.documents.get(key)!==s.document||s.document.version!==s.version)))return;
         this.accept(uri,report,version);
         for(const [relatedUri,related]of Object.entries(report.relatedDocuments||{})){
           const captured=snapshots.get(relatedUri),live=this.client.documents.get(relatedUri);
@@ -64,7 +65,14 @@ export class PullDiagnostics {
           this.accept(relatedUri,related,captured.version);
         }
       }).catch(error=>{
-        if(current()&&![-32800,-32801,-32802].includes(error.code))this.onError(error);
+        if(!current())return;
+        if(error.code===-32802&&error.data?.retriggerRequest===true){
+          // Servers may cancel a pull while rebuilding their project. Bound
+          // retries and back off instead of busy-looping a broken server.
+          state.retries=(state.retries||0)+1;
+          if(state.retries<=3)this.schedule(uri,Math.max(this.delay,100)*2**(state.retries-1),true);
+          else this.onError(new Error('Language-server diagnostics repeatedly cancelled; edit or refresh to retry.'));
+        }else if(![-32800,-32801,-32802].includes(error.code))this.onError(error);
       }).finally(()=>{
         if(state.abort===abort)state.abort=null;--this.running;this.drain();
       });
@@ -80,7 +88,7 @@ export class PullDiagnostics {
       if(!state.result||typeof report.resultId!=='string')throw new Error('An unchanged diagnostic report has no corresponding previous result.');
       state.result={...state.result,resultId:report.resultId};
     }
-    this.client.emit('diagnostics',{uri,version,diagnostics:state.result.items});
+    state.retries=0;this.client.emit('diagnostics',{uri,version,diagnostics:state.result.items});
   }
   dispose() {
     if(this.disposed)return;this.disposed=true;for(const uri of [...this.states.keys()])this.remove(uri);
