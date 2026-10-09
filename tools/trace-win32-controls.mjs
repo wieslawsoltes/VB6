@@ -1,3 +1,4 @@
+import {traceNativeSurfacePixels} from './trace-win32-surface-pixels.mjs';
 import {traceNativeSurfaceDeletion} from './trace-win32-surface.mjs';
 /** Failure-only instrumentation of the same native fixture. The original EXE's
  * result remains authoritative; these checkpoints only localize crashes/errors. */
@@ -31,6 +32,7 @@ export function traceControlFixture(project){
     return [marker,...values,line];
   }).join('\n').replace('Option Explicit','Option Explicit\n'+api)+'\n'+routine+'\n';
   if(project.name==='AotControlSurfaces')traceNativeSurfaceDeletion(module);
+  if(project.name==='AotControlSurfaceGraphics')traceNativeSurfacePixels(module);
   if(project.name==='AotControlItemObjects'){
     // Preserve the authoritative input sequence. Only the failure-only copy
     // records the native coordinates and message that reached COMCTL32.
