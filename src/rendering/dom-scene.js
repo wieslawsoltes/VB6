@@ -7,7 +7,17 @@ const SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE',
 const NATIVE = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'IFRAME', 'VIDEO', 'AUDIO', 'CANVAS', 'SVG', 'IMG', 'OBJECT', 'EMBED', 'TABLE', 'METER', 'PROGRESS']);
 const rectOf = rect => [rect.left, rect.top, rect.width, rect.height];
 const number = value => Number.parseFloat(value) || 0;
-const STYLE_KEYS = ['color','display','visibility','position','zIndex','overflowX','overflowY','boxShadow','outlineWidth','outlineStyle','opacity','filter','backdropFilter','mixBlendMode','clipPath','maskImage','writingMode','transform','borderImageSource','backgroundColor','backgroundImage','backgroundSize','backgroundPosition','backgroundRepeat','backgroundOrigin','backgroundClip','direction','letterSpacing','textShadow','textDecorationLine','textOverflow','whiteSpace', ...['Top','Right','Bottom','Left'].flatMap(s=>['Width','Style','Color'].map(p=>'border'+s+p)), ...['TopLeft','TopRight','BottomLeft','BottomRight'].map(s=>'border'+s+'Radius')];
+const STYLE_KEYS = ['color','display','visibility','position','zIndex','overflowX','overflowY','boxShadow','outlineWidth','outlineStyle','opacity','filter','backdropFilter','mixBlendMode','clipPath','maskImage','writingMode','transform','borderImageSource','backgroundColor','backgroundImage','backgroundSize','backgroundPosition','backgroundRepeat','backgroundOrigin','backgroundClip','direction','letterSpacing','textShadow','textDecorationLine','textOverflow','whiteSpace','contentVisibility', ...['Top','Right','Bottom','Left'].flatMap(s=>['Width','Style','Color'].map(p=>'border'+s+p)), ...['TopLeft','TopRight','BottomLeft','BottomRight'].map(s=>'border'+s+'Radius')];
+// The first direct summary is the only painted child of closed <details>.
+// Hidden disclosure content can still return nonzero DOM/Range rectangles;
+// measuring it can even force layout. Never infer paint visibility from those
+// rectangles or from computed display alone.
+// https://html.spec.whatwg.org/multipage/interactive-elements.html#the-details-element
+function summaryOf(node) { return [...node.children].find(child => child.tagName === 'SUMMARY') || null; }
+function paintedChildren(node) {
+  if (node.tagName === 'DETAILS' && !node.open) { const summary = summaryOf(node); return summary ? [summary] : []; }
+  return node.childNodes;
+}
 function shadowParts(value) {
   if (!value || value === 'none') return [];
   return splitCSS(value).map(part => {
@@ -90,19 +100,35 @@ export class DOMScene {
   native(node, rect, clip, reason) {
     // Shadows/outlines and descendants can extend beyond a native element's border box.
     const style = this.style(node); let [x, y, w, h] = rect, right = x + w, bottom = y + h;
-    if (!NATIVE.has(node.tagName.toUpperCase()) && (style.overflowX === 'visible' || style.overflowY === 'visible')) {
+    if (!NATIVE.has(node.tagName.toUpperCase()) && style.contentVisibility !== 'hidden' && (style.overflowX === 'visible' || style.overflowY === 'visible')) {
+      // Walk the paint tree, not querySelectorAll: a rounded/themed ancestor
+      // must not reveal hidden tool results or clear unrelated GPU text. Keep
+      // the existing budget and include visible overflow of opened results.
       let count = 0;
-      for (const child of node.querySelectorAll('*')) {
+      const pending = [paintedChildren(node)[Symbol.iterator]()];
+      while (pending.length) {
+        const next = pending.at(-1).next();
+        if (next.done) { pending.pop(); continue; }
+        const child = next.value;
+        if (child.nodeType !== 1) continue;
         if (++count > 2000) { x = 0; y = 0; right = this.scene.width; bottom = this.scene.height; break; }
-        if (child.hasAttribute('data-vb-render-layer')) continue;
-        const r = child.getBoundingClientRect(); if (!r.width || !r.height) continue;
-        x = Math.min(x, r.left); y = Math.min(y, r.top); right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
+        if (SKIP.has(child.tagName.toUpperCase()) || child.hasAttribute('data-vb-render-layer') || child.hidden) continue;
+        const childStyle = this.style(child);
+        if (childStyle.display === 'none') continue;
+        const r = this.rect(child);
+        if (r[2] && r[3]) { x = Math.min(x, r[0]); y = Math.min(y, r[1]); right = Math.max(right, r[0] + r[2]); bottom = Math.max(bottom, r[1] + r[3]); }
+        if (childStyle.contentVisibility !== 'hidden') pending.push(paintedChildren(child)[Symbol.iterator]());
       }
     }
     const pad = style.boxShadow !== 'none' || number(style.outlineWidth) ? 4 : 1;
     this.scene.native([x - pad, y - pad, right - x + pad * 2, bottom - y + pad * 2], clip, reason);
   }
   unsupported(node, style) {
+    // Preserve the browser's disclosure marker (including its open state) and
+    // the synthesized label when no direct summary is present. Only this
+    // small native island is needed; opened result bodies still use GPU paint.
+    if ((node.tagName === 'SUMMARY' && node.parentElement?.tagName === 'DETAILS' && summaryOf(node.parentElement) === node) ||
+        (node.tagName === 'DETAILS' && !summaryOf(node))) return 'native disclosure summary';
     if (requiresNativeShadowPaint(node) || NATIVE.has(node.tagName.toUpperCase()) || node.isContentEditable || node.matches('[data-vb-native-render],.code-editor,.source-editor,.editor-container,.vb-richtext')) return 'native control, image or editor';
     if (number(style.opacity) !== 1 || style.filter !== 'none' || (style.backdropFilter && style.backdropFilter !== 'none') || style.mixBlendMode !== 'normal') return 'native compositing';
     if (style.clipPath !== 'none' || (style.maskImage && style.maskImage !== 'none') || style.writingMode !== 'horizontal-tb') return 'native clipping or writing mode';
@@ -203,6 +229,13 @@ export class DOMScene {
     }
   }
   children(node, clip, depth) {
+    if (this.style(node).contentVisibility === 'hidden') return;
+    // Read disclosure state before using the cached child order. A caller may
+    // render synchronously after changing .open, before MutationObserver runs.
+    if (node.tagName === 'DETAILS' && !node.open) {
+      for (const child of paintedChildren(node)) this.element(child, clip, depth + 1);
+      return;
+    }
     // Stable order for the classic IDE's local stacking contexts, including MDI z-order.
     let nodes = this.order.get(node);
     if (!nodes) { nodes = [...node.childNodes].map((child, index) => {
