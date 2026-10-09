@@ -17,19 +17,22 @@ export function installAdvancedEditor(ide) {
     const settings=normalizeAdvancedEditorSettings(value);
     for(const name of ['vb6Endpoint','xamlEndpoint'])settings[name]=validateLanguageServerEndpoint(settings[name],view.location.protocol);
     const generation=++controller.generation;
+    controller.initializing?.abort();controller.initializing=null;
     controller.settings=settings;
     if(persist)try{saveAdvancedEditorSettings(storage,settings);}catch(error){controller.report(new Error('Options apply to this session only; browser storage is unavailable.'));}
     if(controller.runtime){controller.runtime.dispose();controller.runtime=null;}
     ide.root.dataset.advancedEditor='false';
     if(!settings.enabled){ide.status('Classic code editor enabled.');return false;}
+    const initializing=new AbortController();controller.initializing=initializing;
     try {
       const assets=await loadAdvancedEditorAssets(document,baseUrl);
       if(generation!==controller.generation)return false;
-      const runtime=await assets.create(ide,settings,assets);
+      const runtime=await assets.create(ide,settings,assets,{signal:initializing.signal});
       if(generation!==controller.generation){runtime.dispose();return false;}
       controller.runtime=runtime;ide.root.dataset.advancedEditor='true';
       ide.status('Advanced VB6/XAML editor enabled.');return true;
-    }catch(error){if(generation===controller.generation){controller.report(error);ide.root.dataset.advancedEditor='false';}throw error;}
+    }catch(error){if(generation!==controller.generation)return false;controller.report(error);ide.root.dataset.advancedEditor='false';throw error;}
+    finally{if(controller.initializing===initializing)controller.initializing=null;}
   };
   controller.options=async()=>{
     const fields={},settings=controller.settings,body=el('div',{class:'advanced-editor-options'});
@@ -58,7 +61,7 @@ export function installAdvancedEditor(ide) {
   ide.applyAppearance=(...args)=>{const result=appearance(...args);controller.runtime?.appearance();return result;};
   // Save notifications are tied to actual persistence, not merely Ctrl+S.
   if(ide.saveProject){const save=ide.saveProject.bind(ide);ide.saveProject=async(...args)=>{const runtime=controller.runtime,snapshot=runtime?.willSave();const result=await save(...args);if(result===true&&runtime===controller.runtime)runtime?.didSave(snapshot);return result;};}
-  view.addEventListener('pagehide',()=>{++controller.generation;controller.runtime?.dispose();controller.runtime=null;});
+  view.addEventListener('pagehide',()=>{++controller.generation;controller.initializing?.abort();controller.initializing=null;controller.runtime?.dispose();controller.runtime=null;});
   if(controller.settings.enabled)controller.pending=controller.configure(controller.settings,{persist:false}).catch(controller.report);
   return controller;
 }

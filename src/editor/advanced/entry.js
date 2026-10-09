@@ -1,4 +1,5 @@
 import {LanguageClient} from './client.js';
+import {PullDiagnostics} from './pull-diagnostics.js';
 import {messagePortTransport,connectWebSocket} from './rpc.js';
 import {planWorkspaceEdit} from './text-document.js';
 import {prepareProjectEdits} from './workspace.js';
@@ -20,16 +21,18 @@ export class AdvancedEditorRuntime {
     this.commandId='vb6.advanced.lsp.'+(++sequence);
   }
   report(error) {if(!this.disposed)this.ide.status('Language service: '+(error.message||error));}
+  checkActive(){if(this.disposed)throw new Error('Advanced editor initialization cancelled.');}
   async initialize() {
-    const options={applyEdit:(edit,label)=>this.applyEdit(this.builtin,edit,label,true),onError:error=>this.report(error),showMessage:p=>this.message(p)};
+    this.checkActive();const options={applyEdit:(edit,label)=>this.applyEdit(this.builtin,edit,label,true),onError:error=>this.report(error),showMessage:p=>this.message(p)};
     if(!this.settings.vb6Endpoint||!this.settings.xamlEndpoint){
-      this.builtin=new LanguageClient(messagePortTransport(this.assets.worker(),{terminate:true}),options);this.sessions.add(this.builtin);await this.builtin.initialize();
+      this.builtin=new LanguageClient(messagePortTransport(this.assets.worker(),{terminate:true}),options);this.sessions.add(this.builtin);await this.builtin.initialize();this.checkActive();
     }
     for(const language of ['vb6','xaml']) {
       const endpoint=this.settings[language+'Endpoint'];
       if(endpoint){const transport=await connectWebSocket(endpoint,{signal:this.abort.signal});
+        if(this.disposed){transport.close();this.checkActive();}
         const client=new LanguageClient(transport,{...options,rootUri:'vb6-editor://workspace/'+encodeURIComponent(this.ide.project.id)+'/',applyEdit:(edit,label)=>this.applyEdit(client,edit,label,true)});
-        this.clients[language]=client;this.sessions.add(client);await client.initialize();
+        this.clients[language]=client;this.sessions.add(client);await client.initialize();this.checkActive();
       }else this.clients[language]=this.builtin;
     }
     this.disposables.push(registerAdvancedLanguages(this.monaco));
@@ -42,8 +45,11 @@ export class AdvancedEditorRuntime {
     }
     for(const client of this.sessions){
       this.diagnosticValues.set(client,new Map());
-      this.disposables.push({dispose:client.on('diagnostics',p=>this.diagnosticValues.get(client)?.set(p.uri,p.diagnostics||[]))});
-      this.disposables.push({dispose:client.on('closed',()=>{if(!this.disposed){this.report(new Error('Language server disconnected. Source remains editable; reapply Advanced Editor Options to reconnect.'));for(const language of ['vb6','xaml'])if(this.clients[language]===client)this.providers.get(language)?.dispose();}})});
+      this.disposables.push({dispose:client.on('diagnostics',p=>{const values=this.diagnosticValues.get(client);if(client.documents.has(p.uri))values?.set(p.uri,p.diagnostics||[]);else values?.delete(p.uri);})});
+      // The local worker already pushes diagnostics; external pull-only servers
+      // need an owned scheduler, including refresh and dynamic registration.
+      if(client!==this.builtin)this.disposables.push(new PullDiagnostics(client,{onError:error=>this.report(error)}));
+      this.disposables.push({dispose:client.on('closed',()=>{this.diagnosticValues.get(client)?.clear();if(!this.disposed){this.report(new Error('Language server disconnected. Source remains editable; reapply Advanced Editor Options to reconnect.'));for(const language of ['vb6','xaml'])if(this.clients[language]===client)this.providers.get(language)?.dispose();}})});
       this.disposables.push({dispose:client.on('window/logMessage',p=>this.report(p.message))});
     }
     this.sync();this.installHooks();this.appearance();return this;
@@ -150,6 +156,7 @@ export class AdvancedEditorRuntime {
   async applyEdit(client,edit,label='Language server edit',confirm=true) {
     try {
       if(this.disposed||!client||client.state!=='ready')throw new Error('Language server is no longer connected.');
+      if(!client.responseIsCurrent(edit))throw new Error('Workspace edit is stale. Request it again.');
       this.sync();const plans=planWorkspaceEdit(edit,client.documents);
       if(!plans.length)return {applied:true};
       const snapshots=plans.map(p=>{const r=this.records.get(p.uri);if(!r)throw new Error('Unknown document.');return {record:r,version:r.model.getVersionId()};});
@@ -169,7 +176,7 @@ export class AdvancedEditorRuntime {
     try {
       if(raw.command==='vb6.applyCodeAction'){
         const [action,uri,version]=raw.arguments||[],record=this.records.get(uri);
-        if(!record||record.model.getVersionId()!==version)throw new Error('Code action is stale. Request it again.');
+        if(!record||record.model.getVersionId()!==version||!client.responseIsCurrent(action))throw new Error('Code action is stale. Request it again.');
         if(action.edit){const result=await this.applyEdit(client,action.edit,action.title,false);if(!result.applied)throw new Error(result.failureReason);}
         if(action.command)return this.executeCommand(client,action.command);return;
       }
@@ -178,7 +185,7 @@ export class AdvancedEditorRuntime {
         let selected=null;for(const location of references.slice(0,2000))body.append(el('button',{type:'button',style:{display:'block'},onclick:()=>{selected=location;finish?.(true);}},decodeURIComponent(new URL(location.uri).pathname.split('/').pop())+':'+(location.range.start.line+1)));
         let finish;await modal('Find References',{content:body,onReady:context=>finish=context.finish,buttons:[{label:'Close',value:false}]});if(selected)this.open(selected.uri,fromRange(selected.range));return;
       }
-      const allowed=client.capabilities.executeCommandProvider?.commands||[];
+      const allowed=[...(client.capabilities.executeCommandProvider?.commands||[]),...[...client.registrations.values()].filter(r=>r.method==='workspace/executeCommand').flatMap(r=>r.registerOptions?.commands||[])];
       if(!allowed.includes(raw.command))throw new Error('The language server did not advertise this command: '+raw.command);
       if(!await modal('Run Language Server Command',{content:el('p',{},'Run '+raw.command+' on the configured language server?'),buttons:[{label:'Run',value:true,primary:true},{label:'Cancel',value:false}]}))return;
       return await client.request('workspace/executeCommand',{command:raw.command,arguments:raw.arguments});
@@ -189,6 +196,10 @@ export class AdvancedEditorRuntime {
   dispose(){if(this.disposed)return;this.disposed=true;this.abort.abort();for(const surface of [...this.surfaces.values()])surface.dispose();for(const record of [...this.records.values()])this.removeRecord(record);for(const provider of this.providers.values())provider.dispose();this.providers.clear();for(const item of [...this.disposables].reverse())item.dispose();for(const client of this.sessions)client.dispose();this.sessions.clear();this.diagnosticValues.clear();}
 }
 
-export async function createAdvancedEditorRuntime(ide,settings,assets) {
-  const runtime=new AdvancedEditorRuntime(ide,settings,assets);try{return await runtime.initialize();}catch(error){runtime.dispose();throw error;}
+export async function createAdvancedEditorRuntime(ide,settings,assets,{signal}={}) {
+  const runtime=new AdvancedEditorRuntime(ide,settings,assets),cancel=()=>runtime.dispose();
+  signal?.addEventListener('abort',cancel,{once:true});
+  runtime.disposables.push({dispose:()=>signal?.removeEventListener('abort',cancel)});
+  if(signal?.aborted)cancel();
+  try{return await runtime.initialize();}catch(error){runtime.dispose();throw error;}
 }
