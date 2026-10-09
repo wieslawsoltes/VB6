@@ -18,6 +18,12 @@ for(const optimization of[0,1,2]){
   const m=drawingMachine(t,optimization),count=m.count();m.fail(api);assert.ok([5,7].includes(m.draw(2,[1,1,5,4])));assert.equal(m.count(),count);assert.equal(m.dc().saved.length,0);assert.equal(m.dc().pen,m.stockPen);assert.equal(m.dc().brush,m.stockBrush);assert.equal(m.readFloat('x'),0);
   assert.equal(m.draw(2,[1,1,5,4]),0);
  });
+ test(`PSet copy-publication failure preserves pixels, cursor and caller ROP O${optimization}`,t=>{
+  const m=drawingMachine(t,optimization),count=m.count();m.set('drawMode',7);m.pixels().pixels[1]=0x987654;
+  m.fail('SetROP2',2);assert.equal(m.draw(4,[1,0]),5);assert.equal(m.pixels().pixels[1],0x987654);
+  assert.equal(m.readFloat('x'),0);assert.equal(m.dc().saved.length,0);assert.equal(m.dc().rop,13);assert.equal(m.count(),count);
+  assert.equal(m.draw(4,[1,0]),0);assert.equal(m.pixels().pixels[1],0x987654^0x123456);
+ });
  test(`draw scale/bounds/lifetime validation runs before pixel writes O${optimization}`,t=>{
   const m=drawingMachine(t,optimization),count=m.count();assert.equal(m.draw(3,[2,2,-1]),5);assert.equal(m.draw(0,[2**25,0,1,1]),6);m.epoch(0);assert.equal(m.draw(0,[0,0,1,1]),91);assert.equal(m.draws.length,0);assert.equal(m.count(),count);
  });

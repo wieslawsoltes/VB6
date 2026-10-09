@@ -141,6 +141,10 @@ Private Sub SurfaceDraw(s As Surface,ByVal epoch As Long,ByVal kind As Long,ByVa
   ' GDI returns CLR_INVALID outside the surface/clip; PSet there is a no-op.
   If pixel<>-1 Then
    pixel=SurfacePixelColor(color,pixel,s.drawMode)
+   ' SetPixelV applies the HDC's foreground ROP on actual Windows as well.
+   ' The result above is already mixed; publish it under R2_COPYPEN once.
+   ' SaveDC/RestoreDC still preserves the caller's original raster mode.
+   If SetROP2(dc,13)=0 Then Error 5
    n=SetPixelV(dc,x1,y1,pixel)
    If n=0 Then Error 5
   End If

@@ -40,7 +40,9 @@ export function drawingMachine(t,optimization){
  for(const name of ['Rectangle','Ellipse'])hook(name,5,(hdc,...coords)=>{const d=get(hdc,'dc');draws.push({name,coords:coords.map(n=>n|0),pen:{...get(d.pen,'pen')},brush:{...get(d.brush,'brush')},rop:d.rop});return 1;});
  hook('LineTo',3,(hdc,x,y)=>{const d=get(hdc,'dc');draws.push({name:'LineTo',coords:[...d.position,x|0,y|0],pen:{...get(d.pen,'pen')},rop:d.rop});return 1;});
  hook('GetPixel',3,(hdc,x,y)=>{const b=get(get(hdc,'dc').bitmap,'bitmap');return (x|0)<0||(y|0)<0||x>=b.width||y>=b.height?0xffffffff:b.pixels[y*b.width+x];});
- hook('SetPixelV',4,(hdc,x,y,color)=>{const b=get(get(hdc,'dc').bitmap,'bitmap');b.pixels[y*b.width+x]=color;draws.push({name:'SetPixelV',coords:[x,y],color});return 1;});
+ hook('SetPixelV',4,(hdc,x,y,color)=>{const b=get(get(hdc,'dc').bitmap,'bitmap');const d=b.pixels[y*b.width+x],p=color,truth=get(hdc,'dc').rop-1;
+  color=((~d&~p&(truth&1?-1:0))|(d&~p&(truth&2?-1:0))|(~d&p&(truth&4?-1:0))|(d&p&(truth&8?-1:0)))&0xffffff;
+  b.pixels[y*b.width+x]=color;draws.push({name:'SetPixelV',coords:[x,y],color});return 1;});
  hook('SendMessageW',4,(hwnd,msg,wp,lp)=>{assert.deepEqual([hwnd,msg,wp,lp],[42,0x31,0,0]);return stockFont;},'user32.dll');
  hook('SetTextColor',2,(hdc,value)=>{const d=get(hdc,'dc'),old=d.textColor;d.textColor=value;return old;});
  hook('SetTextAlign',2,(hdc,value)=>{const d=get(hdc,'dc'),old=d.alignment;d.alignment=value;return old;});
