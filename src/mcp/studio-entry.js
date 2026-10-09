@@ -1,3 +1,4 @@
+import {installAdvancedEditor} from '../ide/advanced-editor.js';
 import {installWebBrowser} from '../ide/webbrowser.js';
 import {installIntelligentUI} from '../intelligent-ui/studio.js';
 import {installXaml} from '../ide/xaml.js';
@@ -22,5 +23,6 @@ if (globalThis.vb6Studio) {
   installAutoLayout(globalThis.vb6Studio);
   installXaml(globalThis.vb6Studio);
   installStudioRendering(globalThis.vb6Studio);
+  installAdvancedEditor(globalThis.vb6Studio);
 }
 export {installXaml, installStudioRendering, installAutoLayout, VB6Studio, StudioAPI, installMcp};

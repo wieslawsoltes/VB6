@@ -24,6 +24,10 @@ jobs:
           node-version: 22
       - run: npm run build
       - run: npm test
+      - name: Build opt-in editor assets beside the classic IDE
+        run: |
+          npm ci --prefix packages/advanced-editor --ignore-scripts --no-audit --no-fund
+          node tools/build-advanced-editor.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
