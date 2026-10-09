@@ -11,10 +11,17 @@ export function richUserMessage(provider, text, content = []) {
   const blocks = normalizeContentBlocks(content), parts = [];
   const addText = value => parts.push(provider === 'openai' ? {type:'input_text', text:value} : provider === 'anthropic' ? {type:'text', text:value} : {text:value});
   const media = (mimeType, data, kind, filename = 'attachment.pdf') => {
-    const image = ['image/png','image/jpeg','image/gif','image/webp'].includes(mimeType);
-    if (kind === 'image' && !image) throw new Error('Image format is not supported for provider delivery: ' + mimeType);
-    if (provider === 'google' && (image || mimeType === 'application/pdf' || kind === 'audio' && ['audio/wav','audio/x-wav','audio/mp3','audio/mpeg','audio/aiff','audio/aac','audio/ogg','audio/flac'].includes(mimeType))) {
-      parts.push({inlineData:{mimeType, data}}); return;
+    // MIME support is provider-specific; never fall through from Gemini to an
+    // Anthropic-shaped block. The original attachment bytes remain unchanged.
+    const imageTypes = provider === 'google'
+      ? ['image/png','image/jpeg','image/webp','image/heic','image/heif']
+      : ['image/png','image/jpeg','image/gif','image/webp'];
+    const image = imageTypes.includes(mimeType);
+    if (kind === 'image' && !image) throw new Error('Image format is not supported for ' + provider + ' delivery: ' + mimeType);
+    if (provider === 'google') {
+      const audio = kind === 'audio' && ['audio/wav','audio/x-wav','audio/mp3','audio/mpeg','audio/aiff','audio/aac','audio/ogg','audio/flac','audio/m4a','audio/l16','audio/opus','audio/alaw','audio/mulaw','audio/webm'].includes(mimeType);
+      if (!image && mimeType !== 'application/pdf' && !audio) throw new Error('google delivery does not support ' + mimeType + '. Nothing was sent.');
+      parts.push({inlineData:{mimeType: mimeType === 'audio/x-wav' ? 'audio/wav' : mimeType, data}}); return;
     }
     if (image) { parts.push(provider === 'openai' ? {type:'input_image', image_url:'data:'+mimeType+';base64,'+data} : {type:'image', source:{type:'base64', media_type:mimeType, data}}); return; }
     if (mimeType === 'application/pdf') { parts.push(provider === 'openai' ? {type:'input_file', filename, file_data:'data:application/pdf;base64,'+data} : {type:'document', source:{type:'base64', media_type:mimeType, data}}); return; }

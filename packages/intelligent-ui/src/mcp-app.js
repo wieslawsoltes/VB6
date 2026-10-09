@@ -12,7 +12,7 @@ export class McpAppClient {
     this.listener=event=>void this.receive(event);window.addEventListener('message',this.listener);
   }
   send(message){if(this.disposed)throw new UIError('disposed','MCP App transport is disposed.');this.parent.postMessage(message,this.hostOrigin);}
-  request(method,params={}){if(this.disposed)return Promise.reject(new UIError('disposed','MCP App transport is disposed.'));if(this.pending.size>=32)return Promise.reject(new UIError('queue','MCP App request limit reached.'));const id='iui-'+(++this.sequence);return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);this.notify('notifications/cancelled',{requestId:id,reason:'App request timed out.'});reject(new UIError('timeout','MCP App host did not respond.'));},this.timeout);this.pending.set(id,{resolve,reject,timer});try{this.send({jsonrpc:'2.0',id,method,params:boundedData(params,500000,{maxText:192000})});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}});}
+  request(method,params={}){if(this.disposed)return Promise.reject(new UIError('disposed','MCP App transport is disposed.'));if(this.life.signal.aborted)return Promise.reject(new UIError('cancelled','MCP App execution was cancelled.'));if(this.pending.size>=32)return Promise.reject(new UIError('queue','MCP App request limit reached.'));const id='iui-'+(++this.sequence);return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);this.notify('notifications/cancelled',{requestId:id,reason:'App request timed out.'});reject(new UIError('timeout','MCP App host did not respond.'));},this.timeout);this.pending.set(id,{resolve,reject,timer});try{this.send({jsonrpc:'2.0',id,method,params:boundedData(params,500000,{maxText:192000})});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}});}
   notify(method,params){if(this.ready)this.send({jsonrpc:'2.0',method,params});}
   async connect(){if(this.parent===this.window)throw new UIError('host','Open this resource through an MCP Apps host.');const result=await this.request('ui/initialize',{appInfo:this.appInfo,appCapabilities:{availableDisplayModes:this.displayModes,...(this.onToolCall?{tools:{listChanged:true}}:{})},protocolVersion:MCP_APP_VERSION});if(result.protocolVersion!==MCP_APP_VERSION)throw new UIError('version','Unsupported MCP Apps protocol version.');this.context=result.hostContext||{};this.capabilities=result.hostCapabilities||{};this.ready=true;this.send({jsonrpc:'2.0',method:'ui/notifications/initialized'});return result;}
   async receive(event){
@@ -20,7 +20,12 @@ export class McpAppClient {
     try{message=boundedData(event.data,600000,{maxText:250000});}catch{return;}if(!record(message)||message.jsonrpc!=='2.0')return;
     if(message.id!==undefined&&!message.method){const pending=this.pending.get(message.id);if(!pending)return;clearTimeout(pending.timer);this.pending.delete(message.id);if(message.error)pending.reject(new UIError('host',String(message.error.message||'Host rejected the request.')));else pending.resolve(message.result);return;}
     if(message.method==='ping'&&message.id!==undefined){this.send({jsonrpc:'2.0',id:message.id,result:{}});return;}
-    if(message.method==='ui/resource-teardown'&&message.id!==undefined){this.life.abort();try{const pending=this.onTeardown();if(pending?.then)await pending;}finally{this.send({jsonrpc:'2.0',id:message.id,result:{}});this.dispose();}return;}
+    if(message.method==='ui/resource-teardown'&&message.id!==undefined){
+      this.life.abort();this.rejectPending(new UIError('disposed','MCP App is being torn down.'));
+      try{const pending=this.onTeardown();if(pending?.then)await pending;if(!this.disposed)this.send({jsonrpc:'2.0',id:message.id,result:{}});}
+      catch(error){if(!this.disposed)this.send({jsonrpc:'2.0',id:message.id,error:{code:-32000,message:String(error.message||error).slice(0,1000)}});}
+      finally{this.dispose();}return;
+    }
     if(!this.ready)return;
     if(message.method==='ui/notifications/host-context-changed')this.context={...this.context,...message.params};
     if(message.id!==undefined){
@@ -41,7 +46,10 @@ export class McpAppClient {
       finally{this.active.delete(message.id);}return;
     }
     if(message.method==='notifications/cancelled'){this.active.get(message.params?.requestId)?.abort();return;}
-    if(message.method==='ui/notifications/tool-cancelled')this.life.abort();
+    if(message.method==='ui/notifications/tool-cancelled'){
+      const error=new UIError('cancelled','MCP App execution was cancelled.');
+      this.life.abort(error);this.rejectPending(error);
+    }
     try{Promise.resolve(this.onNotification(message.method,message.params||{})).catch(()=>{});}catch{}
   }
   setTools(tools){
@@ -55,7 +63,8 @@ export class McpAppClient {
     return this.request('ui/request-display-mode',{mode});
   }
   downloadFile(contents){return this.request('ui/download-file',{contents:normalizeContentBlocks(contents,{types:['resource','resource_link'],allowEmpty:false})});}
-  dispose(){if(this.disposed)return;this.disposed=true;this.life.abort();for(const control of this.active.values())control.abort();this.active.clear();this.window.removeEventListener('message',this.listener);for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new UIError('disposed','MCP App transport closed.'));}this.pending.clear();}
+  rejectPending(error){for(const pending of this.pending.values()){clearTimeout(pending.timer);pending.reject(error);}this.pending.clear();}
+  dispose(){if(this.disposed)return;this.disposed=true;this.life.abort();for(const control of this.active.values())control.abort();this.active.clear();this.window.removeEventListener('message',this.listener);this.rejectPending(new UIError('disposed','MCP App transport closed.'));}
 }
 export function startMcpApp({root=globalThis.document?.getElementById('intelligent-ui-root')}={}){
   if(!root)throw new UIError('root','MCP App root is missing.');const win=root.ownerDocument.defaultView;let surface,lastUI=null,cancelled=false,observer=null;
