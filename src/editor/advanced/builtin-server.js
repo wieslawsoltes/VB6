@@ -1,3 +1,4 @@
+import {SourceHierarchy} from './hierarchy.js';
 import {JsonRpcPeer,RpcError,RPC_CANCELLED,RPC_CONTENT_MODIFIED} from './rpc.js';
 import {LspTextDocument} from './text-document.js';
 import {EditorIntelligence,wordAt} from '../intelligence.js';
@@ -47,6 +48,7 @@ export class BuiltinLanguageServer {
     this.peer.onRequest('initialize',()=>{if(this.initializeRequested)throw new RpcError(-32600,'Already initialized.');this.initializeRequested=true;return ({serverInfo:{name:'VB6 Studio built-in language server',version:'1'},capabilities:{
       positionEncoding:'utf-16',textDocumentSync:{openClose:true,change:2,save:{includeText:false}},
       completionProvider:{triggerCharacters:['.',' ','<',':','{','"'],resolveProvider:false},hoverProvider:true,signatureHelpProvider:{triggerCharacters:['(',','],retriggerCharacters:[',',')']},
+      callHierarchyProvider:true,typeHierarchyProvider:true,declarationProvider:true,typeDefinitionProvider:true,implementationProvider:true,
       definitionProvider:true,referencesProvider:true,documentHighlightProvider:true,documentSymbolProvider:true,workspaceSymbolProvider:true,
       renameProvider:{prepareProvider:true},documentFormattingProvider:true,documentRangeFormattingProvider:true,
       foldingRangeProvider:true,selectionRangeProvider:true,linkedEditingRangeProvider:true,
@@ -64,7 +66,9 @@ export class BuiltinLanguageServer {
     this.peer.onNotification('textDocument/didChange',p=>this.change(p.textDocument,p.contentChanges));
     this.peer.onNotification('textDocument/didClose',p=>this.close(p.textDocument.uri));
     this.peer.onNotification('textDocument/didSave',()=>this.scheduleDiagnostics());
+    this.hierarchy=new SourceHierarchy(this,symbolRange);
     const handlers={
+      ...this.hierarchy.handlers(),
       'textDocument/completion':(p,c)=>this.completion(p,c), 'textDocument/hover':p=>this.hover(p),
       'textDocument/signatureHelp':p=>this.signatureHelp(p),'textDocument/definition':p=>this.definition(p),
       'textDocument/references':(p,c)=>this.references(p,c),'textDocument/documentHighlight':async(p,c)=>(await this.references({...p,context:{includeDeclaration:true}},c)).filter(r=>r.uri===p.textDocument.uri).map(r=>({range:r.range,kind:1})),
@@ -86,7 +90,7 @@ export class BuiltinLanguageServer {
       if(!this.initialized)throw new RpcError(-32002,'Server not initialized.');if(this.stopped)throw new RpcError(-32600,'Server has shut down.');
       const document=p?.textDocument?this.document(p.textDocument.uri):null,revision=this.revision;
       checkCancelled(context.signal);const result=await handler(p,context);checkCancelled(context.signal);
-      if(document&&(this.documents.get(document.uri)!==document||revision!==this.revision))throw new RpcError(RPC_CONTENT_MODIFIED,'Workspace changed during the request.');
+      if(revision!==this.revision||document&&this.documents.get(document.uri)!==document)throw new RpcError(RPC_CONTENT_MODIFIED,'Workspace changed during the request.');
       return result;
     });
   }
