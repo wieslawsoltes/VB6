@@ -1,3 +1,4 @@
+import {installAdvancedEditor} from '../ide/advanced-editor.js';
 import {installXaml} from '../ide/xaml.js';
 import {installClassicExport} from '../ide/classic-build.js';
 import {installMacOSExport} from '../ide/macos-build.js';
@@ -18,5 +19,6 @@ if (globalThis.vb6Studio) {
   installAutoLayout(globalThis.vb6Studio);
   installXaml(globalThis.vb6Studio);
   installStudioRendering(globalThis.vb6Studio);
+  installAdvancedEditor(globalThis.vb6Studio);
 }
 export {installXaml, installStudioRendering, installAutoLayout, VB6Studio, StudioAPI, installMcp};
