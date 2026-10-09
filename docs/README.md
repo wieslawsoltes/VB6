@@ -44,6 +44,9 @@ These guides describe the implemented system, not complete native VB6 parity.
 
 ## IDE, appearance and rendering
 
+- [Optional advanced editor](ADVANCED-EDITOR.md): minimap, source navigation, split views,
+  safe debugger data tips, VB6/XAML language servers, lifecycle and deployment.
+
 - [Optional XAML form authoring](XAML.md): standalone compiler, source editor,
   designer/Properties synchronization, persistence and conversion boundaries.
 
@@ -97,6 +100,7 @@ These guides describe the implemented system, not complete native VB6 parity.
 ## Independently reusable packages
 
 Package READMEs own their API, installation and compatibility details:
+[optional advanced editor](../packages/advanced-editor/README.md),
 [automatic layout](../packages/auto-layout/README.md),
 [XAML compiler and language services](../packages/xaml-compiler/README.md),
 [Win32 browser compatibility](../packages/win32-browser/README.md),

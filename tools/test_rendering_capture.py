@@ -11,6 +11,10 @@ import unittest
 from test_rendering_primitives import PrimitiveCaptureTests
 
 
+class ScreenshotTimeout(Exception):
+    pass
+
+
 class CaptureTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -28,6 +32,7 @@ class CaptureTests(unittest.TestCase):
 
         self.namespace = {
             'OUT': self.output, 'json': json, 'check': check,
+            'PlaywrightTimeoutError': ScreenshotTimeout,
             'pixels': lambda a, b: {'changedPixels': int(a != b)},
         }
         exec(compile(module, str(Path(__file__)), 'exec'), self.namespace)
@@ -47,6 +52,8 @@ class CaptureTests(unittest.TestCase):
                 self.calls.append(options)
                 image = images[min(self.index, len(images)-1)]
                 self.index += 1
+                if isinstance(image, Exception):
+                    raise image
                 return image
         return Page()
 
@@ -87,6 +94,86 @@ class CaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'unexpected renderer'):
             self.capture(page, 'fallback', 'webgpu')
         self.assertEqual(page.calls, [])
+
+    def test_timeout_preserves_failure_and_requires_three_fresh_captures(self):
+        page = self.page([b'old', b'old', ScreenshotTimeout('capture timed out'),
+                          b'new', b'new', b'new'])
+        self.assertEqual(self.capture(page, 'recovered', 'html'), b'new')
+        self.assertEqual(len(page.calls), 6)
+        report = json.loads((self.output / 'recovered-reference.json').read_text())
+        self.assertTrue(report['accepted'])
+        self.assertEqual(report['stableCaptures'], 3)
+        self.assertEqual(report['captureErrors'], [{'attempt': 2, 'error': 'capture timed out'}])
+        self.assertIsNone(report['samples'][2]['difference'])
+
+    def test_a_second_timeout_fails_even_after_successful_captures(self):
+        page = self.page([ScreenshotTimeout('first'), b'a', b'a', ScreenshotTimeout('second')])
+        with self.assertRaisesRegex(ScreenshotTimeout, 'second'):
+            self.capture(page, 'failed-recovery', 'html')
+        self.assertEqual(len(page.calls), 4)
+        report = json.loads((self.output / 'failed-recovery-reference.json').read_text())
+        self.assertFalse(report['accepted'])
+        self.assertEqual(len(report['captureErrors']), 2)
+        self.assertEqual(report['stableCaptures'], 0)
+        self.assertFalse((self.output / 'failed-recovery-html.png').exists())
+
+    def test_non_timeout_screenshot_errors_are_not_retried(self):
+        page = self.page([RuntimeError('target closed'), b'frame'])
+        with self.assertRaisesRegex(RuntimeError, 'target closed'):
+            self.capture(page, 'closed', 'html')
+        self.assertEqual(len(page.calls), 1)
+        report = json.loads((self.output / 'closed-reference.json').read_text())
+        self.assertFalse(report['accepted'])
+        self.assertEqual(report['captureErrors'], [])
+
+    def test_recovery_cannot_accept_backend_fallback(self):
+        page = self.page([ScreenshotTimeout('capture'), b'frame'])
+        reads = []
+        original = page.evaluate
+        def evaluate(expression):
+            if expression == 'vb6Studio.rendering.backend':
+                reads.append(expression)
+                if len(reads) > 1:
+                    return 'canvas2d'
+            return original(expression)
+        page.evaluate = evaluate
+        with self.assertRaisesRegex(AssertionError, 'unexpected renderer'):
+            self.capture(page, 'fallback-after-timeout', 'html')
+        self.assertEqual(len(page.calls), 1)
+        report = json.loads((self.output / 'fallback-after-timeout-reference.json').read_text())
+        self.assertFalse(report['accepted'])
+        self.assertEqual(len(report['captureErrors']), 1)
+
+    def test_unstable_frames_after_timeout_still_fail_at_the_original_attempt_limit(self):
+        page = self.page([ScreenshotTimeout('capture')] + [b'a', b'b'] * 15)
+        with self.assertRaisesRegex(AssertionError, 'never reached stable pixels'):
+            self.capture(page, 'unstable-after-timeout', 'html')
+        self.assertEqual(len(page.calls), 30)
+        report = json.loads((self.output / 'unstable-after-timeout-reference.json').read_text())
+        self.assertFalse(report['accepted'])
+        self.assertEqual(len(report['samples']), 29)
+
+    def test_readiness_timeout_is_not_misclassified_as_a_screenshot_timeout(self):
+        page = self.page([b'frame'])
+        original = page.evaluate
+        def evaluate(expression):
+            if 'document.fonts.ready' in expression:
+                raise ScreenshotTimeout('font or frame readiness did not finish')
+            return original(expression)
+        page.evaluate = evaluate
+        with self.assertRaisesRegex(ScreenshotTimeout, 'readiness'):
+            self.capture(page, 'unready', 'html')
+        self.assertEqual(page.calls, [])
+        report = json.loads((self.output / 'unready-reference.json').read_text())
+        self.assertFalse(report['accepted'])
+        self.assertEqual(report['captureErrors'], [])
+
+    def test_failed_rerun_removes_prior_accepted_image(self):
+        (self.output / 'rerun-html.png').write_bytes(b'previous run')
+        page = self.page([RuntimeError('target closed')])
+        with self.assertRaises(RuntimeError):
+            self.capture(page, 'rerun', 'html')
+        self.assertFalse((self.output / 'rerun-html.png').exists())
 
 
 if __name__ == '__main__':

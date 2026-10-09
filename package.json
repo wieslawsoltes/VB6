@@ -102,7 +102,10 @@
     "test:intelligent-ui:browser": "python tools/intelligent-ui-browser-tests.py",
     "pack:intelligent-ui": "node tools/pack-intelligent-ui.mjs",
     "ui:sandbox": "node tools/serve-intelligent-ui-sandbox.mjs",
-    "test:intelligent-ui:host:browser": "python tools/intelligent-ui-host-browser-tests.py"
+    "test:intelligent-ui:host:browser": "python tools/intelligent-ui-host-browser-tests.py",
+    "build:advanced-editor": "node tools/build-advanced-editor.mjs",
+    "test:advanced-editor": "node --test tests/advanced-editor*.test.mjs",
+    "test:browser:advanced-editor": "python tools/browser-advanced-editor-tests.py"
   },
   "engines": {
     "node": ">=22"

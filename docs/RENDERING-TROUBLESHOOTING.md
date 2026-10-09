@@ -152,6 +152,25 @@ unavailable API. `--offline` inlines local bundles for restricted environments;
 it does not waive a requested GPU requirement. Software-backed API execution is
 correctness evidence, not physical-hardware performance certification.
 
+### Screenshot capture timeouts in the validation harness
+
+A `Page.screenshot` timeout is not a successful pixel comparison and does not
+identify an application renderer defect. The reference-independent capture helper
+allows one retry of that screenshot operation on the same page. It rechecks
+backend/font/frame readiness and resets its stability history: three fresh,
+consecutive, identical captures are required after the timeout. It never reloads
+the page, changes graphics flags or backends, masks pixels, or retries a mismatch
+against the fixed HTML reference. A second timeout, backend change, non-timeout
+error or failure to stabilize within the existing 30-attempt budget fails the
+case. This is bounded harness recovery, not a claim that a browser capture bug
+has been fixed.
+
+Each `*-reference.json` records `captureErrors`, successful sample hashes,
+`stableCaptures` and `accepted`, including when recovery fails. Unit regressions
+exercise timeout recovery, exhausted retries, target closure, backend fallback
+and persistent pixel instability. Preserve these failure records when reviewing
+CI; software screenshots still do not qualify physical-hardware performance.
+
 References: [Chrome GPU troubleshooting](https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips),
 [WebGPU compatibility requests](https://developer.chrome.com/blog/new-in-webgpu-146),
 [WebGL context attributes](https://registry.khronos.org/webgl/specs/latest/1.0/#5.2).
