@@ -32,7 +32,9 @@ export function nativeSurfaceFixture(fixture){
   add('Canvas.AutoRedraw=False\nother=Canvas.hDC');check('GetObjectType(other)=3 And Not Canvas.AutoRedraw','disabling AutoRedraw uses a real window DC rather than memory backing');
   add('Canvas.AutoRedraw=True\ndc=Canvas.hDC');check('GetObjectType(dc)=10 And Canvas.AutoRedraw And GetPixel(dc,1,1)=&HABCDEF','enabling AutoRedraw creates fresh owned backing');
   add('baseline=GetGuiResources(GetCurrentProcess(),0)\nother=Panels(7).hDC\nn=DestroyWindow(Panels(7).hWnd)');
-  check('n<>0 And GetObjectType(other)=0 And GetGuiResources(GetCurrentProcess(),0)<=baseline-2','native HWND destruction frees the owned HDC and bitmap immediately');
+  // Windows run 37980253104 independently demonstrated GetObjectType=3 after
+  // successful DeleteDC. Test unusability and failed re-deletion, not stale tags.
+  check('n<>0 And GetCurrentObject(other,7)=0 And DeleteDC(other)=0 And GetGuiResources(GetCurrentProcess(),0)<=baseline-2','native HWND destruction frees the owned HDC and bitmap immediately');
   add('On Error Resume Next\nErr.Clear\nPanels(3).BackColor=DestroyReceiver()');
   check('Err.Number=91','receiver destruction during an assignment expression cannot mutate stale surface state');
   add('Err.Clear\nOn Error GoTo 0\nn=SelectObject(copy,old)\nn=DeleteObject(bitmap)\nn=DeleteDC(copy)');
