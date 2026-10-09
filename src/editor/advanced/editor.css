@@ -5,7 +5,11 @@
 .xaml-editor.advanced-editor-active > .xaml-viewport,
 .xaml-editor.advanced-editor-active > .xaml-find { display: none !important; }
 .advanced-editor-surface { flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; overflow: hidden; width: 100%; }
-.advanced-editor-surface > .monaco-editor { position: absolute; inset: 0; }
+.advanced-editor-surface { display: flex; flex-direction: column; }
+.advanced-editor-pane { flex: 1 1 0px; min-height: 0; min-width: 0; position: relative; overflow: hidden; }
+.advanced-editor-pane > .monaco-editor { position: absolute; inset: 0; }
+.advanced-editor-splitter { flex: 0 0 7px; cursor: row-resize; touch-action: none; background: var(--vb-face, #c0c0c0); border-block: 1px solid var(--vb-shadow, #808080); box-sizing: border-box; }
+.advanced-editor-splitter:focus-visible { outline: 2px solid var(--vb-selection, #000080); outline-offset: -2px; }
 .advanced-editor-active .monaco-editor .advanced-breakpoint { background: #b91c1c; border: 1px solid #7f1d1d; border-radius: 50%; width: 11px !important; height: 11px !important; margin: 3px; box-sizing: border-box; }
 .advanced-editor-active .monaco-editor .advanced-breakpoint.disabled { background: transparent; }
 .advanced-editor-active .monaco-editor .advanced-bookmark { border-left: 3px solid #2563eb; margin-left: 2px; }
@@ -24,3 +28,15 @@
 .advanced-peek-locations button { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 6px; }
 .advanced-peek-locations [aria-selected=true] { background: var(--vb-selection, #000080); color: var(--vb-selection-text, #fff); }
 .advanced-peek-preview { flex: 1; min-width: 0; position: relative; }
+
+.advanced-navigation-tool { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--vb-window-text, #000); background: var(--vb-window, #fff); }
+.advanced-navigation-toolbar { display: flex; gap: 5px; padding: 5px; background: var(--vb-face, #c0c0c0); flex-wrap: wrap; }
+.advanced-navigation-toolbar input, .advanced-navigation-toolbar select { flex: 1; min-width: 100px; }
+.advanced-navigation-status { padding: 4px 8px; font-size: 12px; min-height: 24px; box-sizing: border-box; }
+.advanced-navigation-list { flex: 1; min-height: 0; overflow: auto; outline-offset: -2px; }
+.advanced-navigation-rows { position: relative; min-width: 250px; }
+.advanced-navigation-row { position: absolute; height: 32px; left: 0; right: 0; box-sizing: border-box; cursor: default; display: flex; align-items: center; gap: 12px; white-space: nowrap; overflow: hidden; padding-right: 8px; }
+.advanced-navigation-row[aria-selected=true] { background: var(--vb-selection, #000080); color: var(--vb-selection-text, #fff); }
+.advanced-navigation-row[aria-disabled=true] { opacity: .6; }
+.advanced-navigation-name { flex: 0 0 auto; max-width: 65%; overflow: hidden; text-overflow: ellipsis; }
+.advanced-navigation-detail { opacity: .8; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }

@@ -50,9 +50,11 @@ export function installAdvancedEditor(ide) {
   };
   const menu=ide.menu.bind(ide),command=ide.command.bind(ide),update=ide.updateCommandState.bind(ide),appearance=ide.applyAppearance.bind(ide);
   ide.menu=name=>{const items=menu(name);if(name==='Tools')items.push(null,{id:'advancedEditorOptions',label:'Advanced Editor Options…'});
-    if(name==='View'&&controller.runtime)items.push(null,{id:'advancedEditorMinimap',label:'Code Minimap',checked:controller.settings.minimap},{id:'advancedEditorPalette',label:'Editor Command Palette',shortcut:'F1'});return items;};
+    if(name==='View'&&controller.runtime)items.push(null,{id:'advancedEditorMinimap',label:'Code Minimap',checked:controller.settings.minimap},{id:'advancedEditorPalette',label:'Editor Command Palette',shortcut:'F1'},{id:'advancedEditorSymbols',label:'Go to Project Symbol…',shortcut:'Ctrl+T'},{id:'advancedEditorCalls',label:'Call Hierarchy'},{id:'advancedEditorTypes',label:'Type Hierarchy'},{id:'advancedEditorSplit',label:'Split Code Editor',checked:controller.runtime?.active()?.views.length===2});return items;};
   ide.command=(id,...args)=>{if(id==='advancedEditorOptions')return controller.options();
     if(id==='advancedEditorMinimap')return controller.configure({...controller.settings,minimap:!controller.settings.minimap});
+    if(['advancedEditorSymbols','advancedEditorCalls','advancedEditorTypes'].includes(id))return controller.runtime?.navigationTools.open(({advancedEditorSymbols:'symbols',advancedEditorCalls:'call',advancedEditorTypes:'type'})[id]);
+    if(id==='advancedEditorSplit'){const surface=controller.runtime?.active();return surface?.setSplit(surface.views.length===1);}
     if(id==='advancedEditorPalette')return controller.runtime?.action('editor.action.quickCommand');
     const result=controller.runtime?.handleCommand(id);if(result?.handled)return result.value;
     return command(id,...args);

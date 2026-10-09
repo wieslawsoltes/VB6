@@ -43,8 +43,9 @@ export function languageClientCapabilities() {
       formatting:dynamic,rangeFormatting:dynamic,onTypeFormatting:dynamic,
       rename:{...dynamic,prepareSupport:true,prepareSupportDefaultBehavior:1,honorsChangeAnnotations:true},
       foldingRange:{...dynamic,lineFoldingOnly:true,foldingRangeKind:{valueSet:['comment','imports','region']}},
-      // The pinned Monaco API has no hierarchy/inline-value presentation.
-      // Generic requests remain available, but these capabilities are not advertised.
+      // Hierarchies have owned modeless IDE tools, independent of Monaco's
+      // language-provider API. Inline values are not advertised without a UI.
+      callHierarchy:dynamic,typeHierarchy:dynamic,
       selectionRange:dynamic,linkedEditingRange:dynamic,
       semanticTokens:{...dynamic,requests:{range:true,full:{delta:true}},tokenTypes,tokenModifiers,formats:['relative'],overlappingTokenSupport:false,multilineTokenSupport:false,serverCancelSupport:true,augmentsSyntaxTokens:true},
       inlayHint:{...dynamic,resolveSupport:{properties:['tooltip','textEdits','label.tooltip','label.location','label.command']}},

@@ -45,7 +45,7 @@ test('document lifecycle events are ordered and carry advancing snapshots',async
 });
 test('capabilities advertise supported presentations, not unavailable editor APIs',()=>{
   const c=languageClientCapabilities();assert.equal(c.textDocument.diagnostic.relatedDocumentSupport,true);
-  assert.equal(c.textDocument.callHierarchy,undefined);assert.equal(c.textDocument.typeHierarchy,undefined);assert.equal(c.textDocument.inlineValue,undefined);
+  assert.equal(c.textDocument.callHierarchy.dynamicRegistration,true);assert.equal(c.textDocument.typeHierarchy.dynamicRegistration,true);assert.equal(c.textDocument.inlineValue,undefined);
   assert.equal(c.workspace.workspaceEdit.resourceOperations,undefined);
 });
 

@@ -1,3 +1,4 @@
+import {NavigationTools} from './navigation-tools.js';
 import {LanguageClient} from './client.js';
 import {PullDiagnostics} from './pull-diagnostics.js';
 import {messagePortTransport,connectWebSocket} from './rpc.js';
@@ -52,12 +53,13 @@ export class AdvancedEditorRuntime {
       this.disposables.push({dispose:client.on('closed',()=>{this.diagnosticValues.get(client)?.clear();if(!this.disposed){this.report(new Error('Language server disconnected. Source remains editable; reapply Advanced Editor Options to reconnect.'));for(const language of ['vb6','xaml'])if(this.clients[language]===client)this.providers.get(language)?.dispose();}})});
       this.disposables.push({dispose:client.on('window/logMessage',p=>this.report(p.message))});
     }
+    this.navigationTools=new NavigationTools(this);
     this.sync();this.installHooks();this.appearance();return this;
   }
   installHooks() {
     const wrap=(object,name,handler)=>{const original=object[name],wrapped=function(...args){return handler(original.bind(this),...args);};object[name]=wrapped;this.disposables.push({dispose:()=>{if(object[name]===wrapped)object[name]=original;}});};
     wrap(this.ide.documents,'editor',(original,module)=>{const editor=original(module);if(!this.syncing)this.attachSource(editor,module);return editor;});
-    wrap(this.ide.documents,'reset',(original,...args)=>{for(const surface of [...this.surfaces.values()])surface.dispose();for(const record of [...this.records.values()])this.removeRecord(record);this.metadataKey=null;return original(...args);});
+    wrap(this.ide.documents,'reset',(original,...args)=>{this.navigationTools.dispose();for(const surface of [...this.surfaces.values()])surface.dispose();for(const record of [...this.records.values()])this.removeRecord(record);this.metadataKey=null;return original(...args);});
     if(this.ide.xaml)wrap(this.ide.xaml,'open',(original,...args)=>{const tool=original(...args);this.sync();if(tool){this.attachXaml(tool);this.surfaces.get(tool.editor)?.focus();}return tool;});
     // Definitions/Peek may open any model from the current project, not arbitrary URLs.
     this.disposables.push(this.monaco.editor.registerEditorOpener({openCodeEditor:async(_editor,uri,selection)=>{
@@ -132,7 +134,7 @@ export class AdvancedEditorRuntime {
     const record=this.records.get(uriFor(this.ide.project,module,'xaml'));if(!record)return;
     const old=this.surfaces.get(tool.editor);if(old?.record===record)return;old?.dispose();record.legacy=tool.editor;this.surfaces.set(tool.editor,new AdvancedSurface(this,record,tool.editor));
   }
-  active() {return [...this.surfaces.values()].find(s=>s.view?.hasTextFocus()||s.view?.hasWidgetFocus())||this.surfaces.get(this.ide.editor);}
+  active() {return [...this.surfaces.values()].find(s=>s.view?.hasTextFocus()||s.view?.hasWidgetFocus())||(!this.lastActive?.disposed&&this.lastActive)||this.surfaces.get(this.ide.editor);}
   action(id){const surface=this.active();if(!surface)return;return surface.run(id);}
   handleCommand(id) {
     const active=this.active();if(!active||!active.root.isConnected)return null;
@@ -193,7 +195,7 @@ export class AdvancedEditorRuntime {
   }
   willSave(){const values=[];for(const record of this.records.values()){if(record.client.state==='ready')record.client.willSave(record.uri);values.push({record,version:record.version});}return values;}
   didSave(values=[]){for(const {record,version}of values)if(this.records.get(record.uri)===record&&record.version===version&&record.client.state==='ready')record.client.save(record.uri);}
-  dispose(){if(this.disposed)return;this.disposed=true;this.abort.abort();for(const surface of [...this.surfaces.values()])surface.dispose();for(const record of [...this.records.values()])this.removeRecord(record);for(const provider of this.providers.values())provider.dispose();this.providers.clear();for(const item of [...this.disposables].reverse())item.dispose();for(const client of this.sessions)client.dispose();this.sessions.clear();this.diagnosticValues.clear();}
+  dispose(){if(this.disposed)return;this.disposed=true;this.abort.abort();this.navigationTools?.dispose();for(const surface of [...this.surfaces.values()])surface.dispose();for(const record of [...this.records.values()])this.removeRecord(record);for(const provider of this.providers.values())provider.dispose();this.providers.clear();for(const item of [...this.disposables].reverse())item.dispose();for(const client of this.sessions)client.dispose();this.sessions.clear();this.diagnosticValues.clear();}
 }
 
 export async function createAdvancedEditorRuntime(ide,settings,assets,{signal}={}) {
