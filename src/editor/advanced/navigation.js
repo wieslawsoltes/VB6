@@ -27,7 +27,7 @@ export class PeekPanel {
   constructor(surface,locations,title) {
     this.surface=surface;this.runtime=surface.runtime;this.origin=surface.view;this.monaco=surface.monaco;this.locations=locations;this.index=0;
     const doc=surface.host.ownerDocument;
-    this.root=doc.createElement('section');this.root.className='advanced-peek';this.root.setAttribute('aria-label',title);
+    this.root=doc.createElement('section');this.root.className='advanced-peek';this.root.setAttribute('aria-label',title);this.root.setAttribute('role','region');
     this.header=doc.createElement('div');this.header.className='advanced-peek-header';
     this.label=doc.createElement('strong');this.label.textContent=title+' · '+locations.length;this.header.append(this.label);
     const button=(name,fn)=>{const b=doc.createElement('button');b.type='button';b.textContent=name;b.addEventListener('click',fn);return b;};
@@ -35,11 +35,24 @@ export class PeekPanel {
     const body=doc.createElement('div');body.className='advanced-peek-body';this.list=doc.createElement('div');this.list.className='advanced-peek-locations';this.list.tabIndex=0;this.list.setAttribute('role','listbox');this.list.setAttribute('aria-label','Locations');
     this.rows=doc.createElement('div');this.rows.style.height=(locations.length*26)+'px';this.rows.style.position='relative';this.list.append(this.rows);
     const preview=doc.createElement('div');preview.className='advanced-peek-preview';body.append(this.list,preview);this.root.append(this.header,body);
-    this.origin.changeViewZones(accessor=>{this.zone=accessor.addZone({afterLineNumber:this.origin.getPosition().lineNumber,heightInLines:16,domNode:this.root,suppressMouseDown:false});});
+    // View-zone containers are aria-hidden in Monaco. Use the zone only as a
+    // scroll spacer; interactive content is a public overlay widget so its
+    // buttons, list and nested editor remain in the accessibility tree.
+    this.overlay={getId:()=>surface.runtime.commandId+'.peek',getDomNode:()=>this.root,getPosition:()=>null};
+    this.origin.addOverlayWidget(this.overlay);this.root.style.position='absolute';
+    this.origin.changeViewZones(accessor=>{this.zone=accessor.addZone({afterLineNumber:this.origin.getPosition().lineNumber,heightInLines:16,domNode:doc.createElement('div'),
+      onDomNodeTop:top=>{this.top=top;this.layout();},onComputedHeight:height=>{this.height=height;this.layout();}});});
+    this.layoutListener=this.origin.onDidLayoutChange(()=>this.layout());
     this.preview=this.monaco.editor.create(preview,{model:null,theme:'vb6-advanced',readOnly:true,domReadOnly:true,automaticLayout:true,minimap:{enabled:false},lineNumbers:'on',scrollBeyondLastLine:false,fontSize:this.runtime.ide.appearance.editorSize||13,fontFamily:this.runtime.ide.appearance.editorFont||'monospace',codeLens:false,inlayHints:{enabled:'off'},contextmenu:false,editContext:false});
     this.list.addEventListener('scroll',()=>this.render());
     this.root.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();this.dispose();}else if(e.target===this.list&&['ArrowDown','ArrowUp','Enter'].includes(e.key)){e.preventDefault();if(e.key==='Enter')this.open();else this.select(this.index+(e.key==='ArrowDown'?1:-1));}});
-    this.select(0);this.list.focus();
+    this.layout();this.select(0);this.list.focus();
+  }
+  layout(){
+    if(this.disposed)return;const info=this.origin.getLayoutInfo(),top=this.top??0,height=this.height??256;
+    this.root.style.left=info.contentLeft+'px';this.root.style.top=top+'px';this.root.style.height=height+'px';
+    this.root.style.width=Math.max(100,info.width-info.contentLeft-info.verticalScrollbarWidth-info.minimap.minimapWidth)+'px';
+    this.root.style.visibility=top+height<0||top>info.height?'hidden':'visible';this.preview?.layout();
   }
   render(){
     const first=Math.max(0,Math.floor(this.list.scrollTop/26)-2),last=Math.min(this.locations.length,first+Math.ceil((this.list.clientHeight||300)/26)+4),doc=this.root.ownerDocument;
@@ -55,7 +68,7 @@ export class PeekPanel {
     const top=this.index*26;if(top<this.list.scrollTop)this.list.scrollTop=top;else if(top+26>this.list.scrollTop+this.list.clientHeight)this.list.scrollTop=top+26-this.list.clientHeight;this.render();
   }
   open(){const item=this.locations[this.index];this.dispose(false);this.runtime.open(item.uri,fromRange(item.range));}
-  dispose(focus=true){if(this.disposed)return;this.disposed=true;this.preview.dispose();if(this.zone)this.origin.changeViewZones(accessor=>accessor.removeZone(this.zone));this.root.remove();if(this.surface.peek===this)this.surface.peek=null;if(focus)this.surface.focus();}
+  dispose(focus=true){if(this.disposed)return;this.disposed=true;this.layoutListener?.dispose();this.preview.dispose();this.origin.removeOverlayWidget(this.overlay);if(this.zone)this.origin.changeViewZones(accessor=>accessor.removeZone(this.zone));this.root.remove();if(this.surface.peek===this)this.surface.peek=null;if(focus)this.surface.focus();}
 }
 
 export async function navigateLanguageLocation(surface,method,{peek=false,title='Definition',includeDeclaration=true}={}) {

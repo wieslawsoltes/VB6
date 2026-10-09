@@ -94,10 +94,12 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.page.evaluate('s.view.getAction("editor.unfoldAll").run()');self.done()
     def test_breakpoint_and_execution_decorations_keep_real_source_coordinates(self):
         self.enable();self.page.evaluate('vb6Studio.toggleBreakpoint("Form1",4);vb6Studio.editor.setExecution({module:"Form1",line:4});s.decorate();')
-        self.page.wait_for_timeout(150);self.assertGreater(self.page.locator('.advanced-breakpoint').count(),0);self.assertGreater(self.page.locator('.advanced-execution-arrow').count(),0)
+        self.page.locator('.advanced-breakpoint').first.wait_for(state='visible');self.page.locator('.advanced-execution-arrow').first.wait_for(state='visible')
+        lanes=self.page.evaluate('s.record.model.getAllDecorations().filter(d=>d.options.glyphMarginClassName?.startsWith("advanced-")).map(d=>d.options.glyphMargin.position)')
+        self.assertEqual(len(set(lanes)),2)
         self.assertEqual(self.page.evaluate('vb6Studio.breakpoints[0].line'),4)
         self.page.evaluate('vb6Studio.editor.setExecution(null);vb6Studio.toggleBreakpoint("Form1",4);s.decorate()')
-        self.page.wait_for_timeout(150);self.assertEqual(self.page.locator('.advanced-breakpoint').count(),0);self.done()
+        self.page.locator('.advanced-breakpoint').wait_for(state='detached');self.assertEqual(self.page.locator('.advanced-execution-arrow').count(),0);self.done()
     def test_read_only_running_guard_blocks_typing_and_api_edits(self):
         self.enable();before=self.text();self.page.evaluate('vb6Studio.runState="running";vb6Studio.documents.readOnly();s.select(0)')
         self.page.keyboard.insert_text('blocked');self.page.evaluate('vb6Studio.editor.replaceGlobal("blocked",0,0)')
@@ -120,4 +122,36 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.enable();old=self.page.evaluate('[...r.records.keys()]');self.page.evaluate('()=>{const p=VB6StudioAPI.newProject("Other");p.id="other-project";vb6Studio.loadProject(p);vb6Studio.openDocument(p.modules[0].id,"code");}')
         self.page.wait_for_function('[...r.records.keys()].every(u=>u.includes("other-project"))')
         self.assertFalse(any(u in old for u in self.page.evaluate('[...r.records.keys()]')));self.assertEqual(self.page.evaluate('VB6AdvancedMonaco.monaco.editor.getModels().length'),1);self.done()
+    def test_inline_peek_previews_shared_models_without_changing_active_document(self):
+        self.enable();self.page.evaluate('()=>{s.view.setPosition({lineNumber:4,column:14});return s.view.getAction("editor.action.peekDefinition").run();}')
+        self.page.wait_for_function('!!s.peek?.preview.getModel()')
+        self.assertEqual(self.page.evaluate('vb6Studio.activeModule.id'),'form')
+        self.assertTrue(self.page.evaluate('s.peek.preview.getModel()===r.records.get(s.peek.locations[0].uri).model'))
+        self.assertIn('Math.bas',self.page.locator('.advanced-peek-locations').inner_text())
+        self.page.locator('.advanced-peek').get_by_role('button',name='Open',exact=True).click()
+        self.page.wait_for_function('vb6Studio.activeModule.id==="math"');self.assertEqual(self.page.locator('.advanced-peek').count(),0);self.done()
+    def test_rename_widget_uses_one_undoable_project_transaction(self):
+        self.enable();before=self.text();self.page.evaluate('s.view.setPosition({lineNumber:4,column:7});s.focus()')
+        self.page.keyboard.press('F2')
+        box=self.page.locator('.rename-box input').first;box.wait_for(state='visible');box.fill('sum');box.press('Enter')
+        self.page.wait_for_function('vb6Studio.project.modules[0].code.includes("Public sum As Long")')
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'),1)
+        self.page.evaluate('vb6Studio.command("undo")');self.assertEqual(self.text(),before);self.done()
+    def test_superseded_opt_in_does_not_leave_workers_or_models_mounted(self):
+        results=self.page.evaluate('async()=>{const a=vb6Studio.advancedEditor;return await Promise.all([a.configure({enabled:true}),a.configure({enabled:false})]);}')
+        self.assertEqual(results,[False,False]);self.assertEqual(self.page.locator('.advanced-editor-surface').count(),0)
+        self.enable();self.assertEqual(self.page.evaluate('VB6AdvancedMonaco.monaco.editor.getModels().length'),3);self.done()
+    def test_large_document_keeps_dom_and_lexical_scans_bounded(self):
+        self.page.evaluate(r'''()=>{const p=VB6StudioAPI.newProject('Large');p.id='large';p.modules[0].code='Option Explicit\nPrivate Sub Main()\nDim value As Long\n'+('    value = 1\n').repeat(99996)+'End Sub\n';vb6Studio.loadProject(p);vb6Studio.openDocument(p.modules[0].id,'code');}''')
+        self.enable();metrics=self.page.evaluate('''()=>{const model=s.record.model,doc=s.record.client.documents.get(s.record.uri),before=vb6Studio.editor.metrics.indexedLines,scanned=doc.scannedCharacters,times=[];s.view.setPosition({lineNumber:50000,column:14});
+          for(let i=0;i<5;i++){const pos=s.selection().start,t=performance.now();s.replace(' ',pos,pos);times.push(performance.now()-t);}
+          return {lines:model.getLineCount(),utf16:model.getValueLength(),indexedLines:vb6Studio.editor.metrics.indexedLines-before,scannedCharacters:doc.scannedCharacters-scanned,editAndSyncMilliseconds:times};}''')
+        self.page.wait_for_function('s.view.getVisibleRanges().some(r=>r.startLineNumber<=50000&&r.endLineNumber>=50000)')
+        metrics['visibleDomLines']=self.page.locator('.advanced-editor-surface .view-line').count()
+        metrics['measurement']='Synchronous programmatic IDE edit and LSP sync wall time; not keystroke latency or FPS.'
+        (REPORT/'large-document.json').write_text(json.dumps(metrics,indent=2))
+        self.assertEqual(metrics['lines'],100001);self.assertLess(metrics['visibleDomLines'],200)
+        self.assertLess(metrics['indexedLines'],30);self.assertLess(metrics['scannedCharacters'],1000)
+        self.assertTrue(self.page.evaluate('s.record.model.getValue()===vb6Studio.activeModule.code'))
+        self.done()
 if __name__=='__main__':unittest.main(verbosity=2)
