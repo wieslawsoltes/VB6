@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse, base64, functools, http.server, io, json, os, platform, shlex, shutil, subprocess, threading, time, traceback
 from pathlib import Path
 from PIL import Image, ImageChops
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'reports/rendering'
@@ -278,28 +278,50 @@ with sync_playwright() as playwright:
         # This is the same stability prerequisite as Playwright screenshots:
         # https://playwright.dev/docs/api/class-pageassertions#page-assertions-to-have-screenshot-1
         import hashlib
-        previous = None; consecutive = 0; samples = []
-        for attempt in range(30):
-            check(page.evaluate(renderer+'.backend') == backend, 'Capture used an unexpected renderer')
-            page.evaluate('async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
-            # Read-only fixture: do not mutate every input's inline caret-color
-            # on each capture. Playwright's default hide/restore cycle caused
-            # native scrollbar raster drift after dark-theme switches, even in
-            # HTML-only mode. Keep all pixels, including any actual caret;
-            # an unstable or wrong image still fails the unchanged strict gate.
-            # https://playwright.dev/python/docs/api/class-page#page-screenshot-option-caret
-            current = page.screenshot(caret='initial')
-            difference = pixels(previous, current) if previous is not None else None
-            samples.append({'attempt': attempt, 'sha256': hashlib.sha256(current).hexdigest(), 'difference': difference})
-            consecutive = consecutive + 1 if difference and difference['changedPixels'] == 0 else 1
-            if consecutive == 3:
-                (OUT/(name+'-reference.json')).write_text(json.dumps({'backend':backend,'samples':samples,'stableCaptures':consecutive},indent=2))
-                (OUT/(name+'-'+backend+'.png')).write_bytes(current)
-                return current
-            if attempt == 0: (OUT/(name+'-startup.png')).write_bytes(current)
-            previous = current
-        (OUT/(name+'-reference.json')).write_text(json.dumps({'backend':backend,'samples':samples,'stableCaptures':consecutive},indent=2))
-        raise AssertionError('Renderer never reached stable pixels; no capture accepted')
+        previous = None; consecutive = 0; samples = []; capture_errors = []
+        accepted = False
+        report_path = OUT/(name+'-reference.json')
+        image_path = OUT/(name+'-'+backend+'.png')
+        image_path.unlink(missing_ok=True)  # A failed rerun must not retain old evidence.
+        def report():
+            report_path.write_text(json.dumps({'backend':backend,'samples':samples,
+                'stableCaptures':consecutive,'captureErrors':capture_errors,
+                'accepted':accepted},indent=2))
+        try:
+            for attempt in range(30):
+                check(page.evaluate(renderer+'.backend') == backend, 'Capture used an unexpected renderer')
+                page.evaluate('async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
+                # Do not mutate every input's caret-color. Keep all actual pixels;
+                # an unstable/wrong image still fails the unchanged strict gate.
+                # https://playwright.dev/python/docs/api/class-page#page-screenshot-option-caret
+                try:
+                    current = page.screenshot(caret='initial')
+                except PlaywrightTimeoutError as error:
+                    # The browser's screenshot command can time out even after
+                    # fonts/rAF and backend readiness completed. Retry only that
+                    # command once per capture session, on the SAME page. Never
+                    # retry a pixel mismatch, reload source, change a backend or
+                    # accept prior pixels. The next iteration repeats readiness
+                    # checks and must produce three NEW consecutive equal images.
+                    capture_errors.append({'attempt':attempt,'error':str(error)})
+                    previous = None; consecutive = 0
+                    report()  # Preserve the first failure even if recovery fails.
+                    if len(capture_errors) > 1:
+                        raise
+                    continue
+                check(page.evaluate(renderer+'.backend') == backend, 'Capture used an unexpected renderer')
+                difference = pixels(previous, current) if previous is not None else None
+                samples.append({'attempt': attempt, 'sha256': hashlib.sha256(current).hexdigest(), 'difference': difference})
+                consecutive = consecutive + 1 if difference and difference['changedPixels'] == 0 else 1
+                if consecutive == 3:
+                    image_path.write_bytes(current)
+                    accepted = True
+                    return current
+                if len(samples) == 1: (OUT/(name+'-startup.png')).write_bytes(current)
+                previous = current
+            raise AssertionError('Renderer never reached stable pixels; no capture accepted')
+        finally:
+            report()
 
     def stable_html_reference(page, name):
         return stable_render_capture(page, name, 'html')

@@ -1,0 +1,12 @@
+{
+  "name": "@vb6-studio/advanced-editor-build",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Optional, self-hosted advanced editor build dependencies; the classic IDE has no npm runtime dependencies.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "esbuild": "0.25.9",
+    "monaco-editor": "0.57.0"
+  }
+}

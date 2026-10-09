@@ -79,3 +79,7 @@ packages/intelligent-ui/dist/
 
 # Generated isolated Intelligent UI proxy
 /dist/intelligent-ui-sandbox.html
+
+# Optional advanced editor is rebuilt from pinned dependencies and source.
+/dist/advanced-editor/
+/dist/VB6-Studio-Web-Advanced.html
