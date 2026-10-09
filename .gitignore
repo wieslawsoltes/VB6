@@ -66,3 +66,16 @@ packages/vbnet-runtime-windows/obj/
 # Reproducible Apple Silicon compiler bundle and native execution outputs.
 /dist/vb6-macos.js
 /artifacts/macos-native/
+
+# Reproducible Intelligent UI outputs are fingerprinted, not source.
+src/intelligent-ui/payload.js
+packages/intelligent-ui/dist/
+/dist/intelligent-ui.js
+/dist/intelligent-ui-worker.js
+/dist/intelligent-ui.css
+/dist/intelligent-ui-mcp.html
+/dist/packages/vb6-intelligent-ui-*.tgz
+/dist/packages/vb6-intelligent-ui-*.tgz.sha256
+
+# Generated isolated Intelligent UI proxy
+/dist/intelligent-ui-sandbox.html

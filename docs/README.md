@@ -135,3 +135,9 @@ No proprietary fonts, icons or runtime binaries are redistributed.
 - Microsoft, STRINGTABLE resource: https://learn.microsoft.com/en-us/windows/win32/menurc/stringtable-resource
 - Microsoft, WM_MDICASCADE (Win32 window behavior, not browser parity certification): https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-mdicascade
 - Microsoft, Visual Basic 6.0 Resource Center: https://learn.microsoft.com/en-us/previous-versions/visualstudio/visual-basic-6/visual-basic-6.0-documentation
+
+## Intelligent UI
+
+[INTELLIGENT-UI.md](INTELLIGENT-UI.md) documents the reusable streaming UI library,
+MCP tools and App resource, coding-agent conversation rendering, permission
+boundaries, standalone packaging, and integration validation.

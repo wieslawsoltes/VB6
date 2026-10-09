@@ -50,6 +50,16 @@ jobs:
           node tools/verify-x86-encodings.mjs
           node tools/test-x86-cpu.mjs
           node tools/test-native-optimizer-cpu.mjs
+      - name: Independently extracted Intelligent UI package
+        run: npm run pack:intelligent-ui
+      - name: Type-check standalone Intelligent UI declarations
+        run: npm exec --yes --package=typescript@5.8.3 -- tsc --noEmit --strict --lib ES2023,DOM --module NodeNext --moduleResolution NodeNext packages/intelligent-ui/src/index.d.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: intelligent-ui-package
+          path: dist/packages/vb6-intelligent-ui-*.tgz*
+          if-no-files-found: error
+          retention-days: 7
       - name: Independently installed COM and Automation packages
         run: node tools/test-com-ole-packages.mjs
       - uses: actions/upload-artifact@v4
@@ -91,6 +101,8 @@ jobs:
           python tools/recovery-browser-tests.py
           python tools/browser-finalization-05.py
           python tools/browser-boundaries-06.py
+      - name: Intelligent UI library, real IDE integration and MCP App lifecycle
+        run: python tools/intelligent-ui-browser-tests.py
       - name: Verify reproducible generated bundles
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
@@ -396,3 +408,42 @@ jobs:
           name: rendering-themes-${{ matrix.backend }}-${{ matrix.display }}
           path: reports/rendering
           retention-days: 14
+
+  intelligent-ui-browser:
+    name: Intelligent UI (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run build
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Intelligent UI on HTTP, file and real separate-origin sandbox
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+          DEBUG: pw:browser
+        run: |
+          # Collect both transport suites even when one fails; either failure
+          # still fails this job. Keep the installed browser/version and assertions.
+          status=0
+          python tools/intelligent-ui-browser-tests.py || status=$?
+          python tools/intelligent-ui-host-browser-tests.py || status=$?
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intelligent-ui-${{ matrix.browser }}
+          path: |
+            reports/intelligent-ui
+            reports/intelligent-ui-host
+          retention-days: 7

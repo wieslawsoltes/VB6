@@ -96,7 +96,13 @@
     "macos:bridge": "node tools/serve-macos.mjs",
     "test:macos": "node --test tests/macos-*.test.mjs",
     "test:macos:native": "node tools/test-macos-native.mjs",
-    "test:macos:browser": "python tools/browser-macos-export-tests.py"
+    "test:macos:browser": "python tools/browser-macos-export-tests.py",
+    "build:intelligent-ui": "node tools/build-intelligent-ui.mjs",
+    "test:intelligent-ui": "node --test tests/intelligent-ui*.test.mjs",
+    "test:intelligent-ui:browser": "python tools/intelligent-ui-browser-tests.py",
+    "pack:intelligent-ui": "node tools/pack-intelligent-ui.mjs",
+    "ui:sandbox": "node tools/serve-intelligent-ui-sandbox.mjs",
+    "test:intelligent-ui:host:browser": "python tools/intelligent-ui-host-browser-tests.py"
   },
   "engines": {
     "node": ">=22"
