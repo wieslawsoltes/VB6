@@ -85,23 +85,53 @@ jobs:
           retention-days: 7
   advanced-editor:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - run: npm run build
-      - name: Install pinned optional editor dependencies
-        run: npm install --prefix packages/advanced-editor --ignore-scripts --no-audit --no-fund
-      - name: Build self-hosted editor vendor assets
-        run: node tools/build-advanced-editor.mjs --vendor-only
+      - name: Install locked optional editor dependencies
+        run: npm ci --prefix packages/advanced-editor --ignore-scripts --no-audit --no-fund
+      - name: Build complete self-hosted and offline editor packages
+        run: node tools/build-advanced-editor.mjs
+      - name: Advanced editor protocol and transaction regressions
+        run: node --test tests/advanced-editor*.test.mjs
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Resolve Chromium executable
+        if: matrix.browser == 'chromium'
+        run: |
+          python - <<'PYTHON' >> "$GITHUB_ENV"
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print('CHROMIUM_PATH=' + p.chromium.executable_path)
+          PYTHON
+      - name: Hosted editor with same-origin workers and lazy assets
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+          VB6_TEST_TRANSPORT: http
+        run: python tools/browser-advanced-editor-tests.py
+      - name: Offline HTML with embedded assets and workers
+        env:
+          VB6_BROWSER: ${{ matrix.browser }}
+          VB6_TEST_TRANSPORT: file
+        run: python tools/browser-advanced-editor-tests.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: advanced-editor-distribution
+          name: advanced-editor-${{ matrix.browser }}
           path: |
             dist/advanced-editor
-            packages/advanced-editor/package-lock.json
+            dist/VB6-Studio-Web-Advanced.html
+            reports/advanced-editor
           if-no-files-found: error
           retention-days: 7

@@ -66,3 +66,7 @@ packages/vbnet-runtime-windows/obj/
 # Reproducible Apple Silicon compiler bundle and native execution outputs.
 /dist/vb6-macos.js
 /artifacts/macos-native/
+
+# Optional advanced editor is rebuilt from pinned dependencies and source.
+/dist/advanced-editor/
+/dist/VB6-Studio-Web-Advanced.html
