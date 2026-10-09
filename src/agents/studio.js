@@ -1,3 +1,5 @@
+import {contentSummary} from '../../packages/intelligent-ui/src/content.js';
+import {userMessage} from './providers.js';
 import {ChatGPTConnection} from './chatgpt-connection.js';
 import {el, download} from '../core/core.js';
 import {modal, tabbedPages, icon} from '../ide/ui.js';
@@ -357,6 +359,8 @@ class AgentPanel {
       if (continuation && (!this.api.agent.canResume || provider !== this.api.agent.provider || model !== this.api.agent.model)) throw new Error("Choose the task's original provider/model and a resumable task, or start a new task.");
       const binding = this.chatgpt.binding();
       if ((continuation || compactOnly || this.api.agent.historyBytes) && this.api.conversations.active.authBinding && this.api.conversations.active.authBinding !== binding) throw new Error('This task belongs to another billing mode or ChatGPT account. Restore its connection, or create a new task with reviewed context.');
+      if(queued?.content)userMessage(provider,prompt,queued.content);
+      const uiContextRevision=task.agent.uiContexts.revision;
       const transport = this.transport(), permissions = this.readPermissions(), {mode, scopes} = permissions;
       if (!this.api.agent.permissionConstraints.allowedModes.includes(mode) || permissions.permissionMinutes > this.api.agent.permissionConstraints.maxMinutes) throw new Error('These permissions exceed the host policy.');
       const fullConfirmation = input('Confirm Full IDE access for this run', {type: 'checkbox'});
@@ -366,6 +370,8 @@ class AgentPanel {
       const allowed = await cancellableDialog(compactOnly ? 'AI Coding Agent — Compact Context' : continuation ? 'AI Coding Agent — Continue Task' : 'AI Coding Agent — Start Task', el('div', {class: 'agent-review'},
         el('p', {}, 'Send this task and requested project context from ' + project.name + ' to ' + PROVIDERS[provider].label + ' (' + model + ')?'),
         ...(queued ? [el('p', {}, 'Send the selected queued message to task ' + task.title + '? The unsent composer draft is not included.'), el('pre', {class: 'agent-log'}, prompt.slice(0, 4000) + (prompt.length > 4000 ? '\n[Preview shortened; cancel to edit the full queued message.]' : ''))] : []),
+        ...(queued?.content?[el('pre',{class:'agent-log'},'Reviewed attachments:\n'+contentSummary(queued.content))]:[]),
+        ...(!compactOnly&&task.agent.uiContexts.entries.size?[el('pre',{class:'agent-log'},'Latest reviewed UI context included in this run:\n'+JSON.stringify(task.agent.uiContexts.snapshot().map(c=>({id:c.id,structuredContent:c.structuredContent||{},content:c.content?contentSummary(c.content):''})),null,2))]:[]),
         ...(compactOnly ? [el('p', {}, 'Request a checkpoint of this task’s public history from the same provider. No IDE tools will execute. Existing context is replaced only after a valid summary; the public thread and cumulative budget remain. Summaries may lose detail.')] : []),
         el('p', {}, 'Recovery: up to ' + limits.maxRetries + ' automatic retries per generation request. Checkpoints and retry attempts consume this run’s request and session allowances.'),
         el('p', {}, this.chatgpt.description() + ' Review source for secrets before continuing. Read access includes project files and debugger data.'),
@@ -378,12 +384,13 @@ class AgentPanel {
       if (!allowed) return; signal.throwIfAborted();
       if (mode === 'full' && !fullConfirmation.checked) throw new Error('Full IDE access was not confirmed. No request was sent.');
       if (task !== this.api.conversations.active || queued && (!task.followups.matches(queued) || !task.followups.inCurrentWorkspace(queued))) throw new Error('Task or queued message changed during confirmation. Review it again.');
+      if(uiContextRevision!==task.agent.uiContexts.revision)throw new Error('Reviewed UI context changed during confirmation. Review the run again.');
       if (project !== this.ide.project) throw new Error('Project changed; review the current project again.');
       this.pending = null; this.api.conversations.active.limits = limits; this.api.conversations.defaultLimits = saveAgentLimits(limits);
       this.api.conversations.active.permissions = permissions;
       this.api.conversations.active.authBinding = binding;
       this.api.conversations.active.authDescription = this.chatgpt.description();
-      const options = {provider, model, prompt, transport, ...permissions, fullAccessConfirmed: mode === 'full' && fullConfirmation.checked, ...limits};
+      const options = {provider, model, prompt, content:queued?.content||[], transport, ...permissions, fullAccessConfirmed: mode === 'full' && fullConfirmation.checked, ...limits};
       this.sendingQueued = queued ? {task, item: queued} : null;
       const run = compactOnly ? this.api.agent.compact(options) : continuation ? this.api.agent.resume(options) : this.api.agent.run(options);
       if (compactOnly && this.prompt.value.trim() === '/compact') { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
@@ -400,7 +407,7 @@ class AgentPanel {
     if (event.taskId && event.taskId !== this.api.conversations.activeId) return;
     if (event.type === 'user') {
       const sending = this.sendingQueued;
-      if (sending && sending.task === this.api.conversations.active && event.text === sending.item.text) {
+      if (sending && sending.task === this.api.conversations.active && event.text === sending.item.text+(sending.item.content?.length?'\n\nReviewed content:\n'+contentSummary(sending.item.content):'')) {
         sending.task.followups.remove(sending.item.id, sending.item.version); this.sendingQueued = null;
       } else { this.prompt.value = ''; this.api.conversations.active.draft = ''; }
     }

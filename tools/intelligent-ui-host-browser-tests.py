@@ -64,6 +64,16 @@ try:
             frame.get_by_role('button',name='Forbidden',exact=True).click();frame.locator('#out').filter(has_text='forbidden').wait_for()
             check(page.evaluate('calls')==['read'],'App called a model-only or unknown connection tool')
             passed('tool calls remain connection-scoped and enforce app visibility')
+            page.evaluate('window.keptFrame=host.frame;host.setDisplayMode("pip")')
+            check(page.locator('.iui-app-pip').count()==1,'PiP did not float the existing app')
+            check(frame.locator('#increment').inner_text()=='Count: 1','PiP reloaded app state')
+            page.get_by_role('button',name='Move floating app with arrow keys or drag',exact=True).press('ArrowLeft')
+            page.evaluate('host.setDisplayMode("fullscreen")')
+            page.get_by_role('button',name='Return app inline',exact=True).click()
+            check(page.evaluate('host.frame===keptFrame&&host.display.mode==="inline"'),'Display transitions replaced the iframe')
+            check(frame.locator('#increment').inner_text()=='Count: 1','Display transitions lost local state')
+            passed('PiP, keyboard movement, fullscreen and inline preserve actual isolated app state')
+
             page.evaluate("host.updateHostContext({styles:{variables:{'--color-background-primary':'#123456'}}})")
             expect(frame.locator('body')).to_have_css('background-color', 'rgb(18, 52, 86)')
             passed('host theme updates reach the isolated app without replacing its state')
@@ -86,6 +96,21 @@ try:
             page.screenshot(path=str(report/'mcp-host.png'));page.evaluate('host.teardown()');check(page.locator('#root iframe').count()==0,'Teardown left resource mounted')
             check(not page.evaluate('hostErrors'),'MCP host reported errors: '+str(page.evaluate('hostErrors')))
             passed('generated MCP resource supports graceful teardown')
+            # Both ends are real package transports, using a trusted test app.
+            page.evaluate(r"""async proxy=>{
+              const library=await (await fetch('/intelligent-ui.js')).text();window.toolChanges=0;
+              const appScript=`globalThis.client=new IntelligentUI.McpAppClient({tools:[{name:'echo',inputSchema:{type:'object'}}],onToolCall:async(name,args)=>({content:[{type:'text',text:JSON.stringify(args)}],structuredContent:args})});client.connect();`;
+              const html='<!doctype html><button id="change">Change tools</button><script>'+library.replace(/<\/script/gi,'<\\/script')+appScript+"document.getElementById('change').onclick=()=>client.setTools([{name:'updated',inputSchema:{type:'object'}}]);"+'<'+ '/script>';
+              window.host=new IntelligentUI.McpAppHost(document.querySelector('#root'),{proxyUrl:proxy,html,onToolsChanged:()=>toolChanges++,onError:e=>hostErrors.push(e.message)});
+            }""",proxy)
+            page.wait_for_function('host.ready')
+            check(page.evaluate('host.listAppTools()')['tools'][0]['name']=='echo','App tool catalogue was not returned')
+            check(page.evaluate('host.callAppTool("echo",{selected:7})')['structuredContent']=={'selected':7},'App tool result changed in transit')
+            page.frame_locator('#root > iframe').frame_locator('iframe').get_by_role('button',name='Change tools',exact=True).click()
+            page.wait_for_function('toolChanges===1')
+            check(page.evaluate('host.listAppTools()')['tools'][0]['name']=='updated','Tool list-changed notification did not refresh the catalogue')
+            page.evaluate('host.teardown()')
+            passed('actual app-exposed tool discovery, invocation, list changes and teardown')
             # Actual IDE integration, not a host test double.
             page.goto(origin+'/index.html');page.wait_for_function('!!vb6Studio?.intelligentUI')
             page.evaluate('''proxy=>{vb6Studio.intelligentUI.open();vb6Studio.intelligentUI.extensions.configure({url:proxy,enabled:true});}''',proxy)
@@ -116,9 +141,31 @@ try:
             page.get_by_role('button',name='Queue reviewed message',exact=True).wait_for()
             page.evaluate('vb6Studio.intelligentUI.setEnabled(false)')
             check(page.locator('.iui-playground-preview iframe').count()==0,'Disabling UI did not revoke running app')
-            page.get_by_role('button',name='Queue reviewed message',exact=True).click()
+            expect(page.get_by_role('button',name='Queue reviewed message',exact=True)).to_have_count(0)
             check(page.evaluate('vb6Studio.codingAgents.conversations.active.followups.items.length')==1,'Revoked app completed a pending approval')
             passed('IDE AppBlock execution requires approval and revokes pending actions on feature disable')
+            page.evaluate("""async()=>{
+              vb6Studio.intelligentUI.setEnabled(true);vb6Studio.intelligentUI.open();const adapter=vb6Studio.mcp.adapter;adapter.setEnabled(true);
+              window.downloadSource='<text>Exact reviewed UI source</text>';
+              await adapter.tools.find(t=>t.name==='vb6.ui.present').execute({source:downloadSource,title:'Download fixture'},{principal:'download-owner'});
+            }""")
+            page.get_by_role('button',name='Open as MCP App',exact=True).last.click()
+            download_app=page.frame_locator('.iui-gallery-item iframe').frame_locator('iframe')
+            download_app.get_by_role('button',name='Download UI source',exact=True).click()
+            with page.expect_download() as saved:
+                page.get_by_role('button',name='Allow once',exact=True).click()
+            artifact=saved.value
+            check(artifact.suggested_filename=='source.dil','Unexpected source download name')
+            check(Path(artifact.path()).read_text()==page.evaluate('downloadSource'),'Downloaded bytes differ from the reviewed UI source')
+            passed('actual IDE MCP App source download requires approval and preserves exact bytes')
+            downloads=[];page.on('download',lambda value: downloads.append(value))
+            download_app.get_by_role('button',name='Download UI source',exact=True).click()
+            page.get_by_role('button',name='Cancel',exact=True).last.click()
+            expect(download_app.get_by_role('button',name='Download UI source',exact=True)).to_be_enabled()
+            check(not downloads,'Declined source download wrote a file')
+            page.get_by_role('button',name='Close MCP App',exact=True).last.click()
+            check(page.locator('.iui-gallery-item iframe').count()==0,'Closing downloadable app left a live frame')
+            passed('declined source downloads have no file effects and app disposal releases frames')
             page.close()
         finally: browser.close()
 finally:

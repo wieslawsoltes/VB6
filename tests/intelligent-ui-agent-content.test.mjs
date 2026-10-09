@@ -24,3 +24,11 @@ test('latest context replaces rather than appending to signed native history',()
   const first=withReviewedUIContext('openai',history,store.snapshot());assert.equal(first.length,2);assert.equal(first[0],history[0]);assert.match(JSON.stringify(first),/new/);assert.doesNotMatch(JSON.stringify(first),/old/);
   store.delete('view');assert.equal(withReviewedUIContext('openai',history,store.snapshot()),history);assert.equal(history.length,1);
 });
+
+test('compaction projects rich user text and media descriptions without binary data',async()=>{
+ const {publicHistory}=await import('../src/agents/context.js');
+ for(const provider of ['openai','anthropic','google']){
+   const history=[richUserMessage(provider,'Keep this task',[image,pdf])],before=JSON.stringify(history);
+   const projection=publicHistory(provider,history);assert.match(JSON.stringify(projection),/Keep this task/);assert.match(JSON.stringify(projection),/attachment/);assert.doesNotMatch(JSON.stringify(projection),/AQID/);assert.equal(JSON.stringify(history),before);
+ }
+});

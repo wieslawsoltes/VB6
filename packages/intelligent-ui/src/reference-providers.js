@@ -20,6 +20,7 @@ export class UIReferenceProviders {
     if(typeof owner!=='string'||!owner||owner.length>512||typeof query!=='string'||!query.trim()||query.length>2000)throw new UIError('provider','A trusted owner and bounded query are required.');
     if(this.active.has(owner)||this.active.size>=16)throw new UIError('provider','A reference request is already active or the request limit was reached.');
     const control=new AbortController(),combined=AbortSignal.any([control.signal,provider.life.signal,...(signal?[signal]:[])]);
+    combined.throwIfAborted();
     this.active.set(owner,control);let timer,abort;
     const cancelled=new Promise((_,reject)=>{abort=()=>reject(combined.reason||new UIError('cancelled','Reference request cancelled.'));combined.addEventListener('abort',abort,{once:true});if(combined.aborted)abort();});
     timer=setTimeout(()=>control.abort(new UIError('timeout','Reference provider exceeded its timeout.')),this.timeout);

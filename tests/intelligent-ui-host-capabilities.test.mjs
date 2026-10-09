@@ -45,3 +45,11 @@ test('app client exposes declared tools, rejects unknown tools and aborts active
  await emit({jsonrpc:'2.0',id:'unknown',method:'tools/call',params:{name:'other'}});assert.ok(sent.at(-1).error);
  const pending=emit({jsonrpc:'2.0',id:'call',method:'tools/call',params:{name:'selected',arguments:{}}});await emit({jsonrpc:'2.0',method:'notifications/cancelled',params:{requestId:'call'}});assert.equal(signal.aborted,true);release();await pending;assert.ok(sent.at(-1).error);client.dispose();
 });
+
+test('per-request cancellation revokes pending approval before callback effects',async t=>{
+ let allow,entered,effects=0;const ready=new Promise(r=>entered=r);
+ const f=fixture({approve:async()=>{entered();return new Promise(r=>allow=r);},onMessage:()=>{effects++;}});t.after(()=>f.host.dispose());await f.init();
+ const pending=f.call('ui/message',{role:'user',content:[{type:'text',text:'Do not deliver'}]});await ready;
+ await f.emit({jsonrpc:'2.0',method:'notifications/cancelled',params:{requestId:99}});allow(true);
+ assert.ok((await pending).error);assert.equal(effects,0);assert.equal(f.host.active.size,0);
+});

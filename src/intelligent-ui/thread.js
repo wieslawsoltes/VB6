@@ -9,10 +9,10 @@ export class IntelligentThreadContent {
   entry(item,record){let entry=this.entries.get(item.id);if(!entry){entry={thread:this.view.thread,record,parts:new Map(),taskId:this.view.options.taskId,epoch:this.host.adapter.workspaceEpoch};this.entries.set(item.id,entry);}return entry;}
   surface(entry,id,node,ui){
     const task=this.host.conversations.tasks.get(entry.taskId),thread=entry.thread,epoch=entry.epoch;
-    const surface=new UISurface(node,{...this.host.surfaceOptions({owner:task?.agent.sessionKey,ui,assertLive:()=>{if(task!==this.host.conversations.active||task?.agent.thread!==thread)throw new Error('Switch to the owning task to use this view.');}}),snapshot:this.state().get(id),onAction:(action,view,context)=>{
+    const surface=new UISurface(node,{...this.host.surfaceOptions({owner:task?.agent.sessionKey,ui,assertLive:()=>{if(task!==this.host.conversations.active||task?.agent.thread!==thread)throw new Error('Switch to the owning task to use this view.');}}),snapshot:this.state().get(id),onDispose:()=>task?.agent.uiContexts.delete(ui?'tool:'+ui.id:id),onAction:(action,view,context)=>{
       if(!task||task!==this.host.conversations.active||task.agent.thread!==thread||this.host.adapter.workspaceEpoch!==epoch)throw new Error('This UI belongs to a different task or project session.');
       if(ui){const current=this.host.adapter.intelligentUI.service.run('read',{id:ui.id},{sessionKey:task.agent.sessionKey});if(current.ui.revision!==ui.revision)throw new Error('This UI result is obsolete. Use its latest result.');}
-      return this.host.action(action,{taskId:task.id,thread,epoch,signal:context.signal,origin:ui?.title||'Agent response',assertLive:()=>{if(surface.disposed)throw new Error('This UI was closed while review was pending.');if(ui&&this.host.adapter.intelligentUI.service.run('read',{id:ui.id},{sessionKey:task.agent.sessionKey}).ui.revision!==ui.revision)throw new Error('The UI changed while review was pending.');}});
+      return this.host.action(action,{taskId:task.id,thread,epoch,viewId:ui?'tool:'+ui.id:id,signal:context.signal,origin:ui?.title||'Agent response',assertLive:()=>{if(surface.disposed)throw new Error('This UI was closed while review was pending.');if(ui&&this.host.adapter.intelligentUI.service.run('read',{id:ui.id},{sessionKey:task.agent.sessionKey}).ui.revision!==ui.revision)throw new Error('The UI changed while review was pending.');}});
     }});return surface;
   }
   renderAssistant(item,record){

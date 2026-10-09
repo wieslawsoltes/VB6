@@ -52,6 +52,7 @@ export class UIModelContextStore {
     const clean=normalizeModelContext(value),next=new Map(this.entries);
     next.set(id,clean);if(next.size>16)throw new UIError('context','Too many view contexts.');
     boundedData([...next],500000,{maxText:192000});
+    if([...next.values()].reduce((n,v)=>n+1+(v.content?.length||0),0)>32)throw new UIError('context','Combined view context exceeds the content-block limit.');
     if(JSON.stringify(this.entries.get(id))!==JSON.stringify(clean)){this.entries=next;this.revision++;}
     return this.revision;
   }

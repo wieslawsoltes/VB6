@@ -12,7 +12,7 @@ export class McpAppClient {
     this.listener=event=>void this.receive(event);window.addEventListener('message',this.listener);
   }
   send(message){if(this.disposed)throw new UIError('disposed','MCP App transport is disposed.');this.parent.postMessage(message,this.hostOrigin);}
-  request(method,params={}){if(this.disposed)return Promise.reject(new UIError('disposed','MCP App transport is disposed.'));if(this.pending.size>=32)return Promise.reject(new UIError('queue','MCP App request limit reached.'));const id='iui-'+(++this.sequence);return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);reject(new UIError('timeout','MCP App host did not respond.'));},this.timeout);this.pending.set(id,{resolve,reject,timer});try{this.send({jsonrpc:'2.0',id,method,params:boundedData(params,500000,{maxText:192000})});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}});}
+  request(method,params={}){if(this.disposed)return Promise.reject(new UIError('disposed','MCP App transport is disposed.'));if(this.pending.size>=32)return Promise.reject(new UIError('queue','MCP App request limit reached.'));const id='iui-'+(++this.sequence);return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);this.notify('notifications/cancelled',{requestId:id,reason:'App request timed out.'});reject(new UIError('timeout','MCP App host did not respond.'));},this.timeout);this.pending.set(id,{resolve,reject,timer});try{this.send({jsonrpc:'2.0',id,method,params:boundedData(params,500000,{maxText:192000})});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}});}
   notify(method,params){if(this.ready)this.send({jsonrpc:'2.0',method,params});}
   async connect(){if(this.parent===this.window)throw new UIError('host','Open this resource through an MCP Apps host.');const result=await this.request('ui/initialize',{appInfo:this.appInfo,appCapabilities:{availableDisplayModes:this.displayModes,...(this.onToolCall?{tools:{listChanged:true}}:{})},protocolVersion:MCP_APP_VERSION});if(result.protocolVersion!==MCP_APP_VERSION)throw new UIError('version','Unsupported MCP Apps protocol version.');this.context=result.hostContext||{};this.capabilities=result.hostCapabilities||{};this.ready=true;this.send({jsonrpc:'2.0',method:'ui/notifications/initialized'});return result;}
   async receive(event){
@@ -59,6 +59,7 @@ export class McpAppClient {
 }
 export function startMcpApp({root=globalThis.document?.getElementById('intelligent-ui-root')}={}){
   if(!root)throw new UIError('root','MCP App root is missing.');const win=root.ownerDocument.defaultView;let surface,lastUI=null,cancelled=false,observer=null;
+  const toolbar=root.ownerDocument.createElement('div');toolbar.className='iui-surface-toolbar';root.append(toolbar);
   const status=root.ownerDocument.createElement('p');status.textContent='Connecting to MCP Apps host…';root.append(status);const host=root.ownerDocument.createElement('div');root.append(host);
   const context=value=>{root.dataset.theme=value.theme||'light';const vars=value.styles?.variables||{};for(const [source,target] of [['--color-background-primary','--iui-bg'],['--color-text-primary','--iui-text'],['--color-border-primary','--iui-edge'],['--color-background-secondary','--iui-face']]){surface.viewport.style.removeProperty(target);if(typeof vars[source]==='string'&&win.CSS?.supports('color',vars[source]))surface.viewport.style.setProperty(target,vars[source]);}};
   const show=async ui=>{if(cancelled||!ui||typeof ui.source!=='string')return;if(lastUI&&lastUI.id!==ui.id){surface.dispose();surface=makeSurface();}lastUI=ui;await surface.update(ui.source,{data:ui.data||{},partial:false});surface.refreshReferences();status.textContent=ui.title||'Intelligent UI';};
@@ -71,8 +72,9 @@ export function startMcpApp({root=globalThis.document?.getElementById('intellige
     else if(method==='ui/notifications/host-context-changed')context(client.context);
   }});
   const makeSurface=()=>new UISurface(host,{resolveReference:async id=>lastUI?.references?.[id]||null,onAction:async action=>{if(cancelled||!client.ready)throw new UIError('cancelled','This tool view is not active.');action=normalizeAction(action);let result;
-    if(action.type==='message')result=await client.request('ui/message',{role:'user',content:[{type:'text',text:action.args[0]}]});
-    else if(action.type==='context')result=await client.request('ui/update-model-context',{structuredContent:{intelligentUI:action.args[0]}});
+    if(action.type==='messageContent')result=await client.sendMessage(action.args[0]);
+    else if(action.type==='message')result=await client.request('ui/message',{role:'user',content:[{type:'text',text:action.args[0]}]});
+    else if(action.type==='context'){const value=action.args[0];result=await client.updateModelContext(record(value)&&('content'in value||'structuredContent'in value)?value:{structuredContent:value});}
     else if(action.type==='link')result=await client.request('ui/open-link',{url:safeUrl(action.args[0])});
     else if(action.type==='tool'){if(!client.capabilities.serverTools)throw new UIError('capability','Host does not support tool calls.');result=await client.request('tools/call',{name:action.args[0],arguments:action.args[1]});if(result.structuredContent?.ui)await show(result.structuredContent.ui);else if(lastUI)await surface.update(lastUI.source,{data:{...lastUI.data,actionResult:result.structuredContent||{content:result.content}}});}
     else if(action.type==='copy')await win.navigator.clipboard.writeText(action.args[0]);
@@ -81,6 +83,11 @@ export function startMcpApp({root=globalThis.document?.getElementById('intellige
   },onUpdate:()=>client.notify('ui/notifications/size-changed',{height:Math.min(2000,Math.ceil(root.scrollHeight)),width:Math.ceil(root.clientWidth)})});
   surface=makeSurface();
   observer=win.ResizeObserver?new win.ResizeObserver(()=>client.notify('ui/notifications/size-changed',{height:Math.min(2000,Math.ceil(root.scrollHeight))})):null;observer?.observe(root);
-  const ready=client.connect().then(info=>{context(info.hostContext||{});status.textContent='Waiting for tool data…';}).catch(error=>{status.textContent=error.message;});
+  const ready=client.connect().then(info=>{
+    context(info.hostContext||{});status.textContent='Waiting for tool data…';
+    const button=(label,action)=>{const b=root.ownerDocument.createElement('button');b.type='button';b.textContent=label;b.onclick=async()=>{b.disabled=true;try{if(cancelled)throw new UIError('cancelled','This view is cancelled.');const result=await action();if(result?.isError)throw new UIError('host','Host declined the action.');}catch(error){status.textContent=error.message;}finally{b.disabled=false;}};toolbar.append(b);};
+    if(client.capabilities.downloadFile)button('Download UI source',()=>{if(!lastUI)throw new UIError('source','No UI source is available yet.');return client.downloadFile([{type:'resource',resource:{uri:'ui://vb6/intelligent-ui/source.dil',mimeType:'text/plain',text:lastUI.source}}]);});
+    for(const mode of client.context.availableDisplayModes||[])if(DISPLAY_MODES.includes(mode))button(mode==='pip'?'Float view':mode==='fullscreen'?'Full-screen view':'Inline view',()=>client.requestDisplayMode(mode));
+  }).catch(error=>{status.textContent=error.message;});
   return {client,get surface(){return surface;},ready,dispose(){observer?.disconnect();surface.dispose();client.dispose();}};
 }

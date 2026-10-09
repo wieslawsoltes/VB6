@@ -1,3 +1,4 @@
+import {contentSummary} from '../../packages/intelligent-ui/src/content.js';
 import {el, download, clone} from '../core/core.js';
 import {agentReviewPatch, restoreReviewedSource} from './changes.js';
 import {agentReviewHunks, restoreReviewedHunk} from './review-hunks.js';
@@ -42,10 +43,11 @@ export class AgentWorkbenchView {
     this.queueRemove = button('Remove selected message', () => this.act(() => { this.task.followups.remove(this.queueList.value); this.updateQueue(true); }));
     this.queueUp = button('Move up', () => this.act(() => { this.task.followups.move(this.queueList.value, -1); this.updateQueue(true); }));
     this.queueDown = button('Move down', () => this.act(() => { this.task.followups.move(this.queueList.value, 1); this.updateQueue(true); }));
+    this.queueAttachments=button('Remove attachments',()=>this.act(()=>{const item=this.task.followups.get(this.queueList.value);this.task.followups.removeAttachments(item.id,item.version);this.updateQueue(true);}));
     this.queueStatus = el('p', {role: 'status'});
     this.queueRoot = el('div', {class: 'agent-page agent-queue'},
       el('p', {}, 'Prepare follow-ups while the agent runs. The queue is local and memory-only; nothing sends automatically or changes the active request. Send selected message opens a fresh provider/budget/permission confirmation. Full IDE access must be acknowledged again.'),
-      this.queueStatus, this.queueList, el('div', {class: 'agent-actions'}, this.queueAdd, this.queueSend, this.queueEdit, this.queueRemove, this.queueUp, this.queueDown), this.queuePreview);
+      this.queueStatus, this.queueList, el('div', {class: 'agent-actions'}, this.queueAdd, this.queueSend, this.queueEdit, this.queueRemove, this.queueUp, this.queueDown, this.queueAttachments), this.queuePreview);
     return this.queueRoot;
   }
   queueDraft() {
@@ -58,10 +60,11 @@ export class AgentWorkbenchView {
   }
   queueSelection() {
     const item = this.task.followups.list().find(item => item.id === this.queueList.value);
-    const preview = item ? item.text.slice(0, 20000) + (item.text.length > 20000 ? '\n[Preview shortened; Edit displays the complete queued message.]' : '') : 'No queued message selected.';
+    const preview = item ? (item.content?'Reviewed attachments:\n'+contentSummary(item.content)+'\n\n':'')+item.text.slice(0, 20000) + (item.text.length > 20000 ? '\n[Preview shortened; Edit displays the complete queued message.]' : '') : 'No queued message selected.';
     if (this.queuePreview.textContent !== preview) this.queuePreview.textContent = preview;
     const disabled = !!this.panel.pending || !item;
     for (const node of [this.queueEdit, this.queueRemove, this.queueUp, this.queueDown]) node.disabled = disabled;
+    if(this.queueAttachments)this.queueAttachments.disabled=disabled||!item?.content?.length;
     const agent = this.task.agent;
     this.queueSend.disabled = disabled || agent.busy || !agent.matchesWorkspace() || item && !this.task.followups.inCurrentWorkspace(item) || !['new', 'completed'].includes(agent.state);
     const index = this.task.followups.list().indexOf(item);

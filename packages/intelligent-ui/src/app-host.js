@@ -31,7 +31,7 @@ export class McpAppHost {
     if(typeof html!=='string'||html.length>250000)throw new UIError('resource','App HTML exceeds 250,000 characters.');
     this.root=root;this.window=root.ownerDocument.defaultView;this.doc=root.ownerDocument;this.csp=normalizeAppCsp(csp);this.proxy=appProxyUrl(proxyUrl,this.window.location.origin,this.csp);this.html=html;
     this.callbacks={callTool,readResource,onMessage,onContext,openLink,downloadFile,approve,onError,onLog,onToolsChanged};this.contentTypes=[...contentTypes];this.context=boundedData(hostContext,16000);this.tools=new Map(tools.map(tool=>[tool.name,tool]));this.resourceUris=new Set(resourceUris);
-    this.pending=new Map();this.active=new Set();this.sequence=0;this.ready=false;this.initializing=false;this.disposed=false;this.inputSent=false;this.timeout=timeout;this.life=new AbortController();this.rate={start:Date.now(),count:0};
+    this.pending=new Map();this.active=new Map();this.sequence=0;this.ready=false;this.initializing=false;this.disposed=false;this.inputSent=false;this.timeout=timeout;this.life=new AbortController();this.rate={start:Date.now(),count:0};
     this.frame=this.doc.createElement('iframe');this.frame.title='Isolated MCP App';this.frame.setAttribute('sandbox','allow-scripts allow-same-origin');this.frame.referrerPolicy='no-referrer';this.frame.style.cssText='width:100%;height:400px;border:0';
     this.listener=event=>void this.receive(event);this.window.addEventListener('message',this.listener);root.append(this.frame);
     this.display=new AppDisplayController(root,this.frame,{available:displayModes,onChange:mode=>{this.context.displayMode=mode;if(!this.disposed)this.notify('ui/notifications/host-context-changed',{displayMode:mode});}});
@@ -40,7 +40,7 @@ export class McpAppHost {
   send(message) {if(this.disposed)throw new UIError('disposed','MCP App host is closed.');this.frame.contentWindow.postMessage(message,this.proxy.origin);}
   notify(method,params) {if(this.ready)this.send({jsonrpc:'2.0',method,params});}
   live() {this.life.signal.throwIfAborted();if(this.disposed)throw new UIError('disposed','MCP App host is closed.');}
-  async authorize(method,params) {this.live();if(this.approving)throw new UIError('busy','Another app action is awaiting approval.');this.approving=true;try{if(await this.callbacks.approve({method,params:boundedData(params,500000,{maxText:192000})},{signal:this.life.signal})!==true)throw new UIError('denied','The user declined this app action.');this.live();}finally{this.approving=false;}}
+  async authorize(method,params,signal=this.life.signal) {this.live();signal.throwIfAborted();if(this.approving)throw new UIError('busy','Another app action is awaiting approval.');this.approving=true;try{if(await this.callbacks.approve({method,params:boundedData(params,500000,{maxText:192000})},{signal})!==true)throw new UIError('denied','The user declined this app action.');this.live();signal.throwIfAborted();}finally{this.approving=false;}}
   error(error) {try{this.callbacks.onError(error);}catch{}}
   async receive(event) {
     if(this.disposed||event.source!==this.frame.contentWindow||event.origin!==this.proxy.origin)return;
@@ -51,9 +51,11 @@ export class McpAppHost {
       if(this.proxyReady)return;this.proxyReady=true;this.send({jsonrpc:'2.0',method:'ui/notifications/sandbox-resource-ready',params:{html:this.html,csp:this.csp}});return;
     }
     if(typeof m.method!=='string'||m.method.startsWith('ui/notifications/sandbox-'))return;
-    if(m.id===undefined&&!['ui/notifications/initialized','ui/notifications/size-changed','ui/notifications/request-teardown','notifications/message','notifications/tools/list_changed'].includes(m.method))return;
+    if(m.id===undefined&&!['ui/notifications/initialized','ui/notifications/size-changed','ui/notifications/request-teardown','notifications/message','notifications/tools/list_changed','notifications/cancelled'].includes(m.method))return;
     if(m.id!==undefined&&!(typeof m.id==='string'&&m.id.length<=128||typeof m.id==='number'&&Number.isSafeInteger(m.id)))return;
-    if(m.id!==undefined){if(this.active.has(m.id)||this.active.size>=16)return;this.active.add(m.id);}
+    if(m.method==='notifications/cancelled'&&m.id===undefined){this.active.get(m.params?.requestId)?.abort();return;}
+    const controller=new AbortController(),signal=AbortSignal.any([this.life.signal,controller.signal]);
+    if(m.id!==undefined){if(this.active.has(m.id)||this.active.size>=16)return;this.active.set(m.id,controller);}
     try {
       const p=m.params||{};if(!record(p))throw new UIError('arguments','Request parameters must be an object.');let result;
       if(m.method==='ui/initialize'){
@@ -72,28 +74,28 @@ export class McpAppHost {
           case 'notifications/tools/list_changed':if(this.appCapabilities?.tools?.listChanged)try{this.callbacks.onToolsChanged();}catch{}return;
           case 'tools/call':{
             const tool=this.tools.get(p.name);if(!tool||!(tool._meta?.ui?.visibility||['model','app']).includes('app')||!this.callbacks.callTool)throw new UIError('tool','Tool is not available to this app connection.');
-            if(!record(p.arguments||{}))throw new UIError('arguments','Tool arguments must be an object.');await this.authorize(m.method,p);result=await this.callbacks.callTool(p.name,p.arguments||{},{signal:this.life.signal});break;
+            if(!record(p.arguments||{}))throw new UIError('arguments','Tool arguments must be an object.');await this.authorize(m.method,p,signal);result=await this.callbacks.callTool(p.name,p.arguments||{},{signal});break;
           }
-          case 'resources/read':if(!this.resourceUris.has(p.uri)||!this.callbacks.readResource)throw new UIError('resource','Resource is not available to this app connection.');await this.authorize(m.method,p);result=await this.callbacks.readResource(p.uri,{signal:this.life.signal});break;
-          case 'ui/message':if(p.role!=='user'||!this.callbacks.onMessage)throw new UIError('message','App messages are not enabled.');p.content=normalizeContentBlocks(p.content,{types:this.contentTypes,allowEmpty:false});await this.authorize(m.method,p);result=callbackResult(await this.callbacks.onMessage(p,{signal:this.life.signal}));break;
-          case 'ui/update-model-context':if(!this.callbacks.onContext)throw new UIError('context','Context updates are not enabled.');const context=normalizeModelContext(p);if(context.content)normalizeContentBlocks(context.content,{types:this.contentTypes});await this.authorize(m.method,context);result=callbackResult(await this.callbacks.onContext(context,{signal:this.life.signal}));break;
-          case 'ui/open-link':if(!this.callbacks.openLink)throw new UIError('link','Opening links is not enabled.');p.url=safeUrl(p.url);await this.authorize(m.method,p);result=callbackResult(await this.callbacks.openLink(p.url,{signal:this.life.signal}));break;
-          case 'ui/download-file':if(!this.callbacks.downloadFile||!Array.isArray(p.contents)||p.contents.length>8)throw new UIError('download','Downloads are not enabled or exceed limits.');p.contents=normalizeContentBlocks(p.contents,{types:['resource','resource_link'],allowEmpty:false});for(const item of p.contents)if(item.type==='resource_link'&&!this.resourceUris.has(item.uri))throw new UIError('download','Unknown linked resource.');await this.authorize(m.method,p);result=callbackResult(await this.callbacks.downloadFile(p,{signal:this.life.signal}));break;
-          case 'ui/request-display-mode':if(!DISPLAY_MODES.includes(p.mode))throw new UIError('display','Unsupported display mode.');if(this.display.available.includes(p.mode)&&this.display.supported.includes(p.mode))await this.authorize(m.method,p);result={mode:this.setDisplayMode(p.mode)};break;
+          case 'resources/read':if(!this.resourceUris.has(p.uri)||!this.callbacks.readResource)throw new UIError('resource','Resource is not available to this app connection.');await this.authorize(m.method,p,signal);result=await this.callbacks.readResource(p.uri,{signal});break;
+          case 'ui/message':if(p.role!=='user'||!this.callbacks.onMessage)throw new UIError('message','App messages are not enabled.');p.content=normalizeContentBlocks(p.content,{types:this.contentTypes,allowEmpty:false});await this.authorize(m.method,p,signal);result=callbackResult(await this.callbacks.onMessage(p,{signal}));break;
+          case 'ui/update-model-context':if(!this.callbacks.onContext)throw new UIError('context','Context updates are not enabled.');const context=normalizeModelContext(p);if(context.content)normalizeContentBlocks(context.content,{types:this.contentTypes});await this.authorize(m.method,context,signal);result=callbackResult(await this.callbacks.onContext(context,{signal}));break;
+          case 'ui/open-link':if(!this.callbacks.openLink)throw new UIError('link','Opening links is not enabled.');p.url=safeUrl(p.url);await this.authorize(m.method,p,signal);result=callbackResult(await this.callbacks.openLink(p.url,{signal}));break;
+          case 'ui/download-file':if(!this.callbacks.downloadFile||!Array.isArray(p.contents)||p.contents.length>8)throw new UIError('download','Downloads are not enabled or exceed limits.');p.contents=normalizeContentBlocks(p.contents,{types:['resource','resource_link'],allowEmpty:false});for(const item of p.contents)if(item.type==='resource_link'&&!this.resourceUris.has(item.uri))throw new UIError('download','Unknown linked resource.');await this.authorize(m.method,p,signal);result=callbackResult(await this.callbacks.downloadFile(p,{signal}));break;
+          case 'ui/request-display-mode':if(!DISPLAY_MODES.includes(p.mode))throw new UIError('display','Unsupported display mode.');if(this.display.available.includes(p.mode)&&this.display.supported.includes(p.mode))await this.authorize(m.method,p,signal);result={mode:this.setDisplayMode(p.mode)};break;
           default:throw new UIError('method','Unsupported MCP App request.');
         }
       }
-      this.live();if(m.id!==undefined)this.send({jsonrpc:'2.0',id:m.id,result:boundedData(result||{},500000,{maxText:192000})});
+      this.live();signal.throwIfAborted();if(m.id!==undefined)this.send({jsonrpc:'2.0',id:m.id,result:boundedData(result||{},500000,{maxText:192000})});
     }catch(error){if(!this.disposed&&m.id!==undefined)this.send({jsonrpc:'2.0',id:m.id,error:{code:error.code==='method'?-32601:-32000,message:String(error.message||error).slice(0,2000)}});}
     finally{this.active.delete(m.id);}
   }
   setDisplayMode(mode){this.live();return this.display.set(mode);}
   updateHostContext(context){this.context={...this.context,...boundedData(context,16000)};this.notify('ui/notifications/host-context-changed',context);}
   setToolInput(args,{partial=false}={}){if(this.inputSent)throw new UIError('input','Final tool input has already been sent.');this.input=boundedData(args,200000);this.partial=partial;this.flush();}
-  setToolResult(result){this.result=boundedData(result,500000);this.flush();}
+  setToolResult(result){const clean=boundedData(result,500000,{maxText:192000});if(clean.content!==undefined)normalizeContentBlocks(clean.content);this.result=clean;this.flush();}
   flush(){if(!this.ready)return;if(this.input!==undefined&&!this.inputSent){this.notify(this.partial?'ui/notifications/tool-input-partial':'ui/notifications/tool-input',{arguments:this.input});if(!this.partial)this.inputSent=true;}if(this.result&&this.inputSent){this.notify('ui/notifications/tool-result',this.result);this.result=null;}}
   cancel(){this.notify('ui/notifications/tool-cancelled',{});this.life.abort();for(const pending of this.pending.values()){clearTimeout(pending.timer);pending.reject(new UIError('cancelled','App was cancelled.'));}this.pending.clear();}
-  request(method,params={}){if(!this.ready||this.disposed)return Promise.reject(new UIError('initialize','App is not initialized.'));if(this.pending.size>=16)return Promise.reject(new UIError('queue','Too many host requests.'));const id='host-'+(++this.sequence);return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);reject(new UIError('timeout','App request timed out.'));},this.timeout);this.pending.set(id,{resolve,reject,timer});try{this.live();this.send({jsonrpc:'2.0',id,method,params:boundedData(params)});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}});}
+  request(method,params={}){if(!this.ready||this.disposed)return Promise.reject(new UIError('initialize','App is not initialized.'));if(this.pending.size>=16)return Promise.reject(new UIError('queue','Too many host requests.'));const id='host-'+(++this.sequence);return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);this.notify('notifications/cancelled',{requestId:id,reason:'Host request timed out.'});reject(new UIError('timeout','App request timed out.'));},this.timeout);this.pending.set(id,{resolve,reject,timer});try{this.live();this.send({jsonrpc:'2.0',id,method,params:boundedData(params)});}catch(error){clearTimeout(timer);this.pending.delete(id);reject(error);}});}
   listAppTools(){if(!this.appCapabilities?.tools)return Promise.reject(new UIError('capability','This app does not expose tools.'));return this.request('tools/list');}
   callAppTool(name,args={}){if(!this.appCapabilities?.tools)return Promise.reject(new UIError('capability','This app does not expose tools.'));return this.request('tools/call',{name,arguments:args});}
   async teardown(){try{if(this.ready)await Promise.race([this.request('ui/resource-teardown',{}),new Promise(resolve=>setTimeout(resolve,300))]);}catch{}finally{this.dispose();}}

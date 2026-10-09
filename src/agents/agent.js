@@ -1,3 +1,5 @@
+import {UIModelContextStore, normalizeContentBlocks, contentSummary} from '../../packages/intelligent-ui/src/content.js';
+import {withReviewedUIContext} from './content.js';
 import {INTELLIGENT_UI_INSTRUCTIONS} from '../intelligent-ui/examples.js';
 import {toolCatalog, requestBody, responseCollector, appendTurn, userMessage, providerInfo, modelId, ProviderTransportError, ProviderOutputLimitError} from './providers.js';
 import {retryDelay, abortableDelay, AgentRunPause} from './recovery.js';
@@ -56,6 +58,7 @@ export class CodingAgent {
   reset() {
     if (this.busy) throw new Error('Stop the active agent before starting a new task.');
     this.adapter.intelligentUI?.service.revoke(this.sessionKey);
+    this.uiContexts = new UIModelContextStore(); this.uiContextEpoch = this.adapter.workspaceEpoch;
     this.thread = new AgentThread(); this.eventSequence = 0; this.requestId = ''; this.currentCallId = '';
     this.estimatedTokens = 0; this.unreportedRequests = 0; this.limits = normalizeAgentLimits();
     this.pendingTurn = null; this.limit = null; this.permissionSession = null;
@@ -67,7 +70,7 @@ export class CodingAgent {
   }
   compact(config = {}) { return this.run({...config, provider: this.provider, model: this.model, compactOnly: true, prompt: undefined}); }
   resume(config = {}) { return this.run({...config, provider: this.provider, model: this.model, continuation: true, prompt: undefined}); }
-  async run({provider, model, prompt, transport, mode = 'review', scopes = [], scopeRules = {}, toolRules = {}, approvalPolicy, permissionMinutes = 10, fullAccessConfirmed = false, maxTurns, maxCalls, maxTokens, tokenBudget, maxContextBytes, requestTimeoutMs, maxRetries, autoCompactTokens, contextWindowTokens, compactKeepTurns, compactOutputTokens, toolResultBytes, continuation = false, compactOnly = false} = {}) {
+  async run({provider, model, prompt, content = [], transport, mode = 'review', scopes = [], scopeRules = {}, toolRules = {}, approvalPolicy, permissionMinutes = 10, fullAccessConfirmed = false, maxTurns, maxCalls, maxTokens, tokenBudget, maxContextBytes, requestTimeoutMs, maxRetries, autoCompactTokens, contextWindowTokens, compactKeepTurns, compactOutputTokens, toolResultBytes, continuation = false, compactOnly = false} = {}) {
     if (this.busy || owners.has(this.adapter)) throw new Error('An agent is already running in this IDE.');
     if (this.blocked) throw new Error('Start a new task after a cancelled or failed run. Already applied edits remain in normal Undo history.');
     if (this.pendingTurn && !continuation && !compactOnly) throw new Error('Use Continue to review the deferred tool batch, or start a new task. No new prompt was sent.');
@@ -79,6 +82,12 @@ export class CodingAgent {
     if (permissionMinutes > this.permissionConstraints.maxMinutes) throw new Error('Permission duration exceeds the host limit.');
     if (mode === 'full' && fullAccessConfirmed !== true) throw new Error('Full IDE access requires explicit local confirmation for every run.');
     providerInfo(provider); model = modelId(model);
+    const reviewedContent=normalizeContentBlocks(content);
+    const initialMessage=!continuation&&!compactOnly?userMessage(provider,prompt,reviewedContent):null;
+    const contexts=!compactOnly&&this.uiContextEpoch===this.adapter.workspaceEpoch?this.uiContexts.snapshot():[];
+    // Preflight every attachment before permissions, public events, or transport calls.
+    if(!compactOnly)withReviewedUIContext(provider,[],contexts);
+    const buildRequest=(provider,model,history,definitions,instructions,output,summary=false)=>requestBody(provider,model,summary?history:withReviewedUIContext(provider,history,contexts),definitions,instructions,output);
     const config = normalizeAgentLimits({...this.limits, ...Object.fromEntries(Object.entries({maxTurns, maxCalls, maxTokens, tokenBudget, maxContextBytes, requestTimeoutMs, maxRetries, autoCompactTokens, contextWindowTokens, compactKeepTurns, compactOutputTokens, toolResultBytes}).filter(([, value]) => value !== undefined))});
     const outputTokenLimit = transport.capabilities?.outputTokenLimit !== false;
     const limits = {turns: config.maxTurns, calls: config.maxCalls, output: config.maxTokens, tokens: config.tokenBudget, context: config.maxContextBytes};
@@ -108,7 +117,7 @@ export class CodingAgent {
       const tools = this.tools.filter(tool => this.permissionSession.decision(tool.name).action !== 'deny');
       const catalog = toolCatalog(tools);
       if (!compactOnly) this.emit('run-start', 'Run started with freshly reviewed permissions.');
-      if (!continuation && !compactOnly) { this.goal ||= prompt; this.latestPrompt = prompt; this.history.push(userMessage(provider, prompt)); this.historyBytes = sizeOf(this.history); this.emit('user', prompt); }
+      if (!continuation && !compactOnly) { this.goal ||= prompt; this.latestPrompt = prompt; this.history.push(initialMessage); this.historyBytes = sizeOf(this.history); this.emit('user', prompt+(reviewedContent.length?'\n\nReviewed content:\n'+contentSummary(reviewedContent):'')); }
       else this.emit('resume', this.pendingTurn
         ? 'Continuing a validated deferred batch. It has not executed; original arguments and current permissions/revisions are checked.'
         : 'Continuing from completed tool results. No tool operation is replayed by the IDE.');
@@ -131,7 +140,7 @@ export class CodingAgent {
           if (this.retryAt >= this.permissionSession.expiresAt) throw new AgentRunPause('cooldown', 'The provider cooldown exceeds this run’s permission lease. Retry later; no permission was extended and no request was sent.');
           if (this.retryAt > Date.now()) { await this.wait(this.retryAt - Date.now(), signal); assertLive(); }
           this.retryAt = 0;
-          const body = requestBody(provider, model, history, definitions, instructions, attemptedOutput), bytes = sizeOf(body);
+          const body = buildRequest(provider, model, history, definitions, instructions, attemptedOutput, summary), bytes = sizeOf(body);
           if (config.contextWindowTokens && estimatedInputTokens(body) + attemptedOutput >= config.contextWindowTokens) throw new AgentRunPause('context', 'Estimated request plus output reserve reaches the configured model context window. Compact context, lower output, or correct the model window setting.');
           if (bytes > limits.context) throw new AgentRunPause('context', 'Request context byte limit reached. Compact context or review limits before Continue.', {required: bytes});
           turn++; this.usage.requests++; this.requestId = this.sessionKey + ':request:' + this.usage.requests;
@@ -164,7 +173,7 @@ export class CodingAgent {
         }
       };
       const compact = async instructions => {
-        const before = sizeOf(requestBody(provider, model, this.history, catalog.definitions, instructions, limits.output));
+        const before = sizeOf(buildRequest(provider, model, this.history, catalog.definitions, instructions, limits.output));
         if (!this.completeTurns.length) throw new AgentRunPause('context', 'No completed turn can be compacted safely. Review context/output limits or start a smaller task.', {required: before});
         // Use a smaller, public-only request, not an already overflowing native conversation.
         const summaryCap = Math.min(Math.floor(limits.context * 0.65), config.contextWindowTokens ? config.contextWindowTokens : 180000);
@@ -180,7 +189,7 @@ export class CodingAgent {
           throw new AgentRunPause('compaction', 'Checkpoint was empty, too large, or contained tools. It was not applied; original context is unchanged.');
         const candidates = compactedCandidates(provider, this.history, this.completeTurns, result.text.trim(), this, config.compactKeepTurns);
         const candidate = candidates.find(value => {
-          const body = requestBody(provider, model, value.history, catalog.definitions, instructions, limits.output);
+          const body = buildRequest(provider, model, value.history, catalog.definitions, instructions, limits.output);
           return sizeOf(body) < before - 256 && sizeOf(body) <= limits.context && (!config.contextWindowTokens || estimatedInputTokens(body) + limits.output < config.contextWindowTokens);
         });
         if (!candidate) throw new AgentRunPause('context', 'Compaction could not reduce this request enough. Original context is unchanged; lower output allowance or review context limits.', {required: before});
@@ -188,7 +197,7 @@ export class CodingAgent {
         // Atomic commit only after a complete, validated, tool-free reply. The public thread is untouched.
         this.history = candidate.history; this.completeTurns = candidate.turns; this.historyBytes = sizeOf(this.history);
         this.lastInputTokens = null; this.lastRequestBytes = 0; this.compactions++;
-        this.emit('compacted', 'Context compacted (' + this.compactions + '): ' + Math.ceil(before / 1024) + ' KiB request → ' + Math.ceil(sizeOf(requestBody(provider, model, this.history, catalog.definitions, instructions, limits.output)) / 1024) + ' KiB. User goal, latest request, checkpoint and recent complete turns retained. Prior usage and public transcript are unchanged; re-read live state before new edits.');
+        this.emit('compacted', 'Context compacted (' + this.compactions + '): ' + Math.ceil(before / 1024) + ' KiB request → ' + Math.ceil(sizeOf(buildRequest(provider, model, this.history, catalog.definitions, instructions, limits.output)) / 1024) + ' KiB. User goal, latest request, checkpoint and recent complete turns retained. Prior usage and public transcript are unchanged; re-read live state before new edits.');
       };
       while (this.pendingTurn || turn < limits.turns) {
         signal.throwIfAborted();
@@ -200,7 +209,7 @@ export class CodingAgent {
           // Reuse it without a network request or double-charging its reported usage.
           ({result, requestId: this.requestId} = this.pendingTurn);
         } else {
-          const body = requestBody(provider, model, this.history, catalog.definitions, instructions, limits.output);
+          const body = buildRequest(provider, model, this.history, catalog.definitions, instructions, limits.output);
           const estimate = estimatedInputTokens(body), measured = this.lastInputTokens == null ? estimate : this.lastInputTokens + Math.ceil(Math.max(0, sizeOf(body) - this.lastRequestBytes) / 3);
           const pressure = sizeOf(body) > limits.context || config.autoCompactTokens > 0 && Math.max(estimate, measured) >= config.autoCompactTokens || config.contextWindowTokens > 0 && Math.max(estimate, measured) + limits.output >= config.contextWindowTokens;
           if (compactOnly || config.autoCompactTokens > 0 && pressure && this.completeTurns.length) {
@@ -231,7 +240,7 @@ export class CodingAgent {
         const nextHistory = this.history.slice(); appendTurn(provider, nextHistory, result, []);
         // Reserve space for every result before the first operation. Never edit or
         // truncate provider-native signatures. A larger context cap can resume safely.
-        const baseBytes = sizeOf(requestBody(provider, model, nextHistory, catalog.definitions, instructions, limits.output));
+        const baseBytes = sizeOf(buildRequest(provider, model, nextHistory, catalog.definitions, instructions, limits.output));
         const required = baseBytes + 2048 + 2 * result.calls.length * (512 + 256);
         const resultBudget = Math.min(config.toolResultBytes, Math.floor((limits.context - baseBytes - 2048) / (2 * result.calls.length)) - 256);
         if (resultBudget < 512 && config.autoCompactTokens > 0 && this.completeTurns.length && !windowRecovery) { windowRecovery = true; await compact(instructions); continue; }
