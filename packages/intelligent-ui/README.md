@@ -150,8 +150,9 @@ The package includes both an **app-side client** and **connection-scoped host**.
 message source and origin, restricts app-visible tools and readable resource URIs
 to an explicit connection catalog, bounds requests, and requires an injected
 approval callback for actions. Unsupported methods fail explicitly. Inline and
-fullscreen are supported; picture-in-picture is not advertised. Optional trusted
-callbacks enable resource reads and downloads; app-exposed tools are available
+fullscreen and a movable/resizable in-window `pip` overlay are negotiated.
+PiP is not an OS always-on-top window. Trusted callbacks enable reviewed resource
+reads and staged downloads; app-exposed tools are available
 only after the app declares the capability. The default IDE does not grant raw
 AppBlocks project or tool access.
 
@@ -179,8 +180,10 @@ app.setToolResult(resultFromTool);
 app.dispose();
 ```
 
-CSP metadata permits exact HTTP(S) origins, plus WS(S) for connections; wildcard
-origins are deliberately rejected. The companion enforces restrictive response
+CSP metadata permits exact HTTP(S) origins, plus WS(S) for connections.
+`resourceDomains` alone accepts validated `https://*.subdomain.example` patterns.
+Global wildcards, wildcard IPs, wildcard connections/frames/base origins and
+directive injection are rejected; model source cannot choose CSP policy. The companion enforces restrictive response
 headers inherited by the inner frame and its allowed navigations. Treat the
 sandbox endpoint as trusted deployment code. Browser frame isolation does not
 promise that hostile arbitrary code cannot consume CPU or navigate its own frame.
@@ -247,3 +250,87 @@ The IDE includes a **Responsive dashboard** example. The catalog now exposes
 trusted named SVG icons, image `aspectRatio`/`objectFit` and rendered metric
 `change` text. Unknown icon names, CSS expressions and invalid ratios are rejected.
 Image aspect ratios do not grant permission to load external URLs.
+
+
+## Rich content, view context and downloads
+
+The public `normalizeContentBlocks` validator supports bounded MCP text, image,
+audio, embedded resources and resource links. Binary data requires canonical
+base64. Resource URIs are data, never implicit fetch requests. Use
+`renderContentPreview(root, blocks)` for local Blob-backed raster/audio previews;
+call the returned `dispose()` to release URLs. HTML/SVG resources remain text or
+binary descriptions, not active markup.
+
+`GenUI.sendMessage(blocks)` emits a `messageContent` intent, and
+`McpAppClient.sendMessage(blocks)` sends the corresponding MCP request. Both depend
+on the host's explicit review/delivery policy. `UIModelContextStore` stores the
+latest reviewed `{content, structuredContent}` per view, not an append-only queue.
+Hosts must clear it on owner/view revocation; the VB6 adapter does this and shows
+current context again before a confirmed provider run.
+
+```js
+import {UIModelContextStore, prepareDownloads} from '@vb6/intelligent-ui';
+const contexts = new UIModelContextStore();
+contexts.set('active-view', {structuredContent: {selected: 'module-1'}});
+contexts.set('active-view', {structuredContent: {selected: 'module-2'}});
+// Only module-2 is present. Include snapshots only under your send policy.
+const latest = contexts.snapshot();
+contexts.delete('active-view');
+
+// Invoke only after exact local approval. Links must be connection-allowlisted.
+const files = await prepareDownloads(request.contents, {
+  resourceUris: connectionResourceUris,
+  readResource: (uri, options) => connection.readResource(uri, options),
+  signal
+});
+// No files have been written by the library. Recheck authority before delivery.
+```
+
+Downloads stage all validated files before an embedder writes any. Batches are
+bounded to eight files and 256,000 decoded bytes; a linked response must match the
+requested URI. Cancelled app clients reject pending and future requests, discard
+late success responses and clean up even if teardown callbacks fail. Callback
+`isError` values propagate to callers rather than becoming false success.
+
+## App-exposed tools and floating views
+
+```js
+import {McpAppClient} from '@vb6/intelligent-ui';
+const app = new McpAppClient({
+  tools: [{name: 'selection', inputSchema: {type: 'object'}}],
+  onToolCall: async (name, args, {signal}) => {
+    signal.throwIfAborted();
+    return {content: [{type: 'text', text: currentSelection()}]};
+  }
+});
+await app.connect();
+await app.requestDisplayMode('pip'); // Must be negotiated; host reviews requests.
+```
+
+`setTools` changes the declared catalog and sends the list-changed notification.
+`McpAppHost.listAppTools()` / `callAppTool()` use the app's declared capability.
+There is no connection to arbitrary host functions. Tool callbacks must validate
+their declared argument semantics and observe cancellation. Display transitions
+keep the original iframe connected, preserve state, and provide keyboard movement
+and an inline-return control. PiP/fullscreen are host-window presentation modes.
+
+## Trusted reference-provider registry
+
+`UIReferenceProviders` accepts named host implementations with description and
+`resolve(query, {owner, signal})`. Resolution requires an explicit approval
+callback, bounded queries, concurrency limits and timeout. Registration never
+fetches a URL. Revocation/unregistration cancels in-flight work and discards late
+results. Resolved records must include provenance and pass `validateReference`.
+
+The VB6 adapter exposes registration through
+`vb6Studio.intelligentUI.extensions.registerReferenceProvider` and discovery /
+resolution through `vb6.ui.catalog` / `vb6.ui.resolveReference`. It does not supply
+third-party credentials or choose an external service automatically. Reference
+resolution and subsequent image-URL loading are separate approvals.
+
+The IDE provider adapters retain images/PDFs in native OpenAI, Anthropic and Gemini
+request shapes. Gemini supports its own image MIME set and audio formats; a format
+not supported by the selected adapter fails before sending. Neither protocol
+shape tests nor local preview promise compatibility with every provider model.
+See `docs/INTELLIGENT-UI.md` for the delivery matrix, ownership, resource readers
+and the distinction between local diagnostic and actual HTTP/two-origin tests.

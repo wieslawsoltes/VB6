@@ -1,3 +1,5 @@
+import {prepareDownloads} from '../../packages/intelligent-ui/src/content.js';
+import {readUIResource,readableUIResource} from './resources.js';
 import {pinUIActionContext} from './action-context.js';
 import {el} from '../core/core.js';
 import {modal} from '../ide/ui.js';
@@ -11,9 +13,9 @@ import {INTELLIGENT_UI_WORKER_SOURCE,INTELLIGENT_UI_MCP_HTML} from './payload.js
 export function createStudioUIExtensions(ide,host){
   const references=new UIReferenceStore(),apps=new Set(),listeners=new Set();
   let sandboxUrl='',appsEnabled=false,epoch=host.adapter.workspaceEpoch;
-  const notify=()=>{for(const app of apps)app.dispose();apps.clear();for(const listener of listeners)listener();};
+  const notify=()=>{if(!host.enabled)for(const task of host.conversations.tasks.values())task.agent.uiContexts.clear();for(const app of apps)app.dispose();apps.clear();for(const listener of listeners)listener();};
   host.onChange(notify);
-  host.adapter.onChange(()=>{if(epoch!==host.adapter.workspaceEpoch){epoch=host.adapter.workspaceEpoch;references.clear();notify();}});
+  host.adapter.onChange(()=>{if(epoch!==host.adapter.workspaceEpoch){epoch=host.adapter.workspaceEpoch;references.clear();for(const task of host.conversations.tasks.values())task.agent.uiContexts.clear();notify();}});
   const review=async(title,description,value,{signal}={})=>{
     signal?.throwIfAborted();const captured=host.adapter.workspaceEpoch;
     const allowed=await modal(title,{width:700,content:el('div',{},el('p',{},description),el('pre',{class:'agent-log',tabindex:0},value)),buttons:[{label:'Cancel',value:false,primary:true},{label:'Allow once',value:true}]});
@@ -26,7 +28,7 @@ export function createStudioUIExtensions(ide,host){
   };
   const proxy=()=>{if(!appsEnabled)throw new Error('Enable reviewed AppBlocks in Tools → Intelligent UI first.');return appProxyUrl(sandboxUrl,ide.root.ownerDocument.defaultView.location.origin).href;};
   const subscribeLifecycle=listener=>{listeners.add(listener);return()=>listeners.delete(listener);};
-  const api={references,get sandboxUrl(){return sandboxUrl;},get appsEnabled(){return appsEnabled;},
+  const api={references,registerReferenceProvider(name,provider){const off=[];try{for(const adapter of [host.adapter,ide.mcp.adapter])off.push(adapter.intelligentUI.referenceProviders.register(name,provider));}catch(error){for(const undo of off)undo();throw error;}return()=>{for(const undo of off)undo();};},get sandboxUrl(){return sandboxUrl;},get appsEnabled(){return appsEnabled;},
     configure({url='',enabled=false}={}){
       if(url)appProxyUrl(url,ide.root.ownerDocument.defaultView.location.origin);
       if(enabled&&!url)throw new Error('A separate-origin sandbox URL is required.');
@@ -51,19 +53,21 @@ export function createStudioUIExtensions(ide,host){
         })}
       };
     },
-    openMcpApp(root,adapter,owner,ui){
+    async openMcpApp(root,adapter,owner,ui){
       const url=proxy(),pinned=pinUIActionContext(host,{adapter,owner}),captured=pinned.epoch;let app;
       const live=()=>{pinned.assertLive();app?.live();if(!host.enabled||captured!==host.adapter.workspaceEpoch)throw new Error('App project context was revoked.');const current=adapter.intelligentUI.service.run('read',{id:ui.id},{principal:owner});if(current.ui.revision!==ui.revision)throw new Error('This app result is obsolete. Open the latest revision.');};live();
-      app=new McpAppHost(root,{proxyUrl:url,html:INTELLIGENT_UI_MCP_HTML,hostContext:context(),tools:adapter.enabled?adapter.tools:[],
+      const resourceUris=adapter.enabled?(await adapter.resources()).map(r=>r.uri).filter(readableUIResource):[];live();
+      const readResource=(uri,{signal}={})=>{live();return readUIResource(adapter,uri,pinned.transportContext(signal),resourceUris);};
+      app=new McpAppHost(root,{proxyUrl:url,html:INTELLIGENT_UI_MCP_HTML,hostContext:context(),resourceUris,readResource,downloadFile:async(p,{signal})=>{live();const files=await prepareDownloads(p.contents,{resourceUris,readResource,signal});live();signal?.throwIfAborted();for(const file of files){live();signal?.throwIfAborted();const win=root.ownerDocument.defaultView,url=win.URL.createObjectURL(new win.Blob([file.bytes],{type:file.mimeType})),a=root.ownerDocument.createElement('a');a.href=url;a.download=file.name;root.append(a);a.click();a.remove();win.setTimeout(()=>win.URL.revokeObjectURL(url),1000);}return {};},tools:adapter.enabled?adapter.tools:[],
         ...(adapter.enabled?{callTool:async(name,args,{signal})=>{live();const tool=adapter.tools.find(t=>t.name===name);if(!tool)throw new Error('Unknown connection tool.');const result=await tool.execute(args,pinned.transportContext(signal));return {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result};}}:{}),
         approve:async(action,options)=>{live();const allowed=await review('MCP App — Review request','Approve this exact request once. Normal IDE permissions, sharing and project revision checks still apply.',JSON.stringify(action,null,2),options);live();return allowed;},
-        onMessage:p=>{live();return host.action({type:'message',args:[p.content.map(c=>c.text).join('\n')]},{...pinned,origin:ui.title,assertLive:live});},
-        onContext:p=>{live();return host.action({type:'context',args:[p.structuredContent||{content:p.content}]},{...pinned,origin:ui.title,assertLive:live});},
-        openLink:url=>{live();return host.action({type:'link',args:[url]},{...pinned,origin:ui.title,assertLive:live});},
+        onMessage:(p,{signal})=>{live();return host.action(p.content.every(c=>c.type==='text')?{type:'message',args:[p.content.map(c=>c.text).join('\n')]}:{type:'messageContent',args:[p.content]},{...pinned,viewId:'tool:'+ui.id,signal,origin:ui.title,assertLive:live});},
+        onContext:(p,{signal})=>{live();return host.action({type:'context',args:[p]},{...pinned,viewId:'tool:'+ui.id,signal,origin:ui.title,assertLive:live});},
+        openLink:(url,{signal})=>{live();return host.action({type:'link',args:[url]},{...pinned,signal,origin:ui.title,assertLive:live});},
         onError:error=>{const p=root.ownerDocument.createElement('p');p.textContent=error.message;root.append(p);}
       });
-      const off=adapter.intelligentUI.onChange(event=>{if(event.owner===owner&&event.result.ui.id===ui.id){app.dispose();apps.delete(app);}}),dispose=app.dispose.bind(app);
-      app.dispose=()=>{off();apps.delete(app);dispose();};apps.add(app);app.setToolInput({source:ui.source,data:ui.data});app.setToolResult({content:[{type:'text',text:'Interactive UI result'}],structuredContent:{ui}});return app;
+      const offTask=host.onChange(()=>app.dispose()),off=adapter.intelligentUI.onChange(event=>{if(event.owner===owner&&event.result.ui.id===ui.id){app.dispose();apps.delete(app);}}),dispose=app.dispose.bind(app);
+      app.dispose=()=>{offTask();off();pinned.thread===host.conversations.tasks.get(pinned.taskId)?.agent.thread&&host.conversations.tasks.get(pinned.taskId).agent.uiContexts.delete('tool:'+ui.id);apps.delete(app);dispose();};apps.add(app);app.setToolInput({source:ui.source,data:ui.data});app.setToolResult({content:[{type:'text',text:'Interactive UI result'}],structuredContent:{ui}});return app;
     }
   };return api;
 }

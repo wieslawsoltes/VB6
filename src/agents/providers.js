@@ -1,3 +1,4 @@
+import {richUserMessage} from './content.js';
 import {validateChatGPTEvent} from './chatgpt-protocol.js';
 import {normalizeAgentLimits} from './limits.js';
 /** Native provider protocols. No SDK, remote script, credential persistence or arbitrary endpoints. */
@@ -188,7 +189,7 @@ export function requestBody(provider, model, history, definitions, instructions,
   if (provider === 'anthropic') return {model, system: instructions, messages: history, stream: true, ...(definitions.length ? {tool_choice: {type: 'auto', disable_parallel_tool_use: true}} : {}), max_tokens: maxTokens, tools: definitions.map(({parameters, ...tool}) => ({...tool, input_schema: parameters}))};
   return {model, systemInstruction: {parts: [{text: instructions}]}, contents: history, generationConfig: {maxOutputTokens: maxTokens}, ...(definitions.length ? {tools: [{functionDeclarations: definitions.map(({parameters, ...tool}) => ({...tool, parametersJsonSchema: parameters}))}]} : {})};
 }
-export function userMessage(provider, text) { return provider === 'google' ? {role: 'user', parts: [{text}]} : {role: 'user', content: text}; }
+export function userMessage(provider, text, content = []) { return richUserMessage(provider, text, content); }
 /** Preserve provider-native reasoning/signature blocks for tool continuations; display only public text. */
 export function responseCollector(provider, onText = () => {}) {
   let raw, finished = false, stop = '', usage = {}, googleParts = [], publicCharacters = 0;

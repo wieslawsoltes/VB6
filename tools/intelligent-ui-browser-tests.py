@@ -107,6 +107,40 @@ def ide_cases(browser, mode):
     check(page.locator('.agent-assistant input[type=range]').input_value() == '11', 'Task switching lost UI state')
     check(page.evaluate('JSON.stringify(vb6Studio.project)') == before, 'UI presentation mutated the VB6 project')
     passed(mode + ': task switching restores state without changing project data')
+    # Reviewed rich messages/context use the actual IDE modal and queue, no provider network.
+    page.evaluate("""()=>{window.richBytes='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA4QAAAAASUVORK5CYII=';window.richDone=false;vb6Studio.intelligentUI.action({type:'messageContent',args:[[{type:'text',text:'Review attached pixel'},{type:'image',mimeType:'image/png',data:richBytes}]]}).then(()=>richDone=true);} """)
+    page.get_by_role('button',name='Queue reviewed message',exact=True).wait_for()
+    check(page.locator('.iui-content-preview img').count()==1,'Review did not show the embedded image')
+    page.get_by_role('button',name='Queue reviewed message',exact=True).click()
+    page.wait_for_function('richDone')
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.followups.items.at(-1).content[1].data===richBytes'),'Queue changed attachment bytes')
+    passed(mode + ': reviewed rich content previews locally and retains exact queued bytes')
+    for number in [1,2]:
+        page.evaluate("""number=>{window.contextDone=false;vb6Studio.intelligentUI.action({type:'context',args:[{structuredContent:{selection:number}}]},{viewId:'browser-context'}).then(()=>contextDone=true);}""",number)
+        page.get_by_role('button',name='Replace reviewed context',exact=True).click()
+        page.wait_for_function('contextDone')
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.agent.uiContexts.snapshot().find(c=>c.id==="browser-context").structuredContent.selection')==2,'Model context did not replace the prior value')
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.followups.items.length')==2,'Context updates incorrectly appended follow-ups')
+    page.evaluate('vb6Studio.intelligentUI.open()')
+    page.get_by_role('button',name='Clear reviewed UI context',exact=True).click()
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.agent.uiContexts.entries.size')==0,'Clear context did not release view data')
+    passed(mode + ': latest-wins reviewed context stays separate from the message queue')
+    # Exercise actual confirmed queue delivery with a labelled protocol double.
+    # No provider connection is made, and the unsent composer draft must survive.
+    page.evaluate("""()=>{
+      const panel=vb6Studio.codingAgents.open(),task=vb6Studio.codingAgents.conversations.active;
+      panel.provider.value='openai';panel.connection.value='direct';panel.browserConsent.checked=true;
+      panel.model.value='fixture';panel.keyInput.value='test-only-unused';panel.mode.value='readonly';panel.profileChanged();
+      panel.prompt.value='Keep this unsent draft';task.draft=panel.prompt.value;window.deliveredBodies=[];
+      panel.transportFactory=()=>async(body,{receive})=>{deliveredBodies.push(body);receive({status:'completed',output:[],usage:{input_tokens:1,output_tokens:1}});};
+      window.sendDone=false;panel.start(false,false,task.followups.items.at(-1).id).then(()=>sendDone=true);
+    }""")
+    page.get_by_role('button',name='Start Task',exact=True).click()
+    page.wait_for_function('sendDone')
+    check(page.evaluate('deliveredBodies.length===1&&JSON.stringify(deliveredBodies[0]).includes(richBytes)'), 'Confirmed provider body lost attachment bytes')
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.followups.items.length')==1,'Sent attachment was not removed exactly once from Queue')
+    check(page.evaluate('vb6Studio.codingAgents.conversations.active.draft')=='Keep this unsent draft','Sending queued media erased the unsent draft')
+    passed(mode + ': confirmed rich queue delivery preserves bytes and draft with a protocol double')
     page.screenshot(path=str(REPORT / (mode + '-ide.png')))
     check(not page._errors, 'Uncaught IDE errors: ' + repr(page._errors))
     page.close()

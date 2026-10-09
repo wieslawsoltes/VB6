@@ -1,245 +1,260 @@
 # Intelligent UI in VB6 Studio Web
 
-## Use it
+## Start in the IDE
 
-Open **Tools > Intelligent UI** for the local source editor, reactive estimate,
-real VB6 control example, project-inventory example, and live tool-result gallery.
-The **Interactive agent UI** checkbox enables/disables rich assistant rendering.
-It is an in-memory preference; default is enabled. Turning it off releases the
-visible rich surfaces and shows ordinary source/Markdown without changing tasks.
+Open **Tools > Intelligent UI** for the source editor, reactive estimate, real
+VB6 controls, inspected project inventory, responsive dashboard, references and
+**Reviewed content and context** examples. The live gallery displays results
+created through MCP or the coding agent. **Interactive agent UI** is enabled by
+default; disabling it disposes running apps and clears reviewed view context.
+This preference, sandbox settings, tasks and approvals are memory-only.
 
-Open **AI Coding Agents** and ask for an interactive explanation, calculator,
-project dashboard, or a UI over inspected tool results. All configured providers
-share the same component/tool definitions. The agent may call `vb6.ui.present`
-or stream an explicitly labelled `vb6-ui`, `intelligent-ui`, or `dil` code fence.
-Only assistant messages and results from the three known UI-result tools receive
-interactive interpretation; user messages and ordinary code fences remain text.
+In **AI Coding Agents**, request an interactive explanation or dashboard over
+inspected project data. The agent can call `vb6.ui.present` or stream an explicit
+`vb6-ui`, `intelligent-ui`, or `dil` fence. Ordinary user messages and code fences
+are never interpreted as UI. Only assistant UI fences and the known UI-result
+tools receive rich rendering. Source, diagnostics and text fallback stay available.
 
-For example:
+Changing a slider, typing, selecting a tab or sorting/paging a table is local.
+It does not make a model request or change a project. `GenUI.issueNewTurn` and
+`GenUI.sendMessage` open local review and then enter **Queue**. Sending a queued
+item requires the agent's normal provider, budget and permission confirmation.
+The unsent composer draft is not sent or erased by queued-message delivery.
 
-> Read the current project and present a sortable module inventory and line-count
-> chart using Intelligent UI. Bind the actual project result; do not edit files.
-
-The UI keeps state locally. Moving a slider, editing a field, sorting/paging a
-table or changing a tab does not call a model or modify the project. Message,
-tool-request and context actions display an explicit local review and enter the
-existing task follow-up queue. They do not automatically send a prompt or execute
-a tool. Sending the queued message uses the agent's normal fresh permission flow.
-Copy actions use the clipboard; external links require local review.
-
-## Reusable layers
+## Independent layers
 
 | Layer | Source | Responsibility |
 |---|---|---|
-| Compiler and expression VM | `packages/intelligent-ui/src/{compiler,expression,safety}.js` | DIL-inspired source to inert JSON, partial-prefix recovery, diagnostics and bounds |
-| Reactive runtime | `packages/intelligent-ui/src/runtime.js` | Keyed state, callbacks, render operations, transactional failure and action intents |
-| DOM/Worker surface | `packages/intelligent-ui/src/{renderer,client,surface}.js` | Keyed DOM, accessible inputs, bounded composites, Worker watchdog, source/fallback views |
-| MCP service and app | `packages/intelligent-ui/src/{mcp,mcp-app}.js` | Connection-owned documents, inspected bindings, app-side MCP Apps lifecycle |
-| VB6 integration | `src/intelligent-ui/` | Existing controls, task-bound actions, rich conversation content, gallery and playground |
+| Compiler / interpreter | `packages/intelligent-ui/src/{compiler,expression,safety}.js` | Bounded DIL-inspired syntax, inert JSON, recovery and diagnostics |
+| Reactive runtime | `packages/intelligent-ui/src/runtime.js` | State, derived values, keyed loops/conditions, operations and action intents |
+| Renderer / surface | `packages/intelligent-ui/src/{renderer,client,surface}.js` | Keyed DOM, Worker watchdog, responsive sizing and source/fallback views |
+| MCP Apps | `packages/intelligent-ui/src/{mcp,mcp-app,app-host,sandbox,display-mode}.js` | Owner-bound documents, transport, separate-origin hosting and display modes |
+| Content / references | `packages/intelligent-ui/src/{content,content-view,references,reference-providers}.js` | Reviewed content, downloads, latest context and trusted provider adapters |
+| VB6 integration | `src/intelligent-ui/` and `src/agents/content.js` | Existing BrowserControl adapters, ownership checks, review, queue and provider messages |
 
-The independent package imports no VB6 IDE, runtime, browser control, LLM provider
-SDK, or third-party dependency. Its four `VB6*` components have standalone semantic
-fallbacks. The IDE supplies `BrowserControl` factories for CommandButton, TextBox,
-CheckBox and Label without attaching a VB VM. Controls never become project forms
-or mutate authored form models.
+The MIT `@vb6/intelligent-ui` package imports no IDE, VM, LLM provider SDK or
+external runtime dependency. Its `VB6Button`, `VB6TextBox`, `VB6CheckBox` and
+`VB6Label` have standalone semantic fallbacks; the IDE supplies factories using
+its actual CommandButton, TextBox, CheckBox and Label without attaching a VM.
+Rendering does not add controls to the authored project.
 
-`npm run build:intelligent-ui` builds the standalone JS, Worker, CSS and MCP HTML.
-`npm run pack:intelligent-ui` creates `dist/packages/vb6-intelligent-ui-0.1.0.tgz`,
-extracts it outside the repository, runs its standalone smoke test, and writes a
-SHA-256 sidecar. The package includes TypeScript declarations and a local demo.
-See `packages/intelligent-ui/README.md` for API and supported-language details.
+Build with `npm run build:intelligent-ui`; package with
+`npm run pack:intelligent-ui`. The latter creates a `.tgz` under `dist/packages`,
+extracts it outside the repository, runs the package smoke test, and emits a
+SHA-256 sidecar. The package includes ES modules, TypeScript declarations,
+standalone browser/Worker bundles, CSS, MCP App/proxy HTML and a local demo.
+
+## Language, updates and layout
+
+The compiler accepts Markdown, whitelisted tags/properties, interpolations,
+`{@body const ...}`, `DIL.useState`, derived expressions, conditionals and keyed
+loops. Expressions use a bounded subset, not arbitrary JavaScript. There are no
+ambient globals, network functions, imports, `eval` or dynamic constructors.
+Callbacks use expression-bodied arrows. Unknown syntax/properties are diagnosed.
+
+`UISurface.updateCompiled(document, options)` consumes the inert output of
+`compile(source)` without parsing source again. Its Source panel displays JSON.
+`UIRuntime.patch({constants, data, viewport}, expectedVersion)` and the equivalent
+`UIClient` request update existing string constants or replace data without
+recompilation. Unknown fields/constant keys and stale versions are rejected.
+Failed renders retain the previous program, state, handlers, viewport and tree.
+
+`DIL.useViewport()` returns container width and viewport height in CSS
+pixels. `DIL.useBreakpoint(name)` tests minimum width: sm=640, md=768, lg=1024,
+xl=1280. ResizeObserver updates are coalesced and preserve keyed edited controls.
+Set `responsive:false` and use `setViewport` for explicit host sizing. The
+headless default is 1024 by 768. `DIL.useAppData(selector)` reads bounded host
+JSON; `DIL.useConstants()` reads the current constant table.
+
+The catalog includes layout, text, forms, keyboard-accessible tabs, metrics,
+paginated sortable tables, SVG charts, trusted named SVG icons, and references.
+Images support validated `aspectRatio` / `objectFit`; neither grants permission
+to load a URL. `metric.change` is included in rendering and text fallback.
 
 ## MCP tools and ownership
 
-Six tools are installed by the same adapter helper as existing IDE tools:
+Seven UI tools use the existing permission-checked adapter:
 
 | Tool | Operation |
 |---|---|
-| `vb6.ui.catalog` | Exact component/property catalog and available inspected bindings |
-| `vb6.ui.present` | Create an ephemeral interactive result from source and data |
+| `vb6.ui.catalog` | Exact component/property catalog, captures and registered reference providers |
+| `vb6.ui.present` | Create a caller-owned ephemeral result |
 | `vb6.ui.update` | Replace source/data with `expectedUIRevision` |
-| `vb6.ui.read` | Read the caller's current document and revision |
-| `vb6.ui.list` | List only this caller's documents |
-| `vb6.ui.close` | Close a document with `expectedUIRevision` |
+| `vb6.ui.read` / `vb6.ui.list` | Read only that caller's documents |
+| `vb6.ui.close` | Close a document with the current UI revision |
+| `vb6.ui.resolveReference` | Request a configured trusted provider, with exact-query approval |
 
-These tools cannot modify or execute a VB6 project. They remain behind MCP sharing,
-input validation, cancellation, host ceilings and the coding agent's exact tool
-policy. They are classified as project-read-only display operations; creation and
-update are not advertised as idempotent. UI revision is deliberately separate from
-project revision, so presenting a view does not invalidate a proposed code edit.
+The first six are project-read-only display operations. `resolveReference` may
+contact an external provider and is marked open-world. Its exact query always
+needs local approval; **Never ask** denies it, and declining uses the agent's
+terminal permission-denied code. Presenting UI never grants project authority.
+UI revisions are separate from project edit revisions.
 
-`dataRefs` maps an alias to an exact inspected tool name, for example
-`{"project":"vb6.project.get"}`. Results are captured only after successful,
-permission-checked inspections of project inventory, module source, form model,
-compile diagnostics, workspace search or debugger snapshots. A connection cannot
-use another connection's captures. Each binding carries tool name, inspection
-revision and capture time. Display data may become stale; it is not a live claim
-about a subsequently edited project. Reinspect and update to refresh it.
+`dataRefs`, for example `{"project":"vb6.project.get"}`, refers to a successful
+inspection in the same authenticated connection. Project inventory, module
+source, form model, diagnostics, search and debugger snapshots can be captured.
+Provenance records the tool, capture time and revision. Captures can become stale;
+reinspect instead of claiming they are live data. Model-supplied `data.references`
+is not trusted provenance. `ui.references` is an immutable bounded host snapshot.
 
-Authentication comes from the transport's `principal` (or trusted local session
-key), never from model arguments or `clientInfo`. Bounds are 16 owners, 32 live
-documents globally, eight documents and eight captured results per owner.
-Workspace epoch changes clear documents and bindings, including reloading a
-project with the same ID. MCP principal revocation and sharing/server teardown
-clear external views. Coding-agent run completion revokes execution authority but
-retains its in-memory display; resetting/deleting the task releases its owner.
+Identity comes from the transport principal or trusted local agent session key,
+not model arguments or `clientInfo`. Workspace reloads (even the same project ID),
+sharing teardown and principal revocation release documents/bindings. A completed
+agent run revokes execution permission but can retain its display; resetting or
+deleting the task releases it. Each owner has bounded documents, captures and
+resolved references. Controls, gallery actions and app tools remain pinned to
+the original task, thread, workspace and displayed document revision.
 
-The standard result includes normal text plus `structuredContent.ui`. The tool
-metadata points at `ui://vb6/intelligent-ui`, served as
-`text/html;profile=mcp-app` with no external domains requested. Non-App MCP clients
-still receive text/JSON. The exported app handles `2026-01-26` initialization,
-partial/final input, tool results, theme/context changes, resize, messages,
-context updates, host-proxied tools, links, cancellation and teardown. This is an
-app-side integration plus a reusable connection-scoped host. The IDE gallery's
-**Open as MCP App** uses the same resource on a configured separate origin.
+## Reviewed media and model context
 
-## Enable isolated apps
+The MCP transport accepts bounded text, image, audio, embedded-resource and
+resource-link blocks. Binary data must be canonical base64. `renderContentPreview`
+shows supported embedded raster images/audio from local Blob URLs, revoking them
+on disposal. It never fetches resource links, interprets resource text as HTML,
+or renders SVG as active content. A format that the browser cannot preview still
+has a textual description; preview support is not provider delivery support.
 
-Declarative controls, charts and tables work without a server or sandbox setting.
-Arbitrary app code is a separate, explicitly enabled facility. Start the dedicated
-companion after building; its parent origin must match the IDE's actual origin:
+`GenUI.sendMessage(blocks)` and `McpAppClient.sendMessage(blocks)` preserve reviewed
+attachments in an immutable memory-only follow-up. **Queue** exposes a content
+summary and **Remove attachments**. Unsupported provider formats fail before a
+provider request; links remain descriptions unless explicitly read/downloaded.
+The provider adapters preserve bytes in the provider's native message shape:
+
+| Provider path | Implemented inline binary inputs |
+|---|---|
+| OpenAI Responses | PNG, JPEG, WebP, GIF (provider requires non-animated), PDF |
+| Anthropic Messages | PNG, JPEG, WebP, GIF, PDF |
+| Gemini GenerateContent | PNG, JPEG, WebP, HEIC, HEIF, PDF and supported audio MIME types |
+
+Gemini audio includes WAV, MP3/MPEG, AIFF, AAC, OGG, FLAC, M4A, L16, Opus, A-law,
+mu-law and WebM. `audio/x-wav` is normalized to `audio/wav` without changing bytes.
+Audio is not routed to an unsupported OpenAI Responses or Anthropic Messages
+format. Model-specific capability, content validity, limits and billing are still
+controlled by the provider. Tests use protocol doubles, not paid API requests.
+
+`GenUI.updateContext(data)` or `McpAppClient.updateModelContext({content,
+structuredContent})` opens **Replace reviewed context**. It replaces one owning
+view's snapshot; it does not create a follow-up or send a request. Empty context
+clears that view. The next confirmed run shows and snapshots the latest reviewed
+contexts; approval fails if they change during confirmation. Context is added to
+request construction without modifying signed/native history. Compaction omits
+binary bytes, retaining public text and attachment descriptions.
+
+View disposal, feature disable, task reset and workspace changes release context.
+**Clear reviewed UI context** clears the active task explicitly. In-flight app
+requests carry cancellation signals; closing/cancelling a view prevents pending
+approval from causing later effects. Cancelled clients reject pending and future
+requests, and late responses cannot revive them. Teardown cleans up transport even
+when an embedder's teardown callback fails, reporting that failure to the host.
+
+## Separate-origin apps and display modes
+
+Declarative UI needs no companion. Arbitrary HTML/JavaScript requires explicit
+sandbox configuration and approval of the exact app source. Serve the IDE over
+HTTP(S), then start the dedicated companion with its actual parent origin:
 
 ```sh
 npm run build
 VB6_UI_PARENT_ORIGIN=http://127.0.0.1:8080 npm run ui:sandbox
 ```
 
-Serve the IDE separately, for example with `npm run serve`, and use its actual
-reported port in `VB6_UI_PARENT_ORIGIN`. In **Tools > Intelligent UI**, set the
-sandbox URL to `http://127.0.0.1:47231/intelligent-ui-sandbox.html`, enable
-**reviewed AppBlocks**, then select **Apply sandbox settings**. Load the isolated
-counter example and choose **Run isolated app**; approval shows its source.
-**Stop app**, disabling the feature, changing sandbox configuration, unmounting,
-workspace reload and revocation dispose the app. Approval is invalidated by a
-changed source or host context; it never silently applies to a replacement app.
+Set **Separate-origin sandbox URL** to
+`http://127.0.0.1:47231/intelligent-ui-sandbox.html`, enable **reviewed AppBlocks**,
+and select **Apply sandbox settings**. The companion serves only proxy HTML with
+CSP headers; it has no project files, credentials, writable endpoints or general
+request proxy. A file-origin IDE cannot host arbitrary apps. HTTPS deployments
+may require a separate HTTPS sandbox because of browser mixed-content or local
+network policy. No browser protection is disabled by this feature.
 
-A file-origin IDE cannot host arbitrary apps; use HTTP(S). For GitHub Pages,
-deploy the sandbox on a separate HTTPS origin or use an explicitly supported
-loopback companion where the browser permits it. The URL setting is not a promise
-that HTTPS/private-network/browser policies will allow a local HTTP service.
-No browser protection is disabled or bypassed.
+`AppBlock` runs in an opaque inner iframe behind a different-origin proxy. It
+receives no direct project, tool, clipboard, camera, microphone or geolocation
+capability. Host theme variables reach the app without restarting it. Stop,
+unmount, setting changes and revocation release frames and pending actions.
+Browser isolation is not an OS network firewall or CPU-availability guarantee.
 
-The gallery's **Open as MCP App** renders a tool result using the real host/proxy
-pipeline. Only tools from its original connection may be exposed; each request
-requires approval and calls the existing permission-checked adapter. Obsolete UI
-revisions, workspace changes and owner revocation stop the app. The standalone
-host accepts explicit resource/download callbacks; the IDE does not enable them
-implicitly. Raw AppBlocks remain a more restricted lane without tools.
+The gallery's **Open as MCP App** renders `ui://vb6/intelligent-ui` using the same
+host/proxy pipeline. Tools/resources come only from the original connection and
+normal adapter permissions remain authoritative. App-visible tool filtering,
+notifications, result errors, cancellation and teardown are supported. A reusable
+`McpAppClient` can expose declared app-side tools with `setTools` / `onToolCall`;
+the host can list/call them and observe catalog changes.
 
-## Thread lifecycle and permissions
+Hosts and apps negotiate `inline`, `fullscreen` and `pip`. **Float MCP App** is
+a movable/resizable in-window overlay, not an OS always-on-top window. Keyboard
+movement, **Return app inline** and host Escape are supported. The top layer
+escapes MDI clipping where available without reparenting/reloading the iframe.
+App-requested mode changes need approval; trusted local gallery buttons do not.
 
-Thread views retain the original keyed message window, read position and expanded
-details. Each rich surface is tied to its originating task, thread and workspace
-epoch. Task switches and hidden/evicted entries dispose their DOM/Workers; bounded
-state snapshots are kept only under that in-memory thread. A reset, workspace
-change, stale document revision or task switch cannot redirect an old button into
-a new task. Rich UI toggle does not grant project/network/tool authority.
-Gallery MCP Apps use the original agent session key for permission-checked tool
-calls and pin follow-ups to their original task. App RPC requests await the actual
-host approval result; closing/cancelling an app while review is pending revokes
-the request before it can enter the follow-up queue.
+CSP permits exact HTTP(S) resource origins and WS(S) connection origins. A wildcard
+is accepted only as a validated `http(s)://*.subdomain.example` resource origin;
+global wildcards, wildcard IPs, connection/frame/base wildcards, credentials,
+paths and directive injection are rejected. Wildcards are never enabled by
+model source, and a configured host must explicitly supply its CSP policy.
 
-Model context and public presentation have independent limits. A large UI may be
-omitted from provider context while the bounded local tool result remains visible.
-The model still receives its document ID/revision. Normal tool context truncation
-and public-thread accounting remain in place. Exporting a transcript is an explicit
-user action and may include tool source/data; no automatic task/state persistence
-or secret storage was added.
+## Resource reads and downloads
 
-## Safety and compatibility boundaries
+The IDE's generated MCP App offers **Download UI source** when its host advertises
+that capability. Every request is reviewed. `prepareDownloads` stages the whole
+bounded batch before any download; a resource link must be in the connection
+allowlist and its response must match the exact requested URI. The IDE reads
+project, module source/form, diagnostics and debugger resources through existing
+permission-checked tools, never unrestricted URI fetch. Paged source reads pin
+revision and workspace, rejecting mixed-revision content.
 
-This is an original implementation inspired by an independent reverse-engineering
-article, not OpenAI's private compiler or a promise of exact DIL wire compatibility.
-It implements a documented bounded expression language rather than arbitrary
-JavaScript. Parsing is a full bounded prefix pass; streaming is coalesced, and
-rendering is keyed. It is not a claim of incremental-parser or GPU-renderer parity.
+Only after validation/approval does the IDE request browser downloads using local
+Blob URLs. Browser/user download policy still controls whether files are saved.
+Unknown resources, invalid base64, oversized batches, denial and cancellation
+cause no new download. Raw AppBlocks have no download callback by default.
 
-No model-chosen DOM tags, CSS, raw HTML, global objects, JavaScript constructors,
-network functions or prototype traversal enter the main document. Source, JSON,
-recursion, evaluation work, collections, aggregate render data, state, requests,
-worker lifetime, and composite DOM are bounded. Failures leave the last valid
-state/view; callbacks are never replayed automatically after failure.
+## Configure trusted reference providers
 
-`AppBlock` is inert by default. The IDE can run it only after a local user enables
-the separate-origin sandbox and approves that exact app source. The package's
-`McpAppHost` and proxy support a sandboxed intermediate origin and an opaque inner
-frame. The companion serves restrictive CSP response headers; a same-origin iframe
-is not accepted. Frame isolation is not an OS network firewall or a CPU-availability
-guarantee. Raw AppBlocks receive no direct project or tool capabilities.
+A host can register a real search/image/entity service using an adapter it owns:
 
-Trusted `UIReferenceStore` records and inspected MCP captures provide images,
-entities and citations. Each tool UI has a bounded, immutable `ui.references`
-snapshot with provenance, separate from model-supplied data. Image loading needs
-an explicit local per-URL approval or trusted embedder resource policy. This
-implementation does not fabricate search results, citations or generated images.
+```js
+const unregister = vb6Studio.intelligentUI.extensions.registerReferenceProvider(
+  'company-search', {
+    description: 'Search the configured company reference service',
+    resolve: (query, {signal}) => companyReferenceService.lookup(query, {signal})
+  }
+);
+// lookup must return a validated image/images/entity/citation with provenance.
+// Remove on host integration shutdown:
+unregister();
+```
 
-The generic MCP App host supports connection-allowlisted tools/resources, text
-messages/context, reviewed links, inline/fullscreen, cancellation and teardown.
-Download callbacks and app-exposed tools are optional standalone host APIs, not
-implicitly enabled IDE features. Picture-in-picture, wildcard CSP origins and
-non-text message modalities are rejected rather than falsely advertised.
+`companyReferenceService` is the embedding application's implementation, not a
+bundled service or a model-selected endpoint. Registration itself makes no request.
+The agent discovers providers through `vb6.ui.catalog`, resolves an approved query,
+and references the returned `host-ref-*` ID. Results are caller-private and copied
+into subsequent UI snapshots. Timeouts, cancellation, owner revocation and provider
+unregistration discard late results. Image loading separately requires URL review
+or an explicit trusted resource policy. There are no fabricated search results.
 
-The shipped layout is accessible DOM/CSS with SVG charts. The renderer-neutral
-operation API can drive other backends; this change does not claim a WebGPU widget
-renderer. Classic/Fluent/macOS/X11 IDE palette variables are inherited rather than
-hard-coding a separate application theme.
+## Validation and scope
 
-## Tests and build integration
+`npm run test:intelligent-ui` covers compiler/runtime bounds, streaming, state,
+MCP ownership, rich content, cancellation, downloads, contexts and provider shapes.
+`tools/intelligent-ui-browser-tests.py` defaults to real modular HTTP, standalone
+HTTP and file origins. Its explicit `--opaque` mode is a labelled local diagnostic,
+not an automatic fallback or replacement for deployment tests.
+`tools/intelligent-ui-host-browser-tests.py` requires real separate HTTP origins
+and response-header CSP. The Validate matrix runs both suites in Chromium,
+Firefox and WebKit, alongside the existing native/rendering gates. Package smoke,
+strict declarations and all generated-artifact fingerprints remain enforced.
 
-`npm run test:intelligent-ui` tests the core compiler/runtime, hostile expressions,
-stream recovery, state retention, custom catalogs, exact tool bindings, MCP owner
-isolation/revocation, revisions, cancellation, source/fallback handling, app
-lifecycle, and real coding-agent protocol flows for OpenAI, Anthropic and Google.
-These provider cases use protocol doubles; they do not use keys or paid APIs.
-
-`python tools/intelligent-ui-browser-tests.py` exercises HTTP modules, HTTP
-standalone and file standalone, then tests the independent package and an app-side
-MCP host double. `--opaque` is a clearly labelled DOM/Worker-only mode for managed
-browsers that block navigation. It is never selected automatically or used as a
-substitute for the default CI transport coverage. Reports and screenshots go to
-`reports/intelligent-ui/<browser>/`.
-
-The existing Validate workflow runs the full Node suite, the independent-package
-smoke test and default Intelligent UI browser tests. A new Chromium/Firefox/WebKit job matrix inside that same workflow runs both the
-ordinary HTTP/file suite and `tools/intelligent-ui-host-browser-tests.py`, which
-requires real HTTP origins, response-header CSP, opaque inner frames, actual
-AppBlock execution, exact action approvals, connection visibility, revocation,
-reference rendering and the IDE sandbox settings. There is no opaque-mode
-substitute for those host tests. No elevated permission, weaker threshold, or
-native-test skip was introduced. The existing
-artifact inventory now fingerprints the eleven generated library/Worker/style/MCP/sandbox
-outputs and payloads in addition to all prior IDE/runtime/sample artifacts.
+This is an original DIL-inspired language and versioned inert program format,
+not OpenAI's private compiler or private protocol. Default widgets are semantic
+DOM/CSS with SVG charts; this change does not claim a GPU widget renderer, a
+complete browser/OS sandbox, every provider model, or all possible external
+services. Unsupported syntax, resources, formats and capabilities fail explicitly.
+The advanced editor and WebGPU transcript changes on main are preserved.
 
 ## References
 
 - https://www.openui.com/blog/how-chatgpt-intelligent-ui-works
 - https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx
 - https://github.com/modelcontextprotocol/ext-apps/blob/main/src/spec.types.ts
-
-## Precompiled updates and responsive layouts
-
-`UISurface.updateCompiled(document, options)` accepts the inert result of
-`compile(source)` from a server or another process. It uses the same bounded
-runtime and Worker path without parsing source again. Its Source panel shows the
-compiled JSON. This is the library's own versioned JSON format, not executable
-JavaScript or OpenAI's private wire format.
-
-For lower-level integrations, `UIRuntime.patch({constants, data, viewport},
-expectedVersion)` and `UIClient.request('patch', {patch, version})` update existing
-string constants or replace bound data without recompiling. Unknown constant
-keys/fields and stale versions are rejected. A failed render restores the prior
-program, state, viewport, handlers and tree. Use `UIClient.request('apply',
-{document, options})` for a new compiled program; the host still reviews actions.
-
-`DIL.useViewport()` returns `{width, height}` in CSS pixels. In a surface, width
-is the measured container width and height is the browser viewport height.
-`DIL.useBreakpoint("md")` is a minimum-width test: sm=640, md=768, lg=1024,
-xl=1280. `UISurface` coalesces ResizeObserver updates and retains keyed controls
-and state; set `responsive:false` for explicit `setViewport({width,height})`
-control. `UIRuntime.resize` and the client's `resize` request use the compiled
-program without source parsing. The headless default is 1024 by 768.
-
-The IDE includes a **Responsive dashboard** example. The catalog now exposes
-trusted named SVG icons, image `aspectRatio`/`objectFit` and rendered metric
-`change` text. Unknown icon names, CSS expressions and invalid ratios are rejected.
-Image aspect ratios do not grant permission to load external URLs.
+- https://developers.openai.com/api/docs/guides/images-vision
+- https://platform.claude.com/docs/en/build-with-claude/vision
+- https://ai.google.dev/gemini-api/docs/image-understanding
+- https://ai.google.dev/gemini-api/docs/audio

@@ -1,3 +1,4 @@
+import {normalizeContentBlocks} from './content.js';
 import {normalizeViewport} from './viewport.js';
 import {UIError, boundedData, safeUrl} from './safety.js';
 import {createReferenceFactories} from './reference-renderer.js';
@@ -5,16 +6,17 @@ import {DOMRenderer} from './renderer.js';
 import {UIClient} from './client.js';
 
 export function normalizeAction(action){
-  const clean=boundedData(action,32000);if(!Array.isArray(clean.args))throw new UIError('action','Invalid UI action arguments.');
+  const clean=boundedData(action,500000,{maxText:192000});if(!Array.isArray(clean.args))throw new UIError('action','Invalid UI action arguments.');
   const first=clean.args[0];
   if(['message','copy','link','entity'].includes(clean.type)){if(typeof first!=='string'||!first.trim()||first.length>16000)throw new UIError('action','Action text must contain 1–16,000 characters.');if(clean.type==='link')clean.args[0]=safeUrl(first);}
   else if(clean.type==='tool'){if(typeof first!=='string'||!/^[A-Za-z0-9_.-]{1,128}$/.test(first)||!clean.args[1]||typeof clean.args[1]!=='object'||Array.isArray(clean.args[1]))throw new UIError('action','A tool action needs an exact name and argument object.');}
+  else if(clean.type==='messageContent')clean.args[0]=normalizeContentBlocks(first,{allowEmpty:false});
   else if(clean.type!=='context')throw new UIError('action','Unsupported UI action.');
   return clean;
 }
 export class UISurface {
-  constructor(root,{workerSource='',onAction=()=>{throw new UIError('action_denied','The host has not enabled this action.');},onUpdate=()=>{},snapshot,catalog,responsive=true,factories={},allowResource,resolveReference,approveResource,subscribeReferences}={}){
-    this.root=root;this.doc=root.ownerDocument;this.options={workerSource,onAction,onUpdate,catalog,factories,allowResource,resolveReference,approveResource,subscribeReferences};this.client=new UIClient({workerSource,window:this.doc.defaultView,snapshot,catalog});this.version=0;this.generation=0;this.eventQueue=Promise.resolve();this.referenceListeners=new Set();
+  constructor(root,{workerSource='',onAction=()=>{throw new UIError('action_denied','The host has not enabled this action.');},onUpdate=()=>{},onDispose=()=>{},snapshot,catalog,responsive=true,factories={},allowResource,resolveReference,approveResource,subscribeReferences}={}){
+    this.root=root;this.doc=root.ownerDocument;this.options={workerSource,onAction,onUpdate,onDispose,catalog,factories,allowResource,resolveReference,approveResource,subscribeReferences};this.client=new UIClient({workerSource,window:this.doc.defaultView,snapshot,catalog});this.version=0;this.generation=0;this.eventQueue=Promise.resolve();this.referenceListeners=new Set();
     const make=(tag,cls,text)=>{const n=this.doc.createElement(tag);n.className=cls;if(text)n.textContent=text;return n;};
     this.toolbar=make('div','iui-surface-toolbar');this.status=make('span','iui-status');this.status.setAttribute('role','status');this.sourceButton=make('button','','Source');this.sourceButton.type='button';this.sourceButton.onclick=()=>{this.source.hidden=!this.source.hidden;this.sourceButton.setAttribute('aria-expanded',String(!this.source.hidden));};this.fallbackButton=make('button','','Text fallback');this.fallbackButton.type='button';this.fallbackButton.onclick=()=>{this.fallback.hidden=!this.fallback.hidden;this.fallbackButton.setAttribute('aria-expanded',String(!this.fallback.hidden));};
     this.restartButton=make('button','','Restart view');this.restartButton.type='button';this.restartButton.onclick=()=>this.restart();this.toolbar.append(this.status,this.sourceButton,this.fallbackButton,this.restartButton);
@@ -79,5 +81,5 @@ export class UISurface {
   error(error){if(!this.disposed)this.status.textContent=error.message+' Last valid UI retained.';}
   snapshot(){return this.client.snapshot();}
   restart(){if(this.disposed)return;this.client.dispose();this.renderer.dispose();this.client=new UIClient({workerSource:this.options.workerSource,window:this.doc.defaultView,catalog:this.options.catalog});this.makeRenderer();this.generation++;this.version=0;if(this.latest)void this.enqueue(this.latest.method,this.latest.value,this.latest.options).catch(e=>this.error(e));}
-  dispose(){if(this.disposed)return;this.disposed=true;clearTimeout(this.timer);clearTimeout(this.resizeTimer);this.resizeObserver?.disconnect();this.client.dispose();this.renderer.dispose();this.pending?.reject(new UIError('disposed','UI surface is disposed.'));this.pending=null;this.root.replaceChildren();}
+  dispose(){if(this.disposed)return;this.disposed=true;clearTimeout(this.timer);clearTimeout(this.resizeTimer);this.resizeObserver?.disconnect();this.client.dispose();this.renderer.dispose();this.pending?.reject(new UIError('disposed','UI surface is disposed.'));this.pending=null;this.root.replaceChildren();try{this.options.onDispose();}catch{}}
 }
