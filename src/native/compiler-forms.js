@@ -77,7 +77,7 @@ export const nativeCompilerFormMethods={
       const clientInfo = this.slot('client-create:' + module.name,0); this.data.u32(30000); if (module.windowMenu) x.value(mem(module.windowMenu)).store(clientInfo);
       x.api('user32.dll','CreateWindowExW',[0,this.string('MDICLIENT'),this.string(''),0x50300000,0,0,width,height,mem(module.handle),1,mem('instance'),clientInfo]).test().branch('e','error:7').store(module.client);
     }
-    this.initializeNativeFormPictures(module);this.controls(module); x.value(1).store(module.loaded); this.initializeLayout(module); this.handler(module,prefix + 'Load');
+    this.initializeNativeFormPictures(module);this.initializeNativeSurface(module);this.controls(module); x.value(1).store(module.loaded); this.initializeLayout(module); this.handler(module,prefix + 'Load');
     x.label(done).value(mem(module.handle)).leave();
     this.emitNativeControlProcedures(module);
     this.windowProcedure(module,wnd,prefix); this.showProcedure(module);
@@ -114,6 +114,7 @@ export const nativeCompilerFormMethods={
     const x = this.x, fallback = x.unique(), zero = x.unique(), exit = x.unique(), close = x.unique(), destroy = x.unique(), command = x.unique(), timer = x.unique(), size = x.unique(), focus = x.unique();
     x.label(wnd).enter(64);this.enterCallbackBoundary(-12);
     x.value({argument:12}).compare(2).branch('e',destroy).compare(0x10).branch('e',close);
+    this.nativeSurfaceWindowMessages(module,fallback,zero,exit);
     this.nativeFormPictureMessage(module,fallback,exit);this.nativeControlPaintMessages(module,fallback,exit);
     x.value(mem(module.loaded)).test().branch('e',fallback);
     this.gridEditNotifications(module,zero,exit);this.gridNotificationMessages(module,zero,fallback);
@@ -148,7 +149,8 @@ export const nativeCompilerFormMethods={
     }
     this.handler(module,prefix + 'Unload',[{ref:-4}]); x.emit(0x83,0x7d,0xfc,0).branch('ne',zero);
     if(module.form.properties.MDIChild)x.api('user32.dll','SendMessageW',[mem(this.mdi.client),0x221,{argument:8},0]);else x.api('user32.dll','DestroyWindow',[{argument:8}]);x.jump(zero);
-    x.label(destroy).value(mem(module.handle)).test().branch('e',zero).value(0).store(module.handle).store(module.loaded).store(module.initialized).store(module.client).store(module.menu);
+    x.label(destroy);this.disposeNativeSurface(module);for(const control of module.controls.values())this.disposeNativeSurface(control);
+    x.value(mem(module.handle)).test().branch('e',zero).value(0).store(module.handle).store(module.loaded).store(module.initialized).store(module.client).store(module.menu);
     for (const control of module.controls.values()) x.store(control.handle);
     for(const variable of module.globals.values())if(key(variable.type)==='variant'&&!variable.nativeArray)this.clearVariantStorage({...variable,owner:null});
     this.disposeNativePictures(module);this.disposeNativeControls(module);

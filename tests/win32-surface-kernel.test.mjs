@@ -10,5 +10,5 @@ for(const optimization of [0,1,2])test(`standalone surface service compiles to d
  assert.equal(a.report.extraction,false);assert.equal(a.report.target,'win32-aot');
  for(const name of ['CreateDIBSection','BitBlt','SelectObject','DeleteObject','DeleteDC','SaveDC','RestoreDC'])assert.ok(a.report.imports.some(i=>i.symbol===name),name);
  const s=a.report.records.find(r=>r.name==='service.surface');
- assert.deepEqual(s.fields.map(f=>[f.name,f.offset]),[['hwnd',0],['dc',4],['bitmap',8],['original',12],['width',16],['height',20],['redraw',24],['scale',28],['back',32],['fore',36],['x',40],['y',48],['penWidth',56],['penStyle',60],['drawMode',64],['fillColor',68],['fillStyle',72],['pictureSlot',76],['font',80],['epoch',84]]);
+ assert.deepEqual(s.fields.map(f=>[f.name,f.offset]),[['hwnd',0],['dc',4],['bitmap',8],['original',12],['width',16],['height',20],['redraw',24],['scale',28],['back',32],['fore',36],['x',40],['y',48],['penWidth',56],['penStyle',60],['drawMode',64],['fillColor',68],['fillStyle',72],['pictureSlot',76],['font',80],['epoch',84],['painting',88]]);
 });

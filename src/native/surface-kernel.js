@@ -26,6 +26,7 @@ Private Type Surface
  pictureSlot As Long
  font As Long
  epoch As Long
+ painting As Long
 End Type
 Private Type RECT
  left As Long
@@ -176,6 +177,7 @@ Private Function SurfaceDC(s As Surface) As Long
   n=DeleteDC(dc)
   dc=0
  Else
+  If s.font<>0 Then n=SelectObject(dc,s.font)
   s.dc=dc
   s.original=original
   dc=0
@@ -225,6 +227,53 @@ Failed:
  code=Err.Number
 Cleanup:
  If saved<>0 Then n=RestoreDC(dc,saved)
+ If code<>0 Then Error code
+End Sub
+Private Function SurfaceExtent(s As Surface, ByVal axis As Long) As Double
+ Dim bounds As RECT,value As Long
+ If s.hwnd=0 Then Error 91
+ If GetClientRect(s.hwnd,bounds)=0 Then Error 5
+ If axis=0 Then value=bounds.right Else value=bounds.bottom
+ If s.scale=1 Then value=value*15
+ SurfaceExtent=value
+End Function
+Private Sub SurfaceRedraw(s As Surface, ByVal value As Boolean)
+ Dim replacement As Surface,dc As Long,n As Long
+ If s.redraw=value Then Exit Sub
+ replacement=s
+ replacement.dc=0
+ replacement.bitmap=0
+ replacement.original=0
+ replacement.width=0
+ replacement.height=0
+ replacement.redraw=value
+ dc=SurfaceDC(replacement)
+ SurfaceRelease s
+ s=replacement
+ n=InvalidateRect(s.hwnd,0,0)
+End Sub
+Private Type PAINTSTRUCT
+ dc As Long
+ erase As Long
+ bounds As RECT
+ restore As Long
+ update As Long
+ reserved(0 To 31) As Byte
+End Type
+Private Declare Function BeginPaint Lib "user32" (ByVal hwnd As Long,paint As PAINTSTRUCT) As Long
+Private Declare Function EndPaint Lib "user32" (ByVal hwnd As Long,paint As PAINTSTRUCT) As Long
+Private Sub SurfaceWindowPaint(s As Surface)
+ Dim paint As PAINTSTRUCT,dc As Long,n As Long,code As Long,hwnd As Long
+ hwnd=s.hwnd
+ dc=BeginPaint(hwnd,paint)
+ If dc=0 Then Exit Sub
+ On Error GoTo Failed
+ SurfacePaint s,dc
+ GoTo Cleanup
+Failed:
+ code=Err.Number
+Cleanup:
+ n=EndPaint(hwnd,paint)
  If code<>0 Then Error code
 End Sub
 `;

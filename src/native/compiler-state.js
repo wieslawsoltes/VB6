@@ -59,7 +59,9 @@ export const nativeCompilerStateMethods={
       if (model.type === 'Timer') { control.interval = this.slot('timer-interval:' + module.name + ':' + controlKey,Number(model.properties.Interval) || 0); control.enabled = this.slot('timer-enabled:' + module.name + ':' + controlKey,model.properties.Enabled === 0 ? 0 : -1); }
       control.key=controlKey;this.registerNativeControl(result,control);this.prepareNativeControl(control);
     }
-    const supported = new Set(['load','initialize','activate','deactivate','resize','queryunload','unload']);
+    const supported = new Set(['load','initialize','activate','deactivate','resize','queryunload','unload','paint']);
+    if(result.procedures.has('form_paint'))this.requireNativeSurface(result);
+    for(const control of result.controls.values())if(control.model.type==='PictureBox'&&result.procedures.has(key(control.model.name)+'_paint'))this.requireNativeSurface(control);
     for (const context of result.procedures.values()) {
       const name = key(context.proc.name), match = name.match(/^(?:mdi)?form_(.*)$/);
       if (match && !supported.has(match[1])) this.fail('Native form event is not yet routed: ' + context.proc.name,module);
@@ -71,6 +73,7 @@ export const nativeCompilerStateMethods={
     }
   },
   variable(node, context = this.context) {
+    if(node.kind==='nativeVariable')return node.variable;
     const gridState=this.gridStateVariable(node,context);if(gridState)return gridState;
     if(node.kind==='with')return this.nativeWithBinding().record||null;
     const record=this.recordMember(node,context);if(record)return record;

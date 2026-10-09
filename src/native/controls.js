@@ -115,7 +115,7 @@ export const nativeControlMethods={
         send(0x130c,Number(p.Tab??0));
       }
       if(NATIVE_DATE_CONTROLS.has(type)){send(type==='DTPicker'?0x1002:0x1002,0,control.dateSeed);if(type==='DTPicker'&&p.CustomFormat)send(0x1032,0,this.string(p.CustomFormat));}
-      this.initializeNativeGrid(control);this.initializeNativeChart(control);this.initializeNativeControlPictures(control);this.createNativeControlCollections(control);this.createNativeFileControl(control);this.initializeNativeRichText(control);
+      this.initializeNativeGrid(control);this.initializeNativeChart(control);this.initializeNativeControlPictures(control);this.initializeNativeSurface(control);this.createNativeControlCollections(control);this.createNativeFileControl(control);this.initializeNativeRichText(control);
       if(control.tooltip)this.createNativeTooltip(module,control);
     }
     this.initializeNativeImageBindings(module);

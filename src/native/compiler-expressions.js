@@ -7,6 +7,8 @@ export const nativeCompilerExpressionMethods={
     const type=this.computeNativeType(node);this.typeCache?.set(node,type);return type;
   },
   computeNativeType(node) {
+    if(node.kind==='nativeKernelValue')return 'long';
+    const surfaceType=this.nativeSurfaceType(node);if(surfaceType)return surfaceType;
     const variantType=this.variantType(node);if(variantType)return variantType;
     const stringType=this.stringLibraryType(node);if(stringType)return stringType;
     const layoutType=this.layoutType(node);if(layoutType)return layoutType;
@@ -38,6 +40,8 @@ export const nativeCompilerExpressionMethods={
   textExpression(node) { if(this.type(node)==='variant'){this.expression(node);this.unboxVariant('string');this.stringPointer();return;} this.expression(node); if(this.type(node)==='date'){this.dateToString();}else if(this.type(node)==='currency'){this.currencyToString();}else if(REAL_TYPES.has(this.type(node))){this.floatToString(this.type(node));}else if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); },
   expression(node) {
     if (!node) this.fail('Missing expression'); const x = this.x;
+    if(node.kind==='nativeKernelValue'){x.value(node.value);return;}
+    if(node.kind==='id'&&this.context?.module.form&&!this.variable(node)&&!this.resolveProcedure(node)&&this.getNativeSurfaceProperty(this.context.module,key(node.name)))return;
     if(this.variantOperation(node))return;
     if(this.layoutExpression(node)||this.gridExpression(node)||this.chartExpression(node))return;
     const bound=this.nativeConstant(node);if(bound)return this.emitNativeConstant(bound);
@@ -85,6 +89,7 @@ export const nativeCompilerExpressionMethods={
     if (!object) this.fail('Unknown native object'); const x = this.x;
     this.withGuard(object.nativeWithActive);
     if(this.controlArrayProperty(object,property))return;
+    if(this.getNativeSurfaceProperty(object,property))return;
     if(this.getLayoutProperty(object,property))return;
     if(this.getNativeControlProperty(object,property))return;
     if (property === 'hwnd') { if (object.model?.type === 'Timer') this.fail('Timer has no hWnd'); this.handle(object); return; }
@@ -103,6 +108,7 @@ export const nativeCompilerExpressionMethods={
   },
   setProperty(object, property, expr) {
     if (!object) this.fail('Unknown native assignment target'); const x = this.x;
+    if(this.setNativeSurfaceProperty(object,property,expr))return;
     this.ensure(object);
     if(this.setLayoutProperty(object,property,expr))return;
     if(this.setNativeControlProperty(object,property,expr))return;
@@ -120,6 +126,7 @@ export const nativeCompilerExpressionMethods={
     if(this.nativePictureBuiltin(node,name))return;
     if(this.layoutHostCall(node,name))return;
     if(this.errorCall(node))return;
+    if(node.callee.kind==='id'&&!this.resolveProcedure(node.callee)&&this.context?.module.form&&this.nativeSurfaceMethod(this.context.module,name,args))return;
     if(this.dateIntervalBuiltin(node,name))return;
     if(this.dateBuiltin(node,name))return;
     if(this.currencyBuiltin(node,name))return;
@@ -145,7 +152,7 @@ export const nativeCompilerExpressionMethods={
       const object = this.object(node.callee.object), method = key(node.callee.name);
       if (object) {
         if(this.layoutMethod(object,method,args))return;
-        if(this.nativeControlMethod(object,method,args))return;
+        if(this.nativeSurfaceMethod(object,method,args)||this.nativeControlMethod(object,method,args))return;
         if (['show','hide','setfocus','additem','clear','removeitem'].includes(method)) this.ensure(object);
         if (method === 'show' && object.form) {
           if(args.length>2)this.fail('Native Show expects mode and optional owner');

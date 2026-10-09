@@ -50,7 +50,7 @@ export const nativeControlEventMethods={
         if(event.startsWith('key'))x.value(arg(-20)).emit(0x25).imm(65535).test().branch('e',zero).emit(0x89,0x45,16);
         x.jump(fallback).label(next);
       }
-      x.label(fallback);const nativeFallback=x.unique();this.gridWindowMessages(control,zero,exit,nativeFallback);x.label(nativeFallback);const chartFallback=x.unique();this.chartWindowMessages(control,zero,exit,chartFallback);x.label(chartFallback).api('user32.dll','CallWindowProcW',[mem(control.oldProcedure),arg(8),arg(12),arg(16),arg(20)]).jump(exit);
+      x.label(fallback);this.nativeSurfaceWindowMessages(control,null,zero,exit);const nativeFallback=x.unique();this.gridWindowMessages(control,zero,exit,nativeFallback);x.label(nativeFallback);const chartFallback=x.unique();this.chartWindowMessages(control,zero,exit,chartFallback);x.label(chartFallback).api('user32.dll','CallWindowProcW',[mem(control.oldProcedure),arg(8),arg(12),arg(16),arg(20)]).jump(exit);
       x.label(forward).api('user32.dll','SendMessageW',[mem(module.handle),arg(12),arg(16),arg(20)]).jump(exit);
       x.label(zero).value(0).label(exit);this.leaveCallbackBoundary(-12);x.leave(16);
     }
