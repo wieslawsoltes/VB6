@@ -1,3 +1,4 @@
+import {guardLinkedEditingCancellation} from './monaco-compat.js';
 import {fromRange} from './protocol-converters.js';
 import {el} from '../../core/core.js';
 import {modal} from '../../ide/ui.js';
@@ -44,6 +45,7 @@ export class PeekPanel {
       onDomNodeTop:top=>{this.top=top;this.layout();},onComputedHeight:height=>{this.height=height;this.layout();}});});
     this.layoutListener=this.origin.onDidLayoutChange(()=>this.layout());
     this.preview=this.monaco.editor.create(preview,{model:null,theme:'vb6-advanced',readOnly:true,domReadOnly:true,automaticLayout:true,minimap:{enabled:false},lineNumbers:'on',scrollBeyondLastLine:false,fontSize:this.runtime.ide.appearance.editorSize||13,fontFamily:this.runtime.ide.appearance.editorFont||'monospace',codeLens:false,inlayHints:{enabled:'off'},contextmenu:false,editContext:false});
+    guardLinkedEditingCancellation(this.preview,error=>this.runtime.report(error));
     this.list.addEventListener('scroll',()=>this.render());
     this.root.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();this.dispose();}else if(e.target===this.list&&['ArrowDown','ArrowUp','Enter'].includes(e.key)){e.preventDefault();if(e.key==='Enter')this.open();else this.select(this.index+(e.key==='ArrowDown'?1:-1));}});
     this.layout();this.select(0);this.list.focus();

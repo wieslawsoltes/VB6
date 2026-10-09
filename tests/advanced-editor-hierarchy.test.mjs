@@ -54,3 +54,11 @@ test('hierarchy queries do not execute source and already-cancelled traversal is
   const {client,at}=await workspace(t,[math,main]);const [item]=await client.request('textDocument/prepareCallHierarchy',at('Main','Run'));
   const abort=new AbortController();abort.abort();await assert.rejects(client.request('callHierarchy/outgoingCalls',{item},{signal:abort.signal}),{code:-32800});
 });
+
+test('colon-separated procedure bodies are calls, qualified AddressOf is not',async t=>{
+  const module={id:'main',name:'Main',kind:'module',code:'Public Sub Run(): Call Add(1): End Sub\nPublic Sub Register()\n  Dim callback As Long\n  callback = AddressOf Math.Add\nEnd Sub\n'};
+  const {client,at}=await workspace(t,[math,module]);
+  const [item]=await client.request('textDocument/prepareCallHierarchy',at('Math','Add'));
+  const calls=await client.request('callHierarchy/incomingCalls',{item});
+  assert.deepEqual(calls.map(x=>x.from.name).sort(),['Add','Run']);
+});

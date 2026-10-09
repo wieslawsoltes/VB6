@@ -1,3 +1,4 @@
+import {guardLinkedEditingCancellation} from './monaco-compat.js';
 import {chooseSnippet,navigateLanguageLocation} from './navigation.js';
 import {fromDiagnostic,fromRange} from './protocol-converters.js';
 import {textChange} from '../projection.js';
@@ -33,6 +34,7 @@ export class AdvancedSurface {
       accessibilitySupport:'auto',ariaLabel:this.xaml?'XAML source (advanced)':'Visual Basic source (advanced)',contextmenu:true,mouseWheelZoom:true,renderControlCharacters:true,editContext:false,
       unicodeHighlight:{ambiguousCharacters:true,invisibleCharacters:true},padding:{top:5,bottom:5},largeFileOptimizations:true});
     const view=this.view,state={view,pane,disposables:[],decorations:view.createDecorationsCollection()};this.views.push(state);
+    guardLinkedEditingCancellation(view,error=>this.runtime.report(error));
     const viewDisposables=state.disposables;
     const activate=()=>{if(this.view!==view){this.peek?.dispose(false);this.view=view;}this.runtime.lastActive=this;};
     viewDisposables.push(view.onDidChangeCursorSelection(()=>{if(this.view===view)this.cursorChanged();}));

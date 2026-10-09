@@ -7,7 +7,7 @@ import {JsonRpcPeer,messagePortTransport} from '../src/editor/advanced/rpc.js';
 const tick=()=>new Promise(resolve=>setTimeout(resolve,1));
 async function until(predicate){const deadline=Date.now()+2500;while(!predicate()){if(Date.now()>deadline)assert.fail('Timed out waiting for editor lifecycle.');await tick();}}
 const disposable=()=>({dispose(){}});
-function monacoStub(){return {Uri:{parse:value=>value},languages:{getLanguages:()=>[],register:disposable,setMonarchTokensProvider:disposable,setLanguageConfiguration:disposable},editor:{registerCommand:disposable,getModel:()=>null,getModels:()=>[]}};}
+function monacoStub(){return {Uri:{parse:value=>value},languages:{getLanguages:()=>[],register:disposable,registerHoverProvider:disposable,setMonarchTokensProvider:disposable,setLanguageConfiguration:disposable},editor:{registerCommand:disposable,getModel:()=>null,getModels:()=>[]}};}
 
 class Socket extends EventTarget {
   static instances=[];
@@ -52,4 +52,11 @@ test('runtime owns external pull diagnostics, raw code-action markers and discon
   runtime.clients.vb6.close('vb6-editor://workspace/test/vb6');assert.equal(runtime.diagnosticValues.get(runtime.clients.vb6).size,0);
   Socket.instances[1].close();assert.equal(runtime.diagnosticValues.get(runtime.clients.xaml).size,0);
   runtime.dispose();assert.ok(Socket.instances.every(s=>s.readyState===3));assert.equal(runtime.sessions.size,0);
+});
+
+test('unfocused editor commands target the active document before navigation history',()=>{
+  const a={record:{moduleId:'a'},view:{hasTextFocus:()=>false,hasWidgetFocus:()=>false}},b={record:{moduleId:'b'},view:{hasTextFocus:()=>false,hasWidgetFocus:()=>false}};
+  const runtime=new AdvancedEditorRuntime({documents:{mdi:{active:'b:code'}}},{},{});
+  runtime.surfaces.set('a',a);runtime.surfaces.set('b',b);runtime.lastActive=a;
+  assert.equal(runtime.active(),b);runtime.ide.documents.mdi.active='tool:advanced:call';assert.equal(runtime.active(),a);
 });

@@ -32,7 +32,8 @@ export class SourceHierarchy {
       const symbols=server.intelligence.index(module,server.project),entry={module,uri,document,symbols};index.modules.set(module.id,entry);
       for(const symbol of symbols.procedures) {
         if(!callable(symbol)||symbol.external)continue;
-        index.procedures.set(procedureKey(symbol),{...entry,symbol});
+        const declaration=symbols.statements.find(statement=>statement.start===symbol.offset);
+        index.procedures.set(procedureKey(symbol),{...entry,symbol,declarationEnd:declaration?.end??document.lineEnds[symbol.line-1]});
         if(index.procedures.size>20000)throw new RpcError(-32602,'More than 20,000 procedures; narrow the hierarchy workspace.');
       }
       if(module.kind==='class'||module.form)index.types.set(module.id,entry);
@@ -86,11 +87,11 @@ export class SourceHierarchy {
         let lo=0,hi=procedures.length;
         while(lo<hi){const mid=(lo+hi)>>>1;if(procedures[mid].symbol.offset<=token.start)lo=mid+1;else hi=mid;}
         const from=procedures[lo-1];if(!from||token.start>=from.symbol.endOffset)continue;
-        if(token.line+1===from.symbol.line)continue;
+        if(token.start<from.declarationEnd)continue;
         const symbol=server.intelligence.definition(project,module,token.line+1,document.text,token.start+Math.min(1,token.end-token.start)),to=this.procedure(symbol,index);
         if(!to)continue;
         const prefix=document.text.slice(document.lineStarts[token.line],token.start),suffix=document.text.slice(token.end,document.lineEnds[token.line]);
-        if(/\bAddressOf\s*$/i.test(prefix))continue;
+        if(/\bAddressOf\s+(?:[\p{L}_][\p{L}\p{N}_]*\s*\.\s*)*$/iu.test(prefix))continue;
         // Function-name assignment/reads denote its return variable, not a
         // recursive invocation. Parenthesized or explicit Call uses are calls.
         if(to===from&&symbol.kind==='function'&&!/^\s*\(/.test(suffix)&&!/(?:^|:)\s*Call\s*$/i.test(prefix))continue;

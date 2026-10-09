@@ -31,17 +31,17 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         cls.browser.close();cls.pw.stop();cls.server.shutdown();cls.server.server_close()
         (REPORT/'results.json').write_text(json.dumps({'browser':ENGINE,'transport':TRANSPORT,'results':cls.results},indent=2))
     def setUp(self):
-        self.started=time.perf_counter();self.errors=[];self.requests=[];self.passed=False
+        self.started=time.perf_counter();self.errors=[];self.errorStacks=[];self.requests=[];self.passed=False
         self.context=self.browser.new_context(viewport={'width':1500,'height':1000});self.context.set_default_timeout(15000)
-        self.page=self.context.new_page();self.page.on('pageerror',lambda e:self.errors.append(str(e)));self.page.on('request',lambda r:self.requests.append(r.url))
+        self.page=self.context.new_page();self.page.on('pageerror',lambda e:(self.errors.append(str(e)),self.errorStacks.append(e.stack)));self.page.on('request',lambda r:self.requests.append(r.url))
         if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text())
         elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri())
         else:self.page.goto(self.base+'/dist/index.html')
         self.page.wait_for_function('globalThis.vb6Studio?.advancedEditor');self.page.evaluate(FIXTURE)
     def tearDown(self):
-        self.results.append({'name':self._testMethodName,'passed':self.passed and not self.errors,'pageErrors':self.errors,'milliseconds':round((time.perf_counter()-self.started)*1000,2)})
+        self.results.append({'name':self._testMethodName,'passed':self.passed and not self.errors,'pageErrors':self.errors,'pageErrorStacks':self.errorStacks,'milliseconds':round((time.perf_counter()-self.started)*1000,2)})
         if not self.passed:self.page.screenshot(path=str(REPORT/(self._testMethodName+'.png')))
-        self.context.close();self.assertEqual(self.errors,[])
+        self.context.close();self.assertEqual(self.errors,[], '\n'.join(self.errorStacks))
     def enable(self):
         self.assertTrue(self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:true})'))
         self.page.evaluate('()=>{globalThis.r=vb6Studio.advancedEditor.runtime;globalThis.s=r.surfaces.get(vb6Studio.editor);s.focus();return true;}')
@@ -191,6 +191,34 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.page.evaluate('s.setSplit(false)');self.assertEqual(self.page.locator('.advanced-editor-pane .monaco-editor').count(),1)
         self.assertEqual(self.page.evaluate('s.view.getPosition().lineNumber'),4)
         self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:false})');self.assertEqual(self.page.evaluate('VB6AdvancedMonaco.monaco.editor.getModels().length'),0);self.done()
+    def test_debugger_data_tip_uses_real_paused_frame_and_drops_after_resume(self):
+        self.page.evaluate(r'''()=>{const p=VB6StudioAPI.newProject('DataTip');p.id='data-tip';p.modules=[{id:'form',name:'MainModule',kind:'module',code:'Public Sub Main()\n  Dim value As Long\n  value = 42\n  Stop\n  Debug.Print value\nEnd Sub\n'}];p.startup='Sub Main';vb6Studio.loadProject(p);vb6Studio.openDocument('form','code');}''')
+        self.enable();self.page.evaluate('()=>{void vb6Studio.command("run");}')
+        self.page.wait_for_function('vb6Studio.runState==="paused"&&vb6Studio.debuggerWindows.pauseId>0')
+        self.page.wait_for_timeout(100)
+        result=self.page.evaluate('()=>r.debugHover.provideHover(s.record.model,{lineNumber:5,column:16})')
+        self.assertIn('value = 42',result['contents'][0]['value']);self.assertFalse(result['contents'][0]['isTrusted'])
+        self.page.evaluate('s.view.setPosition({lineNumber:5,column:16});s.focus();s.view.getAction("editor.action.showHover").run()')
+        self.page.locator('.monaco-hover').filter(has_text='value = 42').first.wait_for(state='visible')
+        self.page.evaluate('()=>{void vb6Studio.command("run");}')
+        self.page.wait_for_function('vb6Studio.output.includes("42")')
+        self.assertIsNone(self.page.evaluate('()=>r.debugHover.provideHover(s.record.model,{lineNumber:5,column:16})'))
+        self.page.evaluate('vb6Studio.stop(false)');self.done()
+    def test_confirmation_rejects_edits_after_an_unrelated_document_changes(self):
+        self.enable();before=self.text()
+        self.page.evaluate(r'''()=>{const c=s.record.client,u=s.record.uri;globalThis.editResult=null;const edit={changes:{[u]:[{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"'should not apply\n"}]}};r.applyEdit(c,edit,'Test delayed consent',true).then(value=>editResult=value);}''')
+        dialog=self.page.get_by_role('dialog',name='Apply Workspace Edit');dialog.wait_for(state='visible')
+        self.page.evaluate('()=>{const record=[...r.records.values()].find(x=>x.moduleId==="math");r.setText(record,record.model.getValue()+"\\n");}')
+        dialog.get_by_role('button',name='Apply',exact=True).click()
+        self.page.wait_for_function('!!editResult')
+        self.assertFalse(self.page.evaluate('editResult.applied'));self.assertEqual(self.text(),before);self.done()
+    def test_pending_linked_editing_teardown_is_handled_without_disabling_the_feature(self):
+        self.enable();self.page.evaluate('s.view.setPosition({lineNumber:4,column:5});s.setSplit(true);s.views[1].view.focus()')
+        self.page.wait_for_timeout(800)
+        self.assertTrue(self.page.evaluate('s.views.every(v=>v.view.getOption(VB6AdvancedMonaco.monaco.editor.EditorOption.linkedEditing))'))
+        self.page.evaluate('s.views[1].view.setPosition({lineNumber:4,column:6});s.views[0].view.focus();s.views[1].view.focus();s.setSplit(false)')
+        self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:false})')
+        self.page.wait_for_timeout(100);self.done()
     def test_large_document_keeps_dom_and_lexical_scans_bounded(self):
         self.page.evaluate(r'''()=>{const p=VB6StudioAPI.newProject('Large');p.id='large';p.modules[0].code='Option Explicit\nPrivate Sub Main()\nDim value As Long\n'+('    value = 1\n').repeat(99996)+'End Sub\n';vb6Studio.loadProject(p);vb6Studio.openDocument(p.modules[0].id,'code');}''')
         self.enable();metrics=self.page.evaluate('''()=>{const model=s.record.model,doc=s.record.client.documents.get(s.record.uri),before=vb6Studio.editor.metrics.indexedLines,scanned=doc.scannedCharacters,times=[];s.view.setPosition({lineNumber:50000,column:14});

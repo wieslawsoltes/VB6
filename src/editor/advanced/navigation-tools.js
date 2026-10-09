@@ -73,7 +73,7 @@ class NavigationTool {
     }
   }
   async start() {
-    clearTimeout(this.timer);this.cancel();this.stale=false;const generation=this.generation,abort=new AbortController();this.abort=abort;this.roots=[];this.selected=0;this.status.textContent='Loading…';this.render();
+    clearTimeout(this.timer);this.cancel();this.stale=false;const generation=this.generation,abort=new AbortController();this.abort=abort;this.roots=[];this.loaded=0;this.selected=0;this.status.textContent='Loading…';this.render();
     try {
       if(this.kind==='symbols'){
         const clients=[...new Set(Object.values(this.runtime.clients))].filter(c=>c.state==='ready'&&c.capability('workspace/symbol'));
@@ -88,8 +88,9 @@ class NavigationTool {
         if(client.state!=='ready'||!client.capability(method,client.documents.get(record.uri)))throw new Error('This language server does not provide '+this.title.toLowerCase()+'.');
         const position=surface.view.getPosition(),items=await client.request(method,{textDocument:{uri:record.uri},position:{line:position.lineNumber-1,character:position.column-1}},{signal:abort.signal,workspace:true});
         if(this.disposed||generation!==this.generation)return;
-        this.roots=(items||[]).filter(item=>this.runtime.records.has(item.uri)).map(item=>({client,item,depth:0,revision:client.revision}));
+        this.roots=(items||[]).filter(item=>this.runtime.records.has(item.uri)).slice(0,5000).map(item=>({client,item,depth:0,revision:client.revision}));
         this.status.textContent=this.roots.length?'Select a row; Right/Space expands, Enter opens source.':'No source hierarchy at this position.';
+        this.loaded=this.roots.length;
         if(this.roots.length===1)await this.expand(this.roots[0]);
       }
       this.render();if(this.kind==='symbols')this.query.focus();else this.list.focus();
@@ -103,13 +104,13 @@ class NavigationTool {
     try {
       const values=await row.client.request(method,{item:row.item},{signal:this.abort?.signal,workspace:true});
       if(this.disposed||generation!==this.generation||row.revision!==row.client.revision)return;
-      const remaining=Math.max(0,5000-this.visible().length);
+      const remaining=Math.max(0,5000-this.loaded);
       row.children=(values||[]).slice(0,remaining).map(value=>{
         const item=this.kind==='call'?(direction==='incoming'?value.from:value.to):value;
         if(!this.runtime.records.has(item.uri))return null;
         let cycle=false;for(let ancestor=row;ancestor;ancestor=ancestor.parent)if(ancestor.item.uri===item.uri&&JSON.stringify(ancestor.item.selectionRange)===JSON.stringify(item.selectionRange)&&ancestor.item.name===item.name){cycle=true;break;}
         return {client:row.client,item,parent:row,depth:row.depth+1,edge:this.kind==='call'?value:null,direction,revision:row.revision,cycle};
-      }).filter(Boolean);row.expanded=true;
+      }).filter(Boolean);this.loaded+=row.children.length;row.expanded=true;
       this.status.textContent=row.children.length?'Right expands; Left collapses; Enter opens source.': 'No '+this.direction.selectedOptions[0].textContent.toLowerCase()+' found.';
       if((values||[]).length>remaining)this.status.textContent+=' Result limit reached; open a nested symbol to narrow the search.';
       this.render();

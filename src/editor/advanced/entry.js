@@ -1,3 +1,4 @@
+import {DebugHoverProvider} from './debug-hover.js';
 import {NavigationTools} from './navigation-tools.js';
 import {LanguageClient} from './client.js';
 import {PullDiagnostics} from './pull-diagnostics.js';
@@ -53,6 +54,8 @@ export class AdvancedEditorRuntime {
       this.disposables.push({dispose:client.on('closed',()=>{this.diagnosticValues.get(client)?.clear();if(!this.disposed){this.report(new Error('Language server disconnected. Source remains editable; reapply Advanced Editor Options to reconnect.'));for(const language of ['vb6','xaml'])if(this.clients[language]===client)this.providers.get(language)?.dispose();}})});
       this.disposables.push({dispose:client.on('window/logMessage',p=>this.report(p.message))});
     }
+    this.debugHover=new DebugHoverProvider(this);
+    this.disposables.push(this.debugHover,this.monaco.languages.registerHoverProvider('vb6',this.debugHover));
     this.navigationTools=new NavigationTools(this);
     this.sync();this.installHooks();this.appearance();return this;
   }
@@ -134,7 +137,12 @@ export class AdvancedEditorRuntime {
     const record=this.records.get(uriFor(this.ide.project,module,'xaml'));if(!record)return;
     const old=this.surfaces.get(tool.editor);if(old?.record===record)return;old?.dispose();record.legacy=tool.editor;this.surfaces.set(tool.editor,new AdvancedSurface(this,record,tool.editor));
   }
-  active() {return [...this.surfaces.values()].find(s=>s.view?.hasTextFocus()||s.view?.hasWidgetFocus())||(!this.lastActive?.disposed&&this.lastActive)||this.surfaces.get(this.ide.editor);}
+  active() {
+    const values=[...this.surfaces.values()],mdi=this.ide.documents?.mdi?.active;
+    return values.find(s=>s.view?.hasTextFocus()||s.view?.hasWidgetFocus())||
+      values.find(s=>mdi===(s.xaml?'tool:xaml:'+s.record.moduleId:s.record.moduleId+':code'))||
+      (!this.lastActive?.disposed&&this.lastActive)||this.surfaces.get(this.ide.editor);
+  }
   action(id){const surface=this.active();if(!surface)return;return surface.run(id);}
   handleCommand(id) {
     const active=this.active();if(!active||!active.root.isConnected)return null;
@@ -159,13 +167,15 @@ export class AdvancedEditorRuntime {
     try {
       if(this.disposed||!client||client.state!=='ready')throw new Error('Language server is no longer connected.');
       if(!client.responseIsCurrent(edit))throw new Error('Workspace edit is stale. Request it again.');
-      this.sync();const plans=planWorkspaceEdit(edit,client.documents);
+      this.sync();if(!client.responseIsCurrent(edit))throw new Error('Workspace edit is stale. Request it again.');
+      const revision=client.revision,plans=planWorkspaceEdit(edit,client.documents);
       if(!plans.length)return {applied:true};
       const snapshots=plans.map(p=>{const r=this.records.get(p.uri);if(!r)throw new Error('Unknown document.');return {record:r,version:r.model.getVersionId()};});
       if(confirm||plans.some(p=>p.annotations.some(a=>a.needsConfirmation))){
         const body=el('div',{},el('p',{},String(label||'Apply language-server changes')+' to '+plans.length+' document(s)?'),...plans.map(p=>el('p',{},decodeURIComponent(new URL(p.uri).pathname))));
         if(!await modal('Apply Workspace Edit',{content:body,buttons:[{label:'Apply',value:true,primary:true},{label:'Cancel',value:false}]}))return {applied:false,failureReason:'Cancelled.'};
       }
+      if(this.disposed||client.state!=='ready'||client.revision!==revision||!client.responseIsCurrent(edit))throw new Error('Workspace changed while confirming the edit. Request it again.');
       for(const s of snapshots)if(s.record.model.isDisposed()||s.record.model.getVersionId()!==s.version||this.surfaces.get(s.record.legacy)?.composing)throw new Error('The document changed or an input composition is in progress.');
       const before=this.ide.project,next=prepareProjectEdits(before,plans,this.records,{schema:this.ide.xaml?.schema,runState:this.ide.runState,isLocked:id=>!!this.ide.documents.designers.get(id)?.locked});
       this.ide.project=next;
