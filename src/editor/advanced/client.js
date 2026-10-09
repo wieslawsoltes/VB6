@@ -42,7 +42,9 @@ export function languageClientCapabilities() {
       formatting:dynamic,rangeFormatting:dynamic,onTypeFormatting:dynamic,
       rename:{...dynamic,prepareSupport:true,prepareSupportDefaultBehavior:1,honorsChangeAnnotations:true},
       foldingRange:{...dynamic,lineFoldingOnly:true,foldingRangeKind:{valueSet:['comment','imports','region']}},
-      selectionRange:dynamic,linkedEditingRange:dynamic,callHierarchy:dynamic,typeHierarchy:dynamic,inlineValue:dynamic,
+      // The pinned Monaco API has no hierarchy/inline-value presentation.
+      // Generic requests remain available, but these capabilities are not advertised.
+      selectionRange:dynamic,linkedEditingRange:dynamic,
       semanticTokens:{...dynamic,requests:{range:true,full:{delta:true}},tokenTypes,tokenModifiers,formats:['relative'],overlappingTokenSupport:false,multilineTokenSupport:false,serverCancelSupport:true,augmentsSyntaxTokens:true},
       inlayHint:{...dynamic,resolveSupport:{properties:['tooltip','textEdits','label.tooltip','label.location','label.command']}},
       publishDiagnostics:{relatedInformation:true,versionSupport:true,tagSupport:{valueSet:[1,2]},codeDescriptionSupport:true,dataSupport:true},
@@ -144,7 +146,7 @@ export class LanguageClient {
   }
   syncOpen(document) {
     const sync=this.capabilities.textDocumentSync;
-    if(!this.opened.has(document.uri)&&(typeof sync==='number'||sync?.openClose||this.capability('textDocument/didOpen',document))) {
+    if(!this.opened.has(document.uri)&&(typeof sync==='number'&&sync!==0||sync?.openClose||this.capability('textDocument/didOpen',document))) {
       this.peer.notify('textDocument/didOpen',{textDocument:{uri:document.uri,languageId:document.languageId,text:document.text,version:document.version}});this.opened.add(document.uri);
     }
   }
@@ -152,7 +154,7 @@ export class LanguageClient {
   open(uri,languageId,text,version=1) {
     this.requireReady();if(this.documents.has(uri))throw new Error('Document is already open: '+uri);
     const document=new LspTextDocument(uri,languageId,text,version);this.documents.set(uri,document);
-    this.syncOpen(document);
+    this.syncOpen(document);this.emit('document',{kind:'open',uri,document});
     return document;
   }
   change(uri,changes,version) {
@@ -160,27 +162,27 @@ export class LanguageClient {
     document.applyChanges(changes,version);
     const sync=this.capabilities.textDocumentSync,kind=this.capability('textDocument/didChange',document)?.syncKind??(typeof sync==='number'?sync:sync?.change);
     if(kind===1||kind===2)this.peer.notify('textDocument/didChange',{textDocument:{uri,version},contentChanges:kind===1?[{text:document.text}]:changes});
-    return document;
+    this.emit('document',{kind:'change',uri,document});return document;
   }
   willSave(uri,reason=1) {
     const document=this.documents.get(uri);if(!document||this.state!=='ready')return;
-    if(this.capabilities.textDocumentSync?.willSave)this.peer.notify('textDocument/willSave',{textDocument:{uri},reason});
+    if(this.capabilities.textDocumentSync?.willSave||this.capability('textDocument/willSave',document))this.peer.notify('textDocument/willSave',{textDocument:{uri},reason});
   }
   save(uri) {
     const document=this.documents.get(uri);if(!document||this.state!=='ready')return;
-    const sync=this.capabilities.textDocumentSync;
-    if(sync?.save)this.peer.notify('textDocument/didSave',{textDocument:{uri},...(sync.save.includeText?{text:document.text}:{})});
+    const save=this.capability('textDocument/didSave',document)||this.capabilities.textDocumentSync?.save;
+    if(save)this.peer.notify('textDocument/didSave',{textDocument:{uri},...(save.includeText?{text:document.text}:{})});
   }
   close(uri) {
     const document=this.documents.get(uri);if(!document)return;this.documents.delete(uri);
     const wasOpen=this.opened.delete(uri),sync=this.capabilities.textDocumentSync;
-    if(this.state==='ready'&&!this.peer.closed&&(wasOpen||typeof sync==='number'||sync?.openClose||this.capability('textDocument/didClose',document)))this.peer.notify('textDocument/didClose',{textDocument:{uri}});
-    this.emit('diagnostics',{uri,diagnostics:[]});
+    if(this.state==='ready'&&!this.peer.closed&&(wasOpen||typeof sync==='number'&&sync!==0||sync?.openClose||this.capability('textDocument/didClose',document)))this.peer.notify('textDocument/didClose',{textDocument:{uri}});
+    this.emit('document',{kind:'close',uri,document});this.emit('diagnostics',{uri,diagnostics:[]});
   }
   async request(method,params,{signal,allowStale=false,...options}={}) {
     this.requireReady();const uri=params?.textDocument?.uri,document=uri?this.documents.get(uri):null,version=document?.version;
     const value=await this.peer.request(method,params,{signal,...options});
-    if(!allowStale&&uri&&(!this.documents.has(uri)||this.documents.get(uri).version!==version))throw new RpcError(RPC_CONTENT_MODIFIED,'The document changed while the language server was processing the request.');
+    if(!allowStale&&uri&&(this.documents.get(uri)!==document||document?.version!==version))throw new RpcError(RPC_CONTENT_MODIFIED,'The document changed while the language server was processing the request.');
     return value;
   }
   notify(method,params) {this.requireReady();this.peer.notify(method,params);}
