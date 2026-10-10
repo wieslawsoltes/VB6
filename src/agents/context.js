@@ -15,12 +15,15 @@ export function publicHistory(provider, history) {
       if (item.type === 'function_call') add('completed tool request', {name: item.name, arguments: item.arguments});
       else if (item.type === 'function_call_output') add('confirmed tool result', item.output);
       else if (typeof item.content === 'string' && item.role === 'user') add('user', item.content);
-      else if (item.type === 'message' || item.role === 'assistant') for (const part of item.content || [])
-        if (['output_text', 'text'].includes(part.type)) add(item.role || 'assistant', part.text);
+      else if (item.type === 'message' || ['assistant','user'].includes(item.role)) for (const part of item.content || []) {
+        if (['input_text','output_text','text'].includes(part.type)) add(item.role || 'assistant', part.text);
+        else if (['input_image','input_file'].includes(part.type)) add(item.role || 'user', '[Reviewed '+(part.type==='input_image'?'image':'file')+' attachment; binary data omitted from checkpoint.]');
+      }
     } else if (provider === 'anthropic') {
       if (typeof item.content === 'string') { add(item.role, item.content); continue; }
       for (const part of item.content || []) {
         if (part.type === 'text') add(item.role, part.text);
+        if (['image','document'].includes(part.type)) add(item.role, '[Reviewed '+part.type+' attachment; binary data omitted from checkpoint.]');
         if (part.type === 'tool_use') add('completed tool request', {name: part.name, arguments: part.input});
         if (part.type === 'tool_result') {
           if (typeof part.content === 'string') add('confirmed tool result', part.content);
@@ -29,6 +32,7 @@ export function publicHistory(provider, history) {
       }
     } else for (const part of item.parts || []) {
       if (!part.thought && typeof part.text === 'string') add(item.role, part.text);
+      if (!part.thought && part.inlineData) add(item.role, '[Reviewed '+part.inlineData.mimeType+' attachment; binary data omitted from checkpoint.]');
       if (part.functionCall) add('completed tool request', {name: part.functionCall.name, arguments: part.functionCall.args});
       if (part.functionResponse) add('confirmed tool result', {name: part.functionResponse.name, response: part.functionResponse.response});
     }

@@ -30,11 +30,11 @@ function lastOutput(provider, body) {
 }
 for (const provider of providers) test(`agents integration: ${provider} exposes the complete current IDE catalog`, async t => {
   const {adapter, agent} = fixture(t);
-  assert.equal(adapter.tools.length, 131);
+  assert.equal(adapter.tools.length, 132);
   await agent.run({provider, model: 'test-model', prompt: 'Inspect the available tools.', transport: async (body, {receive}) => {
     const definitions = provider === 'google' ? body.tools[0].functionDeclarations : body.tools;
     assert.deepEqual(definitions.map(tool => tool.name).sort(), agent.tools.map(tool => tool.name.replaceAll('.', '_')).sort());
-    for (const name of ['vb6_project_entries', 'vb6_project_group', 'vb6_project_select', 'vb6_project_startup', 'vb6_build_targets', 'vb6_build_create', 'vb6_build_read', 'vb6_build_release', 'vb6_code_read', 'vb6_data_providers', 'vb6_data_list', 'vb6_data_connection_get', 'vb6_data_connection_set', 'vb6_data_connection_remove', 'vb6_data_command_get', 'vb6_data_command_set', 'vb6_data_command_remove', 'vb6_data_rename', 'vb6_data_validate'])
+    for (const name of ['vb6_ui_resolveReference', 'vb6_project_entries', 'vb6_project_group', 'vb6_project_select', 'vb6_project_startup', 'vb6_build_targets', 'vb6_build_create', 'vb6_build_read', 'vb6_build_release', 'vb6_code_read', 'vb6_data_providers', 'vb6_data_list', 'vb6_data_connection_get', 'vb6_data_connection_set', 'vb6_data_connection_remove', 'vb6_data_command_get', 'vb6_data_command_set', 'vb6_data_command_remove', 'vb6_data_rename', 'vb6_data_validate'])
       assert.ok(definitions.some(tool => tool.name === name), name);
     receive(reply(provider));
   }});
@@ -95,16 +95,16 @@ for (const provider of providers) test(`agents integration: ${provider} code sco
 for (const provider of providers) test(`agents integration: ${provider} preserves local planning tools without exposing them through MCP`, async t => {
   let questions = 0;
   const {adapter, agent} = fixture(t, {askUser: async () => { questions++; return 'Local answer'; }});
-  assert.equal(adapter.tools.length, 131);
-  assert.equal(agent.tools.length, 133);
+  assert.equal(adapter.tools.length, 132);
+  assert.equal(agent.tools.length, 134);
   for (const name of ['vb6.agent.plan', 'vb6.agent.question']) {
     assert.ok(agent.tools.some(tool => tool.name === name));
     assert.ok(!adapter.tools.some(tool => tool.name === name), 'Local tool leaked into external MCP: ' + name);
   }
   await agent.run({provider, model: 'test-model', prompt: 'Inspect the combined catalog.', transport: async (body, {receive}) => {
     const definitions = provider === 'google' ? body.tools[0].functionDeclarations : body.tools;
-    assert.equal(definitions.length, 133);
-    assert.equal(new Set(definitions.map(tool => tool.name)).size, 133);
+    assert.equal(definitions.length, 134);
+    assert.equal(new Set(definitions.map(tool => tool.name)).size, 134);
     for (const name of ['vb6_agent_plan', 'vb6_agent_question', 'vb6_data_connection_set', 'vb6_code_read'])
       assert.ok(definitions.some(tool => tool.name === name), name);
     receive(reply(provider));

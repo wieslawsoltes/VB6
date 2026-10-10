@@ -1,3 +1,8 @@
+import {UIReferenceProviders} from './reference-providers.js';
+export {UIReferenceProviders};
+import {normalizeContentBlocks, normalizeModelContext, contentSummary, base64Bytes, prepareDownloads, UIModelContextStore, CONTENT_TYPES} from './content.js';
+import {AppDisplayController, DISPLAY_MODES} from './display-mode.js';
+export {normalizeContentBlocks, normalizeModelContext, contentSummary, base64Bytes, prepareDownloads, UIModelContextStore, CONTENT_TYPES, AppDisplayController, DISPLAY_MODES};
 import {BREAKPOINTS, normalizeViewport} from './viewport.js';
 import {McpAppHost, normalizeAppCsp, appProxyUrl} from './app-host.js';
 import {createAppBlockFactory, appBlockDocument} from './app-block.js';
@@ -20,3 +25,6 @@ export {McpUIService, MCP_UI_URI, MCP_UI_MIME, MCP_UI_META, UI_TOOL_SCHEMAS, UI_
 export {UIError, LIMITS, boundedData, safeUrl, CATALOG, createCatalog, catalogDescription, compile, StreamingCompiler, classifyUpdate, UIRuntime, diffTrees, DOMRenderer, UIClient, startUIWorker, UISurface, normalizeAction, splitUIMessage};
 
 export {BREAKPOINTS, normalizeViewport};
+
+import {renderContentPreview} from './content-view.js';
+export {renderContentPreview};
