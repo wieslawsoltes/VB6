@@ -19,7 +19,7 @@ export const nativeControlEventMethods={
     const x=this.x;
     for(const control of module.controls.values())if(control.oldProcedure){
       const fallback=x.unique(),exit=x.unique(),zero=x.unique(),forward=x.unique();
-      x.label('control-procedure:'+module.name+':'+control.key).enter(control.nativeDescriptor.kernel?192:48);this.enterCallbackBoundary(-12);
+      x.label('control-procedure:'+module.name+':'+control.key).enter(control.nativeDescriptor.kernel?192:48);this.enterCallbackBoundary(-12);this.nativeSurfaceWindowMessages(control,exit);
       // Container notifications go directly to the form. Do not stop at a Frame
       // or tab HWND, and do not forward the container's own WM_SIZE/WM_PAINT.
       if(control.nativeDescriptor.container){x.value(arg(12));for(const msg of [0x111,0x4e,0x114,0x115,0x2b,0x132,0x133,0x134,0x135,0x136,0x137,0x138])x.compare(msg).branch('e',forward);}

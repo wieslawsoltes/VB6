@@ -85,7 +85,7 @@ export const nativeControlMethods={
       for(let i=0;i<control.initialState.length;i++)x.value(control.initialState[i]).store(control.state,i*4);
       if(descriptor.nonvisual){this.initializeNativeImageList(control);this.initializeNativeDialog(control);continue;}
       const drop=(type==='ComboBox'&&Number(p.Style)!==1)||type==='DriveListBox'?160:0;
-      x.api('user32.dll','CreateWindowExW',[ex,this.string(descriptor.className),this.string(p.Text??p.Caption??''),style,this.pixels(p.Left??0),this.pixels(p.Top??0),this.pixels(p.Width??1440),this.pixels(p.Height??420)+drop,mem(parent.handle),control.id,mem('instance'),0]).test().branch('e','error:7').store(control.handle);
+      x.api('user32.dll','CreateWindowExW',[ex,this.string(control.nativeSurface?'VB6.Native.PictureSurface':descriptor.className),this.string(p.Text??p.Caption??''),style,this.pixels(p.Left??0),this.pixels(p.Top??0),this.pixels(p.Width??1440),this.pixels(p.Height??420)+drop,mem(parent.handle),control.id,mem('instance'),0]).test().branch('e','error:7').store(control.handle);
       x.api('user32.dll','SetWindowLongW',[mem(control.handle),-21,control.state]);this.initializeNativeTabPage(control);
       if(control.oldProcedure)x.api('user32.dll','SetWindowLongW',[mem(control.handle),-4,'control-procedure:'+module.name+':'+control.key]).test().branch('e','error:7').store(control.oldProcedure);
       this.applyNativeControlFont(control);this.initializeNativeControlFont(control);
@@ -115,7 +115,7 @@ export const nativeControlMethods={
         send(0x130c,Number(p.Tab??0));
       }
       if(NATIVE_DATE_CONTROLS.has(type)){send(type==='DTPicker'?0x1002:0x1002,0,control.dateSeed);if(type==='DTPicker'&&p.CustomFormat)send(0x1032,0,this.string(p.CustomFormat));}
-      this.initializeNativeGrid(control);this.initializeNativeChart(control);this.initializeNativeControlPictures(control);this.createNativeControlCollections(control);this.createNativeFileControl(control);this.initializeNativeRichText(control);
+      this.initializeNativeGrid(control);this.initializeNativeChart(control);this.initializeNativeControlPictures(control);this.createNativeControlCollections(control);this.createNativeFileControl(control);this.initializeNativeRichText(control);this.initializeNativeSurface(control);
       if(control.tooltip)this.createNativeTooltip(module,control);
     }
     this.initializeNativeImageBindings(module);

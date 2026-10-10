@@ -15,6 +15,7 @@ export const nativeControlDrawingMethods={
       x.label(draw).value(arg(20)).test().branch('e',fallback).emit(0x89,0xc3,0x8b,0x43,4);
       for(const control of drawings){
         const next=x.unique();x.compare(control.id).branch('ne',next);
+        if(this.nativeSurfaceOwnerDraw(control,exit)){x.label(next);continue;}
         const family=control.model.type==='Shape'?'shape':control.model.type==='Line'?'line':'surface';
         (this.nativeDrawingFamilies ||= new Set()).add(family);
         x.push(arg(20)).push(control.state).call('native:control:draw:'+family).value(1).jump(exit).label(next);

@@ -1,3 +1,5 @@
+import {traceNativeSurfacePixels} from './trace-win32-surface-pixels.mjs';
+import {traceNativeSurfaceDeletion} from './trace-win32-surface.mjs';
 /** Failure-only instrumentation of the same native fixture. The original EXE's
  * result remains authoritative; these checkpoints only localize crashes/errors. */
 import fs from 'node:fs';
@@ -20,6 +22,7 @@ export function traceControlFixture(project){
     if(!inside||/^\s*(Dim |End If|Else|Next\b)/i.test(line))return [line];
     const marker=`NativeTrace "line ${index+1}: ${line.trim().slice(0,150).replaceAll('"','""')}"`;
     const values=[];
+    if(project.name==='AotControlSurfaces'&&line.includes('GetGuiResources(GetCurrentProcess(),0)<=baseline-2'))values.push('NativeTrace "Surface destruction: result=" & CStr(n) & ", old DC type=" & CStr(GetObjectType(other)) & ", baseline=" & CStr(baseline) & ", GDI now=" & CStr(GetGuiResources(GetCurrentProcess(),0))');
     if(line.includes('Pages.Tabs.Count=3'))values.push('NativeTrace "Tabs=" & CStr(Pages.Tabs.Count) & "," & CStr(Strip.Tabs.Count)');
     if(line.includes('n=1 And treeCalls=1'))values.push('NativeTrace "Tree click: result=" & CStr(n) & ", calls=" & CStr(treeCalls) & ", text=" & treeText & ", key=" & treeKey & ", error=" & CStr(Err.Number)');
     if(line.includes('Lists(7).SelCount=0 And'))values.push('NativeTrace "Initial Lists(7): count=" & CStr(Lists(7).SelCount) & ", selected=" & CStr(Lists(7).Selected(0)) & "," & CStr(Lists(7).Selected(1)) & "," & CStr(Lists(7).Selected(2))','NativeTrace "Initial Seeded: count=" & CStr(Seeded.SelCount) & ", selected=" & CStr(Seeded.Selected(0)) & "," & CStr(Seeded.Selected(1)) & "," & CStr(Seeded.Selected(2))');
@@ -28,6 +31,8 @@ export function traceControlFixture(project){
     if(line.includes('Rich.Text=Plain.Text'))values.push('NativeTrace "RTF=" & s','NativeTrace "Actual=" & Rich.Text & ", expected=" & Plain.Text','NativeTrace "Lengths=" & CStr(Len(Rich.Text)) & "," & CStr(Len(Plain.Text))');
     return [marker,...values,line];
   }).join('\n').replace('Option Explicit','Option Explicit\n'+api)+'\n'+routine+'\n';
+  if(project.name==='AotControlSurfaces')traceNativeSurfaceDeletion(module);
+  if(project.name==='AotControlSurfaceGraphics')traceNativeSurfacePixels(module);
   if(project.name==='AotControlItemObjects'){
     // Preserve the authoritative input sequence. Only the failure-only copy
     // records the native coordinates and message that reached COMCTL32.

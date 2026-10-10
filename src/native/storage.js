@@ -102,6 +102,7 @@ export const nativeStorageMethods = {
     if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') {if(this.type(node)==='string')this.expression(node);else this.textExpression(node);} else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
   },
   rawStorageAddress(variable) {
+    if(variable.nativeKernelPointer){this.x.value(variable.nativeKernelPointer);return;}
     if(variable.nativeItem)this.fail('Borrowed native item references cannot be assigned, converted or passed outside their event; read a supported property');
     this.withGuard(variable.nativeWithActive);
     if(variable.recordOf)return this.recordAddress(variable);

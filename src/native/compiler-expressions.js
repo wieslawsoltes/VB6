@@ -7,9 +7,12 @@ export const nativeCompilerExpressionMethods={
     const type=this.computeNativeType(node);this.typeCache?.set(node,type);return type;
   },
   computeNativeType(node) {
+    if(node.kind==='nativeKernelValue')return node.valueType;
+    if(node.kind==='nativeKernelStorage')return key(node.storage.type);
     const variantType=this.variantType(node);if(variantType)return variantType;
     const stringType=this.stringLibraryType(node);if(stringType)return stringType;
     const layoutType=this.layoutType(node);if(layoutType)return layoutType;
+    const surfaceType=this.nativeSurfaceType(node);if(surfaceType)return surfaceType;
     const controlType=this.nativeControlType(node);if(controlType)return controlType;
     const bound=this.nativeConstant(node);if(bound)return bound.type;
     const intervalType=this.dateIntervalType(node);if(intervalType)return intervalType;
@@ -38,6 +41,7 @@ export const nativeCompilerExpressionMethods={
   textExpression(node) { if(this.type(node)==='variant'){this.expression(node);this.unboxVariant('string');this.stringPointer();return;} this.expression(node); if(this.type(node)==='date'){this.dateToString();}else if(this.type(node)==='currency'){this.currencyToString();}else if(REAL_TYPES.has(this.type(node))){this.floatToString(this.type(node));}else if(this.type(node)!=='string'){this.x.push().call('native:string:from-int');this.ownString();}this.stringPointer(); },
   expression(node) {
     if (!node) this.fail('Missing expression'); const x = this.x;
+    if(node.kind==='nativeKernelValue'){x.value(node.value);return;}
     if(this.variantOperation(node))return;
     if(this.layoutExpression(node)||this.gridExpression(node)||this.chartExpression(node))return;
     const bound=this.nativeConstant(node);if(bound)return this.emitNativeConstant(bound);
@@ -56,7 +60,7 @@ export const nativeCompilerExpressionMethods={
       if(this.nativeFunctionType(node))return this.call({kind:'call',callee:node,args:[]});
       return this.getProperty(this.object(node.object),key(node.name));
     }
-    if (node.kind === 'id') { if (this.context?.module.form && (['caption','hwnd','visible','enabled','windowstate','scalewidth','scaleheight'].includes(key(node.name))||this.layoutField(this.context.module,key(node.name))!==undefined)) return this.getProperty(this.context.module,key(node.name)); return this.call({kind:'call',callee:node,args:[]}); }
+    if (node.kind === 'id') { if (this.context?.module.form && (['caption','hwnd','visible','enabled','windowstate','scalewidth','scaleheight','hdc','autoredraw','scalemode','currentx','currenty','backcolor','forecolor','fillcolor','fillstyle','drawwidth','drawstyle','drawmode'].includes(key(node.name))||this.layoutField(this.context.module,key(node.name))!==undefined)) return this.getProperty(this.context.module,key(node.name)); return this.call({kind:'call',callee:node,args:[]}); }
     if (node.kind === 'call') return this.call(node);
     if (node.kind === 'unary') {
       this.numeric(node.value ?? node.expr ?? node.operand); if (node.op === '-') x.emit(0xf7,0xd8).branch('o','error:6'); else if (key(node.op) === 'not') x.emit(0xf7,0xd0); else if (node.op !== '+') this.fail('Unsupported native unary operator: ' + node.op); return;
@@ -86,7 +90,7 @@ export const nativeCompilerExpressionMethods={
     this.withGuard(object.nativeWithActive);
     if(this.controlArrayProperty(object,property))return;
     if(this.getLayoutProperty(object,property))return;
-    if(this.getNativeControlProperty(object,property))return;
+    if(this.getNativeSurfaceProperty(object,property)||this.getNativeControlProperty(object,property))return;
     if (property === 'hwnd') { if (object.model?.type === 'Timer') this.fail('Timer has no hWnd'); this.handle(object); return; }
     if (['text','caption'].includes(property)) {
       if (object.model?.type === 'Timer') this.fail('Timer has no text');
@@ -103,6 +107,7 @@ export const nativeCompilerExpressionMethods={
   },
   setProperty(object, property, expr) {
     if (!object) this.fail('Unknown native assignment target'); const x = this.x;
+    if(this.setNativeSurfaceProperty(object,property,expr))return;
     this.ensure(object);
     if(this.setLayoutProperty(object,property,expr))return;
     if(this.setNativeControlProperty(object,property,expr))return;
@@ -116,6 +121,7 @@ export const nativeCompilerExpressionMethods={
   },
   call(node) {
     const x = this.x, args = node.args, name = node.callee.kind === 'id' ? key(node.callee.name).replace(/\$$/,'') : null;
+    if(name==='cls'&&this.context?.module.form&&!this.resolveProcedure(node.callee)&&this.nativeSurfaceMethod(this.context.module,name,args))return;
     if(this.variantBuiltin(node,name))return;
     if(this.nativePictureBuiltin(node,name))return;
     if(this.layoutHostCall(node,name))return;
@@ -145,7 +151,7 @@ export const nativeCompilerExpressionMethods={
       const object = this.object(node.callee.object), method = key(node.callee.name);
       if (object) {
         if(this.layoutMethod(object,method,args))return;
-        if(this.nativeControlMethod(object,method,args))return;
+        if(this.nativeSurfaceMethod(object,method,args)||this.nativeControlMethod(object,method,args))return;
         if (['show','hide','setfocus','additem','clear','removeitem'].includes(method)) this.ensure(object);
         if (method === 'show' && object.form) {
           if(args.length>2)this.fail('Native Show expects mode and optional owner');

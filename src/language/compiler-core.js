@@ -1,3 +1,4 @@
+import {parseGraphicsStatement} from './graphics-statements.js';
 import {splitPrintList} from './print-list.js';
 import {parseDeclarations,parseParameters,parseProcedureHeader,parseTypeFields} from './declarations.js';
 import {parseModuleHeader,parseEnumMember} from './module-syntax.js';
@@ -120,10 +121,7 @@ class ProcedureCompiler {
     if((m=text.match(/^FileCopy\s+(.+)$/i))){const parts=splitTop(m[1]);if(parts.length!==2)throw new VBError('FileCopy requires source and destination',1002);this.emit('fileCopy',{sourcePath:E(parts[0]),destination:E(parts[1])},line);return;}
     if(/^Name\s+/i.test(text)&&!/^Name\s*[=(.!]/i.test(text)){const as=findKeyword(text,'as',4);if(!as)throw new VBError('Expected As in Name statement',1002);this.emit('fileRename',{sourcePath:E(text.slice(4,as.start)),destination:E(text.slice(as.end))},line);return;}
     if((m=text.match(/^Close(?:\s+(.+))?$/i))){this.emit('fileClose',{handles:m[1]?splitTop(m[1]).map(s=>E(s.replace(/^#/,''))):[]},line);return;}
-    // VB graphics syntax: Picture1.Line (x1,y1)-(x2,y2), color, BF
-    if((m=text.match(/^(?:(.+)\.)?Line\s*\(([^,]+),([^\)]+)\)\s*-\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*([^,]+))?(?:\s*,\s*(B|BF))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:m[7]?'rect':'line',coords:[m[2],m[3],m[4],m[5]].map(E),color:E(m[6]||'0'),fill:/bf/i.test(m[7]||'')},line);return;}
-    if((m=text.match(/^(?:(.+)\.)?PSet\s*\(([^,]+),([^\)]+)\)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'pixel',coords:[E(m[2]),E(m[3])],color:E(m[4]||'0')},line);return;}
-    if((m=text.match(/^(?:(.+)\.)?Circle\s*\(([^,]+),([^\)]+)\)\s*,\s*([^,]+)(?:\s*,\s*(.+))?$/i))){this.emit('graphics',{object:E(m[1]||'Me'),kind:'circle',coords:[E(m[2]),E(m[3]),E(m[4])],color:E(m[5]||'0')},line);return;}
+    const graphics=parseGraphicsStatement(text);if(graphics){const {op,...data}=graphics;this.emit(op,data,line);return;}
     if(/^RaiseEvent\b/i.test(text)){this.emit('raiseEvent',{expr:parseCall(text.replace(/^RaiseEvent\s+/i,''),{explicit:true})},line);return;}
     if((m=text.match(/^(LSet|RSet)\s+(.+?)\s*=\s*(.+)$/i))){const target=E(m[2]);if(!['id','member','call'].includes(target.kind))throw new VBError('Expected assignable string variable',1002);this.emit('stringAlign',{target,expr:E(m[3]),right:/rset/i.test(m[1])},line);return;}
     if(/^Mid\$?\s*\(/i.test(text)){

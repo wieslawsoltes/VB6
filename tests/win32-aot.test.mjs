@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {NativeX86FloatingMachine} from './support/native-x86-floating.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -112,10 +113,33 @@ test('invalid hWnd, missing form resources and unsupported scale modes fail comp
   p.modules[0].code='Private Sub Form_Load()\n Dim n As Long\n n = Timer1.hWnd\nEnd Sub';assert.throws(()=>compileWin32(p),/Timer has no hWnd/);
   for(const props of [{ScaleMode:2},{Picture:'x.bmp'},{Icon:'x.ico'}]){const form=newProject();Object.assign(form.modules[0].form.properties,props);assert.throws(()=>compileWin32(form),/ScaleMode|Missing embedded native picture asset/);}
 });
-test('pixel and twip ScaleWidth lower to distinct explicit coordinate policies',()=>{
-  const p=newProject();p.modules[0].code='Private Sub Form_Resize()\n Dim n As Long\n n = ScaleWidth\nEnd Sub';
-  const twips=compileWin32(p);p.modules[0].form.properties.ScaleMode=3;const pixels=compileWin32(p);
-  const section=r=>r.report.sections.find(s=>s.name==='.text');assert.equal(section(twips).size-section(pixels).size,3);
+test('pixel and twip client sizes execute distinct mutable coordinate policies',t=>{
+  // ScaleMode is now mutable at runtime. A three-byte code-size difference is
+  // no longer its contract: execute the actual authored setters and getters.
+  const p=newProject();p.modules[0].code=`Private observedW As Single, observedH As Single
+Private Sub ReadSize()
+ observedW=ScaleWidth
+ observedH=Me.ScaleHeight
+End Sub
+Private Sub ChangeMode(ByVal mode As Long)
+ Me.ScaleMode=mode
+End Sub`;
+  let linked;const finish=PE32Image.prototype.finish;
+  const mock=t.mock.method(PE32Image.prototype,'finish',function(...args){return linked=finish.apply(this,args);});
+  compileWin32(p);mock.mock.restore();
+  const vm=new NativeX86FloatingMachine(linked),state=vm.symbol('surface:Form1:form');
+  // Isolate the accessor ABI from HWND creation; the Windows fixture separately
+  // asserts actual HWND sizes. No alternate accessor implementation is hooked.
+  for(const name of ['initialize:Form1','create:Form1'])vm.hooks.set(vm.symbol(name),{args:0,callback:()=>42});
+  vm.hook('user32.dll','IsWindow',1,([hwnd])=>hwnd===42?1:0);
+  vm.hook('user32.dll','GetClientRect',2,([hwnd,out])=>{assert.equal(hwnd,42);[0,0,17,11].forEach((n,i)=>vm.memory.write(out+4*i,n));return 1;});
+  vm.hook('kernel32.dll','GetLastError',0,()=>0);
+  vm.memory.write(state,42);vm.memory.write(state+84,1);
+  for(const [mode,w,h]of [[1,255,165],[3,17,11],[1,255,165]]){
+    vm.invoke('proc:Form1:ChangeMode',[mode]);vm.invoke('proc:Form1:ReadSize');
+    assert.equal(vm.readFP(vm.symbol('global:Form1:observedW'),32),w);
+    assert.equal(vm.readFP(vm.symbol('global:Form1:observedH'),32),h);
+  }
 });
 
 test('Frame controls retain native parent handles and forward their notifications',()=>{
