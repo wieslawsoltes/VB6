@@ -17,12 +17,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Reproduce reviewed build without changing expected fingerprints
+      - name: Reconstruct exact reviewed source bytes
+        run: node .github/macos26-stage-objects.mjs prepare
+      - name: Reproduce reviewed fingerprints without refreshing expectations
         run: node tools/build.mjs
-      - name: Stage four immutable reviewed blobs without modifying any refs
+      - name: Publish verified immutable blobs without changing any refs
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node .github/macos26-stage-objects.mjs
+        run: node .github/macos26-stage-objects.mjs publish
       - uses: actions/upload-artifact@v4
         with:
           name: macos26-reviewed-object-shas

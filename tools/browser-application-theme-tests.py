@@ -3,6 +3,7 @@
 VB6_BROWSER selects Chromium/Firefox/WebKit. MEMORY mode explicitly lacks origins.
 """
 import functools
+import io
 import http.server
 import json
 import os
@@ -12,6 +13,7 @@ import subprocess
 import threading
 import unittest
 from playwright.sync_api import sync_playwright
+from PIL import Image
 ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 MEMORY=os.environ.get('VB6_TEST_TRANSPORT')=='memory'
@@ -265,7 +267,7 @@ class ApplicationThemes(unittest.TestCase):
   for theme in ['macos26','macos26-dark']:
    self.theme(theme);self.page.evaluate('document.activeElement?.blur()');self.page.mouse.move(1400,1650)
    for button,color in [(close,'rgb(255, 95, 87)'),(mini,'rgb(254, 188, 46)'),(maxi,'rgb(40, 200, 64)')]:
-    self.assertEqual(button.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[13,13]);self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),color)
+    self.assertEqual(button.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[12,12]);self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),color)
     self.assertEqual(button.locator('.icon').evaluate('e=>getComputedStyle(e).opacity'),'0')
    self.assertLess(close.bounding_box()['x'],mini.bounding_box()['x']);self.assertLess(mini.bounding_box()['x'],maxi.bounding_box()['x'])
    mini.click();self.assertEqual(mini.get_attribute('aria-label'),'Restore');self.assertEqual(mini.get_attribute('data-caption-action'),'minimize')
@@ -273,7 +275,7 @@ class ApplicationThemes(unittest.TestCase):
    maxi.click();self.assertEqual(maxi.get_attribute('aria-label'),'Restore');self.assertEqual(maxi.get_attribute('data-caption-action'),'maximize')
    self.assertEqual(maxi.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(40, 200, 64)');maxi.click()
    self.page.mouse.move(1400,1650);self.page.screenshot(path=str(REPORT/(theme+'-caption-refinement.png')))
-   self.record(theme,captionPixels=[13,13],closeMinimizeMaximizeOrder=True,restoreActionIdentity=True)
+   self.record(theme,captionPixels=[12,12],closeMinimizeMaximizeOrder=True,restoreActionIdentity=True)
  def test_fluent_caption_hover_pressed_and_keyboard_ink(self):
   for theme in ['fluent','fluent-dark']:
    self.theme(theme);close=self.page.locator('.vb-form-title [data-caption-action="close"]').first
@@ -301,7 +303,7 @@ class ApplicationThemes(unittest.TestCase):
   for theme in ['classic',*THEMES]:
    self.theme(theme);self.assertEqual(self.page.evaluate(BOUNDS),baseline)
    edges=self.page.locator('.vb-tree').first.evaluate('e=>{const s=getComputedStyle(e);return [s.borderTopColor,s.borderRightColor,s.borderTopWidth];}')
-   self.assertEqual(edges[2],'2px')
+   self.assertEqual(edges[2],'1px' if theme.startswith('macos26') else '2px')
    if theme=='classic' or theme.startswith('x11'):self.assertNotEqual(edges[0],edges[1])
    else:self.assertEqual(edges[0],edges[1])
    root=self.page.locator('#app');self.assertEqual(root.evaluate('e=>getComputedStyle(e).getPropertyValue("--detail-scrollbar-radius").trim()'),'0px' if theme=='classic' or theme.startswith('x11') else '8px')
@@ -312,4 +314,117 @@ class ApplicationThemes(unittest.TestCase):
    self.assertEqual(set(self.active_pack(self.page.locator('.vb-tree').first)),{'x11'})
    self.assertEqual(self.css('.vb-form-title','backgroundColor'),self.rgb(self.palettes[current]['colors']['title']))
    self.record(legacy,canonical=current,captionContrast=True)
+ def test_macos_command_states_preserve_authored_pairs_and_live_values(self):
+  self.page.evaluate('''()=>{window.systemCommand=vb6Application.forms[0].controls.find(c=>c.model.name==='CommandButton1');window.rgbCommand=vb6Application.forms[0].controls.find(c=>c.model.name==='cmdRGB');rgbCommand.set('Default',-1);}''')
+  button=self.page.locator('[data-control="CommandButton1"]');rgb=self.page.locator('[data-control="cmdRGB"]')
+  baseline=self.page.evaluate(BOUNDS)
+  for theme in ['macos26','macos26-dark']:
+   self.theme(theme);palette=self.palettes[theme]
+   self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['colors']['selection']))
+   self.assertEqual(button.evaluate('e=>getComputedStyle(e).color'),self.rgb(palette['colors']['selectionText']))
+   button.hover();self.page.mouse.down()
+   pressed=button.evaluate('''e=>{const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const c=canvas.getContext('2d');c.fillStyle=getComputedStyle(e).backgroundColor;c.fillRect(0,0,1,1);return [...c.getImageData(0,0,1,1).data].slice(0,3);}''')
+   expected=[round(int(palette['colors']['selection'][i:i+2],16)*.85) for i in (1,3,5)]
+   self.assertEqual(pressed,expected)
+   self.page.mouse.move(1400,1650);self.page.mouse.up()
+   button.focus();self.assertEqual(button.evaluate('e=>getComputedStyle(e,"::after").borderTopColor'),self.rgb(palette['colors']['selectionText']))
+   rgb.hover();self.page.mouse.down();self.assertEqual(rgb.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(153, 102, 51)')
+   self.page.mouse.move(1400,1650);self.page.mouse.up()
+   self.page.evaluate('()=>{systemCommand.set("Enabled",0);rgbCommand.set("Enabled",0);}')
+   self.page.wait_for_function('document.querySelector("[data-control=CommandButton1]").classList.contains("disabled")')
+   self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['colors']['face']))
+   self.assertEqual(rgb.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(153, 102, 51)')
+   self.page.evaluate('()=>{systemCommand.set("Enabled",-1);systemCommand.set("Default",0);rgbCommand.set("Enabled",-1);}')
+   self.page.wait_for_function('!document.querySelector("[data-control=CommandButton1]").classList.contains("default-button")')
+   button.hover();self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['tokens']['hover']))
+   self.page.mouse.down();self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['tokens']['pressed']))
+   self.page.mouse.move(1400,1650);self.page.mouse.up()
+   self.page.evaluate('systemCommand.set("Default",-1)');self.assertEqual(self.page.evaluate(BOUNDS),baseline)
+   self.record(theme,defaultNormalPressedDisabled=True,authoredPairPreserved=True,contrastingDefaultFocus=True)
+ def test_macos_checks_composites_tabs_and_disclosure(self):
+  baseline=self.page.evaluate(BOUNDS)
+  for theme in ['macos26','macos26-dark']:
+   self.theme(theme)
+   check=self.page.locator('[data-control="CheckBox1"] input')
+   self.assertEqual(check.evaluate('e=>getComputedStyle(e).borderRadius'),'3px')
+   self.page.evaluate('vb6Application.forms[0].controls.find(c=>c.model.name==="CheckBox1").set("Value",2)')
+   self.page.wait_for_function('document.querySelector("[data-control=CheckBox1] input").indeterminate')
+   self.assertEqual(check.evaluate('e=>{const s=getComputedStyle(e,"::after");return [s.width,s.height,s.clipPath];}'),['7px','2px','none'])
+   check.focus();self.page.keyboard.press('Space');self.assertFalse(check.evaluate('e=>e.indeterminate'))
+   for selector in ['.vb-tree','.vb-listview','.vb-grid','.vb-richtext']:
+    expected='4px' if selector=='.vb-richtext' else '1px'
+    self.assertEqual(self.css(selector,'borderTopWidth'),'1px');self.assertEqual(self.css(selector,'paddingTop'),expected)
+   toggle=self.page.get_by_role('button',name='Collapse Palette',exact=True);self.assertEqual(toggle.evaluate('e=>getComputedStyle(e).fontSize'),'0px')
+   self.assertEqual(toggle.evaluate('e=>getComputedStyle(e,"::after").content'),'""')
+   toggle.click();self.page.get_by_role('button',name='Expand Palette',exact=True).click()
+   self.page.wait_for_function('document.querySelectorAll(".vb-tree-row").length===2')
+   self.assertEqual(self.css('.vb-month table','borderCollapse'),'separate')
+   self.assertEqual(self.css('.vb-month-header','backgroundColor'),self.rgb(self.palettes[theme]['colors']['window']))
+   for tabs in self.page.locator('.vb-tabs').all():
+    self.assertEqual(tabs.locator('.vb-tab-button').first.evaluate('e=>getComputedStyle(e).borderRadius'),'5px')
+    self.assertEqual(tabs.locator('.vb-tab-button').first.evaluate('e=>getComputedStyle(e).borderTopColor'),'rgba(0, 0, 0, 0)')
+   self.assertEqual(self.page.evaluate(BOUNDS),baseline)
+   self.record(theme,mixedCheckDash=[7,2],onePixelComposites=True,realDisclosureInteraction=True,segmentedTabs=True)
+ def test_macos_slider_orientation_values_and_arrowless_scrollbars(self):
+  self.page.evaluate('''()=>{window.testSlider=vb6Application.forms[0].controls.find(c=>c.model.name==='Slider1');window.testScroll=vb6Application.forms[0].controls.find(c=>c.model.name==='HScrollBar1');Object.assign(testSlider.props,{Min:10,Max:30,Value:20,SmallChange:1});testSlider.refresh();Object.assign(testScroll.props,{Min:0,Max:100,Value:50,LargeChange:20,SmallChange:1});testScroll.refresh();window.sliderNode=testSlider.input;window.scrollNode=testScroll.node;}''')
+  slider=self.page.locator('[data-control="Slider1"] input');scroll=self.page.locator('[data-control="HScrollBar1"]')
+  for theme in ['macos26','macos26-dark']:
+   self.theme(theme)
+   self.assertEqual(slider.evaluate('e=>getComputedStyle(e).getPropertyValue("--vb-range-progress")'),'50%')
+   self.assertEqual(slider.get_attribute('aria-orientation'),'horizontal');slider.focus();self.page.keyboard.press('ArrowRight')
+   self.assertEqual(slider.input_value(),'21');self.page.wait_for_function('Math.abs(parseFloat(getComputedStyle(sliderNode).getPropertyValue("--vb-range-progress"))-55)<1e-9')
+   self.page.evaluate('()=>{Object.assign(testSlider.props,{Orientation:1,Value:20});testSlider.refresh();}')
+   self.assertEqual(slider.get_attribute('aria-orientation'),'vertical');self.assertEqual(slider.evaluate('e=>getComputedStyle(e).writingMode'),'vertical-lr')
+   slider.focus();self.page.keyboard.press('ArrowUp');self.assertEqual(slider.input_value(),'21')
+   self.assertFalse(scroll.locator('.vb-scroll-arrow').first.is_visible())
+   self.page.wait_for_function('Math.abs(testScroll.scrollbar.track.clientWidth-testScroll.node.clientWidth)<1')
+   self.page.wait_for_function('testScroll.scrollbar.geometry.travel===testScroll.scrollbar.track.clientWidth-testScroll.scrollbar.geometry.thumb')
+   scroll.focus();self.page.keyboard.press('ArrowRight');self.assertEqual(scroll.get_attribute('aria-valuenow'),'51')
+   self.page.keyboard.press('Home');self.assertEqual(scroll.get_attribute('aria-valuenow'),'0')
+   self.page.keyboard.press('End');self.assertEqual(scroll.get_attribute('aria-valuenow'),'100')
+   self.page.evaluate('()=>{Object.assign(testSlider.props,{Orientation:0,Value:20});testSlider.refresh();testScroll.set("Value",50);}')
+   self.theme('classic');self.assertTrue(scroll.locator('.vb-scroll-arrow').first.is_visible())
+   self.page.wait_for_function('testScroll.scrollbar.track.clientWidth===testScroll.node.clientWidth-30')
+   self.page.wait_for_function('testScroll.scrollbar.geometry.travel===testScroll.scrollbar.track.clientWidth-testScroll.scrollbar.geometry.thumb')
+   self.assertTrue(self.page.evaluate('sliderNode===testSlider.input&&scrollNode===testScroll.node'))
+   self.record(theme,nativeRangeKeyboard=True,orientationLive=True,arrowlessTrackRelayout=True,classicArrowsRestored=True)
+ def test_macos_material_preferences_and_pressed_caption_actions(self):
+  for theme in ['macos26','macos26-dark']:
+   self.theme(theme)
+   for action,pressed in [('close','rgb(223, 73, 66)'),('minimize','rgb(217, 158, 34)'),('maximize','rgb(31, 163, 51)')]:
+    button=self.page.locator('.vb-form-title [data-caption-action="'+action+'"]').first
+    button.hover();self.page.mouse.down();self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),pressed)
+    self.page.mouse.move(1400,1650);self.page.mouse.up()
+   self.page.get_by_role('menuitem',name='File',exact=True).click();menu=self.page.locator('.runtime-popup').first
+   supports=self.page.evaluate('CSS.supports("backdrop-filter","blur(1px)")')
+   if supports:self.assertIn('blur(20px)',menu.evaluate('e=>getComputedStyle(e).backdropFilter'))
+   self.theme(theme,{'reduceTransparency':True});self.assertEqual(menu.evaluate('e=>getComputedStyle(e).backdropFilter'),'none')
+   self.assertEqual(menu.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(self.palettes[theme]['colors']['face']))
+   self.page.keyboard.press('Escape');self.page.screenshot(path=str(REPORT/(theme+'-component-fidelity.png')))
+   self.record(theme,pressedActionColors=True,menuMaterialReduction=True)
+ def test_macos_caption_raster_at_one_and_two_device_pixels(self):
+  for scale in [1,2]:
+   context=self.browser.new_context(viewport={'width':1440,'height':1700},device_scale_factor=scale,color_scheme='light')
+   context.on('page',lambda p:p.on('pageerror',lambda e:self.errors.append(str(e))))
+   context.on('request',lambda r:self.requests.append(r.url))
+   try:
+    page=context.new_page();self.load(FIXTURE/'gallery.html',page);page.wait_for_function('typeof vb6Application==="object"')
+    baseline=page.evaluate(BOUNDS)
+    for theme in ['macos26','macos26-dark']:
+     page.evaluate('t=>vb6Application.setTheme(t,{reduceMotion:true})',theme)
+     page.evaluate('document.activeElement?.blur()');page.mouse.move(1400,1650);page.wait_for_timeout(110)
+     for action,color in [('close',(255,95,87)),('minimize',(254,188,46)),('maximize',(40,200,64))]:
+      button=page.locator('.vb-form-title [data-caption-action="'+action+'"]').first
+      self.assertEqual(button.evaluate('e=>[e.getBoundingClientRect().width,e.getBoundingClientRect().height]'),[12,12])
+      data=button.screenshot(path=str(REPORT/(theme+'-'+action+'-'+str(scale)+'x.png')),scale='device')
+      image=Image.open(io.BytesIO(data)).convert('RGB');self.assertEqual(image.size,(12*scale,12*scale))
+      self.assertEqual(image.getpixel((6*scale,6*scale)),color)
+      self.assertNotEqual(image.getpixel((0,0)),color,'Traffic light must be circular, not a filled square')
+     self.assertEqual(page.evaluate(BOUNDS),baseline)
+     self.assertEqual(page.locator('.vb-command>u').first.evaluate('e=>getComputedStyle(e).textDecorationLine'),'none')
+     page.screenshot(path=str(REPORT/(theme+'-gallery-'+str(scale)+'x.png')),scale='device')
+     self.record(theme,deviceScaleFactor=scale,captionPhysicalPixels=[12*scale,12*scale],circlePixels=True,geometryUnchanged=True)
+    page.evaluate('()=>vb6Application.setTheme("classic",{reduceMotion:true})')
+    self.assertEqual(page.locator('.vb-command>u').first.evaluate('e=>getComputedStyle(e).textDecorationLine'),'underline')
+   finally:context.close()
 if __name__=='__main__':unittest.main(verbosity=2)
