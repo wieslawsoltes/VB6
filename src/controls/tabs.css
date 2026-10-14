@@ -1,17 +1,17 @@
 /* SSTab stores children relative to its control origin, not below its header. */
 .vb-sstab > .vb-tab-client {inset:0;z-index:0;overflow:hidden}
 .vb-tabs > .vb-tab-header {display:grid;position:absolute;left:0;top:0;padding:0 3px;box-sizing:border-box;z-index:1;align-items:stretch;border:0;gap:0}
-.vb-tabs > .vb-tab-header > .vb-tab-button {box-sizing:border-box;min-width:0;min-height:0;height:100%;top:0;margin:0;padding:2px 8px;display:flex;align-items:center;justify-content:center;gap:4px;overflow:hidden;white-space:nowrap;font:inherit;color:inherit}
+.vb-tabs > .vb-tab-header > .vb-tab-button {box-sizing:border-box;min-width:0;min-height:0;height:100%;top:0;margin:0;padding:2px 8px;display:flex;align-items:center;justify-content:center;gap:4px;overflow:hidden;white-space:nowrap;font:inherit;color:inherit;border-color:var(--detail-tab-border,var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light))}
 .vb-tab-button > span {overflow:hidden;text-overflow:ellipsis}
 .vb-tab-picture {max-width:18px;max-height:18px;object-fit:contain;flex:none}
-.vb-tabs > .vb-tab-header > .vb-tab-button.active {height:100%;border-bottom-color:var(--vb-face);z-index:2}
+.vb-tabs > .vb-tab-header > .vb-tab-button.active {height:100%;border-bottom-color:var(--detail-tab-border,var(--vb-face));z-index:2}
 .vb-tabs[data-tab-orientation="1"] > .vb-tab-header {top:auto;bottom:0}
-.vb-tabs[data-tab-orientation="1"] > .vb-tab-header > .vb-tab-button.active {border-top-color:var(--vb-face);border-bottom-color:var(--vb-shadow)}
+.vb-tabs[data-tab-orientation="1"] > .vb-tab-header > .vb-tab-button.active {border-top-color:var(--detail-tab-border,var(--vb-face));border-bottom-color:var(--detail-tab-border,var(--vb-shadow))}
 .vb-tabs[data-tab-orientation="2"] > .vb-tab-header,.vb-tabs[data-tab-orientation="3"] > .vb-tab-header {padding:3px 0}
 .vb-tabs[data-tab-orientation="3"] > .vb-tab-header {left:auto;right:0}
-.vb-tabs[data-tab-orientation="2"] > .vb-tab-header > .vb-tab-button,.vb-tabs[data-tab-orientation="3"] > .vb-tab-header > .vb-tab-button {writing-mode:vertical-rl;padding:8px 2px;border-bottom-color:var(--vb-shadow)}
-.vb-tabs[data-tab-orientation="2"] > .vb-tab-header > .vb-tab-button.active {border-right-color:var(--vb-face)}
-.vb-tabs[data-tab-orientation="3"] > .vb-tab-header > .vb-tab-button.active {border-left-color:var(--vb-face)}
+.vb-tabs[data-tab-orientation="2"] > .vb-tab-header > .vb-tab-button,.vb-tabs[data-tab-orientation="3"] > .vb-tab-header > .vb-tab-button {writing-mode:vertical-rl;padding:8px 2px;border-bottom-color:var(--detail-tab-border,var(--vb-shadow))}
+.vb-tabs[data-tab-orientation="2"] > .vb-tab-header > .vb-tab-button.active {border-right-color:var(--detail-tab-border,var(--vb-face))}
+.vb-tabs[data-tab-orientation="3"] > .vb-tab-header > .vb-tab-button.active {border-left-color:var(--detail-tab-border,var(--vb-face))}
 .vb-tabs.vb-tab-property-pages > .vb-tab-header > .vb-tab-button {justify-self:start}
 .designer-form .vb-control .vb-tab-header [data-designer-tab] {pointer-events:auto;cursor:default}
 .vb-design-hidden-tab {opacity:.65}

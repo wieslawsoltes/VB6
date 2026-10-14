@@ -13,13 +13,13 @@ export function renderApplicationThemeTokens(){
     else {
       const t=p.tokens,x=p.family==='x11',mac=p.family==='macos26';
       const values={compositeBorder:x?`${p.colors.shadow} ${p.colors.light} ${p.colors.light} ${p.colors.shadow}`:t.border,radius:t.radius,windowRadius:t.windowRadius,controlShadow:x?t.controlShadow:`inset 0 0 0 1px ${t.border}, ${t.controlShadow}`,
-        pressedShadow:x?t.pressedShadow:`inset 0 0 0 1px ${t.focus}, ${t.pressedShadow}`,
-        inputShadow:x?t.pressedShadow:`inset 0 0 0 1px ${t.border}`,hoverShadow:`inset 0 0 0 1px ${t.focus}`,border:t.border,separator:t.separator,
+        pressedShadow:x?t.pressedShadow:mac?`inset 0 0 0 1px ${t.border}, ${t.pressedShadow}`:`inset 0 0 0 1px ${t.focus}, ${t.pressedShadow}`,
+        inputShadow:x?t.pressedShadow:`inset 0 0 0 1px ${t.border}`,hoverShadow:mac?`inset 0 0 0 1px ${t.border}, ${t.controlShadow}`:`inset 0 0 0 1px ${t.focus}`,border:t.border,separator:t.separator,
         surface:t.surface,focus:t.focus,thumb:t.thumb,font:t.font,captionWeight:x?'700':p.family==='fluent'?'400':'600',captionBackground:x?p.colors.title:t.material,
         windowShadow:t.shadow,frameImage:'none',frameBorder:x?`${p.colors.light} ${p.colors.shadow} ${p.colors.shadow} ${p.colors.light}`:t.border,pressedPadding:'4px 9px',disabledShadow:`inset 0 0 0 1px ${p.colors.gray}`,
         disabledTextShadow:'none',progressFill:p.colors.selection,checkBackground:p.colors.selection,checkMark:p.colors.selectionText,
         checkBorder:p.colors.selection,checkShadow:'none',radioRadius:x?'0px':'50%',rangeTrack:t.separator,rangeThumb:p.colors.selection,
-        material:t.material,backdrop:mac?'blur(12px) saturate(1.1)':'none',duration:'90ms',focusWidth:'2px',focusStyle:'solid',windowButtonRadius:mac?'50%':t.radius,radioTransform:x?'rotate(45deg)':'none',disabledColor:p.colors.gray,formIconShadow:'none',legacyIconDisplay:'none',treeIconBorderWidth:'0px',treeIconBackground:'transparent',tabShadow:`inset 0 -2px ${p.colors.selection}`};
+        material:t.material,backdrop:mac?'blur(20px) saturate(1.25)':'none',duration:'90ms',focusWidth:'2px',focusStyle:'solid',windowButtonRadius:mac?'50%':t.radius,radioTransform:x?'rotate(45deg)':'none',disabledColor:p.colors.gray,formIconShadow:'none',legacyIconDisplay:'none',treeIconBorderWidth:'0px',treeIconBackground:'transparent',tabShadow:mac?t.controlShadow:`inset 0 -2px ${p.colors.selection}`};
       for(const key of keys)css+=` --app-${kebab(key)}: ${values[key]};\n`;
     }
     css+=themeDetailTokens(p);
@@ -28,7 +28,7 @@ export function renderApplicationThemeTokens(){
   css+=`[data-vb-theme-family="macos26"][data-vb-reduce-transparency="true"] {--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}
 [data-vb-reduce-motion="true"] {--app-duration:0s;}
 @media(prefers-reduced-motion:reduce) {[data-vb-theme]{--app-duration:0s;}}
-@media(prefers-reduced-transparency:reduce) {[data-vb-theme-family="macos26"]{--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}}
+@media(prefers-reduced-transparency:reduce),(prefers-contrast:more) {[data-vb-theme-family="macos26"]{--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}}
 `;
   return css;
 }

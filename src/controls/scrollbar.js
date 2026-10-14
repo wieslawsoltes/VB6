@@ -12,7 +12,9 @@ export class ClassicScrollbar {
     this.track=el('div',{class:'vb-scroll-track'});this.thumb=el('div',{class:'vb-scroll-thumb','aria-hidden':'true'});this.track.append(this.thumb);node.append(this.before,this.track,this.after);
     this.bindRepeat(this.before,-1,false);this.bindRepeat(this.after,1,false);this.bindRepeat(this.track,0,true);
     this.thumb.addEventListener('pointerdown',e=>this.drag(e),{signal:this.signal});node.addEventListener('keydown',e=>this.keydown(e),{signal:this.signal});
-    this.observer=new ResizeObserver(()=>this.refresh());this.observer.observe(node);this.refresh();
+    // The track can resize without the control resizing (arrowless platform skins).
+    // Reuse the existing observer: no theme listener, polling, or extra observer.
+    this.observer=new ResizeObserver(()=>this.refresh());this.observer.observe(node);this.observer.observe(this.track);this.refresh();
   }
   get props(){return this.properties();}
   available(){return !this.design&&this.props.Enabled!==0&&Number(this.props.Min)!==Number(this.props.Max);}

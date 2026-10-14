@@ -339,14 +339,14 @@ class Themes(unittest.TestCase):
             close=self.page.locator('.document-title [data-caption-action="close"]').first
             # Wait for the real theme transition, not a timer-dependent intermediate color.
             self.page.wait_for_function('''()=>getComputedStyle(document.querySelector('.document-title [data-caption-action="close"]')).backgroundColor==="rgb(255, 95, 87)"''')
-            self.assertEqual(close.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[13,13])
+            self.assertEqual(close.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[12,12])
             self.assertEqual(close.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(255, 95, 87)')
             tool=self.page.locator('.tool-caption>button:has(>.icon[data-icon="close"])').first
             self.assertEqual(tool.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[12,12])
             self.assertTrue(self.page.locator('.mdi-system-menu').first.is_visible())
             self.assertEqual(self.page.evaluate(SNAPSHOT),baseline)
             self.page.screenshot(path=str(REPORT/(theme+'-caption-refinement.png')))
-            self.record(theme,captionPixels=[13,13],toolCaptionPixels=[12,12],systemMenuRetained=True,classicAppUntouched=True)
+            self.record(theme,captionPixels=[12,12],toolCaptionPixels=[12,12],systemMenuRetained=True,classicAppUntouched=True)
         self.direct_theme('classic')
         self.assertEqual(self.page.locator('.document-title [data-caption-action="close"]').first.evaluate('e=>[e.offsetWidth,e.offsetHeight]'),[16,14])
     def test_x11_consolidated_options_and_legacy_preference(self):
@@ -375,6 +375,27 @@ class Themes(unittest.TestCase):
         paint=close.evaluate('e=>{const s=getComputedStyle(e);return [s.color,s.backgroundColor,getComputedStyle(e.querySelector(".icon"),"::after").backgroundColor];}')
         self.assertNotEqual(paint[0],paint[1]);self.assertEqual(paint[0],paint[2])
         self.page.screenshot(path=str(REPORT/'caption-forced-colors.png'));self.record('macOS focus discovery and system-color caption contrast')
+
+    def test_macos_segmented_inspector_and_system_typography(self):
+        authored=self.page.evaluate(SNAPSHOT)
+        for theme in ['macos26','macos26-dark']:
+            self.direct_theme(theme)
+            self.assertEqual(self.page.locator('.app-title-text').evaluate('e=>getComputedStyle(e).fontSize'),'13px')
+            self.assertEqual(self.page.locator('.menubar>button>u').first.evaluate('e=>getComputedStyle(e).textDecorationLine'),'none')
+            tabs=self.page.locator('.property-tabs').first
+            active=tabs.locator('.active')
+            self.assertEqual(active.evaluate('e=>getComputedStyle(e).borderRadius'),'5px')
+            self.assertNotIn('0px -2px',active.evaluate('e=>getComputedStyle(e).boxShadow'))
+            self.assertEqual(active.evaluate('e=>getComputedStyle(e).boxShadow'),self.page.evaluate('''()=>{const n=document.createElement('div');n.style.boxShadow='var(--ide-control-shadow)';document.body.append(n);const value=getComputedStyle(n).boxShadow;n.remove();return value;}'''))
+            self.assertTrue(tabs.evaluate('''e=>{const r=e.getBoundingClientRect();return [...e.querySelectorAll('button')].every(b=>{const q=b.getBoundingClientRect();return q.y>=r.y&&q.bottom<=r.bottom;});}'''))
+            tabs.locator('button:not(.active)').first.click()
+            self.assertEqual(tabs.locator('.active').count(),1)
+            self.assertEqual(self.page.evaluate(SNAPSHOT),authored)
+            self.options()
+            self.assertEqual(self.page.locator('.ide-dialog input[type=checkbox]').first.evaluate('e=>getComputedStyle(e).borderRadius'),'3px')
+            self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
+            self.page.screenshot(path=str(REPORT/(theme+'-inspector-fidelity.png')))
+            self.record(theme,segmentedInspector=True,systemTypefaceSize=13,authoredSurfaceIsolated=True)
 
 if __name__=='__main__':
     unittest.main(verbosity=2)
