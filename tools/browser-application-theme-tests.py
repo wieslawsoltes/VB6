@@ -61,6 +61,8 @@ class ApplicationThemes(unittest.TestCase):
  def theme(self,theme,options=None):
   self.page.evaluate('([t,o])=>{vb6Application.setTheme(t,o||{});}',[theme,options]);self.page.wait_for_timeout(110)
  def css(self,selector,prop):return self.page.locator(selector).first.evaluate('(e,p)=>getComputedStyle(e)[p]',prop)
+ def paint_rgba(self,node):
+  return node.evaluate('''e=>{const c=document.createElement('canvas').getContext('2d');c.fillStyle=getComputedStyle(e).backgroundColor;c.fillRect(0,0,1,1);return [...c.getImageData(0,0,1,1).data];}''')
  def active_pack(self,node):return node.evaluate('e=>[...e.querySelectorAll(".theme-icon-layer")].filter(g=>getComputedStyle(g).display!=="none").map(g=>g.dataset.iconPack)')
  def rgb(self,value):return 'rgb('+', '.join(str(int(value[i:i+2],16)) for i in (1,3,5))+')'
  def test_all_palettes_control_bounds_fonts_and_authored_rgb(self):
@@ -314,17 +316,36 @@ class ApplicationThemes(unittest.TestCase):
    self.assertEqual(set(self.active_pack(self.page.locator('.vb-tree').first)),{'x11'})
    self.assertEqual(self.css('.vb-form-title','backgroundColor'),self.rgb(self.palettes[current]['colors']['title']))
    self.record(legacy,canonical=current,captionContrast=True)
+ def test_macos_replaces_actual_classic_painters_not_only_border_colors(self):
+  check=self.page.locator('[data-control="CheckBox1"] input');check.uncheck()
+  command=self.page.locator('[data-control="CommandButton1"]')
+  baseline=self.page.evaluate(BOUNDS)
+  for theme in ['macos26','macos26-dark']:
+   self.theme(theme)
+   self.assertEqual(check.evaluate('e=>getComputedStyle(e).backgroundImage'),'none')
+   field=self.page.locator('[data-control="TextBox1"] input')
+   self.assertNotIn('-1px',field.evaluate('e=>getComputedStyle(e).boxShadow'))
+   self.assertIn('0px 0px 0px 1px inset',field.evaluate('e=>getComputedStyle(e).boxShadow'))
+   self.assertEqual(command.locator('u').evaluate('e=>getComputedStyle(e).backgroundImage'),'none')
+   self.assertEqual(command.locator('u').evaluate('e=>getComputedStyle(e).textDecorationLine'),'none')
+   self.assertEqual(self.page.evaluate(BOUNDS),baseline)
+   self.record(theme,classicFieldReliefRemoved=True,classicMnemonicStripRemoved=True,authoredBoundsPreserved=True)
+  self.theme('classic')
+  self.assertIn('linear-gradient',check.evaluate('e=>getComputedStyle(e).backgroundImage'))
+  self.assertIn('linear-gradient',command.locator('u').evaluate('e=>getComputedStyle(e).backgroundImage'))
+  self.assertEqual(command.locator('u').evaluate('e=>getComputedStyle(e).textDecorationLine'),'none')
  def test_macos_command_states_preserve_authored_pairs_and_live_values(self):
   self.page.evaluate('''()=>{window.systemCommand=vb6Application.forms[0].controls.find(c=>c.model.name==='CommandButton1');window.rgbCommand=vb6Application.forms[0].controls.find(c=>c.model.name==='cmdRGB');rgbCommand.set('Default',-1);}''')
   button=self.page.locator('[data-control="CommandButton1"]');rgb=self.page.locator('[data-control="cmdRGB"]')
   baseline=self.page.evaluate(BOUNDS)
   for theme in ['macos26','macos26-dark']:
    self.theme(theme);palette=self.palettes[theme]
-   self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['colors']['selection']))
+   self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(0, 122, 255)')
    self.assertEqual(button.evaluate('e=>getComputedStyle(e).color'),self.rgb(palette['colors']['selectionText']))
    button.hover();self.page.mouse.down()
    pressed=button.evaluate('''e=>{const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const c=canvas.getContext('2d');c.fillStyle=getComputedStyle(e).backgroundColor;c.fillRect(0,0,1,1);return [...c.getImageData(0,0,1,1).data].slice(0,3);}''')
-   expected=[round(int(palette['colors']['selection'][i:i+2],16)*.85) for i in (1,3,5)]
+   # Independent active AppKit captures: dark presses lighten, light presses darken.
+   expected=[25,135,255] if theme.endswith('-dark') else [0,110,230]
    self.assertEqual(pressed,expected)
    self.page.mouse.move(1400,1650);self.page.mouse.up()
    button.focus();self.assertEqual(button.evaluate('e=>getComputedStyle(e,"::after").borderTopColor'),self.rgb(palette['colors']['selectionText']))
@@ -332,11 +353,11 @@ class ApplicationThemes(unittest.TestCase):
    self.page.mouse.move(1400,1650);self.page.mouse.up()
    self.page.evaluate('()=>{systemCommand.set("Enabled",0);rgbCommand.set("Enabled",0);}')
    self.page.wait_for_function('document.querySelector("[data-control=CommandButton1]").classList.contains("disabled")')
-   self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['colors']['face']))
+   self.assertEqual(self.paint_rgba(button),[255,255,255,10] if theme.endswith('-dark') else [0,0,0,10])
    self.assertEqual(rgb.evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(153, 102, 51)')
    self.page.evaluate('()=>{systemCommand.set("Enabled",-1);systemCommand.set("Default",0);rgbCommand.set("Enabled",-1);}')
    self.page.wait_for_function('!document.querySelector("[data-control=CommandButton1]").classList.contains("default-button")')
-   button.hover();self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['tokens']['hover']))
+   button.hover();self.assertEqual(self.paint_rgba(button),[255,255,255,20] if theme.endswith('-dark') else [0,0,0,20])
    self.page.mouse.down();self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['tokens']['pressed']))
    self.page.mouse.move(1400,1650);self.page.mouse.up()
    self.page.evaluate('systemCommand.set("Default",-1)');self.assertEqual(self.page.evaluate(BOUNDS),baseline)
@@ -346,10 +367,10 @@ class ApplicationThemes(unittest.TestCase):
   for theme in ['macos26','macos26-dark']:
    self.theme(theme)
    check=self.page.locator('[data-control="CheckBox1"] input')
-   self.assertEqual(check.evaluate('e=>getComputedStyle(e).borderRadius'),'3px')
+   self.assertEqual(check.evaluate('e=>{const s=getComputedStyle(e);return [s.width,s.height,s.borderRadius];}'),['16px','16px','5px'])
    self.page.evaluate('vb6Application.forms[0].controls.find(c=>c.model.name==="CheckBox1").set("Value",2)')
    self.page.wait_for_function('document.querySelector("[data-control=CheckBox1] input").indeterminate')
-   self.assertEqual(check.evaluate('e=>{const s=getComputedStyle(e,"::after");return [s.width,s.height,s.clipPath];}'),['7px','2px','none'])
+   self.assertEqual(check.evaluate('e=>{const s=getComputedStyle(e,"::after");return [s.width,s.height,s.clipPath];}'),['8px','2px','none'])
    check.focus();self.page.keyboard.press('Space');self.assertFalse(check.evaluate('e=>e.indeterminate'))
    for selector in ['.vb-tree','.vb-listview','.vb-grid','.vb-richtext']:
     expected='4px' if selector=='.vb-richtext' else '1px'
@@ -364,7 +385,7 @@ class ApplicationThemes(unittest.TestCase):
     self.assertEqual(tabs.locator('.vb-tab-button').first.evaluate('e=>getComputedStyle(e).borderRadius'),'5px')
     self.assertEqual(tabs.locator('.vb-tab-button').first.evaluate('e=>getComputedStyle(e).borderTopColor'),'rgba(0, 0, 0, 0)')
    self.assertEqual(self.page.evaluate(BOUNDS),baseline)
-   self.record(theme,mixedCheckDash=[7,2],onePixelComposites=True,realDisclosureInteraction=True,segmentedTabs=True)
+   self.record(theme,mixedCheckDash=[8,2],checkSize=[16,16],onePixelComposites=True,realDisclosureInteraction=True,segmentedTabs=True)
  def test_macos_slider_orientation_values_and_arrowless_scrollbars(self):
   self.page.evaluate('''()=>{window.testSlider=vb6Application.forms[0].controls.find(c=>c.model.name==='Slider1');window.testScroll=vb6Application.forms[0].controls.find(c=>c.model.name==='HScrollBar1');Object.assign(testSlider.props,{Min:10,Max:30,Value:20,SmallChange:1});testSlider.refresh();Object.assign(testScroll.props,{Min:0,Max:100,Value:50,LargeChange:20,SmallChange:1});testScroll.refresh();window.sliderNode=testSlider.input;window.scrollNode=testScroll.node;}''')
   slider=self.page.locator('[data-control="Slider1"] input');scroll=self.page.locator('[data-control="HScrollBar1"]')
@@ -425,6 +446,12 @@ class ApplicationThemes(unittest.TestCase):
      page.screenshot(path=str(REPORT/(theme+'-gallery-'+str(scale)+'x.png')),scale='device')
      self.record(theme,deviceScaleFactor=scale,captionPhysicalPixels=[12*scale,12*scale],circlePixels=True,geometryUnchanged=True)
     page.evaluate('()=>vb6Application.setTheme("classic",{reduceMotion:true})')
-    self.assertEqual(page.locator('.vb-command>u').first.evaluate('e=>getComputedStyle(e).textDecorationLine'),'underline')
+    # Classic uses deterministic currentColor strips, not browser underline
+    # rasterization; preserve the existing fractional-DPI renderer contract.
+    mark=page.locator('.vb-command>u').first.evaluate('e=>{const s=getComputedStyle(e);return {decoration:s.textDecorationLine,image:s.backgroundImage,color:s.color}}')
+    self.assertEqual(mark['decoration'],'none');self.assertIn(mark['color'],mark['image'])
+    page.emulate_media(forced_colors='active')
+    mark=page.locator('.vb-command>u').first.evaluate('e=>{const s=getComputedStyle(e);return {decoration:s.textDecorationLine,image:s.backgroundImage}}')
+    self.assertEqual(mark,{'decoration':'underline','image':'none'})
    finally:context.close()
 if __name__=='__main__':unittest.main(verbosity=2)

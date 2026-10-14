@@ -20,6 +20,8 @@ export function applicationThemeGallery(theme='classic'){
   if(type==='CommandButton')Object.assign(c.properties,{Caption:'&Apply',Default:-1});
   if(type==='CheckBox'||type==='OptionButton')c.properties.Value=1;
   if(type==='TextBox')Object.assign(c.properties,{Text:'Authored typeface',FontName:'Courier New',FontSize:10});
+  if(type==='Toolbar')c.properties.Buttons=[{Key:'new',Caption:'New'},{Key:'save',Caption:'Save'},{Key:'disabled',Caption:'Unavailable',Enabled:0}];
+  if(type==='ProgressBar')c.properties.Value=63;
   if(type==='PictureBox')Object.assign(c.properties,{BackColor:-2147483643});
   if(type==='TreeView')c.properties.Nodes=[{Key:'root',Text:'Palette',Expanded:-1},{Key:'child',Parent:'root',Text:'Control'}];
   form.controls.push(c);

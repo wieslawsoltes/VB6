@@ -1,3 +1,4 @@
+import {macosSystemColors} from './macos-reference-metrics.js';
 /** Shared immutable platform palettes. Original browser-rendered artwork and colors;
  * no native toolkit, proprietary font or OS resource dependencies. */
 const freeze = value => {
@@ -43,24 +44,20 @@ export const PLATFORM_THEMES = freeze({
   fluent:profile('fluent','Fluent WinUI 3 — Light','fluent','light',light,lightTokens),
   'fluent-dark':profile('fluent-dark','Fluent WinUI 3 — Dark','fluent','dark',dark,darkTokens),
   macos26:profile('macos26','macOS 26 — Light','macos26','light',{
-    ...light,face:'#f5f5f7',title:'#e9e9ec',titleEnd:'#e9e9ec',text:'#1d1d1f',titleText:'#1d1d1f',
-    inactive:'#ececef',inactiveEnd:'#ececef',inactiveText:'#68686d',windowText:'#1d1d1f',
-    selection:'#005ec4',selectionText:'#ffffff',workspace:'#dcdde1',desktop:'#d9ddeb',gray:'#6e6e73',
-    info:'#f5f5f7',infoText:'#1d1d1f',link:'#0057b8',keyword:'#7136a8',comment:'#386738'
+    ...light,...macosSystemColors('light'),workspace:'#e9e9e9',desktop:'#d9ddeb',
+    link:'#0057b8',keyword:'#7136a8',comment:'#386738'
   },{...lightTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',size:'13px',radius:'6px',windowRadius:'14px',
-    border:'#b9b9bf',separator:'#d8d8dd',control:'#ffffff',focus:'#007aff',surface:'#f0f0f3',hover:'#ececee',pressed:'#dedee2',
-    gutter:'#f5f5f7',gutterText:'#6e6e73',thumb:'#8e8e93',material:'color-mix(in srgb, #ececf0 82%, transparent)',
-    controlShadow:'0 1px 2px #0000001f, inset 0 1px #ffffffcc',pressedShadow:'inset 0 1px 2px #00000018',
+    border:'#e5e5e5',separator:'#e6e6e6',control:'#ebebeb',focus:'#007aff',surface:'#f7f7f7',hover:'#ebebeb',pressed:'#d3d3d3',
+    gutter:'#fafafa',gutterText:'#737373',thumb:'#8e8e93',material:'color-mix(in srgb, #ffffff 82%, transparent)',
+    controlShadow:'none',pressedShadow:'none',
     shadow:'0 18px 48px #00000030, 0 3px 12px #0000001f, 0 0 0 1px #00000012'}),
   'macos26-dark':profile('macos26-dark','macOS 26 — Dark','macos26','dark',{
-    ...dark,face:'#28282b',title:'#303033',titleEnd:'#303033',text:'#f5f5f7',titleText:'#f5f5f7',
-    inactive:'#29292c',inactiveEnd:'#29292c',inactiveText:'#a1a1a6',window:'#1e1e20',windowText:'#f5f5f7',
-    selection:'#0a61c9',selectionText:'#ffffff',workspace:'#171719',desktop:'#222228',gray:'#a1a1a6',
-    info:'#323235',infoText:'#f5f5f7',link:'#91c6ff',keyword:'#dbadff',comment:'#9cd69c'
+    ...dark,...macosSystemColors('dark'),workspace:'#141414',desktop:'#222228',
+    link:'#91c6ff',keyword:'#dbadff',comment:'#9cd69c'
   },{...darkTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',size:'13px',radius:'6px',windowRadius:'14px',
-    border:'#59595f',separator:'#3e3e43',control:'#48484d',focus:'#0a84ff',surface:'#303034',hover:'#545459',pressed:'#38383c',
-    gutter:'#252528',gutterText:'#a1a1a6',thumb:'#8e8e93',material:'color-mix(in srgb, #303033 88%, transparent)',
-    controlShadow:'0 1px 2px #00000055, inset 0 1px #ffffff12',pressedShadow:'inset 0 1px 2px #00000044',
+    border:'#3a3a3a',separator:'#343434',control:'#303030',focus:'#007aff',surface:'#252525',hover:'#303030',pressed:'#454545',
+    gutter:'#252525',gutterText:'#8e8e8e',thumb:'#8e8e93',material:'color-mix(in srgb, #1e1e1e 88%, transparent)',
+    controlShadow:'none',pressedShadow:'none',
     shadow:'0 18px 48px #00000080, 0 3px 12px #00000055, 0 0 0 1px #00000066'}),
   x11:profile('x11','X11 — Light','x11','light',{
     ...light,face:'#bdbdb3',light:'#f2f2e8',highlight:'#d6d6cc',shadow:'#66665c',dark:'#35352d',

@@ -27,7 +27,8 @@
     "browser-application-theme-tests.py",
     "browser-native-caption-tests.py",
     "browser-sample-exports.py",
-    "browser-exporter-tests.py"
+    "browser-exporter-tests.py",
+    "browser-macos-reference-tests.py"
   ],
   "intelligent-ui": [
     "intelligent-ui-browser-tests.py",

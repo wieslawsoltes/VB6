@@ -2,7 +2,7 @@ import {PaintScene, parseColor, splitCSS} from './scene.js';
 import {intersect} from './policy.js';
 import {solidBackgroundLayers, paintBackgroundLayers, preserveBackgroundEdges} from './background.js';
 import {requiresNativeShadowPaint} from './style-activity.js';
-import {hasPartialAlpha, canvasBackground} from './paint-compat.js';
+import {hasPartialAlpha, canvasBackground, preserveOverflowEdges} from './paint-compat.js';
 const SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'HEAD']);
 const NATIVE = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'IFRAME', 'VIDEO', 'AUDIO', 'CANVAS', 'SVG', 'IMG', 'OBJECT', 'EMBED', 'TABLE', 'METER', 'PROGRESS']);
 const rectOf = rect => [rect.left, rect.top, rect.width, rect.height];
@@ -202,7 +202,11 @@ export class DOMScene {
       const dpr = this.scene.dpr;
       const fractional = rect.some(value => Math.abs(value - Math.round(value)) > .001) || [...rect, ...borders.map(edge => edge.width), ...shadows.flatMap(shadow => [shadow.x * scaleX, shadow.y * scaleY])].some(value => Math.abs(value * dpr - Math.round(value * dpr)) > .001);
       if (fractional) {
-        const pad = 1 / dpr;
+        // Native layout origins, border widths and scroll offsets round
+        // independently. At fractional scale a scrolled border can cover the
+        // second adjacent device pixel (e.g. 17px rows, scrollTop=37, DPR=2.5).
+        // Preserve that coverage halo while retaining the opaque interior.
+        const pad = 2 / dpr;
         const sx = Math.max(0, ...shadows.map(shadow => Math.abs(shadow.x * scaleX)));
         const sy = Math.max(0, ...shadows.map(shadow => Math.abs(shadow.y * scaleY)));
         for (const edge of [
@@ -215,11 +219,13 @@ export class DOMScene {
       if (backgroundRects) preserveBackgroundEdges(this.scene, backgroundRects, intersect(rect,clip));
     }
     let childClip = clip;
-    if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+    const clipX = style.overflowX !== 'visible', clipY = style.overflowY !== 'visible';
+    if (clipX || clipY) {
       const own = [rect[0] + box.clientLeft * scaleX, rect[1] + box.clientTop * scaleY, box.clientWidth * scaleX, box.clientHeight * scaleY];
       childClip = intersect(clip, [style.overflowX === 'visible' ? clip[0] : own[0], style.overflowY === 'visible' ? clip[1] : own[1], style.overflowX === 'visible' ? clip[2] : own[2], style.overflowY === 'visible' ? clip[3] : own[3]]);
     }
     this.children(node, childClip, depth);
+    if (clipX || clipY) preserveOverflowEdges(this.scene, childClip, clip, clipX, clipY);
     // Native scrollbar thumbs/buttons remain interactive and platform accurate.
     if (visible && inView && borders) {
       const [t, r, b, l] = borders.map(item => item.width);

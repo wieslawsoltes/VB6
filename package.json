@@ -109,7 +109,10 @@
     "test:advanced-editor": "node --test tests/advanced-editor*.test.mjs",
     "test:browser:advanced-editor": "python tools/browser-advanced-editor-tests.py",
     "test:designer": "node --test tests/designer-*.test.mjs",
-    "test:designer:browser": "python tools/browser-designer-tests.py --origin http"
+    "test:designer:browser": "python tools/browser-designer-tests.py --origin http",
+    "test:macos:theme:browser": "python tools/browser-macos-reference-tests.py",
+    "test:macos:theme:comparison": "python tools/browser-macos-reference-tests.py --native-dir reports/macos-theme-reference",
+    "test:macos:theme:exact": "python tools/browser-macos-reference-tests.py --native-dir reports/macos-theme-reference --require-exact"
   },
   "engines": {
     "node": ">=22"

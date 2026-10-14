@@ -384,7 +384,7 @@ class Themes(unittest.TestCase):
             self.assertEqual(self.page.locator('.menubar>button>u').first.evaluate('e=>getComputedStyle(e).textDecorationLine'),'none')
             tabs=self.page.locator('.property-tabs').first
             active=tabs.locator('.active')
-            self.assertEqual(active.evaluate('e=>getComputedStyle(e).borderRadius'),'5px')
+            self.assertEqual(active.evaluate('e=>getComputedStyle(e).borderRadius'),'6px')
             self.assertNotIn('0px -2px',active.evaluate('e=>getComputedStyle(e).boxShadow'))
             self.assertEqual(active.evaluate('e=>getComputedStyle(e).boxShadow'),self.page.evaluate('''()=>{const n=document.createElement('div');n.style.boxShadow='var(--ide-control-shadow)';document.body.append(n);const value=getComputedStyle(n).boxShadow;n.remove();return value;}'''))
             self.assertTrue(tabs.evaluate('''e=>{const r=e.getBoundingClientRect();return [...e.querySelectorAll('button')].every(b=>{const q=b.getBoundingClientRect();return q.y>=r.y&&q.bottom<=r.bottom;});}'''))
@@ -392,7 +392,7 @@ class Themes(unittest.TestCase):
             self.assertEqual(tabs.locator('.active').count(),1)
             self.assertEqual(self.page.evaluate(SNAPSHOT),authored)
             self.options()
-            self.assertEqual(self.page.locator('.ide-dialog input[type=checkbox]').first.evaluate('e=>getComputedStyle(e).borderRadius'),'3px')
+            self.assertEqual(self.page.locator('.ide-dialog input[type=checkbox]').first.evaluate('e=>getComputedStyle(e).borderRadius'),'5px')
             self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
             self.page.screenshot(path=str(REPORT/(theme+'-inspector-fidelity.png')))
             self.record(theme,segmentedInspector=True,systemTypefaceSize=13,authoredSurfaceIsolated=True)

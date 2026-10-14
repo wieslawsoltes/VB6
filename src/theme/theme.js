@@ -47,6 +47,9 @@ export function cssColor(value,fallback='#c0c0c0') {
     ? `var(--vb-sys-${bits&255}, ${colorValue(value,fallback)})` : colorValue(value,fallback);
 }
 export function fontFamily(name='MS Sans Serif') {
+  // Explicit authored system-font aliases, never an implicit rewrite of VB fonts.
+  if (/^(system-ui|sans-serif|serif|monospace|cursive|fantasy)$/i.test(String(name))) return String(name).toLowerCase();
+  if (/^-apple-system$/i.test(String(name))) return '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
   if(/^MS Sans Serif$/i.test(name))return '"MS Sans Serif", Tahoma, Arial, sans-serif';
   if(/^MS Serif$/i.test(name))return '"MS Serif", "Times New Roman", serif';
   // A quoted family cannot escape the declaration or turn into a URL.

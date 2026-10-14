@@ -1,10 +1,11 @@
+import {MACOS_REFERENCE} from '../src/theme/macos-reference-metrics.js';
 /** Shared caption/control paint, rebound at every IDE and application boundary.
  * No global theme selectors in the component sheet: nested apps stay independent.
  * Dimensions affect chrome only; authored client/control bounds are unchanged.
  */
 export function themeDetailTokens(theme) {
   const family=theme.family||'classic',classic=family==='classic',mac=family==='macos26',x11=family==='x11',fluent=family==='fluent';
-  const t=theme.tokens||{},c=theme.colors;
+  const t=theme.tokens||{},c=theme.colors,m=MACOS_REFERENCE[theme.scheme==='dark'?'dark':'light'];
   const values={
     'button-background':classic||x11?c.face:'transparent',
     'button-hover':classic?c.face:t.hover,
@@ -50,33 +51,47 @@ export function themeDetailTokens(theme) {
     'scrollbar-track':classic?'repeating-conic-gradient(var(--vb-face) 0% 25%,var(--vb-highlight) 0% 50%) 0 0/2px 2px':c.face
   };
   const macPaint={
-    'command-fill':t.control,'command-hover':t.hover,'command-pressed':t.pressed,
-    'command-disabled':c.face,'command-ink':c.text,'default-fill':c.selection,
-    'default-ink':c.selectionText,'default-pressed':`color-mix(in srgb, ${c.selection} 85%, #000000)`,
-    'default-outline-width':'0px','default-focus-ink':'currentColor','command-focus-inset':'1px','command-focus-width':'2px',
-    'check-radius':'3px','check-border':t.border,'check-shadow':t.controlShadow,
-    'mixed-width':'7px','mixed-height':'2px','mixed-left':'2px','mixed-top':'5px',
-    'composite-border-width':'1px','composite-padding':'1px','richtext-padding':'4px',
-    'field-overflow':'visible','control-focus-width':'2px','field-border':t.border,'field-focus-shadow':`0 0 0 3px color-mix(in srgb, ${t.focus} 35%, transparent), inset 0 0 0 1px ${t.focus}`,
-    'frame-shadow':'none','status-border':'transparent',
+    'command-fill':m.neutral,'command-hover':m.neutral,'command-pressed':t.pressed,
+    'command-disabled':m.neutralDisabled,'command-ink':c.text,'default-fill':m.accent,
+    'default-ink':'#ffffff','default-pressed':m.accentPressed,
+    'default-outline-width':'0px','default-focus-ink':'currentColor','command-focus-inset':'1px','command-focus-width':'2px','command-pointer-focus-display':'none',
+    'check-edge-image':'none','field-shadow':`inset 0 0 0 1px ${m.fieldBorder}`,'command-border-block':'2px','command-background-clip':'padding-box','command-corner-radius':'6px / 8px',
+    'check-radius':'5px','check-border':'transparent','check-shadow':'none',
+    'check-size':'16px','check-fill':m.checkOff,'check-border-width':'0px','check-gap':'6px',
+    'check-mark-width':'10px','check-mark-height':'9px','check-mark-left':'3px','check-mark-top':'3px',
+    'radio-dot-inset':'5px','mixed-width':'8px','mixed-height':'2px','mixed-left':'4px','mixed-top':'7px',
+    'check-disabled-fill':m.neutralDisabled,'check-disabled-mark':m.disabledLabel,
+    'composite-radius':'0px','label-padding':'2px','composite-border-width':'1px','composite-padding':'1px','richtext-padding':'4px',
+    'field-overflow':'visible','control-focus-width':'2px','field-border':t.border,'field-focus-shadow':`0 0 0 3px ${m.focus}, inset 0 0 0 1px ${t.focus}`,
+    'frame-shadow':'none','frame-fill':m.group,'frame-legend-fill':'transparent','frame-border':'transparent','frame-radius':'12px','status-border':'transparent',
+    'inactive-selection':m.inactiveSelection,'inactive-selection-ink':m.inactiveSelectionText,
+    'segment-fill':m.neutral,'segment-active':m.selectedControl,'segment-ink':'#ffffff',
     'menu-material':'var(--app-material)','menu-backdrop':'var(--app-backdrop)',
     'popup-radius':'10px','popup-padding':'4px','popup-item-radius':'5px',
-    'range-radius':'999px','range-thumb':'#ffffff','range-thumb-size':'14px',
-    'range-thumb-offset':'-5px','range-thumb-border':`1px solid ${t.border}`,
-    'range-thumb-shadow':'0 1px 3px #00000040','range-track-border':'0px solid transparent',
-    'range-track':t.separator,'range-accent':c.selection,
+    'range-radius':'999px','range-thumb':'#ffffff','range-thumb-size':'20px','range-thumb-height':'18px','range-track-height':'6px',
+    'range-thumb-offset':'-6px','range-thumb-border':'0px solid transparent',
+    'range-thumb-shadow':'0 1px 5px #00000026, 0 0 1px #0000001a','range-track-border':'0px solid transparent',
+    'range-track':m.checkOff,'range-accent':m.selectedControl,
     'progress-radius':'999px','progress-border':'transparent','progress-align':'center',
-    'progress-height':'6px','progress-track':`linear-gradient(transparent calc(50% - 3px), ${t.separator} calc(50% - 3px), ${t.separator} calc(50% + 3px), transparent calc(50% + 3px))`,
-    'tab-radius':'5px','tab-active-fill':t.control,'tab-border':'transparent',
+    'progress-height':'8px','progress-padding':'0px','progress-border-width':'0px',
+    'progress-track':`linear-gradient(transparent calc(50% - 4px), ${m.progressTrack} calc(50% - 4px), ${m.progressTrack} calc(50% + 4px), transparent calc(50% + 4px))`,
+    'tab-radius':'5px','tab-active-fill':m.selectedControl,'tab-active-ink':'#ffffff','tab-border':'transparent',
     'tab-idle-fill':'transparent','tab-header-fill':`color-mix(in srgb, ${c.text} 7%, ${c.face})`,
     'calendar-collapse':'separate','calendar-spacing':'2px','calendar-header':c.window,'calendar-header-ink':c.windowText,'calendar-day-radius':'50%',
     'grid-border':t.separator,'grid-focus-style':'solid','menu-check-background':'transparent',
     'scroll-arrow-display':'none','scroll-border':'transparent','scroll-thumb-border':'0px solid transparent',
     'scroll-thumb-shadow':'none','scroll-thumb-radius':'999px','scroll-thumb-cross':'calc(100% - 6px)','scroll-thumb-inset':'3px',
+    'tree-row-selection':c.selection,'tree-row-selection-ink':c.selectionText,'tree-label-selection':'transparent','tree-label-selection-ink':'inherit',
     'tree-toggle-size':'0px','tree-toggle-border':'transparent','tree-toggle-fill':'transparent',
     'tree-disclosure':'""','tree-disclosure-ink':c.gray,
-    'mnemonic-decoration':'none','toolbar-fill':'transparent','toolbar-border':t.separator,
-    'combo-fill':c.selection,'combo-ink':c.selectionText,'dialog-actions':'flex-end'
+    'mnemonic-decoration':'none','mnemonic-image':'none','toolbar-fill':'transparent','toolbar-border':t.separator,
+    'combo-fill':m.neutral,'combo-ink':c.text,'combo-arrow-radius':'5px',
+    'combo-arrow-inset':'3px','combo-arrow-width':'24px','combo-padding-right':'30px',
+    'combo-arrow-position':'absolute','combo-arrow-top':'50%','combo-arrow-transform':'translateY(-50%)','combo-arrow-height':'20px','popup-button-fill':m.neutral,
+    'combo-chevron-size':'5px','combo-chevron-edge':'1.5px solid currentColor','combo-chevron-zero':'0px solid transparent','combo-chevron-transform':'rotate(45deg)',
+    'stepper-flex':'0 1 13px','stepper-width':'min(20px, 100%)','stepper-align':'center','stepper-justify':'center','stepper-horizontal-width':'min(13px, 50%)','stepper-horizontal-height':'min(20px, 100%)',
+    'stepper-fill':m.neutral,'stepper-radius':'6px','stepper-border':m.separator,
+    'dialog-actions':'flex-end'
   };
   for(const [key,value] of Object.entries(macPaint))values[key]=mac?value:'initial';
   return Object.entries(values).map(([name,value])=>`  --detail-${name}: ${value};\n`).join('');

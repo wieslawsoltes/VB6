@@ -33,7 +33,7 @@ struct Specimen {
 }
 
 enum ReferenceError: Error {
-    case wrongOS(Int), image(String), invalidImage(String), invalidArguments, activation, atlasBounds
+    case wrongOS(Int), image(String), invalidImage(String), invalidArguments, activation, atlasBounds, inactiveWindow
 }
 
 func settle(_ window: NSWindow) {
@@ -118,6 +118,7 @@ func main() throws {
     var images = [[String: Any]]()
     var palettes = [String: Any]()
     var environments = [[String: Any]]()
+    var inactiveEnvironments = [[String: Any]]()
 
     for (scheme, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
         guard let appearance = NSAppearance(named: appearanceName) else { throw ReferenceError.image(scheme) }
@@ -155,7 +156,8 @@ func main() throws {
         primary.keyEquivalent = "\r"
         add("default-button", primary)
         window.defaultButtonCell = primary.cell as? NSButtonCell
-        add("secondary-button", button("Cancel"))
+        let secondary = button("Cancel")
+        add("secondary-button", secondary)
         let disabled = button("Unavailable")
         disabled.isEnabled = false
         add("disabled-button", disabled)
@@ -265,11 +267,47 @@ func main() throws {
             settle(window)
             images.append(try capture(primary, name: "\(scheme)-default-pressed", scale: scale, directory: destination))
             primary.highlight(false)
-            primary.isEnabled = false
+            secondary.highlight(true)
             settle(window)
-            images.append(try capture(primary, name: "\(scheme)-default-disabled", scale: scale, directory: destination))
-            primary.isEnabled = true
+            images.append(try capture(secondary, name: "\(scheme)-secondary-pressed", scale: scale, directory: destination))
+            secondary.highlight(false)
+            let disabledNames: Set<String> = ["default-button", "check-off", "check-on", "check-mixed", "radio-on",
+                                              "text-field", "combo-box", "popup-button", "slider", "stepper"]
+            for specimen in specimens where disabledNames.contains(specimen.name) {
+                guard let control = specimen.view as? NSControl else { throw ReferenceError.image(specimen.name) }
+                let wasEnabled = control.isEnabled
+                control.isEnabled = false
+                settle(window)
+                let stateName = specimen.name == "default-button" ? "default-disabled" : specimen.name + "-disabled"
+                images.append(try capture(control, name: "\(scheme)-\(stateName)", scale: scale, directory: destination))
+                control.isEnabled = wasEnabled
+                settle(window)
+            }
+            // Let AppKit perform a real key-window transition. Calling resignKey
+            // directly or recoloring the canvas would not exercise native state.
+            let activator = ReferenceWindow(contentRect: NSRect(x: 60, y: 60, width: 200, height: 100),
+                                            styleMask: [.titled], backing: .buffered, defer: false)
+            activator.isReleasedWhenClosed = false
+            activator.appearance = appearance
+            activator.makeKeyAndOrderFront(nil)
             settle(window)
+            guard app.isActive, activator.isKeyWindow, !window.isKeyWindow else { throw ReferenceError.inactiveWindow }
+            inactiveEnvironments.append(["scheme": scheme, "scale": scale, "applicationActive": app.isActive,
+                                         "keyWindow": window.isKeyWindow, "otherWindowIsKey": activator.isKeyWindow])
+            images.append(try capture(canvas, name: "\(scheme)-inactive-gallery", scale: scale, directory: destination))
+            if let frameView = canvas.superview {
+                images.append(try capture(frameView, name: "\(scheme)-inactive-window", scale: scale, directory: destination))
+            }
+            for specimen in specimens {
+                images.append(try capture(specimen.view, name: "\(scheme)-inactive-\(specimen.name)", scale: scale,
+                                          directory: destination))
+            }
+            activator.orderOut(nil)
+            activator.close()
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(primary)
+            settle(window)
+            guard app.isActive, window.isKeyWindow else { throw ReferenceError.activation }
         }
         appearance.performAsCurrentDrawingAppearance {
             palettes[scheme] = ["windowBackground": colorJSON(.windowBackgroundColor),
@@ -290,7 +328,7 @@ func main() throws {
     let report: [String: Any] = [
         "schema": 1, "target": "macOS 26", "os": ProcessInfo.processInfo.operatingSystemVersionString,
         "operatingSystemVersion": [version.majorVersion, version.minorVersion, version.patchVersion],
-        "environment": environments, "colorsSRGB": palettes, "captures": images,
+        "environment": environments, "inactiveEnvironment": inactiveEnvironments, "colorsSRGB": palettes, "captures": images,
         "nativePixelParityCertified": false,
         "limitations": ["Native view drawing reference only; no browser/native pixel comparison is inferred.",
                         "WindowServer outside shadows, wallpaper sampling and refraction are not captured.",

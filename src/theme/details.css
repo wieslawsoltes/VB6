@@ -109,7 +109,7 @@
 .classic-menu .popup-menu-item {border-radius:var(--detail-menu-radius,0);}
 .classic-menu .popup-menu-item.menu-selected:not([aria-disabled=true]) {box-shadow:var(--detail-menu-selected-shadow,none);}
 :where(.ide-shell,.ide-dialog,.vb-form,.vb-dialog) input[type=checkbox]:checked:not(:indeterminate)::after {
- clip-path:var(--detail-check-clip);height:8px;
+ clip-path:var(--detail-check-clip);height:var(--detail-check-mark-height,8px);
 }
 .vb-command.default-button {outline-width:var(--detail-default-outline-width,1px);outline-color:var(--detail-focus-color,var(--vb-text));}
 .vb-command:focus::after {border-style:var(--detail-focus-style,dotted);}

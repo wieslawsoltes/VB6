@@ -1,3 +1,4 @@
+import {MACOS_REFERENCE} from '../src/theme/macos-reference-metrics.js';
 import {themeDetailTokens} from './theme-detail-css.mjs';
 /** Skin tokens are reset at every boundary. The component sheet uses classic
  * fallbacks, so a classic app inside a modern IDE/app cannot inherit its skin. */
@@ -11,14 +12,14 @@ export function renderApplicationThemeTokens(){
     css+=`[data-vb-theme="${p.id}"] {\n`;
     if(!p.family){for(const key of keys)css+=` --app-${kebab(key)}: initial;\n`;}
     else {
-      const t=p.tokens,x=p.family==='x11',mac=p.family==='macos26';
-      const values={compositeBorder:x?`${p.colors.shadow} ${p.colors.light} ${p.colors.light} ${p.colors.shadow}`:t.border,radius:t.radius,windowRadius:t.windowRadius,controlShadow:x?t.controlShadow:`inset 0 0 0 1px ${t.border}, ${t.controlShadow}`,
-        pressedShadow:x?t.pressedShadow:mac?`inset 0 0 0 1px ${t.border}, ${t.pressedShadow}`:`inset 0 0 0 1px ${t.focus}, ${t.pressedShadow}`,
-        inputShadow:x?t.pressedShadow:`inset 0 0 0 1px ${t.border}`,hoverShadow:mac?`inset 0 0 0 1px ${t.border}, ${t.controlShadow}`:`inset 0 0 0 1px ${t.focus}`,border:t.border,separator:t.separator,
+      const t=p.tokens,x=p.family==='x11',mac=p.family==='macos26',m=MACOS_REFERENCE[p.scheme==='dark'?'dark':'light'];
+      const values={compositeBorder:x?`${p.colors.shadow} ${p.colors.light} ${p.colors.light} ${p.colors.shadow}`:t.border,radius:t.radius,windowRadius:t.windowRadius,controlShadow:mac?'none':x?t.controlShadow:`inset 0 0 0 1px ${t.border}, ${t.controlShadow}`,
+        pressedShadow:mac?'none':x?t.pressedShadow:`inset 0 0 0 1px ${t.focus}, ${t.pressedShadow}`,
+        inputShadow:x?t.pressedShadow:`inset 0 0 0 1px ${t.border}`,hoverShadow:mac?'none':`inset 0 0 0 1px ${t.focus}`,border:t.border,separator:t.separator,
         surface:t.surface,focus:t.focus,thumb:t.thumb,font:t.font,captionWeight:x?'700':p.family==='fluent'?'400':'600',captionBackground:x?p.colors.title:t.material,
-        windowShadow:t.shadow,frameImage:'none',frameBorder:x?`${p.colors.light} ${p.colors.shadow} ${p.colors.shadow} ${p.colors.light}`:t.border,pressedPadding:'4px 9px',disabledShadow:`inset 0 0 0 1px ${p.colors.gray}`,
-        disabledTextShadow:'none',progressFill:p.colors.selection,checkBackground:p.colors.selection,checkMark:p.colors.selectionText,
-        checkBorder:p.colors.selection,checkShadow:'none',radioRadius:x?'0px':'50%',rangeTrack:t.separator,rangeThumb:p.colors.selection,
+        windowShadow:t.shadow,frameImage:'none',frameBorder:x?`${p.colors.light} ${p.colors.shadow} ${p.colors.shadow} ${p.colors.light}`:t.border,pressedPadding:'4px 9px',disabledShadow:mac?'none':`inset 0 0 0 1px ${p.colors.gray}`,
+        disabledTextShadow:'none',progressFill:mac?m.accent:p.colors.selection,checkBackground:mac?m.selectedControl:p.colors.selection,checkMark:p.colors.selectionText,
+        checkBorder:mac?'transparent':p.colors.selection,checkShadow:'none',radioRadius:x?'0px':'50%',rangeTrack:t.separator,rangeThumb:p.colors.selection,
         material:t.material,backdrop:mac?'blur(20px) saturate(1.25)':'none',duration:'90ms',focusWidth:'2px',focusStyle:'solid',windowButtonRadius:mac?'50%':t.radius,radioTransform:x?'rotate(45deg)':'none',disabledColor:p.colors.gray,formIconShadow:'none',legacyIconDisplay:'none',treeIconBorderWidth:'0px',treeIconBackground:'transparent',tabShadow:mac?t.controlShadow:`inset 0 -2px ${p.colors.selection}`};
       for(const key of keys)css+=` --app-${kebab(key)}: ${values[key]};\n`;
     }

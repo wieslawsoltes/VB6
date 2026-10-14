@@ -193,5 +193,104 @@
 }
 
 /* Suppress Windows access-key underlines, not authored rich-text underlining. */
-.vb-command>u,.vb-label>u,.vb-frame>legend>u,.vb-check>span>u,
-.vb-form-menu button>u,.vb-popup-menu .menu-label>u {text-decoration-line:var(--detail-mnemonic-decoration,underline);}
+@media(forced-colors:none) {
+ .vb-command>u,.vb-label>u,.vb-frame-legend>u,.vb-check>span>u,.vb-popup-menu .menu-label>u {
+  text-decoration-line:var(--detail-mnemonic-decoration,none);
+  background-image:var(--detail-mnemonic-image,linear-gradient(currentColor,currentColor));
+ }
+ .vb-form-menu button>u {text-decoration-line:var(--detail-mnemonic-decoration,underline);}
+}
+
+/* AppKit regular-control measurements. Keep the authored control rectangle and
+ * its events; only the inner indicator/track geometry belongs to the skin. */
+.vb-check {gap:var(--detail-check-gap,5px);}
+.vb-check input {width:var(--detail-check-size,13px);height:var(--detail-check-size,13px);}
+@media(forced-colors:none) {
+ .vb-check input {border-width:var(--detail-check-border-width,1px);}
+ .vb-check input:not(:checked):not(:indeterminate) {background-color:var(--detail-check-fill,var(--vb-window));}
+ .vb-check input:disabled {background-color:var(--detail-check-disabled-fill,var(--vb-face));}
+ .vb-check input:disabled::after {background-color:var(--detail-check-disabled-mark,var(--vb-gray));}
+ .vb-check input[type=checkbox]:checked:not(:indeterminate)::after {
+  left:var(--detail-check-mark-left,2px);top:var(--detail-check-mark-top,2px);
+  width:var(--detail-check-mark-width,8px);height:var(--detail-check-mark-height,8px);
+ }
+ .vb-check input[type=radio]:checked::after {inset:var(--detail-radio-dot-inset,3px);}
+ .vb-progress {padding:var(--detail-progress-padding,2px);border-width:var(--detail-progress-border-width,2px);}
+ .vb-range::-webkit-slider-runnable-track {height:var(--detail-range-track-height,4px);}
+ .vb-range::-webkit-slider-thumb {height:var(--detail-range-thumb-height,21px);}
+ .vb-vrange::-webkit-slider-runnable-track {width:var(--detail-range-track-height,4px);height:100%;}
+ .vb-vrange::-webkit-slider-thumb {width:var(--detail-range-thumb-height,21px);height:var(--detail-range-thumb-size,11px);}
+ .vb-range::-moz-range-track {height:var(--detail-range-track-height,revert);}
+ .vb-range::-moz-range-thumb {height:var(--detail-range-thumb-height,revert);}
+ .vb-vrange::-moz-range-track {width:var(--detail-range-track-height,revert);height:100%;}
+ .vb-vrange::-moz-range-thumb {width:var(--detail-range-thumb-height,revert);height:var(--detail-range-thumb-size,revert);}
+ .vb-tabs>.vb-tab-header>.vb-tab-button.active {color:var(--detail-tab-active-ink,inherit);}
+ .vb-combo-arrow {border-radius:var(--detail-combo-arrow-radius,0);}
+ .vb-spin-button {background-color:var(--detail-stepper-fill,var(--vb-face));}
+ .vb-spin-button:first-child {border-radius:var(--detail-stepper-radius,0) var(--detail-stepper-radius,0) 0 0;}
+ .vb-spin-button:last-child {border-radius:0 0 var(--detail-stepper-radius,0) var(--detail-stepper-radius,0);}
+ /* AppKit distinguishes inactive selection from keyboard-focused selection.
+  * Never override a cell's authored RGB. The renderer marks selection with
+  * these existing classes rather than changing its stored color properties. */
+ .vb-listview:not(:focus-within) .vb-lv-row.selected,
+ .vb-inactive .vb-listview .vb-lv-row.selected {
+  background:var(--detail-inactive-selection,var(--vb-selection));
+  color:var(--detail-inactive-selection-ink,var(--vb-selection-text));
+ }
+ .vb-tree-row.selected {background:var(--detail-tree-row-selection,transparent);color:var(--detail-tree-row-selection-ink,inherit);}
+ .vb-tree-row.selected .vb-tree-label {background:var(--detail-tree-label-selection,var(--vb-selection));color:var(--detail-tree-label-selection-ink,var(--vb-selection-text));}
+ .vb-tree:not(:focus-within) .vb-tree-row.selected,
+ .vb-inactive .vb-tree .vb-tree-row.selected {
+  background:var(--detail-inactive-selection,transparent);
+  color:var(--detail-inactive-selection-ink,inherit);
+ }
+}
+
+.vb-frame {border-color:var(--detail-frame-border,var(--app-border,var(--vb-shadow)));border-radius:var(--detail-frame-radius,var(--app-radius,0));}
+.vb-command:focus:not(:focus-visible)::after {display:var(--detail-command-pointer-focus-display,block);}
+@media(prefers-contrast:more) {
+ [data-vb-theme-family="macos26"] {--detail-field-border:var(--vb-text);--detail-grid-border:var(--vb-gray);--app-border:var(--vb-text);--app-input-shadow:inset 0 0 0 1px var(--vb-text);--detail-check-shadow:inset 0 0 0 1px var(--vb-text);}
+}
+
+/* Match the specificity of the original Classic painters. The old text input
+ * rule includes four :not() selectors and the checkbox paints filled strips,
+ * not a box shadow; changing border/shadow alone did not remove that relief.
+ * Every override is locally reset; only macOS supplies these detail variables. */
+@media(forced-colors:none) {
+ .vb-check input[type=checkbox]:not(:checked):not(:indeterminate):not(:disabled) {background-image:var(--detail-check-edge-image,var(--vb-bevel-sunken-image));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field) {
+  box-shadow:var(--detail-field-shadow,var(--vb-bevel-sunken));
+ }
+ .vb-control textarea,.vb-control select {box-shadow:var(--detail-field-shadow,var(--app-input-shadow,var(--vb-bevel-sunken)));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field):focus-visible,
+ .vb-control textarea:focus-visible,.vb-control select:focus-visible {
+  box-shadow:var(--detail-field-focus-shadow,var(--app-hover-shadow,var(--vb-bevel-sunken)));
+ }
+ .vb-command {
+  border-block-width:var(--detail-command-border-block,0px)!important;
+  border-block-color:transparent!important;
+  background-clip:var(--detail-command-background-clip,border-box)!important;
+  border-radius:var(--detail-command-corner-radius,var(--app-radius,0));
+ }
+ .vb-classic-combo:not(.simple) .vb-combo-field {padding-right:var(--detail-combo-padding-right,3px);}
+ .vb-classic-combo:not(.simple) .vb-combo-arrow {
+  position:var(--detail-combo-arrow-position,static);right:var(--detail-combo-arrow-inset,auto);
+  top:var(--detail-combo-arrow-top,auto);transform:var(--detail-combo-arrow-transform,none);
+  width:var(--detail-combo-arrow-width,17px);min-width:var(--detail-combo-arrow-width,17px);
+  height:var(--detail-combo-arrow-height,100%);max-height:100%;
+ }
+ .vb-classic-combo:not(.simple) .vb-combo-arrow i {
+  width:var(--detail-combo-chevron-size,0px);height:var(--detail-combo-chevron-size,0px);
+  border-top:var(--detail-combo-chevron-zero,4px solid currentColor);
+  border-left:var(--detail-combo-chevron-zero,3px solid transparent);
+  border-right:var(--detail-combo-chevron-edge,3px solid transparent);
+  border-bottom:var(--detail-combo-chevron-edge,0px solid transparent);
+  transform:var(--detail-combo-chevron-transform,none);
+ }
+ .vb-updown {align-items:var(--detail-stepper-align,stretch);justify-content:var(--detail-stepper-justify,normal);}
+ .vb-updown .vb-spin-button {flex:var(--detail-stepper-flex,1);width:var(--detail-stepper-width,100%);}
+ .vb-updown.horizontal .vb-spin-button {width:var(--detail-stepper-horizontal-width,auto);height:var(--detail-stepper-horizontal-height,100%);}
+}
+
+.vb-label {padding-inline:var(--detail-label-padding,0px);}
+.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-radius:var(--detail-composite-radius,var(--app-radius,0));}

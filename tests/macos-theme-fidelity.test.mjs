@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {commandPaint,rangeProgress} from '../src/theme/control-paint.js';
+import {commandPaint,groupPaint,rangeProgress} from '../src/theme/control-paint.js';
 import {THEMES,cssColor} from '../src/theme/theme.js';
 import {themeDetailTokens} from '../tools/theme-detail-css.mjs';
 
@@ -43,6 +43,11 @@ test('range paint remains finite, bounded and monotonic across representable sca
 
 const macOnly=['command-fill','command-hover','command-pressed','command-disabled','command-ink',
   'default-fill','default-ink','default-pressed','default-outline-width','default-focus-ink','command-focus-inset','command-focus-width',
+  'check-size','check-fill','check-border-width','check-gap','check-mark-width','check-mark-height','check-mark-left','check-mark-top','radio-dot-inset','check-disabled-fill','check-disabled-mark',
+  'frame-fill','frame-legend-fill','frame-border','command-pointer-focus-display','frame-radius','inactive-selection','inactive-selection-ink','segment-fill','segment-active','segment-ink',
+  'range-thumb-height','range-track-height','progress-padding','progress-border-width','tab-active-ink',
+  'combo-arrow-radius','combo-arrow-inset','combo-arrow-width','combo-padding-right','stepper-fill','stepper-radius','stepper-border',
+  'tree-row-selection','tree-row-selection-ink','tree-label-selection','tree-label-selection-ink',
   'check-radius','check-border','check-shadow','mixed-width','mixed-height','mixed-left','mixed-top',
   'composite-border-width','composite-padding','richtext-padding','field-overflow','control-focus-width','field-border','field-focus-shadow',
   'frame-shadow','status-border','menu-material','menu-backdrop','popup-radius','popup-padding','popup-item-radius','range-radius',
@@ -69,9 +74,67 @@ test('macOS uses distinct component shapes rather than a universal window radius
   for(const id of ['macos26','macos26-dark']){
     const css=themeDetailTokens(THEMES[id]);
     for(const [key,value] of [['button-width','12px'],['button-height','12px'],['controls-gap','8px'],
-      ['check-radius','3px'],['mixed-height','2px'],['range-thumb-size','14px'],['range-radius','999px'],
-      ['progress-height','6px'],['composite-border-width','1px'],['composite-padding','1px'],['richtext-padding','4px']])
+      ['check-radius','5px'],['mixed-height','2px'],['range-thumb-size','20px'],['range-radius','999px'],
+      ['progress-height','8px'],['composite-border-width','1px'],['composite-padding','1px'],['richtext-padding','4px']])
       assert.ok(css.includes(`--detail-${key}: ${value};`),`${id}: ${key}`);
     assert.ok(Object.isFrozen(THEMES[id])&&Object.isFrozen(THEMES[id].colors)&&Object.isFrozen(THEMES[id].tokens));
+  }
+});
+
+test('group paint adapts only ordinary system colors, including its legend',()=>{
+ assert.deepEqual(groupPaint(face,windowText),{
+  background:`var(--detail-frame-fill, ${cssColor(face)})`,
+  legendBackground:`var(--detail-frame-legend-fill, ${cssColor(face)})`
+ });
+ for(const [back,fore] of [[0xffffff,0],[face,0x112233],[0xc0c0c0,windowText],[-2147483643,windowText]]){
+  assert.deepEqual(groupPaint(back,fore),{background:cssColor(back),legendBackground:cssColor(back)});
+ }
+});
+
+import fs from 'node:fs';
+import {MACOS_REFERENCE,macosSystemColors} from '../src/theme/macos-reference-metrics.js';
+import {fontFamily} from '../src/theme/theme.js';
+import {comboPaint} from '../src/theme/control-paint.js';
+const nativeMeasurements=JSON.parse(fs.readFileSync(new URL('./fixtures/macos26-native-measurements.json',import.meta.url),'utf8'));
+const rgbaHex=value=>'#'+value.slice(0,3).map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('');
+test('macOS semantic colors agree with recorded active AppKit sRGB measurements',()=>{
+  assert.equal(MACOS_REFERENCE.revision,nativeMeasurements.captureRevision);
+  assert.deepEqual(nativeMeasurements.operatingSystemVersion,[26,6,2]);
+  assert.ok(nativeMeasurements.environment.every(v=>v.applicationActive&&v.keyWindow));
+  for(const scheme of ['light','dark']){
+    const measured=nativeMeasurements.colorsSRGB[scheme],m=MACOS_REFERENCE[scheme],c=macosSystemColors(scheme);
+    assert.equal(m.background,rgbaHex(measured.windowBackground));
+    assert.equal(m.accent,rgbaHex(measured.accent));
+    assert.equal(m.selectedContent,rgbaHex(measured.selection));
+    assert.equal(c.selection,m.selectedContent);assert.notEqual(c.selection,m.accent,'content selection is not command accent');
+    assert.equal(THEMES[scheme==='dark'?'macos26-dark':'macos26'].colors.face,m.background);
+  }
+  assert.throws(()=>macosSystemColors('invalid'),RangeError);
+});
+test('macOS reference metrics and all descendant records are immutable',()=>{
+  function verify(value){if(value&&typeof value==='object'){assert.ok(Object.isFrozen(value));for(const child of Object.values(value))verify(child);}}
+  verify(MACOS_REFERENCE);
+  assert.throws(()=>{MACOS_REFERENCE.light.accent='#ff0000';},TypeError);
+});
+test('explicit system font aliases resolve without embedding a font or rewriting authored family names',()=>{
+  assert.match(fontFamily('-apple-system'),/^-apple-system, BlinkMacSystemFont/);
+  assert.equal(fontFamily('system-ui'),'system-ui');assert.equal(fontFamily('MONOSPACE'),'monospace');
+  assert.match(fontFamily('Helvetica Neue'),/"Helvetica Neue"/);
+  assert.doesNotMatch(fontFamily('a";color:red'),/";color:red/);
+});
+test('list-only popup material follows standard OLE roles without recoloring authored values',()=>{
+  const window=-2147483643;
+  assert.equal(comboPaint(window,windowText,2),`var(--detail-popup-button-fill, ${cssColor(window)})`);
+  assert.equal(comboPaint(window,buttonText,'2'),`var(--detail-popup-button-fill, ${cssColor(window)})`);
+  for(const [back,fore,style] of [[window,windowText,0],[window,windowText,1],[0xffffff,windowText,2],[window,0,2],[face,windowText,2]])assert.equal(comboPaint(back,fore,style),cssColor(back));
+});
+test('native paint layer corrections and inner sizes reset outside macOS',()=>{
+  const names=['composite-radius','label-padding','mnemonic-image','check-edge-image','field-shadow','command-border-block','command-background-clip','command-corner-radius',
+    'combo-arrow-position','combo-arrow-top','combo-arrow-transform','combo-arrow-height','popup-button-fill',
+    'combo-chevron-size','combo-chevron-edge','combo-chevron-zero','combo-chevron-transform','stepper-flex','stepper-width',
+    'stepper-align','stepper-justify','stepper-horizontal-width','stepper-horizontal-height'];
+  for(const p of Object.values(THEMES))for(const name of names){
+    const value=new RegExp(`--detail-${name}: ([^;]+);`).exec(themeDetailTokens(p))?.[1];
+    assert.ok(value,name);if(p.family==='macos26')assert.notEqual(value,'initial');else assert.equal(value,'initial');
   }
 });

@@ -1,4 +1,4 @@
-import {commandPaint,rangeProgress} from '../theme/control-paint.js';
+import {commandPaint,groupPaint,comboPaint,rangeProgress} from '../theme/control-paint.js';
 import {resolveRuntimeParent,validateRuntimeContainer,runtimeRemovalPlan} from './container-lifecycle.js';
 import {controlParents,tabPagePlan} from './tab-model.js';
 import {buildTabs,refreshTabs,mountTabPages,getTabProperty,setTabProperty,setIndexedTab,bindTabChild,unbindTabChild} from './tabs.js';
@@ -164,11 +164,11 @@ export class BrowserControl {
     switch(this.type){
       case 'CommandButton':updateMnemonic(n,p.Caption);n.classList.toggle('default-button',!!p.Default);Object.assign(n.style,commandPaint(p.BackColor,p.ForeColor));break;
       case 'Label':updateMnemonic(n,p.Caption);n.style.justifyContent=['flex-start','flex-end','center'][Number(p.Alignment)||0];n.style.textAlign=['left','right','center'][Number(p.Alignment)||0];break;
-      case 'Frame':updateMnemonic(this.legend,p.Caption);this.legend.style.background=oleColor(p.BackColor);break;
+      case 'Frame':{updateMnemonic(this.legend,p.Caption);const paint=groupPaint(p.BackColor,p.ForeColor);n.style.background=paint.background;this.legend.style.background=paint.legendBackground;break;}
       case 'TextBox':if(this.input.value!==String(p.Text??''))this.input.value=String(p.Text??'');this.input.readOnly=truth(p.Locked);if(p.MaxLength>0)this.input.maxLength=Number(p.MaxLength);else this.input.removeAttribute('maxlength');this.input.style.textAlign=['left','right','center'][Number(p.Alignment)||0];this.input.style.backgroundColor=oleColor(p.BackColor);break;
       case 'CheckBox':case 'OptionButton':updateMnemonic(this.label,p.Caption);this.input.checked=truth(p.Value);this.input.indeterminate=Number(p.Value)===2;break;
       case 'ListBox':case 'FileListBox':case 'DirListBox':case 'DriveListBox':if(this.listRevision!==this.itemsRevision||this.lastListCount!==this.items.length){selectOptions(this.input,this.items,Number(p.ListIndex));this.listRevision=this.itemsRevision;this.lastListCount=this.items.length;}if(!p.MultiSelect)this.input.selectedIndex=Number(p.ListIndex);else for(const option of this.input.options)option.selected=this.selectedIndices.has(Number(option.value));break;
-      case 'ComboBox':this.combo.refresh();break;
+      case 'ComboBox':this.combo.refresh();this.input.style.backgroundColor=comboPaint(p.BackColor,p.ForeColor,p.Style);break;
       case 'PictureBox':if(p.Picture||this.surface){const surface=this.ensureSurface();surface.background=p.BackColor;surface.setPicture(safeImage(p.Picture,this.assets));surface.invalidate();}break;
       case 'Image':{const source=safeImage(p.Picture,this.assets);if(source)this.image.src=source;else this.image.removeAttribute('src');this.image.hidden=!source;this.placeholder.hidden=!!source||!this.design;this.image.style.objectFit=truth(p.Stretch)?'fill':'none';break;}
       case 'Shape':this.shape.style.borderColor=oleColor(p.BorderColor||0);this.shape.style.borderRadius=[2,3].includes(Number(p.Shape))?'50%':[4,5].includes(Number(p.Shape))?'10px':'0';this.shape.style.background=Number(p.FillStyle)===1?'transparent':oleColor(p.FillColor);break;
