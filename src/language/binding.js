@@ -1,4 +1,5 @@
 import {bindRedimDeclarations} from './redim-semantics.js';
+import {validateReferences} from './reference-checks.js';
 import {validateLanguageSemantics} from './semantic-checks.js';
 import {LAYOUT_CONSTANTS,LAYOUT_ENUMS} from '../layout/contract.js';
 import {VBError} from './errors.js';
@@ -17,7 +18,7 @@ function intrinsicTable(layout) {
 /** Side-effect-free project constant binding. Cached parsed modules keep their
  * ASTs: binding maps are rebuilt on every cross-module validation, so editing a
  * dependency cannot leave worker diagnostics or execution with old values. */
-export function bindConstants(modules,settings={}) {
+export function bindConstants(modules,settings={},symbols={}) {
   const diagnostics=[], scopes=new Map(), cache=new Map(), active=new Set();
   const publicConstants=new Map(),publicEnums=new Map();
   const recordTypes=new Set([...modules.values()].flatMap(m=>Object.keys(m.types).flatMap(n=>[lower(n),lower(m.name)+'.'+lower(n)])));
@@ -184,5 +185,7 @@ export function bindConstants(modules,settings={}) {
   }
   diagnostics.push(...bindRedimDeclarations(modules,scopes));
   diagnostics.push(...validateLanguageSemantics(modules,scopes,recordTypes));
+  const locations=new Set(diagnostics.map(d=>d.source+'\0'+d.line+'\0'+d.message));
+  for(const d of validateReferences(modules,scopes,settings,symbols)){const key=d.source+'\0'+d.line+'\0'+d.message;if(!locations.has(key)){locations.add(key);diagnostics.push(d);}}
   return diagnostics;
 }

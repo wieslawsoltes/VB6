@@ -49,7 +49,7 @@ test('native ParamArray obeys the host sixteen-byte element budget',()=>{
 test('unused native ParamArray support adds no element-copy API to ordinary programs',()=>{
  const p=project('Dim n As Long\nn=1','');assert.ok(!JSON.stringify(compileWin32(p).report.imports).includes('SafeArrayPutElement'));
 });
-for(const source of ['Pack 1, ByVal 2','Pack first:=1'])test('illegal native ParamArray actuals remain explicit: '+source,()=>assert.throws(()=>compileWin32(project(source)),/positional|ByVal/));
+for(const source of ['Pack 1, ByVal 2','Pack first:=1'])test('illegal native ParamArray actuals remain explicit: '+source,()=>assert.throws(()=>compileWin32(project(source)),error=>{if(source.includes(':=')){assert.deepEqual(error.diagnostics.map(d=>d.code),['VB_NAMED_ARGUMENT','VB_ARGUMENT_REQUIRED']);assert.match(error.message,/Named arguments are not allowed for a ParamArray procedure/);}else assert.match(error.message,/positional|ByVal/);return true;}));
 
 // Instruction execution with explicit OleAut32 mocks checks ABI, ownership and
 // fault paths independently of compiler pattern matching. It is not OS evidence.

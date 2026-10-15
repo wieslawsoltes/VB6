@@ -25,7 +25,7 @@ export function nativeKernelDependencies(procedures,roots){
 export const nativePrivateKernelMethods={
   privateNativeKernel(baseName,code,hosts={},intrinsics={}){
     let name=baseName,suffix=0;while(this.modules.has(key(name)))name=baseName+(++suffix);
-    const program=compileProject({name,startup:'Sub Main',modules:[{id:name,name,kind:'module',code}]});
+    const program=compileProject({name,startup:'Sub Main',externalSymbols:[...Object.keys(hosts),...Object.keys(intrinsics)].map(name=>({name,kind:'function'})),modules:[{id:name,name,kind:'module',code}]});
     if(!program.valid)throw new Error('Invalid private native kernel: '+JSON.stringify(program.diagnostics));
     const module=program.modules.get(key(name));module.nativeInternal=true;
     // The main record registry was prepared before demand for this kernel was

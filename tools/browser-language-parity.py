@@ -44,6 +44,14 @@ def main():
                         for actual,expected in zip(result['diagnostics'],fixture['diagnostics']):
                             if any(actual.get(key)!=expected[key] for key in ['source','line','number']): raise AssertionError(repr(result))
                             if expected['message'] not in actual['message']: raise AssertionError(repr(result))
+                            if 'code' in expected and actual.get('code')!=expected['code']: raise AssertionError(repr(result))
+                    elif mode=='runtime' and fixture.get('host'):
+                        result=page.evaluate('''async project=>{
+                          const output=[],container=document.createElement('div');document.body.append(container);
+                          const host=new VB6Runtime.RuntimeAPI.ApplicationHost(project,container,{persist:false,rendering:false,onMessage:m=>{if(m.type==='output')output.push(m.text);}});
+                          try{await host.start();return {output,error:host.vm.lastError?.number??null};}
+                          finally{host.dispose();container.remove();}
+                        }''',fixture['project'])
                     elif mode=='runtime':
                         result=page.evaluate('''async project=>{
                           const api=VB6Runtime.RuntimeAPI,p=api.compileProject(project),output=[];
@@ -105,6 +113,45 @@ def main():
                             if response['mode']!=backend or response['valid']!=expected_valid[i] or response['semanticCacheHit']!=expected_hit[i] or response['stats']['compiledModules']!=expected_parses[i]: raise AssertionError(repr(result))
                         diagnostic=result['responses'][2]['diagnostics'][0]
                         if diagnostic['source']!='Consumer' or diagnostic['line']!=2 or 'lower bound' not in diagnostic['message']: raise AssertionError(repr(result))
+                        if result['state']!='design' or result['output'] or errors or requests: raise AssertionError(repr(result))
+                        results.append({'name':name,'passed':True,'milliseconds':round((time.perf_counter()-start)*1000,2)})
+                    except Exception as error:
+                        results.append({'name':name,'passed':False,'error':str(error)})
+                    print(('PASS' if results[-1]['passed'] else 'FAIL')+' '+name,flush=True)
+                for backend in ['worker','fallback']:
+                    name=backend+': control metadata and source signatures invalidate semantic cache'
+                    start=time.perf_counter()
+                    try:
+                        fixture=next(f for f in fixtures if f['name']=='Form control names bind from designer metadata')
+                        result=page.evaluate(r'''async ({backend,project})=>{
+                          const ide=vb6Studio,scheduler=ide.syntaxDiagnostics;
+                          scheduler.cancel();scheduler.workerUnavailable=backend==='fallback';ide.appearance.autoSyntaxCheck=true;
+                          const next=change=>new Promise((resolve,reject)=>{
+                            const timeout=setTimeout(()=>{off();reject(new Error('No binding diagnostic response'));},5000);
+                            const off=ide.on('diagnostics',r=>{clearTimeout(timeout);off();resolve(r);});
+                            try{change();}catch(error){clearTimeout(timeout);off();reject(error);}
+                          });
+                          const responses=[];
+                          responses.push(await next(()=>ide.loadProject(project)));
+                          responses.push(await next(()=>scheduler.schedule(ide.project,0)));
+                          responses.push(await next(()=>{ide.project.modules[0].form.controls[0].name='Renamed';scheduler.schedule(ide.project,0);}));
+                          responses.push(await next(()=>{ide.project.modules[0].form.controls[0].name='Command1';scheduler.schedule(ide.project,0);}));
+                          const source={...project,startup:'Sub Main',modules:[
+                            {id:'caller',name:'Caller',kind:'module',code:'Option Explicit\nSub Main()\nHelper.Work\nEnd Sub'},
+                            {id:'helper',name:'Helper',kind:'module',code:'Public Sub Work(Optional ByVal value As Long = 1)\nEnd Sub'}]};
+                          responses.push(await next(()=>ide.loadProject(source)));
+                          responses.push(await next(()=>{ide.project.modules[1].code='Public Sub Work(ByVal value As Long)\nEnd Sub';scheduler.schedule(ide.project,0);}));
+                          responses.push(await next(()=>{ide.project.modules[1].code='Public Sub Work(Optional ByVal value As Long = 1)\nEnd Sub';scheduler.schedule(ide.project,0);}));
+                          return {responses,state:ide.runState,output:ide.output};
+                        }''',{'backend':backend,'project':fixture['project']})
+                        expected_valid=[True,True,False,True,True,False,True]
+                        expected_parses=[1,0,0,0,2,1,1]
+                        for i,response in enumerate(result['responses']):
+                            if response['mode']!=backend or response['valid']!=expected_valid[i] or response['stats']['compiledModules']!=expected_parses[i]: raise AssertionError(repr(result))
+                            if response['semanticCacheHit']!=(i==1): raise AssertionError(repr(result))
+                        for i,source,code in [(2,'Form1','VB_UNDEFINED_NAME'),(5,'Caller','VB_ARGUMENT_REQUIRED')]:
+                            diagnostics=result['responses'][i]['diagnostics']
+                            if len(diagnostics)!=1 or diagnostics[0]['source']!=source or diagnostics[0]['line']!=3 or diagnostics[0].get('code')!=code: raise AssertionError(repr(result))
                         if result['state']!='design' or result['output'] or errors or requests: raise AssertionError(repr(result))
                         results.append({'name':name,'passed':True,'milliseconds':round((time.perf_counter()-start)*1000,2)})
                     except Exception as error:

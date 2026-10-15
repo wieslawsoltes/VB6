@@ -1,3 +1,4 @@
+import {runtimeBoundaryProgram} from './helpers/runtime-boundary-program.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {compileProject} from '../src/language/compiler.js';
@@ -5,7 +6,7 @@ import {logicalLines} from '../src/language/lexer.js';
 import {VirtualMachine} from '../src/runtime/vm.js';
 import {MISSING, coerce, numeric, vbString} from '../src/runtime/values.js';
 const main=body=>`Option Explicit\nSub Main()\n${body}\nEnd Sub`;
-async function run(code,extras=[]){const program=compileProject({name:'Calls04',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code},...extras]});assert.deepEqual(program.diagnostics,[]);const output=[];const vm=new VirtualMachine(program,{print:s=>output.push(s)});await vm.start();return {output,vm};}
+async function run(code,extras=[],expectedDiagnostics=null){let program=compileProject({name:'Calls04',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code},...extras]});if(expectedDiagnostics)program=runtimeBoundaryProgram(program,expectedDiagnostics);else assert.deepEqual(program.diagnostics,[]);const output=[];const vm=new VirtualMachine(program,{print:s=>output.push(s)});await vm.start();return {output,vm};}
 const take=`Function Take(ByVal a As String, Optional b As Variant, Optional c As String = "C") As String\nTake = a & ":" & IsMissing(b) & ":" & c\nEnd Function`;
 test('named colon-equals is not split as statement separator',()=>assert.deepEqual(logicalLines('Call Test(name:="text") : x = 2\nTest name:="abc", value:=2').map(l=>l.text),['Call Test(name:="text")','x = 2','Test name:="abc", value:=2']));
 test('named arguments reordered and optional omitted without comma',async()=>assert.deepEqual((await run(main('Debug.Print Take(c:="last", a:="first")')+'\n'+take)).output,['first:True:last']));
@@ -20,7 +21,14 @@ test('ParamArray is never missing and empty array bounds are defined',async()=>a
 test('named ByRef binds the original variable',async()=>assert.deepEqual((await run(main('Dim n As Long\nn = 3\nChange value:=n\nDebug.Print n')+'\nSub Change(ByRef value As Long)\nvalue = value + 5\nEnd Sub')).output,['8']));
 test('parenthesized named ByRef passes a temporary',async()=>assert.deepEqual((await run(main('Dim n As Long\nn = 3\nChange value:=(n)\nDebug.Print n')+'\nSub Change(ByRef value As Long)\nvalue = value + 5\nEnd Sub')).output,['3']));
 test('named arguments evaluate once in source order before binding',async()=>assert.deepEqual((await run('Option Explicit\nDim Trace As String\n'+main('Debug.Print Pair(b:=Stamp("B"), a:=Stamp("A"))\nDebug.Print Trace').replace('Option Explicit\n','')+'\nFunction Stamp(s As String) As String\nTrace = Trace & s\nStamp = s\nEnd Function\nFunction Pair(a As String, b As String) As String\nPair = a & b\nEnd Function')).output,['AB','BA']));
-for(const [expr,error]of [['Take(a:="a", a:="b")',450],['Take("a", a:="b")',450],['Take(noSuch:="a")',448],['Take(c:="c", "a")',1002],['Take(, 1)',449],['Take()',449]])test('rejects invalid argument binding: '+expr,async()=>await assert.rejects(()=>run(main('Debug.Print '+expr)+'\n'+take),e=>e.number===error));
+for(const [expr,error,issues]of [
+ ['Take(a:="a", a:="b")',450,[['VB_DUPLICATE_ARGUMENT','Argument supplied more than once (a): Take']]],
+ ['Take("a", a:="b")',450,[['VB_DUPLICATE_ARGUMENT','Argument supplied more than once (a): Take']]],
+ ['Take(noSuch:="a")',448,[['VB_NAMED_ARGUMENT','Named argument not found (noSuch): Take'],['VB_ARGUMENT_REQUIRED','Argument not optional (a): Take']]],
+ ['Take(c:="c", "a")',1002,[['VB_ARGUMENT_ORDER','Positional argument cannot follow a named argument: Take'],['VB_ARGUMENT_REQUIRED','Argument not optional (a): Take']]],
+ ['Take(, 1)',449,[['VB_ARGUMENT_REQUIRED','Argument not optional (a): Take']]],
+ ['Take()',449,[['VB_ARGUMENT_REQUIRED','Argument not optional (a): Take']]]
+])test('rejects invalid argument binding at compile and runtime boundaries: '+expr,async()=>await assert.rejects(()=>run(main('Debug.Print '+expr)+'\n'+take,[],issues.map(([code,message])=>({code,message,source:'MainModule',line:3}))),e=>e.number===error));
 test('builtin named arguments use published names',async()=>assert.deepEqual((await run(main('Debug.Print Mid(length:=2, string:="abcdef", start:=3)\nDebug.Print Replace(replace:="X", expression:="abcabc", find:="a")\nDebug.Print Year(DateSerial(day:=5, year:=2024, month:=8))'))).output,['cd','XbcXbc','2024']));
 test('String-returning intrinsics support $ spelling',async()=>assert.deepEqual((await run(main('Debug.Print Left$("abc", 2), Mid$("abc", 2), Trim$(" x "), UCase$("a")'))).output,['ab bc x A']));
 test('Variant string functions propagate Null but $ form rejects it',async()=>{assert.deepEqual((await run(main('Debug.Print IsNull(Left(Null, 1))'))).output,['True']);await assert.rejects(()=>run(main('Debug.Print Left$(Null, 1)')),e=>e.number===94);});

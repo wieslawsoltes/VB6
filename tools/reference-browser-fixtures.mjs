@@ -1,0 +1,19 @@
+import {newProject,createControl} from '../src/project/model.js';
+const module=(name,code,kind='module')=>({id:name,name,code,kind});
+const project=(code,extras=[])=>({...newProject('StaticBindings'),startup:'Sub Main',modules:[module('M',code),...extras]});
+const diagnostic=(line,code,message)=>({source:'M',line,number:1002,code,message});
+const formProject=newProject('ControlBindings');
+formProject.modules[0].code='Option Explicit\nPrivate Sub Form_Load()\nDebug.Print Command1.Caption\nEnd Sub';
+const command=createControl('CommandButton','Command1');command.properties.Caption='Bound';formProject.modules[0].form.controls.push(command);
+export const referenceBrowserFixtures=[
+ {name:'Radix literal widths, optional octal prefix and suffixes',project:project('Sub Main()\nDebug.Print &HFFFF%, &O177777, &HFFFF&, &17, TypeName(&HFFFF&), TypeName(&O17%)\nEnd Sub'),expected:['-1 -1 65535 15 Long Integer'],error:null},
+ {name:'Continued conditional constants and directive expressions',project:project('#Const Enabled = _\n &HFFFF%\n#If Enabled = _\n -1 Then\nSub Main()\nDebug.Print "continued"\nEnd Sub\n#Else\nnot executable source\n#End If'),expected:['continued'],error:null},
+ {name:'Unreachable undeclared names block IDE Run before output',project:project('Option Explicit\nSub Main()\nDebug.Print "must not run"\nExit Sub\ntypo = 1\nEnd Sub'),diagnostics:[diagnostic(5,'VB_UNDEFINED_NAME','Variable not defined: typo')]},
+ {name:'Missing source call arguments block execution',project:project('Option Explicit\nSub Main()\nCall Work()\nEnd Sub\nSub Work(ByVal value As Long)\nEnd Sub'),diagnostics:[diagnostic(3,'VB_ARGUMENT_REQUIRED','Argument not optional (value): Work')]},
+ {name:'Uncalled code is checked with physical continued line locations',project:project('#Const Feature = _\n True\n#If Feature Then\nOption Explicit\nSub Main()\nEnd Sub\nSub Unused()\nDebug.Print typo\nEnd Sub\n#End If'),diagnostics:[diagnostic(8,'VB_UNDEFINED_NAME','Variable not defined: typo')]},
+ {name:'Constant writes fail during compilation',project:project('Option Explicit\nConst Limit = 4\nSub Main()\nLimit = 5\nEnd Sub'),diagnostics:[diagnostic(4,'VB_CONSTANT_ASSIGNMENT','Cannot assign to constant: Limit')]},
+ {name:'Source calls bind required named arguments in declaration order',project:project('Option Explicit\nSub Main()\nDebug.Print Other.Add(second:=4, first:=3)\nEnd Sub',[module('Other','Public Function Add(ByVal first As Long,Optional ByVal second As Long = 2) As Long\nAdd = first + second\nEnd Function')]),expected:['7'],error:null},
+ {name:'Array-returning calls validate parameters before result indexing',project:project('Option Explicit\nSub Main()\nDebug.Print Values(7)(0)\nEnd Sub\nFunction Values(ByVal value As Long) As Long()\nDim a(0) As Long\na(0) = value\nValues = a\nEnd Function'),expected:['7'],error:null},
+ {name:'Source-class private property accessor blocks Run',project:project('Option Explicit\nSub Main()\nDim b As New Box\nb.Value = 3\nEnd Sub',[module('Box','Public Property Get Value() As Long\nValue = 1\nEnd Property\nPrivate Property Let Value(ByVal rhs As Long)\nEnd Property','class')]),diagnostics:[diagnostic(4,'VB_MEMBER_ACCESS','Method or data member not accessible: Value')]},
+ {name:'Form control names bind from designer metadata',project:formProject,host:true,expected:['Bound'],error:null}
+];

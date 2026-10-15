@@ -1,3 +1,4 @@
+import {runtimeBoundaryProgram} from './helpers/runtime-boundary-program.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tokenize, splitTop, logicalLines, VBError } from '../src/language/lexer.js';
@@ -8,7 +9,7 @@ import { VBArray, VBCollection, VBDictionary, binary, coerce, bankersRound, VBCu
 import { VirtualFileSystem } from '../src/runtime/filesystem.js';
 
 function project(code,extras=[]){return {name:'Test',startup:'Sub Main',modules:[{name:'Module1',kind:'module',code},...extras]};}
-async function run(code,extras=[],options={}){const output=[];const compiled=compileProject(project(code,extras));assert.deepEqual(compiled.diagnostics,[]);const vm=new VirtualMachine(compiled,{print:s=>output.push(s)},options);await vm.start();return {vm,output};}
+async function run(code,extras=[],options={}){const output=[];let compiled=compileProject(project(code,extras));if(options.expectedCompileDiagnostics)compiled=runtimeBoundaryProgram(compiled,options.expectedCompileDiagnostics);else assert.deepEqual(compiled.diagnostics,[]);const vm=new VirtualMachine(compiled,{print:s=>output.push(s)},options);await vm.start();return {vm,output};}
 const main=body=>`Option Explicit\nSub Main()\n${body}\nEnd Sub`;
 
 test('lexer preserves strings, doubled quotes, source offsets and suffixes',()=>{const t=tokenize('Left$("a""b", 2) & &HFF');assert.equal(t[0].value,'Left$');assert.equal(t[2].value,'a"b');assert.equal(t.at(-2).value,255);assert.equal(t[0].start,0);});
@@ -33,7 +34,7 @@ test('functions recurse and return typed values',async()=>assert.deepEqual((awai
 test('ByRef changes caller, ByVal does not',async()=>assert.deepEqual((await run('Option Explicit\nSub Main()\nDim x As Long\nx = 2\nAddOne x\nKeep x\nDebug.Print x\nEnd Sub\nSub AddOne(ByRef n As Long)\nn = n + 1\nEnd Sub\nSub Keep(ByVal n As Long)\nn = 99\nEnd Sub')).output,['3']));
 test('optional parameters and ParamArray',async()=>assert.deepEqual((await run('Sub Main()\nDebug.Print Add(5)\nDebug.Print CountArgs(1, 2, 3)\nEnd Sub\nFunction Add(ByVal x As Long, Optional ByVal y As Long = 2) As Long\nAdd = x + y\nEnd Function\nFunction CountArgs(ParamArray args() As Variant) As Long\nCountArgs = UBound(args) + 1\nEnd Function')).output,['7','3']));
 test('Static local persists between invocations',async()=>assert.deepEqual((await run('Sub Main()\nDebug.Print Counter()\nDebug.Print Counter()\nEnd Sub\nFunction Counter() As Long\nStatic n As Long\nn = n + 1\nCounter = n\nEnd Function')).output,['1','2']));
-test('Option Explicit catches missing variable at execution',async()=>await assert.rejects(()=>run(main('oops = 2')),e=>e.number===500));
+test('Option Explicit rejects source while the VM retains its missing-variable guard',async()=>await assert.rejects(()=>run(main('oops = 2'),[],{expectedCompileDiagnostics:[{"code": "VB_UNDEFINED_NAME", "source": "Module1", "line": 3, "message": "Variable not defined: oops"}]}),e=>e.number===500));
 test('Integer overflow is caught',async()=>await assert.rejects(()=>run(main('Dim n As Integer\nn = 32768')),e=>e.number===6));
 test('Option Compare Text applies to comparison',async()=>assert.deepEqual((await run('Option Compare Text\nSub Main()\nDebug.Print "ABC" = "abc"\nEnd Sub')).output,['True']));
 test('typed multidimensional arrays and bounds',async()=>assert.deepEqual((await run(main('Dim a(1 To 2, 3 To 4) As Long\na(2, 4) = 9\nDebug.Print a(2, 4), LBound(a, 2), UBound(a, 1)'))).output,['9 3 2']));

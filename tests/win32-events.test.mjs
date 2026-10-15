@@ -14,7 +14,7 @@ for(const handler of [
  'Private Sub source_Tick(Cancel As Boolean)\nEnd Sub',
  'Private Function source_Tick(Cancel As Boolean,ByVal amount As Long) As Long\nEnd Function'
 ])test('incompatible event sink signatures remain explicit native diagnostics: '+handler,()=>assert.throws(()=>build(handler),e=>e.name==='NativeCompileError'&&/signature/.test(e.message)));
-test('undeclared source events do not produce a compiled no-op',()=>assert.throws(()=>build('','','RaiseEvent Missing'),/declared in the current class/));
+test('undeclared source events do not produce a compiled no-op',()=>assert.throws(()=>build('','','RaiseEvent Missing'),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_EVENT_NAME',source:'Publisher',line:4}]);assert.match(error.message,/Event not declared: Missing/);return true;}));
 test('raw ByRef writes cannot silently bypass a WithEvents cell setter',()=>assert.throws(()=>build('Private Sub Replace(ByRef p As Publisher)\nSet p=Nothing\nEnd Sub\nPrivate Sub Invoke()\nReplace source\nEnd Sub'),/ByRef subscription/));
 for(const name of ['AotControlSourceEvents','AotControlEventReentrancy'])test(name+' compiles deterministically and retains native execution budgets',()=>{
  const f=nativeControlFixtures().find(f=>f.project.name===name),before=JSON.stringify(f.project);

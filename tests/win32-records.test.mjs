@@ -52,7 +52,7 @@ test('As Any refuses ambiguous String ownership, expressions and whole arrays',(
  for(const [decl,value]of [['Dim s As String','s'],['Dim n As Long','(n)'],['Dim a(0 To 2) As Long','a'],['Dim n As Long','1+2']])assert.throws(()=>compile('Private Declare Sub F Lib "x" (p As Any)\nPublic Sub Main()\n'+decl+'\nF '+value+'\nEnd Sub'),/As Any/);
 });
 test('unknown fields, omitted subscripts and wrong ranks remain diagnostics',()=>{
- for(const expr of ['p.missing=1','p.data=1','p.data(1,2)=1'])assert.throws(()=>compile('Private Type T\n data(0 To 2) As Long\nEnd Type\nPublic Sub Main()\nDim p As T\n'+expr+'\nEnd Sub'),/field|rank/);
+ for(const expr of ['p.missing=1','p.data=1','p.data(1,2)=1'])assert.throws(()=>compile('Private Type T\n data(0 To 2) As Long\nEnd Type\nPublic Sub Main()\nDim p As T\n'+expr+'\nEnd Sub'),error=>{if(expr==='p.missing=1'){assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_UNKNOWN_MEMBER',source:'Module1',line:6}]);assert.match(error.message,/User-defined type member not found: missing/);}else assert.match(error.message,/field|rank/);return true;});
 });
 test('private record visibility and same-name record identity are distinct',()=>{
  const p=project('Public Sub Main()\nDim p As POINTAPI\nEnd Sub');p.modules.push({id:'other',name:'Other',kind:'module',code:point});assert.throws(()=>compileWin32(p),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_RECORD_TYPE',source:'Module1',line:2}]);assert.match(error.message,/not accessible/);return true;});

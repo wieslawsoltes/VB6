@@ -1,9 +1,11 @@
+import {referenceBrowserFixtures} from './reference-browser-fixtures.mjs';
 import {parameterFixtures} from './parameter-browser-fixtures.mjs';
 import {newProject} from '../src/project/model.js';
 import {SETTER_ORDER_FIXTURE,SETTER_ORDER_EXPECTED} from '../tests/migration-setter-order-fixtures.mjs';
 const project=code=>({...newProject('LanguageParity'),startup:'Sub Main',modules:[{id:'m',name:'M',kind:'module',code}]});
 const withClass=(code,extra)=>{const result=project(code);result.modules.push(extra);return result;};
 const fixtures=[
+ ...referenceBrowserFixtures,
  ...parameterFixtures,
  {name:'Unused recursive records are rejected before startup',project:project(`Private Type Item
 Next As Item

@@ -1,3 +1,4 @@
+import {runtimeBoundaryProgram} from './helpers/runtime-boundary-program.mjs';
 import {ArrayLeaseScope} from '../src/runtime/array-lifetime.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,8 +7,8 @@ import {VirtualMachine} from '../src/runtime/vm.js';
 import {VBArray,Cell,cloneValue,tagScalar} from '../src/runtime/values.js';
 
 function compile(code,extra=[]){return compileProject({name:'ArrayLifetime',startup:'Sub Main',modules:[{name:'M',kind:'module',code},...extra]});}
-async function run(code,expected,extra=[]){
- const program=compile(code,extra);assert.deepEqual(program.diagnostics,[]);
+async function run(code,expected,extra=[],expectedDiagnostics=null){
+ let program=compile(code,extra);if(expectedDiagnostics)program=runtimeBoundaryProgram(program,expectedDiagnostics);else assert.deepEqual(program.diagnostics,[]);
  const output=[],vm=new VirtualMachine(program,{print:s=>output.push(s)});await vm.start();
  assert.notEqual(vm.state,'error',vm.lastError?.message);assert.deepEqual(output,expected);return vm;
 }
@@ -320,7 +321,7 @@ F a(0)
 Debug.Print Err.Number
 ReDim a(3)
 Debug.Print UBound(a)
-End Sub`,['449','3']));
+End Sub`,['449','3'],[],[{"code": "VB_ARGUMENT_REQUIRED", "source": "M", "line": 8, "message": "Argument not optional (required): F"}]));
 
 test('Unhandled callee error releases its borrowed array before caller resumes',()=>run(`Dim a() As Long
 Sub F(ByRef value As Long)

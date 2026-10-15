@@ -45,7 +45,7 @@ test('unused skipped As New declarations never invoke their constructors',async(
  assert.deepEqual(r.output,['0']);
 });
 test('local constants shadow module storage despite a skipped declaration',async()=>{
- const r=await run('Private Size As Long\nSub Main()\nSize = 99\nWork\nDebug.Print Size\nEnd Sub\nSub Work()\nIf False Then\nConst Size = 7\nEnd If\nDebug.Print Size\nOn Error Resume Next\nSize = 12\nDebug.Print Err.Number\nEnd Sub');
+ const r=await run('Private Size As Long\nSub Main()\nSize = 99\nWork\nDebug.Print Size\nEnd Sub\nSub Work()\nIf False Then\nConst Size = 7\nEnd If\nDebug.Print Size\nOn Error Resume Next\nSize = 12\nDebug.Print Err.Number\nEnd Sub',[],{expectedCompileDiagnostics:[{"code": "VB_CONSTANT_ASSIGNMENT", "source": "M", "line": 13, "message": "Cannot assign to constant: Size"}]});
  assert.deepEqual(r.output,['7','500','99']);
 });
 test('ByRef calls use a skipped declaration rather than a new implicit Variant',async()=>{

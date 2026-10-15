@@ -1,3 +1,4 @@
+import {runtimeBoundaryProgram} from './helpers/runtime-boundary-program.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
@@ -8,7 +9,7 @@ import {VirtualMachine} from '../src/runtime/vm.js';
 import {encodeVariable,decodeVariable} from '../src/runtime/binary-codec.js';
 const parts=d=>[d.getFullYear(),d.getMonth()+1,d.getDate(),d.getHours(),d.getMinutes(),d.getSeconds()];
 const main=body=>`Option Explicit\nSub Main()\n${body}\nEnd Sub`;
-async function run(code,extras=[]){const program=compileProject({name:'Runtime04',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code},...extras]});assert.deepEqual(program.diagnostics,[]);const output=[];const vm=new VirtualMachine(program,{print:s=>output.push(s)});await vm.start();return {output,vm};}
+async function run(code,extras=[],expectedDiagnostics=null){let program=compileProject({name:'Runtime04',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code},...extras]});if(expectedDiagnostics)program=runtimeBoundaryProgram(program,expectedDiagnostics);else assert.deepEqual(program.diagnostics,[]);const output=[];const vm=new VirtualMachine(program,{print:s=>output.push(s)});await vm.start();return {output,vm};}
 for(const [date,count,want]of [['2024-02-29',1,[2025,2,28]],['2024-02-29',-4,[2020,2,29]],['2024-01-31',1,[2025,1,31]]])test('DateAdd year clamps '+date+' '+count,()=>assert.deepEqual(parts(dateAdd('yyyy',count,date)).slice(0,3),want));
 for(const [part,date,count,want]of [['m','2024-01-31',1,[2024,2,29]],['m','2023-03-31',-1,[2023,2,28]],['q','2024-11-30',1,[2025,2,28]],['d','2024-02-28',1,[2024,2,29]],['w','2024-02-28',1,[2024,2,29]]])test(`DateAdd ${part} ${date} ${count}`,()=>assert.deepEqual(parts(dateAdd(part,count,date)).slice(0,3),want));
 test('DateAdd rounds amount ties-to-even',()=>{assert.equal(dateAdd('d',2.5,'2024-01-01').getDate(),3);assert.equal(dateAdd('d',3.5,'2024-01-01').getDate(),5);});
@@ -64,11 +65,11 @@ test('CallByName vbSet preserves identity and Nothing',async()=>assert.deepEqual
 test('CallByName native dictionary methods and indexed property',async()=>assert.deepEqual((await run(main('Dim d As Object\nSet d = New Scripting.Dictionary\nCallByName d, "Add", vbMethod, "key", 5\nDebug.Print CallByName(d, "Item", vbGet, "key")\nCallByName d, "Item", vbLet, "key", 9\nDebug.Print CallByName(d, "Item", vbGet, "key")\nDebug.Print CallByName(d, "Count", vbGet)'))).output,['5','9','1']));
 for(const [body,code]of [
  ['Debug.Print b.hidden',438],['b.hidden = 3',438],['Debug.Print b.Secret()',438],['Debug.Print CallByName(b, "hidden", vbGet)',438],['Debug.Print CallByName(b, "Secret", vbMethod)',438],['CallByName b, "Missing", vbLet, 2',438],['CallByName b, "Value", vbMethod',438],['CallByName b, "Multiply", vbGet, 2',438],['CallByName b, "Value", 99, 1',5],['CallByName b, "Child", vbSet, 2',424],['CallByName b, "Child", vbLet, 2',438],['CallByName b, "Value", vbGet, 2',450],['Debug.Print CallByName(Nothing,"X",vbGet)',91],['Debug.Print CallByName(3,"X",vbGet)',424],['Debug.Print CallByName(b,"constructor",vbMethod)',438],['Debug.Print CallByName(b,"__proto__",vbGet)',438],['Debug.Print CallByName(b,"_runtime",vbGet)',438]
-])test('strict dispatch rejects '+body,async()=>await assert.rejects(()=>run(main('Dim b As New Bag\n'+body),[bag]),e=>e.number===code));
-test('Private module fields are invisible across modules',async()=>await assert.rejects(()=>run(main('Debug.Print InternalValue'),[{name:'Other',kind:'module',code:'Private InternalValue As Long'}]),e=>e.number===500));
+])test('strict dispatch rejects '+body,async()=>await assert.rejects(()=>run(main('Dim b As New Bag\n'+body),[bag],['Debug.Print b.hidden','b.hidden = 3','Debug.Print b.Secret()'].includes(body)?[{code:'VB_MEMBER_ACCESS',source:'MainModule',line:4,message:'Method or data member not accessible: '+(body.includes('Secret')?'Secret':'hidden')}]:null),e=>e.number===code));
+test('Private module fields are invisible across modules',async()=>await assert.rejects(()=>run(main('Debug.Print InternalValue'),[{name:'Other',kind:'module',code:'Private InternalValue As Long'}],[{code:'VB_UNDEFINED_NAME',source:'MainModule',line:3,message:'Variable not defined: InternalValue'}]),e=>e.number===500));
 test('Public module fields remain accessible',async()=>assert.deepEqual((await run(main('SharedValue = 12\nDebug.Print SharedValue'),[{name:'Other',kind:'module',code:'Public SharedValue As Long'}])).output,['12']));
 test('same class code can access Private fields of peer instances',async()=>assert.deepEqual((await run(main('Dim a As New Bag, b As New Bag\na.CopyFrom b\nDebug.Print "ok"'),[bag])).output,['ok']));
 
 test('Error variants cannot be truth values',async()=>await assert.rejects(()=>run(main('If CVErr(7) Then Debug.Print "wrong"')),e=>e.number===13));
 test('TypeOf rejects Variant Error rather than treating it as an object',async()=>await assert.rejects(()=>run(main('Debug.Print TypeOf CVErr(7) Is Object')),e=>e.number===424));
-test('indexed private property setter cannot bypass public getter visibility',async()=>await assert.rejects(()=>run(main('Dim b As New Bag\nb.Text(0) = "bad"'),[{...bag,code:bag.code.replace('Public Property Let Text','Private Property Let Text')}]),e=>e.number===438));
+test('indexed private property setter cannot bypass public getter visibility',async()=>await assert.rejects(()=>run(main('Dim b As New Bag\nb.Text(0) = "bad"'),[{...bag,code:bag.code.replace('Public Property Let Text','Private Property Let Text')}],[{code:'VB_MEMBER_ACCESS',source:'MainModule',line:4,message:'Method or data member not accessible: Text'}]),e=>e.number===438));

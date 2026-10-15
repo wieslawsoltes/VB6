@@ -1,3 +1,4 @@
+import {moduleSymbolSnapshot,projectSymbolSnapshot} from './symbol-snapshot.js';
 import {layoutBindingSnapshot} from '../layout/language-gate.js';
 import {compileModule,validateCompiledModules} from './compiler.js';
 
@@ -10,11 +11,11 @@ export function diagnosticSnapshot(project) {
   const modules=project.modules.map((m,index)=>{
     const code=String(m.code||'');size+=code.length;layoutNodes+=m.form?.controls?.length||0;if(layoutNodes>100000)throw new RangeError('Automatic layout checking is limited to 100,000 component declarations.');
     if(size>16*1024*1024)throw new RangeError('Automatic syntax checking is limited to 16 Mi UTF-16 source characters. Use Check Project Syntax.');
-    return {id:String(m.id||index),name:String(m.name||'Module'+index),kind:String(m.kind||'module'),attributes:[...(m.attributes||[])],code,layoutBindings:layoutBindingSnapshot(m)};
+    return {id:String(m.id||index),name:String(m.name||'Module'+index),kind:String(m.kind||'module'),attributes:[...(m.attributes||[])],code,symbolBindings:JSON.parse(JSON.stringify(moduleSymbolSnapshot(m))),layoutBindings:layoutBindingSnapshot(m)};
   });
   // Conditional compiler values are scalars. JSON also detaches mutable settings.
   const conditionalConstants=JSON.parse(JSON.stringify(project.settings?.conditionalConstants||{}));
-  return {name:String(project.name||'Project'),modules,settings:{conditionalConstants,anchoring:project.settings?.anchoring===true}};
+  return {name:String(project.name||'Project'),modules,symbolMetadata:JSON.parse(JSON.stringify(projectSymbolSnapshot(project))),settings:{conditionalConstants,anchoring:project.settings?.anchoring===true}};
 }
 
 export function compilerDiagnostic(error,name) {
@@ -46,7 +47,8 @@ export class ProjectDiagnosticCache {
       // generators must not overwrite each other's module context at a yield.
       const layout=JSON.stringify(input.layoutBindings||layoutBindingSnapshot(input));
       const form=JSON.stringify(input.form?{type:input.form.type,properties:{MDIChild:input.form.properties?.MDIChild}}:null);
-      inputs.push({entry,layout,form});
+      const symbols=JSON.stringify(moduleSymbolSnapshot(input));
+      inputs.push({entry,layout,form,symbols});
       if(entry.error)diagnostics.push({...entry.error});
       else {const name=entry.compiled.name.toLowerCase();
         if(modules.has(name))diagnostics.push({severity:'error',message:'Duplicate module name: '+entry.compiled.name,number:1002,source:entry.compiled.name,line:1,column:1,origin:'syntax'});
@@ -55,16 +57,16 @@ export class ProjectDiagnosticCache {
       yield {completed:i+1,total:project.modules.length};
     }
     if(epoch===this.epoch)for(const key of this.entries.keys())if(!seen.has(key))this.entries.delete(key);
-    const settings=JSON.stringify(project.settings||{}),previous=this.validation;
-    const semanticCacheHit=!!previous&&previous.settings===settings&&previous.inputs.length===inputs.length&&inputs.every((input,i)=>{
-      const old=previous.inputs[i];return old.entry===input.entry&&old.layout===input.layout&&old.form===input.form;
+    const settings=JSON.stringify(project.settings||{}),symbols=JSON.stringify(projectSymbolSnapshot(project)),previous=this.validation;
+    const semanticCacheHit=!!previous&&previous.settings===settings&&previous.symbols===symbols&&previous.inputs.length===inputs.length&&inputs.every((input,i)=>{
+      const old=previous.inputs[i];return old.entry===input.entry&&old.layout===input.layout&&old.form===input.form&&old.symbols===input.symbols;
     });
     let semantic;
     if(semanticCacheHit)semantic=previous.diagnostics;
     else {
-      for(const {entry,layout,form} of inputs)if(entry.compiled){entry.compiled.layoutBindings=JSON.parse(layout);entry.compiled.form=JSON.parse(form);}
-      semantic=validateCompiledModules(modules,project.settings).map(d=>Object.freeze({...d,origin:'syntax'}));
-      if(epoch===this.epoch)this.validation={inputs,settings,diagnostics:semantic};
+      for(const {entry,layout,form,symbols} of inputs)if(entry.compiled){entry.compiled.layoutBindings=JSON.parse(layout);entry.compiled.form=JSON.parse(form);entry.compiled.symbolBindings=JSON.parse(symbols);}
+      semantic=validateCompiledModules(modules,project.settings,JSON.parse(symbols)).map(d=>Object.freeze({...d,origin:'syntax'}));
+      if(epoch===this.epoch)this.validation={inputs,settings,symbols,diagnostics:semantic};
     }
     // Results are caller-owned. Editing Error List diagnostics must not mutate
     // the immutable semantic result that a later identical snapshot will reuse.

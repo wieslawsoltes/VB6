@@ -134,7 +134,7 @@ test('invalid options, oversized projects and cancellation fail before conversio
   const abort=new AbortController();abort.abort();assert.throws(()=>convert(procedure(''),{signal:abort.signal}),/cancel/i);
 });
 test('plugins are ordered, explicit, reusable, and can add runtime source files',()=>{
-  const calls=[],m=createVbNetMigrator({plugins:[{id:'first',expression({node}){if(node.kind==='id'&&node.name==='Special'){calls.push(1);return '42I';}},finalize(files,context){context.addFile('Adapter/README.txt','adapter');}},{id:'second',expression({node}){if(node.kind==='id'&&node.name==='Special'){calls.push(2);return '7I';}}}]});
+  const calls=[],m=createVbNetMigrator({plugins:[{id:'first',externalSymbols:[{name:'Special',type:'Integer'}],expression({node}){if(node.kind==='id'&&node.name==='Special'){calls.push(1);return '42I';}},finalize(files,context){context.addFile('Adapter/README.txt','adapter');}},{id:'second',expression({node}){if(node.kind==='id'&&node.name==='Special'){calls.push(2);return '7I';}}}]});
   const result=m.convertProject(procedure('Debug.Print Special'));okay(result);assert.deepEqual(calls,[1]);assert.match(code(result),/42I/);assert.equal(result.files['Adapter/README.txt'],'adapter');
 });
 test('duplicate plugin ids and asynchronous hooks are rejected',()=>{

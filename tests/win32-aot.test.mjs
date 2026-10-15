@@ -94,7 +94,7 @@ test('qualified calls respect private procedure and Declare scope',()=>{
   for(const target of ['Private Sub Hidden()\nEnd Sub','Private Declare Sub Hidden Lib "kernel32" Alias "Beep" ()']){
     const p=newProject();p.modules[0].code='Private Sub Form_Load()\n Module1.Hidden\nEnd Sub';
     p.modules.push({id:'m',name:'Module1',kind:'module',code:target});
-    assert.throws(()=>compileWin32(p),/Private native procedure/);
+    assert.throws(()=>compileWin32(p),error=>{assert.equal(error.name,'NativeCompileError');assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_MEMBER_ACCESS',source:'Form1',line:2}]);assert.match(error.message,/not accessible: Hidden/);return true;});
   }
 });
 test('native declarations cannot shadow procedure or storage names',()=>{

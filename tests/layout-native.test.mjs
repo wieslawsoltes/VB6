@@ -10,7 +10,7 @@ import {formNodes,layoutOptions} from '../src/layout/model.js';
 const project=()=>{const p=newProject('LayoutOracle');p.settings.anchoring=true;p.modules[0].code='';return p;};
 async function kernel(p){
  const seed=nativeLayoutSeed(p),source=nativeLayoutCoreSource(seed.count).replace(/^Private Function (?:Seed|HostApply|HostResize|HostClient|HostShow)\([^\n]*\nEnd Function\n/gm,'')+'\nPrivate Sub Main()\nEnd Sub\n';
- const compiled=compileProject({name:'Kernel',startup:'Sub Main',modules:[{name:'Kernel',kind:'module',code:source}]});assert.deepEqual(compiled.diagnostics,[]);
+ const compiled=compileProject({name:'Kernel',externalSymbols:['Seed','HostApply','HostResize','HostClient','HostShow'].map(name=>({name,kind:'function'})),startup:'Sub Main',modules:[{name:'Kernel',kind:'module',code:source}]});assert.deepEqual(compiled.diagnostics,[]);
  const painted=new Map(),clients=new Map(),shown=new Map(),vm=new VirtualMachine(compiled,{}, {instructionLimit:100000000});
  vm.library.set('seed',(node,field)=>seed.rows[node][field]);vm.library.set('hostapply',(hwnd,x,y,width,height)=>{painted.set(hwnd,{x,y,width,height});return 1;});
  vm.library.set('hostresize',(hwnd,width,height)=>{clients.set(hwnd,{width,height});return 1;});vm.library.set('hostclient',(hwnd,axis)=>clients.get(hwnd)[axis?'height':'width']);vm.library.set('hostshow',(hwnd,value)=>{shown.set(hwnd,value);return 1;});

@@ -1,3 +1,4 @@
+import {moduleSymbolSnapshot} from '../language/symbol-snapshot.js';
 /** Renderer-independent runner for VB-authored UserControl logic.
  * Each instance has an isolated interpreter. No project startup, DLL activation,
  * JavaScript evaluation, DOM access or design-mode execution happens implicitly.
@@ -33,7 +34,11 @@ export class SourceUserControl {
     const initialState=state===undefined?selected.ocxState:state;this.#bag=new OcxPropertyBag(initialState);
     // Form/class declarations remain available as types, but the isolated source
     // runner never constructs project forms or executes a project's Sub Main.
-    for(const module of source.modules)if(module.form){module.kind='class';delete module.form;}
+    for(const module of source.modules)if(module.form){
+      module.symbolBindings=moduleSymbolSnapshot(module);
+      if(module===selected)module.symbolBindings.items.push(...Object.keys(controls).map(name=>({name,type:'Object'})));
+      module.kind='class';delete module.form;
+    }
     const compiled=compileProject(source);if(!compiled.valid)throw new Error(compiled.diagnostics.map(d=>`${d.source}:${d.line}: ${d.message}`).join('\n'));
     this.#module=compiled.modules.get(moduleName.toLowerCase());
     if(this.#module.declarations.some(d=>reserved.has(d.name.toLowerCase())))throw TypeError('Source control redeclares a reserved host member');

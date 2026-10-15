@@ -143,7 +143,7 @@ function ensureArithmeticModule(compiler) {
   if (compiler.dateIntervalModule) return compiler.dateIntervalModule;
   let name = 'VB6NativeCalendar', count = 0;
   while (compiler.modules.has(key(name))) name = 'VB6NativeCalendar' + (++count);
-  const program = compileProject({name, startup:'Sub Main', modules:[{id:name,name,kind:'module',code:source}]});
+  const program = compileProject({name, startup:'Sub Main', externalSymbols:['IntervalIndex','FirstDay'].map(name=>({name,kind:'function',type:'Long'})), modules:[{id:name,name,kind:'module',code:source}]});
   if (!program.valid) throw new Error('Invalid internal native calendar: ' + JSON.stringify(program.diagnostics));
   const module = program.modules.get(key(name)); module.nativeInternal = true;
   compiler.externals.set(key(name), new Map());

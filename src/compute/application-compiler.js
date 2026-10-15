@@ -1,3 +1,4 @@
+import {computeSourceProject} from './symbols.js';
 import {compileProject} from '../language/compiler.js';
 import {compileComputeIR} from '../../packages/vb6-compute/src/compiler.js';
 import {ComputeError} from '../../packages/vb6-compute/src/protocol.js';
@@ -12,7 +13,7 @@ export function compileComputeApplication(source,{events,...options}={}) {
   if(project.modules.some(m=>String(m.name).toLowerCase()==='computeinput'))throw new ComputeError('ComputeInput is reserved for application inputs','GPU_NAME');
   const map=events??{load:options.entry||project.startup||'Main'};
   if(!map||typeof map!=='object'||Array.isArray(map)||!Object.keys(map).length)throw new ComputeError('At least one event handler is required','GPU_EVENT');
-  const program=compileProject(project);
+  const program=compileProject(computeSourceProject(project,{input:true}));
   if(!program.valid)throw new ComputeError('The application contains source errors','GPU_SOURCE',{diagnostics:program.diagnostics});
   const canonical={};
   for(const [event,name] of Object.entries(map)) {
@@ -29,6 +30,6 @@ export function compileComputeApplication(source,{events,...options}={}) {
   const code=['Option Explicit',...Object.entries(INPUT_FIELDS).map(([name,type])=>`Public ${name} As ${type}`),'Public Sub Dispatch()', 'Select Case EventId',
     ...Object.entries(canonical).map(([event,name])=>`Case ${APPLICATION_EVENTS[event]}&\nCall ${name}()`),'End Select','End Sub'].join('\n');
   project.modules.push({name:'ComputeInput',kind:'module',code});
-  const artifact=compileComputeIR(compileProject(project),{...options,entry:'ComputeInput.Dispatch'});
+  const artifact=compileComputeIR(compileProject(computeSourceProject(project)),{...options,entry:'ComputeInput.Dispatch'});
   return validateApplication({kind:'vb6-compute-application',version:1,events:canonical,artifact});
 }

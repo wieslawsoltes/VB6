@@ -7,7 +7,7 @@ import {VBError} from '../../src/language/lexer.js';
 export async function gridKernel(count=2){
  const pattern=new RegExp('^Private Function ('+Object.keys(NATIVE_GRID_HOSTS).join('|')+')\\([^\\n]*\\nEnd Function\\n','gm');
  const source=nativeGridCoreSource(count).replace(pattern,'')+'\nPrivate Sub Main()\nEnd Sub\n';
- const program=compileProject({name:'GridKernel',startup:'Sub Main',modules:[{name:'GridKernel',kind:'module',code:source}]});assert.deepEqual(program.diagnostics,[]);
+ const program=compileProject({name:'GridKernel',startup:'Sub Main',externalSymbols:Object.keys(NATIVE_GRID_HOSTS).map(name=>({name,kind:'function'})),modules:[{name:'GridKernel',kind:'module',code:source}]});assert.deepEqual(program.diagnostics,[]);
  const buffers=new Map(),draws=[],notices=[],invalidations=[],bars=[];let next=1,remaining=Infinity,writes=Infinity;
  const allocate=(n,kind)=>{if(remaining--<=0)throw new VBError('Injected allocation failure',7);const handle=next++;buffers.set(handle,{kind,items:Array(n).fill(kind===8?'':0)});return handle;};
  const buffer=h=>{const b=buffers.get(h);if(!b)throw new VBError('Invalid array',9);return b;};

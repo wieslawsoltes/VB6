@@ -37,12 +37,12 @@ test('callback argument cannot be passed as an accidental pointer-to-pointer or 
   assert.throws(()=>compileWin32(project('Dim n As Long\nn=Invoke(AddressOf Target)',undefined,p)),/ByVal Long/);
 });
 test('AddressOf does not permit taking a foreign DLL function or an unknown address',()=>{
- for(const name of ['Invoke','Missing'])assert.throws(()=>compileWin32(project('Dim n As Long\nn=Invoke(AddressOf '+name+')')),/authored Sub or Function/);
+ for(const name of ['Invoke','Missing'])assert.throws(()=>compileWin32(project('Dim n As Long\nn=Invoke(AddressOf '+name+')')),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_ADDRESSOF_TARGET',source:'Entry',line:7}]);return true;});
 });
 test('AddressOf preserves private accessibility',()=>{
  const p=project('Dim n As Long\nn=Invoke(AddressOf Other.Target)','');
  p.modules.push({id:'other',name:'Other',kind:'module',code:'Private Function Target() As Long\nEnd Function'});
- assert.throws(()=>compileWin32(p),/Private native procedure/);
+ assert.throws(()=>compileWin32(p),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_MEMBER_ACCESS',source:'Entry',line:5}]);assert.match(error.message,/not accessible: Target/);return true;});
 });
 test('native callback cannot reference a form method or class instance',()=>{
  const p=project('Dim n As Long\nn=Invoke(AddressOf Form1.Target)','');

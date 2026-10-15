@@ -77,7 +77,7 @@ test('support catalog closes only explicit roots and all extracted units match',
 });
 test('typed plugin results declare exact support; opaque results remain conservative',()=>{
  const input=procedure('Debug.Print Special');
- const p={id:'typed',representationSafe:true,expression({node}){if(node?.kind==='id'&&node.name==='Special')return {code:'42I',requires:[]};}};
+ const p={id:'typed',externalSymbols:[{name:'Special',type:'Integer'}],representationSafe:true,expression({node}){if(node?.kind==='id'&&node.name==='Special')return {code:'42I',requires:[]};}};
  const r=good(createVbNetMigrator({plugins:[p]}).convertProject(input));assert.deepEqual(r.report.runtime.features,[]);
  const q=good(createVbNetMigrator({plugins:[{...p,expression({node}){if(node?.kind==='id'&&node.name==='Special')return '42I';}}]}).convertProject(input));assert.ok(q.report.runtime.features.includes('VbArray'));
  const withSupport=good(createVbNetMigrator({plugins:[{...p,expression({node}){if(node?.kind==='id'&&node.name==='Special')return {code:'VbRuntime.FixedString("x", 3)',requires:['VbRuntime.FixedString']};}}]}).convertProject(input));

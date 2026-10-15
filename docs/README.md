@@ -36,6 +36,8 @@ These guides describe the implemented system, not complete native VB6 parity.
 ## Language, runtime and project files
 
 - [Language frontend](LANGUAGE-FRONTEND.md): scanning, declarations and diagnostics.
+- [Static language binding](LANGUAGE-STATIC-BINDING.md): names, source call signatures,
+  conditional continuations, metadata-aware diagnostics and remaining boundaries.
 - [Procedure-local storage](LANGUAGE-LOCAL-STORAGE.md): skipped declarations, local scope,
   per-invocation initialization, Static lifetime and metadata-only declaration plans.
 - [Circular record dependencies](LANGUAGE-RECORD-RECURSION.md): declaration-cycle diagnostics,

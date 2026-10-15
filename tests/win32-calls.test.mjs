@@ -93,7 +93,7 @@ test('external raw ByVal override is restricted to scalar Long signatures',()=>{
 });
 test('native named external calls use checked declaration names',()=>{
   compile('Dim n As Long\nn=MulDiv(denominator:=2, number:=9, numerator:=2)','Private Declare Function MulDiv Lib "kernel32" (ByVal number As Long, ByVal numerator As Long, ByVal denominator As Long) As Long');
-  assert.throws(()=>compile('F wrong:=1','Private Declare Sub F Lib "example.dll" (ByVal value As Long)'),/Unknown native named argument/);
+  assert.throws(()=>compile('F wrong:=1','Private Declare Sub F Lib "example.dll" (ByVal value As Long)'),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_NAMED_ARGUMENT',source:'Entry',line:4},{code:'VB_ARGUMENT_REQUIRED',source:'Entry',line:4}]);assert.match(error.message,/Named argument not found \(wrong\): F/);return true;});
 });
 test('native call entry stack area is bounded by the RET imm16 ABI',()=>{
   const c={fail:message=>{throw Error(message);}};

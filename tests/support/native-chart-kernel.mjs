@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';import {compileProject} from '../../src/
 import {NATIVE_CHART_HOSTS,nativeChartCoreSource,NATIVE_CHART_FIELDS as F} from '../../src/native/control-chart-core.js';
 export async function chartKernel(count=2){
  const pattern=new RegExp('^Private Function ('+Object.keys(NATIVE_CHART_HOSTS).join('|')+')\\([^\\n]*\\nEnd Function\\n','gm');
- const program=compileProject({name:'ChartKernel',startup:'Sub Main',modules:[{name:'ChartKernel',kind:'module',code:nativeChartCoreSource(count).replace(pattern,'')+'\nPrivate Sub Main()\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);
+ const program=compileProject({name:'ChartKernel',externalSymbols:Object.keys(NATIVE_CHART_HOSTS).map(name=>({name,kind:'function'})),startup:'Sub Main',modules:[{name:'ChartKernel',kind:'module',code:nativeChartCoreSource(count).replace(pattern,'')+'\nPrivate Sub Main()\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);
  const vm=new VirtualMachine(program,{}, {instructionLimit:100000000}),buffers=new Map(),draws=[],invalidations=[];let next=1,allocations=Infinity,writes=Infinity;
  const buffer=h=>{const b=buffers.get(h);if(!b)throw new VBError('Invalid chart array',9);return b;},checked=(h,i)=>{const b=buffer(h);if(!Number.isInteger(i)||i<0||i>=b.items.length)throw new VBError('Subscript out of range',9);return b;};
  vm.library.set('buffernew',(n,kind)=>{if(allocations--<=0)throw new VBError('Injected allocation failure',7);const h=next++;buffers.set(h,{kind,items:Array(n).fill(kind===8?'':0)});return h;});vm.library.set('bufferfree',h=>{if(h)assert.ok(buffers.delete(h),'single destroy');return 0;});

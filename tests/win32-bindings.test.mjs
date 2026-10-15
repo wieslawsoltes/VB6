@@ -79,7 +79,7 @@ test('public numeric/Currency constants compile through assignments and conversi
   const result=compileWin32(p);assert.equal(JSON.stringify(p),before);assert.deepEqual(result.bytes,compileWin32(p).bytes);
 });
 test('constant accessibility is enforced at emitted use sites',()=>{
-  assert.throws(()=>compileWin32(project('Dim n As Long\nn = Rates.Secret','',[rates])),/Private/);
+  assert.throws(()=>compileWin32(project('Dim n As Long\nn = Rates.Secret','',[rates])),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_MEMBER_ACCESS',source:'Money',line:4}]);assert.match(error.message,/not accessible: Secret/);return true;});
   assert.throws(()=>compileWin32(project('Dim n As Long\nn = Rate','',[rates,{...rates,id:'other',name:'Other'}])),/Ambiguous/);
 });
 

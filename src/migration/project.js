@@ -1,3 +1,4 @@
+import {externalSymbolSnapshot,projectSymbolSnapshot} from '../language/symbol-snapshot.js';
 import {createRuntimePlan} from './runtime-plan.js';
 import {createRepresentationPlan} from './representations.js';
 import {projectFile,entrySource,solutionFile} from './project-layout.js';
@@ -41,7 +42,9 @@ function selectEntry(state) {
 }
 function singleProject(project,options,plugins,compile) {
   checkAbort(options.signal);
-  const compiled=compile(project,{retainSyntax:true}),diagnostics=compiled.diagnostics.map(d=>diagnostic('MIG_VB6_'+(d.number||'PARSE'),d.message,d,d.severity||'error'));
+  const symbols=projectSymbolSnapshot(project);
+  const compilerInput={...project,symbolMetadata:{...symbols,globals:[...symbols.globals,...plugins.flatMap(plugin=>externalSymbolSnapshot(plugin.externalSymbols))]}};
+  const compiled=compile(compilerInput,{retainSyntax:true}),diagnostics=compiled.diagnostics.map(d=>diagnostic('MIG_VB6_'+(d.number||'PARSE'),d.message,d,d.severity||'error'));
   for(const module of compiled.modules.values())for(const proc of module.procedures.values())if(proc.returnArray)diagnostics.push(diagnostic('MIG_ARRAY_RETURN','Typed array procedure returns require an explicit VB.NET array-return adapter; scalar emission is not a supported conversion.',{source:module.name,line:proc.line}));
   const target=options.target==='auto'?(project.modules.some(m=>m.form)?'winforms':project.modules.some(m=>/\bSub\s+Main\b/i.test(m.code||''))?'console':'library'):options.target;
   const assemblyName=safeFileName(options.assemblyName||project.name||'MigratedProject'),application='Application',files=Object.create(null),sourceMap=[],interfaces=new Set();

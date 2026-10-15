@@ -1,3 +1,4 @@
+import {moduleSymbolSnapshot} from '../language/symbol-snapshot.js';
 import {VBError} from '../language/lexer.js';
 /** Explicit host for VB .pag source. Imported source is never auto-executed.
  * SelectedControls are detached property facades; only ApplyChanges may stage
@@ -26,7 +27,11 @@ export class SourcePropertyPage {
     const names=Object.keys(controls);
     if(names.length>256||names.some(n=>!identifier(n)||reserved.has(n.toLowerCase()))||new Set(names.map(n=>n.toLowerCase())).size!==names.length)throw TypeError('Invalid property-page child map');
     this.formModel=structuredClone(selected.form);this.#registry=registry;this.#controls=Object.freeze({...controls});this.#onApply=onApply;
-    for(const module of source.modules)if(module.form){module.kind='class';delete module.form;}
+    for(const module of source.modules)if(module.form){
+      module.symbolBindings=moduleSymbolSnapshot(module);
+      if(module===selected)module.symbolBindings.items.push(...Object.keys(controls).map(name=>({name,type:'Object'})));
+      module.kind='class';delete module.form;
+    }
     const compiled=compileProject(source);if(!compiled.valid)throw Error(compiled.diagnostics.map(d=>`${d.source}:${d.line}: ${d.message}`).join('\n'));
     this.#module=compiled.modules.get(moduleName.toLowerCase());
     if(this.#module.declarations.some(d=>reserved.has(d.name.toLowerCase()))||[...this.#module.procedures.values()].some(p=>reserved.has(p.name.toLowerCase())))throw TypeError('Property page redeclares a reserved host member');

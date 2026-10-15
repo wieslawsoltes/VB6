@@ -1,3 +1,4 @@
+import {moduleSymbolSnapshot,projectSymbolSnapshot} from './symbol-snapshot.js';
 import {parseGraphicsStatement} from './graphics-statements.js';
 import {validateRecordDeclarations} from './record-resolution.js';
 import {parseRedimDeclarations} from './redim-semantics.js';
@@ -146,7 +147,7 @@ class ProcedureCompiler {
 }
 
 export function compileModule(input) {
-  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:Object.create(null),types:Object.create(null),typeScopes:Object.create(null),diagnostics:[],source:input.code||'',form:input.form||null,layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
+  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:Object.create(null),types:Object.create(null),typeScopes:Object.create(null),diagnostics:[],source:input.code||'',form:input.form||null,symbolBindings:moduleSymbolSnapshot(input),layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
   const allLines=logicalLines(preprocess(module.source,input.conditionalConstants||{},module.name),{preserveContinuations:true});
   const lines=allLines.filter(e=>{if(/^Attribute\s+/i.test(e.text)){module.attributes.push(e.text);return false;}return true;});let current=null,body=[],enumState=null,typeState=null;
   const typeNames=new Set();
@@ -219,13 +220,13 @@ export function compileProject(project,{retainSyntax=false}={}) {
   const modules=new Map(),diagnostics=[];
   try{validateLayout(project,false);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||380,source:error.source||project.name,line:1,column:1});}
   for(const input of project.modules||[]){try{const module=compileModule({...input,retainSyntax,conditionalConstants:project.settings?.conditionalConstants||{}});const key=lower(module.name);if(modules.has(key))throw new VBError(`Duplicate module name: ${module.name}`,1002,module.name,1);modules.set(key,module);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||1002,source:error.source||input.name,line:error.line||1,column:error.column||1});}}
-  diagnostics.push(...validateCompiledModules(modules,project.settings));
+  diagnostics.push(...validateCompiledModules(modules,project.settings,projectSymbolSnapshot(project)));
   return {name:project.name,startup:project.startup,modules,diagnostics,valid:!diagnostics.length,settings:project.settings||{},sourceProject:project};
 }
 
 /** Cross-module constraints shared by execution and background diagnostics. */
-export function validateCompiledModules(modules,settings={}) {
-  const diagnostics=[...bindConstants(modules,settings),...validateLayoutMembers(modules,settings)];
+export function validateCompiledModules(modules,settings={},symbols={}) {
+  const diagnostics=[...bindConstants(modules,settings,symbols),...validateLayoutMembers(modules,settings)];
   diagnostics.push(...validateRecordDeclarations(modules));
   for(const module of modules.values())for(const proc of module.procedures.values())for(const param of proc.params)if(!param.byRef&&!param.paramArray&&param.bounds!==null)diagnostics.push({severity:'error',message:'Array argument must be ByRef',number:1002,source:module.name,line:proc.line,column:1});
   const parents=[...modules.values()].filter(m=>m.form?.type==='MDIForm');
