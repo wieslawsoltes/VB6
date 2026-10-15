@@ -110,9 +110,10 @@
 .classic-menu .popup-menu-item.menu-selected:not([aria-disabled=true]) {box-shadow:var(--detail-menu-selected-shadow,none);}
 :where(.ide-shell,.ide-dialog,.vb-form,.vb-dialog) input[type=checkbox]:checked:not(:indeterminate)::after {
  clip-path:var(--detail-check-clip);height:var(--detail-check-mark-height,8px);
+ inset:var(--detail-check-mark-inset,2px auto auto 2px);width:var(--detail-check-mark-width,8px);
 }
 .vb-command.default-button {outline-width:var(--detail-default-outline-width,1px);outline-color:var(--detail-focus-color,var(--vb-text));}
-.vb-command:focus::after {border-style:var(--detail-focus-style,dotted);}
+.vb-command:focus::after {border-style:var(--detail-focus-style,dotted);border-width:var(--detail-command-focus-width,1px);}
 .vb-dialog-actions :is(button:focus-visible,.vb-default-button) {
  outline:var(--detail-focus-width,1px) var(--detail-focus-style,dotted) var(--detail-focus-color,var(--vb-text));outline-offset:1px;
 }
@@ -138,4 +139,40 @@
  :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):is(:disabled,[aria-disabled=true]) {color:GrayText!important;}
  :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):focus-visible,
  .vb-dialog-actions :is(button:focus-visible,.vb-default-button) {outline:2px solid Highlight;outline-offset:1px;}
+}
+
+/* Motif paint roles also reset on Classic/Fluent/macOS roots. These rules never
+ * use theme ancestor selectors, change authored bounds or create DOM controls. */
+@media(forced-colors:none) {
+ :is(.app-title,.document-title,.dialog-caption,.vb-form-title,.browser-window-caption) {
+  box-shadow:var(--detail-caption-surface-shadow,none);
+ }
+ :is(.vb-inactive>.vb-form-title,.mdi-window:not(.mdi-active)>.document-title) {
+  --caption-ink:var(--detail-inactive-caption-ink,var(--detail-action-ink));
+  --detail-action-ink:var(--detail-inactive-caption-ink,var(--detail-button-ink));
+  --detail-button-shadow:var(--detail-inactive-button-shadow);
+  box-shadow:var(--detail-inactive-caption-shadow,none);
+ }
+ .classic-menu .popup-menu-item:is(:focus,.menu-selected):not([aria-disabled=true]) {
+  background:var(--detail-menu-active-background,var(--vb-selection));
+  color:var(--detail-menu-active-ink,var(--vb-selection-text));
+  box-shadow:var(--detail-menu-selected-shadow,none);
+ }
+ .classic-menu .popup-menu-item[aria-disabled=true] {text-shadow:var(--detail-menu-disabled-text-shadow,none);}
+ .vb-check input[type=checkbox]:indeterminate::after {
+  background:var(--detail-indeterminate-fill,var(--app-check-mark,var(--vb-gray)));
+ }
+ .vb-command.default-button {outline-style:var(--detail-default-outline-style,solid);box-shadow:var(--detail-default-shadow,var(--app-control-shadow,none));}
+ .vb-command.default-button:hover:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--detail-default-shadow,var(--app-hover-shadow,none));}
+ .vb-command.default-button:active:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--detail-default-pressed-shadow,var(--app-pressed-shadow,none));}
+ .vb-command.default-button:is(.disabled,:disabled,[aria-disabled=true]) {box-shadow:var(--detail-default-shadow,var(--app-disabled-shadow,none));}
+ .vb-dialog-actions .vb-default-button {outline-style:var(--detail-default-outline-style,solid);box-shadow:var(--detail-default-shadow,var(--app-control-shadow,var(--vb-bevel-raised)));}
+ .vb-dialog-actions .vb-default-button:active:not(:disabled) {box-shadow:var(--detail-default-pressed-shadow,var(--app-pressed-shadow,var(--vb-bevel-pressed)));}
+ .vb-dialog-actions .vb-default-button:focus-visible {outline:var(--detail-focus-width,1px) var(--detail-focus-style,dotted) var(--detail-focus-color,var(--vb-text));outline-offset:var(--detail-default-focus-offset,1px);}
+ .vb-check input[type=checkbox]:indeterminate:disabled::after {background:var(--vb-gray);}
+ .vb-range::-webkit-slider-thumb {box-shadow:var(--detail-range-thumb-shadow,var(--app-range-thumb-shadow,var(--vb-bevel-raised)));}
+ .vb-range::-moz-range-thumb {box-shadow:var(--detail-range-thumb-shadow,var(--app-range-thumb-shadow,none));}
+ *::-webkit-scrollbar-track {box-shadow:var(--detail-scrollbar-track-shadow,none);}
+ *::-webkit-scrollbar-button:single-button {box-shadow:var(--detail-scrollbar-button-shadow,var(--vb-bevel-raised));}
+ *::-webkit-scrollbar-button:single-button:active {box-shadow:var(--detail-scrollbar-button-pressed-shadow,var(--vb-bevel-pressed));}
 }

@@ -86,6 +86,8 @@ These guides describe the implemented system, not complete native VB6 parity.
   [matching icon packs](THEME-ICON-PACKS.md).
 - [macOS 26 visual fidelity](MACOS-THEME-FIDELITY.md): component states, native references,
   authored-layout preservation and measured comparison boundaries.
+- [X11 fidelity](X11-THEME-FIDELITY.md): Motif-inspired paint/state contracts,
+  pixel checks, isolation and native-reference certification boundaries.
 - [Classic icons](ICON-AUDIT.md), [classic HTML rendering and attribution](CLASSIC-HTML-RENDERING.md)
   and [visual validation](VISUAL-AUDIT.md).
 

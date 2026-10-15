@@ -316,22 +316,6 @@ html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) {
  html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) :is(.app-title,.browser-window-caption,.classic-menu:not(.runtime-popup)) {background:var(--vb-face);}
 }
 
-/* One consistent Motif-inspired X11 skin; legacy CDE selections migrate to it. */
-html[data-ide-theme-family="x11"] {
-  & :is(.app-title,.document-title strong,.dialog-caption strong) {font-weight:bold;text-align:center;}
-  & :is(.dock-group,.mdi-window,.ide-dialog,.classic-menu:not(.runtime-popup),.property-color-popup) {
-    border:2px solid;border-color:var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light);border-radius:0;
-  }
-  & :is(.window-buttons button,.tool-caption button,.caption-close,.tool-button) {border:1px solid var(--ide-border);box-shadow:var(--ide-control-shadow);background:var(--ide-control);}
-  & :is(.window-buttons button,.tool-caption button,.caption-close,.tool-button):active {box-shadow:var(--ide-pressed-shadow);}
-  & .ide-dialog .default-button {outline:1px solid var(--ide-border);outline-offset:2px;}
-  & input[type=checkbox]:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {border-radius:0;box-shadow:var(--ide-pressed-shadow);}
-  & input[type=radio]:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {border-radius:0;transform:rotate(45deg);}
-  & .dock-group .managed-panel>.tool-caption {flex-basis:22px;height:22px;min-height:22px;}
-  & .document-title {height:24px;min-height:24px;}
-  & .mdi-minimized>.document-title {height:18px;min-height:18px;}
-}
-
 /* Preview is inert, local and safe to cancel; it never changes the live IDE. */
 .ide-theme-preview:is([data-preview-theme="classic"],[data-preview-theme="standard"],[data-preview-theme="contrast"]) {--ide-radius:0px;--ide-control:var(--vb-face);--ide-control-shadow:var(--vb-bevel-raised);}
 .ide-theme-preferences {margin:7px 0;}
@@ -435,3 +419,101 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
 }
 
 .application-theme-note {font-size:11px;line-height:1.4;margin:6px 0;color:var(--vb-gray);}
+
+/* Motif/CDE-style X11 chrome. Kept after the general optional-theme states so
+ * modern accent/default/hover rules cannot flatten these directional edges.
+ * Native inputs remain native controls; authored app roots are always excluded.
+ */
+@media(forced-colors:none) {
+ html:root[data-ide-theme][data-ide-theme-family="x11"] {
+  & .ide-shell {box-shadow:var(--ide-control-shadow);}
+  & :is(.app-title,.document-title strong,.dialog-caption strong) {font-weight:700;text-align:center;}
+  & :is(.dock-group,.mdi-window,.ide-dialog,.classic-menu:not(.runtime-popup),.property-color-popup) {
+   border:2px solid;border-color:var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light);border-radius:0;
+  }
+  & .dock-group .managed-panel>.tool-caption {flex-basis:22px;height:22px;min-height:22px;}
+  & .document-title {height:24px;min-height:24px;}
+  & .mdi-minimized>.document-title {height:18px;min-height:18px;}
+  & button:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   border-color:transparent;box-shadow:var(--ide-control-shadow);transition:none;
+  }
+  & button:hover:not(:disabled):not([aria-disabled=true]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   border-color:transparent;box-shadow:var(--ide-control-shadow);
+  }
+  & button:is(:active,.pressed,[aria-pressed=true]):not(:disabled):not([aria-disabled=true]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   box-shadow:var(--ide-pressed-shadow);background-color:var(--ide-pressed);
+  }
+  & button:is(:disabled,[aria-disabled=true]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   color:var(--vb-gray);text-shadow:1px 1px var(--vb-light);box-shadow:var(--ide-control-shadow);filter:none;
+  }
+  & .ide-dialog .default-button:not(:disabled):not([aria-disabled=true]) {
+   background:var(--vb-face);color:var(--vb-text);border-color:transparent;
+   box-shadow:var(--detail-default-shadow);outline:0;filter:none;
+  }
+  & .ide-dialog .default-button:active:not(:disabled):not([aria-disabled=true]) {box-shadow:var(--detail-default-pressed-shadow);}
+  & .ide-dialog .default-button:focus-visible:not(:disabled):not([aria-disabled=true]) {outline:2px solid var(--ide-focus);outline-offset:-4px;}
+  & :is(input,select,textarea):not(:where(.source-input,[type=checkbox],[type=radio],[type=range],.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   border-color:transparent;box-shadow:var(--ide-pressed-shadow);
+  }
+  & :is(input,select,textarea):focus-visible:not(:where(.source-input,[type=checkbox],[type=radio],[type=range],.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   border-color:transparent;box-shadow:var(--ide-pressed-shadow);outline:2px solid var(--ide-focus);outline-offset:1px;
+  }
+  & input:is([type=checkbox],[type=radio]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   border-radius:0;border-color:transparent;background:var(--vb-face);box-shadow:var(--ide-control-shadow);
+  }
+  & input[type=radio]:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {transform:rotate(45deg);}
+  & input:is([type=checkbox],[type=radio]):is(:checked,:indeterminate):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   border-color:transparent;background:var(--vb-face);box-shadow:var(--ide-pressed-shadow);
+  }
+  & input:is([type=checkbox],[type=radio]):checked:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::after {
+   inset:3px;width:auto;height:auto;clip-path:none;border-radius:0;background:var(--vb-selection);
+  }
+  & input[type=checkbox]:indeterminate:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::after {
+   inset:3px;width:auto;height:auto;clip-path:none;background:var(--detail-indeterminate-fill);
+  }
+  & input:is([type=checkbox],[type=radio]):disabled:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *))::after {background:var(--vb-gray);}
+  & select:is(:not([size]),[size="1"]):not([multiple]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   background-image:linear-gradient(45deg,transparent 50%,var(--vb-text) 50%),linear-gradient(135deg,var(--vb-text) 50%,transparent 50%),linear-gradient(var(--vb-face),var(--vb-face));
+   background-size:4px 4px,4px 4px,18px calc(100% - 4px);background-position:calc(100% - 11px) 50%,calc(100% - 7px) 50%,right 2px center;
+  }
+  & .property-row :is(input,select) {border:0;box-shadow:none;}
+  & :is(.menubar>button,.mdi-system-menu) {box-shadow:none;background:transparent;}
+  & :is(.menubar>.menu-open,.menubar>button:hover):not(:disabled):not([aria-disabled=true]) {
+   background:var(--vb-face);color:var(--vb-text);box-shadow:var(--ide-control-shadow);
+  }
+  & .tool-separator {width:2px;border-left:1px solid var(--vb-shadow);border-right:1px solid var(--vb-light);}
+  & .toolbar-grip {opacity:1;background:repeating-linear-gradient(0deg,var(--vb-light) 0 1px,var(--vb-shadow) 1px 2px,transparent 2px 4px);}
+  & .command-bar-floating .toolbar-grip {background:var(--vb-title);}
+  & .classic-menu:not(.runtime-popup) {background:var(--vb-face);color:var(--vb-text);padding:3px;}
+  & .classic-menu:not(.runtime-popup) .popup-menu-item {
+   height:22px;min-height:22px;border:0;border-radius:0;background:transparent;box-shadow:none;
+  }
+  & .classic-menu:not(.runtime-popup) .popup-menu-item:is(:hover,:focus,.menu-selected):not(:disabled):not([aria-disabled=true]) {
+   background:var(--vb-face);color:var(--vb-text);box-shadow:var(--ide-control-shadow);outline:0;
+  }
+  & .classic-menu:not(.runtime-popup) .popup-menu-item[aria-disabled=true] {box-shadow:none;text-shadow:1px 1px var(--vb-light);}
+  & .classic-menu:not(.runtime-popup) .menu-checked {box-shadow:var(--ide-pressed-shadow);background:var(--vb-face);}
+  & .classic-menu:not(.runtime-popup) .menu-separator {height:2px;border-top:1px solid var(--vb-shadow);border-bottom:1px solid var(--vb-light);background:none;margin:3px 2px;}
+  & :is(.dock-tabbar>button,.document-tab,.property-tabs button,.debug-tabs button,.dialog-tabs button) {
+   border-color:transparent;border-radius:0;box-shadow:var(--ide-control-shadow);background:var(--ide-pressed);
+  }
+  & :is(.dock-tabbar>button[aria-selected=true],.document-tab.active,.property-tabs .active,.debug-tabs .active,.dialog-tabs button[aria-selected=true]) {
+   border-color:transparent;background:var(--vb-face);color:var(--vb-text);box-shadow:var(--ide-control-shadow);
+  }
+  & :is(.project-tree,.property-grid,.tool-list,.resource-tree,.agent-log,.mcp-activity,.debug-value-tree) {box-shadow:var(--ide-pressed-shadow);}
+  & :is(.debug-table th,.data-grid th,.debug-value-header,.property-group) {box-shadow:var(--ide-control-shadow);}
+  & .status-field {border:1px solid;border-color:var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow);}
+  & :is(fieldset,.classic-tab-pages,.anchor-diagram):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+   border:1px solid var(--vb-shadow);box-shadow:1px 1px var(--vb-light),inset 1px 1px var(--vb-light);border-radius:0;
+  }
+  & .classic-tooltip {border:1px solid var(--vb-text);border-radius:0;box-shadow:1px 1px var(--vb-shadow);padding:2px 4px;}
+  & .ide-theme-preview-title {font-weight:700;text-align:center;}
+  & .ide-theme-preview-button {border-color:transparent;}
+  /* Chromium's standard scrollbar-color overrides its WebKit pseudo-element
+   * painter. Retain colored native Firefox bars where that painter is absent. */
+  @supports selector(::-webkit-scrollbar) {
+   scrollbar-color:auto;
+   & *:not(:where(.designer-scroll,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {scrollbar-color:auto;}
+  }
+ }
+}

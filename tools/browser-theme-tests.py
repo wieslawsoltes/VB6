@@ -11,6 +11,7 @@ import shutil
 import threading
 import unittest
 from playwright.sync_api import sync_playwright
+from x11_theme_checks import X11IdeChecks
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = os.environ.get('VB6_BROWSER', 'chromium')
@@ -31,7 +32,7 @@ SNAPSHOT = '''() => {
 class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args): pass
 
-class Themes(unittest.TestCase):
+class Themes(X11IdeChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         REPORT.mkdir(parents=True, exist_ok=True)

@@ -817,7 +817,7 @@
   --vb-app-border: #66665c;
   --vb-app-separator: #929287;
   --vb-app-control: #bdbdb3;
-  --vb-app-hover: #cecec4;
+  --vb-app-hover: #bdbdb3;
   --vb-app-pressed: #a6a69c;
   --vb-app-focus: #233b83;
   --vb-app-surface: #bdbdb3;
@@ -826,8 +826,8 @@
   --vb-app-error: #b42318;
   --vb-app-string: #8f2424;
   --vb-app-shadow: 3px 3px 0 #00000066;
-  --vb-app-control-shadow: inset 1px 1px #f2f2e8, inset -1px -1px #66665c;
-  --vb-app-pressed-shadow: inset 1px 1px #66665c, inset -1px -1px #f2f2e8;
+  --vb-app-control-shadow: inset 2px 2px #f2f2e8, inset -2px -2px #66665c;
+  --vb-app-pressed-shadow: inset 2px 2px #66665c, inset -2px -2px #f2f2e8;
   --vb-app-material: #bdbdb3;
   --vb-app-scrim: #00000030;
   --vb-app-thumb: #bdbdb3;
@@ -840,8 +840,8 @@
   --vb-face: #343c3e;
   --vb-light: #858f90;
   --vb-highlight: #576265;
-  --vb-shadow: #99a4a6;
-  --vb-dark: #b5bfc0;
+  --vb-shadow: #151d20;
+  --vb-dark: #0b1214;
   --vb-text: #f5f5f5;
   --vb-title: #385861;
   --vb-title-end: #385861;
@@ -931,7 +931,7 @@
   --vb-app-border: #99a4a6;
   --vb-app-separator: #5a686b;
   --vb-app-control: #343c3e;
-  --vb-app-hover: #48575c;
+  --vb-app-hover: #343c3e;
   --vb-app-pressed: #263033;
   --vb-app-focus: #b6d5dd;
   --vb-app-surface: #343c3e;
@@ -940,8 +940,8 @@
   --vb-app-error: #ffb4ab;
   --vb-app-string: #f1ada4;
   --vb-app-shadow: 3px 3px 0 #00000099;
-  --vb-app-control-shadow: inset 1px 1px #858f90, inset -1px -1px #151d20;
-  --vb-app-pressed-shadow: inset 1px 1px #151d20, inset -1px -1px #858f90;
+  --vb-app-control-shadow: inset 2px 2px #858f90, inset -2px -2px #151d20;
+  --vb-app-pressed-shadow: inset 2px 2px #151d20, inset -2px -2px #858f90;
   --vb-app-material: #343c3e;
   --vb-app-scrim: #00000066;
   --vb-app-thumb: #75878c;

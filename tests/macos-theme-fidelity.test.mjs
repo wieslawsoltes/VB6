@@ -64,7 +64,10 @@ for(const theme of Object.values(THEMES))test(`${theme.id} locally binds or rese
   for(const key of macOnly){
     assert.ok(tokens.has(key),key);
     if(theme.family==='macos26')assert.notEqual(tokens.get(key),'initial',key);
-    else assert.equal(tokens.get(key),'initial',`${key} must not leak across nested palettes`);
+    else if(['command-focus-width','check-mark-width','check-mark-height'].includes(key)){
+      const expected=key==='command-focus-width'?(theme.family==='x11'?'2px':'1px'):(theme.family==='x11'?'auto':'8px');
+      assert.equal(tokens.get(key),expected,`${key} retains the owning family's definition`);
+    }else assert.equal(tokens.get(key),'initial',`${key} must not leak across nested palettes`);
   }
   assert.doesNotMatch(css,/undefined|NaN|Infinity/);
   assert.equal(css,themeDetailTokens(theme));
@@ -129,7 +132,8 @@ test('list-only popup material follows standard OLE roles without recoloring aut
   for(const [back,fore,style] of [[window,windowText,0],[window,windowText,1],[0xffffff,windowText,2],[window,0,2],[face,windowText,2]])assert.equal(comboPaint(back,fore,style),cssColor(back));
 });
 test('native paint layer corrections and inner sizes reset outside macOS',()=>{
-  const names=['composite-radius','label-padding','mnemonic-image','check-edge-image','field-shadow','command-border-block','command-background-clip','command-corner-radius',
+  const names=['command-border-block-style','progress-track-content','progress-track-fill','progress-track-shadow','progress-fill-position',
+    'stepper-glyph-size','stepper-glyph-edge','stepper-glyph-down','stepper-glyph-up','stepper-glyph-left','stepper-glyph-right','composite-radius','label-padding','mnemonic-image','check-edge-image','field-shadow','command-border-block','command-background-clip','command-corner-radius',
     'combo-arrow-position','combo-arrow-top','combo-arrow-transform','combo-arrow-height','popup-button-fill',
     'combo-chevron-size','combo-chevron-edge','combo-chevron-zero','combo-chevron-transform','stepper-flex','stepper-width',
     'stepper-align','stepper-justify','stepper-horizontal-width','stepper-horizontal-height'];

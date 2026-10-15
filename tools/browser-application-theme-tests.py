@@ -14,6 +14,7 @@ import threading
 import unittest
 from playwright.sync_api import sync_playwright
 from PIL import Image
+from x11_theme_checks import X11ApplicationChecks
 ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 MEMORY=os.environ.get('VB6_TEST_TRANSPORT')=='memory'
@@ -23,7 +24,7 @@ THEMES=['fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark']
 BOUNDS='''()=>{const root=vb6Application.forms[0].node,r=root.getBoundingClientRect();return [...root.querySelectorAll('.vb-control')].map(e=>{const b=e.getBoundingClientRect(),s=getComputedStyle(e);return [e.dataset.control,...[b.x-r.x,b.y-r.y,b.width,b.height].map(n=>Math.round(n*100)/100),s.fontFamily,s.fontSize,s.fontWeight];});}'''
 class Handler(http.server.SimpleHTTPRequestHandler):
  def log_message(self,*args):pass
-class ApplicationThemes(unittest.TestCase):
+class ApplicationThemes(X11ApplicationChecks, unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   subprocess.run(['node','tools/build-theme-fixtures.mjs'],cwd=ROOT,check=True)
@@ -334,6 +335,32 @@ class ApplicationThemes(unittest.TestCase):
   self.assertIn('linear-gradient',check.evaluate('e=>getComputedStyle(e).backgroundImage'))
   self.assertIn('linear-gradient',command.locator('u').evaluate('e=>getComputedStyle(e).backgroundImage'))
   self.assertEqual(command.locator('u').evaluate('e=>getComputedStyle(e).textDecorationLine'),'none')
+ def test_macos_native_command_insets_survive_final_painters_at_1x_and_2x(self):
+  # Literal measurements from the independent AppKit atlas: two transparent
+  # rows above/below a 24px painted button in its authored 28px rectangle.
+  for scale in [1,2]:
+   context=self.browser.new_context(viewport={'width':1440,'height':1700},device_scale_factor=scale)
+   page=context.new_page()
+   try:
+    self.load(FIXTURE/'gallery.html',page);page.wait_for_function('typeof vb6Application==="object"')
+    button=page.locator('[data-control="CommandButton1"]')
+    for theme,background,pressed in [('macos26',(255,255,255),(0,110,230)),('macos26-dark',(30,30,30),(25,135,255))]:
+     page.evaluate('t=>vb6Application.setTheme(t,{reduceMotion:true})',theme)
+     page.evaluate('document.activeElement?.blur()');page.mouse.move(1400,1600)
+     for state,ink in [('normal',(0,122,255)),('pressed',pressed)]:
+      if state=='pressed':button.hover();page.mouse.down()
+      try:
+       style=button.evaluate('e=>{const s=getComputedStyle(e);return [s.borderTopWidth,s.borderBottomWidth,s.borderTopStyle,s.backgroundClip]}')
+       self.assertEqual(style,['2px','2px','solid','padding-box'])
+       image=Image.open(io.BytesIO(button.screenshot())).convert('RGB')
+       self.assertEqual(image.height,28*scale)
+       for y in range(image.height):
+        expected=ink if 2*scale<=y<26*scale else background
+        self.assertEqual(image.getpixel((10*scale,y)),expected,f'{theme} {state} @{scale}x row {y}')
+      finally:
+       if state=='pressed':page.mouse.up()
+     self.record(theme,scale=scale,nativeCommandPaintHeight=24,authoredHeight=28)
+   finally:context.close()
  def test_macos_command_states_preserve_authored_pairs_and_live_values(self):
   self.page.evaluate('''()=>{window.systemCommand=vb6Application.forms[0].controls.find(c=>c.model.name==='CommandButton1');window.rgbCommand=vb6Application.forms[0].controls.find(c=>c.model.name==='cmdRGB');rgbCommand.set('Default',-1);}''')
   button=self.page.locator('[data-control="CommandButton1"]');rgb=self.page.locator('[data-control="cmdRGB"]')

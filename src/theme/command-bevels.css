@@ -31,7 +31,7 @@
 @media(forced-colors:none) {
  .vb-command {
    background-image:var(--command-edge-image)!important;
-   background-origin:border-box!important;background-clip:border-box!important;background-repeat:no-repeat!important;
+   background-origin:border-box!important;background-clip:var(--detail-command-background-clip,border-box)!important;background-repeat:no-repeat!important;
    background-size:100% 100%!important;
    background-position:0 0!important;
    box-shadow:var(--app-control-shadow,none);
