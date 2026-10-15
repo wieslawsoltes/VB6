@@ -1,3 +1,4 @@
+import {winuiThemeTokens} from './winui-theme-css.mjs';
 import {themeDetailTokens} from './theme-detail-css.mjs';
 import {iconPackTokens} from './icon-pack-css.mjs';
 /** IDE-only palette generation; never concatenate this into vb6-controls.css. */
@@ -21,6 +22,7 @@ export function renderIdeThemePalettes() {
     if (colors) for (const [key,value] of Object.entries(colors)) css+=`  --vb-icon-${key}: ${value};\n`;
     css+=iconPackTokens(theme);
     css+=themeDetailTokens(theme);
+    css+=winuiThemeTokens(theme);
     css+=`  color-scheme: ${theme.scheme};\n}\n`;
   }
   return css;

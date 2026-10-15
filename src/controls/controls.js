@@ -1,3 +1,4 @@
+import {applyRangeOrientation,handleRangeEndpointKey} from './range-orientation.js';
 import {commandPaint,groupPaint,comboPaint,rangeProgress} from '../theme/control-paint.js';
 import {resolveRuntimeParent,validateRuntimeContainer,runtimeRemovalPlan} from './container-lifecycle.js';
 import {controlParents,tabPagePlan} from './tab-model.js';
@@ -140,7 +141,7 @@ export class BrowserControl {
       case 'Timer':case 'ImageList':case 'CommonDialog':addClass('vb-nonvisual');n.replaceChildren(controlIcon(this.type));if(this.type==='ImageList'){this.ListImages=new ImageItems(()=>this.invalidate());for(const item of p.ListImages||[])this.ListImages.Add(undefined,item.Key,item.Picture);}break;
       case 'ProgressBar':this.track=el('div',{class:'vb-progress'});this.fill=el('div',{class:'vb-progress-fill'});this.track.append(this.fill);n.append(this.track);break;
       case 'HScrollBar':case 'VScrollBar':this.scrollbar=new ClassicScrollbar(n,()=>this.props,(value,phase)=>{if(phase==='scroll'){this.props.Value=value;this.event('Scroll',[],true);}else if(phase==='commit')this.event('Change');else this.set('Value',value,true);},{vertical:this.type==='VScrollBar',design:this.design});break;
-      case 'Slider':this.input=el('input',{type:'range',class:'vb-range'+(this.type==='VScrollBar'?' vb-vrange':''),'aria-label':this.model.name});n.append(this.input);this.input.addEventListener('input',()=>{this.set('Value',Number(this.input.value),true);this.input.style.setProperty('--vb-range-progress',rangeProgress(this.input.min,this.input.max,this.input.value));this.event('Scroll',[],true);});break;
+      case 'Slider':this.input=el('input',{type:'range',class:'vb-range'+(this.type==='VScrollBar'?' vb-vrange':''),'aria-label':this.model.name});n.append(this.input);this.input.addEventListener('keydown',e=>{if(!this.design&&acceptsInput(this))handleRangeEndpointKey(this.input,e);});this.input.addEventListener('input',()=>{this.set('Value',Number(this.input.value),true);this.input.style.setProperty('--vb-range-progress',rangeProgress(this.input.min,this.input.max,this.input.value));this.event('Scroll',[],true);});break;
       case 'UpDown':this.stepper=new ClassicUpDown(n,()=>this.props,(value,direction)=>{this.set('Value',value,true);this.event(direction>0?'UpClick':'DownClick');},{design:this.design});break;
       case 'TreeView':this.buildTree();break;
       case 'ListView':this.buildListView();break;
@@ -176,7 +177,7 @@ export class BrowserControl {
       case 'ProgressBar':this.fill.style.width=Math.max(0,Math.min(100,(Number(p.Value)-Number(p.Min))/(Number(p.Max)-Number(p.Min)||1)*100))+'%';break;
       case 'HScrollBar':case 'VScrollBar':this.scrollbar.refresh();break;
       case 'UpDown':this.stepper.refresh();break;
-      case 'Slider':this.input.min=p.Min;this.input.max=p.Max;this.input.step=p.SmallChange||1;this.input.value=p.Value;this.input.classList.toggle('vb-vrange',Number(p.Orientation)===1);this.input.setAttribute('aria-orientation',Number(p.Orientation)===1?'vertical':'horizontal');this.input.style.setProperty('--vb-range-progress',rangeProgress(this.input.min,this.input.max,this.input.value));break;
+      case 'Slider':this.input.min=p.Min;this.input.max=p.Max;this.input.step=p.SmallChange||1;this.input.value=p.Value;applyRangeOrientation(this.input,Number(p.Orientation)===1);this.input.style.setProperty('--vb-range-progress',rangeProgress(this.input.min,this.input.max,this.input.value));break;
       case 'TreeView':this.refreshTree();break;
       case 'ListView':this.refreshListView();break;
       case 'StatusBar':n.replaceChildren(...(this.Panels.Count?this.Panels.items.filter(panel=>this.design||truth(panel.Visible)).map(panel=>el('div',{class:'vb-status-panel',text:panel.Text,title:panel.ToolTipText||'',style:{flex:panel.AutoSize?'1':'0 0 '+Number(panel.Width)/15+'px',textAlign:['left','right','center'][Number(panel.Alignment)||0],opacity:truth(panel.Enabled)?'1':'.55'}})):[el('div',{class:'vb-status-panel',text:p.SimpleText||'Ready'})]));break;

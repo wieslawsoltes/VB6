@@ -422,7 +422,13 @@ class ApplicationThemes(X11ApplicationChecks, unittest.TestCase):
    self.assertEqual(slider.get_attribute('aria-orientation'),'horizontal');slider.focus();self.page.keyboard.press('ArrowRight')
    self.assertEqual(slider.input_value(),'21');self.page.wait_for_function('Math.abs(parseFloat(getComputedStyle(sliderNode).getPropertyValue("--vb-range-progress"))-55)<1e-9')
    self.page.evaluate('()=>{Object.assign(testSlider.props,{Orientation:1,Value:20});testSlider.refresh();}')
-   self.assertEqual(slider.get_attribute('aria-orientation'),'vertical');self.assertEqual(slider.evaluate('e=>getComputedStyle(e).writingMode'),'vertical-lr')
+   self.assertEqual(slider.get_attribute('aria-orientation'),'vertical')
+   mode=slider.evaluate('e=>{const s=getComputedStyle(e);return {writing:s.writingMode,appearance:s.appearance,legacy:e.classList.contains("vb-range-legacy-vertical")}}')
+   # WebKit WPE accepts the declaration but forces horizontal form writing modes.
+   # Its capability-selected legacy renderer is valid only with native vertical
+   # pointer/drag behavior, which the separate cross-palette test requires.
+   self.assertTrue(mode['writing']=='vertical-lr' and not mode['legacy'] or
+                   mode['writing']=='horizontal-tb' and mode['appearance']=='slider-vertical' and mode['legacy'],mode)
    slider.focus();self.page.keyboard.press('ArrowUp');self.assertEqual(slider.input_value(),'21')
    self.assertFalse(scroll.locator('.vb-scroll-arrow').first.is_visible())
    self.page.wait_for_function('Math.abs(testScroll.scrollbar.track.clientWidth-testScroll.node.clientWidth)<1')
@@ -436,6 +442,49 @@ class ApplicationThemes(X11ApplicationChecks, unittest.TestCase):
    self.page.wait_for_function('testScroll.scrollbar.geometry.travel===testScroll.scrollbar.track.clientWidth-testScroll.scrollbar.geometry.thumb')
    self.assertTrue(self.page.evaluate('sliderNode===testSlider.input&&scrollNode===testScroll.node'))
    self.record(theme,nativeRangeKeyboard=True,orientationLive=True,arrowlessTrackRelayout=True,classicArrowsRestored=True)
+ def test_vertical_slider_native_hit_testing_drag_keys_disabled_and_live_resize(self):
+  self.page.evaluate('''()=>{window.range=vb6Application.forms[0].controls.find(c=>c.model.name==='Slider1');window.originalRangeNode=range.input;
+   Object.assign(range.props,{Min:10,Max:30,Value:20,SmallChange:1,Width:480,Height:2400,Orientation:1});range.refresh();
+   // Isolate hit testing from adjacent fixture controls without substituting
+   // the native input, its skin, or the runtime's pointer/value handlers.
+   range.node.style.zIndex='200000';window.rangeEvents=[];range.input.addEventListener('input',()=>rangeEvents.push(range.input.value));}''')
+  slider=self.page.locator('[data-control="Slider1"] input')
+  for theme in ['classic','standard','contrast',*THEMES]:
+   self.theme(theme)
+   for colors in ['none','active']:
+    self.page.emulate_media(forced_colors=colors)
+    for height in [160,240]:
+     self.page.evaluate('h=>{range.props.Height=h*15;range.refresh();}',height)
+     bounds=slider.bounding_box();self.assertAlmostEqual(bounds['height'],height,delta=1)
+     x=bounds['x']+bounds['width']/2;top=bounds['y']+1;bottom=bounds['y']+bounds['height']-1
+     self.page.mouse.click(x,top);self.assertEqual(slider.input_value(),'30')
+     self.page.mouse.click(x,bottom);self.assertEqual(slider.input_value(),'10')
+     self.page.mouse.move(x,bottom);self.page.mouse.down();self.page.mouse.move(x,top,steps=8);self.page.mouse.up()
+     self.assertEqual(slider.input_value(),'30');self.assertEqual(self.page.evaluate('range.props.Value'),30)
+     slider.focus();self.page.keyboard.press('ArrowDown');self.assertEqual(slider.input_value(),'29')
+     self.page.keyboard.press('ArrowUp');self.assertEqual(slider.input_value(),'30')
+     self.page.keyboard.press('Home');self.assertEqual(slider.input_value(),'10')
+     self.page.keyboard.press('End');self.assertEqual(slider.input_value(),'30')
+     if colors=='none' and height==240:
+      image=Image.open(io.BytesIO(slider.screenshot())).convert('RGB')
+      image.save(REPORT/(theme+'-vertical-slider.png'))
+      if theme.startswith('macos26'):
+       # The vertical track must also PAINT on the long axis, rather than merely
+       # assigning ARIA orientation to a still-horizontal native range.
+       accent=(6,125,255) if theme.endswith('-dark') else (0,119,249)
+       self.assertEqual(image.getpixel((image.width//2,image.height//2)),accent)
+       self.assertNotEqual(image.getpixel((1,image.height//2)),accent)
+     self.page.evaluate('range.set("Enabled",0)');self.page.wait_for_function('range.input.disabled')
+     count=self.page.evaluate('rangeEvents.length');self.page.mouse.click(x,bottom)
+     self.assertEqual(slider.input_value(),'30');self.assertEqual(self.page.evaluate('rangeEvents.length'),count)
+     self.page.evaluate('range.set("Enabled",-1)');self.page.wait_for_function('!range.input.disabled')
+   self.page.emulate_media(forced_colors='none')
+   self.assertTrue(self.page.evaluate('range.input===originalRangeNode'))
+   self.record(theme,verticalPointerExtremes=[10,30],nativeDragging=True,upIncreases=True,resizeHeights=[160,240],disabledInert=True,forcedColorsInput=True)
+  self.page.evaluate('''()=>{Object.assign(range.props,{Orientation:0,Width:4050,Height:420,Value:20});range.refresh();range.node.style.zIndex='';}''')
+  self.assertFalse(slider.evaluate('e=>e.classList.contains("vb-range-legacy-vertical")'))
+  self.assertEqual(slider.get_attribute('aria-orientation'),'horizontal')
+  slider.focus();self.page.keyboard.press('ArrowRight');self.assertEqual(slider.input_value(),'21')
  def test_macos_material_preferences_and_pressed_caption_actions(self):
   for theme in ['macos26','macos26-dark']:
    self.theme(theme)

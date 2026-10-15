@@ -192,3 +192,33 @@ Apple's design and API references:
 The native APIs document view capture and platform behavior; the project's CSS
 metrics and compatibility choices remain independently tested implementation
 choices, not Apple-supplied pixel-equivalence guarantees.
+
+## WebKit vertical-range compatibility
+
+The Linux WebKit 26 WPE engine used by the pinned browser matrix accepts
+`writing-mode: vertical-lr` in CSS but adjusts range inputs back to
+`horizontal-tb`, even with `!important` and `appearance: none`. That is a real
+hit-testing defect for this skin: clicking the top and bottom produced the same
+value before the fix, not just a different computed-style string.
+
+`src/controls/range-orientation.js` probes a real, hidden range once per document
+and uses `slider-vertical` **only** when native vertical writing modes are absent
+and that appearance is actually supported. Chromium and supporting WebKit ports
+keep the standard writing-mode path. Both paths retain the same input node,
+thumb/track CSS, native drag/keyboard behavior, focus, range normalization, and
+control/VM identities. Horizontal orientation removes the compatibility class.
+No browser-name detection, polling, resize observer, synthetic pointer/value
+handler, or additional focusable element is introduced.
+
+The application theme suite now tests top/bottom pointer values, native dragging,
+Up/Down/Home/End, disabled-event suppression, live resize, restoration to horizontal
+input, and ordinary/forced-colors input across all nine palettes. The two macOS
+palettes additionally require exact accent pixels along the vertical track.
+This replaces the single-mechanism computed-style check with stricter behavior
+and paint assertions; it does not exempt WebKit from orientation coverage.
+
+Unmodified Home/End keys use the native range value sanitizer and the existing
+input/change event path on all engines. Some WebKit ports omit those endpoint
+commands even when native dragging works. Modified shortcuts, IME input, disabled
+controls and prevented events are not intercepted; repeated endpoint keys do not
+emit duplicate changes. Arrow keys and pointer dragging remain browser-owned.

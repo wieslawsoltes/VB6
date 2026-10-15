@@ -36,6 +36,79 @@ async function evaluateRenderer(target, source, userGesture = true, timeout = 15
   } finally { clearTimeout(timer); }
 }
 exports.evaluate = evaluateRenderer;
+// Capture/readback is asynchronous to DOM style mutation. Require painted pixels
+// from the very PNG we retain, not only a matching data-theme attribute. The
+// sampler decodes PNG through an isolated canvas so bitmap channel ordering and
+// native display scale do not become platform-specific assumptions.
+async function capturePaintedFrame({settle, capture, inspect, label, timeout = 5000, maxAttempts = 8, onAttempt = () => {}}) {
+  if (![settle, capture, inspect, onAttempt].every(x => typeof x === 'function') ||
+      !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 30000 ||
+      !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 16)
+    throw new TypeError('Invalid painted-frame capture options');
+  const end = Date.now() + timeout, observed = [];
+  const step = work => {
+    const remaining = end - Date.now();
+    if (remaining <= 0) throw new Error('Timed out: ' + label);
+    return withDeadline(work, label, remaining);
+  };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Separate deadline awaits: a late completion after timeout cannot start the
+    // next capture/inspection, mutate report state or retry in the background.
+    await step(settle);
+    const png = await step(capture);
+    const samples = await step(() => inspect(png));
+    const rgba = a => Array.isArray(a) && a.length === 4 && a.every(x => Number.isInteger(x) && x >= 0 && x <= 255);
+    if (!Array.isArray(samples) || !samples.length || samples.some(p => !rgba(p.expected) || !rgba(p.actual)))
+      throw new Error('Invalid painted-frame samples: ' + label);
+    const matches = samples.every(p => p.expected.every((v, i) => v === p.actual[i]));
+    const record = {attempt, matches, samples}; observed.push(record); onAttempt(record);
+    if (matches) return {png, attempts: attempt, samples};
+  }
+  throw new Error('Painted frame does not match ' + label + ': ' + JSON.stringify(observed));
+}
+// Both functions below execute in the actual child document. They are serialized
+// explicitly (no Node/preload authority is exposed to the sandboxed renderer).
+async function nativePaintOracle(face) {
+  const content = document.querySelector('.vb-form-content'), input = document.querySelector('[data-control="Text1"] input');
+  if (!content || !input) throw new Error('Missing native paint fixture');
+  // Resolve the final CSS transition endpoint, not an interpolated alpha.
+  // The caller bounds this evaluation; cancellation is expected during theme
+  // replacement, but unrelated renderer failures must remain visible.
+  await new Promise(requestAnimationFrame);
+  await Promise.all(input.getAnimations().map(animation => animation.finished.catch(error => {
+    if (error?.name !== 'AbortError') throw error;
+  })));
+  await new Promise(requestAnimationFrame);
+  const r = content.getBoundingClientRect(), t = input.getBoundingClientRect();
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext('2d', {colorSpace: 'srgb'});
+  ctx.fillStyle = face; ctx.fillRect(0, 0, 1, 1);
+  const body = Array.from(ctx.getImageData(0, 0, 1, 1).data);
+  // Compute the input's expected alpha composite independently of the capture.
+  // Its fixture has no image/gradient and the sample avoids glyphs and strokes.
+  const ancestors = []; for (let n = input; n && n !== content; n = n.parentElement) ancestors.unshift(n);
+  for (const n of ancestors) { ctx.fillStyle = getComputedStyle(n).backgroundColor; ctx.fillRect(0, 0, 1, 1); }
+  return {width: innerWidth, height: innerHeight, points: [
+    {name: 'application background', x: r.right - 20, y: r.bottom - 20, expected: body},
+    {name: 'unobscured text control', x: t.right - 12, y: t.top + t.height / 2, expected: Array.from(ctx.getImageData(0, 0, 1, 1).data)}
+  ]};
+}
+async function sampleCapturedPng(base64, oracle) {
+  const image = new Image(); image.src = 'data:image/png;base64,' + base64; await image.decode();
+  const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+  const ctx = canvas.getContext('2d', {colorSpace: 'srgb', willReadFrequently: true}); ctx.drawImage(image, 0, 0);
+  if (!(oracle.width > 0 && oracle.height > 0) || !Array.isArray(oracle.points)) throw new Error('Invalid paint oracle');
+  return oracle.points.map(point => {
+    // CSS viewport -> actual encoded raster, including fractional-DPI captures.
+    const x = Math.floor(point.x * canvas.width / oracle.width), y = Math.floor(point.y * canvas.height / oracle.height);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= canvas.width || y >= canvas.height)
+      throw new Error('Paint sample outside capture: ' + point.name);
+    return {...point, raster: [x, y], actual: Array.from(ctx.getImageData(x, y, 1, 1).data)};
+  });
+}
+exports.capturePaintedFrame = capturePaintedFrame;
+exports.nativePaintOracle = nativePaintOracle;
+exports.sampleCapturedPng = sampleCapturedPng;
 function createSmokeProbe({app, root, records, report, reportPath, log = text => console.log(text)}) {
   const listeners = [], observed = new WeakSet();
   report.events = [];
@@ -251,7 +324,18 @@ exports.run = async ({ app, root, records, manifest, reportPath }) => {
         })()`));
         check(theme+' retains native HWND, VM, controls and authored client size',
           w1.getNativeWindowHandle().equals(originalHandle) && await js(`host.vm===captionVM && captionControls.every((c,i)=>c===f1.controls[i]) && JSON.stringify([f1.props.ClientWidth,f1.props.ClientHeight])===${JSON.stringify(JSON.stringify(originalClient))}`));
-        if(reportPath)fs.writeFileSync(reportPath+'.'+theme+'.png',(await withDeadline(()=>w1.webContents.capturePage(),'caption client capture',15000)).toPNG());
+        const face=await js(`VB6Runtime.RuntimeAPI.THEMES[${JSON.stringify(theme)}].colors.face`);
+        const oracle=await evaluate(w1.webContents,`(${nativePaintOracle.toString()})(${JSON.stringify(face)})`);
+        report.paintedFrames ||= []; const frameReport={theme,attempts:[]}; report.paintedFrames.push(frameReport);
+        const frame=await capturePaintedFrame({
+          label:theme+' native client pixels',
+          settle:()=>evaluate(w1.webContents,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))'),
+          capture:async()=>(await w1.webContents.capturePage()).toPNG(),
+          inspect:png=>evaluate(w1.webContents,`(${sampleCapturedPng.toString()})(${JSON.stringify(png.toString('base64'))},${JSON.stringify(oracle)})`),
+          onAttempt:attempt=>{frameReport.attempts.push(attempt);probe.flush();}
+        });
+        check(theme+' capture contains the current palette and unobscured text control',true);
+        if(reportPath)fs.writeFileSync(reportPath+'.'+theme+'.png',frame.png);
       }
       await js('host.setTheme("classic");void 0;');
       await evaluate(w1.webContents, 'document.querySelector("[data-control=Command1]").click(); void 0;', true);

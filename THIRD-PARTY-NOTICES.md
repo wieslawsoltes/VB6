@@ -23,3 +23,14 @@ Optional native gateway drivers (`pg`, `mysql2`, `mssql`, `odbc`) are operator-i
 server dependencies and are not bundled into the browser distribution. Their
 installed packages carry their respective licenses. OLE DB/Jet/ACE/ODBC drivers and
 Microsoft runtime components are not redistributed by this project.
+
+## Microsoft WinUI semantic resources
+
+The Fluent light/dark theme adapts Microsoft.UI.Xaml semantic color resources
+and component state mappings from Windows App SDK 2.5.1, tag
+`winui3/release/2.5.1` of https://github.com/microsoft/microsoft-ui-xaml.
+Copyright (c) Microsoft Corporation. All rights reserved. MIT licensed.
+The complete license is retained in `LICENSES/WinUI.txt` and in generated theme
+CSS. Source blob provenance, implementation scope and native-renderer limitations
+are documented in `docs/WINUI-PARITY.md`. These are browser-rendered adaptations,
+not native WinUI bindings. No Microsoft font binaries or artwork are added.

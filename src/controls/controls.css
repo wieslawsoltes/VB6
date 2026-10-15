@@ -18,6 +18,15 @@
 .vb-form-menu button{border:0;background:transparent;font:inherit;padding:3px 8px;color:inherit}
 .vb-form-menu button:hover{background:var(--vb-selection);color:var(--vb-selection-text)}
 
+/* A form/PictureBox may allocate its drawing surface after its controls exist.
+   Keep both GPU and Canvas2D overlay planes below controls, even after ZOrder
+   moves a control to the first child. Isolation keeps negative planes above
+   this host's background, never behind an ancestor. Equal plane indices retain
+   GraphicsSurface's GPU-before-overlay DOM order. The inline overlay z-index
+   is intentionally overridden only for these control-owning drawing hosts. */
+:is(.vb-form-content,.vb-picture):has(> .graphics-surface){isolation:isolate}
+:is(.vb-form-content,.vb-picture)>.graphics-surface{z-index:-1!important}
+
 .vb-control{position:absolute;overflow:hidden;user-select:none;line-height:normal;outline:none}
 .vb-control[hidden]{display:none!important}
 .vb-control.disabled{color:var(--vb-shadow)!important;text-shadow:1px 1px var(--vb-light);pointer-events:none}

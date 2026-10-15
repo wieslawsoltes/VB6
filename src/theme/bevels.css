@@ -40,9 +40,9 @@
  .classic-bevel-sunken { border:0;box-shadow:var(--vb-bevel-sunken); }
  .classic-bevel-raised:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed); }
 
- .vb-command { border:0!important;box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+ .vb-command { border:var(--winui-ButtonBorder,0)!important;box-shadow:var(--vb-bevel-raised);padding:var(--winui-ButtonPadding,4px 9px); }
  .vb-command:active:not(:disabled):not([aria-disabled=true]) { box-shadow:var(--vb-bevel-pressed);padding:5px 8px 3px 10px; }
- .vb-command:disabled,.vb-command[aria-disabled=true] { box-shadow:var(--vb-bevel-raised);padding:4px 9px; }
+ .vb-command:disabled,.vb-command[aria-disabled=true] { box-shadow:var(--vb-bevel-raised);padding:var(--winui-ButtonPadding,4px 9px); }
 
  /* Preserve these containers' original border widths and padding exactly.
     Transparent border paint avoids diagonal joins; the equivalent border-box

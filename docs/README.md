@@ -84,8 +84,8 @@ These guides describe the implemented system, not complete native VB6 parity.
   live diagnostics, saved-policy retry and environment limitations.
 - [IDE themes](IDE-THEMES.md), [application themes](APPLICATION-THEMES.md) and
   [matching icon packs](THEME-ICON-PACKS.md).
-- [macOS 26 visual fidelity](MACOS-THEME-FIDELITY.md): component states, native references,
-  authored-layout preservation and measured comparison boundaries.
+- [WinUI 3 resource fidelity](WINUI-PARITY.md): pinned resources, component states,
+  boundary isolation, validation and native-pixel limits.
 - [X11 fidelity](X11-THEME-FIDELITY.md): Motif-inspired paint/state contracts,
   pixel checks, isolation and native-reference certification boundaries.
 - [Classic icons](ICON-AUDIT.md), [classic HTML rendering and attribution](CLASSIC-HTML-RENDERING.md)

@@ -18,7 +18,7 @@ class WorkflowAuditTests(unittest.TestCase):
     def reject(self,mutate):
         value=copy.deepcopy(self.workflow);mutate(value);self.path.write_text(yaml.safe_dump(value,sort_keys=False))
         with self.assertRaises(ValueError):check.audit(self.root)
-    def test_complete_graph_passes(self):self.assertEqual(check.audit(self.root)['preservedEntrypoints'],81)
+    def test_complete_graph_passes(self):self.assertEqual(check.audit(self.root)['preservedEntrypoints'],82)
     def test_gate_omission_rejected(self):self.reject(lambda w:w['jobs']['test']['needs'].remove('macos-browser-native'))
     def test_skippable_gate_rejected(self):self.reject(lambda w:w['jobs']['test'].update({'if':'success()'}))
     def test_failure_suppression_rejected(self):self.reject(lambda w:w['jobs']['figma'].update({'continue-on-error':True}))

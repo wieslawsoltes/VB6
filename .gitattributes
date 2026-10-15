@@ -9,6 +9,7 @@
 
 # The exact third-party notice is embedded verbatim in the LF CSS source.
 /LICENSES/98.css.txt text eol=lf
+/LICENSES/WinUI.txt text eol=lf
 
 # Authored migration runtime inputs are embedded in deterministic browser bundles.
 /packages/vbnet-runtime/** text eol=lf

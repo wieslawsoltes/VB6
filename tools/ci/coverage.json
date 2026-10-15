@@ -27,6 +27,7 @@
     "tools/browser-theme-tests.py",
     "tools/browser-webbrowser-tests.py",
     "tools/browser-windows-tests.py",
+    "tools/browser-winui-tests.py",
     "tools/browser-xaml-tests.py",
     "tools/build-advanced-editor.mjs",
     "tools/build-macos-native.mjs",

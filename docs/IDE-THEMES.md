@@ -203,3 +203,10 @@ and [Oracle Motif/CDE window-manager architecture](https://docs.oracle.com/cd/E1
 complete token resets. The existing three-engine IDE/application browser suites
 now also cover caption geometry, restore identity, modern composite edges,
 scrollbar isolation, disabled/hidden controls and keyboard/forced-color ink.
+
+## WinUI resource-backed fidelity
+
+Fluent light/dark now use pinned Microsoft.UI.Xaml semantic colors, state brushes
+and component metrics. See [WinUI rendering and validation](WINUI-PARITY.md) for
+the exact reference, authored-color/geometry boundaries, tests and remaining
+native-pixel certification requirements.
