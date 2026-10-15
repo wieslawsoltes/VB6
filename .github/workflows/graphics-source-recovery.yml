@@ -1,0 +1,34 @@
+name: Graphics source recovery
+on:
+  push:
+    branches: [chore/graphics-source-recovery]
+    paths: [.github/workflows/graphics-source-recovery.yml]
+permissions:
+  contents: read
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Archive previously uploaded candidate and its exact history
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit=e691c8da4a459e6df70d7a4d90ff7cd4213df85e
+          test "$(git rev-parse "$commit^{tree}")" = 59e1a9aa485e268b087ff086e072f0c5d272d7a4
+          mkdir recovery
+          git archive --format=zip "$commit" -o recovery/graphics-source.zip
+          git branch recovery-source "$commit"
+          git bundle create recovery/graphics-history.bundle recovery-source
+          git rev-parse "$commit" "$commit^{tree}" > recovery/revision.txt
+          sha256sum recovery/* > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graphics-source-recovery
+          path: recovery/
+          retention-days: 7
+          if-no-files-found: error
