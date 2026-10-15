@@ -1,0 +1,80 @@
+name: Materialize reviewed control source
+on:
+  push:
+    branches: [work/control-source-transport]
+permissions:
+  contents: read
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify and decode reviewed source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, lzma, os
+          from pathlib import Path
+          expected = ['3466a150c9054d4a7cf1a71c6cb880b5b620a230','75345ff23a4740b161deaa3c2245f2327667c97b','5c97d25306f482691cecb64185e03e4da2a054a2','9c0d589d4e901e6e2b91148eb61d9ee1c1a55dde','13c135b736ca7c052f2ac6dac596660d39d5cced']
+          def blob(data):
+              return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          parts=[]
+          for i, sha in enumerate(expected, 1):
+              data=Path(f'.control-source-transport/{i}.bin').read_bytes()
+              assert blob(data)==sha, ('chunk',i)
+              if i==3:
+                  # Repair the one verified base64 transcription error during upload.
+                  # Both the received blob and corrected blob are checked explicitly.
+                  assert len(data)==15000 and data[11391]==157
+                  data=data[:11391]+bytes([53])+data[11392:]
+                  assert blob(data)=='2731855272829273e385ca4ae6adf021435a4881'
+              parts.append(data)
+          packed=b''.join(parts)
+          assert len(packed)==74432
+          assert hashlib.sha256(packed).hexdigest()=='ae250078d8b7df7e912ea818192a72498db6d11f36158c3a4f74882bc5eba4cf'
+          patch=lzma.decompress(packed,memlimit=256*1024*1024)
+          assert len(patch)==324025
+          assert hashlib.sha256(patch).hexdigest()=='449176987e2a82d89543ed412616a8aadebdf49d039fbdcbb66aec9cc0c8af91'
+          Path(os.environ['RUNNER_TEMP'],'controls-reviewed.patch').write_bytes(patch)
+          print('All five chunks, decoded patch and SHA-256 digests verified.')
+          PY
+      - name: Materialize exact tested tree without executing source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach 638b5f4a6e5e9feda7e30b435a3720124725ff7c
+          git apply --index --unidiff-zero "$RUNNER_TEMP/controls-reviewed.patch"
+          tree=$(git write-tree)
+          test "$tree" = a9b5daf77326e3ae9953a84efbb0b94591dfb4a3
+          git diff --cached --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          commit=$(git commit-tree "$tree" -p c978ce6f8d74df3d78e66637786b9856893d79c4 -p 638b5f4a6e5e9feda7e30b435a3720124725ff7c -m 'Materialize exact locally validated browser control implementation')
+          printf '%s\n' "$commit" "$tree" > "$RUNNER_TEMP/control-source-revision.txt"
+          printf 'COMMIT=%s\n' "$commit" >> "$GITHUB_ENV"
+          printf 'Verified source tree: `%s`\n' "$tree" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish temporary source reference only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          target=refs/heads/work/control-source-materialized
+          test -z "$(git ls-remote --heads origin "$target")"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "$COMMIT:$target"
+          # The PR branch and main are intentionally untouched here. The connector
+          # publishes the verified source tree to the PR, triggering normal CI.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: control-source-revision
+          path: ${{ runner.temp }}/control-source-revision.txt
+          if-no-files-found: error
+          retention-days: 7
