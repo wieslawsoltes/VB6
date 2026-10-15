@@ -16,16 +16,32 @@ const expected={
  'tools/ide-artifacts.json':'8d49402c2f664da7ae26760b943aeb545eedb079'
 };
 const mode=process.argv[2];assert.ok(mode==='prepare'||mode==='publish');
+const gitHash=data=>createHash('sha1').update(`blob ${data.length}\0`).update(data).digest('hex');
+const delta=brotliDecompressSync(Buffer.from(fs.readFileSync('.github/macos26-endpoints.b64','utf8').trim(),'base64'));
+assert.equal(createHash('sha256').update(delta).digest('hex'),'1eb8dc213d3bd8cedf5558e36f492b5f18f6b5e74523109a7200938fe5d6b89c');
+const refinements=JSON.parse(delta);
 if(mode==='prepare'){
  const data=brotliDecompressSync(Buffer.from(fs.readFileSync('.github/macos26-range.b64','utf8').trim(),'base64'));
  assert.equal(createHash('sha256').update(data).digest('hex'),'1bbdf70db1a607e0913d95e0ccfc3f3bcce489ceee38fdd09a0e514705c98f67');
  execFileSync('git',['apply','--check','-'],{input:data});
  execFileSync('git',['apply','-'],{input:data});
+ const output=[];
+ for(const entry of refinements){
+  assert.equal(expected[entry.path],entry.base);
+  const original=fs.readFileSync(entry.path);assert.equal(gitHash(original),entry.base,entry.path);
+  let position=0;const parts=[];
+  for(const [start,end,text] of entry.edits){
+   assert.ok(Number.isInteger(start)&&Number.isInteger(end)&&start>=position&&end>=start&&end<=original.length);
+   parts.push(original.subarray(position,start),Buffer.from(text));position=end;
+  }
+  parts.push(original.subarray(position));const result=Buffer.concat(parts);assert.equal(gitHash(result),entry.sha,entry.path);
+  output.push([entry.path,result]);
+ }
+ for(const [path,data] of output)fs.writeFileSync(path,data);
 }
+for(const entry of refinements){assert.equal(expected[entry.path],entry.base);expected[entry.path]=entry.sha;}
 const entries=Object.entries(expected).map(([path,sha])=>{
- const data=fs.readFileSync(path);
- assert.equal(createHash('sha1').update(`blob ${data.length}\0`).update(data).digest('hex'),sha,path);
- return {path,sha,data};
+ const data=fs.readFileSync(path);assert.equal(gitHash(data),sha,path);return {path,sha,data};
 });
 if(mode==='publish'){
  assert.ok(process.env.GH_TOKEN);const report=[];
