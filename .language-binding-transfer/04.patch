@@ -1,0 +1,313 @@
+diff --git a/tests/runtime-library.test.mjs b/tests/runtime-library.test.mjs
+index e5d5f3d1c93ca35ab91be5227ad03e760df983aa..367914fa40b822e305391a04a2e442eec8b54d33 100644
+--- a/tests/runtime-library.test.mjs
++++ b/tests/runtime-library.test.mjs
+@@ -0,0 +1 @@
++import {runtimeBoundaryProgram} from './helpers/runtime-boundary-program.mjs';
+@@ -11 +12 @@ const main=body=>`Option Explicit\nSub Main()\n${body}\nEnd Sub`;
+-async function run(code,extras=[]){const program=compileProject({name:'Runtime04',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code},...extras]});assert.deepEqual(program.diagnostics,[]);const output=[];const vm=new VirtualMachine(program,{print:s=>output.push(s)});await vm.start();return {output,vm};}
++async function run(code,extras=[],expectedDiagnostics=null){let program=compileProject({name:'Runtime04',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code},...extras]});if(expectedDiagnostics)program=runtimeBoundaryProgram(program,expectedDiagnostics);else assert.deepEqual(program.diagnostics,[]);const output=[];const vm=new VirtualMachine(program,{print:s=>output.push(s)});await vm.start();return {output,vm};}
+@@ -67,2 +68,2 @@ for(const [body,code]of [
+-])test('strict dispatch rejects '+body,async()=>await assert.rejects(()=>run(main('Dim b As New Bag\n'+body),[bag]),e=>e.number===code));
+-test('Private module fields are invisible across modules',async()=>await assert.rejects(()=>run(main('Debug.Print InternalValue'),[{name:'Other',kind:'module',code:'Private InternalValue As Long'}]),e=>e.number===500));
++])test('strict dispatch rejects '+body,async()=>await assert.rejects(()=>run(main('Dim b As New Bag\n'+body),[bag],['Debug.Print b.hidden','b.hidden = 3','Debug.Print b.Secret()'].includes(body)?[{code:'VB_MEMBER_ACCESS',source:'MainModule',line:4,message:'Method or data member not accessible: '+(body.includes('Secret')?'Secret':'hidden')}]:null),e=>e.number===code));
++test('Private module fields are invisible across modules',async()=>await assert.rejects(()=>run(main('Debug.Print InternalValue'),[{name:'Other',kind:'module',code:'Private InternalValue As Long'}],[{code:'VB_UNDEFINED_NAME',source:'MainModule',line:3,message:'Variable not defined: InternalValue'}]),e=>e.number===500));
+@@ -74 +75 @@ test('TypeOf rejects Variant Error rather than treating it as an object',async()
+-test('indexed private property setter cannot bypass public getter visibility',async()=>await assert.rejects(()=>run(main('Dim b As New Bag\nb.Text(0) = "bad"'),[{...bag,code:bag.code.replace('Public Property Let Text','Private Property Let Text')}]),e=>e.number===438));
++test('indexed private property setter cannot bypass public getter visibility',async()=>await assert.rejects(()=>run(main('Dim b As New Bag\nb.Text(0) = "bad"'),[{...bag,code:bag.code.replace('Public Property Let Text','Private Property Let Text')}],[{code:'VB_MEMBER_ACCESS',source:'MainModule',line:4,message:'Method or data member not accessible: Text'}]),e=>e.number===438));
+diff --git a/tests/support/native-chart-kernel.mjs b/tests/support/native-chart-kernel.mjs
+index 6d59f393fc28375ddd90a69c7d22fbde6752dbbc..ecfb932e0dbfb6657abb40aa335de00280b3fc43 100644
+--- a/tests/support/native-chart-kernel.mjs
++++ b/tests/support/native-chart-kernel.mjs
+@@ -5 +5 @@ export async function chartKernel(count=2){
+- const program=compileProject({name:'ChartKernel',startup:'Sub Main',modules:[{name:'ChartKernel',kind:'module',code:nativeChartCoreSource(count).replace(pattern,'')+'\nPrivate Sub Main()\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);
++ const program=compileProject({name:'ChartKernel',externalSymbols:Object.keys(NATIVE_CHART_HOSTS).map(name=>({name,kind:'function'})),startup:'Sub Main',modules:[{name:'ChartKernel',kind:'module',code:nativeChartCoreSource(count).replace(pattern,'')+'\nPrivate Sub Main()\nEnd Sub'}]});assert.deepEqual(program.diagnostics,[]);
+diff --git a/tests/support/native-grid-kernel.mjs b/tests/support/native-grid-kernel.mjs
+index 2ef4e395c6f798e9468c0894ecf54f193b551ecc..60ef077838693a512a49be4bf603ca22622726a4 100644
+--- a/tests/support/native-grid-kernel.mjs
++++ b/tests/support/native-grid-kernel.mjs
+@@ -10 +10 @@ export async function gridKernel(count=2){
+- const program=compileProject({name:'GridKernel',startup:'Sub Main',modules:[{name:'GridKernel',kind:'module',code:source}]});assert.deepEqual(program.diagnostics,[]);
++ const program=compileProject({name:'GridKernel',startup:'Sub Main',externalSymbols:Object.keys(NATIVE_GRID_HOSTS).map(name=>({name,kind:'function'})),modules:[{name:'GridKernel',kind:'module',code:source}]});assert.deepEqual(program.diagnostics,[]);
+diff --git a/tests/win32-aot.test.mjs b/tests/win32-aot.test.mjs
+index bd0b8789b3b9fc4fef0e281719728b651eb4b205..031d7457662941fcc808a31d251c5d984e0093c1 100644
+--- a/tests/win32-aot.test.mjs
++++ b/tests/win32-aot.test.mjs
+@@ -97 +97 @@ test('qualified calls respect private procedure and Declare scope',()=>{
+-    assert.throws(()=>compileWin32(p),/Private native procedure/);
++    assert.throws(()=>compileWin32(p),error=>{assert.equal(error.name,'NativeCompileError');assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_MEMBER_ACCESS',source:'Form1',line:2}]);assert.match(error.message,/not accessible: Hidden/);return true;});
+diff --git a/tests/win32-bindings.test.mjs b/tests/win32-bindings.test.mjs
+index 98b9d1bb25cc5d3702e65e24b1c135321c20496f..4457afccfee899589268fbc4f4695bc6b73fbfc1 100644
+--- a/tests/win32-bindings.test.mjs
++++ b/tests/win32-bindings.test.mjs
+@@ -82 +82 @@ test('constant accessibility is enforced at emitted use sites',()=>{
+-  assert.throws(()=>compileWin32(project('Dim n As Long\nn = Rates.Secret','',[rates])),/Private/);
++  assert.throws(()=>compileWin32(project('Dim n As Long\nn = Rates.Secret','',[rates])),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_MEMBER_ACCESS',source:'Money',line:4}]);assert.match(error.message,/not accessible: Secret/);return true;});
+diff --git a/tests/win32-callbacks.test.mjs b/tests/win32-callbacks.test.mjs
+index a92407e9d0e5148142f40a161b8c41b55f701eb6..40cb57f8b4ea3112239460613d2da516309dc3a3 100644
+--- a/tests/win32-callbacks.test.mjs
++++ b/tests/win32-callbacks.test.mjs
+@@ -40 +40 @@ test('AddressOf does not permit taking a foreign DLL function or an unknown addr
+- for(const name of ['Invoke','Missing'])assert.throws(()=>compileWin32(project('Dim n As Long\nn=Invoke(AddressOf '+name+')')),/authored Sub or Function/);
++ for(const name of ['Invoke','Missing'])assert.throws(()=>compileWin32(project('Dim n As Long\nn=Invoke(AddressOf '+name+')')),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_ADDRESSOF_TARGET',source:'Entry',line:7}]);return true;});
+@@ -45 +45 @@ test('AddressOf preserves private accessibility',()=>{
+- assert.throws(()=>compileWin32(p),/Private native procedure/);
++ assert.throws(()=>compileWin32(p),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_MEMBER_ACCESS',source:'Entry',line:5}]);assert.match(error.message,/not accessible: Target/);return true;});
+diff --git a/tests/win32-calls.test.mjs b/tests/win32-calls.test.mjs
+index 49b9426364c4cb151dfa0d673ce3eb0442580176..c8028f809b86abdd21855260d6ac4e2204c38c83 100644
+--- a/tests/win32-calls.test.mjs
++++ b/tests/win32-calls.test.mjs
+@@ -96 +96 @@ test('native named external calls use checked declaration names',()=>{
+-  assert.throws(()=>compile('F wrong:=1','Private Declare Sub F Lib "example.dll" (ByVal value As Long)'),/Unknown native named argument/);
++  assert.throws(()=>compile('F wrong:=1','Private Declare Sub F Lib "example.dll" (ByVal value As Long)'),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_NAMED_ARGUMENT',source:'Entry',line:4},{code:'VB_ARGUMENT_REQUIRED',source:'Entry',line:4}]);assert.match(error.message,/Named argument not found \(wrong\): F/);return true;});
+diff --git a/tests/win32-events.test.mjs b/tests/win32-events.test.mjs
+index ed33fbb82a56e10970d2a7584f60fc62f70a27f7..5e4b352a87ea4e57cf4b9542c1d804a19a0d474c 100644
+--- a/tests/win32-events.test.mjs
++++ b/tests/win32-events.test.mjs
+@@ -17 +17 @@ for(const handler of [
+-test('undeclared source events do not produce a compiled no-op',()=>assert.throws(()=>build('','','RaiseEvent Missing'),/declared in the current class/));
++test('undeclared source events do not produce a compiled no-op',()=>assert.throws(()=>build('','','RaiseEvent Missing'),error=>{assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_EVENT_NAME',source:'Publisher',line:4}]);assert.match(error.message,/Event not declared: Missing/);return true;}));
+diff --git a/tests/win32-paramarray.test.mjs b/tests/win32-paramarray.test.mjs
+index 70d47d84c85b7612b8b0ee7ff05cc0d282e2e0b8..7b043df6bec41e568fd7b6bbcc4b12e205056779 100644
+--- a/tests/win32-paramarray.test.mjs
++++ b/tests/win32-paramarray.test.mjs
+@@ -52 +52 @@ test('unused native ParamArray support adds no element-copy API to ordinary prog
+-for(const source of ['Pack 1, ByVal 2','Pack first:=1'])test('illegal native ParamArray actuals remain explicit: '+source,()=>assert.throws(()=>compileWin32(project(source)),/positional|ByVal/));
++for(const source of ['Pack 1, ByVal 2','Pack first:=1'])test('illegal native ParamArray actuals remain explicit: '+source,()=>assert.throws(()=>compileWin32(project(source)),error=>{if(source.includes(':=')){assert.deepEqual(error.diagnostics.map(d=>d.code),['VB_NAMED_ARGUMENT','VB_ARGUMENT_REQUIRED']);assert.match(error.message,/Named arguments are not allowed for a ParamArray procedure/);}else assert.match(error.message,/positional|ByVal/);return true;}));
+diff --git a/tests/win32-records.test.mjs b/tests/win32-records.test.mjs
+index bee408e399a372c55751ef901132d5f5c9c3a4be..10215229d1cd67724fc1d0a4fb9548f669aec6ce 100644
+--- a/tests/win32-records.test.mjs
++++ b/tests/win32-records.test.mjs
+@@ -55 +55 @@ test('unknown fields, omitted subscripts and wrong ranks remain diagnostics',()=
+- for(const expr of ['p.missing=1','p.data=1','p.data(1,2)=1'])assert.throws(()=>compile('Private Type T\n data(0 To 2) As Long\nEnd Type\nPublic Sub Main()\nDim p As T\n'+expr+'\nEnd Sub'),/field|rank/);
++ for(const expr of ['p.missing=1','p.data=1','p.data(1,2)=1'])assert.throws(()=>compile('Private Type T\n data(0 To 2) As Long\nEnd Type\nPublic Sub Main()\nDim p As T\n'+expr+'\nEnd Sub'),error=>{if(expr==='p.missing=1'){assert.deepEqual(error.diagnostics.map(({code,source,line})=>({code,source,line})),[{code:'VB_UNKNOWN_MEMBER',source:'Module1',line:6}]);assert.match(error.message,/User-defined type member not found: missing/);}else assert.match(error.message,/field|rank/);return true;});
+diff --git a/tools/browser-language-parity.py b/tools/browser-language-parity.py
+index 4e80116b9206588fb089cec20a9d935d4bb72497..be408771efd062b6e450e7be1f4533ade6cd96b2 100644
+--- a/tools/browser-language-parity.py
++++ b/tools/browser-language-parity.py
+@@ -46,0 +47,8 @@ def main():
++                            if 'code' in expected and actual.get('code')!=expected['code']: raise AssertionError(repr(result))
++                    elif mode=='runtime' and fixture.get('host'):
++                        result=page.evaluate('''async project=>{
++                          const output=[],container=document.createElement('div');document.body.append(container);
++                          const host=new VB6Runtime.RuntimeAPI.ApplicationHost(project,container,{persist:false,rendering:false,onMessage:m=>{if(m.type==='output')output.push(m.text);}});
++                          try{await host.start();return {output,error:host.vm.lastError?.number??null};}
++                          finally{host.dispose();container.remove();}
++                        }''',fixture['project'])
+@@ -112,0 +121,39 @@ def main():
++                for backend in ['worker','fallback']:
++                    name=backend+': control metadata and source signatures invalidate semantic cache'
++                    start=time.perf_counter()
++                    try:
++                        fixture=next(f for f in fixtures if f['name']=='Form control names bind from designer metadata')
++                        result=page.evaluate(r'''async ({backend,project})=>{
++                          const ide=vb6Studio,scheduler=ide.syntaxDiagnostics;
++                          scheduler.cancel();scheduler.workerUnavailable=backend==='fallback';ide.appearance.autoSyntaxCheck=true;
++                          const next=change=>new Promise((resolve,reject)=>{
++                            const timeout=setTimeout(()=>{off();reject(new Error('No binding diagnostic response'));},5000);
++                            const off=ide.on('diagnostics',r=>{clearTimeout(timeout);off();resolve(r);});
++                            try{change();}catch(error){clearTimeout(timeout);off();reject(error);}
++                          });
++                          const responses=[];
++                          responses.push(await next(()=>ide.loadProject(project)));
++                          responses.push(await next(()=>scheduler.schedule(ide.project,0)));
++                          responses.push(await next(()=>{ide.project.modules[0].form.controls[0].name='Renamed';scheduler.schedule(ide.project,0);}));
++                          responses.push(await next(()=>{ide.project.modules[0].form.controls[0].name='Command1';scheduler.schedule(ide.project,0);}));
++                          const source={...project,startup:'Sub Main',modules:[
++                            {id:'caller',name:'Caller',kind:'module',code:'Option Explicit\nSub Main()\nHelper.Work\nEnd Sub'},
++                            {id:'helper',name:'Helper',kind:'module',code:'Public Sub Work(Optional ByVal value As Long = 1)\nEnd Sub'}]};
++                          responses.push(await next(()=>ide.loadProject(source)));
++                          responses.push(await next(()=>{ide.project.modules[1].code='Public Sub Work(ByVal value As Long)\nEnd Sub';scheduler.schedule(ide.project,0);}));
++                          responses.push(await next(()=>{ide.project.modules[1].code='Public Sub Work(Optional ByVal value As Long = 1)\nEnd Sub';scheduler.schedule(ide.project,0);}));
++                          return {responses,state:ide.runState,output:ide.output};
++                        }''',{'backend':backend,'project':fixture['project']})
++                        expected_valid=[True,True,False,True,True,False,True]
++                        expected_parses=[1,0,0,0,2,1,1]
++                        for i,response in enumerate(result['responses']):
++                            if response['mode']!=backend or response['valid']!=expected_valid[i] or response['stats']['compiledModules']!=expected_parses[i]: raise AssertionError(repr(result))
++                            if response['semanticCacheHit']!=(i==1): raise AssertionError(repr(result))
++                        for i,source,code in [(2,'Form1','VB_UNDEFINED_NAME'),(5,'Caller','VB_ARGUMENT_REQUIRED')]:
++                            diagnostics=result['responses'][i]['diagnostics']
++                            if len(diagnostics)!=1 or diagnostics[0]['source']!=source or diagnostics[0]['line']!=3 or diagnostics[0].get('code')!=code: raise AssertionError(repr(result))
++                        if result['state']!='design' or result['output'] or errors or requests: raise AssertionError(repr(result))
++                        results.append({'name':name,'passed':True,'milliseconds':round((time.perf_counter()-start)*1000,2)})
++                    except Exception as error:
++                        results.append({'name':name,'passed':False,'error':str(error)})
++                    print(('PASS' if results[-1]['passed'] else 'FAIL')+' '+name,flush=True)
+diff --git a/tools/ide-artifacts.json b/tools/ide-artifacts.json
+index a0f9e5d46d08f98a20be19ef8b4b8f6eb86ca253..ccdfc435689bc97a2d220439d8eb83b483b919da 100644
+--- a/tools/ide-artifacts.json
++++ b/tools/ide-artifacts.json
+@@ -5,2 +5,2 @@
+-      "bytes": 11192183,
+-      "sha256": "e77a914d9166b5b0332bd98d9f390d20427df2dbc96fa0f97ca3e3ac33a3487b"
++      "bytes": 11527373,
++      "sha256": "d55c28a0d85feee0d8182cff9a2744bca54282c764b489de30a1361c0f949ddd"
+@@ -9,2 +9,2 @@
+-      "bytes": 11925556,
+-      "sha256": "704387ad9a633de66bb377d895cd9362ed5f43460e44f2a85533fd869cd4f4fb"
++      "bytes": 12260746,
++      "sha256": "45f21af17beb507a63adc3022f05e2303cb3ab97ba09a54dd77964d279cc4896"
+@@ -77,2 +77,2 @@
+-      "bytes": 1408361,
+-      "sha256": "914f605e2198d88debd5a7ad6d3d445b3862121bf567f5410c59539248a3a615"
++      "bytes": 1520048,
++      "sha256": "6169e81f3afc73ce14dd351cd16f7a5164b22a922de06fce7d524f6733bf9950"
+@@ -81,2 +81,2 @@
+-      "bytes": 258668,
+-      "sha256": "8f839b9f01f03c03aec316f558e22e80348bf0064ac5930df0bf16ca6524754a"
++      "bytes": 476589,
++      "sha256": "4ce373298bf68d97af5ef58891df91a8e086617d5763f5d3368702d2ee3a68d9"
+@@ -85,2 +85,2 @@
+-      "bytes": 254534,
+-      "sha256": "d355ea3ede5c660b4309077f067d231df5cbdbbdea92030d1ba07aadf3726ef2"
++      "bytes": 469237,
++      "sha256": "877eb2b59e2a3e06741a9a50c8c0996ec84133f14e9aefb8fda850d76a27a673"
+@@ -97,2 +97,2 @@
+-      "bytes": 2577130,
+-      "sha256": "add6f447be84234cd1b276877096bbeb540756d562e789dedbe7f91b8fe123b8"
++      "bytes": 2670238,
++      "sha256": "00303e04aee064e97e0689d82399f6532f4270c2a71ef955d89c344daff0a498"
+@@ -101,2 +101,2 @@
+-      "bytes": 2977971,
+-      "sha256": "41acf53e2b907745f881cb9be9b856ce00956057ce0a466f5d62be0736540514"
++      "bytes": 3072650,
++      "sha256": "ee754f4d4b1531370cf23a0eec6ce41f8a66ceec34e7655125a822b33d487722"
+@@ -105,2 +105,2 @@
+-      "bytes": 2589245,
+-      "sha256": "2e971854b045fda2f31310bf94b127a125a8d366284c9790c7abd53495a14153"
++      "bytes": 2682353,
++      "sha256": "50e87ffef1e00c1c173f3035407c9dfa8d4807c0ae18d4b9536e7413591ca004"
+@@ -109,2 +109,2 @@
+-      "bytes": 2969228,
+-      "sha256": "7646ea23fcd3d1151cc695bb8c9abf0bc358bf3ba2ec2f2c1cee037345fa8964"
++      "bytes": 3062336,
++      "sha256": "47047cc9293ee057427aca858af41966490f0be0a7eec87033843a408f8bbfd6"
+@@ -113,2 +113,2 @@
+-      "bytes": 2963402,
+-      "sha256": "2103110f5e6a14b5088729651e70899e0247ba3808b432f9776143e012ff3c53"
++      "bytes": 3056510,
++      "sha256": "fb9165c4ed6e8577c9f6f0a70542f9e2e4418c4dc2a671179e8deebaa1e1553d"
+@@ -117,2 +117,2 @@
+-      "bytes": 2957050,
+-      "sha256": "610b7127d3b5e24998c17a8e139625d7f9b73a7860789ecff0125f34fe42ccd1"
++      "bytes": 3050158,
++      "sha256": "5def42962c4a28869af8ee2c65c27564a5ba085239826b88df1c37016d9521d2"
+@@ -121,2 +121,2 @@
+-      "bytes": 2956765,
+-      "sha256": "af4318601b939c3110fd49c778982b115c5b4ddd48c9457601525ffc2e682b42"
++      "bytes": 3049873,
++      "sha256": "932336854468d7e395b5cdddf7dcba48b7d57d1b0fdbd97ecfb5b0b05c380d88"
+@@ -125,2 +125,2 @@
+-      "bytes": 2958914,
+-      "sha256": "fa407de5594676cdde405d3c58dcdd0d20f392d2abf01f1e56da708315faedd9"
++      "bytes": 3052022,
++      "sha256": "2cb24ed39dae381712ff5746810b0959b613b097f102ba0008c8414d965dfef1"
+@@ -129,2 +129,2 @@
+-      "bytes": 2959335,
+-      "sha256": "e65b138d13eef115f74c55d13a17d1f88c91c78e2926dffdf579ac00a71dbf6e"
++      "bytes": 3052443,
++      "sha256": "cf2f0e490f538f26b1c925d2b18f2cfc1ac406d537e046612f8802d320d80bc5"
+@@ -133,2 +133,2 @@
+-      "bytes": 2955016,
+-      "sha256": "a19bdf7dca4626228292eb96fde56da7570ef595d043859c1f787ca34aae34b8"
++      "bytes": 3048124,
++      "sha256": "6a7780116124e3095b4880e046c3e395bdbb540cd63d3c60767f4acbf34c5a94"
+@@ -137,2 +137,2 @@
+-      "bytes": 2959794,
+-      "sha256": "f598513b0c9326de79c713c3d9f07faad449d230b655cdce39a1c2bd1513da93"
++      "bytes": 3052902,
++      "sha256": "d7a86fdf0a5f743b74dba2ccab9c267159ab4ddaa5f187b97a5121dd775d1993"
+@@ -141,2 +141,2 @@
+-      "bytes": 2962672,
+-      "sha256": "138a774211159eab74b8a3a870fcd9bd7215d344b4ba47dc51ad9602a830f263"
++      "bytes": 3055780,
++      "sha256": "23338e74a946087add78c08ce21ac9ca9db80909ca136583cea988e65641c71a"
+@@ -145,2 +145,2 @@
+-      "bytes": 2964798,
+-      "sha256": "b122bb197d92561ce6e82f9125f71a084135d28ad0819384657516cc0c5d96ef"
++      "bytes": 3057906,
++      "sha256": "183d15fd8593a57ecef46fd7f3c13a7e5e384e4480e26ac459908e58fff39725"
+@@ -149,2 +149,2 @@
+-      "bytes": 2959931,
+-      "sha256": "3ba9e38b571b562fa5d8b7484848f58d0deefcc10d183f06e303bf07197a7b91"
++      "bytes": 3053039,
++      "sha256": "c25d17476f77f8423caaeb61d51558527c7662eabb080db98057fcc89b7426ee"
+@@ -153,2 +153,2 @@
+-      "bytes": 2962147,
+-      "sha256": "ecd79d343e70501a018dd990b7f7ec1fefb01c6e8281f1084a5a3c4c67f2e609"
++      "bytes": 3055255,
++      "sha256": "934dff2116096f379552c24343056472ca98ab1fcd33b52e507ac228ddb8d4ac"
+@@ -157,2 +157,2 @@
+-      "bytes": 2961987,
+-      "sha256": "6925e55aec05e40591d1988283272b800823febce498450b5d643d27586a8809"
++      "bytes": 3055095,
++      "sha256": "6eacd6ed08a4f52d11be02010d6a47fe772e0848ed8e31453c30d5c768399693"
+@@ -161,2 +161,2 @@
+-      "bytes": 2961768,
+-      "sha256": "547e393df45704550afb2ddd1cf0ebe8d0b5877b2921cb511422cd301521ce83"
++      "bytes": 3054876,
++      "sha256": "078f6cb3e4584b90cface0613f8cb9e030f0cc954829442d63ec99a5e440701c"
+@@ -165,2 +165,2 @@
+-      "bytes": 2961895,
+-      "sha256": "3eb61d08518e6049381b9019023d47512c2c5cfc4a247d49855f8b751ee25f1e"
++      "bytes": 3055003,
++      "sha256": "cbdd2055ba6211957cfced36576eef4752c221667b3ef495456161266636308c"
+@@ -169,2 +169,2 @@
+-      "bytes": 2971013,
+-      "sha256": "f62c7c096f5f9a7844a1735b71df58aa140aa7ba410500b76119dc1d87b77cf6"
++      "bytes": 3064121,
++      "sha256": "0d81fad50beaba70ccf8915900cd8eebea07f76be737948dbebb856589911cda"
+@@ -173,2 +173,2 @@
+-      "bytes": 2961368,
+-      "sha256": "3367d109469c6e6ff92f14561fe517f4f42ca3fb7ff5f993a0992deaa7a89dd4"
++      "bytes": 3054476,
++      "sha256": "924e67b9655face95664c06692096a4b867ead19cdf6eb11fda2409779aa3d4e"
+@@ -177,2 +177,2 @@
+-      "bytes": 2958850,
+-      "sha256": "40e44d7560c1ecc530f1adc8f33db3b77564b0bcc6e3786ce04f679dcef40815"
++      "bytes": 3051958,
++      "sha256": "f79cf451e8a24406dc75d1bfb42c2f540fc52ea43b3a5b3efb447ce076456638"
+@@ -181,2 +181,2 @@
+-      "bytes": 2959059,
+-      "sha256": "88699eb4db1caeeded63e126a0e3a9b7cd7bf245f6dad09ef3dcd8c5aa1860b5"
++      "bytes": 3052167,
++      "sha256": "ececf87686754051aae4dd553990dbfe5bcb28ffb1f517de8c49de536971de6a"
+@@ -185,2 +185,2 @@
+-      "bytes": 2959815,
+-      "sha256": "8db16645574af1db2324e47f606972d67d7f8cfe7b8d5b6f214780acff23c084"
++      "bytes": 3052923,
++      "sha256": "5919c00312fa8d86e339700d400e5bbd43260bf7312505ee683904599de0fad3"
+@@ -189,2 +189,2 @@
+-      "bytes": 2959212,
+-      "sha256": "48c3d98189ac9f6db76dc6f2017a0ac30ea1cbc835b9049b5024649a12dd7713"
++      "bytes": 3052320,
++      "sha256": "bd94af3de4c255a130cf18f800673d5faac750e64adc69bf62ac10d18c4c254d"
+@@ -193,2 +193,2 @@
+-      "bytes": 2958895,
+-      "sha256": "4ca810ec85c55e7e24457a0d11293030fae37d995afde4b50a8302303eba6d78"
++      "bytes": 3052003,
++      "sha256": "e051885d1745e3f864308b1d2e7c63245b31e2d4a45af26c1373e764fdbe7059"
+@@ -197,2 +197,2 @@
+-      "bytes": 2959974,
+-      "sha256": "d49002eae6ec0238b09928d6dddad51de63ad47bab30aa7501a6e6de1826735c"
++      "bytes": 3053082,
++      "sha256": "67208f037e3554821bdea0398f3b2ebc5229e5add239043965004dbdd7ab0518"
+@@ -201,2 +201,2 @@
+-      "bytes": 2959790,
+-      "sha256": "ad508da7104008c883072e2069b47375bfdc086b94a4e742598b37a4c59193a5"
++      "bytes": 3052898,
++      "sha256": "5917da7859864675717b6c3182a5ef142010cdce68f7cc03a715897ca39c0ea0"
+@@ -205,2 +205,2 @@
+-      "bytes": 2962502,
+-      "sha256": "cd9bde5f5544a3de187673a865541f2abae0b64ef59bba074df5ce3c31d63db6"
++      "bytes": 3055610,
++      "sha256": "3f84a37886c388b5948a9c402246c09ae4fafa09cca3e9c8c047d15209e264c3"
+diff --git a/tools/language-browser-fixtures.mjs b/tools/language-browser-fixtures.mjs
+index 221f1bd39dd71f5f87198951f5835529ded7ee18..94ee733b070cc208d3c424f97b78595fa030752e 100644
+--- a/tools/language-browser-fixtures.mjs
++++ b/tools/language-browser-fixtures.mjs
+@@ -0,0 +1 @@
++import {referenceBrowserFixtures} from './reference-browser-fixtures.mjs';
+@@ -6,0 +8 @@ const fixtures=[
++ ...referenceBrowserFixtures,

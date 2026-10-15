@@ -1,0 +1,253 @@
+diff --git a/docs/LANGUAGE-STATIC-BINDING.md b/docs/LANGUAGE-STATIC-BINDING.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..88d99f9458450f829d2f28143ba9acfbfd7e2d03
+--- /dev/null
++++ b/docs/LANGUAGE-STATIC-BINDING.md
+@@ -0,0 +1,112 @@
++# Language front end and static reference binding
++
++The source compiler now validates statically known names and source-defined calls before execution, including uncalled procedures and unreachable statements. `compileProject`, Check Project Syntax, automatic worker diagnostics and the fallback checker share the same semantic pass. An invalid program still cannot start in the normal VM or native compiler.
++
++This is an incremental compatibility improvement, not complete Microsoft VB6 parity or certification against a licensed VB6 compiler.
++
++## Implemented behavior
++
++| Area | Behavior |
++| --- | --- |
++| Numeric tokens | Hexadecimal and octal literals, including optional `O`, `%` Integer and `&` Long suffixes; signed 16/32-bit interpretation; located overflow. |
++| Conditional compilation | Physical continuations for `#Const`, `#If` and `#ElseIf`; blank excluded/consumed lines retain physical debugger and diagnostic coordinates. Strings, comments and bracketed identifiers cannot introduce continuations. |
++| Name identity | Case-insensitive, type-suffix-insensitive parameter/loop identity; later local declarations, Static/Const, implicit ReDim and function-result variables retain existing whole-procedure scope. |
++| Static references | `Option Explicit` names, public imports and ambiguity, module/class private members, source UDT fields and enum members, nested With receivers, constants, source events and AddressOf targets. |
++| Calls | Required/optional and omitted arguments, named parameter identity, duplicate or unknown names, positional-after-named order, excess arguments, ParamArray named restrictions, call-site ByVal for Declare only, Sub-as-value rejection. |
++| Properties and arrays | Get/Let/Set selected using expression or assignment context; accessor-specific visibility; index arguments exclude the setter value; source default members; array-returning calls bind before result subscripts. |
++| IDE metadata | Designer control/menu declarations and ambient form/source-control names; data-only external declarations and reference types; metadata-only edits invalidate semantic results without reparsing unchanged source. |
++
++For example, neither `Debug.Print "started"` nor a later statement executes here:
++
++```vb
++Option Explicit
++Sub Main()
++    Debug.Print "started"
++    Exit Sub
++    misspelled = 1
++End Sub
++```
++
++Compilation reports `VB_UNDEFINED_NAME` at the last assignment. `On Error Resume Next` cannot suppress compile-time errors. Without `Option Explicit`, implicit variables retain their existing behavior; known private members and malformed source-defined calls are still checked.
++
++## Integration architecture
++
++`reference-checks.js` reuses the constant binder's module/local declaration scopes and the existing `RecordTypeIndex`. Its descriptors, visibility maps, With receivers and call checks live only for the current validation. It neither evaluates an argument nor invokes a property/host getter. It adds no runtime instructions and does not change statement budgets or sequence points.
++
++A source record field is resolved in the declaring record's module, not whichever module uses it. Source properties retain separate accessors rather than copying the visibility of their first declaration. Typed array returns distinguish calling the producer from indexing its result.
++
++The diagnostic cache retains parsed modules, not live controls or provider connections. Ordered module identities, conditional settings, layout/form declarations, external symbols and reference metadata participate in semantic-cache identity. A dependency edit revalidates all modules; an identical snapshot reuses the completed semantic result. Interleaved/cancelled passes install their own detached metadata only when completing validation. Returned diagnostic arrays are caller-owned.
++
++## Explicit host and compiler-extension declarations
++
++A host that injects names into the runtime library must also describe them to the compiler. Pass declarations, not executable values:
++
++```js
++const compilerInput = {
++  ...project,
++  externalSymbols: [
++    {name: 'HostClock', kind: 'function', type: 'Long'},
++    {name: 'HostDevice', type: 'Object'}
++  ]
++};
++const compiled = compileProject(compilerInput);
++```
++
++This acknowledges the name; it does not implement the host service or authorize it. The host remains responsible for its runtime implementation, permissions and supported argument/types. These declarations currently do **not** receive the full source-procedure signature checking described above.
++
++`externalSymbolSnapshot` reads own data descriptors rather than getters, keeps only name/type/kind/array/readOnly/parameter declaration text, and bounds the number of symbols and parameters. The diagnostic worker receives no connection strings, credentials, image assets or live service adapters. Inputs otherwise follow the existing plain-data project contract; this is not a sandbox for arbitrary JavaScript project objects.
++
++Compute compilation supplies its own typed intrinsic declarations; they never become ordinary VB6 globals. Application prevalidation temporarily describes `ComputeInput`, then checks the generated source module in the final program. Existing `COMPUTE_SYMBOLS` and `computeSymbolProject` exports remain available. Native internal kernels and the VM test oracles declare only their explicit host registries. Source UserControls and PropertyPages retain designer/ambient declarations when creating an isolated source class.
++
++Migration plugins that introduce source names provide `externalSymbols` alongside their expression hook:
++
++```js
++const plugin = {
++  id: 'device-migration',
++  externalSymbols: [{name: 'Special', kind: 'function', type: 'Integer'}],
++  expression({node}) {
++    if (node.kind === 'id' && node.name.toLowerCase() === 'special') {
++      return '42I';
++    }
++  }
++};
++```
++
++Declaring an extension name does not disable checks for unrelated names. Source metadata is combined for compilation without replacing the original project in migration results.
++
++## Validation
++
++`tests/language-static-front-end.test.mjs` covers numeric widths, malformed tokens, suffix aliases, continuation boundaries and source locations. Its 31 cases reproduce 26 failures on the unchanged starting tree.
++
++`tests/language-reference-checks.test.mjs` exercises names, calls, source classes/records/properties/events, extension metadata, startup rejection and cache invalidation. The initial 52 cases reproduce 42 failures on the unchanged starting tree. Additional cases cover backend symbol isolation, connection-secret exclusion and parser depth limits.
++
++`tools/reference-browser-fixtures.mjs` runs through the built runtime and actual IDE, including its application host for real designer controls. `tools/browser-language-parity.py` also changes control metadata and source signatures through both the worker and fallback scheduler, asserting exact diagnostics and parse/cache counts. The existing browser fixtures remain in the suite.
++
++Some existing tests intentionally exercise invalid runtime bytecode. Their test-only `runtimeBoundaryProgram` helper first asserts exact compile diagnostics, then constructs an explicitly unchecked program to reach the original runtime guard. The production startup check is unchanged. Native diagnostic tests now assert stable compiler codes and source locations when errors are caught earlier; lower-level native ABI, memory/lifetime, error and argument-plan checks remain intact.
++
++Useful commands:
++
++```sh
++npm run build
++node --test --test-concurrency=4 tests/*.test.mjs
++python tools/browser-language-parity.py
++```
++
++Normal builds verify the committed artifact fingerprints. The existing explicit maintainer manifest-update command is used only after reviewing source changes; it is not enabled in ordinary builds or CI.
++
++## Remaining compatibility boundaries
++
++Object/Variant and incomplete native/reference metadata remain late-bound. This pass does not infer dynamic object flow or certify every native/COM/OCX member. Full static ByRef type compatibility, all implicit default-member/value conversions, complete assignment type/rank checking, external-library overload selection, exact full VB6 name-resolution priority in every host namespace, and licensed VB6 differential conformance remain further work. Runtime checks are still required.
++
++Parser/compiler allocation and expression-depth limits remain deliberate safety boundaries. Locale/ANSI behavior, all host APIs, native array-return ABI, COM activation/destruction and debugger Edit-and-Continue parity are not completed by these changes. No overall compiler speedup is claimed: additional semantic checking has a cost, while completed diagnostic results can be reused.
++
++## Primary language references
++
++The Microsoft specifications below guide the supported syntax and checks. MS-VBAL also describes newer VBA features; its presence here does not imply that VB6 supports LongLong/LongPtr or every VBA extension.
++
++- [MS-VBAL lexical tokens and numeric literals](https://learn.microsoft.com/en-us/openspecs/microsoft_general_purpose_programming_languages/ms-vbal/685ad840-accb-4bdb-8bfd-f3d88498547a)
++- [MS-VBAL simple name expressions](https://learn.microsoft.com/en-us/openspecs/microsoft_general_purpose_programming_languages/ms-vbal/e3af3398-f090-40db-ade6-de3a93589c76)
++- [MS-VBAL Option Explicit](https://learn.microsoft.com/en-us/openspecs/microsoft_general_purpose_programming_languages/ms-vbal/e9253cf2-5139-4abd-8c1d-eaf390805cb8)
++- [MS-VBAL call statements](https://learn.microsoft.com/en-us/openspecs/microsoft_general_purpose_programming_languages/ms-vbal/f7c864a8-8fce-49dc-8347-30dc749d6576)
++- [MS-VBAL conditional compilation](https://learn.microsoft.com/en-us/openspecs/microsoft_general_purpose_programming_languages/ms-vbal/a95f1a56-68ba-4a7a-8269-a5e9d96a7cbc)
++- [Microsoft ParamArray named-argument restriction](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/a-procedure-with-a-paramarray-argument-cannot-be-called-with-named-arguments)
+diff --git a/docs/README.md b/docs/README.md
+index fdc7371dba4ad0de5d6130b9ef17df6cfbf15758..4c05de8b425d926f704d25be3746012ad2b454b9 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -38,0 +39,2 @@ These guides describe the implemented system, not complete native VB6 parity.
++- [Static language binding](LANGUAGE-STATIC-BINDING.md): names, source call signatures,
++  conditional continuations, metadata-aware diagnostics and remaining boundaries.
+diff --git a/src/compute/application-compiler.js b/src/compute/application-compiler.js
+index b6efa3ef9cb92eaead455c1bd0511c8f6f179b97..fd3c40880382ebe03dec70955fba6cea41d62187 100644
+--- a/src/compute/application-compiler.js
++++ b/src/compute/application-compiler.js
+@@ -0,0 +1 @@
++import {computeSourceProject} from './symbols.js';
+@@ -15 +16 @@ export function compileComputeApplication(source,{events,...options}={}) {
+-  const program=compileProject(project);
++  const program=compileProject(computeSourceProject(project,{input:true}));
+@@ -32 +33 @@ export function compileComputeApplication(source,{events,...options}={}) {
+-  const artifact=compileComputeIR(compileProject(project),{...options,entry:'ComputeInput.Dispatch'});
++  const artifact=compileComputeIR(compileProject(computeSourceProject(project)),{...options,entry:'ComputeInput.Dispatch'});
+diff --git a/src/compute/index.js b/src/compute/index.js
+index d3dc6a014b531d6154927cf4b002ecc7c0b7ec2c..6d90e89d34ac80df5efa7534b58221e6aaf7b21c 100644
+--- a/src/compute/index.js
++++ b/src/compute/index.js
+@@ -0,0 +1 @@
++import {computeSourceProject} from './symbols.js';
+@@ -9 +10 @@ export function compileCompute(source,options={}) {
+-  return compileComputeIR(compileProject(project),options);
++  return compileComputeIR(compileProject(computeSourceProject(project)),options);
+diff --git a/src/compute/symbols.js b/src/compute/symbols.js
+index 7b257922149ffea53b80376dd22026b3eadd9e03..d79b2d00e44a9ecda9d946db537d88f98a0fa6be 100644
+--- a/src/compute/symbols.js
++++ b/src/compute/symbols.js
+@@ -0,0 +1,2 @@
++import {externalSymbolSnapshot,projectSymbolSnapshot} from '../language/symbol-snapshot.js';
++
+@@ -6,0 +9,2 @@ export const COMPUTE_SYMBOLS=Object.freeze([
++  fn('ComputeLoad','Long',['ByVal index As Long']),fn('ComputeStore','Void',['ByVal index As Long','ByVal value As Long']),
++  fn('Cls','Void'),
+@@ -16,0 +21,8 @@ export const COMPUTE_SYMBOLS=Object.freeze([
++/** Metadata for source validation; final WGSL checks retain their own type,
++ * argument and effect validation. The input namespace is temporary only while
++ * checking an application before its generated source module exists. */
++export function computeSourceProject(project,{input=false}={}) {
++  const metadata=projectSymbolSnapshot(project),extras=input?[{name:'ComputeInput',type:'Object'}]:[];
++  return {...project,symbolMetadata:{...metadata,globals:[...externalSymbolSnapshot(metadata.globals),...COMPUTE_SYMBOLS,...extras]}};
++}
++// Retain the existing extension API and its declaration-rich public symbols.
+@@ -18 +30 @@ export function computeSymbolProject(project) {
+-  return {...project,externalSymbols:[...(project.externalSymbols||[]),...COMPUTE_SYMBOLS]};
++  return {...project,externalSymbols:[...externalSymbolSnapshot(project.externalSymbols),...COMPUTE_SYMBOLS]};
+diff --git a/src/controls/ocx-source-page.js b/src/controls/ocx-source-page.js
+index d3dad9f30ff8355d62bcaaf578abd36b268ccb7a..dc67c40e37a84f89c5c3ee3af13205850adfd238 100644
+--- a/src/controls/ocx-source-page.js
++++ b/src/controls/ocx-source-page.js
+@@ -0,0 +1 @@
++import {moduleSymbolSnapshot} from '../language/symbol-snapshot.js';
+@@ -29 +30,5 @@ export class SourcePropertyPage {
+-    for(const module of source.modules)if(module.form){module.kind='class';delete module.form;}
++    for(const module of source.modules)if(module.form){
++      module.symbolBindings=moduleSymbolSnapshot(module);
++      if(module===selected)module.symbolBindings.items.push(...Object.keys(controls).map(name=>({name,type:'Object'})));
++      module.kind='class';delete module.form;
++    }
+diff --git a/src/controls/ocx-source.js b/src/controls/ocx-source.js
+index a21acf1021b3a44d46be971ce22cc89a85d66611..6b4d6f69fd7f13cf46cf2c8380f62658095236b3 100644
+--- a/src/controls/ocx-source.js
++++ b/src/controls/ocx-source.js
+@@ -0,0 +1 @@
++import {moduleSymbolSnapshot} from '../language/symbol-snapshot.js';
+@@ -36 +37,5 @@ export class SourceUserControl {
+-    for(const module of source.modules)if(module.form){module.kind='class';delete module.form;}
++    for(const module of source.modules)if(module.form){
++      module.symbolBindings=moduleSymbolSnapshot(module);
++      if(module===selected)module.symbolBindings.items.push(...Object.keys(controls).map(name=>({name,type:'Object'})));
++      module.kind='class';delete module.form;
++    }
+diff --git a/src/language/binding.js b/src/language/binding.js
+index 3573a7c280bdfb2c55dc1a8615744de0950d4067..6eca971f815efb9bd6edb557ff9387801a9dc04f 100644
+--- a/src/language/binding.js
++++ b/src/language/binding.js
+@@ -1,0 +2 @@ import {bindRedimDeclarations} from './redim-semantics.js';
++import {validateReferences} from './reference-checks.js';
+@@ -20 +21 @@ function intrinsicTable(layout) {
+-export function bindConstants(modules,settings={}) {
++export function bindConstants(modules,settings={},symbols={}) {
+@@ -186,0 +188,2 @@ export function bindConstants(modules,settings={}) {
++  const locations=new Set(diagnostics.map(d=>d.source+'\0'+d.line+'\0'+d.message));
++  for(const d of validateReferences(modules,scopes,settings,symbols)){const key=d.source+'\0'+d.line+'\0'+d.message;if(!locations.has(key)){locations.add(key);diagnostics.push(d);}}
+diff --git a/src/language/compiler-core.js b/src/language/compiler-core.js
+index 9c59ceffda32205d5d65f892fa1c0299eb51ed2a..612756c5b0d49a26c180a26f5441029485e4c069 100644
+--- a/src/language/compiler-core.js
++++ b/src/language/compiler-core.js
+@@ -0,0 +1 @@
++import {moduleSymbolSnapshot,projectSymbolSnapshot} from './symbol-snapshot.js';
+@@ -149 +150 @@ export function compileModule(input) {
+-  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:Object.create(null),types:Object.create(null),typeScopes:Object.create(null),diagnostics:[],source:input.code||'',form:input.form||null,layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
++  const module={name:input.name,kind:input.kind||'module',interfaces:[],defaultTypes:{},defaultMember:null,attributes:[...(input.attributes||[])],optionExplicit:false,optionBase:0,optionCompare:'binary',declarations:[],procedures:new Map(),enums:Object.create(null),types:Object.create(null),typeScopes:Object.create(null),diagnostics:[],source:input.code||'',form:input.form||null,symbolBindings:moduleSymbolSnapshot(input),layoutBindings:input.layoutBindings||layoutBindingSnapshot(input)};
+@@ -222 +223 @@ export function compileProject(project,{retainSyntax=false}={}) {
+-  diagnostics.push(...validateCompiledModules(modules,project.settings));
++  diagnostics.push(...validateCompiledModules(modules,project.settings,projectSymbolSnapshot(project)));
+@@ -227,2 +228,2 @@ export function compileProject(project,{retainSyntax=false}={}) {
+-export function validateCompiledModules(modules,settings={}) {
+-  const diagnostics=[...bindConstants(modules,settings),...validateLayoutMembers(modules,settings)];
++export function validateCompiledModules(modules,settings={},symbols={}) {
++  const diagnostics=[...bindConstants(modules,settings,symbols),...validateLayoutMembers(modules,settings)];
+diff --git a/src/language/diagnostics.js b/src/language/diagnostics.js
+index e7769ed14f7f92d595c531c675dd645d5deffb8d..ac6efd496f1d5c71c6618d85ee142bfba64439a1 100644
+--- a/src/language/diagnostics.js
++++ b/src/language/diagnostics.js
+@@ -0,0 +1 @@
++import {moduleSymbolSnapshot,projectSymbolSnapshot} from './symbol-snapshot.js';
+@@ -13 +14 @@ export function diagnosticSnapshot(project) {
+-    return {id:String(m.id||index),name:String(m.name||'Module'+index),kind:String(m.kind||'module'),attributes:[...(m.attributes||[])],code,layoutBindings:layoutBindingSnapshot(m)};
++    return {id:String(m.id||index),name:String(m.name||'Module'+index),kind:String(m.kind||'module'),attributes:[...(m.attributes||[])],code,symbolBindings:JSON.parse(JSON.stringify(moduleSymbolSnapshot(m))),layoutBindings:layoutBindingSnapshot(m)};
+@@ -17 +18 @@ export function diagnosticSnapshot(project) {
+-  return {name:String(project.name||'Project'),modules,settings:{conditionalConstants,anchoring:project.settings?.anchoring===true}};
++  return {name:String(project.name||'Project'),modules,symbolMetadata:JSON.parse(JSON.stringify(projectSymbolSnapshot(project))),settings:{conditionalConstants,anchoring:project.settings?.anchoring===true}};
+@@ -49 +50,2 @@ export class ProjectDiagnosticCache {
+-      inputs.push({entry,layout,form});
++      const symbols=JSON.stringify(moduleSymbolSnapshot(input));
++      inputs.push({entry,layout,form,symbols});
+@@ -58,3 +60,3 @@ export class ProjectDiagnosticCache {
+-    const settings=JSON.stringify(project.settings||{}),previous=this.validation;
+-    const semanticCacheHit=!!previous&&previous.settings===settings&&previous.inputs.length===inputs.length&&inputs.every((input,i)=>{
+-      const old=previous.inputs[i];return old.entry===input.entry&&old.layout===input.layout&&old.form===input.form;
++    const settings=JSON.stringify(project.settings||{}),symbols=JSON.stringify(projectSymbolSnapshot(project)),previous=this.validation;
++    const semanticCacheHit=!!previous&&previous.settings===settings&&previous.symbols===symbols&&previous.inputs.length===inputs.length&&inputs.every((input,i)=>{
++      const old=previous.inputs[i];return old.entry===input.entry&&old.layout===input.layout&&old.form===input.form&&old.symbols===input.symbols;
+@@ -65,3 +67,3 @@ export class ProjectDiagnosticCache {
+-      for(const {entry,layout,form} of inputs)if(entry.compiled){entry.compiled.layoutBindings=JSON.parse(layout);entry.compiled.form=JSON.parse(form);}
+-      semantic=validateCompiledModules(modules,project.settings).map(d=>Object.freeze({...d,origin:'syntax'}));
+-      if(epoch===this.epoch)this.validation={inputs,settings,diagnostics:semantic};
++      for(const {entry,layout,form,symbols} of inputs)if(entry.compiled){entry.compiled.layoutBindings=JSON.parse(layout);entry.compiled.form=JSON.parse(form);entry.compiled.symbolBindings=JSON.parse(symbols);}
++      semantic=validateCompiledModules(modules,project.settings,JSON.parse(symbols)).map(d=>Object.freeze({...d,origin:'syntax'}));
++      if(epoch===this.epoch)this.validation={inputs,settings,symbols,diagnostics:semantic};

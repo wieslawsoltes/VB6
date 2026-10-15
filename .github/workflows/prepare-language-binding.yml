@@ -1,0 +1,46 @@
+name: Prepare exact language binding source objects
+on:
+  push:
+    branches: [build/language-binding-transfer-721e5a]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.repository == 'wieslawsoltes/VB6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: transfer
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: d20437cf95fd0dfb4eab4361189b94155ce3a65f
+          path: source
+      - name: Reconstruct and verify the locally tested source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat transfer/.language-binding-transfer/*.patch > "$RUNNER_TEMP/language.patch"
+          echo 'd474000e84562fc20e30414c96effb5632857cfe8e41a5f468898bb42ff4310a  '"$RUNNER_TEMP/language.patch" | sha256sum --check
+          cd source
+          test "$(git rev-parse HEAD)" = d20437cf95fd0dfb4eab4361189b94155ce3a65f
+          git apply --index --unidiff-zero "$RUNNER_TEMP/language.patch"
+          tree=$(git write-tree)
+          test "$tree" = 721e5add1ed711c9bc370380542b46c18831abc4
+          test -z "$(git ls-files .language-binding-transfer .github/workflows/prepare-language-binding.yml)"
+          candidate=$(printf '%s\n' 'Prepare verified language binding source tree' | git -c user.name='Wiesław Šoltés' -c user.email='wieslawsoltes@users.noreply.github.com' commit-tree "$tree" -p d20437cf95fd0dfb4eab4361189b94155ce3a65f)
+          git push origin "$candidate:refs/heads/build/language-binding-prepared-721e5a"
+          printf '%s\n' "$candidate" "$tree" > "$RUNNER_TEMP/prepared-revision.txt"
+          git archive --format=zip "$candidate" -o "$RUNNER_TEMP/prepared-source.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-language-binding-721e5a
+          path: |
+            ${{ runner.temp }}/prepared-revision.txt
+            ${{ runner.temp }}/prepared-source.zip
+          if-no-files-found: error
+          retention-days: 7
