@@ -1,34 +1,55 @@
-name: Diagnose WebKit range orientation
+name: Verify and stage macOS range fix
 on:
   push:
     branches: [automation/macos26-object-staging]
-permissions:
-  contents: read
+permissions: {}
 jobs:
-  diagnose:
+  objects:
     if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/automation/macos26-object-staging'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install playwright==1.57.0
+      - name: Reconstruct and verify reviewed source
+        run: node .github/macos26-stage-objects.mjs prepare
+      - name: Verify reviewed build and capability regressions
+        run: |
+          node tools/build.mjs
+          node --test tests/range-orientation.test.mjs
+      - run: python -m pip install playwright==1.57.0 Pillow
       - run: python -m playwright install --with-deps webkit
-      - run: python .github/macos26-range-diagnostic.py
-      - name: Retain versioned compatibility libraries for local engine reproduction
-        run: tar -czhf reports/webkit-compat-libraries.tar.gz -C /usr/lib/x86_64-linux-gnu libicudata.so.74 libicui18n.so.74 libicuuc.so.74 libwoff2dec.so.1.0.2 libwoff2common.so.1.0.2 libjpeg.so.8
+      - name: Require actual WebKit native pointer and paint behavior
+        env:
+          VB6_BROWSER: webkit
+        run: python tools/browser-application-theme-tests.py ApplicationThemes.test_macos_slider_orientation_values_and_arrowless_scrollbars ApplicationThemes.test_vertical_slider_native_hit_testing_drag_keys_disabled_and_live_resize
+      - name: Publish checked immutable blobs without moving refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/macos26-stage-objects.mjs publish
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: webkit-range-diagnostic
-          path: reports/range-diagnostic.json
+          name: macos26-range-evidence
+          path: |
+            reports/macos26-reviewed-object-shas.json
+            reports/application-themes/webkit
           retention-days: 7
+      - name: Retain local WebKit diagnostic GL dispatch library
+        if: always()
+        run: tar -czhf reports/webkit-gles.tar.gz -C /usr/lib/x86_64-linux-gnu libGLESv2.so.2
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: webkit-debug-libraries
-          path: reports/webkit-compat-libraries.tar.gz
-          compression-level: 0
+          name: webkit-debug-gles
+          path: reports/webkit-gles.tar.gz
           retention-days: 1
