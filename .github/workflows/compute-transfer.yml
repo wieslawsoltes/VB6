@@ -1,0 +1,103 @@
+name: Temporary compute transfer and acceptance
+'on':
+  push:
+    branches: [feat/compute-parity-transfer]
+    paths: ['.github/compute-transfer/**', '.github/workflows/compute-transfer.yml']
+permissions:
+  contents: read
+jobs:
+  transfer:
+    if: github.repository == 'wieslawsoltes/VB6' && github.ref == 'refs/heads/feat/compute-parity-transfer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      clean_sha: ${{ steps.transfer.outputs.clean_sha }}
+      clean_tree: ${{ steps.transfer.outputs.clean_tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: transfer
+        name: Verify exact source, preserve current main and push temporary branch only
+        run: python .github/compute-transfer/apply.py
+  oracle:
+    needs: [transfer]
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.transfer.outputs.clean_sha }}
+          persist-credentials: false
+      - name: Capture actual Windows Automation and NLS results
+        shell: pwsh
+        run: |
+          ./tools/compute-native-oracle.ps1
+          git rev-parse HEAD | Set-Content -Encoding utf8 reports/compute/oracle/exact-head.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compute-transfer-native-reference
+          path: reports/compute/oracle
+          if-no-files-found: error
+          retention-days: 14
+  acceptance:
+    needs: [transfer, oracle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.transfer.outputs.clean_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-browser
+        with:
+          browser: chromium
+          profile: rendering
+          mesa: 'true'
+      - uses: actions/download-artifact@v4
+        with:
+          name: compute-transfer-native-reference
+          path: reports/compute/oracle
+      - name: Verify source and run full host, CI and actual GPU acceptance
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ needs.transfer.outputs.clean_sha }}
+          EXPECTED_TREE: ${{ needs.transfer.outputs.clean_tree }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          assert Path('reports/compute/oracle/exact-head.txt').read_text(encoding='utf-8-sig').strip() == os.environ['EXPECTED_HEAD']
+          PY
+          python -m pip install -r tools/ci/requirements-checks.txt
+          python tools/ci/check.py
+          python tools/ci/test_check.py
+          node --test --test-concurrency=2 tests/*.test.mjs 2>&1 | tee reports/compute/full-node.log
+          npm run test:compute:browser
+          git diff --exit-code
+      - name: Archive reproducible tested source and reusable package
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/compute/source
+          git archive --format=zip HEAD -o reports/compute/source/source.zip
+          git bundle create reports/compute/source/history.bundle HEAD
+          git rev-parse HEAD HEAD^{tree} > reports/compute/source/revision.txt
+          if test -f artifacts/vb6-compute/package.json; then
+            (cd artifacts/vb6-compute && npm pack --ignore-scripts)
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compute-transfer-acceptance
+          path: |
+            reports/compute
+            artifacts/vb6-compute
+          if-no-files-found: error
+          retention-days: 14
