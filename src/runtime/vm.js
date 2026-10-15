@@ -312,7 +312,7 @@ export class VirtualMachine extends Signal {
     const intrinsicKey=String(name).endsWith('$')&&this.library.has(key+'$')?key+'$':key;
     if(this.library.has(intrinsicKey)){const value=this.library.get(intrinsicKey);return typeof value==='number'?tagScalar(value,value>=-32768&&value<=32767?'integer':'long'):tagScalar(value);}
     if(frame.module.optionExplicit)throw new VBError(`Variable not defined: ${name}`,500);
-    const cell=new Cell(defaultIdentifierType(name,frame.module.defaultTypes));frame.locals.set(key,cell);return readScalar(cell);
+    const cell=new Cell(defaultIdentifierType(node.name,frame.module.defaultTypes));frame.locals.set(key,cell);return readScalar(cell);
   }
   nativeKey(object,name){
     if(object===NOTHING||object===null||object===undefined)throw new VBError('Object variable or With block variable not set',91);
@@ -705,7 +705,14 @@ export class VirtualMachine extends Signal {
           case 'fileClose':if(!ins.handles.length)this.fs.close();else for(const h of ins.handles)this.fs.close(await this.evaluateScalar(h,frame));break;
           case 'filePrint':{const values=[];for(const e of ins.exprs)values.push(await this.defaultValue(await this.evaluateScalar(e,frame)));const text=values.map(v=>printScalar(v,ins.csv)).join(ins.csv?',':'');this.fs.print(await this.evaluateScalar(ins.handle,frame),text,ins.newline);break;}
           case 'fileInput':{const n=unbox(await this.evaluateScalar(ins.handle,frame));for(const target of ins.targets){const ref=await this.reference(target,frame,true);const value=ins.whole?this.fs.lineInput(n):this.fs.inputValue(n,ref.type);await ref.set(value);}break;}
-          case 'graphics':{const obj=await this.evaluateScalar(ins.object,frame,{raw:true}),control=obj?.__vbInstance?obj.formObject:obj;if(!control?.draw)throw new VBError('Object does not support graphics methods',438);const coords=[];for(const e of ins.coords)coords.push(numeric(await this.evaluateScalar(e,frame)));control.draw(ins.kind,coords,numeric(await this.evaluateScalar(ins.color,frame)),ins.fill);break;}
+          case 'graphicsExtended':case 'graphics':{
+            const obj=await this.evaluateScalar(ins.object,frame,{raw:true}),control=obj?.__vbInstance?obj.formObject:obj;
+            if(!control?.draw)throw new VBError('Object does not support graphics methods',438);
+            const coords=[];for(const e of ins.coords)coords.push(numeric(await this.evaluateScalar(e,frame)));
+            const color=ins.defaultColor?undefined:numeric(await this.evaluateScalar(ins.color,frame)),options={stepStart:ins.stepStart,stepEnd:ins.stepEnd,implicitStart:ins.implicitStart};
+            for(const key of ['start','end','aspect'])if(ins.arc?.[key])options[key]=numeric(await this.evaluateScalar(ins.arc[key],frame));
+            control.draw(ins.kind,coords,color,ins.fill,options);break;
+          }
           case 'raiseEvent':await this.raiseEvent(frame.instance,ins.expr.callee.name,ins.expr.args,frame);break;
           default:throw new VBError('Invalid bytecode instruction '+ins.op,1002);
         }

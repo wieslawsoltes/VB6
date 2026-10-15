@@ -15,9 +15,23 @@ test('implicit form and With receivers remain distinct and flags are case insens
  assert.deepEqual(parseGraphicsStatement('.PSet (1,2), 3').object,{kind:'with'});
  assert.equal(parseGraphicsStatement('Picture.Circle (1,2),F(3,4),RGB(5,6,7)').coords[2].args.length,2);
 });
-for(const text of ['Line (1)-(2,3)','Line (1,2)-(3,4),0,BB','PSet (1,2),3,4','Circle (1,2)','Circle (1,2),3,4,5','Line (1,2)'])test('invalid coordinate/flag syntax is diagnosed: '+text,()=>assert.throws(()=>parseGraphicsStatement(text)));
+for(const text of ['Line (1)-(2,3)','Line (1,2)-(3,4),0,BB','PSet (1,2),3,4','Circle (1,2)','Circle (1,2),3,4,5,6,7,8','Line (1,2)'])test('invalid coordinate/flag syntax is diagnosed: '+text,()=>assert.throws(()=>parseGraphicsStatement(text)));
 
 test('quoted parentheses inside coordinate arguments never change structural depth',()=>{
  const s=parseGraphicsStatement('Canvas.Line (F("("),1)-(2,F(")")),0');
  assert.equal(s.coords[0].args[0].value,'(');assert.equal(s.coords[3].args[0].value,')');
 });
+
+test('Step and implicit Line starts have explicit IR flags without rewriting receivers',()=>{
+ const s=parseGraphicsStatement('Canvas(Choose()).Line Step (F(),G())-Step (H(),J()), , BF');
+ assert.equal(s.object.kind,'call');assert.equal(s.stepStart,true);assert.equal(s.stepEnd,true);assert.equal(s.defaultColor,true);assert.equal(s.fill,true);
+ const implicit=parseGraphicsStatement('.Line -Step (1,2)');assert.equal(implicit.implicitStart,true);assert.equal(implicit.stepEnd,true);assert.equal(implicit.coords.length,4);
+ assert.equal(parseGraphicsStatement('PSet Step (1,2)').stepStart,true);
+});
+test('Circle omitted option slots and scale syntax remain structural',()=>{
+ const s=parseGraphicsStatement('Circle Step (1,2),Radius(),,Start(),,Aspect()');
+ assert.equal(s.defaultColor,true);assert.equal(s.arc.start.callee.name,'Start');assert.equal(s.arc.aspect.callee.name,'Aspect');assert.equal(s.arc.end,undefined);
+ assert.equal(parseGraphicsStatement('Circle (1,2),3,4,5').arc.start.value,5);
+ assert.equal(parseGraphicsStatement('Canvas.Scale (10,20)-(30,40)').kind,'scale');assert.deepEqual(parseGraphicsStatement('Scale').coords,[]);
+});
+for(const text of ['Scale (1,2)-(3,4),0','Circle Step -(1,2),3','Line Step -(1,2)','Circle (1,2),,0','Line (1,2)-Step 3,4'])test('reject malformed extended graphics: '+text,()=>assert.throws(()=>parseGraphicsStatement(text)));

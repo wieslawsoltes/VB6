@@ -9,3 +9,10 @@ test('all eight fill patterns and negative coordinates have stable 8px phase',()
 test('wide VB pens are solid without mutating the stored DrawStyle',()=>{for(let s=1;s<=4;s++){assert.ok(dashPattern(s,1).length);assert.deepEqual(dashPattern(s,2),[]);}});
 test('affine matrix composition and immutable paths',()=>{assert.deepEqual(multiplyTransform([2,0,0,3,4,5],[1,0,0,1,6,7]),[2,0,0,3,16,26]);const input=[['M',1,2],['Q',3,4,5,6],['C',1,2,3,4,5,6],['Z']];const p=normalizePath(input);input[0][1]=99;assert.equal(p[0][1],1);assert.throws(()=>p[0][1]=0);});
 test('only exact opaque integer rectangles/pixels take the triangle fast path',()=>{assert.ok(triangleCompatible(normalizeCommand('pixel',[0,0])));assert.ok(triangleCompatible(normalizeCommand('rect',[0,0,10,10],0,true)));for(const c of [normalizeCommand('rect',[0,0,10,10]),normalizeCommand('pixel',[.1,0]),normalizeCommand('pixel',[0,0],0,false,1,{opacity:.5}),normalizeCommand('pixel',[0,0],0,false,1,{drawMode:7}),normalizeCommand('line',[0,0,5,5])])assert.equal(triangleCompatible(c),false);});
+
+test('retained commands reject mutable or invalid colors before copying state',()=>{
+ for(const value of [{toString:()=> '#f00'},[],null,NaN,Infinity,1.5,0x100000000,'', 'x'.repeat(1025)])assert.throws(()=>normalizeCommand('pixel',[0,0],value),/color/);
+ assert.equal(normalizeCommand('pixel',[0,0],-2147483633).color,-2147483633);
+ assert.throws(()=>normalizeStyle({fillColor:{}}),/color/);
+ for(const kind of ['__proto__','constructor','toString'])assert.throws(()=>normalizeCommand(kind,[1,2]),/Unsupported/);
+});

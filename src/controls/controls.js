@@ -1,3 +1,5 @@
+import {controlSize,controlSystem,graphicsProperty,drawControl,printControl,measureControl,scaleControl,scaleLength,paintControlPicture} from '../graphics/control-graphics.js';
+import {finite} from '../graphics/contract.js';
 import {applyRangeOrientation,handleRangeEndpointKey} from './range-orientation.js';
 import {commandPaint,groupPaint,comboPaint,rangeProgress} from '../theme/control-paint.js';
 import {controlThemeColor,controlThemePaint} from '../theme/control-theme-color.js';
@@ -37,12 +39,12 @@ function safeImage(picture,assets={}){if(typeof picture==='string'){if(/^data:im
 export class BrowserControl {
   constructor(model,{controlRegistry=null,design=false,vm=null,instance=null,form=null,anchoring=false,assets={},backend='auto',onBackend=()=>{}}={}) {
     this.anchoring=(anchoring===true||form?.anchoring===true||vm?.program?.settings?.anchoring===true);this.controlRegistry=controlRegistry||vm?.host?.controlRegistry;this.__control=true;this.__type=model.type;this.model=model;this.design=design;this.vm=vm;this.instance=instance;this.form=form;this.assets=assets;this.backend=backend;this.onBackend=onBackend;this.disposed=false;this.type=model.type;
-    this.props={Left:0,Top:0,Width:1800,Height:450,Visible:-1,Enabled:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,BackColor:-2147483633,ForeColor:-2147483640,TabIndex:0,TabStop:-1,ToolTipText:'',Tag:'',...clone(CONTROL_DEFAULTS[model.type]||{}),...(this.controlRegistry?.defaults?.(model.type)||{}),...clone(model.properties||{}),Name:model.name};
+    this.props={Left:0,Top:0,Width:1800,Height:450,Visible:-1,Enabled:-1,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,BackColor:-2147483633,ForeColor:-2147483640,TabIndex:0,TabStop:-1,ToolTipText:'',Tag:'',DrawWidth:1,DrawStyle:0,DrawMode:13,FillStyle:1,FillColor:0,FontTransparent:-1,...clone(CONTROL_DEFAULTS[model.type]||{}),...(this.controlRegistry?.defaults?.(model.type)||{}),...clone(model.properties||{}),Name:model.name};
     for(const key of Object.keys(this.props))if(layoutKey(key))delete this.props[key];
     if(this.anchoring)for(const [key,value]of Object.entries(layoutDefaults(model)))this.props[key]=layoutProperty(key,model.properties?.[key]??value,model.properties||{});
     for(const [key,value]of Object.entries(this.props))if(value?.resource)this.props[key]=CONTROL_DEFAULTS[model.type]?.[key]??'';
     this.node=el('div',{class:'vb-control','data-control':model.name,'data-control-id':model.id,'data-type':model.type,tabindex:0});this.node.style.touchAction=design?'none':'auto';this.input=null;this.childHost=this.node;this.items=[...(this.props.List||[])];this.itemData=[];this.selectedIndices=new Set();this.gridData=clone(this.props.GridData||[]);this._colWidths=[];this.currentX=0;this.currentY=0;
-    const props=new Set([...RICH_SELECTION_PROPERTIES,...Object.keys(this.props),'Text','Caption','Value','ListIndex','Enabled','Visible','Left','Top','Width','Height','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','ToolTipText','Tag','MaxLength','Locked','PasswordChar','Default','Cancel','Min','Max','Rows','Cols','FixedRows','FixedCols','Row','Col','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataSource','RecordSource','DatabaseName','Connect','ConnectionString','CommandType','CursorType','LockType','ReadOnly','RecordsetType','DataMember','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Picture','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','CancelError','FileName','Filter','FilterIndex','DialogTitle','Flags','FontStrikethru','TextRTF','MultiLine','ScrollBars']);
+    const props=new Set([...RICH_SELECTION_PROPERTIES,...Object.keys(this.props),'Text','Caption','Value','ListIndex','Enabled','Visible','Left','Top','Width','Height','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','ToolTipText','Tag','MaxLength','Locked','PasswordChar','Default','Cancel','Min','Max','Rows','Cols','FixedRows','FixedCols','Row','Col','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','DrawMode','DrawStyle','FontTransparent','Image','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataSource','RecordSource','DatabaseName','Connect','ConnectionString','CommandType','CursorType','LockType','ReadOnly','RecordsetType','DataMember','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Picture','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','CancelError','FileName','Filter','FilterIndex','DialogTitle','Flags','FontStrikethru','TextRTF','MultiLine','ScrollBars']);
     for(const key of props)if(!['Nodes','Tabs','Panels','Buttons','ListItems','ColumnHeaders','ListImages'].includes(key)&&!(key in this))Object.defineProperty(this,key,{enumerable:true,configurable:true,get:()=>this.get(key),set:value=>this.set(key,value)});
     if(this.anchoring&&form)Object.defineProperty(this,'Container',{enumerable:true,get:()=>this.get('Container'),set:value=>this.set('Container',value)});
     if(this.anchoring&&['Form','MDIForm','Frame','PictureBox','TabStrip','SSTab'].includes(this.type)) {
@@ -72,8 +74,9 @@ export class BrowserControl {
     if(key==='Value'&&['DTPicker','MonthView'].includes(this.type)){const value=this.props.Value;if(value instanceof Date)return value;return new Date(String(value)+'T00:00:00');}
     if(key==='DataSource')return this._dataSource;
     if(key==='Data'&&this.type==='MSChart')return this.gridData[(this.props.Row||1)-1]?.[(this.props.Column||1)-1]||0;
-    if(key==='ScaleWidth')return this.props.ScaleWidth??(this.content||this.node).clientWidth*inputScaleFactor(this.props.ScaleMode??1);
-    if(key==='ScaleHeight')return this.props.ScaleHeight??(this.content||this.node).clientHeight*inputScaleFactor(this.props.ScaleMode??1,true);
+    if(key==='ScaleWidth')return this.props.ScaleWidth??controlSize(this).width*controlSystem(this).sx;
+    if(key==='ScaleHeight')return this.props.ScaleHeight??controlSize(this).height*controlSystem(this).sy;
+    if(key==='Image')return this.ensureSurface().toDataURL();
     if(key==='TextRTF')return this.rich?.rtf||'';
     if(this.type==='RichTextBox'&&RICH_SELECTION_PROPERTIES.includes(key)){const value=this.rich.style(key);return value===null?null:['SelIndent','SelHangingIndent','SelRightIndent'].includes(key)?value/15*units(this.form?.props.ScaleMode||1):value;}
     return this.props[key]??(['Text','Caption','ToolTipText','Tag','Path','Pattern','SimpleText','FileName','DialogTitle'].includes(key)?'':0);
@@ -81,6 +84,8 @@ export class BrowserControl {
   set(key,value,fromDOM=false){
     if(this.disposed)return;
     if(setTabProperty(this,key,value))return;
+    if(graphicsProperty(this,key,value))return;
+    if(key==='Image')throw new VBError('Image is read-only',383);
     if(key==='Container'&&this.anchoring&&this.form&&this.form!==this){
       const owner=this.form,parent=validateRuntimeContainer(owner,this,value===owner?null:value);
       bindTabChild(this,parent);
@@ -223,11 +228,18 @@ export class BrowserControl {
     if(this.anchoring&&['Form','MDIForm'].includes(this.type)){if(width!==undefined)this.props.ClientWidth=Number(width);if(height!==undefined)this.props.ClientHeight=Number(height);this.layoutController?.arrange();}
     else this.form?.layoutController?.edit(this,'Width');this.invalidate();}ZOrder(position=0){if(position===0)this.node.parentNode?.append(this.node);else this.node.parentNode?.prepend(this.node);}
   Cls(){this.surface?.clear();this.currentX=0;this.currentY=0;}
-  get CurrentX(){return this.currentX;}set CurrentX(v){this.currentX=Number(v);}get CurrentY(){return this.currentY;}set CurrentY(v){this.currentY=Number(v);}
+  get CurrentX(){return this.currentX;}set CurrentX(v){this.currentX=finite(v);}get CurrentY(){return this.currentY;}set CurrentY(v){this.currentY=finite(v);}
   ensureSurface(){if(!this.surface){this.node.style.position='absolute';this.surface=new GraphicsSurface(this.node,{backend:this.backend,background:this.props.BackColor,onBackend:this.onBackend});this.surface.setPicture(safeImage(this.props.Picture,this.assets));}return this.surface;}
-  draw(kind,coords,color=0,fill=false){const scale=units(this.props.ScaleMode||1),translated=coords.map((n,i)=>(n-(i%2?(this.props.ScaleTop||0):(this.props.ScaleLeft||0)))/scale);if(kind==='circle')translated[2]=coords[2]/scale;this.ensureSurface().add(kind,translated,color,fill,Number(this.props.DrawWidth)||1);}
-  Print(...values){const scale=units(this.props.ScaleMode||1);this.ensureSurface().text(values.map(v=>String(v??'')).join(' '),this.currentX/scale,this.currentY/scale,this.props.ForeColor,`${this.props.FontBold?'bold ':''}${Number(this.props.FontSize)*96/72}px Arial`);this.currentY+=Number(this.props.FontSize)*96/72*scale*1.3;}
-  Scale(x1,y1,x2,y2){this.props.ScaleLeft=x1;this.props.ScaleTop=y1;this.props.ScaleWidth=x2-x1;this.props.ScaleHeight=y2-y1;this.props.ScaleMode=0;}
+  draw(kind,coords,color,fill=false,options={}){return drawControl(this,kind,coords,color,fill,options);}
+  Print(...values){return printControl(this,values);}
+  TextWidth(text){return measureControl(this,text);}
+  TextHeight(text){return measureControl(this,text,true);}
+  Point(x,y){const s=controlSystem(this);return this.ensureSurface().point(s.x(x),s.y(y));}
+  PSet(x,y,color){return this.draw('pixel',[x,y],color);}
+  PaintPicture(picture,x,y,width,height,sx,sy,sw,sh,opcode){return paintControlPicture(this,typeof picture==='string'?safeImage(picture,this.assets):picture,x,y,width,height,sx,sy,sw,sh,opcode);}
+  Scale(...values){return scaleControl(this,...values);}
+  ScaleX(value,from,to){return scaleLength(this,value,from,to);}
+  ScaleY(value,from,to){return scaleLength(this,value,from,to,true);}
   updateTimer(){clearInterval(this.timerId);this.timerId=null;if(this.design||this.disposed||!this.form?.shown||!truth(this.props.Enabled)||!this.props.Interval)return;this.timerId=setInterval(()=>this.event('Timer',[],true),Math.max(10,Number(this.props.Interval)));}
   buildDataControl(){
     this._recordset=this.vm?.data?.createObject('ADODB.Recordset')||new MemoryRecordset();

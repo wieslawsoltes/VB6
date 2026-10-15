@@ -6,6 +6,13 @@ export const GRAPHICS_LIMITS = Object.freeze({commands:50000,commandBytes:32*102
 export const DRAW_MODES = Object.freeze({Blackness:1,NotMergePen:2,MaskNotPen:3,NotCopyPen:4,MaskPenNot:5,Invert:6,XorPen:7,NotMaskPen:8,MaskPen:9,NotXorPen:10,Nop:11,MergeNotPen:12,CopyPen:13,MergePenNot:14,MergePen:15,Whiteness:16});
 export const DRAW_STYLES = Object.freeze({Solid:0,Dash:1,Dot:2,DashDot:3,DashDotDot:4,Invisible:5,InsideSolid:6});
 export const FILL_STYLES = Object.freeze({Solid:0,Transparent:1,HorizontalLine:2,VerticalLine:3,UpwardDiagonal:4,DownwardDiagonal:5,Cross:6,DiagonalCross:7});
+/** Colors are immutable OLE_COLOR integers or bounded CSS strings. Do not
+ * retain caller objects whose toString/valueOf can change after a draw. */
+export function graphicsColor(value){
+  if(typeof value==='number'&&Number.isInteger(value)&&value>=-2147483648&&value<=0xffffffff)return value;
+  if(typeof value==='string'&&value.trim()&&value.length<=1024)return value;
+  throw new TypeError('Graphics color must be an OLE_COLOR integer or CSS string');
+}
 export function finite(value,name='coordinate',limit=GRAPHICS_LIMITS.coordinate){const n=Number(value);if(!Number.isFinite(n)||Math.abs(n)>limit)throw new RangeError(`Invalid graphics ${name}`);return n;}
 export function integer(value,min,max,name){const n=Number(value);if(!Number.isInteger(n)||n<min||n>max)throw new RangeError(`Invalid graphics ${name}`);return n;}
 export function dimensions(width,height,maxPixels=GRAPHICS_LIMITS.readPixels){width=integer(width,1,GRAPHICS_LIMITS.dimension,'width');height=integer(height,1,GRAPHICS_LIMITS.dimension,'height');if(width*height>maxPixels)throw new RangeError('Graphics pixel quota exceeded');return {width,height};}
@@ -19,7 +26,7 @@ export function normalizeStyle(options={}){
   if(!options||typeof options!=='object')throw new TypeError('Graphics style must be an object');
   const opacity=finite(options.opacity??1,'opacity',1);if(opacity<0)throw new RangeError('Invalid graphics opacity');
   const style={drawMode:integer(options.drawMode??13,1,16,'DrawMode'),drawStyle:integer(options.drawStyle??0,0,6,'DrawStyle'),fillStyle:integer(options.fillStyle??1,0,7,'FillStyle'),opacity,clip:copyClip(options.clip),transform:copyTransform(options.transform)};
-  if(options.fillColor!==undefined)style.fillColor=options.fillColor;
+  if(options.fillColor!==undefined)style.fillColor=graphicsColor(options.fillColor);
   if(options.stroke!==undefined)style.stroke=!!options.stroke;
   if(options.fillRule!==undefined&&!['nonzero','evenodd'].includes(options.fillRule))throw new RangeError('Invalid graphics fill rule');
   style.fillRule=options.fillRule||'nonzero';
@@ -36,13 +43,13 @@ export function rop3Byte(pattern,source,destination,truth=0xcc){let out=0;for(le
 export function rasterOperation(value=0x00cc0020){const n=Number(value);if(!Number.isInteger(n)||n< -2147483648||n>0xffffffff)throw new RangeError('Invalid raster operation');return (n>>>16)&255;}
 const counts={pixel:[2,3],line:[4,4],rect:[4,4],circle:[3,3],ellipse:[4,4],arc:[6,6],roundrect:[5,6],polyline:[4,32768],polygon:[6,32768]};
 export function normalizeCommand(kind,coords,color=0,fill=false,width=1,options={}){
-  const count=counts[kind];if(!count)throw new RangeError('Unsupported graphics primitive: '+kind);
+  const count=Object.hasOwn(counts,kind)?counts[kind]:null;if(!count)throw new RangeError('Unsupported graphics primitive: '+kind);
   if((!Array.isArray(coords)&&!ArrayBuffer.isView(coords))||coords.length<count[0]||coords.length>count[1]||['polyline','polygon'].includes(kind)&&coords.length%2)throw new TypeError('Invalid '+kind+' coordinates');
   const a=Array.from(coords,v=>finite(v));if(kind==='pixel')a.length=2;
   if(['circle','ellipse','arc'].includes(kind)&&a.slice(2,kind==='circle'?3:4).some(v=>v<0))throw new RangeError('Graphics radii cannot be negative');
   if(kind==='roundrect'&&a.slice(4).some(v=>v<0))throw new RangeError('Corner radii cannot be negative');
   width=integer(width,1,32767,'DrawWidth');const style=normalizeStyle(options);
-  const cmd={kind,coords:Object.freeze(a),color,fill:!!fill,width,style};
+  const cmd={kind,coords:Object.freeze(a),color:graphicsColor(color),fill:!!fill,width,style};
   if(kind==='arc'){cmd.radialStart=!!options.radialStart;cmd.radialEnd=!!options.radialEnd;}
   return Object.freeze(cmd);
 }
