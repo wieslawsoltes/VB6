@@ -66,7 +66,7 @@ test('every application boundary resets the same complete X11 role inventory',()
  for(const id of ['classic','standard','contrast','fluent','fluent-dark','macos26','macos26-dark']){
   const a=app(id);
   for(const key of ['app-check-rest-shadow','app-check-rest-image','app-check-width','app-input-focus-outline','app-aux-shadow','app-calendar-label','detail-default-shadow','detail-default-pressed-shadow'])assert.equal(a[key],'initial',`${id}: ${key}`);
-  assert.equal(a['detail-check-mark-width'],'8px');assert.equal(a['detail-radio-mark-radius'],'50%');
+  assert.equal(a['detail-check-mark-width'],THEMES[id].family==='macos26'?'10px':'8px');assert.equal(a['detail-radio-mark-radius'],'50%');
  }
  assert.equal(fs.readFileSync(new URL('../src/theme/application-palettes.css',import.meta.url),'utf8'),appCSS);
  assert.doesNotMatch(appCSS,/undefined|data-ide-theme|@import|https?:\/\//);
@@ -75,7 +75,7 @@ test('every application boundary resets the same complete X11 role inventory',()
 test('X11 edge/state checks are owned by both existing cross-engine browser harnesses',()=>{
  const read=name=>fs.readFileSync(new URL('../tools/'+name,import.meta.url),'utf8');
  assert.match(read('browser-theme-tests.py'),/class Themes\(X11IdeChecks, unittest\.TestCase\)/);
- assert.match(read('browser-application-theme-tests.py'),/class ApplicationThemes\(X11ApplicationChecks, unittest\.TestCase\)/);
+ assert.match(read('browser-application-theme-tests.py'),/class ApplicationThemes\(MacOSCompositeChecks, X11ApplicationChecks, unittest\.TestCase\)/);
  const checks=read('x11_theme_checks.py');
  assert.match(checks,/test_x11_integer_dpr_edge_pixels_and_fractional_metrics/);
  assert.match(checks,/for dpr in \(1, 1\.25, 1\.5, 2\)/);

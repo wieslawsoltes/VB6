@@ -53,7 +53,7 @@ test('tree removes a selected subtree once and permits key reuse', () => {
 });
 test('tree maintains stable sorted siblings without reordering the collection', () => {
   const t = new TreeNodes(undefined, undefined, {sorted: () => true}); const z = t.Add(undefined, undefined, 'z', 'Z'), a = t.Add(undefined, undefined, 'a', 'A');
-  assert.deepEqual(t.flattened().map(r => r.node.Key), ['a', 'z']); assert.equal(z.Index, 1); assert.equal(a.Next, z);
+  t.sort();assert.deepEqual(t.flattened().map(r => r.node.Key), ['a', 'z']); assert.equal(z.Index, 1); assert.equal(a.Next, z);
 });
 test('tree depth and subtree removal do not recurse or scan all nodes per descendant', () => {
   const t = new TreeNodes(); let n = t.Add(undefined, undefined, 'root'); const root = n;
@@ -89,4 +89,19 @@ test('empty and invalid control array bounds and indices fail explicitly', () =>
   assert.throws(() => a.LBound, error(9)); assert.throws(() => a.UBound, error(9));
   for (const n of [-1, 1.5, NaN, Infinity, 32768]) assert.throws(() => a.Load(n), error(380));
   a.Load(0); a.Load(32767); assert.equal(a.LBound, 0); assert.equal(a.UBound, 32767);
+});
+
+test('collection keys do not normalize VB type suffixes', () => {
+  const c=new ListItems();for(const key of ['x','x$','x%','x&','x!','x#','x@'])c.Add(undefined,key,key);
+  assert.equal(c.Count,7);assert.equal(c.Item('X$').Text,'x$');assert.equal(c.Item('X').Text,'x');
+});
+test('collection subscriptions release and preserve batched delivery', () => {
+  const c=new ListItems();let count=0;const off=c.subscribe(()=>count++);
+  c.batch(()=>{c.Add();c.Add();});assert.equal(count,1);off();c.Clear();assert.equal(count,1);
+});
+test('TreeView sort is an explicit operation, not an automatic insertion policy', () => {
+  const c=new TreeNodes(),p=c.Add(undefined,undefined,'p'),z=c.Add(p,4,'z','Zulu'),a=c.Add(p,4,'a','Alpha');
+  p.Sorted=-1;assert.equal(p.Child,a);assert.equal(a.Next,z);const b=c.Add(p,4,'b','Beta');assert.equal(z.Next,b);
+  p.Sorted=-1;assert.equal(a.Next,b);assert.equal(b.Next,z);b.Text='ZZZ';assert.equal(b.Next,z);
+  p.Sorted=-1;assert.equal(z.Next,b);assert.equal(b.Index,4);b.Parent={__nothing:true};assert.equal(b.Parent,null);
 });

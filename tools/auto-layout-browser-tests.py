@@ -148,6 +148,16 @@ class AutoLayout(unittest.TestCase):
         else:self.page.add_script_tag(url=self.base+'/dist/vb6-runtime.js')
         result=self.page.evaluate('''async()=>{const p=structuredClone(vb6Studio.project);p.modules[0].code='Option Explicit\\n';const root=document.createElement('div');document.body.append(root);const h=new VB6Runtime.RuntimeAPI.ApplicationHost(p,root,{persist:false});await h.start();const f=h.forms[0],before=f.layoutController.wrapped.size;for(let i=0;i<100;i++){const c=f.Controls.Add('VB.CommandButton','Transient'+i);c.Visible=-1;f.Controls.Remove(c);}const result={before,after:f.layoutController.wrapped.size,records:f.layoutController.records.size,controls:f.controls.length};h.dispose();root.remove();return result;}''')
         self.assertEqual(result['after'],result['before']);self.assertEqual(result['records'],result['controls']);self.done()
+    def test_diagnostics_worker_uses_owned_source_and_completes(self):
+        before=self.page.evaluate('vb6Studio.syntaxDiagnostics.metrics.responses')
+        self.page.evaluate('''()=>{const s=vb6Studio.syntaxDiagnostics;s.cancel();s.schedule(vb6Studio.project,0);s.start();}''')
+        self.page.wait_for_function('n=>vb6Studio.syntaxDiagnostics.metrics.responses>n',arg=before)
+        self.assertEqual(self.page.evaluate('vb6Studio.syntaxDiagnostics.mode'),'worker')
+        urls=[worker.url for worker in self.page.workers]
+        self.assertEqual(len(urls),1)
+        if MEMORY:self.assertTrue(urls[0].startswith('blob:'),urls)
+        else:self.assertEqual(urls,[self.base+'/dist/vb6-diagnostics-worker.js'])
+        self.done()
     def test_self_contained_html_preserves_advanced_responsive_layout(self):
         self.change({'LayoutMode':5,'LayoutGridColumns':'1fr 2fr'});self.select(['a','b','c']);self.change({'LayoutWidthMode':2});project=self.page.evaluate('vb6Studio.project')
         code="import {exportApplication} from './src/exporter/exporter.js';import fs from 'node:fs';process.stdout.write(exportApplication(JSON.parse(fs.readFileSync(0,'utf8')),{persist:false}));"

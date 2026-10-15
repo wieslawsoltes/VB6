@@ -1,10 +1,11 @@
+import {MACOS_REFERENCE} from '../src/theme/macos-reference-metrics.js';
 /** Shared caption/control paint, rebound at every IDE and application boundary.
  * No global theme selectors in the component sheet: nested apps stay independent.
  * Dimensions affect chrome only; authored client/control bounds are unchanged.
  */
 export function themeDetailTokens(theme) {
   const family=theme.family||'classic',classic=family==='classic',mac=family==='macos26',x11=family==='x11',fluent=family==='fluent';
-  const t=theme.tokens||{},c=theme.colors;
+  const t=theme.tokens||{},c=theme.colors,m=MACOS_REFERENCE[theme.scheme==='dark'?'dark':'light'];
   // Motif relief is a paint role, not an inverted text-contrast role.
   const captionTop=theme.scheme==='dark'?'#73939b':'#8b9ea6';
   const captionBottom=theme.scheme==='dark'?'#172c32':'#28373e';
@@ -19,19 +20,23 @@ export function themeDetailTokens(theme) {
     'pressed-shadow':classic?'var(--vb-bevel-pressed)':x11?captionPressed:'none',
     'button-border':'0px solid transparent',
     'button-radius':'0px','button-shift':classic||x11?'1px':'0px',
-    'button-width':classic?'initial':mac?'13px':fluent?'24px':'18px',
-    'button-height':mac?'13px':'initial','compact-width':classic?'initial':mac?'12px':fluent?'20px':'16px',
+    'button-width':classic?'initial':mac?'12px':fluent?'24px':'18px',
+    'button-height':mac?'12px':'initial','compact-width':classic?'initial':mac?'12px':fluent?'20px':'16px',
     'compact-height':mac?'12px':'initial',
     'emboss-display':classic||x11?'block':'none','controls-order':mac?'-2':'0',
-    'controls-gap':mac?'6px':x11?'0px':'2px','title-align':mac||x11?'center':'start',
+    'controls-gap':mac?'8px':x11?'0px':'2px','title-align':mac||x11?'center':'start',
     'system-icon-display':mac?'none':'inline-flex','close-order':mac?'-3':'0',
     'minimize-order':mac?'-2':'0','maximize-order':mac?'-1':'0',
     'close-gap':mac||fluent||x11?'0px':'2px','action-radius':mac?'50%':'0px',
-    'action-shadow':mac?'inset 0 0 0 1px #00000026':'initial',
+    'action-shadow':mac?'inset 0 0 0 1px #0000001f':'initial',
     'action-glyph-opacity':mac?'0':'1','action-ink':mac?'#272727':x11?c.titleText:c.text,
     'close-background':mac?'#ff5f57':x11?c.title:classic?c.face:'transparent',
     'minimize-background':mac?'#febc2e':x11?c.title:classic?c.face:'transparent',
+    'minimize-hover':mac?'#febc2e':'initial','minimize-pressed':mac?'#d99e22':'initial',
+    'minimize-ink':mac?'#6b4b00':'initial',
     'maximize-background':mac?'#28c840':x11?c.title:classic?c.face:'transparent',
+    'maximize-hover':mac?'#28c840':'initial','maximize-pressed':mac?'#1fa333':'initial',
+    'maximize-ink':mac?'#005b0c':'initial',
     'close-hover':mac?'#ff5f57':fluent?'#c42b1c':x11?c.title:classic?c.face:t.hover,
     'close-hover-ink':fluent?'#ffffff':mac?'#4d0000':x11?c.titleText:c.text,
     'close-pressed':mac?'#df4942':fluent?'#a92216':x11?c.title:classic?c.face:t.pressed,
@@ -68,5 +73,70 @@ export function themeDetailTokens(theme) {
     'check-mark-inset':x11?'2px':'2px auto auto 2px',
     'check-mark-width':x11?'auto':'8px','check-mark-height':x11?'auto':'8px'
   };
+  const macPaint={
+    'command-fill':m.neutral,'command-hover':m.neutral,'command-pressed':t.pressed,
+    'command-disabled':m.neutralDisabled,'command-ink':c.text,'default-fill':m.accent,
+    'default-ink':'#ffffff','default-pressed':m.accentPressed,
+    'default-outline-width':'0px','default-focus-ink':'currentColor','command-focus-inset':'1px','command-focus-width':'2px','command-pointer-focus-display':'none',
+    'check-edge-image':'none','field-shadow':`inset 0 0 0 1px ${m.fieldBorder}`,'command-border-block-style':'solid','command-border-block':'2px','command-background-clip':'padding-box','command-corner-radius':'6px / 8px',
+    'check-radius':'5px','check-border':'transparent','check-shadow':'none',
+    'check-size':'16px','check-fill':m.checkOff,'check-border-width':'0px','check-gap':'6px',
+    'check-mark-inset':'3px auto auto 3px','check-mark-width':'10px','check-mark-height':'9px','check-mark-left':'3px','check-mark-top':'3px',
+    'radio-dot-inset':'5px','mixed-width':'8px','mixed-height':'2px','mixed-left':'4px','mixed-top':'7px',
+    'check-disabled-fill':m.neutralDisabled,'check-disabled-mark':m.disabledLabel,
+    'composite-radius':'0px','label-padding':'2px','composite-border-width':'1px','composite-padding':'1px','richtext-padding':'4px',
+    'field-overflow':'visible','control-focus-width':'2px','field-border':t.border,'field-focus-shadow':`0 0 0 3px ${m.focus}, inset 0 0 0 1px ${t.focus}`,
+    'frame-shadow':'none','frame-fill':m.group,'frame-legend-fill':'transparent','frame-border':'transparent','frame-radius':'12px','status-border':'transparent',
+    'inactive-selection':m.inactiveSelection,'inactive-selection-ink':m.inactiveSelectionText,
+    'segment-fill':m.neutral,'segment-active':m.selectedControl,'segment-ink':'#ffffff',
+    'menu-material':'var(--app-material)','menu-backdrop':'var(--app-backdrop)',
+    'popup-radius':'10px','popup-padding':'4px','popup-item-radius':'5px',
+    'range-radius':'999px','range-thumb':'#ffffff','range-thumb-size':'20px','range-thumb-height':'18px','range-track-height':'6px',
+    'range-thumb-offset':'-6px','range-thumb-border':'0px solid transparent',
+    'range-thumb-shadow':'0 1px 5px #00000026, 0 0 1px #0000001a','range-track-border':'0px solid transparent',
+    'range-track':m.checkOff,'range-accent':m.selectedControl,
+    'progress-radius':'999px','progress-border':'transparent','progress-align':'center',
+    'progress-height':'8px','progress-padding':'0px','progress-border-width':'0px',
+    'progress-track':'none','progress-track-content':'""','progress-track-fill':m.progressTrack,
+    'progress-track-shadow':`inset 0 0 0 .5px ${m.separator}`,'progress-fill-position':'relative',
+    'tab-radius':'5px','tab-active-fill':m.selectedControl,'tab-active-ink':'#ffffff','tab-border':'transparent',
+    'tab-idle-fill':'transparent','tab-header-fill':`color-mix(in srgb, ${c.text} 7%, ${c.face})`,
+    'calendar-collapse':'separate','calendar-spacing':'2px','calendar-header':c.window,'calendar-header-ink':c.windowText,'calendar-day-radius':'50%',
+    'grid-border':t.separator,'grid-focus-style':'solid','menu-check-background':'transparent',
+    'scroll-track-image':'none','scroll-arrow-display':'none','scroll-border':'transparent','scroll-thumb-border':'0px solid transparent',
+    'scroll-thumb-shadow':'none','scroll-thumb-radius':'999px','scroll-thumb-cross':'calc(100% - 6px)','scroll-thumb-inset':'3px',
+    'tree-row-selection':c.selection,'tree-row-selection-ink':c.selectionText,'tree-label-selection':'transparent','tree-label-selection-ink':'inherit',
+    'tree-toggle-size':'0px','tree-toggle-border':'transparent','tree-toggle-fill':'transparent',
+    'tree-disclosure':'""','tree-disclosure-ink':c.gray,
+    'mnemonic-decoration':'none','mnemonic-image':'none','toolbar-fill':'transparent','toolbar-border':t.separator,
+    'combo-fill':m.neutral,'combo-ink':c.text,'combo-arrow-radius':'5px',
+    'combo-arrow-inset':'3px','combo-arrow-width':'24px','combo-padding-right':'30px',
+    'combo-arrow-position':'absolute','combo-arrow-top':'50%','combo-arrow-transform':'translateY(-50%)','combo-arrow-height':'20px','popup-button-fill':m.neutral,
+    'combo-chevron-size':'5px','combo-chevron-edge':'1.5px solid currentColor','combo-chevron-zero':'0px solid transparent','combo-chevron-transform':'rotate(45deg)',
+    'stepper-flex':'0 1 13px','stepper-width':'min(20px, 100%)','stepper-align':'center','stepper-justify':'center','stepper-horizontal-width':'min(13px, 50%)','stepper-horizontal-height':'min(20px, 100%)',
+    'stepper-glyph-size':'7px','stepper-glyph-edge':'1.5px solid currentColor',
+    'stepper-glyph-down':'rotate(45deg)','stepper-glyph-up':'rotate(225deg)',
+    'stepper-glyph-left':'rotate(135deg)','stepper-glyph-right':'rotate(-45deg)',
+    'stepper-fill':m.neutral,'stepper-radius':'6px','stepper-border':m.separator,
+    // Inactive state is inherited from the owning form. Every nested theme
+    // boundary rebinds these state roles, including an active nested app.
+    'inactive-command-fill':m.neutral,'inactive-command-ink':m.label,
+    'inactive-check-fill':m.inactiveCheck,'inactive-range-fill':m.inactiveRange,
+    // Native selected alpha (50/255) includes the neutral header (20/255).
+    // Apply the residual alpha over that header instead of compositing twice.
+    'inactive-progress-fill':'#aaaaaa','inactive-segment-fill':`color-mix(in srgb, ${m.inactiveSegment.slice(0,7)} ${(50-20)/(255-20)*100}%, transparent)`,
+    'state-check-fill':m.selectedControl,'state-check-ink':'#ffffff','state-progress-fill':m.accent,
+    // A list-only combo is a popup button, not an editable field plus a well.
+    'popup-button-height':'max(0px, calc(100% - 4px))','popup-button-align':'center',
+    'popup-button-shadow':'none','popup-button-padding':'3px 28px 3px 12px',
+    'popup-button-arrow-fill':'transparent','popup-button-arrow-right':'1px',
+    'popup-button-chevron-visibility':'hidden','popup-button-chevron-content':'""',
+    'popup-button-disabled':m.neutralDisabled,'popup-button-pressed':t.pressed,
+    'strip-border':'transparent','strip-left':'-1px','strip-top':'1px',
+    'strip-width':'calc(100% + 2px)','strip-padding':'0px','strip-fill':m.neutral,
+    'strip-column':'auto','strip-radius':'6px','strip-separator-content':'""','strip-separator':m.separator,
+    'dialog-actions':'flex-end'
+  };
+  for(const [key,value] of Object.entries(macPaint))if(mac||!(key in values))values[key]=mac?value:'initial';
   return Object.entries(values).map(([name,value])=>`  --detail-${name}: ${value};\n`).join('');
 }

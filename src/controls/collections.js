@@ -1,6 +1,7 @@
 /** Common-control collections. Collection indices are one based; ListBox data
  * indices are intentionally handled elsewhere. Mutations validate before commit.
  */
+import {markControlItem} from './compatibility-contract.js';
 import { VBError } from '../language/lexer.js';
 import { lower } from '../core/core.js';
 
@@ -10,6 +11,7 @@ export function controlInteger(value, min, max, number = 380) {
   if (!Number.isSafeInteger(n) || n < min || n > max) fail('Invalid property value or index', number);
   return n;
 }
+const collectionKey = value => String(value).toLowerCase();
 const boolean = value => value ? -1 : 0;
 const string = value => String(value ?? '');
 const owner = new WeakMap(), ordinal = new WeakMap();
@@ -26,28 +28,30 @@ function properties(item, values, changed) {
 export class ControlCollection {
   constructor(onChange = () => {}) {
     this.items = []; this.onChange = onChange; this.keys = new Map(); this.revision = 0;
-    this.depth = 0; this.dirty = false;
+    this.depth = 0; this.dirty = false; this.listeners = new Set();
   }
   get Count() { return this.items.length; }
-  changed() { this.revision++; if (this.depth) this.dirty = true; else this.onChange(); }
+  subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  notify() { this.onChange(); for (const listener of [...this.listeners]) listener(); }
+  changed() { this.revision++; if (this.depth) this.dirty = true; else this.notify(); }
   batch(action) {
     this.depth++;
     try { return action(); }
-    finally { if (!--this.depth && this.dirty) {this.dirty = false; this.onChange();} }
+    finally { if (!--this.depth && this.dirty) {this.dirty = false; this.notify();} }
   }
   owns(item) { return !!item && owner.get(item) === this; }
   require(item) { if (!this.owns(item)) fail('Element not found', 35601); return item; }
   Item(key) {
     const item = typeof key === 'number'
       ? this.items[controlInteger(key, 1, this.Count, 35600) - 1]
-      : this.keys.get(lower(string(key)));
+      : this.keys.get(collectionKey(string(key)));
     if (!item) fail('Element not found', 35601);
     return item;
   }
   index(key) { return this.Item(key).Index - 1; }
   insertion(index) { return index === undefined || index === 0 ? this.Count : controlInteger(index, 1, this.Count + 1, 35600) - 1; }
   checkKey(key, except = null) {
-    key = string(key); const existing = key && this.keys.get(lower(key));
+    key = string(key); const existing = key && this.keys.get(collectionKey(key));
     if (existing && existing !== except) fail('Key is not unique in collection', 35602);
     return key;
   }
@@ -59,15 +63,17 @@ export class ControlCollection {
       get: () => currentKey, set: value => {
         const next = this.owns(item) ? this.checkKey(value, item) : string(value);
         if (next === currentKey) return;
-        if (this.owns(item)) {if (currentKey) this.keys.delete(lower(currentKey)); if (next) this.keys.set(lower(next), item);}
+        if (this.owns(item)) {if (currentKey) this.keys.delete(collectionKey(currentKey)); if (next) this.keys.set(collectionKey(next), item);}
         currentKey = next; if (this.owns(item)) this.changed();
       }});
     Object.defineProperty(item, 'Index', {enumerable: true, configurable: true, get: () => ordinal.get(item) || 0});
-    owner.set(item, this); if (key) this.keys.set(lower(key), item);
+    const kind={TreeNodes:'Node',ListItems:'ListItem',ListSubItems:'ListSubItem',ColumnHeaders:'ColumnHeader',ToolbarButtons:'Button',ButtonMenus:'ButtonMenu',StatusPanels:'Panel',TabItems:'Tab',ImageItems:'ListImage'}[this.constructor.name];
+    if(kind)markControlItem(item,kind);
+    owner.set(item, this); if (key) this.keys.set(collectionKey(key), item);
     this.items.splice(at, 0, item); this.reindex(at); this.changed(); return item;
   }
   reindex(start = 0) { for (let i = start; i < this.Count; i++) ordinal.set(this.items[i], i + 1); }
-  detach(item) { if (item.Key) this.keys.delete(lower(item.Key)); owner.delete(item); ordinal.delete(item); }
+  detach(item) { if (item.Key) this.keys.delete(collectionKey(item.Key)); owner.delete(item); ordinal.delete(item); }
   Remove(key) { const at = this.index(key); this.detach(this.items[at]); this.items.splice(at, 1); this.reindex(at); this.changed(); }
   Clear() { if (!this.Count) return; for (const item of this.items) this.detach(item); this.items = []; this.changed(); }
   [Symbol.iterator]() { return this.items[Symbol.iterator](); }
@@ -83,7 +89,7 @@ export class TreeNodes extends ControlCollection {
   children(parent) { return parent ? nodeState.get(this.require(parent)).children : this.roots; }
   placement(relative, relationship = 2, moving = null) {
     const relation = controlInteger(relationship, 0, 4);
-    const rel = relative === undefined || relative === null || relative === '' ? null
+    const rel = relative === undefined || relative === null || relative?.__nothing || relative === '' ? null
       : typeof relative === 'object' ? this.require(relative) : this.Item(relative);
     if (rel === moving && moving) fail('A node cannot be relative to itself');
     const parent = rel ? relation === 4 ? rel : rel.Parent : null;
@@ -95,13 +101,14 @@ export class TreeNodes extends ControlCollection {
   }
   Add(relative, relationship = 2, key = '', text = '', image, selectedImage) {
     this.checkKey(key); const {parent, at} = this.placement(relative, relationship);
-    const item = {Key: key, Tag: ''}, state = {parent, children: [], selected: 0};
+    const item = {Key: key, Tag: ''}, state = {parent, children: [], selected: 0, sorted: 0};
     nodeState.set(item, state);
     const changed = () => {if (this.owns(item)) this.changed();};
     for (const [name, value] of Object.entries({Text: string(text), Image: image, SelectedImage: selectedImage,
-      ExpandedImage: undefined, Bold: 0, Checked: 0, Expanded: 0, Sorted: 0, ForeColor: null, BackColor: null}))
+      ExpandedImage: undefined, Bold: 0, Checked: 0, Expanded: 0, ForeColor: null, BackColor: null}))
       observable(item, name, value, changed, name === 'Text' ? string : ['Bold', 'Checked', 'Expanded', 'Sorted'].includes(name) ? boolean : v => v);
     Object.defineProperties(item, {
+      Sorted: {enumerable: true, get: () => state.sorted, set: value => {state.sorted = boolean(value); if (state.sorted && this.owns(item)) this.sort(item);}},
       Parent: {enumerable: true, get: () => state.parent, set: value => this.move(item, value, 4)},
       Selected: {enumerable: true, get: () => state.selected, set: value => this.select(value ? item : this.selected === item ? null : this.selected)},
       Children: {get: () => state.children.length},
@@ -121,10 +128,12 @@ export class TreeNodes extends ControlCollection {
     this.batch(() => {this.insert(item); this.children(parent).splice(at, 0, item);});
     return item;
   }
-  ordered(parent = null) {
-    const children = this.children(parent);
-    return (parent ? parent.Sorted : this.options.sorted?.())
-      ? children.slice().sort((a, b) => a.Text.localeCompare(b.Text)) : children;
+  ordered(parent = null) { return this.children(parent); }
+  sort(parent = null) {
+    // VB6 sorts the current siblings only. Later Add/Move/Text mutations do not
+    // implicitly re-sort; assigning Sorted=True again explicitly sorts them.
+    this.children(parent).sort((a,b) => a.Text.localeCompare(b.Text, undefined, {sensitivity:'base'}));
+    this.changed();
   }
   sibling(item, delta) {this.require(item); const siblings = this.ordered(item.Parent); return siblings[siblings.indexOf(item) + delta] || null;}
   move(item, relative, relationship = 4) {
@@ -225,7 +234,13 @@ export class ButtonMenus extends ControlCollection {
 export class ToolbarButtons extends ControlCollection {
   Add(index, key = '', caption = '', style = 0, image) {
     const item = {Key: key, Tag: ''}, changed = () => {if (this.owns(item)) this.changed();};
-    properties(item, {Caption: string(caption), Image: image, Enabled: -1, Visible: -1, Value: 0, ToolTipText: '', Description: '', MixedState: 0}, changed);
+    properties(item, {Caption: string(caption), Image: image, Enabled: -1, Visible: -1, ToolTipText: '', Description: '', MixedState: 0}, changed);
+    let pressed = 0;
+    Object.defineProperty(item,'Value',{enumerable:true,get:()=>pressed,set:value=>{
+      const next=controlInteger(value,0,1);if(next===pressed)return;
+      this.batch(()=>{if(next&&item.Style===2&&this.owns(item)){const at=item.Index-1;for(const step of [-1,1])for(let i=at+step;i>=0&&i<this.Count&&this.items[i].Style===2;i+=step)this.items[i].Value=0;}pressed=next;changed();});
+    }});
+    observable(item,'Width',360,changed,value=>{const n=Number(value);if(!Number.isFinite(n)||n<0||n>300000)fail('Invalid button width');return n;});
     observable(item, 'Style', style, changed, value => controlInteger(value, 0, 5));
     item.ButtonMenus = new ButtonMenus(changed);
     return this.insert(item, index);
@@ -234,7 +249,9 @@ export class ToolbarButtons extends ControlCollection {
 export class StatusPanels extends ControlCollection {
   Add(index, key = '', text = '', style = 0) {
     const item = {Key: key, Tag: ''}, changed = () => {if (this.owns(item)) this.changed();};
-    properties(item, {Text: string(text), Style: style, Width: 1440, MinWidth: 0, AutoSize: 0, Alignment: 0, Enabled: -1, Visible: -1, ToolTipText: '', Picture: '', Bevel: 1}, changed);
+    properties(item, {Text: string(text), Enabled: -1, Visible: -1, ToolTipText: '', Picture: ''}, changed);
+    for(const [key,value,max]of [['Style',style,6],['AutoSize',0,2],['Alignment',0,2],['Bevel',1,2]])observable(item,key,value,changed,v=>controlInteger(v,0,max));
+    for(const [key,value]of [['Width',1440],['MinWidth',0]])observable(item,key,value,changed,v=>{const n=Number(v);if(!Number.isFinite(n)||n<0||n>300000)fail('Invalid panel width');return n;});
     return this.insert(item, index);
   }
 }

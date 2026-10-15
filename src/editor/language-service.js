@@ -1,3 +1,4 @@
+import {controlEventSignature} from '../controls/compatibility-contract.js';
 import {isWebBrowser,webBrowserEventSignature} from '../controls/webbrowser-contract.js';
 import { escapeHTML, lower } from '../core/core.js';
 export const KEYWORDS='DefBool DefByte DefInt DefLng DefCur DefSng DefDbl DefDate DefStr DefObj DefVar Implements Option Explicit Base Compare Text Binary Private Public Global Friend Static Dim ReDim Preserve Const As New Set Let Call Sub Function Property Get End Exit If Then Else ElseIf For Each To Step Next Do Loop While Until Wend Select Case Is With WithEvents GoTo GoSub Return On Error Resume Stop And Or Xor Not Eqv Imp Mod Like True False Nothing Null Empty ByVal ByRef Optional ParamArray Type TypeOf LSet RSet Enum Implements RaiseEvent Event Open Close Print Write Input Line Append Output Random Binary Access Read Shared Lock Unlock Integer Long Single Double Currency Decimal Byte Boolean String Date Object Variant Me Debug Load Unload'.split(' ');
@@ -33,5 +34,6 @@ export function formatCode(code,tabWidth=4){
   }).join('\n');
 }
 export function defaultEventSignature(type,event){
+  const controlSignature=controlEventSignature(type,event);if(controlSignature!==undefined)return controlSignature;
   if(type==='SSTab'&&event==='Click')return 'PreviousTab As Integer';
   if(isWebBrowser(type)){const signature=webBrowserEventSignature(event);if(signature!==undefined)return signature;}if(event==='KeyDown'||event==='KeyUp')return 'KeyCode As Integer, Shift As Integer';if(event==='KeyPress')return 'KeyAscii As Integer';if(['MouseDown','MouseMove','MouseUp'].includes(event))return 'Button As Integer, Shift As Integer, X As Single, Y As Single';if(event==='QueryUnload')return 'Cancel As Integer, UnloadMode As Integer';if(event==='Unload')return 'Cancel As Integer';if(event==='NodeClick')return 'ByVal Node As Object';if(event==='ItemClick')return 'ByVal Item As Object';if(event==='ButtonClick')return 'ByVal Button As Object';if(event==='DateClick')return 'ByVal DateClicked As Date';return '';}

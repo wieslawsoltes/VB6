@@ -38,12 +38,14 @@
  order:var(--detail-close-order,0);margin-inline-start:var(--detail-close-gap,2px);
 }
 :is(.window-buttons button,.vb-window-button,.tool-caption button):is([data-caption-action="minimize"],:has(>.icon[data-icon="minimize"])) {
- --caption-rest:var(--detail-minimize-background);--caption-ink:var(--detail-action-ink);
+ --caption-rest:var(--detail-minimize-background);--caption-ink:var(--detail-minimize-ink,var(--detail-action-ink));
+ --caption-hover:var(--detail-minimize-hover);--caption-pressed:var(--detail-minimize-pressed);
  --caption-radius:var(--detail-action-radius);--caption-shadow:var(--detail-action-shadow);
  --caption-glyph-opacity:var(--detail-action-glyph-opacity);order:var(--detail-minimize-order,0);
 }
 :is(.window-buttons button,.vb-window-button):is([data-caption-action="maximize"],[aria-label="Maximize document"],[aria-label="Restore document"]:not([data-caption-action="minimize"])) {
- --caption-rest:var(--detail-maximize-background);--caption-ink:var(--detail-action-ink);
+ --caption-rest:var(--detail-maximize-background);--caption-ink:var(--detail-maximize-ink,var(--detail-action-ink));
+ --caption-hover:var(--detail-maximize-hover);--caption-pressed:var(--detail-maximize-pressed);
  --caption-radius:var(--detail-action-radius);--caption-shadow:var(--detail-action-shadow);
  --caption-glyph-opacity:var(--detail-action-glyph-opacity);order:var(--detail-maximize-order,0);
 }
@@ -90,6 +92,11 @@
 :is(.window-buttons,.vb-form-title,.tool-caption):is(:hover,:focus-within) {--caption-visible:1;}
 :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close)[hidden] {display:none!important;}
 .vb-form-title>.vb-window-button:last-child {margin-inline-start:var(--detail-close-gap,2px);}
+@media(forced-colors:none) {
+ :is(.window-buttons button,.caption-close,.tool-caption button,.vb-window-button,.command-floating-close):is(:disabled,[aria-disabled=true])>.icon {
+  opacity:var(--detail-action-glyph-opacity,1);
+ }
+}
 /* Buttons remain functional and legible when a form/document loses activation. */
 :is(.vb-inactive>.vb-form-title,.mdi-window:not(.mdi-active)>.document-title) {
  --detail-close-background:var(--detail-disabled-background);--detail-minimize-background:var(--detail-disabled-background);
@@ -105,7 +112,7 @@
  clip-path:var(--detail-check-clip);height:var(--detail-check-mark-height,8px);
  inset:var(--detail-check-mark-inset,2px auto auto 2px);width:var(--detail-check-mark-width,8px);
 }
-.vb-command.default-button {outline-color:var(--detail-focus-color,var(--vb-text));}
+.vb-command.default-button {outline-width:var(--detail-default-outline-width,1px);outline-color:var(--detail-focus-color,var(--vb-text));}
 .vb-command:focus::after {border-style:var(--detail-focus-style,dotted);border-width:var(--detail-command-focus-width,1px);}
 .vb-dialog-actions :is(button:focus-visible,.vb-default-button) {
  outline:var(--detail-focus-width,1px) var(--detail-focus-style,dotted) var(--detail-focus-color,var(--vb-text));outline-offset:1px;
@@ -163,8 +170,8 @@
  .vb-dialog-actions .vb-default-button:active:not(:disabled) {box-shadow:var(--winui-ButtonShadow,var(--detail-default-pressed-shadow,var(--app-pressed-shadow,var(--vb-bevel-pressed))));}
  .vb-dialog-actions .vb-default-button:focus-visible {outline:var(--detail-focus-width,1px) var(--detail-focus-style,dotted) var(--detail-focus-color,var(--vb-text));outline-offset:var(--detail-default-focus-offset,1px);}
  .vb-check input[type=checkbox]:indeterminate:disabled::after {background:var(--vb-gray);}
- .vb-range::-webkit-slider-thumb {box-shadow:var(--app-range-thumb-shadow,var(--vb-bevel-raised));}
- .vb-range::-moz-range-thumb {box-shadow:var(--app-range-thumb-shadow,none);}
+ .vb-range::-webkit-slider-thumb {box-shadow:var(--detail-range-thumb-shadow,var(--app-range-thumb-shadow,var(--vb-bevel-raised)));}
+ .vb-range::-moz-range-thumb {box-shadow:var(--detail-range-thumb-shadow,var(--app-range-thumb-shadow,none));}
  *::-webkit-scrollbar-track {box-shadow:var(--detail-scrollbar-track-shadow,none);}
  *::-webkit-scrollbar-button:single-button {box-shadow:var(--detail-scrollbar-button-shadow,var(--vb-bevel-raised));}
  *::-webkit-scrollbar-button:single-button:active {box-shadow:var(--detail-scrollbar-button-pressed-shadow,var(--vb-bevel-pressed));}

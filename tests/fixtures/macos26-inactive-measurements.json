@@ -1,0 +1,152 @@
+{
+  "schema": 1,
+  "captureRevision": "4b6c481cfa3264dfb2f8e40de905c23e57ea76f2",
+  "artifact": 11954783994,
+  "os": "Version 26.6.2 (Build 25G83)",
+  "inactiveEnvironment": [
+    {
+      "applicationActive": true,
+      "keyWindow": false,
+      "otherWindowIsKey": true,
+      "scale": 1,
+      "scheme": "light"
+    },
+    {
+      "applicationActive": true,
+      "keyWindow": false,
+      "otherWindowIsKey": true,
+      "scale": 2,
+      "scheme": "light"
+    },
+    {
+      "applicationActive": true,
+      "keyWindow": false,
+      "otherWindowIsKey": true,
+      "scale": 1,
+      "scheme": "dark"
+    },
+    {
+      "applicationActive": true,
+      "keyWindow": false,
+      "otherWindowIsKey": true,
+      "scale": 2,
+      "scheme": "dark"
+    }
+  ],
+  "measurements": {
+    "light": {
+      "default-button": {
+        "rgba": [
+          0,
+          0,
+          0,
+          20
+        ],
+        "sourceFile": "light-inactive-default-button-1x.png",
+        "sourceSHA256": "1e15917b6c5fefdec6e4ffd7d0163c6e83ff4644a7bf0cb07caca3ddaf7662d8",
+        "matchingPixels": 6453
+      },
+      "check-on": {
+        "rgba": [
+          0,
+          0,
+          0,
+          36
+        ],
+        "sourceFile": "light-inactive-check-on-1x.png",
+        "sourceSHA256": "023b22a7d5b0e1e9c919ac2e746dca175066eb25b077f55611ce9bf64be44234",
+        "matchingPixels": 151
+      },
+      "slider": {
+        "rgba": [
+          0,
+          0,
+          0,
+          58
+        ],
+        "sourceFile": "light-inactive-slider-1x.png",
+        "sourceSHA256": "a844df7458ecd9a7f7ebdc9a80fcfe5c9feb2c126b7c2ecc6d86a98e4754251d",
+        "matchingPixels": 750
+      },
+      "segmented-control": {
+        "rgba": [
+          0,
+          0,
+          0,
+          50
+        ],
+        "sourceFile": "light-inactive-segmented-control-1x.png",
+        "sourceSHA256": "87d9676b7cbac76fab153e3753076930a4864dea62ad108aab6f9574913f9340",
+        "matchingPixels": 1832
+      },
+      "progress": {
+        "rgba": [
+          170,
+          170,
+          170,
+          255
+        ],
+        "sourceFile": "light-inactive-progress-1x.png",
+        "sourceSHA256": "6b25e78e2137ca5e9efd42862d08949876bedbf355a54963f321775d3f9ed31f",
+        "matchingPixels": 1082
+      }
+    },
+    "dark": {
+      "default-button": {
+        "rgba": [
+          255,
+          255,
+          255,
+          20
+        ],
+        "sourceFile": "dark-inactive-default-button-1x.png",
+        "sourceSHA256": "873b9a5a331bd7db03671fb299700565300aee870b89d4b504ef6f86abd0a9ce",
+        "matchingPixels": 6429
+      },
+      "check-on": {
+        "rgba": [
+          255,
+          255,
+          255,
+          36
+        ],
+        "sourceFile": "dark-inactive-check-on-1x.png",
+        "sourceSHA256": "17b050083731360b8f38fae1ec596536018f4cf4b44af1490073643895fc3cf7",
+        "matchingPixels": 150
+      },
+      "slider": {
+        "rgba": [
+          255,
+          255,
+          255,
+          58
+        ],
+        "sourceFile": "dark-inactive-slider-1x.png",
+        "sourceSHA256": "774e0ca810bc3d956dda295706d0eef0c906e4b7362dd5eede3eac8136afa33d",
+        "matchingPixels": 673
+      },
+      "segmented-control": {
+        "rgba": [
+          255,
+          255,
+          255,
+          50
+        ],
+        "sourceFile": "dark-inactive-segmented-control-1x.png",
+        "sourceSHA256": "cf7cdcae14e54110382eb74c3ad4be86b24f33315231f77f8b3c09dac7351550",
+        "matchingPixels": 1802
+      },
+      "progress": {
+        "rgba": [
+          170,
+          170,
+          170,
+          255
+        ],
+        "sourceFile": "dark-inactive-progress-1x.png",
+        "sourceSHA256": "8a2652661be5e1c6d34f001833a9de281c8292e01599284f8bd42c705be92b0e",
+        "matchingPixels": 1082
+      }
+    }
+  }
+}

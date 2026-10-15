@@ -734,6 +734,26 @@ jobs:
       - name: Verify trusted local distribution with actual Apple tools
         if: runner.os == 'macOS'
         run: node tools/test-macos-distribution.mjs
+      - name: Capture macOS 26 AppKit appearance references
+        if: matrix.os == 'macos-26'
+        run: |
+          mkdir -p reports/macos-theme-reference
+          swiftc tools/macos-theme-reference.swift -o reports/macos-theme-reference/capture -framework AppKit
+          reports/macos-theme-reference/capture
+          rm reports/macos-theme-reference/capture
+      - name: Prepare same-host macOS WebKit comparison
+        if: matrix.os == 'macos-26'
+        uses: ./.github/actions/setup-browser
+        with:
+          browser: webkit
+      - name: Compare every AppKit state with actual browser pixels
+        if: matrix.os == 'macos-26'
+        run: |
+          python tools/test_macos_theme_compare.py
+          python tools/browser-macos-reference-tests.py --native-dir reports/macos-theme-reference
+          python -m playwright install chromium
+          VB6_BROWSER=chromium python tools/browser-macos-reference-tests.py --native-dir reports/macos-theme-reference
+          git diff --exit-code
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -741,6 +761,8 @@ jobs:
           path: |
             reports/macos-aot
             reports/macos-aot-distribution
+            reports/macos-theme-reference
+            reports/macos-theme-browser
             artifacts/macos-aot
           retention-days: 14
       - uses: actions/upload-artifact@v4

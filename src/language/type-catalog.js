@@ -1,3 +1,4 @@
+import {installControlTypeCatalog} from './control-type-catalog.js';
 import {installWebBrowserTypeCatalog} from './webbrowser-type-catalog.js';
 import {installDataTypeCatalog} from './data-type-catalog.js';
 import {BUILTIN_SIGNATURES} from '../runtime/signatures.js';
@@ -239,3 +240,5 @@ for(const type of TYPE_CATALOG.values())type.creatable=browserConstructors.has(s
 for(const name of ['Form','MDIForm','PictureBox'])builtinType(name).members.push(member('hDC','Long'));
 
 installWebBrowserTypeCatalog({add,member,method,enumType:(name,pattern)=>ENUM_TYPES.set(symbolKey(name),{name,kind:'enum',members:CONSTANT_SYMBOLS.filter(s=>pattern.test(s.name)).map(s=>({...s,type:name,parentType:name}))})});
+
+installControlTypeCatalog({add,get:builtinType,member,method,props,enumType:(name,pattern)=>ENUM_TYPES.set(symbolKey(name),{name,kind:'enum',members:CONSTANT_SYMBOLS.filter(s=>pattern.test(s.name)).map(s=>({...s,type:name,parentType:name}))})});

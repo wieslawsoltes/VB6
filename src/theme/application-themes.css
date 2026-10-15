@@ -21,9 +21,9 @@
 .vb-command:focus::after {border-color:var(--app-focus,var(--vb-text));border-radius:var(--app-radius,0);}
 .vb-frame {border-color:var(--app-border,var(--vb-shadow));border-radius:var(--app-radius,0);}
 .vb-picture,.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-radius:var(--app-radius,0);}
-.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-color:var(--app-composite-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
+.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-width:var(--detail-composite-border-width,2px);border-color:var(--app-composite-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
 .vb-tree-toggle {border-radius:var(--app-radius,0);border-color:var(--app-border,var(--vb-shadow));}
-.vb-check input {border-radius:var(--app-radius,0);border-color:var(--app-check-rest-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));background:var(--app-check-rest-background,var(--vb-window));box-shadow:var(--app-check-rest-shadow,inset 1px 1px var(--vb-dark));}
+.vb-check input {border-radius:var(--detail-check-radius,var(--app-radius,0));border-color:var(--app-check-rest-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));background:var(--app-check-rest-background,var(--vb-window));box-shadow:var(--app-check-rest-shadow,inset 1px 1px var(--vb-dark));}
 .vb-check input[type=radio] {border-radius:var(--app-radio-radius,50%);}
 .vb-check input:checked {background:var(--app-check-background,var(--vb-window));border-color:var(--app-check-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));box-shadow:var(--app-check-shadow,none);}
 .vb-check input[type=checkbox]:checked::after,.vb-check input[type=radio]:checked::after {background:var(--app-check-mark,var(--vb-window-text));}
@@ -35,30 +35,30 @@
 .vb-check input:disabled::after {background:var(--vb-gray);}
 .vb-check input:focus-visible {outline:var(--app-focus-width,1px) var(--app-focus-style,dotted) var(--app-focus,var(--vb-text));outline-offset:2px;}
 .vb-dialog input:not([type=checkbox]):not([type=radio]):focus-visible {outline:var(--app-focus-width,0px) solid var(--app-focus,var(--vb-text));outline-offset:1px;}
-.vb-progress {border-radius:var(--app-radius,0);border-color:var(--app-composite-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
-.vb-progress-fill {background:var(--app-progress-fill,repeating-linear-gradient(90deg,var(--vb-selection) 0px,var(--vb-selection) 8px,transparent 8px,transparent 10px));border-radius:var(--app-radius,0);}
-.vb-status-panel {border-color:var(--app-status-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
+.vb-progress {border-radius:var(--detail-progress-radius,var(--app-radius,0));border-color:var(--detail-progress-border,var(--app-composite-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow)));align-items:var(--detail-progress-align,stretch);background-image:var(--detail-progress-track,none);}
+.vb-progress-fill {background:var(--app-progress-fill,repeating-linear-gradient(90deg,var(--vb-selection) 0px,var(--vb-selection) 8px,transparent 8px,transparent 10px));border-radius:var(--detail-progress-radius,var(--app-radius,0));height:var(--detail-progress-height,100%);max-height:100%;}
+.vb-status-panel {border-color:var(--detail-status-border,var(--app-status-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow)));}
 .vb-lv-header>div {border-color:var(--app-header-border,var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light));}
 .vb-tabs {border-color:var(--app-separator,var(--vb-shadow));}
 .vb-tab-header {border-bottom-color:var(--app-separator,var(--vb-light));}
 .vb-toolbar {border-top-color:var(--app-separator,var(--vb-light));border-bottom-color:var(--app-separator,var(--vb-shadow));}
 .vb-tab-button.active {box-shadow:var(--app-tab-shadow,inset -1px -1px var(--vb-shadow),inset 1px 1px var(--vb-highlight));}
 .vb-month {border-color:var(--app-border,var(--vb-shadow));border-radius:var(--app-radius,0);}
-.vb-scrollbar {border-color:var(--app-border,var(--vb-shadow));border-radius:var(--app-radius,0);}
+.vb-scrollbar {border-color:var(--detail-scroll-border,var(--app-border,var(--vb-shadow)));border-radius:var(--app-radius,0);}
 .vb-scroll-thumb {background:var(--app-thumb,var(--vb-face));border-radius:var(--app-radius,0);}
 .vb-range:focus-visible {outline:var(--app-focus-width,1px) var(--app-focus-style,dotted) var(--app-focus,var(--vb-text))!important;outline-offset:-2px;}
 .vb-range::-webkit-slider-runnable-track {background:var(--app-range-track,var(--vb-face));border-radius:var(--app-radius,0);}
 .vb-range::-webkit-slider-thumb {background:var(--app-range-thumb,var(--vb-face));border-radius:var(--app-radius,0);}
 .vb-range::-moz-range-track {background:var(--app-range-track,revert);border-radius:var(--app-radius,revert);}
 .vb-range::-moz-range-thumb {background:var(--app-range-thumb,revert);border-radius:var(--app-radius,revert);}
-.vb-combo-popup {border-radius:var(--app-radius,0);border-color:var(--app-border,var(--vb-dark));box-shadow:var(--app-window-shadow,inset 1px 1px var(--vb-shadow));color-scheme:var(--vb-app-color-scheme,light);}
+.vb-combo-popup {border-radius:var(--detail-popup-radius,var(--app-radius,0));border-color:var(--app-border,var(--vb-dark));box-shadow:var(--app-window-shadow,inset 1px 1px var(--vb-shadow));color-scheme:var(--vb-app-color-scheme,light);}
 .vb-popup-menu.classic-menu {border-radius:var(--app-window-radius,0);font-family:var(--app-font,var(--vb-font));}
 .vb-popup-menu.classic-menu .popup-menu-item {border-radius:var(--app-radius,0);}
 .vb-popup-menu.classic-menu .popup-menu-item[aria-disabled=true] {color:var(--vb-gray);text-shadow:var(--app-disabled-text-shadow,1px 1px var(--vb-light));}
 @media(forced-colors:none) {
  .vb-form:not(.vb-borderless),.vb-dialog,.vb-popup-menu.classic-menu {background-image:var(--app-frame-image,var(--vb-bevel-raised-image));border-color:var(--app-frame-border,transparent);box-shadow:var(--app-window-shadow,none);}
  .vb-form.vb-borderless {border-radius:0;}
- .vb-form-title {backdrop-filter:var(--app-backdrop,none);}
+ .vb-form-title {backdrop-filter:var(--app-backdrop,none);-webkit-backdrop-filter:var(--app-backdrop,none);}
  .vb-command,.vb-dialog-actions button {box-shadow:var(--app-control-shadow,var(--vb-bevel-raised));}
  .vb-command:hover:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--app-hover-shadow,var(--vb-bevel-raised));}
  .vb-command:active:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed));padding:var(--app-pressed-padding,5px 8px 3px 10px);}
@@ -70,7 +70,7 @@
  .vb-scroll-arrow {box-shadow:var(--app-control-shadow,var(--vb-bevel-raised))!important;}
  .vb-scroll-arrow:active:not(:disabled) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed))!important;}
  .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]),.vb-control textarea,.vb-control select,.vb-dialog input:not([type=checkbox]):not([type=radio]) {box-shadow:var(--winui-input-shadow,var(--app-input-shadow,var(--vb-bevel-sunken)));}
- .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,.vb-control textarea:focus-visible,.vb-control select:focus-visible {box-shadow:var(--winui-input-shadow,var(--app-input-focus-shadow,var(--vb-bevel-sunken)));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,.vb-control textarea:focus-visible,.vb-control select:focus-visible {box-shadow:var(--winui-input-shadow,var(--detail-field-focus-shadow,var(--app-input-focus-shadow,var(--vb-bevel-sunken))));}
  .vb-control :is(input,textarea):read-only {outline-color:var(--app-border,var(--vb-shadow));}
  .vb-form ::-webkit-scrollbar-thumb,.vb-dialog ::-webkit-scrollbar-thumb,.vb-combo-popup::-webkit-scrollbar-thumb {border-radius:var(--detail-scrollbar-radius,0);border:var(--detail-scrollbar-border,0);background:var(--detail-scrollbar-thumb,var(--vb-face));box-shadow:var(--detail-scrollbar-shadow,var(--vb-bevel-raised));}
 }
@@ -105,7 +105,7 @@
 .vb-dialog-actions button {font-family:var(--app-font,var(--vb-font));}
 .vb-dialog .vb-window-button:disabled {opacity:1;}
 /* Inactive optional captions are opaque; no bright active material shines through. */
-.vb-inactive>.vb-form-title {backdrop-filter:none;}
+.vb-inactive>.vb-form-title {backdrop-filter:none;-webkit-backdrop-filter:none;}
 @media(forced-colors:active) {
  .vb-form-title,.vb-inactive>.vb-form-title {forced-color-adjust:none;color:CanvasText;background:Canvas;}
 }
@@ -115,7 +115,7 @@
 @media(forced-colors:none) {
  .vb-popup-menu.classic-menu .popup-menu-item:is(:hover,:focus,.menu-selected):not([aria-disabled=true]) {background:var(--detail-menu-active-background,var(--vb-selection));color:var(--detail-menu-active-ink,var(--vb-selection-text));box-shadow:var(--detail-menu-selected-shadow,none);}
  .vb-popup-menu.classic-menu .popup-menu-item[aria-disabled=true]:is(:hover,:focus) {background:transparent;color:var(--vb-gray);box-shadow:none;}
- .vb-check input:is([type=checkbox],[type=radio]) {border-width:var(--app-check-width,1px);}
+ .vb-check input:is([type=checkbox],[type=radio]) {border-width:var(--detail-check-border-width,var(--app-check-width,1px));}
  .vb-check input[type=checkbox]:not(:checked):not(:indeterminate) {background-image:var(--app-check-rest-image,var(--vb-bevel-sunken-image));box-shadow:var(--app-check-rest-shadow,none);}
  .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,.vb-control textarea:focus-visible,.vb-control select:focus-visible,.vb-richtext:focus-visible {outline:var(--app-input-focus-outline,none);outline-offset:-4px;}
  .vb-month th {color:var(--app-calendar-label,var(--vb-shadow));}
@@ -141,4 +141,287 @@
  .vb-range::-moz-range-track {height:var(--x11-range-track-size,revert);border:var(--x11-range-track-border,revert);border-color:var(--x11-range-track-edge,revert);box-sizing:border-box;}
  .vb-vrange::-moz-range-thumb {width:var(--x11-range-height,revert);height:var(--x11-range-width,revert);}
  .vb-vrange::-moz-range-track {width:var(--x11-range-track-size,revert);height:100%;}
+}
+
+/* Component-specific macOS paint. Tokens are reset even at a nested Classic
+ * boundary. Outer control dimensions, authored typography and VB event dispatch
+ * are unchanged. No native element is replaced when the appearance changes. */
+.vb-command {
+ --command-fill:var(--detail-command-fill);--command-ink:var(--detail-command-ink);
+}
+.vb-command:hover:not(:where(.disabled,:disabled,[aria-disabled=true])) {--command-fill:var(--detail-command-hover);}
+.vb-command:active:not(:where(.disabled,:disabled,[aria-disabled=true])) {--command-fill:var(--detail-command-pressed);}
+.vb-command:is(.default-button,.vb-default-button) {--command-fill:var(--detail-default-fill);--command-ink:var(--detail-default-ink);}
+.vb-command:is(.default-button,.vb-default-button):active:not(:where(.disabled,:disabled,[aria-disabled=true])) {--command-fill:var(--detail-default-pressed);}
+.vb-command:is(.disabled,:disabled,[aria-disabled=true]) {--command-fill:var(--detail-command-disabled);--command-ink:var(--app-disabled-color,var(--vb-gray));}
+.vb-command:focus::after {inset:var(--detail-command-focus-inset,4px);border-width:var(--detail-command-focus-width,1px);}
+.vb-dialog-actions {justify-content:var(--detail-dialog-actions,center);}
+.vb-dialog-actions .vb-command {background-color:var(--command-fill,var(--vb-face));color:var(--command-ink,var(--vb-text));}
+.vb-check input:not(:checked):not(:indeterminate) {border-color:var(--winui-check-stroke,var(--detail-check-border,var(--app-check-rest-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow))));box-shadow:var(--winui-CheckShadow,var(--detail-check-shadow,var(--app-check-rest-shadow,inset 1px 1px var(--vb-text))));}
+.vb-check input[type=checkbox]:indeterminate::after {left:var(--detail-mixed-left,3px);top:var(--detail-mixed-top,3px);width:var(--detail-mixed-width,5px);height:var(--detail-mixed-height,5px);}
+.vb-control :is(.vb-text-input,.vb-date-input),.vb-dialog input {border-color:var(--detail-field-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
+.vb-control :is(.vb-combo-field,.vb-list) {border-color:var(--detail-field-border,currentColor);}
+.vb-frame {box-shadow:var(--detail-frame-shadow,1px 1px var(--vb-light),inset 1px 1px var(--vb-light));}
+.vb-tree .vb-tree-toggle {position:relative;font-size:var(--detail-tree-toggle-size,inherit);border-color:var(--detail-tree-toggle-border,var(--app-border,var(--vb-shadow)));background:var(--detail-tree-toggle-fill,var(--vb-window));}
+.vb-tree-toggle::after {content:var(--detail-tree-disclosure,none);position:absolute;width:5px;height:5px;left:1px;top:2px;border-right:1.5px solid var(--detail-tree-disclosure-ink);border-bottom:1.5px solid var(--detail-tree-disclosure-ink);transform:rotate(-45deg);}
+.vb-tree-row[aria-expanded=true]>.vb-tree-toggle::after {transform:rotate(45deg);top:1px;}
+.vb-grid :is(td,th):not(.vb-grid-spacer) {border-color:var(--detail-grid-border,var(--vb-face));}
+.vb-grid th:not(.vb-grid-spacer) {border-color:var(--detail-grid-border,var(--vb-shadow));}
+.vb-grid td.active {outline-style:var(--detail-grid-focus-style,dotted);}
+.vb-tabs>.vb-tab-header>.vb-tab-button {border-radius:var(--detail-tab-radius,var(--app-radius,0))!important;}
+.vb-tabs>.vb-tab-header>.vb-tab-button.active {background:var(--detail-tab-active-fill,var(--vb-face));}
+.vb-month-header {background:var(--detail-calendar-header,var(--vb-selection));color:var(--detail-calendar-header-ink,var(--vb-selection-text));}
+.vb-month-header button {color:inherit;}
+.vb-month table {border-collapse:var(--detail-calendar-collapse,collapse);border-spacing:var(--detail-calendar-spacing,2px);}
+.vb-month td {border-radius:var(--detail-calendar-day-radius,0);}
+.vb-range {--range-track-paint:linear-gradient(to right,var(--detail-range-accent) var(--vb-range-progress,0%),var(--detail-range-track) 0);}
+.vb-range.vb-vrange {--range-track-paint:linear-gradient(to top,var(--detail-range-accent) var(--vb-range-progress,0%),var(--detail-range-track) 0);}
+.vb-control.disabled .vb-range {--detail-range-accent:var(--vb-gray);}
+@media(forced-colors:none) {
+ .vb-range::-webkit-slider-runnable-track {background:var(--range-track-paint,var(--app-range-track,var(--vb-face)));border:var(--detail-range-track-border,1px solid);border-color:var(--detail-range-track,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));border-radius:var(--detail-range-radius,var(--app-radius,0));}
+ .vb-range::-webkit-slider-thumb {width:var(--detail-range-thumb-size,11px);height:var(--detail-range-thumb-size,21px);margin-top:var(--detail-range-thumb-offset,-10px);background:var(--detail-range-thumb,var(--app-range-thumb,var(--vb-face)));border:var(--detail-range-thumb-border,0px solid);border-color:var(--detail-field-border,var(--vb-light) var(--vb-dark) var(--vb-dark) var(--vb-light));border-radius:var(--detail-range-radius,var(--app-radius,0));box-shadow:var(--detail-range-thumb-shadow,var(--vb-bevel-raised));}
+ .vb-vrange::-webkit-slider-thumb {width:var(--detail-range-thumb-size,21px);height:var(--detail-range-thumb-size,11px);margin-top:0;margin-left:var(--detail-range-thumb-offset,-10px);}
+ .vb-range::-moz-range-track {background:var(--range-track-paint,var(--app-range-track,revert));border:var(--detail-range-track-border,var(--x11-range-track-border,revert));border-radius:var(--detail-range-radius,var(--app-radius,revert));}
+ .vb-range::-moz-range-thumb {width:var(--detail-range-thumb-size,var(--x11-range-width,revert));height:var(--detail-range-thumb-size,var(--x11-range-height,revert));background:var(--detail-range-thumb,var(--app-range-thumb,revert));border:var(--detail-range-thumb-border,var(--x11-range-border,revert));border-radius:var(--detail-range-radius,var(--app-radius,revert));box-shadow:var(--detail-range-thumb-shadow,none);}
+ .vb-toolbar button {background:var(--detail-toolbar-fill,var(--vb-face));}
+ .vb-toolbar button:hover {border-color:var(--detail-toolbar-border,var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light));}
+ .vb-toolbar button:active {border-color:var(--detail-toolbar-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
+ .vb-combo-arrow {background:var(--detail-combo-fill,var(--vb-face));color:var(--detail-combo-ink,var(--vb-text));}
+ .vb-popup-menu.classic-menu .menu-checked {background:var(--detail-menu-check-background,var(--vb-face));}
+}
+@media(forced-colors:active) {
+ [data-vb-theme-family="macos26"] {--detail-check-border:ButtonText;--detail-check-shadow:none;--detail-field-border:ButtonText;--detail-field-focus-shadow:none;--detail-default-focus-ink:HighlightText;--detail-command-fill:ButtonFace;--detail-command-ink:ButtonText;--detail-command-hover:ButtonFace;--detail-command-pressed:ButtonFace;--detail-command-disabled:ButtonFace;--detail-default-fill:Highlight;--detail-default-ink:HighlightText;--detail-default-pressed:Highlight;--detail-range-accent:Highlight;--detail-range-track:ButtonText;}
+}
+/* Opaque fallback where backdrop filtering is unavailable. Do not claim native
+ * wallpaper sampling/refraction: these are browser-owned material surfaces. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+ [data-vb-theme-family="macos26"] {--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}
+}
+
+.vb-popup-menu.classic-menu {padding:var(--detail-popup-padding,2px);}
+.vb-combo-option {border-radius:var(--detail-popup-item-radius,0);}
+@media(forced-colors:none) {
+ .vb-scroll-arrow {display:var(--detail-scroll-arrow-display,flex)!important;}
+}
+
+/* Keep border+padding extents invariant while replacing two-pixel relief with
+ * a one-pixel edge. Virtualized row origins and RTF content geometry stay put. */
+.vb-tree,.vb-listview,.vb-grid {padding:var(--detail-composite-padding,0px);}
+.vb-richtext {padding:var(--detail-richtext-padding,3px);}
+.vb-tabs {box-shadow:var(--detail-frame-shadow,inset 1px 1px var(--vb-light));}
+
+.vb-command:is(.default-button,.vb-default-button):focus::after {border-color:var(--detail-default-focus-ink,var(--app-focus,var(--vb-text)));}
+@media(forced-colors:none) {
+ .vb-control:focus-visible {outline-width:var(--detail-control-focus-width,1px);}
+}
+.vb-control:has(>.vb-text-input:focus-visible,>.vb-date-input:focus-visible,>.vb-richtext:focus-visible) {overflow:var(--detail-field-overflow,hidden);}
+.vb-richtext:focus-visible {box-shadow:var(--detail-field-focus-shadow,none);}
+.vb-tabs>.vb-tab-header {background:var(--detail-tab-header-fill,transparent);border-radius:var(--detail-tab-radius,0);}
+.vb-tabs>.vb-tab-header>.vb-tab-button:not(.active) {background:var(--detail-tab-idle-fill,var(--vb-face));}
+@media(forced-colors:none) {
+ .vb-popup-menu.classic-menu {background-color:var(--detail-menu-material,var(--vb-face));backdrop-filter:var(--detail-menu-backdrop,none);-webkit-backdrop-filter:var(--detail-menu-backdrop,none);}
+ .vb-scroll-track {background-image:var(--detail-scroll-track-image,repeating-conic-gradient(var(--vb-highlight) 0% 25%,transparent 0% 50%));}
+ .vb-scroll-thumb {border:var(--detail-scroll-thumb-border,0px solid);border-color:var(--detail-scroll-border,currentColor);border-radius:var(--detail-scroll-thumb-radius,var(--app-radius,0));box-shadow:var(--detail-scroll-thumb-shadow,var(--app-control-shadow,var(--vb-bevel-raised)));}
+ .vb-scrollbar.horizontal .vb-scroll-thumb {height:var(--detail-scroll-thumb-cross,100%);top:var(--detail-scroll-thumb-inset,0);}
+ .vb-scrollbar.vertical .vb-scroll-thumb {width:var(--detail-scroll-thumb-cross,100%);left:var(--detail-scroll-thumb-inset,0);}
+}
+
+/* Suppress Windows access-key underlines, not authored rich-text underlining. */
+@media(forced-colors:none) {
+ .vb-command>u,.vb-label>u,.vb-frame-legend>u,.vb-check>span>u,.vb-popup-menu .menu-label>u {
+  text-decoration-line:var(--detail-mnemonic-decoration,none);
+  background-image:var(--detail-mnemonic-image,linear-gradient(currentColor,currentColor));
+ }
+ .vb-form-menu button>u {text-decoration-line:var(--detail-mnemonic-decoration,underline);}
+}
+
+/* AppKit regular-control measurements. Keep the authored control rectangle and
+ * its events; only the inner indicator/track geometry belongs to the skin. */
+.vb-check {gap:var(--detail-check-gap,5px);}
+.vb-check input {width:var(--detail-check-size,13px);height:var(--detail-check-size,13px);}
+@media(forced-colors:none) {
+ .vb-check input {border-width:var(--detail-check-border-width,1px);}
+ .vb-check input:not(:checked):not(:indeterminate) {background-color:var(--winui-check-fill,var(--detail-check-fill,var(--vb-window)));}
+ .vb-check input:disabled {background-color:var(--detail-check-disabled-fill,var(--vb-face));}
+ .vb-check input:disabled::after {background-color:var(--detail-check-disabled-mark,var(--vb-gray));}
+ .vb-check input[type=checkbox]:checked:not(:indeterminate)::after {
+  left:var(--detail-check-mark-left,2px);top:var(--detail-check-mark-top,2px);
+  width:var(--detail-check-mark-width,8px);height:var(--detail-check-mark-height,8px);
+ }
+ .vb-check input[type=radio]:checked::after {inset:var(--detail-radio-dot-inset,var(--detail-radio-mark-inset,3px));}
+ .vb-progress {padding:var(--detail-progress-padding,2px);border-width:var(--detail-progress-border-width,2px);}
+ .vb-range::-webkit-slider-runnable-track {height:var(--detail-range-track-height,4px);}
+ .vb-range::-webkit-slider-thumb {height:var(--detail-range-thumb-height,21px);}
+ .vb-vrange::-webkit-slider-runnable-track {width:var(--detail-range-track-height,4px);height:100%;}
+ .vb-vrange::-webkit-slider-thumb {width:var(--detail-range-thumb-height,21px);height:var(--detail-range-thumb-size,11px);}
+ .vb-range::-moz-range-track {height:var(--detail-range-track-height,revert);}
+ .vb-range::-moz-range-thumb {height:var(--detail-range-thumb-height,revert);}
+ .vb-vrange::-moz-range-track {width:var(--detail-range-track-height,revert);height:100%;}
+ .vb-vrange::-moz-range-thumb {width:var(--detail-range-thumb-height,revert);height:var(--detail-range-thumb-size,revert);}
+ .vb-tabs>.vb-tab-header>.vb-tab-button.active {color:var(--detail-tab-active-ink,inherit);}
+ .vb-combo-arrow {border-radius:var(--detail-combo-arrow-radius,0);}
+ .vb-spin-button {background-color:var(--detail-stepper-fill,var(--vb-face));}
+ .vb-spin-button:first-child {border-radius:var(--detail-stepper-radius,0) var(--detail-stepper-radius,0) 0 0;}
+ .vb-spin-button:last-child {border-radius:0 0 var(--detail-stepper-radius,0) var(--detail-stepper-radius,0);}
+ /* AppKit distinguishes inactive selection from keyboard-focused selection.
+  * Never override a cell's authored RGB. The renderer marks selection with
+  * these existing classes rather than changing its stored color properties. */
+ .vb-listview:not(:focus-within) .vb-lv-row.selected,
+ .vb-inactive .vb-listview .vb-lv-row.selected {
+  background:var(--detail-inactive-selection,var(--vb-selection));
+  color:var(--detail-inactive-selection-ink,var(--vb-selection-text));
+ }
+ .vb-tree-row.selected {background:var(--detail-tree-row-selection,transparent);color:var(--detail-tree-row-selection-ink,inherit);}
+ .vb-tree-row.selected .vb-tree-label {background:var(--detail-tree-label-selection,var(--vb-selection));color:var(--detail-tree-label-selection-ink,var(--vb-selection-text));}
+ .vb-tree:not(:focus-within) .vb-tree-row.selected,
+ .vb-inactive .vb-tree .vb-tree-row.selected {
+  background:var(--detail-inactive-selection,transparent);
+  color:var(--detail-inactive-selection-ink,inherit);
+ }
+}
+
+.vb-frame {border-color:var(--detail-frame-border,var(--app-border,var(--vb-shadow)));border-radius:var(--detail-frame-radius,var(--app-radius,0));}
+.vb-command:focus:not(:focus-visible)::after {display:var(--detail-command-pointer-focus-display,block);}
+@media(prefers-contrast:more) {
+ [data-vb-theme-family="macos26"] {--detail-field-border:var(--vb-text);--detail-grid-border:var(--vb-gray);--app-border:var(--vb-text);--app-input-shadow:inset 0 0 0 1px var(--vb-text);--detail-check-shadow:inset 0 0 0 1px var(--vb-text);}
+}
+
+/* Match the specificity of the original Classic painters. The old text input
+ * rule includes four :not() selectors and the checkbox paints filled strips,
+ * not a box shadow; changing border/shadow alone did not remove that relief.
+ * Every override is locally reset; only macOS supplies these detail variables. */
+@media(forced-colors:none) {
+ .vb-check input[type=checkbox]:not(:checked):not(:indeterminate):not(:disabled) {background-image:var(--detail-check-edge-image,var(--app-check-rest-image,var(--vb-bevel-sunken-image)));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field) {
+  box-shadow:var(--winui-input-shadow,var(--detail-field-shadow,var(--vb-bevel-sunken)));
+ }
+ .vb-control textarea,.vb-control select {box-shadow:var(--winui-input-shadow,var(--detail-field-shadow,var(--app-input-shadow,var(--vb-bevel-sunken))));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field):focus-visible,
+ .vb-control textarea:focus-visible,.vb-control select:focus-visible {
+  box-shadow:var(--winui-input-shadow,var(--detail-field-focus-shadow,var(--app-input-focus-shadow,var(--vb-bevel-sunken))));
+ }
+ .vb-command,.vb-command:active {
+  border-block:var(--winui-ButtonBorder,var(--detail-command-border-block,0px) var(--detail-command-border-block-style,none) transparent)!important;
+  background-clip:var(--winui-ButtonClip,var(--detail-command-background-clip,border-box))!important;
+  border-radius:var(--detail-command-corner-radius,var(--app-radius,0));
+ }
+ .vb-classic-combo:not(.simple) .vb-combo-field {padding-right:var(--detail-combo-padding-right,3px);}
+ .vb-classic-combo:not(.simple) .vb-combo-arrow {
+  border-radius:var(--detail-combo-arrow-radius,0);
+  position:var(--detail-combo-arrow-position,static);right:var(--detail-combo-arrow-inset,auto);
+  top:var(--detail-combo-arrow-top,auto);transform:var(--detail-combo-arrow-transform,none);
+  width:var(--detail-combo-arrow-width,17px);min-width:var(--detail-combo-arrow-width,17px);
+  height:var(--detail-combo-arrow-height,100%);max-height:100%;
+ }
+ .vb-classic-combo:not(.simple) .vb-combo-arrow i {
+  width:var(--detail-combo-chevron-size,0px);height:var(--detail-combo-chevron-size,0px);
+  border-top:var(--detail-combo-chevron-zero,4px solid currentColor);
+  border-left:var(--detail-combo-chevron-zero,3px solid transparent);
+  border-right:var(--detail-combo-chevron-edge,3px solid transparent);
+  border-bottom:var(--detail-combo-chevron-edge,0px solid transparent);
+  transform:var(--detail-combo-chevron-transform,none);
+ }
+ .vb-updown {align-items:var(--detail-stepper-align,stretch);justify-content:var(--detail-stepper-justify,normal);}
+ .vb-updown .vb-spin-button {flex:var(--detail-stepper-flex,1);width:var(--detail-stepper-width,100%);}
+ .vb-updown.horizontal .vb-spin-button {width:var(--detail-stepper-horizontal-width,auto);height:var(--detail-stepper-horizontal-height,100%);}
+}
+
+.vb-label {padding-inline:var(--detail-label-padding,0px);}
+.vb-tree,.vb-listview,.vb-grid,.vb-richtext {border-radius:var(--detail-composite-radius,var(--app-radius,0));}
+
+/* The native progress trough is a capsule, not a full-box gradient whose ends
+ * remain square when the authored control is taller than the painted track. */
+@media(forced-colors:none) {
+ .vb-progress::before {
+  content:var(--detail-progress-track-content,none);position:absolute;left:0;right:0;top:50%;
+  height:var(--detail-progress-height,8px);max-height:100%;transform:translateY(-50%);
+  border-radius:999px;background:var(--detail-progress-track-fill,transparent);
+  box-shadow:var(--detail-progress-track-shadow,none);pointer-events:none;
+ }
+ .vb-progress-fill {position:var(--detail-progress-fill-position,static);}
+ .vb-updown .vb-spin-button i {
+  width:var(--detail-stepper-glyph-size,0px);height:var(--detail-stepper-glyph-size,0px);
+  border-top:var(--detail-combo-chevron-zero,4px solid currentColor);
+  border-left:var(--detail-combo-chevron-zero,3px solid transparent);
+  border-right:var(--detail-stepper-glyph-edge,3px solid transparent);
+  border-bottom:var(--detail-stepper-glyph-edge,0px solid transparent);
+  transform:var(--detail-stepper-glyph-down,none);
+ }
+ .vb-updown .vb-spin-button.up i {transform:var(--detail-stepper-glyph-up,rotate(180deg));}
+ .vb-updown.horizontal .vb-spin-button.up i {transform:var(--detail-stepper-glyph-left,rotate(90deg));}
+ .vb-updown.horizontal .vb-spin-button.down i {transform:var(--detail-stepper-glyph-right,rotate(-90deg));}
+}
+
+/* AppKit key-window state is a form-local inheritance boundary, not a
+ * descendant selector that recolors an independent nested application. These
+ * roles are initial in other palettes; WinUI's own state brushes keep priority.
+ * Disabled controls continue to use their separate disabled state.
+ */
+@media(forced-colors:none) {
+ .vb-inactive {
+  --detail-default-fill:var(--detail-inactive-command-fill);
+  --detail-default-ink:var(--detail-inactive-command-ink);
+  --detail-state-check-fill:var(--detail-inactive-check-fill);
+  --detail-state-check-ink:var(--detail-inactive-command-ink);
+  --detail-range-accent:var(--detail-inactive-range-fill);
+  --detail-state-progress-fill:var(--detail-inactive-progress-fill);
+  --detail-tab-active-fill:var(--detail-inactive-segment-fill);
+  --detail-tab-active-ink:var(--detail-inactive-command-ink);
+ }
+ .vb-check input:is(:checked,:indeterminate):not(:disabled) {
+  background-color:var(--winui-check-fill,var(--detail-state-check-fill,var(--app-check-background,var(--vb-window))));
+ }
+ .vb-check input:indeterminate:not(:disabled) {background-color:var(--winui-check-fill,var(--detail-state-check-fill,var(--app-check-background,var(--vb-face))));}
+ .vb-check input[type=checkbox]:checked:not(:disabled)::after,
+ .vb-check input[type=checkbox]:indeterminate:not(:disabled)::after {
+  background:var(--winui-check-glyph,var(--detail-state-check-ink,var(--detail-indeterminate-fill,var(--app-check-mark,var(--vb-gray)))));
+ }
+ .vb-check input[type=radio]:checked:not(:disabled)::after {
+  background:var(--winui-RadioGlyph,var(--detail-state-check-ink,var(--app-check-mark,var(--vb-window-text))));
+ }
+ .vb-progress-fill {background:var(--detail-state-progress-fill,var(--app-progress-fill,repeating-linear-gradient(90deg,var(--vb-selection) 0px,var(--vb-selection) 8px,transparent 8px,transparent 10px)));}
+
+ /* readonly is reflected by ClassicCombo.refresh for Style=2. The live input,
+  * focus target, virtual popup, keyboard handling and authored RGB stay intact.
+  */
+ .vb-control.vb-classic-combo:not(.simple)>.vb-combo-field[readonly] {
+  height:var(--detail-popup-button-height,100%);align-self:var(--detail-popup-button-align,auto);
+  padding:var(--detail-popup-button-padding,3px 3px 3px 5px);
+  box-shadow:var(--winui-input-shadow,var(--detail-popup-button-shadow,var(--app-input-shadow,var(--vb-bevel-sunken))));
+ }
+ .vb-control.vb-classic-combo:not(.simple)>.vb-combo-field[readonly]:focus-visible {
+  box-shadow:var(--winui-input-shadow,var(--detail-field-focus-shadow,var(--app-input-focus-shadow,var(--app-input-shadow,var(--vb-bevel-sunken)))));
+ }
+ .vb-classic-combo:has(>.vb-combo-field[readonly])>.vb-combo-arrow {
+  background:var(--detail-popup-button-arrow-fill,var(--detail-combo-fill,var(--vb-face)));
+  right:var(--detail-popup-button-arrow-right,var(--detail-combo-arrow-inset,auto));
+ }
+ .vb-classic-combo:has(>.vb-combo-field[readonly])>.vb-combo-arrow i {visibility:var(--detail-popup-button-chevron-visibility,visible);}
+ .vb-classic-combo:has(>.vb-combo-field[readonly])>.vb-combo-arrow::before,
+ .vb-classic-combo:has(>.vb-combo-field[readonly])>.vb-combo-arrow::after {
+  content:var(--detail-popup-button-chevron-content,none);position:absolute;
+  width:5px;height:5px;left:calc(50% - 2.5px);border-right:1.5px solid currentColor;
+  border-bottom:1.5px solid currentColor;box-sizing:border-box;pointer-events:none;
+ }
+ .vb-classic-combo:has(>.vb-combo-field[readonly])>.vb-combo-arrow::before {top:calc(50% - 4px);transform:rotate(225deg);}
+ .vb-classic-combo:has(>.vb-combo-field[readonly])>.vb-combo-arrow::after {top:calc(50% - 1px);transform:rotate(45deg);}
+ .vb-classic-combo:has(>.vb-combo-field[readonly]):has(>.vb-combo-field:active:not(:disabled),>.vb-combo-arrow:active:not(:disabled)) {--detail-popup-button-fill:var(--detail-popup-button-pressed);}
+ .vb-classic-combo:has(>.vb-combo-field[readonly]:disabled) {--detail-popup-button-fill:var(--detail-popup-button-disabled);}
+
+ /* Standalone TabStrip uses a segmented header. SSTab page/client coordinates
+  * and vertical/multirow tab layouts retain their own geometry contract. */
+ .vb-tabs:not(.vb-sstab)[data-tab-orientation="0"] {border-color:var(--detail-strip-border,var(--app-separator,var(--vb-shadow)));}
+ .vb-tabs:not(.vb-sstab)[data-tab-orientation="0"]>.vb-tab-header {
+  left:var(--detail-strip-left,0px);top:var(--detail-strip-top,0px);
+  padding:var(--detail-strip-padding,0px 3px);background:var(--detail-strip-fill,var(--detail-tab-header-fill,transparent));
+  border-radius:var(--detail-strip-radius,var(--detail-tab-radius,0));
+ }
+ .vb-tabs:not(.vb-sstab)[data-tab-orientation="0"]>.vb-tab-header>.vb-tab-button:not(.active):not(:has(+.active)):not(:last-child)::after {
+  content:var(--detail-strip-separator-content,none);position:absolute;right:0;top:5px;bottom:5px;
+  width:1px;background:var(--detail-strip-separator,transparent);pointer-events:none;
+ }
+}
+
+@media(forced-colors:active) {
+ [data-vb-theme-family="macos26"] {--detail-strip-width:100%;--detail-strip-column:minmax(0, 1fr);}
 }

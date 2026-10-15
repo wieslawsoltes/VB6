@@ -1,15 +1,32 @@
 import {ProjectDiagnosticCache,diagnosticSnapshot} from '../language/diagnostics.js';
 import {DIAGNOSTICS_WORKER_SOURCE} from './diagnostics-payload.js';
 
-// One immutable URL per owner document. Revoking immediately after terminate()
-// can race WebKit's asynchronous worker-script fetch during project replacement
-// or reload. The document owns this bounded allocation and the browser releases
-// it on document destruction; cancellation must not invalidate another worker.
+/** Resolve the build-owned sibling worker for an HTTP-served script only.
+ * Inline/file/opaque-origin IDEs keep their self-contained Blob source. Never
+ * resolve a relative worker against <base>, the current route, or a CDN script.
+ */
+export function diagnosticWorkerURL(scriptURL, ownerURL) {
+  if (!scriptURL || !ownerURL) return null;
+  try {
+    const owner = new URL(ownerURL), script = new URL(scriptURL);
+    if (!['http:', 'https:'].includes(owner.protocol) || script.origin !== owner.origin) return null;
+    return new URL('vb6-diagnostics-worker.js', script).href;
+  } catch { return null; }
+}
+
+// Capture currentScript while the bundle is executing, not when the debounced
+// worker starts. A stable HTTP resource avoids the document-owned Blob URL's
+// invalidation racing an in-flight worker fetch during WebKit navigation.
+const hostedWorkerURL = diagnosticWorkerURL(globalThis.document?.currentScript?.src, globalThis.location?.href);
 let diagnosticWorkerSourceURL;
 export function createDiagnosticWorker() {
-  if(typeof Worker!=='function'||typeof URL?.createObjectURL!=='function')return null;
-  diagnosticWorkerSourceURL ||= URL.createObjectURL(new Blob([DIAGNOSTICS_WORKER_SOURCE],{type:'text/javascript'}));
-  return new Worker(diagnosticWorkerSourceURL,{name:'VB6 syntax diagnostics'});
+  if (typeof Worker !== 'function') return null;
+  if (hostedWorkerURL) return new Worker(hostedWorkerURL, {name: 'VB6 syntax diagnostics'});
+  if (typeof globalThis.URL?.createObjectURL !== 'function' || typeof Blob !== 'function') return null;
+  // One bounded, document-owned allocation for inline and file exports. Do not
+  // revoke during cancellation: an already-started fetch may still need it.
+  diagnosticWorkerSourceURL ||= URL.createObjectURL(new Blob([DIAGNOSTICS_WORKER_SOURCE], {type: 'text/javascript'}));
+  return new Worker(diagnosticWorkerSourceURL, {name: 'VB6 syntax diagnostics'});
 }
 
 /** Latest-revision-only scheduler. A worker never executes VB source. If workers

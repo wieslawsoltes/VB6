@@ -1,6 +1,7 @@
 import {el,lower} from '../core/core.js';
 import {findModule} from '../project/model.js';
 import {DiagnosticsScheduler} from '../editor/diagnostics-scheduler.js';
+import {bindDiagnosticsLifecycle} from '../editor/diagnostics-lifecycle.js';
 
 /** Automatic checks never activate a window, change focus, or replace runtime
  * errors. Explicit compilation remains the authority for running/exporting. */
@@ -30,9 +31,6 @@ export function installDiagnostics(ide) {
   };
   const menu=ide.menu.bind(ide);ide.menu=name=>{const items=menu(name);if(name==='Debug')items.push(null,{id:'nextDiagnostic',label:'Next Source Error',enabled:!!ide.diagnostics.length},{id:'previousDiagnostic',label:'Previous Source Error',enabled:!!ide.diagnostics.length});return items;};
   ide.on('stop',queue);
-  // Pane return/late editor events must not restart worker creation in a dying
-  // document. A back-forward-cache restoration may resume with fresh source.
-  globalThis.addEventListener?.('pagehide',()=>scheduler.suspend());
-  globalThis.addEventListener?.('pageshow',()=>{scheduler.resume();queue();});
+  bindDiagnosticsLifecycle(scheduler,{onResume:queue});
   return scheduler;
 }

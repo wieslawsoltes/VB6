@@ -1,0 +1,987 @@
+{
+  "schema": 1,
+  "captureRevision": "b6472b68740e282562aadd728f43f8cac97aa0b0",
+  "artifact": 11927890599,
+  "operatingSystemVersion": [
+    26,
+    6,
+    2
+  ],
+  "os": "Version 26.6.2 (Build 25G83)",
+  "environment": [
+    {
+      "appearance": "NSAppearanceNameAqua",
+      "applicationActive": true,
+      "keyWindow": true,
+      "scheme": "light",
+      "windowBackingScale": 1
+    },
+    {
+      "appearance": "NSAppearanceNameDarkAqua",
+      "applicationActive": true,
+      "keyWindow": true,
+      "scheme": "dark",
+      "windowBackingScale": 1
+    }
+  ],
+  "colorsSRGB": {
+    "dark": {
+      "accent": [
+        0,
+        0.47843137254901963,
+        1,
+        1
+      ],
+      "controlBackground": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1
+      ],
+      "disabledText": [
+        1,
+        1,
+        1,
+        0.24705882352941178
+      ],
+      "focus": [
+        0.10196078568696976,
+        0.6627451181411743,
+        1,
+        0.49803921580314636
+      ],
+      "label": [
+        1,
+        1,
+        1,
+        0.8470588235294118
+      ],
+      "selection": [
+        0,
+        0.3490196168422699,
+        0.8196078538894653,
+        1
+      ],
+      "selectionText": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "separator": [
+        1,
+        1,
+        1,
+        0.09803921568627451
+      ],
+      "text": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "windowBackground": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1
+      ]
+    },
+    "light": {
+      "accent": [
+        0,
+        0.47843137254901963,
+        1,
+        1
+      ],
+      "controlBackground": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "disabledText": [
+        0,
+        0,
+        0,
+        0.24705882352941178
+      ],
+      "focus": [
+        0,
+        0.40392157435417175,
+        0.95686274766922,
+        0.49803921580314636
+      ],
+      "label": [
+        0,
+        0,
+        0,
+        0.8470588235294118
+      ],
+      "selection": [
+        0,
+        0.3921568691730499,
+        0.8823529481887817,
+        1
+      ],
+      "selectionText": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "separator": [
+        0,
+        0,
+        0,
+        0.09803921568627451
+      ],
+      "text": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "windowBackground": [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  },
+  "samples": {
+    "light-default-button": {
+      "file": "light-default-button-1x.png",
+      "sha256": "99ceb5f11181bcc7357d4187a92e542aa72f401cad738786ee0cd957e68f84d5",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        2,
+        280,
+        26
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            122,
+            255,
+            255
+          ],
+          "count": 6413
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 1132
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "count": 43
+        },
+        {
+          "rgba": [
+            130,
+            190,
+            255,
+            255
+          ],
+          "count": 16
+        }
+      ]
+    },
+    "light-default-pressed": {
+      "file": "light-default-pressed-1x.png",
+      "sha256": "bce4c5367f0e1dda6c2c280173422d5713af4cc1255874bf26ef0a9a45530757",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        2,
+        280,
+        26
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            110,
+            230,
+            255
+          ],
+          "count": 6413
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 1132
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "count": 43
+        },
+        {
+          "rgba": [
+            130,
+            184,
+            243,
+            255
+          ],
+          "count": 16
+        }
+      ]
+    },
+    "light-disabled-button": {
+      "file": "light-disabled-button-1x.png",
+      "sha256": "5313912a81735533ed1993f1c58d457ed1f26826cdf797b519a78b60708255e2",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        2,
+        280,
+        26
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            10
+          ],
+          "count": 6271
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 1140
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            72
+          ],
+          "count": 42
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            73
+          ],
+          "count": 34
+        }
+      ]
+    },
+    "light-check-off": {
+      "file": "light-check-off-1x.png",
+      "sha256": "8acfdba7d3d71f64302e382bdf146cf59cbd36dc58a95a58ea7beccdf25e7b3f",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        6,
+        86,
+        22
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 7260
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            25
+          ],
+          "count": 200
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            216
+          ],
+          "count": 24
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            3
+          ],
+          "count": 12
+        }
+      ]
+    },
+    "light-check-on": {
+      "file": "light-check-on-1x.png",
+      "sha256": "17fba8a0f8c892c3975907157174eecec57d908bdcfa261b3485a83da5ec309c",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        6,
+        86,
+        22
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 7260
+        },
+        {
+          "rgba": [
+            0,
+            119,
+            249,
+            255
+          ],
+          "count": 142
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            216
+          ],
+          "count": 24
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            213
+          ],
+          "count": 11
+        }
+      ]
+    },
+    "light-check-mixed": {
+      "file": "light-check-mixed-1x.png",
+      "sha256": "5032a6f1e76c89426f1523d595318b5bbb7ec4ade7c20cf3ea44cb3714384e4c",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        6,
+        86,
+        22
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 7260
+        },
+        {
+          "rgba": [
+            0,
+            119,
+            249,
+            255
+          ],
+          "count": 176
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            216
+          ],
+          "count": 24
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            213
+          ],
+          "count": 11
+        }
+      ]
+    },
+    "light-slider": {
+      "file": "light-slider-1x.png",
+      "sha256": "786767f6334300f5511e8f7a4c4191044952c8daf39b7211f9de1a6e6c503b6c",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        3,
+        280,
+        27
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 5800
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            25
+          ],
+          "count": 750
+        },
+        {
+          "rgba": [
+            0,
+            119,
+            249,
+            255
+          ],
+          "count": 748
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "count": 220
+        }
+      ]
+    },
+    "light-progress": {
+      "file": "light-progress-1x.png",
+      "sha256": "092998d3e0964cd444b929a3699c55060859908add6ec57f696d7ef9325e98ae",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        10,
+        280,
+        18
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 5604
+        },
+        {
+          "rgba": [
+            0,
+            122,
+            255,
+            255
+          ],
+          "count": 1082
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            15
+          ],
+          "count": 830
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            22
+          ],
+          "count": 276
+        }
+      ]
+    },
+    "dark-default-button": {
+      "file": "dark-default-button-1x.png",
+      "sha256": "99ceb5f11181bcc7357d4187a92e542aa72f401cad738786ee0cd957e68f84d5",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        2,
+        280,
+        26
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            122,
+            255,
+            255
+          ],
+          "count": 6413
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 1132
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "count": 43
+        },
+        {
+          "rgba": [
+            130,
+            190,
+            255,
+            255
+          ],
+          "count": 16
+        }
+      ]
+    },
+    "dark-default-pressed": {
+      "file": "dark-default-pressed-1x.png",
+      "sha256": "92e95212628b6f1f260b7c9b538b285a634d5028531e4b6da0cc11ea8855f472",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        2,
+        280,
+        26
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            25,
+            135,
+            255,
+            255
+          ],
+          "count": 6413
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 1132
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "count": 43
+        },
+        {
+          "rgba": [
+            142,
+            196,
+            255,
+            255
+          ],
+          "count": 16
+        }
+      ]
+    },
+    "dark-disabled-button": {
+      "file": "dark-disabled-button-1x.png",
+      "sha256": "84c02216fa313a808ddaba946526fcde6584b6fd8a5438eccad53ae44e445e7a",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        2,
+        280,
+        26
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            10
+          ],
+          "count": 6179
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 1140
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            71
+          ],
+          "count": 119
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            18
+          ],
+          "count": 30
+        }
+      ]
+    },
+    "dark-check-off": {
+      "file": "dark-check-off-1x.png",
+      "sha256": "a6f322988dd7149ce81800e137a887d0d87313855d255c5cedc92b619a968658",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        6,
+        86,
+        22
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 7207
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            25
+          ],
+          "count": 208
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            216
+          ],
+          "count": 70
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            3
+          ],
+          "count": 11
+        }
+      ]
+    },
+    "dark-check-on": {
+      "file": "dark-check-on-1x.png",
+      "sha256": "3548e9727678f734f6523132bbc5b7eb11274c9418b09a0333ecc8960ded1811",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        6,
+        86,
+        22
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 7207
+        },
+        {
+          "rgba": [
+            6,
+            125,
+            255,
+            255
+          ],
+          "count": 142
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            216
+          ],
+          "count": 70
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "count": 10
+        }
+      ]
+    },
+    "dark-check-mixed": {
+      "file": "dark-check-mixed-1x.png",
+      "sha256": "142fdfde511c468ec293cb42c001a31278eecffa896b1595e85dce2507cfa211",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        6,
+        86,
+        22
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 7207
+        },
+        {
+          "rgba": [
+            6,
+            125,
+            255,
+            255
+          ],
+          "count": 176
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            216
+          ],
+          "count": 70
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            97
+          ],
+          "count": 10
+        }
+      ]
+    },
+    "dark-slider": {
+      "file": "dark-slider-1x.png",
+      "sha256": "10656b55b10794cb4ea116880779ababbdd8994dd39ee54d3aeb3997838e42ce",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        0,
+        280,
+        28
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 5125
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            25
+          ],
+          "count": 681
+        },
+        {
+          "rgba": [
+            6,
+            125,
+            255,
+            255
+          ],
+          "count": 671
+        },
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "count": 435
+        }
+      ]
+    },
+    "dark-progress": {
+      "file": "dark-progress-1x.png",
+      "sha256": "61a5cffc23f8a8057555cbedc1a0d8bf76044141d1b038741b78d7ccedcc6041",
+      "size": [
+        280,
+        28
+      ],
+      "paintBounds": [
+        0,
+        10,
+        280,
+        18
+      ],
+      "dominant": [
+        {
+          "rgba": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "count": 5604
+        },
+        {
+          "rgba": [
+            0,
+            122,
+            255,
+            255
+          ],
+          "count": 1082
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            20
+          ],
+          "count": 830
+        },
+        {
+          "rgba": [
+            255,
+            255,
+            255,
+            24
+          ],
+          "count": 276
+        }
+      ]
+    }
+  }
+}

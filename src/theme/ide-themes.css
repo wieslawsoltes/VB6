@@ -226,15 +226,94 @@ html[data-ide-theme-family="fluent"] {
   & .tool-caption strong {font-weight:600;}
 }
 
-/* macOS 26: glass only on functional chrome, never over code or data content. */
-html[data-ide-theme-family="macos26"] {
+/* macOS 26: material belongs to navigation/chrome, not editor/data surfaces.
+ * Local SF is selected by the font stack; no font or symbol assets are shipped. */
+html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) {
   & :is(.app-title,.browser-window-caption,.classic-menu:not(.runtime-popup)) {
-    background:var(--ide-material);backdrop-filter:blur(14px) saturate(1.15);-webkit-backdrop-filter:blur(14px) saturate(1.15);
+    background:var(--ide-material);backdrop-filter:blur(20px) saturate(1.25);-webkit-backdrop-filter:blur(20px) saturate(1.25);
   }
+  & .app-title {position:relative;}
+  & :is(.menubar>button,.classic-menu:not(.runtime-popup) .menu-label)>u {text-decoration-line:none;}
+  & .app-title-text {font-size:13px;font-weight:600;}
   & .ide-dialog {border-color:var(--ide-border);box-shadow:var(--ide-shadow);}
-  & .dialog-caption strong {text-align:center;}
+  & .dialog-caption strong {text-align:center;font-size:13px;font-weight:600;}
+  & .document-title {position:relative;}
+  & .document-title>strong {position:absolute;inset-inline:82px;text-align:center;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  & .document-title>.mdi-system-menu {margin-inline-start:auto;}
   & .dock-group {border-radius:8px;}
-
+  & .tool-caption strong {font-weight:600;}
+  & .ide-dialog-footer {border-top:1px solid var(--ide-separator);padding:12px;gap:8px;}
+  & .ide-dialog-footer button {min-height:28px;}
+  & button:hover:not(:disabled):not([aria-disabled=true]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {border-color:var(--ide-border);}
+  & :is(.tool-button,.toolbox-grid button,.menubar>button,.mdi-system-menu):hover:not(:disabled) {border-color:transparent;}
+  & :is(input,textarea,select):focus-visible:not(:where(.source-input,.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
+    outline:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--ide-focus) 35%,transparent);border-color:var(--ide-focus);
+  }
+  & input:is([type=checkbox],[type=radio]):focus-visible:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {outline:2px solid var(--ide-focus);outline-offset:2px;box-shadow:none;}
+  & input:is([type=checkbox],[type=radio]):not(:checked):not(:indeterminate):not(:disabled):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {box-shadow:var(--ide-control-shadow);}
+  & input[type=checkbox]:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {border-radius:5px;}
+  /* Segmented inspectors/tool tabs are not WinUI underline tabs. */
+  & :is(.property-tabs,.debug-tabs,.dialog-tabs) {height:auto;min-height:26px;align-items:center;border:0;border-radius:8px;padding:2px;gap:2px;background:color-mix(in srgb,var(--vb-text) 7%,var(--vb-face));}
+  & :is(.property-tabs button,.debug-tabs button,.dialog-tabs button) {height:22px;min-height:22px;border-color:transparent;border-radius:5px;}
+  & :is(.property-tabs .active,.debug-tabs .active,.dialog-tabs button[aria-selected=true]) {
+    background:var(--detail-segment-active);color:var(--detail-segment-ink);border-color:transparent;box-shadow:none;
+  }
+  & :is(.dock-tabbar>button[aria-selected=true],.document-tab.active) {
+    background:var(--vb-window);color:var(--vb-text);border-color:transparent;box-shadow:0 1px 3px #00000018;
+  }
+  & :is(.property-tabs button,.debug-tabs button,.dialog-tabs button):focus-visible {outline:2px solid var(--ide-focus);outline-offset:-2px;}
+  & .classic-menu:not(.runtime-popup) {border-radius:10px;padding:5px;border-color:color-mix(in srgb,var(--ide-border) 70%,transparent);}
+  & .classic-menu:not(.runtime-popup) .popup-menu-item {border-radius:5px;height:25px;min-height:25px;padding-inline:8px;}
+  & .classic-menu:not(.runtime-popup) .menu-separator {margin:4px 7px;}
+  & .classic-menu:not(.runtime-popup) .menu-checked {background:transparent;border:0;box-shadow:none;}
+  & .classic-tooltip {border-radius:6px;box-shadow:0 3px 10px #00000026;}
+  & :is(.project-tree,.resource-tree) {background:var(--ide-surface);}
+  & .project-tree .tree-row {border-radius:5px;}
+  & .project-tree .tree-row.selected {background:var(--vb-selection);color:var(--vb-selection-text);}
+  & .project-tree .tree-row.selected .tree-label {background:transparent;color:inherit;}
+  & :is(.agent-thread-entry,.agent-context,.agent-plan,.agent-review,.mcp-page fieldset) {border-color:var(--ide-separator);border-radius:8px;}
+  & :is(progress,meter):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {border-radius:999px;}
+  & progress:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *))::-webkit-progress-bar {border-radius:999px;}
+  & progress:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *))::-webkit-progress-value {border-radius:999px;}
+}
+/* Native chrome, not authored form controls. Runtime roots are deliberately
+ * excluded: switching IDE appearance cannot reskin a different application. */
+html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) {
+ & .ide-shell {grid-template-rows:32px 25px auto minmax(0,1fr) 23px;border-color:var(--ide-separator);padding:0;}
+ & .ide-shell.command-bar-shell {grid-template-rows:32px 25px auto minmax(0,1fr) auto 23px!important;}
+ & .app-title {height:32px;padding-inline:10px;border-bottom:1px solid var(--ide-separator);}
+ & .toolbar {min-height:30px;padding-block:3px;gap:3px;border-color:var(--ide-separator);}
+ & .tool-caption {min-height:27px;padding-inline:9px;background:var(--ide-surface);border-bottom:1px solid var(--ide-separator);}
+ & .tool-caption strong {font-size:11px;color:var(--ide-gutter-text);}
+ & :is(.project-tree,.resource-tree) {padding:5px;}
+ & .project-tree .tree-row {min-height:24px;line-height:20px;padding-block:2px;gap:5px;}
+ & .project-tree:not(:focus-within) .tree-row.selected {background:var(--detail-inactive-selection);color:var(--detail-inactive-selection-ink);}
+ & .project-tree .tree-toggle {border:0;box-shadow:none;background:transparent;color:var(--ide-gutter-text);}
+ & .property-object-select {margin:6px;width:calc(100% - 12px);min-height:26px;}
+ & .property-grid :is(.property-row,.property-group) {min-height:24px;border-color:var(--ide-separator);}
+ & .property-group {font-weight:600;background:var(--ide-surface);}
+ & :is(.property-tabs,.debug-tabs,.dialog-tabs) {background:var(--detail-segment-fill);gap:0;border-radius:6px;padding:0;margin:4px 6px;min-height:24px;}
+ & :is(.property-tabs button,.debug-tabs button,.dialog-tabs button) {min-height:24px;height:24px;border-radius:6px;}
+ & :is(input,select):not(:where(.source-input,[type=checkbox],[type=radio],[type=range],.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {min-height:26px;padding-inline:6px;border-color:var(--ide-border);}
+ & input:is([type=checkbox],[type=radio]):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {width:16px;height:16px;border:0;flex-shrink:0;}
+ & input:is([type=checkbox],[type=radio]):not(:checked):not(:indeterminate):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {background:var(--detail-check-fill);}
+ & input:is([type=checkbox],[type=radio]):checked:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {background:var(--detail-segment-active);}
+ & input[type=checkbox]:checked:not(:indeterminate):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *))::after {width:10px;height:9px;left:3px;top:3px;}
+ & input[type=checkbox]:indeterminate:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {background:var(--detail-segment-active);}
+ & input[type=checkbox]:indeterminate:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *))::after {content:"";clip-path:none;position:absolute;width:8px;height:2px;left:4px;top:7px;background:white;}
+ & input[type=radio]:checked:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *))::after {inset:5px;}
+ & input:is([type=checkbox],[type=radio]):disabled:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *)) {background:var(--detail-check-disabled-fill);opacity:1;}
+ & input:is([type=checkbox],[type=radio]):disabled:not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .vb-control *))::after {background:var(--detail-check-disabled-mark);}
+ & .ide-dialog-footer button {border:0;background:var(--ide-control);box-shadow:none;border-radius:6px;min-width:80px;}
+ & .ide-dialog-footer button:is(.primary,.default-button,[data-default=true]) {background:var(--detail-default-fill);color:var(--detail-default-ink);}
+ & .ide-dialog-footer button:is(.primary,.default-button,[data-default=true]):hover {background:var(--detail-default-fill);filter:none;}
+ & .ide-dialog-footer button:is(.primary,.default-button,[data-default=true]):active {background:var(--detail-default-pressed);filter:none;}
+ & .ide-dialog-footer button:disabled {background:var(--detail-command-disabled);color:var(--vb-gray);}
+ & :is(.statusbar,.ide-statusbar) {border-top:1px solid var(--ide-separator);background:var(--ide-surface);}
+ & .classic-tooltip {background:var(--vb-info);border:1px solid var(--ide-separator);padding:5px 8px;}
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+ html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) :is(.app-title,.browser-window-caption,.classic-menu:not(.runtime-popup)) {background:var(--vb-face);}
 }
 
 /* Preview is inert, local and safe to cancel; it never changes the live IDE. */
@@ -252,9 +331,7 @@ html[data-ide-theme-family="macos26"] {
 .ide-theme-preview-comment {color:var(--vb-comment);}
 .ide-theme-note {font-size:11px;line-height:1.4;margin:5px 0;}
 
-@supports not (backdrop-filter:blur(1px)) {
-  html[data-ide-theme-family="macos26"] :is(.app-title,.browser-window-caption,.classic-menu:not(.runtime-popup)) {background:var(--vb-face);}
-}
+
 @media (prefers-reduced-transparency:reduce), (prefers-contrast:more) {
   html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) :is(.app-title,.browser-window-caption,.classic-menu:not(.runtime-popup)) {background:var(--vb-face);backdrop-filter:none;-webkit-backdrop-filter:none;}
 }

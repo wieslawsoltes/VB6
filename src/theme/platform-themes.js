@@ -1,3 +1,5 @@
+import {macosSystemColors} from './macos-reference-metrics.js';
+
 import {WINUI_RESOURCES} from './winui-resources.js';
 /** Shared immutable platform palettes. Original browser-rendered artwork and colors;
  * no native toolkit, proprietary font or OS resource dependencies. */
@@ -54,18 +56,21 @@ export const PLATFORM_THEMES = freeze({
   fluent:profile('fluent','Fluent WinUI 3 — Light','fluent','light',light,fluentTokens('light',lightTokens)),
   'fluent-dark':profile('fluent-dark','Fluent WinUI 3 — Dark','fluent','dark',{...dark,selectionText:'#000000'},fluentTokens('dark',darkTokens)),
   macos26:profile('macos26','macOS 26 — Light','macos26','light',{
-    ...light,face:'#ececf0',title:'#ececf0',titleEnd:'#ececf0',text:'#1d1d1f',titleText:'#1d1d1f',
-    windowText:'#1d1d1f',selection:'#005ec4',workspace:'#dfe1e9',desktop:'#d9ddeb',link:'#0057b8',
-    keyword:'#7136a8',comment:'#386738'
-  },{...lightTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',radius:'6px',windowRadius:'12px',
-    focus:'#005ec4',surface:'#f7f7fa',hover:'#e0e7f4',pressed:'#ccd9ef',material:'color-mix(in srgb, #ececf0 92%, transparent)',
-    controlShadow:'0 1px 2px #0000001f, inset 0 1px #ffffffcc',shadow:'0 12px 32px #20203833, 0 1px 4px #00000026'}),
+    ...light,...macosSystemColors('light'),workspace:'#e9e9e9',desktop:'#d9ddeb',
+    link:'#0057b8',keyword:'#7136a8',comment:'#386738'
+  },{...lightTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',size:'13px',radius:'6px',windowRadius:'14px',
+    border:'#e5e5e5',separator:'#e6e6e6',control:'#ebebeb',focus:'#007aff',surface:'#f7f7f7',hover:'#ebebeb',pressed:'#d3d3d3',
+    gutter:'#fafafa',gutterText:'#737373',thumb:'#8e8e93',material:'color-mix(in srgb, #ffffff 82%, transparent)',
+    controlShadow:'none',pressedShadow:'none',
+    shadow:'0 18px 48px #00000030, 0 3px 12px #0000001f, 0 0 0 1px #00000012'}),
   'macos26-dark':profile('macos26-dark','macOS 26 — Dark','macos26','dark',{
-    ...dark,face:'#2b2b30',title:'#303036',titleEnd:'#303036',window:'#1e1e23',selection:'#8bc2ff',
-    selectionText:'#102235',workspace:'#17171c',desktop:'#222535',link:'#91c6ff',keyword:'#dbadff',comment:'#9cd69c'
-  },{...darkTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',radius:'6px',windowRadius:'12px',
-    focus:'#8bc2ff',surface:'#303036',hover:'#41434e',pressed:'#4c5263',material:'color-mix(in srgb, #2b2b30 94%, transparent)',
-    controlShadow:'0 1px 2px #00000066, inset 0 1px #ffffff12'}),
+    ...dark,...macosSystemColors('dark'),workspace:'#141414',desktop:'#222228',
+    link:'#91c6ff',keyword:'#dbadff',comment:'#9cd69c'
+  },{...darkTokens,font:'-apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',size:'13px',radius:'6px',windowRadius:'14px',
+    border:'#3a3a3a',separator:'#343434',control:'#303030',focus:'#007aff',surface:'#252525',hover:'#303030',pressed:'#454545',
+    gutter:'#252525',gutterText:'#8e8e8e',thumb:'#8e8e93',material:'color-mix(in srgb, #1e1e1e 88%, transparent)',
+    controlShadow:'none',pressedShadow:'none',
+    shadow:'0 18px 48px #00000080, 0 3px 12px #00000055, 0 0 0 1px #00000066'}),
   x11:profile('x11','X11 — Light','x11','light',{
     ...light,face:'#bdbdb3',light:'#f2f2e8',highlight:'#d6d6cc',shadow:'#66665c',dark:'#35352d',
     title:'#526872',titleEnd:'#526872',titleText:'#ffffff',inactive:'#a5a59a',inactiveEnd:'#a5a59a',inactiveText:'#292922',

@@ -14,6 +14,7 @@
   ],
   "integration-controls": [
     "browser-html-retention.py",
+    "browser-control-compatibility-tests.py",
     "browser-webbrowser-tests.py",
     "browser-com-ole-tests.py",
     "browser-common-automation-tests.py",
@@ -24,10 +25,12 @@
     "browser-theme-tests.py",
     "browser-layout-tests.py",
     "auto-layout-browser-tests.py",
+    "browser-diagnostics-navigation-tests.py",
     "browser-application-theme-tests.py",
     "browser-native-caption-tests.py",
     "browser-sample-exports.py",
     "browser-exporter-tests.py",
+    "browser-macos-reference-tests.py",
     "browser-winui-tests.py"
   ],
   "intelligent-ui": [

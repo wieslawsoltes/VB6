@@ -39,6 +39,7 @@ server-profiles.local.json
 /packages/auto-layout/dist/auto-layout.js
 /dist/vb6-native.js
 /src/editor/diagnostics-payload.js
+/dist/vb6-diagnostics-worker.js
 /dist/studio.css
 
 # Reusable COM/Automation tarballs and their generated manifest.

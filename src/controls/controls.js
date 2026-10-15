@@ -1,4 +1,16 @@
-import {controlThemeColor} from '../theme/control-theme-color.js';
+import {showColor,showFont} from './common-dialogs.js';
+import {dialogCancelled} from './common-dialog-contract.js';
+import {DateViewController} from './date-view.js';
+import {ToolbarController,StatusBarController} from './bar-controls.js';
+import {GridViewController} from './grid-view.js';
+import {GRID_TYPES,CELL_KEYS,initializeGrid,gridIndex,gridIndexed,setGridProperty,cellStyle,gridClip,setGridClip,setGridText,addGridItem,removeGridItem} from './grid-state.js';
+import {TreeViewController} from './tree-view.js';
+import {ListViewController} from './list-view.js';
+import {LIST_TYPES,initializeList,sortList,addListItem,removeListItem,clearList,setListIndex,setListIndexed,listIndex} from './list-state.js';
+import {validateCollectionProperty} from './control-contract.js';
+import {applyRangeOrientation,handleRangeEndpointKey} from './range-orientation.js';
+import {commandPaint,groupPaint,comboPaint,rangeProgress} from '../theme/control-paint.js';
+import {controlThemeColor,controlThemePaint} from '../theme/control-theme-color.js';
 import {resolveRuntimeParent,validateRuntimeContainer,runtimeRemovalPlan} from './container-lifecycle.js';
 import {controlParents,tabPagePlan} from './tab-model.js';
 import {buildTabs,refreshTabs,mountTabPages,getTabProperty,setTabProperty,setIndexedTab,bindTabChild,unbindTabChild} from './tabs.js';
@@ -19,7 +31,7 @@ import { GraphicsSurface } from '../graphics/surface.js';
 import { cssColor as oleColor, fontFamily, getTheme } from '../theme/theme.js';
 import { icon, controlIcon } from '../theme/icons.js';
 import { CONTROL_DEFAULTS, createControl, newId } from '../project/model.js';
-import { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray } from './collections.js';
+import { controlInteger, ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray } from './collections.js';
 
 export const NONVISUAL_TYPES=new Set(['Timer','ImageList','CommonDialog']);
 export const DEFAULT_EVENTS={Form:'Load',MDIForm:'Load',CommandButton:'Click',TextBox:'Change',RichTextBox:'Change',ListBox:'Click',ComboBox:'Click',Timer:'Timer',HScrollBar:'Change',VScrollBar:'Change',TreeView:'NodeClick',ListView:'ItemClick',ProgressBar:'MouseDown',Slider:'Change',Toolbar:'ButtonClick',TabStrip:'Click',SSTab:'Click',DTPicker:'Change',MonthView:'DateClick',MSFlexGrid:'Click',PictureBox:'Click'};
@@ -48,7 +60,7 @@ export class BrowserControl {
       this.SuspendLayout=()=>this.form?.layoutController?.suspend();
       this.ResumeLayout=(perform=true)=>this.form?.layoutController?.resume(perform);
     }
-    this.build();this.attachEvents();this.refresh();
+    this.build();initializeList(this);initializeGrid(this);this.attachEvents();this.refresh();
     if(!this.design&&this.vm?.win32){
       Object.defineProperty(this,'hWnd',{enumerable:true,value:this.vm.win32.registerControl(this)});
       if(['Form','MDIForm','PictureBox'].includes(this.type))Object.defineProperty(this,'hDC',{enumerable:true,get:()=>{
@@ -59,6 +71,8 @@ export class BrowserControl {
     }
   }
   get(key){
+    if(this.dateView?.state.handles(key))return this.dateView.get(key);
+    if(GRID_TYPES.has(this.type)&&CELL_KEYS.has(key)){const state=cellStyle(this,this.props.Row,this.props.Col);return state[key]??this.props[key];}
     const tabValue=getTabProperty(this,key);if(tabValue!==undefined)return tabValue;
     if(key==='Container'&&this.anchoring&&this.form&&this.form!==this)return resolveRuntimeParent(this.form,this.model)||this.form;
     if(layoutKey(key)&&(!this.anchoring||!Object.hasOwn(layoutDefaults(this.model),key)))throw new VBError("Object does not support this property: "+key,438);
@@ -78,6 +92,7 @@ export class BrowserControl {
   }
   set(key,value,fromDOM=false){
     if(this.disposed)return;
+    if(fromDOM&&!acceptsInput(this)){this.invalidate();return;}
     if(setTabProperty(this,key,value))return;
     if(key==='Container'&&this.anchoring&&this.form&&this.form!==this){
       const owner=this.form,parent=validateRuntimeContainer(owner,this,value===owner?null:value);
@@ -88,18 +103,24 @@ export class BrowserControl {
     if(layoutKey(key)){if(!this.anchoring||!Object.hasOwn(layoutDefaults(this.model),key))throw new VBError("Object does not support this property: "+key,438);setLayoutProperty(this,key,value);(this.form||this).layoutController?.edit(this,key);this.invalidate();return;}
     if(key==='DataSource'){this.bindRecordset(value);return;}
     if(key==='DataField'||key==='DataMember'){this.props[key]=value;if(this._dataSource)this.bindRecordset(this._dataSource);return;}
+    if(this.dateView?.state.handles(key)){this.dateView.set(key,value);return;}
     if(this._boundRS&&this.props.DataField&&['Text','Value'].includes(key)&&!this.design){this._boundRS.Fields.Item(this.props.DataField).Value=value;}
     if(this._boundRS&&['Rows','Cols','FixedRows','FixedCols','FormatString'].includes(key))throw new VBError('Bound grid dimensions and headers belong to the Recordset',445);
+    if(setGridProperty(this,key,value))return;
     if(key==='Picture'){this.props.Picture=value;if(this.surface||value&&['Form','MDIForm'].includes(this.type))this.ensureSurface().setPicture(safeImage(value,this.assets));this.invalidate();return;}
     if(key==='TextRTF'&&this.rich){this.rich.setRTF(value);return;}
     if(key==='Text'&&this.rich){this.rich.setText(value);return;}
     if(this.rich&&RICH_SELECTION_PROPERTIES.includes(key)){if(['SelIndent','SelHangingIndent','SelRightIndent'].includes(key))value=Math.round(Number(value)/units(this.form?.props.ScaleMode||1)*15);this.rich.format(key,value);return;}
-    if(key==='Text'&&['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)){this.setIndexed('TextMatrix',[this.props.Row||0,this.props.Col||0],String(value));return;}
+    if(key==='Text'&&GRID_TYPES.has(this.type)){setGridText(this,value);return;}
     if(key==='Data'&&this.type==='MSChart'){const row=(this.props.Row||1)-1,col=(this.props.Column||1)-1;this.gridData[row] ||= [];this.gridData[row][col]=Number(value);this.invalidate();return;}
-    if(key==='ListIndex'){value=Number(value);if(value< -1||value>=this.items.length)throw new VBError('Invalid property value: ListIndex',380);}
+    if(key==='ListIndex'&&LIST_TYPES.has(this.type)){const previous=this.props.ListIndex;setListIndex(this,value);if(previous!==this.props.ListIndex){this.invalidate();if(!fromDOM)this.event('Click');}return;}
+    value=validateCollectionProperty(this.type,key,value);
+    if(key==='Sorted'&&this.type==='TreeView'){this.props.Sorted=value;if(value)this.Nodes.sort();return;}
+    if(key==='Sorted'&&LIST_TYPES.has(this.type)){const previous=this.props.Sorted;this.props.Sorted=value;if(value&&!previous)sortList(this);return;}
     if(key==='Value'&&['HScrollBar','VScrollBar','Slider','ProgressBar','UpDown'].includes(this.type)){value=Number(value);if(!Number.isFinite(value)||value<Math.min(Number(this.props.Min),Number(this.props.Max))||value>Math.max(Number(this.props.Min),Number(this.props.Max)))throw new VBError('Invalid property value: Value',380);}
-    if(['Rows','Cols','RowCount','ColumnCount'].includes(key)){value=Math.floor(Number(value));if(value<0||value>10000)throw new VBError('Invalid property value: '+key,380);}
-    if(key==='Interval'){value=Number(value);if(value<0||value>65535)throw new VBError('Invalid Timer interval',380);}
+    if(['Rows','Cols','RowCount','ColumnCount'].includes(key))value=controlInteger(value,0,10000);
+    if(key==='Interval')value=controlInteger(value,0,65535);
+    if(this.type==='ImageList'&&['ImageWidth','ImageHeight'].includes(key)){value=controlInteger(value,1,4096);this.props[key]=value;this.ListImages.changed();return;}
     if(this.anchoring&&['Left','Top','Width','Height','ClientWidth','ClientHeight'].includes(key)) {
       value=Number(value);if(!Number.isFinite(value)||Math.abs(value)>300000||/Width|Height/.test(key)&&value<0)throw new VBError('Invalid geometry: '+key,380);
     }
@@ -107,7 +128,7 @@ export class BrowserControl {
     if(this.anchoring&&['Form','MDIForm'].includes(this.type)&&['Width','Height','ClientWidth','ClientHeight'].includes(key)){const axis=key.endsWith('Width')?'Width':'Height';this.props[axis]=value;this.props['Client'+axis]=value;this.layoutController?.arrange();}
     else if(this.anchoring&&['Left','Top','Width','Height','Visible'].includes(key))this.form?.layoutController?.edit(this,key);
     if(key==='Value'&&this.type==='OptionButton'&&truth(value))for(const c of this.form?.controls||[])if(c!==this&&c.type==='OptionButton'&&(c.model.parent||null)===(this.model.parent||null)){c.props.Value=0;c.invalidate();}
-    if(key==='Text'&&this.type==='ComboBox'){const i=this.items.indexOf(String(value));this.props.ListIndex=i;}
+    if(key==='Text'&&this.type==='ComboBox'){const i=this.items.indexOf(String(value));setListIndex(this,i);}
     if(this.type==='Timer'&&['Interval','Enabled'].includes(key))this.updateTimer();
     if(this.rich&&['Locked','Enabled','MaxLength'].includes(key)){this.rich.readOnly=this.design||truth(this.props.Locked)||!truth(this.props.Enabled);this.rich.maxLength=Number(this.props.MaxLength)||0;}
     if(!fromDOM)this.invalidate();
@@ -131,26 +152,25 @@ export class BrowserControl {
       case 'TextBox':this.input=el(p.MultiLine?'textarea':'input',{class:'vb-text-input',type:p.PasswordChar?'password':'text','aria-label':this.model.name});n.append(this.input);this.input.addEventListener('input',()=>this.set('Text',this.input.value,true));break;
       case 'Frame':addClass('vb-frame');this.legend=el('span',{class:'vb-frame-legend'});this.childHost=el('div',{class:'vb-frame-client'});n.append(this.legend,this.childHost);break;
       case 'CheckBox':case 'OptionButton':addClass('vb-check');this.input=el('input',{type:this.type==='CheckBox'?'checkbox':'radio',name:'radio_'+(this.form?.model.name||'form')+'_'+(this.model.parent||'root'),'aria-label':p.Caption||this.model.name});this.label=el('span');n.append(this.input,this.label);this.input.addEventListener('change',()=>this.set('Value',this.input.checked?this.type==='CheckBox'?1:-1:0,true));n.addEventListener('click',e=>{if(e.target!==this.input){e.vbHandled=true;this.input.click();e.stopPropagation();}});break;
-      case 'ListBox':case 'FileListBox':case 'DirListBox':case 'DriveListBox':this.input=el('select',{class:this.type==='DriveListBox'?'vb-combo':'vb-list',size:this.type==='DriveListBox'?1:2,multiple:this.type==='ListBox'&&p.MultiSelect,'aria-label':this.model.name});n.append(this.input);this.input.addEventListener('change',()=>{this.props.ListIndex=this.input.selectedIndex;this.selectedIndices=new Set([...this.input.selectedOptions].map(o=>Number(o.value)));this.event('Click');if(this.type!=='ListBox')this.event('Change');});if(this.type==='DriveListBox')this.items=['C: [Virtual disk]'];if(this.type==='DirListBox')this.items=this.vm?[...this.vm.fs.directories]:['/','/Documents','/Projects'];if(this.type==='FileListBox')this.items=this.vm?[...this.vm.fs.files.keys()].filter(k=>k.startsWith(p.Path||'/')):['Readme.txt','Sample.vbp'];break;
-      case 'ComboBox':this.combo=new ClassicCombo(n,()=>this.props,()=>this.items,text=>this.set('Text',text,true),index=>{this.props.ListIndex=index;this.props.Text=this.items[index]||'';this.combo.input.value=this.props.Text;this.event('Click');this.event('Change');this.invalidate();},{design:this.design});this.input=this.combo.input;break;
+      case 'ListBox':case 'FileListBox':case 'DirListBox':case 'DriveListBox':this.input=el('select',{class:this.type==='DriveListBox'?'vb-combo':'vb-list',size:this.type==='DriveListBox'?1:2,multiple:this.type==='ListBox'&&p.MultiSelect,'aria-label':this.model.name});n.append(this.input);this.input.addEventListener('change',()=>{if(!acceptsInput(this)){this.invalidate();return;}this.props.ListIndex=this.input.selectedIndex;this.selectedIndices=new Set([...this.input.selectedOptions].map(o=>Number(o.value)));this.event('Click');if(this.type!=='ListBox')this.event('Change');});if(this.type==='DriveListBox')this.items=['C: [Virtual disk]'];if(this.type==='DirListBox')this.items=this.vm?[...this.vm.fs.directories]:['/','/Documents','/Projects'];if(this.type==='FileListBox')this.items=this.vm?[...this.vm.fs.files.keys()].filter(k=>k.startsWith(p.Path||'/')):['Readme.txt','Sample.vbp'];break;
+      case 'ComboBox':this.combo=new ClassicCombo(n,()=>this.props,()=>this.items,text=>this.set('Text',text,true),index=>{if(!acceptsInput(this)){this.invalidate();return;}setListIndex(this,index);this.props.Text=this.items[index]||'';this.combo.input.value=this.props.Text;this.event('Click');this.event('Change');this.invalidate();},{design:this.design});this.input=this.combo.input;break;
       case 'PictureBox':addClass('vb-picture');break;
       case 'Image':addClass('vb-image');this.image=el('img',{alt:''});this.placeholder=el('div',{class:'vb-image-placeholder'});n.append(this.image,this.placeholder);break;
       case 'Shape':addClass('vb-shape');this.shape=el('div',{class:'vb-shape-inner'});n.append(this.shape);break;
       case 'Line':this.shape=el('div',{style:{height:'1px',width:'100%',background:'#000'}});n.append(this.shape);break;
       case 'Timer':case 'ImageList':case 'CommonDialog':addClass('vb-nonvisual');n.replaceChildren(controlIcon(this.type));if(this.type==='ImageList'){this.ListImages=new ImageItems(()=>this.invalidate());for(const item of p.ListImages||[])this.ListImages.Add(undefined,item.Key,item.Picture);}break;
       case 'ProgressBar':this.track=el('div',{class:'vb-progress'});this.fill=el('div',{class:'vb-progress-fill'});this.track.append(this.fill);n.append(this.track);break;
-      case 'HScrollBar':case 'VScrollBar':this.scrollbar=new ClassicScrollbar(n,()=>this.props,(value,phase)=>{if(phase==='scroll'){this.props.Value=value;this.event('Scroll',[],true);}else if(phase==='commit')this.event('Change');else this.set('Value',value,true);},{vertical:this.type==='VScrollBar',design:this.design});break;
-      case 'Slider':this.input=el('input',{type:'range',class:'vb-range'+(this.type==='VScrollBar'?' vb-vrange':''),'aria-label':this.model.name});n.append(this.input);this.input.addEventListener('input',()=>{this.set('Value',Number(this.input.value),true);this.event('Scroll',[],true);});break;
+      case 'HScrollBar':case 'VScrollBar':this.scrollbar=new ClassicScrollbar(n,()=>this.props,(value,phase)=>{if(!acceptsInput(this)){this.invalidate();return;}if(phase==='scroll'){this.props.Value=value;this.event('Scroll',[],true);}else if(phase==='commit')this.event('Change');else this.set('Value',value,true);},{vertical:this.type==='VScrollBar',design:this.design});break;
+      case 'Slider':this.input=el('input',{type:'range',class:'vb-range'+(this.type==='VScrollBar'?' vb-vrange':''),'aria-label':this.model.name});n.append(this.input);this.input.addEventListener('keydown',e=>{if(!this.design&&acceptsInput(this))handleRangeEndpointKey(this.input,e);});this.input.addEventListener('input',()=>{this.set('Value',Number(this.input.value),true);this.input.style.setProperty('--vb-range-progress',rangeProgress(this.input.min,this.input.max,this.input.value));this.event('Scroll',[],true);});break;
       case 'UpDown':this.stepper=new ClassicUpDown(n,()=>this.props,(value,direction)=>{this.set('Value',value,true);this.event(direction>0?'UpClick':'DownClick');},{design:this.design});break;
       case 'TreeView':this.buildTree();break;
       case 'ListView':this.buildListView();break;
-      case 'StatusBar':addClass('vb-statusbar');this.Panels=new StatusPanels(()=>this.invalidate());for(const item of p.Panels||[]){const panel=this.Panels.Add(undefined,item.Key,item.Text,item.Style);for(const key of ['Width','Alignment','Enabled','Visible','AutoSize','ToolTipText','Picture'])if(item[key]!==undefined)panel[key]=clone(item[key]);}break;
-      case 'Toolbar':addClass('vb-toolbar');this.Buttons=new ToolbarButtons(()=>this.invalidate());for(const item of p.Buttons||[]){const button=this.Buttons.Add(undefined,item.Key,item.Caption,item.Style,item.Image);for(const key of ['Enabled','Visible','Value','ToolTipText','Tag'])if(item[key]!==undefined)button[key]=clone(item[key]);}break;
+      case 'StatusBar':this.barView=new StatusBarController(this,safeImage);break;
+      case 'Toolbar':this.barView=new ToolbarController(this,safeImage);break;
       case 'TabStrip':case 'SSTab':buildTabs(this);break;
       case 'RichTextBox':this.input=el('div',{class:'vb-richtext',contenteditable:!this.design,'aria-label':this.model.name,role:'textbox',style:{width:'100%',height:'100%'}});n.append(this.input);this.rich=new RichTextController(this.input,{text:p.Text,rtf:p.TextRTF,defaults:{fontName:p.FontName,fontSize:Number(p.FontSize),bold:truth(p.FontBold),italic:truth(p.FontItalic),underline:truth(p.FontUnderline),color:oleColor(p.ForeColor)},readOnly:this.design||truth(p.Locked)||!truth(p.Enabled),maxLength:Number(p.MaxLength)||0,onChange:()=>{this.props.Text=this.rich.text;this.event('Change');},onSelection:()=>this.event('SelChange',[],true)});break;
       case 'MSFlexGrid':case 'MSHFlexGrid':case 'DataGrid':this.buildGrid();break;
-      case 'DTPicker':this.input=el('input',{type:'date',class:'vb-date-input','aria-label':this.model.name});n.append(this.input);this.input.addEventListener('change',()=>this.set('Value',this.input.value,true));break;
-      case 'MonthView':addClass('vb-month');break;
+      case 'DTPicker':case 'MonthView':this.dateView=new DateViewController(this);break;
       case 'MSChart':this.props.Column=1;break;
       case 'Data':case 'Adodc':this.buildDataControl();break;
       default:addClass('vb-unsupported');n.textContent=this.type+' — native control not implemented';break;
@@ -162,13 +182,13 @@ export class BrowserControl {
     if(this.input){if(!['Slider','UpDown','CheckBox','OptionButton'].includes(this.type))this.input.style.backgroundColor=['TextBox','ComboBox','DTPicker'].includes(this.type)?controlThemeColor(p.BackColor,'inputBackground'):oleColor(p.BackColor);this.input.style.color=['TextBox','ComboBox','DTPicker'].includes(this.type)?controlThemeColor(p.ForeColor,'inputForeground'):oleColor(p.ForeColor);if(this.input.disabled!==disabled)this.input.disabled=disabled;if(this.input.tabIndex!==tabIndex)this.input.tabIndex=tabIndex;}
     if(['Frame','TextBox','PictureBox','CommandButton','Label','RichTextBox'].includes(this.type))n.style.background=Number(p.BackStyle)===0&&this.type==='Label'?'transparent':this.type==='CommandButton'?controlThemeColor(p.BackColor,'commandBackground'):this.type==='TextBox'?controlThemeColor(p.BackColor,'inputHostBackground'):oleColor(p.BackColor);
     switch(this.type){
-      case 'CommandButton':updateMnemonic(n,p.Caption);n.classList.toggle('default-button',!!p.Default);break;
+      case 'CommandButton':{updateMnemonic(n,p.Caption);n.classList.toggle('default-button',!!p.Default);const paint=commandPaint(p.BackColor,p.ForeColor);n.style.background=controlThemePaint(p.BackColor,'commandBackground',paint.background);n.style.color=controlThemePaint(p.ForeColor,'commandForeground',paint.color);break;}
       case 'Label':updateMnemonic(n,p.Caption);n.style.justifyContent=['flex-start','flex-end','center'][Number(p.Alignment)||0];n.style.textAlign=['left','right','center'][Number(p.Alignment)||0];break;
-      case 'Frame':updateMnemonic(this.legend,p.Caption);this.legend.style.background=oleColor(p.BackColor);break;
+      case 'Frame':{updateMnemonic(this.legend,p.Caption);const paint=groupPaint(p.BackColor,p.ForeColor);n.style.background=paint.background;this.legend.style.background=paint.legendBackground;break;}
       case 'TextBox':if(this.input.value!==String(p.Text??''))this.input.value=String(p.Text??'');this.input.readOnly=truth(p.Locked);if(p.MaxLength>0)this.input.maxLength=Number(p.MaxLength);else this.input.removeAttribute('maxlength');this.input.style.textAlign=['left','right','center'][Number(p.Alignment)||0];this.input.style.backgroundColor=controlThemeColor(p.BackColor,'inputBackground');break;
       case 'CheckBox':case 'OptionButton':updateMnemonic(this.label,p.Caption);this.input.checked=truth(p.Value);this.input.indeterminate=Number(p.Value)===2;break;
       case 'ListBox':case 'FileListBox':case 'DirListBox':case 'DriveListBox':if(this.listRevision!==this.itemsRevision||this.lastListCount!==this.items.length){selectOptions(this.input,this.items,Number(p.ListIndex));this.listRevision=this.itemsRevision;this.lastListCount=this.items.length;}if(!p.MultiSelect)this.input.selectedIndex=Number(p.ListIndex);else for(const option of this.input.options)option.selected=this.selectedIndices.has(Number(option.value));break;
-      case 'ComboBox':this.combo.refresh();break;
+      case 'ComboBox':this.combo.refresh();this.input.style.backgroundColor=controlThemePaint(p.BackColor,'inputBackground',comboPaint(p.BackColor,p.ForeColor,p.Style));break;
       case 'PictureBox':if(p.Picture||this.surface){const surface=this.ensureSurface();surface.background=p.BackColor;surface.setPicture(safeImage(p.Picture,this.assets));surface.invalidate();}break;
       case 'Image':{const source=safeImage(p.Picture,this.assets);if(source)this.image.src=source;else this.image.removeAttribute('src');this.image.hidden=!source;this.placeholder.hidden=!!source||!this.design;this.image.style.objectFit=truth(p.Stretch)?'fill':'none';break;}
       case 'Shape':this.shape.style.borderColor=oleColor(p.BorderColor||0);this.shape.style.borderRadius=[2,3].includes(Number(p.Shape))?'50%':[4,5].includes(Number(p.Shape))?'10px':'0';this.shape.style.background=Number(p.FillStyle)===1?'transparent':oleColor(p.FillColor);break;
@@ -176,36 +196,48 @@ export class BrowserControl {
       case 'ProgressBar':this.fill.style.width=Math.max(0,Math.min(100,(Number(p.Value)-Number(p.Min))/(Number(p.Max)-Number(p.Min)||1)*100))+'%';break;
       case 'HScrollBar':case 'VScrollBar':this.scrollbar.refresh();break;
       case 'UpDown':this.stepper.refresh();break;
-      case 'Slider':this.input.min=p.Min;this.input.max=p.Max;this.input.step=p.SmallChange||1;this.input.value=p.Value;break;
+      case 'Slider':this.input.min=p.Min;this.input.max=p.Max;this.input.step=p.SmallChange||1;this.input.value=p.Value;applyRangeOrientation(this.input,Number(p.Orientation)===1);this.input.style.setProperty('--vb-range-progress',rangeProgress(this.input.min,this.input.max,this.input.value));break;
       case 'TreeView':this.refreshTree();break;
       case 'ListView':this.refreshListView();break;
-      case 'StatusBar':n.replaceChildren(...(this.Panels.Count?this.Panels.items.filter(panel=>this.design||truth(panel.Visible)).map(panel=>el('div',{class:'vb-status-panel',text:panel.Text,title:panel.ToolTipText||'',style:{flex:panel.AutoSize?'1':'0 0 '+Number(panel.Width)/15+'px',textAlign:['left','right','center'][Number(panel.Alignment)||0],opacity:truth(panel.Enabled)?'1':'.55'}})):[el('div',{class:'vb-status-panel',text:p.SimpleText||'Ready'})]));break;
-      case 'Toolbar':n.replaceChildren(...this.Buttons.items.filter(b=>b.Visible).map(button=>el('button',{text:button.Style===3?'│':stripMnemonic(button.Caption||button.Key),disabled:!button.Enabled,title:button.ToolTipText||button.Caption,onclick:()=>this.event('ButtonClick',[button])})));if(this.design&&!this.Buttons.Count)n.append(el('button',{text:'New'}),el('button',{text:'Open'}),el('button',{text:'Save'}));break;
+      case 'StatusBar':this.barView.refresh();break;
+      case 'Toolbar':this.barView.refresh();break;
       case 'TabStrip':case 'SSTab':refreshTabs(this,value=>safeImage(value,this.assets));break;
       case 'RichTextBox':this.rich.readOnly=this.design||truth(p.Locked)||!truth(p.Enabled);this.input.contentEditable=String(!this.rich.readOnly);break;
       case 'MSFlexGrid':case 'MSHFlexGrid':case 'DataGrid':this.refreshGrid();break;
-      case 'DTPicker':{const value=this.get('Value');if(!isNaN(value))this.input.value=[value.getFullYear(),String(value.getMonth()+1).padStart(2,'0'),String(value.getDate()).padStart(2,'0')].join('-');break;}
-      case 'MonthView':this.refreshMonth();break;
+      case 'DTPicker':case 'MonthView':this.dateView.refresh();break;
       case 'MSChart':this.refreshChart();break;
       case 'Data':case 'Adodc':this.dataLabel.textContent=p.Caption||'Data';break;
     }
   }
   defaultValue(){if(['TextBox','RichTextBox','ComboBox','ListBox','FileListBox','DirListBox','DriveListBox','MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type))return this.get('Text');if(['CheckBox','OptionButton','HScrollBar','VScrollBar','Slider','ProgressBar','UpDown','DTPicker'].includes(this.type))return this.get('Value');return this.get('Caption');}
   defaultRef(){const key=['TextBox','RichTextBox','ComboBox','ListBox','FileListBox','MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)?'Text':['CheckBox','OptionButton','HScrollBar','VScrollBar','Slider','ProgressBar','UpDown','DTPicker'].includes(this.type)?'Value':'Caption';return new Ref(()=>this.get(key),v=>this.set(key,v));}
-  AddItem(text,index){if(this._boundRS)throw new VBError('Use Recordset.AddNew to add a bound row',445);if(['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)){const row=String(text).split('\t'),at=index===undefined?this.props.Rows:Number(index);this.gridData.splice(at,0,row);this.props.Rows++;this.invalidate();return;}const at=index===undefined?this.items.length:Number(index);if(at<0||at>this.items.length)throw new VBError('Invalid property value',380);this.items.splice(at,0,String(text));this.itemData.splice(at,0,0);this.NewIndex=at;if(this.props.Sorted)this.items.sort((a,b)=>a.localeCompare(b));this.itemsRevision=(this.itemsRevision||0)+1;this.invalidate();}
-  RemoveItem(index){if(this._boundRS)throw new VBError('Use Recordset.Delete to delete a bound row',445);index=Number(index);if(['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)){if(index<0||index>=this.props.Rows)throw new VBError('Invalid row',381);this.gridData.splice(index,1);this.props.Rows--;this.invalidate();return;}if(index<0||index>=this.items.length)throw new VBError('Invalid property array index',381);this.items.splice(index,1);this.itemData.splice(index,1);this.props.ListIndex=-1;this.itemsRevision=(this.itemsRevision||0)+1;this.invalidate();}
-  Clear(){if(this._boundRS)throw new VBError('Clear is not supported on bound grids',445);this.items=[];this.itemData=[];this.props.ListIndex=-1;this.gridData=[];this.itemsRevision=(this.itemsRevision||0)+1;this.invalidate();}
-  get ListCount(){return this.items.length;}get SelCount(){return this.selectedIndices.size;}
-  List(index){if(index<0||index>=this.items.length)throw new VBError('Invalid property array index',381);return this.items[Number(index)];}
-  ItemData(index){if(index<0||index>=this.items.length)throw new VBError('Invalid property array index',381);return this.itemData[index]||0;}
-  Selected(index){return this.selectedIndices.has(Number(index))?-1:0;}
+  AddItem(text,index){if(this._boundRS)throw new VBError('Use Recordset.AddNew to add a bound row',445);if(GRID_TYPES.has(this.type)){addGridItem(this,text,index);return;}addListItem(this,text,index);}
+  RemoveItem(index){if(this._boundRS)throw new VBError('Use Recordset.Delete to delete a bound row',445);if(GRID_TYPES.has(this.type)){removeGridItem(this,index);return;}removeListItem(this,index);}
+  Clear(){if(this._boundRS)throw new VBError('Clear is not supported on bound grids',445);if(LIST_TYPES.has(this.type)){clearList(this);return;}this.gridData=[];this._cellStyles?.clear();this.invalidate();}
+  get ListCount(){return this.items.length;}get SelCount(){return this.selectedIndices.size;}get NewIndex(){return this._newIndex??-1;}
+  List(index){return this.items[listIndex(this,index)];}
+  ItemData(index){return this.itemData[listIndex(this,index)]??0;}
+  Selected(index){return this.selectedIndices.has(listIndex(this,index))?-1:0;}
   TextMatrix(row,col){row=Number(row);col=Number(col);if(!Number.isInteger(row)||!Number.isInteger(col)||row<0||col<0||row>=this.props.Rows||col>=this.props.Cols)throw new VBError('Invalid row or column',381);return this.gridValue(row,col);}
-  ColWidth(index){return this._colWidths[index]??1200;}
-  RowHeight(){return 315;}
-  setIndexed(name,args,value){if(setIndexedTab(this,name,args,value))return;const key=lower(name);if(key==='list'){const index=Number(args[0]);this.List(index);this.items[index]=String(value);this.itemsRevision=(this.itemsRevision||0)+1;}else if(key==='itemdata'){this.List(args[0]);this.itemData[args[0]]=Number(value);}else if(key==='selected'){const i=Number(args[0]);this.List(i);if(truth(value))this.selectedIndices.add(i);else this.selectedIndices.delete(i);}else if(key==='textmatrix'){const [r,c]=args.map(Number);this.TextMatrix(r,c);if(this._boundRS){if(r===0)throw new VBError('Bound column headers are read-only',445);this._boundRS.setRowValue(this._boundRows[r-1],c,value);}else{this.gridData[r] ||= [];this.gridData[r][c]=String(value);}}else if(key==='colwidth'){const index=Number(args[0]),width=Number(value);if(!Number.isInteger(index)||index< -1||index>=Number(this.props.Cols)||!Number.isFinite(width)||width<0||width>300000)throw new VBError('Invalid column width or index',380);if(index===-1)this._colWidths=Array(Number(this.props.Cols)).fill(width);else this._colWidths[index]=width;}else if(key==='rowheight'){if(Number(value)!==315)throw new VBError('Variable row heights are not supported by this grid renderer',445);}else throw new VBError('Unknown indexed property: '+name,438);this.invalidate();}
-  get Clip(){const r1=Math.min(this.props.Row||0,this.props.RowSel||this.props.Row||0),r2=Math.max(this.props.Row||0,this.props.RowSel||this.props.Row||0),c1=Math.min(this.props.Col||0,this.props.ColSel||this.props.Col||0),c2=Math.max(this.props.Col||0,this.props.ColSel||this.props.Col||0);return Array.from({length:r2-r1+1},(_,i)=>Array.from({length:c2-c1+1},(_,j)=>this.TextMatrix(r1+i,c1+j)).join('\t')).join('\r\n');}
-  set Clip(text){String(text).split(/\r?\n/).forEach((line,i)=>line.split('\t').forEach((value,j)=>{const r=(this.props.Row||0)+i,c=(this.props.Col||0)+j;if(r<this.props.Rows&&c<this.props.Cols)this.setIndexed('TextMatrix',[r,c],value);}));}
-  get SelStart(){if(this.rich){this.rich.readSelection();return this.rich.start;}return this.input?.selectionStart||0;}set SelStart(v){v=Number(v);if(!Number.isInteger(v)||v<0)throw new VBError('Invalid selection start',380);if(this.rich)this.rich.select(Math.min(v,this.rich.text.length));else this.input?.setSelectionRange?.(v,v);}
+  ColWidth(index){return this._colWidths[gridIndex(this,'colwidth',index)]??1200;}
+  RowHeight(index){return this._rowHeights[gridIndex(this,'rowheight',index)]??315;}
+  RowData(index){return this._rowData[gridIndex(this,'rowdata',index)]??0;}
+  ColData(index){return this._colData[gridIndex(this,'coldata',index)]??0;}
+  ColAlignment(index){return this._colAlignment[gridIndex(this,'colalignment',index)]??9;}
+  ColAlignmentFixed(index){return this._colAlignmentFixed[gridIndex(this,'colalignmentfixed',index)]??9;}
+  RowPos(index){return this.gridView?.position('row',index)??0;}
+  ColPos(index){return this.gridView?.position('col',index)??0;}
+  get TopRow(){return this.gridView?.getTop('row')??0;}set TopRow(value){this.gridView?.setTop('row',value);}
+  get LeftCol(){return this.gridView?.getTop('col')??0;}set LeftCol(value){this.gridView?.setTop('col',value);}
+  get MouseRow(){return this.gridView?.lastMouse.row??-1;}get MouseCol(){return this.gridView?.lastMouse.col??-1;}
+  TextArray(index){index=controlInteger(index,0,this.props.Rows*this.props.Cols-1,381);return this.TextMatrix(Math.floor(index/this.props.Cols),index%this.props.Cols);}
+
+  setIndexed(name,args,value){if(setIndexedTab(this,name,args,value))return;const key=lower(name);if(key==='daybold'&&this.type==='MonthView'){if(args.length!==1)throw new VBError('Wrong number of arguments',450);this.dateView.state.setDayBold(args[0],value);return;}if(GRID_TYPES.has(this.type)&&gridIndexed(this,key,args,value))return;if(key==='textarray'&&GRID_TYPES.has(this.type)){if(args.length!==1)throw new VBError('Wrong number of arguments',450);const index=controlInteger(args[0],0,this.props.Rows*this.props.Cols-1,381);this.setIndexed('TextMatrix',[Math.floor(index/this.props.Cols),index%this.props.Cols],value);return;}if(LIST_TYPES.has(this.type)&&setListIndexed(this,key,args,value))return;if(key==='textmatrix'){const [r,c]=args.map(Number);this.TextMatrix(r,c);if(this._boundRS){if(r===0)throw new VBError('Bound column headers are read-only',445);this._boundRS.setRowValue(this._boundRows[r-1],c,value);}else{this.gridData[r] ||= [];this.gridData[r][c]=String(value);}}else throw new VBError('Unknown indexed property: '+name,438);this.invalidate();}
+  VisibleDays(index){if(this.type!=='MonthView')throw new VBError('VisibleDays requires MonthView',438);return this.dateView.visibleDays(index);}
+  DayBold(date){if(this.type!=='MonthView')throw new VBError('DayBold requires MonthView',438);return this.dateView.state.dayBold(date);}
+  get Clip(){return gridClip(this);}
+  set Clip(value){setGridClip(this,value);}
+  get SelStart(){if(this.type==='MonthView')return this.dateView.get('SelStart');if(this.rich){this.rich.readSelection();return this.rich.start;}return this.input?.selectionStart||0;}set SelStart(v){if(this.type==='MonthView'){this.dateView.set('SelStart',v);return;}v=Number(v);if(!Number.isInteger(v)||v<0)throw new VBError('Invalid selection start',380);if(this.rich)this.rich.select(Math.min(v,this.rich.text.length));else this.input?.setSelectionRange?.(v,v);}
   get SelLength(){if(this.rich){this.rich.readSelection();return this.rich.end-this.rich.start;}return (this.input?.selectionEnd||0)-(this.input?.selectionStart||0);}set SelLength(v){v=Number(v);if(!Number.isInteger(v)||v<0)throw new VBError('Invalid selection length',380);if(this.rich)this.rich.select(this.rich.start,Math.min(this.rich.text.length,this.rich.start+v));else this.input?.setSelectionRange?.(this.SelStart,this.SelStart+v);}
   get SelText(){if(this.rich){this.rich.readSelection();return this.rich.selectedText;}return String(this.props.Text||'').slice(this.SelStart,this.SelStart+this.SelLength);}set SelText(value){if(this.rich)this.rich.replaceSelection(String(value));else if(this.input?.setRangeText){this.input.setRangeText(String(value),this.SelStart,this.SelStart+this.SelLength,'end');this.set('Text',this.input.value,true);}}
   get SelRTF(){if(!this.rich)throw new VBError('SelRTF requires RichTextBox',438);return this.rich.selectedRTF;}set SelRTF(value){if(!this.rich)throw new VBError('SelRTF requires RichTextBox',438);this.rich.replaceSelection(parseRTF(String(value),this.rich.defaults));}
@@ -214,7 +246,7 @@ export class BrowserControl {
   Find(text,start=0,end=-1,options=0){if(!this.rich)throw new VBError('Find requires RichTextBox',438);return this.rich.find(text,start,end,options);}
   GetLineFromChar(index){if(!this.rich)throw new VBError('GetLineFromChar requires RichTextBox',438);index=Number(index);this.rich.document.checkRange(index);return this.rich.text.slice(0,index).split('\r\n').length-1;}
   get RTFWarnings(){return this.rich?.document.warnings.join('\r\n')||'';}
-  SetFocus(){(this.input||this.node).focus();}Refresh(){if(['Data','Adodc'].includes(this.type)&&!this.design)return this.refreshDataControl();this.refresh();this.surface?.render();}Move(left,top,width,height){
+  SetFocus(){(this.input||this.viewport||this.node).focus();}Refresh(){if(['Data','Adodc'].includes(this.type)&&!this.design)return this.refreshDataControl();this.refresh();this.surface?.render();}Move(left,top,width,height){
     const values={Left:Number(left),...(top===undefined?{}:{Top:Number(top)}),...(width===undefined?{}:{Width:Number(width)}),...(height===undefined?{}:{Height:Number(height)})};
     if(this.anchoring)for(const [key,value]of Object.entries(values))if(!Number.isFinite(value)||Math.abs(value)>300000||/Width|Height/.test(key)&&value<0)throw new VBError('Invalid geometry: '+key,380);
     Object.assign(this.props,values);
@@ -267,7 +299,7 @@ export class BrowserControl {
   }
   refreshBinding(kind){
     const rs=this._boundRS;if(!rs||this.disposed)return;
-    if(!['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)){const field=this.props.DataField;if(!field)return;const value=rs.State&&!rs.BOF&&!rs.EOF?rs.Fields.Item(field).Value:null;this.props[this.type==='Label'?'Caption':['CheckBox','DTPicker'].includes(this.type)?'Value':'Text']=value??(this.type==='CheckBox'?0:'');this.invalidate();return;}
+    if(!['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)){const field=this.props.DataField;if(!field)return;const value=rs.State&&!rs.BOF&&!rs.EOF?rs.Fields.Item(field).Value:null;if(this.dateView){if(value!==null)this.dateView.set('Value',value,{fromBinding:true,silent:true});else if(this.props.CheckBox)this.dateView.set('Value',null,{fromBinding:true,silent:true});else{this.LastDataError='A Null date requires CheckBox = True';}return;}this.props[this.type==='Label'?'Caption':['CheckBox','DTPicker'].includes(this.type)?'Value':'Text']=value??(this.type==='CheckBox'?0:'');this.invalidate();return;}
     this._boundRows=rs.State?rs.view():[];this.props.Rows=this._boundRows.length+1;this.props.Cols=rs.columns.length;this.props.FixedRows=1;
     const previous=this.props.Row;this.props.Row=this.props.RowSel=rs.State&&!rs.BOF&&!rs.EOF?rs.position+1:0;this.props.Col=Math.max(0,Math.min(Number(this.props.Col)||0,rs.columns.length-1));
     if(kind!=='move'||previous!==this.props.Row)this.invalidate();
@@ -275,14 +307,14 @@ export class BrowserControl {
   gridValue(row,col){if(this._boundRS)return row===0?this._boundRS.columns[col]?.Name??'':String(this._boundRows?.[row-1]?.[this._boundRS.columns[col]?.Name]??'');return this.gridData[row]?.[col]??'';}
   syncGridCursor(){if(this._boundRS?.State&&this.props.Row>0&&this.props.Row<=this._boundRows.length&&this._boundRS.position!==this.props.Row-1)this._boundRS.AbsolutePosition=this.props.Row;}
   beginGridEdit(td,row,col){
-    if(this.design||this.gridEditor||!this.props.Enabled||truth(this.props.Locked)||this._boundRS?.LockType===1)return;
-    const source=this._boundRS,record=this._boundRows?.[row-1],old=source?record?.[source.columns[col]?.Name]:this.gridValue(row,col),input=el('input',{value:this.gridValue(row,col)});
+    if(!acceptsInput(this)||this.gridEditor||truth(this.props.Locked)||truth(this.props.ReadOnly)||this._boundRS?.LockType===1)return;
+    const source=this._boundRS,record=this._boundRows?.[row-1],old=source?record?.[source.columns[col]?.Name]:this.gridValue(row,col),input=el('input',{class:'vb-grid-editor','aria-label':'Edit row '+row+', column '+col,value:this.gridValue(row,col)});
     const editor={input,row,col};this.gridEditor=editor;td.replaceChildren(input);input.focus();input.select();let done=false;
     const commit=async()=>{if(done)return;done=true;try{
       const cancel=new Cell('Integer',0);await this.event('BeforeColUpdate',[col,old,{ref:cancel}]);if(!cancel.get())await this.event('Validate',[{ref:cancel}]);
       if(cancel.get()||this.disposed||this.vm?.state==='error')return;
       if(source!==this._boundRS)throw new VBError('DataSource changed during editing',3197);
-      if(source)await source.setRowValue(record,col,input.value,old);else{this.gridData[row] ||= [];this.gridData[row][col]=input.value;}
+      if(source)await source.setRowValue(record,col,input.value,old);else{if(row>=this.props.Rows||col>=this.props.Cols||this.gridValue(row,col)!==old)throw new VBError('The grid cell changed during editing',3197);this.gridData[row] ||= [];this.gridData[row][col]=input.value;}
       this.LastDataError='';this.node.removeAttribute('data-error');this.node.title=String(this.props.ToolTipText||'');
       await this.event('AfterColUpdate',[col]);
     }catch(error){this.LastDataError=error.message;this.node.dataset.error=error.message;this.node.title='Edit rejected: '+error.message;}
@@ -292,41 +324,37 @@ export class BrowserControl {
   applyRichFormat(key,value){this.rich?.format(key,value);}
   LoadFile(path,fileType=0){if(!this.vm)throw new VBError('Runtime not active',5);if(this.rich){if(![0,1].includes(Number(fileType)))throw new VBError('Invalid rich text file type',380);this.set(Number(fileType)===0?'TextRTF':'Text',this.vm.fs.read(path));}else this.set('Text',this.vm.fs.read(path));}
   SaveFile(path,fileType=0){if(!this.vm)throw new VBError('Runtime not active',5);if(this.rich&&![0,1].includes(Number(fileType)))throw new VBError('Invalid rich text file type',380);this.vm.fs.write(path,this.rich&&Number(fileType)===0?this.get('TextRTF'):this.get('Text'));}
-  async ShowOpen(){const result=await this.vm?.host.openFile?.(this.props);if(!result){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=result.name;if(result.bytes)this.vm.fs.writeBytes(result.name,result.bytes);else this.vm.fs.write(result.name,result.text);}
-  async ShowSave(){const name=await this.vm?.host.inputBox?.('File name:',this.props.DialogTitle||'Save As',this.props.FileName||'Untitled.txt');if(!name){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=name;this.vm?.host.saveFile?.(name,this.vm.fs.exists(name)?this.vm.fs.readBytes(name):'');}
-  async ShowColor(){const value=await this.vm?.host.inputBox?.('Color as #RRGGBB:','Color',oleColor(this.props.Color||0));if(/^#[0-9a-f]{6}$/i.test(value)){this.Color=parseInt(value.slice(1,3),16)+(parseInt(value.slice(3,5),16)<<8)+(parseInt(value.slice(5,7),16)<<16);}}
-  dispose(){unbindTabChild(this);this.vm?.win32?.unregisterControl(this.hWnd);this._unsubscribeData?.();this._unsubscribeData=null;this.gridEditor=null;this.disposed=true;cancelAnimationFrame(this.raf);clearInterval(this.timerId);this.surface?.dispose();this.rich?.dispose();this.scrollbar?.dispose();this.combo?.dispose();this.stepper?.dispose();this.node.remove();}
-  buildTree(){this.node.classList.add('vb-tree');this.viewport=el('div',{class:'vb-virtual-viewport',role:'tree',tabindex:0});this.spacer=el('div',{class:'vb-virtual-spacer'});this.viewport.append(this.spacer);this.node.append(this.viewport);this._selectedNode=null;this.Nodes=new TreeNodes(()=>this.invalidate(),item=>{this._selectedNode=item;this.invalidate();});this.viewport.addEventListener('scroll',()=>this.paintTreeRows());this.viewport.addEventListener('keydown',e=>{const rows=this.treeRows||[];let i=rows.findIndex(r=>r.node===this._selectedNode);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();i=Math.max(0,Math.min(rows.length-1,i+(e.key==='ArrowDown'?1:-1)));if(rows[i]){this._selectedNode=rows[i].node;this.viewport.scrollTop=Math.max(0,i*20-this.viewport.clientHeight/2);this.paintTreeRows();this.event('NodeClick',[this._selectedNode]);}}else if(e.key==='ArrowRight'&&this._selectedNode){this._selectedNode.Expanded=-1;}else if(e.key==='ArrowLeft'&&this._selectedNode){this._selectedNode.Expanded=0;}});for(const item of this.props.Nodes||[]){const node=this.Nodes.Add(undefined,0,item.Key,item.Text,item.Image,item.SelectedImage);node.Expanded=item.Expanded??-1;}const keys=new Map(this.Nodes.items.filter(n=>n.Key).map(n=>[lower(n.Key),n]));for(let i=0;i<this.Nodes.items.length;i++){const key=this.props.Nodes[i].Parent;if(key)this.Nodes.items[i].Parent=keys.get(lower(key))||null;}}
-  get SelectedItem(){if(this.type==='TreeView')return this._selectedNode;if(this.type==='ListView')return this._selectedItem;if(this.type==='TabStrip')return this.Tabs.items[this.props.Tab||0]||null;return null;}
-  set SelectedItem(item){if(this.type==='TreeView')this._selectedNode=item;else if(this.type==='ListView')this._selectedItem=item;else if(this.type==='TabStrip')this.set('Tab',this.Tabs.items.indexOf(item));this.invalidate();}
-  refreshTree(){this.treeRows=this.Nodes.flattened();if(this.design&&!this.treeRows.length)this.treeRows=[{node:{Text:'Project1',Expanded:-1},depth:0,children:2},{node:{Text:'Forms'},depth:1,children:0},{node:{Text:'Modules'},depth:1,children:0}];this.spacer.style.height=this.treeRows.length*20+'px';this.paintTreeRows();}
-  paintTreeRows(){if(!this.treeRows)return;const first=Math.max(0,Math.floor(this.viewport.scrollTop/20)-2),count=Math.ceil((this.viewport.clientHeight||Number(this.props.Height)/15)/20)+5;const rows=this.treeRows.slice(first,first+count).map((entry,j)=>{const {node,depth,children}=entry,index=first+j;const row=el('div',{class:'vb-tree-row'+(this._selectedNode===node?' selected':''),role:'treeitem','aria-level':depth+1,'aria-expanded':children?!!node.Expanded:null,style:{top:index*20+'px',paddingLeft:depth*16+4+'px'}});const toggle=el('button',{class:'vb-tree-toggle',text:children?(node.Expanded?'−':'+'):'',style:{visibility:children?'visible':'hidden'},tabindex:-1,onclick:e=>{e.stopPropagation();node.Expanded=node.Expanded?0:-1;}});row.append(toggle,el('span',{class:'vb-tree-icon'},icon(node.Expanded?'folder-open':'folder',14)),el('span',{class:'vb-tree-label',text:node.Text}));row.addEventListener('click',()=>{this._selectedNode=node;this.paintTreeRows();this.event('NodeClick',[node]);});row.addEventListener('dblclick',()=>{if(children)node.Expanded=node.Expanded?0:-1;});return row;});this.spacer.replaceChildren(...rows);}
-  buildListView(){this.node.classList.add('vb-listview');this.header=el('div',{class:'vb-lv-header'});this.viewport=el('div',{class:'vb-virtual-viewport',tabindex:0,role:'listbox'});this.spacer=el('div',{class:'vb-virtual-spacer'});this.viewport.append(this.spacer);this.node.append(this.header,this.viewport);this.ListItems=new ListItems(()=>this.invalidate(),item=>{this._selectedItem=item;this.invalidate();});this.ColumnHeaders=new ColumnHeaders(()=>this.invalidate());this.viewport.addEventListener('scroll',()=>{this.header.scrollLeft=this.viewport.scrollLeft;this.paintListRows();});this.viewport.addEventListener('keydown',e=>{if(e.key!=='ArrowUp'&&e.key!=='ArrowDown')return;e.preventDefault();let i=this.listRows.indexOf(this._selectedItem);i=Math.max(0,Math.min(this.listRows.length-1,i+(e.key==='ArrowDown'?1:-1)));this._selectedItem=this.listRows[i];this.viewport.scrollTop=Math.max(0,i*20-this.viewport.clientHeight/2);this.paintListRows();if(this._selectedItem)this.event('ItemClick',[this._selectedItem]);});for(const c of this.props.Columns||this.props.ColumnHeaders||[])this.ColumnHeaders.Add(undefined,c.Key,c.Text,c.Width??1440,c.Alignment||0);for(const item of this.props.Items||this.props.ListItems||[]){const added=this.ListItems.Add(undefined,item.Key,item.Text,item.Icon,item.SmallIcon);added.subItems=[...(item.SubItems||[])];added.Checked=item.Checked??0;}}
-  refreshListView(){const cols=this.ColumnHeaders.Count?this.ColumnHeaders.items:[{Text:'Name',Width:Math.max(2400,this.props.Width)}];this.header.replaceChildren(...cols.map((col,i)=>el('div',{text:col.Text,style:{width:Math.max(30,col.Width/15)+'px'},onclick:()=>{this.props.SortKey=i;this.props.Sorted=-1;this.props.SortOrder=this.props.SortOrder?0:1;this.invalidate();this.event('ColumnClick',[col]);}})));this.listColumns=cols;this.listRows=[...this.ListItems.items];if(this.props.Sorted){const index=Number(this.props.SortKey)||0,dir=this.props.SortOrder?-1:1;this.listRows.sort((a,b)=>String(index?a.subItems[index-1]||'':a.Text).localeCompare(String(index?b.subItems[index-1]||'':b.Text))*dir);}if(this.design&&!this.listRows.length)this.listRows=[{Text:'First item',subItems:['Details']},{Text:'Second item',subItems:['Details']}];this.spacer.style.height=this.listRows.length*20+'px';this.spacer.style.minWidth=cols.reduce((n,c)=>n+Math.max(30,c.Width/15),0)+'px';this.paintListRows();}
-  paintListRows(){if(!this.listRows)return;const first=Math.max(0,Math.floor(this.viewport.scrollTop/20)-2),count=Math.ceil((this.viewport.clientHeight||Number(this.props.Height)/15)/20)+5;this.spacer.replaceChildren(...this.listRows.slice(first,first+count).map((item,j)=>{const row=el('div',{class:'vb-lv-row'+(item===this._selectedItem?' selected':''),role:'option','aria-selected':item===this._selectedItem,style:{top:(first+j)*20+'px'}});for(let i=0;i<this.listColumns.length;i++)row.append(el('div',{text:i?item.subItems[i-1]||'':item.Text,style:{width:Math.max(30,this.listColumns[i].Width/15)+'px',borderRight:this.props.GridLines?'1px solid #ddd':''}}));row.addEventListener('click',()=>{this._selectedItem=item;this.paintListRows();this.event('ItemClick',[item]);});return row;}));}
-  FindItem(text){return this.ListItems?.items.find(i=>i.Text.toLowerCase().includes(String(text).toLowerCase()))||null;}
-  buildGrid(){this.node.classList.add('vb-grid');this.viewport=el('div',{class:'vb-grid-scroll',tabindex:0});this.table=el('table',{role:'grid'});this.viewport.append(this.table);this.node.append(this.viewport);this.viewport.addEventListener('scroll',()=>this.paintGridRows());this.viewport.addEventListener('keydown',e=>{const moves={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]};if(moves[e.key]){e.preventDefault();const [dr,dc]=moves[e.key];this.props.Row=Math.max(0,Math.min(this.props.Rows-1,(this.props.Row||0)+dr));this.props.Col=Math.max(0,Math.min(this.props.Cols-1,(this.props.Col||0)+dc));this.props.RowSel=this.props.Row;this.props.ColSel=this.props.Col;this.syncGridCursor();this.ensureGridCellVisible();this.paintGridRows();this.event('RowColChange');}});}
-  refreshGrid(){if(!this._boundRS&&this.props.FormatString){const cols=String(this.props.FormatString).split('|');this.gridData[0]=cols.map(s=>s.replace(/^[<>^]/,''));this.props.Cols=Math.max(this.props.Cols,cols.length);}this.paintGridRows();}
-  gridColumns(){const count=Math.max(0,Math.min(10000,Number(this.props.Cols)||0)),offsets=new Float64Array(count+1);for(let c=0;c<count;c++)offsets[c+1]=offsets[c]+Math.max(0,this.ColWidth(c)/15);return offsets;}
-  ensureGridCellVisible(){const r=Number(this.props.Row)||0,c=Number(this.props.Col)||0,offsets=this.gridColumns(),v=this.viewport,fixed=Math.max(0,Number(this.props.FixedRows)||0)*21;if(r*21<v.scrollTop+fixed)v.scrollTop=Math.max(0,r*21-fixed);else if((r+1)*21>v.scrollTop+v.clientHeight)v.scrollTop=(r+1)*21-v.clientHeight;if(offsets[c]<v.scrollLeft)v.scrollLeft=offsets[c];else if(offsets[c+1]>v.scrollLeft+v.clientWidth)v.scrollLeft=offsets[c+1]-v.clientWidth;}
-  paintGridRows(){
-    if(this.gridEditor)return;
-    const rows=Math.max(0,Math.min(this._boundRS?100001:10000,Number(this.props.Rows)||0)),offsets=this.gridColumns(),cols=offsets.length-1,fixed=Math.min(rows,Math.max(0,Number(this.props.FixedRows)||0)),first=Math.min(rows,Math.max(fixed,Math.floor(this.viewport.scrollTop/21)-2)),visible=Math.ceil((this.viewport.clientHeight||Number(this.props.Height)/15)/21)+6,last=Math.min(rows,first+visible),left=this.viewport.scrollLeft,right=left+(this.viewport.clientWidth||Number(this.props.Width)/15);
-    let start=0;while(start<cols&&offsets[start+1]<Math.max(0,left-100))start++;let end=start;while(end<cols&&offsets[end]<right+100)end++;
-    const indices=[];for(let c=start;c<end;c++)if(offsets[c+1]>offsets[c])indices.push(c);
-    const prefix=offsets[start]||0,suffix=offsets[cols]-(offsets[end]||0),span=Math.max(1,indices.length+(prefix>0?1:0)+(suffix>0?1:0)),body=el('tbody'),group=el('colgroup');
-    const widths=[...(prefix>0?[prefix]:[]),...indices.map(c=>offsets[c+1]-offsets[c]),...(suffix>0?[suffix]:[])];for(const width of widths)group.append(el('col',{style:{width:width+'px'}}));
-    this.table.style.width=Math.max(1,offsets[cols])+'px';this.table.style.minWidth='0';this.table.setAttribute('aria-rowcount',rows);this.table.setAttribute('aria-colcount',cols);this.table.replaceChildren(group);
-    const horizontalPad=(row,width,tag='td')=>{if(width>0)row.append(el(tag,{class:'vb-grid-spacer','aria-hidden':'true',style:{width:width+'px',minWidth:'0',padding:'0',border:'0',pointerEvents:'none'}}));};
-    if(fixed){const head=el('thead');for(let r=0;r<Math.min(fixed,visible);r++){const tr=el('tr');horizontalPad(tr,prefix,'th');for(const c of indices)tr.append(el('th',{text:this.gridValue(r,c),style:{width:(offsets[c+1]-offsets[c])+'px',minWidth:'0',top:r*21+'px'},'aria-rowindex':r+1,'aria-colindex':c+1}));horizontalPad(tr,suffix,'th');head.append(tr);}if(fixed>visible)head.append(el('tr',{},el('th',{colspan:span,style:{height:(fixed-visible)*21+'px',padding:'0',border:'0'}})));this.table.append(head);}
-    this.table.append(body);
-    const verticalPad=height=>{if(height>0)body.append(el('tr',{style:{height:height+'px'},'aria-hidden':'true'},el('td',{colspan:span,class:'vb-grid-spacer',style:{height:height+'px',minWidth:'0',padding:'0',border:'0'}})));};verticalPad((first-fixed)*21);
-    for(let r=first;r<last;r++){const tr=el('tr');horizontalPad(tr,prefix);for(const c of indices){const td=el('td',{text:this.gridValue(r,c),class:r===Number(this.props.Row)&&c===Number(this.props.Col)?'active':'',style:{width:(offsets[c+1]-offsets[c])+'px',minWidth:'0',background:c<Number(this.props.FixedCols)&&!(r===this.props.Row&&c===this.props.Col)?'var(--vb-face)':''},'data-row':r,'data-col':c,'aria-rowindex':r+1,'aria-colindex':c+1});
-      td.addEventListener('click',()=>{this.props.Row=this.props.RowSel=r;this.props.Col=this.props.ColSel=c;for(const node of this.table.querySelectorAll('td.active'))node.classList.remove('active');td.classList.add('active');this.syncGridCursor();this.event('RowColChange');});
-      if(!this.design)td.addEventListener('dblclick',()=>this.beginGridEdit(td,r,c));tr.append(td);
-    }horizontalPad(tr,suffix);body.append(tr);}verticalPad((rows-last)*21);
+  async ShowOpen(){const result=await this.vm?.host.openFile?.(this.props);if(!result){return dialogCancelled(this);}if(this.disposed)return;this.props.FileName=result.name;this.props.FileTitle=String(result.name).split(/[\\/]/).at(-1);if(result.bytes)this.vm.fs.writeBytes(result.name,result.bytes);else this.vm.fs.write(result.name,result.text);}
+  async ShowSave(){const name=await this.vm?.host.inputBox?.('File name:',this.props.DialogTitle||'Save As',this.props.FileName||'Untitled.txt');if(!name){return dialogCancelled(this);}if(this.disposed)return;this.props.FileName=name;this.props.FileTitle=String(name).split(/[\\/]/).at(-1);this.vm?.host.saveFile?.(name,this.vm.fs.exists(name)?this.vm.fs.readBytes(name):'');}
+  async ShowColor(){return showColor(this);}
+  async ShowFont(){return showFont(this);}
+  dispose(){unbindTabChild(this);this.vm?.win32?.unregisterControl(this.hWnd);this._unsubscribeData?.();this._unsubscribeData=null;this.gridEditor=null;this.disposed=true;if(this.ListImages){this.ListImages.changed();this.ListImages.listeners.clear();}this.collectionView?.dispose();this.gridView?.dispose();this.barView?.dispose();this.dateView?.dispose();cancelAnimationFrame(this.raf);clearInterval(this.timerId);this.surface?.dispose();this.rich?.dispose();this.scrollbar?.dispose();this.combo?.dispose();this.stepper?.dispose();this.node.remove();}
+  buildTree(){this.collectionView=new TreeViewController(this,safeImage);}
+  get SelectedItem(){if(this.type==='TreeView')return this.Nodes.selected;if(this.type==='ListView')return this.ListItems.selected;if(this.type==='TabStrip')return this.Tabs.items[this.props.Tab||0]||null;return null;}
+  set SelectedItem(item){
+    if(item?.__nothing)item=null;
+    if(this.type==='TreeView')this.Nodes.select(item);
+    else if(this.type==='ListView'){if(item)this.ListItems.select(item,true,false);else this.ListItems.clearSelection();}
+    else if(this.type==='TabStrip'){if(!this.Tabs.items.includes(item))throw new VBError('Invalid tab',380);this.set('Tab',this.Tabs.items.indexOf(item));}
+    this.invalidate();
   }
-  refreshMonth(){const value=this.get('Value'),d=!isNaN(value)?value:new Date(),year=d.getFullYear(),month=d.getMonth();const title=el('div',{class:'vb-month-header'});const change=n=>{const next=new Date(year,month+n,Math.min(d.getDate(),new Date(year,month+n+1,0).getDate()));this.props.Value=next;this.invalidate();};title.append(el('button',{text:'◀',onclick:()=>change(-1)}),el('span',{text:d.toLocaleDateString('en-US',{month:'long',year:'numeric'})}),el('button',{text:'▶',onclick:()=>change(1)}));const table=el('table'),head=el('tr');for(const day of ['S','M','T','W','T','F','S'])head.append(el('th',{text:day}));table.append(head);const start=new Date(year,month,1).getDay(),days=new Date(year,month+1,0).getDate();let day=1;for(let week=0;week<6;week++){const row=el('tr');for(let col=0;col<7;col++){const number=week*7+col-start+1;const valid=number>=1&&number<=days;row.append(el('td',{text:valid?number:'',class:valid&&number===d.getDate()?'selected':'',onclick:()=>{if(valid){const date=new Date(year,month,number);this.props.Value=date;this.invalidate();this.event('DateClick',[date]);this.event('Change');}}}));}table.append(row);}this.node.replaceChildren(title,table);}
+  refreshTree(){this.collectionView.refresh();}
+  paintTreeRows(){this.collectionView.paint();}
+  buildListView(){this.collectionView=new ListViewController(this,safeImage);}
+  refreshListView(){this.collectionView.refresh();}
+  paintListRows(){this.collectionView.paint();}
+  FindItem(text,where=0,index=1,match=0){return this.collectionView?.find?.(text,where,index,match)||null;}
+  HitTest(x,y){return this.collectionView?.hitTest(x,y)||null;}
+  GetFirstVisible(){return this.collectionView?.firstVisible()||null;}
+  GetVisibleCount(){return this.collectionView?.visibleCount()||0;}
+  StartLabelEdit(){if(!this.collectionView)throw new VBError('Label editing is not supported',438);return this.collectionView.startEdit(true);}
+
+  buildGrid(){this.gridView=new GridViewController(this);}
+  refreshGrid(){this.gridView.refresh();}
+  gridColumns(){return this.gridView.geometry().col;}
+  ensureGridCellVisible(){this.gridView.scrollToCell();}
+  paintGridRows(){this.gridView.paint();}
+  refreshMonth(){this.dateView?.refresh();}
   refreshChart(){if(!this.node.isConnected&&!this.design)return;const surface=this.ensureSurface();surface.background=this.props.BackColor;surface.clear();const w=Number(this.props.Width)/15,h=Number(this.props.Height)/15,values=(this.gridData.length?this.gridData.map(r=>Number(r[0])||0):[24,38,31,55,42]),max=Math.max(1,...values),left=34,top=18,bottom=h-24,right=w-16;for(let i=0;i<=4;i++){const y=bottom-(bottom-top)*i/4;surface.add('line',[left,y,right,y],-2147483632);surface.text(String(Math.round(max*i/4)),3,y-6,this.props.ForeColor,'10px Arial');}surface.add('line',[left,top,left,bottom],this.props.ForeColor);surface.add('line',[left,bottom,right,bottom],this.props.ForeColor);const step=(right-left)/Math.max(1,values.length);values.forEach((v,i)=>{const x=left+i*step+step*.2,y=bottom-(bottom-top)*v/max;if(Number(this.props.ChartType)===3&&i>0){const prev=values[i-1];surface.add('line',[left+(i-.5)*step,bottom-(bottom-top)*prev/max,left+(i+.5)*step,y],16711680,false,2);}else surface.add('rect',[x,y,x+step*.6,bottom-1],-2147483635,true);surface.text(String(i+1),left+(i+.5)*step-3,bottom+6,this.props.ForeColor,'10px Arial');});}
 }
 

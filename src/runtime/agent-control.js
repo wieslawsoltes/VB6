@@ -1,3 +1,4 @@
+import {CONTROL_EVENT_SIGNATURES,CONTROL_INDEXED_PROPERTIES} from '../controls/compatibility-contract.js';
 /** Structured automation of the runtime only; never queries the owner IDE's DOM. */
 import {CONTROL_EVENTS, DEFAULT_EVENTS} from '../controls/controls.js';
 import {clone} from '../core/core.js';
@@ -5,8 +6,8 @@ import {newId} from '../project/model.js';
 const PROPERTIES=Object.freeze(['Name','Caption','Text','Value','Enabled','Visible','Left','Top','Width','Height','ListIndex','Min','Max','Row','Col','Rows','Cols','SelStart','SelLength','Checked','WindowState','ToolTipText','Tag','BackColor','ForeColor','FontName','FontSize','FontBold','FontItalic','FontUnderline','TabIndex','TabStop','MaxLength','Locked','PasswordChar','Default','Cancel','FixedRows','FixedCols','RowSel','ColSel','FormatString','SimpleText','Tab','Interval','ScaleMode','ScaleLeft','ScaleTop','ScaleWidth','ScaleHeight','DrawWidth','FillStyle','FillColor','BorderWidth','Alignment','Sorted','SortKey','SortOrder','FullRowSelect','View','Path','Pattern','Drive','DataField','SelBold','SelItalic','SelUnderline','SelColor','SelFontName','SelFontSize','Stretch','ChartType','RowCount','ColumnCount','RowLabel','ColumnLabel','Data','MultiLine','ScrollBars']);
 const WRITABLE=new Set(PROPERTIES.filter(k=>k!=='Name'));
 const METHODS=Object.freeze(['AddItem','RemoveItem','Clear','Move','SetFocus','Refresh','Cls','Print','Scale','Undo','Redo','Find','GetLineFromChar']);
-const INDEXED=Object.freeze(['List','ItemData','Selected','TextMatrix','ColWidth','RowHeight']);
-const EVENTS=new Set([...CONTROL_EVENTS,...Object.values(DEFAULT_EVENTS),'Change','Timer','Click','DblClick','GotFocus','LostFocus','NodeClick','ItemClick','ButtonClick','DateClick']);
+const INDEXED=Object.freeze(CONTROL_INDEXED_PROPERTIES.filter(name=>!['Item','SubItems'].includes(name)));
+const EVENTS=new Set([...Object.values(CONTROL_EVENT_SIGNATURES).flatMap(events=>Object.keys(events)),...CONTROL_EVENTS,...Object.values(DEFAULT_EVENTS),'Change','Timer','Click','DblClick','GotFocus','LostFocus','NodeClick','ItemClick','ButtonClick','DateClick']);
 export class RuntimeAgentControl {
   constructor(host) {this.host=host;this.ids=new WeakMap();this.sequence=0;this.epoch=newId();}
   id(object,prefix) {let id=this.ids.get(object);if(!id){id=this.epoch+'-'+prefix+'-'+(++this.sequence);this.ids.set(object,id);}return id;}

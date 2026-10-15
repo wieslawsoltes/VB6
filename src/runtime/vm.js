@@ -1,3 +1,4 @@
+import {controlIndexedProperty,controlItemScalarType} from '../controls/compatibility-contract.js';
 import {procedureLocalDeclarations} from './local-storage.js';
 import {bindReferenceParameter} from './parameter-binding.js';
 import {RecordTypeIndex} from '../language/record-resolution.js';
@@ -229,13 +230,18 @@ export class VirtualMachine extends Signal {
     else if(object instanceof VBCollection||object instanceof VBDictionary){if(key==='count')type='long';if(key==='exists')type='boolean';}
     else if(object?.__control){
       const control=object.type||object.model?.type;
-      if(['enabled','visible','tabstop','autoredraw','wordwrap','multiline','locked','sorted','cancel','default','mdichild'].includes(key))type='boolean';
-      else if(['left','top','width','height','scalewidth','scaleheight','scaleleft','scaletop','currentx','currenty'].includes(key))type='single';
-      else if(['hwnd','hdc','backcolor','forecolor','selstart','sellength','maxlength','interval','itemdata'].includes(key))type='long';
-      else if(['listindex','listcount','tabindex','index','mousepointer','borderstyle','appearance','windowstate','scalemode','alignment','style'].includes(key))type='integer';
+      if(control==='DTPicker'&&['value','day','month','year','dayofweek','hour','minute','second'].includes(key)&&raw===null)return storageScalar(null,'Variant');
+      if(['DTPicker','MonthView'].includes(control)&&['mindate','maxdate'].includes(key))return tagScalar(raw,'date');
+      if(control==='MonthView'&&['value','selstart','selend','visibledays'].includes(key))return tagScalar(raw,'date');
+      if(control==='DTPicker'&&key==='value')return tagScalar(raw,'date',true);
+      if(['enabled','visible','tabstop','autoredraw','wordwrap','multiline','locked','sorted','cancel','default','mdichild','daybold','checkbox','checkboxes','multiselect','hideselection','fullrowselect','gridlines','hidecolumnheaders','allowcolumnreorder','showtoday','showtodaycircle','showweeknumbers','updown'].includes(key))type='boolean';
+      else if(['left','top','width','height','scalewidth','scaleheight','scaleleft','scaletop','currentx','currenty','rowheight','colwidth','rowpos','colpos'].includes(key))type='single';
+      else if(['hwnd','hdc','backcolor','forecolor','selstart','sellength','maxlength','interval','itemdata','rowdata','coldata','row','col','rows','cols','rowsel','colsel','fixedrows','fixedcols'].includes(key))type='long';
+      else if(['listindex','listcount','tabindex','index','mousepointer','borderstyle','appearance','windowstate','scalemode','alignment','style','year','month','day','hour','minute','second','dayofweek','colalignment'].includes(key))type='integer';
       else if(key==='selected')type='boolean';
       else if(key==='value')type=control==='OptionButton'?'boolean':control==='DTPicker'?'date':['HScrollBar','VScrollBar','CheckBox'].includes(control)?'integer':type;
     }
+    type=controlItemScalarType(object,key)||type;
     return tagScalar(raw,type,variant);
   }
   async invokeScalar(target,args,frame){
@@ -524,7 +530,7 @@ export class VirtualMachine extends Signal {
     const native=this.nativeKey(object,name);if(native===null)throw new VBError('Object does not support property or method: '+name,438);
     const value=object[native];
     if(callType===1){if(typeof value!=='function')throw new VBError('Member is not a method',438);return this.invokeScalar({__native:value,receiver:object,memberName:name},args,frame);}
-    if(callType===2){if(typeof value==='function'){if(!['item','list','selected','itemdata','textmatrix','colwidth','rowheight'].includes(key))throw new VBError('Member is not a property',438);return this.invokeScalar({__native:value,receiver:object,memberName:name},args,frame);}if(args.length)throw new VBError('Wrong number of arguments',450);return this.nativeScalar(object,name,value);}
+    if(callType===2){if(typeof value==='function'){if(!controlIndexedProperty(key))throw new VBError('Member is not a property',438);return this.invokeScalar({__native:value,receiver:object,memberName:name},args,frame);}if(args.length)throw new VBError('Wrong number of arguments',450);return this.nativeScalar(object,name,value);}
     if(!args.length)throw new VBError('Argument not optional',449);
     if(typeof value==='function'){
       if(key==='item'&&typeof object.setItem==='function')return object.setItem(...args);

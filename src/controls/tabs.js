@@ -160,7 +160,9 @@ export function refreshTabs(view, image = () => '') {
   const rows = Math.max(1, Math.ceil(visible.length / perRow)), height = Math.max(18, Number(view.props.TabHeight ?? 360) / 15);
   if (view.node.dataset.tabOrientation !== String(orientation)) view.node.dataset.tabOrientation = String(orientation);
   tabAttribute(view.tabHeader, 'aria-orientation', vertical ? 'vertical' : 'horizontal');
-  Object.assign(view.tabHeader.style, {gridTemplateColumns: vertical ? `repeat(${rows}, ${height}px)` : `repeat(${Math.min(perRow, Math.max(1, visible.length))}, minmax(0, 1fr))`, gridTemplateRows: vertical ? `repeat(${Math.min(perRow, Math.max(1, visible.length))}, minmax(0, 1fr))` : `repeat(${rows}, ${height}px)`, gridAutoFlow: vertical ? 'column' : 'row', height: vertical ? '100%' : rows * height + 'px', width: vertical ? rows * height + 'px' : '100%'});
+  const segmented = view.type === 'TabStrip' && orientation === 0;
+  const track = segmented ? 'var(--detail-strip-column, minmax(0, 1fr))' : 'minmax(0, 1fr)';
+  Object.assign(view.tabHeader.style, {gridTemplateColumns: vertical ? `repeat(${rows}, ${height}px)` : `repeat(${Math.min(perRow, Math.max(1, visible.length))}, ${track})`, gridTemplateRows: vertical ? `repeat(${Math.min(perRow, Math.max(1, visible.length))}, minmax(0, 1fr))` : `repeat(${rows}, ${height}px)`, gridAutoFlow: vertical ? 'column' : 'row', height: vertical ? '100%' : rows * height + 'px', width: vertical ? rows * height + 'px' : segmented ? 'var(--detail-strip-width, 100%)' : '100%'});
   view.node.classList.toggle('vb-tab-property-pages', Number(view.props.Style) === 1);
   const signature = JSON.stringify([visible.map(({entry, index}) => [index, entry.Caption, entry.Enabled, entry.Visible, entry.Picture, entry.Image]), view.design]);
   if (signature !== view._tabSignature) {

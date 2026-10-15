@@ -196,7 +196,7 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
     const cancelValue=input!==null?'':options.cancelValue??buttons.find(b=>b.caption.replace('&','').toLowerCase()==='cancel')?.value??(buttons.length===1?buttons[0].value:undefined);
     let record;
     try {
-      record=open({title:String(title),width:460,height:210,borderStyle:3,minButton:false,maxButton:false,
+      record=open({title:String(title),width:Math.max(260,Math.min(1200,Number(options.width)||460)),height:Math.max(160,Math.min(900,Number(options.height)||210)),borderStyle:3,minButton:false,maxButton:false,
         controlBox:cancelValue!==undefined,captionMode,backgroundColor:background()});
       const dialogHost={container:record.doc.body,get dialogs(){return host.dialogs;},set dialogs(value){host.dialogs=value;}};
       const result=runtimeDialog(dialogHost,title,body,buttons,input,{...options,nativeWindow:true});

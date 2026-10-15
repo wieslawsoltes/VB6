@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DiagnosticsScheduler, createDiagnosticWorker} from '../src/editor/diagnostics-scheduler.js';
+import {DiagnosticsScheduler, createDiagnosticWorker, diagnosticWorkerURL} from '../src/editor/diagnostics-scheduler.js';
 
 const project = {name: 'Lifecycle', modules: [{id: 'm', name: 'Module1', kind: 'module', code: 'Public Sub Main()\nEnd Sub'}], settings: {}};
 const reply = (revision) => ({data: {type: 'diagnostics-result', revision, result: {valid: true, diagnostics: [], stats: {}}}});
@@ -70,4 +70,27 @@ test('worker source has one document-owned URL, not a revoke-during-startup race
   for (let i = 0; i < 25; i++) { const worker = createDiagnosticWorker(); worker.terminate(); worker.releaseSource?.(); }
   assert.equal(urls.length, 1, 'One immutable source allocation per document, bounded independently of edit count.');
   assert.deepEqual(revoked, [], 'The document, not a cancelled worker, owns the shared source URL.');
+});
+
+for (const [name, script, owner, expected] of [
+  ['HTTPS directory', 'https://example.test/vb6/studio.js', 'https://example.test/vb6/', 'https://example.test/vb6/vb6-diagnostics-worker.js'],
+  ['HTTP port and route', 'http://localhost:8123/dist/studio.js?v=3#module', 'http://localhost:8123/workspace/1', 'http://localhost:8123/dist/vb6-diagnostics-worker.js'],
+  ['CDN is not an allowed worker origin', 'https://cdn.test/studio.js', 'https://example.test/', null],
+  ['same host different port', 'https://example.test:8123/studio.js', 'https://example.test/', null],
+  ['same host different protocol', 'http://example.test/studio.js', 'https://example.test/', null],
+  ['file export', 'file:///dist/studio.js', 'file:///dist/index.html', null],
+  ['inline export', '', 'https://example.test/VB6-Studio-Web.html', null],
+  ['opaque owner', 'https://example.test/studio.js', 'about:blank', null],
+  ['blob script', 'blob:https://example.test/worker', 'https://example.test/', null],
+  ['unresolved relative script', 'studio.js', 'https://example.test/', null],
+  ['malformed URL', 'https://[', 'https://example.test/', null],
+  ['missing browser globals', undefined, undefined, null]
+]) test('diagnostic worker URL: '+name, () => {
+  assert.equal(diagnosticWorkerURL(script, owner), expected);
+});
+
+test('hosted and standalone diagnostic worker artifacts contain identical executable source', async () => {
+  const fs = await import('node:fs');
+  const {DIAGNOSTICS_WORKER_SOURCE} = await import('../src/editor/diagnostics-payload.js');
+  assert.equal(fs.readFileSync(new URL('../dist/vb6-diagnostics-worker.js', import.meta.url), 'utf8'), DIAGNOSTICS_WORKER_SOURCE);
 });

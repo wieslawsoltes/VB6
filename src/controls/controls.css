@@ -235,3 +235,77 @@
 /* Runtime MDI client and sizable form chrome; content retains the chosen theme. */
 .vb-mdi-parent>.vb-form-content{overflow:hidden}.vb-mdi-client{position:absolute;overflow:hidden;background:var(--vb-workspace);border:1px solid var(--vb-shadow);box-shadow:inset 1px 1px var(--vb-dark)}.vb-mdi-child{transform:none!important}.vb-mdi-child.vb-minimized{width:160px!important}.vb-mdi-child .vb-form-title{cursor:default}.vb-form-title:focus-visible{outline:1px dotted var(--vb-title-text);outline-offset:-2px}
 .vb-form-grip{position:absolute;z-index:5000;touch-action:none}.vb-form-grip-n{left:6px;right:6px;top:0;height:4px;cursor:n-resize}.vb-form-grip-s{left:6px;right:6px;bottom:0;height:4px;cursor:s-resize}.vb-form-grip-e{top:6px;bottom:6px;right:0;width:4px;cursor:e-resize}.vb-form-grip-w{top:6px;bottom:6px;left:0;width:4px;cursor:w-resize}.vb-form-grip-ne,.vb-form-grip-nw,.vb-form-grip-se,.vb-form-grip-sw{width:7px;height:7px}.vb-form-grip-ne{right:0;top:0;cursor:ne-resize}.vb-form-grip-nw{left:0;top:0;cursor:nw-resize}.vb-form-grip-se{right:0;bottom:0;cursor:se-resize}.vb-form-grip-sw{left:0;bottom:0;cursor:sw-resize}.vb-fixed-window>.vb-form-grip{display:none}
+
+/* Only ports that actually reject vertical range writing modes receive this
+ * capability-selected appearance. The same native input and themed track/thumb
+ * retain pointer, touch, keyboard, focus and disabled behavior. */
+.vb-range.vb-range-legacy-vertical {appearance:slider-vertical}
+/* Common-control content is retained by identity; only visible rows are realized. */
+.vb-tree-row .vb-tree-label,.vb-lv-label{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.vb-tree-row.vb-full-row.selected{background:var(--vb-selection);color:var(--vb-selection-text)}
+.vb-control .vb-item-image{object-fit:contain;flex:none;margin-right:3px}
+.vb-control .vb-item-check{appearance:auto;position:static;width:13px;height:13px;flex:none;margin:0 4px 0 1px;padding:0;accent-color:var(--vb-selection)}
+.vb-control .vb-item-check[hidden],.vb-control .vb-item-image[hidden],.vb-lv-header[hidden]{display:none!important}
+.vb-lv-primary{display:flex;align-items:center;gap:2px}
+.vb-lv-primary .vb-lv-label{display:block;flex:1}
+.vb-lv-row:not(.vb-full-row).selected{background:transparent;color:inherit}
+.vb-lv-row:not(.vb-full-row).selected .vb-lv-label{background:var(--vb-selection);color:var(--vb-selection-text)}
+.vb-lv-row.vb-grid-lines{border-bottom:1px solid var(--vb-face)}
+.vb-listview[data-view="0"] .vb-lv-primary{flex-direction:column;justify-content:flex-start;gap:3px;position:relative}
+.vb-listview[data-view="0"] .vb-lv-primary .vb-lv-label{flex:none;width:100%;white-space:normal;line-height:14px;max-height:28px}
+.vb-listview[data-view="0"] .vb-item-check{position:absolute;left:5px;top:2px}
+.vb-lv-header>div{position:relative;display:flex;align-items:center;gap:3px}
+.vb-lv-header>div>span{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:1}
+.vb-lv-resize{position:absolute;right:0;top:0;width:6px;height:100%;cursor:col-resize;touch-action:none}
+.vb-item-label-editor{display:block;box-sizing:border-box;min-width:30px;width:100%;height:100%;border:1px solid var(--vb-selection);padding:0 1px;margin:0;font:inherit;color:var(--vb-window-text);background:var(--vb-window);user-select:text}
+.vb-tree-row.vb-tree-lines:before{content:"";position:absolute;left:calc(var(--vb-tree-indent,0px) - 7px);top:0;height:50%;width:7px;border-left:1px dotted var(--vb-shadow);border-bottom:1px dotted var(--vb-shadow);pointer-events:none}
+.vb-hide-selection:not(:focus-within) .vb-tree-row.selected,.vb-hide-selection:not(:focus-within) .vb-lv-row.selected{background:transparent;color:inherit}
+.vb-hide-selection:not(:focus-within) .selected .vb-tree-label,.vb-hide-selection:not(:focus-within) .selected .vb-lv-label{background:transparent;color:inherit}
+.vb-hottracking .vb-tree-label:hover,.vb-hottracking .vb-lv-label:hover{text-decoration:underline;cursor:pointer}
+.vb-tree>.vb-virtual-viewport:focus-visible,.vb-listview>.vb-virtual-viewport:focus-visible{outline:1px dotted var(--vb-window-text);outline-offset:-2px}
+.vb-grid th.active,.vb-grid td.selected,.vb-grid th.selected{background:var(--vb-selection);color:var(--vb-selection-text)}
+.vb-grid-resize{display:block;position:absolute;touch-action:none;z-index:4}
+.vb-grid-resize-col{top:0;right:0;bottom:0;width:5px;cursor:col-resize}
+.vb-grid-resize-row{bottom:0;right:0;left:0;height:5px;cursor:row-resize}
+.vb-grid .vb-grid-cell-text{line-height:normal;min-width:0}
+.vb-toolbar-slot{display:flex;align-items:stretch;flex:none;min-width:0;height:100%}
+.vb-toolbar-slot[data-style="3"]{border-left:1px solid var(--vb-shadow);border-right:1px solid var(--vb-light);height:70%;margin:2px 4px;width:0!important;align-self:center}
+.vb-toolbar-slot[data-style="4"]{flex:none}
+.vb-toolbar-button{display:flex;align-items:center;justify-content:center;gap:3px;min-height:20px}
+.vb-toolbar-button.pressed{border-color:var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow);background:var(--vb-face-alt,var(--vb-face));box-shadow:inset 1px 1px var(--vb-shadow)}
+.vb-toolbar-button.mixed{opacity:.6}
+.vb-toolbar-dropdown{width:13px!important;min-width:13px;padding:0!important;flex:none}
+.vb-toolbar-slot>[hidden]{display:none!important}
+.vb-status-panel{display:flex;align-items:center;min-width:0;overflow:hidden;white-space:nowrap}
+.vb-status-panel>span{overflow:hidden;text-overflow:ellipsis}
+.vb-status-panel[data-bevel="0"],.vb-status-simple{border:0;box-shadow:none}
+.vb-status-panel[data-bevel="2"]{border-color:var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light)}
+.vb-status-simple{flex:1}
+
+/* Retained date editor/calendar. Authored geometry is never resized implicitly. */
+.vb-date-picker{display:flex;align-items:stretch;min-width:0;overflow:hidden}
+.vb-date-picker .vb-date-input{flex:1;width:0;min-width:0;height:100%;box-sizing:border-box;border:0;font:inherit;padding:1px 3px}
+.vb-date-check{flex:none;align-self:center;margin:0 3px;width:13px;height:13px}
+.vb-date-arrow{flex:none;width:18px;padding:0;font:inherit}
+.vb-date-spin{display:flex;flex-direction:column;width:17px;flex:none}
+.vb-date-spin button{flex:1;min-height:0;line-height:1;padding:0;font-size:9px}
+.vb-date-picker [hidden]{display:none!important}.vb-date-input[aria-invalid=true]{outline:1px solid #c00000;outline-offset:-2px}
+.vb-month.vb-calendar{display:block;overflow:auto;padding:2px;box-sizing:border-box}
+.vb-calendar-months{display:grid;gap:4px}.vb-calendar-panel{min-width:172px}
+.vb-calendar .vb-month-header{display:flex;align-items:center;justify-content:space-between;gap:2px;padding:2px;min-height:23px}
+.vb-calendar .vb-month-header button{font:inherit;color:inherit;line-height:1.4;padding:0 4px;min-width:19px}
+.vb-calendar .vb-calendar-caption{flex:1;border:0;box-shadow:none;background:transparent;text-align:center;font-weight:bold}
+.vb-calendar table{width:100%;border-collapse:collapse;table-layout:fixed;font:inherit}
+.vb-calendar th{font-weight:normal;padding:1px;text-align:center}.vb-calendar td{padding:0;text-align:center}
+.vb-calendar .vb-calendar-day{display:block;width:100%;height:22px;box-sizing:border-box;border:1px solid transparent;box-shadow:none;padding:0;background:transparent;color:inherit;font:inherit;text-align:center;line-height:20px}
+.vb-calendar .vb-calendar-day.selected{background:var(--vb-app-selection-background,#000080);color:var(--vb-app-selection-foreground,#fff)!important}
+.vb-calendar .vb-calendar-day.today{border-color:#b00020}.vb-calendar .vb-calendar-day:focus-visible{outline:1px dotted currentColor;outline-offset:-3px}
+.vb-calendar .vb-calendar-day:disabled{opacity:.45}.vb-calendar .vb-calendar-day:not(:disabled):hover{box-shadow:inset 0 0 0 1px currentColor}
+.vb-calendar .vb-calendar-today{display:block;margin:2px auto 0;max-width:100%;font:inherit;min-height:22px}
+.vb-calendar [hidden]{display:none!important}.vb-calendar-week{opacity:.7}
+.vb-calendar-jump{display:flex;gap:2px;padding:2px}.vb-calendar-jump select{min-width:0;flex:1;font:inherit}.vb-calendar-jump input{width:55px;font:inherit}.vb-calendar-jump button{font:inherit}
+.vb-date-popup{position:fixed;z-index:2147481000;min-width:210px;width:max-content;overflow:auto;padding:3px;border:1px solid #808080;box-shadow:2px 2px 4px #0005;font:11px Arial;background:#fff}
+.vb-common-color{display:flex;align-items:center;gap:12px;min-width:250px}.vb-common-color label{display:grid;gap:5px}.vb-common-color input[type=color]{width:68px;height:48px;padding:2px}
+.vb-common-font{display:grid;grid-template-columns:1fr 100px;gap:8px;min-width:300px}.vb-common-font>label:not(.vb-font-effect){display:grid;gap:4px}.vb-font-effect{display:flex;align-items:center;gap:4px}.vb-font-preview{grid-column:1/-1;border:2px inset var(--vb-face);padding:12px;min-height:70px;overflow:hidden;background:var(--vb-window);color:var(--vb-window-text)}
+
+.vb-virtual-viewport:focus .vb-lv-row.focused { outline: 1px dotted currentColor; outline-offset: -2px; }

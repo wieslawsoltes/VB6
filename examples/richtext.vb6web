@@ -428,7 +428,15 @@
               "Filter": "Rich Text Files (*.rtf)|*.rtf|All Files (*.*)|*.*",
               "FileName": "",
               "DialogTitle": "Open",
-              "CancelError": -1
+              "CancelError": -1,
+              "Color": 0,
+              "FilterIndex": 1,
+              "DefaultExt": "",
+              "InitDir": "",
+              "FileTitle": "",
+              "Flags": 0,
+              "Min": 0,
+              "Max": 0
             }
           }
         ],

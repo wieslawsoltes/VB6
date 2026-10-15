@@ -21,7 +21,7 @@ Application preferences are separate from the similarly named IDE preferences:
 
 - **Application: follow system light/dark appearance** follows the system within
   the chosen optional family without rewriting the saved ID.
-- **Application: reduce transparency** removes macOS title-material blur. It does
+- **Application: reduce transparency** removes macOS title and popup-material blur. It does
   not flatten Classic captions or affect authored pictures and colors.
 - **Application: reduce motion** removes theme control transitions. The browser's
   reduced-motion preference is also respected.
@@ -239,6 +239,14 @@ checks do not certify native macOS/Linux behavior or pixel equivalence.
 build and verified against a mandatory, locally reviewed SHA-256/length entry in
 `tools/ide-artifacts.json`. Edit the source styles, not the derivative. CI never
 refreshes its own expected fingerprints.
+
+### macOS 26 component fidelity
+
+See [macOS theme fidelity](MACOS-THEME-FIDELITY.md) for component/state coverage,
+geometry and authored-color preservation, slider/scrollbar behavior, device-scale
+raster tests, and the native AppKit reference capture in the macOS 26 CI job.
+Native references and browser screenshots are deliberately distinguished; passing
+browser regressions is not a claim of complete native pixel equivalence.
 
 ## WinUI resource-backed fidelity
 
