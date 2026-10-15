@@ -247,3 +247,10 @@ geometry and authored-color preservation, slider/scrollbar behavior, device-scal
 raster tests, and the native AppKit reference capture in the macOS 26 CI job.
 Native references and browser screenshots are deliberately distinguished; passing
 browser regressions is not a claim of complete native pixel equivalence.
+
+## WinUI resource-backed fidelity
+
+Fluent light/dark now use pinned Microsoft.UI.Xaml semantic colors, state brushes
+and component metrics. See [WinUI rendering and validation](WINUI-PARITY.md) for
+the exact reference, authored-color/geometry boundaries, tests and remaining
+native-pixel certification requirements.

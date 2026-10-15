@@ -222,3 +222,28 @@ input/change event path on all engines. Some WebKit ports omit those endpoint
 commands even when native dragging works. Modified shortcuts, IME input, disabled
 controls and prevented events are not intercepted; repeated endpoint keys do not
 emit duplicate changes. Arrow keys and pointer dragging remain browser-owned.
+
+### Shared WinUI/X11 integration
+
+The macOS skin composes with the resource-backed WinUI skin rather than
+replacing its state brushes. `controlThemePaint` wraps the already-authored
+command/combo paint: an invalid WinUI resource falls back to the local macOS
+paint, and an invalid macOS resource falls back to the original OLE role.
+Neither layer resolves an ancestor's color prematurely. Invalid, fractional or
+out-of-range OLE numbers cannot alias a state-brush slot.
+
+The final WinUI component sheet retains the existing non-WinUI detail metrics,
+including macOS 16px indicators, transparent 2px command insets, zero default
+outline, popup padding, capsule progress, and horizontal/vertical range geometry.
+The macOS scroll track no longer retains the Classic checkerboard image.
+The four-`:not()` Classic field selector now gives the owning WinUI input resource
+priority, so TextBox and DTPicker use their actual resource strokes instead of
+Classic relief. This is an intentional WinUI field-paint correction, not a claim
+that all non-macOS pixels are unchanged.
+
+`tests/theme-paint-composition.test.mjs` exercises the nested fallback and OLE
+contracts. The existing WinUI browser suite still removes/reinserts its complete
+sheet and requires identical non-WinUI computed paints and disabled glyphs.
+An additional literal-resource field test checks normal/disabled stroke paint
+and unchanged authored bounds. Existing X11 assertions and captured-pixel
+requirements are retained without changing their thresholds.

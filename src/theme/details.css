@@ -162,12 +162,12 @@
  .vb-check input[type=checkbox]:indeterminate::after {
   background:var(--detail-indeterminate-fill,var(--app-check-mark,var(--vb-gray)));
  }
- .vb-command.default-button {outline-style:var(--detail-default-outline-style,solid);box-shadow:var(--detail-default-shadow,var(--app-control-shadow,none));}
- .vb-command.default-button:hover:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--detail-default-shadow,var(--app-hover-shadow,none));}
- .vb-command.default-button:active:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--detail-default-pressed-shadow,var(--app-pressed-shadow,none));}
- .vb-command.default-button:is(.disabled,:disabled,[aria-disabled=true]) {box-shadow:var(--detail-default-shadow,var(--app-disabled-shadow,none));}
- .vb-dialog-actions .vb-default-button {outline-style:var(--detail-default-outline-style,solid);box-shadow:var(--detail-default-shadow,var(--app-control-shadow,var(--vb-bevel-raised)));}
- .vb-dialog-actions .vb-default-button:active:not(:disabled) {box-shadow:var(--detail-default-pressed-shadow,var(--app-pressed-shadow,var(--vb-bevel-pressed)));}
+ .vb-command.default-button {outline-style:var(--detail-default-outline-style,solid);box-shadow:var(--winui-ButtonShadow,var(--detail-default-shadow,var(--app-control-shadow,none)));}
+ .vb-command.default-button:hover:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--winui-ButtonShadow,var(--detail-default-shadow,var(--app-hover-shadow,none)));}
+ .vb-command.default-button:active:not(.disabled):not(:disabled):not([aria-disabled=true]) {box-shadow:var(--winui-ButtonShadow,var(--detail-default-pressed-shadow,var(--app-pressed-shadow,none)));}
+ .vb-command.default-button:is(.disabled,:disabled,[aria-disabled=true]) {box-shadow:var(--winui-ButtonShadow,var(--detail-default-shadow,var(--app-disabled-shadow,none)));}
+ .vb-dialog-actions .vb-default-button {outline-style:var(--detail-default-outline-style,solid);box-shadow:var(--winui-ButtonShadow,var(--detail-default-shadow,var(--app-control-shadow,var(--vb-bevel-raised))));}
+ .vb-dialog-actions .vb-default-button:active:not(:disabled) {box-shadow:var(--winui-ButtonShadow,var(--detail-default-pressed-shadow,var(--app-pressed-shadow,var(--vb-bevel-pressed))));}
  .vb-dialog-actions .vb-default-button:focus-visible {outline:var(--detail-focus-width,1px) var(--detail-focus-style,dotted) var(--detail-focus-color,var(--vb-text));outline-offset:var(--detail-default-focus-offset,1px);}
  .vb-check input[type=checkbox]:indeterminate:disabled::after {background:var(--vb-gray);}
  .vb-range::-webkit-slider-thumb {box-shadow:var(--detail-range-thumb-shadow,var(--app-range-thumb-shadow,var(--vb-bevel-raised)));}

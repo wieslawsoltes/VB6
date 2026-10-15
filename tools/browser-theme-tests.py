@@ -204,7 +204,7 @@ class Themes(X11IdeChecks, unittest.TestCase):
             self.assertNotEqual(checkbox.is_checked(),was_checked)
             self.assertGreaterEqual(float(checkbox.evaluate('(e)=>parseFloat(getComputedStyle(e).outlineOffset)')),1)
             primary.evaluate('(e)=>e.disabled=true')
-            self.assertEqual(primary.evaluate('(e)=>getComputedStyle(e).color'),self.page.locator('.ide-theme-note').evaluate('(e)=>{const p=e.ownerDocument.createElement("span");p.style.color="var(--vb-gray)";e.append(p);const c=getComputedStyle(p).color;p.remove();return c;}'))
+            self.assertEqual(primary.evaluate('(e)=>getComputedStyle(e).color'),self.page.locator('.ide-theme-note').evaluate('(e)=>{const p=e.ownerDocument.createElement("span");p.style.color="var(--winui-AccentButtonForegroundDisabled,var(--vb-gray))";e.append(p);const c=getComputedStyle(p).color;p.remove();return c;}'))
             primary.evaluate('(e)=>e.disabled=false')
             self.record(theme,primaryFocusContrast=True,pressedTextContrast=True,checkedFocusOutside=True)
         self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()

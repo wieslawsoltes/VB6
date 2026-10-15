@@ -1,4 +1,6 @@
 import {macosSystemColors} from './macos-reference-metrics.js';
+
+import {WINUI_RESOURCES} from './winui-resources.js';
 /** Shared immutable platform palettes. Original browser-rendered artwork and colors;
  * no native toolkit, proprietary font or OS resource dependencies. */
 const freeze = value => {
@@ -39,10 +41,20 @@ const darkTokens = {
   pressedShadow:'inset 0 1px 2px #00000055',material:'#202020',scrim:'#00000066',thumb:'#adadad',
   success:'#9ccc8a',warning:'#ffd58a'
 };
+// Fluent uses native semantic brushes; other platform palettes remain unchanged.
+function fluentTokens(scheme, base) {
+  const r=WINUI_RESOURCES[scheme];
+  return {...base,size:'14px',border:r.ControlStrokeColorDefault,separator:r.DividerStrokeColorDefault,
+    control:r.ControlFillColorDefault,hover:r.ControlFillColorSecondary,pressed:r.ControlFillColorTertiary,
+    surface:r.SolidBackgroundFillColorTertiary,material:r.SolidBackgroundFillColorBase,
+    controlShadow:'none',pressedShadow:'none',scrim:r.SmokeFillColorDefault,
+    thumb:r.ControlStrongFillColorDefault,error:r.SystemFillColorCritical,
+    success:r.SystemFillColorSuccess,warning:r.SystemFillColorCaution};
+}
 const profile = (id,name,family,scheme,colors,tokens) => ({id,name,family,scheme,colors,tokens});
 export const PLATFORM_THEMES = freeze({
-  fluent:profile('fluent','Fluent WinUI 3 — Light','fluent','light',light,lightTokens),
-  'fluent-dark':profile('fluent-dark','Fluent WinUI 3 — Dark','fluent','dark',dark,darkTokens),
+  fluent:profile('fluent','Fluent WinUI 3 — Light','fluent','light',light,fluentTokens('light',lightTokens)),
+  'fluent-dark':profile('fluent-dark','Fluent WinUI 3 — Dark','fluent','dark',{...dark,selectionText:'#000000'},fluentTokens('dark',darkTokens)),
   macos26:profile('macos26','macOS 26 — Light','macos26','light',{
     ...light,...macosSystemColors('light'),workspace:'#e9e9e9',desktop:'#d9ddeb',
     link:'#0057b8',keyword:'#7136a8',comment:'#386738'

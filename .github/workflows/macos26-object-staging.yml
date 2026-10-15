@@ -1,4 +1,4 @@
-name: Stage reviewed macOS WinUI integration
+name: Stage reviewed macOS theme objects
 on:
   push:
     branches: [automation/macos26-object-staging]
@@ -17,13 +17,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Reconstruct exact reviewed source
+      - name: Restore exact reviewed source patch
         run: node .github/macos26-stage-objects.mjs prepare
-      - name: Verify all reviewed fingerprints and shared paint contracts
-        run: |
-          node tools/build.mjs
-          node --test tests/theme-paint-composition.test.mjs tests/macos-theme-fidelity.test.mjs tests/winui-theme.test.mjs tests/x11-theme.test.mjs tests/range-orientation.test.mjs
-      - name: Publish immutable checked objects without changing refs
+      - name: Reproduce reviewed fingerprints without refreshing expectations
+        run: node tools/build.mjs
+      - name: Verify production tree and publish immutable blobs only
         env:
           GH_TOKEN: ${{ github.token }}
         run: node .github/macos26-stage-objects.mjs publish

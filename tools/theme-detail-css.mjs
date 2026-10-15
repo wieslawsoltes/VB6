@@ -103,7 +103,7 @@ export function themeDetailTokens(theme) {
     'tab-idle-fill':'transparent','tab-header-fill':`color-mix(in srgb, ${c.text} 7%, ${c.face})`,
     'calendar-collapse':'separate','calendar-spacing':'2px','calendar-header':c.window,'calendar-header-ink':c.windowText,'calendar-day-radius':'50%',
     'grid-border':t.separator,'grid-focus-style':'solid','menu-check-background':'transparent',
-    'scroll-arrow-display':'none','scroll-border':'transparent','scroll-thumb-border':'0px solid transparent',
+    'scroll-track-image':'none','scroll-arrow-display':'none','scroll-border':'transparent','scroll-thumb-border':'0px solid transparent',
     'scroll-thumb-shadow':'none','scroll-thumb-radius':'999px','scroll-thumb-cross':'calc(100% - 6px)','scroll-thumb-inset':'3px',
     'tree-row-selection':c.selection,'tree-row-selection-ink':c.selectionText,'tree-label-selection':'transparent','tree-label-selection-ink':'inherit',
     'tree-toggle-size':'0px','tree-toggle-border':'transparent','tree-toggle-fill':'transparent',

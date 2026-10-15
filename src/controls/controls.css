@@ -235,3 +235,8 @@
 /* Runtime MDI client and sizable form chrome; content retains the chosen theme. */
 .vb-mdi-parent>.vb-form-content{overflow:hidden}.vb-mdi-client{position:absolute;overflow:hidden;background:var(--vb-workspace);border:1px solid var(--vb-shadow);box-shadow:inset 1px 1px var(--vb-dark)}.vb-mdi-child{transform:none!important}.vb-mdi-child.vb-minimized{width:160px!important}.vb-mdi-child .vb-form-title{cursor:default}.vb-form-title:focus-visible{outline:1px dotted var(--vb-title-text);outline-offset:-2px}
 .vb-form-grip{position:absolute;z-index:5000;touch-action:none}.vb-form-grip-n{left:6px;right:6px;top:0;height:4px;cursor:n-resize}.vb-form-grip-s{left:6px;right:6px;bottom:0;height:4px;cursor:s-resize}.vb-form-grip-e{top:6px;bottom:6px;right:0;width:4px;cursor:e-resize}.vb-form-grip-w{top:6px;bottom:6px;left:0;width:4px;cursor:w-resize}.vb-form-grip-ne,.vb-form-grip-nw,.vb-form-grip-se,.vb-form-grip-sw{width:7px;height:7px}.vb-form-grip-ne{right:0;top:0;cursor:ne-resize}.vb-form-grip-nw{left:0;top:0;cursor:nw-resize}.vb-form-grip-se{right:0;bottom:0;cursor:se-resize}.vb-form-grip-sw{left:0;bottom:0;cursor:sw-resize}.vb-fixed-window>.vb-form-grip{display:none}
+
+/* Only ports that actually reject vertical range writing modes receive this
+ * capability-selected appearance. The same native input and themed track/thumb
+ * retain pointer, touch, keyboard, focus and disabled behavior. */
+.vb-range.vb-range-legacy-vertical {appearance:slider-vertical}

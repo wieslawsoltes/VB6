@@ -69,8 +69,8 @@
  .vb-form-title .vb-window-button:active:not(:disabled),.vb-combo-arrow:active:not(:disabled),.vb-spin-button:active:not(:disabled) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed));}
  .vb-scroll-arrow {box-shadow:var(--app-control-shadow,var(--vb-bevel-raised))!important;}
  .vb-scroll-arrow:active:not(:disabled) {box-shadow:var(--app-pressed-shadow,var(--vb-bevel-pressed))!important;}
- .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]),.vb-control textarea,.vb-control select,.vb-dialog input:not([type=checkbox]):not([type=radio]) {box-shadow:var(--app-input-shadow,var(--vb-bevel-sunken));}
- .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,.vb-control textarea:focus-visible,.vb-control select:focus-visible {box-shadow:var(--detail-field-focus-shadow,var(--app-input-focus-shadow,var(--vb-bevel-sunken)));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]),.vb-control textarea,.vb-control select,.vb-dialog input:not([type=checkbox]):not([type=radio]) {box-shadow:var(--winui-input-shadow,var(--app-input-shadow,var(--vb-bevel-sunken)));}
+ .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,.vb-control textarea:focus-visible,.vb-control select:focus-visible {box-shadow:var(--winui-input-shadow,var(--detail-field-focus-shadow,var(--app-input-focus-shadow,var(--vb-bevel-sunken))));}
  .vb-control :is(input,textarea):read-only {outline-color:var(--app-border,var(--vb-shadow));}
  .vb-form ::-webkit-scrollbar-thumb,.vb-dialog ::-webkit-scrollbar-thumb,.vb-combo-popup::-webkit-scrollbar-thumb {border-radius:var(--detail-scrollbar-radius,0);border:var(--detail-scrollbar-border,0);background:var(--detail-scrollbar-thumb,var(--vb-face));box-shadow:var(--detail-scrollbar-shadow,var(--vb-bevel-raised));}
 }
@@ -157,7 +157,7 @@
 .vb-command:focus::after {inset:var(--detail-command-focus-inset,4px);border-width:var(--detail-command-focus-width,1px);}
 .vb-dialog-actions {justify-content:var(--detail-dialog-actions,center);}
 .vb-dialog-actions .vb-command {background-color:var(--command-fill,var(--vb-face));color:var(--command-ink,var(--vb-text));}
-.vb-check input:not(:checked):not(:indeterminate) {border-color:var(--detail-check-border,var(--app-check-rest-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow)));box-shadow:var(--detail-check-shadow,var(--app-check-rest-shadow,inset 1px 1px var(--vb-text)));}
+.vb-check input:not(:checked):not(:indeterminate) {border-color:var(--winui-check-stroke,var(--detail-check-border,var(--app-check-rest-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow))));box-shadow:var(--winui-CheckShadow,var(--detail-check-shadow,var(--app-check-rest-shadow,inset 1px 1px var(--vb-text))));}
 .vb-check input[type=checkbox]:indeterminate::after {left:var(--detail-mixed-left,3px);top:var(--detail-mixed-top,3px);width:var(--detail-mixed-width,5px);height:var(--detail-mixed-height,5px);}
 .vb-control :is(.vb-text-input,.vb-date-input),.vb-dialog input {border-color:var(--detail-field-border,var(--vb-shadow) var(--vb-light) var(--vb-light) var(--vb-shadow));}
 .vb-control :is(.vb-combo-field,.vb-list) {border-color:var(--detail-field-border,currentColor);}
@@ -220,6 +220,7 @@
 .vb-tabs>.vb-tab-header>.vb-tab-button:not(.active) {background:var(--detail-tab-idle-fill,var(--vb-face));}
 @media(forced-colors:none) {
  .vb-popup-menu.classic-menu {background-color:var(--detail-menu-material,var(--vb-face));backdrop-filter:var(--detail-menu-backdrop,none);-webkit-backdrop-filter:var(--detail-menu-backdrop,none);}
+ .vb-scroll-track {background-image:var(--detail-scroll-track-image,repeating-conic-gradient(var(--vb-highlight) 0% 25%,transparent 0% 50%));}
  .vb-scroll-thumb {border:var(--detail-scroll-thumb-border,0px solid);border-color:var(--detail-scroll-border,currentColor);border-radius:var(--detail-scroll-thumb-radius,var(--app-radius,0));box-shadow:var(--detail-scroll-thumb-shadow,var(--app-control-shadow,var(--vb-bevel-raised)));}
  .vb-scrollbar.horizontal .vb-scroll-thumb {height:var(--detail-scroll-thumb-cross,100%);top:var(--detail-scroll-thumb-inset,0);}
  .vb-scrollbar.vertical .vb-scroll-thumb {width:var(--detail-scroll-thumb-cross,100%);left:var(--detail-scroll-thumb-inset,0);}
@@ -240,7 +241,7 @@
 .vb-check input {width:var(--detail-check-size,13px);height:var(--detail-check-size,13px);}
 @media(forced-colors:none) {
  .vb-check input {border-width:var(--detail-check-border-width,1px);}
- .vb-check input:not(:checked):not(:indeterminate) {background-color:var(--detail-check-fill,var(--vb-window));}
+ .vb-check input:not(:checked):not(:indeterminate) {background-color:var(--winui-check-fill,var(--detail-check-fill,var(--vb-window)));}
  .vb-check input:disabled {background-color:var(--detail-check-disabled-fill,var(--vb-face));}
  .vb-check input:disabled::after {background-color:var(--detail-check-disabled-mark,var(--vb-gray));}
  .vb-check input[type=checkbox]:checked:not(:indeterminate)::after {
@@ -292,18 +293,16 @@
 @media(forced-colors:none) {
  .vb-check input[type=checkbox]:not(:checked):not(:indeterminate):not(:disabled) {background-image:var(--detail-check-edge-image,var(--app-check-rest-image,var(--vb-bevel-sunken-image)));}
  .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field) {
-  box-shadow:var(--detail-field-shadow,var(--vb-bevel-sunken));
+  box-shadow:var(--winui-input-shadow,var(--detail-field-shadow,var(--vb-bevel-sunken)));
  }
- .vb-control textarea,.vb-control select {box-shadow:var(--detail-field-shadow,var(--app-input-shadow,var(--vb-bevel-sunken)));}
+ .vb-control textarea,.vb-control select {box-shadow:var(--winui-input-shadow,var(--detail-field-shadow,var(--app-input-shadow,var(--vb-bevel-sunken))));}
  .vb-control input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.vb-combo-field):focus-visible,
  .vb-control textarea:focus-visible,.vb-control select:focus-visible {
-  box-shadow:var(--detail-field-focus-shadow,var(--app-input-focus-shadow,var(--vb-bevel-sunken)));
+  box-shadow:var(--winui-input-shadow,var(--detail-field-focus-shadow,var(--app-input-focus-shadow,var(--vb-bevel-sunken))));
  }
  .vb-command,.vb-command:active {
-  border-block-style:var(--detail-command-border-block-style,none)!important;
-  border-block-width:var(--detail-command-border-block,0px)!important;
-  border-block-color:transparent!important;
-  background-clip:var(--detail-command-background-clip,border-box)!important;
+  border-block:var(--winui-ButtonBorder,var(--detail-command-border-block,0px) var(--detail-command-border-block-style,none) transparent)!important;
+  background-clip:var(--winui-ButtonClip,var(--detail-command-background-clip,border-box))!important;
   border-radius:var(--detail-command-corner-radius,var(--app-radius,0));
  }
  .vb-classic-combo:not(.simple) .vb-combo-field {padding-right:var(--detail-combo-padding-right,3px);}

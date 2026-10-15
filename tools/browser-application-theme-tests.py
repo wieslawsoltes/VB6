@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import threading
 import unittest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 from PIL import Image
 from x11_theme_checks import X11ApplicationChecks
 ROOT=Path(__file__).resolve().parents[1]
@@ -74,7 +74,9 @@ class ApplicationThemes(X11ApplicationChecks, unittest.TestCase):
    self.theme(theme);self.assertEqual(self.page.evaluate(BOUNDS),baseline,theme)
    self.assertTrue(self.page.evaluate('savedControls.every((n,i)=>n===document.querySelectorAll("#app .vb-control")[i])'))
    self.assertEqual(self.page.evaluate('JSON.stringify(vb6Application.project)'),project)
-   self.assertEqual(self.css('[data-control="TextBox1"] input','backgroundColor'),self.rgb(self.palettes[theme]['colors']['window']))
+   # A fixed sleep can sample an in-flight WebKit transition under CI load.
+   # Await the same exact endpoint rather than accepting intermediate alpha.
+   expect(self.page.locator('[data-control="TextBox1"] input')).to_have_css('background-color',{'fluent':'rgba(255, 255, 255, 0.7)','fluent-dark':'rgba(255, 255, 255, 0.06)'}.get(theme,self.rgb(self.palettes[theme]['colors']['window'])),timeout=10000)
    self.assertEqual(self.css('[data-control="cmdRGB"]','backgroundColor'),'rgb(153, 102, 51)')
    self.assertEqual(self.css('[data-control="cmdRGB"]','color'),'rgb(255, 255, 255)')
    self.assertEqual(self.css('[data-control="OptionButton1"] input','borderRadius'),'0px' if theme.startswith('x11') else '50%')
@@ -387,7 +389,9 @@ class ApplicationThemes(X11ApplicationChecks, unittest.TestCase):
    button.hover();self.assertEqual(self.paint_rgba(button),[255,255,255,20] if theme.endswith('-dark') else [0,0,0,20])
    self.page.mouse.down();self.assertEqual(button.evaluate('e=>getComputedStyle(e).backgroundColor'),self.rgb(palette['tokens']['pressed']))
    self.page.mouse.move(1400,1650);self.page.mouse.up()
-   self.page.evaluate('systemCommand.set("Default",-1)');self.assertEqual(self.page.evaluate(BOUNDS),baseline)
+   self.page.evaluate('systemCommand.set("Default",-1)')
+   self.page.wait_for_function('systemCommand.node.classList.contains("default-button")')
+   self.assertEqual(self.page.evaluate(BOUNDS),baseline)
    self.record(theme,defaultNormalPressedDisabled=True,authoredPairPreserved=True,contrastingDefaultFocus=True)
  def test_macos_checks_composites_tabs_and_disclosure(self):
   baseline=self.page.evaluate(BOUNDS)

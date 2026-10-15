@@ -221,6 +221,20 @@ class WinUI(unittest.TestCase):
    self.assertEqual(command.evaluate(snapshot),baseline)
    self.assertEqual(self.page.evaluate('JSON.stringify(vb6Application.project)'),original)
    self.record(theme=theme,authoredValuesPreserved=True)
+ def test_field_resource_shadows_override_classic_painter_specificity(self):
+  # These are literal pinned WinUI strokes, not values read back from the theme.
+  # The Classic input selector has four :not() terms and previously won the
+  # cascade even though the resource-backed sheet was loaded last.
+  for theme,strong,edge in [('fluent','#00000072','#0000000f'),('fluent-dark','#ffffff8b','#ffffff12')]:
+   self.theme(theme);self.park_pointer()
+   for name in ['TextBox1','DTPicker1']:
+    field=self.node(name).locator('input');bounds=field.bounding_box()
+    self.assertEqual(self.css(field,'boxShadow'),f'{self.color(strong)} 0px -1px 0px 0px inset, {self.color(edge)} 0px 0px 0px 1px inset')
+    self.set(name,'Enabled',0)
+    self.assertEqual(self.css(field,'boxShadow'),f'{self.color(edge)} 0px 0px 0px 1px inset')
+    self.set(name,'Enabled',-1)
+    self.assertEqual(field.bounding_box(),bounds,'Stroke correction must not change authored bounds')
+   self.record(theme=theme,classicFieldPainterSuppressed=True,disabledStrokeRetained=True)
  def test_check_radio_and_indeterminate_geometry_and_states(self):
   check=self.node('CheckBox1').locator('input');radio=self.node('OptionButton1').locator('input')
   for theme,r in RESOURCE.items():

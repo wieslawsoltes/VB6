@@ -1,43 +1,47 @@
-// One-use transport on an isolated branch. Never merge this file/workflow.
+// Temporary immutable-object transport on the named branch only, not production.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {brotliDecompressSync} from 'node:zlib';
-import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 assert.equal(process.env.GITHUB_REPOSITORY,'wieslawsoltes/VB6');
 assert.equal(process.env.GITHUB_REF,'refs/heads/automation/macos26-object-staging');
-const decoded=brotliDecompressSync(Buffer.from(fs.readFileSync('.github/macos26-winui-merge.b64','utf8').trim(),'base64'));
-assert.equal(createHash('sha256').update(decoded).digest('hex'),'05c8ad309552f73463f3f019061a8ae70fe83cf3e62719a5aaeada7478e5ee45');
-const entries=JSON.parse(decoded),mode=process.argv[2];assert.equal(entries.length,23);
-assert.ok(mode==='prepare'||mode==='publish');
-const gitHash=data=>createHash('sha1').update(`blob ${data.length}\0`).update(data).digest('hex');
-const output=[];
-for(const entry of entries){
- assert.ok(!path.isAbsolute(entry.path)&&!entry.path.split('/').includes('..')&&!entry.path.startsWith('.git/'));
- assert.equal(entry.mode,'100644');assert.equal(entry.type,'blob');
- if(mode==='prepare'&&entry.edits){
-  const exists=fs.existsSync(entry.path),original=exists?fs.readFileSync(entry.path):Buffer.alloc(0);
-  assert.equal(exists?gitHash(original):null,entry.base,entry.path+' base');
-  let position=0;const parts=[];
-  for(const [start,end,text] of entry.edits){
-   assert.ok(Number.isInteger(start)&&Number.isInteger(end)&&start>=position&&end>=start&&end<=original.length);
-   parts.push(original.subarray(position,start),Buffer.from(text,'utf8'));position=end;
-  }
-  parts.push(original.subarray(position));const data=Buffer.concat(parts);
-  assert.equal(gitHash(data),entry.sha,entry.path+' reconstructed');output.push({...entry,data});
- }else if(mode==='publish'){
-  const data=fs.readFileSync(entry.path);assert.equal(gitHash(data),entry.sha,entry.path+' reviewed');output.push({...entry,data});
- }
+const inputs=[1,2].map(n=>`.github/macos26-refinements.${n}.b64`);
+const packed=inputs.map(p=>fs.readFileSync(p,'utf8').trim()).join('');
+const data=brotliDecompressSync(Buffer.from(packed,'base64'),{maxOutputLength:1024*1024});
+assert.equal(createHash('sha256').update(data).digest('hex'),'ac44adf597d615a8b6bb62faae06a4e6e363f13bedd6c00bfe2048cb32001a49');
+const {patch,files}=JSON.parse(data);assert.equal(files.length,15);
+const mode=process.argv[2];assert.ok(mode==='prepare'||mode==='publish');
+const hash=data=>createHash('sha1').update(`blob ${data.length}\0`).update(data).digest('hex');
+for(const entry of files){
+ assert.ok(!path.isAbsolute(entry.path)&&!entry.path.split('/').includes('..')&&!entry.path.startsWith('.git'));
+ assert.equal(entry.mode,'100644');assert.equal(entry.type,'blob');assert.match(entry.sha,/^[a-f0-9]{40}$/);
 }
 if(mode==='prepare'){
- for(const {path:filename,data} of output){fs.mkdirSync(path.dirname(filename),{recursive:true});fs.writeFileSync(filename,data);}
- console.log('Reconstructed',output.length,'reviewed files; the strict build regenerates palettes.');
+ execFileSync('git',['apply','--check','--whitespace=error','-'],{input:patch});
+ execFileSync('git',['apply','--whitespace=error','-'],{input:patch});
+ console.log('Applied reviewed source patch; strict build must reproduce the committed fingerprints.');
 }else{
- assert.ok(process.env.GH_TOKEN);const report=[];
- for(const {path:filename,data,sha} of output){
-  const response=await fetch('https://api.github.com/repos/wieslawsoltes/VB6/git/blobs',{method:'POST',headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},body:JSON.stringify({encoding:'base64',content:data.toString('base64')})});
+ const blobs=files.map(entry=>{const bytes=fs.readFileSync(entry.path);assert.equal(hash(bytes),entry.sha,entry.path);return {...entry,bytes};});
+ // Verify the entire production tree after removing only this transport's files.
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'macos-object-index-'));
+ try{
+  const env={...process.env,GIT_INDEX_FILE:path.join(temp,'index')};
+  const git=(...args)=>execFileSync('git',args,{env,encoding:'utf8'}).trim();
+  git('read-tree','HEAD');
+  git('update-index','--force-remove',...inputs,'.github/macos26-stage-objects.mjs','.github/workflows/macos26-object-staging.yml');
+  git('add','--',...files.map(e=>e.path));
+  assert.equal(git('write-tree'),'55c8e0d6310cca59cb456536561c1bc949b18d4e');
+ }finally{fs.rmSync(temp,{recursive:true,force:true});}
+ assert.ok(process.env.GH_TOKEN);
+ const report=[];
+ for(const {path:filename,sha,bytes} of blobs){
+  const response=await fetch('https://api.github.com/repos/wieslawsoltes/VB6/git/blobs',{method:'POST',headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},body:JSON.stringify({encoding:'base64',content:bytes.toString('base64')})});
   assert.equal(response.status,201,`${filename}: HTTP ${response.status}`);
-  assert.equal((await response.json()).sha,sha,filename);report.push({path:filename,sha,bytes:data.length});
+  const result=await response.json();assert.equal(result.sha,sha,filename);
+  report.push({path:filename,sha,bytes:bytes.length});console.log(filename,sha);
  }
  fs.mkdirSync('reports',{recursive:true});fs.writeFileSync('reports/macos26-reviewed-object-shas.json',JSON.stringify(report,null,2)+'\n');
 }
