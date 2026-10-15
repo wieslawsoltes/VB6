@@ -97,3 +97,11 @@ export function statementParts(text) {
   if (raw.trim()) parts.push({text: raw.trim(), start: start + leading});
   return parts;
 }
+
+/** Start of a trailing continuation, or -1. Quoted/comment/bracket contents
+ * never join physical lines, even when they contain an unfinished literal. */
+export function continuationStart(text) {
+  const match=/\s_\s*$/.exec(text);if(!match)return -1;
+  let last=null;scanSyntax(text,token=>{last=token;});
+  return last?.kind==='id'&&last.value==='_'&&last.start===match.index+1?match.index:-1;
+}
