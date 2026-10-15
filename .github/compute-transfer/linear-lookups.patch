@@ -1,0 +1,71 @@
+diff --git a/packages/vb6-compute/src/global-writes.js b/packages/vb6-compute/src/global-writes.js
+index 4d7523f..4098672 100644
+--- a/packages/vb6-compute/src/global-writes.js
++++ b/packages/vb6-compute/src/global-writes.js
+@@ -12,6 +12,22 @@ export function globalField(artifact,name) {
+   return matches[0];
+ }
+ 
++/** Resolve every global once per batch. Rebuild rather than caching mutable
++ * artifact metadata; null retains ambiguity even when a third alias collides. */
++function indexGlobalFields(artifact) {
++  const fields=new Map();
++  for(const symbol of artifact.globals) {
++    const short=symbol.name.toLowerCase(),qualified=(symbol.module+'.'+short).toLowerCase();
++    for(const name of new Set([short,qualified]))fields.set(name,fields.has(name)?null:symbol);
++  }
++  return fields;
++}
++function indexedGlobalField(fields,name) {
++  const n=name.toLowerCase(),symbol=fields.get(n);
++  if(!symbol)throw new ComputeError(fields.has(n)?'Ambiguous global: '+name:'Unknown global: '+name,'GPU_NAME');
++  return symbol;
++}
++
+ export function stringPayload(values,storage) {
+   const data=new Uint32Array(values.length*storage.stride);
+   for(let i=0;i<values.length;i++)data.set(encodeStringBlock(values[i],storage),i*storage.stride);
+@@ -27,10 +43,11 @@ const MAX_WORDS=16777216,MAX_UPDATES=65536;
+ export function snapshotGlobalWrites(artifact,count,updates) {
+   if(!Array.isArray(updates))throw new ComputeError('Expected an array of global updates','GPU_VALUE');
+   integer(updates.length,'global update count',0,MAX_UPDATES);
++  const fields=updates.length?indexGlobalFields(artifact):null;
+   const destinations=new Set(),ranges=[],dynamic=[];let totalWords=0;
+   for(const update of updates) {
+     if(!update||typeof update!=='object'||Array.isArray(update)||typeof update.name!=='string')throw new ComputeError('Each update requires a name, value and optional lane','GPU_VALUE');
+-    const {name,value,lane=0}=update,s=globalField(artifact,name);
++    const {name,value,lane=0}=update,s=indexedGlobalField(fields,name);
+     integer(lane,'lane',0,count-1);
+     const slot=lane*artifact.stateStride+STATE_HEADER_WORDS+s.offset;
+     if(destinations.has(slot))throw new ComputeError('Duplicate global update: '+name,'GPU_ARGUMENT');
+ diff --git a/tests/compute-global-writes.test.mjs b/tests/compute-global-writes.test.mjs
+index 2a7b9f7..c78c74c 100644
+--- a/tests/compute-global-writes.test.mjs
++++ b/tests/compute-global-writes.test.mjs
+@@ -95,3 +95,26 @@ test('batch budgets are bounded before allocating payload storage',()=>{
+ test('DataView is not accepted by shared or array initialization APIs',async()=>{
+  const c=await setup();try{const view=new DataView(new ArrayBuffer(8));assert.throws(()=>c.program.initializeArray('values',[[0,1]],view));assert.throws(()=>c.program.writeShared(view));}finally{await c.dispose();}
+ });
++
++test('large batches traverse global names once, not once per update',()=>{
++ let reads=0;const n=8192,artifact={stateStride:n+6,globals:Array.from({length:n},(_,i)=>({
++  get name(){reads++;return 'field'+i;},get module(){reads++;return 'Module1';},offset:i,type:'long',array:false
++ }))};
++ const updates=Array.from({length:n},(_,i)=>({name:i%2?'MODULE1.FIELD'+i:'field'+i,value:i}));
++ const plan=snapshotGlobalWrites(artifact,1,updates);
++ assert.equal(reads,2*n);assert.equal(plan.writes.length,1);assert.equal(plan.writes[0].offset,24);
++ assert.deepEqual([...plan.writes[0].data],Array.from({length:n},(_,i)=>i));
++});
++test('indexed batch lookup retains ambiguity across three modules and accepts qualified names',()=>{
++ const artifact={stateStride:9,globals:['Alpha','Beta','Gamma'].map((module,offset)=>({module,name:'value',offset,type:'long',array:false}))};
++ assert.throws(()=>snapshotGlobalWrites(artifact,1,[{name:'VaLuE',value:7}]),e=>e.code==='GPU_NAME'&&e.message.includes('Ambiguous'));
++ assert.throws(()=>snapshotGlobalWrites(artifact,1,[{name:'missing',value:7}]),e=>e.code==='GPU_NAME'&&e.message.includes('Unknown'));
++ const plan=snapshotGlobalWrites(artifact,1,[{name:'BETA.VALUE',value:42}]);assert.equal(plan.writes[0].offset,28);assert.equal(plan.writes[0].data[0],42);
++});
++test('batch lookup does not cache a stale global list or inspect metadata for empty writes',()=>{
++ const artifact={stateStride:8,globals:[{module:'Module1',name:'a',offset:0,type:'long',array:false}]};
++ assert.equal(snapshotGlobalWrites(artifact,1,[{name:'a',value:1}]).writes[0].data[0],1);
++ artifact.globals.push({module:'Module2',name:'a',offset:1,type:'long',array:false});
++ assert.throws(()=>snapshotGlobalWrites(artifact,1,[{name:'a',value:2}]),e=>e.code==='GPU_NAME');
++ assert.deepEqual(snapshotGlobalWrites({get globals(){throw Error('empty batch must not inspect globals');}},1,[]),{dynamic:[],writes:[]});
++});

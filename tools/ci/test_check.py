@@ -18,7 +18,13 @@ class WorkflowAuditTests(unittest.TestCase):
     def reject(self,mutate):
         value=copy.deepcopy(self.workflow);mutate(value);self.path.write_text(yaml.safe_dump(value,sort_keys=False))
         with self.assertRaises(ValueError):check.audit(self.root)
-    def test_complete_graph_passes(self):self.assertEqual(check.audit(self.root)['preservedEntrypoints'],82)
+    def test_complete_graph_passes(self):self.assertEqual(check.audit(self.root)['preservedEntrypoints'],85)
+    def test_compute_reference_dependency_required(self):
+        self.reject(lambda w:w['jobs']['compute-gpu'].update({'needs':['hygiene']}))
+    def test_compute_shader_execution_cannot_be_removed(self):
+        self.reject(lambda w:[s.update({'run':'npm run test:compute'}) for s in w['jobs']['compute-gpu']['steps'] if 'npm run test:compute:browser' in s.get('run','')])
+    def test_compute_native_reference_download_required(self):
+        self.reject(lambda w:[s['with'].update({'name':'unrelated'}) for s in w['jobs']['compute-gpu']['steps'] if s.get('uses')=='actions/download-artifact@v4'])
     def test_gate_omission_rejected(self):self.reject(lambda w:w['jobs']['test']['needs'].remove('macos-browser-native'))
     def test_skippable_gate_rejected(self):self.reject(lambda w:w['jobs']['test'].update({'if':'success()'}))
     def test_failure_suppression_rejected(self):self.reject(lambda w:w['jobs']['figma'].update({'continue-on-error':True}))

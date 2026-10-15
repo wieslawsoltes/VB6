@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: transfer
-        name: Verify exact source, preserve current main and push temporary branch only
+        name: Verify exact source and push source-only changes on temporary branch
         run: python .github/compute-transfer/apply.py
   oracle:
     needs: [transfer]

@@ -783,6 +783,72 @@ jobs:
           name: macos-direct-browser-native-execution-${{ matrix.os }}
           path: reports/macos-aot-browser-native
           retention-days: 14
+  compute-reference:
+    name: Compute Windows reference
+    needs: [hygiene]
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Capture actual Automation and NLS reference values
+        shell: pwsh
+        run: |
+          ./tools/compute-native-oracle.ps1
+          git rev-parse HEAD | Set-Content -Encoding utf8 reports/compute/oracle/exact-head.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compute-native-reference
+          path: reports/compute/oracle
+          if-no-files-found: error
+          retention-days: 14
+  compute-gpu:
+    name: Compute WebGPU acceptance
+    needs: [compute-reference]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-browser
+        with:
+          browser: chromium
+          profile: rendering
+          mesa: 'true'
+      - uses: actions/download-artifact@v4
+        with:
+          name: compute-native-reference
+          path: reports/compute/oracle
+      - name: Verify source identity and run actual WGSL and pixel acceptance
+        run: |
+          set -euo pipefail
+          python - <<'PYCODE'
+          from pathlib import Path
+          import subprocess
+          expected = Path('reports/compute/oracle/exact-head.txt').read_text(encoding='utf-8-sig').strip()
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert expected == actual, 'Reference/source revision mismatch'
+          PYCODE
+          npm run test:compute
+          npm run test:compute:browser
+      - name: Archive independently reusable compute package
+        run: |
+          set -euo pipefail
+          cd artifacts/vb6-compute
+          npm pack --ignore-scripts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compute-webgpu-acceptance
+          path: |
+            reports/compute
+            artifacts/vb6-compute
+          if-no-files-found: error
+          retention-days: 14
   test:
     name: test
     runs-on: ubuntu-latest
@@ -804,6 +870,8 @@ jobs:
       - migration
       - macos
       - macos-browser-native
+      - compute-reference
+      - compute-gpu
     if: always()
     steps:
       - uses: actions/checkout@v4
@@ -816,4 +884,4 @@ jobs:
         run: node tools/ci/gate.mjs
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
-          CI_EXPECTED: hygiene,node,packages,core-browser,browser,figma,authoring-exports,advanced-build,advanced-editor,rendering-qualification,win32-system-contracts,native-com-ole,native-compiler,migration,macos,macos-browser-native
+          CI_EXPECTED: hygiene,node,packages,core-browser,browser,figma,authoring-exports,advanced-build,advanced-editor,rendering-qualification,win32-system-contracts,native-com-ole,native-compiler,migration,macos,macos-browser-native,compute-reference,compute-gpu

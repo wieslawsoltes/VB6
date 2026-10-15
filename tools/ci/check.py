@@ -58,6 +58,16 @@ def audit(root=ROOT):
         for dependency in jobs[name].get('needs', []):
             visit(dependency, ancestors | {name})
     visit('test', set())
+    if jobs.get('compute-reference', {}).get('runs-on') != 'windows-latest':
+        raise ValueError('Compute native reference must run on Windows')
+    if jobs.get('compute-gpu', {}).get('needs') != ['compute-reference']:
+        raise ValueError('Compute GPU acceptance must consume the Windows reference')
+    compute_steps = jobs['compute-gpu']['steps']
+    if not any('npm run test:compute:browser' in step.get('run', '') for step in compute_steps):
+        raise ValueError('Actual compute browser execution is required')
+    if not any(step.get('uses') == 'actions/download-artifact@v4' and
+               step.get('with', {}).get('name') == 'compute-native-reference' for step in compute_steps):
+        raise ValueError('Compute acceptance must use this run’s native reference artifact')
     if jobs['node']['strategy']['matrix']['shard'] != [1, 2, 3, 4]:
         raise ValueError('Node shards must partition all four parts')
     if '--test-shard="${SHARD}/4" tests/*.test.mjs' not in (root / '.github/workflows/validate.yml').read_text():

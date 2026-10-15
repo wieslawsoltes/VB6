@@ -213,7 +213,7 @@ ReDim Preserve a(2)
 Debug.Print a(2) Is Nothing
 End Sub`,['True True','True'],[{name:'Box',kind:'class',code:'Public Value As Long'}]));
 
-test('Typed array backend boundaries are explicit instead of scalar miscompilation',async()=>{
+test('Typed array returns compile for compute while unsupported backend boundaries stay explicit',async()=>{
  const source='Function F() As Long()\nEnd Function\nSub Main()\nEnd Sub';
  const {compileCompute}=await import('../src/compute/index.js');
  const {compileWin32}=await import('../src/native/compiler.js');
@@ -226,7 +226,10 @@ test('Typed array backend boundaries are explicit instead of scalar miscompilati
   assert.match(result.files['Directory.Build.targets'],/RequireResolvedMigration/);
   assert.throws(()=>exportVbNetProject(project,{codeStyle}),/unresolved diagnostics/);
  }
- assert.throws(()=>compileCompute(source),e=>e.code==='GPU_TYPE'&&/array procedure returns/.test(e.message));
+ const artifact=compileCompute(source.replace('Sub Main()\nEnd Sub','Public values() As Long\nSub Main()\nvalues=F()\nEnd Sub'));
+ assert.equal(artifact.target,'webgpu-compute');
+ assert.ok(artifact.sources.some(p=>p.procedure==='F'));
+ assert.match(artifact.wgsl,/array_copy_value/);
  assert.throws(()=>compileWin32({...newProject('ArrayReturns'),startup:'Sub Main',modules:[{name:'M',kind:'module',code:source}]}),/native array-return ABI is not implemented/);
 });
 
