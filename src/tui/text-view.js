@@ -5,7 +5,7 @@ import {CellBuffer,CanvasCellRenderer} from './cells.js';
 import {tuiAttribute} from './appearance.js';
 
 export function paintTextView(buffer,snapshot,profile){
-  const editor=tuiAttribute(profile,'editor'),selection=tuiAttribute(profile,'selected');
+  const editor=tuiAttribute(profile,'editor'),selection=tuiAttribute(profile,'selected'),search=tuiAttribute(profile,'search');
   const {cellWidth,cellHeight}=snapshot;
   if(!Number.isFinite(cellWidth)||cellWidth<=0||!Number.isFinite(cellHeight)||cellHeight<=0||!Array.isArray(snapshot.items)||snapshot.items.length>70000)throw new RangeError('Text view exceeds projection budget');
   buffer.fill(0,0,buffer.columns,buffer.rows,' ',editor.foreground,editor.background);
@@ -13,8 +13,8 @@ export function paintTextView(buffer,snapshot,profile){
     if(!Number.isFinite(item.x)||!Number.isFinite(item.y)||typeof item.text!=='string')continue;
     const x=Math.round(item.x/cellWidth),y=Math.floor((item.y+cellHeight*.5)/cellHeight);
     if(y<0||y>=buffer.rows||x<0||x>=buffer.columns)continue;
-    const a=item.selected?selection:editor;
-    buffer.text(x,y,item.text,{width:Math.min(32,buffer.columns-x),foreground:item.marker??(item.selected?a.foreground:item.color??a.foreground),background:a.background});
+    const a=item.selected?selection:item.searchMatch?search:editor;
+    buffer.text(x,y,item.text,{width:Math.min(32,buffer.columns-x),foreground:item.marker??(item.selected||item.searchMatch?a.foreground:item.color??a.foreground),background:a.background});
   }
   for(const caret of snapshot.focused?snapshot.carets||[]:[]){
     const x=Math.round(caret.x/cellWidth),y=Math.floor((caret.y+cellHeight*.5)/cellHeight);

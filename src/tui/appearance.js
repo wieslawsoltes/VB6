@@ -5,25 +5,25 @@ const profiles = {
   turbo: {
     panel: attr(0,7,4), title: attr(15,1,14), inactiveTitle: attr(7,1,7), menu: attr(0,7,4),
     selected: attr(0,3,15), field: attr(0,3,0), button: attr(0,2,15), focusedButton: attr(15,2,14),
-    disabled: attr(8,7,8), editor: attr(14,1,15), status: attr(0,7,4), border: attr(15,7),
+    disabled: attr(8,7,8), editor: attr(14,1,15), search: attr(0,14), status: attr(0,7,4), border: attr(15,7),
     window: attr(15,1,14), desktop: attr(0,1), shadow: attr(0,0)
   },
   commander: {
     panel: attr(14,1,15), title: attr(0,3,15), inactiveTitle: attr(7,1,7), menu: attr(0,3,15),
     selected: attr(0,3,15), field: attr(14,1,15), button: attr(0,3,15), focusedButton: attr(15,3,14),
-    disabled: attr(8,1,8), editor: attr(14,1,15), status: attr(0,3,15), border: attr(11,1),
+    disabled: attr(8,1,8), editor: attr(14,1,15), search: attr(0,14), status: attr(0,3,15), border: attr(11,1),
     window: attr(14,1,15), desktop: attr(0,1), shadow: attr(0,0)
   },
   win31: {
     panel: attr(0,7,4), title: attr(15,1,15), inactiveTitle: attr(7,8,7), menu: attr(0,7,4),
     selected: attr(15,1,14), field: attr(0,15,4), button: attr(0,7,4), focusedButton: attr(0,7,4),
-    disabled: attr(8,7,8), editor: attr(0,15,1), status: attr(0,7,4), border: attr(0,7),
+    disabled: attr(8,7,8), editor: attr(0,15,1), search: attr(0,14), status: attr(0,7,4), border: attr(0,7),
     window: attr(0,7,4), desktop: attr(3,3), shadow: attr(0,0)
   },
   monochrome: {
     panel: attr(7,0,15), title: attr(0,7,0), inactiveTitle: attr(7,0,15), menu: attr(0,7,0),
     selected: attr(0,7,0), field: attr(15,0,15), button: attr(0,7,0), focusedButton: attr(0,15,0),
-    disabled: attr(8,0,8), editor: attr(7,0,15), status: attr(0,7,0), border: attr(7,0),
+    disabled: attr(8,0,8), editor: attr(7,0,15), search: attr(0,15), status: attr(0,7,0), border: attr(7,0),
     window: attr(7,0,15), desktop: attr(8,0), shadow: attr(0,0)
   }
 };
