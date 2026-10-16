@@ -184,8 +184,11 @@ export class EditorInputModeService extends Signal {
     }
   }
   report(record, error) {
-    this.notify(record, error?.message || String(error));
-    this.ide.status('Input mode: ' + (error?.message || String(error)));
+    const message = error?.message || String(error);
+    // Ex reports its error before rethrowing; keep that notification rather
+    // than stacking a second copy when the outer input guard catches it.
+    if (record.message !== message && record.message !== String(error)) this.notify(record, message);
+    this.ide.status('Input mode: ' + message);
   }
   notify(record, text) { return openInputModeNotification(record, text, {duration: 5000}, () => this.publish()); }
   executeEx(command, editor) {
