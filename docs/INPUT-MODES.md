@@ -44,14 +44,14 @@ including its composition, completion, indentation, and language services.
 | Area | Commands and examples |
 | --- | --- |
 | Modes | `i`, `a`, `I`, `A`, `o`, `O`; `R` for Replace; `v`, `V`, `Ctrl+V` for character, line, and block Visual modes |
-| Counts and motions | `h j k l`, `w b e`, `W B E`, `0 ^ $`, `gg`, `G`, `12G`, `{ }`, `%`, `f/F`, `t/T`, `;`, `,` |
+| Counts and motions | `h j k l`, `gj gk` for wrapped rows, `w b e`, `W B E`, `0 ^ $`, `gg`, `G`, `12G`, `{ }`, `%`, `f/F`, `t/T`, `;`, `,` |
 | Operators | `d`, `c`, `y`, `>`, `<`, `=`, `gu`, `gU`, `g~` combined with motions or selections; `3dw`, `ciw`, `dd`, `yy`, `>>` |
 | Text objects | Inner/around words, paragraphs, quotes, paired delimiters, and tags; `iw`, `aw`, `ip`, `ap`, `i"`, `a(`, `it` |
 | Editing | `x`, `X`, `r`, `D`, `C`, `s`, `S`, `J`, `gJ`, `p`, `P`, case changes, and numeric increment/decrement |
 | Repeat and history | `.` repeats the last change, `u` undoes, `Ctrl+R` redoes; counted changes and native Insert text participate in repeat |
 | Registers | `"a` through `"z`, uppercase append, unnamed and numbered registers, black-hole register, line/block contents, and `"+` / `"*` clipboard registers |
 | Macros and marks | `qa … q`, `@a`, `@@`, counts on playback, `ma`, `'a`, and backtick plus `a` for an exact mark position |
-| Search | `/pattern`, `?pattern`, `n`, `N`, `*`, `#`, search history, and incremental search |
+| Search | `/pattern`, `?pattern`, `n`, `N`, `*`, `#`, search history, incremental search, and `:nohlsearch` / `:noh` to clear highlighting |
 | Scrolling | `Ctrl+D/U`, `Ctrl+F/B`, `Ctrl+E/Y`, `H/M/L`, and `z` cursor placement commands |
 | Ex editing | Line/range addresses, `:s`, `:%s/old/new/g`, confirmation with `gc`, `:global`, `:sort`, delete/yank/put, and supported `:set` / mapping commands |
 
@@ -61,10 +61,21 @@ the other selected lines. Native source inputs display an overlay for ranges
 their single-selection textarea cannot represent. Monaco uses its own multiple
 selections. Both edit the same canonical document.
 
+Monaco uses its displayed layout for vertical and page movement. `j` and `k`
+move by source lines while skipping folded bodies; `gj` and `gk` move between
+wrapped visual rows. A linewise operator spanning a fold includes its hidden
+source. Macros and `:normal` also use the layout of their pending edits without
+writing temporary text into the project or creating extra undo entries.
+
 Search and Ex prompts are real inputs in the editor's owning window. This keeps
 command history, keyboard selection, IME, and substitute confirmation usable in
 detached windows. The engine supports Vim-style regular expressions and its PCRE
 option; use the prompt's regex selector or `:set` options to choose the dialect.
+Visible matches are highlighted in Classic, XAML, Monaco, and the DOS / TUI cell
+renderer. `:nohlsearch` clears the highlights; a later search restores them.
+Highlighting visits visible source ranges and leaves source selections and
+history unchanged. Switching backends retains the active search; switching to
+Default clears the Vim presentation and releases its listeners.
 
 ## IDE commands
 
