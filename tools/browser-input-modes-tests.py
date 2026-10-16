@@ -145,7 +145,7 @@ class BrowserHarness:
         return self.page.evaluate('id => vb6Studio.project.modules.find(m=>m.id===id).code', module)
 
     def buffer(self, text, module='form'):
-        self.page.evaluate('''({text,id}) => {
+        self.page.evaluate(r'''({text,id}) => {
           const i=vb6Studio;i.openDocument(id,'code');i.editor.setViewMode('module');
           i.editor.setValue(text);i.history.reset();i.lastTyped=0;i.lastTypingModule=null;
           i.editor.goToLine(1,1);i.editor.input.focus();
@@ -194,7 +194,7 @@ class BrowserHarness:
 
     def enable_advanced(self):
         self.assertTrue(self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:true})'))
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           globalThis.ar=vb6Studio.advancedEditor.runtime;
           globalThis.as=ar.surfaces.get(vb6Studio.editor);as.focus();
         }''')
@@ -246,7 +246,7 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.page.locator('[data-input-mode-status]').press('Enter')
         self.page.get_by_role('menuitemcheckbox', name='Default', exact=True).click()
         self.assertEqual(self.page.evaluate('vb6Studio.inputModes.settings.mode'), 'default')
-        self.page.evaluate('''() => {globalThis.removeTestMode=vb6Studio.inputModes.registerMode({
+        self.page.evaluate(r'''() => {globalThis.removeTestMode=vb6Studio.inputModes.registerMode({
           id:'test-pass',label:'Test pass',description:'A registered pass-through mode.',
           createSession:()=>({state:{mode:'normal'},handleKey:()=>false,dispose(){}})});}''')
         self.menu_mode('test-pass')
@@ -374,7 +374,8 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.type('u')
         self.assertEqual(self.text(), source)
         self.press('Control+r')
-        self.ex('%sort')
+        # Sort the authored rows; the final empty editor row stays in place.
+        self.ex('1,3sort')
         self.assertEqual(self.text(), 'alpha BETA\ncharlie BETA\ndelta BETA\n')
         self.ex('%s/BETA/omega/gc')
         self.page.locator('.input-mode-notification:visible,.input-mode-commandline:visible').first.wait_for()
@@ -405,7 +406,7 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
 
     def test_procedure_projection_and_split_selections_use_global_offsets(self):
         self.vim()
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           const e=vb6Studio.editor,line=e.text.slice(0,e.text.indexOf('Private Sub Beta')).split('\n').length;
           e.goToLine(line+1,5);e.setViewMode('procedure');e.input.focus();
         }''')
@@ -415,7 +416,7 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         expected = SOURCE.replace('    total = total + 1', '    value = total + 1')
         self.assertEqual(self.text(), expected)
         self.ex('split')
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           const e=vb6Studio.editor;globalThis.primarySelection={...e.selectionBounds(e.primary)};
           e.activatePane(e.secondary);e.input.focus();
         }''')
@@ -426,13 +427,13 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.done()
 
     def test_one_hundred_thousand_lines_remain_virtualized_during_vim_edits(self):
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           const e=vb6Studio.editor;e.setValue(Array.from({length:100000},(_,i)=>"' row "+String(i+1).padStart(6,'0')).join('\n')+'\n');
           vb6Studio.history.reset();e.setViewMode('module');e.goToLine(1,1);
         }''')
         self.vim()
         self.type('50000G0x')
-        result = self.page.evaluate('''() => {
+        result = self.page.evaluate(r'''() => {
           const e=vb6Studio.editor,lines=e.text.split('\n');return {
             before:lines[49998],edited:lines[49999],after:lines[50000],
             virtual:e.activePane.virtualizer.active,nativeLength:e.input.value.length,
@@ -453,7 +454,7 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
 
     def test_xaml_keyboard_edit_and_undo_update_the_real_form_model(self):
         self.vim()
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           globalThis.xt=vb6Studio.xaml.open('form');const at=xt.editor.text.indexOf('Caption="Original"')+9;
           xt.editor.reveal(at);
         }''')
@@ -531,7 +532,7 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.press('Escape')
         self.assertEqual(self.text(), 'alpha beta\n')
         self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           vb6Studio.editor.setReadOnly(false);vb6Studio.openDocument('form','form');
           vb6Studio.designer.select(['button']);vb6Studio.togglePanel('properties',true);
         }''')
@@ -557,7 +558,7 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.buffer('alpha\nbeta\n')
         self.vim()
         self.type('i')
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           const input=vb6Studio.editor.input,view=input.ownerDocument.defaultView;
           input.dispatchEvent(new view.CompositionEvent('compositionstart',{bubbles:true}));
           input.setRangeText('Zażółć 😀',input.selectionStart,input.selectionEnd,'end');
@@ -584,7 +585,7 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.assertEqual(self.page.evaluate('vb6Studio.history.transactionDepth'), 0)
         self.assertTrue(self.page.evaluate('[...vb6Studio.inputModes.records.values()].every(r=>!r.session)'))
         self.vim()
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           globalThis.retiredEditor=vb6Studio.editor;const p=VB6StudioAPI.newProject('Replacement');
           p.modules[0].code='alpha\n';vb6Studio.loadProject(p);vb6Studio.openDocument(p.modules[0].id,'code');
           vb6Studio.editor.goToLine(1,1);
@@ -629,7 +630,7 @@ class AdvancedInputModeAcceptance(BrowserHarness, unittest.TestCase):
     def test_real_monaco_xaml_and_dos_cell_projection_keep_vim_state(self):
         self.enable_advanced()
         self.vim()
-        self.page.evaluate('''() => {
+        self.page.evaluate(r'''() => {
           const tool=vb6Studio.xaml.open('form');globalThis.ax=ar.surfaces.get(tool.editor);
           const at=ax.record.model.getValue().indexOf('Caption="Original"')+9;ax.select(at);ax.focus();
         }''')
@@ -644,7 +645,7 @@ class AdvancedInputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.assertEqual(self.page.evaluate(caption), 'Original')
         self.assertEqual(self.state(), 'normal')
         self.assertTrue(self.page.evaluate('[...vb6Studio.dosMode.sessions.values()].every(s=>s.metrics.failures===0)'))
-        self.page.evaluate('''() => {vb6Studio.openDocument('form','code');globalThis.as=ar.surfaces.get(vb6Studio.editor);as.select(0);as.focus();}''')
+        self.page.evaluate(r'''() => {vb6Studio.openDocument('form','code');globalThis.as=ar.surfaces.get(vb6Studio.editor);as.select(0);as.focus();}''')
         self.type('iDOS_')
         self.press('Escape')
         self.assertTrue(self.text().startswith('DOS_Option Explicit'))
