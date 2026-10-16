@@ -7,12 +7,18 @@ import {GuideIndex} from '../src/layout/guides.js';
 const samples=100,results=[];
 const stats=times=>{times.sort((a,b)=>a-b);return {median:times[Math.floor(times.length*.5)],p95:times[Math.floor(times.length*.95)]};};
 const time=fn=>{const a=performance.now();fn();return performance.now()-a;};
-for(const count of [1000,10000])for(const flow of ['Horizontal','Wrap','VerticalWrap','Grid']){
-  const nodes=Array.from({length:count},(_,id)=>({id,bounds:{x:0,y:0,width:60,height:30},widthMode:flow==='Horizontal'||flow==='Grid'?'fill':'fixed',maxWidth:flow==='Horizontal'&&id%3===0?65:0}));
-  let engine;const compile=time(()=>engine=new LayoutEngine(nodes,{width:1000,height:800,layout:flow,columns:20,gap:4,crossGap:6}));
+for(const count of [1000,10000])for(const flow of ['Horizontal','Wrap','VerticalWrap','Grid','Masonry','HorizontalMasonry']){
+  const nodes=Array.from({length:count},(_,id)=>({id,bounds:{x:0,y:0,width:60,height:30},widthMode:flow==='Horizontal'||flow==='Grid'||flow==='Masonry'?'fill':'fixed',heightMode:flow==='HorizontalMasonry'?'fill':'fixed',maxWidth:flow==='Horizontal'&&id%3===0?65:0}));
+  let engine;const compile=time(()=>engine=new LayoutEngine(nodes,{width:1000,height:800,layout:flow,columns:20,rows:20,gap:4,crossGap:6}));
   for(let i=0;i<20;i++)engine.arrange(1000+i%7,800+i%11);
   const values=Array.from({length:samples},(_,i)=>time(()=>engine.arrange(1000+i%7,800+i%11)));
   results.push({case:flow,nodes:count,compile,...stats(values)});
+}
+for(const count of [1000,10000]){
+  const nodes=Array.from({length:count},(_,id)=>({id,bounds:{width:60,height:30},widthMode:'fill'}));
+  const engine=new LayoutEngine(nodes,{layout:'Grid',width:850,height:800,columns:'repeat(auto-fill,minmax(var(--min),1fr))',layoutVariables:{'--min':40},gap:4});
+  for(let i=0;i<20;i++)engine.arrange(850+i%10*41,800);
+  results.push({case:'Responsive grid (changing count)',nodes:count,...stats(Array.from({length:samples},(_,i)=>time(()=>engine.arrange(850+i%10*41,800))))});
 }
 for(const count of [1000,10000]){
   const nodes=Array.from({length:count},(_,id)=>({id,bounds:{width:60,height:30},widthMode:'hug',heightMode:'hug',measure:()=>({width:60,height:30})}));

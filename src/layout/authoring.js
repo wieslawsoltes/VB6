@@ -6,7 +6,8 @@ import {arrangeFormEdit,parentIds} from './model.js';
  * no partial graph or geometry is published when validation/measurement fails. */
 export function layoutEdit(form,operation){
   const draft=structuredClone(form),selection=operation(draft)||[],old=new Map(form.controls.map(c=>[c.id,c]));
-  if(!Array.isArray(selection)||selection.some(id=>!draft.controls.some(c=>c.id===id)))throw new TypeError('A layout operation must return existing selected control IDs');
+  const available=new Set(draft.controls.map(c=>c.id));
+  if(!Array.isArray(selection)||selection.some(id=>!available.has(id)))throw new TypeError('A layout operation must return existing selected control IDs');
   if(draft.controls.length>10000)throw new RangeError('A form supports at most 10,000 controls');
   const changed=draft.controls.filter(c=>{const b=old.get(c.id);return !b||c.parent!==b.parent||c.nativeParentId!==b.nativeParentId||['Left','Top','Width','Height','Anchor','Dock'].some(k=>b.properties[k]!==c.properties[k]);}).map(c=>c.id);
   arrangeFormEdit(form,draft,changed);

@@ -1,11 +1,15 @@
-import {advancedColumns,normalizeAdvanced,normalizeTracks,measureTree,layoutGrid,distribute} from './advanced.js';
+import {cloneTracks} from './track-template.js';
+import {normalizeGridSelectors} from './grid-lines.js';
+import {normalizeVariables} from './track-expression.js';
+import {advancedColumns,normalizeAdvanced,normalizeTracks,measureTree,layoutGrid,layoutMasonry,distribute} from './advanced.js';
 /**
  * Renderer-independent layout in arbitrary logical units. No DOM, global state,
  * clock, or dependencies. Baselines never change as a side effect of arrange().
  */
 export const AnchorStyles = Object.freeze({None:0, Top:1, Bottom:2, Left:4, Right:8, All:15});
 export const DockStyle = Object.freeze({None:0, Top:1, Bottom:2, Left:3, Right:4, Fill:5});
-export const LayoutMode = Object.freeze({Absolute:0, Horizontal:1, Vertical:2, Wrap:3, VerticalWrap:4, Grid:5});
+export const LayoutMode = Object.freeze({Absolute:0, Horizontal:1, Vertical:2, Wrap:3, VerticalWrap:4, Grid:5, Masonry:6, HorizontalMasonry:7});
+const metadata=n=>({...normalizeGridSelectors(n),layoutVariables:normalizeVariables(n.layoutVariables)});
 const own = (o,k) => Object.prototype.hasOwnProperty.call(o,k);
 function finite(v, fallback = 0, label = 'geometry') {
   if (v === undefined) return fallback;
@@ -115,7 +119,7 @@ function normalizeNode(n,parentWidth,parentHeight) {
  */
 export class LayoutEngine {
   constructor(nodes = [], options = {}) {
-    this.options = {width:nonnegative(options.width),height:nonnegative(options.height),padding:box(options.padding),layout:parseLayoutMode(options.layout),gap:finite(options.gap),justify:named(options.justify,justifies,0,'justify'),...normalizeAdvanced(options),columns:normalizeTracks(options.columns,2),rows:normalizeTracks(options.rows,0)};
+    this.options = {width:nonnegative(options.width),height:nonnegative(options.height),padding:box(options.padding),layout:parseLayoutMode(options.layout),gap:finite(options.gap),justify:named(options.justify,justifies,0,'justify'),...normalizeAdvanced(options),...metadata(options),columns:normalizeTracks(options.columns,2),rows:normalizeTracks(options.rows,0)};
     this.revision = 0;
     this.setNodes(nodes);
   }
@@ -128,7 +132,7 @@ export class LayoutEngine {
       const n = nodes[i];
       if (!n || !['string','number'].includes(typeof n.id) || (typeof n.id === 'number' && !Number.isFinite(n.id))) throw new TypeError('Each node needs a finite numeric or string id');
       if (index.has(n.id)) throw new Error(`Duplicate layout id: ${n.id}`);
-      index.set(n.id,i); records[i] = {...n,bounds:{...(n.bounds||n)},...(n.padding&&typeof n.padding==='object'?{padding:Array.isArray(n.padding)?n.padding.slice():{...n.padding}}:{}),...(n.margin&&typeof n.margin==='object'?{margin:Array.isArray(n.margin)?n.margin.slice():{...n.margin}}:{})};
+      index.set(n.id,i); records[i] = {...n,...metadata(n),bounds:{...(n.bounds||n)},...(n.padding&&typeof n.padding==='object'?{padding:Array.isArray(n.padding)?n.padding.slice():{...n.padding}}:{}),...(n.margin&&typeof n.margin==='object'?{margin:Array.isArray(n.margin)?n.margin.slice():{...n.margin}}:{})};
     }
     for (let i=0;i<count;i++) {
       const p = records[i].parent;
@@ -141,7 +145,7 @@ export class LayoutEngine {
     for (let q=0;q<order.length;q++) for (const c of children[order[q]]) order.push(c);
     if (order.length !== count) throw new Error('Cyclic layout parent relationship');
     const tracks=records.map(n=>({columns:normalizeTracks(n.columns,2),rows:normalizeTracks(n.rows,0)}));
-    records.forEach((n,i)=>{n.columns=tracks[i].columns.map(t=>({...t}));n.rows=tracks[i].rows.map(t=>({...t}));});
+    records.forEach((n,i)=>{n.columns=cloneTracks(tracks[i].columns);n.rows=cloneTracks(tracks[i].rows);});
     const data = Object.fromEntries(COLS.map(k=>[k,new Float64Array(count+1)]));
     const visible = new Uint8Array(count), participant = new Uint8Array(count);
     const opt = this.options;
@@ -157,7 +161,8 @@ export class LayoutEngine {
     }
     // Publish only after validation; a failed setNodes leaves the old tree usable.
     this.nodes=records;this.index=index;this.children=children;this.parents=parents;
-    this.gridCache=new Map();this.tracks=tracks;this.hugCount=records.reduce((sum,_,i)=>sum+(data.wm[i]===1||data.hm[i]===1?1:0),data.wm[count]===1||data.hm[count]===1?1:0);
+    this.contextRevision=-1;this.resolvedDirection=new Uint8Array(count+1);this.resolvedVariables=new Array(count+1);this.gridCache=new Map();this.gridLayouts=new Map();this.masonryLayouts=new Map();this.tracks=tracks;this.hugCount=records.reduce((sum,_,i)=>sum+(data.wm[i]===1||data.hm[i]===1?1:0),data.wm[count]===1||data.hm[count]===1?1:0);
+    this.modeCounts=new Uint32Array(8);for(const mode of data.mode)this.modeCounts[mode]++;
     this.order=Int32Array.from(order);this.data=data;this.visible=visible;this.participant=participant;this.count=count;
     this.rects=new Float64Array((count+1)*4);this.rollback=new Float64Array((count+1)*4);this.previous=new Float64Array(count*4);this.previous.fill(NaN);
     this.changed=new Int32Array(count);this.work=new Float64Array(count);this.flex=new Float64Array(count);this.frozen=new Uint8Array(count);
@@ -170,7 +175,7 @@ export class LayoutEngine {
     if(this.solving)throw new Error('Layout mutation is not allowed during intrinsic measurement');
     const i=this.index.get(id);if(i===undefined)throw new Error(`Unknown layout id: ${id}`);
     const old=this.nodes[i],d=this.data;
-    const next={...old,baselineWidth:d.bw[i],baselineHeight:d.bh[i],...patch,bounds:{...old.bounds,...patch.bounds}};
+    const next={...old,baselineWidth:d.bw[i],baselineHeight:d.bh[i],...patch,...metadata({...old,...patch}),bounds:{...old.bounds,...patch.bounds}};
     if(next.id!==old.id||next.parent!==old.parent){
       const nodes=this.nodes.map((n,j)=>({...n,baselineWidth:d.bw[j],baselineHeight:d.bh[j]}));
       if(next.parent!==old.parent){const p=next.parent==null?this.count:this.index.get(next.parent);if(p===undefined)throw new Error(`Missing layout parent: ${next.parent}`);next.baselineWidth=patch.baselineWidth??Math.max(0,this.rects[p*4+2]-d.pl[p]-d.pr[p]);next.baselineHeight=patch.baselineHeight??Math.max(0,this.rects[p*4+3]-d.pt[p]-d.pb[p]);}
@@ -180,8 +185,8 @@ export class LayoutEngine {
     if(next.padding&&typeof next.padding==='object')next.padding=Array.isArray(next.padding)?next.padding.slice():{...next.padding};
     if(next.margin&&typeof next.margin==='object')next.margin=Array.isArray(next.margin)?next.margin.slice():{...next.margin};
     const v=normalizeNode(next,next.baselineWidth,next.baselineHeight),track={columns:normalizeTracks(next.columns,2),rows:normalizeTracks(next.rows,0)};
-    next.columns=track.columns.map(t=>({...t}));next.rows=track.rows.map(t=>({...t}));
-    this.hugCount+=(v.wm===1||v.hm===1?1:0)-(d.wm[i]===1||d.hm[i]===1?1:0);this.tracks[i]=track;
+    next.columns=cloneTracks(track.columns);next.rows=cloneTracks(track.rows);
+    this.hugCount+=(v.wm===1||v.hm===1?1:0)-(d.wm[i]===1||d.hm[i]===1?1:0);this.tracks[i]=track;this.modeCounts[d.mode[i]]--;this.modeCounts[v.mode]++;
     for(const col of COLS)d[col][i]=v[col];this.visible[i]=next.visible!==false?1:0;this.participant[i]=next.participate!==false?1:0;
     this.nodes[i]=next;this.dirty=true;this.revision++;return this;
   }
@@ -189,8 +194,8 @@ export class LayoutEngine {
   configure(patch={}) {
     if(this.solving)throw new Error('Layout mutation is not allowed during intrinsic measurement');
     const o=this.options,n=this.count,d=this.data;
-    const next={width:nonnegative(patch.width,o.width),height:nonnegative(patch.height,o.height),padding:patch.padding===undefined?o.padding:box(patch.padding),layout:patch.layout===undefined?o.layout:parseLayoutMode(patch.layout),gap:finite(patch.gap,o.gap),...normalizeAdvanced({...o,...patch,crossGap:own(patch,'crossGap')?patch.crossGap:(Number.isNaN(o.crossGap)?undefined:o.crossGap)}),columns:normalizeTracks(patch.columns===undefined?o.columns:patch.columns,2),rows:normalizeTracks(patch.rows===undefined?o.rows:patch.rows,0),justify:patch.justify===undefined?o.justify:named(patch.justify,justifies,0,'justify')};
-    this.hugCount+=(next.wm===1||next.hm===1?1:0)-(d.wm[n]===1||d.hm[n]===1?1:0);this.options=next;this.tracks[n]={columns:next.columns,rows:next.rows};for(const col of advancedColumns)d[col][n]=next[col];d.mode[n]=next.layout;d.gap[n]=next.gap;d.justify[n]=next.justify;[d.pt[n],d.pr[n],d.pb[n],d.pl[n]]=next.padding;this.dirty=true;this.revision++;return this;
+    const next={...metadata({...o,...patch}),width:nonnegative(patch.width,o.width),height:nonnegative(patch.height,o.height),padding:patch.padding===undefined?o.padding:box(patch.padding),layout:patch.layout===undefined?o.layout:parseLayoutMode(patch.layout),gap:finite(patch.gap,o.gap),...normalizeAdvanced({...o,...patch,crossGap:own(patch,'crossGap')?patch.crossGap:(Number.isNaN(o.crossGap)?undefined:o.crossGap)}),columns:normalizeTracks(patch.columns===undefined?o.columns:patch.columns,2),rows:normalizeTracks(patch.rows===undefined?o.rows:patch.rows,0),justify:patch.justify===undefined?o.justify:named(patch.justify,justifies,0,'justify')};
+    this.hugCount+=(next.wm===1||next.hm===1?1:0)-(d.wm[n]===1||d.hm[n]===1?1:0);this.modeCounts[d.mode[n]]--;this.modeCounts[next.layout]++;this.options=next;this.tracks[n]={columns:next.columns,rows:next.rows};for(const col of advancedColumns)d[col][n]=next[col];d.mode[n]=next.layout;d.gap[n]=next.gap;d.justify[n]=next.justify;[d.pt[n],d.pr[n],d.pb[n],d.pl[n]]=next.padding;this.dirty=true;this.revision++;return this;
   }
   rebase(id, bounds, client) {
     const patch={bounds:{...bounds}};
@@ -202,30 +207,56 @@ export class LayoutEngine {
     const k=i*4,r=this.rects;out.x=r[k];out.y=r[k+1];out.width=r[k+2];out.height=r[k+3];return out;
   }
   getRootBounds(out={}) {const k=this.count*4,r=this.rects;return Object.assign(out,{x:r[k],y:r[k+1],width:r[k+2],height:r[k+3]});}
+  /** Detached metadata from the last successful arrange, including empty tracks.
+   * A failed solve leaves both geometry and these snapshots unchanged. */
+  getGridLayout(id=null) {
+    const i=id===null?this.count:this.index.get(id);
+    if(i===undefined)throw new Error(`Unknown layout id: ${id}`);
+    const g=this.gridLayouts.get(i);return g?{...g,columns:g.columns.map(t=>({...t,...(t.names?{names:t.names.slice()}:{}),...(t.endNames?{endNames:t.endNames.slice()}:{} )})),rows:g.rows.map(t=>({...t,...(t.names?{names:t.names.slice()}:{}),...(t.endNames?{endNames:t.endNames.slice()}:{} )})),cells:g.cells.map(c=>({...c}))}:null;
+  }
+  getMasonryLayout(id=null) {
+    const i=id===null?this.count:this.index.get(id);if(i===undefined)throw new Error(`Unknown layout id: ${id}`);const g=this.masonryLayouts.get(i);return g?{...g,lanes:g.lanes.map(t=>({...t,names:t.names.slice()})),cells:g.cells.map(c=>({...c}))}:null;
+  }
+  prepareContext() {
+    if(this.contextRevision===this.revision)return;
+    const root=this.count,d=this.data,vars=this.resolvedVariables,dirs=this.resolvedDirection;
+    dirs[root]=d.dir[root]===1?1:0;vars[root]=this.options.layoutVariables;
+    for(const i of this.order){const parent=this.parents[i],own=this.nodes[i].layoutVariables;
+      dirs[i]=d.dir[i]===2?dirs[parent]:d.dir[i];
+      vars[i]=Object.keys(own).length?Object.assign(Object.create(null),vars[parent],own):vars[parent];
+      if(Object.keys(vars[i]).length>256)throw new RangeError('Inherited layout variable budget exceeded');
+    }
+    this.contextRevision=this.revision;
+  }
   arrange(width=this.options.width,height=this.options.height) {
     if(this.solving)throw new Error('Layout mutation is not allowed during intrinsic measurement');
     width=nonnegative(width);height=nonnegative(height);
     const result=this.result;result.changedCount=0;result.visited=0;result.passes=0;
     if (!this.dirty && width===this.lastWidth && height===this.lastHeight) return result;
     const d=this.data,r=this.rects,n=this.count,root=n*4;
-    const guarded=this.hugCount||d.mode.includes(5);
+    const hasGrid=this.modeCounts[5]>0,hasMasonry=this.modeCounts[6]>0||this.modeCounts[7]>0,guarded=this.hugCount||hasGrid||hasMasonry;
+    this.prepareContext();
     if(guarded)this.rollback.set(r);
     d.w[n]=width;d.h[n]=height;r[root]=0;r[root+1]=0;r[root+2]=width;r[root+3]=height;
     // Intrinsic trees converge bottom-up against the final constrained wrap/grid
     // widths. The ordinary anchor path never enters the measurement loop.
     result.passes=1;
+    this.pendingGridLayouts=hasGrid?new Map():null;this.pendingMasonryLayouts=hasMasonry?new Map():null;
     this.solving=true;
     try {
     if(this.hugCount)measureTree(this,false);
     for(let pass=0;;pass++) {
       if(d.wm[n]===1)r[root+2]=this.measuredWidth[n];if(d.hm[n]===1)r[root+3]=this.measuredHeight[n];
       this.layoutChildren(n);
-      for(const i of this.order)if(this.children[i].length)this.layoutChildren(i);
+      for(const i of this.order)if(this.children[i].length||d.mode[i]>=5)this.layoutChildren(i);
       if(!this.hugCount||!measureTree(this,true))break;
       result.passes++;
       if(pass>=Math.min(this.count+1,127))throw new Error('Intrinsic layout did not converge; fix a cyclic Hug/Fill or wrap constraint');
     }
-    } catch(error) {if(guarded)r.set(this.rollback);this.dirty=true;throw error;}finally{this.solving=false;}
+    if(guarded&&r.some(v=>!Number.isFinite(v)))throw new RangeError('Nonfinite resolved layout geometry');
+    } catch(error) {if(guarded)r.set(this.rollback);this.pendingGridLayouts=null;this.pendingMasonryLayouts=null;this.dirty=true;throw error;}finally{this.solving=false;}
+    if(this.pendingGridLayouts)this.gridLayouts=this.pendingGridLayouts;else this.gridLayouts.clear();this.pendingGridLayouts=null;
+    if(this.pendingMasonryLayouts)this.masonryLayouts=this.pendingMasonryLayouts;else this.masonryLayouts.clear();this.pendingMasonryLayouts=null;
     for (const i of this.order) {
       const k=i*4;result.visited++;
       if (r[k]!==this.previous[k]||r[k+1]!==this.previous[k+1]||r[k+2]!==this.previous[k+2]||r[k+3]!==this.previous[k+3]) {
@@ -269,7 +300,7 @@ export class LayoutEngine {
       }
       r[k]=x;r[k+1]=y;r[k+2]=w;r[k+3]=h;
     }
-    if(flow.length){const args=[parent,flow,left,top,Math.max(0,right-left),Math.max(0,bottom-top)];if(d.mode[parent]===5)layoutGrid(this,...args);else this.layoutFlow(...args);}
+    if(flow.length||d.mode[parent]>=5){const args=[parent,flow,left,top,Math.max(0,right-left),Math.max(0,bottom-top)];if(d.mode[parent]===5)layoutGrid(this,...args);else if(d.mode[parent]>=6){if(d.rev[parent])args[1]=flow.slice().reverse();layoutMasonry(this,...args);}else {if(d.rev[parent])args[1]=flow.slice().reverse();this.layoutFlow(...args);const vertical=d.mode[parent]===2||d.mode[parent]===4;for(const i of flow){const k=i*4;if(d.wrapRev[parent]){if(vertical)r[k]=left+right-r[k]-r[k+2];else r[k+1]=top+bottom-r[k+1]-r[k+3];}if(this.resolvedDirection[parent])r[k]=left+right-r[k]-r[k+2];}}}
   }
   preferred(i,vertical) {const d=this.data;return vertical?(d.hm[i]===1?this.measuredHeight[i]:d.h[i]):(d.wm[i]===1?this.measuredWidth[i]:d.w[i]);}
   layoutFlow(parent,ids,x,y,width,height) {
@@ -314,8 +345,8 @@ export class LayoutEngine {
     let baseline=0;
     if(!vertical)for(let j=begin;j<end;j++){const i=ids[j],a=d.align[i]<0?d.items[parent]:d.align[i];if(a===4)baseline=Math.max(baseline,d.mt[i]+Math.min(this.preferred(i,true),d.baseline[i]));}
     for(let j=begin;j<end;j++) {
-      const i=ids[j],k=i*4,start=vertical?d.mt[i]:d.ml[i],finish=vertical?d.mb[i]:d.mr[i];
-      const cstart=vertical?d.ml[i]:d.mt[i],cend=vertical?d.mr[i]:d.mb[i],available=Math.max(0,cross-cstart-cend);
+      const i=ids[j],k=i*4,rtl=this.resolvedDirection[parent],start=vertical?d.mt[i]:rtl?d.mr[i]:d.ml[i],finish=vertical?d.mb[i]:rtl?d.ml[i]:d.mr[i];
+      const cstart=vertical?(rtl?d.mr[i]:d.ml[i]):d.mt[i],cend=vertical?(rtl?d.ml[i]:d.mr[i]):d.mb[i],available=Math.max(0,cross-cstart-cend);
       const align=d.align[i]<0?d.items[parent]:d.align[i],base=this.preferred(i,!vertical),fill=(vertical?d.wm[i]:d.hm[i])===2;
       const cs=clamp(align===3||fill?available:base,vertical?d.minW[i]:d.minH[i],vertical?d.maxW[i]:d.maxH[i]);
       const cp=!vertical&&align===4?baseline-Math.min(cs,d.baseline[i]):cstart+(align===1?(available-cs)/2:align===2?available-cs:0);pos+=start;

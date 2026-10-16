@@ -1,8 +1,8 @@
 {
   "name": "@vb6/auto-layout",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "type": "module",
-  "description": "Dependency-free anchoring, intrinsic stack/wrap and two-dimensional grid layout",
+  "description": "Dependency-free anchoring, intrinsic flow, responsive grids and masonry layout",
   "exports": {
     ".": {
       "types": "./src/index.d.ts",

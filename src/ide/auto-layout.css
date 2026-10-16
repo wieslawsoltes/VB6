@@ -39,3 +39,11 @@
 .auto-grid-cell { border: 1px dashed color-mix(in srgb, var(--vb-selection, #000080) 28%, transparent); }
 .auto-drag-ghost { border: 1px dashed var(--vb-selection, #000080); background: color-mix(in srgb, var(--vb-selection, #000080) 10%, transparent); }
 @media (forced-colors: active) { .auto-space-handle, .auto-guide, .auto-drag-ghost, .auto-drop-container { border-color: Highlight; } }
+
+.auto-grid-track-handle { position: absolute; box-sizing: border-box; pointer-events: auto; border-left: 1px dashed var(--vb-selection, #000080); touch-action: none; cursor: ew-resize; }
+.auto-grid-track-handle[data-axis=y] { border-left: 0; border-top: 1px dashed var(--vb-selection, #000080); cursor: ns-resize; }
+.auto-grid-track-handle span { position: absolute; top: 0; left: 0; font-size: 10px; padding: 1px 2px; background: var(--vb-face, #c0c0c0); color: var(--vb-text, #000); pointer-events: none; }
+.auto-grid-track-handle[data-axis=y] span { top: -12px; }
+.auto-grid-track-handle:hover, .auto-grid-track-handle:focus { outline: 1px solid var(--vb-selection, #000080); background: color-mix(in srgb, var(--vb-selection, #000080) 15%, transparent); }
+.auto-grid-track-handle[aria-disabled=true] { pointer-events: none; }
+@media (forced-colors: active) { .auto-grid-track-handle { border-color: Highlight; } }

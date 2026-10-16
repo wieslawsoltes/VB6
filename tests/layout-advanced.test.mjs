@@ -4,7 +4,7 @@ import {distribute,normalizeTracks} from '../packages/auto-layout/src/advanced.j
 const node=(id,width=40,height=20,extra={})=>({id,bounds:{x:0,y:0,width,height},shrink:0,...extra});
 const eq=(e,id,b)=>assert.deepEqual(e.getBounds(id),b);
 const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-6,`${a} != ${b}`);
-test('advanced modes preserve existing numeric identifiers',()=>{assert.deepEqual(LayoutMode,{Absolute:0,Horizontal:1,Vertical:2,Wrap:3,VerticalWrap:4,Grid:5});});
+test('advanced modes preserve existing numeric identifiers',()=>{assert.deepEqual(LayoutMode,{Absolute:0,Horizontal:1,Vertical:2,Wrap:3,VerticalWrap:4,Grid:5,Masonry:6,HorizontalMasonry:7});});
 test('nested Hug containers measure from leaves without overwriting authored bounds',()=>{
  const e=new LayoutEngine([node('p',200,100,{layout:1,widthMode:'hug',heightMode:'hug',padding:[5,10,15,20],gap:7}),node('a',40,20,{parent:'p'}),node('b',60,30,{parent:'p'})],{width:500,height:400});
  e.arrange();eq(e,'p',{x:0,y:0,width:137,height:50});eq(e,'a',{x:20,y:5,width:40,height:20});eq(e,'b',{x:67,y:5,width:60,height:30});assert.equal(e.nodes[0].bounds.width,200);

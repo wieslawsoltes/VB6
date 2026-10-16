@@ -1,6 +1,6 @@
-import {LAYOUT_CONSTANTS,LAYOUT_CHOICES,layoutDefaults,layoutEnabled} from './contract.js';
-const enumFor=name=>name==='Anchor'?'AnchorStyles':name==='Dock'?'DockStyle':name==='LayoutMode'?'LayoutMode':['LayoutGridColumns','LayoutGridRows'].includes(name)?'String':['LayoutIgnore','LayoutClipContents'].includes(name)?'Boolean':/^Layout(?:Width|Height)Mode$/.test(name)?'LayoutSizeMode':LAYOUT_CHOICES[name]?'Long':'Double';
-export const layoutConstantSymbols=Object.entries(LAYOUT_CONSTANTS).map(([name,value])=>({name,value,kind:'constant',type:/^vbAnchor/.test(name)?'AnchorStyles':/^vbDock/.test(name)?'DockStyle':/^vbLayout(?:Absolute|Horizontal|Vertical|Wrap|VerticalWrap|Grid)$/.test(name)?'LayoutMode':/^vbLayoutSize/.test(name)?'LayoutSizeMode':'Long',signature:name+' = '+value}));
+import {LAYOUT_CONSTANTS,LAYOUT_CHOICES,LAYOUT_DEFAULTS,layoutDefaults,layoutEnabled} from './contract.js';
+const enumFor=name=>name==='Anchor'?'AnchorStyles':name==='Dock'?'DockStyle':name==='LayoutMode'?'LayoutMode':typeof LAYOUT_DEFAULTS[name]==='string'?'String':['LayoutIgnore','LayoutClipContents','LayoutReverse','LayoutWrapReverse'].includes(name)?'Boolean':/^Layout(?:Width|Height)Mode$/.test(name)?'LayoutSizeMode':LAYOUT_CHOICES[name]?'Long':'Double';
+export const layoutConstantSymbols=Object.entries(LAYOUT_CONSTANTS).map(([name,value])=>({name,value,kind:'constant',type:/^vbAnchor/.test(name)?'AnchorStyles':/^vbDock/.test(name)?'DockStyle':/^vbLayout(?:Absolute|Horizontal|Vertical|Wrap|VerticalWrap|Grid|Masonry|HorizontalMasonry)$/.test(name)?'LayoutMode':/^vbLayoutSize/.test(name)?'LayoutSizeMode':'Long',signature:name+' = '+value}));
 export function layoutMembers(project,type) {
   if(!layoutEnabled(project))return [];
   const properties=Object.keys(layoutDefaults({type})).map(name=>({name,kind:'property',type:enumFor(name),signature:name+' As '+enumFor(name),description:'Opt-in project layout extension. Geometry uses twips.'}));

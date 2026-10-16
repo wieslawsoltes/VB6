@@ -23,7 +23,7 @@ export function distanceGuides(a,b){
 /** Line-aware insertion for horizontal/vertical stacks, wraps, and row-major grid. */
 export function insertionGuide(rects,point,mode,parent){
   if(!rects.length)return {index:0,guide:{kind:'insert',x1:parent.x+4,x2:parent.x+4,y1:parent.y+4,y2:parent.y+Math.max(12,parent.height-4)}};
-  const vertical=mode===2||mode===4,wrap=mode===3||mode===4||mode===5;
+  const vertical=mode===2||mode===4||mode===6,wrap=mode===3||mode===4||mode>=5;
   let at=rects.length;
   if(!wrap)at=rects.findIndex(r=>vertical?point.y<r.y+r.height/2:point.x<r.x+r.width/2);
   else{let best=Infinity;for(let i=0;i<rects.length;i++){const r=rects[i],near=vertical?Math.max(r.x-point.x,0,point.x-r.x-r.width):Math.max(r.y-point.y,0,point.y-r.y-r.height);const distance=near*100000+(vertical?Math.abs(point.y-r.y-r.height/2):Math.abs(point.x-r.x-r.width/2));if(distance<best){best=distance;at=i+(vertical?point.y>=r.y+r.height/2:point.x>=r.x+r.width/2?1:0);}}}

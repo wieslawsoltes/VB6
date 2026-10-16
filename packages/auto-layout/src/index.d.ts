@@ -7,19 +7,31 @@ export type Insets = number | [number] | [number, number] | [number, number, num
 export type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
 export type Justify = 'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly';
 export type SizeMode = 'fixed' | 'hug' | 'fill';
-export type Track = number | 'hug' | 'auto' | `${number}fr` | {size: number | string; min?: number; max?: number};
+/** Length expressions are bounded data: percentages, calc/min/max/clamp and var. */
+export type Length = number | string;
+export interface TrackNames { before?: string[]; after?: string[]; }
+export interface TrackRecord extends TrackNames { size?: Length; min?: Length; max?: Length; }
+export interface NormalizedTrackRecord extends TrackNames { mode:0|1|2|'fixed'|'hug'|'fill'; value?:Length; min?:Length; max?:Length; }
+export interface RepeatTrack extends TrackNames { repeat:'auto-fit'|'auto-fill'; tracks:Track[]; }
+export type Track = Length | TrackRecord | NormalizedTrackRecord | RepeatTrack;
 export type Tracks = number | string | Track[];
+export type Direction = 'ltr' | 'rtl' | 'inherit';
+export type LayoutVariables = Record<string, Length> | string;
 export interface Limits { minWidth?: number; minHeight?: number; maxWidth?: number; maxHeight?: number; }
 export interface LayoutSettings {
   layout?: number | keyof typeof LayoutMode; padding?: Insets; gap?: number; crossGap?: number; justify?: Justify;
   alignItems?: Align; alignContent?: Justify | 'stretch'; widthMode?: SizeMode; heightMode?: SizeMode;
-  columns?: Tracks; rows?: Tracks;
+  direction?:Direction; reverse?:boolean; wrapReverse?:boolean; layoutVariables?:LayoutVariables;
+  gridTemplateAreas?:string|string[];
+  columns?: Tracks; rows?: Tracks; gridAutoFlow?: 'row' | 'column' | 'row dense' | 'column dense';
 }
 export interface LayoutNode extends Limits, LayoutSettings {
   id: Id; parent?: Id | null; bounds?: Partial<Rect>; anchor?: number | string; dock?: number | keyof typeof DockStyle;
   baselineWidth?: number; baselineHeight?: number; margin?: Insets; grow?: number; shrink?: number; basis?: number;
   align?: Align; visible?: boolean; participate?: boolean; ignoreLayout?: boolean;
   preferredWidth?: number; preferredHeight?: number; baseline?: number;
+  /** One-based named/numeric line selectors are separate from legacy zero-based cells. */
+  gridColumnStart?:string|number; gridColumnEnd?:string|number; gridRowStart?:string|number; gridRowEnd?:string|number; gridArea?:string;
   gridColumn?: number; gridRow?: number; columnSpan?: number; rowSpan?: number; justifySelf?: Exclude<Align,'baseline'>;
   /** Pure intrinsic callback. Called only for leaf Hug sizes. Never mutate the
    * engine or input graph from this callback. Cache expensive font/content work. */
@@ -30,12 +42,18 @@ export interface LayoutOptions extends LayoutSettings { width?: number; height?:
 export interface LayoutResult { rects: Float64Array; changed: Int32Array; changedCount: number; visited: number; revision: number; passes: number; }
 export const AnchorStyles: Readonly<{ None:0; Top:1; Bottom:2; Left:4; Right:8; All:15 }>;
 export const DockStyle: Readonly<{ None:0; Top:1; Bottom:2; Left:3; Right:4; Fill:5 }>;
-export const LayoutMode: Readonly<{ Absolute:0; Horizontal:1; Vertical:2; Wrap:3; VerticalWrap:4; Grid:5 }>;
+export const LayoutMode: Readonly<{ Absolute:0; Horizontal:1; Vertical:2; Wrap:3; VerticalWrap:4; Grid:5; Masonry:6; HorizontalMasonry:7 }>;
 export function parseAnchor(value?: number | string): number;
 export function formatAnchor(value: number | string): string;
 export function parseDock(value?: number | string): number;
 export function parseLayoutMode(value?: number | string): number;
 export function solveAnchor(bounds: Partial<Rect>, baselineClient: Size, client: Size, anchor?: number | string, limits?: Limits, out?: Partial<Rect>): Rect;
+export interface TrackSnapshot { index:number; start:number; size:number; min:number; max:number; collapsed:boolean; autoRepeat:'auto-fit'|'auto-fill'|null; sourceIndex:number; names:string[]; }
+export interface GridTrack extends TrackSnapshot { implicit:boolean; endNames:string[]; }
+export interface GridCell extends Rect { id:Id; row:number; column:number; rowSpan:number; columnSpan:number; }
+export interface GridLayout extends Rect { direction:'ltr'|'rtl'; columns:GridTrack[]; rows:GridTrack[]; cells:GridCell[]; }
+export interface MasonryCell extends Rect { id:Id; lane:number; laneSpan:number; }
+export interface MasonryLayout extends Rect { orientation:'vertical'|'horizontal'; direction:'ltr'|'rtl'; contentWidth:number; contentHeight:number; lanes:TrackSnapshot[]; cells:MasonryCell[]; probes:number; }
 export class LayoutEngine {
   constructor(nodes?: LayoutNode[], options?: LayoutOptions);
   readonly nodes: LayoutNode[]; readonly index: Map<Id,number>; readonly count:number; readonly rects:Float64Array; readonly revision:number;
@@ -47,6 +65,10 @@ export class LayoutEngine {
   rebase(id:Id,bounds:Rect,client?:Size):this;
   getBounds(id:Id,out?:Partial<Rect>):Rect;
   getRootBounds(out?:Partial<Rect>):Rect;
+  /** Detached metadata from the last successful solve, including empty tracks. */
+  getGridLayout(id?:Id|null):GridLayout|null;
+  /** Detached shortest-lane packing metadata; null for non-masonry nodes. */
+  getMasonryLayout(id?:Id|null):MasonryLayout|null;
   /** O(n) anchor pass and constant-time unchanged-root fast path. Capped flex
    * distribution O(n log n) worst case. Intrinsic wrapping uses bounded passes. */
   arrange(width?:number,height?:number):LayoutResult;
