@@ -299,12 +299,20 @@ export class EditorInputModeService extends Signal {
   }
   beforeInput(record, event) {
     if (!record.session || !record.host.ownsEvent(event) || record.composing || event.isComposing || record.busy) return;
+    if (this.settings.mode === 'vim' && ['historyUndo', 'historyRedo'].includes(event.inputType)) {
+      // Browser edit menus and touch input must use the project history too;
+      // the textarea's private undo stack cannot represent modal operations.
+      event.preventDefault();
+      record.endCoalescing?.(); record.endCoalescing = null;
+      if (!record.host.readOnly) this.run(record, () => event.inputType === 'historyUndo' ? record.host.undo() : record.host.redo());
+      return;
+    }
     const state = record.session.state || emptyState;
     if (['insert', 'replace'].includes(state.mode)) this.ensureCoalescing(record);
     if (this.settings.mode === 'vim' && !['insert', 'replace'].includes(state.mode)) {
       // Native paste/drop/spellcheck must not bypass Normal mode. A paste event
       // is handled separately using the shared engine operation/undo protocol.
-      if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') event.preventDefault();
+      event.preventDefault();
     }
   }
   paste(record, event) {

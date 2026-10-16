@@ -106,3 +106,16 @@ test('session keyboard mappings apply after IDE and composition exclusions', () 
   assert.equal(mapped, 1); assert.deepEqual(received, ['j']);
   f.service.dispose();
 });
+
+test('native browser undo and redo use canonical history and honor read-only source', () => {
+  const f = fixture(), host = f.hosts[0], calls = [];
+  host.undo = () => calls.push('undo'); host.redo = () => calls.push('redo');
+  f.service.configure({mode: 'vim'});
+  const record = f.service.records.get(f.editor), event = inputType => ({inputType, preventDefault() { this.prevented = true; }});
+  const undo = event('historyUndo'), redo = event('historyRedo');
+  f.service.beforeInput(record, undo); f.service.beforeInput(record, redo);
+  assert.equal(undo.prevented, true); assert.equal(redo.prevented, true); assert.deepEqual(calls, ['undo', 'redo']);
+  host.readOnly = true; const denied = event('historyUndo'); f.service.beforeInput(record, denied);
+  assert.equal(denied.prevented, true); assert.deepEqual(calls, ['undo', 'redo']);
+  f.service.dispose();
+});
