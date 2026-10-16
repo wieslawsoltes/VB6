@@ -13,7 +13,7 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,Number(value)||0));
 const copySelection=s=>({anchor:s.anchor,head:s.head});
 const sameSelections=(a,b)=>a.length===b.length&&a.every((s,i)=>s.anchor===b[i].anchor&&s.head===b[i].head);
 const escapeRegExp=text=>String(text).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-const wordChar=character=>!!character&&/[\p{L}\p{N}_$]/u.test(character);
+const wordChar=character=>!!character&&/[\p{L}\p{N}_]/u.test(character);
 const nextCodePoint=(text,offset)=>Math.min(text.length,offset+(text.codePointAt(offset)>0xffff?2:1));
 const previousCodePoint=(text,offset)=>Math.max(0,offset-(offset>1&&/[\uDC00-\uDFFF]/.test(text[offset-1])&&/[\uD800-\uDBFF]/.test(text[offset-2])?2:1));
 
@@ -60,11 +60,11 @@ class VimMarker {
 class VimSearchCursor {
   constructor(cm,query,position){
     this.cm=cm;this.regex=query instanceof RegExp?new RegExp(query.source,[...new Set(query.flags.replace(/y/g,'')+'gm')].join('')):new RegExp(escapeRegExp(query),'gm');
-    this.index=cm.indexFromPos(position||new VimPosition(0,0));this.start=this.end=null;this.match=null;this.lastDirection=0;
+    this.index=cm.indexFromPos(position?new VimPosition(position.line,position.ch??Infinity):new VimPosition(0,0));this.start=this.end=null;this.match=null;this.lastDirection=0;this.afterEmptyMatch=false;
   }
   find(back=false){return back?this.findPrevious():this.findNext();}
   findNext(){
-    const text=this.cm.getValue();let index=this.end===null?this.index:this.end;if(this.lastDirection===1&&this.start===this.end){if(index>=text.length)return this.fail(1);index=nextCodePoint(text,index);}
+    const text=this.cm.getValue();let index=this.end===null?this.index:this.end;if(this.lastDirection===1&&this.afterEmptyMatch){if(index>=text.length)return this.fail(1);index=nextCodePoint(text,index);}
     this.regex.lastIndex=index;const match=this.regex.exec(text);return match?this.accept(match,1):this.fail(1);
   }
   findPrevious(){
@@ -72,7 +72,7 @@ class VimSearchCursor {
     while((match=this.regex.exec(text))){if(match.index+match[0].length>limit||this.lastDirection===-1&&match.index===limit)break;last=match;if(!match[0].length){if(this.regex.lastIndex>=text.length)break;this.regex.lastIndex=nextCodePoint(text,this.regex.lastIndex);}}
     return last?this.accept(last,-1):this.fail(-1);
   }
-  accept(match,direction){this.match=match;this.start=match.index;this.end=match.index+match[0].length;this.lastDirection=direction;return match;}
+  accept(match,direction){this.match=match;this.start=match.index;this.end=match.index+match[0].length;this.afterEmptyMatch=!match[0].length;this.lastDirection=direction;return match;}
   fail(direction){this.match=null;this.lastDirection=direction;return null;}
   from(){return this.start===null?undefined:this.cm.posFromIndex(this.start);}
   to(){return this.end===null?undefined:this.cm.posFromIndex(this.end);}
@@ -88,7 +88,7 @@ export class VimAdapter {
   get cm6(){return this.host;}
   get _handlers(){return Object.fromEntries([...eventMap(this)].map(([key,value])=>[key,[...value]]));}
   on(type,listener){on(this,type,listener);}
-  off(type,listener){off(this,type,listener);}
+  off(type,listener){if(type==='change')this.flushChangeEvents(this.curOp);off(this,type,listener);}
   signal(type,...args){signal(this,type,...args);}
   index(){if(this._lines)return;this._lines=this._text.split('\n');this._starts=new Uint32Array(this._lines.length);for(let i=1;i<this._lines.length;i++)this._starts[i]=this._starts[i-1]+this._lines[i-1].length+1;}
   normalizeSelections(selections){return (selections?.length?selections:[{anchor:0,head:0}]).map(s=>({anchor:clamp(s.anchor,0,this._text.length),head:clamp(s.head,0,this._text.length)}));}
@@ -100,7 +100,7 @@ export class VimAdapter {
   lineCount(){this.index();return this._lines.length;}
   getLine(line){this.index();return this._lines[line]??'';}
   getValue(){return this._text;}
-  setValue(text){this.replaceRange(String(text),new VimPosition(0,0),this.posFromIndex(this._text.length),'setValue');}
+  setValue(text){this.operation(()=>{this.replaceRange(String(text),new VimPosition(0,0),this.posFromIndex(this._text.length),'setValue');this.setCursor(0,0);});}
   getRange(start,end){return this._text.slice(this.indexFromPos(start),this.indexFromPos(end));}
   getCursor(which='head'){
     const selection=this._selections[Math.min(this._primary,this._selections.length-1)],index=which==='anchor'?selection.anchor:which==='start'?Math.min(selection.anchor,selection.head):which==='end'?Math.max(selection.anchor,selection.head):selection.head;return this.posFromIndex(index);
@@ -122,10 +122,11 @@ export class VimAdapter {
       for(const handle of this._lineHandles)if(handle.offset!==null)handle.offset=end>start&&handle.offset>=start&&handle.offset<end?null:transformOffset(handle.offset,start,end,text.length,1);
       this._selections=this._selections.map(s=>({anchor:transformOffset(s.anchor,start,end,text.length),head:transformOffset(s.head,start,end,text.length)}));this.$lastChangeEndOffset=start+text.length;
       this.curOp.changes.push(change);this.curOp.cursorActivity=true;this.curOp.lastChange=change;
-      // Core insert listeners must observe the mode at the time of the edit.
-      // In particular, `o` changes the document before entering Insert, and
-      // replayed macro edits occur while the engine suppresses recording.
-      this.signal('change',this,change);
+      // Capture listeners when the edit occurs, then let them observe its final
+      // caret at the end of the operation. This preserves both `o` (the initial
+      // newline precedes Insert) and native auto-pairs (the caret is inside the
+      // inserted pair). Macro replay must retain its recording suppression.
+      this.curOp.changeEvents.push({change,listeners:[...eventMaps.get(this)?.get('change')||[]],playing:Vim.getVimGlobalState_().macroModeState.isPlaying});
     });
   }
   replaceSelection(text,collapse='end',origin='+input'){return this.replaceSelections([text],collapse,origin);}
@@ -141,19 +142,24 @@ export class VimAdapter {
   operation(callback){
     const previousAdapter=activeAdapter;activeAdapter=this;
     if(this.curOp){this.curOp.$d++;try{return callback();}finally{this.curOp.$d--;activeAdapter=previousAdapter;}}
-    const op=this.curOp={$d:1,changes:[],cursorActivity:false,isVimOp:false};let result;
+    const op=this.curOp={$d:1,changes:[],changeEvents:[],cursorActivity:false,isVimOp:false};let result;
     try{result=callback();this.flush(op);return result;}finally{this.curOp=null;activeAdapter=previousAdapter;}
   }
   flush(op){
     this._flushing=true;
     try{
+      this.flushChangeEvents(op);
+      if(op.cursorActivity)this.signal('cursorActivity',this);
       if(!this.disposed){
         if(this.host.getText()!==this._text)this.host.apply(this._text,this._selections.map(copySelection),{origin:this.state.vim?.insertMode?'typing':'vim',kind:this.state.vim?.insertMode?'typing':'command'});
         else if(!sameSelections(this.normalizeSelections(this.host.getSelections?.()||[]),this._selections))this.host.setSelections(this._selections.map(copySelection));
       }
       if(op.changes.length)this.signal('changes',this,op.changes);
-      if(op.cursorActivity)this.signal('cursorActivity',this);
     }finally{this._flushing=false;}
+  }
+  flushChangeEvents(op){
+    if(!op||op.dispatchingChanges)return;op.dispatchingChanges=true;
+    try{while(op.changeEvents.length){const {change,listeners,playing}=op.changeEvents.shift(),macro=Vim.getVimGlobalState_().macroModeState,previous=macro.isPlaying;try{if(playing)macro.isPlaying=true;for(const listener of listeners)listener(this,change);}finally{macro.isPlaying=previous;}}}finally{op.dispatchingChanges=false;}
   }
   sync(change={}){
     if(this.disposed||this._flushing)return;
@@ -216,13 +222,28 @@ export class VimAdapter {
     for(let line=first;line<=last;line++){const text=this.getLine(line)||'';if(!text.trim()){flush();lines.push(text);}else{paragraph.push(text);if(!allowMerge)flush();}}flush();this.replaceRange(lines.join('\n'),new VimPosition(first,0),new VimPosition(last,(this.getLine(last)||'').length));return first+lines.length-1;
   }
   getTokenTypeAt(position){
-    if(this.host.getTokenTypeAt)return this.host.getTokenTypeAt(this.indexFromPos(position));const line=this.getLine(position.line)||'',limit=Math.min(line.length,position.ch),mode=String(this.getOption('mode')||'').toLowerCase(),vb=/vb|basic/.test(mode);let quote=null;
-    for(let i=0;i<limit;i++){const ch=line[i];if(quote){if(ch===quote){if(vb&&line[i+1]===quote)i++;else quote=null;}else if(!vb&&ch==='\\')i++;}else if(ch==='"'||!vb&&(ch==="'"||ch==='`'))quote=ch;else if(vb&&ch==="'"||!vb&&ch==='/'&&line[i+1]==='/')return 'comment';}
-    return quote?'string':'';
+    if(this.host.getTokenTypeAt)return this.host.getTokenTypeAt(this.indexFromPos(position));
+    const text=this._text,mode=String(this.getOption('mode')||'').toLowerCase(),vb=/vb|basic/.test(mode),xml=/xml|xaml|html/.test(mode);
+    if(this._tokenText!==text||this._tokenMode!==mode){
+      const styles=new Uint8Array(text.length);let i=0,lineStart=0;
+      while(i<text.length){
+        const start=i,ch=text[i];let style=0;
+        if(xml&&text.startsWith('<!--',i)){const end=text.indexOf('-->',i+4);i=end<0?text.length:end+3;style=2;}
+        else if(xml&&text.startsWith('<![CDATA[',i)){const end=text.indexOf(']]>',i+9);i=end<0?text.length:end+3;style=1;}
+        else if(!vb&&!xml&&text.startsWith('/*',i)){const end=text.indexOf('*/',i+2);i=end<0?text.length:end+2;style=2;}
+        else if(vb&&(ch==="'"||/^rem(?:\s|$)/i.test(text.slice(i,i+4))&&/^(?:\s*|.*:\s*)$/.test(text.slice(lineStart,i)))||!vb&&!xml&&text.startsWith('//',i)){const end=text.indexOf('\n',i);i=end<0?text.length:end;style=2;}
+        else if(ch==='"'||!vb&&(ch==="'"||!xml&&ch==='`')){
+          i++;while(i<text.length){if(vb&&text[i]==='\n')break;if(text[i]===ch){i++;if(vb&&text[i]===ch){i++;continue;}break;}if(!vb&&!xml&&text[i]==='\\')i++;i++;}style=1;
+        }else{i++;if(ch==='\n')lineStart=i;}
+        if(style){styles.fill(style,start,i);const newline=text.lastIndexOf('\n',i-1);if(newline>=lineStart)lineStart=newline+1;}
+      }
+      this._tokenText=text;this._tokenMode=mode;this._tokenStyles=styles;
+    }
+    return ['','string','comment'][this._tokenStyles[Math.max(0,this.indexFromPos(position)-1)]]||'';
   }
   scanForBracket(position,direction,style,config={}){
-    const regex=config.bracketRegex||/[(){}[\]]/,text=this._text,pairs={'(':')','[':']','{':'}',')':'(',']':'[','}':'{'},stack=[];let offset=this.indexFromPos(position);
-    if(direction<0)offset--;for(;offset>=0&&offset<text.length;offset+=direction){const ch=text[offset];regex.lastIndex=0;if(!regex.test(ch)||!pairs[ch])continue;const at=this.posFromIndex(offset);if(style!==undefined&&style!==null&&this.getTokenTypeAt(new VimPosition(at.line,at.ch+1))!==style)continue;const opening='([{'.includes(ch);if(opening===(direction>0))stack.push(ch);else if(!stack.length)return {pos:at,ch};else if(pairs[stack.pop()]!==ch)return null;}return false;
+    const regex=config.bracketRegex||/[(){}[\]]/,text=this._text,pairs={'(':')','[':']','{':'}','<':'>',')':'(',']':'[','}':'{','>':'<'},stack=[];let offset=this.indexFromPos(position);
+    if(direction<0)offset--;for(;offset>=0&&offset<text.length;offset+=direction){const ch=text[offset];regex.lastIndex=0;if(!regex.test(ch)||!pairs[ch])continue;const at=this.posFromIndex(offset);if(style!==undefined&&style!==null&&this.getTokenTypeAt(new VimPosition(at.line,at.ch+1))!==style)continue;const opening='([{<'.includes(ch);if(opening===(direction>0))stack.push(ch);else if(!stack.length)return {pos:at,ch};else if(pairs[stack.pop()]!==ch)return null;}return false;
   }
   findMatchingBracket(position,options={}){
     let offset=this.indexFromPos(position),ch=this._text[offset];if(!'()[]{}'.includes(ch||'')&&offset>0){offset--;ch=this._text[offset];}if(!ch||!'()[]{}'.includes(ch))return {to:undefined};const direction='([{'.includes(ch)?1:-1,from=this.posFromIndex(offset),start=this.posFromIndex(offset+(direction>0?1:0)),style=this.getTokenTypeAt(new VimPosition(from.line,from.ch+1)),match=this.scanForBracket(start,direction,style,options),pairs={'(':')','[':']','{':'}',')':'(',']':'[','}':'{'};return match&&match.ch===pairs[ch]?{from,to:match.pos,match:true,forward:direction>0}:{from,to:undefined,match:false};
@@ -244,16 +265,16 @@ export class VimAdapter {
     });
   }
   overWriteSelection(text){this.operation(()=>{
-    const beforeText=this._text,before=this._selections.map(copySelection),selections=this._selections.map(s=>{let end=Math.max(s.anchor,s.head);if(s.anchor===s.head&&this._text[end]!=='\n')end=nextCodePoint(this._text,end);return {anchor:this.posFromIndex(Math.min(s.anchor,s.head)),head:this.posFromIndex(end)};});
-    const replaced=selections.map(s=>this.getRange(s.anchor,s.head));this.setSelections(selections);this.replaceSelections(selections.map(()=>text));this._replaceStack.push({beforeText,before,afterText:this._text,after:this._selections.map(copySelection),replaced,text:String(text)});
+    const before=this._selections.map(copySelection),selections=this._selections.map(s=>{let end=Math.max(s.anchor,s.head);if(s.anchor===s.head&&this._text[end]!=='\n')end=nextCodePoint(this._text,end);return {anchor:this.posFromIndex(Math.min(s.anchor,s.head)),head:this.posFromIndex(end)};});
+    const replaced=selections.map(s=>this.getRange(s.anchor,s.head));this.setSelections(selections);this.replaceSelections(selections.map(()=>text));this._replaceStack.push({before,after:this._selections.map(copySelection),replaced,text:String(text),revision:this.revision});
   });}
   backspaceOverwrite(){
     const last=this._replaceStack.at(-1);
-    if(!last||last.afterText!==this._text||!sameSelections(last.after,this._selections)){this.moveH(-1);return;}
-    this._replaceStack.pop();this.operation(()=>{this.setSelections(this._selections.map(s=>({anchor:this.posFromIndex(Math.max(0,s.head-last.text.length)),head:this.posFromIndex(s.head)})));this.replaceSelections(last.replaced,'end','+delete');this.setSelections(last.before.map(s=>({anchor:this.posFromIndex(s.anchor),head:this.posFromIndex(s.head)})));});
+    if(!last||last.revision!==this.revision||!sameSelections(last.after,this._selections)){this.moveH(-1);return;}
+    this._replaceStack.pop();this.operation(()=>{this.setSelections(this._selections.map(s=>({anchor:this.posFromIndex(Math.max(0,s.head-last.text.length)),head:this.posFromIndex(s.head)})));this.replaceSelections(last.replaced,'end','+delete');this.setSelections(last.before.map(s=>({anchor:this.posFromIndex(s.anchor),head:this.posFromIndex(s.head)})));const previous=this._replaceStack.at(-1);if(previous)previous.revision=this.revision;});
   }
   save(){return this.host.execute?.('save');}
-  onBeforeEndOperation(){}
+  onBeforeEndOperation(){this.flushChangeEvents(this.curOp);}
   onChange(){this.sync();}
   onSelectionChange(){this.sync();}
   destroy(){if(this.disposed)return;this.disposed=true;for(const marker of [...this._markers])marker.clear();this._lineHandles.clear();for(const close of this._notifications)close();this._notifications.clear();this.host.setSearchOverlay?.(null);eventMaps.delete(this);eventMaps.delete(this._input);}

@@ -61,6 +61,9 @@ isolated('counted open-line inserts and dot repeat exclude the originating newli
   const e=editor('');e.keys('3o','text','<Esc>');assert.equal(e.text,'\ntext\ntext\ntext');e.dispose();
   const dot=editor('');dot.keys('o','z','<Esc>','2.');assert.equal(dot.text,'\nz\nz\nz');dot.dispose();
 });
+isolated('dot records the final caret inside native auto-pair insertions',()=>{
+  const e=editor('5 6');e.keys('a');e.session.adapter.operation(()=>{e.session.adapter.replaceSelection('()');e.session.adapter.setCursor(0,2);});e.keys('xy','<Esc>','.');assert.equal(e.text,'5(xy(xy)) 6');e.dispose();
+});
 isolated('all visual modes retain directional and block selections',()=>{
   const e=editor('abcd\nefgh\nijkl');e.keys('<C-v>','j','l');assert.deepEqual(e.selections,[{anchor:0,head:2},{anchor:5,head:7}]);e.keys('d');assert.equal(e.text,'cd\ngh\nijkl');e.keys('u','gg','V','j','y','G','p');assert.equal(e.text,'abcd\nefgh\nijkl\nabcd\nefgh');e.dispose();
 });
@@ -84,7 +87,7 @@ isolated('marks and jump positions track host changes',()=>{
   const e=editor('one\ntwo\nthree');e.keys('j','ma','G');e.at(0).native('zero\n');e.keys('`a');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(2,0));e.dispose();
 });
 isolated('word, paragraph, sentence, pair and quote text objects compose with operators',()=>{
-  const pairs=[['outer(inner(value))',13,'di(','outer(inner())'],['a [b [c] d] e',6,'da[','a [b  d] e'],['Say "one two" now',7,'di"','Say "" now'],['one two three',5,'daw','one three']];
+  const pairs=[['outer(inner(value))',13,'di(','outer(inner())'],['a [b [c] d] e',6,'da[','a [b  d] e'],['Say "one two" now',7,'di"','Say "" now'],['one two three',5,'daw','one three'],['a <b<c>d> e',6,'di<','a <b<>d> e'],['a\t<\n\tbar\n>b',7,'da>','a\tb']];
   for(const [source,offset,keys,expected]of pairs){const e=editor(source,offset);e.keys(keys);assert.equal(e.text,expected,keys+' in '+source);e.dispose();}
   const e=editor('first paragraph\nsecond line\n\nnext paragraph');e.keys('dap');assert.equal(e.text,'next paragraph');e.dispose();
 });
@@ -92,9 +95,16 @@ isolated('XAML tag text objects and bracket matching understand nested ranges',(
   const e=editor('<StackPanel><TextBlock>Hello</TextBlock></StackPanel>',25,{language:'xaml'});e.keys('dit');assert.equal(e.text,'<StackPanel><TextBlock></TextBlock></StackPanel>');e.keys('dat');assert.equal(e.text,'<StackPanel></StackPanel>');e.dispose();
   const b=editor('call(a, (b + c))');b.keys('f(','%');assert.equal(b.selections[0].head,15);b.dispose();
 });
+isolated('bracket matching skips VB strings, apostrophe and Rem comments, and XML comments',()=>{
+  const sources=[['(\")\")','vb6'],["( ' )\n)",'vb6'],['(\nRem )\n)','vb6'],['(<!-- )\n -->)','xaml'],['(/* )\n */)','javascript']];
+  for(const [source,language]of sources){const e=editor(source,0,{language});e.keys('%');assert.equal(e.selections[0].head,source.length-1,source);e.dispose();}
+});
 isolated('replace mode, character replacement, case operators and numeric changes work',()=>{
   const e=editor('abc def');e.keys('R','XY','<BS>','Z','<Esc>');assert.equal(e.text,'XZc def');e.keys('gg','gUw');assert.equal(e.text,'XZC def');e.keys('w','rQ');assert.equal(e.text,'XZC Qef');e.dispose();
   const n=editor('counter = 9',10);n.keys('<C-a>');assert.equal(n.text,'counter = 10');n.keys('2<C-x>');assert.equal(n.text,'counter = 8');n.dispose();
+});
+isolated('replace backspace restores successive overwritten characters without retaining whole documents',()=>{
+  const e=editor('A😀BCD');e.keys('R','xyz','<BS>','<BS>');assert.equal(e.text,'x😀BCD');assert.ok(e.session.adapter._replaceStack.every(change=>!('beforeText'in change)&&!('afterText'in change)));e.keys('<BS>','<Esc>');assert.equal(e.text,'A😀BCD');e.dispose();
 });
 isolated('Ex ranges, substitution flags, global commands, sort and undo share canonical edits',()=>{
   const e=editor('cat dog\ncat cat\nzebra\napple');e.ex('%s/cat/fox/g');assert.equal(e.text,'fox dog\nfox fox\nzebra\napple');e.ex('g/fox/d');assert.equal(e.text,'zebra\napple');e.ex('sort');assert.equal(e.text,'apple\nzebra');e.keys('u');assert.equal(e.text,'zebra\napple');e.dispose();
@@ -102,11 +112,20 @@ isolated('Ex ranges, substitution flags, global commands, sort and undo share ca
 isolated('global commands invalidate joined line handles instead of processing the joined line twice',()=>{
   const e=editor('one\ntwo\nthree\nfour\nfive\n');e.ex('g/o/s/\\n/;');assert.equal(e.text,'one;two\nthree\nfour;five\n');e.dispose();
 });
+isolated('substitution deletes adjacent matches and zero-width global substitution terminates',()=>{
+  const e=editor('W12345678OR12345D');e.ex('s/\\d//g');assert.equal(e.text,'WORD');e.ex('%s/^/prefix /g');assert.equal(e.text,'prefix WORD');e.dispose();
+});
 isolated('substitute confirmation callbacks commit outside a keyboard operation',()=>{
   const e=editor('cat cat\ncat');e.ex('%s/cat/fox/gc');e.promptKey('y');assert.equal(e.text,'fox cat\ncat');e.promptKey('n');e.promptKey('a');assert.equal(e.text,'fox cat\nfox');e.dispose();
 });
 isolated('search prompts, next/previous results and search history update the canonical selection',()=>{
   const e=editor('one two one\none');e.keys('/').submit('one');assert.equal(e.selections[0].head,8);e.keys('n');assert.equal(e.selections[0].head,12);e.keys('N');assert.equal(e.selections[0].head,8);e.keys('?').submit('two');assert.equal(e.selections[0].head,4);e.dispose();
+});
+isolated('backward search wraps to the final line including non-overlapping matches',()=>{
+  const e=editor('aaa aa \n a aa');e.keys('?').submit('aa');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(1,3));e.keys('n');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,4));e.keys('n');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,0));e.keys('n');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(1,3));e.dispose();
+});
+isolated('programmatic document replacement resets the caret and adopts canonical text',()=>{
+  const e=editor('old source',7);e.session.adapter.setValue('new source');assert.equal(e.text,'new source');assert.deepEqual(e.selections,[{anchor:0,head:0}]);e.keys('cG','changed','<Esc>');assert.equal(e.text,'changed');e.dispose();
 });
 isolated('multiline and zero-length search cursors terminate and track replacements',()=>{
   const e=editor('a\na\nb');let cursor=e.session.adapter.getSearchCursor(/^/gm,new VimPosition(0,0)),positions=[];while(cursor.findNext()){positions.push(cursor.from());assert.ok(positions.length<10);}assert.deepEqual(positions,[new VimPosition(0,0),new VimPosition(1,0),new VimPosition(2,0)]);cursor=e.session.adapter.getSearchCursor(/a\na/,new VimPosition(0,0));assert.ok(cursor.findNext());cursor.replace('x');assert.equal(e.text,'x\nb');e.dispose();
@@ -127,7 +146,7 @@ isolated('clipboard registers guard permission failures and cross-document async
   let resolveRead,written='';const e=editor('one two',0,{writeClipboard:text=>{written=text;return Promise.resolve();},readClipboard:()=>new Promise(resolve=>resolveRead=resolve)});
   e.keys('"+yiw');assert.equal(written,'one');e.keys('w','"*p');resolveRead('X');await e.session.adapter.pendingClipboard;assert.equal(e.text,'one tXwo');
   e.keys('"+p');e.at(0);resolveRead('wrong');await e.session.adapter.pendingClipboard;assert.equal(e.text,'one tXwo');assert.ok(e.notifications.some(n=>n.includes('cancelled')));
-  e.host.readClipboard=()=>Promise.reject(new Error('denied'));e.keys('"+p');await e.session.adapter.pendingClipboard;assert.equal(e.text,'o onene tXwo'.replace(' ',''));
+  e.host.readClipboard=()=>Promise.reject(new Error('denied'));e.keys('"+p');await e.session.adapter.pendingClipboard;assert.equal(e.text,'oonene tXwo');
   e.dispose();
 });
 isolated('clipboard read completion cannot mutate a disposed or read-only session',async()=>{
