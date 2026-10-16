@@ -183,7 +183,7 @@ export class VimAdapter {
   getInputField(){return this._input;}
   getWrapperElement(){return this.host.root||this.host.input?.parentElement;}
   getMode(){return {name:this.getOption('mode')};}
-  getOption(name){if(name==='readOnly')return !!this.host.readOnly||!!this.host.composing;if(!this.localOptions.has(name)&&['tabSize','indentUnit','indentWithTabs'].includes(name))return this.host.options?.[name]??this.options[name];return this.options[name];}
+  getOption(name){if(name==='readOnly')return !!this.host.readOnly||!!this.host.composing&&!this.startingComposition;if(!this.localOptions.has(name)&&['tabSize','indentUnit','indentWithTabs'].includes(name))return this.host.options?.[name]??this.options[name];return this.options[name];}
   setOption(name,value){this.localOptions.add(name);this.options[name]=value;this.host.setOption?.(name,value);}
   toggleOverwrite(value){if(this.state.overwrite!==!!value)this._replaceStack.length=0;this.state.overwrite=!!value;this.host.setOverwrite?.(!!value);}
   focus(){this.host.focus?.();}
@@ -274,7 +274,7 @@ export class VimAdapter {
     });
   }
   overWriteSelection(text){this.operation(()=>{
-    const before=this._selections.map(copySelection),selections=this._selections.map(s=>{let end=Math.max(s.anchor,s.head);if(s.anchor===s.head&&this._text[end]!=='\n')end=nextCodePoint(this._text,end);return {anchor:this.posFromIndex(Math.min(s.anchor,s.head)),head:this.posFromIndex(end)};});
+    const before=this._selections.map(copySelection),selections=this._selections.map(s=>{let end=Math.max(s.anchor,s.head);if(s.anchor===s.head)for(const character of String(text)){if(this._text[end]==='\n'||character==='\n')break;end=nextCodePoint(this._text,end);}return {anchor:this.posFromIndex(Math.min(s.anchor,s.head)),head:this.posFromIndex(end)};});
     const replaced=selections.map(s=>this.getRange(s.anchor,s.head));this.setSelections(selections);this.replaceSelections(selections.map(()=>text));this._replaceStack.push({before,after:this._selections.map(copySelection),replaced,text:String(text),revision:this.revision});
   });}
   backspaceOverwrite(){
@@ -377,7 +377,7 @@ let expandTab=true;
 Vim.defineOption('expandtab',true,'boolean',['et'],(value,cm)=>{if(value===undefined)return cm?!cm.getOption('indentWithTabs'):expandTab;if(cm)cm.setOption('indentWithTabs',!value);else expandTab=value;});
 
 export function createVimSession(host,{onStatus=()=>{}}={}){
-  const adapter=new VimAdapter(host);let disposed=false;
+  const adapter=new VimAdapter(host);let disposed=false,composition=null;
   const snapshot=()=>{const vim=adapter.state.vim||{},global=Vim.getVimGlobalState_(),recording=global.macroModeState?.isRecording?global.macroModeState.latestRegister:null;return {mode:vim.insertMode?adapter.state.overwrite?'replace':'insert':vim.visualMode?'visual':'normal',subMode:vim.visualMode?vim.visualBlock?'blockwise':vim.visualLine?'linewise':'':'',keyBuffer:vim.inputState?.keyBuffer?.join('')||'',status:vim.status||'',recording,selections:adapter._selections.map(copySelection)};};
   const changed=()=>onStatus(snapshot());adapter.on('vim-mode-change',changed);adapter.on('vim-command-done',changed);adapter.on('cursorActivity',changed);adapter.on('change',changed);Vim.enterVimMode(adapter);changed();
   return {
@@ -398,8 +398,34 @@ export function createVimSession(host,{onStatus=()=>{}}={}){
       });changed();return handled;
     },
     insertText(text,{origin='paste'}={}){if(disposed||host.readOnly)return false;adapter.sync();adapter.operation(()=>{adapter.curOp.isVimOp=true;adapter.replaceSelections(adapter._selections.map(()=>String(text)),'end',origin);});changed();return true;},
+    beginComposition(){
+      if(disposed||host.readOnly)return false;adapter.sync();
+      if(!adapter.state.vim?.insertMode){
+        // Host composition listeners may already have locked editing. Entering
+        // Insert only changes modal state; all preedit text stays native.
+        const selections=adapter.listSelections();adapter.startingComposition=true;try{adapter.operation(()=>{adapter.curOp.isVimOp=true;Vim.handleKey(adapter,'<Esc>','user');Vim.handleKey(adapter,'i','user');adapter.setSelections(selections);});}finally{adapter.startingComposition=false;}
+      }
+      composition={text:adapter.getValue(),selections:adapter._selections.map(copySelection),revision:adapter.revision,overwrite:!!adapter.state.overwrite,identity:host.identity};changed();return true;
+    },
+    endComposition(){
+      if(disposed)return false;const before=composition;composition=null;
+      const reconcile=()=>{adapter.sync({origin:'+input'});changed();return false;};
+      if(!before||host.readOnly||host.composing||!adapter.state.vim?.insertMode||before.revision!==adapter.revision||before.identity!==host.identity||before.overwrite!==!!adapter.state.overwrite)return reconcile();
+      const after=String(host.getText());if(after===before.text)return reconcile();
+      const ranges=before.selections.map(s=>({start:Math.min(s.anchor,s.head),end:Math.max(s.anchor,s.head)})),ordered=[...ranges].sort((a,b)=>a.start-b.start),primary=ranges[0];let inserted;
+      const applyNative=text=>{let result=before.text;for(const range of [...ordered].reverse())result=result.slice(0,range.start)+text+result.slice(range.end);return result;};
+      // Monaco can commit IME into all native selections itself. Textareas
+      // commit only the primary selection. Recognize both before reconciling.
+      const count=(after.length-before.text.length+ranges.reduce((sum,range)=>sum+range.end-range.start,0))/ranges.length;
+      if(Number.isInteger(count)&&count>=0){const candidate=after.slice(ordered[0].start,ordered[0].start+count);if(applyNative(candidate)===after)inserted=candidate;}
+      if(inserted===undefined){const prefix=before.text.slice(0,primary.start),suffix=before.text.slice(primary.end),native=host.getSelections?.()[0];if(after.length>=prefix.length+suffix.length&&after.startsWith(prefix)&&after.endsWith(suffix)){
+        const candidate=after.slice(prefix.length,after.length-suffix.length);if(!native||native.anchor===primary.start+candidate.length&&native.head===native.anchor)inserted=candidate;
+      }}
+      if(inserted===undefined)return reconcile();
+      adapter.operation(()=>{adapter.curOp.isVimOp=true;adapter.setSelections(before.selections.map(s=>({anchor:adapter.posFromIndex(s.anchor),head:adapter.posFromIndex(s.head)})));if(before.overwrite)adapter.overWriteSelection(inserted);else adapter.replaceSelections(ranges.map(()=>inserted),'end','+input');});changed();return true;
+    },
     executeEx(command){if(disposed)return;adapter.sync();const result=adapter.operation(()=>{adapter.curOp.isVimOp=true;return Vim.handleEx(adapter,String(command).replace(/^:/,''));});changed();return result;},
-    sync(change){if(disposed)return;adapter.sync(change);changed();},
-    dispose(){if(disposed)return;disposed=true;if(adapter.state.vim?.insertMode)Vim.exitInsertMode(adapter,true);Vim.leaveVimMode(adapter);adapter.destroy();},
+    sync(change){if(disposed||composition)return;adapter.sync(change);changed();},
+    dispose(){if(disposed)return;disposed=true;composition=null;if(adapter.state.vim?.insertMode)Vim.exitInsertMode(adapter,true);Vim.leaveVimMode(adapter);adapter.destroy();},
   };
 }

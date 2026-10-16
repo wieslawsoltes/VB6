@@ -152,6 +152,21 @@ isolated('multiline and zero-length search cursors terminate and track replaceme
 isolated('Unicode insertions, deletion, native composition sync and surrogate offsets remain valid',()=>{
   const e=editor('A😀B');e.keys('l','x');assert.equal(e.text,'AB');e.keys('i');e.native('zażółć 漢字');e.keys('<Esc>');assert.equal(e.text,'Azażółć 漢字B');assert.ok(!/[\uD800-\uDFFF]/.test(e.text));e.dispose();
 });
+isolated('native IME commitment fills every block row and remains one canonical undo',()=>{
+  const e=editor('abc\ndef');e.keys('<C-v>','j','I');e.host.composing=true;e.session.beginComposition();e.native('漢😀');assert.equal(e.text,'漢😀abc\ndef');e.host.composing=false;assert.equal(e.session.endComposition(),true);assert.equal(e.text,'漢😀abc\n漢😀def');e.keys('<Esc>','u');assert.equal(e.text,'abc\ndef');e.dispose();
+});
+isolated('IME already committed to native multiple selections is reconciled without duplication',()=>{
+  const e=editor('abc\ndef');e.keys('<C-v>','j','I');e.host.composing=true;e.session.beginComposition();e.host.apply('漢abc\n漢def',[{anchor:1,head:1},{anchor:6,head:6}],{kind:'typing'});e.session.sync();e.host.composing=false;assert.equal(e.session.endComposition(),true);assert.equal(e.text,'漢abc\n漢def');assert.equal(e.applications.length,1);assert.deepEqual(Vim.getVimGlobalState_().macroModeState.lastInsertModeChanges.changes,['漢']);e.keys('<Esc>');e.dispose();
+});
+isolated('IME can enter Insert from Normal after the host composition guard is active',()=>{
+  const e=editor('abc');e.keys('d');e.host.composing=true;assert.equal(e.session.beginComposition(),true);assert.equal(e.session.state.mode,'insert');e.native('漢');e.host.composing=false;e.session.endComposition();e.keys('<Esc>','.');assert.equal(e.text,'漢漢abc');e.dispose();
+});
+isolated('Replace IME overwrites complete code points and Backspace restores the original text',()=>{
+  const e=editor('A😀BC');e.keys('R');e.host.composing=true;e.session.beginComposition();e.native('漢字');e.host.composing=false;e.session.endComposition();assert.equal(e.text,'漢字BC');e.keys('<BS>','<Esc>');assert.equal(e.text,'A😀BC');e.dispose();
+});
+isolated('IME reconciliation cancels extra modal edits after an unexpected source or surface change',()=>{
+  const e=editor('abc\ndef');e.keys('<C-v>','j','I');e.host.composing=true;e.session.beginComposition();e.host.apply('external change',[{anchor:0,head:0}],{kind:'command'});e.host.composing=false;assert.equal(e.session.endComposition(),false);assert.equal(e.text,'external change');assert.deepEqual(e.selections,[{anchor:0,head:0}]);e.dispose();
+});
 isolated('read-only editing blocks operators, substitutes, insertions and undo while preserving motions',()=>{
   const e=editor('one two\nthree',0,{readOnly:true});e.keys('w');assert.equal(e.selections[0].head,4);e.keys('dd');e.ex('%s/o/x/g');e.keys('i','x','u');assert.equal(e.text,'one two\nthree');assert.equal(e.applications.length,0);e.dispose();
 });
