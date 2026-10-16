@@ -125,6 +125,34 @@ test('host follows a dynamically enabled Monaco surface and restores its exact c
   f.host.dispose();assert.equal(advanced.view.raw.cursorStyle,'line-thin');assert.equal(advanced.view.raw.cursorBlinking,'phase');assert.equal(f.editor.input.dataset.vimMode,undefined);
 });
 
+test('backend transitions preserve backward and block selections without stealing another split or module selection',()=>{
+  const f=sourceFixture('alpha\nbeta\ngamma\n'),values=[{anchor:4,head:1},{anchor:9,head:7}];
+  f.host.setMode({mode:'visual',subMode:'blockwise'});f.host.setSelections(values);
+  const second=f.addPane();second.input.setSelectionRange(10,10);f.editor.activePane=second;
+  assert.deepEqual(f.host.getSelections(),[{anchor:10,head:10}]);
+  f.editor.activePane=f.editor.primary;assert.deepEqual(f.host.getSelections(),values);
+  for(let cycle=0;cycle<2;cycle++){
+    const a=attachMonaco(f);
+    a.view.setSelections([{selectionStartLineNumber:1,selectionStartColumn:2,positionLineNumber:1,positionColumn:5}]);
+    assert.deepEqual(f.host.getSelections(),values);
+    assert.equal(a.view.getSelections().length,2);
+    a.runtime.surfaces.delete(f.editor);a.pane.remove();f.editor.input.setSelectionRange(1,4);
+    assert.deepEqual(f.host.getSelections(),values);assert.equal(f.editor.input.selectionDirection,'backward');
+  }
+  const a=attachMonaco(f);a.view.setSelections([{selectionStartLineNumber:1,selectionStartColumn:2,positionLineNumber:1,positionColumn:5}]);
+  f.editor.module={...f.editor.module,id:'other'};
+  assert.deepEqual(f.host.getSelections(),[{anchor:1,head:4}]);f.host.dispose();
+});
+
+test('Monaco native selection changes are retained before a same-turn backend teardown',()=>{
+  const f=sourceFixture('alpha\nbeta\ngamma\n'),a=attachMonaco(f);f.host.setMode({mode:'visual',subMode:'blockwise'});f.host.getSelections();
+  a.view.setSelections([{selectionStartLineNumber:2,selectionStartColumn:4,positionLineNumber:2,positionColumn:2},{selectionStartLineNumber:3,selectionStartColumn:4,positionLineNumber:3,positionColumn:2}]);
+  f.editor.emit('cursor',{});
+  a.surface.disposed=true;a.view.selections=[];f.editor.input.setSelectionRange(0,0);f.editor.emit('cursor',{});
+  a.runtime.surfaces.delete(f.editor);a.pane.remove();f.editor.input.setSelectionRange(7,9);
+  assert.deepEqual(f.host.getSelections(),[{anchor:9,head:7},{anchor:14,head:12}]);f.host.dispose();
+});
+
 test('shared method hooks remain observable after detach while another surface wraps a method',async()=>{
   const f=sourceFixture('alpha'),under=f.editor.setDocument,appearance=f.editor.setAppearance;
   f.editor.setDocument=function(...args){return under.apply(this,args);};f.host.dispose();
@@ -138,6 +166,16 @@ test('classic presentation paints a block caret and secondary range without addi
   const f=sourceFixture('alpha\nbeta\n');f.editor.overwrite=true;f.host.setSelections([{anchor:0,head:0},{anchor:6,head:9}]);f.host.setMode({mode:'normal'});assert.equal(f.editor.overwrite,false);f.host.paintSelections();
   assert.equal(f.host.overlay.children.length,2);assert.equal(f.host.overlay.children[0].className,'input-mode-cursor');assert.equal(f.host.overlay.children[1].className,'input-mode-selection');assert.equal(f.host.overlay.attributes.get('aria-hidden'),'true');
   const overlay=f.host.overlay;f.host.dispose();assert.equal(overlay.parentNode,null);assert.equal(f.editor.input.dataset.vimMode,undefined);assert.equal(f.editor.overwrite,true);
+});
+
+test('adopting an editor into another window reschedules a pending caret frame',()=>{
+  const f=sourceFixture('alpha'),cancelled=[],scheduled=[];
+  f.doc.defaultView.requestAnimationFrame=callback=>{scheduled.push(callback);return 11;};f.doc.defaultView.cancelAnimationFrame=id=>cancelled.push(id);
+  f.host.setMode({mode:'normal'});assert.equal(scheduled.length,1);
+  const adopted=documentFixture();adopted.defaultView.requestAnimationFrame=callback=>{scheduled.push(callback);return 22;};adopted.defaultView.cancelAnimationFrame=id=>cancelled.push(id);
+  f.editor.root.ownerDocument=adopted;f.host.schedulePaint();
+  assert.deepEqual(cancelled,[11]);assert.equal(scheduled.length,2);
+  f.host.dispose();assert.deepEqual(cancelled,[11,22]);
 });
 
 test('geometry retains UTF-16 offsets around astral characters and expands tabs consistently',()=>{

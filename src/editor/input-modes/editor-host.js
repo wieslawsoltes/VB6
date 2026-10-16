@@ -48,7 +48,7 @@ export class EditorHost {
     if(!editor?.root)throw new TypeError('An editor surface is required.');
     this.editor=editor;this.ide=ide;this.root=editor.root;this.xaml=!Array.isArray(editor.panes);
     this.listeners=new Set();this.disposables=[];this.selectionStates=new WeakMap();this.cursorOptions=new Map();this.pending=new Map();this.mode=null;
-    const changed=event=>this.queue('change',event),cursor=event=>{this.queue('cursor',event);this.schedulePaint();};
+    const changed=event=>this.queue('change',event),cursor=event=>{if(!this.settingSelection&&!this.applying)this.getSelections();this.queue('cursor',event);this.schedulePaint();};
     if(typeof editor.on==='function'){
       this.disposables.push(editor.on('change',changed),editor.on('cursor',cursor));
     }
@@ -70,6 +70,7 @@ export class EditorHost {
       observer.observe(this.root,{childList:true,attributes:true,attributeFilter:['class']});this.disposables.push(()=>observer.disconnect());
     }
     if(view?.ResizeObserver){const observer=new view.ResizeObserver(()=>this.schedulePaint());observer.observe(this.root);this.disposables.push(()=>observer.disconnect());}
+    this.getSelections();
   }
   get surface(){const value=this.ide?.advancedEditor?.runtime?.surfaces?.get(this.editor);return value&&!value.disposed?value:null;}
   get view(){return this.surface?.view||null;}
@@ -110,10 +111,29 @@ export class EditorHost {
     return {anchor:s.anchor??(back?s.end:s.start),head:s.focus??(back?s.start:s.end)};
   }
   getSelections(){
-    const surface=this.surface,view=surface?.view;
-    if(view){const model=surface.record.model,values=view.getSelections?.();if(values?.length)return values.map(s=>({anchor:model.getOffsetAt({lineNumber:s.selectionStartLineNumber,column:s.selectionStartColumn}),head:model.getOffsetAt({lineNumber:s.positionLineNumber,column:s.positionColumn})}));}
-    const primary=this.primarySelection(),state=this.selectionStates.get(this.identity);
-    return state&&state.text===this.getText()&&sameSelection(primary,state.selections[0])?copySelections(state.selections):[primary];
+    const attached=this.ide?.advancedEditor?.runtime?.surfaces?.get(this.editor);
+    // Disposal/reparenting can synchronously emit blur and cursor events while
+    // Monaco's wrappers still own the legacy methods. Keep the last complete
+    // selection until the replacement surface is installed.
+    if(this.selectionSnapshot&&attached&&(attached.disposed||!attached.view||attached.view.getModel?.()===null))return copySelections(this.selectionSnapshot.selections);
+    const surface=this.surface,view=surface?.view,identity=this.identity,text=this.getText();let selections;
+    if(view){const model=surface.record.model,values=view.getSelections?.();if(values?.length)selections=values.map(s=>({anchor:model.getOffsetAt({lineNumber:s.selectionStartLineNumber,column:s.selectionStartColumn}),head:model.getOffsetAt({lineNumber:s.positionLineNumber,column:s.positionColumn})}));}
+    if(!selections){const primary=this.primarySelection(),state=this.selectionStates.get(identity);selections=state&&state.text===text&&sameSelection(primary,state.selections[0])?copySelections(state.selections):[primary];}
+    const previous=this.selectionSnapshot;
+    const oldViewExists=surface?surface===previous?.surface&&surface.views.some(state=>state.view===previous.identity):!previous?.surface&&(this.xaml?identity===previous?.identity:this.editor.panes.includes(previous?.identity));
+    if(this.mode&&previous&&!oldViewExists&&previous.text===text&&previous.moduleId===this.moduleId&&previous.projectId===this.ide?.project?.id){
+      const before=previous.selections[0],after=selections[0];
+      // Legacy backend transfers retain only the normalized primary range.
+      // Restore direction and block ranges only when that same primary range
+      // survived. Ordinary split focus or an explicit navigation stays intact.
+      if(Math.min(before.anchor,before.head)===Math.min(after.anchor,after.head)&&Math.max(before.anchor,before.head)===Math.max(after.anchor,after.head)){
+        selections=copySelections(previous.selections);this.setSelections(selections,{reveal:false});
+      }
+    }
+    this.rememberSelections(selections,surface,identity,text);return selections;
+  }
+  rememberSelections(selections,surface=this.surface,identity=this.identity,text=this.getText()){
+    this.selectionSnapshot={surface,identity,text,moduleId:this.moduleId,projectId:this.ide?.project?.id,selections:copySelections(selections)};
   }
   setSelections(selections,{reveal=true,focus=false}={}){
     if(this.disposed)return;
@@ -153,6 +173,7 @@ export class EditorHost {
         }
       }
       this.selectionStates.set(this.identity,{text:this.getText(),selections:values});
+      this.rememberSelections(values);
       if(focus)this.focus();
     }finally{this.settingSelection=false;}
     this.queue('cursor');this.schedulePaint();
@@ -289,8 +310,10 @@ export class EditorHost {
   padding(){const style=this.root.ownerDocument?.defaultView?.getComputedStyle?.(this.editor.input);return {left:finite(parseFloat(style?.paddingLeft),3),top:finite(parseFloat(style?.paddingTop),4)};}
   visualColumn(text,offset){let column=0;const tabSize=this.options.tabSize;for(const glyph of String(text).slice(0,offset))column+=glyph==='\t'?tabSize-column%tabSize:1;return column;}
   schedulePaint(){
-    if(this.disposed||this.paintFrame!=null)return;
-    const win=this.root.ownerDocument?.defaultView;if(!win?.requestAnimationFrame)return;
+    if(this.disposed)return;
+    const win=this.root.ownerDocument?.defaultView;
+    if(this.paintFrame!=null&&this.paintWindow!==win){this.paintWindow?.cancelAnimationFrame?.(this.paintFrame);this.paintFrame=null;}
+    if(this.paintFrame!=null||!win?.requestAnimationFrame)return;
     this.paintWindow=win;this.paintFrame=win.requestAnimationFrame(()=>{this.paintFrame=null;this.paintSelections();});
   }
   paintSelections(){
@@ -320,7 +343,7 @@ export class EditorHost {
     this.mode=null;this.updateCursorOptions();
     for(const state of this.surface?.views||[])state.presentation?.refresh?.();
     for(const input of this.xaml?[this.editor.input]:this.editor.panes.map(pane=>pane.input))if(input?.dataset)delete input.dataset.vimMode;
-    this.overlay?.remove();this.overlay=null;this.pending.clear();this.listeners.clear();
+    this.overlay?.remove();this.overlay=null;this.selectionSnapshot=null;this.pending.clear();this.listeners.clear();
   }
 }
 
