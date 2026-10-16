@@ -511,6 +511,10 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.assertEqual(self.state(), 'normal')
         self.assertTrue(self.page.evaluate('vb6Studio.editor===originalEditor'))
         self.assertTrue(self.page.evaluate('[...vb6Studio.dosMode.sessions.values()].every(s=>s.metrics.failures===0)'))
+        self.page.wait_for_function(r'''[...vb6Studio.dosMode.sessions.values()].some(session=>{
+          const cells=session.chrome.entries.get(vb6Studio.statusbar)?.buffer?.glyphs;
+          return cells&&String.fromCodePoint(...cells).includes('VIM NORMAL');
+        })''')
         self.page.screenshot(path=str(REPORT / 'dos-vim.png'))
         self.page.evaluate('vb6Studio.dosMode.configure({mode:"classic"})')
         self.assertEqual(self.page.evaluate('vb6Studio.inputModes.settings.mode'), 'vim')

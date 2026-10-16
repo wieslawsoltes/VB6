@@ -174,7 +174,7 @@ export function installInputModes(ide){
   const status=el('button',{
     type:'button',class:'status-field input-mode-status','aria-haspopup':'menu','aria-expanded':'false',
     'data-input-mode-status':''
-  },modeLabel,stateLabel,keysLabel);
+  },modeLabel,' ',stateLabel,' ',keysLabel);
   const openStatusMenu=()=>{
     if(disposed)return;
     const bounds=status.getBoundingClientRect();
