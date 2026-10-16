@@ -68,8 +68,8 @@ class VimSearchCursor {
     this.regex.lastIndex=index;const match=this.regex.exec(text);return match?this.accept(match,1):this.fail(1);
   }
   findPrevious(){
-    const text=this.cm.getValue(),limit=this.start===null?this.index:this.start;this.regex.lastIndex=0;let match,last=null;
-    while((match=this.regex.exec(text))){if(match.index+match[0].length>limit||this.lastDirection===-1&&match.index===limit)break;last=match;if(!match[0].length){if(this.regex.lastIndex>=text.length)break;this.regex.lastIndex=nextCodePoint(text,this.regex.lastIndex);}}
+    const text=this.cm.getValue(),limit=this.start===null?this.index:this.afterEmptyMatch?previousCodePoint(text,this.start):this.start,includeBoundary=this.start===null&&limit<text.length&&text[limit]!=='\n';this.regex.lastIndex=0;let match,last=null;
+    while((match=this.regex.exec(text))){if(match.index+match[0].length>limit||match.index===limit&&!match[0].length&&!includeBoundary)break;last=match;if(!match[0].length){if(this.regex.lastIndex>=text.length)break;this.regex.lastIndex=nextCodePoint(text,this.regex.lastIndex);}}
     return last?this.accept(last,-1):this.fail(-1);
   }
   accept(match,direction){this.match=match;this.start=match.index;this.end=match.index+match[0].length;this.afterEmptyMatch=!match[0].length;this.lastDirection=direction;return match;}
@@ -81,7 +81,7 @@ class VimSearchCursor {
 
 export class VimAdapter {
   constructor(host){
-    this.host=host;this.state={};this.options={firstLineNumber:1,tabSize:4,indentUnit:4,indentWithTabs:false,mode:host.language||'vb6',keyMap:'vim',...host.options};
+    this.host=host;this.state={};this.localOptions=new Set();this.options={firstLineNumber:1,tabSize:4,indentUnit:4,indentWithTabs:false,mode:host.language||'vb6',keyMap:'vim',...host.options};
     this.marks={};this.$mid=0;this._markers=new Set();this._lineHandles=new Set();this._input={};this._text=String(host.getText());this._selections=this.normalizeSelections(host.getSelections?.()||[{anchor:0,head:0}]);this._primary=0;
     this._lines=null;this._starts=null;this.curOp=null;this._scroll={left:0,top:0};this._notifications=new Set();this.$lastChangeEndOffset=0;this._overlays=new Set();this._replaceStack=[];this.revision=0;this.disposed=false;
   }
@@ -183,8 +183,8 @@ export class VimAdapter {
   getInputField(){return this._input;}
   getWrapperElement(){return this.host.root||this.host.input?.parentElement;}
   getMode(){return {name:this.getOption('mode')};}
-  getOption(name){if(name==='readOnly')return !!this.host.readOnly||!!this.host.composing;if(['tabSize','indentUnit','indentWithTabs'].includes(name))return this.options[name]??this.host.options?.[name];return this.options[name];}
-  setOption(name,value){this.options[name]=value;this.host.setOption?.(name,value);}
+  getOption(name){if(name==='readOnly')return !!this.host.readOnly||!!this.host.composing;if(!this.localOptions.has(name)&&['tabSize','indentUnit','indentWithTabs'].includes(name))return this.host.options?.[name]??this.options[name];return this.options[name];}
+  setOption(name,value){this.localOptions.add(name);this.options[name]=value;this.host.setOption?.(name,value);}
   toggleOverwrite(value){if(this.state.overwrite!==!!value)this._replaceStack.length=0;this.state.overwrite=!!value;this.host.setOverwrite?.(!!value);}
   focus(){this.host.focus?.();}
   blur(){this.host.blur?.();}
@@ -217,9 +217,18 @@ export class VimAdapter {
   indentMore(){this.operation(()=>{for(const line of this.selectedLines())this.indentLine(line,true);});}
   indentLess(){this.operation(()=>{for(const line of this.selectedLines())this.indentLine(line,false);});}
   hardWrap({from,to,column=this.state.textwidth||this.getOption('textwidth')||80,allowMerge=true}){
-    const first=typeof from==='object'?from.line:from,last=typeof to==='object'?to.line:to;const lines=[];let paragraph=[];
-    const flush=()=>{if(!paragraph.length)return;const indent=/^\s*/.exec(paragraph[0])[0],words=(allowMerge?paragraph.map(s=>s.trim()).join(' '):paragraph[0].trim()).split(/\s+/);let line=indent;for(const word of words){if(line.trim()&&line.length+1+word.length>column){lines.push(line);line=indent+word;}else line+=(line.trim()?' ':'')+word;}lines.push(line);paragraph=[];};
-    for(let line=first;line<=last;line++){const text=this.getLine(line)||'';if(!text.trim()){flush();lines.push(text);}else{paragraph.push(text);if(!allowMerge)flush();}}flush();this.replaceRange(lines.join('\n'),new VimPosition(first,0),new VimPosition(last,(this.getLine(last)||'').length));return first+lines.length-1;
+    const a=typeof from==='object'?from.line:from,b=typeof to==='object'?to.line:to;let row=Math.min(a,b),endRow=Math.max(a,b);
+    const breakAt=text=>{if(text.length<column)return;let start=column,end=column;while(start>0&&/\s/.test(text[start-1]))start--;while(end<text.length&&/\s/.test(text[end]))end++;if(start<end)return {start,end};let left=column;while(left>0&&!/\s/.test(text[left-1]))left--;if(left>5){start=left;while(start>0&&/\s/.test(text[start-1]))start--;return {start,end:left};}let right=column;while(right<text.length&&!/\s/.test(text[right]))right++;if(right<text.length){end=right;while(end<text.length&&/\s/.test(text[end]))end++;return {start:right,end};}};
+    for(;row<=endRow;row++){
+      const line=this.getLine(row),indent=/^\s*/.exec(line)[0];
+      if(line.length>column){const split=breakAt(line);if(split&&split.start>indent.length){this.replaceRange('\n'+indent,new VimPosition(row,split.start),new VimPosition(row,split.end));endRow++;}}
+      else if(allowMerge&&/\S/.test(line)&&row<endRow){
+        const next=this.getLine(row+1);if(!/\S/.test(next))continue;const left=line.trimEnd(),right=next.trimStart(),merged=left+' '+right,split=breakAt(merged);
+        if(merged.length<column||split&&split.start>left.length){this.replaceRange(' ',new VimPosition(row,left.length),new VimPosition(row+1,next.length-right.length));endRow--;row--;}
+        else if(left.length<line.length)this.replaceRange('',new VimPosition(row,left.length),new VimPosition(row,line.length));
+      }
+    }
+    return row;
   }
   getTokenTypeAt(position){
     if(this.host.getTokenTypeAt)return this.host.getTokenTypeAt(this.indexFromPos(position));
@@ -291,7 +300,16 @@ function deleteInput(cm,backward,word=false){
   });cm.setSelections(ranges);cm.replaceSelections(ranges.map(()=>''));
 }
 function newline(cm){const texts=cm._selections.map(s=>{const position=cm.posFromIndex(Math.min(s.anchor,s.head)),before=cm.getLine(position.line).slice(0,position.ch);return '\n'+/^[ \t]*/.exec(before)[0];});cm.replaceSelections(texts);}
+function historyCommand(cm,redo){
+  if(cm.getOption('readOnly'))return;const before=cm.getValue();if(redo)cm.host.redo?.();else cm.host.undo?.();cm.sync({origin:redo?'redo':'undo'});const after=cm.getValue();if(before!==after){let start=0;while(start<before.length&&start<after.length&&before[start]===after[start])start++;cm.setCursor(cm.posFromIndex(start));}
+}
+function toggleComment(cm){
+  const lines=cm.selectedLines(),xml=/xml|xaml|html/i.test(String(cm.getOption('mode')||'')),vb=/vb|basic/i.test(String(cm.getOption('mode')||''));
+  if(xml){const pattern=/^(\s*)<!-- ?([\s\S]*?) ?-->\s*$/,uncomment=lines.every(line=>pattern.test(cm.getLine(line)));for(const line of lines){const text=cm.getLine(line),match=pattern.exec(text);if(uncomment)cm.replaceRange(match[1]+match[2],new VimPosition(line,0),new VimPosition(line,text.length));else if(!match){const start=/^\s*/.exec(text)[0].length;cm.replaceRange('<!-- '+text.slice(start)+' -->',new VimPosition(line,start),new VimPosition(line,text.length));}}return;}
+  const prefix=vb?"'":'// ',pattern=vb?/^\s*'/ : /^\s*\/\//,uncomment=lines.every(line=>pattern.test(cm.getLine(line)));for(const line of lines){const text=cm.getLine(line),start=/^\s*/.exec(text)[0].length,length=vb?1:text.slice(start,start+3)==='// '?3:2;cm.replaceRange(uncomment?'':prefix,new VimPosition(line,start),new VimPosition(line,start+(uncomment?length:0)));}
+}
 function tagsAround(cm,position,onlyAt=false){
+  if(!/xml|xaml|html/i.test(String(cm.getOption('mode')||'')))return;
   const text=cm.getValue(),offset=cm.indexFromPos(position),tokens=/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(!?\/?)([\w:.-]+)\b(?:"[^"]*"|'[^']*'|[^'">])*\/?>/g,stack=[],pairs=[];let match;
   while((match=tokens.exec(text))){if(!match[2]||match[1]==='!'||/\/>$/.test(match[0]))continue;const token={name:match[2],start:match.index,end:tokens.lastIndex};if(match[1]==='/'){let i=stack.length-1;while(i>=0&&stack[i].name!==token.name)i--;if(i>=0){const open=stack[i];stack.length=i;pairs.push({open,close:token});}}else stack.push(token);}
   const found=pairs.filter(p=>onlyAt?offset>=p.open.start&&offset<p.open.end||offset>=p.close.start&&offset<p.close.end:offset>=p.open.start&&offset<=p.close.end).sort((a,b)=>(a.close.end-a.open.start)-(b.close.end-b.open.start))[0];
@@ -311,8 +329,8 @@ VimAdapter.keyName=event=>{const key=({Backspace:'Backspace',Delete:'Delete',Arr
 VimAdapter.findMatchingTag=(cm,pos)=>tagsAround(cm,pos,true);
 VimAdapter.findEnclosingTag=(cm,pos)=>tagsAround(cm,pos);
 VimAdapter.commands={
-  undo:cm=>{if(cm.getOption('readOnly'))return;cm.host.undo?.();cm.sync({origin:'undo'});},
-  redo:cm=>{if(cm.getOption('readOnly'))return;cm.host.redo?.();cm.sync({origin:'redo'});},
+  undo:cm=>historyCommand(cm,false),
+  redo:cm=>historyCommand(cm,true),
   save:cm=>cm.save(),
   newlineAndIndent:newline,
   indentAuto:cm=>{for(const line of cm.selectedLines())cm.indentLine(line);},
@@ -322,9 +340,11 @@ VimAdapter.commands={
   goCharLeft:cm=>cm.moveH(-1),goCharRight:cm=>cm.moveH(1),cursorCharLeft:cm=>cm.moveH(-1),
   goLineLeft:cm=>cm.setCursor(cm.getCursor().line,0),goLineRight:cm=>cm.setCursor(cm.getCursor().line,cm.getLine(cm.getCursor().line).length),
   goLineUp:cm=>cm.setCursor(cm.findPosV(cm.getCursor(),-1,'line')),goLineDown:cm=>cm.setCursor(cm.findPosV(cm.getCursor(),1,'line')),
-  toggleLineComment:cm=>{const lines=cm.selectedLines(),uncomment=lines.every(line=>/^\s*'/.test(cm.getLine(line)));for(const line of lines){const text=cm.getLine(line),start=/^\s*/.exec(text)[0].length;cm.replaceRange(uncomment?'':"'",new VimPosition(line,start),new VimPosition(line,start+(uncomment?1:0)));}},
+  toggleLineComment:toggleComment,
 };
 const insertBindings={Enter:'newlineAndIndent',Tab:'insertTab',Backspace:'delCharBefore',Delete:'delCharAfter','Ctrl-Backspace':'delWordBefore','Ctrl-Delete':'delWordAfter',Left:'goCharLeft',Right:'goCharRight',Up:'goLineUp',Down:'goLineDown',Home:'goLineLeft',End:'goLineRight'};
+for(const direction of ['Left','Right','Up','Down'])insertBindings['Arrow'+direction]=insertBindings[direction];
+insertBindings.Return=insertBindings.Enter;
 VimAdapter.lookupKey=(key,map,handler)=>{const binding=insertBindings[key];return binding?handler(binding):false;};
 
 function clipboardNotification(cm,message){
@@ -370,7 +390,8 @@ export function createVimSession(host,{onStatus=()=>{}}={}){
         adapter.curOp.isVimOp=true;if(event)signal(adapter._input,'keydown',event);const vim=adapter.state.vim;if(vim)vim.status=(vim.status||'')+key;
         handled=!!Vim.multiSelectHandleKey(adapter,key,'user');
         if(!handled&&adapter.state.vim?.insertMode&&(adapter.isInMultiSelectMode()||adapter.state.overwrite)){
-          if(key.length===1){if(adapter.state.overwrite)adapter.overWriteSelection(key);else adapter.replaceSelections(adapter._selections.map(()=>key));handled=true;}
+          const typed=event?.key&&[...event.key].length===1?event.key:key;
+          if([...typed].length===1){if(adapter.state.overwrite)adapter.overWriteSelection(typed);else adapter.replaceSelections(adapter._selections.map(()=>typed));handled=true;}
           else{const plain=event?VimAdapter.keyName(event):({ '<CR>':'Enter','<BS>':'Backspace','<Del>':'Delete','<Tab>':'Tab','<Left>':'Left','<Right>':'Right','<Up>':'Up','<Down>':'Down','<Home>':'Home','<End>':'End'})[key],binding=insertBindings[plain];if(adapter.state.overwrite&&plain==='Backspace'){adapter.backspaceOverwrite();handled=true;}else if(binding){VimAdapter.commands[binding](adapter);handled=true;}}
         }
         if(handled)adapter.signal('vim-keypress',key);

@@ -47,7 +47,7 @@ function editor(text,offset=0,extra={}){
 function isolated(name,run){test(name,()=>{Vim.resetVimGlobalState_();Vim.mapclear();Vim.setOption('pcre',false);return run();});}
 
 test('vendored Vim engine matches the pinned release and documented clipboard patch',()=>{
-  const bytes=readFileSync(new URL('../src/editor/input-modes/vendor/vim.js',import.meta.url));assert.equal(createHash('sha256').update(bytes).digest('hex'),'70039ec37682bd7ac2c67512a9da46dc91202c50801310957b9e911758cf41c6');
+  const bytes=readFileSync(new URL('../src/editor/input-modes/vendor/vim.js',import.meta.url));assert.equal(createHash('sha256').update(bytes).digest('hex'),'7bc67a1391ea08162eb4dedb3f4f2b234258fa59a2841f3a08c652e228b71122');
 });
 
 isolated('normal mode counts, operator motion composition, and dot repeat are atomic',()=>{
@@ -64,11 +64,17 @@ isolated('counted open-line inserts and dot repeat exclude the originating newli
 isolated('dot records the final caret inside native auto-pair insertions',()=>{
   const e=editor('5 6');e.keys('a');e.session.adapter.operation(()=>{e.session.adapter.replaceSelection('()');e.session.adapter.setCursor(0,2);});e.keys('xy','<Esc>','.');assert.equal(e.text,'5(xy(xy)) 6');e.dispose();
 });
+isolated('Vim undo places the caret at the first restored change for subsequent motions',()=>{
+  const e=editor('prefix suffix',11);e.keys('ciw','X','<Esc>','u');assert.equal(e.text,'prefix suffix');assert.equal(e.selections[0].head,7);e.dispose();
+});
 isolated('all visual modes retain directional and block selections',()=>{
   const e=editor('abcd\nefgh\nijkl');e.keys('<C-v>','j','l');assert.deepEqual(e.selections,[{anchor:0,head:2},{anchor:5,head:7}]);e.keys('d');assert.equal(e.text,'cd\ngh\nijkl');e.keys('u','gg','V','j','y','G','p');assert.equal(e.text,'abcd\nefgh\nijkl\nabcd\nefgh');e.dispose();
 });
 isolated('visual block insertion and append edit all rows without replacing the active surface',()=>{
   const e=editor('abc\ndef\nghi');e.keys('<C-v>','j','I','!','<Esc>');assert.equal(e.text,'!abc\n!def\nghi');e.keys('gg','<C-v>','j','l','A','?','<Esc>');assert.equal(e.text,'!a?bc\n!d?ef\nghi');e.dispose();
+});
+isolated('language keyboard maps preserve literal text in block Insert and Replace',()=>{
+  const e=editor('abc\ndef');try{Vim.langmap('xh');e.keys('<C-v>','j','I');const event={key:'x',code:'KeyX'};assert.equal(e.session.keyFromEvent(event),'h');e.session.handleKey('h',event);e.keys('<Esc>');assert.equal(e.text,'xabc\nxdef');e.keys('gg','R');e.session.handleKey('h',event);e.keys('<Esc>');assert.equal(e.text,'xabc\nxdef');}finally{e.dispose();Vim.langmap('');}
 });
 isolated('reselecting a previous block includes insertions at the original mark boundary',()=>{
   const e=editor('1234\n5678\nabcdefg\nxyz',2);e.keys('<C-v>','2j','l','I','+-','<Esc>');e.at(e.text.indexOf('xyz')+2).keys('gv');assert.equal(e.session.adapter.getSelection(),'+-34\n+-78\n+-cd');e.dispose();
@@ -99,6 +105,9 @@ isolated('bracket matching skips VB strings, apostrophe and Rem comments, and XM
   const sources=[['(\")\")','vb6'],["( ' )\n)",'vb6'],['(\nRem )\n)','vb6'],['(<!-- )\n -->)','xaml'],['(/* )\n */)','javascript']];
   for(const [source,language]of sources){const e=editor(source,0,{language});e.keys('%');assert.equal(e.selections[0].head,source.length-1,source);e.dispose();}
 });
+isolated('comment operators use VB and XML comment syntax and toggle cleanly',()=>{
+  for(const [source,language,commented]of [['  value','vb6',"  'value"],['  <TextBlock />','xaml','  <!-- <TextBlock /> -->']]){const e=editor(source,0,{language});e.keys('gcc');assert.equal(e.text,commented);e.keys('gcc');assert.equal(e.text,source);e.dispose();}
+});
 isolated('replace mode, character replacement, case operators and numeric changes work',()=>{
   const e=editor('abc def');e.keys('R','XY','<BS>','Z','<Esc>');assert.equal(e.text,'XZc def');e.keys('gg','gUw');assert.equal(e.text,'XZC def');e.keys('w','rQ');assert.equal(e.text,'XZC Qef');e.dispose();
   const n=editor('counter = 9',10);n.keys('<C-a>');assert.equal(n.text,'counter = 10');n.keys('2<C-x>');assert.equal(n.text,'counter = 8');n.dispose();
@@ -108,6 +117,13 @@ isolated('replace backspace restores successive overwritten characters without r
 });
 isolated('Ex ranges, substitution flags, global commands, sort and undo share canonical edits',()=>{
   const e=editor('cat dog\ncat cat\nzebra\napple');e.ex('%s/cat/fox/g');assert.equal(e.text,'fox dog\nfox fox\nzebra\napple');e.ex('g/fox/d');assert.equal(e.text,'zebra\napple');e.ex('sort');assert.equal(e.text,'apple\nzebra');e.keys('u');assert.equal(e.text,'zebra\napple');e.dispose();
+});
+isolated('Ex normal and mapped Insert commands honor DOM arrow-key aliases',()=>{
+  const e=editor('abc\ndef');e.ex('normal i<Right>X<Esc>');assert.equal(e.text,'aXbc\ndef');e.ex('%normal A<Left>!<Esc>');assert.equal(e.text,'aXb!c\nde!f');e.dispose();
+});
+isolated('format operators reflow paragraphs at textwidth and leave the caret on the final affected line',()=>{
+  const e=editor('alpha beta gamma delta\nepsilon zeta\n\nend');e.ex('set tw=15');e.keys('gqj');assert.equal(e.text,'alpha beta\ngamma delta\nepsilon zeta\n\nend');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(2,0));e.dispose();
+  const long=editor('x'.repeat(100));long.ex('set tw=15');long.keys('gqq');assert.equal(long.text,'x'.repeat(100));long.dispose();
 });
 isolated('global commands invalidate joined line handles instead of processing the joined line twice',()=>{
   const e=editor('one\ntwo\nthree\nfour\nfive\n');e.ex('g/o/s/\\n/;');assert.equal(e.text,'one;two\nthree\nfour;five\n');e.dispose();
@@ -124,6 +140,9 @@ isolated('search prompts, next/previous results and search history update the ca
 isolated('backward search wraps to the final line including non-overlapping matches',()=>{
   const e=editor('aaa aa \n a aa');e.keys('?').submit('aa');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(1,3));e.keys('n');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,4));e.keys('n');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,0));e.keys('n');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(1,3));e.dispose();
 });
+isolated('backward zero-width search avoids the preceding match boundary and line endings',()=>{
+  const e=editor('aaa  aa\n aa');e.keys('?').submit('a*');const expected=[[1,1],[1,0],[0,5],[0,4],[0,0]];for(const [line,ch]of expected){assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(line,ch));e.keys('n');}e.dispose();
+});
 isolated('programmatic document replacement resets the caret and adopts canonical text',()=>{
   const e=editor('old source',7);e.session.adapter.setValue('new source');assert.equal(e.text,'new source');assert.deepEqual(e.selections,[{anchor:0,head:0}]);e.keys('cG','changed','<Esc>');assert.equal(e.text,'changed');e.dispose();
 });
@@ -138,6 +157,9 @@ isolated('read-only editing blocks operators, substitutes, insertions and undo w
 });
 isolated('user mappings, Ex options and editor commands retain extensibility',()=>{
   const e=editor('one two');e.ex('nmap Q diw');e.keys('Q');assert.equal(e.text,' two');e.ex('set shiftwidth=2');e.keys('>>');assert.equal(e.text,'   two');e.ex('write');assert.deepEqual(e.host.commands,[{command:'save',args:undefined}]);e.dispose();
+});
+isolated('host indentation options update dynamically until a local Vim option overrides them',()=>{
+  const e=editor('value');e.host.options.indentUnit=2;e.keys('>>');assert.equal(e.text,'  value');e.ex('set sw=3');e.host.options.indentUnit=8;e.keys('>>');assert.equal(e.text,'     value');e.dispose();
 });
 isolated('disposal restores options and stops notifications and late mutation',()=>{
   const e=editor('one');e.keys('i','x');e.dispose();assert.equal(e.session.handleKey('x'),false);assert.equal(e.session.insertText('late'),false);assert.equal(e.text,'xone');assert.equal(e.session.adapter.disposed,true);

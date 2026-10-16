@@ -8,15 +8,19 @@ It has no runtime package dependencies. Its MIT license is retained in `LICENSE`
 Original source file SHA-256:
 `a8c2887193e966a6d1c4acf01105a0b6e8ed11e8ff26dfe3bb8a898649efe650`.
 
+Source with trailing whitespace normalized SHA-256:
+`7e0127c558f98f6053fca82888836650ac4074a857636058d541aa7c40496838`.
+
 Patched source file SHA-256:
-`70039ec37682bd7ac2c67512a9da46dc91202c50801310957b9e911758cf41c6`.
+`7bc67a1391ea08162eb4dedb3f4f2b234258fa59a2841f3a08c652e228b71122`.
 
 The three localized changes in `clipboard-host.patch` register `*` and delegate
 clipboard register reads/writes to the host. The upstream direct browser calls
 could reject without a handler or paste into a document that changed during an
 asynchronous permission request. The adapter supplies permission-safe fallback,
 document/selection/disposal guards, and atomic asynchronous edit transactions.
-All other engine source is unchanged.
+Trailing whitespace is normalized without changing behavior; all other engine
+source is unchanged. The patch applies after that whitespace normalization.
 
 The source is intentionally readable and pinned. The IDE's existing bundler
 includes its named `initVim` export without a framework, package installation,
