@@ -46,12 +46,50 @@ function editor(text,offset=0,extra={}){
 }
 function isolated(name,run){test(name,()=>{Vim.resetVimGlobalState_();Vim.mapclear();Vim.setOption('pcre',false);return run();});}
 
+// A visual surface with four-character wrapped rows and optional hidden model
+// lines. It answers from the supplied staged text, independently of the host's
+// last committed document and selection, just like a layout-aware backend.
+function visualEditor(source,offset=0,{width=4,hidden=[],pageRows=3}={}){
+  const calls=[];let e;
+  function layout(text){const lines=text.split('\n'),rows=[],visible=[];let start=0;for(let line=0;line<lines.length;line++){if(!hidden.includes(line)){visible.push({line,start,length:lines[line].length});for(let ch=0;ch<Math.max(1,lines[line].length);ch+=width)rows.push({line,from:start+ch,to:start+Math.min(lines[line].length,ch+width)});}start+=lines[line].length+1;}return {rows,visible};}
+  function rowAt(rows,offset){let index=0;for(let i=0;i<rows.length;i++){if(rows[i].from>offset)break;index=i;}return index;}
+  e=editor(source,offset,{
+    charCoords(offset,mode,context){const {rows}=layout(context?.text??e?.text??source),row=rowAt(rows,offset);return {left:(offset-rows[row].from)*8,top:row*18,bottom:(row+1)*18};},
+    findPosV(offset,amount,unit,goalColumn,context){
+      calls.push({offset,amount,unit,goalColumn,...context,canonicalText:e.text,canonicalHead:e.selections[0].head});
+      const {rows,visible}=layout(context.text),current=rowAt(rows,offset);
+      if(context.logical){const line=rows[current].line,from=visible.findIndex(value=>value.line===line),target=Math.max(0,Math.min(visible.length-1,from+amount)),destination=visible[target];return {offset:destination.start+Math.min(destination.length,context.goalCharacter??context.position.ch),hitSide:target===from&&amount!==0};}
+      const target=Math.max(0,Math.min(rows.length-1,current+amount*(unit==='page'?pageRows:1))),destination=rows[target],column=goalColumn===undefined?offset-rows[current].from:goalColumn/8;
+      return {offset:destination.from+Math.min(destination.to-destination.from,column),hitSide:target===current&&amount!==0};
+    },
+  });e.visualCalls=calls;return e;
+}
+
 test('vendored Vim engine matches the pinned release and documented clipboard patch',()=>{
   const bytes=readFileSync(new URL('../src/editor/input-modes/vendor/vim.js',import.meta.url));assert.equal(createHash('sha256').update(bytes).digest('hex'),'82ea6d8a0629d7d2ea2c30690f069158f7342be1f3adab496b0077a796dc2dc0');
 });
 
 isolated('normal mode counts, operator motion composition, and dot repeat are atomic',()=>{
   const e=editor('one two three four five six');e.keys('2dw');assert.equal(e.text,'three four five six');assert.equal(e.applications.length,1);e.keys('.');assert.equal(e.text,'five six');e.keys('u');assert.equal(e.text,'three four five six');e.keys('<C-r>');assert.equal(e.text,'five six');e.dispose();
+});
+isolated('wrapped-row motions delegate counts and preserve visual goals through short lines',()=>{
+  const e=visualEditor('abcdefgh\nx\nijklmnop',2);e.keys('2gj');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(1,0));e.keys('gj');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(2,2));e.keys('2gk');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,6));
+  assert.ok(e.visualCalls.every(call=>call.unit==='line'&&!call.logical&&call.goalColumn===16));e.dispose();
+});
+isolated('logical motions skip folded lines under wrapped headers and keep the desired model column',()=>{
+  const e=visualEditor('abcdefghij\nhidden\nhidden\nx\nabcdefghijkl',7,{hidden:[1,2]});e.keys('j');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(3,0));e.keys('j');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(4,7));e.keys('2k');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,7));
+  assert.ok(e.visualCalls.every(call=>call.logical&&call.goalCharacter===7));assert.equal(e.visualCalls.at(-1).amount,-2);e.keys('dj');assert.equal(e.text,'abcdefghijkl');assert.equal(e.applications.length,1);e.keys('u');assert.equal(e.text,'abcdefghij\nhidden\nhidden\nx\nabcdefghijkl');e.dispose();
+});
+isolated('display-line operators and Ex normal use staged positions and publish one canonical edit',()=>{
+  const e=visualEditor('abcdefghijkl\nnext',2);e.keys('dgj');assert.equal(e.text,'abghijkl\nnext');assert.equal(e.applications.length,1);e.keys('u');e.at(0).ex('normal! lgj');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,5));assert.equal(e.visualCalls.at(-1).offset,1);assert.equal(e.visualCalls.at(-1).canonicalHead,0);
+  e.at(0).ex('normal! xgj');assert.equal(e.text,'bcdefghijkl\nnext');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,4));const staged=e.visualCalls.at(-1);assert.equal(staged.text,'bcdefghijkl\nnext');assert.equal(staged.canonicalText,'abcdefghijkl\nnext');assert.equal(staged.lineCount,2);assert.equal(staged.getLine(0),'bcdefghijkl');assert.equal(staged.offsetAt(1,2),14);assert.deepEqual(staged.positionAt(14),new VimPosition(1,2));assert.strictEqual(staged.changes,staged.operation.changes);assert.equal(staged.changes.length,1);assert.equal(e.applications.length,2);
+  e.keys('u');assert.equal(e.text,'abcdefghijkl\nnext');assert.equal(staged.getLine(0),'bcdefghijkl','Captured layout index remains stable after another canonical edit');e.dispose();
+});
+isolated('mapped and macro display-line edits use current staged layout and remain one undo',()=>{
+  const e=visualEditor('abcdefghijklmnopqrstuvwxyz');e.ex('nmap Q gj');e.keys('Q');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,4));e.at(0).keys('qa','x','gj','x','q');assert.equal(e.text,'bcdeghijklmnopqrstuvwxyz');e.keys('@a');assert.equal(e.text,'bcdehijkmnopqrstuvwxyz');assert.equal(e.applications.length,3);const replay=e.visualCalls.at(-1);assert.equal(replay.text,'bcdehijklmnopqrstuvwxyz');assert.equal(replay.canonicalText,'bcdeghijklmnopqrstuvwxyz');e.keys('u');assert.equal(e.text,'bcdeghijklmnopqrstuvwxyz');e.dispose();
+});
+isolated('page motions delegate page units and repeat counts to native visual geometry',()=>{
+  const e=visualEditor('abcdefghijklmnop\nqrstuvwxyz\n0123456789',1);e.keys('<C-f>');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,13));e.keys('2<C-b>');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,1));assert.deepEqual(e.visualCalls.map(call=>[call.amount,call.unit,call.logical]),[[1,'page',false],[-2,'page',false]]);e.dispose();
 });
 isolated('native insert transactions feed dot replay and counted insert correctly',()=>{
   const e=editor('one two');e.keys('ciw','NEW','<Esc>','w','.');assert.equal(e.text,'NEW NEW');e.keys('u');assert.equal(e.text,'NEW two');e.dispose();

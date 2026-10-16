@@ -86,6 +86,15 @@ class VimSearchCursor {
 export class VimAdapter {
   constructor(host){
     this.host=host;this.state={};this.localOptions=new Set();this.options={firstLineNumber:1,tabSize:4,indentUnit:4,indentWithTabs:false,mode:host.language||'vb6',keyMap:'vim',...host.options};
+    // Upstream clears inputState immediately before executing its motion. Keep
+    // the motion name at that handoff so a native layout can distinguish j/k
+    // from gj/gk, including mapped commands, macro replay and visual operators.
+    this._observedVimStates=new WeakSet();let vimState;
+    Object.defineProperty(this.state,'vim',{enumerable:true,configurable:true,get:()=>vimState,set:value=>{
+      vimState=value;this._activeMotion=null;
+      if(!value||this._observedVimStates.has(value))return;this._observedVimStates.add(value);let input=value.inputState;
+      Object.defineProperty(value,'inputState',{enumerable:true,configurable:true,get:()=>input,set:next=>{this._activeMotion=input?.motion||null;input=next;}});
+    }});
     this.marks={};this.$mid=0;this._markers=new Set();this._lineHandles=new Set();this._input={};this._text=String(host.getText());this._selections=this.normalizeSelections(host.getSelections?.()||[{anchor:0,head:0}]);this._primary=0;
     this._lines=null;this._starts=null;this.curOp=null;this._scroll={left:0,top:0};this._notifications=new Set();this.$lastChangeEndOffset=0;this._overlays=new Set();this._replaceStack=[];this.revision=0;this.disposed=false;
   }
@@ -198,17 +207,45 @@ export class VimAdapter {
   blur(){this.host.blur?.();}
   setSize(width,height){this.host.setSize?.(width,height);}
   refresh(){this.host.refresh?.();}
+  geometryContext(position){
+    if(this._geometryDocument?.text!==this._text){
+      this.index();const text=this._text,lines=this._lines,starts=this._starts;
+      // Capture the existing index by reference. Later edits replace these
+      // arrays, so a layout snapshot remains consistent without copying the
+      // source or scanning it again while a macro visits wrapped lines.
+      this._geometryDocument={text,lineCount:lines.length,getLine:line=>lines[line]??'',
+        offsetAt:(line,ch)=>{if(line>=lines.length)return text.length;if(line<0)return 0;line=Math.floor(clamp(line,0,lines.length-1));return starts[line]+clamp(ch,0,lines[line].length);},
+        positionAt:offset=>{offset=clamp(offset,0,text.length);let lo=0,hi=starts.length;while(lo+1<hi){const mid=(lo+hi)>>>1;if(starts[mid]<=offset)lo=mid;else hi=mid;}return new VimPosition(lo,offset-starts[lo]);},
+      };
+    }
+    return {...this._geometryDocument,position,logical:this._activeMotion==='moveByLines',goalCharacter:this.state.vim?.lastHPos,changes:this.curOp?.changes||[],operation:this.curOp,revision:this.revision};
+  }
   defaultTextHeight(){return Number(this.host.options?.lineHeight)||18;}
-  getScrollInfo(){const supplied=this.host.getScrollInfo?.();return {left:this._scroll.left,top:this._scroll.top,height:this.lineCount()*this.defaultTextHeight(),width:800,clientHeight:this.defaultTextHeight()*(this.host.options?.viewportLines||24),clientWidth:800,...supplied};}
+  getScrollInfo(){const supplied=this.host.getScrollInfo?.(this.geometryContext());return {left:this._scroll.left,top:this._scroll.top,height:this.lineCount()*this.defaultTextHeight(),width:800,clientHeight:this.defaultTextHeight()*(this.host.options?.viewportLines||24),clientWidth:800,...supplied};}
   scrollTo(left,top){if(left!=null)this._scroll.left=Math.max(0,left);if(top!=null)this._scroll.top=Math.max(0,top);this.host.scrollTo?.(left,top);}
   scrollIntoView(position,margin){if(position?.from)this.host.scrollIntoView?.({from:this.indexFromPos(position.from),to:this.indexFromPos(position.to||position.from)},margin);else this.host.scrollIntoView?.(this.indexFromPos(position||this.getCursor()),margin);}
   charCoords(position,mode='local'){
-    const supplied=this.host.charCoords?.(this.indexFromPos(position),mode);if(supplied)return supplied;position=this.clipPos(position);const height=this.defaultTextHeight(),width=Number(this.host.options?.charWidth)||8;return {left:visualColumn(this.getLine(position.line),position.ch,this.getOption('tabSize'))*width,top:position.line*height,bottom:(position.line+1)*height};
+    const supplied=this.host.charCoords?.(this.indexFromPos(position),mode,this.geometryContext(position));if(supplied)return supplied;position=this.clipPos(position);const height=this.defaultTextHeight(),width=Number(this.host.options?.charWidth)||8;return {left:visualColumn(this.getLine(position.line),position.ch,this.getOption('tabSize'))*width,top:position.line*height,bottom:(position.line+1)*height};
   }
   coordsChar(coords,mode='local'){
-    const supplied=this.host.coordsChar?.(coords,mode);if(supplied!==undefined)return typeof supplied==='number'?this.posFromIndex(supplied):supplied;const line=clamp(Math.floor(coords.top/this.defaultTextHeight()),0,this.lastLine()),column=Math.round(coords.left/(Number(this.host.options?.charWidth)||8));return new VimPosition(line,characterAtColumn(this.getLine(line),column,this.getOption('tabSize')));
+    const supplied=this.host.coordsChar?.(coords,mode,this.geometryContext());if(supplied!==undefined)return typeof supplied==='number'?this.posFromIndex(supplied):supplied;const line=clamp(Math.floor(coords.top/this.defaultTextHeight()),0,this.lastLine()),column=Math.round(coords.left/(Number(this.host.options?.charWidth)||8));return new VimPosition(line,characterAtColumn(this.getLine(line),column,this.getOption('tabSize')));
   }
   findPosV(start,amount,unit,goalColumn){
+    const vim=this.state.vim,logical=this._activeMotion==='moveByLines';
+    // The native surface owns wrapping and folding. Supply the staged cursor
+    // and document explicitly: operators and :normal can move several times
+    // before the outer operation publishes its canonical selection or edit.
+    const supplied=this.host.findPosV?.(this.indexFromPos(start),amount,unit,goalColumn,this.geometryContext(start));
+    if(supplied!==undefined&&supplied!==null){
+      const result=this.posFromIndex(typeof supplied==='number'?supplied:supplied.offset);
+      // Vim only adopts this ch for logical motions when the native surface
+      // skips folded lines. Preserve the desired logical column across short
+      // destinations; cursor clipping remains the engine's responsibility.
+      if(logical&&typeof vim.lastHPos==='number')result.ch=vim.lastHPos;
+      result.hitSide=!!supplied.hitSide;
+      if(supplied.goalColumn!==undefined)result.goalColumn=supplied.goalColumn;
+      return result;
+    }
     const size=unit==='page'?Math.max(1,Math.floor(this.getScrollInfo().clientHeight/this.defaultTextHeight())-2):1,target=start.line+amount*size,line=clamp(target,0,this.lastLine());
     const column=goalColumn===undefined?visualColumn(this.getLine(start.line)||'',start.ch,this.getOption('tabSize')):goalColumn/(Number(this.host.options?.charWidth)||8);
     const result=new VimPosition(line,characterAtColumn(this.getLine(line),column,this.getOption('tabSize')));result.hitSide=target!==line;return result;
