@@ -26,6 +26,7 @@ function vimReference(){
     ]),
     referenceTable('Motions',[
       ['h j k l','Move left, down, up, and right.'],
+      ['gj gk','Move down or up by a displayed row, including wrapped rows.'],
       ['w / b / e','Next word, previous word, and end of word; uppercase uses whitespace-delimited words.'],
       ['0 / ^ / $','Beginning of line, first nonblank character, and end of line.'],
       ['gg / G / 12G','First line, last line, and a numbered line.'],

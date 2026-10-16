@@ -640,6 +640,100 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
 class AdvancedInputModeAcceptance(BrowserHarness, unittest.TestCase):
     advanced_artifact = True
 
+    def test_real_monaco_visual_rows_and_folded_line_navigation(self):
+        wrapped = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\nsecond line\n'
+        self.buffer(wrapped)
+        self.enable_advanced()
+        self.vim()
+        self.page.evaluate(r'''() => {
+          as.view.updateOptions({wordWrap:'wordWrapColumn',wordWrapColumn:24,
+            wrappingIndent:'none',lineNumbers:'off',glyphMargin:false,minimap:{enabled:false}});
+          as.select(4);as.focus();
+        }''')
+        # Establish actual rendered rows before using Vim; a logical-line
+        # implementation must not accidentally satisfy the motion assertions.
+        self.page.wait_for_function(r'''() => {
+          const a=as.view.getScrolledVisiblePosition({lineNumber:1,column:5}),
+            b=as.view.getScrolledVisiblePosition({lineNumber:1,column:29}),
+            c=as.view.getScrolledVisiblePosition({lineNumber:1,column:53});
+          return a&&b&&c&&a.top<b.top&&b.top<c.top&&Math.abs(a.left-b.left)<1;
+        }''')
+        position = '({line:as.view.getPosition().lineNumber,column:as.view.getPosition().column})'
+        self.type('2gj')
+        self.assertEqual(self.page.evaluate(position), {'line': 1, 'column': 53})
+        self.type('gk')
+        self.assertEqual(self.page.evaluate(position), {'line': 1, 'column': 29})
+        self.type('gk')
+        self.assertEqual(self.page.evaluate(position), {'line': 1, 'column': 5})
+        self.assertEqual(self.text(), wrapped)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
+        self.type('vgj')
+        self.assertEqual(self.state(), 'visual')
+        self.assertEqual(self.page.evaluate('vb6Studio.inputModes.records.get(vb6Studio.editor).host.getSelections()'),
+                         [{'anchor': 4, 'head': 29}])
+        self.press('Escape')
+        self.page.evaluate('as.select(4);as.focus()')
+        self.type('dgj')
+        deleted = wrapped[:4] + wrapped[28:]
+        self.assertEqual(self.text(), deleted)
+        self.assertEqual(self.page.evaluate('as.record.model.getValue()'), deleted)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 1)
+        self.type('u')
+        self.assertEqual(self.text(), wrapped)
+        self.press('Control+r')
+        self.assertEqual(self.text(), deleted)
+        self.type('u')
+        # :normal stages edits and motions in one transaction. Geometry must
+        # follow the edited line before the final source change is published.
+        self.page.evaluate('as.select(0);as.focus()')
+        self.ex('normal! xgjx')
+        self.assertEqual(self.text(), wrapped[1:25] + wrapped[26:])
+        self.assertEqual(self.page.evaluate('as.record.model.getValue()'), self.text())
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 1)
+        self.type('u')
+        self.assertEqual(self.text(), wrapped)
+
+        folded = ("' lead\n"
+                  'Private Sub FoldedProcedureWithLongName(ByVal value As Long)\n'
+                  '    total = 10\n'
+                  '    Debug.Print "hidden"\n'
+                  'End Sub\n'
+                  'afterValue = 99\n'
+                  'tailValue = 1\n')
+        self.buffer(folded)
+        self.page.evaluate(r'''() => {
+          as.select(7);as.focus();return as.view.getAction('editor.foldAll').run();
+        }''')
+        self.page.wait_for_function(r'''() => {
+          const ranges=as.view.getVisibleRanges(),visible=line=>ranges.some(r=>r.startLineNumber<=line&&r.endLineNumber>=line),
+            start=as.view.getScrolledVisiblePosition({lineNumber:2,column:1}),
+            end=as.view.getScrolledVisiblePosition({lineNumber:2,column:50});
+          return visible(2)&&!visible(3)&&!visible(5)&&visible(6)&&start&&end&&end.top>start.top;
+        }''')
+        self.type('gj')
+        display_position = self.page.evaluate(position)
+        self.assertEqual(display_position['line'], 2)
+        self.assertGreater(display_position['column'], 1)
+        self.type('gk')
+        self.assertEqual(self.page.evaluate(position), {'line': 2, 'column': 1})
+        self.type('j')
+        self.assertEqual(self.page.evaluate(position), {'line': 6, 'column': 1})
+        self.type('k')
+        self.assertEqual(self.page.evaluate(position), {'line': 2, 'column': 1})
+        self.type('gg2j')
+        self.assertEqual(self.page.evaluate(position), {'line': 6, 'column': 1})
+        self.assertEqual(self.text(), folded)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
+        self.type('ggjdj')
+        self.assertEqual(self.text(), "' lead\ntailValue = 1\n")
+        self.assertEqual(self.page.evaluate('as.record.model.getValue()'), self.text())
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 1)
+        self.type('u')
+        self.assertEqual(self.text(), folded)
+        self.press('Control+r')
+        self.assertEqual(self.text(), "' lead\ntailValue = 1\n")
+        self.done()
+
     def test_real_monaco_modes_undo_splits_and_backend_switches(self):
         self.buffer('alpha beta\nsecond line\n')
         self.enable_advanced()
