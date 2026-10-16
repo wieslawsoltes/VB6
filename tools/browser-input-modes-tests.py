@@ -64,6 +64,17 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class InputModeTestResult(unittest.TextTestResult):
+    """Surface failures immediately while the remaining browser cases run."""
+    def addError(self, test, error):
+        super().addError(test, error)
+        self.stream.writeln(self._exc_info_to_string(error, test))
+
+    def addFailure(self, test, error):
+        super().addFailure(test, error)
+        self.stream.writeln(self._exc_info_to_string(error, test))
+
+
 class BrowserHarness:
     advanced_artifact = False
 
@@ -625,6 +636,24 @@ class AdvancedInputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.press('Escape')
         self.assertEqual(self.text(), 'Omega beta\nsecond line\n')
         self.assertTrue(self.page.evaluate('as.record.model.getValue()===vb6Studio.editor.text'))
+        self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:false})')
+        self.buffer('alpha\nbeta\ngamma\n')
+        self.type('gg0ll')
+        self.press('Control+v')
+        self.type('jh')
+        selection = 'vb6Studio.inputModes.records.get(vb6Studio.editor).host.getSelections()'
+        backward_block = self.page.evaluate(selection)
+        self.assertEqual(len(backward_block), 2)
+        self.assertTrue(all(value['anchor'] > value['head'] for value in backward_block))
+        self.enable_advanced()
+        self.assertEqual(self.page.evaluate(selection), backward_block)
+        self.assertEqual(self.state(), 'visual-block')
+        self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:false})')
+        self.page.evaluate('vb6Studio.editor.input.focus()')
+        self.assertEqual(self.page.evaluate(selection), backward_block)
+        self.assertEqual(self.state(), 'visual-block')
+        self.type('x')
+        self.assertEqual(self.text(), 'aha\nba\ngamma\n')
         self.done()
 
     def test_real_monaco_xaml_and_dos_cell_projection_keep_vim_state(self):
@@ -665,4 +694,5 @@ def load_tests(loader, standard_tests, pattern):
 
 
 if __name__ == '__main__':
-    unittest.main(verbosity=2)
+    unittest.main(verbosity=2, testRunner=functools.partial(
+        unittest.TextTestRunner, resultclass=InputModeTestResult))
