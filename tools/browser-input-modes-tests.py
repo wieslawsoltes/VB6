@@ -121,6 +121,9 @@ class BrowserHarness:
         self.addCleanup(self.context.close)
         self.addCleanup(self.record_result)
         self.context.set_default_timeout(15000)
+        # The standalone IDE can take longer to parse on contended CI workers;
+        # interaction and assertion waits retain their shorter deadline.
+        self.context.set_default_navigation_timeout(60000)
         self.context.on('page', self.observe_page)
         self.page = self.context.new_page()
         artifact = ROOT / 'dist' / ('VB6-Studio-Web-Advanced.html' if self.advanced_artifact else 'VB6-Studio-Web.html')
