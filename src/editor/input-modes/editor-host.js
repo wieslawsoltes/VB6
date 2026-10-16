@@ -276,13 +276,66 @@ export class EditorHost {
       else if(at.bottom>info.top+info.clientHeight-margin)this.scrollTo(null,Math.max(0,at.bottom-info.clientHeight+margin));
     }
   }
+  /** Ask the displayed Monaco layout for a motion without changing the Vim
+   * buffer. The native command handles wrapping, tabs, injected text and folded
+   * regions. Its temporary cursor never reaches the canonical source editor. */
+  findPosV(offset,amount,unit='line',goalColumn,context={}){
+    const surface=this.surface,view=surface?.view,model=surface?.record.model;
+    if(!view?.trigger||!view.getPosition||this.disposed||this.composing||context.text!==undefined&&context.text!==this.getText())return undefined;
+    const count=Math.abs(Math.trunc(finite(amount)))*(unit==='page'?Math.max(1,this.options.viewportLines-2):1);
+    offset=clamp(offset,this.getText().length);if(!count)return {offset,hitSide:false};
+    const selections=view.getSelections?.();if(!selections?.length)return undefined;
+    const saved=selections.map(s=>({selectionStartLineNumber:s.selectionStartLineNumber,selectionStartColumn:s.selectionStartColumn,positionLineNumber:s.positionLineNumber,positionColumn:s.positionColumn}));
+    const scroll={scrollTop:view.getScrollTop?.()||0,scrollLeft:view.getScrollLeft?.()||0},setting=this.settingSelection,sync=surface.syncCursor;
+    const immediate=surface.monaco?.editor.ScrollType?.Immediate,start=model.getPositionAt(offset),top=p=>view.getTopForPosition?.(p.lineNumber,p.column)??view.getTopForLineNumber?.(p.lineNumber),fromTop=top(start);
+    const move=args=>view.trigger('vim-motion','cursorMove',{select:false,noHistory:true,...args});
+    this.settingSelection=true;surface.syncCursor=true;
+    try{
+      view.setSelections([{selectionStartLineNumber:start.lineNumber,selectionStartColumn:start.column,positionLineNumber:start.lineNumber,positionColumn:start.column}],'api');
+      // A row's first column has an unambiguous wrap affinity. Move that point
+      // first, then hit-test the saved pixel goal on the destination row; this
+      // retains a long goal column while crossing short continuation rows.
+      const pixelGoal=!context.logical&&Number.isFinite(goalColumn)&&view.getTargetAtClientPoint;
+      if(pixelGoal)move({to:'wrappedLineStart'});
+      move({to:amount<0?'up':'down',by:context.logical?'foldedLine':'wrappedLine',value:Math.min(1e9,count)});
+      let position=view.getPosition();if(!position)return undefined;
+      const toTop=top(position),hitSide=fromTop!==undefined&&toTop===fromTop;
+      if(pixelGoal&&!hitSide){
+        view.revealPositionInCenterIfOutsideViewport?.(position);
+        const layout=view.getLayoutInfo?.()||{},left=layout.contentLeft||0,width=layout.contentWidth||this.viewport?.clientWidth||400,goal=Math.max(left+1,goalColumn);
+        let horizontal=view.getScrollLeft?.()||0;
+        if(goal-horizontal<left+1||goal-horizontal>left+width-1){view.setScrollPosition?.({scrollLeft:Math.max(0,goal-left-width/2)},immediate);horizontal=view.getScrollLeft?.()||0;}
+        // Hit testing requires the destination row to be rendered, including a
+        // counted jump outside the original viewport.
+        view.render?.();
+        const rect=view.getDomNode?.()?.getBoundingClientRect?.(),at=view.getScrolledVisiblePosition?.(position),height=view.getLineHeightForPosition?.(position)||this.options.lineHeight;
+        if(rect&&at){
+          const target=view.getTargetAtClientPoint(rect.left+Math.max(left+1,Math.min(left+width-1,goal-horizontal)),rect.top+at.top+height/2)?.position;
+          if(target){
+            const targetTop=top(target);
+            if(targetTop===undefined||toTop===undefined||targetTop===toTop)position=target;
+            else if(target.lineNumber===position.lineNumber&&targetTop>toTop){
+              // A soft-wrap boundary is both the preceding row's end and the
+              // next row's start. Keep a normal-mode motion on this row.
+              let end=model.getOffsetAt(target),text=this.getText();
+              if(end>0){end--;const code=text.charCodeAt(end);if(code>=0xdc00&&code<=0xdfff&&end>0)end--;const previous=model.getPositionAt(end);if(top(previous)===toTop)position=previous;}
+            }
+          }
+        }
+      }
+      return {offset:model.getOffsetAt(position),hitSide};
+    }finally{
+      try{view.setSelections(saved,'api');view.setScrollPosition?.(scroll,immediate);}
+      finally{surface.syncCursor=sync;this.settingSelection=setting;}
+    }
+  }
   charCoords(offset,mode='page'){
     const p=positionAt(this.index,offset),view=this.view,input=this.editor.input,win=this.root.ownerDocument?.defaultView,rect=(view?.getDomNode?.()||input)?.getBoundingClientRect?.()||{left:0,top:0};
     let left,top,height=this.options.lineHeight,width=this.options.charWidth;
     if(view){
       const at=view.getScrolledVisiblePosition?.({lineNumber:p.line,column:p.column}),column=at?0:view.getOffsetForColumn?.(p.line,p.column);
       left=at?at.left+(view.getScrollLeft?.()||0):(view.getLayoutInfo?.().contentLeft||0)+(column>=0?column:this.visualColumn(this.index.lines[p.line-1],p.column-1)*width);
-      top=at?at.top+(view.getScrollTop?.()||0):view.getTopForLineNumber?.(p.line)??(p.line-1)*height;height=at?.height||height;
+      top=at?at.top+(view.getScrollTop?.()||0):view.getTopForPosition?.(p.line,p.column)??view.getTopForLineNumber?.(p.line)??(p.line-1)*height;height=at?.height||height;
     }else {const padding=this.padding();left=padding.left+this.visualColumn(this.index.lines[p.line-1],p.column-1)*width;top=padding.top+(p.line-1)*height;}
     if(mode!=='local'&&mode!=='div'){
       const scroll=this.getScrollInfo();left+=rect.left-scroll.left;top+=rect.top-scroll.top;

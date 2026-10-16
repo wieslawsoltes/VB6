@@ -225,6 +225,84 @@ test('Monaco document coordinates include scroll offsets and screen motions targ
   assert.deepEqual(f.host.charCoords(offset,'local'),local);f.host.dispose();
 });
 
+function attachMotionMonaco(f){
+  const a=attachMonaco(f),view=a.view,index=f.editor.index;
+  // Variable-length display rows and a wrapped fold header. Hidden model lines
+  // 5 and 6 have no display rows; a native cursor can cross them in one step.
+  const rows=[{line:1,start:1,end:10},{line:2,start:1,end:9},{line:2,start:9,end:12},{line:2,start:12,end:21},
+    {line:3,start:1,end:2},{line:4,start:1,end:9},{line:4,start:9,end:10},
+    {line:7,start:1,end:9},{line:7,start:9,end:13},{line:8,start:1,end:4}];
+  const rowAt=p=>{let result=-1;for(let i=0;i<rows.length;i++)if(rows[i].line===p.lineNumber&&rows[i].start<=p.column)result=i;return Math.max(0,result);};
+  a.model.getPositionAt=offset=>{const p=positionAt(index,offset);return {lineNumber:p.line,column:p.column};};
+  a.model.getOffsetAt=p=>offsetAt(index,p.lineNumber,p.column);
+  const observed=[],commands=[];let scrollTop=17,scrollLeft=3;
+  Object.assign(view,{
+    getPosition(){const s=this.getSelection();return {lineNumber:s.positionLineNumber,column:s.positionColumn};},
+    setSelections(values){this.selections=structuredClone(values);if(!a.surface.syncCursor){observed.push(structuredClone(values));f.editor.emit('cursor',{});}},
+    getScrollTop:()=>scrollTop,getScrollLeft:()=>scrollLeft,setScrollPosition(value){scrollTop=value.scrollTop??scrollTop;scrollLeft=value.scrollLeft??scrollLeft;},
+    getLayoutInfo:()=>({contentLeft:40,contentWidth:240}),getTopForPosition:(lineNumber,column)=>5+rowAt({lineNumber,column})*20,
+    getScrolledVisiblePosition(p){const n=rowAt(p);return {left:40+(p.column-rows[n].start)*8-scrollLeft,top:5+n*20-scrollTop,height:20};},
+    getLineHeightForPosition:()=>20,render(){this.renders=(this.renders||0)+1;},
+    getTargetAtClientPoint(x,y){const n=Math.max(0,Math.min(rows.length-1,Math.floor((y+scrollTop-5)/20))),row=rows[n];return {position:{lineNumber:row.line,column:Math.max(row.start,Math.min(row.end,row.start+Math.round((x+scrollLeft-40)/8)))}};},
+    trigger(source,id,args){
+      commands.push({source,id,args});assert.equal(id,'cursorMove');assert.equal(args.select,false);assert.equal(args.noHistory,true);
+      const p=this.getPosition(),n=rowAt(p),row=rows[n];let next;
+      if(args.to==='wrappedLineStart')next={lineNumber:row.line,column:row.start};
+      else if(args.by==='foldedLine'){
+        const lines=[...new Set(rows.map(r=>r.line))],target=Math.max(0,Math.min(lines.length-1,lines.indexOf(p.lineNumber)+(args.to==='up'?-1:1)*args.value)),line=lines[target];
+        next={lineNumber:line,column:Math.min(index.lines[line-1].length+1,p.column)};
+      }else{
+        assert.equal(args.by,'wrappedLine');const to=Math.max(0,Math.min(rows.length-1,n+(args.to==='up'?-1:1)*args.value)),destination=rows[to];
+        next={lineNumber:destination.line,column:Math.min(destination.end,destination.start+p.column-row.start)};
+      }
+      this.setSelections([{selectionStartLineNumber:next.lineNumber,selectionStartColumn:next.column,positionLineNumber:next.lineNumber,positionColumn:next.column}]);
+      scrollTop=Math.max(0,this.getTopForPosition(next.lineNumber,next.column)-40);
+    }
+  });
+  return {...a,observed,commands};
+}
+
+const motionSource='😀 header\nabcdefghijklmnopqrst\nx\nabcdefghi\nfold one\nfold two\nuvwxyzabcdef\nend';
+
+test('Monaco visual-row probes preserve pixel goals, backward block selections, scroll and canonical history',()=>{
+  const f=sourceFixture(motionSource),a=attachMotionMonaco(f),values=[{anchor:f.editor.index.starts[6]+6,head:f.editor.index.starts[6]+2},{anchor:6,head:2}];
+  f.host.setMode({mode:'visual',subMode:'blockwise'});f.host.setSelections(values);a.observed.length=0;
+  const scroll=f.host.getScrollInfo(),goal=40+6*8,at=column=>f.editor.index.starts[1]+column-1;
+  // The middle row is shorter than the goal. A boundary shared with the next
+  // row stays on the middle row; the following motion recovers the saved goal.
+  assert.deepEqual(f.host.findPosV(at(7),1,'line',goal,{text:motionSource}),{offset:at(11),hitSide:false});
+  assert.deepEqual(f.host.findPosV(at(11),1,'line',goal,{text:motionSource}),{offset:at(18),hitSide:false});
+  assert.deepEqual(f.host.findPosV(at(7),2,'line',goal,{text:motionSource}),{offset:at(18),hitSide:false});
+  assert.deepEqual(f.host.findPosV(at(18),-1,'line',goal,{text:motionSource}),{offset:at(11),hitSide:false});
+  assert.deepEqual(f.host.getSelections(),values);assert.deepEqual(f.host.getScrollInfo(),scroll);assert.deepEqual(a.observed,[]);
+  assert.equal(f.history.undoStack.length,0);assert.equal(f.changes.length,0);assert.equal(a.model.valueReads,0);assert.ok(a.view.renders>=4);
+  assert.equal(f.host.findPosV(0,-1,'line',40,{text:motionSource}).hitSide,true);f.host.dispose();
+});
+
+test('Monaco logical motions skip hidden regions even when the fold header wraps and editing is read-only',()=>{
+  const f=sourceFixture(motionSource),a=attachMotionMonaco(f),at=(line,column=1)=>f.editor.index.starts[line-1]+column-1;
+  f.editor.setReadOnly(true);const saved=f.host.getSelections();
+  assert.deepEqual(f.host.findPosV(at(4,3),1,'line',56,{text:motionSource,logical:true}),{offset:at(7,3),hitSide:false});
+  assert.deepEqual(f.host.findPosV(at(4,3),2,'line',56,{text:motionSource,logical:true}),{offset:at(8,3),hitSide:false});
+  assert.deepEqual(f.host.findPosV(at(7,3),-1,'line',56,{text:motionSource,logical:true}),{offset:at(4,3),hitSide:false});
+  assert.deepEqual(f.host.findPosV(at(4),1,'line',40,{text:motionSource}),{offset:at(4,9),hitSide:false});
+  assert.deepEqual(f.host.getSelections(),saved);assert.equal(f.host.getText(),motionSource);assert.equal(f.changes.length,0);
+  assert.equal(a.commands.filter(c=>c.args.by==='foldedLine').length,3);f.host.dispose();
+});
+
+test('Monaco motion probes reject stale staged text and restore nested guards after a native failure',()=>{
+  const f=sourceFixture(motionSource);assert.equal(f.host.findPosV(0,1,'line'),undefined);
+  const a=attachMotionMonaco(f),values=[{anchor:6,head:2},{anchor:18,head:15}];f.host.setSelections(values);a.observed.length=0;
+  assert.equal(f.host.findPosV(0,1,'line',40,{text:motionSource+'\n'}),undefined);assert.equal(a.commands.length,0);
+  const scroll=f.host.getScrollInfo(),trigger=a.view.trigger;
+  f.host.settingSelection=true;a.surface.syncCursor=true;
+  a.view.trigger=function(...args){trigger.apply(this,args);throw new Error('Native motion failed');};
+  assert.throws(()=>f.host.findPosV(0,1,'line',40),/Native motion failed/);
+  assert.deepEqual(f.host.getSelections(),values);assert.deepEqual(f.host.getScrollInfo(),scroll);assert.deepEqual(a.observed,[]);
+  assert.equal(f.host.settingSelection,true);assert.equal(a.surface.syncCursor,true);assert.equal(f.history.undoStack.length,0);
+  f.host.settingSelection=false;a.surface.syncCursor=false;f.host.dispose();
+});
+
 test('100k-line presentation reuses the canonical source index and cached Monaco text',()=>{
   const code=Array.from({length:100000},(_,i)=>`line${i}`).join('\n'),f=sourceFixture(code),index=f.editor.index,offset=index.starts[50000];
   f.host.setSelections([{anchor:offset,head:offset},{anchor:offset+10,head:offset+13}]);f.host.setMode({mode:'normal'});
