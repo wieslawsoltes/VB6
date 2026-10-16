@@ -75,6 +75,10 @@ class InputModeTestResult(unittest.TextTestResult):
         self.stream.writeln(self._exc_info_to_string(error, test))
 
 
+class InputModeTestRunner(unittest.TextTestRunner):
+    resultclass = InputModeTestResult
+
+
 class BrowserHarness:
     advanced_artifact = False
 
@@ -719,5 +723,4 @@ def load_tests(loader, standard_tests, pattern):
 
 
 if __name__ == '__main__':
-    unittest.main(verbosity=2, testRunner=functools.partial(
-        unittest.TextTestRunner, resultclass=InputModeTestResult))
+    unittest.main(verbosity=2, testRunner=InputModeTestRunner)
