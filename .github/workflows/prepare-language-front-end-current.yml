@@ -1,0 +1,102 @@
+name: Prepare current-main language front-end integration
+on:
+  push:
+    branches:
+      - build/language-front-end-current-0181
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: prepare-language-front-end-current-0181
+  cancel-in-progress: true
+jobs:
+  prepare:
+    if: github.repository == 'wieslawsoltes/VB6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify exact reviewed source overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=0181dcb40d3768cfa40dee7a155969b6f5df517e
+          test "$(git rev-parse HEAD^)" = "$base"
+          cat > "$RUNNER_TEMP/expected-temp.txt" <<'EOF'
+          .github/workflows/prepare-language-front-end-current.yml
+          src/language/conditional.js
+          src/language/declarations.js
+          src/language/expression.js
+          src/language/lexer.js
+          src/language/semantic-checks.js
+          src/language/source-scanner.js
+          tests/language-static-front-end.test.mjs
+          EOF
+          git diff --name-only "$base" HEAD | sort > "$RUNNER_TEMP/actual-temp.txt"
+          diff -u "$RUNNER_TEMP/expected-temp.txt" "$RUNNER_TEMP/actual-temp.txt"
+          test "$(git rev-parse HEAD:src/language/conditional.js)" = 15bae64ac67526f1313972e0ab4b632e5ec4cb09
+          test "$(git rev-parse HEAD:src/language/source-scanner.js)" = 7d21c56232fded3b402824ab5c5fbf67f1873def
+          test "$(git rev-parse HEAD:src/language/lexer.js)" = 292b32790a66c63e024a9e67cda080b9f209b276
+          test "$(git rev-parse HEAD:src/language/declarations.js)" = 1658dfdd854f6b01c8013debf10feda4b36e9ea9
+          test "$(git rev-parse HEAD:src/language/expression.js)" = fc71fa6b9e9db2605ddf3e4d26742d709534b4b5
+          test "$(git rev-parse HEAD:src/language/semantic-checks.js)" = 365e3730fe1c180d70e3192cdabc4631c0c40be9
+          test "$(git rev-parse HEAD:tests/language-static-front-end.test.mjs)" = 213e775520f8422e9c00f8743ca8c6a571cb3b51
+      - name: Rebuild reviewed artifacts and execute language validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u CI npm run build:update-ide-artifacts
+          env -u CI npm run build
+          node --test --test-concurrency=4 tests/language*.test.mjs tests/constants-binding.test.mjs tests/diagnostics-semantic-cache.test.mjs tests/compiler-runtime-integration.test.mjs
+      - name: Publish clean candidate without the temporary workflow
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=0181dcb40d3768cfa40dee7a155969b6f5df517e
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          export GIT_INDEX_FILE="$RUNNER_TEMP/clean-index"
+          rm -f "$GIT_INDEX_FILE"
+          git read-tree "$base"
+          git add -- \
+            src/language/conditional.js \
+            src/language/declarations.js \
+            src/language/expression.js \
+            src/language/lexer.js \
+            src/language/semantic-checks.js \
+            src/language/source-scanner.js \
+            tests/language-static-front-end.test.mjs \
+            tools/ide-artifacts.json
+          cat > "$RUNNER_TEMP/expected-clean.txt" <<'EOF'
+          src/language/conditional.js
+          src/language/declarations.js
+          src/language/expression.js
+          src/language/lexer.js
+          src/language/semantic-checks.js
+          src/language/source-scanner.js
+          tests/language-static-front-end.test.mjs
+          tools/ide-artifacts.json
+          EOF
+          git diff --cached --name-only "$base" | sort > "$RUNNER_TEMP/actual-clean.txt"
+          diff -u "$RUNNER_TEMP/expected-clean.txt" "$RUNNER_TEMP/actual-clean.txt"
+          tree=$(git write-tree)
+          candidate=$(printf '%s\n\n%s\n' \
+            'fix(language): complete radix literals and continued directives' \
+            'Integrate the reviewed language front-end increment onto current main, regenerate the reviewed artifact manifest, and retain the 31 focused regressions.' \
+            | git commit-tree "$tree" -p "$base")
+          git push --force origin "$candidate:refs/heads/build/language-front-end-clean-0181"
+          printf '%s\n%s\n' "$candidate" "$tree" | tee "$RUNNER_TEMP/prepared-revision.txt"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-language-front-end-current
+          path: ${{ runner.temp }}/prepared-revision.txt
+          if-no-files-found: error
+          retention-days: 7

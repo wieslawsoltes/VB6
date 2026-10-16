@@ -1,4 +1,4 @@
-import {isDigit,isIdentifierStart,isIdentifierPart,isSpace,identifierEnd,stringEnd,dateEnd,scanSyntax,stripComment,statementParts} from './source-scanner.js';
+import {isDigit,isIdentifierStart,isIdentifierPart,isSpace,identifierEnd,stringEnd,dateEnd,scanSyntax,stripComment,statementParts,continuationStart} from './source-scanner.js';
 import {asDate} from '../runtime/calendar.js';
 /** VB lexical scanner. Tokens retain original source offsets for editor/debugger use. */
 import {VBError} from './errors.js';
@@ -20,12 +20,17 @@ export function tokenize(text) {
       if (isNaN(d)) throw new VBError('Invalid date literal', 13, null, 0, start + 1);
       push('date', d.toISOString(), start); continue;
     }
-    if (c === '&' && /[hHoO]/.test(text[i+1] || '')) {
-      const base = text[i+1].toLowerCase() === 'h' ? 16 : 8; i += 2; const digits = i;
+    if (c === '&' && /[hHoO0-7]/.test(text[i+1] || '')) {
+      const base = /[hH]/.test(text[i+1]) ? 16 : 8;
+      i += /[hHoO]/.test(text[i+1]) ? 2 : 1; const digits = i;
       while (i < text.length && (base === 16 ? /[0-9a-f]/i : /[0-7]/).test(text[i])) i++;
-      if (i === digits) throw new VBError('Expected digits in numeric literal', 1002);
-      let n = parseInt(text.slice(digits, i), base); if (n > 2147483647) n -= 4294967296;
-      if (text[i] === '&') i++; push('number', n, start); continue;
+      if (i === digits) throw new VBError('Expected digits in numeric literal', 1002, null, 0, start + 1);
+      const n = parseInt(text.slice(digits, i), base);
+      const suffix = text[i]; if (suffix === '&' || suffix === '%') i++;
+      if (n > 4294967295 || suffix === '%' && n > 65535) throw new VBError('Overflow in numeric literal', 6, null, 0, start + 1);
+      // Keep the existing token-value contract (32-bit interpretation). The
+      // expression parser applies the declared Integer/Long width separately.
+      push('number', n > 2147483647 ? n - 4294967296 : n, start); continue;
     }
     if (isDigit(text.charCodeAt(i)) || (c === '.' && isDigit(text.charCodeAt(i+1)))) {
       if (c === '.') i++;
@@ -74,7 +79,8 @@ export function logicalLines(source,{preserveContinuations=false}={}) {
     let s=stripComment(raw);
     // Only a lexical underscore after whitespace is a continuation, never one
     // inside a string, bracketed identifier, or comment.
-    if (/\s_\s*$/.test(s)) { carry += s.replace(/\s_\s*$/,' '); if(preserveContinuations)continuations.push(carry.length); continue; }
+    const continuation=continuationStart(s);
+    if (continuation>=0) { carry += s.slice(0,continuation)+' '; if(preserveContinuations)continuations.push(carry.length); continue; }
     const combined=carry+s,leading=combined.length-combined.trimStart().length;
     let joins=preserveContinuations?continuations.map(at=>at-leading):null;
     s=combined.trim();carry='';continuations=[];if(!s)continue;
