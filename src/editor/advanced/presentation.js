@@ -34,10 +34,11 @@ export function registerAdvancedPresentation(surface,state){
         if(/[\u0590-\u0dff\u200c-\u200f\u202a-\u202e\u2066-\u2069]/u.test(text)){output.native=true;continue;}
         const tokens=monaco.editor.tokenize(text.slice(0,65536),model.getLanguageId())[0]||[];let tokenIndex=0;
         const decorations=view.getLineDecorations(line)||[],attributes=decorations.map(d=>d.options);
-        const matches=decorations.filter(d=>String(d.options.className||'').split(/\s+/).includes('input-mode-search-match')).map(d=>({
-          start:line===d.range.startLineNumber?d.range.startColumn:1,
-          end:line===d.range.endLineNumber?d.range.endColumn:text.length+1
-        })).sort((a,b)=>a.start-b.start);let matchIndex=0;
+        const matches=decorations.filter(d=>String(d.options.className||'').split(/\s+/).includes('input-mode-search-match')).map(d=>{
+          const start=line===d.range.startLineNumber?d.range.startColumn:1,
+            end=line===d.range.endLineNumber?d.range.endColumn:text.length+1;
+          return {start,end:Math.max(start+1,end),empty:start===end};
+        }).sort((a,b)=>a.start-b.start);let matchIndex=0;
         const base=position(line,start);
         if(base){
           output.items.push({x:layout.lineNumbersLeft,y:base.top,text:String(line),gutter:true});
@@ -56,6 +57,11 @@ export function registerAdvancedPresentation(surface,state){
             output.items.push({x:at.left,y:at.top,text:glyph==='\t'?' ':glyph,color,selected,searchMatch});
           }
           col+=glyph.length;
+        }
+        if(matches.some(match=>match.empty&&match.start===text.length+1)){
+          const column=text.length+1,at=position(line,column),selected=selections.some(s=>(line>s.startLineNumber||line===s.startLineNumber&&column>=s.startColumn)&&(line<s.endLineNumber||line===s.endLineNumber&&column<s.endColumn));
+          if(at&&at.top>=-lineHeight&&at.top<layout.height&&at.left>=layout.contentLeft-pitch&&at.left<layout.width)
+            output.items.push({x:at.left,y:at.top,text:' ',searchMatch:true,selected});
         }
       }
     }

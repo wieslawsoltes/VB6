@@ -202,6 +202,11 @@ class BrowserHarness:
         page.keyboard.type(pattern)
         page.keyboard.press('Enter')
 
+    def wait_search_matches(self, count, root='vb6Studio.editor.root'):
+        self.page.wait_for_function('count => {const markers=[...' + root + r'''.querySelectorAll('.input-mode-search-match')];
+          return count===0?markers.length===0:markers.filter(node=>{const r=node.getBoundingClientRect();return r.width>0&&r.height>0;}).length===count;
+        }''', arg=count)
+
     def options(self, page=None):
         page = page or self.page
         page.get_by_role('menuitem', name='Tools', exact=True).click()
@@ -397,10 +402,18 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.search('beta')
         first = source.index('beta')
         self.assertEqual(self.page.evaluate('vb6Studio.editor.cursor().offset'), first)
+        selection = self.page.evaluate('vb6Studio.inputModes.records.get(vb6Studio.editor).host.getSelections()')
+        self.wait_search_matches(3)
+        self.assertEqual(self.page.evaluate('vb6Studio.inputModes.records.get(vb6Studio.editor).host.getSelections()'), selection)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
         self.type('n')
         self.assertEqual(self.page.evaluate('vb6Studio.editor.cursor().offset'), source.index('beta', first + 1))
         self.type('N')
         self.assertEqual(self.page.evaluate('vb6Studio.editor.cursor().offset'), first)
+        self.ex('nohlsearch')
+        self.wait_search_matches(0)
+        self.search('beta')
+        self.wait_search_matches(3)
         self.ex('%s/beta/BETA/g')
         self.assertEqual(self.text(), source.replace('beta', 'BETA'))
         self.type('u')
@@ -414,6 +427,11 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.type('a')
         self.assertEqual(self.text(), 'alpha omega\ncharlie omega\ndelta omega\n')
         self.assertEqual(self.state(), 'normal')
+        self.search('omega')
+        self.wait_search_matches(3)
+        self.page.evaluate('vb6Studio.inputModes.configure({mode:"default"})')
+        self.wait_search_matches(0)
+        self.assertEqual(self.page.locator('.input-mode-search-overlay').count(), 0)
         self.done()
 
     def test_ide_ex_buffers_splits_and_close_preserve_the_project(self):
@@ -639,6 +657,96 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
 
 class AdvancedInputModeAcceptance(BrowserHarness, unittest.TestCase):
     advanced_artifact = True
+
+    def test_real_monaco_search_highlights_xaml_backend_switches_and_dos_cells(self):
+        source = 'alpha beta\nbeta alpha\nalpha beta\n'
+        self.buffer(source)
+        self.enable_advanced()
+        self.vim()
+        self.page.evaluate('as.focus()')
+        self.search('alpha')
+        selection = self.page.evaluate('vb6Studio.inputModes.records.get(vb6Studio.editor).host.getSelections()')
+        self.wait_search_matches(3)
+        self.assertEqual(self.page.evaluate('vb6Studio.inputModes.records.get(vb6Studio.editor).host.getSelections()'), selection)
+        self.ex('nohlsearch')
+        self.wait_search_matches(0)
+        self.search('beta')
+        self.wait_search_matches(3)
+        self.page.evaluate(r'''async () => {
+          vb6Studio.dosMode.configure({mode:'dos',editing:'cells',profile:'turbo'});
+          await vb6Studio.dosMode.ready;
+          globalThis.searchDosSession=[...vb6Studio.dosMode.sessions.values()].find(s=>s.document===document);
+          globalThis.searchCellText=backend=>{
+            const entry=backend==='monaco'?searchDosSession.textViews.entries.get(as.views.find(s=>s.view===as.view).pane):
+              searchDosSession.chrome.entries.get(vb6Studio.editor.syntax),buffer=entry?.buffer;
+            return buffer?Array.from(buffer.glyphs,(glyph,i)=>buffer.colors[i]>>4===14?String.fromCodePoint(glyph):'').join(''):null;
+          };
+          vb6Studio.statusbar.querySelector('[data-input-mode-status]').focus();
+        }''')
+        # Read the pixels' source cell attributes, not hidden Monaco DOM or an
+        # overlay rectangle: the exact matched glyphs must use the EGA paper.
+        self.page.wait_for_function('searchCellText("monaco")==="betabetabeta"')
+        self.assertTrue(self.page.evaluate('searchDosSession.textViews.entries.get(as.views[0].pane).visible'))
+        self.page.screenshot(path=str(REPORT / 'dos-monaco-vim-search.png'))
+        self.page.evaluate('as.focus()')
+        self.search('^')
+        self.page.evaluate('vb6Studio.statusbar.querySelector("[data-input-mode-status]").focus()')
+        self.page.wait_for_function('searchCellText("monaco")==="aba "')
+        self.page.evaluate('as.focus()')
+        self.search('$')
+        self.page.evaluate('vb6Studio.statusbar.querySelector("[data-input-mode-status]").focus()')
+        self.page.wait_for_function('searchCellText("monaco")==="    "')
+        self.page.evaluate('as.focus()')
+        self.ex('nohlsearch')
+        self.wait_search_matches(0)
+        self.page.evaluate('vb6Studio.statusbar.querySelector("[data-input-mode-status]").focus()')
+        self.page.wait_for_function('searchCellText("monaco")===""')
+        self.page.evaluate('as.focus()')
+        self.search('beta')
+        self.wait_search_matches(3)
+        self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:false});vb6Studio.statusbar.querySelector("[data-input-mode-status]").focus()')
+        self.wait_search_matches(3)
+        self.page.wait_for_function('searchCellText("classic")==="betabetabeta"')
+        self.assertEqual(self.page.locator('.monaco-editor').count(), 0)
+        self.page.screenshot(path=str(REPORT / 'dos-classic-vim-search.png'))
+        self.page.evaluate('vb6Studio.editor.input.focus()')
+        self.ex('nohlsearch')
+        self.wait_search_matches(0)
+        self.page.wait_for_function('searchCellText("classic")===""')
+        self.search('beta')
+        self.wait_search_matches(3)
+        self.enable_advanced()
+        self.wait_search_matches(3)
+        self.page.evaluate('vb6Studio.statusbar.querySelector("[data-input-mode-status]").focus()')
+        self.page.wait_for_function('searchCellText("monaco")==="betabetabeta"')
+        self.page.evaluate('vb6Studio.inputModes.configure({mode:"default"})')
+        self.wait_search_matches(0)
+        self.page.wait_for_function('searchCellText("monaco")===""')
+        self.assertEqual(self.page.locator('.input-mode-search-overlay').count(), 0)
+        self.assertEqual(self.page.evaluate('as.record.model.getAllDecorations().filter(d=>d.options.className==="input-mode-search-match").length'), 0)
+        self.assertEqual(self.text(), source)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
+        self.assertTrue(self.page.evaluate('[...vb6Studio.dosMode.sessions.values()].every(s=>s.metrics.failures===0)'))
+        self.page.evaluate('vb6Studio.dosMode.configure({mode:"classic"})')
+        self.vim()
+        self.page.evaluate(r'''() => {
+          const tool=vb6Studio.xaml.open('form');globalThis.searchXamlEditor=tool.editor;
+          ar.surfaces.get(searchXamlEditor).focus();
+        }''')
+        self.search('Original')
+        self.wait_search_matches(1, 'searchXamlEditor.root')
+        self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:false});searchXamlEditor.input.focus()')
+        self.wait_search_matches(1, 'searchXamlEditor.root')
+        self.ex('nohlsearch')
+        self.wait_search_matches(0, 'searchXamlEditor.root')
+        self.search('Original')
+        self.wait_search_matches(1, 'searchXamlEditor.root')
+        self.page.evaluate('vb6Studio.inputModes.configure({mode:"default"})')
+        self.wait_search_matches(0, 'searchXamlEditor.root')
+        self.assertEqual(self.page.locator('.input-mode-search-overlay').count(), 0)
+        self.assertEqual(self.text(), source)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
+        self.done()
 
     def test_real_monaco_visual_rows_and_folded_line_navigation(self):
         wrapped = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\nsecond line\n'
