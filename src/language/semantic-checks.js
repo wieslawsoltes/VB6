@@ -1,7 +1,7 @@
 import {parseExpression} from './expression.js';
 import {defaultIdentifierType} from './default-types.js';
 
-const lower=value=>String(value).toLowerCase();
+import {lower} from '../core/core.js';
 const numeric=new Set(['byte','integer','long','single','double','currency','date','variant']);
 const scalar=new Set([...numeric,'boolean','string','object','decimal','any']);
 

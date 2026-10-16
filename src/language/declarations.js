@@ -1,3 +1,4 @@
+import {lower} from '../core/core.js';
 import {VBError} from './errors.js';
 import {splitTop} from './lexer.js';
 import {DeclarationCursor} from './declaration-cursor.js';
@@ -70,7 +71,7 @@ export function parseParameters(text,defaultTypes={},options=VARIABLE_CONTEXT) {
   });
   let optionalSeen=false;const names=new Set();
   for(let i=0;i<params.length;i++) {
-    const p=params[i],key=p.name.toLowerCase();
+    const p=params[i],key=lower(p.name);
     if(names.has(key))throw new VBError('Duplicate parameter: '+p.name,1002);names.add(key);
     if(p.paramArray) {
       if(i!==params.length-1||optionalSeen||p.bounds?.length!==0||p.type.toLowerCase()!=='variant'||p.initial)throw new VBError('ParamArray must be the final Variant array parameter, without Optional parameters',1002);

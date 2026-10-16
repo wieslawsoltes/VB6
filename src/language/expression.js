@@ -129,16 +129,20 @@ export function parseCall(text,{explicit=false,continuations=null}={}) {
 function numericLiteralType(token){
   const suffix=token.raw.at(-1),explicit={'%':'integer','&':'long','!':'single','#':'double'}[suffix];
   if(explicit)return explicit;
-  if(/^[&][ho]/i.test(token.raw))return parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8)<=65535?'integer':'long';
+  if(/^&(?:[ho]|[0-7])/i.test(token.raw))return radixLiteralValue(token.raw)<=65535?'integer':'long';
   if(/[.eEdD]/.test(token.raw))return 'double';
   return token.value>=-32768&&token.value<=32767?'integer':token.value>=-2147483648&&token.value<=2147483647?'long':'double';
 }
 
 function numericLiteralValue(token){
-  if(/^&[ho]/i.test(token.raw)){
-    const n=parseInt(token.raw.slice(2),/^&h/i.test(token.raw)?16:8);
+  if(/^&(?:[ho]|[0-7])/i.test(token.raw)){
+    const n=radixLiteralValue(token.raw);
     if(n>4294967295)throw new VBError('Overflow in numeric literal',6);
     return n>2147483647?n-4294967296:n>=32768&&n<=65535&&!token.raw.endsWith('&')?n-65536:n;
   }
   return token.value;
+}
+
+function radixLiteralValue(raw) {
+  return parseInt(raw.slice(/^&[ho]/i.test(raw)?2:1),/^&h/i.test(raw)?16:8);
 }
