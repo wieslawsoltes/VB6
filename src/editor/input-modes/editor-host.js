@@ -90,12 +90,13 @@ export class EditorHost {
     return undefined;
   }
   get options(){
-    const surface=this.surface,model=surface?.record.model,raw=model?.getOptions?.(),tabSize=Math.max(1,finite(raw?.tabSize,this.xaml?2:this.editor.project?.settings?.tabWidth||this.ide?.project?.settings?.tabWidth||4));
-    const lineHeight=finite(this.view?.getRawOptions?.().lineHeight,this.editor.lineHeight||17),charWidth=this.editor.characterWidth||lineHeight*.48,viewport=this.viewport;
+    const surface=this.surface,view=surface?.view,model=surface?.record.model,raw=model?.getOptions?.(),tabSize=Math.max(1,finite(raw?.tabSize,this.xaml?2:this.editor.project?.settings?.tabWidth||this.ide?.project?.settings?.tabWidth||4));
+    const keys=surface?.monaco?.editor.EditorOption,font=keys&&view?.getOption?.(keys.fontInfo);
+    const lineHeight=Math.max(1,finite(keys&&view?.getOption?.(keys.lineHeight),finite(view?.getRawOptions?.().lineHeight,this.editor.lineHeight||17))),charWidth=font?.typicalHalfwidthCharacterWidth||this.editor.characterWidth||lineHeight*.48,viewport=this.viewport;
     return {tabSize,indentUnit:tabSize,indentWithTabs:raw?.insertSpaces===false,lineHeight,charWidth,viewportLines:Math.max(1,Math.floor((viewport?.clientHeight||300)/lineHeight))};
   }
   get viewport(){return this.surface?.views.find(state=>state.view===this.view)?.pane||this.editor.activePane?.viewport||this.editor.viewport;}
-  getText(){return String(this.surface?.record.model.getValue()??this.editor.text??'');}
+  getText(){const record=this.surface?.record;return String(record?(record.lastText??record.model.getValue()):(this.editor.text??''));}
   get index(){const text=this.getText();if(this.editor.index?.text===text)return this.editor.index;if(this.cachedIndex?.text!==text)this.cachedIndex=indexSource(text);return this.cachedIndex;}
   normalizeSelections(selections,length=this.getText().length){
     const values=Array.isArray(selections)&&selections.length?selections:[{anchor:0,head:0}];
@@ -165,7 +166,6 @@ export class EditorHost {
     try{
       if(before!==next){
         const change=textChange(before,next),typing=kind==='typing';
-        if(!typing)this.ide?.history?.stopMerging?.();
         if(this.xaml&&this.ide?.xaml?.apply&&this.moduleId!==undefined)this.ide.xaml.apply(this.moduleId,next,{typing});
         else if(this.xaml&&this.surface)this.surface.replace(next.slice(change.start,change.newEnd),change.start,change.oldEnd,kind);
         else if(this.xaml)this.editor.edit([{start:change.start,end:change.oldEnd,text:next.slice(change.start,change.newEnd)}]);
@@ -219,41 +219,74 @@ export class EditorHost {
     for(const input of this.xaml?[this.editor.input]:this.editor.panes.map(pane=>pane.input))if(input?.dataset)input.dataset.vimMode=this.mode.mode;
   }
   getScrollInfo(){
-    const view=this.view,input=this.editor.input,viewport=this.viewport,virtual=this.editor.activePane?.virtualizer;
-    return {left:view?.getScrollLeft?.()??input.scrollLeft??0,top:view?.getScrollTop?.()??(virtual?.active?virtual.rail.scrollTop:input.scrollTop)??0,
-      width:view?.getScrollWidth?.()??input.scrollWidth??viewport?.clientWidth??0,height:view?.getScrollHeight?.()??(virtual?.active?virtual.spacer.offsetHeight:input.scrollHeight)??0,
+    const view=this.view,input=this.editor.input,viewport=this.viewport,pane=this.editor.activePane,virtual=pane?.virtualizer;
+    if(view)return {left:view.getScrollLeft?.()||0,top:view.getScrollTop?.()||0,width:view.getScrollWidth?.()||0,height:view.getScrollHeight?.()||0,clientWidth:viewport?.clientWidth||0,clientHeight:viewport?.clientHeight||0};
+    const origin=(virtual?.active?virtual.full.firstLine:pane?.range.firstLine||0)*this.options.lineHeight;
+    return {left:input.scrollLeft||0,top:origin+(virtual?.active?virtual.rail.scrollTop:input.scrollTop)||0,
+      width:input.scrollWidth||viewport?.clientWidth||0,height:Math.max(input.scrollHeight||0,this.index.lines.length*this.options.lineHeight+this.padding().top*2),
       clientWidth:viewport?.clientWidth||0,clientHeight:viewport?.clientHeight||0};
   }
   scrollTo(left,top){
     if(this.view){const position={};if(left!=null)position.scrollLeft=finite(left);if(top!=null)position.scrollTop=finite(top);this.view.setScrollPosition(position);}
-    else {const input=this.editor.input,virtual=this.editor.activePane?.virtualizer;if(left!=null)input.scrollLeft=finite(left);if(top!=null){if(virtual?.active)virtual.scrollTo(finite(top));else input.scrollTop=finite(top);}this.editor.schedulePaint?.();}
+    else {
+      const pane=this.editor.activePane,{lineHeight}=this.options;
+      if(top!=null){
+        top=Math.max(0,finite(top));
+        if(pane?.mode==='procedure'){
+          const range=pane.virtualizer?.full||pane.range,origin=range.firstLine*lineHeight;
+          const height=(positionAt(this.index,range.end).line-range.firstLine)*lineHeight+this.padding().top*2;
+          // Vim scroll positions belong to the full document. If scrolling
+          // leaves a procedure, expose the module without moving its selection.
+          if(top<origin||top>origin+Math.max(0,height-(this.viewport?.clientHeight||0))){const selections=this.getSelections();pane.mode='module';pane.explicitDeclarations=false;this.setSelections(selections,{reveal:false});}
+        }
+        const virtual=pane?.virtualizer,origin=(virtual?.active?virtual.full.firstLine:pane?.range.firstLine||0)*lineHeight;
+        if(virtual?.active)virtual.scrollTo(top-origin);else this.editor.input.scrollTop=top-origin;
+      }
+      if(left!=null)this.editor.input.scrollLeft=finite(left);
+      this.editor.schedulePaint?.();
+    }
     this.schedulePaint();
   }
   scrollIntoView(value,margin=0){
     const offset=clamp(typeof value==='object'?value.to??value.from:value,this.getText().length);
     if(this.view)this.view.revealPositionInCenterIfOutsideViewport(this.surface.record.model.getPositionAt(offset));
-    else {const input=this.editor.input,rect=input.getBoundingClientRect?.()||{top:0,bottom:this.viewport?.clientHeight||300},at=this.charCoords(offset,'window'),info=this.getScrollInfo();
-      if(at.top<rect.top+margin)this.scrollTo(null,Math.max(0,info.top+at.top-rect.top-margin));
-      else if(at.bottom>rect.bottom-margin)this.scrollTo(null,Math.max(0,info.top+at.bottom-rect.bottom+margin));
+    else {const at=this.charCoords(offset,'local'),info=this.getScrollInfo();
+      if(at.top<info.top+margin)this.scrollTo(null,Math.max(0,at.top-margin));
+      else if(at.bottom>info.top+info.clientHeight-margin)this.scrollTo(null,Math.max(0,at.bottom-info.clientHeight+margin));
     }
   }
   charCoords(offset,mode='page'){
-    const p=positionAt(this.index,offset),view=this.view,input=this.input,doc=this.root.ownerDocument,win=doc?.defaultView,rect=(view?.getDomNode?.()||input)?.getBoundingClientRect?.()||{left:0,top:0};
+    const p=positionAt(this.index,offset),view=this.view,input=this.editor.input,win=this.root.ownerDocument?.defaultView,rect=(view?.getDomNode?.()||input)?.getBoundingClientRect?.()||{left:0,top:0};
     let left,top,height=this.options.lineHeight,width=this.options.charWidth;
-    if(view){const at=view.getScrolledVisiblePosition({lineNumber:p.line,column:p.column});left=(at?.left??0)+rect.left;top=(at?.top??0)+rect.top;height=at?.height||height;}
-    else {const padding=this.padding(),first=this.editor.activePane?.range.firstLine||0;left=rect.left+padding.left+this.visualColumn(this.index.lines[p.line-1],p.column-1)*width-(input?.scrollLeft||0);top=rect.top+padding.top+(p.line-1-first)*height-(input?.scrollTop||0);}
-    if(mode==='page'){left+=win?.scrollX||0;top+=win?.scrollY||0;}
+    if(view){
+      const at=view.getScrolledVisiblePosition?.({lineNumber:p.line,column:p.column}),column=at?0:view.getOffsetForColumn?.(p.line,p.column);
+      left=at?at.left+(view.getScrollLeft?.()||0):(view.getLayoutInfo?.().contentLeft||0)+(column>=0?column:this.visualColumn(this.index.lines[p.line-1],p.column-1)*width);
+      top=at?at.top+(view.getScrollTop?.()||0):view.getTopForLineNumber?.(p.line)??(p.line-1)*height;height=at?.height||height;
+    }else {const padding=this.padding();left=padding.left+this.visualColumn(this.index.lines[p.line-1],p.column-1)*width;top=padding.top+(p.line-1)*height;}
+    if(mode!=='local'&&mode!=='div'){
+      const scroll=this.getScrollInfo();left+=rect.left-scroll.left;top+=rect.top-scroll.top;
+      if(mode==='page'){left+=win?.scrollX||0;top+=win?.scrollY||0;}
+    }
     return {left,right:left+width,top,bottom:top+height};
   }
   coordsChar(coords,mode='page'){
-    const win=this.root.ownerDocument?.defaultView,x=finite(coords?.left??coords?.x)-(mode==='page'?win?.scrollX||0:0),y=finite(coords?.top??coords?.y)-(mode==='page'?win?.scrollY||0:0);
-    if(this.view){const target=this.view.getTargetAtClientPoint?.(x,y);return target?.position?this.surface.record.model.getOffsetAt(target.position):this.primarySelection().head;}
-    const input=this.editor.input,rect=input.getBoundingClientRect?.()||{left:0,top:0},padding=this.padding(),first=this.editor.activePane?.range.firstLine||0,{lineHeight,charWidth,tabSize}=this.options;
-    const line=Math.max(0,Math.min(this.index.lines.length-1,first+Math.floor((y-rect.top-padding.top+(input.scrollTop||0))/lineHeight))),text=this.index.lines[line],column=Math.max(0,Math.round((x-rect.left-padding.left+(input.scrollLeft||0))/charWidth));
+    const win=this.root.ownerDocument?.defaultView,view=this.view,input=this.editor.input,rect=(view?.getDomNode?.()||input)?.getBoundingClientRect?.()||{left:0,top:0},scroll=this.getScrollInfo();
+    let x=finite(coords?.left??coords?.x),y=finite(coords?.top??coords?.y);
+    if(mode!=='local'&&mode!=='div'){x-=rect.left-scroll.left+(mode==='page'?win?.scrollX||0:0);y-=rect.top-scroll.top+(mode==='page'?win?.scrollY||0:0);}
+    const {lineHeight,charWidth,tabSize}=this.options,padding=view?{left:view.getLayoutInfo?.().contentLeft||0,top:0}:this.padding();
+    let line=Math.max(0,Math.min(this.index.lines.length-1,Math.floor((y-padding.top)/lineHeight)));
+    if(view){
+      // Screen motions request x=0. Target the text lane, including when the
+      // editor has line numbers, a glyph margin or horizontal scroll.
+      const target=view.getTargetAtClientPoint?.(rect.left+Math.max(padding.left+1,x-scroll.left),rect.top+y-scroll.top);
+      if(target?.position)return this.surface.record.model.getOffsetAt(x<=padding.left?{...target.position,column:1}:target.position);
+      if(view.getTopForLineNumber){let low=1,high=this.index.lines.length;while(low<high){const mid=Math.ceil((low+high)/2);if(view.getTopForLineNumber(mid)<=y)low=mid;else high=mid-1;}line=low-1;}
+    }
+    const text=this.index.lines[line],column=Math.max(0,Math.round((x-padding.left)/charWidth));
     let visual=0,index=0;for(const glyph of text){const width=glyph==='\t'?tabSize-visual%tabSize:1;if(visual+width>column)break;visual+=width;index+=glyph.length;}
     return offsetAt(this.index,line+1,index+1);
   }
-  padding(){const style=this.root.ownerDocument?.defaultView?.getComputedStyle?.(this.editor.input);return {left:parseFloat(style?.paddingLeft)||3,top:parseFloat(style?.paddingTop)||4};}
+  padding(){const style=this.root.ownerDocument?.defaultView?.getComputedStyle?.(this.editor.input);return {left:finite(parseFloat(style?.paddingLeft),3),top:finite(parseFloat(style?.paddingTop),4)};}
   visualColumn(text,offset){let column=0;const tabSize=this.options.tabSize;for(const glyph of String(text).slice(0,offset))column+=glyph==='\t'?tabSize-column%tabSize:1;return column;}
   schedulePaint(){
     if(this.disposed||this.paintFrame!=null)return;

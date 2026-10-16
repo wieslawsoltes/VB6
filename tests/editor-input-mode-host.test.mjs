@@ -30,7 +30,7 @@ function sourceFixture(text,{mode='module',threshold=2000}={}){
   const doc=documentFixture(),root=new Node(doc),project={settings:{tabWidth:4},modules:[{id:'module',name:'Module1',code:text,bookmarks:[]}]},history=new History(),changes=[];
   const editor=Object.assign(Object.create(SourceEditor.prototype),{
     root,project,module:project.modules[0],listeners:new Map(),text:'',lastValue:'',index:indexSource(''),metrics:{indexedLines:0},panes:[],lineHeight:17,characterWidth:8,
-    appearance:{},procedures:new Node(doc),objects:new Node(doc),paint(){},updateSelectors(){},closeCompletion(){},closeInfo(){},refreshAssistance(){this.changingSource=false;},
+    appearance:{},procedures:new Node(doc),objects:new Node(doc),paint(){},schedulePaint(){},updateSelectors(){},closeCompletion(){},closeInfo(){},refreshAssistance(){this.changingSource=false;},
     dispose(){this.disposed=true;this.root.remove();},setAppearance(){},setReadOnly(value){this.readOnly=value;for(const pane of this.panes)pane.input.readOnly=value;}
   });
   function addPane(){
@@ -68,6 +68,16 @@ test('a distant Unicode edit preserves full source and split selection with one 
   f.host.undo();assert.equal(f.host.getText(),code);f.host.redo();assert.equal(f.host.getText(),next);assert.deepEqual(f.ide.commands,['undo','redo']);f.host.dispose();
 });
 
+test('change and open commands join their following live insert session in canonical history',()=>{
+  const f=sourceFixture('alpha beta\n'),end=f.history.beginCoalescing('module');
+  f.host.apply(' beta\n',[{anchor:0,head:0}],{origin:'vim',kind:'command'});
+  assert.equal(end.active,true);
+  f.host.apply('new beta\n',[{anchor:3,head:3}],{origin:'typing',kind:'typing'});
+  end();assert.equal(f.history.undoStack.length,1);assert.equal(f.history.transactionDepth,0);
+  f.host.undo();assert.equal(f.host.getText(),'alpha beta\n');
+  f.host.redo();assert.equal(f.host.getText(),'new beta\n');f.host.dispose();
+});
+
 test('secondary selections retain direction and cannot be mutated through the returned array',()=>{
   const f=sourceFixture('alpha\nbeta\ngamma\n'),selections=[{anchor:4,head:1},{anchor:9,head:7},{anchor:14,head:12}];
   f.host.setSelections(selections);assert.deepEqual(f.host.getSelections(),selections);
@@ -96,11 +106,11 @@ test('XAML commands use one explicit non-typing designer transaction and retain 
 
 function attachMonaco(f){
   const doc=f.doc,pane=new Node(doc),input=new Node(doc,'TEXTAREA');input.className='inputarea';pane.append(input);f.editor.root.append(pane);
-  const model={value:f.editor.text,getValue(){return this.value;},getPositionAt(offset){const p=positionAt(indexSource(this.value),offset);return {lineNumber:p.line,column:p.column};},getOffsetAt(p){return offsetAt(indexSource(this.value),p.lineNumber,p.column);},getOptions(){return {tabSize:3,insertSpaces:false};}};
+  const model={value:f.editor.text,valueReads:0,getValue(){this.valueReads++;return this.value;},getPositionAt(offset){const p=positionAt(indexSource(this.value),offset);return {lineNumber:p.line,column:p.column};},getOffsetAt(p){return offsetAt(indexSource(this.value),p.lineNumber,p.column);},getOptions(){return {tabSize:3,insertSpaces:false};}};
   const view={selections:[{selectionStartLineNumber:1,selectionStartColumn:1,positionLineNumber:1,positionColumn:1}],raw:{cursorStyle:'line-thin',cursorBlinking:'phase',lineHeight:20},
     getDomNode:()=>pane,getSelections(){return this.selections;},getSelection(){return this.selections[0];},setSelections(values){this.selections=values;},getRawOptions(){return this.raw;},updateOptions(options){Object.assign(this.raw,options);},focus(){input.focus();},revealPositionInCenterIfOutsideViewport(){}};
-  const runtime={surfaces:new Map()},surface={view,views:[{view,pane}],record:{model,moduleId:'module'},runtime,readOnly:()=>!!f.editor.readOnly};runtime.surfaces.set(f.editor,surface);f.ide.advancedEditor={runtime};
-  const original=f.editor.replaceGlobal;f.editor.replaceGlobal=function(text,start,end,kind){model.value=model.value.slice(0,start)+text+model.value.slice(end);return original.call(this,text,start,end,kind);};
+  const runtime={surfaces:new Map()},surface={view,views:[{view,pane}],record:{model,lastText:model.value,moduleId:'module'},runtime,readOnly:()=>!!f.editor.readOnly};runtime.surfaces.set(f.editor,surface);f.ide.advancedEditor={runtime};
+  const original=f.editor.replaceGlobal;f.editor.replaceGlobal=function(text,start,end,kind){model.value=model.value.slice(0,start)+text+model.value.slice(end);surface.record.lastText=model.value;return original.call(this,text,start,end,kind);};
   return {model,view,pane,input,surface,runtime};
 }
 
@@ -134,4 +144,55 @@ test('geometry retains UTF-16 offsets around astral characters and expands tabs 
   const f=sourceFixture('\t😀alpha\nbeta');const at=f.host.charCoords(3,'window');
   assert.equal(at.left,3+5*8);assert.equal(f.host.coordsChar({left:at.left,top:at.top},'window'),3);
   const before=f.host.getSelections();f.host.scrollIntoView(9);assert.deepEqual(f.host.getSelections(),before);f.host.dispose();
+});
+
+test('procedure and virtual coordinates stay in full-document space while page coordinates follow the window',()=>{
+  const code='Option Explicit\nSub Alpha()\n'+Array.from({length:300},()=>"\t😀alpha\n").join('')+'End Sub\nSub Beta()\n'+Array.from({length:300},()=>"\t😀beta\n").join('')+'End Sub\n';
+  for(const threshold of [2000,2]){
+    const f=sourceFixture(code,{mode:'procedure',threshold}),offset=f.editor.index.starts[350]+3;
+    f.host.setSelections([{anchor:offset,head:offset}]);
+    const pane=f.editor.activePane,origin=(pane.virtualizer.full.firstLine)*17;
+    pane.input.getBoundingClientRect=()=>({left:100,top:220,right:500,bottom:420});
+    f.doc.defaultView.scrollX=7;f.doc.defaultView.scrollY=19;
+    f.host.scrollTo(11,origin+70);
+    assert.equal(f.host.getScrollInfo().top,origin+70);assert.equal(pane.mode,'procedure');
+    assert.equal(f.host.getScrollInfo().height,f.editor.index.lines.length*17+8);
+    const local=f.host.charCoords(offset,'local'),div=f.host.charCoords(offset,'div'),window=f.host.charCoords(offset,'window'),page=f.host.charCoords(offset,'page');
+    assert.deepEqual(local,div);assert.equal(local.top,4+350*17);assert.equal(local.left,3+5*8);
+    assert.equal(window.top,220+local.top-origin-70);assert.equal(window.left,100+local.left-11);
+    assert.equal(page.top,window.top+19);assert.equal(page.left,window.left+7);
+    for(const [coords,mode]of [[local,'local'],[div,'div'],[window,'window'],[page,'page']])assert.equal(f.host.coordsChar(coords,mode),offset);
+    const selections=f.host.getSelections();f.host.scrollTo(null,0);
+    assert.equal(pane.mode,'module');assert.equal(f.host.getScrollInfo().top,0);assert.deepEqual(f.host.getSelections(),selections);f.host.dispose();
+  }
+});
+
+test('Monaco document coordinates include scroll offsets and screen motions target the text lane',()=>{
+  const f=sourceFixture(Array.from({length:100},(_,i)=>`line${i}`).join('\n')),a=attachMonaco(f),view=a.view;
+  a.pane.getBoundingClientRect=()=>({left:120,top:230,right:520,bottom:430});
+  Object.assign(view,{
+    getScrollLeft:()=>11,getScrollTop:()=>117,getScrollHeight:()=>2010,getScrollWidth:()=>600,
+    getLayoutInfo:()=>({contentLeft:45}),getTopForLineNumber:line=>5+(line-1)*20,
+    getScrolledVisiblePosition:({lineNumber,column})=>({left:45+(column-1)*8-11,top:5+(lineNumber-1)*20-117,height:20}),
+    getTargetAtClientPoint(x,y){if(x<165||y<230||y>=430)return null;return {position:{lineNumber:Math.floor((y-230+117-5)/20)+1,column:Math.max(1,Math.round((x-120+11-45)/8)+1)}};}
+  });
+  f.doc.defaultView.scrollX=7;f.doc.defaultView.scrollY=19;
+  const offset=f.editor.index.starts[10]+3,local=f.host.charCoords(offset,'local'),window=f.host.charCoords(offset,'window'),page=f.host.charCoords(offset,'page');
+  assert.equal(local.left,69);assert.equal(local.top,205);assert.equal(window.left,178);assert.equal(window.top,318);
+  assert.equal(page.left,185);assert.equal(page.top,337);
+  for(const [coords,mode]of [[local,'local'],[window,'window'],[page,'page']])assert.equal(f.host.coordsChar(coords,mode),offset);
+  assert.equal(f.host.coordsChar({left:0,top:205},'local'),f.editor.index.starts[10]);
+  assert.equal(f.host.coordsChar({left:0,top:1605},'local'),f.editor.index.starts[80]);
+  view.getScrolledVisiblePosition=()=>null;view.getOffsetForColumn=(_line,column)=>(column-1)*8;
+  assert.deepEqual(f.host.charCoords(offset,'local'),local);f.host.dispose();
+});
+
+test('100k-line presentation reuses the canonical source index and cached Monaco text',()=>{
+  const code=Array.from({length:100000},(_,i)=>`line${i}`).join('\n'),f=sourceFixture(code),index=f.editor.index,offset=index.starts[50000];
+  f.host.setSelections([{anchor:offset,head:offset},{anchor:offset+10,head:offset+13}]);f.host.setMode({mode:'normal'});
+  for(let i=0;i<5;i++){f.host.paintSelections();assert.equal(f.host.index,index);assert.ok(f.host.overlay.children.length<=3);}
+  assert.ok(f.editor.input.value.length<4000);
+  const a=attachMonaco(f);
+  for(let i=0;i<10;i++){assert.equal(f.host.getText(),code);assert.equal(f.host.index,index);f.host.paintSelections();}
+  assert.equal(a.model.valueReads,0);f.host.dispose();
 });

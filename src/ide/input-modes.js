@@ -150,7 +150,7 @@ export function installInputModes(ide){
   const originalMenu=ide.menu,originalCommand=ide.command;
   const menu=function(name){
     const items=originalMenu.call(this,name);
-    if(!disposed&&name==='Tools')items.push(null,{label:'Input Mode',items:modeItems});
+    if(!disposed&&name==='Tools')items.push(null,{label:'Input Mode',items:modeItems()});
     return items;
   };
   const command=function(id,...args){
