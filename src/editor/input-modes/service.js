@@ -59,8 +59,21 @@ export class EditorInputModeService extends Signal {
     this.emit('change', this.snapshot());
   }
   currentRecord() {
+    const documents = this.ide.documents, key = documents.mdi?.active;
+    const tool = documents.tools.get(key), doc = this.ide.docs?.find(value => value.key === key);
+    const current = this.records.get(tool?.editor || documents.editors.get(doc?.id) || this.ide.editor);
+    // A programmatic tab activation can leave focus in the previous MDI child.
+    // Detached windows own their focus independently of the main document.
+    for (const record of this.records.values()) {
+      if (this.hasTextFocus(record) && (!current || current === record || record.host.root.ownerDocument !== this.document)) return record;
+    }
+    if (current) return current;
     if (this.activeRecord && this.records.has(this.activeRecord.host.editor)) return this.activeRecord;
-    return this.records.get(this.ide.editor) || this.records.values().next().value;
+    return this.records.values().next().value;
+  }
+  hasTextFocus(record) {
+    const document = record.host.root.ownerDocument;
+    return record.host.ownsEvent({target: document.activeElement}) && (document.hasFocus?.() ?? true);
   }
   configure(value, {persist = true} = {}) {
     if (this.disposed) return false;
@@ -92,14 +105,17 @@ export class EditorInputModeService extends Signal {
     record.busy++;
     try {
       const session = definition.createSession(record.host, {onStatus: state => this.stateChanged(record, state)});
-      if (!session || typeof session.handleKey !== 'function' || typeof session.dispose !== 'function') throw new TypeError('An input mode session must implement handleKey and dispose.');
+      if (!session || typeof session.handleKey !== 'function' || typeof session.dispose !== 'function') {
+        session?.dispose?.();
+        throw new TypeError('An input mode session must implement handleKey and dispose.');
+      }
       record.session = session;
       this.stateChanged(record, session.state || emptyState);
     } finally { record.busy--; }
   }
   releaseSession(record) {
     const selections = record.host.getSelections();
-    record.busy++;
+    record.busy++; record.releasing = true;
     try {
       record.endCoalescing?.(); record.endCoalescing = null;
       record.closePrompt?.();
@@ -110,11 +126,11 @@ export class EditorInputModeService extends Signal {
       record.windowPrefix = false; record.message = ''; record.lastMode = null;
       delete record.host.root.dataset.inputMode; delete record.host.root.dataset.vimMode;
       delete record.host.root.dataset.inputComposing;
-    } finally { record.busy--; }
+    } finally { record.busy--; record.releasing = false; }
     this.ide.history?.stopMerging();
   }
   stateChanged(record, state) {
-    if (record.disposed || this.disposed) return;
+    if (record.disposed || record.releasing || this.disposed) return;
     const mode = state?.mode || 'normal';
     if (record.lastMode && mode !== record.lastMode) {
       record.endCoalescing?.(); record.endCoalescing = null;
@@ -131,7 +147,7 @@ export class EditorInputModeService extends Signal {
     this.publish();
   }
   ensureCoalescing(record) {
-    if (record.endCoalescing?.active || !this.ide.history?.beginCoalescing) return;
+    if (this.activeRecord !== record || !this.hasTextFocus(record) || record.releasing || record.endCoalescing?.active || !this.ide.history?.beginCoalescing) return;
     const host = record.host, id = host.moduleId;
     if (id == null || host.readOnly) return;
     const key = host.xaml ? 'xaml:' + this.ide.project.id + ':' + id : id;
@@ -153,8 +169,8 @@ export class EditorInputModeService extends Signal {
     finally {
       record.busy--;
       if (!record.busy && record.session) {
-        record.session.sync?.();
-        this.stateChanged(record, record.session.state || emptyState);
+        try { record.session.sync?.(); this.stateChanged(record, record.session.state || emptyState); }
+        catch (error) { this.report(record, error); }
       }
     }
   }
@@ -187,7 +203,7 @@ export class EditorInputModeService extends Signal {
       if (!clipboard?.writeText) throw new Error('System clipboard is unavailable; text remains in the Vim clipboard register.');
       return clipboard.writeText(text);
     };
-    host.isActive = () => !record.disposed && !this.disposed && this.activeRecord === record && !!record.session && !!host.root.isConnected;
+    host.isActive = () => !record.disposed && !this.disposed && this.currentRecord() === record && this.hasTextFocus(record) && !!record.session && !!host.root.isConnected;
     host.execute = (command, args) => {
       try {
         const result = executeIdeVimCommand(this, record, command, args);
@@ -203,7 +219,7 @@ export class EditorInputModeService extends Signal {
       this.publish();
     }, true));
     record.cleanup.push(listen(host.root, 'focusout', event => {
-      if (owns(event) && !host.root.contains(event.relatedTarget)) { record.endCoalescing?.(); record.endCoalescing = null; }
+      if (owns(event) && !owns({target: event.relatedTarget})) { record.endCoalescing?.(); record.endCoalescing = null; }
     }, true));
     record.cleanup.push(listen(host.root, 'keydown', event => this.keydown(record, event), true));
     record.cleanup.push(listen(host.root, 'beforeinput', event => this.beforeInput(record, event), true));
@@ -262,13 +278,14 @@ export class EditorInputModeService extends Signal {
     if (event.defaultPrevented || !record.session || !record.host.ownsEvent(event) || record.composing || event.isComposing || event.keyCode === 229 || hasUIDialog()) return;
     record.host.activateEvent(event); this.activate(record);
     // Window commands have priority only after an explicit Normal-mode prefix.
-    const key = vimKeyFromEvent(event);
-    if (!key) return;
+    const rawKey = vimKeyFromEvent(event);
+    if (!rawKey) return;
     if (this.settings.mode === 'vim' && record.windowPrefix) {
       event.preventDefault(); event.stopImmediatePropagation(); record.windowPrefix = false;
-      this.run(record, () => executeWindowKey(this, record, key)); this.publish(); return;
+      this.run(record, () => executeWindowKey(this, record, rawKey)); this.publish(); return;
     }
     if (isIdeReservedKey(event)) { record.endCoalescing?.(); record.endCoalescing = null; return; }
+    const key = record.session.keyFromEvent?.(event) || rawKey;
     const before = record.session.state || emptyState;
     if (this.settings.mode === 'vim' && key === '<C-w>' && !['insert', 'replace'].includes(before.mode)) {
       event.preventDefault(); event.stopImmediatePropagation(); record.windowPrefix = true; this.publish(); return;

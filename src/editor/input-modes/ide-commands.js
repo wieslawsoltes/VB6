@@ -24,6 +24,13 @@ function sourceKey(ide, editor) {
   return id ? id + ':code' : ide.documents.mdi.active;
 }
 
+function focusCurrentSource(service) {
+  const ide = service.ide, tool = ide.documents.tools.get(ide.documents.mdi.active);
+  const editor = tool?.editor || (ide.activeDoc?.view === 'code' ? ide.editor : null);
+  const record = service.records.get(editor);
+  if (record) { service.activate(record); record.host.focus(); }
+}
+
 export function executeIdeVimCommand(service, record, command, args = {}) {
   const ide = service.ide, editor = record.host.editor, surface = ide.advancedEditor?.runtime?.surfaces.get(editor);
   const text = String(args.argString ?? args.args?.join(' ') ?? '').trim();
@@ -48,19 +55,19 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
     case 'nextBuffer': case 'previousBuffer': {
       const modules = ide.project.modules;
       if (!modules.length) return;
-      const index = modules.findIndex(module => module.id === (editor.module?.id || ide.activeModule?.id));
+      const index = modules.findIndex(module => module.id === record.host.moduleId);
       const delta = command === 'nextBuffer' ? 1 : -1;
       const module = modules[(Math.max(0, index) + delta + modules.length) % modules.length];
-      ide.openDocument(module.id, 'code'); ide.editor.input.focus(); return;
+      ide.openDocument(module.id, 'code'); focusCurrentSource(service); return;
     }
     case 'buffer': {
-      if (!text) return service.notify(record, ide.activeModule?.name || 'No active buffer');
+      if (!text) return service.notify(record, ide.project.modules.find(module => module.id === record.host.moduleId)?.name || 'No active buffer');
       const modules = ide.project.modules, name = text.replace(/\.(bas|frm|cls)$/i, '').toLowerCase();
       const module = /^\d+$/.test(text) ? modules[Number(text) - 1] : modules.find(value => value.name.toLowerCase() === name);
       if (!module) throw new Error('No source buffer named ' + text);
-      ide.openDocument(module.id, 'code'); ide.editor.input.focus(); return;
+      ide.openDocument(module.id, 'code'); focusCurrentSource(service); return;
     }
-    case 'buffers': return service.notify(record, ide.project.modules.map((module, index) => `${index + 1}${module.id === ide.activeModule?.id ? ' % ' : '   '}${module.name}`).join('\n'));
+    case 'buffers': return service.notify(record, ide.project.modules.map((module, index) => `${index + 1}${module.id === record.host.moduleId ? ' % ' : '   '}${module.name}`).join('\n'));
     case 'split': case 'vsplit': {
       const direction = command === 'vsplit' ? 'vertical' : 'horizontal';
       if (surface) { surface.setSplit(true); surface.setSplitOrientation?.(direction); }
@@ -82,7 +89,8 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
       return editor.toggleFold?.();
     case 'goToDefinition': case 'goToDeclaration':
       if (surface) return surface.run('editor.action.revealDefinition');
-      return ide.command('definition');
+      if (record.host.xaml) return editor.action('definition');
+      return ide.command('goToDefinition');
     case 'autocomplete': return editor.complete?.();
     default: throw new Error('Vim command is not provided by this editor: ' + command);
   }
@@ -103,7 +111,7 @@ export function executeWindowKey(service, record, key) {
       surface.views[(index + (previous ? -1 : 1) + surface.views.length) % surface.views.length].view.focus(); return;
     }
     if (editor.secondary) { editor.activatePane(editor.activePane === editor.primary ? editor.secondary : editor.primary); editor.input.focus(); return; }
-    ide.documents.mdi.cycle(previous ? -1 : 1); ide.editor?.input.focus(); return;
+    ide.documents.mdi.cycle(previous ? -1 : 1); focusCurrentSource(service); return;
   }
   throw new Error('Unknown window command: Ctrl+W ' + key);
 }
