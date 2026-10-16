@@ -8,19 +8,21 @@ It has no runtime package dependencies. Its MIT license is retained in `LICENSE`
 Original source file SHA-256:
 `a8c2887193e966a6d1c4acf01105a0b6e8ed11e8ff26dfe3bb8a898649efe650`.
 
-Source with trailing whitespace normalized SHA-256:
-`7e0127c558f98f6053fca82888836650ac4074a857636058d541aa7c40496838`.
+Source with the nonsemantic packaging normalization below SHA-256:
+`102e7818bc392e42fcbf638a63cae153be6dd23e8b4d0506ca810801e99fb5b1`.
 
 Patched source file SHA-256:
-`7bc67a1391ea08162eb4dedb3f4f2b234258fa59a2841f3a08c652e228b71122`.
+`82ea6d8a0629d7d2ea2c30690f069158f7342be1f3adab496b0077a796dc2dc0`.
 
 The three localized changes in `clipboard-host.patch` register `*` and delegate
 clipboard register reads/writes to the host. The upstream direct browser calls
 could reject without a handler or paste into a document that changed during an
 asynchronous permission request. The adapter supplies permission-safe fallback,
 document/selection/disposal guards, and atomic asynchronous edit transactions.
-Trailing whitespace is normalized without changing behavior; all other engine
-source is unchanged. The patch applies after that whitespace normalization.
+Two nonsemantic packaging normalizations precede that patch: trailing whitespace
+is removed, and the HTML-comment opening in the documentation example is written
+as `\x3c!--`. This prevents the standalone IDE payload from entering HTML
+legacy double-escaped script parsing. All other engine source is unchanged.
 
 The source is intentionally readable and pinned. The IDE's existing bundler
 includes its named `initVim` export without a framework, package installation,

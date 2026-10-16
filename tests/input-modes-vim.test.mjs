@@ -47,7 +47,7 @@ function editor(text,offset=0,extra={}){
 function isolated(name,run){test(name,()=>{Vim.resetVimGlobalState_();Vim.mapclear();Vim.setOption('pcre',false);return run();});}
 
 test('vendored Vim engine matches the pinned release and documented clipboard patch',()=>{
-  const bytes=readFileSync(new URL('../src/editor/input-modes/vendor/vim.js',import.meta.url));assert.equal(createHash('sha256').update(bytes).digest('hex'),'7bc67a1391ea08162eb4dedb3f4f2b234258fa59a2841f3a08c652e228b71122');
+  const bytes=readFileSync(new URL('../src/editor/input-modes/vendor/vim.js',import.meta.url));assert.equal(createHash('sha256').update(bytes).digest('hex'),'82ea6d8a0629d7d2ea2c30690f069158f7342be1f3adab496b0077a796dc2dc0');
 });
 
 isolated('normal mode counts, operator motion composition, and dot repeat are atomic',()=>{

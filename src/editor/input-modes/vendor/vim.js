@@ -4103,7 +4103,7 @@ export function initVim(CM) {
    *
    * - Does not work inside comments:
    *   ```
-   *   <!-- <div>broken</div> -->
+   *   \x3c!-- <div>broken</div> -->
    *   ```
    * - Does not work when tags have different cases:
    *   ```

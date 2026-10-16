@@ -245,7 +245,7 @@ export class VimAdapter {
       const styles=new Uint8Array(text.length);let i=0,lineStart=0;
       while(i<text.length){
         const start=i,ch=text[i];let style=0;
-        if(xml&&text.startsWith('<!--',i)){const end=text.indexOf('-->',i+4);i=end<0?text.length:end+3;style=2;}
+        if(xml&&text.startsWith('\x3c!--',i)){const end=text.indexOf('-->',i+4);i=end<0?text.length:end+3;style=2;}
         else if(xml&&text.startsWith('<![CDATA[',i)){const end=text.indexOf(']]>',i+9);i=end<0?text.length:end+3;style=1;}
         else if(!vb&&!xml&&text.startsWith('/*',i)){const end=text.indexOf('*/',i+2);i=end<0?text.length:end+2;style=2;}
         else if(vb&&(ch==="'"||/^rem(?:\s|$)/i.test(text.slice(i,i+4))&&/^(?:\s*|.*:\s*)$/.test(text.slice(lineStart,i)))||!vb&&!xml&&text.startsWith('//',i)){const end=text.indexOf('\n',i);i=end<0?text.length:end;style=2;}
@@ -313,12 +313,12 @@ function historyCommand(cm,redo){
 }
 function toggleComment(cm){
   const lines=cm.selectedLines(),xml=/xml|xaml|html/i.test(String(cm.getOption('mode')||'')),vb=/vb|basic/i.test(String(cm.getOption('mode')||''));
-  if(xml){const pattern=/^(\s*)<!-- ?([\s\S]*?) ?-->\s*$/,uncomment=lines.every(line=>pattern.test(cm.getLine(line)));for(const line of lines){const text=cm.getLine(line),match=pattern.exec(text);if(uncomment)cm.replaceRange(match[1]+match[2],new VimPosition(line,0),new VimPosition(line,text.length));else if(!match){const start=/^\s*/.exec(text)[0].length;cm.replaceRange('<!-- '+text.slice(start)+' -->',new VimPosition(line,start),new VimPosition(line,text.length));}}return;}
+  if(xml){const pattern=/^(\s*)\x3c!-- ?([\s\S]*?) ?-->\s*$/,uncomment=lines.every(line=>pattern.test(cm.getLine(line)));for(const line of lines){const text=cm.getLine(line),match=pattern.exec(text);if(uncomment)cm.replaceRange(match[1]+match[2],new VimPosition(line,0),new VimPosition(line,text.length));else if(!match){const start=/^\s*/.exec(text)[0].length;cm.replaceRange('\x3c!-- '+text.slice(start)+' -->',new VimPosition(line,start),new VimPosition(line,text.length));}}return;}
   const prefix=vb?"'":'// ',pattern=vb?/^\s*'/ : /^\s*\/\//,uncomment=lines.every(line=>pattern.test(cm.getLine(line)));for(const line of lines){const text=cm.getLine(line),start=/^\s*/.exec(text)[0].length,length=vb?1:text.slice(start,start+3)==='// '?3:2;cm.replaceRange(uncomment?'':prefix,new VimPosition(line,start),new VimPosition(line,start+(uncomment?length:0)));}
 }
 function tagsAround(cm,position,onlyAt=false){
   if(!/xml|xaml|html/i.test(String(cm.getOption('mode')||'')))return;
-  const text=cm.getValue(),offset=cm.indexFromPos(position),tokens=/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(!?\/?)([\w:.-]+)\b(?:"[^"]*"|'[^']*'|[^'">])*\/?>/g,stack=[],pairs=[];let match;
+  const text=cm.getValue(),offset=cm.indexFromPos(position),tokens=/\x3c!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(!?\/?)([\w:.-]+)\b(?:"[^"]*"|'[^']*'|[^'">])*\/?>/g,stack=[],pairs=[];let match;
   while((match=tokens.exec(text))){if(!match[2]||match[1]==='!'||/\/>$/.test(match[0]))continue;const token={name:match[2],start:match.index,end:tokens.lastIndex};if(match[1]==='/'){let i=stack.length-1;while(i>=0&&stack[i].name!==token.name)i--;if(i>=0){const open=stack[i];stack.length=i;pairs.push({open,close:token});}}else stack.push(token);}
   const found=pairs.filter(p=>onlyAt?offset>=p.open.start&&offset<p.open.end||offset>=p.close.start&&offset<p.close.end:offset>=p.open.start&&offset<=p.close.end).sort((a,b)=>(a.close.end-a.open.start)-(b.close.end-b.open.start))[0];
   if(!found)return;return {open:{from:cm.posFromIndex(found.open.start),to:cm.posFromIndex(found.open.end)},close:{from:cm.posFromIndex(found.close.start),to:cm.posFromIndex(found.close.end)}};
