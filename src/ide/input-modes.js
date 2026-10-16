@@ -148,6 +148,12 @@ export function installInputModes(ide){
     {id:'inputModeHelp',label:'Vim Key Reference…'}
   ];
   const originalMenu=ide.menu,originalCommand=ide.command;
+  const chooseMode=mode=>{
+    const result=service.configure({mode});
+    const tool=ide.documents.tools.get(ide.documents.mdi.active);
+    if(tool?.editor||ide.activeDoc?.view==='code')service.currentRecord()?.host.focus();
+    return result;
+  };
   const menu=function(name){
     const items=originalMenu.call(this,name);
     if(!disposed&&name==='Tools')items.push(null,{label:'Input Mode',items:modeItems()});
@@ -157,8 +163,8 @@ export function installInputModes(ide){
     if(!disposed){
       if(id==='inputModeOptions')return service.options();
       if(id==='inputModeHelp')return service.help();
-      if(id==='inputModeToggle')return service.configure({mode:service.settings.mode==='vim'?'default':'vim'});
-      if(typeof id==='string'&&id.startsWith(MODE_COMMAND_PREFIX))return service.configure({mode:id.slice(MODE_COMMAND_PREFIX.length)});
+      if(id==='inputModeToggle')return chooseMode(service.settings.mode==='vim'?'default':'vim');
+      if(typeof id==='string'&&id.startsWith(MODE_COMMAND_PREFIX))return chooseMode(id.slice(MODE_COMMAND_PREFIX.length));
     }
     return originalCommand.call(this,id,...args);
   };
