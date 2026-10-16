@@ -59,7 +59,11 @@ class VimMarker {
 
 class VimSearchCursor {
   constructor(cm,query,position){
-    this.cm=cm;this.regex=query instanceof RegExp?new RegExp(query.source,[...new Set(query.flags.replace(/y/g,'')+'gm')].join('')):new RegExp(escapeRegExp(query),'gm');
+    this.cm=cm;const source=query instanceof RegExp?query.source:escapeRegExp(query),flags=[...new Set((query instanceof RegExp?query.flags.replace(/y/g,''):'')+'gm')].join('');
+    // Vim works with complete characters. Prefer Unicode regular expressions
+    // so `.` and character classes cannot split an astral character. Preserve
+    // older JavaScript-only patterns whose escape syntax rejects Unicode mode.
+    try{this.regex=new RegExp(source,/[uv]/.test(flags)?flags:flags+'u');}catch{this.regex=new RegExp(source,flags);}
     this.index=cm.indexFromPos(position?new VimPosition(position.line,position.ch??Infinity):new VimPosition(0,0));this.start=this.end=null;this.match=null;this.lastDirection=0;this.afterEmptyMatch=false;
   }
   find(back=false){return back?this.findPrevious():this.findNext();}
@@ -115,7 +119,11 @@ export class VimAdapter {
   replaceRange(text,from,to=from,origin='+input'){
     if(this.getOption('readOnly')&&!this._adopting)return;
     return this.operation(()=>{
-      text=String(text);const start=this.indexFromPos(from),end=this.indexFromPos(to);if(start>end)throw new RangeError('Vim edit range is reversed.');const removed=this._text.slice(start,end);if(removed===text)return;
+      text=String(text);const start=this.indexFromPos(from);let end=this.indexFromPos(to);if(start>end)throw new RangeError('Vim edit range is reversed.');
+      // Upstream repeat stores Replace input as text and computes its range in
+      // UTF-16 units. Consume the same number of whole source code points.
+      if(!this._adopting&&this.state.overwrite&&Vim.getVimGlobalState_().macroModeState.isPlaying&&text&&!text.includes('\n')&&end>start){end=start;for(const character of text){if(this._text[end]==='\n')break;end=nextCodePoint(this._text,end);}}
+      const removed=this._text.slice(start,end);if(removed===text)return;
       const change={from:this.posFromIndex(start),to:this.posFromIndex(end),text:text.split('\n'),removed:removed.split('\n'),origin},transform={start,end,text};
       this._text=this._text.slice(0,start)+text+this._text.slice(end);this._lines=null;this._starts=null;this.revision++;
       for(const marker of this._markers)marker.update(transform);

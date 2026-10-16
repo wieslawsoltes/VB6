@@ -164,6 +164,10 @@ isolated('IME can enter Insert from Normal after the host composition guard is a
 isolated('Replace IME overwrites complete code points and Backspace restores the original text',()=>{
   const e=editor('A😀BC');e.keys('R');e.host.composing=true;e.session.beginComposition();e.native('漢字');e.host.composing=false;e.session.endComposition();assert.equal(e.text,'漢字BC');e.keys('<BS>','<Esc>');assert.equal(e.text,'A😀BC');e.dispose();
 });
+isolated('Replace dot replay and regular-expression substitution operate on Unicode code points',()=>{
+  const e=editor('AB 😀😀');e.keys('R');e.host.composing=true;e.session.beginComposition();e.native('漢字');e.host.composing=false;e.session.endComposition();e.keys('<Esc>','w','.');assert.equal(e.text,'漢字 漢字');e.dispose();
+  const s=editor('😀😀');s.ex('%s/./X/g');assert.equal(s.text,'XX');s.dispose();
+});
 isolated('IME reconciliation cancels extra modal edits after an unexpected source or surface change',()=>{
   const e=editor('abc\ndef');e.keys('<C-v>','j','I');e.host.composing=true;e.session.beginComposition();e.host.apply('external change',[{anchor:0,head:0}],{kind:'command'});e.host.composing=false;assert.equal(e.session.endComposition(),false);assert.equal(e.text,'external change');assert.deepEqual(e.selections,[{anchor:0,head:0}]);e.dispose();
 });
