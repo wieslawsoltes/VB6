@@ -2,6 +2,7 @@ import {Signal} from '../../core/signal.js';
 
 export const INPUT_MODE_SETTINGS_KEY = 'vb6-studio-web.input-mode.v1';
 export const DEFAULT_INPUT_MODE = 'default';
+const modeId = /^[a-z][a-z0-9-]{0,63}$/;
 
 /** A mode owns keyboard interpretation, never a project or an editor backend.
  * Factories are lazy: default editing allocates no modal engine session.
@@ -14,7 +15,7 @@ export class InputModeRegistry extends Signal {
   }
 
   register(definition) {
-    if (!definition || !/^[a-z][a-z0-9-]{0,63}$/.test(definition.id || '')) throw new TypeError('Input mode IDs must be lowercase names.');
+    if (!definition || typeof definition.id !== 'string' || !modeId.test(definition.id)) throw new TypeError('Input mode IDs must be lowercase names.');
     if (typeof definition.label !== 'string' || !definition.label.trim()) throw new TypeError('An input mode needs a label.');
     if (typeof definition.createSession !== 'function') throw new TypeError('An input mode needs a session factory.');
     if (this.definitions.has(definition.id)) throw new Error('Input mode already registered: ' + definition.id);
@@ -42,11 +43,15 @@ export function normalizeInputModeSettings(value, registry) {
   return Object.freeze({mode});
 }
 
-export function loadInputModeSettings(storage, registry) {
+export function readStoredInputMode(storage) {
   try {
     const value = JSON.parse(storage?.getItem(INPUT_MODE_SETTINGS_KEY) || 'null');
-    return normalizeInputModeSettings(value?.version === 1 ? value : null, registry);
-  } catch { return normalizeInputModeSettings(null, registry); }
+    return value?.version === 1 && typeof value.mode === 'string' && modeId.test(value.mode) ? value.mode : DEFAULT_INPUT_MODE;
+  } catch { return DEFAULT_INPUT_MODE; }
+}
+
+export function loadInputModeSettings(storage, registry) {
+  return normalizeInputModeSettings({mode: readStoredInputMode(storage)}, registry);
 }
 
 export function saveInputModeSettings(storage, settings) {

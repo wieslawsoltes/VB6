@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EditorInputModeService} from '../src/editor/input-modes/service.js';
 import {History} from '../src/core/history.js';
+import {INPUT_MODE_SETTINGS_KEY} from '../src/editor/input-modes/registry.js';
 
-function fixture() {
+function fixture({storedMode} = {}) {
   const document = {defaultView: {}, createElement() { throw new Error('No UI is needed by this fixture'); }};
   const root = () => Object.assign(new EventTarget(), {ownerDocument: document, dataset: {}, contains: () => true, isConnected: true});
   const editor = {root: root(), dispose() { this.disposed = true; }};
   const entries = new Map(), storage = {getItem: key => entries.get(key), setItem: (key, value) => entries.set(key, value)};
+  if (storedMode) entries.set(INPUT_MODE_SETTINGS_KEY, JSON.stringify({version: 1, mode: storedMode}));
   const ide = {root: root(), project: {id: 'project', modules: []}, editor, history: new History(), status() {},
     documents: {editors: new Map([['source', editor]]), tools: new Map(), editor: () => editor, openTool: value => value, reset() {}}};
   const hosts = [];
@@ -146,4 +148,19 @@ test('a factory failure for a later editor keeps document creation usable and re
   assert.equal(f.service.records.get(editor).session, null);
   assert.equal(f.service.records.get(f.editor).session, null);
   f.service.dispose();
+});
+
+test('late extension registration restores its saved mode until the user makes an explicit selection', () => {
+  for (const explicit of [false, true]) {
+    const f = fixture({storedMode: 'later'}); let created = 0;
+    assert.equal(f.service.settings.mode, 'default');
+    if (explicit) f.service.configure({mode: 'default'});
+    const unregister = f.service.registerMode({id: 'later', label: 'Later', createSession: () => {
+      created++; return {handleKey() {}, dispose() {}};
+    }});
+    assert.equal(f.service.settings.mode, explicit ? 'default' : 'later');
+    assert.equal(created, explicit ? 0 : 1);
+    unregister(); assert.equal(f.service.settings.mode, 'default');
+    f.service.dispose();
+  }
 });

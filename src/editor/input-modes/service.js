@@ -1,6 +1,6 @@
 import {Signal} from '../../core/signal.js';
 import {hasUIDialog} from '../../core/window-context.js';
-import {InputModeRegistry, DEFAULT_INPUT_MODE, loadInputModeSettings, saveInputModeSettings} from './registry.js';
+import {InputModeRegistry, DEFAULT_INPUT_MODE, readStoredInputMode, loadInputModeSettings, saveInputModeSettings} from './registry.js';
 import {vimKeyFromEvent, isIdeReservedKey} from './keys.js';
 import {createEditorHost} from './editor-host.js';
 import {createVimSession} from './vim-adapter.js';
@@ -28,14 +28,19 @@ export class EditorInputModeService extends Signal {
     if (storage === undefined) { try { storage = this.document.defaultView.localStorage; } catch {} }
     this.storage = storage;
     if (!this.registry.has('vim')) this.registry.register({id: 'vim', label: 'Vim', description: 'Modal editing with motions, operators, Visual selection, registers, macros and Ex commands.', createSession: createVimSession});
+    const preferred = readStoredInputMode(storage);
+    this.pendingMode = this.registry.has(preferred) ? null : preferred;
     installIdeVimCommands();
     this.disposables.push(this.registry.on('change', () => {
-      if (!this.registry.has(this.settings.mode)) this.configure({mode: DEFAULT_INPUT_MODE});
+      if (this.pendingMode && this.registry.has(this.pendingMode)) {
+        try { this.configure({mode: this.pendingMode}, {persist: false}); }
+        catch (error) { this.ide.status('Input mode disabled: ' + (error?.message || String(error))); }
+      } else if (!this.registry.has(this.settings.mode)) this.configure({mode: DEFAULT_INPUT_MODE});
       else this.publish();
     }));
     this.installLifecycle();
     this.attachExisting();
-    this.configure(loadInputModeSettings(storage, this.registry), {persist: false});
+    this.configure(loadInputModeSettings(storage, this.registry), {persist: false, restore: true});
   }
 
   listModes() { return this.registry.list(); }
@@ -75,10 +80,11 @@ export class EditorInputModeService extends Signal {
     const document = record.host.root.ownerDocument;
     return record.host.ownsEvent({target: document.activeElement}) && (document.hasFocus?.() ?? true);
   }
-  configure(value, {persist = true} = {}) {
+  configure(value, {persist = true, restore = false} = {}) {
     if (this.disposed) return false;
     const mode = value?.mode;
     if (typeof mode !== 'string' || !this.registry.has(mode)) throw new RangeError('Unknown editor input mode: ' + String(mode));
+    if (!restore) this.pendingMode = null;
     if (this.settings.mode !== mode) {
       this.generation++;
       for (const record of this.records.values()) this.releaseSession(record);
@@ -194,6 +200,7 @@ export class EditorInputModeService extends Signal {
     const host = this.hostFactory(editor, this.ide);
     const record = {host, session: null, busy: 0, composing: false, disposed: false, windowPrefix: false, notifications: new Set(), cleanup: [], lastMode: null};
     this.records.set(editor, record);
+    record.run = action => this.run(record, action);
     host.openDialog = (template, callback, options = {}) => openInputModePrompt(record, template, callback, options, () => this.publish());
     host.openNotification = (template, options = {}) => openInputModeNotification(record, template, options, () => this.publish());
     host.readClipboard = () => {
@@ -208,11 +215,9 @@ export class EditorInputModeService extends Signal {
     };
     host.isActive = () => !record.disposed && !this.disposed && this.currentRecord() === record && this.hasTextFocus(record) && !!record.session && !!host.root.isConnected;
     host.execute = (command, args) => {
-      try {
-        const result = executeIdeVimCommand(this, record, command, args);
-        if (result?.then) result.catch(error => this.report(record, error));
-        return result;
-      } catch (error) { this.report(record, error); throw error; }
+      const result = executeIdeVimCommand(this, record, command, args);
+      if (result?.then) result.catch(error => this.report(record, error));
+      return result;
     };
     const owns = event => host.ownsEvent(event);
     record.cleanup.push(listen(host.root, 'focusin', event => {
@@ -232,12 +237,13 @@ export class EditorInputModeService extends Signal {
       // Native composition is owned by the existing editor. An IME start in
       // Normal mode enters Insert, so preedit text is never mistaken for keys.
       if (record.session && !['insert', 'replace'].includes(record.session.state?.mode)) this.run(record, () => record.session.handleKey('i'));
+      if (record.session?.beginComposition) this.run(record, () => record.session.beginComposition());
       record.composing = true; host.root.dataset.inputComposing = 'true';
     }, true));
     record.cleanup.push(listen(host.root, 'compositionend', event => {
       if (!owns(event)) return;
       record.composing = false; delete host.root.dataset.inputComposing;
-      queueMicrotask(() => { if (!record.disposed) this.run(record, () => record.session?.sync?.()); });
+      queueMicrotask(() => { if (!record.disposed) this.run(record, () => record.session?.endComposition ? record.session.endComposition() : record.session?.sync?.()); });
     }, true));
     record.cleanup.push(host.subscribe(event => {
       if (record.disposed || record.busy || record.composing || !record.session) return;

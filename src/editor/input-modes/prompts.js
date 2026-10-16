@@ -23,10 +23,11 @@ export function openInputModePrompt(record, template, callback, options, notify)
     if (typeof value === 'string') { input.value = value; return; }
     closed = true; bar.remove();
     if (record.closePrompt === close) record.closePrompt = null;
-    options.onClose?.(bar);
+    invoke(() => options.onClose?.(bar));
     notify();
   };
   const invoke = fn => {
+    if (record.run) return record.run(fn);
     record.busy++;
     try { return fn(); }
     finally { record.busy--; notify(); }
@@ -53,7 +54,7 @@ export function openInputModePrompt(record, template, callback, options, notify)
   });
   input.addEventListener('blur', event => {
     if (closed) return;
-    options.onBlur?.(event, close);
+    invoke(() => options.onBlur?.(event, close));
     if (options.closeOnBlur === true) close();
   });
   record.closePrompt = close;

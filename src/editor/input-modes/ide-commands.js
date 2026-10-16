@@ -35,9 +35,10 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
   const ide = service.ide, editor = record.host.editor, surface = ide.advancedEditor?.runtime?.surfaces.get(editor);
   const text = String(args.argString ?? args.args?.join(' ') ?? '').trim();
   const close = () => {
-    if (surface?.views.length > 1) return surface.setSplit(false);
-    if (editor.secondary) return editor.toggleSplit(false);
-    return ide.closeDocument(sourceKey(ide, editor));
+    const currentSurface = ide.advancedEditor?.runtime?.surfaces.get(editor);
+    if (currentSurface?.views.length > 1) { currentSurface.setSplit(false); record.host.focus(); return; }
+    if (editor.secondary) { editor.toggleSplit(false); record.host.focus(); return; }
+    ide.closeDocument(sourceKey(ide, editor)); focusCurrentSource(service);
   };
   switch (command) {
     case 'save':
@@ -47,7 +48,7 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
       if (text) throw new Error('Use the IDE Save As command to choose a project filename.');
       const project = ide.project, key = sourceKey(ide, editor);
       return Promise.resolve(ide.saveProject()).then(saved => {
-        if (saved !== false && !service.disposed && project === ide.project) ide.closeDocument(key);
+        if (saved !== false && !service.disposed && !record.disposed && project === ide.project && sourceKey(ide, editor) === key) close();
         return saved;
       });
     }
@@ -76,8 +77,9 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
       return;
     }
     case 'only':
-      if (surface) return surface.setSplit(false);
-      return editor.toggleSplit?.(false);
+      if (surface) surface.setSplit(false);
+      else editor.toggleSplit?.(false);
+      record.host.focus(); return;
     case 'help': return service.help?.();
     case 'defaultInputMode': return service.configure({mode: 'default'});
     case 'vimInputMode': return service.configure({mode: 'vim'});
@@ -103,7 +105,7 @@ export function executeWindowKey(service, record, key) {
   if (key === 'v' || key === '<C-v>') return executeIdeVimCommand(service, record, 'vsplit');
   if (key === 'o' || key === '<C-o>') return executeIdeVimCommand(service, record, 'only');
   if (key === 'c' || key === 'q') return executeIdeVimCommand(service, record, 'close');
-  if (key === '=') { if (surface) surface.setSplitOrientation?.(surface.splitOrientation || 'horizontal'); else editor.setSplitRatio?.(.5); return; }
+  if (key === '=') { if (surface?.views.length > 1) surface.setSplitRatio(50); else if (!surface && editor.secondary) editor.setSplitRatio?.(.5); return; }
   if (['h', 'j', 'k', 'l', 'w', 'W', 'p', '<C-w>', '<Left>', '<Right>', '<Up>', '<Down>', '<C-h>', '<C-j>', '<C-k>', '<C-l>'].includes(key)) {
     const previous = ['h', 'k', 'W', '<Left>', '<Up>', '<C-h>', '<C-k>'].includes(key);
     if (surface?.views.length > 1) {

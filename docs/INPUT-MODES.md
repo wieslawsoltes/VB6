@@ -16,6 +16,8 @@ The preference is stored for this IDE in browser local storage under
 `vb6-studio-web.input-mode.v1`. It is not a project setting or an exported runtime
 dependency. Unavailable storage still allows switching for the current session;
 invalid, unsupported, or unrecognized stored values fall back to Default.
+If an extension registers the saved mode later during startup, it is restored
+unless the user has already explicitly chosen a mode in the current session.
 
 The status button displays the selected mode, Normal/Insert/Replace/Visual state,
 pending keys, and macro recording. **Tools → Input Mode → Vim Key Reference**
@@ -70,7 +72,7 @@ option; use the prompt's regex selector or `:set` options to choose the dialect.
 | --- | --- |
 | `:w`, `:write`, `:wall` | Save the project with the normal IDE save workflow |
 | `:q`, `:quit`, `:close`, `:bd` | Close a split pane first, or close the editor document; project source remains in the project |
-| `:wq`, `:x` | Save successfully, then close the editor document |
+| `:wq`, `:x` | Save successfully, then close the active split or editor document |
 | `:bn`, `:bp`, `:bN` | Open the next or previous project source module |
 | `:buffer NAME`, `:buffer NUMBER` | Open a module by its name or its one-based position in the buffer list |
 | `:ls`, `:buffers` | List project source buffers |
