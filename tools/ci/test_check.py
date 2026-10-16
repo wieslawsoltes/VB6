@@ -18,7 +18,7 @@ class WorkflowAuditTests(unittest.TestCase):
     def reject(self,mutate):
         value=copy.deepcopy(self.workflow);mutate(value);self.path.write_text(yaml.safe_dump(value,sort_keys=False))
         with self.assertRaises(ValueError):check.audit(self.root)
-    def test_complete_graph_passes(self):self.assertEqual(check.audit(self.root)['preservedEntrypoints'],89)
+    def test_complete_graph_passes(self):self.assertEqual(check.audit(self.root)['preservedEntrypoints'],90)
     def test_compute_reference_dependency_required(self):
         self.reject(lambda w:w['jobs']['compute-gpu'].update({'needs':['hygiene']}))
     def test_compute_shader_execution_cannot_be_removed(self):

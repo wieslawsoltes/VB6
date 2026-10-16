@@ -164,3 +164,4 @@
 .source-editor[data-code-split="vertical"] .code-split-grip {right:0;left:auto;top:0;bottom:auto;width:5px;height:16px;cursor:col-resize;}
 .input-mode-commandline > div {min-width:0;flex:1;}
 .input-mode-commandline .input-mode-command-input {min-width:0;background:transparent;color:inherit;font:inherit;border:0;outline:0;}
+[data-tui-shell] .statusbar>.input-mode-status {padding-inline:var(--dos-cell-width)!important;}
