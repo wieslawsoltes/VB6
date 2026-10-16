@@ -66,6 +66,7 @@
   ],
   "advanced-editor": [
     "browser-advanced-editor-tests.py",
+    "browser-input-modes-tests.py",
     "browser-tui-advanced-tests.py",
     "figma-advanced-editor-browser-tests.py"
   ],

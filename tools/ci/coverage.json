@@ -7,6 +7,7 @@
     "tools/bench-layout.mjs",
     "tools/benchmark-decimal.mjs",
     "tools/browser-advanced-editor-tests.py",
+    "tools/browser-input-modes-tests.py",
     "tools/browser-application-theme-tests.py",
     "tools/browser-classic-export-tests.py",
     "tools/browser-com-ole-tests.py",

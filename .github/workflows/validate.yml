@@ -382,7 +382,9 @@ jobs:
         with:
           name: advanced-editor-assets
           path: dist
-      - name: Actual Monaco and Figma integration on both origins
+      - name: Actual Monaco, Vim, TUI and Figma integration on both origins
+        env:
+          VB6_TEST_ADVANCED: '1'
         run: python tools/ci/run.py advanced-editor
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
@@ -392,6 +394,7 @@ jobs:
           name: advanced-editor-${{ matrix.browser }}
           path: |-
             reports/advanced-editor
+            reports/input-modes
             reports/ci
           if-no-files-found: error
           retention-days: 7
