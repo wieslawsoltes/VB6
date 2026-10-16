@@ -26,6 +26,15 @@ class Node extends EventTarget {
 }
 function documentFixture(){const doc={defaultView:{getComputedStyle:()=>({paddingLeft:'3px',paddingTop:'4px'})},activeElement:null};doc.createElement=tag=>new Node(doc,tag.toUpperCase());return doc;}
 
+test('native XAML geometry measures the displayed font and refreshes after style or owning-window changes',()=>{
+  let measured=0,style={font:'13px monospace',letterSpacing:'normal'};
+  const makeDocument=width=>({defaultView:{getComputedStyle:()=>style},createElement:()=>({getContext:()=>({measureText:()=>{measured++;return {width};}})})});
+  const host=Object.assign(Object.create(EditorHost.prototype),{root:{ownerDocument:makeDocument(7.8)},editor:{input:{}},xaml:true});
+  assert.equal(host.nativeCharacterWidth(8.16),7.8);assert.equal(host.nativeCharacterWidth(8.16),7.8);assert.equal(measured,1);
+  style={font:'13px monospace',letterSpacing:'1px'};assert.equal(host.nativeCharacterWidth(8.16),8.8);assert.equal(measured,2);
+  host.root.ownerDocument=makeDocument(8);assert.equal(host.nativeCharacterWidth(8.16),9);assert.equal(measured,3);
+});
+
 function sourceFixture(text,{mode='module',threshold=2000}={}){
   const doc=documentFixture(),root=new Node(doc),project={settings:{tabWidth:4},modules:[{id:'module',name:'Module1',code:text,bookmarks:[]}]},history=new History(),changes=[];
   const editor=Object.assign(Object.create(SourceEditor.prototype),{

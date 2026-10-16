@@ -122,6 +122,12 @@
   outline-offset:-1px;
 }
 .input-mode-selection {background:var(--vb-selection);opacity:.35;}
+.input-mode-search-overlay {position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:3;}
+.input-mode-search-match,.input-mode-search-empty {background:color-mix(in srgb,#ffcf33 42%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,#a57700 65%,transparent);pointer-events:none;}
+.input-mode-search-empty {position:absolute;width:1ch;height:1em;}
+@media(forced-colors:active){.input-mode-search-match,.input-mode-search-empty {background:Highlight;outline:1px solid Highlight;opacity:.4;}}
+[data-tui-shell] :is(.code-viewport,.xaml-viewport):has(> :is(.syntax-layer,.xaml-highlight)[data-tui-source-paint]) > .input-mode-search-overlay .input-mode-search-match,
+[data-tui-shell] [data-tui-text-view] :is(.input-mode-search-match,.input-mode-search-empty) {background:transparent;box-shadow:none;outline:0;}
 [data-input-mode="vim"]:is([data-vim-mode="normal"],[data-vim-mode="replace"]):not([data-input-composing="true"]) :is(.source-input,.xaml-input) {caret-color:transparent;}
 [data-input-mode="vim"][data-input-composing="true"] :is(.source-input,.xaml-input) {caret-color:auto;}
 [data-tui-shell] .input-mode-status {

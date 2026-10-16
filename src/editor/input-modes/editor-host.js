@@ -1,4 +1,5 @@
 import {indexSource,positionAt,offsetAt,sourceRange,textChange} from '../projection.js';
+import {InputModeSearchOverlay} from './search-overlay.js';
 
 const hooksKey=Symbol.for('vb6.editor.input-host.hooks.v1');
 const finite=(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fallback;
@@ -56,7 +57,7 @@ export class EditorHost {
     if(!editor?.root)throw new TypeError('An editor surface is required.');
     this.editor=editor;this.ide=ide;this.root=editor.root;this.xaml=!Array.isArray(editor.panes);
     this.listeners=new Set();this.disposables=[];this.selectionStates=new WeakMap();this.cursorOptions=new Map();this.pending=new Map();this.mode=null;
-    const changed=event=>this.queue('change',event),cursor=event=>{if(!this.settingSelection&&!this.applying)this.getSelections();this.queue('cursor',event);this.schedulePaint();};
+    const changed=event=>{this.queue('change',event);this.schedulePaint();},cursor=event=>{if(!this.settingSelection&&!this.applying)this.getSelections();this.queue('cursor',event);this.schedulePaint();};
     if(typeof editor.on==='function'){
       this.disposables.push(editor.on('change',changed),editor.on('cursor',cursor));
     }
@@ -101,8 +102,18 @@ export class EditorHost {
   get options(){
     const surface=this.surface,view=surface?.view,model=surface?.record.model,raw=model?.getOptions?.(),tabSize=Math.max(1,finite(raw?.tabSize,this.xaml?2:this.editor.project?.settings?.tabWidth||this.ide?.project?.settings?.tabWidth||4));
     const keys=surface?.monaco?.editor.EditorOption,font=keys&&view?.getOption?.(keys.fontInfo);
-    const lineHeight=Math.max(1,finite(keys&&view?.getOption?.(keys.lineHeight),finite(view?.getRawOptions?.().lineHeight,this.editor.lineHeight||17))),charWidth=font?.typicalHalfwidthCharacterWidth||this.editor.characterWidth||lineHeight*.48,viewport=this.viewport;
+    const lineHeight=Math.max(1,finite(keys&&view?.getOption?.(keys.lineHeight),finite(view?.getRawOptions?.().lineHeight,this.editor.lineHeight||17))),charWidth=font?.typicalHalfwidthCharacterWidth||this.editor.characterWidth||(this.xaml?this.nativeCharacterWidth(lineHeight*.48):lineHeight*.48),viewport=this.viewport;
     return {tabSize,indentUnit:tabSize,indentWithTabs:raw?.insertSpaces===false,lineHeight,charWidth,viewportLines:Math.max(1,Math.floor((viewport?.clientHeight||300)/lineHeight))};
+  }
+  nativeCharacterWidth(fallback){
+    const doc=this.root.ownerDocument,style=doc?.defaultView?.getComputedStyle?.(this.editor.input);
+    if(!style)return fallback;
+    const font=style.font||`${style.fontStyle||'normal'} ${style.fontWeight||'normal'} ${style.fontSize||'13px'} ${style.fontFamily||'monospace'}`,spacing=parseFloat(style.letterSpacing)||0,key=font+':'+spacing;
+    if(this.nativeFont?.document===doc&&this.nativeFont.key===key)return this.nativeFont.width;
+    const canvas=doc.createElement?.('canvas'),context=canvas?.getContext?.('2d');if(!context)return fallback;
+    context.font=font;const width=context.measureText('M').width+spacing;
+    if(!Number.isFinite(width)||width<=0)return fallback;
+    this.nativeFont={document:doc,key,width};return width;
   }
   get viewport(){return this.surface?.views.find(state=>state.view===this.view)?.pane||this.editor.activePane?.viewport||this.editor.viewport;}
   getText(){const record=this.surface?.record;return String(record?(record.lastText??record.model.getValue()):(this.editor.text??''));}
@@ -231,6 +242,7 @@ export class EditorHost {
     queueMicrotask(()=>{this.notificationPending=false;if(this.disposed)return;const events=[...this.pending.values()];this.pending.clear();for(const value of events)this.notify(value);});
   }
   setMode(state){this.mode=state?.mode?{...state}:null;this.updateCursorOptions();this.schedulePaint();}
+  setSearchOverlay(overlay){if(!this.searchOverlay&&!overlay)return;this.searchOverlay??=new InputModeSearchOverlay(this);this.searchOverlay.set(overlay);this.schedulePaint();}
   updateCursorOptions(){
     if(!this.xaml){
       if(this.mode){if(!this.overwriteState)this.overwriteState={value:this.editor.overwrite};if(this.editor.overwrite){this.editor.overwrite=false;this.root.classList?.toggle('overwrite-mode',false);}}
@@ -431,7 +443,7 @@ export class EditorHost {
     this.paintWindow=win;this.paintFrame=win.requestAnimationFrame(()=>{this.paintFrame=null;this.paintSelections();});
   }
   paintSelections(){
-    if(this.disposed)return;this.updateCursorOptions();
+    if(this.disposed)return;this.updateCursorOptions();this.searchOverlay?.paint();
     const input=this.editor.input,viewport=this.viewport,doc=this.root.ownerDocument;
     if(this.surface||!this.mode||this.composing||!viewport?.getBoundingClientRect||doc?.activeElement!==input){this.overlay?.remove();this.overlay=null;return;}
     if(this.overlay?.parentNode!==viewport){this.overlay?.remove();this.overlay=doc.createElement('div');this.overlay.className='input-mode-overlay';this.overlay.setAttribute('aria-hidden','true');Object.assign(this.overlay.style,{position:'absolute',inset:'0',pointerEvents:'none',overflow:'hidden',zIndex:'4'});viewport.append(this.overlay);}
@@ -454,6 +466,7 @@ export class EditorHost {
     if(this.disposed)return;this.disposed=true;
     if(this.paintFrame!=null)this.paintWindow?.cancelAnimationFrame?.(this.paintFrame);this.paintFrame=null;
     for(const dispose of this.disposables.splice(0))dispose();
+    this.searchOverlay?.dispose();this.searchOverlay=null;
     this.mode=null;this.updateCursorOptions();
     for(const state of this.surface?.views||[])state.presentation?.refresh?.();
     for(const input of this.xaml?[this.editor.input]:this.editor.panes.map(pane=>pane.input))if(input?.dataset)delete input.dataset.vimMode;
