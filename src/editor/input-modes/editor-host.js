@@ -5,6 +5,14 @@ const finite=(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fa
 const clamp=(value,length)=>Math.max(0,Math.min(length,Math.trunc(finite(value))));
 const sameSelection=(a,b)=>a?.anchor===b?.anchor&&a?.head===b?.head;
 const copySelections=values=>values.map(({anchor,head})=>({anchor,head}));
+const comparePosition=(a,b)=>a.line-b.line||a.ch-b.ch;
+const changeEnd=(from,text)=>({line:from.line+text.length-1,ch:(text.length===1?from.ch:0)+text[text.length-1].length});
+function transformPosition(position,from,to,text,assoc=1){
+  if(comparePosition(position,from)<0||comparePosition(position,from)===0&&assoc<0)return position;
+  const end=changeEnd(from,text);
+  if(comparePosition(position,to)>0||comparePosition(position,to)===0&&assoc>0)return {line:position.line+end.line-to.line,ch:position.line===to.line?end.ch+position.ch-to.ch:position.ch};
+  return assoc<0?{...from}:end;
+}
 
 /** A shared notification hook survives the optional Monaco adapter wrapping an
  * editor method. It never retains a disposed host, even when an outer adapter
@@ -281,7 +289,8 @@ export class EditorHost {
    * regions. Its temporary cursor never reaches the canonical source editor. */
   findPosV(offset,amount,unit='line',goalColumn,context={}){
     const surface=this.surface,view=surface?.view,model=surface?.record.model;
-    if(!view?.trigger||!view.getPosition||this.disposed||this.composing||context.text!==undefined&&context.text!==this.getText())return undefined;
+    if(!view?.trigger||!view.getPosition||this.disposed||this.composing)return undefined;
+    if(context.text!==undefined&&context.text!==this.getText())return this.findStagedPosV(offset,amount,unit,goalColumn,context);
     const count=Math.abs(Math.trunc(finite(amount)))*(unit==='page'?Math.max(1,this.options.viewportLines-2):1);
     offset=clamp(offset,this.getText().length);if(!count)return {offset,hitSide:false};
     const selections=view.getSelections?.();if(!selections?.length)return undefined;
@@ -329,14 +338,66 @@ export class EditorHost {
       finally{surface.syncCursor=sync;this.settingSelection=setting;}
     }
   }
-  charCoords(offset,mode='page'){
-    const p=positionAt(this.index,offset),view=this.view,input=this.editor.input,win=this.root.ownerDocument?.defaultView,rect=(view?.getDomNode?.()||input)?.getBoundingClientRect?.()||{left:0,top:0};
+  stagedLayout(context){
+    const surface=this.surface,create=surface?.runtime.assets?.createVimLineLayout;
+    if(!create||!context?.getLine||!context.positionAt||!context.offsetAt||context.text===this.getText())return null;
+    const operation=context.operation&&typeof context.operation==='object'?context.operation:null;
+    this.stagedLayouts??=new WeakMap();let state=operation&&this.stagedLayouts.get(operation);
+    if(!state||state.view!==surface.view){
+      const model=surface.record.model,ranges=surface.view.saveViewState?.()?.contributionsState?.['editor.contrib.folding']?.collapsedRegions||[];
+      state={view:surface.view,layout:create(surface.view),changes:0,folds:ranges.filter(r=>r.isCollapsed!==false&&r.endLineNumber>r.startLineNumber).map(r=>({from:{line:r.startLineNumber-1,ch:0},to:{line:r.endLineNumber-1,ch:Math.max(0,(model.getLineMaxColumn?.(r.endLineNumber)||1)-1)}}))};
+      if(operation)this.stagedLayouts.set(operation,state);
+    }
+    const changes=context.changes||[];
+    for(;state.changes<changes.length;state.changes++){
+      const change=changes[state.changes];
+      for(const fold of state.folds){fold.from=transformPosition(fold.from,change.from,change.to,change.text,1);fold.to=transformPosition(fold.to,change.from,change.to,change.text,-1);}
+    }
+    const hidden=[];
+    for(const fold of [...state.folds].sort((a,b)=>comparePosition(a.from,b.from))){
+      const from=fold.from.line+1,to=Math.min(context.lineCount-1,fold.to.line);if(from>to)continue;
+      const previous=hidden[hidden.length-1];if(previous&&from<=previous.to+1)previous.to=Math.max(previous.to,to);else hidden.push({from,to});
+    }
+    return {layout:state.layout,hidden};
+  }
+  findStagedPosV(offset,amount,unit,goalColumn,context){
+    const staged=this.stagedLayout(context);if(!staged)return undefined;
+    const count=Math.abs(Math.trunc(finite(amount)))*(unit==='page'?Math.max(1,this.options.viewportLines-2):1),direction=amount<0?-1:1,start=context.positionAt(clamp(offset,context.text.length));
+    if(!count)return {offset:context.offsetAt(start.line,start.ch),hitSide:false};
+    let line=start.line,remaining=count,projection=staged.layout.line(context.getLine(line)),row=projection.rowAt(start.ch);
+    const nextLine=(current,steps)=>{
+      let next=current+direction*steps;
+      for(const range of direction>0?staged.hidden:[...staged.hidden].reverse()){
+        if(direction>0&&range.from>current&&range.from<=next)next+=range.to-range.from+1;
+        else if(direction<0&&range.to<current&&range.to>=next)next-=range.to-range.from+1;
+      }
+      return Math.max(0,Math.min(context.lineCount-1,next));
+    };
+    if(context.logical){line=nextLine(line,count);return {offset:context.offsetAt(line,Number.isFinite(context.goalCharacter)?context.goalCharacter:start.ch),hitSide:count>0&&line===start.line};}
+    const left=this.view.getLayoutInfo?.().contentLeft||0,goal=Number.isFinite(goalColumn)?goalColumn-left:projection.left(start.ch);
+    while(remaining>0){
+      const available=direction>0?projection.count-1-row:row;
+      if(remaining<=available){row+=direction*remaining;remaining=0;break;}
+      remaining-=available;const next=nextLine(line,1);if(next===line)break;
+      line=next;projection=staged.layout.line(context.getLine(line));row=direction>0?0:projection.count-1;remaining--;
+    }
+    return {offset:context.offsetAt(line,projection.character(row,goal)),hitSide:remaining>0};
+  }
+  charCoords(offset,mode='page',context){
+    const external=context?.positionAt&&context.text!==this.getText(),position=external?context.positionAt(clamp(offset,context.text.length)):null;
+    const p=position?{line:position.line+1,column:position.ch+1}:positionAt(this.index,offset),text=external?context.getLine(position.line):this.index.lines[p.line-1],view=this.view,input=this.editor.input,win=this.root.ownerDocument?.defaultView,rect=(view?.getDomNode?.()||input)?.getBoundingClientRect?.()||{left:0,top:0};
     let left,top,height=this.options.lineHeight,width=this.options.charWidth;
-    if(view){
+    const staged=external&&this.stagedLayout(context);
+    if(view&&staged){
+      const projection=staged.layout.line(text);left=(view.getLayoutInfo?.().contentLeft||0)+projection.left(position.ch);
+      let base={line:position.line,ch:0};const changes=context.changes||[];
+      for(let i=changes.length-1;i>=0;i--){const change=changes[i];base=transformPosition(base,change.from,changeEnd(change.from,change.text),change.removed,1);}
+      top=(view.getTopForLineNumber?.(base.line+1)||0)+projection.rowAt(position.ch)*height;
+    }else if(view){
       const at=view.getScrolledVisiblePosition?.({lineNumber:p.line,column:p.column}),column=at?0:view.getOffsetForColumn?.(p.line,p.column);
-      left=at?at.left+(view.getScrollLeft?.()||0):(view.getLayoutInfo?.().contentLeft||0)+(column>=0?column:this.visualColumn(this.index.lines[p.line-1],p.column-1)*width);
+      left=at?at.left+(view.getScrollLeft?.()||0):(view.getLayoutInfo?.().contentLeft||0)+(column>=0?column:this.visualColumn(text,p.column-1)*width);
       top=at?at.top+(view.getScrollTop?.()||0):view.getTopForPosition?.(p.line,p.column)??view.getTopForLineNumber?.(p.line)??(p.line-1)*height;height=at?.height||height;
-    }else {const padding=this.padding();left=padding.left+this.visualColumn(this.index.lines[p.line-1],p.column-1)*width;top=padding.top+(p.line-1)*height;}
+    }else {const padding=this.padding();left=padding.left+this.visualColumn(text,p.column-1)*width;top=padding.top+(p.line-1)*height;}
     if(mode!=='local'&&mode!=='div'){
       const scroll=this.getScrollInfo();left+=rect.left-scroll.left;top+=rect.top-scroll.top;
       if(mode==='page'){left+=win?.scrollX||0;top+=win?.scrollY||0;}
@@ -396,7 +457,7 @@ export class EditorHost {
     this.mode=null;this.updateCursorOptions();
     for(const state of this.surface?.views||[])state.presentation?.refresh?.();
     for(const input of this.xaml?[this.editor.input]:this.editor.panes.map(pane=>pane.input))if(input?.dataset)delete input.dataset.vimMode;
-    this.overlay?.remove();this.overlay=null;this.selectionSnapshot=null;this.pending.clear();this.listeners.clear();
+    this.overlay?.remove();this.overlay=null;this.selectionSnapshot=null;this.stagedLayouts=null;this.pending.clear();this.listeners.clear();
   }
 }
 

@@ -303,6 +303,55 @@ test('Monaco motion probes reject stale staged text and restore nested guards af
   f.host.settingSelection=false;a.surface.syncCursor=false;f.host.dispose();
 });
 
+function stagedContext(text,changes=[],operation={}){
+  const index=indexSource(text),reads=[];
+  return {text,changes,operation,revision:changes.length,lineCount:index.lines.length,reads,
+    getLine(line){reads.push(line);return index.lines[line];},offsetAt:(line,ch)=>offsetAt(index,line+1,ch+1),positionAt(offset){const p=positionAt(index,offset);return {line:p.line-1,ch:p.column-1};}};
+}
+function attachStagedLayout(a,width=8){
+  a.runtime.assets={createVimLineLayout:()=>({line(text){
+    const count=Math.max(1,Math.ceil(text.length/width)),rowAt=ch=>Math.min(count-1,Math.floor(ch/width));
+    return {count,rowAt,left:ch=>(ch-rowAt(ch)*width)*8,character:(row,goal)=>Math.min(text.length,(row+1)*width-(row<count-1?1:0),row*width+Math.max(0,Math.round(goal/8)))};
+  }})};
+}
+
+test('staged Vim rows use the pending text and pixel goal without probing or committing the Monaco model',()=>{
+  const source='abcdefghijklmnopqrstuvwxyz0123456789\nsecond',f=sourceFixture(source),a=attachMonaco(f);attachStagedLayout(a);
+  a.view.trigger=()=>assert.fail('Staged geometry must not move native cursors');a.view.getPosition=()=>({lineNumber:1,column:1});a.view.getLayoutInfo=()=>({contentLeft:40});a.view.getTopForLineNumber=line=>(line-1)*20;
+  const values=[{anchor:18,head:15},{anchor:6,head:2}];f.host.setSelections(values);
+  const change={from:{line:0,ch:0},to:{line:0,ch:1},text:[''],removed:['a']},context=stagedContext(source.slice(1),[change]);
+  assert.deepEqual(f.host.findPosV(0,1,'line',40,context),{offset:8,hitSide:false});
+  assert.equal(f.host.charCoords(10,'local',context).left,56);
+  assert.deepEqual(f.host.findPosV(0,2,'line',56,context),{offset:18,hitSide:false});
+  assert.deepEqual(f.host.findPosV(18,-1,'line',56,context),{offset:10,hitSide:false});
+  assert.deepEqual(f.host.getSelections(),values);assert.equal(f.host.getText(),source);assert.equal(a.model.value,source);
+  assert.equal(a.model.valueReads,0);assert.equal(f.history.undoStack.length,0);assert.equal(f.changes.length,0);f.host.dispose();
+});
+
+test('staged fold ranges follow inserted and removed lines within the same atomic operation',()=>{
+  const f=sourceFixture(motionSource),a=attachMotionMonaco(f);attachStagedLayout(a);
+  a.model.getLineMaxColumn=line=>f.editor.index.lines[line-1].length+1;let snapshots=0;
+  a.view.saveViewState=()=>{snapshots++;return {contributionsState:{'editor.contrib.folding':{collapsedRegions:[{startLineNumber:4,endLineNumber:6,isCollapsed:true}]}}};};
+  const insertion={from:{line:1,ch:0},to:{line:1,ch:0},text:['new',''],removed:['']},changes=[insertion],operation={};
+  const text=motionSource.slice(0,f.editor.index.starts[1])+'new\n'+motionSource.slice(f.editor.index.starts[1]),context=stagedContext(text,changes,operation);
+  context.logical=true;context.goalCharacter=2;
+  assert.deepEqual(f.host.findPosV(context.offsetAt(4,2),1,'line',56,context),{offset:context.offsetAt(7,2),hitSide:false});
+  assert.deepEqual(f.host.findPosV(context.offsetAt(7,2),-1,'line',56,context),{offset:context.offsetAt(4,2),hitSide:false});
+  const from=context.offsetAt(4,0),to=context.offsetAt(7,0),removed=text.slice(from,to).split('\n');
+  changes.push({from:{line:4,ch:0},to:{line:7,ch:0},text:[''],removed});
+  const next=stagedContext(text.slice(0,from)+text.slice(to),changes,operation);next.logical=true;next.goalCharacter=2;
+  assert.deepEqual(f.host.findPosV(next.offsetAt(4,2),1,'line',56,next),{offset:next.offsetAt(5,2),hitSide:false});
+  assert.equal(snapshots,1);assert.equal(a.commands.length,0);assert.equal(f.changes.length,0);f.host.dispose();
+});
+
+test('staged navigation in 100k lines projects only the nearby requested rows',()=>{
+  const source=Array.from({length:100000},(_,i)=>`line${i}`).join('\n'),f=sourceFixture(source),a=attachMonaco(f);attachStagedLayout(a,24);
+  a.view.trigger=()=>assert.fail('A staged motion must not probe the native model');a.view.getPosition=()=>({lineNumber:1,column:1});a.view.getLayoutInfo=()=>({contentLeft:40});
+  const context=stagedContext('X'+source,[{from:{line:0,ch:0},to:{line:0,ch:0},text:['X'],removed:['']}]),from=context.offsetAt(90000,2),to=context.offsetAt(90001,2);
+  assert.deepEqual(f.host.findPosV(from,1,'line',56,context),{offset:to,hitSide:false});
+  assert.deepEqual([...new Set(context.reads)],[90000,90001]);assert.equal(a.model.valueReads,0);assert.equal(f.changes.length,0);f.host.dispose();
+});
+
 test('100k-line presentation reuses the canonical source index and cached Monaco text',()=>{
   const code=Array.from({length:100000},(_,i)=>`line${i}`).join('\n'),f=sourceFixture(code),index=f.editor.index,offset=index.starts[50000];
   f.host.setSelections([{anchor:offset,head:offset},{anchor:offset+10,head:offset+13}]);f.host.setMode({mode:'normal'});
