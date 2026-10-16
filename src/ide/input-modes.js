@@ -203,6 +203,8 @@ export function installInputModes(ide){
     if(keysLabel.hidden===!!keys)keysLabel.hidden=!keys;
     attribute('data-input-mode',mode);
     attribute('data-input-state',String(snapshot.state||''));
+    const columns=String(Math.min(34,Array.from([label.toUpperCase(),state,keys].filter(Boolean).join(' ')).length+4));
+    if(status.style.getPropertyValue('--input-mode-status-columns')!==columns)status.style.setProperty('--input-mode-status-columns',columns);
     const summary=[label,state,keys,message].filter(Boolean).join(' — ');
     attribute('title',summary+'\nChange editor input mode');
     attribute('aria-label','Editor input mode: '+summary+'. Change input mode.');
