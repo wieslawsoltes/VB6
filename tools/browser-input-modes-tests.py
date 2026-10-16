@@ -118,6 +118,8 @@ class BrowserHarness:
         self.errors, self.requests, self.notes = [], [], []
         self.passed = False
         self.context = self.browser.new_context(viewport={'width': 1560, 'height': 1060})
+        self.addCleanup(self.context.close)
+        self.addCleanup(self.record_result)
         self.context.set_default_timeout(15000)
         self.context.on('page', self.observe_page)
         self.page = self.context.new_page()
@@ -136,18 +138,22 @@ class BrowserHarness:
         page.on('request', lambda request: self.requests.append(request.url))
 
     def tearDown(self):
+        self.assertEqual(self.errors, [], 'Uncaught page errors')
+
+    def record_result(self):
         if not self.passed or self.errors:
             try:
-                self.page.screenshot(path=str(REPORT / (self._testMethodName + '.png')), full_page=True)
+                self.page.screenshot(path=str(REPORT / (self._testMethodName + '.png')), full_page=True, timeout=10000)
             except Exception as error:
                 self.notes.append('Failure screenshot unavailable: ' + str(error))
+        outcome = self._outcome.result
+        failures = [trace for test, trace in outcome.errors + outcome.failures if test is self]
         RESULTS.append({
             'name': self._testMethodName, 'suite': 'advanced' if self.advanced_artifact else 'core',
-            'passed': self.passed and not self.errors, 'pageErrors': self.errors, 'coverageNotes': self.notes,
+            'passed': self.passed and not self.errors and not failures,
+            'pageErrors': self.errors, 'failures': failures, 'coverageNotes': self.notes,
             'milliseconds': round((time.perf_counter() - self.started) * 1000, 2)
         })
-        self.context.close()
-        self.assertEqual(self.errors, [], 'Uncaught page errors')
 
     def done(self):
         self.passed = True
@@ -274,6 +280,10 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.assertGreater(dialog.locator('.input-mode-reference tbody tr').count(), 40)
         dialog.get_by_role('button', name='Close', exact=True).click()
         self.assertEqual(self.page.evaluate('JSON.stringify(vb6Studio.project)'), before)
+        self.page.evaluate('vb6Studio.openDocument("form","form")')
+        self.menu_mode('vim')
+        self.assertEqual(self.page.evaluate('vb6Studio.activeDoc.view'), 'form')
+        self.assertFalse(self.page.evaluate('document.activeElement===vb6Studio.editor.input'))
         self.done()
 
     def test_normal_motions_counts_and_line_navigation_do_not_edit(self):
