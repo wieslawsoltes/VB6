@@ -119,3 +119,31 @@ test('native browser undo and redo use canonical history and honor read-only sou
   assert.equal(denied.prevented, true); assert.deepEqual(calls, ['undo', 'redo']);
   f.service.dispose();
 });
+
+test('an extension cleanup failure still releases keyboard ownership and other resources', () => {
+  const f = fixture(); let sync = 0, disposed = 0;
+  f.service.registerMode({id: 'faulty', label: 'Faulty', createSession: () => ({handleKey() {},
+    sync() { sync++; throw new Error('sync failure'); }, dispose() { disposed++; throw new Error('dispose failure'); }})});
+  f.service.configure({mode: 'faulty'});
+  assert.doesNotThrow(() => f.service.configure({mode: 'default'}));
+  assert.equal(sync, 1); assert.equal(disposed, 1);
+  assert.equal(f.service.records.get(f.editor).session, null);
+  assert.equal(f.editor.root.dataset.inputMode, undefined);
+  assert.equal(f.hosts[0].state, null);
+  f.service.dispose();
+});
+
+test('a factory failure for a later editor keeps document creation usable and restores Default', () => {
+  const f = fixture(); let created = 0, disposed = 0;
+  f.service.registerMode({id: 'fragile', label: 'Fragile', createSession: () => {
+    if (++created > 1) throw new Error('unsupported surface');
+    return {handleKey() {}, dispose() { disposed++; }};
+  }});
+  f.service.configure({mode: 'fragile'});
+  const editor = {root: f.root(), dispose() {}};
+  assert.doesNotThrow(() => f.service.attach(editor));
+  assert.equal(f.service.settings.mode, 'default'); assert.equal(disposed, 1);
+  assert.equal(f.service.records.get(editor).session, null);
+  assert.equal(f.service.records.get(f.editor).session, null);
+  f.service.dispose();
+});

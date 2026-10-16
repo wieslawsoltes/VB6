@@ -115,19 +115,22 @@ export class EditorInputModeService extends Signal {
   }
   releaseSession(record) {
     const selections = record.host.getSelections();
+    const errors = [], cleanup = action => { try { action(); } catch (error) { errors.push(error); } };
     record.busy++; record.releasing = true;
     try {
-      record.endCoalescing?.(); record.endCoalescing = null;
-      record.closePrompt?.();
-      for (const close of [...record.notifications]) close();
-      record.session?.sync?.(); record.session?.dispose(); record.session = null;
-      record.host.setMode?.(null);
-      record.host.setSelections(selections);
+      cleanup(() => record.endCoalescing?.()); record.endCoalescing = null;
+      cleanup(() => record.closePrompt?.()); record.closePrompt = null;
+      for (const close of [...record.notifications]) cleanup(close);
+      const session = record.session; record.session = null;
+      cleanup(() => session?.sync?.()); cleanup(() => session?.dispose());
+      cleanup(() => record.host.setMode?.(null));
+      cleanup(() => record.host.setSelections(selections));
       record.windowPrefix = false; record.message = ''; record.lastMode = null;
       delete record.host.root.dataset.inputMode; delete record.host.root.dataset.vimMode;
       delete record.host.root.dataset.inputComposing;
     } finally { record.busy--; record.releasing = false; }
     this.ide.history?.stopMerging();
+    if (errors.length) this.ide.status('Input mode released: ' + (errors[0]?.message || String(errors[0])));
   }
   stateChanged(record, state) {
     if (record.disposed || record.releasing || this.disposed) return;
@@ -246,7 +249,16 @@ export class EditorInputModeService extends Signal {
       editor.dispose = dispose;
       record.cleanup.push(() => { if (editor.dispose === dispose) editor.dispose = originalDispose; });
     }
-    this.startSession(record); return record;
+    try { this.startSession(record); }
+    catch (error) {
+      // A newly opened editor can expose a factory failure after the mode was
+      // selected. Keep document creation usable and release every input owner.
+      for (const item of this.records.values()) this.releaseSession(item);
+      this.settings = Object.freeze({mode: DEFAULT_INPUT_MODE});
+      this.ide.status('Input mode disabled: ' + (error?.message || String(error)));
+      this.publish();
+    }
+    return record;
   }
   detach(editor) {
     const record = this.records.get(editor); if (!record || record.disposed) return;
