@@ -71,6 +71,7 @@ function splitFixture(backend, orientation) {
     surface.views = [0, 1].map(index => ({view: {index, focus() { surface.view = this; f.calls.push(['pane', index]); }}}));
     surface.view = surface.views[0].view;
     surface.setSplit = () => { f.retained = surface.view.index; f.calls.push(['collapse']); };
+    f.surface = surface;
     f.ide.advancedEditor.runtime.surfaces.set(f.editor, surface);
     f.active = () => surface.view.index;
     f.choose = index => { surface.view = surface.views[index].view; };
@@ -127,6 +128,33 @@ test('closing a split preserves the other pane while only retains the current pa
         assert.equal(f.retained, command === 'only' ? active : 1 - active, `${backend}: ${command} from ${active}`);
         assert.equal(f.ide.project.modules.length, 2);
       }
+    }
+  }
+});
+
+test('write and quit closes the requested pane even when focus changes while saving', async () => {
+  for (const backend of ['classic', 'monaco']) {
+    const f = splitFixture(backend, 'vertical'); let finish;
+    f.ide.saveProject = () => new Promise(resolve => { finish = resolve; });
+    f.choose(0);
+    const pending = executeIdeVimCommand(f.service, f.record, 'saveAndClose');
+    f.choose(1); finish(true); await pending;
+    assert.equal(f.retained, 1, backend + ': the pane selected during save must survive');
+  }
+});
+
+test('delayed write and quit cannot close a replacement split or the remaining document', async () => {
+  for (const backend of ['classic', 'monaco']) {
+    for (const recreated of [false, true]) {
+      const f = splitFixture(backend, 'vertical'); let finish;
+      f.ide.saveProject = () => new Promise(resolve => { finish = resolve; });
+      const pending = executeIdeVimCommand(f.service, f.record, 'saveAndClose');
+      if (f.surface) {
+        f.surface.views = [f.surface.views[0]];
+        if (recreated) f.surface.views.push({view: {index: 1}});
+      } else f.editor.secondary = recreated ? {index: 1} : null;
+      finish(true); await pending;
+      assert.deepEqual(f.calls, [], `${backend}: recreated=${recreated}`);
     }
   }
 });

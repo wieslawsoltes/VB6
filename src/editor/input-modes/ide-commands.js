@@ -34,17 +34,29 @@ function focusCurrentSource(service) {
 export function executeIdeVimCommand(service, record, command, args = {}) {
   const ide = service.ide, editor = record.host.editor, surface = ide.advancedEditor?.runtime?.surfaces.get(editor);
   const text = String(args.argString ?? args.args?.join(' ') ?? '').trim();
-  const close = () => {
+  const close = target => {
     const currentSurface = ide.advancedEditor?.runtime?.surfaces.get(editor);
+    if (target) {
+      // A save dialog can outlive focus, backend, and split changes. Complete
+      // the original request only while that exact source viewport survives.
+      if (target.surface !== currentSurface) return;
+      if (currentSurface) {
+        if (!currentSurface.views.some(value => value.view === target.pane)) return;
+        if (target.views.length > 1 && target.views.some(view => !currentSurface.views.some(value => value.view === view))) return;
+      } else {
+        if (target.secondary && editor.secondary !== target.secondary) return;
+        if (target.pane && target.pane !== editor.primary && target.pane !== editor.secondary) return;
+      }
+    }
     if (currentSurface?.views.length > 1) {
       // Collapsing a backend retains its active view state. A close keeps the
       // other pane, whereas :only deliberately retains the current pane.
-      const surviving = currentSurface.views.find(value => value.view !== currentSurface.view);
+      const surviving = currentSurface.views.find(value => value.view !== (target?.pane || currentSurface.view));
       if (surviving) currentSurface.view = surviving.view;
       currentSurface.setSplit(false); record.host.focus(); return;
     }
     if (editor.secondary) {
-      const surviving = editor.activePane === editor.primary ? editor.secondary : editor.primary;
+      const surviving = (target?.pane || editor.activePane) === editor.primary ? editor.secondary : editor.primary;
       if (surviving) editor.activatePane?.(surviving);
       editor.toggleSplit(false); record.host.focus(); return;
     }
@@ -57,8 +69,9 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
     case 'saveAndClose': {
       if (text) throw new Error('Use the IDE Save As command to choose a project filename.');
       const project = ide.project, key = sourceKey(ide, editor);
+      const target = {surface, pane: surface?.view || editor.activePane, views: surface?.views.map(value => value.view), secondary: editor.secondary};
       return Promise.resolve(ide.saveProject()).then(saved => {
-        if (saved !== false && !service.disposed && !record.disposed && project === ide.project && sourceKey(ide, editor) === key) close();
+        if (saved !== false && !service.disposed && !record.disposed && project === ide.project && sourceKey(ide, editor) === key) close(target);
         return saved;
       });
     }
