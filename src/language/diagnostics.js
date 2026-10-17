@@ -1,6 +1,7 @@
 import {layoutBindingSnapshot} from '../layout/language-gate.js';
 import {compileModule,validateCompiledModules} from './compiler.js';
 import {moduleLanguage} from '../project/language.js';
+import {pascalUnitOrder} from './pascal/project-linker.js';
 
 /** Clone only compiler inputs, never forms, image assets or the complete workspace.
  * Limits apply to automatic diagnostics, not to the project file/export format. */
@@ -71,7 +72,7 @@ export class ProjectDiagnosticCache {
     if(semanticCacheHit)semantic=previous.diagnostics;
     else {
       for(const {entry,layout,form} of inputs)if(entry.compiled){entry.compiled.layoutBindings=JSON.parse(layout);entry.compiled.form=JSON.parse(form);}
-      semantic=validateCompiledModules(modules,project.settings).map(d=>Object.freeze({...d,origin:'syntax'}));
+      semantic=[...validateCompiledModules(modules,project.settings),...pascalUnitOrder(modules).diagnostics].map(d=>Object.freeze({...d,origin:'syntax'}));
       if(epoch===this.epoch)this.validation={inputs,settings,diagnostics:semantic};
     }
     // Results are caller-owned. Editing Error List diagnostics must not mutate
