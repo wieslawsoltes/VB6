@@ -1,5 +1,6 @@
 import {PascalError} from './lexer.js';
 import {parsePascalModule} from './parser.js';
+import {resolveObjectType, prepareObjectMethods, validateObjectMethodLocals, objectReferenceCompatible} from './object-lowering.js';
 import {builtinType, BUILTIN_SYMBOLS, CONSTANT_SYMBOLS} from '../type-catalog.js';
 
 const key = value => String(value).toLowerCase();
@@ -19,8 +20,8 @@ export const PASCAL_TYPES = Object.freeze({
 });
 export const ORDINAL_KINDS = new Set(['ordinal', 'enum', 'subrange', 'char', 'boolean']);
 export const isOrdinal = type => ORDINAL_KINDS.has(type?.kind);
-export const isString = type => ['char', 'string'].includes(type?.kind);
-export const isNumeric = type => ['ordinal', 'subrange', 'real'].includes(type?.kind);
+export const isString = type => ['char', 'string'].includes(type?.kind) || type?.kind === 'subrange' && isString(type.base);
+export const isNumeric = type => ['ordinal', 'real'].includes(type?.kind) || type?.kind === 'subrange' && isNumeric(type.base);
 export const isAggregate = type => ['array', 'record'].includes(type?.kind);
 export function foreignType(name = 'Variant') {
   const normalized = key(name), primitive = {long: 'longint', integer: 'integer', byte: 'byte', boolean: 'boolean', single: 'single', double: 'double', string: 'string', variant: 'variant'}[normalized];
@@ -51,6 +52,7 @@ export function sameType(left, right) {
 export function assignmentCompatible(target, value) {
   if (!target || !value || target.kind === 'variant' || value.kind === 'variant') return true;
   if (sameType(target, value)) return true;
+  if (objectReferenceCompatible(target, value)) return true;
   if (isNumeric(target) && isNumeric(value)) return target.kind === 'real' || value.kind !== 'real';
   if (target.kind === 'string' && isString(value)) return true;
   if (target.kind === 'char' && value.kind === 'string') return value.literalLength === 1;
@@ -138,6 +140,7 @@ export class PascalBinder {
     }
     this.registerDeclarations(this.scope, this.ast.declarations);
     for (const binder of this.imports) binder.ensure();
+    prepareObjectMethods(this);
     for (const symbol of this.scope.symbols.values()) this.resolveSymbol(symbol);
     this.ready = true; this.preparing = false; return this;
   }
@@ -148,7 +151,8 @@ export class PascalBinder {
       if (node.kind === 'typeDeclaration') scope.define({kind: 'type', name: node.name, node, public: publicSymbol});
       else if (node.kind === 'constant') scope.define({kind: node.typed ? 'variable' : 'constant', name: node.name, vbName: node.name, node, typedConstant: node.typed, public: publicSymbol});
       else if (node.kind === 'variable') {if (node.absolute) this.fail('Absolute memory aliases require the segmented-memory compatibility runtime', node, 'TP_UNSUPPORTED_ABSOLUTE'); for (const name of node.names) scope.define({kind: 'variable', name, vbName: name, node, public: publicSymbol});}
-      else if (['procedure', 'function'].includes(node.kind)) {
+      else if (['procedure', 'function', 'constructor', 'destructor'].includes(node.kind)) {
+        if (scope !== this.scope && (node.name.includes('.') || ['constructor', 'destructor'].includes(node.kind))) this.fail('Object methods must be implemented in the outermost scope of their declaring module', node, 'TP_OBJECT_SCOPE');
         const previous = scope.symbols.get(key(node.name));
         if (previous) {
           if (previous.kind !== 'procedure' || previous.definition && !node.declarationOnly) this.fail(`Duplicate routine '${node.name}'`, node, 'TP_DUPLICATE');
@@ -179,10 +183,15 @@ export class PascalBinder {
       for (const node of symbol.nodes) if (node !== declaration && node.explicitParams) {
         if (node.params.length !== symbol.params.length || node.params.some((param, i) => param.byRef !== symbol.params[i].byRef || key(param.name) !== key(symbol.params[i].name) || !sameType(this.resolveType(param.type, symbol.scope), symbol.params[i].type))) this.fail(`Routine parameters do not match the earlier declaration of '${symbol.name}'`, node, 'TP_SIGNATURE');
       }
+      if (symbol.objectMethod) {
+        validateObjectMethodLocals(this, symbol, declaration, definition);
+        symbol.self = {kind: 'parameter', name: 'Self', vbName: '__PascalSelf', type: symbol.objectMethod.declaringType, byRef: true, implicit: true, loc: definition.loc};
+        symbol.params.unshift(symbol.self);
+      }
       symbol.localScope = new PascalScope(this, symbol.scope, symbol); symbol.captures = [];
       for (let parent = symbol.scope; parent && parent !== this.scope; parent = parent.parent) for (const value of parent.symbols.values()) if (['variable', 'parameter', 'result'].includes(value.kind)) symbol.captures.push({symbol: value, name: `__capture_${symbol.captures.length}_${value.name}`});
-      for (const param of symbol.params) {const local = symbol.localScope.define({kind: 'parameter', name: param.name, vbName: param.name, type: param.type, param, node: param, resolved: true}); param.symbol = local;}
-      if (symbol.returnType) symbol.result = symbol.localScope.define({kind: 'result', name: symbol.name, vbName: symbol.vbName, type: symbol.returnType, procedure: symbol, node: symbol.node, resolved: true});
+      for (const param of symbol.params) {const local = symbol.localScope.define({kind: 'parameter', name: param.name, vbName: param.vbName || param.name, type: param.type, param, node: param, resolved: true, internal: !!param.implicit}); param.symbol = local;}
+      if (symbol.returnType) symbol.result = symbol.localScope.define({kind: 'result', name: symbol.objectMethod?.name || symbol.name, vbName: symbol.vbName, type: symbol.returnType, procedure: symbol, node: symbol.node, resolved: true});
       this.registerDeclarations(symbol.localScope, definition.declarations); this.procedures.push(symbol);
       symbol.resolved = true; symbol.resolving = false;
       for (const local of symbol.localScope.symbols.values()) this.resolveSymbol(local);
@@ -192,6 +201,7 @@ export class PascalBinder {
   }
   resolveType(node, scope, suggestedName = null, publicType = false) {
     if (!node) return PASCAL_TYPES.variant;
+    if (node.kind === 'objectType') return resolveObjectType(this, node, scope, suggestedName, publicType);
     if (node.kind === 'namedType') {
       const parts = node.name.split('.');
       if (parts.length > 1) {const binder = this.workspace.get(parts[0]); if (!binder || binder !== this && !this.imports.includes(binder)) this.fail(`Unit '${parts[0]}' is not in the uses clause`, node); binder.ensure(); const symbol = binder.scope.symbols.get(key(parts.slice(1).join('.'))); if (!symbol || symbol.kind !== 'type' || binder !== this && !symbol.public) this.fail(`Unknown exported type '${node.name}'`, node); return binder.resolveSymbol(symbol).type;}
