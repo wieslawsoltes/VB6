@@ -49,7 +49,7 @@ export const WINUI3_GALLERY_XAML=`<Page xmlns="http://schemas.microsoft.com/winf
     <TextBlock x:Name="TextStatus" Canvas.Left="640" Canvas.Top="76" Width="240" Height="24" Text="0:Ready" Tag="0"/>
     <Canvas x:Name="ShadowScope" Canvas.Left="24" Canvas.Top="134" Width="300" Height="110">
       <Canvas.Resources><SolidColorBrush x:Key="PanelBrush" Color="#802060A0"/></Canvas.Resources>
-      <TextBlock Canvas.Left="12" Canvas.Top="4" Width="275" Height="22" Text="Local resource shadows Page"/>
+      <TextBlock x:Name="ScopeHeading" Canvas.Left="12" Canvas.Top="4" Width="275" Height="22" Text="Local resource shadows Page" Foreground="#FF0000FF"/>
       <TextBox x:Name="ShadowText" Canvas.Left="12" Canvas.Top="34" Width="260" Height="32" Text="Local brush" Background="{ThemeResource PanelBrush}"/>
     </Canvas>
     <Canvas x:Name="DarkScope" Canvas.Left="360" Canvas.Top="134" Width="520" Height="110" RequestedTheme="Dark" Background="{ThemeResource PageBrush}">
@@ -84,7 +84,8 @@ export const WINUI3_GALLERY_XAML=`<Page xmlns="http://schemas.microsoft.com/winf
     </Canvas>
     <TextBlock x:Name="ActionStatus" Canvas.Left="340" Canvas.Top="562" Width="520" Height="28" Text="No action"/>
     <Button x:Name="ReleaseColor" Canvas.Left="24" Canvas.Top="598" Width="230" Height="32" Content="Use explicit VB color" Click="ReleaseColor_Click"/>
-    <TextBlock Canvas.Left="24" Canvas.Top="632" Width="840" Height="40" Text="Source-backed browser compatibility. Native Windows pixel parity is a separate acceptance target." TextWrapping="Wrap"/>
+    <RichEditBox x:Name="RichDocument" Canvas.Left="380" Canvas.Top="606" Width="240" Height="42" Background="{ThemeResource PanelBrush}"/>
+    <TextBlock Canvas.Left="24" Canvas.Top="660" Width="840" Height="26" Text="Source-backed browser compatibility. Native Windows pixel parity is a separate acceptance target." TextWrapping="Wrap"/>
   </Canvas>
 </Page>`;
 

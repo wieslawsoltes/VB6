@@ -250,6 +250,85 @@ class WinUI3Acceptance(unittest.TestCase):
         self.assert_identity()
         self.done()
 
+    def test_child_textblock_keeps_explicit_foreground_when_parent_changes_state(self):
+        self.page.mouse.move(1400, 1000)
+        self.set_control('ShadowScope', {'WinUI3': {
+            'version': 1, 'sourceType': 'Canvas',
+            'properties': {'Foreground': '#FFFF0000'},
+            'states': {'PointerOver': {'Foreground': '#FF00FF00'}}}})
+        parent, child = self.control('ShadowScope'), self.control('ScopeHeading')
+        expect(parent).to_have_css('color', 'rgb(255, 0, 0)')
+        expect(child).to_have_css('color', 'rgb(0, 0, 255)')
+        child.hover()
+        expect(parent).to_have_css('color', 'rgb(0, 255, 0)')
+        expect(child).to_have_css('color', 'rgb(0, 0, 255)')
+        self.theme('fluent-dark')
+        expect(child).to_have_css('color', 'rgb(0, 0, 255)')
+        self.page.mouse.move(1400, 1000)
+        expect(parent).to_have_css('color', 'rgb(255, 0, 0)')
+        self.set_control('ShadowScope', {'WinUI3': None})
+        expect(child).to_have_css('color', 'rgb(0, 0, 255)')
+        self.assert_identity()
+        self.done()
+
+    def test_late_graphics_surface_follows_button_states_and_retains_drawn_commands(self):
+        self.page.mouse.move(1400, 1000)
+        self.page.evaluate('''async () => {
+            const surface=winuiControls.StateButton.ensureSurface();
+            surface.add('rect',[7,7,13,13],255,true);
+            await surface.flush();
+        }''')
+        button = self.control('StateButton')
+
+        def assert_painted_state(rgb):
+            # The retained buffer and the final composed browser pixels are
+            # independent of the CSS variable spelling used by the adapter.
+            self.page.wait_for_function('''rgb=>{
+                const p=winuiControls.StateButton.surface.readPixels(215,15,1,1).data;
+                return rgb.every((value,index)=>Math.abs(p[index]-value)<=1);
+            }''', arg=list(rgb))
+            pixels = Image.open(io.BytesIO(button.screenshot())).convert('RGB')
+            for actual, expected in zip(pixels.getpixel((pixels.width - 12, pixels.height // 2)), rgb):
+                self.assertAlmostEqual(actual, expected, delta=2)
+            self.assertEqual(self.page.evaluate('''() =>
+                [...winuiControls.StateButton.surface.readPixels(10,10,1,1).data]'''), [255, 0, 0, 255])
+
+        button.hover()
+        assert_painted_state((190, 34, 102))
+        self.page.mouse.down()
+        try:
+            assert_painted_state((102, 51, 153))
+        finally:
+            self.page.mouse.up()
+        assert_painted_state((190, 34, 102))
+        self.set_control('StateButton', {'Enabled': 0})
+        assert_painted_state((120, 120, 120))
+        self.theme('fluent-dark')
+        assert_painted_state((120, 120, 120))
+        self.assert_identity()
+        self.done()
+
+    def test_richeditbox_alpha_has_one_paint_plane_and_preserves_edited_document(self):
+        editor = self.control('RichDocument').get_by_role('textbox', name='RichDocument', exact=True)
+        retained = editor.element_handle()
+        editor.fill('Retained rich draft')
+        self.field('LiveText').focus()
+        self.page.mouse.move(1400, 1000)
+        for theme, brush, blended in (
+                ('fluent', LIGHT_BRUSH, (153, 137, 129)),
+                ('fluent-dark', DARK_BRUSH, (56, 80, 104)),
+                ('fluent', LIGHT_BRUSH, (153, 137, 129))):
+            self.theme(theme)
+            self.expect_color(editor, 'background-color', brush)
+            pixels = Image.open(io.BytesIO(editor.screenshot())).convert('RGB')
+            for actual, expected in zip(pixels.getpixel((pixels.width - 12, pixels.height - 12)), blended):
+                self.assertAlmostEqual(actual, expected, delta=2)
+            expect(editor).to_have_text('Retained rich draft')
+            self.assertEqual(self.page.evaluate('winuiControls.RichDocument.get("Text")'), 'Retained rich draft')
+            self.assertTrue(retained.evaluate('e=>e===winuiControls.RichDocument.input'))
+        self.assert_identity()
+        self.done()
+
     def test_open_combo_popup_tracks_requested_theme_and_disposes_with_its_control(self):
         choices = self.control('ScopeChoices')
         choices.locator('.vb-combo-arrow').click()
