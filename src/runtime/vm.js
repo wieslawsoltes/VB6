@@ -6,6 +6,7 @@ import {pushWithScope,popWithScope,unwindWithScopes,closeWithScopes,reconcileWit
 import {ArrayLeaseScope,inheritArrayOwners,closeArrayEnumeration,closeArrayEnumerations,reconcileArrayEnumerations} from './array-lifetime.js';
 import {VBScalar,SCALAR_TYPES,recordField,printScalar,unbox,tagScalar,scalarType,storageScalar,readScalar,literalScalar,signedLiteralScalar} from './values.js';
 import {RuntimeDebugger,StopExecution,isSequencePoint,statementIndex,immediateStatements} from './debug-control.js';
+import {lowerPascalDebugExpression,compilePascalImmediate,pascalDebugIntrinsic} from './pascal-debug.js';
 import {VBWin32Bridge} from './win32.js';
 import {isAutomationObject,automationDefaultName,automationMember,automationReference,automationInvoke,automationEnumerate,automationSubscribe} from './automation.js';
 import {propertyReference} from './property-reference.js';
@@ -72,13 +73,13 @@ export class VirtualMachine extends Signal {
   setBreakpoint(module,line,condition='',enabled=true){
     const location=this.breakpointLocation(module,line);condition=String(condition);
     if(condition.length>4096)throw new VBError('Breakpoint condition is too long',5);
-    if(condition)this.debugInspector.parse(condition);
+    if(condition)this.debugInspector.parse(condition,this.program.modules.get(lower(module)));
     const value={...location,condition,enabled:enabled!==false};this.breakpoints.set(lower(location.module)+':'+line,value);
     this.emit('breakpoints',[...this.breakpoints.values()]);return value;
   }
   replaceBreakpoints(breakpoints=[]){
     if(!Array.isArray(breakpoints)||breakpoints.length>10000)throw new VBError('Invalid breakpoint list',5);
-    const next=new Map();for(const bp of breakpoints){const value={...this.breakpointLocation(bp.module,bp.line),condition:String(bp.condition||''),enabled:bp.enabled!==false};if(value.condition.length>4096)throw new VBError('Breakpoint condition is too long',5);if(value.condition)this.debugInspector.parse(value.condition);next.set(lower(value.module)+':'+value.line,value);}
+    const next=new Map();for(const bp of breakpoints){const value={...this.breakpointLocation(bp.module,bp.line),condition:String(bp.condition||''),enabled:bp.enabled!==false};if(value.condition.length>4096)throw new VBError('Breakpoint condition is too long',5);if(value.condition)this.debugInspector.parse(value.condition,this.program.modules.get(lower(value.module)));next.set(lower(value.module)+':'+value.line,value);}
     this.breakpoints=next;this.emit('breakpoints',[...next.values()]);
   }
   removeBreakpoint(module,line){this.breakpoints.delete(lower(module)+':'+line);this.emit('breakpoints',[...this.breakpoints.values()]);}
@@ -365,6 +366,8 @@ export class VirtualMachine extends Signal {
     if(!frame){const instance=this.instances.values().next().value;if(!instance)throw new VBError('Runtime is not initialized',5);frame=this.makeFrame(instance);}
     let value;
     switch(node.kind){
+      case 'pascalIntrinsic':{const args=[];for(const arg of node.args)args.push(await this.evaluateScalar(arg,frame));return pascalDebugIntrinsic(node.name,args);}
+      case 'pascalShortCircuit':{const first=truth(await this.evaluateScalar(node.args[0],frame));return tagScalar((node.op==='and'?first&&truth(await this.evaluateScalar(node.args[1],frame)):first||truth(await this.evaluateScalar(node.args[1],frame)))?-1:0,'boolean');}
       case 'missing':return MISSING;case 'nothing':return NOTHING;case 'currency':case 'literal':case 'date':return literalScalar(node);case 'empty':return tagScalar(undefined,'empty',true);case 'group':return this.evaluateScalar(node.expr,frame,{raw});
       case 'id':value=await this.getIdentifier(node.name,frame);break;
       case 'with':return withValue(frame,this.state==='paused'&&(!this.debugEvaluation||this.debugEvaluation.contextFrame===frame)?frame.proc.code[frame.pc]:frame.activeInstruction);
@@ -582,7 +585,7 @@ export class VirtualMachine extends Signal {
     for(const {frame,...update}of plan.frameUpdates)Object.assign(frame,update);
     for(const {module,name}of plan.removedProcedures||[])module.procedures.delete(name);
     for(const frame of this.stack.slice(0,-1)){frame.activePc=frame.pc-1;frame.activeInstruction=frame.proc.code[frame.activePc];}
-    for(const [key,module]of this.program.modules){const replacement=next.modules.get(key);for(const [name,proc]of replacement.procedures)if(!module.procedures.has(name))module.procedures.set(name,proc);module.source=replacement.source;}
+    for(const [key,module]of this.program.modules){const replacement=next.modules.get(key);for(const [name,proc]of replacement.procedures)if(!module.procedures.has(name))module.procedures.set(name,proc);module.source=replacement.source;if(module.language==='pascal')Object.assign(module,{generatedSource:replacement.generatedSource,sourceMap:replacement.sourceMap,pascalAst:replacement.pascalAst,pascal:replacement.pascal});}
     const breakpoints=[];for(const bp of this.breakpoints.values()){const mapped=plan.lineMap.get(lower(bp.module)+':'+bp.line);if(mapped===undefined)invalidated.push(bp);else breakpoints.push({...bp,line:mapped});}
     this.breakpoints=new Map(breakpoints.map(bp=>[lower(bp.module)+':'+bp.line,bp]));
     this.program.settings=next.settings;this.program.sourceProject=structuredClone(project);this.codeRevision=(this.codeRevision||0)+1;
@@ -763,6 +766,7 @@ export class VirtualMachine extends Signal {
     if(!frame?.instance)throw new VBError('Start the runtime before evaluating an expression',5);
     if(this.state==='running'&&this.stack.length&&!selectedFrame)throw new VBError('Pause execution before using the Immediate window',5);
     text=String(text);if(text.length>65536)throw new VBError('Enter at most 65,536 characters',5);
+    if(frame.module.language==='pascal')return this.pascalImmediateAt(text,frame);
     const leases=new ArrayLeaseScope(),previousLeases=frame.activeArrayLeases;frame.activeArrayLeases=leases;
     let value;
     try {
@@ -792,6 +796,16 @@ export class VirtualMachine extends Signal {
     return value;
     }finally{leases.release();frame.activeArrayLeases=previousLeases;}
   }
+  async pascalImmediateAt(text,frame){
+    if(/^\s*\?/.test(text)){const expression=text.replace(/^\s*\?/,'').trim().replace(/;$/,'');const value=await this.evaluateScalar(lowerPascalDebugExpression(expression,frame,this.program.sourceProject),frame);this.output(describe(value));return value;}
+    const compiled=compilePascalImmediate(text,frame,this.program.sourceProject),added=[];
+    // Only trusted compiler helpers enter this overlay. The bounded explicit
+    // session excludes event interleaving and always removes the temporary code.
+    for(const [name,procedure]of compiled.helpers)if(!frame.module.procedures.has(name)){frame.module.procedures.set(name,procedure);added.push(name);}
+    const immediate=this.makeFrame(frame.instance,{...frame.proc,code:compiled.procedure.code});immediate.locals=new Map(frame.locals);immediate.result=frame.result;immediate.caller=frame;
+    try{await this.execute(immediate);return undefined;}
+    finally{closeWithScopes(immediate);closeArrayEnumerations(immediate);for(const name of added)frame.module.procedures.delete(name);}
+  }
   debugAwait(value){return this.debugEvaluation?this.debugEvaluation.wait(value):value;}
   cancelEvaluation(){this.debugEvaluation?.cancel();return {cancelled:!!this.debugEvaluation};}
   async evaluateExplicit(text,{frameIndex=null,pauseId,instructionLimit=100000,timeLimit=5000,immediate=false,allowIdle=false,module=null}={}){
@@ -805,14 +819,14 @@ export class VirtualMachine extends Signal {
     if(this.state!=='paused'){this.immediateFrames ||= new WeakMap();const instance=frame.instance;if(!this.immediateFrames.has(instance))this.immediateFrames.set(instance,frame);frame=this.immediateFrames.get(instance);}
     const session=new DebugEvaluationSession(this,{instructionLimit,timeLimit}),saved={frame:this.currentFrame,err:{...this.err},lastError:this.lastError,erl:this.lastErrorErl,step:this.stepMode,pauseRequested:this.pauseRequested,runTarget:this.runTarget};
     session.contextFrame=frame;this.debugEvaluation=session;this.currentFrame=frame;this.emit('evaluation',{active:true,frameIndex:this.stack.indexOf(frame)});
-    try {const value=immediate?await this.immediateAt(text,frame):await this.evaluateScalar(parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return unbox(value);}
+    try {const value=immediate?await this.immediateAt(text,frame):await this.evaluateScalar(frame.module.language==='pascal'?lowerPascalDebugExpression(text.replace(/^\s*\?/,''),frame,this.program.sourceProject):parseExpression(text.replace(/^\s*\?/,'')),frame);session.check();return unbox(value);}
     finally {session.dispose();this.debugEvaluation=null;this.currentFrame=saved.frame;if(this.state==='stopped')this.pauseResolver?.();Object.assign(this.err,saved.err);this.lastError=saved.lastError;this.lastErrorErl=saved.erl;this.stepMode=saved.step;this.pauseRequested=saved.pauseRequested;this.runTarget=saved.runTarget;this.emit('evaluation',{active:false,instructions:session.instructions,milliseconds:performance.now()-session.started});if(this.eventQueue.length&&!this.stack.length&&this.state!=='paused')queueMicrotask(()=>this.processEvents());}
   }
   async evaluateWatch(text,options={}){return this.debugInspector.evaluate(text,options.frameIndex??null);}
   inspectDebug(expression,options={}){return this.debugInspector.inspect(expression,options);}
   debugLocals(options={}){return this.debugInspector.locals(options);}
   assignDebug(expression,text,options={}){return this.debugInspector.assign(expression,text,options);}
-  setWatchpoints(watches=[]){if(!Array.isArray(watches)||watches.length>100)throw new VBError('At most 100 break watches are supported',5);const next=watches.map((w,i)=>{if(!['true','change'].includes(w.mode))throw new VBError('Invalid watch type',5);return {id:String(w.id??i),expression:String(w.expression),mode:w.mode,module:String(w.module||''),procedure:String(w.procedure||''),node:this.debugInspector.parse(w.expression)};});this.watchpoints=next;this.watchpointValues.clear();}
+  setWatchpoints(watches=[]){if(!Array.isArray(watches)||watches.length>100)throw new VBError('At most 100 break watches are supported',5);const next=watches.map((w,i)=>{if(!['true','change'].includes(w.mode))throw new VBError('Invalid watch type',5);return {id:String(w.id??i),expression:String(w.expression),mode:w.mode,module:String(w.module||''),procedure:String(w.procedure||''),node:this.debugInspector.parse(w.expression,this.program.modules.get(lower(w.module||'')))};});this.watchpoints=next;this.watchpointValues.clear();}
   watchSnapshot(value){return value instanceof VBDecimal?{decimal:value}:value instanceof VBCurrency?{currency:value.raw}:value instanceof Date?{date:value.getTime()}:value instanceof VBErrorValue?{error:value.number}:value;}
   sameWatchValue(before,after){if(before&&typeof before==='object'){if(Object.hasOwn(before,'decimal'))return after instanceof VBDecimal&&before.decimal.compare(after)===0;if(Object.hasOwn(before,'currency'))return after instanceof VBCurrency&&before.currency===after.raw;if(Object.hasOwn(before,'date'))return after instanceof Date&&before.date===after.getTime();if(Object.hasOwn(before,'error'))return after instanceof VBErrorValue&&before.error===after.number;}return Object.is(before,after);}
   runToCursor(module,line,column=null){if(this.state!=='paused')throw new VBError('Run to Cursor requires break mode',5);const target=this.breakpointLocation(module,line,column);this.runTarget=target;this.resume('continue');return target;}
