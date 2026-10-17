@@ -136,7 +136,7 @@ test('namespace aliases lower functional ToggleSwitch, ToggleButton and Hyperlin
  const toggle=control(form),sw=control(form,'Switch'),link=control(form,'Link');
  assert.equal(toggle.type,'CheckBox');assert.equal(toggle.properties.Style,1);assert.equal(toggle.properties.Value,1);
  assert.equal(sw.type,'CheckBox');assert.equal(sw.properties.Value,1);
- assert.deepEqual({...sw.properties.WinUI3.properties},{Header:'Updates',OnContent:'Enabled',OffContent:'Paused'});
+ assert.deepEqual(Object.fromEntries(['Header','OnContent','OffContent'].map(key=>[key,sw.properties.WinUI3.properties[key]])),{Header:'Updates',OnContent:'Enabled',OffContent:'Paused'});
  assert.equal(link.type,'CommandButton');assert.equal(link.properties.FontUnderline,-1);
  assert.equal(link.properties.WinUI3.sourceType,'HyperlinkButton');
  assert.ok(toggle.properties.WinUI3.states.CheckedPointerOver.Background);assert.ok(toggle.properties.WinUI3.states.IndeterminateDisabled.BorderBrush);

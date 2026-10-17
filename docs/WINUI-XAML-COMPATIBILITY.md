@@ -185,6 +185,31 @@ layer beneath the authored Style. AccentButtonStyle has no native BasedOn, yet
 the unset button padding, font, border thickness and focus metrics still come
 from its default theme style.
 
+Other supported controls receive the following audited presentation defaults
+from their pinned native styles. Resource aliases resolve through the consuming
+control's real lexical dictionaries, including application overrides, the
+selected theme and the compact-density overlay. A Dark control inside a Light
+application therefore has its correct normal foreground before it is hovered or
+focused.
+
+| Control family | Native default presentation resolved by the compiler |
+| --- | --- |
+| TextBox, PasswordBox, RichEditBox, ComboBox | Normal foreground/background/border, border thickness, padding, corner radius, font family/size and the implemented focus/background-sizing flags declared by that native style |
+| CheckBox, RadioButton, ToggleSwitch | Content foreground and font family/size; glyph paints remain independent in the control theme |
+| ListBox | Normal foreground/background/border, border thickness and font family/size |
+| Slider | Track Background from SliderTrackFill and value Foreground from SliderTrackValueFill, including pointer/pressed/disabled resources |
+| ProgressBar | Track Background from ProgressBarBackground and indicator Foreground from ProgressBarForeground, shared by determinate and indeterminate presentation |
+
+These defaults are a supported presentation subset, not a partially instantiated
+native Style object. CheckBox/RadioButton content margins and glyph borders,
+Slider thumb borders and track corner geometry, list item templates, and other
+unimplemented template targets are not converted into unrelated outer-box
+properties. Explicit requests for unsupported full-style behavior remain
+diagnostics. The ProgressBar target mapping comes from the pinned
+[ProgressBar.xaml](https://github.com/microsoft/microsoft-ui-xaml/blob/ba3a8d59e6de4e2b86ca4f61c78bc26ccf129afd/src/controls/dev/ProgressBar/ProgressBar.xaml)
+template; its deprecated empty DefaultProgressBarStyle is not used as a default
+presentation definition.
+
 Explicit, implicit and inline authored styles support scalar setters and BasedOn
 chains. Local properties override their setters. An explicit style replaces the
 authored implicit style; it does not combine their setters. `Style="{x:Null}"`
@@ -228,6 +253,7 @@ authorization to discard unsupported setters or execute its native Template.
 | `CheckBox`, `RadioButton` | CheckBox, OptionButton | Caption, checked state and existing native control interaction; glyph and label state painting remain independent |
 | `TextBlock` | Label | Plain text, supported fonts, alignment, wrapping and character trimming |
 | `TextBox`, `PasswordBox` | TextBox | Text/password, placeholder, enabled/read-only/multiline-related scalar properties and existing input behavior |
+| `RichEditBox` | RichTextBox | Supported text/editing properties, native formatting and live text-field appearance; arbitrary XAML flow content is diagnosed |
 | `ComboBox`, `ListBox` | ComboBox, ListBox | Static string items and simple text-only item containers, initial selection and supported list modes; ComboBox is non-editable by default |
 | `Slider`, `ScrollBar`, `ProgressBar` | Existing range controls | Scalar bounds/value, supported orientation/step properties; ProgressBar supports determinate and indeterminate presentation |
 
@@ -239,7 +265,7 @@ palette independently of whether their complete WinUI XAML API is supported.
 
 | Presentation value | Supported form contract |
 | --- | --- |
-| Background, Foreground, BorderBrush | Canonical XAML ARGB colors; alpha preserved. Background and BorderBrush also accept the gradient subset below |
+| Background, Foreground, BorderBrush | Canonical XAML ARGB colors; alpha preserved. Background and BorderBrush also accept the gradient subset below on implemented paint targets; Slider track Background requires a solid color |
 | Padding, BorderThickness | Four nonnegative DIPs in left/top/right/bottom order |
 | CornerRadius | Four nonnegative DIPs in top-left/top-right/bottom-right/bottom-left order |
 | FontFamily, FontSize, FontWeight | Bounded family string, positive DIP size, named/numeric weight; exact weight retained beside the native bold fallback |
@@ -250,12 +276,20 @@ palette independently of whether their complete WinUI XAML API is supported.
 | UseSystemFocusVisuals, FocusVisualMargin | Boolean focus presentation and signed four-sided focus offsets without changing authored bounds |
 
 Button and hyperlink states retain normal, pointer-over, pressed and disabled
-resource values. ToggleButton adds checked and indeterminate combinations.
-TextBox/PasswordBox and ComboBox retain the applicable focused resources as well
-as other declared states. Each brush is resolved in the same scope as the
+resource values. ToggleButton adds checked and indeterminate combinations, and
+CheckBox retains those combinations for content foreground independently of the
+glyph. RadioButton content uses its common states regardless of selection;
+ToggleSwitch retains disabled content foreground. TextBox/PasswordBox/RichEditBox
+and ComboBox retain the applicable focused resources as well as other declared
+states. Each brush is resolved in the same scope as the
 control, so local state-resource overrides work. Composite controls keep their
 glyph, content and fill channels separate; retaining a custom resting brush
 does not freeze the pointer or disabled state.
+
+Native `FontFamily` and `FontWeight` resource elements can appear in ordinary or
+theme dictionaries. A ThemeResource font family or weight preserves all theme
+branches just like a directly authored font property; family aliases and exact
+numeric weights are validated when assigned to an implemented text target.
 
 ### Brush geometry
 

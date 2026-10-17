@@ -136,7 +136,7 @@ export function createWinUISchema() {
   add('ToolTipService', 'DependencyObject', {ToolTip: attached('Object'), Placement: attached('String'), IsEnabled: attached('Boolean')});
   add('AutomationProperties', 'DependencyObject', Object.fromEntries(['Name', 'AutomationId', 'HelpText', 'ItemType', 'ItemStatus', 'LabeledBy'].map(n => [n, attached('String')])));
   for (const name of ['String', 'Double', 'Int32', 'Boolean']) schema.registerType(XAML_NS, name, {primitive: name, contentProperty: '$value', members: {$value: name}});
-  for (const name of ['Thickness', 'CornerRadius', 'Color', 'GridLength', 'Point']) schema.registerType(PRESENTATION_NS, name, {primitive: name, contentProperty: '$value', members: {$value: name}});
+  for (const name of ['Thickness', 'CornerRadius', 'Color', 'GridLength', 'Point', 'FontFamily', 'FontWeight']) schema.registerType(PRESENTATION_NS, name, {primitive: name, contentProperty: '$value', members: {$value: name}});
   // WinUI supports both presentation XML names and its public controls namespace.
   // Register real schema aliases with base identity retained, never local-name
   // matching that would accidentally lower a foreign Button to a native control.
@@ -150,7 +150,7 @@ export function convertValue(value, member = {type: 'String'}) {
   const type = member.type ?? 'String';
   if (value === null) { if (member.nullable || ['Object', 'String', 'Brush', 'ImageSource'].includes(type)) return null; throw new TypeError('Null is not valid for ' + type + '.'); }
   const text = String(value), trimmed = text.trim();
-  if (type === 'String' || type === 'Object' || type === 'Type' || type === 'Brush' || type === 'ImageSource' || type === 'Color' || type === 'FontWeight') return text;
+  if (type === 'String' || type === 'Object' || type === 'Type' || type === 'Brush' || type === 'ImageSource' || type === 'Color' || type === 'FontWeight' || type === 'FontFamily') return text;
   if (type === 'Json') return JSON.parse(text);
   if (type === 'Boolean') { if (/^true$/i.test(trimmed)) return true; if (/^false$/i.test(trimmed)) return false; throw new TypeError('Expected True or False.'); }
   if (type === 'Enum') { const found = member.values?.find(v => v.toLowerCase() === trimmed.toLowerCase()); if (found !== undefined) return found; throw new TypeError('Expected ' + member.values.join(', ') + '.'); }

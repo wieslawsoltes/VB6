@@ -152,22 +152,69 @@ export function winui3BuiltinDictionary(node) {
 }
 export const WINUI3_CONTROL_ALIASES=Object.freeze({ToggleSwitch:'CheckBox',ToggleButton:'CheckBox',HyperlinkButton:'CommandButton'});
 export const WINUI3_DEFAULT_STYLES=Object.freeze({Button:'DefaultButtonStyle',ToggleButton:'DefaultToggleButtonStyle',HyperlinkButton:'DefaultHyperlinkButtonStyle',TextBlock:'BodyTextBlockStyle'});
+const fieldPresentation=Object.freeze(['Foreground','Background','BorderBrush','BorderThickness','FontFamily','FontSize','Padding','CornerRadius','UseSystemFocusVisuals','BackgroundSizing']);
+/** This is an audited presentation projection of native theme defaults, not a
+ * claim that each complete native Style/ControlTemplate can be instantiated.
+ * Only properties whose actual template targets exist in the browser adapter
+ * are selected. Authored Style values still pass through the strict full-style
+ * reader above, so an unsupported flyout, template or behavioral setter cannot
+ * disappear merely because its control has supported presentation defaults.
+ * CheckBox/RadioButton.Padding is a content-presenter margin, and Slider's
+ * BorderBrush paints the thumb: neither is equivalent to a root box property.
+ */
+const defaultPresentations=Object.freeze({
+  TextBox:{style:'DefaultTextBoxStyle',properties:fieldPresentation},
+  PasswordBox:{style:'DefaultPasswordBoxStyle',properties:fieldPresentation},
+  RichEditBox:{style:'DefaultRichEditBoxStyle',properties:fieldPresentation},
+  ComboBox:{style:'DefaultComboBoxStyle',properties:fieldPresentation},
+  CheckBox:{style:'DefaultCheckBoxStyle',properties:['Foreground','FontFamily','FontSize']},
+  RadioButton:{style:'DefaultRadioButtonStyle',properties:['Foreground','FontFamily','FontSize']},
+  ToggleSwitch:{style:'DefaultToggleSwitchStyle',properties:['Foreground','FontFamily','FontSize']},
+  ListBox:{style:'DefaultListBoxStyle',properties:['Foreground','Background','BorderBrush','BorderThickness','FontFamily','FontSize']},
+  Slider:{style:'DefaultSliderStyle',properties:['Foreground','Background']},
+  // ProgressBar.xaml at the pinned reference, lines 4–5 and 157–169: the
+  // foreground fills the determinate/indeterminate indicator rectangles and
+  // the background fills ProgressBarTrack. Its deprecated named default style
+  // in CommonStyles is empty and must not be used to infer these defaults.
+  ProgressBar:{setters:[
+    {property:'Foreground',value:{kind:'Resource',key:'ProgressBarForeground',theme:true}},
+    {property:'Background',value:{kind:'Resource',key:'ProgressBarBackground',theme:true}}
+  ]}
+});
+function defaultPresentationStyle(name,theme) {
+  const projection=defaultPresentations[name];
+  if(!projection)return undefined;
+  let selected=projection.setters;
+  if(projection.style) {
+    const {type,value}=winui3ResourceDefinition(projection.style,themeName(theme));
+    if(type!=='Style'||value.targetType!==name)throw new TypeError('Pinned WinUI presentation target mismatch for '+projection.style+'.');
+    selected=value.setters.filter(setter=>projection.properties.includes(setter.property));
+  }
+  const setters=selected.map(setter=>object('Setter',[
+    property('Setter','Property',literal(setter.property),'String'),property('Setter','Value',setter.value)
+  ],{builtinPresentation:true}));
+  return object('Style',[property('Style','TargetType',literal(name),'Type'),property('Style','Setters',{kind:'Collection',items:setters})],{builtinPresentation:true});
+}
 export function winui3DefaultStyle(node,scopes) {
-  if(!isWinUI3Namespace(node.type.namespaceURI)||!Object.hasOwn(WINUI3_DEFAULT_STYLES,node.type.name))return undefined;
+  if(!isWinUI3Namespace(node.type.namespaceURI)||!Object.hasOwn(WINUI3_DEFAULT_STYLES,node.type.name)&&!Object.hasOwn(defaultPresentations,node.type.name))return undefined;
   const active=(scope,seen=new Set())=>{
     if(seen.has(scope))return false;seen.add(scope);
     const selected=scope.themes.get(scopes[0]?.theme??'Light')??scope.themes.get('Default');
     return !!scope.builtin||scope.merged.some(child=>active(child,seen))||!!selected&&active(selected,seen);
   };
   if(!scopes.some(scope=>active(scope)))return undefined;
-  return {kind:'Resource',key:WINUI3_DEFAULT_STYLES[node.type.name],theme:false};
+  return Object.hasOwn(WINUI3_DEFAULT_STYLES,node.type.name)?{kind:'Resource',key:WINUI3_DEFAULT_STYLES[node.type.name],theme:false}:defaultPresentationStyle(node.type.name,scopes[0]?.theme??'Light');
 }
 export function winui3StateResources(node,appearance,statics,scopes) {
-  if(!['Button','ToggleButton','HyperlinkButton','TextBox','PasswordBox','ComboBox'].includes(node.type.name))return undefined;
-  const prefix=appearance.style==='AccentButtonStyle'?'AccentButton':appearance.style==='SubtleButtonStyle'?'SubtleButton':['TextBox','PasswordBox'].includes(node.type.name)?'TextControl':node.type.name;
-  const names=['PointerOver','Pressed','Disabled',...(['TextBox','PasswordBox','ComboBox'].includes(node.type.name)?['Focused']:[]),...(node.type.name==='ToggleButton'?['Checked','CheckedPointerOver','CheckedPressed','CheckedDisabled','Indeterminate','IndeterminatePointerOver','IndeterminatePressed','IndeterminateDisabled']:[])],states={};
-  for(const state of names)for(const property of ['Background','Foreground','BorderBrush']) {
-    const key=prefix+property+state;
+  const type=node.type.name;
+  if(!['Button','ToggleButton','HyperlinkButton','TextBox','PasswordBox','RichEditBox','ComboBox','CheckBox','RadioButton','ToggleSwitch','Slider'].includes(type))return undefined;
+  const prefix=appearance.style==='AccentButtonStyle'?'AccentButton':appearance.style==='SubtleButtonStyle'?'SubtleButton':['TextBox','PasswordBox','RichEditBox'].includes(type)?'TextControl':type;
+  const names=type==='ToggleSwitch'?['Disabled']:['PointerOver','Pressed','Disabled',...(['TextBox','PasswordBox','RichEditBox','ComboBox'].includes(type)?['Focused']:[]),...(['ToggleButton','CheckBox'].includes(type)?['Checked','CheckedPointerOver','CheckedPressed','CheckedDisabled','Indeterminate','IndeterminatePointerOver','IndeterminatePressed','IndeterminateDisabled']:[])],states={};
+  const channels=['CheckBox','RadioButton','ToggleSwitch'].includes(type)?['Foreground']:type==='Slider'?['Background','Foreground']:['Background','Foreground','BorderBrush'];
+  for(const state of names)for(const property of channels) {
+    const key=type==='CheckBox'?'CheckBoxForeground'+(/^(Checked|Indeterminate)/.test(state)?state:'Unchecked'+state):
+      type==='ToggleSwitch'?'ToggleSwitchContentForeground'+state:
+      type==='Slider'?(property==='Background'?'SliderTrackFill':'SliderTrackValueFill')+state:prefix+property+state;
     if(!statics.lookup(key,scopes))continue;
     const value=statics.convert({kind:'Resource',key,theme:true},{type:'Brush'},scopes);
     if(!isWinUI3ThemeResource(value))throw new TypeError('A WinUI state resource must resolve to a live theme value.');

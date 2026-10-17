@@ -14,7 +14,7 @@ export function createStaticValues(compilation,{themeColor,themeResource,builtin
   const schema=compilation.schema;
   const semanticTokens=new WeakSet();
   const syntax=new Map(compilation.syntax.elements.map(node=>[node.start,node]));
-  const namespaces=node=>node.builtinStyle?{'':PRESENTATION_NS}:syntax.get(node.source?.start)?.namespaces ?? {'':PRESENTATION_NS};
+  const namespaces=node=>node.builtinStyle||node.builtinPresentation?{'':PRESENTATION_NS}:syntax.get(node.source?.start)?.namespaces ?? {'':PRESENTATION_NS};
   const fail=message=>{throw new TypeError(message);};
   const typeName=(value,node)=>{
     if(typeof value!=='string')return fail('Style TargetType must be a literal type name.');
