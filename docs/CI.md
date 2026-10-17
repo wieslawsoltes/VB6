@@ -84,7 +84,25 @@ execute unconditionally in the audit job. The pinned, SHA-256-verified actionlin
 syntax and expression types. Historical timings or results do not qualify a
 later source revision.
 
+## Screenshot command recovery
+
+Agent-transcript captures require three consecutive identical images, independently
+of the expected reference, within the original twelve-attempt limit. A single
+Playwright screenshot-command timeout may be retried on the same page, with the
+same renderer, viewport and unmodified caret. That retry discards all pre-timeout
+stability and must obtain three fresh consecutive images. A second timeout,
+readiness failure, backend change or non-timeout browser error fails immediately.
+Pixel mismatches are never retried, references are never updated, and GPU
+requirements are unchanged. Per-capture JSON preserves timeouts, sample hashes
+and the acceptance result even on failure; a failed rerun removes old accepted
+images. These transport checks run through the required Node test discovery.
+
 ## Publication boundary
+
+A skipped Pages run after failed **Validate** is an intentional publication
+block, not a successful deployment. Fix and validate current `main`; the
+successful push validation triggers Pages automatically. Do not bypass the gate
+or redeploy an older successful revision to hide current failures.
 
 Pages accepts only successful **Validate** pushes to this repository's current
 `main`. It checks the event, repository and exact SHA, then rebuilds that source
