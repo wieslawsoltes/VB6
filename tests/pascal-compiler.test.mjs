@@ -49,6 +49,28 @@ end.`);
   assert.deepEqual(output, ['15:-2:-1', '-32768']);
 });
 
+test('integer promotions preserve unsigned Word arithmetic and signed 32-bit literal limits', async () => {
+  const {output}=await execute(`program NumericTypes;
+var W:Word; B:Byte; I:Integer; L:Longint;
+begin W:=65535; B:=0; I:=1; Writeln(W+B,':',W+1,':',W+I,':',SizeOf(W+B),':',SizeOf(W+I));
+B:=200; Writeln(B+B,':',-B); W:=256; Writeln(Sqr(W));
+{$R+} W:=0; Writeln(Not W); {$R-} L:=-2147483648; Writeln(L,':',$FFFFFFFF,':',$80000000) end.`);
+  assert.deepEqual(output,['65535:0:65536:2:4','400:-200','0','65535','-2147483648:-1:-2147483648']);
+  for (const source of ['program Bounds; begin Writeln(2147483648) end.','program Bounds; begin Writeln($100000000) end.']) invalid(source,/Integer constant is outside/);
+  const compiled=compileProject(project('program Overflow; var W:Word; begin W:=65535; {$Q+} W:=W+1 end.')); assert.deepEqual(compiled.diagnostics,[]);
+  await assert.rejects(new VirtualMachine(compiled).start(),error=>error.number===215);
+});
+
+test('character and Boolean subranges retain ordinal checks and loop representations', async () => {
+  const {output}=await execute(`program OrdinalRanges;
+type Letter='a'..'c'; Truth=True..True;
+var C:Letter; B:Truth;
+begin {$R+} for C:='a' to 'c' do Write(C); Writeln; C:='a'; Inc(C); Writeln(C,':',Ord(C)); B:=True; if B then Writeln(B); end.`);
+  assert.deepEqual(output,['a','b','c','','b:98','TRUE']);
+  const compiled=compileProject(project("program Range; type Letter='a'..'c'; var C:Letter; begin {$R+} C:='z' end.")); assert.deepEqual(compiled.diagnostics,[]);
+  await assert.rejects(new VirtualMachine(compiled).start(),error=>error.number===201);
+});
+
 test('For handles maximal ordinal endpoints and descending Char loops without overflowing', async () => {
   const {output} = await execute("program Loops; var I: Integer; C: Char; begin for I := 32766 to 32767 do Writeln(I); for C := 'c' downto 'a' do Write(C); Writeln; end.");
   assert.deepEqual(output, ['32766', '32767', 'c', 'b', 'a', '']);
@@ -74,6 +96,21 @@ var Total: Integer;
 begin Total := 0; Add(3); Writeln(Total) end;
 begin Outer(7); Outer(2) end.`);
   assert.deepEqual(output, ['21', '6']);
+});
+
+test('routine arguments evaluate left to right and snapshot value arrays before later mutations', async () => {
+  const {output}=await execute(`program ArgumentOrder;
+type Items=array[1..2] of Integer;
+var Trace:String; A:Items; Index:Integer;
+function First:Integer; begin Trace:=Trace+'F'; First:=1 end;
+function Second:Integer; begin Trace:=Trace+'S'; Second:=2 end;
+procedure Numbers(X,Y:Integer); begin Writeln(X,':',Y) end;
+function Mutate:Integer; begin A[1]:=9; Index:=2; Mutate:=7 end;
+procedure Snapshot(Copy:Items; Ignored:Integer); begin Writeln(Copy[1]) end;
+procedure Store(var Target:Integer; Value:Integer); begin Target:=Value end;
+begin Numbers(First,Sqr(Second)); Writeln(Trace); Trace:=''; Writeln(First,':',Sqr(Second)); Writeln(Trace); A[1]:=3; Snapshot(A,Mutate);
+Index:=1; Store(A[Index],Mutate); Writeln(A[1],':',A[2]) end.`);
+  assert.deepEqual(output,['1:4','FS','1:4','FS','3','7:0']);
 });
 
 test('array copies and by-value aggregate parameters keep independent storage', async () => {
@@ -131,7 +168,7 @@ begin Assign(F,'text.txt'); Rewrite(F); Writeln(F,42,' abcdef'); Writeln(F,'last
 Reset(F); Read(F,N); Read(F,S); Readln(F,Tail); Writeln(N,':',S,':',Tail,':',Eof(F));
 Readln(F,Tail); Writeln(Tail,':',Eof(F)); Close(F);
 Append(F); Write(F,'tail'); Close(F); Rename(F,'renamed.txt') end.`);
-  assert.deepEqual(output, ['42: ab:cdef:FALSE', 'last:TRUE']);
+  assert.deepEqual(output, ['42: ab::FALSE', 'last:TRUE']);
   assert.deepEqual([...vm.fs.readBytes('/renamed.txt')], [...new TextEncoder().encode('42 abcdef\r\nlast\r\ntail')]);
   assert.equal(vm.fs.exists('/text.txt'), false);
 });
@@ -171,7 +208,7 @@ test('buffered console Read/ReadLn share line input across units and preserve em
 var N:Integer; S:String[3]; Tail:String[20]; C:Char;
 begin ReadNumber(N); Read(S); Readln(Tail); Writeln(N,':',S,':',Tail);
 Readln(Tail); Writeln(Length(Tail)); Read(N); Writeln(N,':',Eoln); Readln; Read(C); Writeln(Ord(C)) end.`,[unit],{host:{inputBox:async()=>{requests++; assert.ok(lines.length,'unexpected input request'); return lines.shift();}}});
-  assert.deepEqual(output,['12: ab:cdef','0','7:TRUE','120']); assert.equal(requests,4);
+  assert.deepEqual(output,['12: ab:','0','7:TRUE','120']); assert.equal(requests,4);
   assert.deepEqual(compiled.modules.get('consolework').pascal.hostRequirements,['consoleLineInput']);
   invalid('program EndOfInput; begin Writeln(Eof) end.',/end-of-input sentinel/);
 });

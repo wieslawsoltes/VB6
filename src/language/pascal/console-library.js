@@ -22,7 +22,7 @@ Private Function __PascalConsoleReadText(ByRef buffer As String, ByRef position 
   Call __PascalConsoleEnsure(buffer, position, ready, checked, status)
   If status <> 0 Then Exit Function
   __PascalConsoleReadText = Mid$(buffer, position, capacity)
-  position = position + Len(__PascalConsoleReadText)
+  position = Len(buffer) + 1
 End Function
 
 Private Function __PascalConsoleReadChar(ByRef buffer As String, ByRef position As Long, ByRef ready As Boolean, ByVal checked As Boolean, ByRef status As Long) As String

@@ -21,7 +21,7 @@ export class PascalFileLowerer {
   source() {return getPascalFileRuntimeSource(this.helpers) + (this.usesConsole ? '\n' + PASCAL_CONSOLE_SOURCE : '');}
   globals(writer, node) {if (this.owner === this.lowerer.binder.name) {writer.emit('Public __PascalIOStatus As Long', node, true); writer.emit('Public __PascalFileMode As Long = 2&', node, true); writer.emit('Public __PascalConsoleBuffer As String\nPublic __PascalConsolePosition As Long\nPublic __PascalConsoleReady As Boolean', node, true);}}
   consoleCall(name, args, node) {this.usesConsole = true; this.helper('fileCapture'); return `${id(`__PascalConsole${name}`)}(${[...this.consoleArguments, ...args, boolean(this.lowerer.flag('ioChecks', node)), this.status].join(', ')})`;}
-  file(node, context) {const type = this.lowerer.typeOf(node, context); if (type.kind !== 'file') this.lowerer.fail('File variable required', node, 'TP_FILE_TYPE'); this.lowerer.assignable(node, context); return {type, source: this.lowerer.expression(node, context, {lvalue: true})};}
+  file(node, context) {const type = this.lowerer.typeOf(node, context); if (type.kind !== 'file') this.lowerer.fail('File variable required', node, 'TP_FILE_TYPE'); this.lowerer.assignable(node, context); return {type, source: context.pure ? this.lowerer.expression(node, context, {lvalue: true}) : this.lowerer.freezeReference(node, context)};}
   expression(call, context) {
     const name = call.callee.kind === 'identifier' ? KEY(call.callee.name) : ''; if (!EXPRESSION_NAMES.has(name)) return null;
     const c = this.lowerer;
@@ -52,9 +52,9 @@ export class PascalFileLowerer {
   }
   format(arg, context) {
     const c = this.lowerer, value = arg.kind === 'formatted' ? arg.value : arg, type = c.typeOf(value, context), expression = c.expression(value, context);
-    if (arg.kind !== 'formatted' && isString(type)) return expression;
     if (isAggregate(type) || ['file', 'pointer', 'object', 'set'].includes(type.kind)) c.fail('Text Write requires a scalar value', value);
-    return c.callHelper('format', [expression, arg.kind === 'formatted' ? c.expression(arg.width, context) : '-1&', arg.kind === 'formatted' && arg.precision ? c.expression(arg.precision, context) : '-1&', quote(type.kind === 'boolean' ? 'boolean' : type.kind === 'real' ? 'real' : isString(type) ? 'string' : 'integer')]);
+    const formatted = arg.kind !== 'formatted' && isString(type) ? expression : c.callHelper('format', [expression, arg.kind === 'formatted' ? c.expression(arg.width, context) : '-1&', arg.kind === 'formatted' && arg.precision ? c.expression(arg.precision, context) : '-1&', quote(type.kind === 'boolean' || type.kind === 'subrange' && type.base.kind === 'boolean' ? 'boolean' : type.kind === 'real' ? KEY(type.name) : isString(type) ? 'string' : 'integer')]);
+    const temporary = c.temporary(context, PASCAL_TYPES.string, arg, 'formatted'); c.emit(context, `${temporary} = ${formatted}`, arg, true); return temporary;
   }
   write(call, context, node, newline) {
     const c = this.lowerer, file = this.file(call.args[0], context), args = call.args.slice(1);
@@ -130,6 +130,7 @@ export class PascalFileLowerer {
   }
   visit(value, type, context, node, leaf) {
     const c = this.lowerer;
+    if (type.isPascalObject && type.hasVmt) c.fail('Objects with virtual method storage require an address-independent file representation', node, 'TP_FILE_OBJECT_VMT');
     if (type.kind === 'record') {for (const field of type.fields.values()) if (!field.internal) this.visit(`${value}.${id(field.name)}`, field.type, context, node, leaf); return;}
     if (type.kind === 'array') {
       if (type.open) c.fail('File codecs require statically bounded arrays', node);
@@ -162,7 +163,7 @@ export class PascalFileLowerer {
       c.emit(context, `${incoming} = ${this.call('fileBlockRead', [file.source, count, boolean(!!result), transferred], node)}`, node);
       c.emit(context, `If Len(${incoming}) > 0& Then`, node, true); c.emit(context, `${incoming} = ${incoming} & Mid$(${original}, Len(${incoming}) + 1&)`, node, true); this.decode(source, type, incoming, context, buffer); c.emit(context, 'End If', node, true);
     }
-    c.emit(context, 'End If', node, true);
     if (result) c.emit(context, `${destination} = ${c.range(transferred, c.typeOf(result, context), context, result)}`, node, true);
+    c.emit(context, 'End If', node, true);
   }
 }

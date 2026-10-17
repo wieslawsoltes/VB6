@@ -31,6 +31,13 @@ export function foreignType(name = 'Variant') {
 }
 const basicIntrinsics = new Map(BUILTIN_SYMBOLS.map(symbol => [key(symbol.name), symbol]));
 const basicConstants = new Map(CONSTANT_SYMBOLS.map(symbol => [key(symbol.name), symbol]));
+function integerConstantType(value) {
+  if (value >= 0 && value <= 255) return PASCAL_TYPES.byte;
+  if (value >= -128 && value < 0) return PASCAL_TYPES.shortint;
+  if (value >= -32768 && value <= 32767) return PASCAL_TYPES.integer;
+  if (value >= 0 && value <= 65535) return PASCAL_TYPES.word;
+  return PASCAL_TYPES.longint;
+}
 export function numericType(left, right) {
   if (left?.kind === 'subrange') left = left.base;
   if (right?.kind === 'subrange') right = right.base;
@@ -63,7 +70,7 @@ export function assignmentCompatible(target, value) {
   if (isNumeric(target) && isNumeric(value)) return target.kind === 'real' || value.kind !== 'real';
   if (target.kind === 'string' && isString(value)) return true;
   if (target.kind === 'char' && value.kind === 'string') return value.literalLength === 1;
-  if (target.kind === 'set' && value.kind === 'set') return !value.base || !target.base || sameType(target.base, value.base);
+  if (target.kind === 'set' && value.kind === 'set') return !value.base || !target.base || sameType(target.base, value.base) || isNumeric(target.base) && isNumeric(value.base);
   if (target.kind === 'array' && value.kind === 'array' && target.open) return sameType(target.element, value.element);
   if (target.kind === 'pointer' && value.kind === 'nil' || target.kind === 'object' && value.kind === 'nil') return true;
   return target.kind === 'object' && value.kind === 'object';
@@ -264,12 +271,27 @@ export class PascalBinder {
   ordinalValue(value) {return value.type.kind === 'char' ? value.value.charCodeAt(0) : value.type.kind === 'boolean' ? Number(value.value) : value.value;}
   constant(node, scope = this.scope) {
     if (node.kind === 'group') return this.constant(node.expression, scope);
-    if (node.kind === 'number') return {value: node.value, type: /[.eE]/.test(node.raw.replace(/^\$[a-f0-9]+$/i, '0')) ? PASCAL_TYPES.real : node.value >= -32768 && node.value <= 32767 ? PASCAL_TYPES.integer : PASCAL_TYPES.longint};
+    if (node.kind === 'number') {
+      if (/[.eE]/.test(node.raw.replace(/^\$[a-f0-9]+$/i, '0'))) return {value: node.value, type: PASCAL_TYPES.real};
+      const hexadecimal = node.raw.startsWith('$');
+      if (!Number.isSafeInteger(node.value) || node.value < 0 || node.value > (hexadecimal ? 4294967295 : 2147483647)) this.fail('Integer constant is outside the signed 32-bit decimal or 32-bit hexadecimal range', node, 'TP_INTEGER_CONSTANT');
+      if (hexadecimal && node.value >= 2147483648) return {value: node.value - 4294967296, type: PASCAL_TYPES.longint};
+      return {value: node.value, type: integerConstantType(node.value)};
+    }
     if (node.kind === 'string') return {value: node.value, type: node.value.length === 1 ? PASCAL_TYPES.char : {...PASCAL_TYPES.string, literalLength: node.value.length}};
     if (node.kind === 'boolean') return {value: node.value, type: PASCAL_TYPES.boolean};
     if (node.kind === 'identifier') {const symbol = scope.resolve(node.name, true, node); if (!['constant', 'enumMember'].includes(symbol.kind)) this.fail('Constant expression required', node, 'TP_CONSTANT'); return {value: symbol.value, type: symbol.type};}
     if (node.kind === 'member' && node.object.kind === 'identifier') {const binder = this.workspace.get(node.object.name); binder?.ensure(); const symbol = binder?.scope.symbols.get(key(node.name)); if (!symbol?.public || !['constant', 'enumMember'].includes(symbol.kind)) this.fail('Exported constant expression required', node, 'TP_CONSTANT'); return binder.constant({kind: 'identifier', name: symbol.name, loc: node.loc}, binder.scope);}
-    if (node.kind === 'unary') {const operand = this.constant(node.operand, scope), value = node.operator === '-' ? -operand.value : node.operator === '+' ? +operand.value : node.operator === 'not' ? operand.type.kind === 'boolean' ? !operand.value : ~operand.value : this.fail('Address is not a compile-time constant', node); return {value, type: operand.type};}
+    if (node.kind === 'unary') {
+      let literal = node.operand; while (literal.kind === 'group') literal = literal.expression;
+      if (node.operator === '-' && literal.kind === 'number' && !literal.raw.startsWith('$') && literal.value === 2147483648) return {value: -2147483648, type: PASCAL_TYPES.longint};
+      const operand = this.constant(node.operand, scope);
+      if (node.operator === 'not' && operand.type.kind === 'boolean') return {value: !operand.value, type: PASCAL_TYPES.boolean};
+      if (!isNumeric(operand.type)) this.fail('Numeric constant operand required', node, 'TP_CONSTANT');
+      const value = node.operator === '-' ? -operand.value : node.operator === '+' ? +operand.value : node.operator === 'not' ? ~operand.value : this.fail('Address is not a compile-time constant', node);
+      if (operand.type.kind !== 'real' && (value < -2147483648 || value > 2147483647)) this.fail('Integer constant is outside the signed 32-bit range', node, 'TP_INTEGER_CONSTANT');
+      return {value, type: operand.type.kind === 'real' ? operand.type : literal.kind === 'number' && ['+','-'].includes(node.operator) ? integerConstantType(value) : numericType(operand.type, operand.type)};
+    }
     if (node.kind === 'binary') {
       const left = this.constant(node.left, scope), right = this.constant(node.right, scope), a = left.value, b = right.value, op = node.operator;
       const compare = {'=': () => a === b, '<>': () => a !== b, '<': () => a < b, '>': () => a > b, '<=': () => a <= b, '>=': () => a >= b};
