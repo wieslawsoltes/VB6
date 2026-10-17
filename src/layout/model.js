@@ -4,8 +4,42 @@ import {measureLayoutControl,hasLayoutMeasurement} from './measurement.js';
 const aligns=['start','center','end','stretch','baseline'];
 const justifies=['start','center','end','space-between','space-around','space-evenly','stretch'];
 const sizeModes=['fixed','hug','fill'];
+const winui3LayoutValues=new WeakMap();
+const winui3LayoutContainers=new Set(['Page','Window','UserControl','Canvas','Grid','StackPanel','Border']);
+const winui3Insets=value=>[value[1],value[2],value[3],value[0]].map(v=>v*15);
 export const formSize=form=>({width:Number(form.properties.ClientWidth??form.properties.Width??0),height:Number(form.properties.ClientHeight??form.properties.Height??0)});
-export function layoutInsets(p,prefix='LayoutPadding'){return ['Top','Right','Bottom','Left'].map(side=>Number(p[prefix+side]??-1)<0?Number(p[prefix]||0):Number(p[prefix+side]));}
+/** Resolved presentation geometry belongs to the live view, not its authored
+ * properties. Call only for a WinUI container whose child host uses this layout
+ * engine; ordinary control template padding remains a paint concern. */
+export function setWinUI3LayoutValues(p,values){
+  const before=layoutInsets(p);
+  if(values===null)winui3LayoutValues.delete(p);
+  else {
+    const next={};
+    for(const key of ['Padding','BorderThickness'])if(values[key]!==undefined){
+      const value=values[key];
+      if(!Array.isArray(value)||value.length!==4||[...value].some(v=>typeof v!=='number'||!Number.isFinite(v)||v<0||v>20000))throw new TypeError('WinUI '+key+' requires four finite nonnegative DIP values.');
+      next[key]=Object.freeze([...value]);
+    }
+    winui3LayoutValues.set(p,Object.freeze(next));
+  }
+  return layoutInsets(p).some((v,i)=>v!==before[i]);
+}
+/** Immutable snapshot used to roll back a failed native layout assignment. */
+export const getWinUI3LayoutValues=p=>winui3LayoutValues.get(p)??null;
+export function layoutInsets(p,prefix='LayoutPadding'){
+  let insets=['Top','Right','Bottom','Left'].map(side=>Number(p[prefix+side]??-1)<0?Number(p[prefix]||0):Number(p[prefix+side]));
+  if(prefix!=='LayoutPadding')return insets;
+  const active=winui3LayoutValues.get(p),appearance=p.WinUI3;
+  if(!active&&!winui3LayoutContainers.has(appearance?.sourceType))return insets;
+  // The compiler already lowered the initial Padding into LayoutPadding.
+  // Resolved live Padding replaces those values; a visual-only border adds its
+  // thickness exactly once, in the layout engine's Top/Right/Bottom/Left order.
+  if(active?.Padding)insets=winui3Insets(active.Padding);
+  const border=active?.BorderThickness??appearance?.properties?.BorderThickness;
+  if(border){const stroke=winui3Insets(border);insets=insets.map((v,i)=>v+stroke[i]);}
+  return insets;
+}
 export function layoutSettings(p){return {direction:['ltr','rtl','inherit'][p.LayoutDirection??2],reverse:!!p.LayoutReverse,wrapReverse:!!p.LayoutWrapReverse,layoutVariables:p.LayoutVariables||undefined,gridTemplateAreas:p.LayoutGridAreas||undefined,layout:p.LayoutMode??0,padding:layoutInsets(p),gap:Number(p.LayoutGap??0),
   crossGap:p.LayoutCrossGap===undefined||p.LayoutCrossGap===-1?undefined:Number(p.LayoutCrossGap),alignItems:aligns[p.LayoutAlignItems??0],alignContent:justifies[p.LayoutAlignContent??0],
   justify:justifies[p.LayoutJustify??0],widthMode:sizeModes[p.LayoutWidthMode??0],heightMode:sizeModes[p.LayoutHeightMode??0],columns:p.LayoutGridColumns,rows:p.LayoutGridRows,gridAutoFlow:['row','column','row dense','column dense'][p.LayoutGridAutoFlow??0]};}
