@@ -5,6 +5,7 @@ import {SourceEditor} from '../src/editor/editor.js';
 import {VirtualTextInput} from '../src/editor/virtual-input.js';
 import {indexSource,positionAt,offsetAt} from '../src/editor/projection.js';
 import {History} from '../src/core/history.js';
+import {createVimSession} from '../src/editor/input-modes/vim-adapter.js';
 
 class Node extends EventTarget {
   constructor(document,tagName='DIV'){
@@ -25,6 +26,13 @@ class Node extends EventTarget {
   querySelector(selector){return this.children.find(child=>child.matches(selector))||this.children.map(child=>child.querySelector(selector)).find(Boolean)||null;}
 }
 function documentFixture(){const doc={defaultView:{getComputedStyle:()=>({paddingLeft:'3px',paddingTop:'4px'})},activeElement:null};doc.createElement=tag=>new Node(doc,tag.toUpperCase());return doc;}
+function dispatchNativeFocus(root,input){
+  // Node's EventTarget resets eventPhase between listeners. A DOM event keeps
+  // its dispatch phase until every capture/target/bubble listener has returned.
+  let phase=2;const event=new Event('focusin',{bubbles:true});
+  Object.defineProperties(event,{target:{value:input},eventPhase:{get:()=>phase}});
+  try{root.dispatchEvent(event);}finally{phase=0;}
+}
 
 test('native XAML geometry measures the displayed font and refreshes after style or owning-window changes',()=>{
   let measured=0,style={font:'13px monospace',letterSpacing:'normal'};
@@ -160,6 +168,43 @@ test('Monaco native selection changes are retained before a same-turn backend te
   a.surface.disposed=true;a.view.selections=[];f.editor.input.setSelectionRange(0,0);f.editor.emit('cursor',{});
   a.runtime.surfaces.delete(f.editor);a.pane.remove();f.editor.input.setSelectionRange(7,9);
   assert.deepEqual(f.host.getSelections(),[{anchor:9,head:7},{anchor:14,head:12}]);f.host.dispose();
+});
+
+test('a transient native focus selection cannot turn a restored Vim block into characterwise selection',async()=>{
+  const f=sourceFixture('alpha\nbeta\ngamma\n'),session=createVimSession(f.host,{onStatus:state=>f.host.setMode(state)});
+  const unsubscribe=f.host.subscribe(event=>session.sync(event));
+  try{
+    for(const key of ['l','l','<C-v>','j','h'])assert.equal(session.handleKey(key),true);
+    const selections=[{anchor:3,head:1},{anchor:9,head:7}];assert.deepEqual(f.host.getSelections(),selections);
+    const a=attachMonaco(f);a.view.setSelections([{selectionStartLineNumber:1,selectionStartColumn:2,positionLineNumber:1,positionColumn:4}]);
+    assert.deepEqual(f.host.getSelections(),selections);session.sync();
+    a.runtime.surfaces.delete(f.editor);a.pane.remove();f.editor.input.setSelectionRange(1,3);
+    assert.deepEqual(f.host.getSelections(),selections);session.sync();
+    let during;
+    f.editor.root.addEventListener('focusin',()=>{during=f.host.getSelections();session.sync();},true);
+    // WebKit reports an empty range to synchronous focus listeners, then
+    // restores its native selection before input.focus() returns.
+    f.editor.input.setSelectionRange(0,0,'forward');
+    dispatchNativeFocus(f.editor.root,f.editor.input);f.editor.input.setSelectionRange(1,3,'backward');
+    assert.deepEqual(during,selections);assert.equal(session.state.subMode,'blockwise');
+    await Promise.resolve();assert.deepEqual(f.host.getSelections(),selections);assert.equal(session.state.subMode,'blockwise');
+    assert.equal(session.handleKey('x'),true);assert.equal(f.editor.text,'aha\nba\ngamma\n');
+  }finally{unsubscribe();session.dispose();f.host.dispose();}
+});
+
+test('native focus protection ends with dispatch and never overrides another module or default editing',()=>{
+  for(const mode of [null,{mode:'normal'}]){
+    const f=sourceFixture('alpha\nbeta\n');f.host.setMode(mode);f.host.setSelections([{anchor:7,head:7}]);
+    const observed=[];f.editor.root.addEventListener('focusin',()=>observed.push(f.host.getSelections()),true);
+    const focus=()=>dispatchNativeFocus(f.editor.root,f.editor.input);
+    f.editor.input.setSelectionRange(0,0);focus();
+    assert.deepEqual(observed.pop(),mode?[{anchor:7,head:7}]:[{anchor:0,head:0}]);
+    f.editor.input.setSelectionRange(2,4,'backward');
+    assert.deepEqual(f.host.getSelections(),[{anchor:4,head:2}],'settled focus/navigation is immediately visible');
+    f.editor.module={...f.editor.module,id:'other'};f.editor.input.setSelectionRange(5,5);focus();
+    assert.deepEqual(observed.pop(),[{anchor:5,head:5}],'an identical-text module owns its own selection');
+    f.host.dispose();
+  }
 });
 
 test('shared method hooks remain observable after detach while another surface wraps a method',async()=>{

@@ -70,7 +70,14 @@ export class EditorHost {
     }));
     const listen=(name,callback,capture=false)=>{this.root.addEventListener?.(name,callback,capture);this.disposables.push(()=>this.root.removeEventListener?.(name,callback,capture));};
     listen('scroll',()=>this.schedulePaint(),true);
-    for(const type of ['focusin','focusout','select','pointerup'])listen(type,event=>{if(this.ownsEvent(event)){cursor();this.queue('surface');}},true);
+    for(const type of ['focusin','focusout','select','pointerup'])listen(type,event=>{
+      if(!this.ownsEvent(event))return;
+      if(type==='focusin'&&!this.view){
+        this.nativeFocusEvent=event;
+        queueMicrotask(()=>{if(this.nativeFocusEvent===event)this.nativeFocusEvent=null;});
+      }
+      cursor();this.queue('surface');
+    },true);
     listen('compositionstart',event=>{if(this.ownsEvent(event)){this.nativeComposition=true;this.schedulePaint();}},true);
     listen('compositionend',event=>{if(this.ownsEvent(event)){this.nativeComposition=false;this.schedulePaint();}},true);
     const view=this.root.ownerDocument?.defaultView;
@@ -130,6 +137,15 @@ export class EditorHost {
     return {anchor:s.anchor??(back?s.end:s.start),head:s.focus??(back?s.start:s.end)};
   }
   getSelections(){
+    const previous=this.selectionSnapshot;
+    // WebKit temporarily exposes a collapsed textarea selection while focusin
+    // is being dispatched, then restores the real range before focus() returns.
+    // Publishing that intermediate cursor loses Vim's visual/block state. Keep
+    // the current pane's last complete selection only during this event; the
+    // queued cursor notification observes the settled range and real navigation.
+    if(this.nativeFocusEvent?.eventPhase&&this.mode&&!this.view&&previous&&
+      previous.identity===this.identity&&previous.text===this.getText()&&
+      previous.moduleId===this.moduleId&&previous.projectId===this.ide?.project?.id)return copySelections(previous.selections);
     const attached=this.ide?.advancedEditor?.runtime?.surfaces?.get(this.editor);
     // Disposal/reparenting can synchronously emit blur and cursor events while
     // Monaco's wrappers still own the legacy methods. Keep the last complete
@@ -138,7 +154,6 @@ export class EditorHost {
     const surface=this.surface,view=surface?.view,identity=this.identity,text=this.getText();let selections;
     if(view){const model=surface.record.model,values=view.getSelections?.();if(values?.length)selections=values.map(s=>({anchor:model.getOffsetAt({lineNumber:s.selectionStartLineNumber,column:s.selectionStartColumn}),head:model.getOffsetAt({lineNumber:s.positionLineNumber,column:s.positionColumn})}));}
     if(!selections){const primary=this.primarySelection(),state=this.selectionStates.get(identity);selections=state&&state.text===text&&sameSelection(primary,state.selections[0])?copySelections(state.selections):[primary];}
-    const previous=this.selectionSnapshot;
     const oldViewExists=surface?surface===previous?.surface&&surface.views.some(state=>state.view===previous.identity):!previous?.surface&&(this.xaml?identity===previous?.identity:this.editor.panes.includes(previous?.identity));
     if(this.mode&&previous&&!oldViewExists&&previous.text===text&&previous.moduleId===this.moduleId&&previous.projectId===this.ide?.project?.id){
       const before=previous.selections[0],after=selections[0];
