@@ -113,7 +113,7 @@ export function compileXaml(text, options = {}) {
     }
     flush();
     if (member.dictionary) {
-      if (values.length === 1 && values[0].kind === 'Object' && values[0].dictionary) return values[0];
+      if (values.length === 1 && values[0].kind === 'Object' && values[0].dictionary && values[0].directives.Key===undefined && member.name!=='ThemeDictionaries') return values[0];
       const seen = new Set(), entries = [];
       for (const value of values) {
         const target = value.kind === 'Object' && value.type.name === 'Style' ? value.properties.find(p => p.member.name === 'TargetType')?.value?.value : null;

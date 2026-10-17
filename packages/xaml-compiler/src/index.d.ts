@@ -135,6 +135,7 @@ export interface Compilation {
 }
 export function compileXaml(text: string | DocumentSyntax, options?: CompilerOptions): Compilation;
 export function emitXamlModule(compilation: Compilation, options?: {runtimeModule?: string}): string;
+export const WINUI_CONTROLS_NS: 'using:Microsoft.UI.Xaml.Controls';
 export interface InstantiateOptions { resources?: Map<string,unknown> | Record<string,unknown>; signal?: AbortSignal; maxOperations?: number }
 export interface HostContext<T> { root: T; names: Map<string,T>; resources: Map<string,unknown>[]; node: ObjectValue; readResource(key: string, theme?: boolean): unknown }
 export interface XamlInstance<T> { root: T; names: Map<string,T>; scopes: Map<number,Map<string,T>>; dispose(): void }
