@@ -12,6 +12,15 @@ export const LINUX_TARGETS=Object.freeze({x64:LINUX_TARGET,arm64:Object.freeze({
   option:'arm64',machine:183,callingConvention:'aapcs64',pageBytes:65536,
   interpreters:Object.freeze(['/lib/ld-linux-aarch64.so.1','/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1'])
 })});
+export const LINUX_TOOLKITS=Object.freeze({
+  gtk3:Object.freeze({id:'gtk3',label:'GTK 3.24',controls:'GTK3',minimumGTK:'3.24',pkgConfig:'gtk+-3.0',printPkgConfig:'gtk+-unix-print-3.0',library:'libgtk-3.so.0'}),
+  gtk4:Object.freeze({id:'gtk4',label:'GTK 4.14',controls:'GTK4',minimumGTK:'4.14',pkgConfig:'gtk4',printPkgConfig:'gtk4-unix-print',library:'libgtk-4.so.1'})
+});
+const gtk4Targets=Object.freeze(Object.fromEntries(Object.entries(LINUX_TARGETS).map(([architecture,target])=>[architecture,Object.freeze({...target,controls:'GTK4',minimumGTK:'4.14'})])));
+export function linuxToolkit(toolkit='gtk3'){
+  if(typeof toolkit!=='string'||!Object.hasOwn(LINUX_TOOLKITS,toolkit))throw new LinuxCompileError('Linux executable toolkit must be gtk3 or gtk4');
+  return LINUX_TOOLKITS[toolkit];
+}
 export const LINUX_LIMITS=Object.freeze({runtimeBytes:64*1024*1024,codeBytes:64*1024*1024,
   metadataBytes:8*1024*1024,imageBytes:160*1024*1024,archiveBytes:256*1024*1024,
   expandedBytes:256*1024*1024,resourceBytes:20*1024*1024,totalResourceBytes:50*1024*1024,files:4096});
@@ -21,24 +30,23 @@ export class LinuxCompileError extends Error {
     this.diagnostics=[{severity:'error',source,line,code,message}];
   }
 }
-export function linuxTarget(architecture='x64'){
+export function linuxTarget(architecture='x64',toolkit='gtk3'){
   const key=architecture==='x86_64'?'x64':architecture;
   if(typeof key!=='string'||!Object.hasOwn(LINUX_TARGETS,key))throw new LinuxCompileError('Linux executable architecture must be x64 or arm64');
-  return LINUX_TARGETS[key];
+  return linuxToolkit(toolkit).id==='gtk4'?gtk4Targets[key]:LINUX_TARGETS[key];
 }
 /** Download stems may be shortened without changing the executable/app name. */
-export function linuxArtifactFilename(name,architecture='x64',extension='.zip'){
-  const options=linuxOptions({name,architecture}),encoder=new TextEncoder();
+export function linuxArtifactFilename(name,architecture='x64',extension='.zip',toolkit='gtk3'){
+  const options=linuxOptions({name,architecture,toolkit}),encoder=new TextEncoder();
   if(typeof extension!=='string'||extension.length>32||!/^\.[a-z0-9]+(?:\.[a-z0-9]+)*$/.test(extension))throw new LinuxCompileError('Invalid Linux artifact extension');
-  const suffix='-linux-'+options.architecture+extension,budget=255-encoder.encode(suffix).length;let stem='',size=0;
+  const suffix='-linux-'+options.architecture+(options.toolkit==='gtk4'?'-gtk4':'')+extension,budget=255-encoder.encode(suffix).length;let stem='',size=0;
   for(const character of options.name){const bytes=encoder.encode(character).length;if(size+bytes>budget)break;stem+=character;size+=bytes;}
   return stem+suffix;
 }
 export function linuxOptions(options={}){
   if(!options||typeof options!=='object'||Array.isArray(options))throw new TypeError('Linux options must be an object');
-  const target=linuxTarget(options.architecture??options.arch??'x64'),toolkit=options.toolkit??'gtk3',optimization=Number(options.optimization??2);
-  if(options.arch!==undefined&&linuxTarget(options.arch)!==target)throw new LinuxCompileError('Conflicting Linux architecture and arch options');
-  if(toolkit!=='gtk3')throw new LinuxCompileError('Linux executable export currently requires GTK3');
+  const toolkit=linuxToolkit(options.toolkit).id,target=linuxTarget(options.architecture??options.arch??'x64',toolkit),optimization=Number(options.optimization??2);
+  if(options.arch!==undefined&&linuxTarget(options.arch).option!==target.option)throw new LinuxCompileError('Conflicting Linux architecture and arch options');
   if(!Number.isInteger(optimization)||optimization<0||optimization>3)throw new LinuxCompileError('optimization must be 0, 1, 2 or 3');
   const name=options.name??'Application';
   if(typeof name!=='string'||!name.length||name.length>100||new TextEncoder().encode(name).length>255||new TextDecoder().decode(new TextEncoder().encode(name))!==name||name==='.'||name==='..'||/[\x00-\x1f\x7f/\\:]/.test(name)||name.startsWith('-'))throw new LinuxCompileError('Invalid Linux application name');

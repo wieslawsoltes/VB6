@@ -11,8 +11,8 @@ export const LINUX_METADATA_FLAG=0x02000000;
 const PHDR_SIZE=56,SHDR_SIZE=64,encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true});
 const align=(value,unit)=>Math.ceil(value/unit)*unit;
 const bounded=(value,min,max,message='Unsafe ELF range')=>{if(!Number.isSafeInteger(value)||value<min||value>max)throw new Error(message);return value;};
-const libraries=/^lib(?:gtk-3|gdk-3|pangocairo-1\.0|pango-1\.0|gobject-2\.0|glib-2\.0|gio-2\.0|gdk_pixbuf-2\.0|cairo|cairo-gobject|harfbuzz|atk-1\.0|stdc\+\+|gcc_s|m|c|dl|pthread|fontconfig|freetype|cups|z)\.so(?:\.\d+)*$/;
-export function inspectLinuxELF(input,{requireProject=false,architecture}={}){
+const libraries=/^lib(?:gtk-3|gtk-4|gdk-3|graphene-1\.0|vulkan|X11|pangocairo-1\.0|pango-1\.0|gobject-2\.0|glib-2\.0|gio-2\.0|gdk_pixbuf-2\.0|cairo|cairo-gobject|harfbuzz|atk-1\.0|stdc\+\+|gcc_s|m|c|dl|pthread|fontconfig|freetype|cups|z)\.so(?:\.\d+)*$/;
+export function inspectLinuxELF(input,{requireProject=false,architecture,toolkit}={}){
   const bytes=input instanceof Uint8Array?input:new Uint8Array(input);
   if(bytes.length<64||bytes.length>LINUX_LIMITS.imageBytes)throw new Error('Invalid or excessive ELF image');
   const v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),u16=p=>v.getUint16(p,true),u32=p=>v.getUint32(p,true);
@@ -20,8 +20,8 @@ export function inspectLinuxELF(input,{requireProject=false,architecture}={}){
   const range=(offset,size,end=bytes.length)=>{bounded(offset,0,end);bounded(size,0,end);if(offset>end-size)throw new Error('ELF range is outside image');};
   const string=(offset,size)=>{range(offset,size);let end=offset;while(end<offset+size&&bytes[end])end++;if(end===offset+size)throw new Error('Unterminated ELF string');return decoder.decode(bytes.subarray(offset,end));};
   if(u32(0)!==0x464c457f||bytes[4]!==2||bytes[5]!==1||bytes[6]!==1||![0,3].includes(bytes[7])||u16(16)!==3||![62,183].includes(u16(18))||u32(20)!==1||u32(48)!==0||u16(52)!==64)throw new Error('Expected a little-endian Linux x86_64 or ARM64 ELF64 PIE');
-  const target=linuxTarget(u16(18)===183?'arm64':'x64'),PAGE=target.pageBytes;
-  if(architecture!==undefined&&linuxTarget(architecture)!==target)throw new Error('ELF machine does not match the requested Linux architecture');
+  let target=linuxTarget(u16(18)===183?'arm64':'x64');const PAGE=target.pageBytes;
+  if(architecture!==undefined&&linuxTarget(architecture).option!==target.option)throw new Error('ELF machine does not match the requested Linux architecture');
   const entry=u64(24),programOffset=u64(32),sectionOffset=u64(40),programCount=u16(56),sectionCount=u16(60),stringSection=u16(62);
   if(u16(54)!==PHDR_SIZE||u16(58)!==SHDR_SIZE||programCount<4||programCount>128||sectionCount<2||sectionCount>4096||stringSection>=sectionCount)throw new Error('Unsupported ELF table layout');
   range(programOffset,programCount*PHDR_SIZE);range(sectionOffset,sectionCount*SHDR_SIZE);
@@ -70,7 +70,10 @@ export function inspectLinuxELF(input,{requireProject=false,architecture}={}){
     if(kind===24||kind===30&&(value&8)||kind===0x6ffffffb&&(value&1))bindNow=true;
     if(kind===1){if(value>=dynamicStrings.size)throw new Error('Invalid ELF dependency');const name=string(dynamicStrings.offset+value,dynamicStrings.size-value);if((!libraries.test(name)&&name!==interpreter.split('/').at(-1))||dependencies.includes(name))throw new Error('ELF runtime has an unsupported native dependency: '+name);dependencies.push(name);}
   }
-  if(!terminated||!bindNow||!dependencies.includes('libgtk-3.so.0'))throw new Error('ELF runtime requires GTK3 and immediate binding');
+  const gtk3=dependencies.includes('libgtk-3.so.0'),gtk4=dependencies.includes('libgtk-4.so.1');
+  if(!terminated||!bindNow||gtk3===gtk4||gtk4&&dependencies.includes('libgdk-3.so.0'))throw new Error('ELF runtime requires exactly one supported GTK toolkit and immediate binding');
+  const nativeToolkit=gtk4?'gtk4':'gtk3';target=linuxTarget(target.option,nativeToolkit);
+  if(toolkit!==undefined&&toolkit!==nativeToolkit)throw new Error('ELF toolkit does not match the requested Linux toolkit');
   const codeSegments=loads.filter(s=>s.flags&LINUX_CODE_FLAG),metadataSegments=loads.filter(s=>s.flags&LINUX_METADATA_FLAG),hasProject=codeSegments.length||metadataSegments.length;
   let code,metadata,metadataOffset,metadataJSON,codeSize,metadataSize;
   if(hasProject){
@@ -86,18 +89,18 @@ export function inspectLinuxELF(input,{requireProject=false,architecture}={}){
     for(const address of symbols.values())if(address>=code.address)throw new Error('ELF native helpers cannot occupy project mappings');
   }else if(requireProject)throw new Error('ELF is an unpopulated AOT runtime template');
   return {bytes,target,entry,programOffset,programCount,sectionOffset,sectionCount,stringSection,segments,sections,loads,phdr,shstr,symbols,
-    interpreter,dependencies,code,metadata,metadataOffset,metadataJSON,codeSize,metadataSize,
-    image:{architecture:target.architecture,machine:target.machine,callingConvention:target.callingConvention,pageBytes:PAGE,format:'ELF64',pie:true,nonExecutableStack:true,relro:true,bindNow:true,interpreter,dependencies,project:!!hasProject}};
+    interpreter,dependencies,toolkit:nativeToolkit,code,metadata,metadataOffset,metadataJSON,codeSize,metadataSize,
+    image:{architecture:target.architecture,machine:target.machine,callingConvention:target.callingConvention,pageBytes:PAGE,toolkit:nativeToolkit,format:'ELF64',pie:true,nonExecutableStack:true,relro:true,bindNow:true,interpreter,dependencies,project:!!hasProject}};
 }
 export async function createLinuxAOTRuntimeManifest(bytes,provenance={}){
   if(!(bytes instanceof Uint8Array)||bytes.length>LINUX_LIMITS.runtimeBytes)throw new Error('Invalid or excessive Linux runtime template');
   const layout=inspectLinuxELF(bytes);if(layout.code)throw new Error('A Linux runtime template must not contain a linked project');
   return {version:1,layout:'append-load-v1',abi:AOT_ABI,architecture:layout.target.architecture,machine:layout.target.machine,callingConvention:layout.target.callingConvention,pageBytes:layout.target.pageBytes,format:'ELF64',sha256:await sha256Bytes(bytes),bytes:bytes.length,
-    helpers:Object.fromEntries(layout.symbols),dependencies:layout.dependencies,provenance};
+    toolkit:layout.toolkit,helpers:Object.fromEntries(layout.symbols),dependencies:layout.dependencies,provenance};
 }
 export async function verifyLinuxAOTRuntime(bytes,manifest){
   if(!(bytes instanceof Uint8Array)||bytes.length>LINUX_LIMITS.runtimeBytes||!manifest||manifest.version!==1||manifest.layout!=='append-load-v1'||manifest.abi!==AOT_ABI||!['x86_64','arm64'].includes(manifest.architecture)||manifest.format!=='ELF64'||manifest.bytes!==bytes.length||manifest.sha256!==await sha256Bytes(bytes))throw new Error('Linux AOT runtime integrity or ABI mismatch');
-  const layout=inspectLinuxELF(bytes,{architecture:manifest.architecture});if(layout.code)throw new Error('Linux AOT runtime must be an unpopulated template');
+  const layout=inspectLinuxELF(bytes,{architecture:manifest.architecture,toolkit:manifest.toolkit??'gtk3'});if(layout.code)throw new Error('Linux AOT runtime must be an unpopulated template');
   if(['machine','callingConvention','pageBytes'].some(key=>manifest[key]!==undefined&&manifest[key]!==layout.image[key]))throw new Error('Linux AOT runtime manifest has an incorrect machine ABI');
   if(!manifest.helpers||Object.keys(manifest.helpers).length!==layout.symbols.size||[...layout.symbols].some(([name,address])=>manifest.helpers[name]!==address)||JSON.stringify(manifest.dependencies)!==JSON.stringify(layout.dependencies))throw new Error('Linux AOT runtime manifest does not match ELF symbols or dependencies');
   return layout;
@@ -107,6 +110,7 @@ export function linkLinuxELF(compiled,template,layout=inspectLinuxELF(template))
   if(layout.code)throw new Error('Cannot link into an already populated ELF application');
   const target=layout.target,PAGE=target.pageBytes;
   if(compiled.report?.architecture!==target.architecture||compiled.report?.target!==target.id||compiled.report?.codegen!==target.codegen)throw new Error('Linux AOT object code and runtime architectures do not match');
+  if(compiled.report.toolkit!==layout.toolkit||compiled.options.toolkit!==layout.toolkit)throw new Error('Linux AOT object code and runtime toolkits do not match');
   const metadataBytes=encoder.encode(JSON.stringify(compiled.metadata));
   bounded(metadataBytes.length,1,LINUX_LIMITS.metadataBytes,'Linux metadata exceeds 8 MiB');
   bounded(compiled.section?.length,1,LINUX_LIMITS.codeBytes,'Linux AOT code exceeds 64 MiB');

@@ -64,6 +64,14 @@ Args mouseArgs(GtkControl& control, double x, double y, guint state, guint butto
     Arg(Value::real(x/control.unit(-1,true)+control.number("scaleleft"),Type::Single)),
     Arg(Value::real(y/control.unit(-1,false)+control.number("scaletop"),Type::Single))};
 }
+void releaseMenus(GtkForm& form) {
+#if GTK_MAJOR_VERSION >= 4
+  if(form.menuModel){g_object_unref(form.menuModel);form.menuModel=nullptr;}
+  if(form.menuActions){g_object_unref(form.menuActions);form.menuActions=nullptr;}
+#else
+  (void)form;
+#endif
+}
 }
 
 void gtkSignal(gpointer object, const char* signal, GCallback callback,
@@ -95,6 +103,13 @@ GtkHost::~GtkHost() { shutdown(); }
 void GtkHost::ensureApplication() {
   if (std::this_thread::get_id() != thread) fail(5,"GTK must run on the native application's main thread");
   if (initialized) return;
+  // GTK4 no longer parses argv. Its recent-file manager still needs a
+  // program name to create the command used to reopen a selected document.
+  if (!g_get_prgname()) {
+    auto program = runtime->executablePath.filename().string();
+    if (program.empty()) program = runtime->name.empty() ? "vb6" : runtime->name;
+    g_set_prgname(program.c_str());
+  }
   if (!gtk_init_check(nullptr,nullptr)) fail(453,"GTK could not open a display (check DISPLAY or WAYLAND_DISPLAY)");
   initialized = true;
   g_set_application_name(runtime->name.c_str());
@@ -182,6 +197,17 @@ void GtkHost::createForm(const std::shared_ptr<Instance>& owner) {
     gtk_window_move(GTK_WINDOW(value->window),int(surface->number("left",300)/15),int(surface->number("top",300)/15));
     if (surface->number("startupposition",2)!=0) gtk_window_set_position(GTK_WINDOW(value->window),GTK_WIN_POS_CENTER);
     value->accelerators = gtk_accel_group_new(); gtk_window_add_accel_group(GTK_WINDOW(value->window),value->accelerators);
+#if GTK_MAJOR_VERSION >= 4
+    gtkSignal(value->window,"close-request",G_CALLBACK(+[](GtkWindow*,gpointer data)->gboolean {
+      gtkEvent(data,[](GtkControl& c) { c.host->closeForm(c.form()); }); return TRUE;
+    }),surface);
+    gtkSignal(value->window,"notify::is-active",G_CALLBACK(+[](GtkWindow* window,GParamSpec*,gpointer data) {
+      gtkEvent(data,[&](GtkControl& c) { c.event(gtk_window_is_active(window)?"activate":"deactivate"); });
+    }),surface);
+    gtk_widget_add_tick_callback(surface->view,+[](GtkWidget*,GdkFrameClock*,gpointer data)->gboolean {
+      gtkEvent(data,[](GtkControl& c){c.host->resize(c.form());});return G_SOURCE_CONTINUE;
+    },new std::weak_ptr<GtkControl>(surface),+[](gpointer data){delete static_cast<std::weak_ptr<GtkControl>*>(data);});
+#else
     gtkSignal(value->window,"delete-event",G_CALLBACK(+[](GtkWidget*,GdkEvent*,gpointer data)->gboolean {
       gtkEvent(data,[](GtkControl& c) { c.host->closeForm(c.form()); }); return TRUE;
     }),surface);
@@ -194,6 +220,7 @@ void GtkHost::createForm(const std::shared_ptr<Instance>& owner) {
     gtkSignal(surface->view,"size-allocate",G_CALLBACK(+[](GtkWidget*,GtkAllocation*,gpointer data) {
       gtkEvent(data,[](GtkControl& c) { c.host->resize(c.form()); });
     }),surface);
+#endif
     std::vector<ControlSpec> remaining = owner->module->controls;
     remaining.insert(remaining.end(),owner->module->menus.begin(),owner->module->menus.end());
     while (!remaining.empty()) {
@@ -217,18 +244,26 @@ void GtkHost::createForm(const std::shared_ptr<Instance>& owner) {
     auto controls = gtkFormControls(owner);
     std::stable_sort(controls.begin(),controls.end(),[](auto& a,auto& b) { return a->number("tabindex")<b->number("tabindex"); });
     std::map<GtkWidget*,GList*> chains;
-    for (auto& c:controls) if(c->view && !c->menu && c->flag("tabstop",true) && gtk_widget_get_can_focus(c->widget)) {
+    for (auto& c:controls) if(c->view && !c->menu && c->flag("tabstop",true) && gtkNativeCanFocus(c->widget)) {
       auto* parent=gtk_widget_get_parent(c->view); chains[parent]=g_list_append(chains[parent],c->view);
       if(c->spec.type=="CommandButton" && c->flag("default")) {
         gtk_widget_set_can_default(c->widget,TRUE); gtk_window_set_default(GTK_WINDOW(value->window),c->widget);
       }
     }
-    for(auto& entry:chains) { gtk_container_set_focus_chain(GTK_CONTAINER(entry.first),entry.second); g_list_free(entry.second); }
+    for(auto& entry:chains) {
+#if GTK_MAJOR_VERSION < 4
+      gtk_container_set_focus_chain(GTK_CONTAINER(entry.first),entry.second);
+#endif
+      // GTK4's NativeFixed focus virtual reads TabIndex directly; changing
+      // native sibling order here would also change the designer's ZOrder.
+      g_list_free(entry.second);
+    }
   } catch (...) {
     for(auto& control:gtkFormControls(owner)) control->dispose();
     if(value->surface) value->surface->dispose();
     if(value->window) { gtk_widget_destroy(value->window); g_object_unref(value->window); value->window=nullptr; }
     if(value->accelerators) { g_object_unref(value->accelerators); value->accelerators=nullptr; }
+    releaseMenus(*value);
     owner->controls.clear(); forms.erase(owner.get()); throw;
   }
 }
@@ -238,7 +273,7 @@ Value GtkHost::formGet(const std::shared_ptr<Instance>& owner,const std::string&
   if(name=="caption") return Value::string(fromUTF8(gtk_window_get_title(GTK_WINDOW(value->window))));
   if(name=="visible") return Value::boolean(gtk_widget_get_visible(value->window));
   if(name=="enabled") return Value::boolean(value->enabled);
-  if(name=="left"||name=="top") { int x,y; gtk_window_get_position(GTK_WINDOW(value->window),&x,&y); return Value::real((name=="left"?x:y)*15,Type::Single); }
+  if(name=="left"||name=="top") { gtkNativeRequireX11(value->window,"Form.Left/Top");int x,y; gtk_window_get_position(GTK_WINDOW(value->window),&x,&y); return Value::real((name=="left"?x:y)*15,Type::Single); }
   if(name=="width"||name=="height") { int w,h; gtk_window_get_size(GTK_WINDOW(value->window),&w,&h); return Value::real((name=="width"?w:h)*15,Type::Single); }
   if(name=="clientwidth"||name=="clientheight") return Value::real((name=="clientwidth"?value->width:value->height)*15,Type::Single);
   if(name=="windowstate") { auto* window=gtk_widget_get_window(value->window); auto state=window?gdk_window_get_state(window):GdkWindowState(0); return Value::integer(state&GDK_WINDOW_STATE_ICONIFIED?1:state&GDK_WINDOW_STATE_MAXIMIZED?2:0,Type::Integer); }
@@ -254,7 +289,7 @@ void GtkHost::formSet(const std::shared_ptr<Instance>& owner,const std::string& 
   if(name=="left"||name=="top"||name=="width"||name=="height"||name=="clientwidth"||name=="clientheight") {
     auto n=input.floating()/15; bool position=name=="left"||name=="top";
     if(!std::isfinite(n)||std::abs(n)>20000||(!position&&n<0))fail(380);
-    int x,y; if(position) { gtk_window_get_position(GTK_WINDOW(value->window),&x,&y); gtk_window_move(GTK_WINDOW(value->window),name=="left"?int(n):x,name=="top"?int(n):y); }
+    int x,y; if(position) { gtkNativeRequireX11(value->window,"Form.Left/Top");gtk_window_get_position(GTK_WINDOW(value->window),&x,&y); gtk_window_move(GTK_WINDOW(value->window),name=="left"?int(n):x,name=="top"?int(n):y); }
     else { gtk_window_get_size(GTK_WINDOW(value->window),&x,&y); gtk_window_resize(GTK_WINDOW(value->window),name=="width"||name=="clientwidth"?std::max(1,int(n)):x,name=="height"||name=="clientheight"?std::max(1,int(n)):y); }
     value->surface->properties[name]=input; return;
   }
@@ -268,6 +303,7 @@ Value GtkHost::formCall(const std::shared_ptr<Instance>& owner,const std::string
     for(auto& control:gtkFormControls(owner))control->dispose();
     value->surface->dispose(); gtk_widget_destroy(value->window); g_object_unref(value->window); value->window=nullptr;
     g_object_unref(value->accelerators);value->accelerators=nullptr;
+    releaseMenus(*value);
     forms.erase(owner.get());if(forms.empty())stopLoops();return {};
   }
   if(name=="show") {
@@ -288,14 +324,72 @@ Value GtkHost::formCall(const std::shared_ptr<Instance>& owner,const std::string
     return {};
   }
   if(name=="hide") { gtk_widget_hide(value->window);value->surface->properties["visible"]=Value::boolean(false);if(value->modalLoop)g_main_loop_quit(value->modalLoop);return {}; }
-  if(name=="move") { if(args.size()<2||args.size()>4)fail(450);const char* properties[]={"left","top","width","height"};for(size_t i=0;i<args.size();++i)if(args[i].value.type!=Type::Missing)formSet(owner,properties[i],args[i].value);return {}; }
+  if(name=="move") {
+    if(args.size()<2||args.size()>4)fail(450);const char* properties[]={"left","top","width","height"};int values[4]{};bool present[4]{};
+    for(size_t i=0;i<args.size();++i)if(args[i].value.type!=Type::Missing){const auto number=args[i].value.floating()/15;if(!std::isfinite(number)||std::abs(number)>20000||(i>=2&&number<0))fail(380);present[i]=true;values[i]=int(number);}
+    if(present[0]||present[1]){gtkNativeRequireX11(value->window,"Form.Move");int x,y;gtk_window_get_position(GTK_WINDOW(value->window),&x,&y);gtk_window_move(GTK_WINDOW(value->window),present[0]?values[0]:x,present[1]?values[1]:y);}
+    if(present[2]||present[3]){int width,height;gtk_window_get_size(GTK_WINDOW(value->window),&width,&height);gtk_window_resize(GTK_WINDOW(value->window),present[2]?std::max(1,values[2]):width,present[3]?std::max(1,values[3]):height);}
+    for(size_t i=0;i<args.size();++i)if(present[i])value->surface->properties[properties[i]]=args[i].value;return {};
+  }
   if(name=="setfocus") { gtk_window_present(GTK_WINDOW(value->window));return {}; }
-  if(name=="zorder") { auto n=integerArgument(args,0);if(n<0||n>1)fail(5);auto* window=gtk_widget_get_window(value->window);if(window){if(n)gdk_window_lower(window);else gdk_window_raise(window);}return {}; }
-  if(name=="popupmenu") { auto c=std::dynamic_pointer_cast<GtkControl>(argument(args,0).asObject());if(!c||!c->menu)fail(424);auto* menu=gtk_menu_item_get_submenu(GTK_MENU_ITEM(c->menu));if(!menu)fail(5,"PopupMenu requires child items");gtk_menu_popup_at_pointer(GTK_MENU(menu),nullptr);return {}; }
+  if(name=="zorder") { auto n=integerArgument(args,0);if(n<0||n>1)fail(5);gtkNativeRequireX11(value->window,"Form.ZOrder");auto* window=gtk_widget_get_window(value->window);if(window){if(n)gdk_window_lower(window);else gdk_window_raise(window);}return {}; }
+  if(name=="popupmenu") {
+    auto c=std::dynamic_pointer_cast<GtkControl>(argument(args,0).asObject());if(!c||c->spec.type!="Menu")fail(424);
+#if GTK_MAJOR_VERSION >= 4
+    if(!c->submenuModel||!g_menu_model_get_n_items(G_MENU_MODEL(c->submenuModel)))fail(5,"PopupMenu requires child items");
+    auto* popup=gtk_popover_menu_new_from_model(G_MENU_MODEL(c->submenuModel));gtk_widget_set_parent(popup,value->surface->view);
+    if(args.size()>2){auto point=value->surface->point(argument(args,2).floating(),args.size()>3?argument(args,3).floating():0);GdkRectangle rectangle{int(point.first),int(point.second),1,1};gtk_popover_set_pointing_to(GTK_POPOVER(popup),&rectangle);}
+    g_signal_connect(popup,"closed",G_CALLBACK(+[](GtkPopover* popover,gpointer){if(gtk_widget_get_parent(GTK_WIDGET(popover)))gtk_widget_unparent(GTK_WIDGET(popover));}),nullptr);gtk_popover_popup(GTK_POPOVER(popup));
+#else
+    auto* menu=gtk_menu_item_get_submenu(GTK_MENU_ITEM(c->menu));if(!menu)fail(5,"PopupMenu requires child items");gtk_menu_popup_at_pointer(GTK_MENU(menu),nullptr);
+#endif
+    return {};
+  }
   if(name=="printform")return gtkPrintForm(*this,value);
   return value->surface->invoke(*runtime,name,std::move(args));
 }
 void GtkHost::rebuildMenus(const std::shared_ptr<GtkForm>& value) {
+#if GTK_MAJOR_VERSION >= 4
+  if(value->rebuildingMenus)return;value->rebuildingMenus=true;
+  struct Reset{bool& flag;~Reset(){flag=false;}}reset{value->rebuildingMenus};
+  auto controls=gtkFormControls(value->owner);auto* actions=g_simple_action_group_new();
+  while(g_list_model_get_n_items(G_LIST_MODEL(value->accelerators))){auto* shortcut=GTK_SHORTCUT(g_list_model_get_item(G_LIST_MODEL(value->accelerators),0));gtk_shortcut_controller_remove_shortcut(value->accelerators,shortcut);g_object_unref(shortcut);}
+  for(auto& c:controls)if(c->spec.type=="Menu"){
+    if(!c->spec.parent.empty()){auto found=value->owner->controls.find(lower(c->spec.parent));auto parent=found==value->owner->controls.end()?nullptr:std::dynamic_pointer_cast<GtkControl>(found->second);if(!parent||parent->spec.type!="Menu"){g_object_unref(actions);fail(5,"Menu parent is not a menu");}}
+    if(c->menuAction)g_object_unref(c->menuAction);if(c->submenuModel)g_object_unref(c->submenuModel);
+    const auto name="menu"+std::to_string(c->handle);c->menuAction=g_simple_action_new_stateful(name.c_str(),nullptr,g_variant_new_boolean(c->flag("checked")));c->submenuModel=g_menu_new();
+    g_simple_action_set_enabled(c->menuAction,c->flag("enabled",true));
+    gtkSignal(c->menuAction,"activate",G_CALLBACK(+[](GSimpleAction*,GVariant*,gpointer data){gtkEvent(data,[](GtkControl& c){c.event("click");});}),c);
+    g_action_map_add_action(G_ACTION_MAP(actions),G_ACTION(c->menuAction));
+    auto shortcut=lower(toUTF8(c->property("shortcut",Value::string(u"")).string()));
+    if(!shortcut.empty()){
+      std::string accelerator;if(shortcut.find("ctrl")!=std::string::npos||shortcut[0]=='^')accelerator+="<Control>";
+      if(shortcut.find("alt")!=std::string::npos)accelerator+="<Alt>";if(shortcut.find("shift")!=std::string::npos)accelerator+="<Shift>";
+      auto at=shortcut.find_last_of('+');accelerator+=at!=std::string::npos?shortcut.substr(at+1):shortcut[0]=='^'?shortcut.substr(1):shortcut;
+      if(auto* trigger=gtk_shortcut_trigger_parse_string(accelerator.c_str()))gtk_shortcut_controller_add_shortcut(value->accelerators,gtk_shortcut_new(trigger,gtk_named_action_new(("vb6."+name).c_str())));
+    }
+  }
+  auto* model=g_menu_new();
+  std::function<void(GMenu*,const std::string&,size_t)> append=[&](GMenu* target,const std::string& parent,size_t depth){
+    if(depth>1024)fail(7,"Menu exceeds native depth limit");auto* section=g_menu_new();
+    for(auto& c:controls)if(c->spec.type=="Menu"&&lower(c->spec.parent)==parent){
+      // Hidden root menus still own their complete PopupMenu model.
+      append(c->submenuModel,lower(c->spec.name),depth+1);if(!c->flag("visible",true))continue;
+      auto caption=c->property("caption",Value::string(u"")).string();if(caption==u"-"){if(g_menu_model_get_n_items(G_MENU_MODEL(section)))g_menu_append_section(target,nullptr,G_MENU_MODEL(section));g_object_unref(section);section=g_menu_new();continue;}
+      auto action="vb6.menu"+std::to_string(c->handle);auto label=gtkCaption(caption);
+      auto* item=g_menu_item_new(label.c_str(),action.c_str());
+      if(g_menu_model_get_n_items(G_MENU_MODEL(c->submenuModel)))g_menu_item_set_submenu(item,G_MENU_MODEL(c->submenuModel));
+      if(parent.empty()&&!g_menu_model_get_n_items(G_MENU_MODEL(c->submenuModel))){auto* leaf=g_menu_new();g_menu_append_item(leaf,item);g_menu_append_submenu(section,label.c_str(),G_MENU_MODEL(leaf));g_object_unref(leaf);}else g_menu_append_item(section,item);
+      g_object_unref(item);
+    }
+    if(g_menu_model_get_n_items(G_MENU_MODEL(section)))g_menu_append_section(target,nullptr,G_MENU_MODEL(section));g_object_unref(section);
+  };
+  append(model,"",0);gtk_widget_insert_action_group(value->window,"vb6",G_ACTION_GROUP(actions));
+  if(value->menuActions)g_object_unref(value->menuActions);value->menuActions=actions;
+  if(!value->menuBar){value->menuBar=gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(model));gtk_box_prepend(GTK_BOX(value->box),value->menuBar);}else gtk_popover_menu_bar_set_menu_model(GTK_POPOVER_MENU_BAR(value->menuBar),G_MENU_MODEL(model));
+  if(value->menuModel)g_object_unref(value->menuModel);value->menuModel=model;
+  gtk_widget_set_visible(value->menuBar,g_menu_model_get_n_items(G_MENU_MODEL(model))>0);
+#else
   if(!value->menuBar) {value->menuBar=gtk_menu_bar_new();gtk_box_pack_start(GTK_BOX(value->box),value->menuBar,FALSE,FALSE,0);}
   bool any=false;
   for(auto& c:gtkFormControls(value->owner))if(c->menu) {
@@ -316,6 +410,7 @@ void GtkHost::rebuildMenus(const std::shared_ptr<GtkForm>& value) {
     c->refresh();
   }
   gtk_widget_set_visible(value->menuBar,any);
+#endif
 }
 void GtkHost::resize(const std::shared_ptr<GtkForm>& value) {
   if(value->closing||value->sizing)return;
@@ -353,7 +448,16 @@ gboolean GtkHost::keyEvent(GtkControl& control,GdkEventKey* input,bool down) {
       if(value->surface->flag("keypreview")&&value->surface.get()!=&control)value->surface->event("keypress",pressed);
       if(ascii->get().integral())control.event("keypress",pressed);
       auto next=uint16_t(ascii->get().integral());if(!next)return TRUE;
-      if(next!=unicode){input->keyval=gdk_unicode_to_keyval(next);gchar buffer[8]={};input->length=g_unichar_to_utf8(next,buffer);g_free(input->string);input->string=g_strndup(buffer,input->length);}
+      if(next!=unicode){
+#if GTK_MAJOR_VERSION >= 4
+        // GTK4 events are immutable. Commit a changed KeyAscii through the
+        // same editable boundary as SelText, preserving UTF-16 and Change.
+        if(control.editor()&&!control.flag("locked"))control.set(*runtime,"seltext",Value::string(Text(1,char16_t(next))));
+        return TRUE;
+#else
+        input->keyval=gdk_unicode_to_keyval(next);gchar buffer[8]={};input->length=g_unichar_to_utf8(next,buffer);g_free(input->string);input->string=g_strndup(buffer,input->length);
+#endif
+      }
     }
     if(input->keyval==GDK_KEY_Escape)for(auto& c:gtkFormControls(value->owner))if(c->spec.type=="CommandButton"&&c->flag("cancel")&&c->flag("enabled",true)&&c->flag("visible",true)){c->event("click");return TRUE;}
   }
@@ -361,6 +465,21 @@ gboolean GtkHost::keyEvent(GtkControl& control,GdkEventKey* input,bool down) {
 }
 void gtkConnectInput(GtkControl& c) {
   if(!c.widget)return;auto self=c.self();auto* target=c.view&&GTK_IS_EVENT_BOX(c.view)?c.view:c.widget;
+#if GTK_MAJOR_VERSION >= 4
+  auto* keys=gtk_event_controller_key_new();gtk_event_controller_set_propagation_phase(keys,GTK_PHASE_CAPTURE);
+  gtkSignal(keys,"key-pressed",G_CALLBACK(+[](GtkEventControllerKey*,guint keyval,guint,GdkModifierType state,gpointer data)->gboolean{
+    gboolean handled=FALSE;gtkEvent(data,[&](GtkControl& control){auto* root=gtk_widget_get_root(control.widget);auto* focused=root?gtk_root_get_focus(root):nullptr;auto owner=control.host->controlForWidget(focused);if(owner&&owner.get()!=&control)return;GdkEventKey key;key.keyval=keyval;key.state=state;handled=control.host->keyEvent(control,&key,true);});return handled;
+  }),self);
+  gtkSignal(keys,"key-released",G_CALLBACK(+[](GtkEventControllerKey*,guint keyval,guint,GdkModifierType state,gpointer data){
+    gtkEvent(data,[&](GtkControl& control){auto* root=gtk_widget_get_root(control.widget);auto owner=control.host->controlForWidget(root?gtk_root_get_focus(root):nullptr);if(owner&&owner.get()!=&control)return;GdkEventKey key;key.keyval=keyval;key.state=state;control.host->keyEvent(control,&key,false);});
+  }),self);gtk_widget_add_controller(target,keys);g_object_set_data(G_OBJECT(target),"vb6-key-controller",keys);
+  auto* click=gtk_gesture_click_new();gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click),0);gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(click),GTK_PHASE_CAPTURE);
+  gtkSignal(click,"pressed",G_CALLBACK(+[](GtkGestureClick* gesture,int count,double x,double y,gpointer data){gtkEvent(data,[&](GtkControl& control){auto* picked=gtk_widget_pick(control.widget,x,y,GTK_PICK_DEFAULT);auto owner=control.host->controlForWidget(picked);if(owner&&owner.get()!=&control)return;auto state=gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));auto button=gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));control.event(count==2?"dblclick":"mousedown",count==2?Args{}:mouseArgs(control,x,y,state,button?button:1));});}),self);
+  gtkSignal(click,"released",G_CALLBACK(+[](GtkGestureClick* gesture,int,double x,double y,gpointer data){gtkEvent(data,[&](GtkControl& control){auto* picked=gtk_widget_pick(control.widget,x,y,GTK_PICK_DEFAULT);auto owner=control.host->controlForWidget(picked);if(owner&&owner.get()!=&control)return;auto state=gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));auto button=gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));if(!button)button=1;control.event("mouseup",mouseArgs(control,x,y,state,button));if(!GTK_IS_BUTTON(control.widget)&&!gtkNativeToggle(control.widget)&&!GTK_IS_TREE_VIEW(control.widget)&&!GTK_IS_COMBO_BOX(control.widget)&&button==1)control.event("click");});}),self);
+  gtk_widget_add_controller(target,GTK_EVENT_CONTROLLER(click));g_object_set_data(G_OBJECT(target),"vb6-click-controller",click);
+  auto* motion=gtk_event_controller_motion_new();gtkSignal(motion,"motion",G_CALLBACK(+[](GtkEventControllerMotion* controller,double x,double y,gpointer data){gtkEvent(data,[&](GtkControl& control){auto* picked=gtk_widget_pick(control.widget,x,y,GTK_PICK_DEFAULT);auto owner=control.host->controlForWidget(picked);if(owner&&owner.get()!=&control)return;control.event("mousemove",mouseArgs(control,x,y,gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller)),0));});}),self);gtk_widget_add_controller(target,motion);
+  auto* focus=gtk_event_controller_focus_new();gtkSignal(focus,"enter",G_CALLBACK(+[](GtkEventControllerFocus*,gpointer data){gtkEvent(data,[](GtkControl& control){control.event("gotfocus");});}),self);gtkSignal(focus,"leave",G_CALLBACK(+[](GtkEventControllerFocus*,gpointer data){gtkEvent(data,[](GtkControl& control){control.event("lostfocus");});}),self);gtk_widget_add_controller(target,focus);
+#else
   gtk_widget_add_events(target,GDK_KEY_PRESS_MASK|GDK_KEY_RELEASE_MASK|GDK_BUTTON_PRESS_MASK|GDK_BUTTON_RELEASE_MASK|GDK_POINTER_MOTION_MASK|GDK_FOCUS_CHANGE_MASK);
   gtkSignal(target,"key-press-event",G_CALLBACK(+[](GtkWidget*,GdkEventKey* e,gpointer d)->gboolean {gboolean result=FALSE;gtkEvent(d,[&](GtkControl& c){result=c.host->keyEvent(c,e,true);});return result;}),self);
   gtkSignal(target,"key-release-event",G_CALLBACK(+[](GtkWidget*,GdkEventKey* e,gpointer d)->gboolean {gboolean result=FALSE;gtkEvent(d,[&](GtkControl& c){result=c.host->keyEvent(c,e,false);});return result;}),self);
@@ -369,6 +488,7 @@ void gtkConnectInput(GtkControl& c) {
   gtkSignal(target,"motion-notify-event",G_CALLBACK(+[](GtkWidget*,GdkEventMotion* e,gpointer d)->gboolean {gtkEvent(d,[&](GtkControl& c){c.event("mousemove",mouseArgs(c,e->x,e->y,e->state,0));});return FALSE;}),self);
   gtkSignal(target,"focus-in-event",G_CALLBACK(+[](GtkWidget*,GdkEventFocus*,gpointer d)->gboolean {gtkEvent(d,[](GtkControl& c){c.event("gotfocus");});return FALSE;}),self);
   gtkSignal(target,"focus-out-event",G_CALLBACK(+[](GtkWidget*,GdkEventFocus*,gpointer d)->gboolean {gtkEvent(d,[](GtkControl& c){c.event("lostfocus");});return FALSE;}),self);
+#endif
 }
 int GtkHost::run(Runtime&) {
   check();if(!initialized||forms.empty())return 0;
@@ -388,6 +508,7 @@ void GtkHost::shutdown() {
     for(auto& c:gtkFormControls(value->owner))c->dispose();value->surface->dispose();
     gtk_widget_destroy(value->window);g_object_unref(value->window);value->window=nullptr;
     g_object_unref(value->accelerators);value->accelerators=nullptr;
+    releaseMenus(*value);
     value->owner->controls.clear();value->owner->loaded=false;}
   forms.clear();handles.clear();
 }

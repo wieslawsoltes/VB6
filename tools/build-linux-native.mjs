@@ -6,7 +6,7 @@ import {bundle} from './bundle.mjs';
 import {readLinuxAOTSources,checkLinuxAOTRuntimeProvenance} from './linux-aot-provenance.mjs';
 const root=path.resolve(import.meta.dirname,'..');
 export function buildLinuxPackage(sourceRoot=root,{allowStaleAOTRuntime=false}={}) {
-  if(!allowStaleAOTRuntime)for(const architecture of ['x64','arm64'])checkLinuxAOTRuntimeProvenance(sourceRoot,{architecture});
+  if(!allowStaleAOTRuntime)for(const toolkit of ['gtk3','gtk4'])for(const architecture of ['x64','arm64'])checkLinuxAOTRuntimeProvenance(sourceRoot,{architecture,toolkit});
   const directory=path.join(sourceRoot,'packages/linux-native'),entry=path.join(directory,'src/index.js');
   const source=fs.readFileSync(entry,'utf8');
   const names=[...source.matchAll(/\bexport\s+(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map(match=>match[1]);

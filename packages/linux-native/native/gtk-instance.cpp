@@ -3,6 +3,7 @@
 #include "gtk-instance.hpp"
 #include <glib.h>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -57,7 +58,7 @@ bool lockedElsewhere(int fd){
     instanceError("inspect process lock");
   }
 }
-std::string executableIdentity(){
+std::string executablePath(){
   std::vector<char> path(256);
   for(;;){
     auto count=readlink("/proc/self/exe",path.data(),path.size());
@@ -69,14 +70,71 @@ std::string executableIdentity(){
       const std::string deleted=" (deleted)";
       if(value.size()>deleted.size()&&value.compare(value.size()-deleted.size(),deleted.size(),deleted)==0)
         value.resize(value.size()-deleted.size());
-      gchar* checksum=g_compute_checksum_for_data(G_CHECKSUM_SHA256,
-        reinterpret_cast<const guchar*>(value.data()),value.size());
-      if(!checksum)throw std::runtime_error("Could not hash application identity");
-      std::string result(checksum);g_free(checksum);return result;
+      return value;
     }
     if(path.size()>=65536)throw std::runtime_error("Executable path exceeds the application identity limit");
     path.resize(path.size()*2);
   }
+}
+std::string canonicalPath(const char* value){
+  if(!value||value[0]!='/')return {};
+  char* resolved=realpath(value,nullptr);if(!resolved)return {};
+  std::string result(resolved);free(resolved);return result;
+}
+std::string appImageIdentity(const std::string& executable){
+  // The official type-2 runtime gives each mount/extraction a different path.
+  // Use its canonical outer file only when this executable is actually inside
+  // that AppDir's sealed application layout. Unrelated inherited variables do
+  // not change the identity of a normal executable.
+  auto directory=canonicalPath(g_getenv("APPDIR")),image=canonicalPath(g_getenv("APPIMAGE"));
+  if(directory.empty()||directory=="/"||image.empty())return {};
+  auto prefix=directory+"/usr/lib/";
+  if(executable.compare(0,prefix.size(),prefix)!=0)return {};
+  auto relative=executable.substr(prefix.size());auto separator=relative.find('/');
+  if(separator==std::string::npos||!separator||relative.compare(separator,5,"/bin/")!=0||
+     relative.size()<=separator+5||relative.find('/',separator+5)!=std::string::npos)return {};
+  Descriptor fd(open(image.c_str(),O_RDONLY|O_CLOEXEC|O_NOFOLLOW));
+  struct stat info{};unsigned char header[20]{};
+  if(fd.value<0||fstat(fd.value,&info)||!S_ISREG(info.st_mode)||info.st_size<20)return {};
+  ssize_t count;do{count=pread(fd.value,header,sizeof(header),0);}while(count<0&&errno==EINTR);
+  if(count!=ssize_t(sizeof(header))||std::memcmp(header,"\177ELF",4)||header[4]!=2||header[5]!=1||
+     header[8]!='A'||header[9]!='I'||header[10]!=2)return {};
+  return image;
+}
+std::string flatpakApplication(const std::string& executable){
+  if(executable.compare(0,5,"/app/")!=0)return {};
+  Descriptor fd(open("/.flatpak-info",O_RDONLY|O_CLOEXEC|O_NOFOLLOW));
+  if(fd.value<0){if(errno==ENOENT)return {};instanceError("read Flatpak metadata");}
+  struct stat info{};
+  if(fstat(fd.value,&info))instanceError("inspect Flatpak metadata");
+  if(!S_ISREG(info.st_mode)||info.st_size<=0||info.st_size>1024*1024)
+    throw std::runtime_error("Invalid Flatpak application metadata");
+  std::string data(size_t(info.st_size),'\0');size_t offset=0;
+  while(offset<data.size()){
+    auto count=read(fd.value,data.data()+offset,data.size()-offset);
+    if(count<0&&errno==EINTR)continue;
+    if(count<=0)throw std::runtime_error("Could not read complete Flatpak application metadata");
+    offset+=size_t(count);
+  }
+  GKeyFile* metadata=g_key_file_new();
+  if(!g_key_file_load_from_data(metadata,data.data(),data.size(),G_KEY_FILE_NONE,nullptr)||
+     !g_key_file_has_group(metadata,"Instance")){
+    g_key_file_unref(metadata);throw std::runtime_error("Invalid running Flatpak application metadata");
+  }
+  gchar* name=g_key_file_get_string(metadata,"Application","name",nullptr);
+  std::string result=name?name:"";g_free(name);g_key_file_unref(metadata);
+  bool valid=!result.empty()&&result.size()<=255&&result.front()!='.'&&result.back()!='.'&&result.find('.')!=std::string::npos;
+  for(char character:result)if(!g_ascii_isalnum(character)&&character!='.'&&character!='_'&&character!='-')valid=false;
+  if(!valid||result.find("..")!=std::string::npos)throw std::runtime_error("Invalid Flatpak application ID");
+  return result;
+}
+std::string executableIdentity(const std::string& executable,const std::string& flatpak){
+  auto image=appImageIdentity(executable);
+  const auto value=flatpak.empty()?(image.empty()?executable:image):"flatpak:"+flatpak+":"+executable;
+  gchar* checksum=g_compute_checksum_for_data(G_CHECKSUM_SHA256,
+    reinterpret_cast<const guchar*>(value.data()),value.size());
+  if(!checksum)throw std::runtime_error("Could not hash application identity");
+  std::string result(checksum);g_free(checksum);return result;
 }
 bool instanceName(const std::string& name){
   if(name.size()!=45||name.compare(0,9,"instance-")!=0)return false;
@@ -107,15 +165,21 @@ struct LinuxApplicationInstance::State {
 std::shared_ptr<LinuxApplicationInstance::State> LinuxApplicationInstance::acquire(){
   static std::map<std::string,std::weak_ptr<State>> registrations;
   std::lock_guard<std::mutex> local(instanceMutex);
-  auto identity=executableIdentity();
+  auto executable=executablePath(),flatpak=flatpakApplication(executable);
+  auto identity=executableIdentity(executable,flatpak);
   auto key=std::to_string(getpid())+":"+identity;
   if(auto current=registrations[key].lock())return current;
 
   // A fixed private location avoids splitting identity when launches use
   // different TMPDIR, HOME, or XDG_RUNTIME_DIR environments. No PID probing,
   // display server, D-Bus session, or externally managed daemon is required.
-  Descriptor temporary(open("/tmp",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW));
+  // Flatpak's /tmp belongs to one launch, whereas its per-app runtime directory
+  // is shared across that app's sandboxes. Resolve the app ID from the immutable
+  // sandbox metadata, never from FLATPAK_ID or XDG_RUNTIME_DIR environment input.
+  const auto temporaryPath=flatpak.empty()?"/tmp":"/run/user/"+std::to_string(geteuid())+"/app/"+flatpak;
+  Descriptor temporary(open(temporaryPath.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW));
   if(temporary.value<0)instanceError("open temporary filesystem");
+  if(!flatpak.empty())checkPrivate(temporary.value,true);
   Descriptor base(directoryAt(temporary.value,"vb6-native-"+std::to_string(geteuid())));
   Descriptor registry(directoryAt(base.value,"instances-v1"));
   Descriptor directory(directoryAt(registry.value,identity));

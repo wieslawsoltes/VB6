@@ -85,11 +85,11 @@ def audit(root=ROOT):
                  and 'if' not in step]
     if len(discovery) != 1:
         raise ValueError('Complete unconditional Node discovery required in the Node job')
-    if not any('sudo apt-get install -y libgtk-3-0t64 libcups2t64' in step.get('run', '').splitlines()
+    if not any('sudo apt-get install -y libgtk-3-0t64 libgtk-4-1 libcups2t64' in step.get('run', '').splitlines()
                and 'if' not in step for step in node_steps[:discovery[0]]):
         raise ValueError('Node shards must install the Linux GTK runtime before executing tests')
     linux_node_tests = sorted(p.name for p in (root / 'tests').glob('linux-*.test.mjs') if p.is_file())
-    if not {'linux-aot.test.mjs', 'linux-aot-arm64.test.mjs', 'linux-aot-native.test.mjs', 'linux-aot-printer.test.mjs', 'linux-package.test.mjs', 'linux-distribution.test.mjs'} <= set(linux_node_tests):
+    if not {'linux-aot.test.mjs', 'linux-aot-arm64.test.mjs', 'linux-aot-native.test.mjs', 'linux-aot-printer.test.mjs', 'linux-package.test.mjs', 'linux-distribution.test.mjs', 'linux-gtk4.test.mjs', 'linux-native-distribution.test.mjs'} <= set(linux_node_tests):
         raise ValueError('Linux compiler, native execution and package tests must remain discoverable')
     npm = json.loads((root / 'package.json').read_text())['scripts']
     if npm.get('test:linux') != 'node --test tests/linux-*.test.mjs':
@@ -110,7 +110,7 @@ def audit(root=ROOT):
         raise ValueError('Missing native AOT platform')
     if jobs['macos-browser-native']['needs'] != ['authoring-exports']:
         raise ValueError('Native execution must depend on browser exports')
-    for owner in ('linux', 'linux-browser-native'):
+    for owner in ('linux', 'linux-browser-native', 'linux-native-distribution'):
         job = jobs.get(owner, {})
         if job.get('runs-on') != "${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}" or set(job.get('strategy', {}).get('matrix', {}).get('architecture', [])) != {'x64', 'arm64'}:
             raise ValueError('Linux GTK AOT must execute on both declared native architectures')
@@ -119,10 +119,29 @@ def audit(root=ROOT):
     linux_commands = {step.get('run', '').strip() for step in jobs['linux']['steps'] if 'if' not in step}
     if not {'npm run test:linux', 'node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --report reports/linux-aot/shipped',
             'node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --rebuild --report reports/linux-aot/rebuilt',
+            'node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --rebuild --report reports/linux-aot/gtk4-rebuilt',
+            'node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --report reports/linux-aot/gtk4-shipped',
+            'node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --report reports/linux-distribution/gtk4',
             'node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --report reports/linux-distribution'} <= linux_commands:
         raise ValueError('Linux must execute shipped and rebuilt runtimes and independently validate native packages')
-    if not any('libcups2-dev' in step.get('run', '') and 'if' not in step for step in jobs['linux']['steps']):
-        raise ValueError('Linux printer qualification requires the CUPS development dependency')
+    if not any(all(package in step.get('run', '').split() for package in ('libgtk-3-dev', 'libgtk-4-dev', 'libcups2-dev'))
+               and 'if' not in step for step in jobs['linux']['steps']):
+        raise ValueError('Linux qualification requires both GTK development dependencies and CUPS')
+    distribution = jobs['linux-native-distribution']
+    if set(distribution['strategy']['matrix'].get('toolkit', [])) != {'gtk3', 'gtk4'} or distribution.get('env', {}).get('TOOLKIT') != '${{ matrix.toolkit }}':
+        raise ValueError('Native distribution must execute both GTK toolkits')
+    distribution_command = 'dbus-run-session -- xvfb-run -a node tools/test-linux-native-distribution.mjs --architecture "$ARCHITECTURE" --toolkit "$TOOLKIT" --flatpak-user-dir "$RUNNER_TEMP/vb6-flatpak" --iso-mount-namespace privileged --report reports/linux-native-distribution'
+    if not any(step.get('run') == distribution_command and 'if' not in step for step in distribution['steps']):
+        raise ValueError('Native AppImage and sandboxed Flatpak execution, GTK, instances and signing must be mandatory')
+    # The session daemon launches Flatpak's portal on demand. Its inherited
+    # installation must match the CLI's, including nested glycin image loaders.
+    if not any(step.get('run') == distribution_command and
+               step.get('env', {}).get('FLATPAK_USER_DIR') == '${{ runner.temp }}/vb6-flatpak'
+               for step in distribution['steps']):
+        raise ValueError('The Flatpak session daemon and nested sandbox portal must share the isolated installation')
+    if not any('flatpak --user install --noninteractive --assumeyes --no-related flathub org.gnome.Platform//50' in step.get('run', '').splitlines()
+               and step.get('env', {}).get('FLATPAK_USER_DIR') == '${{ runner.temp }}/vb6-flatpak' and 'if' not in step for step in distribution['steps']):
+        raise ValueError('Native Flatpak qualification must install the declared runtime')
     if jobs.get('linux-browser-native', {}).get('needs') != ['authoring-exports']:
         raise ValueError('Linux native execution must consume actual browser exports')
     if jobs['linux-browser-native'].get('if') != '${{ !cancelled() }}':

@@ -228,9 +228,9 @@ that wins after artifact allocation but before settlement releases the orphan ar
 No legacy experimental Tasks protocol or taskification of mutations is advertised.
 
 `vb6.build.create` produces inert project JSON, application HTML, native-source
-ZIP, an existing-compiler Win32 PE32, or a native Linux GTK application ZIP
-(`target: "linux"`). Linux export emits x86-64 ELF machine code directly and uses
-the bundled native SDK. Supply the current `expectedRevision`,
+ZIP, an existing-compiler Win32 PE32, or a native Linux GTK application
+(`target: "linux"`). Linux export emits x86-64 or ARM64 ELF machine code directly
+and links the selected GTK3 or GTK4 native SDK. Supply the current `expectedRevision`,
 then use `vb6.build.read` with byte offsets and base64 chunks, or follow the
 returned resource link to its caller-owned manifest. A resource link is inert:
 it neither downloads bytes nor executes the artifact. Every chunk carries
@@ -238,8 +238,37 @@ the full-file SHA-256, total byte size and snapshot revision. Unsupported native
 constructs return diagnostics, not a substitute executable. SHA-256 uses WebCrypto
 where available and a native-differential-tested JS fallback on plain HTTP.
 Read-only builds do not run the application, start a compiler process or write
-host files. Electron packaging and the licensed classic compiler remain local CLI
-operations; `vb6.build.targets` describes this boundary.
+host files. Electron packaging, the licensed classic compiler, and Linux
+AppImage/Flatpak packaging use local CLI tools; `vb6.build.targets` describes
+their execution requirements.
+
+The Linux build request accepts these additional options:
+
+| Field | Choices or behavior |
+| --- | --- |
+| `architecture` | `x64` (default) or `arm64` |
+| `toolkit` | `gtk3` (default, GTK 3.24) or `gtk4` (GTK 4.14) |
+| `format` | `zip` (default), `tar.gz`, `deb`, or `rpm` |
+| `optimization` | Project machine-code optimization from `0` through `3` |
+| `package` | Validated package identity, version, publisher, license, and desktop metadata |
+
+For example, send this object to `vb6.build.create` using the current revision:
+
+```json
+{"target":"linux","architecture":"arm64","toolkit":"gtk4","format":"deb","optimization":3,"package":{"packageName":"my-application","version":"1.0.0","maintainer":"Application Publisher"},"expectedRevision":42}
+```
+
+Linux-only options are rejected for other targets. Invalid metadata creates no
+artifact. `vb6.build.targets` lists both `architectures`, both `toolkits`, and the
+four browser-safe `packageFormats`; its separate `nativePackageFormats` metadata
+describes AppImage and Flatpak with `authority: "node-native"`, required Linux
+tools, and the CLI route. These two native formats are not accepted by
+`vb6.build.create`: save the project and use `npm run build:linux -- PROJECT
+--out DIRECTORY --format appimage` or `--format flatpak` on a Linux packaging
+host. Source compilation remains offline; the local format tools package the
+completed ELF without running it. See [Linux AOT](LINUX-AOT.md),
+[native distribution](LINUX-DISTRIBUTION.md), [GTK behavior](LINUX-GTK.md), and
+[rich documents](LINUX-RTF.md).
 
 Build artifacts expire after five minutes. At most eight / 32 MiB total are
 retained, evicting the oldest when necessary; reads are limited to 256 KiB per

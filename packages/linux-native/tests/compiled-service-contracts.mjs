@@ -8,13 +8,13 @@ import {exportLinuxAOT} from '../src/aot-export.js';
 import {linuxPrinterProject,linuxInstanceProject} from './services.mjs';
 import {createMockCups} from './mock-cups.mjs';
 
-export async function qualifyLinuxCompiledServices(runtime,{architecture='x64',prefix=[]}={}) {
+export async function qualifyLinuxCompiledServices(runtime,{architecture='x64',toolkit='gtk3',prefix=[]}={}) {
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'vb6-compiled-services-'));
   const artifacts={};
   const service=await createMockCups();const children=new Set();
   const env={...process.env,CUPS_SERVER:service.server,HOME:directory};delete env.DISPLAY;delete env.WAYLAND_DISPLAY;delete env.LPDEST;delete env.PRINTER;
   async function build(project){
-    const result=await exportLinuxAOT(project,runtime,{architecture,optimization:3});
+    const result=await exportLinuxAOT(project,runtime,{architecture,toolkit,optimization:3});
     const {executableSha256,runtimeSha256,architecture:canonicalArchitecture,machine,callingConvention}=result.report;
     artifacts[project===linuxPrinterProject?'printer':'instance']={executableSha256,runtimeSha256,architecture:canonicalArchitecture,machine,callingConvention};
     for(const [name,bytes]of Object.entries(result.files)){const filename=path.join(directory,name);await fs.mkdir(path.dirname(filename),{recursive:true});await fs.writeFile(filename,bytes,{flag:'wx',mode:name===project.name+'/bin/'+project.name?0o755:0o644});}

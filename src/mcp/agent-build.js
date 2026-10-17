@@ -6,7 +6,7 @@ import {validateWorkspace} from '../project/native-project.js';
 import {writeZip} from '../project/zip.js';
 import {toBase64} from '../project/frx.js';
 import {compileWin32, NativeCompileError} from '../native/compiler.js';
-import {exportLinuxDistribution, linuxDistributionOptions, LinuxCompileError} from '../../packages/linux-native/src/index.js';
+import {exportLinuxDistribution, linuxDistributionOptions, LinuxCompileError, LINUX_NATIVE_DISTRIBUTION_FORMATS} from '../../packages/linux-native/src/index.js';
 import {exportApplication} from '../exporter/exporter.js';
 import {McpError, checkAbort, randomToken} from './protocol.js';
 import {S, N, E, REV} from './agent-schema.js';
@@ -32,17 +32,17 @@ export function installBuildTools(ide, adapter, {add, output, consent, commit, c
   add('build.targets', 'Describe build/export targets. Building returns inert bytes; Electron desktop packaging and the licensed classic compiler require their local CLI.', {}, [], () => output({
     targets: [{id: 'project', format: 'JSON', extension: '.vb6web'}, {id: 'html', format: 'standalone application HTML', extension: '.html'},
       {id: 'sources', format: 'native source/project group ZIP', extension: '.zip'}, {id: 'win32', format: 'freestanding x86 PE32', extension: '.exe', graphics: 'native controls/GDI', compatibility: 'Existing native compiler subset; unsupported constructs return diagnostics.'},
-      {id: 'linux', format: 'native ELF application', extension: '-linux-x64.zip', architectures: ['x64','arm64'], packageFormats: ['zip','tar.gz','deb','rpm'], graphics: 'GTK 3.24/Cairo', compatibility: 'Direct native AOT using the shared VB6 runtime; requires Linux with the matching architecture and archive-listed system libraries.'}],
-    localOnly: ['Electron/WebGPU desktop packaging: npm run build:windows', 'Licensed Microsoft VB6 compiler: npm run build:classic'],
+      {id: 'linux', format: 'native ELF application', extension: '-linux-x64.zip', architectures: ['x64','arm64'], toolkits:['gtk3','gtk4'], defaultToolkit:'gtk3', packageFormats: ['zip','tar.gz','deb','rpm'], nativePackageFormats:LINUX_NATIVE_DISTRIBUTION_FORMATS, graphics: 'GTK 3.24 or GTK 4.14/Cairo', compatibility: 'Direct native AOT using the shared VB6 runtime; requires Linux with the matching architecture, selected GTK toolkit and archive-listed system libraries.'}],
+    localOnly: ['Electron/WebGPU desktop packaging: npm run build:windows', 'Licensed Microsoft VB6 compiler: npm run build:classic', 'Linux AppImage and Flatpak packaging: npm run build:linux -- PROJECT --format appimage|flatpak'],
     maxArtifactBytes: maxBytes, maxRetainedArtifacts: 8, ttlMs, chunkBytes: 262144
   }));
-  add('build.create', 'Build an immutable project, HTML, source ZIP, Win32 EXE or Linux GTK AOT application. Linux supports x64/arm64 and ZIP, tar.gz, DEB or RPM packages, fully offline. Requires the snapshot revision; does not execute project code. Read its exact bytes in chunks with build.read.', {
+  add('build.create', 'Build an immutable project, HTML, source ZIP, Win32 EXE or Linux GTK AOT application. Linux supports x64/arm64, GTK3/GTK4 and ZIP, tar.gz, DEB or RPM packages, fully offline. AppImage and Flatpak use the local CLI. Requires the snapshot revision; does not execute project code. Read its exact bytes in chunks with build.read.', {
     target: E(['project','html','sources','win32','linux']), expectedRevision: REV,
-    architecture: E(['x64','arm64']), format: E(['zip','tar.gz','deb','rpm']), optimization: N(0,3),
+    architecture: E(['x64','arm64']), toolkit:E(['gtk3','gtk4']), format: E(['zip','tar.gz','deb','rpm']), optimization: N(0,3),
     package: {type:'object', additionalProperties:false, properties:{packageName:S,version:S,release:S,maintainer:S,summary:S,description:S,license:S,homepage:S,categories:{type:'array',items:S,minItems:1,maxItems:16}}}
   }, ['target','expectedRevision'], async (args, ctx) => {
     checkRevision(args.expectedRevision); checkAbort(ctx.signal); purge(); ctx.reportProgress?.(0.2,1,'Preparing build snapshot');
-    if(args.target!=='linux'&&['architecture','format','optimization','package'].some(key=>Object.hasOwn(args,key)))throw new McpError(-32602,'Linux build options require the linux target.');
+    if(args.target!=='linux'&&['architecture','toolkit','format','optimization','package'].some(key=>Object.hasOwn(args,key)))throw new McpError(-32602,'Linux build options require the linux target.');
     const epoch = adapter.authorityEpoch, sourceRevision = adapter.revision, project = clone(ide.project);
     let data, report, mimeType, extension, filename;
     if (args.target === 'win32') {
@@ -53,7 +53,7 @@ export function installBuildTools(ide, adapter, {add, output, consent, commit, c
       let distribution;
       try {distribution=linuxDistributionOptions({...args.package,format:args.format},project.name);}
       catch(error){throw new McpError(-32602,error.message);}
-      try {const result = await exportLinuxDistribution(project, {architecture:args.architecture,optimization:args.optimization}, distribution, {signal:ctx.signal}); data = result.bytes; report = result.report; mimeType = result.mimeType; filename = result.filename;}
+      try {const result = await exportLinuxDistribution(project, {architecture:args.architecture,toolkit:args.toolkit,optimization:args.optimization}, distribution, {signal:ctx.signal}); data = result.bytes; report = result.report; mimeType = result.mimeType; filename = result.filename;}
       catch (error) {
         if (!(error instanceof LinuxCompileError)) throw error;
         return output({valid: false, sourceRevision, diagnostics: error.diagnostics || [{severity: 'error', message: error.message, module: error.module, line: error.line}]});

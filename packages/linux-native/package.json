@@ -17,6 +17,14 @@
   "files": [
     "dist",
     "src/node.mjs",
+    "src/native-distribution.mjs",
+    "src/native-distribution-tools.mjs",
+    "src/distribution-targets.js",
+    "src/appimage-dependencies.mjs",
+    "src/appimage-gtk-data.mjs",
+    "src/appimage-runtime.mjs",
+    "src/appimage-runtime-notices.mjs",
+    "src/appimage-runtime-payload.mjs",
     "bin",
     "README.md",
     "LICENSE"

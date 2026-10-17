@@ -24,10 +24,40 @@ GtkScreenState& screenState(GtkHost& host){
 }
 struct CursorState {
   GdkCursor* original;GdkCursor* applied=nullptr;
+#if GTK_MAJOR_VERSION >= 4
+  bool applying=false;
+  explicit CursorState(GtkWidget* widget):original(gtk_widget_get_cursor(widget)){if(original)g_object_ref(original);}
+#else
   explicit CursorState(GdkWindow* window):original(gdk_window_get_cursor(window)){if(original)g_object_ref(original);}
+#endif
   ~CursorState(){if(original)g_object_unref(original);if(applied)g_object_unref(applied);}
   static void replace(GdkCursor*& target,GdkCursor* value){if(value)g_object_ref(value);if(target)g_object_unref(target);target=value;}
 };
+#if GTK_MAJOR_VERSION >= 4
+void applyCursorWidget(GtkControl& fallback,GtkWidget* widget,int global){
+  if(!widget)return;auto owner=fallback.host->controlForWidget(widget);auto& control=owner?*owner:fallback;
+  auto pointer=global?global:int(control.number("mousepointer"));constexpr const char* key="vb6-original-cursor";
+  if(!g_object_get_data(G_OBJECT(widget),"vb6-cursor-watch")){
+    g_object_set_data(G_OBJECT(widget),"vb6-cursor-watch",GINT_TO_POINTER(1));
+    gtkSignal(widget,"notify::cursor",G_CALLBACK(+[](GtkWidget* widget,GParamSpec*,gpointer data){
+      auto* saved=static_cast<CursorState*>(g_object_get_data(G_OBJECT(widget),"vb6-original-cursor"));if(saved&&(saved->applying||gtk_widget_get_cursor(widget)==saved->applied))return;
+      gtkEvent(data,[&](GtkControl& control){applyCursorWidget(control,widget,screenState(*control.host).mousePointer);});
+    }),control.self());
+  }
+  auto* saved=static_cast<CursorState*>(g_object_get_data(G_OBJECT(widget),key));
+  if(saved&&gtk_widget_get_cursor(widget)!=saved->applied)CursorState::replace(saved->original,gtk_widget_get_cursor(widget));
+  if(!pointer){if(saved){saved->applying=true;gtk_widget_set_cursor(widget,saved->original);g_object_set_data(G_OBJECT(widget),key,nullptr);}}
+  else{
+    if(!saved){saved=new CursorState(widget);g_object_set_data_full(G_OBJECT(widget),key,saved,+[](gpointer data){delete static_cast<CursorState*>(data);});}
+    static const char* names[]={"default","default","crosshair","text","icon","move","nesw-resize","ns-resize","nwse-resize","ew-resize","up-arrow","wait","not-allowed","progress","help","move"};
+    GdkCursor* cursor=nullptr;
+    if(pointer==99){auto value=control.property("mouseicon",Value::object(nullptr));auto picture=value.type==Type::Object?std::dynamic_pointer_cast<GtkPicture>(std::get<ObjectPtr>(value.payload)):nullptr;if(picture&&picture->pixels){auto* texture=gdk_texture_new_for_pixbuf(picture->pixels);cursor=gdk_cursor_new_from_texture(texture,int(picture->hotspotX),int(picture->hotspotY),nullptr);g_object_unref(texture);}}
+    if(!cursor)cursor=gdk_cursor_new_from_name(pointer>=0&&pointer<=15?names[pointer]:"default",nullptr);
+    saved->applying=true;gtk_widget_set_cursor(widget,cursor);CursorState::replace(saved->applied,cursor);saved->applying=false;if(cursor)g_object_unref(cursor);
+  }
+  for(auto* child=gtk_widget_get_first_child(widget);child;child=gtk_widget_get_next_sibling(child))applyCursorWidget(control,child,global);
+}
+#else
 void applyCursorWindow(GtkControl& fallback,GdkWindow* window,int global){
   if(!window||gdk_window_is_destroyed(window))return;
   gpointer widget=nullptr;gdk_window_get_user_data(window,&widget);
@@ -51,6 +81,7 @@ void applyCursorWindow(GtkControl& fallback,GdkWindow* window,int global){
   for(auto* child=children;child;child=child->next)applyCursorWindow(control,GDK_WINDOW(child->data),global);
   g_list_free(children);
 }
+#endif
 struct Dialog {
   GtkWidget* widget;
   explicit Dialog(GtkWidget* value):widget(value){g_object_ref_sink(widget);}
@@ -119,7 +150,12 @@ std::string settingPart(const Value& value){auto name=toUTF8(changeCase(value.st
 }
 void gtkApplyMousePointer(GtkControl& control){
   if(control.disposed||control.hostLife.expired()||!control.view||!gtk_widget_get_realized(control.view))return;
+#if GTK_MAJOR_VERSION >= 4
+  auto* root=control.view;if(control.spec.type=="Form"||control.spec.type=="MDIForm")if(auto* window=control.form()->window)root=window;
+  applyCursorWidget(control,root,screenState(*control.host).mousePointer);
+#else
   applyCursorWindow(control,gtk_widget_get_window(control.view),screenState(*control.host).mousePointer);
+#endif
 }
 void gtkConnectMousePointer(GtkControl& control){
   auto connect=[&](GtkWidget* target,const char* signal,GCallback callback){
@@ -132,7 +168,9 @@ void gtkConnectMousePointer(GtkControl& control){
     // GtkEntry resets its text-area cursor in the state-flags class handler
     // (notably focus), and restores it from motion/drag/key event handlers.
     connect(target,"state-flags-changed",G_CALLBACK(+[](GtkWidget*,GtkStateFlags,gpointer data){gtkEvent(data,[](GtkControl& c){gtkApplyMousePointer(c);});}));
+#if GTK_MAJOR_VERSION < 4
     connect(target,"event-after",G_CALLBACK(+[](GtkWidget*,GdkEvent*,gpointer data){gtkEvent(data,[](GtkControl& c){gtkApplyMousePointer(c);});}));
+#endif
   }
 }
 void gtkRegisterApplication(GtkHost& host){
@@ -198,7 +236,9 @@ Value GtkHost::dialog(GtkControl& control,const std::string& name) {
   if(name=="showfont") {
     Dialog dialog(gtk_font_chooser_dialog_new("Font",activeWindow()));auto* font=pango_font_description_new();pango_font_description_set_family(font,toUTF8(control.property("fontname",Value::string(u"Sans")).string()).c_str());pango_font_description_set_size(font,int(control.number("fontsize",8.25)*PANGO_SCALE));pango_font_description_set_weight(font,control.flag("fontbold")?PANGO_WEIGHT_BOLD:PANGO_WEIGHT_NORMAL);pango_font_description_set_style(font,control.flag("fontitalic")?PANGO_STYLE_ITALIC:PANGO_STYLE_NORMAL);gtk_font_chooser_set_font_desc(GTK_FONT_CHOOSER(dialog.widget),font);pango_font_description_free(font);
     if(runDialog(dialog.widget)!=GTK_RESPONSE_OK){if(control.flag("cancelerror"))fail(32755);return {};}
-    font=gtk_font_chooser_get_font_desc(GTK_FONT_CHOOSER(dialog.widget));control.properties["fontname"]=Value::string(fromUTF8(pango_font_description_get_family(font)));control.properties["fontsize"]=Value::real(double(pango_font_description_get_size(font))/PANGO_SCALE);control.properties["fontbold"]=Value::boolean(pango_font_description_get_weight(font)>=PANGO_WEIGHT_BOLD);control.properties["fontitalic"]=Value::boolean(pango_font_description_get_style(font)!=PANGO_STYLE_NORMAL);pango_font_description_free(font);return {};
+    font=gtk_font_chooser_get_font_desc(GTK_FONT_CHOOSER(dialog.widget));
+    if(!font||!pango_font_description_get_family(font)){if(font)pango_font_description_free(font);fail(380,"No native font was selected");}
+    control.properties["fontname"]=Value::string(fromUTF8(pango_font_description_get_family(font)));control.properties["fontsize"]=Value::real(double(pango_font_description_get_size(font))/PANGO_SCALE);control.properties["fontbold"]=Value::boolean(pango_font_description_get_weight(font)>=PANGO_WEIGHT_BOLD);control.properties["fontitalic"]=Value::boolean(pango_font_description_get_style(font)!=PANGO_STYLE_NORMAL);pango_font_description_free(font);return {};
   }
   if(name=="showprinter") {
     gtkShowPrinterDialog(*this,control);return {};

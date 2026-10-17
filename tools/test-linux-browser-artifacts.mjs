@@ -19,10 +19,10 @@ for(let index=3;index<process.argv.length;index+=2){
 }
 if(architecture!==process.arch&&!sysroot)throw new Error('Cross-architecture browser execution requires an explicit sysroot.');
 const cases = [];
-for (const format of ['zip','tar.gz','deb','rpm']) {
-const expected = await exportLinuxDistribution(linuxBrowserProject(architecture),{architecture},{format});
+for (const toolkit of ['gtk3','gtk4']) for (const format of ['zip','tar.gz','deb','rpm']) {
+const expected = await exportLinuxDistribution(linuxBrowserProject(architecture,toolkit),{architecture,toolkit},{format});
 for (const browser of ['chromium', 'firefox', 'webkit']) for (const origin of ['http', 'file']) {
-  const filename = browser + '-' + origin + (architecture==='x64'&&format==='zip'?'':'-'+architecture) + '.' + format, bytes = new Uint8Array(await fs.readFile(path.join(input, filename)));
+  const filename = browser + '-' + origin + (toolkit==='gtk3'&&architecture==='x64'&&format==='zip'?'':'-'+architecture+(toolkit==='gtk4'?'-gtk4':'')) + '.' + format, bytes = new Uint8Array(await fs.readFile(path.join(input, filename)));
   assert.deepEqual(bytes, expected.bytes, filename + ' must match the exact current-source fixture');
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'vb6-linux-browser-'));
   try {
@@ -50,8 +50,8 @@ for (const browser of ['chromium', 'firefox', 'webkit']) for (const origin of ['
     assert.equal(result.error, undefined, result.error?.message);
     assert.equal(result.status, 0, filename + '\n' + result.stderr);
     assert.equal(result.stdout.trim(), 'LINUX_BROWSER_AOT_OK');
-    cases.push({browser, origin,architecture,format,archiveSha256: createHash('sha256').update(bytes).digest('hex'), exitCode: result.status, output: result.stdout.trim()});
-    console.log('PASS actual browser ELF execution:', browser, origin,architecture,format);
+    cases.push({browser, origin,architecture,toolkit,format,archiveSha256: createHash('sha256').update(bytes).digest('hex'), exitCode: result.status, output: result.stdout.trim()});
+    console.log('PASS actual browser ELF execution:', browser, origin,architecture,toolkit,format);
   } finally {await fs.rm(work, {recursive: true, force: true});}
 }
 }
