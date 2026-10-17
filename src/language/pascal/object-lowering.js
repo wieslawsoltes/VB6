@@ -14,6 +14,8 @@
 const key = value => String(value).toLowerCase();
 const identifier = value => `[${String(value).replaceAll(']', '')}]`;
 const VMT_FIELD = '__PascalTypeId';
+const CONSTRUCTOR_TYPE = '__PascalConstructorType';
+const CONSTRUCTOR_FAILURE = '__PascalConstructorFail';
 const METHOD_KINDS = new Set(['procedure', 'function', 'constructor', 'destructor']);
 
 export function objectReferenceCompatible(formal, actual) {
@@ -66,14 +68,21 @@ export function resolveObjectType(binder, node, scope, name, isPublic) {
       if (normalized.startsWith('__pascal')) binder.fail("Identifiers beginning with '__Pascal' are reserved for compiler-generated storage", member, 'TP_RESERVED_IDENTIFIER');
       if (type.fields.has(normalized) || ownNames.has(normalized)) binder.fail(`Duplicate object component '${member.name}'`, member, 'TP_DUPLICATE');
       const virtual = member.modifiers.find(modifier => modifier.name === 'virtual');
-      if (virtual) binder.fail('Virtual and dynamic object methods require runtime dispatch and are not yet supported', virtual, 'TP_UNSUPPORTED_VIRTUAL_METHOD');
+      if (virtual && member.kind === 'constructor') binder.fail('Constructors cannot be virtual', member, 'TP_VIRTUAL_CONSTRUCTOR');
+      const inherited = type.methods.get(normalized), dynamicIndex = virtual?.expression ? binder.constant(virtual.expression, scope).value : null;
+      if (dynamicIndex !== null && (!Number.isInteger(dynamicIndex) || dynamicIndex < 1 || dynamicIndex > 65535)) binder.fail('Dynamic method index must be an integer constant in 1..65535', virtual, 'TP_DYNAMIC_INDEX');
+      if (inherited?.virtual && (!virtual || dynamicIndex !== inherited.dynamicIndex)) binder.fail(`Override '${member.name}' must preserve its ancestor virtual directive and dynamic method index`, member, 'TP_VIRTUAL_OVERRIDE');
+      if (dynamicIndex !== null && [...type.methods.values()].some(other => other !== inherited && other.dynamicIndex === dynamicIndex)) binder.fail(`Dynamic method index ${dynamicIndex} is already used by another object method`, virtual, 'TP_DYNAMIC_INDEX');
       ownNames.add(normalized);
-      const method = {name: member.name, kind: member.kind, node: member, declaringType: type, visibility: member.visibility || 'public', virtual: false, symbol: null};
+      const method = {name: member.name, kind: member.kind, node: member, declaringType: type, visibility: member.visibility || 'public', virtual: !!virtual, dynamicIndex, overridden: inherited || null, symbol: null};
+      method.slot = virtual ? inherited?.virtual ? inherited.slot : method : null;
       type.methods.set(normalized, method); type.declaredMethods.push(method);
-      if (member.kind === 'constructor' || member.kind === 'destructor') type.hasVmt = true;
+      if (member.kind === 'constructor' || member.kind === 'destructor' || virtual) type.hasVmt = true;
     } else binder.fail(`Unsupported object component '${member.kind}'`, member, 'TP_OBJECT_COMPONENT');
   }
+  if ([...type.methods.values()].some(method => method.virtual) && ![...type.methods.values()].some(method => method.kind === 'constructor')) binder.fail('An object with virtual methods must declare or inherit a constructor', node, 'TP_OBJECT_CONSTRUCTOR');
   binder.recordTypes.push(type);
+  binder.workspace.objectTypesRevision = (binder.workspace.objectTypesRevision || 0) + 1;
   return type;
 }
 
@@ -93,11 +102,19 @@ export function prepareObjectMethods(binder) {
     symbol.objectMethod = method;
     symbol.vbName = `__PascalMethod_${type.name.length}_${type.name}_${method.name}`;
     symbol.public = type.public && method.visibility !== 'private';
+    symbol.internalPublic = true;
     method.symbol = symbol;
   }
   for (const symbol of binder.scope.symbols.values()) if (symbol.kind === 'procedure' && (symbol.name.includes('.') || ['constructor', 'destructor'].includes(symbol.node.kind)) && !symbol.objectMethod) {
     binder.fail(`Method '${symbol.name}' has no matching declaration in an object type`, symbol.node, 'TP_OBJECT_METHOD');
   }
+}
+
+export function validateObjectMethodSignature(binder, symbol, sameType) {
+  const method = symbol.objectMethod;
+  if (!method?.overridden?.virtual) return;
+  const ancestor = method.overridden.declaringType.owner.resolveSymbol(method.overridden.symbol), expected = ancestor.params.filter(param => !param.implicit), actual = symbol.params.filter(param => !param.implicit);
+  if (method.kind !== method.overridden.kind || actual.length !== expected.length || actual.some((param, i) => key(param.name) !== key(expected[i].name) || param.byRef !== expected[i].byRef || !!param.constant !== !!expected[i].constant || !sameType(param.type, expected[i].type)) || !sameType(symbol.returnType, ancestor.returnType)) binder.fail(`Virtual override '${method.name}' must match its ancestor parameter names, types, modes and result type`, symbol.node, 'TP_VIRTUAL_SIGNATURE');
 }
 
 export function validateObjectMethodLocals(binder, symbol, declaration, definition) {
@@ -158,7 +175,8 @@ export function objectWithSymbol(lowerer, object, node, context) {
     return {kind: 'withField', name: field.name, type: field.type, access: `${object.source}.${identifier(field.name)}`};
   }
   const method = objectMethod(object.type, node.name);
-  return method ? bindMethod(lowerer, method, null, object.type, node, {objectReceiverSource: object.source}) : null;
+  const enclosing = enclosingMethod(context), implicitSelf = !!enclosing && object.source === lowerer.access(enclosing.self.symbol, context);
+  return method ? bindMethod(lowerer, method, null, object.type, node, {objectReceiverSource: object.source, objectImplicitSelf: implicitSelf}) : null;
 }
 
 /** A method designator may be instance-qualified, ancestor-qualified, or use
@@ -194,12 +212,17 @@ export function objectMemberSymbol(lowerer, node, context) {
   return bindMethod(lowerer, method, node.object, type, node);
 }
 
-function objectTypeTag(type) {
-  const types = [...new Set(type.owner.workspace.binders.values())].flatMap(binder => binder.recordTypes.filter(value => value.isPascalObject));
-  const identities = [...new Set(types.map(value => value.identity))].sort();
-  if (identities.length > 65535) type.owner.fail('Project exceeds the object type identifier limit', type.node, 'TP_LIMIT');
-  return identities.indexOf(type.identity) + 1;
+function objectCatalog(workspace) {
+  const revision = workspace.objectTypesRevision || 0;
+  if (workspace.objectCatalog?.revision === revision) return workspace.objectCatalog;
+  const types = [...new Set(workspace.binders.values())].flatMap(binder => binder.recordTypes.filter(value => value.isPascalObject)).sort((a, b) => a.identity.localeCompare(b.identity));
+  if (types.length > 65535) types[0].owner.fail('Project exceeds the object type identifier limit', types[0].node, 'TP_LIMIT');
+  workspace.objectCatalog = {revision, types, tags: new Map(types.map((type, i) => [type.identity, i + 1]))};
+  return workspace.objectCatalog;
 }
+function objectTypeTag(type) {return objectCatalog(type.owner.workspace).tags.get(type.identity);}
+function dispatcherName(method) {const slot = method.slot; return `__PascalDispatch_${slot.declaringType.name.length}_${slot.declaringType.name}_${slot.name}`;}
+function dispatcherAccess(lowerer, method) {const slot = method.slot, name = identifier(dispatcherName(slot)); return slot.declaringType.owner === lowerer.binder ? name : `${identifier(slot.declaringType.owner.name)}.${name}`;}
 
 function ungroup(node) {while (node?.kind === 'group') node = node.expression; return node;}
 
@@ -217,18 +240,28 @@ export function objectRoutineCall(lowerer, symbol, args, context, node) {
   const source = symbol.objectReceiverSource || lowerer.freezeReference(ungroup(receiver), context);
   const values = lowerer.routineArguments({...symbol, params: symbol.params.filter(param => !param.implicit)}, symbol.objectForwardArguments || args, context, node);
   const implicitSelf = receiver && ungroup(receiver).kind === 'identifier' && lowerer.resolve(ungroup(receiver), context, false)?.param?.implicit;
-  if (symbol.objectMethod.kind === 'constructor' && !symbol.objectQualified && !implicitSelf) lowerer.emit(context, `${source}.${identifier(VMT_FIELD)} = ${objectTypeTag(receiverType)}&`, node, true);
-  return `${lowerer.access(symbol, context)}(${[source, ...values].join(', ')})`;
+  if (symbol.objectMethod.kind === 'constructor') values.push(`${symbol.objectQualified || symbol.objectImplicitSelf || implicitSelf ? 0 : objectTypeTag(receiverType)}&`);
+  const callable = symbol.objectMethod.virtual && !symbol.objectQualified ? dispatcherAccess(lowerer, symbol.objectMethod) : lowerer.access(symbol, context);
+  return `${callable}(${[source, ...values].join(', ')})`;
 }
 
-function copyData(lowerer, destination, source, type, context, node) {
+function copyData(lowerer, destination, source, type, context, node, valueParameter = false) {
   if (type.kind === 'record') {
-    for (const field of type.fields.values()) if (!field.internal) copyData(lowerer, `${destination}.${identifier(field.name)}`, `${source}.${identifier(field.name)}`, field.type, context, node);
+    if (valueParameter && type.isPascalObject) {
+      // An object value parameter is projected to its formal type, including
+      // its methods. Never retain a descendant VMT on ancestor-sized storage.
+      lowerer.emit(context, `If ${source}.${identifier(VMT_FIELD)} <> 0& Then`, node, true);
+      lowerer.emit(context, `${destination}.${identifier(VMT_FIELD)} = ${objectTypeTag(type)}&`, node, true);
+      lowerer.emit(context, 'Else', node, true);
+      lowerer.emit(context, `${destination}.${identifier(VMT_FIELD)} = 0&`, node, true);
+      lowerer.emit(context, 'End If', node, true);
+    }
+    for (const field of type.fields.values()) if (!field.internal) copyData(lowerer, `${destination}.${identifier(field.name)}`, `${source}.${identifier(field.name)}`, field.type, context, node, valueParameter);
   } else if (type.kind === 'array') {
     const integer = lowerer.binder.scope.symbols.get('longint').type;
     const indices = type.dimensions.map(() => lowerer.temporary(context, integer, node, 'objectIndex'));
     for (let i = 0; i < indices.length; i++) lowerer.emit(context, `For ${indices[i]} = ${type.dimensions[i].low}& To ${type.dimensions[i].high}&`, node, true);
-    copyData(lowerer, `${destination}(${indices.join(', ')})`, `${source}(${indices.join(', ')})`, type.element, context, node);
+    copyData(lowerer, `${destination}(${indices.join(', ')})`, `${source}(${indices.join(', ')})`, type.element, context, node, valueParameter);
     for (let i = indices.length - 1; i >= 0; i--) lowerer.emit(context, `Next ${indices[i]}`, node, true);
   } else lowerer.emit(context, `${type.kind === 'object' ? 'Set ' : ''}${destination} = ${source}`, node);
 }
@@ -243,7 +276,7 @@ export function lowerObjectAssignment(lowerer, target, value, context, node) {
 
 export function lowerObjectValueParameter(lowerer, param, source, context) {
   if (!param.type.isPascalObject) return false;
-  copyData(lowerer, identifier(param.vbName || param.name), source, param.type, context, param);
+  copyData(lowerer, identifier(param.vbName || param.name), source, param.type, context, param, true);
   return true;
 }
 
@@ -266,6 +299,73 @@ export function objectTypeSizeOf(lowerer, type, node) {
   return [...type.fields.values()].filter(field => !field.internal).reduce((size, field) => size + lowerer.sizeOf(field.type, node), type.hasVmt ? 2 : 0);
 }
 
+/** Emit a closed-world VMT thunk for every virtual slot declared by this unit.
+ * The original Self variable is forwarded, preserving aliasing and private
+ * ancestor state. Native backends verify the serialized view and type tag
+ * before narrowing an ancestor record reference to an override receiver.
+ */
+export function emitObjectDispatchers(lowerer, context) {
+  lowerer.objectDispatchers = [];
+  for (const type of lowerer.binder.recordTypes) if (type.isPascalObject) for (const method of type.declaredMethods) {
+    if (!method.virtual || method.slot !== method) continue;
+    const procedure = method.symbol, name = dispatcherName(method), result = !!procedure.returnType, kind = result ? 'Function' : 'Sub';
+    const params = procedure.params.map(param => `${param.byRef || ['array', 'record'].includes(param.type.kind) ? 'ByRef' : 'ByVal'} ${lowerer.declaration(param.vbName || param.name, param.type, true)}`);
+    const self = identifier(procedure.self.vbName), args = procedure.params.filter(param => !param.implicit).map(param => identifier(param.vbName || param.name));
+    const metadata = {name, receiver: {parameter: procedure.self.vbName, identity: type.identity, vmtField: VMT_FIELD}, branches: []};
+    lowerer.emit(context, `Public ${kind} ${identifier(name)}(${params.join(', ')})${result ? ` As ${lowerer.storageType(procedure.returnType)}` : ''}`, method.node, true);
+    lowerer.emit(context, `Select Case ${self}.${identifier(VMT_FIELD)}`, method.node, true);
+    for (const runtimeType of objectCatalog(lowerer.workspace).types) {
+      if (!objectReferenceCompatible(type, runtimeType)) continue;
+      const implementation = objectMethod(runtimeType, method.name);
+      if (implementation?.slot !== method) continue;
+      const typeId = objectTypeTag(runtimeType), target = implementation.symbol;
+      metadata.branches.push({typeId, runtimeType: runtimeType.identity, targetModule: target.owner.name, targetProcedure: target.vbName, viewType: implementation.declaringType.identity});
+      lowerer.emit(context, `Case ${typeId}&`, method.node, true);
+      const call = `${lowerer.access(target, context)}(${[self, ...args].join(', ')})`;
+      lowerer.emit(context, result ? `${identifier(name)} = ${call}` : `Call ${call}`, method.node, true);
+      lowerer.emit(context, `Exit ${kind}`, method.node, true);
+    }
+    lowerer.emit(context, 'Case Else', method.node, true);
+    lowerer.emit(context, 'Err.Raise 210, "Turbo Pascal", "Object not initialized or incompatible virtual receiver"', method.node, true);
+    lowerer.emit(context, 'End Select', method.node, true);
+    lowerer.emit(context, `End ${kind}`, method.node, true);
+    lowerer.objectDispatchers.push(metadata);
+  }
+}
+
+export function objectDispatcherMetadata(lowerer) {return lowerer.objectDispatchers || [];}
+
+export function initializeObjectMethod(lowerer, procedure, context) {
+  if (procedure.objectMethod?.kind !== 'constructor') return;
+  const self = lowerer.access(procedure.self.symbol, context), type = identifier(CONSTRUCTOR_TYPE);
+  lowerer.emit(context, 'On Error GoTo [__PascalCtorFailure]', procedure.node, true);
+  lowerer.emit(context, `If ${type} <> 0& Then ${self}.${identifier(VMT_FIELD)} = ${type}`, procedure.node, true);
+  lowerer.emit(context, `${identifier(procedure.vbName)} = True`, procedure.node, true);
+}
+
+export function finalizeObjectMethod(lowerer, procedure, context) {
+  if (procedure.objectMethod?.kind !== 'constructor') return;
+  const self = lowerer.access(procedure.self.symbol, context);
+  lowerer.emit(context, 'Exit Function', procedure.definition, true);
+  lowerer.emit(context, '[__PascalCtorFailure]:', procedure.definition, true);
+  lowerer.emit(context, `If Err.Number = 210 And Err.Source = "${CONSTRUCTOR_FAILURE}" Then`, procedure.definition, true);
+  lowerer.emit(context, `${self}.${identifier(VMT_FIELD)} = 0&`, procedure.definition, true);
+  lowerer.emit(context, `${identifier(procedure.vbName)} = False`, procedure.definition, true);
+  lowerer.emit(context, 'Err.Clear', procedure.definition, true);
+  lowerer.emit(context, 'Exit Function', procedure.definition, true);
+  lowerer.emit(context, 'End If', procedure.definition, true);
+  lowerer.emit(context, 'Err.Raise Err.Number, Err.Source, Err.Description', procedure.definition, true);
+}
+
+export function objectFailStatement(lowerer, call, context, node) {
+  if (call.callee.kind !== 'identifier' || key(call.callee.name) !== 'fail') return false;
+  const method = enclosingMethod(context);
+  if (method?.objectMethod.kind !== 'constructor') lowerer.fail('Fail can be called only within a constructor', node, 'TP_FAIL_CONTEXT');
+  lowerer.count(call, 0);
+  lowerer.emit(context, `Err.Raise 210, "${CONSTRUCTOR_FAILURE}", "Constructor failed"`, node);
+  return true;
+}
+
 export function objectTypeMetadata(binder) {
   const storageName = type => type.kind === 'array' ? storageName(type.element) : type.kind === 'record' ? type.owner === binder ? type.name : `${type.owner.name}.${type.name}` : type.vb;
   return binder.recordTypes.filter(type => type.isPascalObject).map(type => ({
@@ -273,6 +373,6 @@ export function objectTypeMetadata(binder) {
     parent: type.parent ? {module: type.parent.owner.name, name: type.parent.name, identity: type.parent.identity} : null,
     fields: [...type.fields.values()].map(field => ({name: field.name, type: storageName(field.type), internal: !!field.internal})),
     vmtField: type.vmtField, hasVmt: type.hasVmt, typeId: objectTypeTag(type),
-    methods: [...type.methods.values()].map(method => ({name: method.name, kind: method.kind, module: method.declaringType.owner.name, declaringType: method.declaringType.name, vbName: method.symbol.vbName, visibility: method.visibility, virtual: method.virtual})),
+    methods: [...type.methods.values()].map(method => ({name: method.name, kind: method.kind, module: method.declaringType.owner.name, declaringType: method.declaringType.name, vbName: method.symbol.vbName, visibility: method.visibility, virtual: method.virtual, dynamicIndex: method.dynamicIndex, dispatcher: method.virtual ? dispatcherName(method) : null})),
   }));
 }

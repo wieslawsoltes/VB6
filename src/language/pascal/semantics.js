@@ -1,6 +1,6 @@
 import {PascalError} from './lexer.js';
 import {parsePascalModule} from './parser.js';
-import {resolveObjectType, prepareObjectMethods, validateObjectMethodLocals, objectReferenceCompatible} from './object-lowering.js';
+import {resolveObjectType, prepareObjectMethods, validateObjectMethodLocals, validateObjectMethodSignature, objectReferenceCompatible} from './object-lowering.js';
 import {builtinType, BUILTIN_SYMBOLS, CONSTANT_SYMBOLS} from '../type-catalog.js';
 
 const key = value => String(value).toLowerCase();
@@ -32,10 +32,17 @@ export function foreignType(name = 'Variant') {
 const basicIntrinsics = new Map(BUILTIN_SYMBOLS.map(symbol => [key(symbol.name), symbol]));
 const basicConstants = new Map(CONSTANT_SYMBOLS.map(symbol => [key(symbol.name), symbol]));
 export function numericType(left, right) {
-  if (left?.kind === 'real' || right?.kind === 'real') return PASCAL_TYPES.real;
-  if (left?.bits === 32 || right?.bits === 32 || left?.kind === 'variant' || right?.kind === 'variant') return PASCAL_TYPES.longint;
-  if (left?.name === 'Word' || right?.name === 'Word') return PASCAL_TYPES.word;
-  return PASCAL_TYPES.integer;
+  if (left?.kind === 'subrange') left = left.base;
+  if (right?.kind === 'subrange') right = right.base;
+  if (left?.kind === 'real' || right?.kind === 'real') {
+    for (const name of ['double', 'real', 'single']) if ([left, right].some(type => type?.kind === 'real' && key(type.name) === name)) return PASCAL_TYPES[name];
+    return PASCAL_TYPES.real;
+  }
+  if (left?.kind === 'variant' || right?.kind === 'variant') return PASCAL_TYPES.longint;
+  const low = Math.min(left?.low ?? -32768, right?.low ?? -32768), high = Math.max(left?.high ?? 32767, right?.high ?? 32767);
+  // Byte operands use an intermediate word before arithmetic (TP7, p. 25).
+  // The remaining common type must contain every possible operand value.
+  return [PASCAL_TYPES.integer, PASCAL_TYPES.word, PASCAL_TYPES.longint].find(type => type.low <= low && type.high >= high) || PASCAL_TYPES.longint;
 }
 export function sameType(left, right) {
   if (left === right) return true;
@@ -174,10 +181,10 @@ export class PascalBinder {
       const declaration = symbol.nodes.find(node => node.explicitParams || node.returnType) || symbol.node;
       const definition = symbol.definition;
       if (!definition) this.fail(`Routine '${symbol.name}' was declared but has no implementation`, symbol.node, 'TP_MISSING_ROUTINE');
-      if (symbol.nodes.some(node => node.modifiers.some(modifier => ['external', 'assembler', 'interrupt', 'virtual', 'inline'].includes(modifier.name)))) this.fail(`Routine '${symbol.name}' requires an unsupported machine-code calling convention`, symbol.node, 'TP_UNSUPPORTED_CALLING_CONVENTION');
+      if (symbol.nodes.some(node => node.modifiers.some(modifier => ['external', 'assembler', 'interrupt', 'inline'].includes(modifier.name) || modifier.name === 'virtual' && !symbol.objectMethod))) this.fail(`Routine '${symbol.name}' requires an unsupported machine-code calling convention`, symbol.node, 'TP_UNSUPPORTED_CALLING_CONVENTION');
       symbol.params = declaration.params.map(param => ({...param, type: this.resolveType(param.type, symbol.scope)}));
       for (const param of symbol.params) if (param.type.kind === 'file' && !param.byRef) this.fail('File parameters must be declared var', param, 'TP_FILE_PARAMETER');
-      symbol.returnType = symbol.node.kind === 'function' ? declaration.returnType ? this.resolveType(declaration.returnType, symbol.scope) : this.fail(`Function '${symbol.name}' requires a return type`, symbol.node) : null;
+      symbol.returnType = symbol.node.kind === 'constructor' ? PASCAL_TYPES.boolean : symbol.node.kind === 'function' ? declaration.returnType ? this.resolveType(declaration.returnType, symbol.scope) : this.fail(`Function '${symbol.name}' requires a return type`, symbol.node) : null;
       if (symbol.returnType && isAggregate(symbol.returnType)) this.fail('Turbo Pascal functions cannot return arrays or records', symbol.node, 'TP_RETURN_TYPE');
       if (symbol.nodes.some(node => node.kind !== symbol.node.kind)) this.fail(`Routine kind does not match interface for '${symbol.name}'`, symbol.node);
       for (const node of symbol.nodes) if (node !== declaration && node.explicitParams) {
@@ -185,8 +192,10 @@ export class PascalBinder {
       }
       if (symbol.objectMethod) {
         validateObjectMethodLocals(this, symbol, declaration, definition);
+        validateObjectMethodSignature(this, symbol, sameType);
         symbol.self = {kind: 'parameter', name: 'Self', vbName: '__PascalSelf', type: symbol.objectMethod.declaringType, byRef: true, implicit: true, loc: definition.loc};
         symbol.params.unshift(symbol.self);
+        if (symbol.objectMethod.kind === 'constructor') symbol.params.push({kind: 'parameter', name: '__PascalConstructorType', type: PASCAL_TYPES.word, byRef: false, implicit: true, loc: definition.loc});
       }
       symbol.localScope = new PascalScope(this, symbol.scope, symbol); symbol.captures = [];
       for (let parent = symbol.scope; parent && parent !== this.scope; parent = parent.parent) for (const value of parent.symbols.values()) if (['variable', 'parameter', 'result'].includes(value.kind)) symbol.captures.push({symbol: value, name: `__capture_${symbol.captures.length}_${value.name}`});
@@ -203,6 +212,8 @@ export class PascalBinder {
     if (!node) return PASCAL_TYPES.variant;
     if (node.kind === 'objectType') return resolveObjectType(this, node, scope, suggestedName, publicType);
     if (node.kind === 'namedType') {
+      if (key(node.name) === 'extended') this.fail('Extended requires 80-bit floating point storage; shared backend currently supports Real48, Single and Double', node, 'TP_UNSUPPORTED_REAL80');
+      if (key(node.name) === 'comp') this.fail('Comp requires exact signed 64-bit integer arithmetic and storage', node, 'TP_UNSUPPORTED_COMP');
       const parts = node.name.split('.');
       if (parts.length > 1) {const binder = this.workspace.get(parts[0]); if (!binder || binder !== this && !this.imports.includes(binder)) this.fail(`Unit '${parts[0]}' is not in the uses clause`, node); binder.ensure(); const symbol = binder.scope.symbols.get(key(parts.slice(1).join('.'))); if (!symbol || symbol.kind !== 'type' || binder !== this && !symbol.public) this.fail(`Unknown exported type '${node.name}'`, node); return binder.resolveSymbol(symbol).type;}
       const symbol = scope.resolve(node.name, true, node); if (symbol.kind !== 'type') this.fail(`'${node.name}' is not a type`, node); return symbol.type;
