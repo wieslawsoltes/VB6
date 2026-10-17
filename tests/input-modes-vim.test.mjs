@@ -190,6 +190,17 @@ isolated('multiline and zero-length search cursors terminate and track replaceme
 isolated('Unicode insertions, deletion, native composition sync and surrogate offsets remain valid',()=>{
   const e=editor('A😀B');e.keys('l','x');assert.equal(e.text,'AB');e.keys('i');e.native('zażółć 漢字');e.keys('<Esc>');assert.equal(e.text,'Azażółć 漢字B');assert.ok(!/[\uD800-\uDFFF]/.test(e.text));e.dispose();
 });
+isolated('Insert and Replace leave Normal carets on complete Unicode characters before deletion and repeat',()=>{
+  const insert=editor('abc');insert.keys('i').native('😀').keys('<Esc>');assert.deepEqual(insert.selections,[{anchor:0,head:0}]);insert.keys('x');assert.equal(insert.text,'abc');insert.keys('u');assert.equal(insert.text,'😀abc');insert.dispose();
+  const replace=editor('abc');replace.keys('R');replace.session.handleKey('😀',{key:'😀'});replace.keys('<Esc>');assert.equal(replace.text,'😀bc');assert.deepEqual(replace.selections,[{anchor:0,head:0}]);replace.keys('l','.');assert.equal(replace.text,'😀😀c');assert.deepEqual(replace.selections,[{anchor:2,head:2}]);replace.keys('x');assert.equal(replace.text,'😀c');replace.dispose();
+});
+isolated('Unicode selection boundaries expand directed ranges and clip collapsed external carets safely',()=>{
+  const e=editor('A😀B');e.at(2);assert.deepEqual(e.selections,[{anchor:1,head:1}]);e.keys('x');assert.equal(e.text,'AB');e.keys('u');
+  e.at(1,2);assert.deepEqual(e.selections,[{anchor:1,head:3}]);e.keys('y');assert.equal(Vim.getVimGlobalState_().registerController.getRegister('"').toString(),'😀');
+  e.keys('gv');assert.equal(e.session.adapter.getSelection(),'😀');e.keys('<Esc>');
+  e.at(2,1);assert.deepEqual(e.selections,[{anchor:3,head:1}]);e.keys('d');assert.equal(e.text,'AB');e.dispose();
+  for(const [anchor,head]of [[1,3],[3,1]]){const selected=editor('A😀B');selected.at(anchor,head).keys('y');assert.equal(Vim.getVimGlobalState_().registerController.getRegister('"').toString(),'😀');selected.dispose();}
+});
 isolated('native IME commitment fills every block row and remains one canonical undo',()=>{
   const e=editor('abc\ndef');e.keys('<C-v>','j','I');e.host.composing=true;e.session.beginComposition();e.native('漢😀');assert.equal(e.text,'漢😀abc\ndef');e.host.composing=false;assert.equal(e.session.endComposition(),true);assert.equal(e.text,'漢😀abc\n漢😀def');e.keys('<Esc>','u');assert.equal(e.text,'abc\ndef');e.dispose();
 });

@@ -16,6 +16,7 @@ const escapeRegExp=text=>String(text).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const wordChar=character=>!!character&&/[\p{L}\p{N}_]/u.test(character);
 const nextCodePoint=(text,offset)=>Math.min(text.length,offset+(text.codePointAt(offset)>0xffff?2:1));
 const previousCodePoint=(text,offset)=>Math.max(0,offset-(offset>1&&/[\uDC00-\uDFFF]/.test(text[offset-1])&&/[\uD800-\uDBFF]/.test(text[offset-2])?2:1));
+const codePointBoundary=(text,offset,assoc=-1)=>offset>0&&/[\uDC00-\uDFFF]/.test(text[offset]||'')&&/[\uD800-\uDBFF]/.test(text[offset-1])?offset+assoc:offset;
 
 function eventMap(target){let map=eventMaps.get(target);if(!map){map=new Map();eventMaps.set(target,map);}return map;}
 function on(target,type,listener){if(target.addEventListener)target.addEventListener(type,listener);else{const map=eventMap(target);if(!map.has(type))map.set(type,new Set());map.get(type).add(listener);}}
@@ -53,7 +54,7 @@ function transformOffset(offset,start,end,length,assoc=1){if(offset<start||offse
 class VimMarker {
   constructor(cm,offset,insertLeft=false){this.cm=cm;this.id=++cm.$mid;this.offset=offset;this.assoc=insertLeft?1:-1;cm._markers.add(this);}
   clear(){this.offset=null;this.cm._markers.delete(this);}
-  find(){return this.offset===null||this.cm.disposed?null:this.cm.posFromIndex(this.offset);}
+  find(){return this.offset===null||this.cm.disposed?null:this.cm.posFromIndex(codePointBoundary(this.cm._text,this.offset));}
   update(change){if(this.offset!==null)this.offset=transformOffset(this.offset,change.start,change.end,change.text.length,this.assoc);}
 }
 
@@ -104,7 +105,13 @@ export class VimAdapter {
   off(type,listener){if(type==='change')this.flushChangeEvents(this.curOp);off(this,type,listener);}
   signal(type,...args){signal(this,type,...args);}
   index(){if(this._lines)return;this._lines=this._text.split('\n');this._starts=new Uint32Array(this._lines.length);for(let i=1;i<this._lines.length;i++)this._starts[i]=this._starts[i-1]+this._lines[i-1].length+1;}
-  normalizeSelections(selections){return (selections?.length?selections:[{anchor:0,head:0}]).map(s=>({anchor:clamp(s.anchor,0,this._text.length),head:clamp(s.head,0,this._text.length)}));}
+  normalizeSelections(selections){return (selections?.length?selections:[{anchor:0,head:0}]).map(s=>{
+    const anchor=clamp(s.anchor,0,this._text.length),head=clamp(s.head,0,this._text.length);
+    // Exiting Insert subtracts one UTF-16 unit in the engine, and native
+    // selections can land inside a surrogate pair. Clip carets to the start
+    // of the complete character; expand ranges outward without reversing them.
+    return {anchor:codePointBoundary(this._text,anchor,anchor>head?1:-1),head:codePointBoundary(this._text,head,head>anchor?1:-1)};
+  });}
   indexFromPos(position){this.index();if(!position)return 0;if(position.line>=this._lines.length)return this._text.length;if(position.line<0)return 0;const line=Math.floor(clamp(position.line,0,this._lines.length-1));return this._starts[line]+clamp(position.ch,0,this._lines[line].length);}
   posFromIndex(offset){this.index();offset=clamp(offset,0,this._text.length);let lo=0,hi=this._starts.length;while(lo+1<hi){const mid=(lo+hi)>>>1;if(this._starts[mid]<=offset)lo=mid;else hi=mid;}return new VimPosition(lo,offset-this._starts[lo]);}
   clipPos(position){return this.posFromIndex(this.indexFromPos(position));}
@@ -166,10 +173,18 @@ export class VimAdapter {
     this._flushing=true;
     try{
       this.flushChangeEvents(op);
-      if(op.cursorActivity)this.signal('cursorActivity',this);
+      if(op.cursorActivity){
+        this.signal('cursorActivity',this);
+        // The engine converts native exclusive range ends to inclusive Visual
+        // positions by subtracting one unit. Keep those internal positions on
+        // the first unit of a complete character before a later operator clips
+        // its range; otherwise a mouse selection ending after an emoji can
+        // incorrectly include the following character.
+        const vim=this.state.vim;if(vim?.visualMode&&vim.sel)for(const end of ['anchor','head']){const pos=vim.sel[end];if(pos)pos.ch=codePointBoundary(this.getLine(pos.line),pos.ch);}
+      }
       if(!this.disposed){
         if(this.host.getText()!==this._text)this.host.apply(this._text,this._selections.map(copySelection),{origin:this.state.vim?.insertMode?'typing':'vim',kind:this.state.vim?.insertMode?'typing':'command'});
-        else if(!sameSelections(this.normalizeSelections(this.host.getSelections?.()||[]),this._selections))this.host.setSelections(this._selections.map(copySelection));
+        else if(!sameSelections(this.host.getSelections?.()||[],this._selections))this.host.setSelections(this._selections.map(copySelection));
       }
       if(op.changes.length)this.signal('changes',this,op.changes);
     }finally{this._flushing=false;}
@@ -181,7 +196,7 @@ export class VimAdapter {
   sync(change={}){
     if(this.disposed||this._flushing)return;
     const text=String(this.host.getText()),selections=this.host.getSelections?.()||this._selections;
-    if(text===this._text&&sameSelections(this.normalizeSelections(selections),this._selections))return;
+    if(text===this._text&&sameSelections(selections,this._selections))return;
     this._adopting=true;
     try{return this.operation(()=>{
       if(text!==this._text){let start=0,end=this._text.length,nextEnd=text.length;while(start<end&&start<nextEnd&&this._text[start]===text[start])start++;while(end>start&&nextEnd>start&&this._text[end-1]===text[nextEnd-1]){end--;nextEnd--;}
@@ -406,7 +421,7 @@ VimAdapter.vimClipboardRead=(cm,register,callback)=>{
   // so it uses the last explicitly read/yanked clipboard register immediately.
   if(Vim.getVimGlobalState_().macroModeState.isPlaying){callback(register.toString());return;}
   const source=cm.getValue(),selections=cm._selections.map(copySelection),revision=cm.revision;
-  const current=()=>!cm.disposed&&!cm.getOption('readOnly')&&cm.host.isActive?.()!==false&&cm.host.getText()===source&&cm.revision===revision&&sameSelections(cm.normalizeSelections(cm.host.getSelections?.()||cm._selections),selections);
+  const current=()=>!cm.disposed&&!cm.getOption('readOnly')&&cm.host.isActive?.()!==false&&cm.host.getText()===source&&cm.revision===revision&&sameSelections(cm.host.getSelections?.()||cm._selections,selections);
   let read;try{read=cm.host.readClipboard?cm.host.readClipboard():globalThis.navigator?.clipboard?.readText?.();}catch(error){read=Promise.reject(error);}
   cm.pendingClipboard=Promise.resolve(read).then(value=>value===undefined?register.toString():String(value),()=>{clipboardNotification(cm,'Clipboard access failed. Using the saved clipboard register.');return register.toString();}).then(value=>{if(current())cm.operation(()=>{cm.curOp.isVimOp=true;if(value!==register.toString())register.setText(value,/\n$/.test(value),false);callback(value);});else if(!cm.disposed)clipboardNotification(cm,'Clipboard paste cancelled because the editor changed.');}).catch(error=>clipboardNotification(cm,error?.message||'Clipboard paste failed.'));
   return cm.pendingClipboard;
