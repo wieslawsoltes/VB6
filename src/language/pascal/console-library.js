@@ -15,7 +15,7 @@ Private Sub __PascalConsoleEnsure(ByRef buffer As String, ByRef position As Long
   End If
   Exit Sub
 Failed:
-  Call __PascalFileCapture(Err.Number, Err.Source, checked, status)
+  Call __PascalFileCapture(Err.Number, Err.Source, checked, status, Err.Description)
 End Sub
 
 Private Function __PascalConsoleReadText(ByRef buffer As String, ByRef position As Long, ByRef ready As Boolean, ByVal capacity As Long, ByVal checked As Boolean, ByRef status As Long) As String

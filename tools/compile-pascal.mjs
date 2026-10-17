@@ -2,26 +2,32 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {createInterface} from 'node:readline';
+import {VBError} from '../src/language/lexer.js';
 import {createPascalProject,compileProject,parsePascalModule} from '../packages/turbo-pascal/src/index.js';
 
 export const PASCAL_CLI_USAGE=`Usage: node tools/compile-pascal.mjs main.pas [unit.pas ...] [options]
        node tools/compile-pascal.mjs project.vb6web [options]
   --target check|run|ir|html|win32|macos|linux   Default: check
   --out FILE          Required for artifact targets; creates a new file
-  --name IDENTIFIER   Override the project/application name
+  --name NAME         Override the project/application name
   --help              Display help
 
 Forms use the same .vb6web project and designer model as Visual Basic.
 Native targets reuse the existing Win32 PE, macOS ARM64 and Linux ELF AOT
 compilers. macOS/Linux output is a verified application ZIP. Build the matching
-runtime first with npm run build. Existing output files are never overwritten.`;
+runtime first with npm run build. Existing output files are never overwritten.
+Run reads UTF-8 lines from standard input and preserves Write/WriteLn output.
+End of standard input raises Pascal I/O error 100; diagnostics use standard
+error. Check and artifact targets print a JSON result.`;
 
 export function parsePascalOptions(args) {
   const result={target:'check',inputs:[]},seen=new Set();
   for(let index=0;index<args.length;index++) {
     const arg=args[index];
     if(arg==='--help'){result.help=true;continue;}
-    if(!arg.startsWith('--')){result.inputs.push(arg);continue;}
+    if(arg==='--'){result.inputs.push(...args.slice(index+1));break;}
+    if(!arg.startsWith('-')){result.inputs.push(arg);continue;}
     if(!['--target','--out','--name'].includes(arg))throw new Error('Unknown option: '+arg);
     if(seen.has(arg))throw new Error('Repeated option: '+arg);
     seen.add(arg);
@@ -49,14 +55,18 @@ export async function readPascalProject(inputs,{name}={}) {
   if(/\.vb6web$/i.test(inputs[0])) {
     if(inputs.length!==1)throw new Error('Additional sources belong in the .vb6web project.');
     const project=JSON.parse(await readSource(inputs[0]));
+    if(!project||typeof project!=='object'||Array.isArray(project)||!Array.isArray(project.modules))throw new Error('Expected a .vb6web project object with a modules array.');
     if(name!==undefined)project.name=name;
     return project;
   }
   if(inputs.some(file=>!/\.(?:pas|pp)$/i.test(file)))throw new Error('Expected .pas, .pp or .vb6web input.');
-  const modules=[];
+  const modules=[],names=new Set();
   for(const file of inputs) {
     const code=await readSource(file),fallback=path.basename(file).replace(/\.[^.]+$/,'');
     const ast=parsePascalModule({name:fallback,code});
+    if(modules.length&&ast.moduleKind!=='unit')throw new Error('Additional Pascal source files must declare units: '+file);
+    if(names.has(ast.name.toLowerCase()))throw new Error('Duplicate Pascal program or unit name: '+ast.name);
+    names.add(ast.name.toLowerCase());
     modules.push({name:ast.name||fallback,code,sourcePath:path.basename(file),language:'pascal'});
   }
   const [main,...units]=modules;
@@ -70,16 +80,35 @@ function serializableIR(value) {
   return value;
 }
 
-export async function compilePascalCLI(options,{print=text=>process.stdout.write(String(text)+'\n')}={}) {
+/** The shared VM requests one line at a time through its existing InputBox
+ * host contract. Opening lazily avoids consuming stdin for unused routines. */
+export function createPascalLineInput(input=process.stdin) {
+  let reader=null,iterator=null,closed=false;
+  const endOfInput=()=>new VBError('Unexpected end of standard input',100,'Turbo Pascal file I/O');
+  return {
+    async inputBox() {
+      if(closed)throw endOfInput();
+      if(!reader){reader=createInterface({input,terminal:false,crlfDelay:Infinity});iterator=reader[Symbol.asyncIterator]();}
+      const next=await iterator.next();
+      if(next.done)throw endOfInput();
+      return next.value;
+    },
+    close(){closed=true;reader?.close();},
+  };
+}
+
+export async function compilePascalCLI(options,{print=(text,newline=true)=>process.stdout.write(String(text)+(newline?'\n':'')),input=process.stdin,inputBox=null}={}) {
   if(options.help){print(PASCAL_CLI_USAGE);return {valid:true};}
   const project=await readPascalProject(options.inputs,options);
   const program=compileProject(project);
   if(!program.valid)return {valid:false,diagnostics:program.diagnostics};
   if(options.target==='check')return {valid:true,language:'pascal',modules:program.modules.size,diagnostics:[]};
   if(options.target==='run') {
+    if([...program.modules.values()].some(module=>module.form))throw new Error('The run target provides console I/O; use the HTML or native target to run forms.');
     const {VirtualMachine}=await import('../src/runtime/vm.js');
-    const vm=new VirtualMachine(program,{print});await vm.start();
-    return {valid:true,executed:true};
+    const lines=inputBox?null:createPascalLineInput(input);
+    try {const vm=new VirtualMachine(program,{print,inputBox:inputBox||lines.inputBox});await vm.start();return {valid:true,executed:true};}
+    finally{lines?.close();}
   }
   let bytes,report;
   switch(options.target) {
@@ -109,7 +138,8 @@ export async function compilePascalCLI(options,{print=text=>process.stdout.write
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const result=await compilePascalCLI(parsePascalOptions(process.argv.slice(2)));
-    console.log(JSON.stringify(result,null,2));if(!result.valid)process.exitCode=1;
-  }catch(error){console.error(JSON.stringify({valid:false,diagnostics:error.diagnostics||[{severity:'error',message:error.message,source:error.source,line:error.line,column:error.column}]},null,2));process.exitCode=1;}
+    const options=parsePascalOptions(process.argv.slice(2)),result=await compilePascalCLI(options);
+    if(!result.valid){console.error(JSON.stringify(result,null,2));process.exitCode=1;}
+    else if(!options.help&&options.target!=='run')console.log(JSON.stringify(result,null,2));
+  }catch(error){console.error(JSON.stringify({valid:false,diagnostics:error.diagnostics||[{severity:'error',message:error.message,number:error.number,code:error.code,source:error.source,line:error.line,column:error.column}]},null,2));process.exitCode=1;}
 }

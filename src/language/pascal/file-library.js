@@ -44,7 +44,7 @@ End ${kind}`, ['fileCapture', ...dependencies]);
 }
 
 define('fileCapture', 'FileCapture', `
-Private Sub __PascalFileCapture(ByVal number As Long, ByVal source As String, ByVal checked As Boolean, ByRef status As Long)
+Private Sub __PascalFileCapture(ByVal number As Long, ByVal source As String, ByVal checked As Boolean, ByRef status As Long, Optional ByVal description As String = "")
   If source <> "Turbo Pascal file I/O" Then
     Select Case number
       Case 53: number = 2
@@ -61,7 +61,8 @@ Private Sub __PascalFileCapture(ByVal number As Long, ByVal source As String, By
   End If
   status = number
   Err.Clear
-  If checked Then Err.Raise number, "Turbo Pascal file I/O", "Pascal file operation failed"
+  If description = "" Then description = "Pascal file operation failed"
+  If checked Then Err.Raise number, "Turbo Pascal file I/O", description
 End Sub`);
 
 define('fileIOResult', 'FileIOResult', `

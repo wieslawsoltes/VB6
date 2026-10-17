@@ -188,7 +188,12 @@ export class VirtualMachine extends Signal {
   async evalBounds(bounds,frame){const result=[];for(const [lo,hi]of bounds)result.push([lo?numeric(await this.evaluateScalar(lo,frame)):frame.module.optionBase,numeric(await this.evaluateScalar(hi,frame))]);return result;}
   async start({breakOnEntry=false,runToCursor=null}={}) {
     if(this.immediateContext)throw new VBError('Reset design-mode Immediate before starting the project',5);
-    try { if(runToCursor)this.runTarget=this.breakpointLocation(runToCursor.module,runToCursor.line,runToCursor.column??null);await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
+    try {
+      if(this.program.valid!==false&&typeof this.host.inputBox!=='function') {
+        const module=[...this.program.modules.values()].find(value=>value.pascal?.hostRequirements?.includes('consoleLineInput'));
+        if(module){const error=new VBError('Pascal console line input requires a host inputBox function',5,module.name,1,1);error.code='TP_HOST_INPUT_REQUIRED';throw error;}
+      }
+      if(runToCursor)this.runTarget=this.breakpointLocation(runToCursor.module,runToCursor.line,runToCursor.column??null);await this.initialize();this.setState('running');this.lastYield=performance.now();if(breakOnEntry)this.stepMode={mode:'into',depth:0};
       for(const instance of this.instances.values()){const init=this.formProcedure(instance,'initialize');if(init)await this.callProcedure(instance,init,[]);}
       const name=lower(this.program.startup||'');let instance=this.instances.get(name);
       if(instance?.module.kind==='form'){await this.showForm(instance);return;}
