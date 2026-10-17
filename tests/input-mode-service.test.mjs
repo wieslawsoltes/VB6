@@ -212,3 +212,85 @@ test('an unavailable selection during release cannot retain mode keyboard owners
   assert.equal(f.editor.root.dataset.inputMode, undefined);
   f.service.dispose();
 });
+
+test('IME composition calls extension hooks without injecting a Vim command', async () => {
+  for (const hooks of [false, true]) {
+    const f = fixture(), keys = []; let started = 0, ended = 0;
+    f.service.registerMode({id: 'custom', label: 'Custom', createSession: () => ({state: {mode: 'command'},
+      handleKey(key) { keys.push(key); }, dispose() {},
+      ...(hooks ? {beginComposition() { started++; }, endComposition() { ended++; }} : {})
+    })});
+    f.service.configure({mode: 'custom'});
+    f.editor.root.dispatchEvent(new Event('compositionstart'));
+    assert.deepEqual(keys, []);
+    assert.equal(started, hooks ? 1 : 0);
+    assert.equal(f.service.records.get(f.editor).composing, true);
+    f.editor.root.dispatchEvent(new Event('compositionend'));
+    await Promise.resolve();
+    assert.equal(ended, hooks ? 1 : 0);
+    assert.equal(f.service.records.get(f.editor).composing, false);
+    f.service.dispose();
+  }
+});
+
+test('composition completion belongs to the original session and composition', async () => {
+  const f = fixture(), ended = []; let created = 0;
+  f.service.registerMode({id: 'custom', label: 'Custom', createSession: () => {
+    const owner = ++created;
+    return {handleKey() {}, beginComposition() {}, endComposition() { ended.push(owner); }, dispose() {}};
+  }});
+  f.service.configure({mode: 'custom'});
+  f.editor.root.dispatchEvent(new Event('compositionstart'));
+  f.editor.root.dispatchEvent(new Event('compositionend'));
+  f.service.configure({mode: 'default'});
+  f.service.configure({mode: 'custom'});
+  await Promise.resolve();
+  assert.deepEqual(ended, []);
+  f.editor.root.dispatchEvent(new Event('compositionstart'));
+  f.editor.root.dispatchEvent(new Event('compositionend'));
+  f.editor.root.dispatchEvent(new Event('compositionstart'));
+  await Promise.resolve();
+  assert.deepEqual(ended, []);
+  f.editor.root.dispatchEvent(new Event('compositionend'));
+  await Promise.resolve();
+  assert.deepEqual(ended, [2]);
+  f.service.dispose();
+});
+
+test('Default composition keeps the native input path free of modal presentation', async () => {
+  const f = fixture(), record = f.service.records.get(f.editor);
+  f.editor.root.dispatchEvent(new Event('compositionstart'));
+  assert.equal(record.session, null);
+  assert.equal(f.editor.root.dataset.inputComposing, undefined);
+  f.editor.root.dispatchEvent(new Event('compositionend'));
+  await Promise.resolve();
+  assert.equal(f.hosts[0].state, undefined);
+  f.service.dispose();
+});
+
+test('cancelled native input and paste events retain their existing owner', () => {
+  const f = fixture(), edits = [];
+  f.hosts[0].undo = () => edits.push('undo');
+  f.service.configure({mode: 'vim'});
+  const record = f.service.records.get(f.editor);
+  record.session.insertText = text => edits.push(text);
+  const event = {defaultPrevented: true, preventDefault() {}, stopImmediatePropagation() {}};
+  f.service.beforeInput(record, {...event, inputType: 'historyUndo'});
+  f.service.paste(record, {...event, clipboardData: {getData: () => 'paste'}});
+  assert.deepEqual(edits, []);
+  f.service.dispose();
+});
+
+test('Normal-mode native input cannot reach a backend that performs its own edit', () => {
+  const f = fixture(); let nativeEdits = 0;
+  f.service.configure({mode: 'vim'});
+  // Classic overwrite and virtualized input handlers perform canonical edits
+  // themselves, so cancelling the browser default alone cannot stop them.
+  f.editor.root.addEventListener('beforeinput', () => { nativeEdits++; });
+  const event = new Event('beforeinput', {cancelable: true});
+  Object.defineProperty(event, 'inputType', {value: 'insertText'});
+  f.editor.root.dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(nativeEdits, 0);
+  f.service.dispose();
+});

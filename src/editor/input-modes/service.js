@@ -245,16 +245,23 @@ export class EditorInputModeService extends Signal {
     record.cleanup.push(listen(host.root, 'paste', event => this.paste(record, event), true));
     record.cleanup.push(listen(host.root, 'compositionstart', event => {
       if (!owns(event)) return;
-      // Native composition is owned by the existing editor. An IME start in
-      // Normal mode enters Insert, so preedit text is never mistaken for keys.
-      if (record.session && !['insert', 'replace'].includes(record.session.state?.mode)) this.run(record, () => record.session.handleKey('i'));
-      if (record.session?.beginComposition) this.run(record, () => record.session.beginComposition());
-      record.composing = true; host.root.dataset.inputComposing = 'true';
+      record.composing = true; record.compositionOwner = {};
+      const session = record.session;
+      if (!session) return;
+      // The editor owns preedit text; each mode owns its transition into
+      // composition. Only Vim's hook knows how to enter its Insert state.
+      host.root.dataset.inputComposing = 'true';
+      if (session.beginComposition) this.run(record, () => session.beginComposition());
     }, true));
     record.cleanup.push(listen(host.root, 'compositionend', event => {
       if (!owns(event)) return;
       record.composing = false; delete host.root.dataset.inputComposing;
-      queueMicrotask(() => { if (!record.disposed) this.run(record, () => record.session?.endComposition ? record.session.endComposition() : record.session?.sync?.()); });
+      const session = record.session, statusOwner = record.statusOwner, compositionOwner = record.compositionOwner;
+      if (!session) return;
+      queueMicrotask(() => {
+        if (record.disposed || record.composing || record.session !== session || record.statusOwner !== statusOwner || record.compositionOwner !== compositionOwner) return;
+        this.run(record, () => session.endComposition ? session.endComposition() : session.sync?.());
+      });
     }, true));
     record.cleanup.push(host.subscribe(event => {
       if (record.disposed || record.busy || record.composing || !record.session) return;
@@ -327,11 +334,11 @@ export class EditorInputModeService extends Signal {
     }
   }
   beforeInput(record, event) {
-    if (!record.session || !record.host.ownsEvent(event) || record.composing || event.isComposing || record.busy) return;
+    if (event.defaultPrevented || !record.session || !record.host.ownsEvent(event) || record.composing || event.isComposing || record.busy || hasUIDialog()) return;
     if (this.settings.mode === 'vim' && ['historyUndo', 'historyRedo'].includes(event.inputType)) {
       // Browser edit menus and touch input must use the project history too;
       // the textarea's private undo stack cannot represent modal operations.
-      event.preventDefault();
+      event.preventDefault(); event.stopImmediatePropagation?.();
       record.endCoalescing?.(); record.endCoalescing = null;
       if (!record.host.readOnly) this.run(record, () => event.inputType === 'historyUndo' ? record.host.undo() : record.host.redo());
       return;
@@ -341,11 +348,11 @@ export class EditorInputModeService extends Signal {
     if (this.settings.mode === 'vim' && !['insert', 'replace'].includes(state.mode)) {
       // Native paste/drop/spellcheck must not bypass Normal mode. A paste event
       // is handled separately using the shared engine operation/undo protocol.
-      event.preventDefault();
+      event.preventDefault(); event.stopImmediatePropagation?.();
     }
   }
   paste(record, event) {
-    if (!record.session || !record.host.ownsEvent(event) || record.composing || this.settings.mode !== 'vim') return;
+    if (event.defaultPrevented || !record.session || !record.host.ownsEvent(event) || record.composing || record.busy || this.settings.mode !== 'vim' || hasUIDialog()) return;
     const text = event.clipboardData?.getData('text/plain');
     if (text == null || !record.session.insertText) return;
     event.preventDefault(); event.stopImmediatePropagation();
