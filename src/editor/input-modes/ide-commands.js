@@ -36,8 +36,18 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
   const text = String(args.argString ?? args.args?.join(' ') ?? '').trim();
   const close = () => {
     const currentSurface = ide.advancedEditor?.runtime?.surfaces.get(editor);
-    if (currentSurface?.views.length > 1) { currentSurface.setSplit(false); record.host.focus(); return; }
-    if (editor.secondary) { editor.toggleSplit(false); record.host.focus(); return; }
+    if (currentSurface?.views.length > 1) {
+      // Collapsing a backend retains its active view state. A close keeps the
+      // other pane, whereas :only deliberately retains the current pane.
+      const surviving = currentSurface.views.find(value => value.view !== currentSurface.view);
+      if (surviving) currentSurface.view = surviving.view;
+      currentSurface.setSplit(false); record.host.focus(); return;
+    }
+    if (editor.secondary) {
+      const surviving = editor.activePane === editor.primary ? editor.secondary : editor.primary;
+      if (surviving) editor.activatePane?.(surviving);
+      editor.toggleSplit(false); record.host.focus(); return;
+    }
     ide.closeDocument(sourceKey(ide, editor)); focusCurrentSource(service);
   };
   switch (command) {
@@ -98,6 +108,25 @@ export function executeIdeVimCommand(service, record, command, args = {}) {
   }
 }
 
+const windowDirections = Object.freeze({
+  h: 'left', '<C-h>': 'left', '<Left>': 'left',
+  l: 'right', '<C-l>': 'right', '<Right>': 'right',
+  k: 'up', '<C-k>': 'up', '<Up>': 'up',
+  j: 'down', '<C-j>': 'down', '<Down>': 'down'
+});
+
+function windowTarget(key, index, length, orientation) {
+  if (key === 't' || key === '<C-t>') return 0;
+  if (key === 'b' || key === '<C-b>') return length - 1;
+  const direction = windowDirections[key];
+  if (direction) {
+    const vertical = orientation === 'vertical', horizontalMotion = direction === 'left' || direction === 'right';
+    if (vertical !== horizontalMotion) return index;
+    return Math.max(0, Math.min(length - 1, index + (direction === 'left' || direction === 'up' ? -1 : 1)));
+  }
+  return (index + (key === 'W' ? -1 : 1) + length) % length;
+}
+
 export function executeWindowKey(service, record, key) {
   const ide = service.ide, editor = record.host.editor, surface = ide.advancedEditor?.runtime?.surfaces.get(editor);
   if (key === '<Esc>') return;
@@ -106,13 +135,21 @@ export function executeWindowKey(service, record, key) {
   if (key === 'o' || key === '<C-o>') return executeIdeVimCommand(service, record, 'only');
   if (key === 'c' || key === 'q') return executeIdeVimCommand(service, record, 'close');
   if (key === '=') { if (surface?.views.length > 1) surface.setSplitRatio(50); else if (!surface && editor.secondary) editor.setSplitRatio?.(.5); return; }
-  if (['h', 'j', 'k', 'l', 'w', 'W', 'p', '<C-w>', '<Left>', '<Right>', '<Up>', '<Down>', '<C-h>', '<C-j>', '<C-k>', '<C-l>'].includes(key)) {
-    const previous = ['h', 'k', 'W', '<Left>', '<Up>', '<C-h>', '<C-k>'].includes(key);
+  if (windowDirections[key] || ['w', 'W', 'p', 't', 'b', '<C-w>', '<C-p>', '<C-t>', '<C-b>'].includes(key)) {
     if (surface?.views.length > 1) {
       const index = surface.views.findIndex(value => value.view === surface.view);
-      surface.views[(index + (previous ? -1 : 1) + surface.views.length) % surface.views.length].view.focus(); return;
+      const target = windowTarget(key, Math.max(0, index), surface.views.length, surface.splitOrientation);
+      if (target !== index) surface.views[target].view.focus();
+      return;
     }
-    if (editor.secondary) { editor.activatePane(editor.activePane === editor.primary ? editor.secondary : editor.primary); editor.input.focus(); return; }
+    if (editor.secondary) {
+      const index = editor.activePane === editor.secondary ? 1 : 0;
+      const target = windowTarget(key, index, 2, editor.splitOrientation);
+      if (target !== index) { editor.activatePane(target ? editor.secondary : editor.primary); editor.input.focus(); }
+      return;
+    }
+    if (['t', 'b', '<C-t>', '<C-b>'].includes(key)) return;
+    const previous = windowDirections[key] === 'left' || windowDirections[key] === 'up' || key === 'W';
     ide.documents.mdi.cycle(previous ? -1 : 1); focusCurrentSource(service); return;
   }
   throw new Error('Unknown window command: Ctrl+W ' + key);
