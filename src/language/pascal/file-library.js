@@ -277,7 +277,7 @@ guarded('fileReadBytes', 'FileReadBytes', 'ByRef file As String, ByVal count As 
 `, ['fileHandle']);
 
 guarded('fileBlockRead', 'FileBlockRead', 'ByRef file As String, ByVal count As Long, ByVal allowPartial As Boolean, ByRef transferred As Long', 'String', `
-  Dim handle As Long, size As Long, requested As Double, available As Long, bytes As String
+  Dim handle As Long, size As Long, requested As Double, available As Long, actual As Long, bytes As String
   handle = __PascalFileHandle(file, 1)
   If AscW(Mid$(file, 2, 1)) <> 2 Then Err.Raise 106, "Turbo Pascal file I/O", "BlockRead requires an untyped file"
   size = __PascalFileRecordSize(file)
@@ -286,11 +286,13 @@ guarded('fileBlockRead', 'FileBlockRead', 'ByRef file As String, ByVal count As 
   transferred = 0
   available = LOF(handle) - Seek(handle) + 1
   If available < 0 Then available = 0
-  If allowPartial And requested > available Then requested = available
-  bytes = __PascalFileReadBytes(file, CLng(requested), checked, status)
+  actual = CLng(requested)
+  If actual > available Then actual = available
+  bytes = __PascalFileReadBytes(file, actual, checked, status)
   If status = 0 Then
     transferred = Len(bytes) \\ size
     __PascalFileBlockRead = bytes
+    If Not allowPartial And transferred <> count Then Err.Raise 100, "Turbo Pascal file I/O", "Disk read error"
   End If
 `, ['fileHandle', 'fileRecordSize', 'fileReadBytes']);
 

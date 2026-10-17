@@ -77,6 +77,18 @@ Call __PascalFileClose(f, True, status)`);
   assert.deepEqual(output, ['-42 1.25E+2', 'last True']);
 });
 
+test('Text reads into zero-capacity strings still consume the line before the end marker', async () => {
+  const {output} = await execute(`Call __PascalFileAssign(f, "empty-string.txt", 0, 1)
+Call __PascalFileOpen(f, 1, 0, 2, True, status)
+Call __PascalFileWriteText(f, "discarded", True, True, status)
+Call __PascalFileClose(f, True, status)
+Call __PascalFileOpen(f, 0, 0, 2, True, status)
+Debug.Print Len(__PascalFileReadText(f, 0, True, status)), __PascalFileEOLN(f, True, status)
+Debug.Print AscW(__PascalFileReadChar(f, True, status)), __PascalFileEOF(f, True, status)
+Call __PascalFileClose(f, True, status)`);
+  assert.deepEqual(output, ['0 True', '13 True']);
+});
+
 test('typed and untyped record positions are zero-based and exact binary layouts survive writes', async () => {
   const {vm, output} = await execute(`Dim bytes As String
 Call __PascalFileAssign(f, "integers.dat", 1, 2)
@@ -159,9 +171,10 @@ bytes = __PascalFileBlockRead(f, 0, False, transferred, True, status)
 Debug.Print Len(bytes), transferred, __PascalFilePos(f, True, status)
 Call __PascalFileSeek(f, 0, True, status)
 bytes = __PascalFileBlockRead(f, 3, False, transferred, False, status)
-Debug.Print Len(bytes), transferred, __PascalFileIOResult(status)
+Debug.Print bytes, transferred, __PascalFileIOResult(status)
+Debug.Print __PascalFilePos(f, True, status), __PascalFileEOF(f, True, status)
 Call __PascalFileClose(f, True, status)`);
-  assert.deepEqual(output, ['2', 'ABCDE 2 0', '0 0 0', '0 0 2', '0 0 100']);
+  assert.deepEqual(output, ['2', 'ABCDE 2 0', '0 0 0', '0 0 2', 'ABCDE 2 100', '2 True']);
 });
 
 for (const allowPartial of [false, true]) test(`BlockWrite bounds its source and reports complete records on disk-full, Result present=${allowPartial}`, async () => {
