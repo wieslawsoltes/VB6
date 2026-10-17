@@ -1,5 +1,6 @@
 import {layoutBindingSnapshot} from '../layout/language-gate.js';
 import {compileModule,validateCompiledModules} from './compiler.js';
+import {moduleLanguage} from '../project/language.js';
 
 /** Clone only compiler inputs, never forms, image assets or the complete workspace.
  * Limits apply to automatic diagnostics, not to the project file/export format. */
@@ -10,11 +11,12 @@ export function diagnosticSnapshot(project) {
   const modules=project.modules.map((m,index)=>{
     const code=String(m.code||'');size+=code.length;layoutNodes+=m.form?.controls?.length||0;if(layoutNodes>100000)throw new RangeError('Automatic layout checking is limited to 100,000 component declarations.');
     if(size>16*1024*1024)throw new RangeError('Automatic syntax checking is limited to 16 Mi UTF-16 source characters. Use Check Project Syntax.');
-    return {id:String(m.id||index),name:String(m.name||'Module'+index),kind:String(m.kind||'module'),attributes:[...(m.attributes||[])],code,layoutBindings:layoutBindingSnapshot(m)};
+    const language=moduleLanguage(m,project);
+    return {id:String(m.id||index),name:String(m.name||'Module'+index),kind:String(m.kind||'module'),...(language==='pascal'||m.language!==undefined?{language}:{}),attributes:[...(m.attributes||[])],code,layoutBindings:layoutBindingSnapshot(m)};
   });
   // Conditional compiler values are scalars. JSON also detaches mutable settings.
   const conditionalConstants=JSON.parse(JSON.stringify(project.settings?.conditionalConstants||{}));
-  return {name:String(project.name||'Project'),modules,settings:{conditionalConstants,anchoring:project.settings?.anchoring===true}};
+  return {name:String(project.name||'Project'),...(project.language!==undefined?{language:project.language}:{}),modules,settings:{conditionalConstants,anchoring:project.settings?.anchoring===true}};
 }
 
 export function compilerDiagnostic(error,name) {
@@ -32,13 +34,19 @@ export class ProjectDiagnosticCache {
   *steps(project) {
     const modules=new Map(),diagnostics=[],seen=new Set(),inputs=[],epoch=this.epoch;let compiledModules=0,cacheHits=0;
     const constants=JSON.stringify(project.settings?.conditionalConstants||{}),counts=new Map();
+    // A Pascal unit's exported declarations can alter dependent type/name
+    // binding without changing the importing module's text. Keep that context
+    // in the cache identity rather than returning stale diagnostics.
+    const pascalDependencies=project.modules.some(m=>moduleLanguage(m,project)==='pascal')
+      ?JSON.stringify(project.modules.map(m=>[m.name,moduleLanguage(m,project),m.code])):'';
     for(const input of project.modules)if(input.id!==undefined&&input.id!==null){const id=String(input.id);counts.set(id,(counts.get(id)||0)+1);}
     for(let i=0;i<project.modules.length;i++) {
       const input=project.modules[i],id=String(input.id),key=input.id!==undefined&&input.id!==null&&counts.get(id)===1?'id:'+id:'position:'+i,attributes=JSON.stringify(input.attributes||[]);seen.add(key);
+      const language=moduleLanguage(input,project),dependencies=language==='pascal'?pascalDependencies:'';
       let entry=this.entries.get(key);
-      if(!entry||entry.code!==input.code||entry.name!==input.name||entry.kind!==input.kind||entry.constants!==constants||entry.attributes!==attributes) {
-        entry={code:input.code,name:input.name,kind:input.kind,constants,attributes};compiledModules++;
-        try {entry.compiled=compileModule({...input,conditionalConstants:project.settings?.conditionalConstants||{}});}
+      if(!entry||entry.code!==input.code||entry.name!==input.name||entry.kind!==input.kind||entry.constants!==constants||entry.attributes!==attributes||entry.language!==language||entry.dependencies!==dependencies) {
+        entry={code:input.code,name:input.name,kind:input.kind,constants,attributes,language,dependencies};compiledModules++;
+        try {entry.compiled=compileModule({...input,language,conditionalConstants:project.settings?.conditionalConstants||{}},{project});}
         catch(error){entry.error=compilerDiagnostic(error,input.name);}
         if(epoch===this.epoch)this.entries.set(key,entry);
       } else cacheHits++;

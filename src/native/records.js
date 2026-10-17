@@ -14,8 +14,9 @@ export class NativeRecordLayouts {
   constructor(program, reject=fail) {
     this.reject=reject;this.definitions=new Map();this.layouts=new Map();this.active=new Set();
     for(const module of program.modules.values())for(const [name,fields]of Object.entries(module.types)) {
-      const header=module.source.split(/\r?\n/).find(line=>new RegExp('^\\s*(?:(?:Public|Private)\\s+)?Type\\s+'+name+'(?:\\s|$)','i').test(line));
-      const definition={id:key(module.name)+'.'+key(name),name,module,fields,private:/^\s*Private\b/i.test(header||'')};
+      const scope=module.typeScopes?.[key(name)];
+      const header=scope===undefined?(module.generatedSource||module.source).split(/\r?\n/).find(line=>new RegExp('^\\s*(?:(?:Public|Private)\\s+)?Type\\s+'+name+'(?:\\s|$)','i').test(line)):'';
+      const definition={id:key(module.name)+'.'+key(name),name,module,fields,private:scope==='private'||scope===undefined&&/^\s*Private\b/i.test(header||'')};
       this.definitions.set(definition.id,definition);
     }
   }
