@@ -16,6 +16,7 @@ from playwright.sync_api import expect, sync_playwright
 from PIL import Image
 from x11_theme_checks import X11ApplicationChecks
 from macos_composite_checks import MacOSCompositeChecks
+from macos26_compat_checks import MacOS26CompatibilityChecks
 ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 MEMORY=os.environ.get('VB6_TEST_TRANSPORT')=='memory'
@@ -25,7 +26,7 @@ THEMES=['fluent','fluent-dark','macos26','macos26-dark','x11','x11-dark']
 BOUNDS='''()=>{const root=vb6Application.forms[0].node,r=root.getBoundingClientRect();return [...root.querySelectorAll('.vb-control')].map(e=>{const b=e.getBoundingClientRect(),s=getComputedStyle(e);return [e.dataset.control,...[b.x-r.x,b.y-r.y,b.width,b.height].map(n=>Math.round(n*100)/100),s.fontFamily,s.fontSize,s.fontWeight];});}'''
 class Handler(http.server.SimpleHTTPRequestHandler):
  def log_message(self,*args):pass
-class ApplicationThemes(MacOSCompositeChecks, X11ApplicationChecks, unittest.TestCase):
+class ApplicationThemes(MacOSCompositeChecks, MacOS26CompatibilityChecks, X11ApplicationChecks, unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   subprocess.run(['node','tools/build-theme-fixtures.mjs'],cwd=ROOT,check=True)
@@ -185,7 +186,12 @@ class ApplicationThemes(MacOSCompositeChecks, X11ApplicationChecks, unittest.Tes
   self.assertEqual(set(self.active_pack(self.page.locator('.vb-mdi-child').last)),{'x11'})
   self.page.screenshot(path=str(REPORT/'mdi-themed-children.png'))
  def open_ide(self):
-  page=self.context.new_page();self.load(ROOT/'dist'/'VB6-Studio-Web.html',page);page.wait_for_function('typeof vb6Studio==="object"');return page
+  page=self.context.new_page();path=ROOT/'dist'/'VB6-Studio-Web.html'
+  if MEMORY:self.load(path,page)
+  else:page.goto(self.base+str(path.relative_to(ROOT)),wait_until='commit',timeout=30000)
+  # WebKit can leave this large inline document in "loading" after the IDE is
+  # usable. Await its real API/shell, with a startup budget separate from actions.
+  page.wait_for_function('typeof vb6Studio==="object"&&document.querySelector(".ide-shell")',polling=100,timeout=60000);return page
  def options(self,page):
   page.evaluate('()=>{void vb6Studio.command("options");}');page.get_by_role('tab',name='General',exact=True).click()
  def test_options_cancel_commit_undo_and_independent_ide_palette(self):

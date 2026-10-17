@@ -3,6 +3,7 @@
 #include "appkit-pictures.hpp"
 #include "appkit-edit.hpp"
 #include "appkit-control-utils.hpp"
+#include "appkit-appearance.hpp"
 #include <cfloat>
 
 namespace vb6 {
@@ -61,7 +62,7 @@ void MacControl::applyFrame(){
   if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(w)||!std::isfinite(h)||w<0||h<0||std::max({std::abs(x),std::abs(y),w,h})>20000)fail(380,"Control geometry exceeds native limits");
   if(spec.type=="Form"||spec.type=="MDIForm")return;
   view.frame=NSMakeRect(x,y,w,h);
-  if(widget!=view&&![view isKindOfClass:NSScrollView.class])widget.frame=view.bounds;
+  layoutNativeAppearance(*this);
 }
 void MacControl::applyFont(){
   const auto name=property("fontname",Value::string(u"Helvetica")).string();double size=number("fontsize",8.25)*4.0/3.0;
@@ -70,11 +71,14 @@ void MacControl::applyFont(){
   NSFontTraitMask traits=0;if(flag("fontbold"))traits|=NSBoldFontMask;if(flag("fontitalic"))traits|=NSItalicFontMask;
   if(traits)font=[NSFontManager.sharedFontManager convertFont:font toHaveTrait:traits];
   if([widget respondsToSelector:@selector(setFont:)])[(id)widget setFont:font];
-  if([widget isKindOfClass:NSTableView.class]){auto table=(NSTableView*)widget;for(NSTableColumn*c in table.tableColumns)[(NSCell*)c.dataCell setFont:font];table.rowHeight=std::max(16.0,std::ceil(font.ascender-font.descender+5));}
+  if(appearanceCaption)appearanceCaption.font=font;
+  if([widget isKindOfClass:NSTableView.class]){auto table=(NSTableView*)widget;for(NSTableColumn*c in table.tableColumns)[(NSCell*)c.dataCell setFont:font];auto size=property("macoscontrolsize",Value::string(u"regular")).string();double preferred=size==u"mini"?16:size==u"small"?20:size==u"large"?32:size==u"extraLarge"?40:24;table.rowHeight=std::max(preferred,std::ceil(font.ascender-font.descender+5));}
+  refreshNativePlaceholder(*this);
 }
 void MacControl::initialize(){
   if(initialized)return;initialized=true;for(auto&p:spec.properties)properties[lower(p.name)]=p.value;
   properties["name"]=Value::string(fromUTF8(spec.name));if(spec.index>=0)properties["index"]=Value::integer(spec.index,Type::Integer);
+  validateNativeAppearance(*this);
   delegate=[VB6ControlDelegate new];delegate->model=self();
   initializeNativePictures(*this);
   const std::string&t=spec.type;
@@ -85,12 +89,14 @@ void MacControl::initialize(){
     handle=host->handles.add(self(),HandleKind::Menu);return;
   }
   if(t=="Timer"||t=="CommonDialog"||t=="ImageList"){handle=host->handles.add(self(),HandleKind::Control);if(t=="Timer")timerChanged();if(t=="ImageList")items("listimages");return;}
-  if(t=="CommandButton"||t=="CheckBox"||t=="OptionButton"){
+  if(t=="CheckBox"&&property("macoscontrolstyle",Value::string(u"automatic")).string()==u"switch"){
+    auto control=[NSSwitch new];control.target=delegate;control.action=@selector(action:);widget=control;view=nativeSwitchView(*this,control);
+  }else if(t=="CommandButton"||t=="CheckBox"||t=="OptionButton"){
     NSButton*b=[[NSButton alloc]initWithFrame:NSZeroRect];[b setButtonType:t=="CheckBox"?NSButtonTypeSwitch:t=="OptionButton"?NSButtonTypeRadio:NSButtonTypeMomentaryPushIn];
     b.bezelStyle=NSBezelStyleRounded;b.target=delegate;b.action=@selector(action:);b.allowsMixedState=t=="CheckBox";widget=b;view=b;
     if(flag("default"))b.keyEquivalent=@"\r";else if(flag("cancel"))b.keyEquivalent=@"\033";
   }else if(t=="Label"||t=="TextBox"&&!flag("multiline")){
-    NSTextField*f=t=="Label"?[NSTextField new]:nativeTextField(!property("passwordchar",Value::string(u"")).string().empty());
+    NSTextField*f=t=="Label"?[NSTextField new]:property("macoscontrolstyle",Value::string(u"automatic")).string()==u"search"?nativeSearchField():nativeTextField(!property("passwordchar",Value::string(u"")).string().empty());
     f.editable=t!="Label"&&!flag("locked");f.selectable=t!="Label";f.bezeled=t!="Label";f.drawsBackground=t!="Label"||flag("backstyle");f.delegate=delegate;f.target=delegate;f.action=@selector(action:);widget=f;view=f;
   }else if(t=="TextBox"||t=="RichTextBox"){
     auto scroll=[NSScrollView new];auto editor=[[NSTextView alloc]initWithFrame:NSMakeRect(0,0,120,80)];editor.delegate=delegate;editor.richText=t=="RichTextBox";editor.importsGraphics=t=="RichTextBox";editor.editable=!flag("locked");editor.verticallyResizable=YES;editor.horizontallyResizable=(int(number("scrollbars",3))&1)!=0;
@@ -98,9 +104,9 @@ void MacControl::initialize(){
   }else if(t=="ComboBox"||t=="DriveListBox"){
     auto combo=nativeComboBox();combo.editable=number("style",0)!=2;combo.delegate=delegate;combo.target=delegate;combo.action=@selector(action:);widget=combo;view=combo;
   }else if(t=="Frame"){
-    auto box=[NSBox new];box.boxType=NSBoxPrimary;box.contentView=[VB6Canvas new];widget=box;view=box;
+    auto box=nativeAppearanceBox(self());box.boxType=NSBoxPrimary;box.contentView=[VB6Canvas new];widget=box;view=box;
   }else if(t=="Image"){
-    auto image=[NSImageView new];image.imageScaling=flag("stretch",true)?NSImageScaleAxesIndependently:NSImageScaleNone;widget=image;view=image;
+    auto image=nativeAppearanceImage(self());image.imageScaling=flag("stretch",true)?NSImageScaleAxesIndependently:NSImageScaleNone;widget=image;view=image;
   }else if(t=="ListBox"||t=="ListView"||t=="FileListBox"||t=="DirListBox"||t=="TreeView"||t=="MSFlexGrid"||t=="MSHFlexGrid"||t=="DataGrid"){
     auto scroll=[NSScrollView new];NSTableView*table;
     if(t=="TreeView"){
@@ -134,6 +140,7 @@ void MacControl::initialize(){
 }
 void MacControl::refresh(){
   if(disposed)return;if(menu){menu.title=ns(captionText(property("caption",Value::string(u"")).string()));menu.enabled=flag("enabled",true);menu.hidden=!flag("visible",true);menu.state=flag("checked")?NSControlStateValueOn:NSControlStateValueOff;return;}
+  prepareNativeAppearance(*this);
   view.hidden=!flag("visible",true);if([widget respondsToSelector:@selector(setEnabled:)])[(id)widget setEnabled:flag("enabled",true)];
   Text caption=captionText(property("caption",Value::string(fromUTF8(spec.name))).string());
   if([widget isKindOfClass:NSButton.class]){auto b=(NSButton*)widget;b.title=ns(caption);int n=int(number("value",0));b.state=n==2?NSControlStateValueMixed:n?NSControlStateValueOn:NSControlStateValueOff;}
@@ -149,9 +156,10 @@ void MacControl::refresh(){
   if([widget isKindOfClass:NSDatePicker.class]){auto date=property("value",Value::string(u"2000-01-01"));auto c=civilTime(parseDate(date));NSDateComponents*components=[NSDateComponents new];components.year=c.year;components.month=c.month;components.day=c.day;components.hour=c.hour;components.minute=c.minute;components.second=c.second;((NSDatePicker*)widget).dateValue=[[NSCalendar currentCalendar]dateFromComponents:components];}
   if(spec.type=="ComboBox"||spec.type=="ListBox"||spec.type=="DriveListBox"||spec.type=="FileListBox"||spec.type=="DirListBox")reloadList();
   refreshNativePictures(*this);
+  applyNativeAppearance(*this);
   view.needsDisplay=YES;
 }
-void MacControl::dispose(){if(disposed)return;disposed=true;if(dataBinding){dataBinding->detach();dataBinding.reset();}boundEdit.reset();if(cursorTracking){[view removeTrackingArea:cursorTracking];cursorTracking=nil;}[timer invalidate];timer=nil;[view removeFromSuperview];[menu.menu removeItem:menu];host->handles.remove(handle);for(auto&entry:collections)entry.second->owner.reset();if(delegate)delegate->model.reset();if(tableDelegate)tableDelegate->model.reset();if(outlineDelegate)outlineDelegate->model.reset();}
+void MacControl::dispose(){if(disposed)return;disposed=true;if(dataBinding){dataBinding->detach();dataBinding.reset();}boundEdit.reset();if(cursorTracking){[view removeTrackingArea:cursorTracking];cursorTracking=nil;}if([widget isKindOfClass:NSProgressIndicator.class])[(NSProgressIndicator*)widget stopAnimation:nil];[timer invalidate];timer=nil;[view removeFromSuperview];[menu.menu removeItem:menu];host->handles.remove(handle);for(auto&entry:collections)entry.second->owner.reset();if(delegate)delegate->model.reset();if(tableDelegate)tableDelegate->model.reset();if(outlineDelegate)outlineDelegate->model.reset();}
 void MacControl::event(const std::string&name,Args args){
   if(disposed||eventSuppression)return;auto object=owner.lock();if(!object||!object->loaded)return;
   std::string prefix=spec.type=="Form"?"form":spec.type=="MDIForm"?"mdiform":lower(spec.name);
@@ -171,7 +179,8 @@ void MacControl::changed(const std::string& name){
       auto b=(NSButton*)widget;int value=b.state==NSControlStateValueMixed?2:b.state==NSControlStateValueOn?1:0;
       if(spec.type=="OptionButton"){value=1;if(auto object=owner.lock())for(auto&entry:object->controls)if(auto peer=std::dynamic_pointer_cast<MacControl>(entry.second))if(peer.get()!=this&&peer->spec.type=="OptionButton"&&peer->spec.parent==spec.parent){peer->properties["value"]=Value::integer(0,Type::Integer);((NSButton*)peer->widget).state=NSControlStateValueOff;}}
       properties["value"]=Value::integer(value,Type::Integer);
-    }else if([widget isKindOfClass:NSDatePicker.class]){auto c=[[NSCalendar currentCalendar]components:NSCalendarUnitYear|NSCalendarUnitMonth|NSCalendarUnitDay|NSCalendarUnitHour|NSCalendarUnitMinute|NSCalendarUnitSecond fromDate:((NSDatePicker*)widget).dateValue];properties["value"]=civilDate({int(c.year),int(c.month),int(c.day),int(c.hour),int(c.minute),int(c.second)});}
+    }else if([widget isKindOfClass:NSSwitch.class])properties["value"]=Value::integer(((NSSwitch*)widget).state==NSControlStateValueOn?1:0,Type::Integer);
+    else if([widget isKindOfClass:NSDatePicker.class]){auto c=[[NSCalendar currentCalendar]components:NSCalendarUnitYear|NSCalendarUnitMonth|NSCalendarUnitDay|NSCalendarUnitHour|NSCalendarUnitMinute|NSCalendarUnitSecond fromDate:((NSDatePicker*)widget).dateValue];properties["value"]=civilDate({int(c.year),int(c.month),int(c.day),int(c.hour),int(c.minute),int(c.second)});}
     else if([widget respondsToSelector:@selector(doubleValue)])properties["value"]=Value::integer(bankers([(id)widget doubleValue]));
     event(spec.type=="CheckBox"||spec.type=="OptionButton"?"click":"change");return;
   }

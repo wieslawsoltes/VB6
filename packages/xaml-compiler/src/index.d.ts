@@ -49,7 +49,9 @@ export function applyTextEdits(text: string, edits: readonly TextEdit[]): string
 export interface TypeReference { namespaceURI: string; name: string }
 export interface MemberDefinition {
   type?: string; kind?: 'property' | 'event'; values?: readonly string[]; collection?: boolean;
-  dictionary?: boolean; itemType?: string; attached?: boolean; nullable?: boolean;
+  dictionary?: boolean; itemType?: string; itemNamespaceURI?: string; attached?: boolean; nullable?: boolean;
+  /** Canonical assignment identity for a host-defined member alias. Original spelling remains in IR. */
+  aliasFor?: string;
   parameters?: readonly string[]; convert?: (value: unknown) => unknown;
 }
 export interface BoundMember extends MemberDefinition, TypeReference { owner: string }
@@ -62,6 +64,8 @@ export interface XamlType extends TypeReference, Omit<TypeDefinition,'members'> 
 export class XamlSchemaContext {
   constructor();
   readonly types: Map<string,XamlType>; revision: number;
+  readonly markupExtensionNamespaces: Set<string>;
+  readonly themeResourceKeys: Set<string>;
   registerType(namespaceURI: string, name: string, definition?: TypeDefinition): XamlType;
   getType(namespaceURI: string, name: string): XamlType | undefined;
   resolveType(name: string, namespaces?: Record<string,string>): XamlType | undefined;
@@ -75,6 +79,14 @@ export class XamlSchemaContext {
 }
 export function safeMember(name: string): string;
 export function createWinUISchema(): XamlSchemaContext;
+export const MACOS26_NS: 'urn:vb6:macos26';
+export const MACOS26_CONTROL_SIZES: readonly ['mini','small','regular','large','extraLarge'];
+export const MACOS26_CONTROL_STYLES: readonly string[];
+export const MACOS26_MATERIALS: readonly string[];
+export const MACOS26_SEMANTIC_COLORS: readonly string[];
+export const MACOS26_CONTROLS: Readonly<Record<string,Readonly<{presentationType: string; nativeType: string}>>>;
+export function registerMacOS26Schema(schema: XamlSchemaContext): XamlSchemaContext;
+export function createMacOS26Schema(): XamlSchemaContext;
 export function convertValue(value: unknown, member?: MemberDefinition): unknown;
 
 export type BindingExpression =

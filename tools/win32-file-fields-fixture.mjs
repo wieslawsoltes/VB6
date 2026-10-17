@@ -1,3 +1,4 @@
+import {appendNativeVariantByteChecks} from './win32-variant-byte-fixture.mjs';
 /** Native Write/Input round trips plus independently authored interchange text.
  * Expected scalar types and values are asserted in freestanding Windows EXEs. */
 export function nativeFileFieldsFixture(fixture){
@@ -24,5 +25,6 @@ export function nativeFileFieldsFixture(fixture){
  add('Err.Clear\nOn Error GoTo 0\nClose #1\nOpen "fields.txt" For Output As #1\nPrint #1,"1,not-date"\nClose #1\nOpen "fields.txt" For Input As #1\nOn Error Resume Next\nErr.Clear\nInput #1,b');check('Err.Number=6','numeric text is not silently converted to a Boolean by Input');
  add('Err.Clear\nInput #1,d');check('Err.Number=6','a Date input requires an interchange date marker');
  add('Err.Clear\nOn Error GoTo 0\nClose\nn=DeleteFileW(StrPtr("fields.txt"))');
- return finish('Private Declare Function DeleteFileW Lib "kernel32" (ByVal path As Long) As Long');
+ appendNativeVariantByteChecks({add,check});
+ return finish('Private Declare Function DeleteFileW Lib "kernel32" (ByVal path As Long) As Long\nPrivate Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByVal destination As Long, ByVal source As Long, ByVal count As Long)');
 }

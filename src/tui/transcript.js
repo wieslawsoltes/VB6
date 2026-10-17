@@ -9,10 +9,17 @@ export function captureTranscript(node, columns, rows, settings) {
   const selection=node.ownerDocument.getSelection();
   if(selection?.rangeCount&&!selection.isCollapsed){
     const selected=selection.getRangeAt(0);
-    if(node.contains(selected.startContainer)&&node.contains(selected.endContainer)){
+    const contents=node.ownerDocument.createRange();contents.selectNodeContents(node);
+    // A browser can normalize an endpoint to an ancestor, and a real drag can
+    // enter/leave the transcript. Intersect ranges rather than requiring both
+    // endpoint containers to be descendants. This also handles Select All.
+    const first=contents.comparePoint(selected.startContainer,selected.startOffset);
+    const last=contents.comparePoint(selected.endContainer,selected.endOffset);
+    if(first<=0&&last>=0){
       const prefix=node.ownerDocument.createRange();prefix.selectNodeContents(node);
-      prefix.setEnd(selected.startContainer,selected.startOffset);start=prefix.toString().length;
-      prefix.setEnd(selected.endContainer,selected.endOffset);end=prefix.toString().length;
+      if(first===0){prefix.setEnd(selected.startContainer,selected.startOffset);start=prefix.toString().length;}
+      end=text.length;
+      if(last===0){prefix.setEnd(selected.endContainer,selected.endOffset);end=prefix.toString().length;}
     }
   }
   const textColumns=Math.max(1,Math.min(columns,Math.floor((node.clientWidth||columns*settings.cellWidth)/settings.cellWidth)));

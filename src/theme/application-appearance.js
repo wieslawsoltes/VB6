@@ -1,13 +1,15 @@
+import {observeThemeEnvironment} from './environment.js';
 /** Project-owned application appearance. One listener per host/designer, no
  * DOM rebuild, external resources, per-control observers or implicit persistence. */
 import {THEMES,themeId,applyTheme} from './theme.js';
 export const APPLICATION_THEME_ATTRIBUTES=Object.freeze(['data-vb-theme','data-vb-theme-family',
-  'data-vb-theme-scheme','data-vb-reduce-transparency','data-vb-reduce-motion']);
+  'data-vb-theme-scheme','data-vb-reduce-transparency','data-vb-reduce-motion','data-vb-increase-contrast']);
 export function normalizeApplicationAppearance(value={}) {
   if(!value||typeof value!=='object'||Array.isArray(value))value={};
   const options=value.themeOptions&&typeof value.themeOptions==='object'&&!Array.isArray(value.themeOptions)?value.themeOptions:{};
   return {theme:themeId(value.theme),themeOptions:{followSystemTheme:options.followSystemTheme===true,
     reduceTransparency:options.reduceTransparency===true,reduceMotion:options.reduceMotion===true,
+    ...(options.increaseContrast===true?{increaseContrast:true}:{}),
     ...(options.systemCaption===true?{systemCaption:true}:{})}};
 }
 export function resolveApplicationTheme(value={},prefersDark=false) {
@@ -32,21 +34,21 @@ export class ApplicationThemeController {
   constructor(root,{onChange=()=>{}}={}) {
     this.root=root;this.view=root.ownerDocument?.defaultView;this.onChange=onChange;
     this.appearance=normalizeApplicationAppearance();this.disposed=false;
-    this.media=this.view?.matchMedia?.('(prefers-color-scheme: dark)');
-    this.onScheme=()=>this.apply(this.appearance);
-    this.onPageShow=e=>{if(e.persisted)this.apply(this.appearance);};
+    this.environment=observeThemeEnvironment(this.view,()=>this.apply(this.appearance));
+    this.media=this.environment.media.dark;
+    this.onPageShow=e=>{if(e.persisted){this.environment.refresh();this.apply(this.appearance);}};
     this.onPageHide=e=>{if(!e.persisted)this.dispose();};
-    this.media?.addEventListener?.('change',this.onScheme);
     this.view?.addEventListener?.('pageshow',this.onPageShow);
     this.view?.addEventListener?.('pagehide',this.onPageHide);
   }
   apply(value) {
     if(this.disposed)return THEMES[themeId(this.root.getAttribute('data-vb-theme'))];
     this.appearance=normalizeApplicationAppearance(value);
-    const profile=resolveApplicationTheme(this.appearance,!!this.media?.matches);
+    const profile=resolveApplicationTheme(this.appearance,this.environment.snapshot.dark);
     let optionsChanged=false;
-    for(const [key,name] of [['reduceTransparency','data-vb-reduce-transparency'],['reduceMotion','data-vb-reduce-motion']]){
-      const next=String(this.appearance.themeOptions[key]);
+    for(const [key,name] of [['reduceTransparency','data-vb-reduce-transparency'],['reduceMotion','data-vb-reduce-motion'],['increaseContrast','data-vb-increase-contrast']]){
+      const environmentKey={reduceTransparency:'reducedTransparency',reduceMotion:'reducedMotion',increaseContrast:'moreContrast'}[key];
+      const next=String(this.appearance.themeOptions[key]===true||this.environment.snapshot[environmentKey]);
       if(this.root.getAttribute(name)!==next){this.root.setAttribute(name,next);optionsChanged=true;}
     }
     const previous=this.root.getAttribute('data-vb-theme');applyTheme(this.root,profile.id);
@@ -57,7 +59,7 @@ export class ApplicationThemeController {
   }
   dispose() {
     if(this.disposed)return;this.disposed=true;
-    this.media?.removeEventListener?.('change',this.onScheme);
+    this.environment.dispose();
     this.view?.removeEventListener?.('pageshow',this.onPageShow);
     this.view?.removeEventListener?.('pagehide',this.onPageHide);
   }

@@ -79,7 +79,7 @@ export function installNativeHost(host, bridge = globalThis.vb6Native) {
     function sync() {
       if (!record.id || record.applying) return;
       const title = String(form.props.Caption ?? form.model.name), bounds = size(form), signature = JSON.stringify(bounds);
-      form.captionNode.textContent=title;form.node.setAttribute('aria-label',title);
+      form.captionNode.textContent=title;form.node.setAttribute('aria-label',form.props.MacOSAccessibilityLabel||title);
       if (title !== record.title) { record.title = title; record.win.document.title = title; command(record.id, 'title', title); }
       if (signature !== record.bounds && record.state === 0) { record.bounds = signature; command(record.id, 'bounds', bounds); }
       const flags=JSON.stringify(chrome());

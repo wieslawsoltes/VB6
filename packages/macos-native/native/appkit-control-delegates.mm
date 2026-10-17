@@ -1,8 +1,10 @@
 // Native AppKit delegate and notification boundary. MIT.
 #include "appkit-edit.hpp"
+#include "appkit-appearance.hpp"
 @implementation VB6Canvas
 -(BOOL)isFlipped{return YES;}
 -(BOOL)acceptsFirstResponder{return YES;}
+-(void)viewDidChangeEffectiveAppearance{[super viewDidChangeEffectiveAppearance];self.needsDisplay=YES;}
 -(void)drawRect:(NSRect)dirty{if(auto c=model.lock())c->host->event([c,dirty]{vb6::drawControl(*c,dirty);});}
 @end
 @implementation VB6ControlDelegate

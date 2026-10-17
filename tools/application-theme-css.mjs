@@ -1,6 +1,7 @@
 import {MACOS_REFERENCE} from '../src/theme/macos-reference-metrics.js';
 
 import {winuiThemeTokens,winuiLicenseCss} from './winui-theme-css.mjs';
+import {macos26ThemeTokens,macos26AccessibilityCss} from './macos26-theme-css.mjs';
 import {themeDetailTokens} from './theme-detail-css.mjs';
 /** Skin tokens are reset at every boundary. The component sheet uses classic
  * fallbacks, so a classic app inside a modern IDE/app cannot inherit its skin. */
@@ -35,6 +36,7 @@ export function renderApplicationThemeTokens(){
     }
     css+=themeDetailTokens(p);
     css+=winuiThemeTokens(p);
+    css+=macos26ThemeTokens(p);
     css+='}\n';
   }
   css+=`[data-vb-theme-family="macos26"][data-vb-reduce-transparency="true"] {--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}
@@ -42,6 +44,6 @@ export function renderApplicationThemeTokens(){
 @media(prefers-reduced-motion:reduce) {[data-vb-theme]{--app-duration:0s;}}
 @media(prefers-reduced-transparency:reduce),(prefers-contrast:more) {[data-vb-theme-family="macos26"]{--app-backdrop:none;--app-material:var(--vb-face);--app-caption-background:var(--vb-title);}}
 `;
-  return css;
+  return css+macos26AccessibilityCss('application');
 }
 export function writeApplicationThemeTokens(){fs.writeFileSync(new URL('../src/theme/application-palettes.css',import.meta.url),renderApplicationThemeTokens());}

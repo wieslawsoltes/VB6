@@ -31,6 +31,10 @@ struct MacItems:Object {
 struct MacControl:Object {
   MacHost*host;std::weak_ptr<Instance>owner;ControlSpec spec;std::map<std::string,Value>properties;
   NSView*view=nil;NSView*widget=nil;NSMenuItem*menu=nil;VB6ControlDelegate*delegate=nil;VB6TableDelegate*tableDelegate=nil;VB6OutlineDelegate*outlineDelegate=nil;NSTimer*timer=nil;NSTrackingArea*cursorTracking=nil;
+  // The authored container survives adding/removing an effect around it. The
+  // widget remains the event, field-editor and child-container owner.
+  NSView*appearanceContent=nil;NSTextField*appearancePlaceholder=nil;NSTextField*appearanceCaption=nil;
+  std::string appliedMaterial="none";bool applyingAppearance=false;
   int32_t handle=0;bool initialized=false,disposed=false,eventActive=false,editSelectionPending=false;std::vector<Text>list;std::vector<int32_t>itemData;std::set<size_t>selected;
   std::map<std::string,std::shared_ptr<MacItems>>collections;std::vector<std::vector<Text>>grid;std::map<int,double>columnWidths,rowHeights;std::vector<GraphicCommand>graphics;
   std::shared_ptr<NativeRecordsetGrid> dataBinding;

@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from exporter_offline_server import offline_fixture_handler
+from exporter_offline_server import offline_fixture_handler, OfflineFixtureOrigin
 
 
 class OfflineFixtureServerTests(unittest.TestCase):
@@ -45,6 +45,22 @@ class OfflineFixtureServerTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.read(), b'worker-two')
         self.assertEqual(self.state['worker_requests'], 2)
+
+    def test_origin_outage_closes_socket_and_restores_same_address(self):
+        import socket
+        handler = offline_fixture_handler(self.root, self.report, self.state)
+        origin = OfflineFixtureOrigin(handler, self.root)
+        self.addCleanup(origin.stop)
+        url = origin.url + '/apps/a/service-worker.js'
+        with urlopen(url, timeout=5) as response:
+            self.assertEqual(response.read(), b'worker-one')
+        origin.stop(); origin.stop()
+        with self.assertRaises(OSError):
+            socket.create_connection(origin.address, timeout=1)
+        self.state['a'] = 'two'
+        origin.start(); origin.start()
+        with urlopen(url, timeout=5) as response:
+            self.assertEqual(response.read(), b'worker-two')
 
     def test_dynamic_api_is_never_a_cached_shell_substitute(self):
         self.state['api_available'] = False

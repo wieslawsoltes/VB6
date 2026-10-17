@@ -1,5 +1,6 @@
 // Retained native drawing, fonts, pictures and Cocoa printing. MIT.
 #include "appkit.hpp"
+#include "appkit-appearance.hpp"
 
 namespace vb6 {
 struct NativePrinter;
@@ -50,11 +51,12 @@ struct NativeFont final:Object {
 Value createNativeFont(std::weak_ptr<MacControl>owner){return Value::object(std::make_shared<NativeFont>(std::move(owner)));}
 GraphicCommand nativeCommand(MacControl&control,std::string kind){
   GraphicCommand command;command.kind=std::move(kind);command.color=int32_t(control.number("forecolor",0));command.width=std::max(1.0,control.number("drawwidth",1));command.style=int(control.number("drawstyle",0));
+  if(!control.property("macosforegroundrole",Value::string(u"")).string().empty())command.color=colorValue(nativeForegroundColor(control));
   command.fontName=control.property("fontname",Value::string(u"Helvetica")).string();command.fontSize=control.number("fontsize",8.25)*4/3;command.bold=control.flag("fontbold");command.italic=control.flag("fontitalic");command.underline=control.flag("fontunderline");command.strikeout=control.flag("fontstrikethru");return command;
 }
 void appendCommand(MacControl&control,GraphicCommand command){
   if(control.graphics.size()>=1000000)fail(7,"Drawing exceeds one million retained commands");for(double value:command.coordinates)if(!std::isfinite(value)||std::abs(value)>1e9)fail(5,"Invalid drawing coordinate");
-  if(!std::isfinite(command.width)||command.width<0||command.width>65535)fail(5);control.graphics.push_back(std::move(command));control.view.needsDisplay=YES;
+  if(!std::isfinite(command.width)||command.width<0||command.width>65535)fail(5);control.graphics.push_back(std::move(command));control.view.needsDisplay=YES;control.widget.needsDisplay=YES;
 }
 Value nativePrint(MacControl&control,Args args){
   Text output;for(auto&arg:args)output+=printValue(scalar(*control.host->runtime,arg.value));auto command=nativeCommand(control,"text");auto point=control.point(control.currentX,control.currentY);command.coordinates={point.x,point.y};command.text=output;appendCommand(control,command);
@@ -63,14 +65,14 @@ Value nativePrint(MacControl&control,Args args){
 void drawControl(MacControl&control,NSRect dirty){
   (void)dirty;[NSGraphicsContext saveGraphicsState];@try{
     NSRect bounds=control.view.bounds;[NSBezierPath clipRect:bounds];
-    if(control.spec.type!="Shape"&&control.spec.type!="Line"){[color(int64_t(control.number("backcolor",0xffffff)))set];NSRectFill(bounds);}
+    if(control.spec.type!="Shape"&&control.spec.type!="Line"&&!nativeMaterialActive(control)){[nativeBackgroundColor(control)set];NSRectFill(bounds);}
     auto picture=control.property("picture");if(picture.type==Type::Object)if(auto image=std::dynamic_pointer_cast<MacImage>(std::get<ObjectPtr>(picture.payload)))if(image->image)[image->image drawInRect:NSMakeRect(0,0,image->image.size.width,image->image.size.height) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
     if(control.spec.type=="Shape"||control.spec.type=="Line"){
       auto command=nativeCommand(control,control.spec.type=="Line"?"line":int(control.number("shape",0))==2||int(control.number("shape",0))==3?"ellipse":"rect");command.color=int32_t(control.number("bordercolor",0));command.width=control.number("borderwidth",1);command.coordinates={0,0,bounds.size.width,bounds.size.height};
       if(control.spec.type=="Shape"&&int(control.number("fillstyle",1))==0){auto fill=command;fill.fill=true;fill.color=int32_t(control.number("fillcolor",0xffffff));drawCommands({fill});}drawCommands({command});
     }
     if(control.spec.type=="StatusBar"&&control.items("panels")->items.empty()){
-      auto command=nativeCommand(control,"text");command.text=control.property("simpletext",Value::string(u"")).string();command.coordinates={4,2};drawCommands({command});
+      auto command=nativeCommand(control,"text");command.text=control.property("simpletext",Value::string(u"")).string();if(control.property("macoscontrolsize",Value::string(u"regular")).string()!=u"regular")command.fontSize=[NSFont systemFontSizeForControlSize:nativeControlSize(control)];command.coordinates={4,2};drawCommands({command});
     }
     if(control.spec.type=="MSChart"&&!control.grid.empty()&&!control.grid[0].empty()){
       double maximum=0;for(auto&row:control.grid)for(auto&cell:row)if(!cell.empty()){try{maximum=std::max(maximum,std::abs(Value::string(cell).floating()));}catch(const Error&) {}}

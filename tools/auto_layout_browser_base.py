@@ -4,6 +4,7 @@ HTTP is the default. Opaque-origin memory mode is only a local fallback, explici
 labelled in the evidence and never substituted for CI's real-origin tests.
 """
 import functools, http.server, json, os, shutil, subprocess, threading, time, unittest
+from contextlib import ExitStack
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 ROOT=Path(__file__).resolve().parents[1]
@@ -37,7 +38,13 @@ class AutoLayout(unittest.TestCase):
         self.page=self.context.new_page();self.page.on('pageerror',lambda error:self.errors.append(str(error)))
         if MEMORY:self.page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
         else:self.page.goto(self.base+'/dist/index.html')
-        self.page.wait_for_function('globalThis.vb6Studio?.autoLayout');self.page.evaluate(FIXTURE,True)
+        self.page.wait_for_function('globalThis.vb6Studio?.autoLayout')
+        if self._testMethodName=='test_diagnostics_worker_uses_owned_source_and_completes':
+            # The ownership/restart case begins with usable workers. Settle the
+            # default project before FIXTURE cancels it; startup cancellation
+            # remains covered by the separate navigation cases.
+            self.page.wait_for_function('!vb6Studio.syntaxDiagnostics.pending&&!vb6Studio.syntaxDiagnostics.busy')
+        self.page.evaluate(FIXTURE,True)
     def tearDown(self):
         self.results.append({'name':self._testMethodName,'passed':self.passed and not self.errors,'pageErrors':self.errors,'milliseconds':round((time.perf_counter()-self.start)*1000,2)})
         (REPORT/'results.json').write_text(json.dumps({'browser':ENGINE,'transport':'memory' if MEMORY else 'http','results':self.results},indent=2))
@@ -149,12 +156,24 @@ class AutoLayout(unittest.TestCase):
         result=self.page.evaluate('''async()=>{const p=structuredClone(vb6Studio.project);p.modules[0].code='Option Explicit\\n';const root=document.createElement('div');document.body.append(root);const h=new VB6Runtime.RuntimeAPI.ApplicationHost(p,root,{persist:false});await h.start();const f=h.forms[0],before=f.layoutController.wrapped.size;for(let i=0;i<100;i++){const c=f.Controls.Add('VB.CommandButton','Transient'+i);c.Visible=-1;f.Controls.Remove(c);}const result={before,after:f.layoutController.wrapped.size,records:f.layoutController.records.size,controls:f.controls.length};h.dispose();root.remove();return result;}''')
         self.assertEqual(result['after'],result['before']);self.assertEqual(result['records'],result['controls']);self.done()
     def test_diagnostics_worker_uses_owned_source_and_completes(self):
-        before=self.page.evaluate('vb6Studio.syntaxDiagnostics.metrics.responses')
-        self.page.evaluate('''()=>{const s=vb6Studio.syntaxDiagnostics;s.cancel();s.schedule(vb6Studio.project,0);s.start();}''')
-        self.page.wait_for_function('n=>vb6Studio.syntaxDiagnostics.metrics.responses>n',arg=before)
+        # This case replaces a usable worker. The dedicated navigation cases
+        # exercise cancellation during startup; Firefox can retain a debugging
+        # target for a worker terminated before its first response.
+        self.page.wait_for_function('!vb6Studio.syntaxDiagnostics.pending&&!vb6Studio.syntaxDiagnostics.busy')
+        # Cancellation returns before Playwright receives the retired worker's
+        # close event. Observe retirement separately from the successor's reply
+        # before asserting the complete set of live workers.
+        with ExitStack() as retired:
+            for worker in self.page.workers:
+                retired.enter_context(worker.expect_event('close'))
+            target=self.page.evaluate('''()=>{const s=vb6Studio.syntaxDiagnostics;s.cancel();const before=s.metrics.responses,revision=s.schedule(vb6Studio.project,0);s.start();return {before,revision};}''')
+        self.page.wait_for_function('''({before,revision})=>{
+            const s=vb6Studio.syntaxDiagnostics;
+            return s.metrics.responses>before&&s.revision===revision&&!s.pending&&!s.busy;
+        }''',arg=target)
         self.assertEqual(self.page.evaluate('vb6Studio.syntaxDiagnostics.mode'),'worker')
         urls=[worker.url for worker in self.page.workers]
-        self.assertEqual(len(urls),1)
+        self.assertEqual(len(urls),1,urls)
         if MEMORY:self.assertTrue(urls[0].startswith('blob:'),urls)
         else:self.assertEqual(urls,[self.base+'/dist/vb6-diagnostics-worker.js'])
         self.done()

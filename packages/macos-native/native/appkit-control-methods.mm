@@ -33,10 +33,10 @@ Value MacControl::invoke(Runtime&rt,const std::string&raw,Args args){
     auto prior=property("listindex",Value::integer(-1)).integral();properties["listindex"]=Value::integer(prior==index?-1:prior>index?prior-1:prior);reloadList();return {};}
   if(name=="clear"){if(dataBinding)fail(380,"Clear requires detaching the Recordset");if(!args.empty())fail(450);list.clear();itemData.clear();selected.clear();properties["listindex"]=Value::integer(-1);for(auto&row:grid)for(auto&cell:row)cell.clear();reloadList();return {};}
   if(name=="setfocus"){if(!args.empty())fail(450);if(!view||view.hidden||!flag("enabled",true))fail(5);auto window=view.window;auto selection=isNativeEdit(*this)?nativeEditSelection(*this):NSMakeRange(0,0);if(!window||![window makeFirstResponder:widget])fail(5);if(isNativeEdit(*this))nativeEditSelect(*this,selection);return {};}
-  if(name=="refresh"){view.needsDisplay=YES;[view displayIfNeeded];return {};}
+  if(name=="refresh"){view.needsDisplay=YES;widget.needsDisplay=YES;[view displayIfNeeded];return {};}
   if(name=="move"){if(args.size()<2||args.size()>4)fail(450);const char*names[]={"left","top","width","height"};for(size_t i=0;i<args.size();i++)if(args[i].value.type!=Type::Missing)properties[names[i]]=args[i].value;applyFrame();return {};}
   if(name=="zorder"){auto mode=integerArgument(args,0,0);if(mode!=0&&mode!=1)fail(5);auto parent=view.superview;if(parent){[view removeFromSuperview];[parent addSubview:view positioned:mode==0?NSWindowAbove:NSWindowBelow relativeTo:nil];}return {};}
-  if(name=="cls"){graphics.clear();currentX=currentY=0;view.needsDisplay=YES;return {};}
+  if(name=="cls"){graphics.clear();currentX=currentY=0;view.needsDisplay=YES;widget.needsDisplay=YES;return {};}
   if(name=="textwidth"||name=="textheight"){
     if(args.size()!=1)fail(450);NSFont*font=[NSFont systemFontOfSize:number("fontsize",8.25)*4/3];NSSize size=[ns(args[0].value.string())sizeWithAttributes:@{NSFontAttributeName:font}];return Value::real(name=="textwidth"?size.width/unit(-1,true):size.height/unit(-1,false),Type::Single);
   }
@@ -73,7 +73,7 @@ void MacControl::reloadList(){
   if([widget isKindOfClass:NSComboBox.class]){
     auto combo=(NSComboBox*)widget;auto live=nativeEditText(*this);auto selection=nativeEditSelection(*this);[combo removeAllItems];for(auto&item:list)[combo addItemWithObjectValue:ns(item)];auto i=number("listindex",-1);if(i>=0&&size_t(i)<list.size())[combo selectItemAtIndex:NSInteger(i)];combo.stringValue=ns(spec.type=="DriveListBox"?property("drive",Value::string(u"")).string():live);if(spec.type=="ComboBox")nativeEditSelect(*this,selection);
   }else if(auto table=tableView(*this)){[table reloadData];NSMutableIndexSet*indices=[NSMutableIndexSet indexSet];for(size_t i:saved)if(i<size_t(table.numberOfRows))[indices addIndex:i];[table selectRowIndexes:indices byExtendingSelection:NO];}
-  view.needsDisplay=YES;
+  view.needsDisplay=YES;widget.needsDisplay=YES;
 }
 void MacControl::resizeGrid(size_t rows,size_t cols){if(rows>100000||cols>10000||(cols&&rows>1000000/cols))fail(7,"Grid exceeds one million cells");grid.resize(rows);for(auto&row:grid)row.resize(cols);}
 void MacControl::updateColumns(){

@@ -106,7 +106,7 @@ void refreshNativePictures(MacControl& c){
   if(c.view&&!c.cursorTracking&&(c.properties.count("mouseicon")||c.properties.count("mousepointer"))){
     c.cursorTracking=[[NSTrackingArea alloc]initWithRect:NSZeroRect options:NSTrackingCursorUpdate|NSTrackingActiveInKeyWindow|NSTrackingInVisibleRect owner:c.delegate userInfo:nil];[c.view addTrackingArea:c.cursorTracking];
   }
-  c.view.needsDisplay=YES;
+  c.view.needsDisplay=YES;c.widget.needsDisplay=YES;
 }
 namespace {
 std::optional<NSSize> naturalSize(MacControl& c,const std::shared_ptr<MacImage>& image,bool stretch,bool autoSize){

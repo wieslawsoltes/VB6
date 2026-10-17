@@ -94,6 +94,67 @@ From the repository, run `node --test tests/xaml-compiler.test.mjs` and
 an isolated import and exercises TypeScript consumers when `tsc` is available.
 No npm registry publication is performed by these commands.
 
+## Optional macOS 26 vocabulary
+
+`createMacOS26Schema()` adds the independent `urn:vb6:macos26` namespace to the
+presentation base schema. `registerMacOS26Schema(schema)` adds it to an existing
+schema without replacing the presentation types. This vocabulary is for host
+authoring; it is not an Apple XAML language, SwiftUI compiler or AppKit ABI.
+
+```js
+import {compileXaml, createMacOS26Schema} from '@vb6/xaml-compiler';
+
+const schema = createMacOS26Schema();
+const result = compileXaml(`
+  <mac:Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+              xmlns:mac="urn:vb6:macos26"
+              x:Name="Form1" Title="Preferences">
+    <mac:Button x:Name="Save" Title="Save" ControlSize="large"
+                ControlStyle="default" IsDefault="True"
+                mac:Accessibility.Label="Save preferences"
+                Foreground="{ThemeResource macOS.labelColor}" />
+  </mac:Window>`, {schema});
+
+if (!result.success) throw new Error(JSON.stringify(result.diagnostics));
+console.log(result.program.root.type.namespaceURI); // urn:vb6:macos26
+```
+
+The schema covers window/container/grid/stack, button/label/text/password/search,
+checkbox/radio/switch, popup/combo/list, slider/scrollbar/progress/stepper,
+table/outline/tab, box/image/date and separator descriptions. `MACOS26_CONTROLS`
+exports the audited presentation/native type mapping; typed table/outline/tab
+item descriptions are schema values, not placeholder controls. The VB6 adapter
+outside this package lowers supported values to its existing native model and
+diagnoses unsupported behavior. Another host must implement its own semantics.
+
+`ControlSize`, `ControlStyle`, `Material`, foreground/background role fields and
+the `mac:Appearance`/`mac:Accessibility` attached properties carry typed metadata.
+Member `aliasFor` metadata gives aliases a canonical assignment identity while
+retaining their original spelling in IR. `Title` and `Content` on a button are
+therefore duplicate assignments. Collection metadata records its declaring/item
+namespace so inheritance across namespaces retains type checks. Hosts still
+receive the original bound member and are responsible for applying the alias.
+
+Language services using this schema provide type/member/enum completion, alias
+hover details and `macOS.<role>` intrinsic theme-resource suggestions. The schema
+exposes `markupExtensionNamespaces` and `themeResourceKeys`; changing these sets
+after a document has been analyzed requires advancing the schema revision.
+The macOS namespace supports the standard built-in markup extensions when used
+as a default namespace; use a presentation prefix for `Style`, `Setter` and brush
+helper objects in that case.
+
+The host must supply theme resolution. The VB6 application adapter preserves
+supported semantic colors as live role metadata plus portable OLE color fallback,
+including styles and opaque brush chains. The standalone object writer continues
+to require an explicit host `resource` implementation for live theme values.
+Neither schema registration nor `createObjectHost()` renders an AppKit control.
+
+The implementation is informed by Apple's public
+[macOS 26 design session](https://developer.apple.com/videos/play/wwdc2025/310/)
+and [design-resource listing](https://www.figma.com/community/file/1543337041090580818/apple-design-resources-macos-26).
+No Apple code, SF Symbols payload or Figma assets are included in this package.
+
 References: Microsoft Learn's XAML syntax, XAML namespaces, x:Bind, Binding,
 StaticResource and TemplateBinding documentation; Microsoft's public
 `microsoft/microsoft-ui-xaml/src/XamlCompiler` source layout. No Microsoft source

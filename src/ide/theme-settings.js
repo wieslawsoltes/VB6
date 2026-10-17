@@ -10,24 +10,24 @@ export function createIdeThemeSettings(value) {
     return {input,label:el('label',{class:'option-check'},input,label)};
   };
   const system=toggle('followSystemTheme','Follow system light/dark appearance'),
-    transparency=toggle('reduceTransparency','Reduce theme transparency'),motion=toggle('reduceMotion','Reduce theme motion');
-  const preferences=el('div',{class:'ide-theme-preferences'},system.label,transparency.label,motion.label);
+    transparency=toggle('reduceTransparency','Reduce theme transparency'),motion=toggle('reduceMotion','Reduce theme motion'),contrast=toggle('increaseContrast','Increase theme contrast');
+  const preferences=el('div',{class:'ide-theme-preferences'},system.label,transparency.label,motion.label,contrast.label);
   const caption=el('div',{class:'ide-theme-preview-title'}),code=el('pre',{class:'ide-theme-preview-code'},
     el('span',{class:'ide-theme-preview-comment'},"' Theme preview\n"),el('span',{class:'ide-theme-preview-keyword'},'Public Sub '),'Main()');
   const preview=el('div',{class:'ide-theme-preview',role:'img','aria-label':'IDE theme preview'},caption,
     el('div',{class:'ide-theme-preview-tools'},el('span',{class:'ide-theme-preview-button'},'Command'),el('span',{class:'ide-theme-preview-selected'},'Selected'),el('span',{},'Properties')),
     el('div',{class:'ide-theme-preview-body'},el('div',{class:'ide-theme-preview-tree'},'Project1',el('br'), '  Form1'),code));
   const note=el('p',{class:'ide-theme-note'},'IDE appearance only. Application Theme controls your forms and exports. Operating-system title bars and native browser dialogs remain system-managed.');
-  const current=()=>({theme:ideThemeId(select.value),followSystemTheme:system.input.checked,reduceTransparency:transparency.input.checked,reduceMotion:motion.input.checked});
+  const current=()=>({theme:ideThemeId(select.value),followSystemTheme:system.input.checked,reduceTransparency:transparency.input.checked,reduceMotion:motion.input.checked,...(contrast.input.checked?{increaseContrast:true}:{})});
   const paint=()=>{
     const selected=IDE_THEMES[ideThemeId(select.value)],view=select.ownerDocument.defaultView;
     const theme=resolveIdeTheme(current(),!!view.matchMedia?.('(prefers-color-scheme: dark)').matches);
     caption.textContent=theme.name;preview.dataset.previewTheme=theme.id;preview.dataset.vbTheme=theme.family?'classic':theme.id;
     preview.setAttribute('aria-label',theme.name+' IDE theme preview');
-    system.input.disabled=!selected.family;transparency.input.disabled=selected.family!=='macos26';motion.input.disabled=!selected.family;
+    system.input.disabled=!selected.family;transparency.input.disabled=selected.family!=='macos26';motion.input.disabled=!selected.family;contrast.input.disabled=selected.family!=='macos26';
     for (const listener of listeners) listener();
   };
-  for (const input of [select,system.input,transparency.input,motion.input]) input.addEventListener('change',paint);
+  for (const input of [select,system.input,transparency.input,motion.input,contrast.input]) input.addEventListener('change',paint);
   paint();
   return {select,preferences,preview,note,value:current,onChange:listener=>listeners.add(listener)};
 }

@@ -9,6 +9,7 @@ pixel parity with our HTML path, CPU timing and physical-hardware qualification.
 from __future__ import annotations
 import argparse, base64, functools, http.server, io, json, os, platform, shutil, subprocess, threading, time, traceback
 from pathlib import Path
+from rendering_launch import rendering_launch_flags
 from PIL import Image, ImageChops
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 

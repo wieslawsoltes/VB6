@@ -28,17 +28,18 @@
   ],
   "integration-authoring": [
     "browser-classic-export-tests.py",
-    "browser-theme-tests.py",
     "browser-layout-tests.py",
     "auto-layout-browser-tests.py",
     "browser-diagnostics-navigation-tests.py",
+    "browser-sample-exports.py",
+    "browser-exporter-tests.py"
+  ],
+  "integration-appearance": [
+    "browser-theme-tests.py",
     "browser-application-theme-tests.py",
     "browser-native-caption-tests.py",
-    "browser-sample-exports.py",
-    "browser-exporter-tests.py",
     "browser-macos-reference-tests.py",
-    "browser-winui-tests.py",
-    "dos-browser-tests.py"
+    "browser-winui-tests.py"
   ],
   "intelligent-ui": [
     "intelligent-ui-browser-tests.py",
@@ -49,6 +50,7 @@
     "browser-xaml-tests.py",
     "browser-macos-export-tests.py",
     "browser-macos-aot-tests.py",
+    "browser-linux-aot-tests.py",
     "browser-designer-tests.py",
     "browser-exporter-offline-tests.py"
   ],
@@ -77,5 +79,8 @@
   "project-authoring": [
     "native-project-browser-tests.py",
     "project-workspace-review-browser-tests.py"
+  ],
+  "tui-authoring": [
+    "dos-browser-tests.py"
   ]
 }

@@ -257,11 +257,12 @@ export class DOMTuiRenderer {
         }
         if (entry.canvas.parentNode !== host) host.append(entry.canvas);
         entry.canvas.classList.toggle('vb-tui-graphics-surface',raster&&entry.capability==='container');
-        entry.canvas.style.width = columns * cellWidth + 'px';
-        entry.canvas.style.height = rows * cellHeight + 'px';
-        entry.canvas.style.clipPath = `inset(0 ${Math.max(0, columns * cellWidth - width)}px ${Math.max(0, rows * cellHeight - height)}px 0)`;
+        entry.canvas.style.width = width + 'px';
+        entry.canvas.style.height = height + 'px';
+        entry.canvas.style.clipPath = 'inset(0px)';
         if(entry.painter&&(entry.painter.cellWidth!==this.settings.cellWidth||entry.painter.cellHeight!==this.settings.cellHeight)){entry.painter.dispose();entry.painter=null;}
         if (!entry.painter) entry.painter = new CanvasCellRenderer(entry.canvas, {cellWidth:this.settings.cellWidth, cellHeight:this.settings.cellHeight, atlas: this.atlas});
+        entry.painter.setExtent(width/cellWidth*this.settings.cellWidth,height/cellHeight*this.settings.cellHeight);
         const dimensions = entry.painter.dimensions({columns, rows}, this.view.devicePixelRatio);
         const pixels = dimensions.width * dimensions.height;
         if (this.surfacePixels - entry.pixels + pixels > TUI_SURFACE_PIXEL_BUDGET) { this.fallback(node, 'budget'); continue; }
@@ -340,7 +341,12 @@ export class DOMTuiRenderer {
         if(/hidden|clip|scroll|auto/.test(style.overflowY)){top=Math.max(top,bounds.top+parent.clientTop);bottom=Math.min(bottom,bounds.top+parent.clientTop+parent.clientHeight);}
       }
       const z=[];for(let element=node;element;element=element.parentElement){const value=this.view.getComputedStyle(element).zIndex;if(value!=='auto')z.unshift(Number(value)||0);}
-      const pitchX=rect.width/entry.buffer.columns,pitchY=rect.height/entry.buffer.rows;
+      const painter=entry.painter;
+      const extentX=Math.min(entry.buffer.columns*painter.cellWidth,painter.extent?.width??Infinity);
+      const extentY=Math.min(entry.buffer.rows*painter.cellHeight,painter.extent?.height??Infinity);
+      // A clipped trailing cell does not reduce the pitch of all preceding
+      // cells. Use the raster's logical extent, not viewport/grid division.
+      const pitchX=rect.width*painter.cellWidth/extentX,pitchY=rect.height*painter.cellHeight/extentY;
       const clipX=Math.ceil((left-rect.left)/pitchX),clipY=Math.ceil((top-rect.top)/pitchY);
       layers.push({node,z,x,y,transparent:entry.frame===true,buffer:entry.buffer,clip:{x:x+clipX,y:y+clipY,width:Math.max(0,Math.floor((right-rect.left)/pitchX)-clipX),height:Math.max(0,Math.floor((bottom-rect.top)/pitchY)-clipY)}});
     };

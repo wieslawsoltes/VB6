@@ -265,12 +265,12 @@ export class TuiChromeRenderer {
         if(!entry.field&&owner.view.getComputedStyle(node).position==='static')node.setAttribute('data-tui-anchor','');
         entry.canvas.style.setProperty('--tui-frame-left',-node.clientLeft+'px');entry.canvas.style.setProperty('--tui-frame-top',-node.clientTop+'px');
         entry.canvas.style.setProperty('--tui-scroll-x',(entry.field?node.offsetLeft:node.scrollLeft)+'px');entry.canvas.style.setProperty('--tui-scroll-y',(entry.field?node.offsetTop:node.scrollTop)+'px');
-        entry.canvas.style.width=columns*cellWidth+'px';entry.canvas.style.height=rows*cellHeight+'px';
-        entry.canvas.style.clipPath=`inset(0 ${Math.max(0,columns*cellWidth-width)}px ${Math.max(0,rows*cellHeight-height)}px 0)`;
+        entry.canvas.style.width=width+'px';entry.canvas.style.height=height+'px';
+        entry.canvas.style.clipPath='inset(0px)';
         const rasterWidth=entry.frame||entry.source?cellWidth:owner.settings.cellWidth,rasterHeight=entry.frame||entry.source?cellHeight:owner.settings.cellHeight;
         if(entry.painter&&(entry.painter.cellWidth!==rasterWidth||entry.painter.cellHeight!==rasterHeight)){entry.painter.dispose();entry.painter=null;}
         entry.painter||=new (entry.frame?FrameCellRenderer:CanvasCellRenderer)(entry.canvas,{cellWidth:rasterWidth,cellHeight:rasterHeight,atlas:owner.atlas,opaque:!entry.frame});
-        entry.painter.setExtent?.(width,height);
+        entry.painter.setExtent(width/cellWidth*rasterWidth,height/cellHeight*rasterHeight);
         const size=entry.painter.dimensions({columns,rows},owner.view.devicePixelRatio),pixels=size.pixels??size.width*size.height;
         if(owner.surfacePixels-entry.pixels+pixels>TUI_SURFACE_PIXEL_BUDGET)throw new RangeError('Chrome exceeds surface budget');
         owner.surfacePixels+=pixels-entry.pixels;entry.pixels=pixels;

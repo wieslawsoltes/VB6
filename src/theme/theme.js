@@ -1,4 +1,5 @@
 import {PLATFORM_THEMES,canonicalPlatformThemeId} from './platform-themes.js';
+import {macos26Resource,readMacOS26ColorToken} from './macos26-resources.js';
 /** Theme data is shared by DOM controls, canvas/WebGPU drawing and the exporter.
  * Values are RGB, not OLE BGR. No proprietary font or artwork is embedded.
  */
@@ -35,6 +36,9 @@ export function applyTheme(element, id) {
   return value;
 }
 export function colorValue(value, fallback='#c0c0c0', theme='classic') {
+  const semantic=readMacOS26ColorToken(value);
+  if(semantic){const profile=THEMES[themeId(theme)];return profile.family==='macos26'
+    ? macos26Resource(semantic.role,profile.scheme) : colorValue(semantic.fallback,fallback,profile.id);}
   if(typeof value==='string' && /^(#[\da-f]{3,8}|rgba?\(|hsla?\()/i.test(value))return value;
   const n=Number(value);if(!Number.isFinite(n))return fallback;
   const bits=n>>>0;
@@ -42,6 +46,8 @@ export function colorValue(value, fallback='#c0c0c0', theme='classic') {
   return '#'+[bits&255,(bits>>>8)&255,(bits>>>16)&255].map(v=>v.toString(16).padStart(2,'0')).join('');
 }
 export function cssColor(value,fallback='#c0c0c0') {
+  const semantic=readMacOS26ColorToken(value);
+  if(semantic)return `var(--macos26-${semantic.role}, ${cssColor(semantic.fallback,fallback)})`;
   const bits=Number(value)>>>0;
   return Number.isFinite(Number(value)) && bits&0x80000000 && SYSTEM_ROLES[bits&255]
     ? `var(--vb-sys-${bits&255}, ${colorValue(value,fallback)})` : colorValue(value,fallback);

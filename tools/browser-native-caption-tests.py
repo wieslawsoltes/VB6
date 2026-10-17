@@ -155,6 +155,19 @@ class NativeCaptions(unittest.TestCase):
   self.assertFalse(popup.is_closed());self.assertTrue(self.page.evaluate('nativeApp.forms[0].instance.loaded'))
   close.click();self.page.wait_for_function('nativeBridge.commands.some(c=>c[0]==="controller"&&c[1]==="quit")')
   self.record(queryUnloadCancel=True,finalQuit=True)
+ def test_authored_form_accessibility_label_survives_native_sync(self):
+  popup,_=self.native('macos26')
+  form=popup.locator('.vb-form[data-native-window]')
+  self.page.evaluate('''()=>{const f=nativeApp.forms[0];f.set('MacOSAccessibilityLabel','Accessible settings window');f.refresh();}''')
+  self.assertEqual(form.get_attribute('aria-label'),'Accessible settings window')
+  self.page.evaluate('''()=>{const f=nativeApp.forms[0];f.set('Caption','Updated visible title');f.refresh();nativeApp.setTheme('macos26-dark');}''')
+  self.assertEqual(popup.title(),'Updated visible title')
+  self.assertEqual(form.get_attribute('aria-label'),'Accessible settings window')
+  self.emit(0,False);self.emit(0,True)
+  self.assertEqual(form.get_attribute('aria-label'),'Accessible settings window')
+  self.page.evaluate('''()=>{const f=nativeApp.forms[0];f.set('MacOSAccessibilityLabel','');f.refresh();}''')
+  self.assertEqual(form.get_attribute('aria-label'),'Updated visible title')
+  self.record(authoredAccessibilityLabel=True,captionFallback=True,themeAndNativeSync=True)
  def complete_dialog(self,popup,button,result):
   # The successful button handler destroys its own host window. Firefox can
   # report that closure before acknowledging the real mouse click. Accept only

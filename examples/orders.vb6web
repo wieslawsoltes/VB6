@@ -819,7 +819,8 @@
   "vfs": {
     "files": {},
     "directories": [
-      "/"
+      "/",
+      "/Orders"
     ]
   },
   "appSettings": {}

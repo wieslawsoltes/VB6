@@ -12,6 +12,17 @@ function usesSystemPair(background, foreground, backgroundRole) {
     (back>>>0)===backgroundRole&&[0x80000008,0x80000012].includes(fore>>>0);
 }
 
+/** Materials and search wells only replace the ordinary system palette. */
+export function macos26MaterialPaint(background, foreground, fallback = cssColor(background)) {
+  return [0x8000000f,0x80000005].some(role=>usesSystemPair(background,foreground,role))
+    ? `var(--macos-material-background, ${fallback})` : fallback;
+}
+
+export function macos26SearchPaint(background, foreground, fallback = cssColor(background)) {
+  return usesSystemPair(background,foreground,0x80000005)
+    ? `var(--macos26-SearchBackground, ${fallback})` : fallback;
+}
+
 export function commandPaint(background, foreground) {
   const system=usesSystemPair(background,foreground,0x8000000f);
   const fill=cssColor(background),ink=cssColor(foreground,'#000000');

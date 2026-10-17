@@ -36,6 +36,7 @@ jobs:
           python tools/ci/check.py
           python tools/ci/test_run.py
           python tools/ci/test_check.py
+          python tools/ci/test_tui_acceptance.py
           node --test tests/ci-gate.test.mjs
       - name: Check Actions expressions and workflow structure with verified actionlint
         run: |
@@ -58,7 +59,7 @@ jobs:
           retention-days: 7
   node:
     name: Node tests (${{ matrix.shard }}/4)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     strategy:
       fail-fast: false
@@ -75,6 +76,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install the native Linux runtime dependency for Node tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0t64
       - name: Build checked products
         run: npm run build
       - name: Initialize installed .NET SDK before parallel conformance tests
@@ -225,6 +230,8 @@ jobs:
         suite:
           - integration-controls
           - integration-authoring
+          - integration-appearance
+          - tui-authoring
           - intelligent-ui
           - project-authoring
     steps:
@@ -310,7 +317,7 @@ jobs:
           browser: ${{ matrix.browser }}
           profile: authoring
           mesa: 'false'
-      - name: XAML, SSTab and direct/native macOS browser exports
+      - name: XAML, SSTab and direct native macOS/Linux browser exports
         run: python tools/ci/run.py authoring-exports
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
@@ -326,6 +333,13 @@ jobs:
         with:
           name: macos-direct-browser-${{ matrix.browser }}
           path: reports/macos-aot-browser
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-direct-browser-${{ matrix.browser }}
+          path: reports/linux-aot-browser
           if-no-files-found: error
           retention-days: 7
   advanced-build:
@@ -887,6 +901,70 @@ jobs:
             artifacts/vb6-compute
           if-no-files-found: error
           retention-days: 14
+  linux:
+    name: Linux ELF AOT and GTK native execution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install native SDK and headless GTK display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang g++ pkg-config libgtk-3-dev xvfb xauth
+      - name: Build verified offline Linux SDK
+        run: node tools/build-linux-native.mjs
+      - name: Validate compiler, ELF, archive and package contracts
+        run: npm run test:linux
+      - name: Execute the shipped native runtime and GTK controls
+        run: node tools/test-linux-aot.mjs
+      - name: Rebuild current native sources and execute generated code
+        run: node tools/test-linux-aot.mjs --rebuild
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-aot-native
+          path: |
+            reports/linux-aot
+            artifacts/linux-aot
+          if-no-files-found: error
+          retention-days: 7
+  linux-browser-native:
+    name: Execute browser-generated Linux ELFs
+    needs:
+      - authoring-exports
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the exported application's system GTK dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0t64
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-direct-browser-*
+          path: browser-linux-input
+          merge-multiple: true
+      - name: Verify and execute each real browser download
+        run: node tools/test-linux-browser-artifacts.mjs browser-linux-input
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-aot-browser-native-execution
+          path: reports/linux-aot-browser-native
+          if-no-files-found: error
+          retention-days: 7
   test:
     name: test
     runs-on: ubuntu-latest
@@ -908,6 +986,8 @@ jobs:
       - migration
       - macos
       - macos-browser-native
+      - linux
+      - linux-browser-native
       - compute-reference
       - compute-gpu
     if: always()
@@ -922,4 +1002,4 @@ jobs:
         run: node tools/ci/gate.mjs
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
-          CI_EXPECTED: hygiene,node,packages,core-browser,browser,figma,authoring-exports,advanced-build,advanced-editor,rendering-qualification,win32-system-contracts,native-com-ole,native-compiler,migration,macos,macos-browser-native,compute-reference,compute-gpu
+          CI_EXPECTED: hygiene,node,packages,core-browser,browser,figma,authoring-exports,advanced-build,advanced-editor,rendering-qualification,win32-system-contracts,native-com-ole,native-compiler,migration,macos,macos-browser-native,linux,linux-browser-native,compute-reference,compute-gpu

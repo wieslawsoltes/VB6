@@ -1,0 +1,120 @@
+/* macOS Tahoe IDE navigation and utility surfaces. Original CSS/SVG paint;
+ * Apple WWDC25 app-structure guidance, no redistributed Figma/font assets.
+ * The application/designer has a separate palette and authored geometry.
+ */
+@media(forced-colors:none) {
+html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) {
+ & :is(.app-title,.browser-window-caption) {
+  background:var(--macos26-TitlebarMaterial);color:var(--macos26-labelColor);
+  backdrop-filter:var(--macos26-GlassBackdrop);-webkit-backdrop-filter:var(--macos26-GlassBackdrop);
+ }
+ & :is(.menubar,.command-bars-host) {background:var(--macos26-WindowMaterial);}
+ & .app-title {border-bottom-color:transparent;}
+ & .brand-icon {background:transparent;border-radius:6px;color:var(--macos26-controlAccentColor);}
+ & .app-title-text {letter-spacing:-.12px;}
+ & .menubar>button {border-radius:5px;padding-inline:9px;}
+ & .menubar>button:is(:hover,.menu-open):not(:disabled) {background:var(--macos26-ToolbarHover);color:var(--macos26-labelColor);border-color:transparent;}
+
+ /* Each bar owns one material sampling plane. Contiguous buttons paint a
+  * concentric capsule group without wrappers, focus changes or per-item blur. */
+ & .ide-shell :is(.toolbar,.command-bar):not(.command-bar-vertical) {
+  min-height:42px;padding:6px 8px;gap:0;background:var(--macos26-WindowMaterial);border-color:var(--macos26-Hairline);
+ }
+ & .ide-shell .command-bar:not(.command-bar-vertical) {backdrop-filter:var(--macos26-GlassBackdrop);-webkit-backdrop-filter:var(--macos26-GlassBackdrop);}
+ & :is(.toolbar,.command-bar)>.tool-button {
+  height:28px;min-height:28px;min-width:28px;padding:4px;border:0;
+  background:var(--macos26-ToolbarMaterial);color:var(--macos26-labelColor);
+  border-radius:999px;box-shadow:inset 0 1px var(--macos26-GlassStroke),0 1px 2px #0000000a;
+  transition:background-color var(--macos26-Duration) var(--macos26-Easing);
+ }
+ & .command-bar:not(.command-bar-large)>.tool-button {width:28px;}
+ & :is(.toolbar,.command-bar):not(.command-bar-vertical)>.tool-button:has(+ .tool-button) {border-start-end-radius:0;border-end-end-radius:0;}
+ & :is(.toolbar,.command-bar):not(.command-bar-vertical)>.tool-button + .tool-button {border-start-start-radius:0;border-end-start-radius:0;}
+ & :is(.toolbar,.command-bar)>.tool-button:hover:not(:disabled):not([aria-disabled=true]) {
+  background:var(--macos26-ToolbarHover);color:var(--macos26-labelColor);border-color:transparent;
+ }
+ & :is(.toolbar,.command-bar)>.tool-button:is(:active,.pressed):not(:disabled):not([aria-disabled=true]) {background:var(--macos26-ToolbarPressed);box-shadow:inset 0 1px var(--macos26-Hairline);}
+ & :is(.toolbar,.command-bar)>.tool-button:is(.active,[aria-pressed=true]):not(:disabled):not([aria-disabled=true]) {
+  background:var(--macos26-ToolbarSelected);color:var(--macos26-controlAccentColor);border-color:transparent;
+ }
+ & :is(.toolbar,.command-bar)>.tool-button:is(:disabled,[aria-disabled=true]) {color:var(--macos26-disabledControlTextColor);background:var(--macos26-ToolbarMaterial);box-shadow:none;}
+ & :is(.toolbar,.command-bar)>.tool-button:focus-visible {outline:2px solid var(--macos26-controlAccentColor);outline-offset:-2px;}
+ & :is(.toolbar,.command-bar)>.tool-separator {margin-inline:7px;border-color:var(--macos26-Hairline);height:16px;align-self:center;}
+ & .ide-shell .command-bar-floating {border:1px solid var(--macos26-Hairline);border-radius:16px;background:var(--macos26-PopoverMaterial);box-shadow:var(--ide-shadow);padding-top:23px;}
+ & .command-bar-floating .toolbar-grip {background:transparent;border:0;}
+ & .command-floating-name {color:var(--macos26-secondaryLabelColor);font-weight:600;font-size:11px;padding-inline:4px;}
+ & .toolbar-grip {opacity:.35;}
+ & .toolbar-grip:hover {opacity:.75;}
+
+ /* The leading sidebar floats; the trailing inspector remains an edge-aligned
+  * companion. Their source tree, property cells and authored canvas stay sharp. */
+ & .dock-zone-left {padding:5px 0 5px 5px;background:var(--macos26-WindowMaterial);}
+ & .dock-zone-left>.dock-group {
+  border:1px solid var(--macos26-GlassStroke);border-radius:var(--macos26-MaterialRadius);
+  background:var(--macos26-SidebarMaterial);box-shadow:var(--macos26-GlassShadow);
+  backdrop-filter:var(--macos26-GlassBackdrop);-webkit-backdrop-filter:var(--macos26-GlassBackdrop);
+ }
+ & .dock-zone-right>.dock-group {
+  border:0;border-inline-start:1px solid var(--macos26-Hairline);border-radius:0;
+  background:var(--macos26-InspectorMaterial);backdrop-filter:var(--macos26-GlassBackdrop);-webkit-backdrop-filter:var(--macos26-GlassBackdrop);
+ }
+ & :is(.dock-zone-left,.dock-zone-right) .managed-panel {background:transparent;}
+ & :is(.dock-zone-left,.dock-zone-right) :is(.tool-caption,.project-tree,.resource-tree,.property-inspector,.property-description,.toolbox-grid,.dock-tabbar) {background:transparent;}
+ & .dock-group .managed-panel>.tool-caption {min-height:28px;border-bottom-color:transparent;padding-inline:10px;}
+ & .tool-caption strong {font-size:11px;font-weight:600;letter-spacing:.1px;color:var(--macos26-secondaryLabelColor);}
+ & .dock-group.dock-active>.dock-group-body>.managed-panel>.tool-caption {background:transparent;color:var(--macos26-labelColor);}
+ & :is(.project-tree,.resource-tree) {color:var(--macos26-labelColor);}
+ & .project-tree .tree-row {border-radius:6px;padding-inline:3px;}
+ & .project-tree .tree-row:hover:not(.selected) {background:var(--macos26-SidebarHover);}
+ & .project-tree .tree-row.selected {background:var(--macos26-SidebarSelection);color:var(--macos26-selectedTextColor);}
+ & .project-tree:not(:focus-within) .tree-row.selected {background:var(--macos26-SidebarSelectionInactive);color:var(--macos26-unemphasizedSelectedTextColor);}
+ & .project-tree .tree-row.selected .tree-label {background:transparent;color:inherit;}
+ & .property-grid {background:transparent;border-color:var(--macos26-Hairline);}
+ & .property-grid .property-row {background:transparent;border-color:var(--macos26-Hairline);}
+ & .property-grid .property-row:nth-child(even) {background:var(--macos26-InspectorRow);}
+ & .property-grid .property-group {background:var(--macos26-InspectorSection);color:var(--macos26-secondaryLabelColor);border-color:var(--macos26-Hairline);font-size:11px;}
+ & .property-object-select {background-color:var(--macos26-ButtonBackground);border-color:transparent;border-radius:6px;}
+ & .property-description {border-top-color:var(--macos26-Hairline);color:var(--macos26-secondaryLabelColor);padding:8px;}
+ & .property-description strong {color:var(--macos26-labelColor);}
+ & .toolbox-grid button:hover:not(:disabled) {background:var(--macos26-SidebarHover);border-color:transparent;border-radius:6px;}
+ & .toolbox-grid button.active {background:var(--macos26-ToolbarSelected);border-color:transparent;border-radius:6px;color:var(--macos26-controlAccentColor);}
+ & :is(.dock-edge-splitter,.dock-group-splitter) {background:var(--macos26-WindowMaterial);}
+ & :is(.dock-edge-splitter,.dock-group-splitter):hover {background:var(--macos26-ToolbarSelected);}
+
+ & :is(.property-tabs,.debug-tabs,.dialog-tabs) {box-shadow:inset 0 0 0 .5px var(--macos26-Hairline);}
+ & :is(.document-tabs,.dock-tabbar) {background:var(--macos26-InspectorMaterial);border-color:var(--macos26-Hairline);}
+ & :is(.document-tab,.dock-tabbar>button) {border-radius:6px 6px 0 0;font-weight:400;}
+ & :is(.document-tab.active,.dock-tabbar>button[aria-selected=true]) {background:var(--macos26-ContentMaterial);color:var(--macos26-labelColor);box-shadow:0 0 0 1px var(--macos26-Hairline);}
+ & :is(.document-tab,.dock-tabbar>button):focus-visible {outline:2px solid var(--macos26-controlAccentColor);outline-offset:-2px;}
+
+ & .classic-menu:not(.runtime-popup) {
+  background:var(--macos26-MenuMaterial);color:var(--macos26-labelColor);
+  border:1px solid var(--macos26-GlassStroke);border-radius:12px;padding:5px;
+  backdrop-filter:var(--macos26-GlassBackdrop);-webkit-backdrop-filter:var(--macos26-GlassBackdrop);
+ }
+ & .classic-menu:not(.runtime-popup) .popup-menu-item {border-radius:6px;gap:8px;}
+ & .classic-menu:not(.runtime-popup) .popup-menu-item.menu-selected:not([aria-disabled=true]) {background:var(--macos26-selectedContentBackgroundColor);color:var(--macos26-selectedTextColor);}
+ & .classic-menu:not(.runtime-popup) .popup-menu-item[aria-disabled=true] {color:var(--macos26-disabledControlTextColor);}
+ & .classic-menu:not(.runtime-popup) .menu-shortcut {font-variant-numeric:tabular-nums;opacity:.75;}
+ & :is(.classic-tooltip:not(.runtime-tooltip),.source-info,.source-data-tip,.property-color-popup) {background:var(--macos26-PopoverMaterial);color:var(--macos26-labelColor);border-color:var(--macos26-Hairline);border-radius:8px;box-shadow:var(--ide-shadow);}
+
+ & .ide-dialog {border:1px solid var(--macos26-GlassStroke);border-radius:20px;background:var(--macos26-SheetMaterial);overflow:hidden;}
+ & .ide-dialog .dialog-caption {min-height:36px;background:transparent;color:var(--macos26-labelColor);border-bottom-color:transparent;padding-inline:14px;}
+ & .ide-dialog .dialog-caption strong {font-size:13px;font-weight:600;}
+ & .ide-dialog-footer {background:var(--macos26-InspectorSection);border-top-color:var(--macos26-Hairline);gap:8px;padding:14px;}
+ & .ide-dialog-footer button {background:var(--macos26-ButtonBackground);color:var(--macos26-ButtonForeground);border-radius:6px;box-shadow:none;}
+ & .ide-dialog-footer button:hover:not(:disabled) {background:var(--macos26-ButtonBackgroundHover);border-color:transparent;}
+ & .ide-dialog-footer button:active:not(:disabled) {background:var(--macos26-ButtonBackgroundPressed);}
+ & .ide-dialog-footer button:is(.primary,.default-button,[data-default=true]) {background:var(--macos26-AccentButtonBackground);color:var(--macos26-AccentButtonForeground);}
+ & .ide-dialog-footer button:is(.primary,.default-button,[data-default=true]):hover:not(:disabled) {background:var(--macos26-AccentButtonBackground);color:var(--macos26-AccentButtonForeground);filter:none;}
+ & .ide-dialog-footer button:is(.primary,.default-button,[data-default=true]):active:not(:disabled) {background:var(--macos26-AccentButtonBackgroundPressed);}
+ & .ide-dialog-footer button:disabled {background:var(--macos26-ButtonBackgroundDisabled);color:var(--macos26-ButtonForegroundDisabled);}
+ & .ide-dialog-footer button:focus-visible {outline:2px solid var(--macos26-controlAccentColor);outline-offset:2px;}
+ & :is(.object-search,.project-search-fields,.agent-search) input:not([type=checkbox]):not([type=radio]):not([type=range]) {
+  border-radius:999px;background-color:var(--macos26-SearchBackground);border-color:transparent;padding-inline:10px;
+ }
+ & :is(.object-search,.project-search-fields,.agent-search) input:not([type=checkbox]):not([type=radio]):focus-visible {box-shadow:var(--macos26-FocusShadow);}
+ & :is(.agent-thread-entry,.agent-context,.agent-plan,.agent-review,.mcp-page fieldset) {background:var(--macos26-InspectorSection);border-color:var(--macos26-Hairline);border-radius:10px;}
+ & :is(.agent-status,.tool-status,.statusbar,.ide-statusbar) {background:var(--macos26-WindowMaterial);border-color:var(--macos26-Hairline);color:var(--macos26-secondaryLabelColor);}
+}
+}

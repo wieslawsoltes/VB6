@@ -11,12 +11,16 @@ These guides describe the implemented system, not complete native VB6 parity.
 - [Architecture and SDK embedding](ARCHITECTURE.md): module boundaries, execution,
   persistence and extension points.
 - [Application export](APPLICATION-EXPORT.md): deployment APIs, modular output, CSP and validation.
+- [Direct Linux GTK AOT export](LINUX-AOT.md): offline x86-64 ELF executable export,
+  native GTK controls, reusable package, resource layout and native validation.
 - [Direct macOS AOT export](MACOS-DIRECT-AOT.md): offline ARM64 executable export,
   reusable Win32 infrastructure, application signing and SDK maintenance.
 - [macOS distribution](MACOS-DISTRIBUTION.md): trusted local Developer ID signing,
   Hardened Runtime, entitlement approval, notarization and final-archive verification.
 - [Native macOS export](MACOS-EXPORT.md): Apple Silicon compiler, AppKit runtime,
   approved local builds, source kits, reusable APIs and compatibility boundaries.
+- [macOS 26 native appearance](macos26-native-appearance.md): semantic colors,
+  AppKit controls, accessibility, availability guards and material fallbacks.
 - [Native macOS resources and pictures](MACOS-RESOURCES.md): RES/FRX imports,
   resource functions, picture ownership, cursor metadata and sealed bundle data.
 - [Native macOS Recordsets](MACOS-RECORDSETS.md): disconnected typed records,

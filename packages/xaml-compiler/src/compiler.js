@@ -47,7 +47,7 @@ export function compileXaml(text, options = {}) {
       if (markup.arguments.length) report('XAML1011','x:Null does not accept arguments.',at);
       try { return literal(convertValue(null,member)); } catch (error) { report('XAML1010',error.message,at); return literal(null); }
     }
-    const valid = name === 'Bind' ? uri === XAML_NS : uri === PRESENTATION_NS && Object.hasOwn(extensionArguments,name);
+    const valid = name === 'Bind' ? uri === XAML_NS : schema.markupExtensionNamespaces.has(uri) && Object.hasOwn(extensionArguments,name);
     if (!valid) { report('XAML1012','Unsupported markup extension ' + markup.name + '.',at); return {kind:'Invalid'}; }
     const args = Object.create(null), allowed = extensionArguments[name];
     let positional = 0, namedSeen = false;
@@ -106,7 +106,7 @@ export function compileXaml(text, options = {}) {
         if (result.primitive) values.push({...result.properties.find(p => p.member.name === '$value')?.value ?? literal(''), directives:result.directives, source:result.source});
         else values.push(result);
         if (member.itemType && member.itemType !== 'Object' && !result.primitive) {
-          const expected = schema.getType(member.namespaceURI,member.itemType), actual = schema.getType(result.type.namespaceURI,result.type.name);
+          const expected = schema.getType(member.itemNamespaceURI ?? member.namespaceURI,member.itemType), actual = schema.getType(result.type.namespaceURI,result.type.name);
           if (expected && !schema.isAssignable(actual,expected)) report('XAML1021',result.type.name + ' is not assignable to ' + member.itemType + '.',child);
         }
       }
@@ -156,7 +156,7 @@ export function compileXaml(text, options = {}) {
     }
     const assigned = new Set();
     const assign = (member, value, at, implicit = false) => {
-      const key = member.attached ? member.namespaceURI + '#' + member.owner + '.' + member.name : member.name;
+      const key = member.aliasFor ?? (member.attached ? member.namespaceURI + '#' + member.owner + '.' + member.name : member.name);
       if (assigned.has(key)) report('XAML1033','Property ' + key + ' is assigned more than once.',at);
       assigned.add(key);
       // Only serializable metadata enters executable IR; converters remain in the schema.

@@ -1,6 +1,7 @@
 // AppKit application lifetime, windows, event routing and platform services. MIT.
 #include "appkit.hpp"
 #include "appkit-pictures.hpp"
+#include "appkit-appearance.hpp"
 #include <spawn.h>
 #include <cstring>
 #include <cerrno>
@@ -17,7 +18,8 @@ int16_t virtualKey(NSEvent*event){
   if(auto it=special.find(event.keyCode);it!=special.end())return it->second;NSString*characters=event.charactersIgnoringModifiers.uppercaseString;if(characters.length){unichar c=[characters characterAtIndex:0];if(c<256)return int16_t(c);}return 0;
 }
 Args mouseArguments(MacControl&control,NSEvent*event){
-  NSPoint point=[control.view convertPoint:event.locationInWindow fromView:nil];int16_t button=event.buttonNumber==0?1:event.buttonNumber==1?2:4;
+  NSView*coordinates=control.appearanceContent?:control.view;
+  NSPoint point=[coordinates convertPoint:event.locationInWindow fromView:nil];int16_t button=event.buttonNumber==0?1:event.buttonNumber==1?2:4;
   if(event.type==NSEventTypeMouseMoved)button=0;
   return {Arg(Value::integer(button,Type::Integer)),Arg(Value::integer(modifiers(event),Type::Integer)),Arg(Value::real(point.x/control.unit(-1,true)+control.number("scaleleft",0),Type::Single)),Arg(Value::real(point.y/control.unit(-1,false)+control.number("scaletop",0),Type::Single))};
 }
@@ -129,6 +131,7 @@ void MacHost::createForm(const std::shared_ptr<Instance>&object){
     if(border==2||border==5)style|=NSWindowStyleMaskResizable;if(surface->flag("minbutton",true))style|=NSWindowStyleMaskMiniaturizable;
     result->window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,width,height)styleMask:style backing:NSBackingStoreBuffered defer:NO];result->window.releasedWhenClosed=NO;result->window.contentView=surface->view;surface->view.frame=NSMakeRect(0,0,width,height);surface->view.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
     result->window.title=ns(surface->property("caption",Value::string(fromUTF8(object->module->name))).string());result->window.backgroundColor=color(int64_t(surface->number("backcolor",0xffffff)));result->window.acceptsMouseMovedEvents=YES;refreshNativePictures(*surface);
+    layoutNativeAppearance(*surface);applyNativeAppearance(*surface);
     result->delegate=[VB6WindowDelegate new];result->delegate->host=this;result->delegate->model=result;result->window.delegate=result->delegate;
     result->originalSize=surface->view.bounds.size;double left=surface->number("left",300)/15,top=surface->number("top",300)/15;NSRect frame=result->window.frame;frame.origin=NSMakePoint(left,NSMaxY(NSScreen.mainScreen.frame)-top-frame.size.height);[result->window setFrame:frame display:NO];
     if(surface->number("startupposition",2)!=0)[result->window center];

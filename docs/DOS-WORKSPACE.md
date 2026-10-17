@@ -51,7 +51,12 @@ partial final cells cannot cut off frame corners. The logical export buffer is
 still dense. Interior controls are never obscured by a full opaque frame canvas.
 
 Device scaling rounds absolute cell edges, preventing accumulated pitch drift.
-Partial trailing cells are clipped rather than stretching the grid. Source
+Partial trailing cells are clipped rather than stretching the grid.
+`CanvasCellRenderer.setExtent(width, height)` bounds the backing bitmap to the
+native viewport while preserving the cell pitch. CSS and bitmap extents agree,
+so presentation cannot create an extra scrollbar or change the scrollport it
+reads. Screen export derives pitch from the logical raster extent, not from
+dividing a cropped viewport by the rounded-up cell count. Source
 editors use their measured column/line pitch. Collection, popup and control
 projections account for borders, scrolling and ancestor scaling.
 
@@ -256,7 +261,7 @@ VB6_ORIGIN=file python tools/dos-browser-tests.py
 python tools/browser-tui-advanced-tests.py
 ```
 
-The DOS suite belongs to the existing cross-engine `integration-authoring` group;
+The DOS suite belongs to the dedicated cross-engine `tui-authoring` group;
 optional-editor TUI tests belong to `advanced-editor`. The state matrix covers
 four palettes and device scales 1, 1.25 and 2, including alternate cell metrics.
 Assertions exercise real controls, source typing/undo, selections, debugger rows,

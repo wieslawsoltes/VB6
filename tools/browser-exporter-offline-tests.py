@@ -8,14 +8,11 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import threading
-from functools import partial
-from http.server import ThreadingHTTPServer
 from urllib.parse import quote
 import zipfile
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Error as PlaywrightError
 from exporter_browser_wait import wait_for_export
-from exporter_offline_server import offline_fixture_handler
+from exporter_offline_server import offline_fixture_handler, OfflineFixtureOrigin
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / 'reports/exporter-offline'
@@ -35,10 +32,9 @@ results, errors = [], []
 
 Handler = offline_fixture_handler(ROOT, REPORT, state)
 
-server = ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=str(ROOT)))
-server.daemon_threads = True
-threading.Thread(target=server.serve_forever, daemon=True).start()
-base = f'http://127.0.0.1:{server.server_port}'
+origin = OfflineFixtureOrigin(Handler, ROOT)
+base = origin.url
+outages = []
 def check(value, message):
     if not value:
         raise AssertionError(message)
@@ -72,15 +68,40 @@ def calculator(page):
     page.get_by_role('button', name='=', exact=True).click()
     wait_for_export(page, 'document.querySelector("[data-control=txtDisplay] input")?.value === "15"')
 
+def online(context):
+    origin.start()
+    context.set_offline(False)
+
 def open_offline_page(context, previous, url):
-    # Playwright's WebKit reload command can fail internally while the browser is
-    # offline even though an active service worker can serve a fresh navigation.
-    # Open a real new client under the offline context and keep the previous
-    # controlled client alive until that navigation has completed.
-    context.set_offline(True)
+    # Playwright WebKit currently rejects SW-served requests before dispatching
+    # the fetch event when its offline flag is set (even literal responses):
+    # https://github.com/microsoft/playwright/issues/42775
+    # Close the REAL origin in every engine. Chromium/Firefox additionally use
+    # offline emulation; WebKit qualifies server-unavailability, not that flag.
+    origin.stop()
+    context.set_offline(ENGINE != 'webkit')
+    check(origin.server is None, 'Origin is still listening')
+    # A clean client with no installed worker must fail against the same stopped
+    # origin. This rejects accidental online/cache/fixture-response substitution.
+    negative_context = context.browser.new_context()
+    negative = negative_context.new_page()
+    try:
+        try:
+            negative.goto(base + '/uncached-outage-probe', wait_until='domcontentloaded', timeout=5000)
+        except PlaywrightError:
+            pass
+        else:
+            raise AssertionError('Worker-free navigation unexpectedly succeeded with origin stopped')
+    finally:
+        negative_context.close()
     page = new_page(context)
-    page.goto(url, wait_until='domcontentloaded')
+    response = page.goto(url, wait_until='domcontentloaded')
+    check(response is not None and response.status == 200 and response.from_service_worker,
+          'Offline navigation was not fulfilled by the installed service worker')
     ready(page)
+    check(page.evaluate('Boolean(navigator.serviceWorker.controller)'), 'Offline client is not controlled')
+    outages.append({'url': url, 'originStopped': True, 'workerFreeNavigationFailed': True,
+                    'fromServiceWorker': True, 'browserOfflineEmulation': ENGINE != 'webkit'})
     previous.close()
     return page
 
@@ -93,7 +114,7 @@ def assert_network_only_api(page):
     check(not page.evaluate('caches.match(new URL("./api/data", location.href)).then(Boolean)'),
           'Dynamic API unexpectedly exists in CacheStorage')
     context = page.context
-    context.set_offline(False)
+    online(context)
     before = state['api_requests']
     state['api_available'] = False
     try:
@@ -126,11 +147,11 @@ try:
         calculator(a)
         check(binary(a) == [0,255,128], 'Binary asset unavailable offline')
         assert_network_only_api(a)
-        passed('real-network-offline-open-and-VB-control-input')
+        passed('real-network-offline-open-and-VB-control-input', originStopped=True, browserOfflineEmulation=ENGINE != 'webkit')
         a = open_offline_page(context, a, base + '/apps/a/?launch=fixture')
         check(a.evaluate('releaseMarker') == 'one', 'Launch query lost the entry fallback')
         passed('offline-entry-navigation-with-launch-query')
-        context.set_offline(False)
+        online(context)
         b = new_page(context); b.goto(base + '/apps/b/index.html'); ready(b); installed(b)
         check(cache_key('a', 'one') in b.evaluate('caches.keys()'), 'Sibling install deleted first application cache')
         check(cache_key('b', 'one') in b.evaluate('caches.keys()'), 'Sibling cache missing')
@@ -164,7 +185,7 @@ try:
         check(a.evaluate('releaseMarker') == 'two', 'Updated code not loaded')
         a = open_offline_page(context, a, base + '/apps/a/index.html')
         check(a.evaluate('releaseMarker') == 'two', 'Updated release unavailable offline')
-        context.set_offline(False)
+        online(context)
         passed('natural-activation-and-offline-updated-release')
         a.evaluate('(key)=>caches.open(key).then(c=>c.delete(new URL("./assets/raw.bin",location.href).href))', cache_key('a', 'two'))
         check(binary(a) == [0,255,128], 'Evicted exact-version asset did not recover')
@@ -234,8 +255,8 @@ except Exception as error:
     results.append({'case': 'execution', 'passed': False, 'error': str(error)})
     raise
 finally:
-    server.shutdown()
-    (REPORT / 'results.json').write_text(json.dumps({'browser': ENGINE, 'realOrigins': True, 'pageErrors': errors, 'results': results}, indent=2) + '\n')
+    origin.stop()
+    (REPORT / 'results.json').write_text(json.dumps({'browser': ENGINE, 'realOrigins': True, 'outages': outages, 'pageErrors': errors, 'results': results}, indent=2) + '\n')
     if os.environ.get('GITHUB_ACTIONS'):
         shutil.rmtree(REPORT / 'fixtures', ignore_errors=True)
         shutil.rmtree(REPORT / 'download', ignore_errors=True)

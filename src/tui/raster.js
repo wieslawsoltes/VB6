@@ -82,7 +82,12 @@ export function paintTuiGlyph(context, code, width, height, style=0) {
       while (x < 8 && mask[y * 8 + x]) x++;
       const left = Math.round(start * width / 8), top = Math.round(y * height / 16);
       const right = Math.round(x * width / 8), bottom = Math.round((y + 1) * height / 16);
-      if (right > left && bottom > top) context.fillRect(Math.max(0,left+(style&2?Math.round((8-y)*width/64):0)), top, Math.min(width-left,right-left+(style&1?1:0)), bottom-top);
+      // Transform both edges before clipping. Clamping only the left edge
+      // shifts clipped ink back into the cell and can spill a bold/italic run
+      // across the right edge. Geometric recipes use this same bounded path.
+      const shift=style&2?Math.round((8-y)*width/64):0;
+      const inkLeft=Math.max(0,left+shift),inkRight=Math.min(width,right+shift+(style&1?1:0));
+      if (inkRight > inkLeft && bottom > top) context.fillRect(inkLeft,top,inkRight-inkLeft,bottom-top);
     }
   }
   return true;

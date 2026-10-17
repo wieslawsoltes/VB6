@@ -10,7 +10,7 @@ import {anchorGuideNodes} from '../layout/designer-tools.js';
 export function renderDesignerSelection(designer){
  const d=designer;if(!d.overlay||!d.module)return;
  const items=d.selected(),controls=d.module.form.controls,views=new Map(d.formView.controls.map(v=>[v.model.id,v]));
- const scale=displayScale(d.formView.content,d.zoom),root=d.formView.content.getBoundingClientRect(),rects=new Map(),nodes=[],handles=[];
+ const root=d.formView.content.getBoundingClientRect(),scale=displayScale(d.formView.content,d.zoom,root),rects=new Map(),nodes=[],handles=[];
  for(const control of d.showTabOrder?controls:items){
   const view=views.get(control.id);if(!view||view.node.closest('[hidden]'))continue;
   const r=view.node.getBoundingClientRect();rects.set(control.id,{x:(r.left-root.left)/scale.x,y:(r.top-root.top)/scale.y,width:r.width/scale.x,height:r.height/scale.y});
@@ -19,7 +19,7 @@ export function renderDesignerSelection(designer){
  const height=!items.length&&d.formSelection?d.formView.node.getBoundingClientRect().height:0;
  // Guides may measure nested parent containers. Do so before replacing either
  // live overlay, not after inserting selection outlines or tab-order markers.
- const guides=anchorGuideNodes(d,{root,rects,views});
+ const guides=anchorGuideNodes(d,{root,scale,rects,views});
  if(!items.length&&d.formSelection)for(const [edge,x,y]of [['nw',0,0],['n',width/2,0],['ne',width,0],['w',0,height/2],['e',width,height/2],['sw',0,height],['s',width/2,height],['se',width,height]]){
   const enabled=!d.locked&&['e','s','se'].includes(edge);handles.push(el('div',{class:'designer-form-handle'+(enabled?'':' disabled'),title:enabled?'Resize form':'Form sizing handle','data-resize-form':edge,style:{left:Math.round(8+x-3)+'px',top:Math.round(8+y-3)+'px'}}));
  }

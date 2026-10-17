@@ -17,5 +17,5 @@ for(const optimization of [0,1,2])test(`Input numeric grammar rejects locale/gro
 });
 for(const optimization of [0,1,2])test(`Input field Windows fixture is deterministic O${optimization}`,()=>{
  const {project,checks}=nativeControlFixtures().find(f=>f.project.name==='AotControlInputFields'),a=compileWin32(project,{optimization});
- assert.deepEqual(a.bytes,compileWin32(project,{optimization}).bytes);assert.equal(checks.length,18);assert.ok(a.bytes.length<100*1024);
+ assert.deepEqual(a.bytes,compileWin32(project,{optimization}).bytes);assert.equal(checks.length,33);assert.ok(a.bytes.length<100*1024);
 });

@@ -5,7 +5,7 @@ import {nativeStatementTemporary} from './statement-temporaries.js';
  * Variant function writes to a caller-owned hidden result slot. No frame pointer
  * or borrowed BSTR escapes its owner. See WIN32-VARIANTS.md for the ABI contract.
  */
-import {mem16,mem32} from './x86-operands.js';
+import {mem8,mem16,mem32} from './x86-operands.js';
 import {NATIVE_VARIANT_TYPES} from './variant-types.js';
 export {NATIVE_VARIANT_TYPES};
 import {nativeVariantArrayMethods} from './variant-arrays.js';
@@ -79,6 +79,10 @@ export const nativeVariantMethods={
     if(['double','currency','date'].includes(type)){x.add('eax',8);if(type==='date')x.call('native:date:validate');}
     else if(type==='single'){x.add('eax',8).push();const f=this.floatWorkspace();this.rawStorageAddress(f);x.popOperand('ecx').pushOperand('eax').pushOperand('ecx').call('native:number:load-single');}
     else if(type==='decimal'){/* VT_DECIMAL overlays the complete VARIANT; retain ownership. */}
+    // https://learn.microsoft.com/windows/win32/api/oaidl/ns-oaidl-variant
+    // Only bVal is defined for VT_UI1. OleAut32 may leave/copy arbitrary
+    // adjacent union padding; a DWORD load fabricates a value above 255.
+    else if(type==='byte')x.movzx('eax',mem8({base:'eax',displacement:8}));
     else if(['integer','boolean'].includes(type))x.movsx('eax',mem16({base:'eax',displacement:8}));
     else x.mov('eax',at('eax',8));
     if(done)x.label(done);

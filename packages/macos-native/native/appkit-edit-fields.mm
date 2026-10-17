@@ -44,7 +44,7 @@ void endSelection(NSText* editor) {
   if (auto c = model((NSView*)delegate)) c->host->event([&] { vb6::nativeEditCapture(*c, editor); });
 }
 }
-// Cocoa's three cell families must retain their respective base implementations.
+// Cocoa's field families must retain their respective base implementations.
 // Share only these attachment hooks; never replace the secure field's editor.
 #define VB6_EDIT_CELL(CLASS, BASE) \
 @interface CLASS : BASE @end \
@@ -63,6 +63,7 @@ void endSelection(NSText* editor) {
 VB6_EDIT_CELL(VB6TextFieldCell, NSTextFieldCell)
 VB6_EDIT_CELL(VB6SecureTextFieldCell, NSSecureTextFieldCell)
 VB6_EDIT_CELL(VB6ComboBoxCell, NSComboBoxCell)
+VB6_EDIT_CELL(VB6SearchFieldCell, NSSearchFieldCell)
 #undef VB6_EDIT_CELL
 
 @interface VB6TextField : NSTextField @end
@@ -77,9 +78,14 @@ VB6_EDIT_CELL(VB6ComboBoxCell, NSComboBoxCell)
 @implementation VB6ComboBox
 +(Class)cellClass { return VB6ComboBoxCell.class; }
 @end
+@interface VB6SearchField : NSSearchField @end
+@implementation VB6SearchField
++(Class)cellClass { return VB6SearchFieldCell.class; }
+@end
 namespace vb6 {
 NSTextField* nativeTextField(bool secure) {
   return secure ? [[VB6SecureTextField alloc] initWithFrame:NSZeroRect] : [[VB6TextField alloc] initWithFrame:NSZeroRect];
 }
 NSComboBox* nativeComboBox() { return [[VB6ComboBox alloc] initWithFrame:NSZeroRect]; }
+NSSearchField* nativeSearchField() { auto field=[[VB6SearchField alloc] initWithFrame:NSZeroRect];field.sendsSearchStringImmediately=YES;return field; }
 }

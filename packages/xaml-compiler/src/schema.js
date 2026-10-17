@@ -2,9 +2,17 @@ import {XAML_NS, PRESENTATION_NS, qualifiedName} from './syntax.js';
 const key = (uri, name) => uri + '\0' + name;
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
 export function safeMember(name) { if (forbidden.has(name)) throw new TypeError('Unsafe object member: ' + name); return name; }
+function collectionMetadata(schema,type,name,member) {
+  if(!member?.itemType||member.itemNamespaceURI)return member;
+  for(let current=type,seen=new Set();current&&!seen.has(current);current=schema.baseType(current)) {
+    seen.add(current);
+    if(Object.hasOwn(current.members,name))return {...member,itemNamespaceURI:current.namespaceURI};
+  }
+  return member;
+}
 /** Schema metadata is host-supplied. The compiler does not depend on WinMD or CLR reflection. */
 export class XamlSchemaContext {
-  constructor() { this.types = new Map(); this.revision = 0; }
+  constructor() { this.types = new Map(); this.revision = 0; this.markupExtensionNamespaces = new Set([PRESENTATION_NS]); this.themeResourceKeys = new Set(); }
   registerType(namespaceURI, name, definition = {}) {
     safeMember(name);
     const members = Object.create(null);
@@ -28,12 +36,12 @@ export class XamlSchemaContext {
     const q = qualifiedName(name), dot = q.localName.indexOf('.');
     if (dot >= 0) {
       const owner = this.getType(q.prefix ? namespaces[q.prefix] : (namespaces[''] ?? type.namespaceURI), q.localName.slice(0, dot));
-      const memberName = q.localName.slice(dot + 1), member = owner && this.members(owner)[memberName];
+      const memberName = q.localName.slice(dot + 1), member = owner && collectionMetadata(this,owner,memberName,this.members(owner)[memberName]);
       if (member && (member.attached || this.isAssignable(type, owner))) return {...member, name: memberName, owner: owner.name, namespaceURI: owner.namespaceURI, attached: !!member.attached};
       return null;
     }
     if (q.prefix && namespaces[q.prefix] !== type.namespaceURI) return null;
-    const member = this.members(type)[q.localName];
+    const member = collectionMetadata(this,type,q.localName,this.members(type)[q.localName]);
     return member ? {...member, name: q.localName, owner: type.name, namespaceURI: type.namespaceURI} : null;
   }
   isAssignable(type, base) {

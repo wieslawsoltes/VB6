@@ -98,7 +98,7 @@ try {
     const uiSources=(await fs.readdir(path.join(sdk,'tests'))).filter(name=>/^appkit(?:-[a-z-]+)?\.mm$/.test(name)).sort().map(name=>path.join(sdk,'tests',name));
     await run(compiler,['-std=c++17','-arch','arm64','-isysroot',sdkPath,'-mmacosx-version-min=11.0','-fobjc-arc','-I',native,...uiSources,path.join(cache,built.runtimeSha256,'libvb6-native.a'),'-framework','AppKit','-framework','Foundation','-framework','CoreGraphics','-framework','QuartzCore','-o',ui]);
     await run('/usr/bin/codesign',['--sign','-','--timestamp=none',ui]);
-    const uiOutput=await run(ui,[],{timeout:30000});assert.match(uiOutput,/APPKIT_RECORDSETS_OK/);assert.match(uiOutput,/APPKIT_CONFORMANCE_OK/);assert.match(uiOutput,/APPKIT_EDIT_SELECTION_LIST_OK/);assert.match(uiOutput,/APPKIT_RICH_SELECTION_OK/);assert.match(uiOutput,/APPKIT_PICTURES_OK/);report.checks.push('appkit-controls-events-api','appkit-live-edit-selection-lists','appkit-rich-selection-formatting');
+    const uiOutput=await run(ui,[],{timeout:30000});assert.match(uiOutput,/APPKIT_RECORDSETS_OK/);assert.match(uiOutput,/APPKIT_CONFORMANCE_OK/);assert.match(uiOutput,/APPKIT_EDIT_SELECTION_LIST_OK/);assert.match(uiOutput,/APPKIT_RICH_SELECTION_OK/);assert.match(uiOutput,/APPKIT_PICTURES_OK/);assert.match(uiOutput,/APPKIT_APPEARANCE_OK/);report.checks.push('appkit-controls-events-api','appkit-live-edit-selection-lists','appkit-rich-selection-formatting','appkit-macos26-appearance');
     const richKit=createMacOSBuildKit(richTextProject()),richDir=path.join(work,'rich-form-kit');
     await writeBuildKit(richDir,richKit.files);
     const richBuilt=await buildNativeKit(richDir,{out:path.join(work,'rich-form-out'),cache,jobs:3,log});

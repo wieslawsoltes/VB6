@@ -6,6 +6,9 @@ import {setResourceString, setResource} from './res.js';
 function c(type,name,x,y,w,h,props={},parent=null){const node=createControl(type,name,x*15,y*15);Object.assign(node.properties,{Width:w*15,Height:h*15,...props});node.parent=parent;return node;}
 function formProject(name,formName,caption,width,height){const p=newProject(name),form=createForm(formName,caption);form.form.properties.ClientWidth=width*15;form.form.properties.ClientHeight=height*15;p.modules=[form];p.startup=formName;return {p,form};}
 export function orderEntryExample(){const {p,form}=formProject('Project1','frmOrders','Order Entry',648,446);p.description='Classic order-entry form with real VB event handlers, control properties, private file I/O and persistence.';
+  // The authored Save handler uses this folder. Open For Output creates the
+  // file, not missing parent directories; seed the sample's private data disk.
+  p.vfs.directories.push('/Orders');
   form.form.controls=[
     c('Label','lblTitle',20,16,420,28,{Caption:'Northwind Traders',FontSize:16,FontBold:-1,ForeColor:8388608}),
     c('Label','lblSubtitle',21,47,570,16,{Caption:'Order entry  ·  Sales and customer services',ForeColor:4210752}),

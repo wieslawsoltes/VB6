@@ -54,9 +54,10 @@ export class TuiTextViews{
         const columns=Math.ceil(s.width/s.cellWidth),rows=Math.ceil(s.height/s.cellHeight);
         if(columns>512||rows>256||columns*rows>65536)throw new RangeError('Text view cell budget exceeded');
         if(!e.canvas){e.canvas=owner.document.createElement('canvas');e.canvas.className='vb-tui-text-view';e.canvas.setAttribute('aria-hidden','true');node.append(e.canvas);}
-        e.canvas.hidden=false;e.canvas.style.width=columns*s.cellWidth+'px';e.canvas.style.height=rows*s.cellHeight+'px';
+        e.canvas.hidden=false;e.canvas.style.width=s.width+'px';e.canvas.style.height=s.height+'px';
         if(e.painter&&(e.painter.cellWidth!==s.cellWidth||e.painter.cellHeight!==s.cellHeight)){e.painter.dispose();e.painter=null;}
         e.painter||=new CanvasCellRenderer(e.canvas,{cellWidth:s.cellWidth,cellHeight:s.cellHeight,atlas:owner.atlas});
+        e.painter.setExtent(s.width,s.height);
         const size=e.painter.dimensions({columns,rows},owner.view.devicePixelRatio),pixels=size.width*size.height;
         if(owner.surfacePixels-e.pixels+pixels>TUI_SURFACE_PIXEL_BUDGET)throw new RangeError('Text view surface budget exceeded');
         owner.surfacePixels+=pixels-e.pixels;e.pixels=pixels;

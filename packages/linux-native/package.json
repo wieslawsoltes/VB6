@@ -1,0 +1,24 @@
+{
+  "name": "@vb6-studio/linux-native",
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "description": "Offline VB6 Linux x86_64 ELF AOT export with native GTK3 controls",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./node": "./src/node.mjs"
+  },
+  "bin": {
+    "vb6-linux": "./bin/vb6-linux.mjs"
+  },
+  "files": [
+    "dist",
+    "src/node.mjs",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ]
+}

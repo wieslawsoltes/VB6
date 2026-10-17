@@ -228,7 +228,9 @@ that wins after artifact allocation but before settlement releases the orphan ar
 No legacy experimental Tasks protocol or taskification of mutations is advertised.
 
 `vb6.build.create` produces inert project JSON, application HTML, native-source
-ZIP or an existing-compiler Win32 PE32. Supply the current `expectedRevision`,
+ZIP, an existing-compiler Win32 PE32, or a native Linux GTK application ZIP
+(`target: "linux"`). Linux export emits x86-64 ELF machine code directly and uses
+the bundled native SDK. Supply the current `expectedRevision`,
 then use `vb6.build.read` with byte offsets and base64 chunks, or follow the
 returned resource link to its caller-owned manifest. A resource link is inert:
 it neither downloads bytes nor executes the artifact. Every chunk carries

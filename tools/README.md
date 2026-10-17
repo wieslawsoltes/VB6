@@ -82,3 +82,58 @@ dependencies; new distributions generate their own source manifests. Source ZIPs
 retain `packages/`, `desktop/`, workflow files and `.gitattributes` so builds and
 validation can run after extraction. Local dependencies, native-build scratch
 files, Python caches, environment secrets and local data profiles are excluded.
+
+## Exact TUI reference acceptance
+
+`python tools/tui_reference.py manifest.json --actual candidate --output report --revision <commit>`
+compares owner-supplied static PNG captures without tolerance, masks, alignment,
+rescaling or reference updates. Install the existing pinned authoring requirements
+for Pillow. Candidate files are named `<fixture-id>.png`; reference paths are
+relative to the manifest. The candidate and capture must show the same explicitly
+identified state, content, dimensions and display configuration.
+
+```json
+{
+  "version": 1,
+  "fixtures": [{
+    "id": "menu-open",
+    "state": "File menu open; second enabled item focused; 80 columns by 25 rows",
+    "reference": {
+      "path": "references/menu-open.png",
+      "sha256": "<actual 64-character lowercase SHA-256 of that PNG>",
+      "width": 640,
+      "height": 400
+    },
+    "cell": {"width": 8, "height": 16},
+    "provenance": {
+      "product": "<reference application>",
+      "version": "<exact version>",
+      "platform": "<OS, display mode and scale>",
+      "method": "<capture method and relevant configuration>",
+      "source": "<authorized capture origin>"
+    }
+  }]
+}
+```
+
+Placeholders above are deliberately not valid acceptance evidence. Supply an
+actual reference image and digest. The tool does not download or generate native
+references, redistribute vendor assets, authenticate declared provenance, or infer
+whole-product parity from a few matching images. Capture provenance and fixture
+coverage require independent review.
+
+Each report records the candidate revision, manifest/reference/candidate digests,
+exact changed-pixel and changed-cell counts, difference bounds and a diagnostic
+mask. RGB and alpha are checked separately, including RGB differences under zero
+alpha. Different dimensions fail rather than being normalized. A missing or
+modified reference fails rather than skipping or updating a golden. Empty suites,
+escaping paths, oversized images, output links onto input evidence and duplicate
+fixture IDs are rejected. Exit status is 0 for all listed pairs equal, 1 for
+comparison or missing-evidence failure, and 2 for invalid invocation/manifest.
+No input or report path should be concurrently changed while a comparison runs.
+
+`tools/ci/test_tui_acceptance.py` checks admission with only the Python standard
+library. `tools/dos_precision_checks.py`, owned by the existing DOS browser suite,
+checks actual Canvas2D partial-frame recovery and the comparator against explicitly
+synthetic images. Its expected pixels are regression fixtures, **not native-vendor
+reference captures**. Existing cross-engine and native acceptance remain separate.

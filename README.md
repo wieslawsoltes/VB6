@@ -73,6 +73,8 @@ Windows Classic, Windows Standard (2000), and High Contrast Black remain availab
 
 **Tools → Options → General → Appearance → IDE theme** also offers **Fluent WinUI 3**, **macOS 26**, and **X11**, each in light and dark variants. Classic VB6 remains the default. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
 
+Selecting a macOS application theme exposes macOS 26 appearance and accessibility properties in the designer. XAML can use the versioned `urn:vb6:macos26` vocabulary for Mac-style controls, structured tables/outlines/tabs, and live semantic colors. The same authored properties feed the browser runtime and native AppKit exports, with explicit diagnostics for unsupported native combinations. See [XAML authoring](docs/XAML.md), [macOS theme fidelity](docs/MACOS-THEME-FIDELITY.md), and [native macOS 26 appearance](docs/macos26-native-appearance.md).
+
 **Application Theme** offers the same six optional variants, independently saved with the project and embedded in exported HTML/Electron apps. Designer previews, running forms, MDI children, dialogs, popup lists, controls and drawing system colors update without a theme-only VM/control restart. Authored RGB, fonts, images and geometry remain intact. Each family includes a complete matching original icon pack—111 command names and 40 toolbox types—throughout the IDE, lazy-created and detached windows, and built-in application UI. Classic artwork remains unchanged. See [Application themes](docs/APPLICATION-THEMES.md) and [Matching icon packs](docs/THEME-ICON-PACKS.md).
 
 ### Optional anchoring and automatic layout
@@ -176,6 +178,19 @@ The browser's **File → Make <project>.exe (Win32 AOT)…** runs the direct com
 The desktop IDE detaches and restores live tool/code panes through native windows, and its ARM64 portable build has been executed on a Windows ARM64 runner. This does not certify physical WebGPU: hosted x64/ARM64 tests explicitly exercised Canvas2D fallback. Classic compiler tests remain labelled mocks unless the separate licensed-toolchain job is run.
 
 See [Direct Win32/AOT contract, examples and SDK](docs/WIN32-AOT.md), [Windows targets](docs/WINDOWS-BUILDS.md), and [Desktop validation](docs/NATIVE-VALIDATION.md). Full VB6 AOT parity, all-GPU rendering, COM/OCX/full Declare ABI and existing-binary browser emulation remain unfinished.
+
+### Native Linux GTK export
+
+**File → Make Project (Linux GTK AOT)…** produces a native Linux x86-64 ELF application ZIP directly in the IDE, including offline. The shared VB6 native compiler emits project machine code; the application uses GTK 3.24 controls, the portable native VB6 runtime, and system libraries. It runs without Node.js, a browser, Wine, or a VB interpreter.
+
+```sh
+npm run build:linux-package
+npm run build:linux -- examples/calculator.vb6web --out NativeOutput
+# Or write a fresh application directory with bin/NAME and Resources/:
+npm run build:linux -- examples/calculator.vb6web --out NativeApplications --extract
+```
+
+The first runtime targets Ubuntu 24.04-compatible Linux x86-64 with GTK 3.24 and glibc 2.39 or newer. O0–O3 project optimization, native resources, deterministic executable ZIPs, standalone package APIs and the `linux` MCP build target share the same exporter. See [Linux AOT architecture, usage and validation](docs/LINUX-AOT.md) and the [reusable Linux package](packages/linux-native/README.md).
 
 ### Reusable Win32 browser compatibility
 

@@ -10,7 +10,7 @@ import {COMMANDS,COMMAND_ICONS,DEFAULT_BARS,decorateCommandItems} from '../src/i
 import {BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES} from '../src/project/model.js';
 
 test('all command catalog entries and saved default bars resolve real artwork',()=>{
- assert.equal(COMMANDS.length,86);
+ assert.equal(COMMANDS.length,87);
  for(const c of COMMANDS){assert.ok(hasIcon(c.icon),`${c.id}: ${c.icon}`);assert.notEqual(c.icon,'missing');}
  for(const bar of DEFAULT_BARS)for(const id of bar.items)if(id!=='|')assert.ok(hasIcon(COMMAND_ICONS[id]),`${bar.id}: ${id}`);
  for(const [id,name] of Object.entries(COMMAND_ICONS))assert.ok(hasIcon(name),id);

@@ -1,4 +1,5 @@
-import {parseXaml,applyTextEdits,escapeXml,XMLNS_NS,XAML_NS,PRESENTATION_NS} from '../../packages/xaml-compiler/src/index.js';
+import {parseXaml,applyTextEdits,escapeXml,XMLNS_NS,XAML_NS,PRESENTATION_NS,MACOS26_NS} from '../../packages/xaml-compiler/src/index.js';
+import {macos26ColorFallback} from '../theme/macos26-resources.js';
 const VB='urn:vb6:forms';
 const attrKey=a=>a.namespaceURI+'#'+a.localName;
 const attrs=e=>new Map(e.attributes.filter(a=>a.namespaceURI!==XMLNS_NS).map(a=>[attrKey(a),a]));
@@ -122,15 +123,19 @@ const reverseValue=(value,encoding)=>{
   if(encoding==='font')return typeof value==='number'?value/0.75:undefined;
   if(encoding==='flag')return value===0?'False':value===-1?'True':undefined;
   if(encoding==='checked')return value===2?'{x:Null}':value===0?'False':value===1?'True':undefined;
+  if(encoding==='radio-checked')return value===0?'False':value===-1?'True':undefined;
   if(encoding==='visibility')return value===0?'Collapsed':value===-1?'Visible':undefined;
   if(encoding==='bold')return value===0?'Normal':value===-1?'Bold':undefined;
   if(encoding==='italic')return value===0?'Normal':value===-1?'Italic':undefined;
   if(encoding==='alignment')return ['Left','Right','Center'][value];
   if(encoding==='orientation')return value===1?'Horizontal':value===2?'Vertical':undefined;
+  if(encoding==='range-orientation')return value===0?'Horizontal':value===1?'Vertical':undefined;
+  if(encoding==='stepper-orientation')return value===1?'Horizontal':value===0?'Vertical':undefined;
+  if(encoding==='image-stretch')return value===-1?'Fill':value===0?'None':undefined;
   if(encoding==='color')return Number.isInteger(value)&&value>=0&&value<=0xffffff?'#'+[value&255,(value>>>8)&255,(value>>>16)&255].map(n=>n.toString(16).padStart(2,'0')).join(''):undefined;
   return typeof value==='string'||typeof value==='number'||typeof value==='boolean'?value:undefined;
 };
-/** Preserve WinUI resources/styles. A style-derived edit becomes a LOCAL
+/** Preserve presentation and macOS resources/styles. A style-derived edit becomes a LOCAL
  * property, never a mutation of a shared Setter. Native-only designer fields
  * remain explicit vb:Designer.Properties overrides rather than being dropped. */
 export function patchWinUISource(text,before,after,compiled) {
@@ -150,10 +155,49 @@ export function patchWinUISource(text,before,after,compiled) {
       const klass=element.attributes.find(a=>a.namespaceURI===XAML_NS&&a.localName==='Class');
       if(klass)plan.setAttribute(element,XAML_NS,'Class',b.name);
       // Event-handler references are code identities, not arbitrary strings.
-      for(const attr of element.attributes)if(!attr.namespaceURI&&new RegExp('^'+a.name+'_','i').test(attr.value)&&['Click','TextChanged','SelectionChanged','ValueChanged','GotFocus','LostFocus','KeyDown','KeyUp'].includes(attr.localName))plan.setAttribute(element,'',attr.localName,b.name+attr.value.slice(a.name.length));
+      for(const attr of element.attributes)if((!attr.namespaceURI||attr.namespaceURI===element.namespaceURI)&&new RegExp('^'+a.name+'_','i').test(attr.value)&&['Action','Click','TextChanged','PasswordChanged','DateChanged','SelectionChanged','ValueChanged','ColumnClick','GotFocus','LostFocus','KeyDown','KeyUp'].includes(attr.localName))plan.setAttribute(element,attr.namespaceURI,attr.localName,b.name+attr.value.slice(a.name.length));
     }
-    const properties=new Set([...Object.keys(a.properties),...Object.keys(b.properties)]),used=new Set();
+    const properties=new Set([...Object.keys(a.properties),...Object.keys(b.properties)]),used=new Set(),handled=new Set();
+    const replaceMapped=(source,value,theme=false)=>{
+      const original=!source.fromStyle&&element.attributes.find(attr=>attr.start===source.start&&attr.end===source.end);
+      const uri=original?original.namespaceURI:source.attached?source.namespaceURI??(source.name.startsWith('Designer.')?VB:PRESENTATION_NS):'';
+      let literal;
+      if(theme) {
+        const namespace=element.namespaces[''],prefix=[PRESENTATION_NS,MACOS26_NS].includes(namespace)?'':plan.prefix(element,PRESENTATION_NS,'ui')+':';
+        literal='{'+prefix+'ThemeResource macOS.'+value+'}';
+      } else {
+        const isNull=source.encoding==='checked'&&value==='{x:Null}',isString=typeof value==='string'&&value.startsWith('{')&&!isNull;
+        literal=isString?'{}'+value:String(value);
+        if(isNull)literal='{'+plan.prefix(element,XAML_NS,'x')+':Null}';
+      }
+      return plan.replaceProperty(element,uri,source.name,literal);
+    };
+    for(const [color,role] of [['BackColor','MacOSBackgroundRole'],['ForeColor','MacOSForegroundRole']]) {
+      if(same(a.properties[color],b.properties[color])&&same(a.properties[role],b.properties[role]))continue;
+      if(!Object.hasOwn(a.properties,role)&&!Object.hasOwn(b.properties,role))continue;
+      if(b.properties[color]===undefined)return null;
+      const source=mapping.properties[role],nextRole=b.properties[role];
+      if(nextRole&&source&&!Object.hasOwn(overrides,role)&&!Object.hasOwn(overrides,color)) {
+        if(!replaceMapped(source,nextRole,source.encoding==='theme-resource'))return null;
+        used.add(source.name);
+        // Choosing a semantic role in the Inspector does not rewrite an
+        // authored OLE fallback. Keep that exact fallback while making the
+        // changed role visible in the original consuming XAML expression.
+        if(b.properties[color]!==macos26ColorFallback(nextRole)) {
+          overrides[color]=b.properties[color];overrides[role]=nextRole;overridesChanged=true;
+        }
+      } else {
+        // An explicit native paint relinquishes a semantic binding. Keeping the
+        // override in Designer.Properties preserves its exact OLE system color,
+        // while the compiler removes the old role before applying that override.
+        overrides[color]=b.properties[color];
+        if(Object.hasOwn(b.properties,role))overrides[role]=nextRole;else delete overrides[role];
+        overridesChanged=true;
+      }
+      handled.add(color);handled.add(role);
+    }
     for(const key of properties) {
+      if(handled.has(key))continue;
       const x=a.properties[key],y=b.properties[key];if(same(x,y))continue;
       if(y===undefined)return null;
       if(key==='Name'&&y===b.name)continue;
@@ -163,11 +207,7 @@ export function patchWinUISource(text,before,after,compiled) {
       // property repeatedly or changing its unaffected axes.
       const multiple=source&&Object.values(mapping.properties).filter(p=>p.start===source.start&&p.end===source.end).length>1;
       if(source&&value!==undefined&&!multiple&&!used.has(source.name)&&!Object.hasOwn(overrides,key)) {
-        const uri=source.name.includes('.')?(source.name.startsWith('Designer.')?VB:PRESENTATION_NS):'';
-        const isString=typeof value==='string'&&value.startsWith('{')&&!(source.encoding==='checked'&&value==='{x:Null}');
-        let literal=isString?'{}'+value:String(value);
-        if(source.encoding==='checked'&&value==='{x:Null}')literal='{'+plan.prefix(element,XAML_NS,'x')+':Null}';
-        if(!plan.replaceProperty(element,uri,source.name,literal))return null;
+        if(!replaceMapped(source,value))return null;
         used.add(source.name);
       } else {overrides[key]=y;overridesChanged=true;}
     }

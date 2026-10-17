@@ -8,7 +8,7 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
   scrollbar-color:var(--ide-thumb) var(--vb-face);
 
   & body {font:var(--ide-size)/1.35 var(--ide-font);background:var(--vb-face);color:var(--vb-text);}
-  & :is(.ide-shell,.ide-dialog,.classic-menu:not(.runtime-popup),.classic-tooltip,.property-color-popup) {
+  & :is(.ide-shell,.ide-dialog,.classic-menu:not(.runtime-popup),.classic-tooltip:not(.runtime-tooltip),.property-color-popup) {
     font-family:var(--ide-font);font-size:var(--ide-size);
   }
   & .ide-shell {padding:2px;border:1px solid var(--ide-separator);background:var(--vb-face);box-shadow:none;}
@@ -134,7 +134,7 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
   & .dock-drop-preview {border:2px solid var(--ide-focus);background:color-mix(in srgb,var(--vb-selection) 20%,var(--vb-window));color:var(--vb-window-text);border-radius:var(--ide-radius);}
 
   /* Body portals do not inherit an isolated runtime palette from their opener. */
-  & :is(.classic-menu:not(.runtime-popup),.property-color-popup,.completion-list,.source-info,.source-data-tip,.classic-tooltip) {
+  & :is(.classic-menu:not(.runtime-popup),.property-color-popup,.completion-list,.source-info,.source-data-tip,.classic-tooltip:not(.runtime-tooltip)) {
     border:1px solid var(--ide-border);border-radius:var(--ide-window-radius);background:var(--vb-info);color:var(--vb-info-text);box-shadow:var(--ide-shadow);
     background-image:none;
   }
@@ -144,7 +144,7 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
   & .classic-menu:not(.runtime-popup) .popup-menu-item[aria-disabled=true] {text-shadow:none;color:var(--vb-gray);}
   & .classic-menu:not(.runtime-popup) .menu-separator {height:1px;border:0;background:var(--ide-separator);margin:4px 5px;}
   & .classic-menu:not(.runtime-popup) .menu-checked {border:0;background:transparent;color:inherit;}
-  & .classic-tooltip {padding:5px 8px;font:var(--ide-size)/1.4 var(--ide-font);}
+  & .classic-tooltip:not(.runtime-tooltip) {padding:5px 8px;font:var(--ide-size)/1.4 var(--ide-font);}
   & .property-color-popup {padding:6px;}
   & .system-color-list button {border:0;box-shadow:none;}
   & .system-color-list button[aria-selected=true] {background:var(--vb-selection);color:var(--vb-selection-text);}
@@ -266,7 +266,7 @@ html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) {
   & .classic-menu:not(.runtime-popup) .popup-menu-item {border-radius:5px;height:25px;min-height:25px;padding-inline:8px;}
   & .classic-menu:not(.runtime-popup) .menu-separator {margin:4px 7px;}
   & .classic-menu:not(.runtime-popup) .menu-checked {background:transparent;border:0;box-shadow:none;}
-  & .classic-tooltip {border-radius:6px;box-shadow:0 3px 10px #00000026;}
+  & .classic-tooltip:not(.runtime-tooltip) {border-radius:6px;box-shadow:0 3px 10px #00000026;}
   & :is(.project-tree,.resource-tree) {background:var(--ide-surface);}
   & .project-tree .tree-row {border-radius:5px;}
   & .project-tree .tree-row.selected {background:var(--vb-selection);color:var(--vb-selection-text);}
@@ -310,7 +310,7 @@ html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) {
  & .ide-dialog-footer button:is(.primary,.default-button,[data-default=true]):active {background:var(--detail-default-pressed);filter:none;}
  & .ide-dialog-footer button:disabled {background:var(--detail-command-disabled);color:var(--vb-gray);}
  & :is(.statusbar,.ide-statusbar) {border-top:1px solid var(--ide-separator);background:var(--ide-surface);}
- & .classic-tooltip {background:var(--vb-info);border:1px solid var(--ide-separator);padding:5px 8px;}
+ & .classic-tooltip:not(.runtime-tooltip) {background:var(--vb-info);border:1px solid var(--ide-separator);padding:5px 8px;}
 }
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
  html[data-ide-theme-family="macos26"]:not([data-ide-theme-family="classic"]) :is(.app-title,.browser-window-caption,.classic-menu:not(.runtime-popup)) {background:var(--vb-face);}
@@ -345,7 +345,7 @@ html[data-ide-reduce-motion="true"][data-ide-theme-family]:not([data-ide-theme-f
 }
 @media (forced-colors:active) {
   html[data-ide-theme-family]:not([data-ide-theme-family="classic"]),
-  html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) :is(.classic-menu:not(.runtime-popup),.classic-tooltip,.property-color-popup,.ide-theme-preview) {
+  html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) :is(.classic-menu:not(.runtime-popup),.classic-tooltip:not(.runtime-tooltip),.property-color-popup,.ide-theme-preview) {
     --vb-face:Canvas;--vb-text:CanvasText;--vb-window:Canvas;--vb-window-text:CanvasText;
     --vb-title:Highlight;--vb-title-text:HighlightText;--vb-inactive:Canvas;--vb-inactive-text:CanvasText;
     --vb-selection:Highlight;--vb-selection-text:HighlightText;--vb-info:Canvas;--vb-info-text:CanvasText;--vb-gray:GrayText;
@@ -506,7 +506,7 @@ html[data-ide-theme-family]:not([data-ide-theme-family="classic"]) {
   & :is(fieldset,.classic-tab-pages,.anchor-diagram):not(:where(.designer-scroll *, .vb-form *, .vb-dialog *, .runtime-popup *, .vb-control *, .vb-combo-popup *)) {
    border:1px solid var(--vb-shadow);box-shadow:1px 1px var(--vb-light),inset 1px 1px var(--vb-light);border-radius:0;
   }
-  & .classic-tooltip {border:1px solid var(--vb-text);border-radius:0;box-shadow:1px 1px var(--vb-shadow);padding:2px 4px;}
+  & .classic-tooltip:not(.runtime-tooltip) {border:1px solid var(--vb-text);border-radius:0;box-shadow:1px 1px var(--vb-shadow);padding:2px 4px;}
   & .ide-theme-preview-title {font-weight:700;text-align:center;}
   & .ide-theme-preview-button {border-color:transparent;}
   /* Chromium's standard scrollbar-color overrides its WebKit pseudo-element

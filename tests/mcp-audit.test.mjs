@@ -13,6 +13,7 @@ import {readZip} from '../src/project/zip.js';
 import {fromBase64} from '../src/project/frx.js';
 import {encodeNativeText} from '../src/project/native-text.js';
 import {compileWin32} from '../src/native/compiler.js';
+import {verifyLinuxAOTArchive} from '../packages/linux-native/src/index.js';
 import {mergedProject} from '../src/project/import-merge.js';
 import {createHash} from 'node:crypto';
 
@@ -133,7 +134,7 @@ test('audit tasks: bounded retention, TTL, project revocation and failed-task er
  const b=store.create(()=>{throw new McpError(-32002,'stale');},ctx,authority.signal);await tick();assert.equal(store.get(b.taskId,ctx).error.code,-32602);authority.abort();assert.equal(store.entries.size,0);
 });
 
-for(const target of ['project','html','sources','win32'])test('audit build: immutable checksummed '+target+' bytes and bounded chunk reads',async t=>{
+for(const target of ['project','html','sources','win32','linux'])test('audit build: immutable checksummed '+target+' bytes and bounded chunk reads',async t=>{
  const f=fixture(t);f.ide.project.modules[0].code='';const original=clone(f.ide.project);
  const result=await tool(f,'build.create',{target,expectedRevision:f.adapter.revision});assert.equal(result.valid,true,JSON.stringify(result));const artifact=result.artifact;
  const blocks=[];let offset=0;do {const part=await tool(f,'build.read',{artifactId:artifact.artifactId,offset,count:262144});blocks.push(Buffer.from(part.data,'base64'));assert.equal(part.offset,offset);offset=part.nextOffset;if(!part.hasMore)break;}while(true);
@@ -142,6 +143,13 @@ for(const target of ['project','html','sources','win32'])test('audit build: immu
  if(target==='sources')assert.ok((await readZip(bytes)).size>0);
  if(target==='html')assert.match(bytes.toString(),/<!doctype html>/i);
  if(target==='win32'){assert.equal(bytes.subarray(0,2).toString(),'MZ');assert.deepEqual(bytes,Buffer.from(compileWin32(original).bytes));}
+ if(target==='linux'){
+   await verifyLinuxAOTArchive(bytes,{name:original.name});
+   const files=await readZip(bytes),elf=files.get(original.name+'/bin/'+original.name);
+   assert.equal(Buffer.from(elf.subarray(0,4)).toString(),'\x7fELF');
+   assert.equal(result.report.codegen,'x86_64-aot');assert.equal(result.report.compiled,true);
+   assert.equal(artifact.name,original.name+'-linux-x64.zip');assert.equal(artifact.mimeType,'application/zip');
+ }
  f.ide.project.modules[0].code="'changed";f.ide.markDirty();const again=await tool(f,'build.read',{artifactId:artifact.artifactId,count:20});assert.equal(again.sha256,artifact.sha256);assert.equal(again.sourceRevision,artifact.sourceRevision);
  await tool(f,'build.release',{artifactId:artifact.artifactId});assert.equal((await modern(f,'tools/call',{name:'vb6.build.read',arguments:{artifactId:artifact.artifactId}})).error.code,-32602);
 });
@@ -161,6 +169,17 @@ test('audit build: supported owned Variant values produce a native executable',a
  const f=fixture(t);f.ide.project.modules[0].code='Private Sub Form_Load()\nDim v As Variant\nv = 1\nv = v + 2\nEnd Sub';
  const r=await tool(f,'build.create',{target:'win32',expectedRevision:f.adapter.revision});assert.equal(r.valid,true);assert.ok(r.artifact.size>0);
  const first=await tool(f,'build.read',{artifactId:r.artifact.artifactId,count:2});assert.equal(Buffer.from(first.data,'base64').toString(),'MZ');
+});
+test('audit Linux build: the catalog and schema expose the same native target',async t=>{
+ const f=fixture(t),catalog=await tool(f,'build.targets'),target=catalog.targets.find(item=>item.id==='linux');
+ assert.ok(target);assert.equal(target.graphics,'GTK 3.24/Cairo');
+ assert.ok(f.adapter.tools.find(item=>item.name==='vb6.build.create').inputSchema.properties.target.enum.includes('linux'));
+ const routes=await tool(f,'commands.list');assert.ok(routes.commands.some(item=>item.id==='exportLinux'&&item.tool==='vb6.build.create'));
+});
+test('audit Linux build: unsupported native declarations return diagnostics without allocating an artifact',async t=>{
+ const f=fixture(t);f.ide.project.modules[0].code='Private Declare Function Missing Lib "unavailable" () As Long\nPrivate Sub Form_Load()\nDebug.Print Missing()\nEnd Sub';
+ const result=await tool(f,'build.create',{target:'linux',expectedRevision:f.adapter.revision});
+ assert.equal(result.valid,false);assert.ok(result.diagnostics.length);assert.equal(result.artifact,undefined);assert.deepEqual(f.adapter.inspectArtifacts(),[]);
 });
 function groupFiles(){return [
  {path:'both.vbg',content:'VBGROUP 5.0\r\nProject=a.vbp\r\nProject=b.vbp\r\nStartupProject=a.vbp\r\n'},

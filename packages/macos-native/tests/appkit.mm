@@ -7,6 +7,7 @@ static int clicks=0;
 void checkNativeRecordsetsAppKit(Runtime&, MacHost&, const std::shared_ptr<Instance>&);
 void checkNativePictures(Runtime&, MacHost&, const std::shared_ptr<Instance>&);
 void checkNativeEditing(Runtime&, MacHost&, const std::shared_ptr<Instance>&);
+void checkNativeAppearance(Runtime&, MacHost&, const std::shared_ptr<Instance>&);
 int main(){@autoreleasepool {
   Runtime rt(makeNativeHost());auto&host=dynamic_cast<MacHost&>(*rt.host);
   Module m;m.name="NativeForm";m.kind="form";m.optionExplicit=true;
@@ -28,6 +29,7 @@ int main(){@autoreleasepool {
   checkNativeEditing(rt,host,form);
   checkNativePictures(rt,host,form);
   checkNativeRecordsetsAppKit(rt,host,form);
+  checkNativeAppearance(rt,host,form);
   int32_t old=edit->handle;rt.unload(form);assert(!host.handles.find(old));
   std::cout<<"APPKIT_CONFORMANCE_OK controls="<<types.size()<<"\n";
 }}

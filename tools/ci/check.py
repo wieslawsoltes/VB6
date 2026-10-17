@@ -68,10 +68,32 @@ def audit(root=ROOT):
     if not any(step.get('uses') == 'actions/download-artifact@v4' and
                step.get('with', {}).get('name') == 'compute-native-reference' for step in compute_steps):
         raise ValueError('Compute acceptance must use this run’s native reference artifact')
+    # Python audit files are explicitly invoked, unlike the Node glob. Keep
+    # the reference-admission and GPU-entrypoint regressions in the required
+    # unconditional audit instead of merely shipping an unexecuted test file.
+    if not any(step.get('if') is None and
+               re.search(r'(?m)^\s*python tools/ci/test_tui_acceptance\.py\s*$', step.get('run', ''))
+               for step in jobs['hygiene']['steps']):
+        raise ValueError('TUI reference admission tests must execute in the required audit')
     if jobs['node']['strategy']['matrix']['shard'] != [1, 2, 3, 4]:
         raise ValueError('Node shards must partition all four parts')
-    if '--test-shard="${SHARD}/4" tests/*.test.mjs' not in (root / '.github/workflows/validate.yml').read_text():
-        raise ValueError('Complete Node discovery required')
+    if jobs['node'].get('runs-on') != 'ubuntu-24.04':
+        raise ValueError('Node shards must support execution of the shipped Linux runtime')
+    node_steps = jobs['node']['steps']
+    discovery = [i for i, step in enumerate(node_steps)
+                 if '--test-shard="${SHARD}/4" tests/*.test.mjs' in step.get('run', '')
+                 and 'if' not in step]
+    if len(discovery) != 1:
+        raise ValueError('Complete unconditional Node discovery required in the Node job')
+    if not any('sudo apt-get install -y libgtk-3-0t64' in step.get('run', '').splitlines()
+               and 'if' not in step for step in node_steps[:discovery[0]]):
+        raise ValueError('Node shards must install the Linux GTK runtime before executing tests')
+    linux_node_tests = sorted(p.name for p in (root / 'tests').glob('linux-*.test.mjs') if p.is_file())
+    if not {'linux-aot.test.mjs', 'linux-aot-native.test.mjs', 'linux-package.test.mjs'} <= set(linux_node_tests):
+        raise ValueError('Linux compiler, native execution and package tests must remain discoverable')
+    npm = json.loads((root / 'package.json').read_text())['scripts']
+    if npm.get('test:linux') != 'node --test tests/linux-*.test.mjs':
+        raise ValueError('Linux package test entrypoint must discover every Linux Node test')
     for owner in ('browser', 'figma', 'authoring-exports', 'advanced-editor'):
         if set(jobs[owner]['strategy']['matrix']['browser']) != {'chromium', 'firefox', 'webkit'}:
             raise ValueError('Missing engine: ' + owner)
@@ -88,6 +110,18 @@ def audit(root=ROOT):
         raise ValueError('Missing native AOT platform')
     if jobs['macos-browser-native']['needs'] != ['authoring-exports']:
         raise ValueError('Native execution must depend on browser exports')
+    if jobs.get('linux', {}).get('runs-on') != 'ubuntu-24.04':
+        raise ValueError('Linux GTK AOT must execute on the declared native platform')
+    linux_commands = {step.get('run', '').strip() for step in jobs['linux']['steps'] if 'if' not in step}
+    if not {'npm run test:linux', 'node tools/test-linux-aot.mjs',
+            'node tools/test-linux-aot.mjs --rebuild'} <= linux_commands:
+        raise ValueError('Linux must run package tests and directly qualify both shipped and rebuilt runtimes')
+    if jobs.get('linux-browser-native', {}).get('needs') != ['authoring-exports']:
+        raise ValueError('Linux native execution must consume actual browser exports')
+    if jobs['linux-browser-native'].get('if') != '${{ !cancelled() }}':
+        raise ValueError('Linux browser artifacts must be verified even after an unrelated export-suite failure')
+    if not any(step.get('with', {}).get('pattern') == 'linux-direct-browser-*' for step in jobs['linux-browser-native']['steps']):
+        raise ValueError('Linux execution must use this run\'s browser archives')
     if jobs['advanced-editor']['needs'] != ['advanced-build']:
         raise ValueError('All engines must consume the shared actual editor build')
     suites = json.loads((root / 'tools/ci/suites.json').read_text())
@@ -102,11 +136,19 @@ def audit(root=ROOT):
         for script in scripts:
             if not re.fullmatch(r'[a-z][a-z0-9_-]*\.py', script) or not (root / 'tools' / script).is_file():
                 raise ValueError('Invalid suite entrypoint: ' + script)
+    # The full DOS palette/DPR/runtime matrix needs its own three-engine job.
+    # Combining it with general authoring consumed the shared deadline before
+    # its final comparisons ran. Preserve deadlines and every assertion instead.
+    browser_groups = jobs['browser']['strategy']['matrix']['suite']
+    if 'tui-authoring' not in browser_groups or suites.get('tui-authoring') != ['dos-browser-tests.py']:
+        raise ValueError('Dedicated TUI acceptance partition required')
+    browser_scripts = [script for group in browser_groups for script in suites[group]]
+    if len(browser_scripts) != len(set(browser_scripts)):
+        raise ValueError('Browser partitions may not duplicate any test entrypoint')
     figma_scripts = [script for group in jobs['figma']['strategy']['matrix']['suite'] for script in suites[group]]
     if len(figma_scripts) != len(set(figma_scripts)):
         raise ValueError('Figma partitions may not duplicate any test entrypoint')
     text = '\n'.join(p.read_text() for p in paths)
-    npm = json.loads((root / 'package.json').read_text())['scripts']
     pending = re.findall(r'npm run ([\w:-]+)', text); seen = set()
     while pending:
         name = pending.pop()
@@ -138,7 +180,8 @@ def audit(root=ROOT):
                     parsed = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
                     if parsed.returncode:
                         raise ValueError('Invalid Bash block: ' + parsed.stderr)
-    return {'workflows': len(paths), 'jobDefinitions': len(jobs), 'preservedEntrypoints': len(required), 'suiteGroups': len(suites)}
+    return {'workflows': len(paths), 'jobDefinitions': len(jobs), 'preservedEntrypoints': len(required),
+            'suiteGroups': len(suites), 'linuxNodeTests': linux_node_tests}
 
 
 if __name__ == '__main__':

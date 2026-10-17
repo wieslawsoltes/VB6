@@ -1,6 +1,7 @@
 // Source-level Win32 contracts implemented with AppKit, Foundation and POSIX.
 // This is a checked adapter, not a loader for Windows DLLs or raw Win32 pointers.
 #include "appkit.hpp"
+#include "appkit-appearance.hpp"
 #include "appkit-pixels.hpp"
 #include "file-codec.hpp"
 #include <cerrno>
@@ -87,11 +88,11 @@ int64_t controlMessage(MacHost&host,const std::shared_ptr<MacControl>&control,ui
   if(message==0x0e)return int64_t(textUnits(windowText(host,control),wide));if(message==0x0c){setWindowText(host,control,readText(lp,wide));return 1;}
   if(message==0x10){if(auto owner=control->owner.lock())rt.unload(owner);return 0;}
   if(message==0x0a){control->set(rt,"enabled",Value::boolean(w!=0));return 0;}if(message==0x18){control->set(rt,"visible",Value::boolean(w!=0));return 0;}
-  if(message==0x0f){control->view.needsDisplay=YES;[control->view displayIfNeeded];return 0;}
+  if(message==0x0f){control->view.needsDisplay=YES;control->widget.needsDisplay=YES;[control->view displayIfNeeded];return 0;}
   if(message==0x07){control->invoke(rt,"setfocus",{});return 0;}
   if(message==0x113)return 0; // An un-subclassed form has no WM_TIMER handler.
   if(message==0xf0)return control->get(rt,"value").integral();if(message==0xf1){control->set(rt,"value",Value::integer(w,Type::Integer));return 0;}
-  if(message==0xf5){if([control->widget isKindOfClass:NSButton.class])[(NSButton*)control->widget performClick:nil];else control->event("click");host.check();return 0;}
+  if(message==0xf5){if([control->widget isKindOfClass:NSButton.class])[(NSButton*)control->widget performClick:nil];else if([control->widget isKindOfClass:NSSwitch.class])clickNativeSwitch(*control);else control->event("click");host.check();return 0;}
   if(message==0xb0){auto start=control->get(rt,"selstart").integral(),length=control->get(rt,"sellength").integral();if(wp.reference&&wp.nativeByRef)writeLong(wp,start);if(lp.reference&&lp.nativeByRef)writeLong(lp,start+length);return int64_t(uint32_t((uint32_t(start)&65535)|((uint32_t(start+length)&65535)<<16)));}
   if(message==0xb1){auto size=control->get(rt,"text").string().size();size_t start=w<0?size:std::min(size_t(w),size),end=l<0?size:std::min(size_t(l),size);control->set(rt,"selstart",Value::integer(std::min(start,end)));control->set(rt,"sellength",Value::integer(std::max(start,end)-std::min(start,end)));return 0;}
   if(message==0xc2){control->set(rt,"seltext",Value::string(readText(lp,wide)));return 1;}
@@ -232,7 +233,7 @@ Value MacHost::api(Runtime&rt,const std::string&raw,Args args){
     if(name=="GetClientRect"){if(!c->view)return bad(rt,87);writeInts(a(1),{0,0,int32_t(bankers(c->view.bounds.size.width)),int32_t(bankers(c->view.bounds.size.height))});return Value::integer(1);}
     if(name=="GetWindowRect"){if(!c->view)return bad(rt,87);writeInts(a(1),winRect(screenRect(c)));return Value::integer(1);}
     if(name=="ClientToScreen"||name=="ScreenToClient"){
-      auto point=readInts(a(1),2);NSPoint p=NSMakePoint(point[0],point[1]);if(name=="ClientToScreen"){p=[c->view convertPoint:p toView:nil];p=[c->view.window convertPointToScreen:p];p.y=NSMaxY(NSScreen.mainScreen.frame)-p.y;}else{p.y=NSMaxY(NSScreen.mainScreen.frame)-p.y;p=[c->view.window convertPointFromScreen:p];p=[c->view convertPoint:p fromView:nil];}writeInts(a(1),{int32_t(bankers(p.x)),int32_t(bankers(p.y))});return Value::integer(1);
+      auto point=readInts(a(1),2);NSView*coordinates=c->appearanceContent?:c->view;NSPoint p=NSMakePoint(point[0],point[1]);if(name=="ClientToScreen"){p=[coordinates convertPoint:p toView:nil];p=[coordinates.window convertPointToScreen:p];p.y=NSMaxY(NSScreen.mainScreen.frame)-p.y;}else{p.y=NSMaxY(NSScreen.mainScreen.frame)-p.y;p=[coordinates.window convertPointFromScreen:p];p=[coordinates convertPoint:p fromView:nil];}writeInts(a(1),{int32_t(bankers(p.x)),int32_t(bankers(p.y))});return Value::integer(1);
     }
     if(name=="MoveWindow"||name=="SetWindowPos"){
       size_t offset=name=="SetWindowPos"?2:1;uint32_t flags=name=="SetWindowPos"?u32(a(6).value):0;double x=n(offset),y=n(offset+1),width=n(offset+2),height=n(offset+3);if(width<0||height<0||std::max({std::abs(x),std::abs(y),width,height})>20000)return bad(rt,87);
@@ -248,7 +249,7 @@ Value MacHost::api(Runtime&rt,const std::string&raw,Args args){
       auto previous=api(rt,"user32.GetParent",{a(0)});auto parent=control(i32(a(1).value));if(!parent||!c->view||!parent->container()||parent==c||[parent->container()isDescendantOf:c->view])return bad(rt,87);[c->view removeFromSuperview];[parent->container()addSubview:c->view];return previous;
     }
     if(name=="InvalidateRect"||name=="UpdateWindow"){
-      if(name=="InvalidateRect"&&(a(1).value.type==Type::Record||a(1).value.type==Type::Array)){auto rect=readInts(a(1),4);[c->view setNeedsDisplayInRect:NSMakeRect(rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1])];}else c->view.needsDisplay=YES;if(name=="UpdateWindow")[c->view displayIfNeeded];return Value::integer(1);
+      if(name=="InvalidateRect"&&(a(1).value.type==Type::Record||a(1).value.type==Type::Array)){auto rect=readInts(a(1),4);[c->view setNeedsDisplayInRect:NSMakeRect(rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1])];}else c->view.needsDisplay=YES;c->widget.needsDisplay=YES;if(name=="UpdateWindow")[c->view displayIfNeeded];return Value::integer(1);
     }
     if(name=="DestroyWindow"){if(c->spec.type=="Form"||c->spec.type=="MDIForm")rt.unload(c->owner.lock());else c->dispose();return Value::integer(1);}
     if(name=="SendMessage")return longValue(uint32_t(controlMessage(*this,c,u32(a(1).value),a(2),a(3),wide)));

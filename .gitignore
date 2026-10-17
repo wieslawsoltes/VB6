@@ -68,6 +68,12 @@ packages/vbnet-runtime-windows/obj/
 /dist/vb6-macos.js
 /artifacts/macos-native/
 
+# Reproducible Linux GTK compiler bundles and native build outputs.
+/dist/vb6-linux.js
+/packages/linux-native/dist/
+/artifacts/linux-native/
+/artifacts/linux-aot/
+
 # Reproducible Intelligent UI outputs are fingerprinted, not source.
 src/intelligent-ui/payload.js
 packages/intelligent-ui/dist/

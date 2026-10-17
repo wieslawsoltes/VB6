@@ -4,6 +4,7 @@
 namespace vb6 {
 // Native cell hooks preserve explicit selection across shared-editor attachment.
 NSTextField* nativeTextField(bool secure);
+NSSearchField* nativeSearchField();
 NSComboBox* nativeComboBox();
 bool isNativeEdit(const MacControl&) noexcept;
 Text nativeEditText(MacControl&);

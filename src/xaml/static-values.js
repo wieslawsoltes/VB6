@@ -1,15 +1,18 @@
-import {convertValue,PRESENTATION_NS} from '../../packages/xaml-compiler/src/index.js';
+import {convertValue,PRESENTATION_NS,MACOS26_NS} from '../../packages/xaml-compiler/src/index.js';
 
 export const objectProperties = node => Object.fromEntries((node?.properties ?? []).filter(p=>!p.member.attached).map(p=>[p.member.name,p]));
 const literal = value => ({kind:'Literal',value});
-const propertyKey = member => member.attached ? member.namespaceURI+'#'+member.owner+'.'+member.name : member.name;
+const propertyKey = member => member.aliasFor ?? (member.attached ? member.namespaceURI+'#'+member.owner+'.'+member.name : member.name);
 
 /** Compile-time resources and styles. This is deliberately not a dependency-
- * property runtime: theme resources, external I/O and dynamic setters fail closed.
+ * property runtime: external I/O and unsupported dynamic setters fail closed.
+ * A host can provide a narrowly typed semantic-color resource resolver; the
+ * color token then survives style/brush resolution without freezing appearance.
  * Resource closures belong to their declaration, never to the consuming control.
  */
-export function createStaticValues(compilation) {
+export function createStaticValues(compilation,{themeColor}={}) {
   const schema=compilation.schema;
+  const semanticTokens=new WeakSet();
   const syntax=new Map(compilation.syntax.elements.map(node=>[node.start,node]));
   const namespaces=node=>syntax.get(node.source?.start)?.namespaces ?? {'':PRESENTATION_NS};
   const fail=message=>{throw new TypeError(message);};
@@ -73,15 +76,20 @@ export function createStaticValues(compilation) {
   }
   function constant(value,scopes,active=new Set()) {
     if(value?.kind==='Resource') {
-      if(value.theme)return fail('ThemeResource requires a live theme resource runtime.');
+      const semantic=value.theme?themeColor?.(value.key):undefined;
+      if(value.theme&&!semantic)return fail('ThemeResource '+value.key+' requires a supported live theme resource runtime.');
+      if(semantic)semanticTokens.add(semantic);
       const entry=lookup(value.key,scopes);
-      if(!entry)return fail('Unknown static resource '+value.key+'.');
+      // A local or merged declaration wins over the built-in semantic color.
+      // Its dependency closure is evaluated at its declaration, just as for
+      // StaticResource. A binding/template shadow still fails closed below.
+      if(!entry)return semantic ?? fail('Unknown static resource '+value.key+'.');
       if(active.has(entry))return fail('Cyclic static resources: '+value.key+'.');
       if(active.size>=64)return fail('Static resource dependency depth exceeds 64.');
       active.add(entry);
       try{return constant(entry.value,entry.scopes,active);}finally{active.delete(entry);}
     }
-    if(value?.kind==='Literal')return structuredClone(value.value);
+    if(value?.kind==='Literal')return semanticTokens.has(value.value)?value.value:structuredClone(value.value);
     if(value?.kind==='Object'&&value.type.namespaceURI===PRESENTATION_NS&&value.type.name==='SolidColorBrush') {
       const p=objectProperties(value);
       if(value.properties.some(p=>!['Color','Opacity'].includes(p.member.name))||p.Opacity&&constant(p.Opacity.value,scopes,active)!==1)return fail('Brush opacity and transforms cannot be discarded by the VB6 target.');
@@ -91,6 +99,10 @@ export function createStaticValues(compilation) {
   }
   function convert(value,member,scopes) {
     const raw=constant(value,scopes);
+    if(semanticTokens.has(raw)) {
+      if(!['Brush','Color'].includes(member.type))return fail('macOS semantic ThemeResource colors require a brush/color property.');
+      return raw;
+    }
     // Typed primitive resource objects already contain arrays/GridLengths. Do not
     // stringify them through a second type converter.
     if(Array.isArray(raw)&&['Thickness','CornerRadius','Point','DoubleCollection'].includes(member.type))return raw;
@@ -120,7 +132,8 @@ export function createStaticValues(compilation) {
         const name=p.Property?.value?.value;
         if(typeof name!=='string'||!p.Value)return fail('A Setter requires Property and Value.');
         const member=schema.member(styleType,name,namespaces(setter));
-        if(!member||member.kind==='event'||member.collection||member.dictionary||member.attached&&member.namespaceURI!==PRESENTATION_NS||['Name','Style','Resources','Children','Child'].includes(member.name))return fail('Unsupported style setter '+name+'.');
+        const safeAttached=member?.namespaceURI===PRESENTATION_NS||member?.namespaceURI===MACOS26_NS&&['Appearance','Accessibility'].includes(member.owner);
+        if(!member||member.kind==='event'||member.collection||member.dictionary||member.attached&&!safeAttached||['Name','Style','Resources','Children','Child'].includes(member.name))return fail('Unsupported style setter '+name+'.');
         const key=propertyKey(member);
         if(own.has(key))return fail('Duplicate style setter '+name+'.');
         own.add(key);

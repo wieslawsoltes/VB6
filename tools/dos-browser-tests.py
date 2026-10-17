@@ -13,6 +13,7 @@ from dos_runtime_checks import run_runtime_checks
 from dos_boundary_checks import run_boundary_checks
 from dos_extended_checks import run_extended_checks
 from dos_fidelity_checks import run_fidelity_checks
+from dos_precision_checks import run_precision_checks
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = os.environ.get('VB6_BROWSER', 'chromium')
@@ -165,6 +166,7 @@ try:
     results['extended_checks'] = run_extended_checks(browser, ROOT, REPORT, page.evaluate('vb6Studio.project'))
     results['boundary_checks'] = run_boundary_checks(browser, ROOT, REPORT, page.evaluate('vb6Studio.project'))
     results['fidelity_matrix'] = run_fidelity_checks(browser, ROOT, REPORT)
+    results['precision'] = run_precision_checks(browser, ROOT, REPORT)
     results['passed'] = True
     browser.close()
 except Exception:

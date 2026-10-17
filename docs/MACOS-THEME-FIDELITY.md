@@ -174,8 +174,8 @@ match, no browser errors/external requests occurred, and no adaptation gaps
 remain. Even that certificate is scoped to the captured view/control inventory,
 not every native framework, third-party OCX, or WindowServer surface.
 
-The current browser fixture explicitly records unresolved adaptations: VB6 has
-no intrinsic NSSearchField; HTML date entry uses the browser's locale/picker;
+The native-comparison browser fixture explicitly records unresolved adaptations:
+its legacy search sample has no intrinsic NSSearchField; HTML date entry uses the browser's locale/picker;
 and native AppKit non-client dimensions differ from the preserved VB6 window
 contract. Native glyph rasterization, segmented/tab geometry and full compositor
 materials also require further comparison rather than an unsupported 100%
@@ -299,3 +299,114 @@ still contain the identical worker source and use one bounded document-owned
 Blob URL. Cross-origin scripts never select an external worker; worker failures
 still take the existing yielding parser fallback. Cancellation, stale-message
 rejection, pagehide suspension and restoration remain covered by lifecycle tests.
+
+## macOS 26 semantic authoring and IDE surfaces
+
+The macOS 26 compatibility extension adds a shared resource dictionary and
+explicit authoring properties for existing controls. `macos26-resources.js`
+separates the measured AppKit colors from additional independently authored
+browser resources. The CSS generator binds every color, state, material and size
+token at every application/IDE palette boundary, including non-macOS boundaries
+where those tokens become invalid. An embedded Classic form therefore does not
+inherit its containing Mac window's switch, search or material paint.
+
+The design references are Apple's
+[AppKit adoption session](https://developer.apple.com/videos/play/wwdc2025/310/),
+[new design system session](https://developer.apple.com/videos/play/wwdc2025/356/),
+and the linked [macOS 26 Figma design resource](https://www.figma.com/community/file/1543337041090580818/apple-design-resources-macos-26).
+The Figma URL is retained as a reference; its design file, artwork, fonts and
+symbols have not been imported. The new resource values and effects are CSS
+implementation choices, not values extracted from that kit.
+
+### IDE hierarchy
+
+Command bars use grouped capsule surfaces. Contiguous command buttons share a
+visual group; separators divide the groups without inserting wrappers or
+changing keyboard order. The leading docked sidebar has a floating rounded pane,
+while the trailing property inspector remains aligned with the document edge.
+Property groups, tree selection, editor/document tabs, tooltips, context menus,
+floating command bars, utility dialogs, and agent/MCP panels use the same local
+semantic roles. Editor text, document data, and designer artwork remain sharp.
+
+Delegated `ToolTipText` overlays retain the opening application's local palette,
+font and accessibility preferences after moving into the document overlay.
+They follow live application theme changes and release that binding when hidden.
+IDE command tooltips follow the IDE palette independently. The browser theme
+suite checks both ownership paths, including Classic help inside every optional
+IDE theme and live macOS light/dark changes while a tooltip remains open.
+
+Chrome materials use bounded backdrop filtering. Reduced transparency,
+increased contrast, forced colors and a missing backdrop-filter implementation
+switch those surfaces to opaque resources. Each bar/pane owns its filter;
+individual toolbar buttons do not allocate separate filters. This implements the
+documented hierarchy with browser compositing; it does not reproduce
+WindowServer refraction, wallpaper sampling or NSGlassEffectContainerView's
+optical interaction between overlapping glass elements.
+
+### Authored appearance properties
+
+| Property | Values / behavior |
+| --- | --- |
+| `MacOSControlSize` | `mini`, `small`, `regular`, `large`, `extraLarge`; changes inner command padding/corners, preserving the authored outer rectangle. Large and extra-large commands use capsules. |
+| `MacOSControlStyle` | Command styles: `automatic`, `push`, `default`, `destructive`, `borderless`, `inline`, `circular`, `help`. CheckBox additionally accepts `switch`; TextBox accepts `search`. |
+| `MacOSMaterial` | `none`, `content`, `sidebar`, `titlebar`, `toolbar`, `menu`, `popover`, `sheet`, `hud` on supported containers. `content` is opaque. |
+| `MacOSBackgroundRole`, `MacOSForegroundRole` | Explicit semantic color names such as `windowBackgroundColor`, `controlAccentColor`, `labelColor`, `secondaryLabelColor`, and `separatorColor`. |
+| `PlaceholderText` | Placeholder for TextBox or editable ComboBox. |
+| `MacOSAccessibilityLabel`, `MacOSAccessibilityHelp`, `MacOSAccessibilityIdentifier` | Stable accessible naming and authoring metadata. |
+| `MacOSIndeterminate` | ProgressBar `0`/`-1`; unknown progress uses a moving bounded segment and omits a falsely precise accessible current value. |
+
+The regular command painter retains the existing 6px/8px corner radii and 4px/9px
+padding used by the native-reference fixture. The other preferred sizes do not
+overwrite twip bounds or authored fonts. A circular command should be authored
+with a square rectangle when an actual circle is required. Destructive commands
+use a secondary red tint and ink so the default action retains greater visual
+prominence. A visual default style should be paired with `Default = True` (or
+`IsDefault="True"` in XAML) when Return should invoke it.
+
+Search retains the original text input, IME state, selection and event path. Its
+magnifier is decorative; its named clear button and unmodified Escape clear the
+same value. Switching presentation does not create a second editable value.
+The switch retains the original checkbox input. The VB6 mixed value keeps
+checkbox accessibility semantics and paints a centered thumb. A moving progress
+segment becomes stationary under reduced motion; it remains partially filled
+instead of suggesting completion.
+
+Explicit RGB still uses the ordinary authored paint. A compatible default
+system-color pair can participate in a material or state brush. Assigning a new
+`BackColor` or `ForeColor` relinquishes the corresponding semantic role unless
+the same edit explicitly supplies the new role.
+
+### XAML authoring
+
+`urn:vb6:macos26` is this project's macOS-shaped authoring vocabulary. It maps to
+the existing VB6 control model; it is not an implementation of the AppKit or
+SwiftUI API/ABI. For stacks and grids, enable the project's XAML and anchoring
+settings.
+
+```xml
+<mac:Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+            xmlns:mac="urn:vb6:macos26"
+            x:Name="Form1" Title="Settings">
+  <mac:StackView Width="360" Height="200" Spacing="12">
+    <mac:SearchField x:Name="Search" StringValue=""
+                     PlaceholderString="Filter settings"
+                     mac:Accessibility.Label="Search settings" />
+    <mac:Switch x:Name="Enabled" Title="Enable feature" IsOn="True" />
+    <mac:Button x:Name="Apply" Title="Apply"
+                ControlSize="large" ControlStyle="default"
+                IsDefault="True" Action="Apply_Click" />
+  </mac:StackView>
+</mac:Window>
+```
+
+Existing presentation/VB6 controls can use `mac:Appearance.ControlSize`,
+`mac:Appearance.ControlStyle`, `mac:Appearance.Material`, and the semantic role
+properties. Intrinsic `{ThemeResource macOS.labelColor}` and other supported
+roles remain live on Background/Foreground instead of being frozen to the
+appearance in effect at compilation time.
+
+The extension's semantic/state and accessibility contracts are covered by
+`tests/macos26-theme.test.mjs` together with the runtime/compiler integration
+suites. These checks extend the existing native-reference checks; they do not
+relabel the native comparison fixture's unresolved optical/raster differences.

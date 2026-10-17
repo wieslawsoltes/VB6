@@ -1,3 +1,4 @@
+import {MACOS26_COLOR_ROLES,macos26Resource} from '../theme/macos26-resources.js';
 import {notifyControlPaint} from '../rendering/invalidation.js';
 import {GPURasterPresenter} from '../../packages/win32-browser/src/gpu-presenter.js';
 import { colorValue, getTheme } from '../theme/theme.js';
@@ -55,7 +56,9 @@ export class GraphicsSurface extends RetainedGraphics {
     this.resizeObserver=new this.themeDocument.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(container);
     this.resize();if(backend!=='canvas2d')this.gpuReady=this.initializeGPU();else this.reportBackend('Canvas2D');
   }
-  get background(){return this._background;}
+  get background(){const t=getTheme(this.theme);return this._backgroundRole&&t.family==='macos26'?macos26Resource(this._backgroundRole,t.scheme):this._background;}
+  get backgroundRole(){return this._backgroundRole||'';}
+  set backgroundRole(value){if(value!==''&&!Object.hasOwn(MACOS26_COLOR_ROLES,value))throw new TypeError('Unknown macOS background role');if(value!==this.backgroundRole){this._backgroundRole=value;this.invalidate();}}
   set background(value){value=graphicsColor(value);if(value!==this._background){this._background=value;this.invalidate();}}
   bindDocument(){this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.themeDocument.fonts?.addEventListener('loadingdone',this.fontsChanged);}
   unbindDocument(){this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);this.themeDocument.fonts?.removeEventListener('loadingdone',this.fontsChanged);}
@@ -116,7 +119,12 @@ export class GraphicsSurface extends RetainedGraphics {
     this.unbindDocument();this.themeDocument=document;this.bindDocument();this.theme=getTheme(this.container).id;
     this.resizeObserver.disconnect();this.resizeObserver=new document.defaultView.ResizeObserver(()=>this.scheduleResize());this.resizeObserver.observe(this.container);
     if(changed){
-      this.dropRasterCaches();this.colorContext=null;this.colorCache=null;this.vertexData=null;this.releaseGPU();
+      this.dropRasterCaches();this.colorContext=null;this.colorCache=null;
+      // Color resolution and device resources belong to the adopted document.
+      // Retire payload AND validity keys together: unchanged dimensions/theme
+      // must not return a null vertex payload from the former document's cache.
+      this.vertexData=this.vertexCommands=this.vertexKey=null;
+      this.triangleCommands=this.triangleKey=null;this.releaseGPU();
       if(this.requestedBackend!=='canvas2d')this.gpuReady=this.initializeGPU();
     }
     this.resize();
@@ -157,7 +165,7 @@ export class GraphicsSurface extends RetainedGraphics {
   }
   vertices(){
     const key=[this.commands.length,this.width,this.height,this.grid,this.theme,this.replayEpoch].join(':');
-    if(this.vertexCommands===this.commands&&this.vertexKey===key)return this.vertexData;
+    if(this.vertexData&&this.vertexCommands===this.commands&&this.vertexKey===key)return this.vertexData;
     const grid=this.grid?Math.ceil(this.width/this.grid)*Math.ceil(this.height/this.grid):0;
     if(this.commands.length+grid>58000)throw new RangeError('Graphics triangle budget exceeded');
     const data=new Float32Array((this.commands.length+grid)*36);let offset=0;

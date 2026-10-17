@@ -14,7 +14,7 @@ class Root extends EventTarget{
  getAttribute(n){return this.attributes.get(n)??null;}setAttribute(n,v){this.writes++;this.attributes.set(n,v);}removeAttribute(n){this.attributes.delete(n);}
  closest(){return this;}
 }
-function environment(){const view=new EventTarget(),media=new EventTarget();media.matches=false;view.matchMedia=()=>media;view.CustomEvent=CustomEvent;const doc={defaultView:view};doc.documentElement=new Root(doc);return {doc,view,media,root:new Root(doc)};}
+function environment(){const view=new EventTarget(),media=new EventTarget(),queries=new Map();media.matches=false;queries.set('(prefers-color-scheme: dark)',media);view.matchMedia=query=>{if(!queries.has(query))queries.set(query,Object.assign(new EventTarget(),{matches:false}));return queries.get(query);};view.CustomEvent=CustomEvent;const doc={defaultView:view};doc.documentElement=new Root(doc);return {doc,view,media,root:new Root(doc)};}
 const ids=Object.keys(PLATFORM_THEMES);
 test('application themes share the immutable complete platform registry, with Classic as default',()=>{
  assert.equal(Object.keys(THEMES).length,9);assert.deepEqual(Object.keys(CLASSIC_THEMES),['classic','standard','contrast']);

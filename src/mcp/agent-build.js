@@ -6,6 +6,7 @@ import {validateWorkspace} from '../project/native-project.js';
 import {writeZip} from '../project/zip.js';
 import {toBase64} from '../project/frx.js';
 import {compileWin32, NativeCompileError} from '../native/compiler.js';
+import {exportLinuxApplication, LinuxCompileError} from '../../packages/linux-native/src/index.js';
 import {exportApplication} from '../exporter/exporter.js';
 import {McpError, checkAbort, randomToken} from './protocol.js';
 import {S, N, E, REV} from './agent-schema.js';
@@ -30,11 +31,12 @@ export function installBuildTools(ide, adapter, {add, output, consent, commit, c
   const metadata = item => ({artifactId: item.id, manifestUri: 'vb6://build/' + item.id, name: item.name, mimeType: item.mimeType, size: item.bytes.length, sha256: item.sha256, sourceRevision: item.sourceRevision, expiresAt: item.expiresAt});
   add('build.targets', 'Describe build/export targets. Building returns inert bytes; desktop packaging and the licensed classic compiler require their local CLI.', {}, [], () => output({
     targets: [{id: 'project', format: 'JSON', extension: '.vb6web'}, {id: 'html', format: 'standalone application HTML', extension: '.html'},
-      {id: 'sources', format: 'native source/project group ZIP', extension: '.zip'}, {id: 'win32', format: 'freestanding x86 PE32', extension: '.exe', graphics: 'native controls/GDI', compatibility: 'Existing native compiler subset; unsupported constructs return diagnostics.'}],
+      {id: 'sources', format: 'native source/project group ZIP', extension: '.zip'}, {id: 'win32', format: 'freestanding x86 PE32', extension: '.exe', graphics: 'native controls/GDI', compatibility: 'Existing native compiler subset; unsupported constructs return diagnostics.'},
+      {id: 'linux', format: 'native x86-64 ELF application ZIP', extension: '-linux-x64.zip', graphics: 'GTK 3.24/Cairo', compatibility: 'Direct native AOT using the shared VB6 runtime; requires Linux x86-64 with the archive-listed system libraries.'}],
     localOnly: ['Electron/WebGPU desktop packaging: npm run build:windows', 'Licensed Microsoft VB6 compiler: npm run build:classic'],
     maxArtifactBytes: maxBytes, maxRetainedArtifacts: 8, ttlMs, chunkBytes: 262144
   }));
-  add('build.create', 'Build an immutable project, HTML, source ZIP or native Win32 EXE artifact. Requires the snapshot revision; does not execute project code. Read its exact bytes in chunks with build.read.', {target: E(['project','html','sources','win32']), expectedRevision: REV}, ['target','expectedRevision'], async (args, ctx) => {
+  add('build.create', 'Build an immutable project, HTML, source ZIP, Win32 EXE or Linux GTK AOT application ZIP. Requires the snapshot revision; does not execute project code. Read its exact bytes in chunks with build.read.', {target: E(['project','html','sources','win32','linux']), expectedRevision: REV}, ['target','expectedRevision'], async (args, ctx) => {
     checkRevision(args.expectedRevision); checkAbort(ctx.signal); purge(); ctx.reportProgress?.(0.2,1,'Preparing build snapshot');
     const epoch = adapter.authorityEpoch, sourceRevision = adapter.revision, project = clone(ide.project);
     let data, report, mimeType, extension;
@@ -42,6 +44,13 @@ export function installBuildTools(ide, adapter, {add, output, consent, commit, c
       try { const result = compileWin32(project); data = result.bytes; report = result.report; }
       catch (error) { if (!(error instanceof NativeCompileError)) throw error; return output({valid: false, sourceRevision, diagnostics: [{severity: 'error', message: error.message, module: error.module, line: error.line}]}); }
       extension = '.exe'; mimeType = 'application/vnd.microsoft.portable-executable';
+    } else if (args.target === 'linux') {
+      try {const result = await exportLinuxApplication(project, {}, {signal: ctx.signal}); data = result.bytes; report = result.report;}
+      catch (error) {
+        if (!(error instanceof LinuxCompileError)) throw error;
+        return output({valid: false, sourceRevision, diagnostics: error.diagnostics || [{severity: 'error', message: error.message, module: error.module, line: error.line}]});
+      }
+      extension = '-linux-x64.zip'; mimeType = 'application/zip';
     } else if (args.target === 'sources') { data = writeZip(sourceFiles(project)); extension = '.zip'; mimeType = 'application/zip'; }
     else if (args.target === 'html') { data = exportApplication(project); extension = '.html'; mimeType = 'text/html'; }
     else { data = JSON.stringify(project, null, 2); extension = '.vb6web'; mimeType = 'application/json'; }

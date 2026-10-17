@@ -4,4 +4,6 @@ import {parseBindingPath,evaluateBindingPath,assignBindingPath,bindingDependenci
 import {compileXaml,emitXamlModule} from './compiler.js';
 import {instantiateXaml,createObjectHost} from './runtime.js';
 import {XamlLanguageService,formatXaml} from './language-service.js';
+import {MACOS26_NS,MACOS26_CONTROL_SIZES,MACOS26_CONTROL_STYLES,MACOS26_MATERIALS,MACOS26_SEMANTIC_COLORS,MACOS26_CONTROLS,registerMacOS26Schema,createMacOS26Schema} from './macos26.js';
+export {MACOS26_NS,MACOS26_CONTROL_SIZES,MACOS26_CONTROL_STYLES,MACOS26_MATERIALS,MACOS26_SEMANTIC_COLORS,MACOS26_CONTROLS,registerMacOS26Schema,createMacOS26Schema};
 export {XAML_NS,PRESENTATION_NS,XML_NS,XMLNS_NS,MC_NS,DESIGN_NS,SourceText,diagnostic,qualifiedName,isXmlName,validXmlChar,xmlSpace,decodeXml,escapeXml,parseXaml,parseMarkupExtension,walkElements,applyTextEdits,XamlSchemaContext,createWinUISchema,convertValue,safeMember,parseBindingPath,evaluateBindingPath,assignBindingPath,bindingDependencies,compileXaml,emitXamlModule,instantiateXaml,createObjectHost,XamlLanguageService,formatXaml};

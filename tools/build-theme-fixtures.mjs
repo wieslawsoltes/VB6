@@ -1,12 +1,17 @@
 /** Test-only owned assets. Built into reports, never injected into user projects. */
 import fs from 'node:fs';
 import {applicationThemeGallery} from '../tests/fixtures/application-theme-gallery.mjs';
+import {macos26CompatibilityGallery,MACOS26_COMPAT_XAML} from '../tests/fixtures/macos26-compat-gallery.mjs';
 import {exportApplication,jsonForHTML} from '../src/exporter/exporter.js';
 import {ICON_NAMES,CONTROL_ICON_TYPES,iconSVG} from '../src/theme/icons.js';
 import {THEMES} from '../src/theme/theme.js';
 const root=new URL('../reports/application-themes/fixtures/',import.meta.url);fs.mkdirSync(root,{recursive:true});
 fs.writeFileSync(new URL('gallery.html',root),exportApplication(applicationThemeGallery(),{persist:false}));
 fs.writeFileSync(new URL('gallery.json',root),JSON.stringify(applicationThemeGallery()));
+const macos26=macos26CompatibilityGallery();
+fs.writeFileSync(new URL('macos26-compat.html',root),exportApplication(macos26,{persist:false}));
+fs.writeFileSync(new URL('macos26-compat.json',root),JSON.stringify(macos26));
+fs.writeFileSync(new URL('macos26-compat.xaml',root),MACOS26_COMPAT_XAML);
 fs.writeFileSync(new URL('palettes.json',root),JSON.stringify(THEMES));
 const mdi=JSON.parse(fs.readFileSync(new URL('../examples/mdi.vb6web',import.meta.url),'utf8'));mdi.settings.renderer='canvas2d';
 fs.writeFileSync(new URL('mdi.html',root),exportApplication(mdi,{persist:false}));

@@ -15,7 +15,7 @@ function declaredNames(compilation) {
   for (const node of compilation.nodes) {
     if (!node.name) continue;
     const element = elements.get(node.source.start);
-    for (const attr of element.attributes) if (attr.namespaceURI === XAML_NS && attr.localName === 'Name' || !attr.namespaceURI && attr.name === compilation.schema.runtimeNameProperty(compilation.schema.getType(node.type.namespaceURI,node.type.name))) {
+    for (const attr of element.attributes) if (attr.namespaceURI === XAML_NS && attr.localName === 'Name' || (!attr.namespaceURI||attr.namespaceURI===element.namespaceURI) && attr.localName === compilation.schema.runtimeNameProperty(compilation.schema.getType(node.type.namespaceURI,node.type.name))) {
       result.push({kind:'name',name:node.name,scope:node.scope,...valueRange(attr),declaration:true});
     }
   }
@@ -32,11 +32,11 @@ function occurrences(compilation) {
       const walk = markup => {
         if (markup.kind !== 'MarkupExtension') return;
         const uri = e.namespaces[markup.prefix] ?? '';
-        if (uri === PRESENTATION_NS && ['StaticResource','ThemeResource'].includes(markup.localName)) {
+        if (compilation.schema.markupExtensionNamespaces.has(uri) && ['StaticResource','ThemeResource'].includes(markup.localName)) {
           const arg = markup.arguments.find(arg => arg.name === 'ResourceKey' || arg.name === null)?.value;
           if (arg?.kind === 'Literal') result.push({kind:'resource',name:arg.value,scope:0,start:arg.start,end:arg.end,encoded:a.rawValue !== a.value});
         }
-        if (uri === PRESENTATION_NS && markup.localName === 'Binding') {
+        if (compilation.schema.markupExtensionNamespaces.has(uri) && markup.localName === 'Binding') {
           const arg = markup.arguments.find(arg => arg.name === 'ElementName')?.value;
           if (arg?.kind === 'Literal') result.push({kind:'name',name:arg.value,scope,start:arg.start,end:arg.end,encoded:a.rawValue !== a.value});
         }
@@ -94,7 +94,12 @@ export class XamlLanguageService {
     const suggestions = [], add = (label,kind,detail,insertText = label,range = {start,end:offset}) => suggestions.push({label,kind,detail,insertText,range:d.source.range(range.start,range.end),start:range.start,end:range.end});
     if (attr) {
       const member = type && this.schema.member(type,attr.name,element.namespaces), valuePrefix = d.text.slice(attr.valueStart,offset);
-      if (/\{(?:\w+:)?(?:StaticResource|ThemeResource)\s+[^}]*$/.test(valuePrefix)) for (const s of occurrences(c).filter(s => s.declaration && s.kind === 'resource')) add(s.name,'value','Resource key');
+      const resource=/\{(?:\w+:)?(StaticResource|ThemeResource)\s+[^}]*$/.exec(valuePrefix);
+      if (resource) {
+        const seen=new Set();
+        for (const s of occurrences(c).filter(s => s.declaration && s.kind === 'resource')) {if(!seen.has(s.name))add(s.name,'value','Resource key');seen.add(s.name);}
+        if(resource[1]==='ThemeResource')for(const key of this.schema.themeResourceKeys)if(!seen.has(key))add(key,'value','Semantic theme resource');
+      }
       else if (/(?:Mode|DefaultBindMode)\s*=\s*[^,}]*$/.test(valuePrefix) || attr.namespaceURI === XAML_NS && attr.localName === 'DefaultBindMode') for (const mode of ['OneTime','OneWay','TwoWay']) add(mode,'value','Binding mode');
       else if (/ElementName\s*=\s*[^,}]*$/.test(valuePrefix)) for (const s of declaredNames(c)) add(s.name,'reference','Named element');
       else {
@@ -127,7 +132,7 @@ export class XamlLanguageService {
     const d = this.document(uri), offset = typeof position === 'number' ? position : d.source.offsetAt(position), c = this.analyze(uri), element = nodeAt(c.syntax,offset), type = typeFor(this.schema,c.syntax,element);
     if (!element || !type) return null;
     const attr = element.attributes.find(a => inSpan(offset,a)), member = attr && this.schema.member(type,attr.name,element.namespaces);
-    const text = attr ? member ? `${member.owner}.${member.name}: ${member.type}${member.collection?' collection':''}${member.attached?' (attached)':''}${member.kind==='event'?' (event)':''}${member.values?'\n'+member.values.join(' | '):''}` : attr.namespaceURI === XAML_NS ? `XAML directive ${attr.name}` : null : `${type.name}${type.base?' : '+(typeof type.base==='string'?type.base:type.base.name):''}\n${type.namespaceURI}`;
+    const text = attr ? member ? `${member.owner}.${member.name}: ${member.type}${member.collection?' collection':''}${member.attached?' (attached)':''}${member.kind==='event'?' (event)':''}${member.aliasFor?' (alias for '+member.aliasFor+')':''}${member.values?'\n'+member.values.join(' | '):''}` : attr.namespaceURI === XAML_NS ? `XAML directive ${attr.name}` : null : `${type.name}${type.base?' : '+(typeof type.base==='string'?type.base:type.base.name):''}\n${type.namespaceURI}`;
     return text ? {contents:{kind:'plaintext',value:text},range:d.source.range(attr?.start ?? element.nameStart,attr?.end ?? element.nameEnd)} : null;
   }
   references(uri, position, includeDeclaration = true) {

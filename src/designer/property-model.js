@@ -1,3 +1,4 @@
+import {validateMacOS26Properties,clearMacOS26ColorRoles,macos26PropertyDefaults,MACOS26_PROPERTIES} from '../theme/macos26-compat.js';
 /** Pure, atomic designer property edits shared by property grids and gestures. */
 import {CONTROL_DEFAULTS} from '../project/model.js';
 import {activeTab, checkedTab, controlParents, materializeTabPages, setTabCount, setTabEntry, tabEntries, tabPagePlan} from '../controls/tab-model.js';
@@ -8,8 +9,9 @@ const common = {Left: 0, Top: 0, Width: 1800, Height: 450, Enabled: -1, Visible:
 const tabKeys = new Set(['Tab', 'Tabs', 'Caption', 'Picture', 'TabEnabled', 'TabVisible', 'TabOrientation', 'TabsPerRow', 'TabHeight', 'TabMaxWidth', 'Style']);
 const geometry = new Set(['Left', 'Top', 'Width', 'Height']);
 
-export function designerPropertyValues(control, form = null, plan = null) {
-  const values = {...(control === form ? {} : common), ...CONTROL_DEFAULTS[control.type], ...control.properties, Name: control.name};
+export function designerPropertyValues(control, form = null, plan = null, options = {}) {
+  const macos=options.macos26===true||MACOS26_PROPERTIES.some(key=>Object.hasOwn(control.properties||{},key));
+  const values = {...(macos?macos26PropertyDefaults(control.type):{}),...(control === form ? {} : common), ...CONTROL_DEFAULTS[control.type], ...control.properties, Name: control.name};
   if (control !== form && !tabOrderEligible(control)) {delete values.TabIndex; delete values.TabStop;}
   if (control.type === 'SSTab') {
     const entries = plan?.owners.get(control.id)?.entries || tabEntries(control), page = activeTab(control), entry = entries[page];
@@ -37,10 +39,12 @@ export function editDesignerProperties(form, ids, changes) {
   if (!form || !ids.length || ids.includes(form.id)) return null;
   const targets = form.controls.filter(c => ids.includes(c.id)), keys = Object.keys(changes);
   if (!targets.length || keys.some(k => k === 'Name' || /^(?:Anchor|Dock|Layout)/.test(k))) return null;
-  if (!keys.some(key => ['TabIndex', 'TabPage', 'Index'].includes(key) || geometry.has(key) || targets.some(c => c.type === 'SSTab' && tabKeys.has(key) || collectionDefinition(c, key)))) return null;
+  if (!keys.some(key => MACOS26_PROPERTIES.includes(key)||['BackColor','ForeColor'].includes(key)||['TabIndex', 'TabPage', 'Index'].includes(key) || geometry.has(key) || targets.some(c => c.type === 'SSTab' && tabKeys.has(key) || collectionDefinition(c, key)))) return null;
   const next = structuredClone(form), selected = next.controls.filter(c => ids.includes(c.id));
   materializeTabPages(next);
   for (const target of selected) {
+    validateMacOS26Properties({...target.properties,...changes},target.type);
+    clearMacOS26ColorRoles(target.properties,changes);
     for (const [key, value] of Object.entries(changes).sort(([a], [b]) => (a === 'Tabs' ? -2 : a === 'Tab' ? -1 : 0) - (b === 'Tabs' ? -2 : b === 'Tab' ? -1 : 0))) {
       const p = target.properties;
       if (key === 'TabIndex') continue;

@@ -1,6 +1,7 @@
 // Native collection-backed controls: tables, outline trees, tabs and command bars.
 #include "appkit.hpp"
 #include "appkit-recordsets.hpp"
+#include "appkit-appearance.hpp"
 namespace vb6 {
 std::shared_ptr<MacItems>MacControl::items(const std::string&raw){auto name=lower(raw);auto found=collections.find(name);if(found!=collections.end())return found->second;auto collection=std::make_shared<MacItems>(name);collection->owner=self();collections[name]=collection;return collection;}
 static Text itemText(const MacItem&item,const std::string&name="text"){auto it=item.properties.find(name);return it==item.properties.end()?Text():it->second.string();}
@@ -26,6 +27,7 @@ void MacItems::changed(){
     for(NSView*view in c->widget.subviews.copy)[view removeFromSuperview];double x=0;size_t i=0;
     for(auto&item:items){auto button=[NSButton new];button.title=ns(captionText(itemText(*item)));button.bordered=kind=="buttons";button.bezelStyle=NSBezelStyleRounded;button.target=c->delegate;button.action=@selector(itemAction:);button.tag=NSInteger(i++);button.enabled=itemFlag(*item,"enabled",true);button.hidden=!itemFlag(*item,"visible",true);button.state=itemFlag(*item,"value")?NSControlStateValueOn:NSControlStateValueOff;
       if(item->properties.count("style")&&item->properties.at("style").integral()==2)[button setButtonType:NSButtonTypePushOnPushOff];
+      applyNativeItemAppearance(*c,button);
       double width=item->properties.count("width")?item->properties.at("width").floating()/15:kind=="panels"?std::max(80.0,c->widget.bounds.size.width/std::max(size_t(1),items.size())):std::max(28.0,double(button.intrinsicContentSize.width));
       button.frame=NSMakeRect(x,0,width,c->widget.bounds.size.height);button.autoresizingMask=NSViewHeightSizable;[c->widget addSubview:button];x+=width;
     }
@@ -138,6 +140,12 @@ Value MacItem::invoke(Runtime&rt,const std::string&raw,Args args){
     c->event("aftercoledit",{vb6::Arg(vb6::Value::integer(col,vb6::Type::Integer))});});
 }
 -(CGFloat)tableView:(NSTableView*)table heightOfRow:(NSInteger)row{if(auto c=model.lock()){auto found=c->rowHeights.find(int(row));if(found!=c->rowHeights.end())return found->second;}return table.rowHeight;}
+-(void)tableView:(NSTableView*)table willDisplayCell:(id)cell forTableColumn:(NSTableColumn*)column row:(NSInteger)row{
+  (void)column;auto c=model.lock();if(!c||![cell respondsToSelector:@selector(setTextColor:)])return;
+  if([table isRowSelected:row])return;
+  auto role=c->property("macosforegroundrole",vb6::Value::string(u"")).string();
+  [cell setTextColor:!role.empty()||c->properties.count("forecolor")?vb6::nativeForegroundColor(*c):NSColor.controlTextColor];
+}
 -(void)tableViewSelectionDidChange:(NSNotification*)notification{auto c=model.lock();if(c&&!(c->spec.type=="ListBox"||c->spec.type=="FileListBox"||c->spec.type=="DirListBox"||c->spec.type=="ListView"))c->host->event([c,notification]{auto table=(NSTableView*)notification.object;if(c->eventSuppression)return;if(c->dataBinding){auto row=table.selectedRow;c->boundSelection=row>0&&size_t(row)<=c->dataBinding->rowIds.size()?c->dataBinding->rowIds[size_t(row)-1]:0;}c->properties["row"]=vb6::Value::integer(std::max(NSInteger(0),table.selectedRow));c->event("selchange");});}
 @end
 @implementation VB6OutlineDelegate
@@ -156,7 +164,7 @@ Value MacItem::invoke(Runtime&rt,const std::string&raw,Args args){
   (void)outline;(void)column;auto c=model.lock();if(!c||![token isKindOfClass:VB6OutlineToken.class])return @"";id result=@"";c->host->event([&]{result=vb6::ns(((VB6OutlineToken*)token)->item->get(*c->host->runtime,"text").string());});return result;
 }
 -(void)outlineView:(NSOutlineView*)outline willDisplayCell:(id)cell forTableColumn:(NSTableColumn*)column item:(id)token{
-  (void)outline;(void)column;auto c=model.lock();if(!c||![token isKindOfClass:VB6OutlineToken.class])return;c->host->event([&]{auto item=((VB6OutlineToken*)token)->item;if([cell respondsToSelector:@selector(setTextColor:)])[cell setTextColor:vb6::color(item->get(*c->host->runtime,"forecolor").integral())];if([cell respondsToSelector:@selector(setFont:)]){NSFont*font=[NSFont systemFontOfSize:c->number("fontsize",8.25)*4/3];if(item->get(*c->host->runtime,"bold").truth())font=[NSFontManager.sharedFontManager convertFont:font toHaveTrait:NSBoldFontMask];[cell setFont:font];}});
+  (void)column;auto c=model.lock();if(!c||![token isKindOfClass:VB6OutlineToken.class])return;c->host->event([&]{auto item=((VB6OutlineToken*)token)->item;if([cell respondsToSelector:@selector(setTextColor:)]&&![outline isRowSelected:[outline rowForItem:token]]){auto role=c->property("macosforegroundrole",vb6::Value::string(u"")).string();[cell setTextColor:item->properties.count("forecolor")?vb6::color(item->get(*c->host->runtime,"forecolor").integral()):!role.empty()||c->properties.count("forecolor")?vb6::nativeForegroundColor(*c):NSColor.controlTextColor];}if([cell respondsToSelector:@selector(setFont:)]){NSFont*font=[NSFont systemFontOfSize:c->number("fontsize",8.25)*4/3];if(item->get(*c->host->runtime,"bold").truth())font=[NSFontManager.sharedFontManager convertFont:font toHaveTrait:NSBoldFontMask];[cell setFont:font];}});
 }
 -(void)outlineViewItemDidExpand:(NSNotification*)note{auto c=model.lock();id token=note.userInfo[@"NSObject"];if(c&&[token isKindOfClass:VB6OutlineToken.class])c->host->event([c,token]{c->event("expand",{vb6::Arg(vb6::Value::object(((VB6OutlineToken*)token)->item))});});}
 -(void)outlineViewItemDidCollapse:(NSNotification*)note{auto c=model.lock();id token=note.userInfo[@"NSObject"];if(c&&[token isKindOfClass:VB6OutlineToken.class])c->host->event([c,token]{c->event("collapse",{vb6::Arg(vb6::Value::object(((VB6OutlineToken*)token)->item))});});}

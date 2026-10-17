@@ -4,6 +4,7 @@
 #include "appkit-edit.hpp"
 #include "appkit-pictures.hpp"
 #include "appkit-richtext.hpp"
+#include "appkit-appearance.hpp"
 namespace vb6 {
 Value MacControl::get(Runtime&rt,const std::string&raw){
   if(disposed)fail(91,"Control has been unloaded");auto name=lower(raw.empty()?defaultMember():raw);
@@ -41,11 +42,13 @@ Value MacControl::get(Runtime&rt,const std::string&raw){
   if(nativePictureProperty(name))return property(name,Value::object(nullptr));
   if(name=="hDC"||name=="hdc")return invoke(rt,"getdc",{});
   auto it=properties.find(name);if(it!=properties.end())return it->second;
+  if(nativeAppearanceProperty(name))return nativeAppearanceDefault(name);
   if(name=="enabled")return Value::boolean(true);if(name=="tag")return Value::string(u"");if(name=="tabindex")return Value::integer(0,Type::Integer);
   fail(438,"Unsupported native property "+spec.type+"."+raw);
 }
 void MacControl::set(Runtime&rt,const std::string&raw,Value value,bool){
   if(disposed)fail(91);auto name=lower(raw.empty()?defaultMember():raw);
+  if(nativeAppearanceProperty(name)){setNativeAppearance(*this,name,std::move(value));return;}
   if(name=="datasource"){bindNativeRecordset(*this,std::move(value));return;}
   if(dataBinding&&(name=="rows"||name=="cols"||name=="rowcount"||name=="columncount"||(name=="fixedrows"&&value.integral()!=1)||(name=="fixedcols"&&value.integral()!=0)))fail(380,"Bound grid shape is owned by its Recordset");
   if(name=="name"||name=="index"||name=="hwnd"||name=="handle"||name=="listcount")fail(383,"Property is read-only");
@@ -86,17 +89,19 @@ void MacControl::set(Runtime&rt,const std::string&raw,Value value,bool){
   if(!supported.count(name))fail(438,"Unsupported native property "+spec.type+"."+raw);
   if(name=="interval"){auto n=value.integral();if(n<0||n>65535)fail(380);}
   if(name=="value"&&(spec.type=="CheckBox"||spec.type=="OptionButton")){auto n=value.integral();if(n<0||n>(spec.type=="CheckBox"?2:1))fail(380);}
+  if(name=="value"&&spec.type=="CheckBox"&&property("macoscontrolstyle",Value::string(u"automatic")).string()==u"switch"&&value.floating()!=0&&value.floating()!=1)fail(380,"Native switches require a binary CheckBox Value of 0 or 1");
   if(name=="scalemode"){auto n=value.integral();if(n<0||n>7)fail(380);}
-  auto previous=property(name);properties[name]=value;
+  auto previousProperties=properties;properties[name]=value;
+  if(name=="backcolor")properties.erase("macosbackgroundrole");if(name=="forecolor")properties.erase("macosforegroundrole");
   try{
     if(name=="left"||name=="top"||name=="width"||name=="height")applyFrame();
     else if(name.rfind("font",0)==0)applyFont();
     else if(name=="interval"||name=="enabled"&&spec.type=="Timer")timerChanged();
     else if(name=="path"||name=="pattern"||name=="drive")reloadFiles();
     else if(name=="tooltiptext")view.toolTip=ns(value.string());
-    else if(name=="visible")view.hidden=!value.truth();
+    else if(name=="visible"){view.hidden=!value.truth();applyNativeAppearance(*this);}
     else refresh();
-  }catch(...){properties[name]=previous;throw;}
+  }catch(...){properties=std::move(previousProperties);throw;}
 }
 Ref MacControl::reference(Runtime&rt,const std::string&raw,Args args){
   if(lower(raw)=="datasource"&&args.empty()&&nativeRecordsetGridControl(*this)){

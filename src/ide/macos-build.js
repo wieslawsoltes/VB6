@@ -36,6 +36,8 @@ export function installMacOSExport(ide, api) {
     const selected = () => ({name: name.value, bundleIdentifier: identifier.value, minimumVersion: minimum.value, optimization: Number(optimization.value)});
     const field = (caption, input) => el('label', {style: {display: 'grid', gridTemplateColumns: '145px minmax(0,1fr)', gap: '8px', marginBottom: '8px'}}, el('span', {}, caption), input);
     const clearDownload = () => {releaseDownload?.(); releaseDownload = null; downloads.replaceChildren();};
+    const appearanceWarnings = report => (report?.diagnostics || []).filter(item => item.severity === 'warning')
+      .map(item => '\n' + (item.code ? item.code + ': ' : '') + item.message).join('');
     const origin = globalThis.location?.origin;
     const content = el('div', {},
       el('p', {}, 'Compile VB6 to a native arm64 Mach-O executable with AppKit controls. The app contains no browser, JavaScript interpreter, Wine or Microsoft runtime.'),
@@ -58,6 +60,7 @@ export function installMacOSExport(ide, api) {
       try {
         const result = compileMacOSAOT(ide.project, selected());
         output.textContent = result.report.modules + ' modules, ' + result.report.procedures + ' native procedures. Project code: O' + result.options.optimization + ', ' + result.report.codeBytes + ' bytes. Target: arm64, minimum macOS ' + result.options.minimumVersion + '.\nDirect AOT emits native code with the bundled SDK. Test application behavior on your Mac.';
+        output.textContent += appearanceWarnings(result.report);
       } catch (error) {output.textContent = error.message;}
     }
     for (const input of [name, identifier, minimum, optimization]) input.addEventListener('change', () => {clearDownload(); preflight();});
@@ -93,6 +96,7 @@ export function installMacOSExport(ide, api) {
           : executable
           ? 'Native arm64 .app ZIP verified: ' + result.bytes.length + ' bytes.\nSHA-256: ' + result.report.sha256 + '\nAd-hoc signing is not notarization. The browser checks structure and hashes, not the cryptographic code signature.'
           : 'Source build kit ready: ' + result.bytes.length + ' bytes. This is not an executable. Extract it on a Mac and run node build.mjs.';
+        output.textContent += appearanceWarnings(result.report);
         ide.emit('export', {kind: mode === 'direct' ? 'macos-arm64-aot' : executable ? 'macos-arm64' : 'macos-source', report: result.report});
         ide.status(executable ? 'Native macOS application archive is ready to save.' : 'macOS source build archive is ready to save; native compilation is still required.');
       } catch (error) {

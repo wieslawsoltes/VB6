@@ -10,7 +10,7 @@ function transcript(text,{width=80,left=0,top=0,wrap=false,start=0,end=0}={}){
   const textNode={textContent:text},node={textContent:text,clientWidth:width,scrollLeft:left,scrollTop:top,contains:n=>n===textNode};
   node.ownerDocument={defaultView:{getComputedStyle:()=>({whiteSpace:wrap?'pre-wrap':'pre'})},
     getSelection:()=>({rangeCount:1,isCollapsed:start===end,getRangeAt:()=>({startContainer:textNode,endContainer:textNode,startOffset:start,endOffset:end})}),
-    createRange:()=>({selectNodeContents(){},setEnd(n,offset){this.end=offset;},toString(){return text.slice(0,this.end);}})};
+    createRange:()=>({selectNodeContents(){},comparePoint(){return 0;},setEnd(n,offset){this.end=offset;},toString(){return text.slice(0,this.end);}})};
   return node;
 }
 const metrics={cellWidth:8,cellHeight:16};

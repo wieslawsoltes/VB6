@@ -1,5 +1,6 @@
 // AppKit owns the editor; the VB object owns its durable UTF-16 selection. MIT.
 #include "appkit-edit.hpp"
+#include "appkit-appearance.hpp"
 namespace vb6 {
 namespace {
 NSText* editor(MacControl& c) {
@@ -72,6 +73,7 @@ void nativeEditSetText(MacControl& c, const Text& value) {
     c.properties["text"] = Value::string(value);
     write(c, value);
     nativeEditSelect(c, NSMakeRange(0, 0));
+    refreshNativePlaceholder(c);
   }
   if (value != old) c.event("change");
 }
@@ -105,6 +107,7 @@ void nativeEditSetSelection(MacControl& c, const std::string& name, Value value)
     } else write(c, next);
     c.properties["text"] = Value::string(next);
     nativeEditSelect(c, NSMakeRange(range.location + replacement.size(), 0));
+    refreshNativePlaceholder(c);
   }
   if (next != current) c.event("change");
 }
@@ -141,6 +144,7 @@ void nativeEditChanged(MacControl& c) {
   }
   // Marked composition is live text but not the committed MaxLength baseline.
   // Do not emit intermediate Change events or lose the pre-composition value.
+  refreshNativePlaceholder(c);
   if (marked) return;
   c.properties["text"] = Value::string(value);
   remember(c, bounded(selection, value.size()));

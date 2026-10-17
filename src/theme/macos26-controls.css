@@ -1,0 +1,148 @@
+/* macOS 26 semantic control styles. All paint resolves at the local palette;
+ * no ancestor theme selector can cross an independent embedded application.
+ * CSS changes inner paint only: authored bounds, fonts and literal RGB survive.
+ */
+.vb-control,.vb-form {
+ --macos-control-background:initial;--macos-control-foreground:initial;
+ --macos-material-background:initial;--macos-control-radius:initial;--macos-control-padding:initial;
+}
+.vb-control[data-macos-control-size="mini"] {--macos-control-radius:var(--macos26-MiniControlRadius);--macos-control-padding:var(--macos26-MiniControlPadding);}
+.vb-control[data-macos-control-size="small"] {--macos-control-radius:var(--macos26-SmallControlRadius);--macos-control-padding:var(--macos26-SmallControlPadding);}
+.vb-control[data-macos-control-size="regular"] {--macos-control-radius:var(--macos26-RegularControlRadius);--macos-control-padding:var(--macos26-RegularControlPadding);}
+.vb-control[data-macos-control-size="large"] {--macos-control-radius:var(--macos26-LargeControlRadius);--macos-control-padding:var(--macos26-LargeControlPadding);}
+.vb-control[data-macos-control-size="extraLarge"] {--macos-control-radius:var(--macos26-ExtraLargeControlRadius);--macos-control-padding:var(--macos26-ExtraLargeControlPadding);}
+
+/* The IDE's --vb-font is not an application font. The locally reset app token
+ * keeps Classic help typography stable beneath any optional IDE palette. */
+.classic-tooltip.runtime-tooltip {font-family:var(--app-font,"MS Sans Serif",Tahoma,Arial,sans-serif);}
+
+@media(forced-colors:none) {
+ /* Body-mounted tooltips carry their opener's local palette. Opaque paint keeps
+  * compact help text legible above both design canvases and runtime controls. */
+ .classic-tooltip.runtime-tooltip {
+  background:var(--macos26-PopoverOpaque,var(--vb-info));color:var(--macos26-labelColor,var(--vb-info-text));
+  border-color:var(--macos26-Hairline,var(--vb-text));border-radius:var(--macos26-ControlRadius,0);
+  padding:var(--macos26-SmallControlPadding,2px 4px);box-shadow:var(--macos26-GlassShadow,1px 1px var(--vb-shadow));
+ }
+ .vb-command {--macos-control-background:var(--command-fill);--macos-control-foreground:var(--command-ink);}
+ .vb-command[data-macos-control-style="default"] {
+  --command-fill:var(--macos26-AccentButtonBackground);--command-ink:var(--macos26-AccentButtonForeground);
+ }
+ .vb-command[data-macos-control-style="default"]:active:not(:where(.disabled,:disabled,[aria-disabled=true])) {--command-fill:var(--macos26-AccentButtonBackgroundPressed);}
+ .vb-command[data-macos-control-style="destructive"] {
+  --command-fill:var(--macos26-DestructiveButtonBackground);--command-ink:var(--macos26-DestructiveButtonForeground);
+ }
+ .vb-command[data-macos-control-style="destructive"]:hover:not(:where(.disabled,:disabled,[aria-disabled=true])) {--command-fill:var(--macos26-DestructiveButtonBackgroundHover);}
+ .vb-command[data-macos-control-style="destructive"]:active:not(:where(.disabled,:disabled,[aria-disabled=true])) {
+  --command-fill:var(--macos26-DestructiveButtonBackgroundPressed);--command-ink:var(--macos26-DestructiveButtonForegroundPressed);
+ }
+ .vb-command:is([data-macos-control-style="borderless"],[data-macos-control-style="inline"]) {
+  --command-fill:var(--macos26-Transparent);--command-ink:var(--macos26-ButtonForeground);
+ }
+ .vb-command:is([data-macos-control-style="borderless"],[data-macos-control-style="inline"]):hover:not(:where(.disabled,:disabled,[aria-disabled=true])) {--command-fill:var(--macos26-ButtonBackgroundHover);}
+ .vb-command:is([data-macos-control-style="borderless"],[data-macos-control-style="inline"]):active:not(:where(.disabled,:disabled,[aria-disabled=true])) {--command-fill:var(--macos26-ButtonBackgroundPressed);}
+ .vb-command:is([data-macos-control-style="circular"],[data-macos-control-style="help"]) {--macos-control-radius:var(--macos26-CircularRadius);}
+ .vb-command[data-macos-control-style]:is(.disabled,:disabled,[aria-disabled=true]) {
+  --command-fill:var(--macos26-ButtonBackgroundDisabled);--command-ink:var(--macos26-ButtonForegroundDisabled);
+ }
+ .vb-command,.vb-command:active {
+  border-radius:var(--macos-control-radius,var(--detail-command-corner-radius,var(--app-radius,0)));
+  padding:var(--macos-control-padding,var(--winui-ButtonPadding,4px 9px));
+ }
+ .vb-command:active:not(.disabled):not(:disabled):not([aria-disabled=true]) {padding:var(--macos-control-padding,var(--winui-ButtonPadding,var(--app-pressed-padding,5px 8px 3px 10px)));}
+ .vb-command:focus::after {border-radius:var(--macos-control-radius,var(--app-radius,0));}
+ .vb-command[data-macos-control-style="default"]:focus::after {border-color:var(--macos26-AccentButtonForeground,var(--detail-default-focus-ink,var(--app-focus,var(--vb-text))));}
+
+ /* The existing inactive form boundary handles old and new styles alike.
+  * A nested application rebinds these resources before its own controls read it. */
+ .vb-inactive {
+  --macos26-AccentButtonBackground:var(--detail-inactive-command-fill);
+  --macos26-AccentButtonForeground:var(--detail-inactive-command-ink);
+  --macos26-DestructiveButtonBackground:var(--detail-inactive-command-fill);
+  --macos26-DestructiveButtonForeground:var(--detail-inactive-command-ink);
+  --macos26-SwitchOnBackground:var(--detail-inactive-check-fill);
+ }
+}
+
+/* A switch retains the original checkbox input and VB Value/Click/Change path.
+ * Its thumb is paint only, including a centered thumb for mixed state. */
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox] {
+ width:var(--macos26-SwitchWidth,var(--winui-CheckSize,var(--detail-check-size,13px)));
+ height:var(--macos26-SwitchHeight,var(--winui-CheckSize,var(--detail-check-size,13px)));
+ border-radius:var(--macos26-CapsuleRadius,var(--winui-CheckRadius,var(--detail-check-radius,var(--app-radius,0))));
+ transition:background-color var(--macos26-Duration,0s) var(--macos26-Easing,ease);
+}
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox]::before {
+ content:var(--macos26-PseudoContent,none);position:absolute;pointer-events:none;
+ inset-inline-start:var(--macos26-SwitchInset,2px);top:var(--macos26-SwitchInset,2px);
+ width:var(--macos26-SwitchThumbSize,16px);height:var(--macos26-SwitchThumbSize,16px);
+ border-radius:50%;background:var(--macos26-SwitchThumb);box-shadow:var(--macos26-SwitchThumbShadow);
+ transform:translateX(0);transition:transform var(--macos26-Duration,0s) var(--macos26-Easing,ease);
+}
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox]:checked::before {transform:translateX(var(--macos26-SwitchTravel,0px));}
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox]:indeterminate::before {transform:translateX(var(--macos26-SwitchMixedTravel,0px));}
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox]:dir(rtl):checked::before {transform:translateX(calc(-1 * var(--macos26-SwitchTravel,0px)));}
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox]:dir(rtl):indeterminate::before {transform:translateX(calc(-1 * var(--macos26-SwitchMixedTravel,0px)));}
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox]:is(:checked,:indeterminate)::after {content:var(--macos26-Hidden,"");}
+.vb-check[data-macos-control-style="switch"]>input[type=checkbox]:disabled::before {background:var(--macos26-SwitchThumbDisabled);}
+@media(forced-colors:none) {
+ .vb-check[data-macos-control-style="switch"]>input[type=checkbox]:not(:checked):not(:indeterminate) {
+  background-color:var(--macos26-SwitchOffBackground,var(--winui-check-fill,var(--detail-check-fill,var(--vb-window))));
+ }
+ .vb-check[data-macos-control-style="switch"]>input[type=checkbox]:is(:checked,:indeterminate) {
+  background-color:var(--macos26-SwitchOnBackground,var(--winui-check-fill,var(--detail-state-check-fill,var(--app-check-background,var(--vb-window)))));
+ }
+ .vb-check[data-macos-control-style="switch"]>input[type=checkbox]:disabled {
+  background-color:var(--macos26-SwitchDisabledBackground,var(--winui-check-fill,var(--detail-check-disabled-fill,var(--vb-face))));
+ }
+}
+@media(forced-colors:active) {
+ .vb-check[data-macos-control-style="switch"]>input[type=checkbox] {box-shadow:var(--macos26-SwitchTrackShadow,none);}
+ .vb-check[data-macos-control-style="switch"]>input[type=checkbox]:is(:checked,:indeterminate)::before {background:HighlightText;}
+ .vb-check[data-macos-control-style="switch"]>input[type=checkbox]:disabled::before {background:GrayText;}
+}
+
+/* Search uses a normal text input for browser-independent native editing/IME.
+ * Helpers are non-authored child nodes; clear is a real, named button. */
+.vb-control[data-macos-control-style="search"]>.vb-text-input {
+ padding:var(--macos26-SearchPadding,var(--winui-TextControlPadding,4px 5px));
+ border-radius:var(--macos26-CapsuleRadius,var(--app-radius,0));
+}
+.macos26-search-icon,.macos26-search-clear {
+ position:absolute;top:50%;transform:translateY(-50%);align-items:center;justify-content:center;
+ display:var(--macos26-Visible,none);flex:none;box-sizing:border-box;
+}
+.macos26-search-icon {inset-inline-start:var(--macos26-SearchInset,8px);width:var(--macos26-SearchIconSize,14px);height:var(--macos26-SearchIconSize,14px);pointer-events:none;color:var(--macos26-secondaryLabelColor);}
+.vb-control>.macos26-search-clear {
+ inset-inline-end:var(--macos26-SearchInset,8px);width:var(--macos26-SearchClearSize,16px);height:var(--macos26-SearchClearSize,16px);
+ min-width:0;min-height:0;margin:0;padding:0;border:0;border-radius:50%;background:var(--macos26-ButtonBackground);color:var(--macos26-secondaryLabelColor);box-shadow:none;
+}
+.vb-control>.macos26-search-clear[hidden],.macos26-search-icon[hidden] {display:none!important;}
+.macos26-search-icon svg {width:14px;height:14px;}
+.vb-control>.macos26-search-clear svg {width:10px;height:10px;pointer-events:none;}
+.vb-control>.macos26-search-clear:hover:not(:disabled) {background:var(--macos26-ButtonBackgroundPressed);color:var(--macos26-labelColor);}
+.vb-control>.macos26-search-clear:focus-visible {outline:2px solid var(--macos26-controlAccentColor);outline-offset:2px;}
+.vb-control>.macos26-search-clear:disabled {color:var(--macos26-disabledControlTextColor);}
+
+/* Materials are explicit on a container and inherited only as paint resources.
+ * The renderer wraps only a compatible system-color pair in this material slot;
+ * authored RGB remains its inline paint. Content has an opaque material. */
+[data-macos-material="content"] {--macos-material-background:var(--macos26-ContentMaterial);}
+[data-macos-material="sidebar"] {--macos-material-background:var(--macos26-SidebarMaterial);}
+[data-macos-material="titlebar"] {--macos-material-background:var(--macos26-TitlebarMaterial);}
+[data-macos-material="toolbar"] {--macos-material-background:var(--macos26-ToolbarMaterial);}
+[data-macos-material="menu"] {--macos-material-background:var(--macos26-MenuMaterial);}
+[data-macos-material="popover"] {--macos-material-background:var(--macos26-PopoverMaterial);}
+[data-macos-material="sheet"] {--macos-material-background:var(--macos26-SheetMaterial);}
+[data-macos-material="hud"] {--macos-material-background:var(--macos26-HudMaterial);--macos-control-foreground:var(--macos26-HudForeground);}
+@media(forced-colors:none) {
+ :is(.vb-control,.vb-form)[data-macos-material]:not([data-macos-material="none"]):not([data-macos-material="content"]) {
+  backdrop-filter:var(--macos26-GlassBackdrop,none);-webkit-backdrop-filter:var(--macos26-GlassBackdrop,none);
+ }
+}
+
+.vb-control[data-macos-indeterminate="true"]>.vb-progress>.vb-progress-fill {
+ animation:var(--macos26-IndeterminateAnimation,none);
+ transform:var(--macos26-IndeterminateRestTransform,none);
+}
+@keyframes macos26-progress {from {transform:translateX(0);}to {transform:translateX(233.3333%);}}

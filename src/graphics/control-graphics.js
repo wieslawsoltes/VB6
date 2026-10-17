@@ -1,5 +1,6 @@
 import {VBError} from '../language/lexer.js';
 import {fontFamily} from '../theme/theme.js';
+import {macos26ColorToken} from '../theme/macos26-resources.js';
 import {finite,integer} from './contract.js';
 import {coordinateSystem,graphicsUnits,prepareDrawing} from './coordinates.js';
 export function controlSize(control){
@@ -29,13 +30,19 @@ export function graphicsProperty(control,key,value){
 export function drawControl(control,kind,coords,color,fill=false,options={}){
   if(kind==='scale'){scaleControl(control,...coords);return;}
   const p=control.props,command=prepareDrawing(kind,coords,controlSystem(control),control.currentX,control.currentY,options);
-  control.ensureSurface().add(command.kind,command.coords,color===undefined?p.ForeColor:color,fill,p.DrawWidth??1,{drawStyle:p.DrawStyle??0,drawMode:p.DrawMode??13,fillStyle:p.FillStyle??1,fillColor:p.FillColor??0,...command.options});
+  control.ensureSurface().add(command.kind,command.coords,color===undefined?controlPaintColor(p,'ForeColor','MacOSForegroundRole'):color,fill,p.DrawWidth??1,{drawStyle:p.DrawStyle??0,drawMode:p.DrawMode??13,fillStyle:p.FillStyle??1,fillColor:p.FillColor??0,...command.options});
   [control.currentX,control.currentY]=command.current;
+}
+// Only implicit drawing colors inherit the authored semantic role. Retained
+// tokens capture this transaction's fallback, so later property edits cannot
+// recolor existing drawing commands; an appearance change can replay the role.
+function controlPaintColor(properties,color,role) {
+  return properties[role] ? macos26ColorToken(properties[role],properties[color]) : properties[color];
 }
 export function controlFont(control){const p=control.props,size=finite(p.FontSize??8.25,'font size',4096);if(size<=0)throw new VBError('Invalid FontSize',380);return `${p.FontItalic?'italic ':''}${p.FontBold?'bold ':''}${size*96/72}px ${fontFamily(p.FontName)}`;}
 export function printControl(control,values){
   const p=control.props,s=control.ensureSurface(),system=controlSystem(control),font=controlFont(control),text=values.map(v=>String(v??'')).join(' '),metrics=s.measureText(text,font);
-  s.text(text,system.x(control.currentX),system.y(control.currentY),p.ForeColor,font,{underline:!!p.FontUnderline,strikeThrough:!!p.FontStrikethru,opaque:p.FontTransparent===0,background:p.BackColor});
+  s.text(text,system.x(control.currentX),system.y(control.currentY),controlPaintColor(p,'ForeColor','MacOSForegroundRole'),font,{underline:!!p.FontUnderline,strikeThrough:!!p.FontStrikethru,opaque:p.FontTransparent===0,background:controlPaintColor(p,'BackColor','MacOSBackgroundRole')});
   control.currentX=system.left;control.currentY+=metrics.height*system.sy;
 }
 export function measureControl(control,text,vertical=false){const size=control.ensureSurface().measureText(text,controlFont(control)),s=controlSystem(control);return vertical?size.height*s.sy:size.width*s.sx;}

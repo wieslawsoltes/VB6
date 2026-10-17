@@ -69,6 +69,7 @@ python -m pip install -r tools/ci/requirements-checks.txt
 python tools/ci/check.py
 python tools/ci/test_run.py
 python tools/ci/test_check.py
+python tools/ci/test_tui_acceptance.py
 node --test tests/ci-gate.test.mjs
 VB6_BROWSER=chromium VB6_TEST_TRANSPORT=http python tools/ci/run.py figma
 # Reproduce one exact CI partition:
@@ -78,7 +79,8 @@ VB6_BROWSER=chromium VB6_TEST_TRANSPORT=http python tools/ci/run.py figma-servic
 The audit rejects duplicate YAML keys, missing gate dependencies, cycles, missing
 suite owners, missing engines/origins/platforms, omitted Figma partitions, matrix exclusions,
 duplicate matrix values, extra `.yaml` workflows and failure suppression. It also
-parses Bash blocks. The pinned, SHA-256-verified actionlint binary checks Actions
+parses Bash blocks and requires the reference-admission/GPU-entrypoint tests to
+execute unconditionally in the audit job. The pinned, SHA-256-verified actionlint binary checks Actions
 syntax and expression types. Historical timings or results do not qualify a
 later source revision.
 
@@ -107,3 +109,37 @@ all standalone ESM, CLI, browser-bundle and archive assertions. The input closes
 on success, extraction failure and process-start failure; a bounded child timeout
 returns a failing result rather than accepting an incomplete package. Only locally
 built, trusted package archives belong in this harness.
+
+## DOS acceptance ownership
+
+The full DOS workspace, runtime and palette/DPR matrix runs in its own
+`tui-authoring` browser partition on Chromium, Firefox and WebKit. It no longer
+shares a deadline with the general `integration-authoring` scripts. All existing
+assertions, browser engines, per-job deadlines and the required `test` gate remain
+unchanged. The coverage audit rejects omission of this partition or duplicate
+entrypoint ownership among browser partitions.
+
+## Appearance acceptance ownership
+
+The `integration-appearance` browser partition owns the IDE theme, application
+theme, native caption, macOS reference and WinUI suites. It runs independently
+from the layout, diagnostics and export checks in `integration-authoring`, so
+those groups each receive the existing 15-minute job deadline. Both partitions
+run on Chromium, Firefox and WebKit with the same browser setup and transport.
+All five appearance scripts and every existing assertion retain coverage under
+the required `test` gate. The coverage audit rejects missing suite owners and
+duplicate entrypoints across browser partitions.
+
+## Offline-origin qualification
+
+The export acceptance server stops its actual listening socket for every outage.
+A fresh worker-free client must fail against that origin; a newly opened client
+with the installed worker must receive a successful service-worker response and
+execute the exported application. No request interception or replacement response
+is used. Chromium and Firefox also enable browser offline emulation. WebKit
+qualifies origin unavailability without that flag because of
+[Playwright issue 42775](https://github.com/microsoft/playwright/issues/42775):
+the flag can reject requests before service-worker fetch dispatch. This is not
+certification that WebKit's offline emulation works. The report records the
+transport distinction, worker response and negative control explicitly. All
+update, cache isolation, integrity, actual ZIP and network-only API checks remain.

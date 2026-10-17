@@ -31,7 +31,10 @@ export class FrameCellRenderer {
     if(this.disposed)throw new Error('Frame renderer is disposed');
     const size=this.dimensions(buffer,dpr),{width:w,height:h,cw,ch}=size;
     const color=buffer.colors[0],double=buffer.glyphs[0]==='╔'.codePointAt(0),key=[w,h,cw,ch,color,double].join(':');
-    if(key===this.key){buffer.takeDamage();return;}this.key=key;
+    if(key===this.key){buffer.takeDamage();return;}
+    // A failure can also damage the formerly valid frame: invalidate its key
+    // before starting, then commit the new key only after all strips succeed.
+    this.key='';
     const chars=double?['╔','╗','╚','╝','═','║']:['┌','┐','└','┘','─','│'];
     const rects=[[0,0,w,ch],[0,Math.max(0,h-ch),w,ch],[0,ch,cw,Math.max(0,h-2*ch)],[Math.max(0,w-cw),ch,cw,Math.max(0,h-2*ch)]];
     const glyph=(code,width=cw,height=ch)=>this.atlas.glyph(code.codePointAt(0),color,width,height,this.palette,false);
@@ -41,13 +44,16 @@ export class FrameCellRenderer {
       canvas.style.width=width/size.dpr+'px';canvas.style.height=height/size.dpr+'px';canvas.hidden=!width||!height;
       const g=canvas.getContext('2d');if(!g)throw new Error('Frame Canvas2D context unavailable');g.imageSmoothingEnabled=false;
       if(index<2){
-        g.save();g.beginPath();g.rect(cw,0,Math.max(0,width-2*cw),height);g.clip();
-        for(let x=cw;x<width-cw;x+=cw)g.drawImage(glyph(chars[4]),x,0);
-        g.restore();g.drawImage(glyph(chars[index===0?0:2]),0,0);
+        g.save();
+        try {
+          g.beginPath();g.rect(cw,0,Math.max(0,width-2*cw),height);g.clip();
+          for(let x=cw;x<width-cw;x+=cw)g.drawImage(glyph(chars[4]),x,0);
+        } finally {g.restore();}
+        g.drawImage(glyph(chars[index===0?0:2]),0,0);
         if(width>cw)g.drawImage(glyph(chars[index===0?1:3]),width-cw,0);
       }else for(let y=0;y<height;y+=ch)g.drawImage(glyph(chars[5]),0,y);
     });
-    buffer.takeDamage();
+    this.key=key;buffer.takeDamage();
   }
   dispose(){if(this.disposed)return;this.disposed=true;for(const canvas of this.strips){canvas.width=canvas.height=1;canvas.remove();}this.strips=[];if(this.ownsAtlas)this.atlas.clear();}
 }

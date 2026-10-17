@@ -21,7 +21,7 @@ export async function anchorDialog(value=5,title='Anchoring') {
 export function anchorGuideNodes(designer,snapshot=null) {
   if(!layoutEnabled(designer.project))return [];
   const views=snapshot?.views||new Map(designer.formView.controls.map(v=>[v.model.id,v])),nodes=[],parents=new Map();
-  const root=snapshot?.root||designer.formView.content.getBoundingClientRect(),scale=displayScale(designer.formView.content,designer.zoom);
+  const root=snapshot?.root||designer.formView.content.getBoundingClientRect(),scale=snapshot?.scale||displayScale(designer.formView.content,designer.zoom,root);
   parents.set(designer.formView.content,root);
   for(const c of designer.selected()) {
     if(!layoutEligible(c)||Number(c.properties.Dock||0))continue;

@@ -134,12 +134,21 @@ export class CanvasCellRenderer {
     this.canvas=canvas;this.context=canvas.getContext('2d',{alpha:true});if(!this.context)throw new Error('Canvas2D unavailable');
     this.opaque=opaque!==false;this.cellWidth=cellWidth;this.cellHeight=cellHeight;this.palette=Object.freeze([...palette]);this.maxPixels=maxPixels;
     this.atlas=atlas||new CellGlyphAtlas(canvas.ownerDocument,{maxGlyphs});this.ownsAtlas=!atlas;
-    this.cache=this.atlas.cache;this.key='';this.disposed=false;
+    this.cache=this.atlas.cache;this.key='';this.extent=null;this.disposed=false;
+  }
+  /** Clip the backing bitmap to a display viewport without stretching the last
+   * cell. A CSS clip-path alone still lets the oversized canvas create scroll
+   * overflow, changing the native scrollport underneath a read-only painter. */
+  setExtent(width,height) {
+    if(![width,height].every(n=>Number.isFinite(n)&&n>0))throw new RangeError('Invalid cell surface extent');
+    this.extent={width,height};
   }
   dimensions(buffer,dpr=1) {
     if(!Number.isSafeInteger(buffer?.columns)||!Number.isSafeInteger(buffer?.rows)||buffer.columns<1||buffer.rows<1||buffer.columns>2048||buffer.rows>2048||buffer.columns*buffer.rows>1048576)throw new RangeError('Invalid cell surface dimensions');
     dpr=Number.isFinite(dpr)?Math.min(4,Math.max(1,dpr)):1;
-    const width=Math.max(1,Math.round(this.cellWidth*dpr*buffer.columns)),height=Math.max(1,Math.round(this.cellHeight*dpr*buffer.rows));
+    const logicalWidth=Math.min(this.cellWidth*buffer.columns,this.extent?.width??Infinity);
+    const logicalHeight=Math.min(this.cellHeight*buffer.rows,this.extent?.height??Infinity);
+    const width=Math.max(1,Math.round(logicalWidth*dpr)),height=Math.max(1,Math.round(logicalHeight*dpr));
     if(width*height>this.maxPixels)throw new RangeError('Cell surface exceeds its pixel budget');
     return {width,height,dpr};
   }
@@ -147,14 +156,23 @@ export class CanvasCellRenderer {
     if(this.disposed)throw new Error('Cell renderer is disposed');
     const size=this.dimensions(buffer,dpr);dpr=size.dpr;
     const key=[size.width,size.height,buffer.columns,buffer.rows,dpr].join(':');
-    if(key!==this.key){this.key=key;this.canvas.width=size.width;this.canvas.height=size.height;buffer.invalidate();}
-    const ctx=this.context;ctx.imageSmoothingEnabled=false;
-    for(const span of buffer.takeDamage())for(let x=span.x;x<span.x+span.width;x++){
-      const i=span.y*buffer.columns+x,left=Math.round(x*this.cellWidth*dpr),top=Math.round(span.y*this.cellHeight*dpr);
-      const width=Math.round((x+1)*this.cellWidth*dpr)-left,height=Math.round((span.y+1)*this.cellHeight*dpr)-top;
-      const glyph=this.atlas.glyph(buffer.glyphs[i],buffer.colors[i],width,height,this.palette,this.opaque,buffer.styles?.[i]||0);
-      if(!this.opaque)ctx.clearRect(left,top,width,height);
-      ctx.drawImage(glyph,left,top);
+    try {
+      // Changing either bitmap dimension resets the context and pixels. Do not
+      // publish the retained key until every damaged cell has been submitted.
+      if(key!==this.key){this.canvas.width=size.width;this.canvas.height=size.height;buffer.invalidate();}
+      const ctx=this.context;ctx.imageSmoothingEnabled=false;
+      for(const span of buffer.takeDamage())for(let x=span.x;x<span.x+span.width;x++){
+        const i=span.y*buffer.columns+x,left=Math.round(x*this.cellWidth*dpr),top=Math.round(span.y*this.cellHeight*dpr);
+        const width=Math.round((x+1)*this.cellWidth*dpr)-left,height=Math.round((span.y+1)*this.cellHeight*dpr)-top;
+        const glyph=this.atlas.glyph(buffer.glyphs[i],buffer.colors[i],width,height,this.palette,this.opaque,buffer.styles?.[i]||0);
+        if(!this.opaque)ctx.clearRect(left,top,width,height);
+        ctx.drawImage(glyph,left,top);
+      }
+      this.key=key;
+    } catch(error) {
+      // Some cells may have reached the bitmap. Repaint from canonical buffer
+      // contents on retry; never regard partially submitted damage as clean.
+      this.key='';buffer.invalidate();throw error;
     }
   }
   dispose(){if(this.disposed)return;this.disposed=true;if(this.ownsAtlas)this.atlas.clear();this.canvas.width=this.canvas.height=1;}
