@@ -146,11 +146,30 @@ struct Parameter {
   std::string name,type; bool byRef=true,optional=false,paramArray=false,array=false;
   std::function<Value(Frame&)> initial;
 };
+// These contracts describe Pascal value objects only. A field-compatible VB
+// record is never an ancestor, and no general record downcast is introduced.
+struct PascalObjectField {
+  std::string name,type; size_t fixedLength=0; bool array=false; Bounds bounds;
+  bool operator==(const PascalObjectField& other) const {
+    return name==other.name&&type==other.type&&fixedLength==other.fixedLength&&array==other.array&&bounds==other.bounds;
+  }
+};
+struct PascalObjectType {
+  std::string identity,parent; int32_t typeId=0; bool hasVmt=false;
+  std::vector<PascalObjectField> fields; std::set<std::string> virtualMethods;
+};
+struct PascalDispatchBranch {
+  int32_t typeId=0; std::string runtimeType,targetModule,targetProcedure,viewType;
+};
+struct PascalDispatch {
+  std::string parameter,receiverType,vmtField; std::vector<PascalDispatchBranch> branches;
+};
 struct Procedure {
   std::string name,returnType="variant",scope="public",accessor;
   bool isFunction=false,isStatic=false,external=false,returnArray=false;
   std::vector<Parameter> parameters;
   std::function<Value(Frame&)> code;
+  std::optional<PascalDispatch> pascalDispatch;
 };
 struct NativeCallback final : Object {
   std::weak_ptr<Instance> owner; std::string procedure;
@@ -164,7 +183,7 @@ struct ControlSpec {
   int index=-1;
 };
 struct Module {
-  std::string name,kind="module",defaultMember;
+  std::string name,kind="module",defaultMember,language="vb6";
   bool textCompare=false,optionExplicit=false; int optionBase=0;
   std::vector<std::string> interfaces;
   std::map<std::string,InterfaceContract> interfaceBindings;
@@ -252,6 +271,7 @@ struct FileState;
 struct Subscription { std::weak_ptr<Object> source; std::weak_ptr<Instance> sink; std::string field; };
 struct Runtime {
   std::map<std::string,Module> modules;
+  std::map<std::string,PascalObjectType> pascalObjects;
   std::map<std::string,std::shared_ptr<Instance>> instances;
   std::map<std::string,Value> constants;
   std::map<std::string,std::function<Value(Frame&,Args)>> builtins;
@@ -273,6 +293,7 @@ struct Runtime {
   std::shared_ptr<Instance> instance(const std::string& name,bool fresh=false);
   Value create(const std::string& name);
   Value defaultValue(const std::string& type,Frame* frame=nullptr);
+  bool pascalObjectReferenceCompatible(const std::string& source,const std::string& target) const;
   Value invoke(const std::shared_ptr<Instance>&,const std::string& name,Args={},bool internal=false);
   Value dispatch(const std::shared_ptr<Instance>&,const std::string&,Args={});
   void load(const std::shared_ptr<Instance>&); void unload(const std::shared_ptr<Instance>&,int16_t mode=1);

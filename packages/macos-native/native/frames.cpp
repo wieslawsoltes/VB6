@@ -2,6 +2,39 @@
 #include "vb6.hpp"
 #include "lifetime.hpp"
 namespace vb6 {
+bool Runtime::pascalObjectReferenceCompatible(const std::string& source,const std::string& target) const {
+  auto current=pascalObjects.find(lower(source));const auto destination=lower(target);
+  if(current==pascalObjects.end()||!pascalObjects.count(destination))return false;
+  std::set<std::string> visited;
+  while(current!=pascalObjects.end()&&visited.size()<128){
+    const auto& object=current->second;
+    if(!visited.insert(object.identity).second)return false;
+    if(object.identity==destination)return true;
+    const auto parent=pascalObjects.find(object.parent);
+    if(parent==pascalObjects.end()||object.fields.size()<parent->second.fields.size()||
+      !std::equal(parent->second.fields.begin(),parent->second.fields.end(),object.fields.begin()))return false;
+    current=parent;
+  }
+  return false;
+}
+static void checkPascalDispatch(Frame& frame){
+  if(!frame.procedure->pascalDispatch)return;
+  const auto& contract=*frame.procedure->pascalDispatch;
+  const auto receiver=frame.locals.find(contract.parameter);
+  if(receiver==frame.locals.end())fail(210,"Invalid Pascal virtual receiver");
+  const auto value=receiver->second.get();if(value.type!=Type::Record)fail(210,"Invalid Pascal virtual receiver");
+  const auto record=value.asRecord();const auto field=record->fields.find(contract.vmtField);
+  if(field==record->fields.end()||field->second->arrayStorage||lower(field->second->type)!="long")fail(210,"Invalid Pascal virtual receiver header");
+  const auto tag=field->second->get().integral();
+  for(const auto& branch:contract.branches)if(branch.typeId==tag){
+    // The backing value keeps its most-derived nominal identity through every
+    // ancestor var alias. A tag can select only a view present in that storage.
+    if(frame.runtime.pascalObjectReferenceCompatible(record->name,branch.runtimeType)&&
+      frame.runtime.pascalObjectReferenceCompatible(record->name,branch.viewType))return;
+    break;
+  }
+  fail(210,"Object not initialized or incompatible virtual receiver");
+}
 static CellPtr makeCell(Frame& frame,const std::string&type,Bounds bounds,int arrayKind,size_t fixed,bool constant,bool autoNew){
   auto&rt=frame.runtime;Value initial;
   if(arrayKind){auto prototype=rt.defaultValue(type,&frame);auto init=[prototype]{return prototype.copy();};initial=Value::array(std::make_shared<Array>(type,bounds,arrayKind==1,rt.maxArrayElements,fixed,init));}
@@ -38,7 +71,10 @@ Frame::Frame(Runtime&rt,std::shared_ptr<Instance> object,Procedure*proc,Args arg
       if(p.array && (arg.value.type!=Type::Array||lower(arg.value.asArray()->elementType)!=lower(p.type)))fail(13,"Matching array argument required");
       if(p.byRef&&arg.reference&&arg.reference.direct){
         auto sourceType=lower(arg.reference.type),target=lower(p.type);
-        if(!p.array&&target!="variant"&&target!=sourceType&&!(arg.value.type==Type::Object&&(!std::get<ObjectPtr>(arg.value.payload)||std::get<ObjectPtr>(arg.value.payload)->supports(target))))fail(13,"ByRef argument type mismatch: "+p.name);
+        const bool pascalTarget=!p.array&&runtime.pascalObjects.count(target);
+        const bool pascalReference=pascalTarget&&arg.value.type==Type::Record&&sourceType==lower(arg.value.asRecord()->name)&&runtime.pascalObjectReferenceCompatible(sourceType,target);
+        if(pascalTarget&&!pascalReference)fail(13,"ByRef Pascal object type mismatch: "+p.name);
+        if(!p.array&&target!="variant"&&target!=sourceType&&!pascalReference&&!(arg.value.type==Type::Object&&(!std::get<ObjectPtr>(arg.value.payload)||std::get<ObjectPtr>(arg.value.payload)->supports(target))))fail(13,"ByRef argument type mismatch: "+p.name);
         if(p.array&&lower(arg.value.asArray()->elementType)!=target)fail(13,"ByRef array element type mismatch");
         if(!p.array&&arg.value.type==Type::Object&&target!="variant"&&target!="object"){
           // A ByRef interface formal aliases the caller's cell but reads through
@@ -54,6 +90,7 @@ Frame::Frame(Runtime&rt,std::shared_ptr<Instance> object,Procedure*proc,Args arg
         auto cell=std::make_shared<Cell>(value,p.type,0,false,p.array);locals[name]=cellRef(cell);
       }
     }
+    checkPascalDispatch(*this);
     // Function result storage is always per invocation, even in a Static
     // procedure. Typed array results start as unallocated dynamic arrays.
     if(proc->isFunction)locals[lower(proc->name)]=cellRef(makeCell(*this,proc->returnType,{},proc->returnArray?1:0,0,false,false));
