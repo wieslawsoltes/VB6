@@ -96,9 +96,11 @@ export class PascalParser {
     const returnType = start.lower === 'function' && this.match(':') ? this.type() : null; this.expect(';');
     const modifiers = [];
     while (['forward', 'external', 'far', 'near', 'assembler', 'interrupt', 'virtual', 'inline'].includes(this.peek().lower)) {
-      const modifier = this.take(), args = [];
-      while (!this.is(';') && this.peek().type !== 'eof') args.push(this.take()); this.expect(';');
-      modifiers.push({name: modifier.lower, args, loc: this.finish('modifier', modifier).loc});
+      const modifier = this.take(), args = []; let expression = null;
+      if (modifier.lower === 'virtual' && !this.is(';')) {const first = this.index; expression = this.expression(); args.push(...this.tokens.slice(first, this.index));}
+      else while (!this.is(';') && this.peek().type !== 'eof') args.push(this.take());
+      this.expect(';');
+      modifiers.push({name: modifier.lower, args, expression, loc: this.finish('modifier', modifier).loc});
     }
     const declarationOnly = interfaceOnly || modifiers.some(m => ['forward', 'external'].includes(m.name));
     let declarations = [], body = null;
@@ -130,11 +132,11 @@ export class PascalParser {
     if (this.is('procedure') || this.is('function')) {const kind = this.take().lower, params = this.parameters(), returnType = kind === 'function' && this.match(':') ? this.type() : null; return this.finish('procedureType', start, {procedureKind: kind, params, returnType});}
     if (this.match('object')) {
       let parent = null; if (this.match('(')) {parent = this.qualifiedName(); this.expect(')');}
-      const members = []; let visibility = 'public';
+      const members = []; let visibility = 'public', componentSection = 0;
       while (!this.is('end') && this.peek().type !== 'eof') {
-        if (this.is('private') || this.is('public')) {visibility = this.take().lower; continue;}
-        if (['procedure', 'function', 'constructor', 'destructor'].includes(this.peek().lower)) {members.push({...this.procedure(this.take(), true), visibility}); continue;}
-        const fieldStart = this.peek(), names = this.identifiers(); this.expect(':'); const type = this.type(); members.push(this.finish('field', fieldStart, {names, type, visibility})); if (!this.match(';')) break;
+        if (this.is('private') || this.is('public')) {visibility = this.take().lower; componentSection++; continue;}
+        if (['procedure', 'function', 'constructor', 'destructor'].includes(this.peek().lower)) {members.push({...this.procedure(this.take(), true), visibility, componentSection}); continue;}
+        const fieldStart = this.peek(), names = this.identifiers(); this.expect(':'); const type = this.type(); members.push(this.finish('field', fieldStart, {names, type, visibility, componentSection})); if (!this.match(';')) break;
       }
       this.expect('end'); return this.finish('objectType', start, {parent, members});
     }

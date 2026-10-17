@@ -6,6 +6,8 @@ import {PascalWorkspace, PASCAL_TYPES, isOrdinal, isString, isNumeric, isAggrega
 import {builtinType} from '../type-catalog.js';
 import {getPascalHelper, getPascalRuntimeSource} from './runtime-library.js';
 import {pascalPointerStorage, generatePascalPointerHeaps} from './pointer-lowering.js';
+import {PascalFileLowerer} from './file-lowering.js';
+import {objectScopedSymbol, objectWithSymbol, objectMemberSymbol, objectRoutineCall, objectReferenceCompatible, lowerObjectAssignment, lowerObjectValueParameter, lowerObjectInitializer, objectTypeSizeOf, objectTypeMetadata} from './object-lowering.js';
 
 export {parsePascalModule};
 export {tokenizePascal, PascalError, PASCAL_KEYWORDS};
@@ -15,7 +17,7 @@ const identifier = name => `[${String(name).replaceAll(']', '')}]`;
 const quote = value => String(value).split(/(\r|\n)/).filter(part => part !== '').map(part => part === '\r' ? 'vbCr' : part === '\n' ? 'vbLf' : `"${part.replaceAll('"', '""')}"`).join(' & ') || '""';
 const number = value => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647 ? `${value}&` : `${Number(value)}${Number.isInteger(value) ? '#' : ''}`;
 const bool = value => value ? 'True' : 'False';
-const INTRINSIC_TYPES = Object.freeze({ord: 'longint', chr: 'char', length: 'integer', copy: 'string', concat: 'string', pos: 'integer', upcase: 'char', round: 'longint', trunc: 'longint', frac: 'real', int: 'real', abs: 'real', sqr: 'real', sqrt: 'real', sin: 'real', cos: 'real', arctan: 'real', exp: 'real', ln: 'real', odd: 'boolean', random: 'real', paramcount: 'integer', paramstr: 'string', sizeof: 'integer', ioresult: 'integer', readkey: 'char', keypressed: 'boolean', low: 'longint', high: 'longint'});
+const INTRINSIC_TYPES = Object.freeze({ord: 'longint', chr: 'char', length: 'integer', copy: 'string', concat: 'string', pos: 'integer', upcase: 'char', round: 'longint', trunc: 'longint', frac: 'real', int: 'real', abs: 'real', sqr: 'real', sqrt: 'real', sin: 'real', cos: 'real', arctan: 'real', exp: 'real', ln: 'real', odd: 'boolean', random: 'real', paramcount: 'integer', paramstr: 'string', sizeof: 'integer', ioresult: 'integer', eof: 'boolean', eoln: 'boolean', filepos: 'longint', filesize: 'longint', readkey: 'char', keypressed: 'boolean', low: 'longint', high: 'longint'});
 const DIRECT_CALLS = Object.freeze({sqrt: 'Sqr', sin: 'Sin', cos: 'Cos', arctan: 'Atn', exp: 'Exp', ln: 'Log', int: 'Fix', length: 'Len'});
 
 class SourceWriter {
@@ -36,16 +38,18 @@ export class PascalLowerer {
     this.binder = this.workspace.add(this.input, this.ast); this.binder.ensure();
     this.workspace.preparePointers();
     this.writer = new SourceWriter(); this.helpers = new Set(); this.tempId = 0; this.labels = 0;
-    this.flags = {completeBoolean: false, rangeChecks: false, overflowChecks: false};
+    this.files = new PascalFileLowerer(this);
+    this.flags = {completeBoolean: false, rangeChecks: false, overflowChecks: false, ioChecks: true};
     this.directiveFlags = [];
     for (const directive of this.ast.directives) {
       const parts = directive.value.slice(1).trim().split(/[\s,]+/);
       for (const part of parts) {
-        const match = /^([BRQ])([+-])$/i.exec(part);
-        if (match) this.directiveFlags.push({start: directive.start, flag: {B: 'completeBoolean', R: 'rangeChecks', Q: 'overflowChecks'}[match[1].toUpperCase()], value: match[2] === '+'});
+        const match = /^([BRQI])([+-])$/i.exec(part);
+        if (match) this.directiveFlags.push({start: directive.start, flag: {B: 'completeBoolean', R: 'rangeChecks', Q: 'overflowChecks', I: 'ioChecks'}[match[1].toUpperCase()], value: match[2] === '+'});
         else if (/^(?:I|INCLUDE)$/i.test(part) && parts.length > 1) this.fail('Include directives require the referenced file to be expanded by the project loader', directive, 'TP_INCLUDE_NOT_FOUND');
         else if (/^(?:IFDEF|IFNDEF|IFOPT|ELSE|ENDIF|DEFINE|UNDEF)$/i.test(part)) this.fail('Conditional compilation directives require project symbol preprocessing', directive, 'TP_UNSUPPORTED_DIRECTIVE');
-        else if (/^[A-Z][+-]$/i.test(part) || /^(?:M|L|D|S|N|E|O|F|A|V|X|G|T|P|C)$/i.test(part)) {if (/^[PNV][+-]$/i.test(part)) this.fail(`Compiler directive '${part}' changes an unsupported ABI mode`, directive, 'TP_UNSUPPORTED_DIRECTIVE');}
+        else if (/^[DLY][+-]$/i.test(part)) { /* Debug information remains available to the shared debugger. */ }
+        else this.fail(`Compiler directive '${part}' is not supported by the shared Turbo Pascal backend`, directive, 'TP_UNSUPPORTED_DIRECTIVE');
       }
     }
     this.initializer = null;
@@ -64,6 +68,7 @@ export class PascalLowerer {
   }
   literal(value, type) {if (type.kind === 'boolean') return bool(value); if (typeof value === 'string') return quote(value); return number(value);}
   access(symbol, context) {
+    if (symbol.ioGlobal === 'fileMode') return this.files.mode;
     if (symbol.builtIn && symbol.kind === 'constant') return this.literal(symbol.value, symbol.type);
     const capture = context.procedure?.captures.find(value => value.symbol === symbol);
     if (capture) return identifier(capture.name);
@@ -72,10 +77,12 @@ export class PascalLowerer {
   }
   resolve(node, context, required = true) {
     if (node.kind !== 'identifier') return null;
-    for (let i = context.withObjects.length - 1; i >= 0; i--) {const object = context.withObjects[i], field = object.type.fields?.get(key(node.name)); if (field) return {kind: 'withField', name: field.name, type: field.type, access: `${object.source}.${identifier(field.name)}`};}
+    for (let i = context.withObjects.length - 1; i >= 0; i--) {const object = context.withObjects[i], member = objectWithSymbol(this, object, node, context); if (member) return member; const field = object.type.fields?.get(key(node.name)); if (field) return {kind: 'withField', name: field.name, type: field.type, access: `${object.source}.${identifier(field.name)}`};}
+    const member = objectScopedSymbol(this, node, context); if (member) return member;
     return context.scope.resolve(node.name, required, node);
   }
   memberSymbol(node, context) {
+    const objectMember = objectMemberSymbol(this, node, context); if (objectMember) return objectMember;
     if (node.kind !== 'member' || node.object.kind !== 'identifier') return null;
     const binder = this.workspace.get(node.object.name);
     if (!binder) return null;
@@ -89,6 +96,7 @@ export class PascalLowerer {
     if (node.kind === 'group') return this.typeOf(node.expression, context);
     if (node.kind === 'number' || node.kind === 'string' || node.kind === 'boolean') return this.binder.constant(node, context.scope).type;
     if (node.kind === 'nil') return {kind: 'nil', name: 'nil', vb: 'Long'};
+    if (node.kind === 'inherited') return this.memberSymbol(node, context)?.returnType || PASCAL_TYPES.variant;
     if (node.kind === 'identifier') {
       const symbol = this.resolve(node, context, false);
       if (symbol) return symbol.kind === 'procedure' ? symbol.returnType || PASCAL_TYPES.variant : symbol.type;
@@ -156,6 +164,7 @@ export class PascalLowerer {
     if (node.kind === 'group') return `(${this.expression(node.expression, context, {lvalue, forceCall})})`;
     if (['number', 'string', 'boolean'].includes(node.kind)) {const constant = this.binder.constant(node, context.scope); return this.literal(constant.value, constant.type);}
     if (node.kind === 'nil') return '0&';
+    if (node.kind === 'inherited') return this.routineCall(this.memberSymbol(node, context), [], context, node);
     if (node.kind === 'identifier') {
       const symbol = this.resolve(node, context, false);
       if (!symbol && Object.hasOwn(INTRINSIC_TYPES, key(node.name))) return this.expression({...node, kind: 'call', callee: node, args: []}, context);
@@ -236,9 +245,10 @@ export class PascalLowerer {
   call(node, context) {
     const name = node.callee.kind === 'identifier' ? key(node.callee.name) : null;
     const symbol = name ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context);
-    if (symbol?.kind === 'type') {this.count(node, 1); const value = this.expression(node.args[0], context); if (symbol.type.kind === 'char') return this.callHelper('chr', [value]); if (symbol.type.kind === 'boolean') return `(${value} <> 0&)`; if (isNumeric(symbol.type)) return this.range(symbol.type.kind === 'real' ? `CDbl(${value})` : `Fix(${value})`, symbol.type, context, node); this.fail('This type cast requires storage reinterpretation', node, 'TP_UNSUPPORTED_CAST');}
+    if (symbol?.kind === 'type') {this.count(node, 1); if (symbol.type.name === 'Extended') this.fail('Extended requires 80-bit floating point storage; supported real types are Real48, Single and Double', node, 'TP_UNSUPPORTED_REAL80'); const value = this.expression(node.args[0], context); if (symbol.type.kind === 'char') return this.callHelper('chr', [value]); if (symbol.type.kind === 'boolean') return `(${value} <> 0&)`; if (isNumeric(symbol.type)) return this.range(symbol.type.kind === 'real' ? `CDbl(${value})` : `Fix(${value})`, symbol.type, context, node); this.fail('This type cast requires storage reinterpretation', node, 'TP_UNSUPPORTED_CAST');}
     if (symbol?.kind === 'procedure' || symbol?.kind === 'result') return this.routineCall(symbol.kind === 'result' ? symbol.procedure : symbol, node.args, context, node);
     if (!symbol && name) {
+      const fileExpression = this.files.expression(node, context); if (fileExpression !== null) return fileExpression;
       if (['ord', 'chr', 'upcase', 'round', 'trunc', 'frac'].includes(name)) {this.count(node, 1); return this.callHelper(name, [this.expression(node.args[0], context)]);}
       if (name === 'copy' || name === 'pos') {this.count(node, name === 'copy' ? 3 : 2); return this.callHelper(name, node.args.map(arg => this.expression(arg, context)));}
       if (DIRECT_CALLS[name]) {this.count(node, 1); return `${DIRECT_CALLS[name]}(${this.expression(node.args[0], context)})`;}
@@ -255,15 +265,15 @@ export class PascalLowerer {
       }
       if (name === 'sizeof') {this.count(node, 1); const type = this.typeOf(node.args[0], context); if (type.kind === 'array' && type.open) {const source = this.expression(node.args[0], context, {lvalue: true}); return `((UBound(${source}) - LBound(${source}) + 1&) * ${number(this.sizeOf(type.element, node))})`;} return number(this.sizeOf(type, node));}
       if (name === 'random') {this.count(node, 0, 1); return node.args.length ? `Int(Rnd() * ${this.expression(node.args[0], context)})` : 'Rnd()';}
-      if (name === 'paramcount') {this.count(node, 0); return '0&';}
+      if (name === 'paramcount') {this.count(node, 0); this.fail('Command-line arguments require the host parameter adapter', node, 'TP_UNSUPPORTED_HOST_IO');}
       if (name === 'paramstr') {this.count(node, 1); this.fail('Command-line arguments require the host parameter adapter', node, 'TP_UNSUPPORTED_HOST_IO');}
-      if (name === 'ioresult') {this.count(node, 0); return '0&';}
       if (name === 'keypressed' || name === 'readkey') this.fail('Crt keyboard polling requires a terminal host adapter', node, 'TP_UNSUPPORTED_CRT');
     }
     if (node.callee.kind === 'member' || symbol?.kind === 'external') return `${this.expression(node.callee, context, {lvalue: true})}(${node.args.map(arg => this.expression(arg, context)).join(', ')})`;
     this.fail(`Unknown Pascal routine '${name || node.callee.name}'`, node, 'TP_UNKNOWN_ROUTINE');
   }
   sizeOf(type, node) {
+    const objectSize = objectTypeSizeOf(this, type, node); if (objectSize !== null) return objectSize;
     if (type.kind === 'ordinal') return type.bits / 8;
     if (type.kind === 'pointer') return 4;
     if (['char', 'boolean', 'enum'].includes(type.kind)) return 1;
@@ -276,15 +286,19 @@ export class PascalLowerer {
     this.fail('SizeOf requires a statically sized Turbo Pascal type', node, 'TP_SIZEOF');
   }
   routineCall(symbol, args, context, node) {
+    const objectCall = objectRoutineCall(this, symbol, args, context, node); if (objectCall !== null) return objectCall;
+    return `${this.access(symbol, context)}(${this.routineArguments(symbol, args, context, node).join(', ')})`;
+  }
+  routineArguments(symbol, args, context, node) {
     if (args.length !== symbol.params.length) this.fail(`Routine '${symbol.name}' expects ${symbol.params.length} argument(s), received ${args.length}`, node, 'TP_ARGUMENT_COUNT');
     const values = args.map((arg, index) => {
       const param = symbol.params[index], actual = this.typeOf(arg, context);
-      if (param.byRef) {this.assignable(arg, context); if (!sameType(param.type, actual) && !(param.type.kind === 'array' && param.type.open && actual.kind === 'array' && sameType(param.type.element, actual.element))) this.fail(`Var parameter '${param.name}' requires exactly ${param.type.name}`, arg, 'TP_VAR_PARAMETER_TYPE'); return this.expression(arg, context, {lvalue: true});}
+      if (param.byRef) {this.assignable(arg, context); if (!sameType(param.type, actual) && !objectReferenceCompatible(param.type, actual) && !(param.type.kind === 'array' && param.type.open && actual.kind === 'array' && sameType(param.type.element, actual.element))) this.fail(`Var parameter '${param.name}' requires exactly ${param.type.name}`, arg, 'TP_VAR_PARAMETER_TYPE'); return this.expression(arg, context, {lvalue: true});}
       if (!assignmentCompatible(param.type, actual)) this.fail(`Argument '${param.name}' has incompatible type`, arg, 'TP_ARGUMENT_TYPE');
       return isAggregate(param.type) ? this.expression(arg, context, {lvalue: true}) : this.range(this.expression(arg, context), param.type, context, arg);
     });
     for (const capture of symbol.captures) values.push(this.access(capture.symbol, context));
-    return `${this.access(symbol, context)}(${values.join(', ')})`;
+    return values;
   }
   assignable(node, context) {
     if (node.kind === 'group') return this.assignable(node.expression, context);
@@ -297,7 +311,9 @@ export class PascalLowerer {
   assign(target, value, context, node, {allowControl = false} = {}) {
     if (!allowControl) this.assignable(target, context);
     const targetType = this.typeOf(target, context), valueType = this.typeOf(value, context);
+    if (targetType.kind === 'file') this.fail('File variables cannot be copied by assignment', node, 'TP_FILE_ASSIGNMENT');
     if (!assignmentCompatible(targetType, valueType)) this.fail(`Cannot assign ${valueType.name || valueType.kind} to ${targetType.name || targetType.kind}`, node, 'TP_ASSIGNMENT_TYPE');
+    if (lowerObjectAssignment(this, target, value, context, node)) return;
     if (target.kind === 'index' && isString(this.typeOf(target.object, context))) {const objectType = this.typeOf(target.object, context); this.emit(context, `Call ${this.helper('stringSet')}(${this.expression(target.object, context, {lvalue: true})}, ${this.ordinal(target.indices[0], context)}, ${this.expression(value, context)}, ${number(objectType.capacity)})`, node); return;}
     const destination = this.expression(target, context, {lvalue: true}), source = value.kind === 'nil' && targetType.kind === 'object' ? 'Nothing' : this.expression(value, context, {lvalue: isAggregate(valueType)});
     if (targetType.kind === 'array') this.copyArray(destination, source, targetType, context, node);
@@ -379,6 +395,7 @@ export class PascalLowerer {
   callStatement(expression, context, node) {
     const call = expression.kind === 'call' ? expression : {...expression, kind: 'call', callee: expression, args: []}, name = call.callee.kind === 'identifier' ? key(call.callee.name) : null, symbol = name ? this.resolve(call.callee, context, false) : this.memberSymbol(call.callee, context);
     if (!symbol && name) {
+      if (this.files.statement(call, context, node)) return;
       if (name === 'new' || name === 'dispose') {
         this.count(call, 1); const pointer = call.args[0], type = this.typeOf(pointer, context); if (type.kind !== 'pointer') this.fail('New/Dispose require a typed pointer', pointer, 'TP_POINTER_TYPE'); const storage = pascalPointerStorage(type, this.binder);
         if (name === 'new') {this.assignable(pointer, context); this.emit(context, `${this.expression(pointer, context, {lvalue: true})} = ${storage.allocate}()`, node);}
@@ -386,6 +403,7 @@ export class PascalLowerer {
         return;
       }
       if (name === 'write' || name === 'writeln') {
+        if (call.args.length && this.typeOf(call.args[0], context).kind === 'file') {this.files.write(call, context, node, name === 'writeln'); return;}
         const values = call.args.map(arg => {
           const value = arg.kind === 'formatted' ? arg.value : arg, type = this.typeOf(value, context);
           if (isAggregate(type) || type.kind === 'set' || type.kind === 'object') this.fail('Write requires scalar values', value);
@@ -420,7 +438,7 @@ export class PascalLowerer {
         this.emit(context, `${this.expression(error, context, {lvalue: true})} = ${this.range(code, errorType, context, node)}`, node, true);
         this.emit(context, `If ${code} = 0& Then`, node, true); this.emit(context, `${this.expression(target, context, {lvalue: true})} = ${this.range(result, targetType, context, node)}`, node, true); this.emit(context, 'End If', node, true); return;
       }
-      if (name === 'read' || name === 'readln') this.fail(`${call.callee.name} requires the Pascal input/token conversion adapter`, node, 'TP_UNSUPPORTED_INPUT');
+      if (name === 'read' || name === 'readln') {const namedFile = call.args.length && this.typeOf(call.args[0], context).kind === 'file'; this.files.read(call, context, node, name === 'readln', !namedFile); return;}
       if (['clrscr', 'gotoxy', 'textcolor', 'textbackground', 'window', 'delay', 'sound', 'nosound'].includes(name)) this.fail(`Crt.${call.callee.name} requires a terminal host adapter`, node, 'TP_UNSUPPORTED_CRT');
     }
     const compiled = this.call(call, context); this.emit(context, `Call ${compiled}`, node);
@@ -430,6 +448,7 @@ export class PascalLowerer {
     this.emit(context, `${modifier} ${this.declaration(symbol.vbName, symbol.type)}`, symbol.node, true);
   }
   initializeValue(destination, type, value, context, node) {
+    if (lowerObjectInitializer(this, destination, type, value, context, node)) return;
     if (type.kind === 'array') {
       if (value.kind !== 'aggregate') this.fail('Array typed constant requires a parenthesized initializer', value);
       const shape = type.dimensions.map(d => d.high - d.low + 1), walk = (aggregate, depth, indices) => {
@@ -447,6 +466,7 @@ export class PascalLowerer {
   }
   lower() {
     const root = this.context(); root.writer.emit('Option Explicit', this.ast, true); root.writer.emit('Option Compare Binary', this.ast, true);
+    this.files.globals(root.writer, this.ast);
     for (const type of this.binder.recordTypes) {
       root.writer.emit(`${type.public && !this.input.form ? 'Public' : 'Private'} Type ${identifier(type.name)}`, type.node, true);
       for (const field of type.fields.values()) root.writer.emit(this.declaration(field.name, field.type), field.node, true);
@@ -469,17 +489,19 @@ export class PascalLowerer {
     }
     const helperSource = getPascalRuntimeSource(this.helpers);
     if (helperSource) root.writer.emit(helperSource, this.ast, true);
+    const fileSource = this.files.source(); if (fileSource) root.writer.emit(fileSource, this.ast, true);
     this.writer = root.writer;
     const allUses = this.ast.uses.flatMap(use => use.units.map(unit => unit.name));
-    return {name: this.input.name || this.ast.name, code: this.writer.source, generatedSource: this.writer.source, source: this.ast.source, sourceMap: this.writer.map, ast: this.ast, pascalAst: this.ast, language: 'pascal', pascal: {version: '7.0', kind: this.ast.moduleKind, unitName: this.ast.name, uses: allUses, interfaceUses: this.ast.uses.filter(use => use.section === 'interface').flatMap(use => use.units.map(unit => unit.name)), implementationUses: this.ast.uses.filter(use => use.section !== 'interface').flatMap(use => use.units.map(unit => unit.name)), initializer: this.initializer, helpers: [...this.helpers], symbols: this.symbolMetadata()}};
+    return {name: this.input.name || this.ast.name, code: this.writer.source, generatedSource: this.writer.source, source: this.ast.source, sourceMap: this.writer.map, ast: this.ast, pascalAst: this.ast, language: 'pascal', pascal: {version: '7.0', kind: this.ast.moduleKind, unitName: this.ast.name, uses: allUses, interfaceUses: this.ast.uses.filter(use => use.section === 'interface').flatMap(use => use.units.map(unit => unit.name)), implementationUses: this.ast.uses.filter(use => use.section !== 'interface').flatMap(use => use.units.map(unit => unit.name)), initializer: this.initializer, helpers: [...this.helpers], symbols: this.symbolMetadata(), objectTypes: objectTypeMetadata(this.binder), hostRequirements: this.files.usesConsole ? ['consoleLineInput'] : [], directives: this.ast.directives.map(value => ({text: value.value, line: value.line}))}};
   }
   lowerProcedure(procedure) {
     const context = this.context(procedure.localScope, procedure), kind = procedure.returnType ? 'Function' : 'Sub';
-    const params = procedure.params.map(param => `${param.byRef || isAggregate(param.type) ? 'ByRef' : 'ByVal'} ${this.declaration(!param.byRef && isAggregate(param.type) ? `__value_${param.name}` : param.name, param.type, true)}`);
+    const params = procedure.params.map(param => `${param.byRef || isAggregate(param.type) ? 'ByRef' : 'ByVal'} ${this.declaration(!param.byRef && isAggregate(param.type) ? `__value_${param.name}` : param.vbName || param.name, param.type, true)}`);
     for (const capture of procedure.captures) params.push(`ByRef ${this.declaration(capture.name, capture.symbol.type, true)}`);
     this.emit(context, `${procedure.public ? 'Public' : 'Private'} ${kind} ${identifier(procedure.vbName)}(${params.join(', ')})${procedure.returnType ? ` As ${this.storageType(procedure.returnType)}` : ''}`, procedure.node, true);
     for (const param of procedure.params) if (!param.byRef && isAggregate(param.type)) {
       this.emit(context, `Dim ${this.declaration(param.name, param.type)}`, param, true);
+      if (lowerObjectValueParameter(this, param, identifier(`__value_${param.name}`), context)) continue;
       if (param.type.kind === 'array' && param.type.open) {
         const destination = identifier(param.name), source = identifier(`__value_${param.name}`), index = this.temporary(context, PASCAL_TYPES.longint, param, 'openIndex');
         this.emit(context, `ReDim ${destination}(0& To UBound(${source}) - LBound(${source}))`, param, true);

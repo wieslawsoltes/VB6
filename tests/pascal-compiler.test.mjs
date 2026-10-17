@@ -5,7 +5,7 @@ import {compileProject} from '../src/language/compiler.js';
 import {VirtualMachine} from '../src/runtime/vm.js';
 
 function project(code, modules = []) {return {name: 'PascalConformance', language: 'pascal', startup: 'Sub Main', modules: [{name: 'MainUnit', kind: 'module', language: 'pascal', code}, ...modules]};}
-async function execute(code, modules = [], options = {}) {const compiled = compileProject(project(code, modules)); assert.deepEqual(compiled.diagnostics, []); const output = [], vm = new VirtualMachine(compiled, {print: (text, newline) => output.push({text, newline})}, options); await vm.start(); assert.equal(vm.lastError, null); return {compiled, output: output.map(value => value.text), chunks: output, vm};}
+async function execute(code, modules = [], options = {}) {const compiled = compileProject(project(code, modules)); assert.deepEqual(compiled.diagnostics, []); const output = [], vm = new VirtualMachine(compiled, {print: (text, newline) => output.push({text, newline}), ...options.host}, options); await vm.start(); assert.equal(vm.err.Number, 0); return {compiled, output: output.map(value => value.text), chunks: output, vm};}
 function invalid(code, pattern, line) {const result = compileProject(project(code)); assert.equal(result.valid, false); assert.match(result.diagnostics.map(error => error.message).join('\n'), pattern); if (line) assert.equal(result.diagnostics[0].line, line); return result;}
 
 test('Pascal lexer preserves original UTF-16 spans, string escapes and comments', () => {
@@ -122,6 +122,78 @@ test('nil and disposed pointer accesses produce deterministic Pascal runtime err
   for (const source of ['program NilPointer; type PInt=^Integer; var P:PInt; begin P:=nil; Writeln(P^) end.', 'program StalePointer; type PInt=^Integer; var P:PInt; begin New(P); Dispose(P); Writeln(P^) end.']) {
     const compiled = compileProject(project(source)); assert.deepEqual(compiled.diagnostics, []); await assert.rejects(new VirtualMachine(compiled).start(), error => error.number === 204);
   }
+});
+
+test('Text files preserve CRLF, token delimiters, short string capacities and stream position', async () => {
+  const {output, vm} = await execute(`program TextIO;
+var F: Text; N: Integer; S: String[3]; Tail: String[20];
+begin Assign(F,'text.txt'); Rewrite(F); Writeln(F,42,' abcdef'); Writeln(F,'last'); Close(F);
+Reset(F); Read(F,N); Read(F,S); Readln(F,Tail); Writeln(N,':',S,':',Tail,':',Eof(F));
+Readln(F,Tail); Writeln(Tail,':',Eof(F)); Close(F);
+Append(F); Write(F,'tail'); Close(F); Rename(F,'renamed.txt') end.`);
+  assert.deepEqual(output, ['42: ab:cdef:FALSE', 'last:TRUE']);
+  assert.deepEqual([...vm.fs.readBytes('/renamed.txt')], [...new TextEncoder().encode('42 abcdef\r\nlast\r\ntail')]);
+  assert.equal(vm.fs.exists('/text.txt'), false);
+});
+
+test('typed file records use Pascal byte layout and zero-based record seeking', async () => {
+  const {output, vm} = await execute(`program Records;
+type Item = record Code: Word; Delta: Integer; Mark: Char; Name: String[3]; Flags: set of 0..7; Values: array[1..2] of Byte end;
+var F: file of Item; A,B: Item;
+begin A.Code:=65535; A.Delta:=-2; A.Mark:='Z'; A.Name:='ab'; A.Flags:=[0,7]; A.Values[1]:=10; A.Values[2]:=20;
+Assign(F,'records.dat'); Rewrite(F); Write(F,A); A.Code:=7; Write(F,A); Writeln(FilePos(F),':',FileSize(F));
+Seek(F,0); Read(F,B); Writeln(B.Code,':',B.Delta,':',B.Mark,':',B.Name,':',7 in B.Flags,':',B.Values[2]);
+Seek(F,1); Read(F,B); Writeln(B.Code,':',Eof(F)); Close(F) end.`);
+  assert.deepEqual(output, ['2:2', '65535:-2:Z:ab:TRUE:20', '7:TRUE']);
+  assert.deepEqual([...vm.fs.readBytes('/records.dat').slice(0,12)], [255,255,254,255,90,2,97,98,0,129,10,20]);
+});
+
+test('unchecked file failures share IOResult across unit boundaries and preserve numeric targets', async () => {
+  const unit = {name:'FileWork', kind:'module', code:`unit FileWork; interface procedure OpenMissing(var F:Text); implementation procedure OpenMissing(var F:Text); begin Assign(F,'missing.txt'); {$I-} Reset(F) {$I+} end; end.`};
+  const {output} = await execute(`program Errors; uses FileWork;
+var F:Text; N,Code:Integer;
+begin OpenMissing(F); Code:=IOResult; Writeln(Code,':',IOResult);
+Rewrite(F); Writeln(F,'invalid'); Close(F); Reset(F); N:=37; {$I-} Read(F,N); {$I+} Code:=IOResult; Writeln(N,':',Code); Close(F) end.`, [unit]);
+  assert.deepEqual(output, ['2:0', '37:106']);
+  invalid('program CopyFile; var A,B: Text; begin A:=B end.', /File variables cannot be copied/);
+  invalid('program FileValue; procedure P(F:Text); begin end; begin end.', /File parameters must be declared var/);
+});
+
+test('typed Real files preserve Borland Real48 byte representations', async () => {
+  const {output, vm} = await execute("program Reals; var F:file of Real; R:Real; begin Assign(F,'real.dat'); Rewrite(F); R:=-1.0; Write(F,R); R:=0; Seek(F,0); Read(F,R); Writeln(R:4:1); Close(F) end.");
+  assert.deepEqual(output,['-1.0']); assert.deepEqual([...vm.fs.readBytes('/real.dat')],[129,0,0,0,0,128]);
+});
+
+test('buffered console Read/ReadLn share line input across units and preserve empty lines', async () => {
+  const unit={name:'ConsoleWork',kind:'module',code:'unit ConsoleWork; interface procedure ReadNumber(var N:Integer); implementation procedure ReadNumber(var N:Integer); begin Read(N) end; end.'};
+  const lines=['12 abcdef','','7','x']; let requests=0;
+  const {output,compiled}=await execute(`program ConsoleInput; uses ConsoleWork;
+var N:Integer; S:String[3]; Tail:String[20]; C:Char;
+begin ReadNumber(N); Read(S); Readln(Tail); Writeln(N,':',S,':',Tail);
+Readln(Tail); Writeln(Length(Tail)); Read(N); Writeln(N,':',Eoln); Readln; Read(C); Writeln(Ord(C)) end.`,[unit],{host:{inputBox:async()=>{requests++; assert.ok(lines.length,'unexpected input request'); return lines.shift();}}});
+  assert.deepEqual(output,['12: ab:cdef','0','7:TRUE','120']); assert.equal(requests,4);
+  assert.deepEqual(compiled.modules.get('consolework').pascal.hostRequirements,['consoleLineInput']);
+  invalid('program EndOfInput; begin Writeln(Eof) end.',/end-of-input sentinel/);
+});
+
+test('bounded untyped block I/O preserves partial-record bytes and untouched buffer storage', async () => {
+  const {output,vm}=await execute(`program Blocks;
+type Bytes=array[1..8] of Byte;
+var F:file; A,B:Bytes; I,N:Integer;
+begin for I:=1 to 8 do begin A[I]:=I; B[I]:=9 end;
+Assign(F,'block.dat'); Rewrite(F,1); BlockWrite(F,A,5,N); Writeln(N); Close(F);
+Reset(F,2); BlockRead(F,B,4,N); Writeln(N,':',B[1],':',B[5],':',B[6],':',B[8],':',Eof(F)); Close(F) end.`);
+  assert.deepEqual(output,['5','2:1:5:9:9:TRUE']); assert.deepEqual([...vm.fs.readBytes('/block.dat')],[1,2,3,4,5]);
+  const compiled=compileProject(project('program Bounds; type Bytes=array[1..4] of Byte; var F:file; A:Bytes; begin Assign(F,\'bounds.dat\'); Rewrite(F,2); BlockWrite(F,A,3) end.'));
+  assert.deepEqual(compiled.diagnostics,[]); await assert.rejects(new VirtualMachine(compiled).start(),error=>error.number===201&&/buffer capacity/.test(error.message));
+});
+
+test('typed IEEE file codecs and Flush lower through the shared portable file runtime', async () => {
+  const {output,vm}=await execute(`program FloatFiles; var F:file of Double; T:Text; D:Double;
+begin Assign(F,'double.dat'); Rewrite(F); D:=-1.5; Write(F,D); Seek(F,0); D:=0; Read(F,D); Writeln(D:4:1); Close(F);
+Assign(T,'flush.txt'); Rewrite(T); Writeln(T,'ready'); Flush(T); Close(T) end.`);
+  assert.deepEqual(output,['-1.5']); assert.deepEqual([...vm.fs.readBytes('/double.dat')],[0,0,0,0,0,0,248,191]);
+  assert.equal(vm.fs.read('/flush.txt'),'ready\r\n');
 });
 
 test('enumerations, subranges, sets and membership maintain ordinal type identity', async () => {
