@@ -85,7 +85,7 @@ export const nativeCompilerStateMethods={
     if (node.kind === 'group') return this.variable(node.expr,context);
     if (node.kind === 'call') {
       const array=this.variable(node.callee,context);
-      if(array?.nativeArray){if(!node.args.length)return array;if(!array.nativeDynamic&&node.args.length!==array.nativeBounds.length)this.fail('Native array rank mismatch: '+array.name);return {type:array.type,fixedLength:array.fixedLength,elementOf:array,indices:node.args};}
+      if(array?.nativeArray){if(!node.args.length)return array;if(!array.nativeDynamic&&node.args.length!==array.nativeBounds.length)this.fail('Native array rank mismatch: '+array.name);return {type:array.type,fixedLength:array.fixedLength,nativeRecord:array.nativeRecord,nativeElementBytes:array.nativeElementBytes,nativeBytes:array.nativeElementBytes,nativeCount:1,elementOf:array,indices:node.args};}
       if(array&&key(array.type)==='variant'&&array!==context?.returnValue&&node.args.length) return {type:'Variant',variantElementOf:array,indices:node.args};
       return null;
     }

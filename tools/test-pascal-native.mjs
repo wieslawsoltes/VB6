@@ -6,7 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {pascalNativeVerificationProject} from '../tests/pascal-integration-fixtures.mjs';
+import {pascalNativeVerificationProject,pascalNativeExpectedResult} from '../tests/pascal-integration-fixtures.mjs';
 
 const project=pascalNativeVerificationProject();
 const directory=await fs.mkdtemp(path.join(os.tmpdir(),'vb6-pascal-native-'));
@@ -47,7 +47,9 @@ try {
     const processResult=spawnSync(executable,[],{cwd:work,encoding:'utf8',timeout:30000,maxBuffer:1024*1024,windowsHide:true});
     assert.ifError(processResult.error);assert.equal(processResult.status,0,processResult.stderr||processResult.stdout);
     const actual=await fs.readFile(path.join(work,'pascal-native-result.txt'),'utf8');
-    assert.equal(actual.trim(),'42','Native Pascal initialization, loops, calls and var aliasing');
+    assert.equal(actual.trim(),pascalNativeExpectedResult,'Native Pascal initialization, loops, calls, objects, pointer heaps and files');
+    assert.equal(await fs.readFile(path.join(work,'pascal-native.txt'),'utf8'),'  42\r\n');
+    assert.deepEqual([...await fs.readFile(path.join(work,'pascal-native.dat'))],[255,255,129,0,0,0,0,64]);
     report.checks.push({optimization,executableSHA256:createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length,result:actual.trim(),executed:true});
   }
   report.valid=true;console.log(JSON.stringify(report,null,2));

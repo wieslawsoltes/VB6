@@ -163,7 +163,8 @@ export const nativeNumericMethods = {
       else if(p.bounds!==null&&p.bounds!==undefined){
         if(node.kind==='group')this.fail('Parenthesized whole-array values are not yet lowered; pass the typed array directly');
         const a=this.variable(node);
-        if(!target.proc||!p.byRef||!a?.nativeArray||a.elementOf||key(a.type)!==key(p.type))this.fail('ByRef array argument must have the exact declared element type');
+        const sameType=p.nativeRecord?a?.nativeRecord?.id===p.nativeRecord.id:!a?.nativeRecord&&key(a?.type)===key(p.type);
+        if(!target.proc||!p.byRef||!a?.nativeArray||a.elementOf||!sameType)this.fail('ByRef array argument must have the exact declared element type');
         if(a.fixedLength)this.fail('Fixed-length String whole-array arguments are not yet lowered');this.rawStorageAddress(a);
       }else if(p.byRef){
         const {pin,temporary,fixedString}=this.nativeReferenceArgument(p,node,omitted);

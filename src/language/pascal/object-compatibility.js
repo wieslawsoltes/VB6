@@ -47,3 +47,29 @@ export function pascalObjectReferenceCompatible(modules, sourceIdentity, targetI
   }
   return false;
 }
+
+/** A generated virtual thunk may narrow its ancestor Self to the defining type
+ * of an override. Return the allowed runtime tags only after independently
+ * checking the receiver, implementation and every nominal ancestry link.
+ * Source code cannot opt into this contract: __Pascal names are reserved.
+ */
+export function pascalObjectDispatchBranches(modules, callerModule, callerProcedure, receiverName, targetModule, targetProcedure, viewIdentity) {
+  const module=modules.get(lower(callerModule)), target=modules.get(lower(targetModule));
+  if(module?.language!=='pascal'||target?.language!=='pascal'||!/^__PascalDispatch_/i.test(callerProcedure)||!/^__PascalMethod_/i.test(targetProcedure))return null;
+  const dispatch=module.pascal?.objectDispatchers?.find(value=>lower(value.name)===lower(callerProcedure));
+  if(!dispatch||lower(dispatch.receiver.parameter)!==lower(receiverName)||dispatch.receiver.vmtField!=='__PascalTypeId')return null;
+  const receiver=definition(modules,dispatch.receiver.identity),view=definition(modules,viewIdentity);
+  const caller=module.procedures.get(lower(callerProcedure)),callee=target.procedures.get(lower(targetProcedure));
+  if(!receiver||!view||!receiver.object.hasVmt||!caller?.params[0]?.byRef||!callee?.params[0]?.byRef)return null;
+  if(lower(caller.params[0].name)!==lower(receiverName)||fieldType(caller.params[0],module)!==lower(receiver.object.identity)||fieldType(callee.params[0],target)!==lower(view.object.identity))return null;
+  if(!view.object.methods?.some(method=>method.virtual&&lower(method.vbName)===lower(targetProcedure)&&lower(method.module)===lower(targetModule)&&lower(method.declaringType)===lower(view.object.name)))return null;
+  const compatible=(from,to)=>lower(from)===lower(to)||pascalObjectReferenceCompatible(modules,from,to);
+  const branches=dispatch.branches.filter(branch=>lower(branch.targetModule)===lower(targetModule)&&lower(branch.targetProcedure)===lower(targetProcedure)&&lower(branch.viewType)===lower(viewIdentity));
+  if(!branches.length||branches.some(branch=>{
+    const runtime=definition(modules,branch.runtimeType);
+    return !runtime||!runtime.object.hasVmt||!Number.isInteger(branch.typeId)||branch.typeId<1||branch.typeId>2147483647||runtime.object.typeId!==branch.typeId||!compatible(runtime.object.identity,receiver.object.identity)||!compatible(runtime.object.identity,view.object.identity);
+  }))return null;
+  const header=receiver.fields[0];
+  if(!header||header.name!==dispatch.receiver.vmtField||lower(header.type)!=='long'||header.bounds!=null)return null;
+  return {receiver:dispatch.receiver,branches};
+}

@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {compileProject} from '../src/language/compiler.js';
 import {compileWin32} from '../src/native/compiler.js';
-import {pascalObjectReferenceCompatible} from '../src/language/pascal/object-compatibility.js';
+import {pascalObjectReferenceCompatible,pascalObjectDispatchBranches} from '../src/language/pascal/object-compatibility.js';
 import {NativeRecordLayouts} from '../src/native/records.js';
+import {pascalNativeVerificationProject,pascalNativeExpectedResult} from './pascal-integration-fixtures.mjs';
+import {VirtualMachine} from '../src/runtime/vm.js';
+import {compileMacOSAOT} from '../packages/macos-native/src/aot-compiler.js';
 
 const source = `program Aliases;
 type TBase = object X: Integer; procedure Add(N: Integer); end;
@@ -47,4 +50,21 @@ test('Win32 object ancestor references also require an identical physical prefix
 
 test('Win32 emits static inherited Self and ancestor var calls at O0 and O2', () => {
   for(const optimization of [0,2])assert.ok(compileWin32(project(),{optimization}).bytes.length>0);
+});
+
+test('generated virtual narrowing requires the declared implementation and runtime tags',()=>{
+  const program=compileProject(pascalNativeVerificationProject());assert.equal(program.valid,true,JSON.stringify(program.diagnostics));
+  const module=program.modules.get('nativeobjects'),dispatch=module.pascal.objectDispatchers[0],branch=dispatch.branches.find(b=>b.targetModule==='NativeDerived');
+  const args=[program.modules,module.name,dispatch.name,dispatch.receiver.parameter,branch.targetModule,branch.targetProcedure,branch.viewType];
+  assert.equal(pascalObjectDispatchBranches(...args).branches.length,1);
+  branch.typeId+=50;assert.equal(pascalObjectDispatchBranches(...args),null);branch.typeId-=50;
+  args[2]='Authored';assert.equal(pascalObjectDispatchBranches(...args),null);
+});
+
+test('private cross-unit virtual receivers, growing pointer heaps and typed files share native lowering',async()=>{
+  const p=pascalNativeVerificationProject(),program=compileProject(p),vm=new VirtualMachine(program,{});
+  assert.equal(program.valid,true,JSON.stringify(program.diagnostics));await vm.start();
+  assert.equal(vm.fs.read('/pascal-native-result.txt').trim(),pascalNativeExpectedResult);
+  for(const optimization of [0,2])assert.ok(compileWin32(p,{optimization}).bytes.length>0);
+  assert.ok(compileMacOSAOT(p).section.length>0);
 });

@@ -1,5 +1,7 @@
 import {pascalObjectReferenceCompatible} from '../language/pascal/object-compatibility.js';
 import {nativeRecordStringMethods} from './record-strings.js';
+import {nativeRecordArrayMethods} from './record-arrays.js';
+import {nativePascalObjectMethods} from './pascal-objects.js';
 /** Native POD records for 32-bit VB/Win32 ABI. Managed fields and SAFEARRAY(VT_RECORD)
  * are rejected: a byte copy must never masquerade as COM record ownership.
  * Fields use natural scalar widths with a maximum four-byte alignment.
@@ -86,12 +88,14 @@ export class NativeRecordLayouts {
 
 export const nativeRecordMethods={
   ...nativeRecordStringMethods,
+  ...nativeRecordArrayMethods,
+  ...nativePascalObjectMethods,
   recordStorage(decl,module) {
     const item=nativeEventItemStorage(this,decl,module,this.preparingProcedure);if(item)return item;
     const layout=this.recordLayouts.resolve(decl.type,module);
     if(!layout)return null;
-    if(decl.bounds!=null)this.fail('Native arrays of records require SAFEARRAY record ownership and are not yet lowered',module);
     if(decl.autoNew||decl.withEvents)this.fail('Native POD records cannot use New or WithEvents',module);
+    if(decl.bounds!=null)return this.recordArrayStorage(Object.assign(decl,{nativeRecord:layout}),module);
     if(decl.parameter&&!decl.byRef)this.fail('Native record parameters must be ByRef',module);
     return Object.assign(decl,{nativeRecord:layout,nativeElementBytes:layout.size,nativeBytes:align(layout.size,4),nativeCount:1});
   },
@@ -99,7 +103,7 @@ export const nativeRecordMethods={
     if(node.kind==='member'){
       const parent=this.variable(node.object,context);
       if(!parent?.nativeRecord)return null;
-      if(parent.recordFieldArray)this.fail('Native record array field requires indices');
+      if(parent.recordFieldArray||parent.nativeArray&&!parent.elementOf)this.fail('Native record array field requires indices');
       const field=parent.nativeRecord.fields.get(key(node.name));
       if(!field)this.fail('Unknown native record field: '+node.name);
       return {...field,recordOf:parent};
@@ -113,7 +117,7 @@ export const nativeRecordMethods={
     return null;
   },
   recordAddress(variable) {
-    const x=this.x;this.address(variable.recordOf);
+    const x=this.x,pin=this.address(variable.recordOf);
     if(variable.recordOffset)x.add('eax',variable.recordOffset);
     if(variable.recordIndices){
       x.push();
@@ -125,28 +129,31 @@ export const nativeRecordMethods={
         x.emit(0x01,0x04,0x24); // add [esp],eax; checked layout bounds prove no offset overflow.
       });x.emit(0x58);
     }
-    return null;
+    return pin;
   },
   copyRecordTo(variable) {
     // EAX is the immutable source snapshot. The destination can evaluate indices.
-    const x=this.x;x.push();this.address(variable);x.emit(0x89,0xc7,0x5e).mov('ecx',variable.nativeRecord.size).cld().repMove(8);
+    const x=this.x;x.push();const pin=this.address(variable);x.emit(0x89,0xc7,0x5e).mov('ecx',variable.nativeRecord.size).cld().repMove(8);this.releaseArrayPin(pin);
   },
   recordExpression(variable,node) {
     const source=this.variable(node);
-    if(!source?.nativeRecord||source.nativeRecord.id!==variable.nativeRecord.id||source.recordFieldArray)this.fail('Native record assignment requires the exact declared record type');
+    if(!source?.nativeRecord||source.nativeRecord.id!==variable.nativeRecord.id||source.recordFieldArray||source.nativeArray&&!source.elementOf)this.fail('Native record assignment requires the exact declared record type');
     // Materialize before evaluating the destination, like scalar expression values.
     const temp=this.arrayWorkspace(align(variable.nativeRecord.size,4),'record-snapshot');temp.nativeRecord=variable.nativeRecord;
-    this.address(source);this.copyRecordTo(temp);this.rawStorageAddress(temp);
+    const pin=this.address(source);this.copyRecordTo(temp);this.releaseArrayPin(pin);this.rawStorageAddress(temp);
   },
   recordReferenceArgument(parameter,node,forced) {
     if(this.nativeRecordTransfers&&parameter.nativeRecord.hasFixedStrings){
       this.nativeRecordTransfers.push(this.nativeExternalRecordArgument(parameter,node));return {};
     }
     const variable=this.variable(node);
-    if(!variable?.nativeRecord||!this.recordLayouts.referenceCompatible(variable.nativeRecord,parameter.nativeRecord)||variable.recordFieldArray)this.fail('ByRef native record argument requires the exact declared record type');
-    if(!forced){this.address(variable);return {};}
+    if(!forced&&variable?.nativeRecord&&!variable.recordFieldArray&&!(variable.nativeArray&&!variable.elementOf)&&!this.recordLayouts.referenceCompatible(variable.nativeRecord,parameter.nativeRecord)){
+      const view=this.pascalObjectViewArgument(parameter,node,variable);if(view)return view;
+    }
+    if(!variable?.nativeRecord||!this.recordLayouts.referenceCompatible(variable.nativeRecord,parameter.nativeRecord)||variable.recordFieldArray||variable.nativeArray&&!variable.elementOf)this.fail('ByRef native record argument requires the exact declared record type');
+    if(!forced)return {pin:this.address(variable)};
     const temporary=this.arrayWorkspace(align(variable.nativeRecord.size,4),'byref-record');Object.assign(temporary,{type:parameter.type,nativeRecord:variable.nativeRecord});
-    this.address(variable);this.copyRecordTo(temporary);this.rawStorageAddress(temporary);return {temporary};
+    const pin=this.address(variable);this.copyRecordTo(temporary);this.releaseArrayPin(pin);this.rawStorageAddress(temporary);return {temporary};
   },
   anyReferenceArgument(node) {
     if(this.nativeRecordTransfers&&this.variable(node)?.nativeRecord?.hasFixedStrings){

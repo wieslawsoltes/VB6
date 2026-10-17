@@ -68,6 +68,7 @@ export const nativeArrayMethods = {
   },
   initializeArrayStorage(variable) {
     if(!variable.nativeArray || variable.parameter || variable.nativeDynamic)return;
+    if(variable.nativeRecord)return this.initializeRecordArrayStorage(variable);
     const x=this.x, done=x.unique(), label=x.unique('fixed-bounds');
     this.ro.align(4).label(label);
     for(const bound of variable.nativeBounds)this.ro.u32(bound.upper-bound.lower+1).u32(bound.lower);
@@ -87,6 +88,7 @@ export const nativeArrayMethods = {
     if(!variable.nativeDynamic)this.fail('ReDim cannot resize a fixed native array: '+decl.name);
     if(decl.explicitType && key(decl.type)!==key(variable.type))this.fail('ReDim cannot change a typed array element type');
     if(decl.fixedLength && decl.fixedLength!==variable.fixedLength)this.fail('ReDim cannot change a fixed String element length');
+    if(variable.nativeRecord)return this.redimRecordArrayStorage(variable,decl,preserve);
     const rank=decl.bounds?.length;
     if(!rank || rank>NATIVE_ARRAY_MAX_RANK)this.fail('Native ReDim requires one to 60 dimensions');
     const bounds=this.arrayWorkspace(rank*8);
@@ -114,6 +116,7 @@ export const nativeArrayMethods = {
     if(variable&&!variable.nativeArray&&key(variable.type)==='variant')return this.eraseVariantArray(variable);
     if(!variable?.nativeArray||variable.elementOf)this.fail('Native Erase requires an array');
     this.x.push(variable.fixedLength || 0);this.rawStorageAddress(variable);this.x.push().call(A+'erase');
+    if(variable.nativeRecord)this.initializeRecordArrayElements(variable);
   },
   assignArrayStorage(variable, node) {
     if(variable.paramArray)this.fail('Whole-array ParamArray replacement is not yet lowered; assign its elements instead');
@@ -121,7 +124,8 @@ export const nativeArrayMethods = {
     if(this.assignNativeVariantArray(variable,node))return;
     const source=this.variable(node);
     if(!variable.nativeDynamic)this.fail('Whole-array assignment requires a dynamic destination');
-    if(!source?.nativeArray || source.elementOf || key(variable.type)!==key(source.type) || (variable.fixedLength||0)!==(source.fixedLength||0))this.fail('Array assignment requires identical declared element types and fixed String lengths');
+    const sameType=variable.nativeRecord?source?.nativeRecord?.id===variable.nativeRecord.id:!source?.nativeRecord&&key(variable.type)===key(source?.type);
+    if(!source?.nativeArray || source.elementOf || !sameType || (variable.fixedLength||0)!==(source.fixedLength||0))this.fail('Array assignment requires identical declared element types and fixed String lengths');
     this.rawStorageAddress(variable);this.x.push();this.rawStorageAddress(source);this.x.emit(0x5b).push().emit(0x53).call(A+'copy');
   }
 };
