@@ -7,7 +7,7 @@ import {assignmentCompatible, isAggregate, isString} from '../language/pascal/se
 import {getPascalRuntimeSource} from '../language/pascal/runtime-library.js';
 import {unbox, scalarType, tagScalar, truth} from './values.js';
 
-const PURE_HELPERS = new Set(('ord chr upcase shortstring stringget ordinal trunc round frac real48 div mod intadd intsub intmul shiftleft shiftright copy pos setempty setnormalize setcontains setwith setwithout setrange setunion setintersect setdifference setsymmetricdifference setequal setsubset setcount debugrange debugsqr').split(' '));
+const PURE_HELPERS = new Set(('ord chr upcase shortstring stringget ordinal trunc round frac real48 div mod intadd intsub intmul wordadd wordsub wordmul shiftleft shiftright copy pos setempty setnormalize setcontains setwith setwithout setrange setunion setintersect setdifference setsymmetricdifference setequal setsubset setcount debugrange debugsqr').split(' '));
 const lower = value => String(value).toLowerCase();
 const error = (message, number = 201) => {throw new VBError(message, number, 'Turbo Pascal');};
 const boolean = value => tagScalar(value ? -1 : 0, 'boolean');
@@ -52,6 +52,7 @@ export function pascalDebugIntrinsic(name, args) {
     case 'div': {const divisor = integer(b); if (!divisor) error('Division by zero', 200); const value = Math.trunc(integer(a) / divisor); if (value < -2147483648 || value > 2147483647) error('Integer division overflow', 200); return tagScalar(value, 'long');}
     case 'mod': if (!integer(b)) error('Division by zero', 200); return tagScalar(integer(a) % integer(b), 'long');
     case 'intadd': case 'intsub': case 'intmul': return tagScalar(arithmetic(name, a, b, c, truth(args[3])), 'long');
+    case 'wordadd': case 'wordsub': case 'wordmul': {const x=BigInt(integer(a)),y=BigInt(integer(b)),value=name==='wordadd'?x+y:name==='wordsub'?x-y:x*y;if(truth(args[2])&&(value<0n||value>65535n))error('Integer overflow',215);return tagScalar(Number(BigInt.asUintN(16,value)),'long');}
     case 'shiftleft': case 'shiftright': {const count = integer(b), width = integer(c ?? 16); if (count < 0 || ![8, 16, 32].includes(width)) error('Invalid shift count or width'); if (count >= width) return tagScalar(0, 'long'); const value = BigInt.asUintN(width, BigInt(integer(a))), result = name === 'shiftleft' ? value << BigInt(count) : value >> BigInt(count); return tagScalar(Number(truth(args[3] ?? -1) ? BigInt.asIntN(width, result) : BigInt.asUintN(width, result)), 'long');}
     case 'copy': {const index = Math.max(1, integer(b)) - 1; return c <= 0 ? '' : String(a).slice(index, index + integer(c));}
     case 'pos': return String(a) === '' ? 0 : String(b).indexOf(String(a)) + 1;
@@ -67,7 +68,7 @@ export function pascalDebugIntrinsic(name, args) {
     }
     case 'setcount': {let count = 0; for (const ch of normalizeSet(a)) for (let bits = ch.charCodeAt(0) & 255; bits; bits &= bits - 1) count++; return count;}
     case 'debugrange': if (a < b || a > c) error('Subrange check failed'); return args[0];
-    case 'debugsqr': return c === undefined || b === 0 ? Number(a) * Number(a) : tagScalar(arithmetic('intmul', a, a, b, truth(args[2])), 'long');
+    case 'debugsqr': return c === undefined || b === 0 ? Number(a) * Number(a) : d!==undefined&&!truth(args[3]) ? pascalDebugIntrinsic('wordmul',[a,a,args[2]]) : tagScalar(arithmetic('intmul', a, a, b, truth(args[2])), 'long');
     default: error('Automatic Pascal helper evaluation is disabled: ' + name, 5);
   }
 }

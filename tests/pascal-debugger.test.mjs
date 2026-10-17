@@ -49,6 +49,11 @@ test('Pascal automatic inspection never invokes authored code or effectful intri
   assert.equal(vm.currentFrame.locals.has('missing'), false);
 });
 
+test('Word debugger arithmetic matches unsigned intermediates and checked overflow',async t=>{
+  const {vm}=await paused(t);
+  for(const [expression,value] of [['Word(65535)+Word(1)',0],['Word(0)-Word(1)',65535],['Word(65535)*Word(65535)',1],['Sqr(Word(200))',40000],['Integer(-1)+Word(65535)',65534]])assert.equal(await vm.evaluateWatch(expression),value,expression);
+});
+
 test('Pascal locals and array children expose editable Pascal expressions and escaped literals', async t => {
   const {vm} = await paused(t), values = vm.inspectDebug('Values');
   assert.equal(values.children[0].expression, 'Values[-2]');
