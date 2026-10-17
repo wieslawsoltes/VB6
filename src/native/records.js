@@ -1,3 +1,4 @@
+import {pascalObjectReferenceCompatible} from '../language/pascal/object-compatibility.js';
 import {nativeRecordStringMethods} from './record-strings.js';
 /** Native POD records for 32-bit VB/Win32 ABI. Managed fields and SAFEARRAY(VT_RECORD)
  * are rejected: a byte copy must never masquerade as COM record ownership.
@@ -12,7 +13,7 @@ const LIMIT=512*1024;
 function fail(message){throw new Error(message);}
 export class NativeRecordLayouts {
   constructor(program, reject=fail) {
-    this.reject=reject;this.definitions=new Map();this.layouts=new Map();this.active=new Set();
+    this.program=program;this.reject=reject;this.definitions=new Map();this.layouts=new Map();this.active=new Set();
     for(const module of program.modules.values())for(const [name,fields]of Object.entries(module.types)) {
       const scope=module.typeScopes?.[key(name)];
       const header=scope===undefined?(module.generatedSource||module.source).split(/\r?\n/).find(line=>new RegExp('^\\s*(?:(?:Public|Private)\\s+)?Type\\s+'+name+'(?:\\s|$)','i').test(line)):'';
@@ -28,6 +29,14 @@ export class NativeRecordLayouts {
     const candidates=[...this.definitions.values()].filter(d=>key(d.name)===type&&!d.private&&d.module.kind==='module');
     if(candidates.length>1)this.reject('Ambiguous native record type: '+name);
     return candidates.length?this.layout(candidates[0]):null;
+  }
+  referenceCompatible(source,target) {
+    if(source.id===target.id)return true;
+    if(!pascalObjectReferenceCompatible(this.program.modules,source.id,target.id)||source.size<target.size)return false;
+    // Verify physical offsets as well as nominal compiler ancestry. A corrupt
+    // prefix must never turn a valid ancestor write into a different field.
+    for(const [name,field]of target.fields){const other=source.fields.get(name);if(!other||field.recordOffset!==other.recordOffset||field.nativeElementBytes!==other.nativeElementBytes||field.nativeBytes!==other.nativeBytes||field.nativeRecord?.id!==other.nativeRecord?.id||JSON.stringify(field.inlineBounds)!==JSON.stringify(other.inlineBounds))return false;}
+    return true;
   }
   bound(node,module) {
     if(node===null)return module.optionBase||0;
@@ -134,7 +143,7 @@ export const nativeRecordMethods={
       this.nativeRecordTransfers.push(this.nativeExternalRecordArgument(parameter,node));return {};
     }
     const variable=this.variable(node);
-    if(!variable?.nativeRecord||variable.nativeRecord.id!==parameter.nativeRecord.id||variable.recordFieldArray)this.fail('ByRef native record argument requires the exact declared record type');
+    if(!variable?.nativeRecord||!this.recordLayouts.referenceCompatible(variable.nativeRecord,parameter.nativeRecord)||variable.recordFieldArray)this.fail('ByRef native record argument requires the exact declared record type');
     if(!forced){this.address(variable);return {};}
     const temporary=this.arrayWorkspace(align(variable.nativeRecord.size,4),'byref-record');Object.assign(temporary,{type:parameter.type,nativeRecord:variable.nativeRecord});
     this.address(variable);this.copyRecordTo(temporary);this.rawStorageAddress(temporary);return {temporary};
