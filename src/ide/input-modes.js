@@ -73,12 +73,15 @@ function vimReference(){
     ]),
     referenceTable('IDE commands',[
       [':w / :write / :wall','Save the current project using the IDE save workflow.'],
-      [':q / :quit / :close','Close the active editor document.'],
-      [':wq / :x','Save, then close the active editor document.'],
+      [':q / :quit / :close','Close the active split pane, or its editor document when unsplit.'],
+      [':wq / :x','Save successfully, then close the originally requested pane or document.'],
       [':bn / :bp / :buffer NAME','Move to the next / previous source buffer, or select a named buffer.'],
       [':ls / :buffers','List source buffers.'],
       [':split / :vsplit / :only','Split the editor or return to one editor pane.'],
-      ['Ctrl+W, then a pane command','Navigate or split editor panes.'],
+      ['Ctrl+W, then h / j / k / l','Move to a neighboring pane in that direction.'],
+      ['Ctrl+W, then w / W / p','Cycle panes or return to the other pane.'],
+      ['Ctrl+W, then t / b','Select the top-left / bottom-right pane.'],
+      ['Ctrl+W, then s / v / o / =','Split horizontally / vertically, retain this pane, or equalize sizes.'],
       [':run / :stop / :build','Run, stop, or build through the IDE.'],
       [':help / :normalmode / :vim','Open this reference, use Default input, or enable Vim input.']
     ]),

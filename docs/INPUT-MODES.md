@@ -89,7 +89,8 @@ Default clears the Vim presentation and releases its listeners.
 | `:ls`, `:buffers` | List project source buffers |
 | `:split`, `:vsplit`, `:only` | Open a horizontal or vertical split, or return to a single pane |
 | `Ctrl+W` then `s`, `v`, `o` | Split horizontally, split vertically, or retain one pane |
-| `Ctrl+W` then `h/j/k/l`, arrows, `w/W/p` | Move between panes; cycle MDI documents when there is no split |
+| `Ctrl+W` then `h/j/k/l` or arrows | Move to the neighboring pane in that direction, respecting the split orientation and stopping at its edge; cycle MDI documents when there is no split |
+| `Ctrl+W` then `w/W/p`, `t/b` | Cycle panes or return to the other pane; select the top-left or bottom-right pane |
 | `Ctrl+W` then `c/q`, `=` | Close the pane/document or equalize split size |
 | `gd` | Use the editor's language definition navigation |
 | `:run`, `:stop`, `:build` | Run, stop, or check syntax through the IDE |
@@ -99,6 +100,10 @@ Default clears the Vim presentation and releases its listeners.
 Ex operates on IDE documents and projects. To choose a filename use the IDE's
 Save As workflow; `:write filename` does not bypass it. Closing a source window
 does not delete its module. Save-and-close honors cancelled and failed saves.
+Closing a split retains the other pane's cursor and view; `:only` retains the
+current pane. A delayed save-and-close remains attached to the originally
+requested pane. It cannot close another pane after focus moves or close the
+remaining document after the original split has been removed or replaced.
 
 ## Input, clipboard, and history ownership
 
@@ -118,6 +123,12 @@ permits it. Permission denial or unavailable clipboard APIs leave a usable Vim
 register and display a notification. A delayed clipboard read is discarded if
 the source, selection, active text input, or session changes before it resolves.
 Native paste is committed through the same editing host.
+
+Vim cursors, directed selections, and marks stay on complete Unicode code-point
+boundaries. Leaving Insert or Replace mode over a supplementary character does
+not leave the cursor inside a UTF-16 surrogate pair. Replace-mode Backspace
+restores overwritten text during live editing, dot repeat, and macro playback;
+typing a character identical to the existing source still participates in repeat.
 
 Every Vim operation commits to the existing project history. A change followed
 by an Insert/Replace session groups into one undo step, including typing slower
@@ -187,6 +198,16 @@ Sessions must implement `handleKey` and `dispose`; `state`, `sync`,
 handled. Call `onStatus` after state changes. Use `service.on('change', ...)` and
 `service.snapshot()` for UI integration. Explicit `service.executeEx(command,
 editor?)` selects the active code/XAML document, or the supplied stable editor.
+An extension may publish its state entirely through `onStatus` without a
+`state` getter. Callbacks belong to their creating session and are ignored after
+that session is released. `keyFromEvent(event)` may return `undefined` to use the
+shared key notation or `null` to decline handling that key. Translation failures
+are reported through the same guarded path as command failures.
+
+Optional `beginComposition` and `endComposition` hooks let a mode own its IME
+state transitions. The service does not send Vim commands to other modes.
+Deferred composition completion is delivered only to the session and composition
+that started it; switching modes or starting another composition retires it.
 
 ## Engine, scope, and validation
 

@@ -188,6 +188,38 @@ class BrowserHarness:
     def press(self, key, page=None):
         (page or self.page).keyboard.press(key)
 
+    def window_key(self, key):
+        self.press('Control+w')
+        self.type(key)
+
+    def check_window_keyboard(self, advanced=False):
+        self.page.evaluate(r'''advanced => {
+          const e=vb6Studio.editor,s=advanced?as:null;
+          globalThis.windowTest={
+            count:()=>s?s.views.length:e.panes.length,
+            active:()=>s?s.views.findIndex(v=>v.view===s.view):e.panes.indexOf(e.activePane),
+            offset:()=>s?s.record.model.getOffsetAt(s.view.getPosition()):e.cursor().offset,
+            choose(index,offset){
+              if(s){s.views[index].view.focus();s.select(offset);s.focus();}
+              else{e.activatePane(e.panes[index]);e.selectGlobal(offset);e.input.focus();}
+            }
+          };
+        }''', advanced)
+        original = self.text()
+        for command, backward, forward, orthogonal in [('vsplit', 'h', 'l', 'j'), ('split', 'k', 'j', 'h')]:
+            with self.subTest(command=command):
+                self.ex(command)
+                self.assertEqual(self.page.evaluate('windowTest.count()'), 2)
+                self.page.evaluate('windowTest.choose(1,12);windowTest.choose(0,2)')
+                for key, expected in [(backward, 0), (forward, 1), (forward, 1), (orthogonal, 1), (backward, 0), ('b', 1), ('t', 0)]:
+                    self.window_key(key)
+                    self.assertEqual(self.page.evaluate('windowTest.active()'), expected, key)
+                self.ex('q')
+                self.assertEqual(self.page.evaluate('windowTest.count()'), 1)
+                self.assertEqual(self.page.evaluate('windowTest.offset()'), 12)
+                self.assertEqual(self.text(), original)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
+
     def ex(self, command, page=None):
         page = page or self.page
         page.keyboard.type(':')
@@ -458,6 +490,12 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.assertEqual(self.text(), SOURCE)
         self.done()
 
+    def test_window_keys_follow_layout_and_close_preserves_other_cursor(self):
+        self.buffer('alpha beta\nsecond line\nthird line\n')
+        self.vim()
+        self.check_window_keyboard()
+        self.done()
+
     def test_procedure_projection_and_split_selections_use_global_offsets(self):
         self.vim()
         self.page.evaluate(r'''() => {
@@ -626,8 +664,38 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
         self.press('Escape')
         self.assertEqual(self.text(), 'Zażółć 😀alpha\nbeta\n')
         self.assertEqual(self.state(), 'normal')
+        self.type('x')
+        self.assertEqual(self.text(), 'Zażółć alpha\nbeta\n')
+        self.assertTrue(self.page.evaluate('vb6Studio.editor.text.isWellFormed()'))
+        self.type('u')
+        self.assertEqual(self.text(), 'Zażółć 😀alpha\nbeta\n')
         self.type('u')
         self.assertEqual(self.text(), 'alpha\nbeta\n')
+        self.done()
+
+    def test_replace_backspace_repeat_and_normal_native_input_ownership(self):
+        self.buffer('abcd wxyz\n')
+        self.vim()
+        self.type('RXY')
+        self.press('Backspace')
+        self.type('Z')
+        self.press('Escape')
+        self.type('w.')
+        self.assertEqual(self.text(), 'XZcd XZyz\n')
+        self.type('u')
+        self.assertEqual(self.text(), 'XZcd wxyz\n')
+        self.type('u')
+        self.assertEqual(self.text(), 'abcd wxyz\n')
+        result = self.page.evaluate(r'''() => {
+          const e=vb6Studio.editor,input=e.input,view=input.ownerDocument.defaultView;
+          e.overwrite=true;
+          const event=new view.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType:'insertText',data:'X'});
+          const dispatched=input.dispatchEvent(event);
+          return {dispatched,prevented:event.defaultPrevented,text:e.text};
+        }''')
+        self.assertFalse(result['dispatched'])
+        self.assertTrue(result['prevented'])
+        self.assertEqual(result['text'], 'abcd wxyz\n')
         self.done()
 
     def test_switching_pending_modes_and_project_replacement_releases_sessions(self):
@@ -657,6 +725,14 @@ class InputModeAcceptance(BrowserHarness, unittest.TestCase):
 
 class AdvancedInputModeAcceptance(BrowserHarness, unittest.TestCase):
     advanced_artifact = True
+
+    def test_real_monaco_window_keys_follow_layout_and_preserve_other_cursor(self):
+        self.buffer('alpha beta\nsecond line\nthird line\n')
+        self.enable_advanced()
+        self.vim()
+        self.page.evaluate('as.focus()')
+        self.check_window_keyboard(advanced=True)
+        self.done()
 
     def test_real_monaco_search_highlights_xaml_backend_switches_and_dos_cells(self):
         source = 'alpha beta\nbeta alpha\nalpha beta\n'
