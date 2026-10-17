@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {executeIdeVimCommand, executeWindowKey} from '../src/editor/input-modes/ide-commands.js';
+import {executeIdeVimCommand, executeWindowKey, installIdeVimCommands} from '../src/editor/input-modes/ide-commands.js';
+import {createVimSession, Vim, VimPosition} from '../src/editor/input-modes/vim-adapter.js';
+
+// Installation adds engine action mappings. Clear mappings before installation;
+// individual scenarios reset registers/options without removing those bindings.
+Vim.mapclear();
+installIdeVimCommands();
 
 function fixture() {
   const calls = [], editor = {module: {id: 'one'}, toggleSplit(value) { this.secondary = value ? {} : null; calls.push(['split', value]); }, setSplitRatio: value => calls.push(['ratio', value])};
@@ -157,4 +163,62 @@ test('delayed write and quit cannot close a replacement split or the remaining d
       assert.deepEqual(f.calls, [], `${backend}: recreated=${recreated}`);
     }
   }
+});
+
+test('real Vim quit callbacks retain the surviving split selection through the final adapter flush', () => {
+  for (const backend of ['classic', 'monaco']) {
+    for (const active of [0, 1]) {
+      Vim.resetVimGlobalState_();
+      const f = splitFixture(backend, 'horizontal'), text = '0123456789\nabcdefghij', offsets = [2, 12];
+      const panes = f.surface ? f.surface.views.map(state => state.view) : [f.editor.primary, f.editor.secondary];
+      panes.forEach((pane, index) => { pane.selection = [{anchor: offsets[index], head: offsets[index]}]; });
+      const current = () => f.surface ? f.surface.view : f.editor.activePane;
+      const collapse = () => {
+        panes[0].selection = current().selection;
+        if (f.surface) { f.surface.views = [f.surface.views[0]]; f.surface.view = panes[0]; }
+        else { f.editor.secondary = null; f.editor.activePane = panes[0]; }
+      };
+      if (f.surface) f.surface.setSplit = collapse; else f.editor.toggleSplit = collapse;
+      Object.assign(f.host, {
+        getText: () => text,
+        getSelections: () => current().selection.map(value => ({...value})),
+        setSelections: values => { current().selection = values.map(value => ({...value})); },
+        apply: () => assert.fail('Closing a split must not edit source or history'),
+        execute: (command, args) => executeIdeVimCommand(f.service, f.record, command, args)
+      });
+      f.choose(active);
+      const session = createVimSession(f.host);
+      try {
+        session.executeEx('q');
+        assert.deepEqual(f.host.getSelections(), [{anchor: offsets[1 - active], head: offsets[1 - active]}], backend + ': close pane ' + active);
+        assert.equal(session.adapter.indexFromPos(session.adapter.getCursor()), offsets[1 - active]);
+      } finally { session.dispose(); }
+    }
+  }
+});
+
+test('real gd bindings use the requesting host and preserve each definition destination', () => {
+  Vim.resetVimGlobalState_();
+  const calls = [], sessions = [], text = '0123456789\nabcdefghij\nklmnopqrst';
+  try {
+    for (const [id, destination] of [['first', 12], ['second', 24]]) {
+      let selections = [{anchor: 2, head: 2}];
+      const host = {
+        getText: () => text, getSelections: () => selections,
+        setSelections: values => { selections = values.map(value => ({...value})); },
+        apply: () => assert.fail('Definition navigation must not edit source or history'),
+        execute(command) { calls.push({id, command}); selections = [{anchor: destination, head: destination}]; }
+      };
+      const session = createVimSession(host); sessions.push({session, host, destination});
+    }
+    for (const {session, host, destination} of sessions) {
+      session.handleKey('g'); session.handleKey('d');
+      assert.deepEqual(host.getSelections(), [{anchor: destination, head: destination}]);
+      assert.equal(session.adapter.indexFromPos(session.adapter.getCursor()), destination);
+      assert.equal(session.state.mode, 'normal');
+    }
+    assert.deepEqual(calls, [{id: 'first', command: 'goToDefinition'}, {id: 'second', command: 'goToDefinition'}]);
+    sessions[0].session.handleKey('j');
+    assert.deepEqual(sessions[0].session.adapter.getCursor(), new VimPosition(2, 1));
+  } finally { for (const {session} of sessions) session.dispose(); }
 });

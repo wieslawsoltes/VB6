@@ -14,7 +14,9 @@ export function installIdeVimCommands() {
     ['run', 'run', 'run'], ['stop', 'stop', 'stop'], ['build', 'build', 'build'],
     ['help', 'h', 'help'], ['normalmode', 'normalmode', 'defaultInputMode'], ['vim', 'vim', 'vimInputMode'],
     ['explore', 'ex', 'explore']
-  ]) Vim.defineEx(name, prefix, (adapter, args) => adapter.host.execute(command, args));
+  ]) Vim.defineEx(name, prefix, (adapter, args) => adapter.executeHostCommand(command, args));
+  Vim.defineAction('ideGoToDefinition', adapter => adapter.executeHostCommand('goToDefinition'));
+  Vim.mapCommand('gd', 'action', 'ideGoToDefinition', {}, {context: 'normal'});
 }
 
 function sourceKey(ide, editor) {
