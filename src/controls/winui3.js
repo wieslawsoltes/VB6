@@ -3,6 +3,7 @@ import {observeThemeEnvironment,writeThemeAttributes} from '../theme/environment
 import {winui3ThemeValues,winui3StateValues,winui3CssBrush,winui3CssThickness,winui3BuiltinStyle} from '../theme/winui3-compat.js';
 import {notifyControlPaint} from '../rendering/invalidation.js';
 import {setWinUI3LayoutValues} from '../layout/model.js';
+import {setWinUI3MeasurementValues} from '../layout/measurement.js';
 
 const documents=new WeakMap(),bindings=new WeakMap();
 const own=(object,key)=>Object.hasOwn(object,key);
@@ -121,7 +122,9 @@ function apply(c,state) {
     'data-winui-composite-state':Object.keys(states).some(name=>/^(Checked|Indeterminate)/.test(name))?'true':null,
     'data-winui-focused-state':states.Focused?'true':null,'data-winui-reduce-motion':String(!!reduceMotion)});
   c.winui3Values=values;c.winui3States=states;
-  if(isLayoutContainer(c)&&setWinUI3LayoutValues(c.props,values))
+  const measurementChanged=setWinUI3MeasurementValues(c.props,values);
+  const containerChanged=isLayoutContainer(c)&&setWinUI3LayoutValues(c.props,values);
+  if(measurementChanged||containerChanged)
     (c.form||c).layoutController?.edit(c,'WinUI3');
   const body=c.content||n,content=c.label||c.input||body;
   if(['Canvas','Grid','StackPanel','Border'].includes(appearance.sourceType)) {
@@ -236,7 +239,9 @@ export function disposeWinUI3Control(c) {
   const state=bindings.get(c)?.state,hadRequested=c.node.hasAttribute('data-winui-requested-theme');
   unsubscribe(c);resetWinUI3ControlPaint(c);
   c.winui3Header?.remove();c.winui3Header=null;c.winui3Focus?.remove();c.winui3Focus=null;c.winui3Border?.remove();c.winui3Border=null;c.winui3Values=null;c.winui3States=null;
-  if(isLayoutContainer(c)&&setWinUI3LayoutValues(c.props,null))
+  const measurementChanged=setWinUI3MeasurementValues(c.props,null);
+  const containerChanged=isLayoutContainer(c)&&setWinUI3LayoutValues(c.props,null);
+  if(measurementChanged||containerChanged)
     (c.form||c).layoutController?.edit(c,'WinUI3');
   writeThemeAttributes(c.node,{'data-winui-control':null,'data-winui-requested-theme':null,
     'data-winui-effective-theme':null,'data-winui-style':null,'data-winui-indeterminate':null,'data-winui-has-header':null,
