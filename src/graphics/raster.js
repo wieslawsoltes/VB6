@@ -1,7 +1,27 @@
 import {colorValue} from '../theme/theme.js';
+import {winui3CssColor,winui3GradientPoints,winui3GradientStopColor} from '../theme/winui3-compat.js';
 import {GRAPHICS_LIMITS,dashPattern,hatchPixel,intersectRect,rectangle,rop2Byte,rop3Byte} from './contract.js';
 const TAU=Math.PI*2;
 export function canvas2D(document,width,height){const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const context=canvas.getContext('2d',{willReadFrequently:true});if(!context)throw new Error('Canvas2D is unavailable for retained graphics');return {canvas,context};}
+/** Paint the resolved WinUI backing into the retained bitmap itself. Canvas
+ * gradients receive DIP endpoints under the same transform as later commands;
+ * CSS gradient strings are never used as Canvas color values. */
+export function paintGraphicsBackground(ctx,surface,fallback='#c0c0c0'){
+  const brush=surface.presentationBackground;
+  ctx.save();try{
+    ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+    if(brush&&typeof brush==='object'){
+      const gradient=ctx.createLinearGradient(...winui3GradientPoints(brush,surface.width,surface.height));
+      for(const stop of brush.gradientStops)gradient.addColorStop(stop.offset,winui3GradientStopColor(stop.color));
+      // Brush.Opacity is applied after color-stop interpolation. Folding it
+      // into individual stop bytes changes Canvas rounding at partial alpha.
+      ctx.fillStyle=gradient;ctx.globalAlpha=brush.opacity;
+    }else{
+      ctx.fillStyle=fallback;ctx.fillStyle=typeof brush==='string'?winui3CssColor(brush):colorValue(surface.background,fallback,surface.theme);
+    }
+    ctx.fillRect(0,0,surface.width,surface.height);
+  }finally{ctx.restore();}
+}
 export function textMetrics(ctx,text,font,lineHeight){
   ctx.save();try{
     ctx.font=font;const lines=String(text).split(/\r\n|\r|\n/),em=Number(/([\d.]+)px/.exec(ctx.font)?.[1])||12;
@@ -126,13 +146,13 @@ export class RasterCache {
     const width=Math.max(1,Math.floor(surface.width*scale)),height=Math.max(1,Math.floor(surface.height*scale));
     if(width*height>GRAPHICS_LIMITS.displayPixels)throw new RangeError('Graphics surface exceeds retained pixel budget');
     if(!this.canvas){const item=canvas2D(this.document,width,height);this.canvas=item.canvas;this.context=item.context;}
-    const key=[surface.width,surface.height,width,height,surface.background,surface.theme,surface.grid,surface.replayEpoch||0].join('|');
+    const key=[surface.width,surface.height,width,height,surface.background,surface.presentationBackgroundRevision||0,surface.theme,surface.grid,surface.replayEpoch||0].join('|');
     const reset=key!==this.key||this.commands!==surface.commands||this.picture!==surface.picture||this.count>surface.commands.length;
     const ctx=this.context;
     if(reset){
       if(this.canvas.width!==width)this.canvas.width=width;if(this.canvas.height!==height)this.canvas.height=height;
       ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,width,height);ctx.setTransform(scale,0,0,scale,0,0);
-      ctx.fillStyle='#c0c0c0';ctx.fillStyle=colorValue(surface.background,'#c0c0c0',surface.theme);ctx.fillRect(0,0,surface.width,surface.height);
+      paintGraphicsBackground(ctx,surface);
       if(surface.picture)ctx.drawImage(surface.picture,0,0);
       if(surface.grid){
         // An 8192x8192 one-pixel grid is one repeating tile, not 67M calls.
