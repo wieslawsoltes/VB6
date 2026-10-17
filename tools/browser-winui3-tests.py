@@ -30,6 +30,7 @@ REPORT = ROOT / 'reports/winui3' / ENGINE
 BUILD_FIXTURE = r'''
 import fs from 'node:fs';
 import {winui3Gallery,WINUI3_GALLERY_XAML} from './tests/fixtures/winui3-gallery.mjs';
+import {winui3LayoutGallery,WINUI3_LAYOUT_XAML} from './tests/fixtures/winui3-layout-gallery.mjs';
 import {exportApplication} from './src/exporter/exporter.js';
 import {compileProject} from './src/language/compiler.js';
 import {WINUI3_REFERENCE} from './src/theme/winui3-resources.js';
@@ -41,6 +42,10 @@ fs.writeFileSync('reports/winui3/fixtures/gallery.json',JSON.stringify(project))
 fs.writeFileSync('reports/winui3/fixtures/gallery.xaml',WINUI3_GALLERY_XAML);
 fs.writeFileSync('reports/winui3/fixtures/reference.json',JSON.stringify(WINUI3_REFERENCE));
 fs.writeFileSync('reports/winui3/fixtures/graphics.html','<!doctype html><meta charset="utf-8"><title>WinUI Canvas acceptance</title>');
+const layoutProject=winui3LayoutGallery(),layoutCompiled=compileProject(layoutProject);
+if(!layoutCompiled.valid)throw new Error(JSON.stringify(layoutCompiled.diagnostics));
+fs.writeFileSync('reports/winui3/fixtures/layout.html',exportApplication(layoutProject,{persist:false}));
+fs.writeFileSync('reports/winui3/fixtures/layout.xaml',WINUI3_LAYOUT_XAML);
 '''
 
 # Independent expectations from the authored resource dictionaries in the fixture.
@@ -122,9 +127,9 @@ class WinUI3Acceptance(unittest.TestCase):
     def done(self):
         self.passed = True
 
-    def load_runtime(self, file_origin=False):
-        self.page.goto((FIXTURE / 'gallery.html').as_uri() if file_origin
-                       else self.base + 'reports/winui3/fixtures/gallery.html')
+    def load_runtime(self, file_origin=False, fixture='gallery.html'):
+        self.page.goto((FIXTURE / fixture).as_uri() if file_origin
+                       else self.base + 'reports/winui3/fixtures/' + fixture)
         self.page.wait_for_function('globalThis.vb6Application?.forms?.length === 1')
         self.page.evaluate('''() => {
             window.winuiControls=Object.fromEntries(vb6Application.forms[0].controls.map(c=>[c.model.name,c]));
@@ -171,6 +176,130 @@ class WinUI3Acceptance(unittest.TestCase):
         self.assertTrue(self.page.evaluate('''winuiIdentity.every((saved,index)=>
             saved.control===vb6Application.forms[0].controls[index] &&
             saved.node===saved.control.node && saved.input===saved.control.input)'''))
+
+    def test_live_font_and_box_resources_remeasure_hug_wrapping_and_release_lifetime_state(self):
+        self.load_runtime(fixture='layout.html')
+        authored = self.page.evaluate('JSON.stringify(vb6Application.project)')
+        native_fonts = self.page.evaluate('''() => Object.fromEntries(
+            ['Hug','Wrapped','Fixed'].map(name=>[name,
+                ['FontName','FontSize','FontBold'].map(key=>winuiControls[name].props[key])]))''')
+
+        def geometry():
+            # Layout publishes solved twips synchronously, then paints at the
+            # next frame. Wait for both queues before inspecting actual glyphs.
+            self.page.wait_for_function('''() => {
+                const f=vb6Application.forms[0],l=f.layoutController;
+                return !l.frame&&!l.paint.size&&!f.pending&&f.controls.every(c=>!c.pending);
+            }''')
+            return self.page.evaluate(r'''() => {
+                const read=name=>{
+                    const c=winuiControls[name],n=c.node,r=n.getBoundingClientRect(),s=getComputedStyle(n);
+                    const text=[...n.childNodes].find(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim());
+                    let glyphs=[],visibleGlyphs=[];
+                    if(text){const range=document.createRange();range.selectNode(text);
+                        const rect=g=>({x:g.x-r.x,y:g.y-r.y,width:g.width,height:g.height});
+                        glyphs=[...range.getClientRects()].map(rect);
+                        // pre-wrap intentionally hangs spaces at the end of a
+                        // line. Test visible characters for clipping, keeping
+                        // the complete line ranges for width/line-count checks.
+                        for(let i=0;i<text.textContent.length;i++)if(/\S/u.test(text.textContent[i])){
+                            range.setStart(text,i);range.setEnd(text,i+1);
+                            visibleGlyphs.push(rect(range.getBoundingClientRect()));}}
+                    return {x:r.x,y:r.y,width:r.width,height:r.height,glyphs,visibleGlyphs,
+                        fontFamily:s.fontFamily,fontSize:s.fontSize,fontWeight:s.fontWeight,
+                        padding:['Left','Top','Right','Bottom'].map(side=>parseFloat(s['padding'+side])),
+                        border:['Left','Top','Right','Bottom'].map(side=>parseFloat(s['border'+side+'Width'])),
+                        modes:[c.props.LayoutWidthMode??0,c.props.LayoutHeightMode??0]};
+                };
+                return Object.fromEntries(['Scope','Flow','Hug','Wrapped','Fixed'].map(name=>[name,read(name)]));
+            }''')
+
+        def assert_box(snapshot, family, size, weight, padding, stroke, flow):
+            outer, inner = snapshot['Scope'], snapshot['Flow']
+            for actual, expected in zip((inner['x'] - outer['x'], inner['y'] - outer['y'],
+                                         inner['width'], inner['height']), flow):
+                self.assertAlmostEqual(actual, expected, delta=0.05, msg='Container padding and stroke inset exactly once')
+            hug, wrapped, fixed = (snapshot[name] for name in ('Hug', 'Wrapped', 'Fixed'))
+            self.assertIn(family, hug['fontFamily'])
+            self.assertEqual(hug['fontSize'], f'{size}px')
+            self.assertEqual(hug['fontWeight'], str(weight))
+            self.assertEqual(hug['padding'], padding)
+            self.assertEqual(hug['border'], stroke)
+            self.assertEqual(hug['modes'], [1, 1])
+            self.assertEqual(wrapped['modes'], [2, 1])
+            self.assertEqual((fixed['width'], fixed['height']), (160, 44))
+            self.assertEqual(len(hug['glyphs']), 1)
+            horizontal = padding[0] + padding[2] + stroke[0] + stroke[2]
+            # The browser's actual text Range is an independent size oracle;
+            # this fails if measurement keeps the initial font or box chrome.
+            self.assertAlmostEqual(hug['width'], hug['glyphs'][0]['width'] + horizontal, delta=0.15)
+            self.assertGreaterEqual(hug['height'] + 0.1,
+                                    hug['glyphs'][0]['height'] + padding[1] + padding[3] + stroke[1] + stroke[3])
+            self.assertAlmostEqual(wrapped['width'], inner['width'], delta=0.05)
+            self.assertAlmostEqual(wrapped['y'] - hug['y'], hug['height'] + 8, delta=0.05)
+            self.assertAlmostEqual(fixed['y'] - wrapped['y'], wrapped['height'] + 8, delta=0.05)
+            for glyph in wrapped['visibleGlyphs']:
+                self.assertGreaterEqual(glyph['x'], -0.1)
+                self.assertLessEqual(glyph['x'] + glyph['width'], wrapped['width'] + 0.15)
+                self.assertGreaterEqual(glyph['y'], -0.1)
+                self.assertLessEqual(glyph['y'] + glyph['height'], wrapped['height'] + 0.15)
+            self.assert_identity()
+            self.assertEqual(self.page.evaluate('JSON.stringify(vb6Application.project)'), authored)
+
+        light = geometry()
+        assert_box(light, 'Arial', 16, 400, [2, 3, 4, 5], [1, 2, 3, 4], [7, 10, 298, 322])
+        self.theme('fluent-dark')
+        dark = geometry()
+        assert_box(dark, 'Courier New', 24, 700, [10, 7, 14, 9], [3, 4, 5, 6], [11, 4, 286, 338])
+        self.assertGreater(dark['Hug']['width'], light['Hug']['width'] + 50)
+        self.assertGreater(dark['Wrapped']['height'], light['Wrapped']['height'])
+        self.assertGreater(len(dark['Wrapped']['glyphs']), len(light['Wrapped']['glyphs']))
+        self.theme('fluent')
+        self.assertEqual(geometry(), light, 'Returning to Light restores the same solved and painted geometry')
+        self.assertEqual(self.page.evaluate('''() => Object.fromEntries(
+            ['Hug','Wrapped','Fixed'].map(name=>[name,
+                ['FontName','FontSize','FontBold'].map(key=>winuiControls[name].props[key])]))'''), native_fonts)
+
+        # Explicit same-value native font edits release only that resource;
+        # the remaining live family, weight and insets still remeasure correctly.
+        self.theme('fluent-dark')
+        self.page.evaluate('winuiControls.Hug.set("FontSize",winuiControls.Hug.FontSize)')
+        self.idle()
+        released = geometry()
+        assert_box(released, 'Courier New', 16, 700, [10, 7, 14, 9], [3, 4, 5, 6], [11, 4, 286, 338])
+        self.assertLess(released['Hug']['width'], dark['Hug']['width'])
+        self.assertTrue(self.page.evaluate('''() => {
+            const m=winuiControls.Hug.WinUI3;
+            return !Object.hasOwn(m.properties,'FontSize')&&!Object.hasOwn(m.resources,'FontSize')&&
+                Object.hasOwn(m.resources,'FontFamily')&&Object.hasOwn(m.resources,'Padding');
+        }'''))
+
+        self.set_control('Hug', {'WinUI3': None})
+        removed = geometry()['Hug']
+        for theme in ('fluent', 'fluent-dark'):
+            self.theme(theme)
+            current = geometry()['Hug']
+            self.assertEqual((current['width'], current['height']), (removed['width'], removed['height']))
+            self.assertEqual(current['fontSize'], '16px')
+            self.assertEqual(current['fontWeight'], '400')
+            self.assertIn('Arial', current['fontFamily'])
+            self.assertEqual(current['modes'], [1, 1])
+        self.assert_identity()
+        self.assertEqual(self.page.evaluate('JSON.stringify(vb6Application.project)'), authored)
+
+        # Dispose with layout and control painting queued. Form disposal tears
+        # down its controller first, so each subsequent brush/metric cleanup
+        # must tolerate that lifetime order and leave no repaint or listeners.
+        lifecycle = self.page.evaluate('''() => {
+            const form=vb6Application.forms[0],layout=form.layoutController;
+            winuiControls.Wrapped.set('Caption','A final queued layout change');
+            vb6Application.dispose();vb6Application.dispose();
+            return {disposed:layout.disposed,frame:layout.frame,paint:layout.paint.size,records:layout.records.size,
+                attached:form.node.isConnected,subscriptions:VB6Runtime.RuntimeAPI.winui3PresentationDiagnostics(document)};
+        }''')
+        self.assertEqual(lifecycle, {'disposed': True, 'frame': 0, 'paint': 0, 'records': 0,
+                                    'attached': False, 'subscriptions': {'controls': 0, 'themeListeners': 0}})
+        self.done()
 
     def test_live_resources_preserve_real_input_value_selection_and_authored_model(self):
         text = self.field('LiveText')
