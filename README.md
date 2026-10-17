@@ -1,6 +1,6 @@
 # VB6 Studio Web
 
-A browser-native classic Visual Basic development environment, source runtime and controls library. Built from HTML, CSS and JavaScript, with WebGPU drawing and Canvas2D fallback. Export edited projects as independent single HTML applications.
+A browser-native classic Visual Basic development environment, source runtime and controls library, with an optional Turbo Pascal 7.0 language frontend. Built from HTML, CSS and JavaScript, with WebGPU drawing and Canvas2D fallback. Export edited projects as independent single HTML applications.
 
 **Not a complete, native or pixel-identical Microsoft VB6 replacement.** See [Compatibility](docs/COMPATIBILITY.md) for supported behavior and limits, and [Testing](docs/TESTING.md) for validation evidence.
 
@@ -82,6 +82,12 @@ Enable **Tools → Options → General → Layout Extensions → Enable anchorin
 The reusable, dependency-free `@vb6/auto-layout` package includes ES module/browser builds and TypeScript declarations. See [the layout guide](docs/anchoring-layout.md) and [standalone package](packages/auto-layout/README.md) for semantics, export compatibility and validation.
 
 ## Language, runtime and debugging
+
+### Optional Turbo Pascal
+
+Choose **Turbo Pascal 7.0** in **File → New Project**, or open the **Pascal Forms** example. Pascal modules reuse the existing form designer, component catalog, source editor, debugger, MCP tools, browser exports, and independent Win32/macOS/Linux AOT backends. Existing projects remain Visual Basic by default, and modules can select their language explicitly.
+
+The JavaScript frontend includes typed Pascal parsing/lowering, units, arrays/records/sets, checked pointers, value objects and virtual methods, portable file codecs, source maps, and Pascal editor/debugger assistance. A standalone ESM/browser SDK and CLI are included. See [Turbo Pascal usage, compatibility boundaries, and native qualification](docs/TURBO-PASCAL.md) and the [compiler package](packages/turbo-pascal/README.md). Complete DOS/8086 behavior and Delphi compatibility are outside the current contract.
 
 ### Compiler and source runtime
 
