@@ -21,6 +21,9 @@ export const PASCAL_ORDINAL_TYPES = Object.freeze({
   char: Object.freeze({bits: 8, signed: false, min: 0, max: 255, storage: 'String'}),
 });
 
+export const PASCAL_REAL48 = Object.freeze({bytes: 6, significandBits: 40, exponentBias: 129,
+  minimumExponent: -128, maximumExponent: 126, storage: 'Double', coercion: '__PascalReal48'});
+
 /** Set values use 32 byte-valued UTF-16 code units, not Unicode/ANSI conversion.
  * The empty VB String is accepted as an uninitialized empty Pascal set. The
  * representation is a value: ordinary String assignment and ByVal parameters
@@ -172,6 +175,152 @@ define('frac', 'Frac', `
 Private Function __PascalFrac(ByVal value As Double) As Double
   __PascalFrac = value - Fix(value)
 End Function`);
+
+/** A Double carries every Real48 value exactly. Quantize at Pascal storage and
+ * software-arithmetic boundaries; this does not claim a six-byte VB ABI layout.
+ */
+define('real48', 'Real48', `
+Private Function __PascalReal48(ByVal value As Double) As Double
+  Dim magnitude As Double, exponent As Long, scale As Double, significand As Double
+  If value <> value Then Err.Raise 205, "Turbo Pascal", "Real48 cannot store NaN"
+  magnitude = Abs(value)
+  If magnitude < 2 ^ (-128) Then Exit Function
+  If magnitude >= 2 ^ 127 Then Err.Raise 205, "Turbo Pascal", "Real48 overflow"
+  exponent = CLng(Int(Log(magnitude) / Log(2)))
+  scale = 2 ^ exponent
+  significand = magnitude / scale
+  If significand < 1 Then
+    significand = significand * 2
+    exponent = exponent - 1
+    scale = scale / 2
+  ElseIf significand >= 2 Then
+    significand = significand / 2
+    exponent = exponent + 1
+    scale = scale * 2
+  End If
+  significand = Int(significand * 549755813888# + 0.5) / 549755813888#
+  If significand >= 2 Then
+    significand = 1
+    exponent = exponent + 1
+    scale = scale * 2
+  End If
+  If exponent > 126 Then Err.Raise 205, "Turbo Pascal", "Real48 overflow"
+  __PascalReal48 = significand * scale
+  If value < 0 Then __PascalReal48 = -__PascalReal48
+End Function`);
+
+define('valInteger', 'ValInteger', `
+Private Sub __PascalValInteger(ByVal text As String, ByRef target As Long, ByRef code As Long)
+  Dim index As Long, firstDigit As Long, base As Long, sign As Long, digit As Long, character As Long
+  Dim value As Double, limit As Double
+  code = 0
+  index = 1
+  sign = 1
+  base = 10
+  Do While index <= Len(text)
+    character = AscW(Mid$(text, index, 1))
+    If character <> 32 And character <> 9 Then Exit Do
+    index = index + 1
+  Loop
+  If index <= Len(text) Then
+    character = AscW(Mid$(text, index, 1))
+    If character = 43 Or character = 45 Then
+      If character = 45 Then sign = -1
+      index = index + 1
+    End If
+  End If
+  If Mid$(text, index, 1) = "$" Then
+    base = 16
+    index = index + 1
+  End If
+  firstDigit = index
+  limit = 2147483647#
+  If sign < 0 Then limit = 2147483648#
+  If base = 16 Then limit = 4294967295#
+  If index > Len(text) Then
+    code = index
+    Exit Sub
+  End If
+  For index = firstDigit To Len(text)
+    character = AscW(Mid$(text, index, 1))
+    digit = -1
+    If character >= 48 And character <= 57 Then digit = character - 48
+    If base = 16 Then
+      If character >= 65 And character <= 70 Then digit = character - 55
+      If character >= 97 And character <= 102 Then digit = character - 87
+    End If
+    If digit < 0 Or digit >= base Then
+      code = index
+      Exit Sub
+    End If
+    value = value * base + digit
+    If value > limit Then
+      code = index
+      Exit Sub
+    End If
+  Next index
+  target = __PascalOrdinal(value * sign, 32, True)
+End Sub`, ['ordinal']);
+
+define('valReal', 'ValReal', `
+Private Sub __PascalValReal(ByVal text As String, ByRef target As Double, ByRef code As Long, Optional ByVal typeTag As String = "real")
+  Dim index As Long, digits As Long, character As Long, exponentDigits As Long, value As Double
+  code = 0
+  index = 1
+  Do While index <= Len(text)
+    character = AscW(Mid$(text, index, 1))
+    If character <> 32 And character <> 9 Then Exit Do
+    index = index + 1
+  Loop
+  If Mid$(text, index, 1) = "+" Or Mid$(text, index, 1) = "-" Then index = index + 1
+  Do While index <= Len(text)
+    character = AscW(Mid$(text, index, 1))
+    If character < 48 Or character > 57 Then Exit Do
+    digits = digits + 1
+    index = index + 1
+  Loop
+  If Mid$(text, index, 1) = "." Then
+    index = index + 1
+    Do While index <= Len(text)
+      character = AscW(Mid$(text, index, 1))
+      If character < 48 Or character > 57 Then Exit Do
+      digits = digits + 1
+      index = index + 1
+    Loop
+  End If
+  If digits = 0 Then
+    code = index
+    Exit Sub
+  End If
+  If Mid$(text, index, 1) = "e" Or Mid$(text, index, 1) = "E" Then
+    index = index + 1
+    If Mid$(text, index, 1) = "+" Or Mid$(text, index, 1) = "-" Then index = index + 1
+    Do While index <= Len(text)
+      character = AscW(Mid$(text, index, 1))
+      If character < 48 Or character > 57 Then Exit Do
+      exponentDigits = exponentDigits + 1
+      index = index + 1
+    Loop
+    If exponentDigits = 0 Then
+      code = index
+      Exit Sub
+    End If
+  End If
+  If index <= Len(text) Then
+    code = index
+    Exit Sub
+  End If
+  On Error GoTo ConversionError
+  value = CDbl(text)
+  If LCase$(typeTag) = "real" Or LCase$(typeTag) = "real87" Then value = __PascalReal48(value)
+  If value <> value Or Abs(value) > 1.7976931348623157E+308 Then GoTo ConversionError
+  target = value
+  Exit Sub
+ConversionError:
+  code = Len(text)
+  If code = 0 Then code = 1
+  Err.Clear
+End Sub`, ['real48']);
 
 define('div', 'Div', `
 Private Function __PascalDiv(ByVal leftValue As Double, ByVal rightValue As Double) As Long

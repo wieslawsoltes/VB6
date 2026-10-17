@@ -22,7 +22,7 @@ async function execute(body, helpers, declarations = '') {
   const output = [];
   const vm = new VirtualMachine(program, {print: text => output.push(text)});
   await vm.start();
-  assert.equal(vm.lastError?.message, undefined);
+  assert.equal(vm.err.Number, 0);
   return output;
 }
 
@@ -101,6 +101,35 @@ test('Pascal Round uses halfway away from zero and Trunc/Frac truncate toward ze
     '\nDebug.Print __PascalTrunc(-3.75), __PascalTrunc(3.75), __PascalFrac(-3.75), __PascalFrac(3.75)',
   ['round', 'trunc', 'frac']);
   assert.deepEqual(output, ['-4', '-3', '-2', '-1', '0', '1', '2', '3', '4', '-3 3 -0.75 0.75']);
+});
+
+test('Real48 storage quantizes its 40-bit significand and flushes denormals', async () => {
+  assert.deepEqual(await execute(`Debug.Print __PascalReal48(1 + 2 ^ (-42)) = 1
+Debug.Print __PascalReal48(1 + 2 ^ (-40)) = 1 + 2 ^ (-39)
+Debug.Print __PascalReal48(-1 - 2 ^ (-40)) = -1 - 2 ^ (-39)
+Debug.Print __PascalReal48(2 ^ (-128)) = 2 ^ (-128), __PascalReal48(2 ^ (-129)) = 0
+Debug.Print __PascalReal48(0) = 0, __PascalReal48(2 ^ 126) = 2 ^ 126
+Debug.Print __PascalReal48(__PascalReal48(1 / 3)) = __PascalReal48(1 / 3)`, ['real48']),
+  ['True', 'True', 'True', 'True True', 'True True', 'True']);
+  const vm = new VirtualMachine(compileProject(project('Debug.Print __PascalReal48(2 ^ 127)', ['real48'])));
+  await assert.rejects(() => vm.start(), error => error.number === 205);
+});
+
+test('Pascal Val accepts signed decimal/hex integers and reports the first invalid position', async () => {
+  const values = ['123', '  -2147483648', '$FFFFFFFF', '$ff', '2147483648', '123 ', '12x', '-', '$', ''];
+  const body = 'Dim value As Long, code As Long\n' + values.map(value =>
+    `value = 777\nCall __PascalValInteger(${JSON.stringify(value)}, value, code)\nDebug.Print value, code`).join('\n');
+  assert.deepEqual(await execute(body, ['valInteger']),
+    ['123 0', '-2147483648 0', '-1 0', '255 0', '777 10', '777 4', '777 3', '777 2', '777 2', '777 1']);
+});
+
+test('Pascal Val validates real syntax without accepting a numeric prefix or trailing blanks', async () => {
+  const values = ['1.25e+2', '-0.5', '1e+', '1.5 ', '3junk', '', '1e400'];
+  const body = 'Dim value As Double, code As Long\n' + values.map(value =>
+    `value = 777\nCall __PascalValReal(${JSON.stringify(value)}, value, code)\nDebug.Print value, code`).join('\n') +
+    '\nCall __PascalValReal("1e100", value, code, "double")\nDebug.Print value = 1e100, code';
+  assert.deepEqual(await execute(body, ['valReal']),
+    ['125 0', '-0.5 0', '777 4', '777 4', '777 2', '777 1', '777 5', 'True 0']);
 });
 
 test('Pascal div/mod preserve signed truncated-quotient semantics', async () => {
