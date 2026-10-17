@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {newProject,normalizeProject,createControl} from '../src/project/model.js';
-import {validateWinUI3Appearance,validateWinUI3Properties,validateWinUI3Brush,winui3ThemeValues,winui3StateValues,winui3CssColor,winui3CssBrush,winui3GradientPoints,winui3CssThickness,clearWinUI3Overrides} from '../src/theme/winui3-compat.js';
+import {validateWinUI3Appearance,validateWinUI3Properties,validateWinUI3Brush,winui3ThemeValues,winui3StateValues,winui3CssColor,winui3CssBrush,winui3GradientPoints,winui3CssThickness,clearWinUI3Overrides,hasWinUI3Override} from '../src/theme/winui3-compat.js';
 
 const appearance=()=>({version:1,sourceType:'Button',requestedTheme:'Default',properties:{Padding:[11,5,11,6],CornerRadius:[4,4,4,4],FontWeight:600},resources:{
   Background:{key:'PanelBrush',values:{Light:'#80402010',Dark:'#CC102040',HighContrast:'#FF000000'}},
@@ -49,6 +49,23 @@ test('same-valued native color edits relinquish corresponding theme branches onl
 test('an explicit combined metadata/color transaction retains the new binding',()=>{
   const props={WinUI3:appearance()};clearWinUI3Overrides(props,{BackColor:0,WinUI3:appearance()});
   assert.equal(props.WinUI3.resources.Background.key,'PanelBrush');
+});
+test('native padding edits release the entire live thickness without removing unrelated appearance',()=>{
+  for(const key of ['LayoutPadding','LayoutPaddingLeft','LayoutPaddingTop','LayoutPaddingRight','LayoutPaddingBottom']) {
+    const props={WinUI3:appearance()};props.WinUI3.resources.Padding={key:'PanelPadding',values:{Light:[1,2,3,4],Dark:[5,6,7,8]}};
+    clearWinUI3Overrides(props,{[key]:0});
+    assert.equal(props.WinUI3.properties.Padding,undefined);assert.equal(props.WinUI3.resources.Padding,undefined);
+    assert.equal(props.WinUI3.resources.Background.key,'PanelBrush');
+  }
+});
+test('inspector ownership includes fonts, padding and state-only brushes and ends after release',()=>{
+  const props={WinUI3:appearance()};
+  assert.equal(hasWinUI3Override(props,'FontBold'),true);assert.equal(hasWinUI3Override(props,'LayoutPaddingLeft'),true);
+  assert.equal(hasWinUI3Override(props,'Caption'),false);
+  delete props.WinUI3.resources.Foreground;props.WinUI3.states={PointerOver:{Foreground:'#FF123456'}};
+  assert.equal(hasWinUI3Override(props,'ForeColor'),true);
+  clearWinUI3Overrides(props,{ForeColor:0,FontBold:0,LayoutPaddingLeft:0});
+  for(const key of ['ForeColor','FontBold','LayoutPaddingLeft'])assert.equal(hasWinUI3Override(props,key),false);
 });
 test('ToggleSwitch and ProgressBar carry truthful binary and indeterminate semantics',()=>{
   const toggle={version:1,sourceType:'ToggleSwitch',properties:{Header:'Network',OnContent:'Connected',OffContent:'Offline'}};

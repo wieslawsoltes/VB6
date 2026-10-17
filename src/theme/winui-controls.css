@@ -376,5 +376,5 @@
 }
 @keyframes winui-progress {from {transform:translateX(-100%);}to {transform:translateX(333.3333%);}}
 /* Motion preferences reset independently at application/IDE boundaries. */
-[data-vb-reduce-motion=true] {--winui-Duration:0s;--winui-ProgressIndeterminateAnimation:none;}
-@media(prefers-reduced-motion:reduce) {html,[data-vb-theme] {--winui-Duration:0s;--winui-ProgressIndeterminateAnimation:none;}}
+[data-vb-reduce-motion=true] {--winui-Duration:0s;--winui-CheckTransition:none;--winui-ProgressIndeterminateAnimation:none;}
+@media(prefers-reduced-motion:reduce) {html,[data-vb-theme] {--winui-Duration:0s;--winui-CheckTransition:none;--winui-ProgressIndeterminateAnimation:none;}}

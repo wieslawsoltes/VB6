@@ -1,11 +1,14 @@
 import {getTheme,fontFamily} from '../theme/theme.js';
 import {observeThemeEnvironment,writeThemeAttributes} from '../theme/environment.js';
-import {winui3ThemeValues,winui3StateValues,winui3CssBrush,winui3CssColor,winui3CssThickness,winui3BuiltinStyle} from '../theme/winui3-compat.js';
+import {winui3ThemeValues,winui3StateValues,winui3CssBrush,winui3CssThickness,winui3BuiltinStyle} from '../theme/winui3-compat.js';
 import {notifyControlPaint} from '../rendering/invalidation.js';
+import {setWinUI3LayoutValues} from '../layout/model.js';
 
 const documents=new WeakMap(),bindings=new WeakMap();
 const own=(object,key)=>Object.hasOwn(object,key);
 const isInputBackground=c=>c.input&&!['Slider','CheckBox','OptionButton','UpDown'].includes(c.type);
+const isLayoutContainer=c=>c.anchoring&&['Form','MDIForm','PictureBox','Frame'].includes(c.type);
+const stateEvents=['pointerover','pointerout','pointerdown','pointerup','pointercancel','focusin','focusout','keydown','keyup','change','input','click'];
 
 function themeFor(c,state) {
   if(state?.environment.snapshot.forcedColors||getTheme(c.node).id==='contrast')return 'HighContrast';
@@ -30,8 +33,19 @@ function subscribe(c) {
     state.environment=observeThemeEnvironment(document.defaultView,()=>update());
     state.changed=event=>update(event);
     state.pageshow=()=>{state.environment.refresh();update();};
+    // CSS owns pointer/focus state on ordinary controls. A retained graphics
+    // surface needs the same brush after the browser updates its pseudo state.
+    state.paintChanged=()=>{
+      if(state.paintFrame!=null||![...state.controls].some(control=>control.surface&&control.winui3States))return;
+      state.paintFrame=document.defaultView.requestAnimationFrame(()=>{
+        state.paintFrame=null;
+        for(const control of state.controls)if(!control.disposed)refreshSurfaceBackground(control);
+      });
+    };
     document.addEventListener('vb-theme-change',state.changed,true);
+    for(const event of stateEvents)document.addEventListener(event,state.paintChanged,true);
     document.defaultView?.addEventListener('pageshow',state.pageshow);
+    document.defaultView?.addEventListener('blur',state.paintChanged);
     documents.set(document,state);
   }
   state.controls.add(c);bindings.set(c,{document,state});return state;
@@ -41,7 +55,10 @@ function unsubscribe(c) {
   const {document,state}=binding;bindings.delete(c);state.controls.delete(c);
   if(!state.controls.size) {
     document.removeEventListener('vb-theme-change',state.changed,true);
+    for(const event of stateEvents)document.removeEventListener(event,state.paintChanged,true);
     document.defaultView?.removeEventListener('pageshow',state.pageshow);
+    document.defaultView?.removeEventListener('blur',state.paintChanged);
+    if(state.paintFrame!=null)document.defaultView?.cancelAnimationFrame(state.paintFrame);
     state.environment.dispose();documents.delete(document);
   }
 }
@@ -69,9 +86,10 @@ function statePaint(c,node,key,cssProperty,normal,states) {
 }
 function borderPaint(c,host,values,states) {
   const n=c.node,thickness=values.BorderThickness;
+  const logicalBorder=isLayoutContainer(c);
   const hasBrush=own(values,'BorderBrush')||Object.values(states).some(values=>own(values,'BorderBrush'));
   if(thickness) {
-    paint(c,host,'border-width',winui3CssThickness(thickness),true);
+    paint(c,host,'border-width',logicalBorder?'0px':winui3CssThickness(thickness),true);
     paint(c,host,'border-style','solid',true);paint(c,host,'box-sizing','border-box');
     paint(c,n,'--winui-BorderPainterContent','none');
   }
@@ -81,8 +99,8 @@ function borderPaint(c,host,values,states) {
     if(!c.winui3Border){c.winui3Border=n.ownerDocument.createElement('span');c.winui3Border.className='vb-winui-border';c.winui3Border.setAttribute('aria-hidden','true');}
     const parent=host===c.input?n:host;
     if(c.winui3Border.parentNode!==parent)parent.append(c.winui3Border);
-    const sides=thickness??[1,1,1,1];
-    paint(c,c.winui3Border,'inset',host===c.input?'0px':winui3CssThickness(sides.map(v=>-v)));
+    const sides=thickness??(logicalBorder?[0,0,0,0]:[1,1,1,1]);
+    paint(c,c.winui3Border,'inset',host===c.input||logicalBorder?'0px':winui3CssThickness(sides.map(v=>-v)));
     paint(c,c.winui3Border,'padding',winui3CssThickness(sides));
     paint(c,c.winui3Border,'border-radius',values.CornerRadius?.map(v=>v+'px').join(' ')||'var(--winui-ControlRadius, 0px)');
     statePaint(c,c.winui3Border,'BorderBrush','background',values.BorderBrush??'#00000000',states);
@@ -92,21 +110,32 @@ function borderPaint(c,host,values,states) {
 }
 function apply(c,state) {
   const appearance=c.props.WinUI3;if(!appearance)return;
-  const n=c.node,previousRequested=n.getAttribute('data-winui-requested-theme');
+  const n=c.node,previousRequested=n.getAttribute('data-winui-requested-theme'),previousEffective=n.getAttribute('data-winui-effective-theme');
   writeThemeAttributes(n,{'data-winui-control':appearance.sourceType,
     'data-winui-requested-theme':appearance.requestedTheme&&appearance.requestedTheme!=='Default'?appearance.requestedTheme:null,
     'data-winui-style':winui3BuiltinStyle(appearance.style)});
   const theme=themeFor(c,state),values=winui3ThemeValues(appearance,theme),states=winui3StateValues(appearance,theme);
+  const reduceMotion=state.environment.snapshot.reducedMotion||n.closest('[data-vb-reduce-motion]')?.getAttribute('data-vb-reduce-motion')==='true';
   writeThemeAttributes(n,{'data-winui-effective-theme':theme,'data-winui-state-paint':Object.keys(states).length?'true':null,
-    'data-winui-focused-state':states.Focused?'true':null});
-  c.winui3Values=values;
+    'data-winui-focused-state':states.Focused?'true':null,'data-winui-reduce-motion':String(!!reduceMotion)});
+  c.winui3Values=values;c.winui3States=states;
+  if(isLayoutContainer(c)&&setWinUI3LayoutValues(c.props,values))
+    (c.form||c).layoutController?.edit(c,'WinUI3');
   const body=c.content||n,content=c.label||c.input||body;
+  if(['Canvas','Grid','StackPanel','Border'].includes(appearance.sourceType)) {
+    // These XAML elements use a PictureBox as their native child host, without
+    // inheriting that control's legacy two-pixel bevel or opaque default fill.
+    paint(c,body,'border-width','0px',true);paint(c,body,'border-style','solid',true);
+    paint(c,body,'border-color','transparent',true);paint(c,body,'box-shadow','none',true);
+    if(!own(values,'Background'))paint(c,body,'background','transparent');
+  }
   if(statePaint(c,isInputBackground(c)?c.input:body,'Background','background',values.Background,states)) {
     // One paint plane: a translucent field must not be composited a second time
     // against an identically colored host.
-    if(isInputBackground(c)&&c.type==='TextBox')paint(c,n,'background','transparent');
-    if(c.surface&&own(values,'Background')) {
-      c.surface.setPresentationBackground(values.Background);
+    if(isInputBackground(c))paint(c,n,'background','transparent');
+    if(c.surface) {
+      refreshSurfaceBackground(c);
+      if(isInputBackground(c))paint(c,c.input,'background','transparent');
       paint(c,body,'background','transparent');
     }
   }
@@ -115,18 +144,9 @@ function apply(c,state) {
     paint(c,c.input,'color','var(--winui3-active-Foreground, var(--winui3-Normal-Foreground))',true);
   const borderHost=isInputBackground(c)?c.input:body;
   borderPaint(c,borderHost,values,states);
-  if(own(values,'Padding')) {
-    if(c.anchoring&&['Form','MDIForm','PictureBox','Frame'].includes(c.type)) {
-      let changed=false;
-      for(const [i,side] of ['Left','Top','Right','Bottom'].entries()) {
-        const key='LayoutPadding'+side,value=values.Padding[i]*15;
-        if(c.props[key]!==value){c.props[key]=value;changed=true;}
-      }
-      if(changed)(c.form||c).layoutController?.edit(c,'LayoutPadding');
-    } else {
-      paint(c,isInputBackground(c)?c.input:body,'padding',winui3CssThickness(values.Padding),true);
-      paint(c,isInputBackground(c)?c.input:body,'box-sizing','border-box');
-    }
+  if(own(values,'Padding')&&!isLayoutContainer(c)) {
+    paint(c,isInputBackground(c)?c.input:body,'padding',winui3CssThickness(values.Padding),true);
+    paint(c,isInputBackground(c)?c.input:body,'box-sizing','border-box');
   }
   if(own(values,'CornerRadius')) {
     const radius=values.CornerRadius.map(value=>value+'px').join(' ');
@@ -170,7 +190,7 @@ function apply(c,state) {
   refreshWinUI3ControlValue(c);
   // A property write can change the requested theme without changing the host
   // palette. Repaint affected descendants once, without reconstructing inputs.
-  if(previousRequested!==n.getAttribute('data-winui-requested-theme')) {
+  if(previousRequested!==n.getAttribute('data-winui-requested-theme')||previousEffective!==theme) {
     for(const child of [...state.controls])if(child!==c&&!child.disposed&&n.contains(child.node)) {
       resetWinUI3ControlPaint(child);apply(child,state);notifyControlPaint(child.node);
     }
@@ -196,6 +216,7 @@ export function refreshWinUI3ControlValue(c) {
       role:'progressbar','aria-valuemin':Number(p.Min)||0,'aria-valuemax':Number(p.Max)||0,
       'aria-valuenow':indeterminate?null:Number(p.Value)||0});
   }
+  refreshSurfaceBackground(c);
 }
 export function refreshWinUI3Control(c) {
   if(!c.props.WinUI3) {
@@ -207,15 +228,19 @@ export function refreshWinUI3Control(c) {
 export function disposeWinUI3Control(c) {
   const state=bindings.get(c)?.state,hadRequested=c.node.hasAttribute('data-winui-requested-theme');
   unsubscribe(c);resetWinUI3ControlPaint(c);
-  c.winui3Header?.remove();c.winui3Header=null;c.winui3Focus?.remove();c.winui3Focus=null;c.winui3Border?.remove();c.winui3Border=null;c.winui3Values=null;
+  c.winui3Header?.remove();c.winui3Header=null;c.winui3Focus?.remove();c.winui3Focus=null;c.winui3Border?.remove();c.winui3Border=null;c.winui3Values=null;c.winui3States=null;
+  if(isLayoutContainer(c)&&setWinUI3LayoutValues(c.props,null))
+    (c.form||c).layoutController?.edit(c,'WinUI3');
   writeThemeAttributes(c.node,{'data-winui-control':null,'data-winui-requested-theme':null,
     'data-winui-effective-theme':null,'data-winui-style':null,'data-winui-indeterminate':null,'data-winui-has-header':null,
-    'data-winui-system-focus':null,'data-winui-custom-focus':null,'data-winui-state-paint':null,'data-winui-focused-state':null});
-  if(c.surface){c.surface.setPresentationBackground(null);c.surface.background=c.props.BackColor;}
+    'data-winui-system-focus':null,'data-winui-custom-focus':null,'data-winui-state-paint':null,'data-winui-focused-state':null,
+    'data-winui-reduce-motion':null});
+  if(c.surface&&!c.surface.disposed){c.surface.setPresentationBackground(null);c.surface.background=c.props.BackColor;}
   if(c.input&&c.type==='CheckBox')writeThemeAttributes(c.input,{role:null,'aria-checked':null,'aria-pressed':null,'aria-label':c.props.Caption||c.model.name});
   if(hadRequested&&state)for(const child of [...state.controls])if(!child.disposed&&c.node.contains(child.node)) {
     resetWinUI3ControlPaint(child);apply(child,state);notifyControlPaint(child.node);
   }
+  if(state)for(const [portal,source] of state.portals)if(c.node===source||c.node.contains(source))updatePortal(source,portal);
 }
 
 /** Diagnostic counts expose listener ownership without retaining documents. */
@@ -223,16 +248,31 @@ export function winui3PresentationDiagnostics(document) {
   const state=documents.get(document);return Object.freeze({controls:state?.controls.size??0,themeListeners:state?1:0});
 }
 export function winui3ControlBackground(c,fallback) {
-  const brush=c.winui3Values?.Background;
-  if(brush!==undefined&&c.surface) {
-    c.surface.setPresentationBackground(brush);
+  if(c.surface&&(c.winui3Values?.Background!==undefined||Object.values(c.winui3States??{}).some(values=>own(values,'Background')))) {
+    refreshSurfaceBackground(c);
+    if(isInputBackground(c))paint(c,c.input,'background','transparent');
     paint(c,c.content||c.node,'background','transparent');
   }
   return fallback;
 }
+function refreshSurfaceBackground(c) {
+  if(!c.surface||c.surface.disposed||!c.props.WinUI3)return;
+  const {container,canvas,gpuCanvas}=c.surface;
+  // Mnemonic/caption refreshes can replace the host's children. Keep the same
+  // surface and retained command stream attached to its original control.
+  if(canvas.parentNode!==container)container.prepend(canvas);
+  if(gpuCanvas&&gpuCanvas.parentNode!==container)canvas.before(gpuCanvas);
+  // Use the actual CSS cascade, including focus specificity and partial-state
+  // fallback, rather than maintaining a second pseudo-state priority table.
+  const active=c.node.ownerDocument.defaultView.getComputedStyle(c.node).getPropertyValue('--winui3-active-Background').trim();
+  const candidates=[c.winui3Values?.Background,...Object.values(c.winui3States??{}).map(values=>values.Background)];
+  const brush=candidates.find(value=>value!==undefined&&winui3CssBrush(value)===active)??c.winui3Values?.Background??null;
+  c.surface.setPresentationBackground(brush);
+}
 function updatePortal(source,portal) {
-  const theme=source.closest('[data-winui-effective-theme]')?.getAttribute('data-winui-effective-theme');
-  writeThemeAttributes(portal,{'data-winui-effective-theme':theme??null});
+  const owner=source.closest('[data-winui-effective-theme]');
+  writeThemeAttributes(portal,{'data-winui-effective-theme':owner?.getAttribute('data-winui-effective-theme')??null,
+    'data-winui-reduce-motion':owner?.getAttribute('data-winui-reduce-motion')??null});
 }
 /** Portals inherit the XAML RequestedTheme branch of their invoking control.
  * Application-theme binding still owns the surrounding VB application policy. */
@@ -240,5 +280,5 @@ export function bindWinUI3Portal(source,portal) {
   const state=documents.get(source.ownerDocument);
   if(!state||!source.closest('[data-winui-effective-theme]'))return ()=>{};
   state.portals.set(portal,source);updatePortal(source,portal);
-  return ()=>{state.portals.delete(portal);writeThemeAttributes(portal,{'data-winui-effective-theme':null});};
+  return ()=>{state.portals.delete(portal);writeThemeAttributes(portal,{'data-winui-effective-theme':null,'data-winui-reduce-motion':null});};
 }

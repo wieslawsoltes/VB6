@@ -1,4 +1,5 @@
 import {macos26PropertyChoices} from '../theme/macos26-compat.js';
+import {hasWinUI3Override} from '../theme/winui3-compat.js';
 import {designerPropertyValues} from '../designer/property-model.js';
 import {resizeAxes} from '../designer/control-model.js';
 import {tabPagePlan} from '../controls/tab-model.js';
@@ -99,7 +100,7 @@ export class PropertyInspector {
     field.addEventListener('change',()=>{
       if(field.dataset.cancel){delete field.dataset.cancel;return;}
       if(!editable()||field.readOnly||mixed&&field.value==='')return;
-      try{let result=key==='Anchor'?parseAnchor(field.value):choices?(typeof choices[0]?.value==='string'?field.value:parsePropertyNumber(field.value)):key==='Index'&&!field.value.trim()?undefined:typeof value==='number'||key==='Index'||isColor?parsePropertyNumber(field.value):field.value;const boundColor=(key==='BackColor'||key==='ForeColor')&&targets.some(t=>t.properties?.[key==='BackColor'?'MacOSBackgroundRole':'MacOSForegroundRole']||t.properties?.WinUI3?.resources?.[key==='BackColor'?'Background':'Foreground']||t.properties?.WinUI3?.properties?.[key==='BackColor'?'Background':'Foreground']);if(!mixed&&Object.is(result,value)&&!boundColor)return;commit(result);}
+      try{let result=key==='Anchor'?parseAnchor(field.value):choices?(typeof choices[0]?.value==='string'?field.value:parsePropertyNumber(field.value)):key==='Index'&&!field.value.trim()?undefined:typeof value==='number'||key==='Index'||isColor?parsePropertyNumber(field.value):field.value;const boundAppearance=targets.some(t=>hasWinUI3Override(t.properties,key)||((key==='BackColor'||key==='ForeColor')&&t.properties?.[key==='BackColor'?'MacOSBackgroundRole':'MacOSForegroundRole']));if(!mixed&&Object.is(result,value)&&!boundAppearance)return;commit(result);}
       catch(error){field.value=choices?String(BOOLS.has(key)?Number(value)?-1:0:value):format();alertDialog(error.message,'Invalid property value');}
     });
     row.append(name,wrap);this.rows.set(key,row);this.fields.set(key,field);return row;

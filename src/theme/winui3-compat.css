@@ -1,5 +1,6 @@
 /* Typed XAML presentation is attached to the original VB control. No geometry
    conversion, model replacement or vendor font dependency is introduced here. */
+[data-winui-reduce-motion="true"] {--winui-Duration:0s;--winui-CheckTransition:none;--winui-ProgressIndeterminateAnimation:none;}
 .vb-check[data-winui-control="ToggleSwitch"][data-winui-has-header="true"] {
   display:grid;grid-template-columns:max-content 1fr;grid-template-rows:auto minmax(0,1fr);
   align-items:center;column-gap:8px;row-gap:4px;
@@ -43,6 +44,25 @@
   .vb-check[data-winui-control="ToggleButton"]:has(> input:focus-visible) {outline:2px solid ButtonText;outline-offset:2px;}
 }
 
+/* Paint belongs to each XAML element. Custom properties otherwise inherit a
+   parent's state brushes into an independently styled nested control. */
+[data-winui-control] {
+  --winui3-active-Background:initial;--winui3-active-Foreground:initial;--winui3-active-BorderBrush:initial;
+  --winui3-Normal-Background:initial;--winui3-Normal-Foreground:initial;--winui3-Normal-BorderBrush:initial;
+  --winui3-PointerOver-Background:initial;--winui3-PointerOver-Foreground:initial;--winui3-PointerOver-BorderBrush:initial;
+  --winui3-Pressed-Background:initial;--winui3-Pressed-Foreground:initial;--winui3-Pressed-BorderBrush:initial;
+  --winui3-Focused-Background:initial;--winui3-Focused-Foreground:initial;--winui3-Focused-BorderBrush:initial;
+  --winui3-Disabled-Background:initial;--winui3-Disabled-Foreground:initial;--winui3-Disabled-BorderBrush:initial;
+  --winui3-Checked-Background:initial;--winui3-Checked-Foreground:initial;--winui3-Checked-BorderBrush:initial;
+  --winui3-CheckedPointerOver-Background:initial;--winui3-CheckedPointerOver-Foreground:initial;--winui3-CheckedPointerOver-BorderBrush:initial;
+  --winui3-CheckedPressed-Background:initial;--winui3-CheckedPressed-Foreground:initial;--winui3-CheckedPressed-BorderBrush:initial;
+  --winui3-CheckedDisabled-Background:initial;--winui3-CheckedDisabled-Foreground:initial;--winui3-CheckedDisabled-BorderBrush:initial;
+  --winui3-Indeterminate-Background:initial;--winui3-Indeterminate-Foreground:initial;--winui3-Indeterminate-BorderBrush:initial;
+  --winui3-IndeterminatePointerOver-Background:initial;--winui3-IndeterminatePointerOver-Foreground:initial;--winui3-IndeterminatePointerOver-BorderBrush:initial;
+  --winui3-IndeterminatePressed-Background:initial;--winui3-IndeterminatePressed-Foreground:initial;--winui3-IndeterminatePressed-BorderBrush:initial;
+  --winui3-IndeterminateDisabled-Background:initial;--winui3-IndeterminateDisabled-Foreground:initial;--winui3-IndeterminateDisabled-BorderBrush:initial;
+}
+
 /* Scoped resource state paint: each property is independent, so a locally
    overridden brush participates without discarding the other native states. */
 .vb-winui-border {position:absolute!important;display:block!important;box-sizing:border-box;pointer-events:none;z-index:1;
@@ -56,9 +76,9 @@
 [data-winui-state-paint="true"].disabled {--winui3-active-Background:var(--winui3-Disabled-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Disabled-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Disabled-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
 [data-winui-state-paint="true"]:has(> input:checked) {--winui3-active-Background:var(--winui3-Checked-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Checked-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Checked-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
 [data-winui-state-paint="true"]:has(> input:checked):hover:not(.disabled) {--winui3-active-Background:var(--winui3-CheckedPointerOver-Background, var(--winui3-Checked-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-CheckedPointerOver-Foreground, var(--winui3-Checked-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-CheckedPointerOver-BorderBrush, var(--winui3-Checked-BorderBrush, var(--winui3-Normal-BorderBrush)));}
-[data-winui-state-paint="true"]:has(> input:checked):active:not(.disabled) {--winui3-active-Background:var(--winui3-CheckedPressed-Background, var(--winui3-CheckedPointerOver-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-CheckedPressed-Foreground, var(--winui3-CheckedPointerOver-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-CheckedPressed-BorderBrush, var(--winui3-CheckedPointerOver-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-state-paint="true"]:has(> input:checked):active:not(.disabled) {--winui3-active-Background:var(--winui3-CheckedPressed-Background, var(--winui3-CheckedPointerOver-Background, var(--winui3-Checked-Background, var(--winui3-Normal-Background))));--winui3-active-Foreground:var(--winui3-CheckedPressed-Foreground, var(--winui3-CheckedPointerOver-Foreground, var(--winui3-Checked-Foreground, var(--winui3-Normal-Foreground))));--winui3-active-BorderBrush:var(--winui3-CheckedPressed-BorderBrush, var(--winui3-CheckedPointerOver-BorderBrush, var(--winui3-Checked-BorderBrush, var(--winui3-Normal-BorderBrush))));}
 [data-winui-state-paint="true"]:has(> input:checked).disabled {--winui3-active-Background:var(--winui3-CheckedDisabled-Background, var(--winui3-Disabled-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-CheckedDisabled-Foreground, var(--winui3-Disabled-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-CheckedDisabled-BorderBrush, var(--winui3-Disabled-BorderBrush, var(--winui3-Normal-BorderBrush)));}
 [data-winui-state-paint="true"]:has(> input:indeterminate) {--winui3-active-Background:var(--winui3-Indeterminate-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Indeterminate-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Indeterminate-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
 [data-winui-state-paint="true"]:has(> input:indeterminate):hover:not(.disabled) {--winui3-active-Background:var(--winui3-IndeterminatePointerOver-Background, var(--winui3-Indeterminate-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-IndeterminatePointerOver-Foreground, var(--winui3-Indeterminate-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-IndeterminatePointerOver-BorderBrush, var(--winui3-Indeterminate-BorderBrush, var(--winui3-Normal-BorderBrush)));}
-[data-winui-state-paint="true"]:has(> input:indeterminate):active:not(.disabled) {--winui3-active-Background:var(--winui3-IndeterminatePressed-Background, var(--winui3-IndeterminatePointerOver-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-IndeterminatePressed-Foreground, var(--winui3-IndeterminatePointerOver-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-IndeterminatePressed-BorderBrush, var(--winui3-IndeterminatePointerOver-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-state-paint="true"]:has(> input:indeterminate):active:not(.disabled) {--winui3-active-Background:var(--winui3-IndeterminatePressed-Background, var(--winui3-IndeterminatePointerOver-Background, var(--winui3-Indeterminate-Background, var(--winui3-Normal-Background))));--winui3-active-Foreground:var(--winui3-IndeterminatePressed-Foreground, var(--winui3-IndeterminatePointerOver-Foreground, var(--winui3-Indeterminate-Foreground, var(--winui3-Normal-Foreground))));--winui3-active-BorderBrush:var(--winui3-IndeterminatePressed-BorderBrush, var(--winui3-IndeterminatePointerOver-BorderBrush, var(--winui3-Indeterminate-BorderBrush, var(--winui3-Normal-BorderBrush))));}
 [data-winui-state-paint="true"]:has(> input:indeterminate).disabled {--winui3-active-Background:var(--winui3-IndeterminateDisabled-Background, var(--winui3-Disabled-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-IndeterminateDisabled-Foreground, var(--winui3-Disabled-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-IndeterminateDisabled-BorderBrush, var(--winui3-Disabled-BorderBrush, var(--winui3-Normal-BorderBrush)));}

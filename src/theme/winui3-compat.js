@@ -215,13 +215,21 @@ export function winui3CssThickness(value) {
 }
 export function winui3BuiltinStyle(style) {return styles.has(style)?style:null;}
 
+const nativeOverrides=Object.freeze({BackColor:'Background',ForeColor:'Foreground',FontBold:'FontWeight',FontName:'FontFamily',FontSize:'FontSize',
+  LayoutPadding:'Padding',LayoutPaddingLeft:'Padding',LayoutPaddingTop:'Padding',LayoutPaddingRight:'Padding',LayoutPaddingBottom:'Padding'});
+/** The inspector must commit an explicit same-value edit while a typed value or
+ * state still owns its paint. A plain native value remains a no-op. */
+export function hasWinUI3Override(properties,nativeKey) {
+  const appearance=properties?.WinUI3,key=nativeOverrides[nativeKey];
+  return !!(appearance&&key&&(own(appearance.properties??{},key)||own(appearance.resources??{},key)||
+    Object.values(appearance.states??{}).some(values=>own(values,key))));
+}
 /** Explicit VB property edits relinquish the corresponding presentation value,
  * including same-value edits. A simultaneous WinUI3 replacement is explicit. */
 export function clearWinUI3Overrides(properties,changes) {
   const appearance=properties.WinUI3;
   if(!appearance||own(changes,'WinUI3'))return;
-  const map={BackColor:'Background',ForeColor:'Foreground',FontBold:'FontWeight',FontName:'FontFamily',FontSize:'FontSize'};
-  for(const [native,key] of Object.entries(map))if(own(changes,native)) {
+  for(const [native,key] of Object.entries(nativeOverrides))if(own(changes,native)) {
     delete appearance.properties?.[key];delete appearance.resources?.[key];
     for(const values of Object.values(appearance.states??{}))delete values[key];
   }
