@@ -100,3 +100,15 @@ test('all composite state and geometry resources reset at every independent fami
  const local=new Set([...css.matchAll(/--winui-([\w-]+)\s*:/g)].map(([,key])=>key));
  for(const [,key] of css.matchAll(/var\(--winui-([\w-]+)/g))assert.ok(WINUI_TOKEN_NAMES.includes(key)||local.has(key),'Unbound control paint '+key);
 });
+
+test('every WinUI IDE component rule excludes authored boundary roots and descendants',()=>{
+ const css=fs.readFileSync(new URL('../src/theme/winui-ide.css',import.meta.url),'utf8');
+ const selectors=[...css.matchAll(/^ & (.+?) \{/gm)].map(([,selector])=>selector);
+ assert.ok(selectors.length>30,'Inspect the actual component rule set');
+ for(const selector of selectors) {
+  assert.ok(selector.includes(':not(:where('),selector+' must be confined to IDE components');
+  for(const guard of ['.vb-control,.vb-control *','.vb-form,.vb-form *','.vb-dialog,.vb-dialog *','[data-vb-theme]:not(html),[data-vb-theme]:not(html) *'])
+   assert.ok(selector.includes(guard),selector+' must exclude '+guard);
+ }
+ assert.doesNotMatch(css,/& input::placeholder/,'Placeholder styling must use the same boundary guard as input paint');
+});
