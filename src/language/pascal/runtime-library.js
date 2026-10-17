@@ -298,16 +298,23 @@ End Function`, [dependency]);
 
 define('setRange', 'SetRange', `
 Private Function __PascalSetRange(ByVal first As Long, ByVal last As Long) As String
-  Dim value As String, ordinal As Long
+  Dim value As String, firstByte As Long, lastByte As Long, index As Long, firstBit As Long, lastBit As Long, mask As Long
   value = __PascalSetEmpty()
   If first <= last Then
     If first < 0 Or last > 255 Then Err.Raise 201, "Turbo Pascal", "Set range out of bounds"
-    For ordinal = first To last
-      Call __PascalSetInclude(value, ordinal)
-    Next ordinal
+    firstByte = first \\ 8 + 1
+    lastByte = last \\ 8 + 1
+    For index = firstByte To lastByte
+      firstBit = 0
+      lastBit = 7
+      If index = firstByte Then firstBit = first Mod 8
+      If index = lastByte Then lastBit = last Mod 8
+      mask = CLng(2 ^ (lastBit + 1) - 2 ^ firstBit)
+      Mid$(value, index, 1) = ChrW(mask)
+    Next index
   End If
   __PascalSetRange = value
-End Function`, ['setEmpty', 'setInclude']);
+End Function`, ['setEmpty']);
 
 for (const [id, suffix, operator] of [
   ['setUnion', 'SetUnion', 'a Or b'],
@@ -361,6 +368,74 @@ Private Function __PascalSetCount(ByVal value As String) As Long
   __PascalSetCount = count
 End Function`);
 
+define('unsignedDecimal', 'UnsignedDecimal', `
+Private Function __PascalUnsignedDecimal(ByVal value As Double) As String
+  Dim quotient As Double, digit As Long, result As String
+  value = Fix(value)
+  If value = 0 Then
+    __PascalUnsignedDecimal = "0"
+    Exit Function
+  End If
+  If value < 0 Or value > 1000000000000# Then Err.Raise 207, "Turbo Pascal", "Invalid decimal conversion"
+  Do While value >= 1
+    quotient = Fix(value / 10)
+    digit = CLng(value - quotient * 10)
+    result = ChrW(48 + digit) & result
+    value = quotient
+  Loop
+  __PascalUnsignedDecimal = result
+End Function`);
+
+define('formatReal', 'FormatReal', `
+Private Function __PascalFormatReal(ByVal value As Double, Optional ByVal width As Long = -1, Optional ByVal precision As Long = -1, Optional ByVal coprocessor As Boolean = False) As String
+  Dim result As String, pattern As String, mantissa As String, exponentText As String, signText As String, exponentSign As String
+  Dim normalized As Double, scale As Double, rounded As Double
+  Dim exponent As Long, decimals As Long, exponentDigits As Long
+  If value <> value Then Err.Raise 207, "Turbo Pascal", "Invalid floating point value"
+  If Abs(value) > 1.7976931348623157E+308 Then Err.Raise 205, "Turbo Pascal", "Floating point overflow"
+  If precision >= 0 Then
+    If precision > 11 Then precision = 11
+    pattern = "0"
+    If precision > 0 Then pattern = pattern & "." & String$(precision, "0")
+    result = Replace$(Format$(value, pattern), ",", ".")
+  Else
+    exponentDigits = 2
+    If coprocessor Then exponentDigits = 4
+    If width < 0 Then width = 17
+    If width < exponentDigits + 6 Then width = exponentDigits + 6
+    decimals = width - exponentDigits - 5
+    If decimals > 10 Then decimals = 10
+    normalized = Abs(value)
+    If normalized <> 0 Then
+      Do While normalized >= 10
+        normalized = normalized / 10
+        exponent = exponent + 1
+      Loop
+      Do While normalized < 1
+        normalized = normalized * 10
+        exponent = exponent - 1
+      Loop
+    End If
+    scale = 10 ^ decimals
+    rounded = Int(normalized * scale + 0.5)
+    If rounded >= scale * 10 Then
+      rounded = scale
+      exponent = exponent + 1
+    End If
+    mantissa = __PascalUnsignedDecimal(rounded)
+    If Len(mantissa) < decimals + 1 Then mantissa = String$(decimals + 1 - Len(mantissa), "0") & mantissa
+    exponentText = __PascalUnsignedDecimal(Abs(exponent))
+    If Len(exponentText) < exponentDigits Then exponentText = String$(exponentDigits - Len(exponentText), "0") & exponentText
+    signText = " "
+    If value < 0 Then signText = "-"
+    exponentSign = "+"
+    If exponent < 0 Then exponentSign = "-"
+    result = signText & Left$(mantissa, 1) & "." & Mid$(mantissa, 2) & "E" & exponentSign & exponentText
+  End If
+  If width > Len(result) Then result = Space$(width - Len(result)) & result
+  __PascalFormatReal = result
+End Function`, ['unsignedDecimal']);
+
 /** Formatting is one expression per argument, so the frontend can concatenate
  * results before printing without VB's comma/semicolon spacing semantics.
  * Explicit type tags preserve Pascal Boolean and real behavior through Variant
@@ -368,23 +443,22 @@ End Function`);
  */
 define('format', 'Format', `
 Private Function __PascalFormat(ByVal value As Variant, Optional ByVal width As Long = -1, Optional ByVal precision As Long = -1, Optional ByVal typeTag As String = "") As String
-  Dim result As String, pattern As String, tag As String
+  Dim result As String, tag As String, realValue As Boolean, coprocessor As Boolean
   tag = LCase$(typeTag)
+  realValue = tag = "real" Or tag = "real87" Or tag = "single" Or tag = "double" Or tag = "extended" Or tag = "comp"
+  coprocessor = tag = "real87" Or tag = "single" Or tag = "double" Or tag = "extended" Or tag = "comp"
   If tag = "boolean" Or VarType(value) = 11 Then
     If value Then result = "TRUE" Else result = "FALSE"
   ElseIf tag = "char" Or tag = "string" Or VarType(value) = 8 Then
     result = CStr(value)
-  ElseIf precision >= 0 Then
-    If precision > 255 Then precision = 255
-    pattern = "0"
-    If precision > 0 Then pattern = pattern & "." & String$(precision, "0")
-    result = Format$(CDbl(value), pattern)
+  ElseIf precision >= 0 Or realValue Then
+    result = __PascalFormatReal(CDbl(value), width, precision, coprocessor)
   Else
     result = CStr(value)
   End If
   If width > Len(result) Then result = Space$(width - Len(result)) & result
   __PascalFormat = result
-End Function`);
+End Function`, ['formatReal']);
 
 // Conventional source spellings are accepted alongside the canonical IDs.
 for (const [alias, canonical] of Object.entries({
