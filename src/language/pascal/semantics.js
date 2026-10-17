@@ -60,6 +60,7 @@ export class PascalScope {
   constructor(owner, parent = null, procedure = null) {this.owner = owner; this.parent = parent; this.procedure = procedure; this.symbols = new Map();}
   define(symbol, node = symbol.node) {
     const name = key(symbol.name);
+    if (name.startsWith('__pascal') && !symbol.internal) this.owner.fail("Identifiers beginning with '__Pascal' are reserved for compiler-generated storage", node, 'TP_RESERVED_IDENTIFIER');
     if (this.symbols.has(name)) this.owner.fail(`Duplicate identifier '${symbol.name}'`, node, 'TP_DUPLICATE');
     symbol.scope = this; symbol.owner = this.owner; this.symbols.set(name, symbol); return symbol;
   }
@@ -198,7 +199,7 @@ export class PascalBinder {
       const dimensions = node.indices.map(index => {const type = this.resolveType(index, scope); if (!isOrdinal(type)) this.fail('Array index type must be ordinal', index, 'TP_ARRAY_INDEX'); return {low: type.low, high: type.high, type};});
       if (dimensions.some(dimension => dimension.high - dimension.low > 1000000)) this.fail('Array dimension exceeds the compiler allocation limit', node, 'TP_LIMIT');
       let element = this.resolveType(node.elementType, scope);
-      if (element.kind === 'array') {if (element.open) this.fail('Open arrays cannot be nested', node); dimensions.push(...element.dimensions); element = element.element;}
+      if (element.kind === 'array') {if (element.open || node.open) this.fail('Open arrays with nested array elements require a descriptor for each element', node, 'TP_OPEN_ARRAY_ELEMENT'); dimensions.push(...element.dimensions); element = element.element;}
       return {kind: 'array', name: suggestedName || '__PascalArray', identity, element, dimensions, open: node.open, vb: element.vb, owner: this, node};
     }
     if (node.kind === 'recordType') {

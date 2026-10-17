@@ -20,6 +20,23 @@ test('Pascal parser constructs structured syntax with positioned nested routines
   assert.equal(ast.moduleKind, 'program'); assert.equal(ast.declarations[0].type.fields[0].names.length, 2); assert.equal(ast.declarations[1].declarations[0].name, 'Inner'); assert.equal(ast.body.kind, 'block');
 });
 
+test('conditional compilation filters lexical branches while preserving physical locations', async () => {
+  const {output, compiled} = await execute(`program Conditional;
+{$DEFINE FEATURE}
+{$IFDEF FEATURE}
+const Value = 42;
+{$ELSE}
+this is not valid Pascal !!!
+{$ENDIF}
+begin
+{$IFOPT R-} Writeln(Value); {$ELSE} Writeln(0); {$ENDIF}
+{$UNDEF FEATURE}
+{$IFNDEF FEATURE} Writeln('done'); {$ENDIF}
+end.`);
+  assert.deepEqual(output, ['42', 'done']); assert.ok(compiled.modules.get('mainunit').procedures.get('main').code.some(instruction => instruction.sequencePoint && instruction.line === 9));
+  invalid('program Broken; {$IFDEF X} begin end.', /Unterminated conditional/);
+});
+
 test('integer division, modulo, arithmetic, loop bounds and source positions use Pascal semantics', async () => {
   const {output} = await execute(`program Arithmetic;
 var I, Total: Integer;
@@ -76,6 +93,16 @@ begin for I := 2 to 3 do for J := -1 to 0 do M[I,J] := I * 10 + J; Writeln(M[2,-
   assert.deepEqual(output, ['19:30']);
 });
 
+test('open array parameters rebase actual bounds and copy value parameters', async () => {
+  const {output} = await execute(`program OpenArrays;
+type Values = array[-2..0] of Integer;
+var A: Values;
+procedure Change(var Items: array of Integer); begin Items[0] := 7; Writeln(Low(Items), ':', High(Items), ':', SizeOf(Items)) end;
+procedure Copy(Items: array of Integer); begin Items[1] := 99; Writeln(Items[0], ':', Items[1]) end;
+begin A[-2] := 1; A[-1] := 2; A[0] := 3; Change(A); Copy(A); Writeln(A[-2], ':', A[-1], ':', A[0]) end.`);
+  assert.deepEqual(output, ['0:2:6', '7:99', '7:2:3']);
+});
+
 test('enumerations, subranges, sets and membership maintain ordinal type identity', async () => {
   const {output} = await execute(`program Sets;
 type Color = (Red,Green,Blue); Colors = set of Color; Small = 1..5;
@@ -89,6 +116,13 @@ test('short strings, character indexing and Pascal Write formatting reuse portab
 var S: String[5]; C: Char;
 begin S := 'abcdefg'; S[2] := 'Z'; C := S[1]; Writeln(S, ':', C, ':', Ord(S[0])); Insert('!',S,1); Delete(S,2,1); Writeln(S); Write(7:3); Writeln(1.25:6:2, ':', True); end.`);
   assert.deepEqual(output, ['aZcde:a:5', '!Zcd', '  7', '  1.25:TRUE']); assert.equal(chunks[2].newline, false);
+});
+
+test('Val preserves the target on errors and reports numeric conversion positions', async () => {
+  const {output} = await execute(`program Conversion;
+var N,Code: Integer; R: Real;
+begin N:=9; Val('123',N,Code); Writeln(N,':',Code); Val('1x3',N,Code); Writeln(N,':',Code); Val('32768',N,Code); Writeln(N,':',Code); Val('1.25',R,Code); Writeln(R:4:2,':',Code) end.`);
+  assert.deepEqual(output, ['123:0', '123:2', '123:5', '1.25:0']);
 });
 
 test('local typed constants initialize once and remain writable across calls', async () => {
@@ -150,6 +184,7 @@ test('declaration and operator diagnostics point to original Pascal source', () 
   invalid('program Bad; var X: Integer; begin case X of 1..3: X := 2; 3: X := 4 end end.', /overlapping/);
   invalid('program Bad; type P = ^Integer; begin end.', /Typed pointers/);
   invalid('program Bad; begin asm mov ax, bx end end.', /Inline 8086 assembly/);
+  invalid('program Bad; var __PascalOrdinal: Integer; begin end.', /reserved/);
 });
 
 test('range and overflow checks are executable rather than ignored compiler directives', async () => {

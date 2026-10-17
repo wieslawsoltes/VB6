@@ -1,4 +1,5 @@
 import {PascalError, tokenizePascal} from './lexer.js';
+import {preprocessPascalTokens} from './preprocessor.js';
 
 const PRECEDENCE = Object.freeze({'=': 1, '<>': 1, '<': 1, '>': 1, '<=': 1, '>=': 1, in: 1, '+': 2, '-': 2, or: 2, xor: 2, '*': 3, '/': 3, div: 3, mod: 3, and: 3, shl: 3, shr: 3});
 const DECLARATIONS = new Set(['const', 'type', 'var', 'label', 'procedure', 'function', 'constructor', 'destructor']);
@@ -9,7 +10,9 @@ export class PascalParser {
     this.input = typeof input === 'string' ? {code: input} : input || {};
     this.source = String(this.input.code ?? this.input.source ?? '');
     this.name = this.input.name || options.sourceName || 'PascalModule';
-    this.tokens = tokenizePascal(this.source, {sourceName: this.name, ...options});
+    const scanned = tokenizePascal(this.source, {...options, sourceName: this.name, tolerant: true});
+    this.tokens = preprocessPascalTokens(scanned, {...options, conditionalConstants: this.input.conditionalConstants || options.conditionalConstants || {}, sourceName: this.name});
+    if (this.tokens.diagnostics.length && !options.tolerant) {const diagnostic = this.tokens.diagnostics[0]; throw new PascalError(diagnostic.message, diagnostic, this.name, diagnostic.code);}
     this.index = 0; this.depth = 0; this.maxDepth = options.maxDepth || 128;
   }
   peek(offset = 0) {return this.tokens[Math.min(this.index + offset, this.tokens.length - 1)];}
