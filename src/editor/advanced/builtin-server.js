@@ -15,9 +15,9 @@ import {PASCAL_KEYWORDS,PASCAL_SNIPPETS,pascalTokens,pascalFoldingRanges,pascalW
 export const BUILTIN_TOKEN_LEGEND = Object.freeze({tokenTypes:['namespace','type','class','enum','parameter','variable','property','enumMember','event','function','method','keyword','modifier','comment','string','number','operator'],tokenModifiers:['declaration','readonly','defaultLibrary']});
 const keywords=new Set(KEYWORDS.map(s=>s.toLowerCase()));
 const key=s=>String(s||'').replace(/^\[|\]$/g,'').replace(/[$%&!#@]$/,'').toLowerCase();
-const kind=s=>({module:2,class:5,type:23,enum:10,constant:14,parameter:13,variable:13,field:8,control:8,event:24,sub:12,function:12,property:7,'property get':7,'property let':7,'property set':7,label:20}[s.kind]||13);
-const identity=s=>s?.moduleId&&s.name ? [s.moduleId,s.ownerId||'',s.parentType||'',key(s.name)].join('|'):null;
-const completionKind=s=>({module:9,class:7,type:22,enum:13,constant:21,parameter:6,variable:6,field:5,control:6,event:23,sub:3,function:3,property:10,'property get':10,'property let':10,'property set':10,keyword:14}[s.kind]||6);
+const kind=s=>({module:2,class:5,type:23,alias:23,pointer:23,array:23,enum:10,constant:14,parameter:13,variable:13,field:8,control:8,event:24,sub:12,function:12,property:7,'property get':7,'property let':7,'property set':7,label:20}[s.kind]||13);
+const identity=s=>s?.bindingIdentity||(s?.moduleId&&s.name ? [s.moduleId,s.ownerId||'',s.parentType||'',key(s.bindingName||s.name)].join('|'):null);
+const completionKind=s=>({module:9,class:7,type:22,alias:22,pointer:22,array:22,enum:13,constant:21,parameter:6,variable:6,field:5,control:6,event:23,sub:3,function:3,property:10,'property get':10,'property let':10,'property set':10,keyword:14}[s.kind]||6);
 const yieldTask=()=>new Promise(resolve=>setTimeout(resolve,0));
 const checkCancelled=signal=>{if(signal?.aborted)throw new RpcError(RPC_CANCELLED,'Request cancelled.');};
 const safeTokenize=line=>{try{return tokenize(line);}catch{return [];}};
@@ -30,6 +30,7 @@ const plainDescription=s=>s?.description||s?.signature||`${s?.name||''}${s?.para
 const tokenKind=s=>({module:'namespace',class:'class',type:'type',enum:'enum',parameter:'parameter',variable:'variable',field:'property',control:'variable',constant:s.parentType?'enumMember':'variable',event:'event',sub:'function',function:'function',property:'property','property get':'property','property let':'property','property set':'property'}[s.kind]||'variable');
 
 function symbolRange(document,symbol) {
+  if(document.languageId==='pascal'&&Number.isInteger(symbol.nameStart)&&Number.isInteger(symbol.nameEnd))return document.range(symbol.nameStart,symbol.nameEnd);
   const line=Math.max(0,Math.min(document.lineStarts.length-1,(symbol.line||1)-1));
   const base=document.lineStarts[line],raw=document.text.slice(base,document.lineEnds[line]);
   const match=tokensAtLine(document,line).find(t=>t.type==='id'&&key(t.value)===key(symbol.name));
@@ -170,7 +171,7 @@ export class BuiltinLanguageServer {
     for(const module of project.modules){
       const uri=uris.get(module.id),doc=documents.get(uri);if(!doc)continue;
       const occurrences=await this.occurrences(doc,signal);
-      for(const {line,start,end}of occurrences.get(key(symbol.name))||[]) {
+      for(const {line,start,end}of occurrences.get(key(symbol.bindingName||symbol.name))||[]) {
         checkCancelled(signal);
         const hit=this.intelligence.definition(project,module,line+1,doc.text,start+Math.min(1,end-start));
         if(identity(hit)!==target)continue;
@@ -245,7 +246,7 @@ export class BuiltinLanguageServer {
       const native=this.nativeName(document,p.position);if(native)return {range:document.range(native.attribute.valueStart,native.attribute.valueEnd),placeholder:native.attribute.value};
       const refs=this.xaml.references(document.uri,p.position);return refs.length?{range:refs.find(r=>r.start<=document.offsetAt(p.position)&&document.offsetAt(p.position)<=r.end)?.range||refs[0].range,placeholder:refs[0].name}:null;
     }
-    if(!identity(symbol)||['control','module','class','label'].includes(symbol.kind)||symbol.implicitRedim)return null;
+    if(!identity(symbol)||['control','module','class','label'].includes(symbol.kind)||symbol.implicitRedim||symbol.implicit)return null;
     if(!symbol.owner&&module?.form&&new RegExp('^(?:Form|MDIForm|UserControl|'+(module.form.controls||[]).map(c=>c.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|')+')_','i').test(symbol.name))return null;
     const token=tokenAt(document,p.position);if(!token)return null;
     const base=document.lineStarts[p.position.line];return {range:document.range(base+token.start,base+token.end),placeholder:token.value};
@@ -277,6 +278,7 @@ export class BuiltinLanguageServer {
       const doc=this.document(reference.uri),module=this.module(doc),line=reference.range.start.line+1,offset=doc.offsetAt(reference.range.start);
       const collision=this.intelligence.resolve(this.project,module,line,p.newName,{offset});
       if(collision&&identity(collision)!==id)throw new RpcError(-32602,'The new name would shadow an existing symbol: '+p.newName);
+      if(doc.languageId==='pascal'&&symbol.parentType){const hit=this.intelligence.definition(this.project,module,line,doc.text,offset),owner=this.project.modules.find(m=>m.id===hit?.moduleId)||module,component=hit?.parentType&&this.intelligence.type(this.project,owner,hit.parentType)?.members?.find(member=>key(member.name)===key(p.newName));if(component&&identity(this.intelligence.declared(this.project,owner,component))!==id)throw new RpcError(-32602,'The new name would shadow an object component: '+p.newName);}
       let edits=changes.get(reference.uri);if(!edits)changes.set(reference.uri,edits=[]);
       const previous=doc.text.slice(offset,doc.offsetAt(reference.range.end)),suffix=previous.match(/[$%&!#@]$/)?.[0]||'';
       edits.push({range:reference.range,newText:p.newName+suffix});
