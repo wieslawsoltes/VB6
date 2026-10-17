@@ -378,6 +378,20 @@ Private Function __PascalIntMul(ByVal leftValue As Long, ByVal rightValue As Lon
   __PascalIntMul = __PascalOrdinal(result, bits, True)
 End Function`, ['ordinal']);
 
+// Word expressions retain unsigned 16-bit results. Double arithmetic is exact
+// for the sum, difference and product of the two bounded Word operands.
+for (const [id, suffix, operator] of [['wordAdd', 'WordAdd', '+'], ['wordSub', 'WordSub', '-'], ['wordMul', 'WordMul', '*']]) {
+  define(id, suffix, `
+Private Function __Pascal${suffix}(ByVal leftValue As Long, ByVal rightValue As Long, Optional ByVal checked As Boolean = False) As Long
+  Dim result As Double
+  result = CDbl(leftValue) ${operator} CDbl(rightValue)
+  If checked Then
+    If result < 0 Or result > 65535# Then Err.Raise 215, "Turbo Pascal", "Word overflow"
+  End If
+  __Pascal${suffix} = __PascalOrdinal(result, 16, False, False)
+End Function`, ['ordinal']);
+}
+
 define('shiftLeft', 'ShiftLeft', `
 Private Function __PascalShiftLeft(ByVal value As Long, ByVal count As Long, Optional ByVal width As Long = 16, Optional ByVal isSigned As Boolean = True) As Long
   Dim result As Double, modulus As Double, i As Long

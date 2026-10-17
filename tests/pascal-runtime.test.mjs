@@ -179,6 +179,25 @@ Debug.Print __PascalIntMul(32767, 32767, 16)`, ['intAdd', 'intSub', 'intMul']), 
   assert.equal(vm.lastError?.number, 215);
 });
 
+test('Pascal Word arithmetic preserves unsigned comparisons, wraps and checks the unsigned range', async () => {
+  const pairs = [[0, 0], [0, 1], [1, 65535], [32767, 1], [32768, 32768], [65535, 65535], [255, 257]];
+  const operations = [
+    ['wordAdd', 'WordAdd', (left, right) => left + right],
+    ['wordSub', 'WordSub', (left, right) => left - right],
+    ['wordMul', 'WordMul', (left, right) => left * right],
+  ];
+  for (const [helper, suffix, operation] of operations) {
+    const output = await execute(pairs.map(([left, right]) => `Debug.Print __Pascal${suffix}(${left}, ${right})`).join('\n'), [helper]);
+    assert.deepEqual(output, pairs.map(([left, right]) => String(BigInt.asUintN(16, operation(BigInt(left), BigInt(right))))));
+  }
+  assert.deepEqual(await execute(`Debug.Print __PascalWordAdd(65535, 0, True) > 0
+Debug.Print __PascalWordSub(65535, 32767, True), __PascalWordMul(255, 257, True)`, ['wordAdd', 'wordSub', 'wordMul']), ['True', '32768 65535']);
+  for (const [helper, expression] of [['wordAdd', '__PascalWordAdd(65535, 1, True)'], ['wordSub', '__PascalWordSub(0, 1, True)'], ['wordMul', '__PascalWordMul(256, 256, True)']]) {
+    const vm = new VirtualMachine(compileProject(project('Debug.Print ' + expression, [helper])));
+    await assert.rejects(() => vm.start(), error => error.number === 215);
+  }
+});
+
 test('Pascal shifts discard outgoing bits and do not use JavaScript modulo-32 counts', async () => {
   assert.deepEqual(await execute(`Debug.Print __PascalShiftLeft(1, 15), __PascalShiftLeft(1, 15, 16, False)
 Debug.Print __PascalShiftRight(-1, 1), __PascalShiftRight(-1, 1, 32)
