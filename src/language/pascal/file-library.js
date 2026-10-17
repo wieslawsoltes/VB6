@@ -15,6 +15,15 @@ export const PASCAL_FILE_LAYOUT = Object.freeze({storage: 'String', headerLength
   signature: 'P', kinds: Object.freeze({text: 0, typed: 1, untyped: 2}),
   defaultRecordSize: 128, maximumRecordSize: 65535, inputMode: 1, outputMode: 2});
 
+/** Arithmetic codecs preserve finite nonzero IEEE values and decode both zero
+ * signs. Common VB arithmetic cannot inspect the sign bit of a zero value, so
+ * encoding canonicalizes zero to +0. NaN/Infinity have no shared runtime value.
+ * This metadata is deliberately separate from the bit-exact Real48/ordinal
+ * disk layouts; consumers must not present it as an unrestricted memory cast.
+ */
+export const PASCAL_IEEE_FILE_CODEC = Object.freeze({bits: Object.freeze([32, 64]),
+  finiteNonzero: 'exact', preservesNegativeZero: false, nonFinite: 'rejected'});
+
 const helpers = new Map(), aliases = new Map();
 function define(id, suffix, source, dependencies = []) {
   const helper = Object.freeze({id, name: '__Pascal' + suffix, source: source.trim(), dependencies: Object.freeze([...dependencies])});
@@ -84,6 +93,14 @@ Private Function __PascalFileHandle(ByVal file As String, Optional ByVal access 
   __PascalFileHandle = AscW(Mid$(file, 4, 1)) + AscW(Mid$(file, 5, 1)) * 256
 End Function`);
 
+define('fileRecordSize', 'FileRecordSize', `
+Private Function __PascalFileRecordSize(ByVal file As String) As Long
+  If Len(file) < 9 Then Err.Raise 102, "Turbo Pascal file I/O", "File not assigned"
+  If Left$(file, 1) <> "P" Then Err.Raise 102, "Turbo Pascal file I/O", "File not assigned"
+  __PascalFileRecordSize = AscW(Mid$(file, 6, 1)) + AscW(Mid$(file, 7, 1)) * 256
+  If __PascalFileRecordSize = 0 Then Err.Raise 106, "Turbo Pascal file I/O", "Invalid record size"
+End Function`);
+
 guarded('fileOpen', 'FileOpen', 'ByRef file As String, ByVal action As Long, ByVal recordSize As Long, ByVal fileMode As Long', '', `
   Dim handle As Long, oldHandle As Long, kind As Long, access As Long, path As String, size As Long
   If Len(file) < 9 Then Err.Raise 102, "Turbo Pascal file I/O", "File not assigned"
@@ -134,6 +151,15 @@ guarded('fileClose', 'FileClose', 'ByRef file As String', '', `
   Close #handle
   Mid$(file, 3, 3) = ChrW(0) & ChrW(0) & ChrW(0)
   Mid$(file, 8, 2) = ChrW(0) & ChrW(0)
+`, ['fileHandle']);
+
+// Every output byte is already published through the shared Put operation.
+// There is no descriptor-owned output buffer for TP Flush to empty. Requiring
+// an open output file retains the normal I/O checks; Flush is not a promise of
+// storage-device durability (fsync/FlushFileBuffers).
+guarded('fileFlush', 'FileFlush', 'ByRef file As String', '', `
+  Dim handle As Long
+  handle = __PascalFileHandle(file, 2)
 `, ['fileHandle']);
 
 define('filePeek', 'FilePeek', `
@@ -194,11 +220,11 @@ guarded('fileReadChar', 'FileReadChar', 'ByRef file As String', 'String', `
 guarded('fileReadText', 'FileReadText', 'ByRef file As String, ByVal capacity As Long', 'String', `
   Dim value As Long, ignored As Long, result As String
   If capacity < 0 Or capacity > 255 Then Err.Raise 106, "Turbo Pascal file I/O", "Invalid string capacity"
-  Do While Len(result) < capacity
+  Do
     value = __PascalFilePeek(file)
     If value = -1 Or value = 26 Or value = 13 Or value = 10 Then Exit Do
     ignored = __PascalFileTake(file)
-    result = result & ChrW(value)
+    If Len(result) < capacity Then result = result & ChrW(value)
   Loop
   __PascalFileReadText = result
 `, ['filePeek', 'fileTake']);
@@ -240,6 +266,7 @@ guarded('fileReadBytes', 'FileReadBytes', 'ByRef file As String, ByVal count As 
   handle = __PascalFileHandle(file, 1)
   If count < 0 Then Err.Raise 106, "Turbo Pascal file I/O", "Invalid read size"
   If count > 1048576 Then Err.Raise 203, "Turbo Pascal file I/O", "Read buffer exceeds runtime string limit"
+  If count = 0 Then Exit Function
   If count > LOF(handle) - Seek(handle) + 1 Then Err.Raise 100, "Turbo Pascal file I/O", "Disk read error"
   result = String$(count, ChrW(0))
   For index = 1 To count
@@ -248,6 +275,59 @@ guarded('fileReadBytes', 'FileReadBytes', 'ByRef file As String, ByVal count As 
   Next index
   __PascalFileReadBytes = result
 `, ['fileHandle']);
+
+guarded('fileBlockRead', 'FileBlockRead', 'ByRef file As String, ByVal count As Long, ByVal allowPartial As Boolean, ByRef transferred As Long', 'String', `
+  Dim handle As Long, size As Long, requested As Double, available As Long, bytes As String
+  handle = __PascalFileHandle(file, 1)
+  If AscW(Mid$(file, 2, 1)) <> 2 Then Err.Raise 106, "Turbo Pascal file I/O", "BlockRead requires an untyped file"
+  size = __PascalFileRecordSize(file)
+  requested = CDbl(count) * size
+  If count < 0 Or requested > 2147483647# Then Err.Raise 106, "Turbo Pascal file I/O", "Invalid block count"
+  transferred = 0
+  available = LOF(handle) - Seek(handle) + 1
+  If available < 0 Then available = 0
+  If allowPartial And requested > available Then requested = available
+  bytes = __PascalFileReadBytes(file, CLng(requested), checked, status)
+  If status = 0 Then
+    transferred = Len(bytes) \\ size
+    __PascalFileBlockRead = bytes
+  End If
+`, ['fileHandle', 'fileRecordSize', 'fileReadBytes']);
+
+define('fileBlockWrite', 'FileBlockWrite', `
+Private Sub __PascalFileBlockWrite(ByRef file As String, ByVal bytes As String, ByVal count As Long, ByVal allowPartial As Boolean, ByRef transferred As Long, ByVal checked As Boolean, ByRef status As Long)
+  Dim handle As Long, size As Long, requested As Double, length As Long, index As Long, ordinal As Long, value As Byte
+  Dim number As Long, source As String
+  If status <> 0 Then Exit Sub
+  On Error GoTo __PascalFileFailed
+  transferred = 0
+  handle = __PascalFileHandle(file, 2)
+  If AscW(Mid$(file, 2, 1)) <> 2 Then Err.Raise 106, "Turbo Pascal file I/O", "BlockWrite requires an untyped file"
+  size = __PascalFileRecordSize(file)
+  requested = CDbl(count) * size
+  If count < 0 Or requested > Len(bytes) Then Err.Raise 106, "Turbo Pascal file I/O", "Block transfer exceeds source buffer"
+  length = CLng(requested)
+  For index = 1 To length
+    ordinal = AscW(Mid$(bytes, index, 1))
+    If ordinal < 0 Or ordinal > 255 Then Err.Raise 106, "Turbo Pascal file I/O", "File data requires byte-valued characters"
+  Next index
+  For index = 1 To length
+    value = AscW(Mid$(bytes, index, 1))
+    Put #handle, , value
+    transferred = index \\ size
+  Next index
+  Exit Sub
+__PascalFileFailed:
+  number = Err.Number
+  source = Err.Source
+  If allowPartial Then
+    If number = 61 Or number = 101 And source = "Turbo Pascal file I/O" Then
+      Err.Clear
+      Exit Sub
+    End If
+  End If
+  Call __PascalFileCapture(number, source, checked, status)
+End Sub`, ['fileCapture', 'fileHandle', 'fileRecordSize']);
 
 guarded('fileWriteBytes', 'FileWriteBytes', 'ByRef file As String, ByVal bytes As String', '', `
   Dim handle As Long, value As Byte, index As Long, ordinal As Long
@@ -376,6 +456,97 @@ Private Function __PascalFileDecodeReal48(ByVal bytes As String) As Double
   __PascalFileDecodeReal48 = (1 + fraction / 549755813888#) * 2 ^ (exponent - 129)
   If high >= 128 Then __PascalFileDecodeReal48 = -__PascalFileDecodeReal48
 End Function`);
+
+define('fileEncodeFloat', 'FileEncodeFloat', `
+Private Function __PascalFileEncodeFloat(ByVal value As Double, ByVal bits As Long) As String
+  Dim size As Long, fractionBits As Long, bias As Long, remaining As Long, exponent As Long, storedExponent As Long
+  Dim magnitude As Double, normalized As Double, fraction As Double, unit As Double, byte As Long, index As Long, top As Long, result As String
+  If bits = 32 Then
+    size = 4
+    fractionBits = 23
+    bias = 127
+    value = CSng(value)
+  ElseIf bits = 64 Then
+    size = 8
+    fractionBits = 52
+    bias = 1023
+  Else
+    Err.Raise 106, "Turbo Pascal file I/O", "IEEE codec requires 32 or 64 bits"
+  End If
+  If value <> value Then Err.Raise 207, "Turbo Pascal", "IEEE file codec requires a finite value"
+  magnitude = Abs(value)
+  If magnitude = 0 Then
+    __PascalFileEncodeFloat = String$(size, ChrW(0))
+    Exit Function
+  End If
+  If magnitude > 1.7976931348623157E+308 Then Err.Raise 207, "Turbo Pascal", "IEEE file codec requires a finite value"
+  unit = 2 ^ fractionBits
+  If magnitude < 2 ^ (1 - bias) Then
+    storedExponent = 0
+    fraction = magnitude / 2 ^ (1 - bias - fractionBits)
+  Else
+    exponent = CLng(Int(Log(magnitude) / Log(2)))
+    If exponent > bias Then exponent = bias
+    normalized = magnitude / 2 ^ exponent
+    If normalized < 1 Then
+      normalized = normalized * 2
+      exponent = exponent - 1
+    ElseIf normalized >= 2 Then
+      normalized = normalized / 2
+      exponent = exponent + 1
+    End If
+    fraction = (normalized - 1) * unit
+    storedExponent = exponent + bias
+  End If
+  fraction = Fix(fraction)
+  For index = 1 To size - 2
+    byte = CLng(fraction - Int(fraction / 256) * 256)
+    result = result & ChrW(byte)
+    fraction = Int(fraction / 256)
+  Next index
+  remaining = fractionBits - (size - 2) * 8
+  top = CLng(fraction) + storedExponent * CLng(2 ^ remaining)
+  If value < 0 Then top = top + 32768
+  __PascalFileEncodeFloat = result & __PascalFileEncodeInteger(top, 2)
+End Function`, ['fileEncodeInteger']);
+
+define('fileDecodeFloat', 'FileDecodeFloat', `
+Private Function __PascalFileDecodeFloat(ByVal bytes As String, ByVal bits As Long) As Double
+  Dim size As Long, fractionBits As Long, bias As Long, remaining As Long, exponent As Long, maximumExponent As Long
+  Dim top As Long, negative As Boolean, fraction As Double, index As Long, value As Double, divisor As Long
+  If bits = 32 Then
+    size = 4
+    fractionBits = 23
+    bias = 127
+    maximumExponent = 255
+  ElseIf bits = 64 Then
+    size = 8
+    fractionBits = 52
+    bias = 1023
+    maximumExponent = 2047
+  Else
+    Err.Raise 106, "Turbo Pascal file I/O", "IEEE codec requires 32 or 64 bits"
+  End If
+  If Len(bytes) <> size Then Err.Raise 106, "Turbo Pascal file I/O", "Invalid IEEE file size"
+  remaining = fractionBits - (size - 2) * 8
+  divisor = CLng(2 ^ remaining)
+  top = CLng(__PascalFileDecodeInteger(Right$(bytes, 2), False))
+  negative = top >= 32768
+  top = top And 32767
+  exponent = top \\ divisor
+  If exponent = maximumExponent Then Err.Raise 207, "Turbo Pascal", "IEEE file value is not finite"
+  fraction = top Mod divisor
+  For index = size - 2 To 1 Step -1
+    fraction = fraction * 256 + AscW(Mid$(bytes, index, 1))
+  Next index
+  If exponent = 0 Then
+    value = fraction * 2 ^ (1 - bias - fractionBits)
+  Else
+    value = (1 + fraction / 2 ^ fractionBits) * 2 ^ (exponent - bias)
+  End If
+  If negative Then value = -value
+  __PascalFileDecodeFloat = value
+End Function`, ['fileDecodeInteger']);
 
 export function getPascalFileHelper(name) {
   const lookup = String(name).toLowerCase();
