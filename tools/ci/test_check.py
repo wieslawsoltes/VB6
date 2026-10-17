@@ -24,7 +24,7 @@ class WorkflowAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):check.audit(self.root)
     def test_complete_graph_passes(self):
         result=check.audit(self.root)
-        self.assertEqual(result['preservedEntrypoints'],89)
+        self.assertEqual(result['preservedEntrypoints'],90)
         self.assertEqual(result['linuxNodeTests'],['linux-aot-native.test.mjs','linux-aot.test.mjs','linux-package.test.mjs'])
     def test_node_native_runtime_platform_required(self):
         self.reject(lambda w:w['jobs']['node'].update({'runs-on':'ubuntu-latest'}))
