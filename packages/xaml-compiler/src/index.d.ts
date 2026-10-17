@@ -135,14 +135,15 @@ export interface Compilation {
 }
 export function compileXaml(text: string | DocumentSyntax, options?: CompilerOptions): Compilation;
 export function emitXamlModule(compilation: Compilation, options?: {runtimeModule?: string}): string;
-export interface InstantiateOptions { resources?: Map<string,unknown> | Record<string,unknown>; signal?: AbortSignal; maxOperations?: number }
+export const WINUI_CONTROLS_NS: 'using:Microsoft.UI.Xaml.Controls';
+export interface InstantiateOptions { resources?: Map<string,unknown> | Record<string,unknown>; theme?: 'Light' | 'Dark' | 'HighContrast'; signal?: AbortSignal; maxOperations?: number }
 export interface HostContext<T> { root: T; names: Map<string,T>; resources: Map<string,unknown>[]; node: ObjectValue; readResource(key: string, theme?: boolean): unknown }
 export interface XamlInstance<T> { root: T; names: Map<string,T>; scopes: Map<number,Map<string,T>>; dispose(): void }
 export interface XamlHost<T = unknown> {
   create(type: TypeReference, context: {node: ObjectValue; names: Map<string,T>; resources: Map<string,unknown>[]}): T;
   set(target: T, member: BoundMember, value: unknown): void;
   add?(target: T, member: BoundMember, value: unknown): void;
-  resource?(key: string, context: {theme: boolean; resources: Map<string,unknown>[]; root: T | undefined; names: Map<string,T>}): unknown;
+  resource?(key: string, context: {theme: boolean; effectiveTheme: 'Light' | 'Dark' | 'HighContrast'; resources: Map<string,unknown>[]; root: T | undefined; names: Map<string,T>; lookup(): unknown}): unknown;
   bind?(target: T, member: BoundMember, binding: BindingValue, context: HostContext<T>): void | (() => void);
   listen?(target: T, member: BoundMember, handler: ConstructionValue, context: HostContext<T>): void | (() => void);
   template?(node: ObjectValue, create: (options?: InstantiateOptions) => XamlInstance<T>): T;

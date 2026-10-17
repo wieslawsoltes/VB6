@@ -5,7 +5,9 @@ import {safeMember} from './schema.js';
 export function instantiateXaml(program, host, options = {}) {
   if (program?.version !== 1 || program.root?.kind !== 'Object') throw new TypeError('Unsupported XAML construction program.');
   if (typeof host?.create !== 'function' || typeof host?.set !== 'function') throw new TypeError('A host with create and set methods is required.');
-  const objects = new Map(), constructing = new Set(), names = new Map(), scopes = new Map(), created = [], subscriptions = [], pending = [];
+  const objects = new Map(), constructing = new Set(), names = new Map(), scopes = new Map(), created = [], subscriptions = [], pending = [], dictionaryDetails=new WeakMap(),activeResources=new Set();
+  const appearance=options.theme??'Light';
+  if(!['Light','Dark','HighContrast'].includes(appearance))throw new TypeError('Object writer theme must be Light, Dark or HighContrast.');
   let root, disposed = false, count = 0;
   const dispose = () => {
     if (disposed) return; disposed = true;
@@ -16,26 +18,75 @@ export function instantiateXaml(program, host, options = {}) {
     if (errors.length) throw new AggregateError(errors,'Errors disposing XAML objects.');
   };
   const members = node => new Map(node.properties.map(p => [p.member.name,p.value]));
-  function entries(value) {
-    if (value?.kind === 'Dictionary') return value.entries;
-    if (value?.kind !== 'Object' || !value.dictionary) return [];
-    const props = members(value), merged = props.get('MergedDictionaries');
-    const result = merged?.kind === 'Collection' ? merged.items.flatMap(entries) : [];
-    if (props.has('Source')) throw new Error('External resource dictionaries require host preprocessing.');
-    return [...result,...entries(props.get('Items'))];
+  function dictionary(value,outer,depth=0) {
+    if(depth>64)throw new RangeError('Resource dictionary nesting exceeds 64.');
+    const scope=new Map(),details={merged:[],themes:new Map()};dictionaryDetails.set(scope,details);
+    let entries=[];
+    if(value?.kind==='Dictionary')entries=value.entries;
+    else if(value?.kind==='Object'&&value.dictionary) {
+      const props=members(value);
+      if(props.has('Source'))throw new Error('External resource dictionaries require explicit host preprocessing.');
+      const merged=props.get('MergedDictionaries');
+      if(merged&&merged.kind!=='Collection')throw new TypeError('MergedDictionaries must be a dictionary collection.');
+      for(const child of merged?.items??[])details.merged.push(dictionary(child,[scope,...outer],depth+1));
+      const themes=props.get('ThemeDictionaries');
+      if(themes) {
+        if(themes.kind!=='Dictionary')throw new TypeError('ThemeDictionaries must contain keyed resource dictionaries.');
+        for(const entry of themes.entries) {
+          if(!['Default','Light','Dark','HighContrast'].includes(entry.key)||entry.value.kind!=='Object'||!entry.value.dictionary)throw new TypeError('Unsupported theme dictionary '+entry.key+'.');
+          if(details.themes.has(entry.key))throw new TypeError('Duplicate theme dictionary '+entry.key+'.');
+          details.themes.set(entry.key,dictionary(entry.value,[scope,...outer],depth+1));
+        }
+      }
+      const items=props.get('Items');
+      if(items&&items.kind!=='Dictionary')throw new TypeError('ResourceDictionary.Items must be keyed entries.');
+      entries=items?.entries??[];
+    } else if(value!==undefined)throw new TypeError('Resources must be a resource dictionary.');
+    for(const entry of entries) {
+      if(scope.has(entry.key))throw new TypeError('Duplicate resource key '+entry.key+'.');
+      scope.set(entry.key,{value:entry.value,resources:[scope,...outer]});
+    }
+    return scope;
+  }
+  function findInDictionary(scope,key,seen=new Set()) {
+    if(seen.has(scope))return undefined;seen.add(scope);
+    if(scope.has(key))return scope.get(key);
+    const details=dictionaryDetails.get(scope);
+    for(let i=(details?.merged.length??0)-1;i>=0;i--){const item=findInDictionary(details.merged[i],key,seen);if(item)return item;}
+    const selected=details?.themes.get(appearance)??details?.themes.get('Default');
+    return selected?findInDictionary(selected,key,seen):undefined;
+  }
+  function resourceKeys(scope,keys,seen=new Set()) {
+    if(seen.has(scope))return;seen.add(scope);
+    for(const key of scope.keys())keys.add(key);
+    const details=dictionaryDetails.get(scope);
+    for(const merged of details?.merged??[])resourceKeys(merged,keys,seen);
+    const selected=details?.themes.get(appearance)??details?.themes.get('Default');
+    if(selected)resourceKeys(selected,keys,seen);
+  }
+  function lookupResource(key,resources) {
+    for(const scope of resources) {
+      const item=findInDictionary(scope,key);if(!item)continue;
+      if(item.external)return {found:true,value:item.value};
+      if(activeResources.has(item))throw new Error('Cyclic resource construction: '+key+'.');
+      if(activeResources.size>=64)throw new RangeError('Resource dependency depth exceeds 64.');
+      activeResources.add(item);
+      try{return {found:true,value:value(item.value,item.resources)};}finally{activeResources.delete(item);}
+    }
+    return {found:false};
   }
   const readResource = (key, resources, theme) => {
-    if (theme) {
-      if (!host.resource) throw new Error('ThemeResource requires host.resource.');
-      return host.resource(key,{theme:true,resources,root,names});
+    const lookup=()=>{const item=lookupResource(key,resources);if(!item.found)throw new Error('Missing XAML resource '+key+'.');return item.value;};
+    // A generic object writer cannot own a dependency-property theme lifecycle.
+    // The host receives the exact scoped resolver and chooses how to subscribe,
+    // replace brushes and invalidate controls. StaticResource remains a snapshot.
+    if(theme) {
+      if(!host.resource)throw new Error('ThemeResource requires host.resource.');
+      return host.resource(key,{theme:true,effectiveTheme:appearance,resources,root,names,lookup});
     }
-    for (const scope of resources) if (scope.has(key)) {
-      const item = scope.get(key);
-      if (item.external) return item.value;
-      return value(item.value,item.resources);
-    }
-    if (host.resource) return host.resource(key,{theme:false,resources,root,names});
-    throw new Error('Missing XAML resource ' + key + '.');
+    const item=lookupResource(key,resources);if(item.found)return item.value;
+    if(host.resource)return host.resource(key,{theme:false,effectiveTheme:appearance,resources,root,names,lookup});
+    throw new Error('Missing XAML resource '+key+'.');
   };
   function value(node, resources, depth = 0) {
     if (++count > (options.maxOperations ?? 200000) || depth > 256) throw new RangeError('XAML object writer budget exceeded.');
@@ -54,13 +105,18 @@ export function instantiateXaml(program, host, options = {}) {
       const create = instanceOptions => {
         const content = node.properties.find(p => p.member.name === 'Content')?.value;
         if (content?.kind !== 'Object') throw new Error('Template content must be an object.');
-        return instantiateXaml({version:1,root:content},host,{...options,...instanceOptions,resources:new Map(resources.flatMap(s => [...s].map(([k]) => [k,readResource(k,resources,false)])))});
+        const keys=new Set();for(const scope of resources)resourceKeys(scope,keys);
+        // The template captures the declaration's selected resource snapshot,
+        // including merged/themed entries and their ordinary lookup precedence.
+        // ThemeResource still delegates to host.resource for its live lifecycle.
+        const snapshot=new Map([...keys].map(key=>[key,readResource(key,resources,false)]));
+        return instantiateXaml({version:1,root:content},host,{...options,...instanceOptions,resources:snapshot});
       };
       const result = host.template(node,create); objects.set(node,result); return result;
     }
     constructing.add(node);
-    const local = new Map(), resourceScopes = [local,...resources];
-    for (const property of node.properties) if (property.member.name === 'Resources' || node.dictionary && property.member.name === 'Items') for (const e of entries(property.value)) local.set(e.key,{value:e.value,resources:resourceScopes});
+    const resourceValue=node.dictionary?node:node.properties.find(p=>p.member.name==='Resources')?.value;
+    const local=dictionary(resourceValue,resources),resourceScopes=[local,...resources];
     const instance = host.create(node.type,{node,names,resources:resourceScopes});
     created.push(instance);
     const scope = scopes.get(node.scope) ?? new Map(); scopes.set(node.scope,scope);

@@ -2,8 +2,9 @@ import {MACOS26_COLOR_ROLES,macos26Resource} from '../theme/macos26-resources.js
 import {notifyControlPaint} from '../rendering/invalidation.js';
 import {GPURasterPresenter} from '../../packages/win32-browser/src/gpu-presenter.js';
 import { colorValue, getTheme } from '../theme/theme.js';
+import {validateWinUI3Brush,winui3CssColor} from '../theme/winui3-compat.js';
 import {RetainedGraphics} from './retained.js';
-import {RasterCache,canvas2D} from './raster.js';
+import {RasterCache,canvas2D,paintGraphicsBackground} from './raster.js';
 import {GRAPHICS_LIMITS,graphicsColor,triangleCompatible} from './contract.js';
 /** Demand-rendered retained graphics. Opaque integer fills use triangles; other
  * operations share ordered CPU rasterization and a cached WebGPU texture. */
@@ -11,6 +12,12 @@ const surfaces = new WeakMap(), containers = new WeakMap();
 export function graphicsSurfaceFor(container){return containers.get(container)||null;}
 export function refreshGraphicsSurfaces(root) { for (const canvas of root.querySelectorAll('canvas.graphics-surface')) surfaces.get(canvas)?.transferDocument(); }
 const sharedDevices = new WeakMap();
+const nativeColor = color => {
+  let hex=color.slice(1).toUpperCase();
+  if(hex.length<=4)hex=[...hex].map(component=>component+component).join('');
+  return '#'+(hex.length===6?'FF':'')+hex;
+};
+const solidBackground = surface => typeof surface.presentationBackground==='string'?winui3CssColor(surface.presentationBackground):surface.background;
 export const GRAPHICS_GPU_DEVICE_TIMEOUT=15000;
 export function oleColor(color,fallback='#c0c0c0',theme='classic'){return colorValue(color,fallback,theme);}
 export async function getGPUDevice(view=globalThis,timeout=GRAPHICS_GPU_DEVICE_TIMEOUT) {
@@ -60,6 +67,30 @@ export class GraphicsSurface extends RetainedGraphics {
   get backgroundRole(){return this._backgroundRole||'';}
   set backgroundRole(value){if(value!==''&&!Object.hasOwn(MACOS26_COLOR_ROLES,value))throw new TypeError('Unknown macOS background role');if(value!==this.backgroundRole){this._backgroundRole=value;this.invalidate();}}
   set background(value){value=graphicsColor(value);if(value!==this._background){this._background=value;this.invalidate();}}
+  get presentationBackground(){return this._presentationBackground??null;}
+  get presentationBackgroundRevision(){return this._presentationBackgroundRevision||0;}
+  /** The application resolves theme/state resources before setting this slot.
+   * Copy the validated data so later caller mutation cannot alter readback or
+   * bypass cache invalidation. Ordinary VB BackColor remains independent. */
+  setPresentationBackground(value){
+    this.assertLive();
+    let brush=null;
+    if(value!==null){
+      validateWinUI3Brush(value);
+      brush=typeof value==='string'?nativeColor(value):Object.freeze({
+        kind:'LinearGradientBrush',startPoint:Object.freeze([...value.startPoint]),endPoint:Object.freeze([...value.endPoint]),
+        mappingMode:value.mappingMode,spreadMethod:value.spreadMethod,opacity:value.opacity,
+        relativeTransform:value.relativeTransform===null?null:Object.freeze({type:'ScaleTransform',scaleX:value.relativeTransform.scaleX,scaleY:value.relativeTransform.scaleY,centerX:value.relativeTransform.centerX,centerY:value.relativeTransform.centerY}),
+        gradientStops:Object.freeze(value.gradientStops.map(stop=>Object.freeze({offset:stop.offset,color:nativeColor(stop.color)})))
+      });
+    }
+    const key=brush===null?'':JSON.stringify(brush);
+    if(key===(this._presentationBackgroundKey||''))return this;
+    this._presentationBackground=brush;this._presentationBackgroundKey=key;
+    this._presentationBackgroundRevision=this.presentationBackgroundRevision+1;
+    this._presentationBackgroundTransparent=typeof brush==='string'?brush.slice(1,3)!=='FF':!!brush&&(brush.opacity!==1||brush.gradientStops.some(stop=>stop.color.slice(1,3)!=='FF'));
+    this.invalidate();return this;
+  }
   bindDocument(){this.themeDocument.addEventListener('vb-theme-change',this.themeChanged);this.themeDocument.fonts?.addEventListener('loadingdone',this.fontsChanged);}
   unbindDocument(){this.themeDocument.removeEventListener('vb-theme-change',this.themeChanged);this.themeDocument.fonts?.removeEventListener('loadingdone',this.fontsChanged);}
   reportBackend(value){if(value!==this.renderingBackend){this.renderingBackend=value;this.onBackend(value);}}
@@ -153,9 +184,10 @@ export class GraphicsSurface extends RetainedGraphics {
     value=Array.from(ctx.getImageData(0,0,1,1).data,v=>v/255);if(this.colorCache.size>=256)this.colorCache.delete(this.colorCache.keys().next().value);this.colorCache.set(key,value);return value;
   }
   canUseTriangles(){
+    if(this.presentationBackground&&typeof this.presentationBackground!=='string')return false;
     if(this.picture||this.pictureTask||this.rasterBytes||this.grid&&!Number.isInteger(this.grid))return false;
     const grid=this.grid?Math.ceil(this.width/this.grid)*Math.ceil(this.height/this.grid):0;
-    if(this.commands.length+grid>58000||this.rgba(this.background)[3]!==1)return false;
+    if(this.commands.length+grid>58000||this.rgba(solidBackground(this))[3]!==1)return false;
     const key=[this.commands.length,this.theme,this.replayEpoch,this.dpr].join(':');
     if(this.triangleCommands===this.commands&&this.triangleKey===key)return this.triangleEligible;
     this.triangleCommands=this.commands;this.triangleKey=key;
@@ -181,7 +213,7 @@ export class GraphicsSurface extends RetainedGraphics {
       if(!this.vertexBuffer||this.bufferSize<data.byteLength){this.vertexBuffer?.destroy();this.bufferSize=Math.max(1024,Math.ceil(data.byteLength/1024)*1024);this.vertexBuffer=device.createBuffer({size:this.bufferSize,usage:usage.VERTEX|usage.COPY_DST});this.uploadedVertices=null;}
       if(this.uploadedVertices!==data){device.queue.writeBuffer(this.vertexBuffer,0,data);this.uploadedVertices=data;}
     }
-    const encoder=device.createCommandEncoder(),bg=this.rgba(this.background),pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});
+    const encoder=device.createCommandEncoder(),bg=this.rgba(solidBackground(this)),pass=encoder.beginRenderPass({colorAttachments:[{view:this.gpuContext.getCurrentTexture().createView(),clearValue:{r:bg[0],g:bg[1],b:bg[2],a:1},loadOp:'clear',storeOp:'store'}]});
     if(data.length){pass.setPipeline(this.pipeline);pass.setBindGroup(0,this.bindGroup);pass.setVertexBuffer(0,this.vertexBuffer);pass.draw(data.length/6);}pass.end();device.queue.submit([encoder.finish()]);
   }
   ensureRasterPresenter(){
@@ -196,7 +228,9 @@ export class GraphicsSurface extends RetainedGraphics {
   render(){
     if(this.disposed)return;
     const ctx=this.context;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
-    if(this.backend==='webgpu'&&this.gpuCanvas){
+    // The shared GDI texture presenter is intentionally opaque. Keep alpha
+    // correct for WinUI brushes by using the transparent Canvas2D surface.
+    if(this.backend==='webgpu'&&this.gpuCanvas&&!this._presentationBackgroundTransparent){
       try{
         if(this.canUseTriangles()){this.renderTriangles();this.gpuCanvas.hidden=false;this.reportBackend('WebGPU');this.renderError=null;return;}
         this.ensureRasterPresenter();
@@ -213,7 +247,7 @@ export class GraphicsSurface extends RetainedGraphics {
       const scale=this.hasGDI?1:this.dpr,cache=this.hasGDI?(this.logicalCache||=new RasterCache(this.container.ownerDocument)):(this.displayCache||=new RasterCache(this.container.ownerDocument)),source=cache.render(this,scale);
       ctx.imageSmoothingEnabled=false;ctx.drawImage(source,0,0,this.canvas.width,this.canvas.height);this.renderError=null;
       this.reportBackend(this.hasGDI?'Canvas2D · GDI bitmap':this.rasterPending?'Canvas2D · GPU initialization':'Canvas2D');
-    }catch(error){this.renderError=error.message||String(error);ctx.fillStyle=oleColor(this.background,'#ffffff',this.theme);ctx.fillRect(0,0,this.canvas.width,this.canvas.height);this.reportBackend('Canvas2D · graphics error');}
+    }catch(error){this.renderError=error.message||String(error);ctx.save();try{ctx.setTransform(this.canvas.width/this.width,0,0,this.canvas.height/this.height,0,0);paintGraphicsBackground(ctx,this,'#ffffff');}finally{ctx.restore();}this.reportBackend('Canvas2D · graphics error');}
   }
   get statistics(){return Object.freeze({commands:this.commands.length,commandBytes:this.commandBytes,rasterBytes:this.rasterBytes,pendingImages:this.imageTasks.size,backend:this.renderingBackend||this.backend,logicalRebuilds:this.logicalCache?.rebuilds||0,displayRebuilds:this.displayCache?.rebuilds||0,logicalCommandsPainted:this.logicalCache?.painter.painted||0,displayCommandsPainted:this.displayCache?.painter.painted||0,gpuBufferBytes:this.bufferSize||0,error:this.renderError||this.gpuError||this.pictureError||null});}
   dispose(){
