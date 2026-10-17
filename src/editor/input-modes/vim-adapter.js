@@ -327,8 +327,34 @@ export class VimAdapter {
   findMatchingBracket(position,options={}){
     let offset=this.indexFromPos(position),ch=this._text[offset];if(!'()[]{}'.includes(ch||'')&&offset>0){offset--;ch=this._text[offset];}if(!ch||!'()[]{}'.includes(ch))return {to:undefined};const direction='([{'.includes(ch)?1:-1,from=this.posFromIndex(offset),start=this.posFromIndex(offset+(direction>0?1:0)),style=this.getTokenTypeAt(new VimPosition(from.line,from.ch+1)),match=this.scanForBracket(start,direction,style,options),pairs={'(':')','[':']','{':'}',')':'(',']':'[','}':'{'};return match&&match.ch===pairs[ch]?{from,to:match.pos,match:true,forward:direction>0}:{from,to:undefined,match:false};
   }
-  foldCode(position){this.host.execute?.('fold',{offset:this.indexFromPos(position)});}
-  execCommand(name){const command=VimAdapter.commands[name];if(command)return this.operation(()=>command(this));return this.host.execute?.(name);}
+  executeHostCommand(name,args){
+    if(this.disposed)return;
+    return this.operation(()=>{
+      const op=this.curOp;
+      // Host commands operate on canonical source and may select a different
+      // pane or document. Publish preceding macro edits before crossing that
+      // boundary, and consume their notifications so the outer operation does
+      // not publish them again when replay continues after the command.
+      const commit=()=>{this.flush(op);op.changes=[];op.cursorActivity=false;};
+      const adopt=()=>{
+        if(this.disposed)return;const wasVim=op.isVimOp;op.isVimOp=false;
+        try{this.sync({origin:'host-command'});commit();}finally{op.isVimOp=wasVim;}
+      };
+      if(op.changes.length||op.changeEvents.length||op.cursorActivity)commit();else adopt();
+      let result;try{result=this.host.execute?.(name,args);}finally{adopt();}
+      if(!result?.then)return result;
+      // Settlement observes the current host state, never a saved document or
+      // selection. Intervening user edits and disposed sessions stay intact.
+      const reconcile=()=>{if(!this.disposed)this.sync({origin:'host-command'});};
+      const completion=Promise.resolve(result).then(value=>{reconcile();return value;},error=>{reconcile();throw error;});
+      // The Ex engine does not return callback promises. The host already owns
+      // command error reporting; keep the returned promise awaitable without
+      // creating an unhandled rejection when an Ex caller ignores its result.
+      completion.catch(()=>{});return completion;
+    });
+  }
+  foldCode(position){return this.executeHostCommand('fold',{offset:this.indexFromPos(position)});}
+  execCommand(name){const command=VimAdapter.commands[name];if(command)return this.operation(()=>command(this));return this.executeHostCommand(name);}
   openDialog(template,callback,options={}){
     const wrap=fn=>typeof fn==='function'?(...args)=>this.operation(()=>{this.curOp.isVimOp=true;return fn(...args);}):fn;
     const close=this.host.openDialog?.(template,wrap(callback),{...options,onKeyDown:wrap(options.onKeyDown),onKeyUp:wrap(options.onKeyUp),onClose:wrap(options.onClose)})||(()=>{});this._notifications.add(close);return value=>{if(typeof value!=='string')this._notifications.delete(close);return close(value);};
@@ -352,7 +378,7 @@ export class VimAdapter {
     if(!last||last.revision!==this.revision||!sameSelections(last.after,this._selections)){this.moveH(-1);return;}
     this._replaceStack.pop();this.operation(()=>{this.setSelections(this._selections.map(s=>({anchor:this.posFromIndex(Math.max(0,s.head-last.text.length)),head:this.posFromIndex(s.head)})));this.replaceSelections(last.replaced,'end','+delete');this.setSelections(last.before.map(s=>({anchor:this.posFromIndex(s.anchor),head:this.posFromIndex(s.head)})));const previous=this._replaceStack.at(-1);if(previous)previous.revision=this.revision;});
   }
-  save(){return this.host.execute?.('save');}
+  save(){return this.executeHostCommand('save');}
   onBeforeEndOperation(){this.flushChangeEvents(this.curOp);}
   onChange(){this.sync();}
   onSelectionChange(){this.sync();}

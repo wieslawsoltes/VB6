@@ -234,6 +234,41 @@ isolated('read-only editing blocks operators, substitutes, insertions and undo w
 isolated('user mappings, Ex options and editor commands retain extensibility',()=>{
   const e=editor('one two');e.ex('nmap Q diw');e.keys('Q');assert.equal(e.text,' two');e.ex('set shiftwidth=2');e.keys('>>');assert.equal(e.text,'   two');e.ex('write');assert.deepEqual(e.host.commands,[{command:'save',args:undefined}]);e.dispose();
 });
+isolated('host navigation and Ex pane closure retain the destination selection after the Vim operation flushes',()=>{
+  const e=editor('0123456789\nabcdefghij\nklmnopqrst',2);
+  e.host.execute=()=>{e.host.setSelections([{anchor:12,head:12}]);};
+  e.session.adapter.operation(()=>{e.session.adapter.curOp.isVimOp=true;e.session.adapter.execCommand('goToDefinition');});
+  assert.deepEqual(e.selections,[{anchor:12,head:12}]);assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(1,1));
+  e.keys('j');assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(2,1));
+  Vim.defineEx('testhostclose','testhostclose',cm=>cm.executeHostCommand('close'));
+  e.at(2).ex('testhostclose');assert.deepEqual(e.selections,[{anchor:12,head:12}]);assert.equal(e.applications.length,0);e.dispose();
+});
+isolated('host commands publish pending edits once and subsequent replay edits use the resulting host caret',()=>{
+  const e=editor('abcdef'),observed=[],changes=[];const cm=e.session.adapter;
+  cm.on('changes',(_,value)=>changes.push(value.map(change=>change.text.join('\n'))));
+  e.host.execute=command=>{observed.push({command,text:e.text,selections:e.selections});e.host.setSelections([{anchor:2,head:2}]);return true;};
+  cm.operation(()=>{cm.curOp.isVimOp=true;Vim.handleKey(cm,'x');cm.execCommand('save');Vim.handleKey(cm,'x');});
+  assert.deepEqual(observed,[{command:'save',text:'bcdef',selections:[{anchor:0,head:0}]}]);
+  assert.equal(e.text,'bcef');assert.equal(e.applications.length,2);assert.deepEqual(changes,[[''],['']]);
+  e.keys('u');assert.equal(e.text,'bcdef');e.keys('u');assert.equal(e.text,'abcdef');e.dispose();
+});
+isolated('host source changes are adopted without replaying them into canonical history',()=>{
+  const e=editor('old text');e.host.execute=()=>{e.host.apply('replacement',[{anchor:3,head:3}],{kind:'command'});};
+  e.session.adapter.execCommand('goToDefinition');assert.equal(e.text,'replacement');assert.equal(e.session.adapter.getValue(),'replacement');assert.equal(e.applications.length,1);
+  e.keys('x');assert.equal(e.text,'repacement');e.keys('u');assert.equal(e.text,'replacement');e.dispose();
+});
+isolated('asynchronous host commands adopt settled selection changes without overwriting intervening edits',async()=>{
+  const e=editor('abcdefghi');let finish;
+  e.host.execute=()=>new Promise(resolve=>{finish=()=>{e.host.setSelections([{anchor:6,head:6}]);resolve('saved');};});
+  const pending=e.session.adapter.execCommand('save');e.keys('x');finish();assert.equal(await pending,'saved');
+  assert.equal(e.text,'bcdefghi');assert.deepEqual(e.selections,[{anchor:6,head:6}]);assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,6));assert.equal(e.applications.length,1);
+  e.host.execute=async()=>{e.host.setSelections([{anchor:2,head:2}]);throw new Error('save failed');};
+  await assert.rejects(e.session.adapter.execCommand('save'),/save failed/);assert.deepEqual(e.selections,[{anchor:2,head:2}]);assert.deepEqual(e.session.adapter.getCursor(),new VimPosition(0,2));e.dispose();
+});
+isolated('late host command settlement does not inspect or mutate a disposed source session',async()=>{
+  const e=editor('abc');let finish;e.host.execute=()=>new Promise(resolve=>{finish=resolve;});
+  const pending=e.session.adapter.execCommand('save');e.dispose();e.host.getText=()=>{throw new Error('disposed host');};finish(true);assert.equal(await pending,true);assert.equal(e.text,'abc');
+});
 isolated('host indentation options update dynamically until a local Vim option overrides them',()=>{
   const e=editor('value');e.host.options.indentUnit=2;e.keys('>>');assert.equal(e.text,'  value');e.ex('set sw=3');e.host.options.indentUnit=8;e.keys('>>');assert.equal(e.text,'     value');e.dispose();
 });
