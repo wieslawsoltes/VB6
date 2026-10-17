@@ -1,4 +1,4 @@
-import {convertValue,PRESENTATION_NS,MACOS26_NS} from '../../packages/xaml-compiler/src/index.js';
+import {convertValue,PRESENTATION_NS,WINUI_CONTROLS_NS,MACOS26_NS} from '../../packages/xaml-compiler/src/index.js';
 
 export const objectProperties = node => Object.fromEntries((node?.properties ?? []).filter(p=>!p.member.attached).map(p=>[p.member.name,p]));
 const literal = value => ({kind:'Literal',value});
@@ -23,9 +23,9 @@ export function createStaticValues(compilation,{themeColor,themeResource,builtin
     const ns=namespaces(node),uri=parts.length===2?ns[parts[0]]:ns[''];
     const type=schema.getType(uri,parts.at(-1));
     if(!type)return fail('Unknown Style TargetType '+value+'.');
-    return type;
+    return type.namespaceURI===WINUI_CONTROLS_NS?schema.getType(PRESENTATION_NS,type.name):type;
   };
-  const typeKey=type=>'@type:{'+type.namespaceURI+'}'+type.name;
+  const typeKey=type=>'@type:{'+(type.namespaceURI===WINUI_CONTROLS_NS?PRESENTATION_NS:type.namespaceURI)+'}'+type.name;
   function dictionary(value,outer,depth=0) {
     if(depth>64)return fail('Merged resource dictionary nesting exceeds 64.');
     const scope={own:new Map(),merged:[],themes:new Map(),outer,theme:outer[0]?.theme??initialTheme};
@@ -200,12 +200,16 @@ export function createStaticValues(compilation,{themeColor,themeResource,builtin
   function properties(node,scopes) {
     const type=schema.getType(node.type.namespaceURI,node.type.name),props=objectProperties(node),explicit=props.Style;
     const implicit=!explicit&&lookup(typeKey(type),scopes);
-    // x:Null explicitly suppresses an implicit style.
-    const selected=explicit?.value??implicit?.value??defaultStyle?.(node,scopes);
+    // A native theme style supplies lower-precedence defaults independently of
+    // the authored Style. For example AccentButtonStyle has no BasedOn, but its
+    // unset font, padding and focus metrics still inherit the Button theme style.
+    // x:Null suppresses an authored implicit style, never the native theme style.
+    const defaultValue=defaultStyle?.(node,scopes),defaults=defaultValue?styleProperties(defaultValue,scopes,type):[];
+    const selected=explicit?.value??implicit?.value;
     const styled=selected&&!(selected.kind==='Literal'&&selected.value===null)?styleProperties(selected,explicit?scopes:implicit?.scopes??scopes,type):[];
-    const result=new Map(styled.map(p=>[propertyKey(p.member),p]));
+    const result=new Map([...defaults,...styled].map(p=>[propertyKey(p.member),p]));
     for(const p of node.properties)if(p.member.name!=='Style'||p.member.attached)result.set(propertyKey(p.member),p);
-    return Object.assign([...result.values()],{builtinStyle:styled.builtinStyle});
+    return Object.assign([...result.values()],{builtinStyle:styled.builtinStyle??defaults.builtinStyle});
   }
   return {dictionary,lookup,resolve,constant,convert,properties};
 }

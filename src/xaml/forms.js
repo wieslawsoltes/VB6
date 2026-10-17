@@ -431,6 +431,9 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
     try{validateMacOS26Properties(target.properties,type);}catch(e){error(e.message,node.source,'VBXAML2601');}
     try{validateWinUI3Properties(target.properties,type);}catch(e){error(e.message,node.source,'VBXAML2701');}
     for (const p of deferred) {
+      if(winuiSource&&['Checked','Unchecked','Indeterminate'].includes(propertyName(p.member))) {
+        error('WinUI '+propertyName(p.member)+' requires state-filtered routed-event dispatch. Use the native '+name+'_Click event and inspect Value; an unconditional Click alias would change the event semantics.',p.source,'VBXAML2701');continue;
+      }
       const event=winui3Event(node,propertyName(p.member))??macOS26Event(node,propertyName(p.member))??nativeEvent[propertyName(p.member)],expected=(root?'Form':name)+'_'+event;
       if(!event||p.value.kind!=='Literal'||p.value.value.toLowerCase()!==expected.toLowerCase())error('Use the VB6 event method '+expected+'; arbitrary handler forwarding is not silently generated.',p.source);
     }

@@ -89,6 +89,25 @@ test('XamlControlsResources applies pinned default button typography, geometry a
  assert.equal(a.resources.Background.values.Dark,'#0FFFFFFF');assert.equal(a.resources.Background.values.HighContrast,'#FF000000');
 });
 
+test('theme style defaults underlay explicit styles and survive implicit style suppression',()=>{
+ const implicit='<Style TargetType="Button"><Setter Property="Padding" Value="20"/><Setter Property="FontWeight" Value="Bold"/></Style>';
+ const form=good(resources(merged('<XamlControlsResources/>')+implicit)+'<Canvas><Button x:Name="B" Style="{StaticResource AccentButtonStyle}"/><Button x:Name="Plain" Style="{x:Null}"/><Button x:Name="Implicit"/><Button x:Name="Local" Style="{StaticResource AccentButtonStyle}" Padding="1,2,3,4"/></Canvas>');
+ const accent=appearance(form),plain=appearance(form,'Plain');
+ assert.equal(accent.style,'AccentButtonStyle');assert.equal(accent.properties.Background,'#FF0067B8');
+ assert.deepEqual(accent.properties.Padding,[11,5,11,6]);assert.deepEqual(accent.properties.BorderThickness,[1,1,1,1]);
+ assert.equal(accent.properties.FontSize,14);assert.equal(accent.properties.FontWeight,400);
+ assert.equal(plain.style,'DefaultButtonStyle');assert.deepEqual(plain.properties.Padding,[11,5,11,6]);assert.equal(plain.properties.FontWeight,400);
+ assert.deepEqual(appearance(form,'Implicit').properties.Padding,[20,20,20,20]);assert.equal(appearance(form,'Implicit').properties.FontWeight,700);
+ assert.deepEqual(appearance(form,'Local').properties.Padding,[1,2,3,4]);
+});
+
+test('presentation and public WinUI namespaces share implicit style type identity in both directions',()=>{
+ for(const [target,tag] of [['Button','controls:Button'],['controls:Button','Button']]) {
+  const form=good(resources(`<Style TargetType="${target}"><Setter Property="Padding" Value="3,4,5,6"/></Style>`)+`<${tag} x:Name="B"/>`);
+  assert.deepEqual(appearance(form).properties.Padding,[3,4,5,6]);
+ }
+});
+
 test('built-in alias and gradient dependencies obey lexical local shadows in each theme',()=>{
  const definitions=themeDictionaries(Object.fromEntries(Object.entries(themeColors).map(([theme,value])=>[theme,color('ControlFillColorDefault',value)+color('ControlStrokeColorSecondary',value)])));
  const form=good(resources(merged('<XamlControlsResources/><ResourceDictionary>'+definitions+'</ResourceDictionary>'))+'<Canvas><Button x:Name="B"/><Button x:Name="Static" Background="{StaticResource ButtonBackground}"/></Canvas>');
@@ -113,7 +132,7 @@ test('visual state brush lookups retain per-control resource overrides and exact
 });
 
 test('namespace aliases lower functional ToggleSwitch, ToggleButton and HyperlinkButton identities',()=>{
- const form=good(standard+'<Canvas><controls:ToggleSwitch x:Name="Switch" Header="Updates" OnContent="Enabled" OffContent="Paused" IsOn="True" Toggled="Switch_Click"/><controls:ToggleButton x:Name="B" IsChecked="True" Checked="B_Click"/><controls:HyperlinkButton x:Name="Link" Content="Details" Click="Link_Click"/></Canvas>');
+ const form=good(standard+'<Canvas><controls:ToggleSwitch x:Name="Switch" Header="Updates" OnContent="Enabled" OffContent="Paused" IsOn="True" Toggled="Switch_Click"/><controls:ToggleButton x:Name="B" IsChecked="True" Click="B_Click"/><controls:HyperlinkButton x:Name="Link" Content="Details" Click="Link_Click"/></Canvas>');
  const toggle=control(form),sw=control(form,'Switch'),link=control(form,'Link');
  assert.equal(toggle.type,'CheckBox');assert.equal(toggle.properties.Style,1);assert.equal(toggle.properties.Value,1);
  assert.equal(sw.type,'CheckBox');assert.equal(sw.properties.Value,1);
@@ -196,6 +215,9 @@ for(const [name,body,pattern] of [
  ['binding','<Button Content="{Binding Caption}"/>',/Binding/],
  ['nonfunctional control alias','<controls:NumberBox/>',/cannot lower|Unknown XAML type/],
  ['tri-state cycling','<ToggleButton IsThreeState="True"/>',/tri-state interaction/],
+ ['checked event','<ToggleButton x:Name="B" Checked="B_Click"/>',/state-filtered routed-event/],
+ ['unchecked event','<CheckBox x:Name="B" Unchecked="B_Click"/>',/state-filtered routed-event/],
+ ['indeterminate event','<CheckBox x:Name="B" Indeterminate="B_Click"/>',/state-filtered routed-event/],
  ['invalid switch event','<ToggleSwitch x:Name="B" Toggled="ArbitraryHandler"/>',/B_Click/],
  ['unimplemented header','<TextBox Header="Name"/>',/header\/content presenter/],
  ['gradient foreground','<TextBlock><TextBlock.Foreground><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Offset="0" Color="Black"/><GradientStop Offset="1" Color="White"/></LinearGradientBrush></TextBlock.Foreground></TextBlock>',/glyph-mask/],

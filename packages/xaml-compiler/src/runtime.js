@@ -56,6 +56,14 @@ export function instantiateXaml(program, host, options = {}) {
     const selected=details?.themes.get(appearance)??details?.themes.get('Default');
     return selected?findInDictionary(selected,key,seen):undefined;
   }
+  function resourceKeys(scope,keys,seen=new Set()) {
+    if(seen.has(scope))return;seen.add(scope);
+    for(const key of scope.keys())keys.add(key);
+    const details=dictionaryDetails.get(scope);
+    for(const merged of details?.merged??[])resourceKeys(merged,keys,seen);
+    const selected=details?.themes.get(appearance)??details?.themes.get('Default');
+    if(selected)resourceKeys(selected,keys,seen);
+  }
   function lookupResource(key,resources) {
     for(const scope of resources) {
       const item=findInDictionary(scope,key);if(!item)continue;
@@ -97,7 +105,12 @@ export function instantiateXaml(program, host, options = {}) {
       const create = instanceOptions => {
         const content = node.properties.find(p => p.member.name === 'Content')?.value;
         if (content?.kind !== 'Object') throw new Error('Template content must be an object.');
-        return instantiateXaml({version:1,root:content},host,{...options,...instanceOptions,resources:new Map(resources.flatMap(s => [...s].map(([k]) => [k,readResource(k,resources,false)])))});
+        const keys=new Set();for(const scope of resources)resourceKeys(scope,keys);
+        // The template captures the declaration's selected resource snapshot,
+        // including merged/themed entries and their ordinary lookup precedence.
+        // ThemeResource still delegates to host.resource for its live lifecycle.
+        const snapshot=new Map([...keys].map(key=>[key,readResource(key,resources,false)]));
+        return instantiateXaml({version:1,root:content},host,{...options,...instanceOptions,resources:snapshot});
       };
       const result = host.template(node,create); objects.set(node,result); return result;
     }

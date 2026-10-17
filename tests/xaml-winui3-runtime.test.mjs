@@ -39,3 +39,14 @@ test('external source dictionaries require preprocessing and cannot trigger I/O 
   const source=program('<Page.Resources><ResourceDictionary Source="https://example.invalid/resources.xaml"/></Page.Resources><Button/>');
   assert.throws(()=>instantiateXaml(source,createObjectHost()),/explicit host preprocessing/);
 });
+
+test('template factories capture merged and selected theme resources with declaration precedence',()=>{
+  const source=program('<Page.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary>'+resource('Merged','merged value')+'<SolidColorBrush x:Key="SharedBrush" Color="#112233"/></ResourceDictionary></ResourceDictionary.MergedDictionaries>'+themes+'<DataTemplate x:Key="Template"><Button Content="{StaticResource Caption}" Tag="{StaticResource Merged}" Background="{StaticResource SharedBrush}"/></DataTemplate></ResourceDictionary></Page.Resources><Button Content="{StaticResource Template}"/>');
+  const host={...createObjectHost(),template(node,create){return create;}};
+  const loaded=instantiateXaml(source,host,{theme:'Dark'}),factory=loaded.root.properties.Content.properties.Content;
+  const first=factory(),second=factory();
+  assert.equal(first.root.properties.Content,'dark');assert.equal(first.root.properties.Tag,'merged value');
+  assert.equal(first.root.properties.Background,second.root.properties.Background);
+  assert.notEqual(first.root,second.root);
+  first.dispose();second.dispose();loaded.dispose();
+});

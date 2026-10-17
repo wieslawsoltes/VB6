@@ -178,7 +178,7 @@ export function winui3StateResources(node,appearance,statics,scopes) {
 }
 export function winui3Event(node,name) {
   if(!isWinUI3Namespace(node.type.namespaceURI))return null;
-  if(['ToggleSwitch','ToggleButton','CheckBox','RadioButton'].includes(node.type.name)&&['Toggled','Checked','Unchecked','Indeterminate'].includes(name))return 'Click';
+  if(node.type.name==='ToggleSwitch'&&name==='Toggled')return 'Click';
   if(name==='Tapped')return 'Click';
   if(name==='DoubleTapped')return 'DblClick';
   return null;
