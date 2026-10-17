@@ -43,7 +43,9 @@ export const WINUI3_GALLERY_XAML=`<Page xmlns="http://schemas.microsoft.com/winf
     <!-- Preserve the resources, vocabulary, comments and handlers through Inspector edits. -->
     <TextBlock x:Name="Heading" Canvas.Left="24" Canvas.Top="20" Width="850" Height="32" FontSize="24" Text="WinUI 3 imported XAML" Foreground="{ThemeResource InkBrush}"/>
     <TextBox x:Name="LiveText" Canvas.Left="24" Canvas.Top="72" Width="330" Height="32" Text="Ready" FontFamily="Courier New" FontSize="16" Padding="6,4,6,4" CornerRadius="4" Background="{ThemeResource PanelBrush}" Foreground="{ThemeResource InkBrush}" TextChanged="LiveText_Change"/>
-    <TextBox x:Name="PaintSample" Canvas.Left="380" Canvas.Top="72" Width="240" Height="32" Text="Live alpha brush" Background="{ThemeResource PanelBrush}" Foreground="{ThemeResource InkBrush}"/>
+    <Canvas x:Name="MovingScope" Canvas.Left="380" Canvas.Top="72" Width="240" Height="32">
+      <TextBox x:Name="PaintSample" Canvas.Left="0" Canvas.Top="0" Width="240" Height="32" Text="Live alpha brush" Background="{ThemeResource PanelBrush}" Foreground="{ThemeResource InkBrush}"/>
+    </Canvas>
     <TextBlock x:Name="TextStatus" Canvas.Left="640" Canvas.Top="76" Width="240" Height="24" Text="0:Ready" Tag="0"/>
     <Canvas x:Name="ShadowScope" Canvas.Left="24" Canvas.Top="134" Width="300" Height="110">
       <Canvas.Resources><SolidColorBrush x:Key="PanelBrush" Color="#802060A0"/></Canvas.Resources>
@@ -53,6 +55,7 @@ export const WINUI3_GALLERY_XAML=`<Page xmlns="http://schemas.microsoft.com/winf
     <Canvas x:Name="DarkScope" Canvas.Left="360" Canvas.Top="134" Width="520" Height="110" RequestedTheme="Dark" Background="{ThemeResource PageBrush}">
       <TextBlock Canvas.Left="12" Canvas.Top="4" Width="235" Height="22" Text="RequestedTheme: Dark" Foreground="{ThemeResource InkBrush}"/>
       <TextBox x:Name="DarkText" Canvas.Left="12" Canvas.Top="34" Width="230" Height="32" Text="Always dark" Background="{ThemeResource PanelBrush}"/>
+      <ComboBox x:Name="ScopeChoices" Canvas.Left="12" Canvas.Top="74" Width="230" Height="30" SelectedIndex="0"><x:String>Alpha</x:String><x:String>Beta</x:String><x:String>Gamma</x:String></ComboBox>
       <Canvas x:Name="LightScope" Canvas.Left="270" Canvas.Top="12" Width="240" Height="86" RequestedTheme="Light" Background="{ThemeResource PageBrush}">
         <TextBlock Canvas.Left="8" Canvas.Top="2" Width="224" Height="22" Text="Nested request: Light" Foreground="{ThemeResource InkBrush}"/>
         <TextBox x:Name="LightText" Canvas.Left="8" Canvas.Top="30" Width="220" Height="32" Text="Always light" Background="{ThemeResource PanelBrush}"/>

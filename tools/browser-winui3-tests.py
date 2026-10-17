@@ -1,0 +1,588 @@
+#!/usr/bin/env python3
+"""WinUI XAML -> VB model -> standalone browser/IDE acceptance.
+
+Runs real HTTP and file origins, compiled VB handlers and native input events.
+No in-memory navigation or network asset substitute is an acceptance path here.
+Native Windows pixel parity remains a separately documented acceptance target.
+"""
+from __future__ import annotations
+
+import functools
+import http.server
+import io
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import threading
+import time
+import unittest
+from urllib.parse import urlparse
+
+from PIL import Image
+from playwright.sync_api import expect, sync_playwright
+
+ROOT = Path(__file__).resolve().parents[1]
+ENGINE = os.environ.get('VB6_BROWSER', 'chromium')
+FIXTURE = ROOT / 'reports/winui3/fixtures'
+REPORT = ROOT / 'reports/winui3' / ENGINE
+BUILD_FIXTURE = r'''
+import fs from 'node:fs';
+import {winui3Gallery,WINUI3_GALLERY_XAML} from './tests/fixtures/winui3-gallery.mjs';
+import {exportApplication} from './src/exporter/exporter.js';
+import {compileProject} from './src/language/compiler.js';
+import {WINUI3_REFERENCE} from './src/theme/winui3-resources.js';
+const project=winui3Gallery(),compiled=compileProject(project);
+if(!compiled.valid)throw new Error(JSON.stringify(compiled.diagnostics));
+fs.mkdirSync('reports/winui3/fixtures',{recursive:true});
+fs.writeFileSync('reports/winui3/fixtures/gallery.html',exportApplication(project,{persist:false}));
+fs.writeFileSync('reports/winui3/fixtures/gallery.json',JSON.stringify(project));
+fs.writeFileSync('reports/winui3/fixtures/gallery.xaml',WINUI3_GALLERY_XAML);
+fs.writeFileSync('reports/winui3/fixtures/reference.json',JSON.stringify(WINUI3_REFERENCE));
+fs.writeFileSync('reports/winui3/fixtures/graphics.html','<!doctype html><meta charset="utf-8"><title>WinUI Canvas acceptance</title>');
+'''
+
+# Independent expectations from the authored resource dictionaries in the fixture.
+LIGHT_BRUSH = '#40201080'
+DARK_BRUSH = '#406080c0'
+CONTRAST_BRUSH = '#00ff0080'
+SHADOW_BRUSH = '#2060a080'
+
+
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+class WinUI3Acceptance(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The normal build must run first, as it does for the other browser suites.
+        subprocess.run(['node', '--input-type=module', '-e', BUILD_FIXTURE], cwd=ROOT, check=True)
+        REPORT.mkdir(parents=True, exist_ok=True)
+        cls.results = []
+        cls.project = json.loads((FIXTURE / 'gallery.json').read_text())
+        cls.source = (FIXTURE / 'gallery.xaml').read_text()
+        cls.reference = json.loads((FIXTURE / 'reference.json').read_text())
+        cls.server = http.server.ThreadingHTTPServer(
+            ('127.0.0.1', 0), functools.partial(QuietHandler, directory=str(ROOT)))
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.base = f'http://127.0.0.1:{cls.server.server_port}/'
+        cls.pw = sync_playwright().start()
+        options = {'headless': True}
+        if ENGINE == 'chromium':
+            executable = os.environ.get('CHROMIUM_PATH') or shutil.which('chromium')
+            if executable:
+                options['executable_path'] = executable
+            options['args'] = ['--no-sandbox']
+        cls.browser = getattr(cls.pw, ENGINE).launch(**options)
+
+    @classmethod
+    def tearDownClass(cls):
+        (REPORT / 'results.json').write_text(json.dumps({
+            'browser': ENGINE, 'transport': 'HTTP and file origins',
+            'reference': cls.reference, 'nativePixelParityCertified': False,
+            'results': cls.results}, indent=2))
+        cls.browser.close()
+        cls.pw.stop()
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        self.started = time.perf_counter()
+        self.errors, self.requests = [], []
+        self.passed = False
+        self.context = self.browser.new_context(
+            viewport={'width': 1440, 'height': 1100}, color_scheme='light',
+            reduced_motion='reduce', device_scale_factor=1)
+        self.context.set_default_timeout(10000)
+        self.context.on('page', lambda page: page.on('pageerror', lambda error: self.errors.append(str(error))))
+        self.context.on('request', lambda request: self.requests.append(request.url))
+        self.page = self.context.new_page()
+        self.load_runtime()
+
+    def tearDown(self):
+        external = [url for url in self.requests if urlparse(url).scheme in ('http', 'https')
+                    and not url.startswith(self.base)]
+        self.results.append({
+            'name': self._testMethodName,
+            'passed': self.passed and not self.errors and not external,
+            'pageErrors': self.errors, 'externalRequests': external,
+            'milliseconds': round((time.perf_counter() - self.started) * 1000, 2)})
+        if not self.passed:
+            try:
+                self.page.screenshot(path=str(REPORT / (self._testMethodName + '-failure.png')))
+            except Exception:
+                pass
+        self.context.close()
+        self.assertEqual(self.errors, [], 'No uncaught browser errors')
+        self.assertEqual(external, [], 'WinUI resources and exported apps are self-contained')
+
+    def done(self):
+        self.passed = True
+
+    def load_runtime(self, file_origin=False):
+        self.page.goto((FIXTURE / 'gallery.html').as_uri() if file_origin
+                       else self.base + 'reports/winui3/fixtures/gallery.html')
+        self.page.wait_for_function('globalThis.vb6Application?.forms?.length === 1')
+        self.page.evaluate('''() => {
+            window.winuiControls=Object.fromEntries(vb6Application.forms[0].controls.map(c=>[c.model.name,c]));
+            window.winuiIdentity=vb6Application.forms[0].controls.map(c=>({control:c,node:c.node,input:c.input}));
+        }''')
+        self.idle()
+
+    def idle(self, page=None):
+        (page or self.page).wait_for_function('''() => {
+            const host=vb6Application;
+            return host?.vm && !host.vm.processing && host.vm.eventQueue.length===0 &&
+                host.forms.every(f=>!f.pending&&f.controls.every(c=>!c.pending));
+        }''')
+
+    def control(self, name):
+        return self.page.locator(f'[data-control="{name}"]')
+
+    def field(self, name):
+        return self.control(name).locator('input')
+
+    def theme(self, name):
+        self.page.evaluate('name=>vb6Application.setTheme(name,{reduceMotion:true,reduceTransparency:true})', name)
+        self.idle()
+
+    def set_control(self, name, values):
+        self.page.evaluate('''([name,values])=>{
+            for(const [key,value] of Object.entries(values))winuiControls[name].set(key,value);
+        }''', [name, values])
+        self.idle()
+
+    def expect_color(self, locator, property_name, color):
+        # Browsers serialize alpha differently (e.g. #80 becomes .5 or .502).
+        # Canonicalize the independent expected literal through the browser's
+        # CSS parser, then still wait for the exact computed-paint endpoint.
+        canonical = locator.evaluate('''(e,color)=>{
+            const probe=e.ownerDocument.createElement('i');
+            probe.style.cssText='position:absolute;pointer-events:none;forced-color-adjust:none';
+            probe.style.color=color;e.ownerDocument.body.append(probe);
+            const value=getComputedStyle(probe).color;probe.remove();return value;
+        }''', color)
+        expect(locator).to_have_css(property_name, canonical)
+
+    def assert_identity(self):
+        self.assertTrue(self.page.evaluate('''winuiIdentity.every((saved,index)=>
+            saved.control===vb6Application.forms[0].controls[index] &&
+            saved.node===saved.control.node && saved.input===saved.control.input)'''))
+
+    def test_live_resources_preserve_real_input_value_selection_and_authored_model(self):
+        text = self.field('LiveText')
+        text.fill('Retained draft')
+        expect(self.control('TextStatus')).to_have_text('1:Retained draft')
+        text.evaluate('e=>{e.focus();e.setSelectionRange(2,9,"backward");}')
+        before = text.locator('..').bounding_box()
+        authored = self.page.evaluate('JSON.stringify(vb6Application.project)')
+        for theme, brush, ink in (
+                ('fluent-dark', DARK_BRUSH, 'rgb(232, 237, 245)'),
+                ('fluent', LIGHT_BRUSH, 'rgb(16, 32, 64)'),
+                ('fluent-dark', DARK_BRUSH, 'rgb(232, 237, 245)'),
+                ('fluent', LIGHT_BRUSH, 'rgb(16, 32, 64)')):
+            self.theme(theme)
+            # The unfocused sibling exposes normal brushes. Native TextBox
+            # Focused resources deliberately replace its normal template paint.
+            self.expect_color(self.field('PaintSample'), 'background-color', brush)
+            expect(self.field('PaintSample')).to_have_css('color', ink)
+            expect(text).to_have_value('Retained draft')
+            expect(text).to_be_focused()
+            self.assertEqual(text.evaluate('e=>[e.selectionStart,e.selectionEnd,e.selectionDirection]'), [2, 9, 'backward'])
+            self.assertEqual(text.locator('..').bounding_box(), before)
+            self.assert_identity()
+            self.assertEqual(self.page.evaluate('JSON.stringify(vb6Application.project)'), authored)
+        expect(self.control('TextStatus')).to_have_text('1:Retained draft')
+        self.page.screenshot(path=str(REPORT / 'light-imported-gallery.png'))
+        self.done()
+
+    def test_alpha_is_composited_once_and_real_same_value_vb_assignment_releases_resource(self):
+        self.page.mouse.move(1400, 1000)
+        sample = self.field('PaintSample')
+        self.expect_color(sample, 'background-color', LIGHT_BRUSH)
+        # #80402010 over #FFF3F3F3 produces this color after one blend. A second
+        # identically painted host/canvas would visibly darken the sample.
+        pixels = Image.open(io.BytesIO(sample.screenshot())).convert('RGB')
+        pixel = pixels.getpixel((pixels.width - 12, pixels.height // 2))
+        for actual, expected in zip(pixel, (153, 137, 129)):
+            self.assertAlmostEqual(actual, expected, delta=2)
+        fallback = self.page.evaluate('winuiControls.PaintSample.BackColor')
+        self.control('ReleaseColor').click()
+        expect(self.control('ActionStatus')).to_have_text('VB color assigned')
+        self.assertEqual(self.page.evaluate('winuiControls.PaintSample.BackColor'), fallback)
+        for theme in ('fluent-dark', 'fluent'):
+            self.theme(theme)
+            expect(sample).to_have_css('background-color', 'rgb(64, 32, 16)')
+            self.expect_color(self.field('LiveText'), 'background-color', DARK_BRUSH if theme.endswith('-dark') else LIGHT_BRUSH)
+            expect(sample).to_have_css('color', 'rgb(232, 237, 245)' if theme.endswith('-dark') else 'rgb(16, 32, 64)')
+        self.assert_identity()
+        self.done()
+
+    def test_resource_shadowing_and_nested_requested_theme_follow_native_precedence(self):
+        for theme in ('fluent', 'fluent-dark', 'fluent'):
+            self.theme(theme)
+            self.expect_color(self.field('ShadowText'), 'background-color', SHADOW_BRUSH)
+            self.expect_color(self.field('DarkText'), 'background-color', DARK_BRUSH)
+            self.expect_color(self.field('LightText'), 'background-color', LIGHT_BRUSH)
+            expect(self.control('DarkText')).to_have_attribute('data-winui-effective-theme', 'Dark')
+            expect(self.control('LightText')).to_have_attribute('data-winui-effective-theme', 'Light')
+        # A requested theme property edit repaints only its affected descendants.
+        self.page.evaluate('''() => {
+            const c=winuiControls.DarkScope,value=structuredClone(c.WinUI3);
+            value.requestedTheme='Light';c.set('WinUI3',value);
+        }''')
+        self.expect_color(self.field('DarkText'), 'background-color', LIGHT_BRUSH)
+        self.expect_color(self.field('LightText'), 'background-color', LIGHT_BRUSH)
+        self.theme('fluent-dark')
+        self.set_control('DarkScope', {'WinUI3': None})
+        self.expect_color(self.field('DarkText'), 'background-color', DARK_BRUSH)
+        self.expect_color(self.field('LightText'), 'background-color', LIGHT_BRUSH)
+        self.set_control('LightScope', {'WinUI3': None})
+        self.expect_color(self.field('LightText'), 'background-color', DARK_BRUSH)
+        self.theme('contrast')
+        for name in ('PaintSample', 'DarkText', 'LightText'):
+            self.expect_color(self.field(name), 'background-color', CONTRAST_BRUSH)
+            expect(self.control(name)).to_have_attribute('data-winui-effective-theme', 'HighContrast')
+        self.expect_color(self.field('ShadowText'), 'background-color', SHADOW_BRUSH)
+        self.assert_identity()
+        self.done()
+
+    def test_open_combo_popup_tracks_requested_theme_and_disposes_with_its_control(self):
+        choices = self.control('ScopeChoices')
+        choices.locator('.vb-combo-arrow').click()
+        popup = self.page.get_by_role('listbox', name='ScopeChoices items', exact=True)
+        expect(popup).to_be_visible()
+        expect(popup).to_have_attribute('data-winui-effective-theme', 'Dark')
+        retained = popup.element_handle()
+        dark = popup.evaluate('e=>getComputedStyle(e).backgroundColor')
+        self.set_control('DarkScope', {'WinUI3': None})
+        expect(popup).to_have_attribute('data-winui-effective-theme', 'Light')
+        self.assertTrue(retained.evaluate('e=>e===document.querySelector(".vb-combo-popup")'))
+        self.assertNotEqual(popup.evaluate('e=>getComputedStyle(e).backgroundColor'), dark)
+        expect(self.control('LightText')).to_have_attribute('data-winui-effective-theme', 'Light')
+        self.page.evaluate('vb6Application.forms[0].removeControl(winuiControls.ScopeChoices)')
+        expect(popup).to_have_count(0)
+        self.theme('fluent-dark')
+        expect(self.control('DarkText')).to_have_attribute('data-winui-effective-theme', 'Dark')
+        self.done()
+
+    def test_moving_an_unrequested_container_repaints_existing_descendants(self):
+        self.set_control('MovingScope', {'Left': 0, 'Top': 0})
+        for parent, theme, brush in (('DarkScope', 'Dark', DARK_BRUSH),
+                                      ('LightScope', 'Light', LIGHT_BRUSH),
+                                      ('Layout', 'Light', LIGHT_BRUSH)):
+            self.page.evaluate('name=>winuiControls.MovingScope.set("Container",winuiControls[name])', parent)
+            self.idle()
+            expect(self.control('MovingScope')).to_have_attribute('data-winui-effective-theme', theme)
+            expect(self.control('PaintSample')).to_have_attribute('data-winui-effective-theme', theme)
+            self.expect_color(self.field('PaintSample'), 'background-color', brush)
+            self.assert_identity()
+        self.theme('fluent-dark')
+        self.expect_color(self.field('PaintSample'), 'background-color', DARK_BRUSH)
+        self.done()
+
+    def test_switch_toggle_hyperlink_buttons_and_range_run_compiled_vb_handlers(self):
+        switch = self.page.get_by_role('switch', name='Notifications', exact=True)
+        expect(switch).to_be_checked()
+        expect(self.control('Notifications').locator('.vb-winui-switch-header')).to_have_text('Notifications')
+        self.assertIn('Enabled', self.control('Notifications').inner_text())
+        switch.press('Space')
+        expect(switch).not_to_be_checked()
+        expect(switch).to_have_attribute('aria-checked', 'false')
+        expect(self.control('ToggleStatus')).to_have_text('1:0')
+        self.assertIn('Disabled', self.control('Notifications').inner_text())
+        switch.click()
+        expect(switch).to_be_checked()
+        expect(self.control('ToggleStatus')).to_have_text('2:1')
+        self.set_control('Notifications', {'Enabled': 0})
+        expect(switch).to_be_disabled()
+        switch.evaluate('e=>e.click()')
+        self.idle()
+        expect(self.control('ToggleStatus')).to_have_text('2:1')
+        self.set_control('Notifications', {'Enabled': -1})
+
+        toggle = self.field('Pin')
+        expect(toggle).to_have_attribute('role', 'button')
+        expect(toggle).to_have_attribute('aria-pressed', 'false')
+        toggle.press('Space')
+        expect(toggle).to_have_attribute('aria-pressed', 'true')
+        expect(self.control('PinStatus')).to_have_text('1:1')
+        toggle.click()
+        expect(toggle).to_have_attribute('aria-pressed', 'false')
+        expect(self.control('PinStatus')).to_have_text('2:0')
+        self.field('LiveText').fill('Saved draft')
+        for name, caption in (('DefaultButton', 'default:Saved draft'),
+                              ('AccentButton', 'accent:Saved draft'),
+                              ('HelpLink', 'help opened locally')):
+            self.control(name).click()
+            expect(self.control('ActionStatus')).to_have_text(caption)
+        slider = self.field('Gain')
+        slider.focus()
+        slider.press('ArrowRight')
+        expect(slider).to_have_value('45')
+        expect(self.control('RangeStatus')).to_have_text('45')
+        slider.press('End')
+        expect(slider).to_have_value('100')
+        expect(self.control('RangeStatus')).to_have_text('100')
+        self.assert_identity()
+        self.done()
+
+    def test_partial_toggle_state_brushes_keep_checked_paint_during_pointer_transitions(self):
+        self.set_control('Pin', {'WinUI3': {
+            'version': 1, 'sourceType': 'ToggleButton',
+            'properties': {'Background': '#FF123456'},
+            'states': {'Checked': {'Background': '#FFAA3300'},
+                       'PointerOver': {'Background': '#FF00AA33'}}}})
+        self.set_control('Pin', {'Value': 1})
+        self.page.mouse.move(1400, 1000)
+        toggle = self.control('Pin')
+        expect(toggle).to_have_css('background-color', 'rgb(170, 51, 0)')
+        toggle.hover()
+        expect(toggle).to_have_css('background-color', 'rgb(170, 51, 0)')
+        self.page.mouse.down()
+        try:
+            expect(toggle).to_have_css('background-color', 'rgb(170, 51, 0)')
+        finally:
+            self.page.mouse.up()
+        expect(self.field('Pin')).to_have_attribute('aria-pressed', 'false')
+        expect(toggle).to_have_css('background-color', 'rgb(0, 170, 51)')
+        self.page.mouse.move(1400, 1000)
+        expect(toggle).to_have_css('background-color', 'rgb(18, 52, 86)')
+        self.done()
+
+    def test_source_metrics_progress_gradient_and_scoped_pointer_states(self):
+        self.page.mouse.move(1400, 1000)
+        # DIPs from the fixture remain outer VB geometry, independent of paint.
+        for name, width, height in (
+                ('LiveText', 330, 32), ('DefaultButton', 130, 32),
+                ('Notifications', 300, 68), ('Progress', 320, 20),
+                ('Gain', 320, 32), ('DarkText', 230, 32)):
+            bounds = self.control(name).bounding_box()
+            self.assertAlmostEqual(bounds['width'], width, delta=0.1, msg=name)
+            self.assertAlmostEqual(bounds['height'], height, delta=0.1, msg=name)
+        for name in ('Layout', 'ShadowScope', 'DarkScope', 'LightScope', 'StateScope'):
+            expect(self.control(name)).to_have_css('border-width', '0px')
+            expect(self.control(name)).to_have_css('box-shadow', 'none')
+        offset = self.control('ShadowText').evaluate('''e=>{
+            const child=e.getBoundingClientRect(),parent=e.parentElement.getBoundingClientRect();
+            return [child.x-parent.x,child.y-parent.y];
+        }''')
+        self.assertEqual(offset, [12, 34], 'Canvas geometry excludes the legacy PictureBox bevel')
+        expect(self.field('LiveText')).to_have_css('font-size', '16px')
+        self.assertIn('Courier New', self.field('LiveText').evaluate('e=>getComputedStyle(e).fontFamily'))
+        switch = self.field('Notifications')
+        self.assertEqual(switch.evaluate('e=>[e.getBoundingClientRect().width,e.getBoundingClientRect().height]'), [40, 20])
+        self.assertEqual(switch.evaluate('e=>{const s=getComputedStyle(e,"::before");return [s.width,s.height];}'), ['12px', '12px'])
+        progress = self.control('Progress')
+        expect(progress).to_have_attribute('role', 'progressbar')
+        expect(progress).to_have_attribute('aria-valuenow', '42')
+        track, fill = progress.locator('.vb-progress'), progress.locator('.vb-progress-fill')
+        self.assertEqual(track.evaluate('e=>getComputedStyle(e,"::before").height'), '1px')
+        self.assertAlmostEqual(fill.bounding_box()['height'], 3, delta=0.1)
+        self.assertAlmostEqual(fill.bounding_box()['width'] / track.bounding_box()['width'], 0.42, delta=0.01)
+        waiting = self.control('Waiting')
+        self.assertIsNone(waiting.get_attribute('aria-valuenow'))
+        expect(waiting.locator('.vb-progress-fill')).to_have_css('animation-name', 'none')
+        self.assertGreater(waiting.locator('.vb-progress-fill').bounding_box()['width'], 0)
+
+        gradient = Image.open(io.BytesIO(self.control('GradientCard').screenshot())).convert('RGB')
+        top = gradient.getpixel((gradient.width // 2, 12))
+        bottom = gradient.getpixel((gradient.width // 2, gradient.height - 12))
+        self.assertGreater(bottom[0] - top[0], 35)
+        self.assertGreater(bottom[1] - top[1], 70)
+        self.assertGreater(bottom[2] - top[2], 60)
+        state = self.control('StateButton')
+        ordinary = self.control('DefaultButton')
+        # Common_themeresources.xaml's absolute 3-DIP gradient has a 0.33
+        # stop (0.99 DIP), reflected around the full control height in Light.
+        for name, gradient_css in (
+                ('DefaultButton', 'linear-gradient(to top, #00000029 0.99px, #0000000f 3px)'),
+                ('AccentButton', 'linear-gradient(to top, #00000066 0.99px, #ffffff14 3px)')):
+            border = self.control(name).locator('.vb-winui-border')
+            expected = border.evaluate('''(e,value)=>{
+                const probe=document.createElement('i');probe.style.backgroundImage=value;
+                document.body.append(probe);const actual=getComputedStyle(probe).backgroundImage;
+                probe.remove();return actual;
+            }''', gradient_css)
+            expect(border).to_have_css('background-image', expected)
+        normal = ordinary.evaluate('e=>getComputedStyle(e).backgroundColor')
+        self.assertNotEqual(normal, 'rgba(0, 0, 0, 0)')
+        expect(state).to_have_css('background-color', normal)
+        state.hover()
+        expect(state).to_have_css('background-color', 'rgb(190, 34, 102)')
+        expect(ordinary).to_have_css('background-color', normal)
+        self.page.mouse.down()
+        try:
+            expect(state).to_have_css('background-color', 'rgb(102, 51, 153)')
+        finally:
+            self.page.mouse.up()
+        self.set_control('StateButton', {'Enabled': 0})
+        expect(state).to_have_css('background-color', 'rgb(120, 120, 120)')
+        self.theme('fluent-dark')
+        self.page.screenshot(path=str(REPORT / 'dark-imported-gallery.png'))
+        self.done()
+
+    def test_forced_colors_selects_high_contrast_resource_branch_and_restores_live_palette(self):
+        text = self.field('LiveText')
+        text.fill('Accessible draft')
+        text.evaluate('e=>{e.focus();e.setSelectionRange(1,6);} ')
+        self.page.emulate_media(forced_colors='active')
+        if not self.page.evaluate('matchMedia("(forced-colors: active)").matches'):
+            self.skipTest('This browser cannot emulate forced-colors; application HighContrast branch is tested separately.')
+        for name in ('PaintSample', 'DarkText', 'LightText'):
+            expect(self.control(name)).to_have_attribute('data-winui-effective-theme', 'HighContrast')
+            # Forced-color adjustment may replace computed paint. The retained
+            # normal brush is the actual CSS variable consumed by the input.
+            self.assertEqual(self.control(name).evaluate('e=>e.style.getPropertyValue("--winui3-Normal-Background")'), CONTRAST_BRUSH)
+        expect(text).to_be_focused()
+        self.assertEqual(text.evaluate('e=>[e.selectionStart,e.selectionEnd]'), [1, 6])
+        self.page.emulate_media(forced_colors='none')
+        self.expect_color(self.field('PaintSample'), 'background-color', LIGHT_BRUSH)
+        self.expect_color(self.field('DarkText'), 'background-color', DARK_BRUSH)
+        self.assert_identity()
+        self.done()
+
+    def test_file_export_and_disposal_release_all_owned_theme_listeners(self):
+        self.load_runtime(file_origin=True)
+        self.assertEqual(urlparse(self.page.url).scheme, 'file')
+        self.field('LiveText').fill('Offline file')
+        self.control('AccentButton').click()
+        expect(self.control('ActionStatus')).to_have_text('accent:Offline file')
+        before = self.page.evaluate('VB6Runtime.RuntimeAPI.winui3PresentationDiagnostics(document)')
+        self.assertGreater(before['controls'], 20)
+        self.assertEqual(before['themeListeners'], 1)
+        self.page.evaluate('''() => {
+            for(let i=0;i<30;i++)vb6Application.setTheme(i%2?'fluent':'fluent-dark',{reduceMotion:true});
+        }''')
+        self.idle()
+        self.assertEqual(self.page.evaluate('VB6Runtime.RuntimeAPI.winui3PresentationDiagnostics(document)'), before)
+        self.page.evaluate('''() => {
+            const api=VB6Runtime.RuntimeAPI,form=vb6Application.forms[0],model=structuredClone(winuiControls.DefaultButton.model);
+            model.id='temporary-winui-button';model.name='TemporaryButton';model.properties.Name=model.name;
+            window.temporaryWinuiControl=new api.BrowserControl(model,{form,design:true,backend:'canvas2d'});
+            form.content.append(temporaryWinuiControl.node);
+        }''')
+        during = self.page.evaluate('VB6Runtime.RuntimeAPI.winui3PresentationDiagnostics(document)')
+        self.assertEqual(during, {'controls': before['controls'] + 1, 'themeListeners': 1})
+        self.page.evaluate('temporaryWinuiControl.dispose();temporaryWinuiControl.dispose()')
+        self.assertEqual(self.page.evaluate('VB6Runtime.RuntimeAPI.winui3PresentationDiagnostics(document)'), before)
+        self.page.evaluate('vb6Application.dispose();vb6Application.dispose()')
+        self.assertEqual(self.page.evaluate('VB6Runtime.RuntimeAPI.winui3PresentationDiagnostics(document)'), {'controls': 0, 'themeListeners': 0})
+        self.page.emulate_media(color_scheme='dark')
+        self.assertEqual(self.page.evaluate('VB6Runtime.RuntimeAPI.winui3PresentationDiagnostics(document)'), {'controls': 0, 'themeListeners': 0})
+        self.done()
+
+    def test_ide_file_import_property_edit_undo_reload_and_runtime_keep_authored_xaml(self):
+        ide = self.context.new_page()
+        ide.goto(self.base + 'dist/index.html')
+        ide.wait_for_function('globalThis.vb6Studio?.xaml')
+        ide.evaluate('p=>vb6Studio.loadProject(p)', self.project)
+        ide.evaluate('vb6Studio.xaml.open() && true')
+        source = self.source.replace('WinUI 3 imported XAML', 'Imported through the IDE')
+        with ide.expect_file_chooser() as chooser:
+            ide.locator('[data-xaml-action="import"]').click()
+        chooser.value.set_files({'name': 'Form1.xaml', 'mimeType': 'application/xml', 'buffer': source.encode()})
+        editor = ide.locator('.xaml-input')
+        expect(editor).to_have_value(source)
+        expect(ide.locator('.xaml-problems button')).to_have_count(0)
+        ide.evaluate('''() => {
+            const button=vb6Studio.activeModule.form.controls.find(c=>c.name==='AccentButton');
+            vb6Studio.designer.select([button.id]);
+        }''')
+        caption = ide.locator('input[data-property="Caption"]')
+        caption.fill('Inspector accent')
+        caption.press('Enter')
+        edited = editor.input_value()
+        self.assertIn('Content="Inspector accent"', edited)
+        self.assertIn('Style="{StaticResource AccentButtonStyle}"', edited)
+        self.assertIn('<ResourceDictionary.ThemeDictionaries>', edited)
+        self.assertIn('<LinearGradientBrush x:Key="PreviewGradient"', edited)
+        self.assertIn('Preserve the resources, vocabulary, comments and handlers', edited)
+        self.assertIn('Toggled="Notifications_Click"', edited)
+        self.assertNotIn('<vb:Form', edited)
+        ide.evaluate('vb6Studio.command("undo")')
+        expect(editor).to_have_value(source)
+        ide.evaluate('vb6Studio.command("redo")')
+        expect(editor).to_have_value(edited)
+        saved = ide.evaluate('JSON.stringify(vb6Studio.project)')
+        ide.evaluate('value=>vb6Studio.loadProject(JSON.parse(value))', saved)
+        ide.evaluate('vb6Studio.xaml.open() && true')
+        expect(ide.locator('.xaml-input')).to_have_value(edited)
+        expect(ide.locator('.xaml-problems button')).to_have_count(0)
+        ide.evaluate('void vb6Studio.command("run")')
+        iframe = ide.locator('iframe[title="Running Visual Basic application"]').element_handle()
+        runtime = iframe.content_frame()
+        runtime.wait_for_function('globalThis.vb6Application?.forms?.length === 1')
+        runtime.locator('[data-control="LiveText"] input').fill('IDE runtime')
+        runtime.locator('[data-control="AccentButton"]').click()
+        expect(runtime.locator('[data-control="ActionStatus"]')).to_have_text('accent:IDE runtime')
+        expect(runtime.locator('[data-control="AccentButton"]')).to_have_text('Inspector accent')
+        ide.screenshot(path=str(REPORT / 'ide-xaml-runtime.png'))
+        self.done()
+
+    def test_ide_tabs_select_focus_and_designer_isolation_use_their_own_theme(self):
+        ide = self.context.new_page()
+        ide.goto(self.base + 'dist/index.html')
+        ide.wait_for_function('globalThis.vb6Studio?.xaml')
+        ide.evaluate('p=>vb6Studio.loadProject(p)', self.project)
+        snapshot = '''() => [...document.querySelectorAll('.designer-scroll .vb-control')].map(e=>{
+            const s=getComputedStyle(e),r=e.getBoundingClientRect();
+            return [e.dataset.control,r.width,r.height,s.font,s.backgroundColor,s.color,s.borderWidth,s.boxShadow];
+        })'''
+        baseline = None
+        for theme, background in (('classic', None), ('fluent', 'rgb(249, 249, 249)'),
+                                  ('fluent-dark', 'rgb(40, 40, 40)')):
+            ide.evaluate('''theme=>{
+                Object.assign(vb6Studio.appearance,{theme,reduceMotion:true,documentTabs:true});
+                vb6Studio.applyAppearance();
+            }''', theme)
+            ide.wait_for_function('''() => {
+                const s=vb6Studio.syntaxDiagnostics;
+                return !s||(!s.pending&&!s.busy&&!s.timer);
+            }''')
+            current = ide.evaluate(snapshot)
+            self.assertGreater(len(current), 25)
+            if baseline is None:
+                baseline = current
+                continue
+            self.assertEqual(current, baseline, 'IDE appearance preserves authored control size, fonts and paint')
+            tab = ide.locator('.document-tab.active').first
+            expect(tab).to_have_css('background-color', background)
+            expect(tab).to_have_css('box-shadow', 'none')
+            expect(tab).to_have_css('font-weight', '400')
+            expect(ide.locator('.project-tree .tree-row').first).to_have_css('height', '28px')
+            ide.evaluate('void vb6Studio.command("options")')
+            dialog = ide.get_by_role('dialog', name='Options', exact=True)
+            dialog.get_by_role('tab', name='General', exact=True).click()
+            choice = dialog.get_by_label('Error Trapping', exact=True)
+            choice.focus()
+            self.expect_color(choice, 'background-color', '#ffffff0f' if theme.endswith('-dark') else '#ffffffb3')
+            expect(choice).to_have_css('outline-style', 'solid')
+            expect(choice).to_have_css('outline-width', '2px')
+            self.assertNotIn('0px -2px', choice.evaluate('e=>getComputedStyle(e).boxShadow'))
+            dialog.get_by_role('button', name='Cancel', exact=True).click()
+        ide.screenshot(path=str(REPORT / 'ide-native-chrome.png'))
+        self.done()
+
+    def test_canvas_alpha_gradient_png_and_retained_commands_match_independent_oracles(self):
+        # Source-module acceptance complements the bundled export tests. The
+        # module owns/disposes its Canvas surfaces and uses literal Canvas
+        # commands as its independent pixel oracle, without conversion helpers.
+        page = self.context.new_page()
+        page.goto(self.base + 'reports/winui3/fixtures/graphics.html')
+        result = page.evaluate('''async () => {
+            const tests=await import('/tests/winui3-graphics-browser.mjs');
+            return tests.runWinUI3GraphicsTests();
+        }''')
+        self.assertTrue(result['passed'])
+        self.assertEqual(len(result['cases']), 5)
+        self.assertGreaterEqual(result['assertions'], 18)
+        (REPORT / 'canvas-results.json').write_text(json.dumps(result, indent=2))
+        self.done()
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)
