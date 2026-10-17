@@ -1,4 +1,5 @@
 import {displayScale} from '../rendering/coordinate-space.js';
+import {designerGridFor} from '../rendering/designer-grid.js';
 import {arrangeFormEdit} from '../layout/model.js';
 import {layoutEnabled} from '../layout/contract.js';
 import {renderDesignerSelection} from './selection.js';
@@ -20,7 +21,7 @@ export class FormDesigner extends Signal {
     // The root capture phase belongs to optional workspace/auto-layout tools.
     // Handle base gestures on the plane in capture, still before native widgets,
     // so a tool that consumes an event cannot start a second base gesture.
-    this.plane.addEventListener('vb-presentation-geometry',()=>this.scheduleSelection());
+    this.plane.addEventListener('vb-presentation-geometry',()=>{this.refreshGrid();this.scheduleSelection();});
     this.plane.addEventListener('pointerdown', e => this.safely(() => this.pointerDown(e)), true);
     this.root.addEventListener('pointerdown', e => {if (e.target === this.root) this.safely(() => this.pointerDown(e));});
     this.root.addEventListener('keydown', e => this.safely(() => this.keydown(e)));
@@ -57,7 +58,7 @@ export class FormDesigner extends Signal {
     this.formView.node.classList.add('designer-form');
     Object.assign(this.formView.node.style, {left: '8px', top: '8px', zIndex: '1', transform: `scale(${this.zoom})`, transformOrigin: 'top left'}); this.plane.append(this.formView.node);
     this.grid = new GraphicsSurface(this.formView.content, {background: this.module.form.properties.BackColor, backend: this.settings.renderer || 'auto', onBackend: value => this.emit('backend', value)});
-    if (this.settings.showGrid !== false) this.grid.setGrid((this.settings.gridSize || 120) / 15); this.grid.canvas.style.zIndex = '0';
+    this.refreshGrid(); this.grid.canvas.style.zIndex = '0';
     this.formView.controls.forEach((c, i) => {c.node.style.zIndex = String(i + 1); c.node.style.pointerEvents = 'auto';});
     this.overlay = el('div', {class: 'designer-overlay'}); this.formView.content.append(this.overlay);
     this.formSelection = el('div', {class: 'designer-form-selection'}); this.plane.append(this.formSelection);
@@ -104,7 +105,28 @@ export class FormDesigner extends Signal {
     const logical = clone(before); materializeTabPages(logical); arrangeFormEdit(logical, this.module.form, edited); this.refreshControlPositions(); return true;
   }
   position(event) {const rect = this.formView.content.getBoundingClientRect(), scale=displayScale(this.formView.content,this.zoom); return {x: (event.clientX - rect.left) / scale.x, y: (event.clientY - rect.top) / scale.y};}
-  snap(value) {const grid = this.settings.snapToGrid === false ? 15 : Number(this.settings.gridSize) || 120; return Math.round(value / grid) * grid;}
+  refreshGrid() {
+    if (!this.grid || this.grid.disposed) return;
+    const metrics = designerGridFor(this.formView?.node), spacing = (this.settings.gridSize || 120) / 15;
+    this.grid.setGrid(this.settings.showGrid === false ? 0 : metrics?.columnWidth || spacing,
+      this.settings.showGrid === false ? 0 : metrics?.rowHeight || spacing);
+  }
+  gridStep(axis = 'x', fine = false) {
+    if (fine) return 15;
+    const metrics = designerGridFor(this.formView?.node);
+    return metrics ? (axis === 'y' ? metrics.rowHeight : metrics.columnWidth) * 15 : Number(this.settings.gridSize) || 120;
+  }
+  snap(value, axis = 'x') {
+    const grid = this.gridStep(axis, this.settings.snapToGrid === false), snapped = Math.round(value / grid) * grid;
+    return designerGridFor(this.formView?.node) ? Math.round(snapped) : snapped;
+  }
+  nudge(value, direction, axis = 'x', fine = false) {
+    if (!direction) return value;
+    const step = this.gridStep(axis, fine);
+    // Quantize from the lattice index on every cell move. Rounding a fractional
+    // twip delta repeatedly would accumulate drift under readable-form scaling.
+    return !fine && designerGridFor(this.formView?.node) ? Math.round((Math.round(value / step) + direction) * step) : value + direction * step;
+  }
   transaction(label, fn) {
     const before = clone(this.module.form);
     try {
@@ -159,7 +181,7 @@ export class FormDesigner extends Signal {
         if (!moved) return;
         if (!materialized && mode !== 'rubber' && mode !== 'draw') {try {materializeTabPages(this.module.form); materialized = true;} catch (error) {cancel(); throw error;}}
         if (mode === 'move') {
-          for (const item of origin) {item.c.properties.Left = this.snap(item.left + dx); item.c.properties.Top = this.snap(item.top + dy);}
+          for (const item of origin) {item.c.properties.Left = this.snap(item.left + dx); item.c.properties.Top = this.snap(item.top + dy, 'y');}
           this.refreshControlPositions(layoutEnabled(this.project) ? null : origin.map(i => i.c.id));
         }
         if (mode === 'resize') {
@@ -167,9 +189,9 @@ export class FormDesigner extends Signal {
           for (const item of origin) {
             let {left, top, width, height} = item; const axes = resizeAxes(item.c);
             if (axes.x && edge.includes('e')) width = this.snap(item.width + dx);
-            if (axes.y && edge.includes('s')) height = this.snap(item.height + dy);
+            if (axes.y && edge.includes('s')) height = this.snap(item.height + dy, 'y');
             if (axes.x && edge.includes('w')) {width = this.snap(item.width - dx); left = item.left + item.width - Math.max(item.c.type === 'Line' ? 0 : 15, width);}
-            if (axes.y && edge.includes('n')) {height = this.snap(item.height - dy); top = item.top + item.height - Math.max(item.c.type === 'Line' ? 0 : 15, height);}
+            if (axes.y && edge.includes('n')) {height = this.snap(item.height - dy, 'y'); top = item.top + item.height - Math.max(item.c.type === 'Line' ? 0 : 15, height);}
             Object.assign(item.c.properties, {Left: left, Top: top}, normalizeSize(item.c, width, height));
           }
           if (!this.reflow(before, origin.map(i => i.c.id))) this.refreshControlPositions(origin.map(i => i.c.id));
@@ -177,7 +199,7 @@ export class FormDesigner extends Signal {
         if (mode === 'formResize') {
           const edge = formHandle.dataset.resizeForm;
           if (edge.includes('e')) this.module.form.properties.ClientWidth = Math.max(900, this.snap(origin.w + dx));
-          if (edge.includes('s')) this.module.form.properties.ClientHeight = Math.max(600, this.snap(origin.h + dy));
+          if (edge.includes('s')) this.module.form.properties.ClientHeight = Math.max(600, this.snap(origin.h + dy, 'y'));
           this.reflow(before); this.formView.props.ClientWidth = this.module.form.properties.ClientWidth; this.formView.props.ClientHeight = this.module.form.properties.ClientHeight;
           this.formView.refresh(); this.formView.node.style.left = '8px'; this.formView.node.style.top = '8px'; this.renderSelection();
         }
@@ -191,8 +213,8 @@ export class FormDesigner extends Signal {
         try {
           if (mode === 'draw') {
             const type = this.tool, name = uniqueName(this.project, this.options.controlRegistry?.describe?.(type)?.baseName || type, this.module), rect = this.containerRect(parent);
-            const bounds = {Left: this.snap((Math.min(point.x, end.x) - rect.x) * 15), Top: this.snap((Math.min(point.y, end.y) - rect.y) * 15)};
-            if (moved) Object.assign(bounds, {Width: this.snap(Math.abs(end.x - point.x) * 15), Height: this.snap(Math.abs(end.y - point.y) * 15)});
+            const bounds = {Left: this.snap((Math.min(point.x, end.x) - rect.x) * 15), Top: this.snap((Math.min(point.y, end.y) - rect.y) * 15, 'y')};
+            if (moved) Object.assign(bounds, {Width: this.snap(Math.abs(end.x - point.x) * 15), Height: this.snap(Math.abs(end.y - point.y) * 15, 'y')});
             const defaults = this.options.controlRegistry?.has?.(type, true) ? this.options.controlRegistry.defaults(type) : {};
             const model = addControl(this.module.form, type, name, bounds, parent, defaults); this.selection = new Set([model.id]); this.primaryId = model.id; this.setTool('Pointer'); this.render();
           }
@@ -264,7 +286,7 @@ export class FormDesigner extends Signal {
         if (command === 'centerVertical') p.Top += Math.round((first.y + (first.height - r.height) / 2 - r.y) * 15);
         if (['sameWidth', 'sameHeight', 'sameSize'].includes(command)) Object.assign(p, normalizeSize(c, command === 'sameHeight' ? p.Width : primary.properties.Width, command === 'sameWidth' ? p.Height : primary.properties.Height));
         if (command === 'centerInForm') {const parent = controlParents(this.module.form).get(c.id), rect = this.containerRect(parent); p.Left = Math.round((rect.width * 15 - p.Width) / 2);}
-        if (command === 'snap') {p.Left = this.snap(p.Left); p.Top = this.snap(p.Top);}
+        if (command === 'snap') {p.Left = this.snap(p.Left); p.Top = this.snap(p.Top, 'y');}
       }
     }); this.render();
   }
@@ -294,15 +316,15 @@ export class FormDesigner extends Signal {
     }
     const moves = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]};
     if (!moves[key] || !this.selection.size || this.locked) return;
-    handled(); const [dx, dy] = moves[key], step = command ? 15 : this.settings.gridSize || 120;
+    handled(); const [dx, dy] = moves[key];
     const roots = selectionRoots(this.module.form, this.selected());
     this.transaction(event.shiftKey ? 'Resize controls' : 'Move controls', () => {
       materializeTabPages(this.module.form);
       for (const c of roots) {
         const p = designerPropertyValues(c, this.module.form);
         for (const key of ['Left', 'Top', 'Width', 'Height']) c.properties[key] ??= p[key];
-        if (event.shiftKey) Object.assign(c.properties, normalizeSize(c, c.properties.Width + dx * step, c.properties.Height + dy * step));
-        else {c.properties.Left += dx * step; c.properties.Top += dy * step;}
+        if (event.shiftKey) Object.assign(c.properties, normalizeSize(c, this.nudge(c.properties.Width, dx, 'x', command), this.nudge(c.properties.Height, dy, 'y', command)));
+        else {c.properties.Left = this.nudge(c.properties.Left, dx, 'x', command); c.properties.Top = this.nudge(c.properties.Top, dy, 'y', command);}
       }
     }); if (!layoutEnabled(this.project)) this.refreshControlPositions(roots.map(c => c.id));
   }
