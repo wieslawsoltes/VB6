@@ -97,6 +97,13 @@ requirements are unchanged. Per-capture JSON preserves timeouts, sample hashes
 and the acceptance result even on failure; a failed rerun removes old accepted
 images. These transport checks run through the required Node test discovery.
 
+The primitive presentation oracle uses the same reference-independent helper as
+whole-IDE rendering, with the existing 256x128 clip and the low-level painter’s
+actual name as its backend identity. Its three stable presentation captures must
+finish before any diagnostic framebuffer readback; recovery never replays the
+scene or uses readback to repair a screenshot. Both blank presentation with a
+correct framebuffer and incorrect readback with correct presentation still fail.
+
 ## Publication boundary
 
 A skipped Pages run after failed **Validate** is an intentional publication
