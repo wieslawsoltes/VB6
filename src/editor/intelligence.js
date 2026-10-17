@@ -7,10 +7,11 @@ import {parseExpression} from '../language/expression.js';
 import {KEYWORDS} from './language-service.js';
 import {moduleLanguage} from '../project/language.js';
 import {PASCAL_KEYWORDS,PASCAL_BUILTINS,pascalMasked,pascalCallContext,pascalWordAt} from './pascal-service.js';
-import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt,completionKey,completionMatches,mapParameterType} from './source-context.js';
+import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt as visualBasicWordAt,completionKey,completionMatches,mapParameterType} from './source-context.js';
 import {scanDeclarations,parameterSymbol} from './declaration-index.js';
 import {PRIMITIVE_TYPES,CONSTANT_SYMBOLS,BUILTIN_SYMBOLS,GLOBAL_OBJECTS,TYPE_CATALOG,ENUM_TYPES,builtinType,member,runtimeType,builtinGroup} from './type-catalog.js';
-export {maskSource,splitArguments,wordAt,scanDeclarations};
+export {maskSource,splitArguments,scanDeclarations};
+export function wordAt(text,offset,language='vb6'){return language==='pascal'?pascalWordAt(text,offset):visualBasicWordAt(text,offset);}
 
 const eq=(a,b)=>symbolKey(a)===symbolKey(b);
 const visible=s=>!s.hidden&&!s.restricted;

@@ -25,8 +25,8 @@ const attrPattern=/^Attribute\s+([A-Za-z_]\w*)\.(VB_Description|VB_HelpID|VB_Use
 export function readProcedureAttributes(module,name){const out={description:'',helpContext:0,memberId:null,hidden:false,restricted:false};for(const line of module.attributes||[]){const m=line.match(attrPattern);if(!m||lower(m[1])!==lower(name))continue;const key=lower(m[2]);if(key==='vb_description')out.description=m[3].replace(/^"|"$/g,'').replace(/""/g,'"');else if(key==='vb_helpid')out.helpContext=Number(m[3])||0;else if(key==='vb_usermemid')out.memberId=Number(m[3]);else{const flags=m[3].replace(/"/g,''),bits=parseInt(flags,16)||0;out.hidden=!!(bits&64);out.restricted=!!(bits&1);}}
  return out;
 }
-export function updateProcedureAttributes(module,name,{description='',helpContext=0,memberId=null,hidden=false,restricted=false}={}){
- if(!scanDeclarations(module).procedures.some(p=>lower(p.name)===lower(name)))throw new Error('Select an existing procedure.');
+export function updateProcedureAttributes(module,name,{description='',helpContext=0,memberId=null,hidden=false,restricted=false}={},project=null){
+ if(!scanDeclarations(module,project).procedures.some(p=>lower(p.name)===lower(name)))throw new Error('Select an existing procedure.');
  if(typeof description!=='string'||description.length>4096||/[\r\n\0]/.test(description))throw new Error('Description must be one line of at most 4,096 characters.');
  helpContext=Number(helpContext);if(!Number.isInteger(helpContext)||helpContext<0||helpContext>2147483647)throw new Error('Help context must be an integer from 0 to 2147483647.');
  if(memberId!==null&&memberId!==''){memberId=Number(memberId);if(!Number.isInteger(memberId)||memberId< -2147483648||memberId>2147483647)throw new Error('Procedure ID must fit a signed Long.');}else memberId=null;

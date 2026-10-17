@@ -256,8 +256,8 @@ export class SourceEditor extends Signal {
     if(!this.module||this.composing)return;const cursor=this.cursor(),module={...this.module,code:this.text},selection=this.selectionBounds(),selected=this.text.slice(selection.start,selection.end);
     let info=this.intelligence.parameterInfo(this.project,module,cursor.line,this.text,cursor.offset,{outer:mode==='parameter'&&!automatic});
     if(mode==='quick'&&(!info||selected)){
-      const st=statementBefore(this.text,cursor.offset),word=selected||wordAt(this.text,cursor.offset).text;
-      info=st.state==='code'?this.intelligence.resolve(this.project,module,cursor.line,word,{offset:cursor.offset}):null;
+      const st=statementBefore(this.text,cursor.offset),word=selected||wordAt(this.text,cursor.offset,moduleLanguage(module,this.project)).text;
+      info=(moduleLanguage(module,this.project)==='pascal'||st.state==='code')?this.intelligence.resolve(this.project,module,cursor.line,word,{offset:cursor.offset}):null;
     }
     if(!info){this.closeInfo();if(!automatic)this.emit('status','No declaration information at this position.');return;}
     if(!this.info){this.info=el('div',{class:'source-info',role:'tooltip','aria-label':'Code information'});this.viewport.append(this.info);}
@@ -270,7 +270,7 @@ export class SourceEditor extends Signal {
     this.infoOffset=cursor.offset;this.positionPopup(this.info);this.lastInfo=info;
   }
   closeInfo(){this.info?.remove();this.info=null;clearTimeout(this.infoTimer);}
-  definition(){const c=this.cursor(),text=this.input.value.slice(this.input.selectionStart,this.input.selectionEnd)||wordAt(this.text,c.offset).text;return this.intelligence.definition(this.project,{...this.module,code:this.text},c.line,this.text,c.offset,text);}
+  definition(){const c=this.cursor(),text=this.input.value.slice(this.input.selectionStart,this.input.selectionEnd)||wordAt(this.text,c.offset,moduleLanguage(this.module,this.project)).text;return this.intelligence.definition(this.project,{...this.module,code:this.text},c.line,this.text,c.offset,text);}
   cancelCompositionAssistance(){clearTimeout(this.compositionTimer);this.compositionTimer=null;this.compositionResume=null;this.compositionMode=null;}
   resumeCompositionAssistance(){
     const pending=this.compositionResume;if(!pending)return;

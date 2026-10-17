@@ -138,7 +138,7 @@ export function editProject(project, operation, args) {
       break;
     }
     case 'procedure.add': { const m=moduleOf(next,args.module); m.code=addProcedureSource(m,{...args,language:moduleLanguage(m,next)}).code; break; }
-    case 'procedure.attributes': { const m=moduleOf(next,args.module); m.attributes=updateProcedureAttributes(m,args.name,args.attributes); break; }
+    case 'procedure.attributes': { const m=moduleOf(next,args.module); m.attributes=updateProcedureAttributes(m,args.name,args.attributes,next); break; }
     case 'procedure.event': {
       const m=moduleOf(next,args.module), form=formOf(next,args.module), node=nodeOf(form,args.id||'$form'); identifier(args.event);
       const object=node===form?(form.type==='MDIForm'?'MDIForm':'Form'):node.name, name=object+'_'+args.event;

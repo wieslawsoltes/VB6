@@ -6,16 +6,17 @@ import {compileModule} from '../language/compiler.js';
 import {BASIC_CONTROL_TYPES,EXTENDED_CONTROL_TYPES,createControl,createForm} from '../project/model.js';
 import {procedures,defaultEventSignature} from '../editor/language-service.js';
 import {DEFAULT_EVENTS} from '../controls/controls.js';
+import {moduleLanguage} from '../project/language.js';
 
 const glyphs={function:'◇',sub:'◇',property:'▣',variable:'•',constant:'◆',event:'ϟ',type:'▤',control:'▣'};
 export function buildObjectCatalog(project){
   const classes=[];
   const add=(library,name,description,members,moduleId=null)=>{const key=library+':'+(moduleId||name);const entry={key,library,name,label:name,description,moduleId,members:members.map((m,i)=>({...m,key:key+':'+(m.key||m.name+':'+m.kind+':'+i),classKey:key,className:name,library,moduleId:m.moduleId||moduleId,glyph:glyphs[m.kind]||'•',label:m.name+(m.accessor?' ('+m.accessor+')':'')}))};classes.push(entry);return entry;};
-  for(const input of project.modules){let compiled;try{compiled=compileModule(input);}catch(error){compiled={procedures:new Map(),declarations:[],types:{},diagnostics:[error]};}const lines=input.code.split('\n'),members=[],find=name=>Math.max(0,lines.findIndex(l=>new RegExp('\\b'+name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i').test(l)))+1;
+  for(const input of project.modules){let compiled;try{compiled=compileModule({...input,language:moduleLanguage(input,project)},{project});}catch(error){compiled={procedures:new Map(),declarations:[],types:{},diagnostics:[error]};}const lines=input.code.split('\n'),members=[],find=name=>Math.max(0,lines.findIndex(l=>new RegExp('\\b'+name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i').test(l)))+1;
     for(const proc of compiled.procedures.values())members.push({name:proc.name,kind:proc.kind,accessor:proc.accessor,scope:proc.scope||'public',line:proc.line,signature:lines[proc.line-1]?.trim()||proc.name});
     const procNames=new Set(members.map(m=>m.name.toLowerCase()+':'+(m.accessor||'')));
     // Preserve navigation while a procedure body is temporarily incomplete.
-    for(const p of procedures(input.code)){const accessor=p.kind.match(/Property\s+(\w+)/i)?.[1]?.toLowerCase();if(!procNames.has(p.name.toLowerCase()+':'+(accessor||'')))members.push({name:p.name,kind:accessor?'property':p.kind.toLowerCase(),accessor,line:p.line,scope:/^\s*Private\b/i.test(lines[p.line-1])?'private':'public',signature:lines[p.line-1].trim(),incomplete:true});}
+    for(const p of procedures(input.code,moduleLanguage(input,project))){const accessor=p.kind.match(/Property\s+(\w+)/i)?.[1]?.toLowerCase();if(!procNames.has(p.name.toLowerCase()+':'+(accessor||'')))members.push({name:p.name,kind:accessor?'property':p.kind.toLowerCase(),accessor,line:p.line,scope:/^\s*Private\b/i.test(lines[p.line-1])?'private':'public',signature:lines[p.line-1].trim(),incomplete:true});}
     for(const d of compiled.declarations){const line=d.line||find(d.name);members.push({name:d.name,kind:d.constant?'constant':'variable',scope:d.scope||'public',line,signature:(d.scope||'public')+' '+(d.constant?'Const ':'')+d.name+(d.bounds?'()':'')+' As '+d.type});}
     for(const e of compiled.events?.values()||[])members.push({name:e.name,kind:'event',scope:e.scope||'public',line:e.line||find(e.name),signature:lines[(e.line||find(e.name))-1].trim()});
     for(const name of Object.keys(compiled.types))members.push({name,kind:'type',line:find(name),signature:'Type '+name});
