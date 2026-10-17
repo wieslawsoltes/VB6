@@ -15,6 +15,7 @@ export const PASCAL_TYPES = Object.freeze({
   double: {kind: 'real', name: 'Double', vb: 'Double'}, extended: {kind: 'real', name: 'Extended', vb: 'Double'},
   string: {kind: 'string', name: 'String', vb: 'String', capacity: 255},
   variant: {kind: 'variant', name: 'Variant', vb: 'Variant'}, object: {kind: 'object', name: 'Object', vb: 'Object'},
+  text: {kind: 'file', name: 'Text', vb: 'String', fileKind: 'text', element: null},
 });
 export const ORDINAL_KINDS = new Set(['ordinal', 'enum', 'subrange', 'char', 'boolean']);
 export const isOrdinal = type => ORDINAL_KINDS.has(type?.kind);
@@ -24,7 +25,7 @@ export const isAggregate = type => ['array', 'record'].includes(type?.kind);
 export function foreignType(name = 'Variant') {
   const normalized = key(name), primitive = {long: 'longint', integer: 'integer', byte: 'byte', boolean: 'boolean', single: 'single', double: 'double', string: 'string', variant: 'variant'}[normalized];
   if (primitive) return {...PASCAL_TYPES[primitive], foreign: true};
-  if (/constants$|enum$|^vb/i.test(name) && !builtinType(name)) return {...PASCAL_TYPES.longint, foreign: true};
+  if (builtinType(name)?.kind === 'enum' || /constants$|enum$|^vb/i.test(name) && !builtinType(name)) return {...PASCAL_TYPES.longint, foreign: true};
   return {kind: 'object', name, vb: 'Object', catalogName: name, foreign: true};
 }
 const basicIntrinsics = new Map(BUILTIN_SYMBOLS.map(symbol => [key(symbol.name), symbol]));
@@ -43,6 +44,7 @@ export function sameType(left, right) {
   if (left.kind !== right.kind) return false;
   if (left.kind === 'array' || left.kind === 'record' || left.kind === 'enum') return !!left.identity && left.identity === right.identity;
   if (left.kind === 'pointer') return left.target && right.target ? sameType(left.target, right.target) : left.identity === right.identity;
+  if (left.kind === 'file') return left.fileKind === right.fileKind && (left.fileKind !== 'typed' || sameType(left.element, right.element));
   if (left.kind === 'set') return sameType(left.base, right.base);
   return left.name === right.name && (left.kind !== 'string' || left.capacity === right.capacity);
 }
@@ -74,7 +76,7 @@ export class PascalScope {
     if (imported.length > 1) this.owner.fail(`Ambiguous imported identifier '${name}'`, node, 'TP_AMBIGUOUS');
     if (imported.length) return imported[0];
     if (this.owner.controls.has(key(name))) return {kind: 'control', name, vbName: name, owner: this.owner, scope: this, type: foreignType(this.owner.controlTypes.get(key(name)) || 'Control')};
-    if (this.owner.externalValues.has(key(name))) return {kind: 'external', name, vbName: name, owner: this.owner, scope: this, type: this.owner.externalTypes.get(key(name)) || PASCAL_TYPES.variant};
+    if (this.owner.externalValues.has(key(name))) return {kind: 'external', name, vbName: name, owner: this.owner, scope: this, type: this.owner.externalTypes.get(key(name)) || PASCAL_TYPES.variant, ...(key(name) === 'filemode' ? {ioGlobal: 'fileMode'} : {})};
     if (key(name) === 'self' && this.owner.input.form) return {kind: 'control', name, vbName: 'Me', owner: this.owner, scope: this, type: foreignType(this.owner.input.form.type || 'Form')};
     const constant = basicConstants.get(key(name)); if (constant) return {kind: 'constant', name: constant.name, value: constant.value, type: foreignType(constant.type), builtIn: true};
     const intrinsic = basicIntrinsics.get(key(name)); if (intrinsic && !this.owner.pascalIntrinsics.has(key(name))) return {kind: 'external', name: intrinsic.name, vbName: intrinsic.name, type: foreignType(intrinsic.type), owner: this.owner, scope: this};
@@ -86,7 +88,7 @@ export class PascalScope {
 export class PascalWorkspace {
   constructor(project = null) {
     this.project = project; this.inputs = new Map(); this.binders = new Map();
-    for (const input of project?.modules || []) if (/^(?:pascal|turbo[- ]?pascal|tp7)$/i.test(input.language || input.sourceLanguage || project.language || '')) this.inputs.set(key(input.name), input);
+    for (const input of project?.modules || []) if (/^(?:pascal|turbo[- ]?pascal|tp7|tp)$/i.test(input.language || input.sourceLanguage || project.language || '')) this.inputs.set(key(input.name), input);
   }
   add(input, ast) {const binder = new PascalBinder(ast, input, this); this.binders.set(key(input.name || ast.name), binder); this.binders.set(key(ast.name), binder); return binder;}
   get(name) {
@@ -114,10 +116,11 @@ export class PascalBinder {
     this.ast = ast; this.input = input || {name: ast.name, code: ast.source}; this.name = this.input.name || ast.name; this.workspace = workspace;
     this.scope = new PascalScope(this); this.imports = []; this.procedures = []; this.recordTypes = []; this.enumTypes = []; this.pointerTypes = []; this.typeId = 0; this.ready = false; this.preparing = false;
     this.controls = new Set(); this.controlTypes = new Map(); this.externalValues = new Set(['me', 'app', 'screen', 'clipboard', 'forms', 'printer', 'debug']); this.externalTypes = new Map();
-    this.pascalIntrinsics = new Set('abs arctan chr concat copy cos delete dispose eof eoln exp frac get high include exclude inc dec insert int ioresult length ln low new odd ord paramcount paramstr pi pos pred put random randomize read readln reset rewrite round seek sin sizeof sqr sqrt str succ trunc upcase val write writeln'.split(' '));
+    this.pascalIntrinsics = new Set('abs append arctan assign blockread blockwrite chr close concat copy cos delete dispose eof eoln erase exp filepos filesize flush frac get high include exclude inc dec insert int ioresult length ln low new odd ord paramcount paramstr pi pos pred put random randomize read readln rename reset rewrite round seek sin sizeof sqr sqrt str succ trunc upcase val write writeln'.split(' '));
     const controls = node => {if (!node) return; if (node.name) {this.controls.add(key(node.name)); this.controlTypes.set(key(node.name), node.type || 'Control');} for (const child of [...(node.controls || []), ...(node.menus || [])]) controls(child);}; controls(input?.form);
     for (const module of workspace.project?.modules || []) if (module.form) {this.controls.add(key(module.name)); this.controlTypes.set(key(module.name), module.form.type || 'Form');}
     for (const [name, type] of Object.entries({me: input?.form?.type || 'Form', app: 'App', screen: 'Screen', clipboard: 'Clipboard', forms: 'Forms', printer: 'Printer', debug: 'Debug'})) this.externalTypes.set(name, foreignType(type));
+    this.externalValues.add('filemode'); this.externalTypes.set('filemode', PASCAL_TYPES.byte);
     if (input?.form) for (const member of builtinType(input.form.type || 'Form')?.members || []) {this.externalValues.add(key(member.name)); this.externalTypes.set(key(member.name), foreignType(member.type));}
     if (input?.form) for (const property of [...Object.keys(input.form.properties || {}), ...'Caption Name Tag Left Top Width Height ClientWidth ClientHeight Visible Enabled BackColor ForeColor Font MousePointer MouseIcon WindowState BorderStyle ScaleMode ScaleWidth ScaleHeight ScaleLeft ScaleTop CurrentX CurrentY AutoRedraw DrawMode DrawStyle DrawWidth FillColor FillStyle ClipControls KeyPreview ControlBox MaxButton MinButton ShowInTaskbar Picture Icon hWnd Controls ActiveControl Parent Move Show Hide Refresh Cls Print PSet Line Circle Point PaintPicture SetFocus PopupMenu'.split(' ')]) this.externalValues.add(key(property));
     for (const [name, type] of Object.entries(PASCAL_TYPES)) this.scope.define({kind: 'type', name, type, builtIn: true, public: false});
@@ -169,6 +172,7 @@ export class PascalBinder {
       if (!definition) this.fail(`Routine '${symbol.name}' was declared but has no implementation`, symbol.node, 'TP_MISSING_ROUTINE');
       if (symbol.nodes.some(node => node.modifiers.some(modifier => ['external', 'assembler', 'interrupt', 'virtual', 'inline'].includes(modifier.name)))) this.fail(`Routine '${symbol.name}' requires an unsupported machine-code calling convention`, symbol.node, 'TP_UNSUPPORTED_CALLING_CONVENTION');
       symbol.params = declaration.params.map(param => ({...param, type: this.resolveType(param.type, symbol.scope)}));
+      for (const param of symbol.params) if (param.type.kind === 'file' && !param.byRef) this.fail('File parameters must be declared var', param, 'TP_FILE_PARAMETER');
       symbol.returnType = symbol.node.kind === 'function' ? declaration.returnType ? this.resolveType(declaration.returnType, symbol.scope) : this.fail(`Function '${symbol.name}' requires a return type`, symbol.node) : null;
       if (symbol.returnType && isAggregate(symbol.returnType)) this.fail('Turbo Pascal functions cannot return arrays or records', symbol.node, 'TP_RETURN_TYPE');
       if (symbol.nodes.some(node => node.kind !== symbol.node.kind)) this.fail(`Routine kind does not match interface for '${symbol.name}'`, symbol.node);
@@ -226,6 +230,11 @@ export class PascalBinder {
     if (node.kind === 'pointerType') {
       const type = {kind: 'pointer', name: suggestedName || `Pointer${this.typeId++}`, vb: 'Long', targetName: node.target, targetScope: scope, target: null, identity, owner: this, node, public: publicType};
       this.pointerTypes.push(type); return type;
+    }
+    if (node.kind === 'fileType') {
+      const element = node.elementType ? this.resolveType(node.elementType, scope) : null;
+      if (element?.kind === 'file') this.fail('A file cannot contain file variables', node, 'TP_FILE_COMPONENT');
+      return {kind: 'file', name: suggestedName || 'File', vb: 'String', fileKind: element ? 'typed' : 'untyped', element, identity, owner: this, node};
     }
     if (node.kind === 'untyped') this.fail('Untyped var parameters require a byte-addressable storage ABI', node, 'TP_UNSUPPORTED_UNTYPED_PARAMETER');
     const labels = {pointerType: 'Typed pointers', fileType: 'Typed and untyped files', objectType: 'Object types', procedureType: 'Procedural variables'};
