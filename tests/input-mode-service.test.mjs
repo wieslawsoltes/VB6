@@ -294,3 +294,33 @@ test('Normal-mode native input cannot reach a backend that performs its own edit
   assert.equal(nativeEdits, 0);
   f.service.dispose();
 });
+
+test('a mode may decline a mapped key while leaving other keys on the shared notation', () => {
+  const f = fixture(), received = [];
+  f.service.registerMode({id: 'custom', label: 'Custom', createSession: () => ({
+    keyFromEvent(event) { return event.key === 'x' ? null : undefined; },
+    handleKey(key) { received.push(key); return true; }, dispose() {}
+  })});
+  f.service.configure({mode: 'custom'});
+  const record = f.service.records.get(f.editor), event = key => ({key, preventDefault() { this.prevented = true; }, stopImmediatePropagation() {}});
+  const declined = event('x'), fallback = event('ArrowLeft');
+  f.service.keydown(record, declined); f.service.keydown(record, fallback);
+  assert.deepEqual(received, ['<Left>']);
+  assert.equal(declined.prevented, undefined);
+  assert.equal(fallback.prevented, true);
+  f.service.dispose();
+});
+
+test('key translation failures use the session error guard and retain Vim command isolation', () => {
+  const f = fixture(), errors = [];
+  f.service.configure({mode: 'vim'});
+  const record = f.service.records.get(f.editor);
+  record.session.keyFromEvent = () => { throw new Error('Mapping failed'); };
+  f.service.report = (record, error) => errors.push(error.message);
+  const event = {key: 'x', preventDefault() { this.prevented = true; }, stopImmediatePropagation() {}};
+  assert.doesNotThrow(() => f.service.keydown(record, event));
+  assert.deepEqual(errors, ['Mapping failed']);
+  assert.equal(event.prevented, true);
+  assert.equal(f.hosts[0].getText(), 'alpha beta');
+  f.service.dispose();
+});

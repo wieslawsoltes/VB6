@@ -321,15 +321,20 @@ export class EditorInputModeService extends Signal {
       this.run(record, () => executeWindowKey(this, record, rawKey)); this.publish(); return;
     }
     if (isIdeReservedKey(event)) { record.endCoalescing?.(); record.endCoalescing = null; return; }
-    const key = record.session.keyFromEvent?.(event) || rawKey;
-    const before = sessionState(record);
-    if (this.settings.mode === 'vim' && key === '<C-w>' && !['insert', 'replace'].includes(before.mode)) {
-      event.preventDefault(); event.stopImmediatePropagation(); record.windowPrefix = true; this.publish(); return;
-    }
-    const handled = this.run(record, () => record.session.handleKey(key, event));
+    const session = record.session, before = sessionState(record);
+    const commandMode = this.settings.mode === 'vim' && !['insert', 'replace'].includes(before.mode);
+    const handled = this.run(record, () => {
+      // Translation is extension code too. Undefined requests the shared
+      // notation; null explicitly leaves this key to the existing editor.
+      const mapped = session.keyFromEvent?.(event), key = mapped === undefined ? rawKey : mapped;
+      if (key == null || key === '') return false;
+      if (typeof key !== 'string') throw new TypeError('An input mode key mapping must return a string, null, or undefined.');
+      if (commandMode && key === '<C-w>') { record.windowPrefix = true; return true; }
+      return session.handleKey(key, event);
+    });
     // In a modal command state, unsupported text must not fall through and
     // change source. Insert mode delegates its ordinary input to the editor.
-    if (handled || this.settings.mode === 'vim' && !['insert', 'replace'].includes(before.mode)) {
+    if (handled || commandMode) {
       event.preventDefault(); event.stopImmediatePropagation();
     }
   }
