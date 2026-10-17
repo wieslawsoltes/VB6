@@ -8,6 +8,7 @@ import {openInputModePrompt, openInputModeNotification} from './prompts.js';
 import {installIdeVimCommands, executeIdeVimCommand, executeWindowKey} from './ide-commands.js';
 
 const emptyState = Object.freeze({mode: 'normal', keyBuffer: '', status: ''});
+const sessionState = record => record?.session?.state || record?.state || emptyState;
 function listen(target, type, callback, capture = false) {
   target.addEventListener(type, callback, capture);
   return () => target.removeEventListener(type, callback, capture);
@@ -49,7 +50,7 @@ export class EditorInputModeService extends Signal {
     return this.registry.register(definition);
   }
   snapshot() {
-    const record = this.currentRecord(), state = record?.session?.state || emptyState;
+    const record = this.currentRecord(), state = sessionState(record);
     const label = this.registry.get(this.settings.mode)?.label || 'Default';
     const suffix = state.subMode === 'blockwise' ? 'block' : state.subMode === 'linewise' ? 'line' : '';
     return {
@@ -107,31 +108,37 @@ export class EditorInputModeService extends Signal {
   startSession(record) {
     if (this.settings.mode === DEFAULT_INPUT_MODE || record.session) return;
     const definition = this.registry.get(this.settings.mode);
+    const statusOwner = record.statusOwner = {};
     record.host.root.dataset.inputMode = this.settings.mode;
     record.busy++;
     try {
-      const session = definition.createSession(record.host, {onStatus: state => this.stateChanged(record, state)});
+      const session = definition.createSession(record.host, {onStatus: state => {
+        // Timers and asynchronous extension work may outlive their session.
+        // A stable editor record must never accept status from its old owner.
+        if (record.statusOwner === statusOwner) this.stateChanged(record, state);
+      }});
       if (!session || typeof session.handleKey !== 'function' || typeof session.dispose !== 'function') {
         session?.dispose?.();
         throw new TypeError('An input mode session must implement handleKey and dispose.');
       }
+      if (record.statusOwner !== statusOwner) { session.dispose(); return; }
       record.session = session;
-      this.stateChanged(record, session.state || emptyState);
+      this.stateChanged(record, sessionState(record));
     } finally { record.busy--; }
   }
   releaseSession(record) {
-    const selections = record.host.getSelections();
-    const errors = [], cleanup = action => { try { action(); } catch (error) { errors.push(error); } };
-    record.busy++; record.releasing = true;
+    const errors = [], cleanup = action => { try { return action(); } catch (error) { errors.push(error); } };
+    record.busy++; record.releasing = true; record.statusOwner = null;
     try {
+      const selections = cleanup(() => record.host.getSelections());
       cleanup(() => record.endCoalescing?.()); record.endCoalescing = null;
       cleanup(() => record.closePrompt?.()); record.closePrompt = null;
       for (const close of [...record.notifications]) cleanup(close);
       const session = record.session; record.session = null;
       cleanup(() => session?.sync?.()); cleanup(() => session?.dispose());
       cleanup(() => record.host.setMode?.(null));
-      cleanup(() => record.host.setSelections(selections));
-      record.windowPrefix = false; record.message = ''; record.lastMode = null;
+      if (selections) cleanup(() => record.host.setSelections(selections));
+      record.windowPrefix = false; record.message = ''; record.lastMode = null; record.state = null;
       delete record.host.root.dataset.inputMode; delete record.host.root.dataset.vimMode;
       delete record.host.root.dataset.inputComposing;
     } finally { record.busy--; record.releasing = false; }
@@ -140,6 +147,7 @@ export class EditorInputModeService extends Signal {
   }
   stateChanged(record, state) {
     if (record.disposed || record.releasing || this.disposed) return;
+    record.state = state || emptyState;
     const mode = state?.mode || 'normal';
     if (record.lastMode && mode !== record.lastMode) {
       record.endCoalescing?.(); record.endCoalescing = null;
@@ -168,7 +176,7 @@ export class EditorInputModeService extends Signal {
       if (this.activeRecord) this.activeRecord.endCoalescing = null;
       this.activeRecord = record;
     }
-    if (['insert', 'replace'].includes(record.session?.state?.mode)) this.ensureCoalescing(record);
+    if (record.session && ['insert', 'replace'].includes(sessionState(record).mode)) this.ensureCoalescing(record);
   }
   run(record, action) {
     if (record.disposed || this.disposed) return;
@@ -178,7 +186,7 @@ export class EditorInputModeService extends Signal {
     finally {
       record.busy--;
       if (!record.busy && record.session) {
-        try { record.session.sync?.(); this.stateChanged(record, record.session.state || emptyState); }
+        try { record.session.sync?.(); this.stateChanged(record, sessionState(record)); }
         catch (error) { this.report(record, error); }
       }
     }
@@ -307,7 +315,7 @@ export class EditorInputModeService extends Signal {
     }
     if (isIdeReservedKey(event)) { record.endCoalescing?.(); record.endCoalescing = null; return; }
     const key = record.session.keyFromEvent?.(event) || rawKey;
-    const before = record.session.state || emptyState;
+    const before = sessionState(record);
     if (this.settings.mode === 'vim' && key === '<C-w>' && !['insert', 'replace'].includes(before.mode)) {
       event.preventDefault(); event.stopImmediatePropagation(); record.windowPrefix = true; this.publish(); return;
     }
@@ -328,7 +336,7 @@ export class EditorInputModeService extends Signal {
       if (!record.host.readOnly) this.run(record, () => event.inputType === 'historyUndo' ? record.host.undo() : record.host.redo());
       return;
     }
-    const state = record.session.state || emptyState;
+    const state = sessionState(record);
     if (['insert', 'replace'].includes(state.mode)) this.ensureCoalescing(record);
     if (this.settings.mode === 'vim' && !['insert', 'replace'].includes(state.mode)) {
       // Native paste/drop/spellcheck must not bypass Normal mode. A paste event

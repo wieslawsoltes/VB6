@@ -164,3 +164,51 @@ test('late extension registration restores its saved mode until the user makes a
     f.service.dispose();
   }
 });
+
+test('extensions may publish status without implementing a state getter', () => {
+  const f = fixture(); let publishStatus;
+  f.service.registerMode({id: 'events', label: 'Events', createSession(host, {onStatus}) {
+    publishStatus = onStatus;
+    onStatus({mode: 'command', keyBuffer: 'initial', status: 'Ready'});
+    return {handleKey() { onStatus({mode: 'insert', keyBuffer: '', status: 'Typing'}); return true; }, dispose() {}};
+  }});
+  f.service.configure({mode: 'events'});
+  assert.deepEqual(f.service.snapshot(), {mode: 'events', label: 'Events', state: 'command', keys: 'initial', message: 'Ready'});
+  const record = f.service.records.get(f.editor);
+  f.service.keydown(record, {key: 'x', preventDefault() {}, stopImmediatePropagation() {}});
+  assert.equal(f.service.snapshot().state, 'insert');
+  assert.equal(f.service.snapshot().message, 'Typing');
+  publishStatus({mode: 'command', status: 'Finished'});
+  assert.equal(f.service.snapshot().state, 'command');
+  f.service.dispose();
+});
+
+test('a released session cannot publish into Default or a replacement session', () => {
+  const f = fixture(), callbacks = [];
+  f.service.registerMode({id: 'events', label: 'Events', createSession(host, {onStatus}) {
+    callbacks.push(onStatus);
+    return {state: {mode: 'command', status: 'Current'}, handleKey() {}, dispose() {}};
+  }});
+  f.service.configure({mode: 'events'});
+  f.service.configure({mode: 'default'});
+  callbacks[0]({mode: 'insert', status: 'Stale'});
+  assert.equal(f.hosts[0].state, null);
+  assert.equal(f.service.snapshot().message, '');
+  f.service.configure({mode: 'events'});
+  callbacks[0]({mode: 'insert', status: 'Stale'});
+  assert.equal(f.hosts[0].state.mode, 'command');
+  assert.equal(f.service.snapshot().message, 'Current');
+  f.service.dispose();
+});
+
+test('an unavailable selection during release cannot retain mode keyboard ownership', () => {
+  const f = fixture(); let disposed = 0;
+  f.service.registerMode({id: 'custom', label: 'Custom', createSession: () => ({handleKey() {}, dispose() { disposed++; }})});
+  f.service.configure({mode: 'custom'});
+  f.hosts[0].getSelections = () => { throw new Error('The old editor view has been removed'); };
+  assert.doesNotThrow(() => f.service.configure({mode: 'default'}));
+  assert.equal(disposed, 1);
+  assert.equal(f.service.records.get(f.editor).session, null);
+  assert.equal(f.editor.root.dataset.inputMode, undefined);
+  f.service.dispose();
+});
