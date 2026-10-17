@@ -5,10 +5,17 @@ application designer, application runtime, Options preview, detached browser
 windows, dialogs, portals and standalone HTML exports. IDE and application
 appearance are still independent. Classic remains the default.
 
+The [WinUI XAML compatibility guide](WINUI-XAML-COMPATIBILITY.md) documents
+imported forms, live typed resources, supported styles/controls, source editing
+and VB property ownership. The [pinned resource catalog](WINUI-RESOURCE-CATALOG.md)
+contains 13,724 entries and 3,536 keys from 84 verified dictionaries. Its complete
+selected source inventory is distinct from the implemented browser templates.
+
 ## Pinned reference and attribution
 
-The reference is Microsoft.UI.Xaml in Windows App SDK **2.5.1**, tag
-[`winui3/release/2.5.1`](https://github.com/microsoft/microsoft-ui-xaml/tree/winui3/release/2.5.1).
+The reference is Microsoft.UI.Xaml tag
+[`winui3/release/2.5.1`](https://github.com/microsoft/microsoft-ui-xaml/tree/ba3a8d59e6de4e2b86ca4f61c78bc26ccf129afd),
+commit `ba3a8d59e6de4e2b86ca4f61c78bc26ccf129afd`.
 The resource paths below are relative to `src/controls/dev/CommonStyles/`:
 
 | Resource | Git blob |
@@ -32,7 +39,9 @@ No Microsoft font binaries, icon fonts, native DLLs or platform artwork are adde
 **Standard and accent buttons.** Normal, pointer-over, pressed and disabled
 states use distinct native fill and foreground resources. Accent hover/pressed
 fills retain the reference 90%/80% opacity. A masked one-pixel border paints the
-three-DIP elevation gradient independently of the inner fill; light and dark
+three-DIP elevation gradient independently of the inner fill. The native
+0.33 stop is at **0.99 DIP/CSS pixel**, preserving the source value rather than
+rounding it to one pixel; light and dark
 border directions differ. Pressing does not shift the content. Padding is
 `5px 11px 6px`; the background transition is 83 ms. Keyboard focus is separate
 from the default action rather than a permanent dotted rectangle. The outer
@@ -45,8 +54,9 @@ buttons use subtle-fill resources instead of standard raised-button paint.
 use normal, hover, focused and disabled resources. Focus strengthens the bottom
 stroke from one to two pixels and selects the active input fill. The TextBox host
 is transparent when its authored background is OLE Window, preventing a second
-white layer underneath a translucent control fill. Dark disabled text uses the
-reference TextBox-specific `#5DFEFEFE`, not the common `#5DFFFFFF` resource.
+white layer underneath a translucent control fill. Disabled text uses the
+reference TextBox-specific Light `#5C010101` and Dark `#5DFEFEFE` values,
+not the common `#5C000000`/`#5DFFFFFF` resources.
 Text, selection and control identity are retained across theme changes.
 
 **Check and radio controls.** The glyph box is 20 by 20 CSS pixels. Check glyphs
@@ -57,14 +67,23 @@ outer control dimensions and label fonts do not change. Radio glyphs keep
 `TextOnAccentFillColorPrimary` in pressed and disabled states; they deliberately
 do not reuse the checkbox disabled/pressed foreground resources.
 
+**Composite and imported-control states.** Checkbox/radio glyph and label paint,
+ToggleButton checked/indeterminate states, ToggleSwitch header and on/off text,
+HyperlinkButton state ink, and editable field focus paint remain separate
+presentation channels. Scoped XAML state resources retain local overrides and
+theme branches. Popup content inherits the invoking control's RequestedTheme
+scope. Explicit resting paint does not freeze hover/pressed/disabled resources.
+
 **Surfaces and supporting components.** The IDE uses a 14-pixel body font,
 32-pixel ordinary buttons and input minimum height, semantic dialog surfaces,
 24-pixel dialog-body/footer padding, 32-pixel menu rows, rounded selections,
 separate tooltip/flyout corners and accent selection indicators. Application
 menus, combo/list/tree selections, frames, scroll tracks, ranges and progress
 bars consume the same boundary-local resources. Dense property editors retain
-their existing compact layout. Authored application controls do not acquire IDE
-minimum heights or a new VB font size.
+their existing compact layout. Existing native VB application controls retain
+their authored geometry and font sizes. Imported WinUI controls use the supported
+source/default typography, including the 14-DIP control font, through the typed
+appearance contract rather than inheriting arbitrary IDE metrics.
 
 Existing form captions, docking, composite controls, grids, rich text, calendars,
 drawing controls and registered adapters continue to consume the shared palette
@@ -83,8 +102,11 @@ selector. IDE-only selectors exclude authored application subtrees.
 Button Face and control text, and editable-control Window and control text.
 Explicit RGB values and other system-color roles remain authored. The existing
 VB model, twip geometry, font points, undo records, VM, input values and graphics
-invalidation lifecycle are not replaced. Theme changes still use the existing
-boundary-attribute update; this work adds no per-control observer or polling loop.
+invalidation lifecycle are not replaced. Theme changes use the existing
+boundary-attribute update. The typed WinUI adapter shares one document-level
+theme/environment dispatcher; it adds no per-control observer or polling loop.
+Explicit native assignments, including a same-value VB BackColor assignment,
+relinquish the corresponding WinUI presentation binding and visual-state channel.
 
 Forced-colors mode retains system-owned colors and existing accessibility rules;
 resource-backed painting is guarded by `forced-colors: none`. Reduced motion
@@ -104,6 +126,7 @@ npm run build
 npm test
 npm run test:winui
 npm run test:winui:browser
+npm run test:winui:compat:browser
 npm run test:application-themes:browser
 npm run test:themes:browser
 python tools/browser-native-caption-tests.py
@@ -111,8 +134,8 @@ python tools/ci/check.py
 python -m unittest discover -s tools/ci -p 'test_*.py'
 ```
 
-The WinUI browser entrypoint belongs to the existing integration-authoring CI
-suite and its browser matrix. `VB6_BROWSER=firefox` and `VB6_BROWSER=webkit`
+The WinUI palette and imported-XAML browser entrypoints belong to the
+`integration-appearance` CI suite and its browser matrix. `VB6_BROWSER=firefox` and `VB6_BROWSER=webkit`
 select the other engines. `VB6_TEST_TRANSPORT=file` selects a real file origin for
 the WinUI harness. Restricted local runs may set `VB6_TEST_TRANSPORT=memory`;
 that transport is identified in the report and does not certify HTTP storage or
