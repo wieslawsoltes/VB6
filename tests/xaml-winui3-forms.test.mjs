@@ -177,6 +177,16 @@ test('Canvas and StackPanel main-axis alignment follow their native arrangement 
  assert.equal(control(stack).properties.LayoutAlign,2);assert.equal(control(stack).properties.LayoutShrink,0);
 });
 
+test('Border arranges its single child in an automatic inner cell with implicit stretch dimensions',()=>{
+ const body='<Canvas><Border x:Name="Outer" Width="100" Height="50" Padding="5,7,11,13" BorderThickness="2,3,4,5"><Grid x:Name="B"/></Border></Canvas>';
+ const form=good(body,{settings:{anchoring:true}}),outer=control(form,'Outer'),child=control(form);
+ assert.equal(outer.properties.LayoutMode,5);assert.equal(outer.properties.LayoutGridColumns,'1fr');assert.equal(outer.properties.LayoutGridRows,'1fr');
+ assert.equal(child.properties.LayoutWidthMode,2);assert.equal(child.properties.LayoutHeightMode,2);
+ assert.equal(child.properties.LayoutColumn,0);assert.equal(child.properties.LayoutRow,0);
+ bad('<Border><Button/></Border>',/Enable anchoring and automatic layout/);
+ assert.equal(good('<Border x:Name="B" Width="100" Height="50"/>').controls[0].type,'PictureBox');
+});
+
 test('explicit native paint overrides relinquish all matching theme and visual state channels',()=>{
  const form=good(standard+'<Canvas><Button x:Name="B" vb:Designer.Properties="{}{&quot;BackColor&quot;:3351057}"/></Canvas>');
  const a=appearance(form);assert.equal(control(form).properties.BackColor,3351057);

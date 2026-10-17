@@ -83,7 +83,7 @@ for(const [name,body,pattern] of [
  ['layout disabled','<Grid><Button Margin="1"/></Grid>',/Enable|automatic/],
  ['negative margin','<Grid><Button Margin="-1"/></Grid>',/Negative/],
  ['negative button padding','<Grid><Button Padding="-2"/></Grid>',/Padding/],
- ['unimplemented alignment parent','<Border><Button VerticalAlignment="Center"/></Border>',/cross axis/],
+ ['unimplemented alignment parent','<Button VerticalAlignment="Center"/>',/cross axis/],
  ['negative width','<Canvas><Button Width="-5"/></Canvas>',/nonnegative/],
 ])test('layout diagnostics: '+name,()=>bad(body,pattern,name==='layout disabled'?{}:{anchoring:true}));
 test('WinUI scalar opacity, translucent brushes and button padding retain presentation data',()=>{

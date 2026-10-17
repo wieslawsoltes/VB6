@@ -224,11 +224,15 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
       if(node.type.name==='SecureField')set('PasswordChar','*');
       if(node.type.name==='TextEditor'){set('MultiLine',-1);set('ScrollBars',3);}
     }
-    if (!native && ['Grid','StackPanel'].includes(sourceType)) {
+    // Border arranges its single child in the padded inner rectangle. Reuse a
+    // one-cell grid so omitted child dimensions stretch inside that rectangle,
+    // instead of leaving the native PictureBox fallback size and origin.
+    const borderLayout=winui&&sourceType==='Border'&&(values.Child||settings.anchoring===true);
+    if (!native && (['Grid','StackPanel'].includes(sourceType)||borderLayout)) {
       if (settings.anchoring !== true) error('Enable anchoring and automatic layout to lower '+node.type.name+'.',node.source,'VBXAML2002');
       else {
-        set('LayoutMode',sourceType === 'Grid'?5:values.Orientation&&statics.convert(values.Orientation.value,values.Orientation.member,scopes)==='Horizontal'?1:2);
-        if(sourceType==='Grid'){set('LayoutGridColumns','1fr');set('LayoutGridRows','1fr');}
+        set('LayoutMode',sourceType !== 'StackPanel'?5:values.Orientation&&statics.convert(values.Orientation.value,values.Orientation.member,scopes)==='Horizontal'?1:2);
+        if(sourceType!=='StackPanel'){set('LayoutGridColumns','1fr');set('LayoutGridRows','1fr');}
       }
     }
     const children = [], deferred = [];
