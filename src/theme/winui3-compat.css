@@ -1,0 +1,44 @@
+/* Typed XAML presentation is attached to the original VB control. No geometry
+   conversion, model replacement or vendor font dependency is introduced here. */
+.vb-check[data-winui-control="ToggleSwitch"][data-winui-has-header="true"] {
+  display:grid;grid-template-columns:max-content 1fr;grid-template-rows:auto minmax(0,1fr);
+  align-items:center;column-gap:8px;row-gap:4px;
+}
+.vb-winui-switch-header {grid-column:1 / -1;align-self:start;white-space:pre-wrap;overflow:hidden;text-overflow:ellipsis;}
+.vb-check[data-winui-control="ToggleSwitch"] > span:not(.vb-winui-switch-header):not(.vb-winui-focus-ring) {min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.vb-check[data-winui-control="ToggleButton"] {display:flex;align-items:center;justify-content:center;padding:5px 11px 6px;box-sizing:border-box;border-radius:4px;}
+.vb-check[data-winui-control="ToggleButton"] > input[type="checkbox"] {
+  position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:inherit;
+}
+.vb-check[data-winui-control="ToggleButton"] > span {pointer-events:none;position:relative;}
+.vb-winui-focus-ring {display:none!important;position:absolute!important;inset:var(--winui3-focus-inset,-3px);pointer-events:none;z-index:1;box-sizing:border-box;border:2px solid var(--winui-FocusStrokeColorOuter,CanvasText);border-radius:var(--winui-ControlRadius,4px);box-shadow:inset 0 0 0 1px var(--winui-FocusStrokeColorInner,Canvas);}
+[data-winui-custom-focus="true"]:is(:focus-visible,:has(:focus-visible)) > .vb-winui-focus-ring {display:block!important;}
+[data-winui-system-focus="false"],[data-winui-custom-focus="true"] {--winui-FocusOutline:none;--winui-FocusShadow:none;}
+@media (forced-colors:none) {
+  .vb-check[data-winui-control="ToggleButton"] {background:var(--winui-ButtonBackground);color:var(--winui-ButtonForeground);border:1px solid var(--winui-ControlStrokeColorDefault);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked) {background:var(--winui-AccentButtonBackground);color:var(--winui-AccentButtonForeground);border-color:var(--winui-ControlStrokeColorOnAccentDefault);}
+  .vb-check[data-winui-control="ToggleButton"]:hover:not(.disabled) {background:var(--winui-ButtonBackgroundPointerOver);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked):hover:not(.disabled) {background:var(--winui-AccentButtonBackgroundPointerOver);}
+  .vb-check[data-winui-control="ToggleButton"]:active:not(.disabled) {background:var(--winui-ButtonBackgroundPressed);color:var(--winui-ButtonForegroundPressed);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked):active:not(.disabled) {background:var(--winui-AccentButtonBackgroundPressed);color:var(--winui-AccentButtonForegroundPressed);}
+  .vb-check[data-winui-control="ToggleButton"].disabled {background:var(--winui-ButtonBackgroundDisabled);color:var(--winui-ButtonForegroundDisabled);}
+  .vb-check[data-winui-control="ToggleButton"].disabled:has(> input:checked) {background:var(--winui-AccentButtonBackgroundDisabled);color:var(--winui-AccentButtonForegroundDisabled);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:focus-visible) {outline:var(--winui-FocusOutline);outline-offset:1px;box-shadow:var(--winui-FocusShadow);}
+  .vb-command[data-winui-control="HyperlinkButton"] {--winui-control-background:transparent;--winui-ButtonElevation:none;--winui-ButtonFlatElevation:none;--winui-control-foreground:var(--vb-link);--winui-BorderPainterContent:none;}
+  .vb-command[data-winui-control="HyperlinkButton"]:hover:not(.disabled) {--winui-control-foreground:var(--winui-TextFillColorSecondary);text-decoration:underline;}
+  .vb-command[data-winui-control="HyperlinkButton"].disabled {--winui-control-foreground:var(--winui-TextFillColorDisabled);}
+  .vb-command[data-winui-style="AccentButtonStyle"] {--winui-control-background:var(--winui-AccentButtonBackground);--winui-control-foreground:var(--winui-AccentButtonForeground);}
+  .vb-command[data-winui-style="AccentButtonStyle"]:hover:not(.disabled) {--winui-control-background:var(--winui-AccentButtonBackgroundPointerOver);}
+  .vb-command[data-winui-style="AccentButtonStyle"]:active:not(.disabled) {--winui-control-background:var(--winui-AccentButtonBackgroundPressed);--winui-control-foreground:var(--winui-AccentButtonForegroundPressed);}
+  .vb-command[data-winui-style="AccentButtonStyle"].disabled {--winui-control-background:var(--winui-AccentButtonBackgroundDisabled);--winui-control-foreground:var(--winui-AccentButtonForegroundDisabled);}
+  .vb-command[data-winui-style="SubtleButtonStyle"] {--winui-control-background:var(--winui-SubtleButtonBackground);--winui-ButtonElevation:none;--winui-ButtonFlatElevation:none;}
+  .vb-command[data-winui-style="SubtleButtonStyle"]:hover:not(.disabled) {--winui-control-background:var(--winui-SubtleButtonBackgroundPointerOver);}
+  .vb-command[data-winui-style="SubtleButtonStyle"]:active:not(.disabled) {--winui-control-background:var(--winui-SubtleButtonBackgroundPressed);}
+  .vb-command[data-winui-style="SubtleButtonStyle"].disabled {--winui-control-background:var(--winui-SubtleButtonBackgroundDisabled);}
+}
+@media (forced-colors:active) {
+  .vb-check[data-winui-control="ToggleButton"] {background:ButtonFace;color:ButtonText;border:1px solid ButtonText;}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked) {background:Highlight;color:HighlightText;forced-color-adjust:none;}
+  .vb-check[data-winui-control="ToggleButton"].disabled {color:GrayText;border-color:GrayText;}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:focus-visible) {outline:2px solid ButtonText;outline-offset:2px;}
+}
