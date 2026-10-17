@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {newProject,normalizeProject,createControl} from '../src/project/model.js';
-import {validateWinUI3Appearance,validateWinUI3Properties,winui3ThemeValues,winui3CssColor,winui3CssThickness,clearWinUI3Overrides} from '../src/theme/winui3-compat.js';
+import {validateWinUI3Appearance,validateWinUI3Properties,validateWinUI3Brush,winui3ThemeValues,winui3StateValues,winui3CssColor,winui3CssBrush,winui3GradientPoints,winui3CssThickness,clearWinUI3Overrides} from '../src/theme/winui3-compat.js';
 
 const appearance=()=>({version:1,sourceType:'Button',requestedTheme:'Default',properties:{Padding:[11,5,11,6],CornerRadius:[4,4,4,4],FontWeight:600},resources:{
   Background:{key:'PanelBrush',values:{Light:'#80402010',Dark:'#CC102040',HighContrast:'#FF000000'}},
@@ -57,4 +57,43 @@ test('ToggleSwitch and ProgressBar carry truthful binary and indeterminate seman
   validateWinUI3Appearance({version:1,sourceType:'ProgressBar',properties:{IsIndeterminate:true}},'ProgressBar');
   assert.throws(()=>validateWinUI3Appearance({version:1,sourceType:'Button',properties:{IsIndeterminate:true}},'CommandButton'),/ProgressBar/);
   assert.throws(()=>validateWinUI3Appearance({version:1,sourceType:'CheckBox',properties:{Header:'Wrong presenter'}},'CheckBox'),/ToggleSwitch/);
+});
+
+const gradient=()=>({kind:'LinearGradientBrush',startPoint:[0,0],endPoint:[0,3],mappingMode:'Absolute',spreadMethod:'Pad',opacity:1,
+  relativeTransform:{type:'ScaleTransform',scaleX:1,scaleY:-1,centerX:0,centerY:.5},
+  gradientStops:[{offset:.33,color:'#29000000'},{offset:1,color:'#0F000000'}]});
+test('absolute native elevation gradients retain the 0.99 DIP stop and relative reflection at every size',()=>{
+  const brush=gradient();validateWinUI3Brush(brush);
+  assert.equal(winui3CssBrush(brush),'linear-gradient(to top, #00000029 0.99px, #0000000f 3px)');
+  assert.deepEqual(winui3GradientPoints(brush,120,32),[0,32,0,29]);
+  assert.deepEqual(winui3GradientPoints(brush,120,48),[0,48,0,45]);
+  brush.relativeTransform=null;
+  assert.equal(winui3CssBrush(brush),'linear-gradient(to bottom, #00000029 0.99px, #0000000f 3px)');
+});
+test('relative gradients preserve directional offset, stop ordering and brush opacity',()=>{
+  const brush=gradient();Object.assign(brush,{startPoint:[.25,0],endPoint:[.75,0],mappingMode:'RelativeToBoundingBox',opacity:.5,relativeTransform:null,
+    gradientStops:[{offset:1,color:'#FFFF0000'},{offset:0,color:'#800000FF'},{offset:1,color:'#FF00FF00'}]});
+  validateWinUI3Brush(brush);
+  assert.deepEqual(winui3GradientPoints(brush,200,40),[50,0,150,0]);
+  assert.equal(winui3CssBrush(brush),'linear-gradient(to right, rgba(0, 0, 255, 0.25098039) 25%, rgba(255, 0, 0, 0.5) 75%, rgba(0, 255, 0, 0.5) 75%)');
+  assert.equal(brush.gradientStops[0].offset,1,'rendering does not mutate authored stop order');
+});
+test('unsupported gradient geometry and executable brush payloads fail before rendering',()=>{
+  for(const change of [b=>b.kind='ImageBrush',b=>b.endPoint=[3,3],b=>b.endPoint=[0,0],b=>b.spreadMethod='Repeat',
+    b=>b.opacity=Infinity,b=>b.relativeTransform.type='MatrixTransform',b=>b.relativeTransform.scaleY=0,
+    b=>b.gradientStops[0].color='url(https://example.invalid)',b=>b.gradientStops[0].offset=2,b=>b.source='https://example.invalid']) {
+    const brush=gradient();change(brush);assert.throws(()=>validateWinUI3Brush(brush));
+  }
+  assert.throws(()=>validateWinUI3Brush(gradient(),{foreground:true}),/Background and BorderBrush/);
+});
+test('state resources stay scoped by theme and explicit native color edits release every matching state',()=>{
+  const value=appearance();value.states={PointerOver:{Background:{key:'Hover',values:{Light:'#80402010',Dark:'#80001020'}},Foreground:'#FF000000'},
+    Pressed:{BorderBrush:gradient()},Disabled:{Background:'#00FFFFFF'}};
+  validateWinUI3Appearance(value,'CommandButton');
+  assert.equal(winui3StateValues(value,'Dark').PointerOver.Background,'#80001020');
+  assert.equal(winui3StateValues(value,'Light').PointerOver.Foreground,'#FF000000');
+  clearWinUI3Overrides({WinUI3:value},{BackColor:0});
+  assert.equal(value.states.PointerOver.Background,undefined);assert.equal(value.states.Disabled.Background,undefined);
+  assert.equal(value.states.PointerOver.Foreground,'#FF000000');assert.equal(value.states.Pressed.BorderBrush.kind,'LinearGradientBrush');
+  value.states.PointerOver.Padding=[1,1,1,1];assert.throws(()=>validateWinUI3Appearance(value,'CommandButton'),/state target/);
 });

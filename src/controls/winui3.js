@@ -1,6 +1,6 @@
 import {getTheme,fontFamily} from '../theme/theme.js';
 import {observeThemeEnvironment,writeThemeAttributes} from '../theme/environment.js';
-import {winui3ThemeValues,winui3CssColor,winui3CssThickness,winui3BuiltinStyle} from '../theme/winui3-compat.js';
+import {winui3ThemeValues,winui3StateValues,winui3CssBrush,winui3CssColor,winui3CssThickness,winui3BuiltinStyle} from '../theme/winui3-compat.js';
 import {notifyControlPaint} from '../rendering/invalidation.js';
 
 const documents=new WeakMap(),bindings=new WeakMap();
@@ -18,13 +18,14 @@ function subscribe(c) {
   if(previous)unsubscribe(c);
   let state=documents.get(document);
   if(!state) {
-    state={controls:new Set(),environment:null};
+    state={controls:new Set(),portals:new Map(),environment:null};
     const update=event=>{
       for(const control of [...state.controls]) {
         if(control.disposed||!state.controls.has(control))continue;
         if(event?.target?.contains&&!event.target.contains(control.node))continue;
         resetWinUI3ControlPaint(control);apply(control,state);notifyControlPaint(control.node);
       }
+      for(const [portal,source] of state.portals)updatePortal(source,portal);
     };
     state.environment=observeThemeEnvironment(document.defaultView,()=>update());
     state.changed=event=>update(event);
@@ -44,10 +45,10 @@ function unsubscribe(c) {
     state.environment.dispose();documents.delete(document);
   }
 }
-function paint(c,node,key,value) {
+function paint(c,node,key,value,important=false) {
   if(!node)return;
   const previous=node.style.getPropertyValue(key),priority=node.style.getPropertyPriority(key);
-  node.style.setProperty(key,value);
+  node.style.setProperty(key,value,important?'important':'');
   (c.winui3Paint??=[]).push({node,key,value:node.style.getPropertyValue(key),previous,priority});
 }
 export function resetWinUI3ControlPaint(c) {
@@ -57,44 +58,75 @@ export function resetWinUI3ControlPaint(c) {
   }
   c.winui3Paint=[];
 }
+function statePaint(c,node,key,cssProperty,normal,states) {
+  const hasStates=Object.values(states).some(values=>own(values,key));
+  if(!hasStates&&normal===undefined)return false;
+  const base=normal===undefined?node.style.getPropertyValue(cssProperty)||'transparent':winui3CssBrush(normal);
+  paint(c,c.node,'--winui3-Normal-'+key,base);
+  for(const [name,values] of Object.entries(states))if(own(values,key))paint(c,c.node,'--winui3-'+name+'-'+key,winui3CssBrush(values[key]));
+  paint(c,node,cssProperty,'var(--winui3-active-'+key+', var(--winui3-Normal-'+key+'))',cssProperty==='color');
+  return true;
+}
+function borderPaint(c,host,values,states) {
+  const n=c.node,thickness=values.BorderThickness;
+  const hasBrush=own(values,'BorderBrush')||Object.values(states).some(values=>own(values,'BorderBrush'));
+  if(thickness) {
+    paint(c,host,'border-width',winui3CssThickness(thickness),true);
+    paint(c,host,'border-style','solid',true);paint(c,host,'box-sizing','border-box');
+    paint(c,n,'--winui-BorderPainterContent','none');
+  }
+  if(hasBrush) {
+    // A separate mask supports nonuniform strokes and corner radii, including
+    // gradients whose 3-DIP ramp is measured from the actual outer edge.
+    if(!c.winui3Border){c.winui3Border=n.ownerDocument.createElement('span');c.winui3Border.className='vb-winui-border';c.winui3Border.setAttribute('aria-hidden','true');}
+    const parent=host===c.input?n:host;
+    if(c.winui3Border.parentNode!==parent)parent.append(c.winui3Border);
+    const sides=thickness??[1,1,1,1];
+    paint(c,c.winui3Border,'inset',host===c.input?'0px':winui3CssThickness(sides.map(v=>-v)));
+    paint(c,c.winui3Border,'padding',winui3CssThickness(sides));
+    paint(c,c.winui3Border,'border-radius',values.CornerRadius?.map(v=>v+'px').join(' ')||'var(--winui-ControlRadius, 0px)');
+    statePaint(c,c.winui3Border,'BorderBrush','background',values.BorderBrush??'#00000000',states);
+    paint(c,host,'border-color','transparent',true);paint(c,host,'border-style','solid',true);
+    paint(c,n,'--winui-BorderPainterContent','none');
+  } else if(c.winui3Border){c.winui3Border.remove();c.winui3Border=null;}
+}
 function apply(c,state) {
   const appearance=c.props.WinUI3;if(!appearance)return;
   const n=c.node,previousRequested=n.getAttribute('data-winui-requested-theme');
   writeThemeAttributes(n,{'data-winui-control':appearance.sourceType,
     'data-winui-requested-theme':appearance.requestedTheme&&appearance.requestedTheme!=='Default'?appearance.requestedTheme:null,
     'data-winui-style':winui3BuiltinStyle(appearance.style)});
-  const theme=themeFor(c,state),values=winui3ThemeValues(appearance,theme);
-  writeThemeAttributes(n,{'data-winui-effective-theme':theme});
+  const theme=themeFor(c,state),values=winui3ThemeValues(appearance,theme),states=winui3StateValues(appearance,theme);
+  writeThemeAttributes(n,{'data-winui-effective-theme':theme,'data-winui-state-paint':Object.keys(states).length?'true':null,
+    'data-winui-focused-state':states.Focused?'true':null});
   c.winui3Values=values;
   const body=c.content||n,content=c.label||c.input||body;
-  if(own(values,'Background')) {
-    const background=winui3CssColor(values.Background);
+  if(statePaint(c,isInputBackground(c)?c.input:body,'Background','background',values.Background,states)) {
     // One paint plane: a translucent field must not be composited a second time
     // against an identically colored host.
-    paint(c,isInputBackground(c)?c.input:body,'background',background);
     if(isInputBackground(c)&&c.type==='TextBox')paint(c,n,'background','transparent');
-    if(c.surface)c.surface.background=background;
+    if(c.surface&&own(values,'Background')) {
+      c.surface.setPresentationBackground(values.Background);
+      paint(c,body,'background','transparent');
+    }
   }
-  if(own(values,'Foreground')) {
-    const color=winui3CssColor(values.Foreground);paint(c,n,'color',color);
-    if(c.input)paint(c,c.input,'color',color);
-  }
+  else if(c.surface)c.surface.setPresentationBackground(null);
+  if(statePaint(c,n,'Foreground','color',values.Foreground,states)&&c.input)
+    paint(c,c.input,'color','var(--winui3-active-Foreground, var(--winui3-Normal-Foreground))',true);
   const borderHost=isInputBackground(c)?c.input:body;
-  if(own(values,'BorderThickness')) {
-    paint(c,borderHost,'border-width',winui3CssThickness(values.BorderThickness));
-    paint(c,borderHost,'border-style','solid');
-    paint(c,borderHost,'box-sizing','border-box');
-    // Explicit XAML borders replace the default template's elevation painter.
-    paint(c,n,'--winui-BorderPainterContent','none');
-  }
-  if(own(values,'BorderBrush')) {
-    const color=winui3CssColor(values.BorderBrush);paint(c,borderHost,'border-color',color);
-    paint(c,n,'--winui-ButtonElevation','linear-gradient('+color+', '+color+')');
-    paint(c,n,'--winui-ButtonFlatElevation','linear-gradient('+color+', '+color+')');
-  }
+  borderPaint(c,borderHost,values,states);
   if(own(values,'Padding')) {
-    const padding=winui3CssThickness(values.Padding);paint(c,isInputBackground(c)?c.input:body,'padding',padding);
-    paint(c,isInputBackground(c)?c.input:body,'box-sizing','border-box');
+    if(c.anchoring&&['Form','MDIForm','PictureBox','Frame'].includes(c.type)) {
+      let changed=false;
+      for(const [i,side] of ['Left','Top','Right','Bottom'].entries()) {
+        const key='LayoutPadding'+side,value=values.Padding[i]*15;
+        if(c.props[key]!==value){c.props[key]=value;changed=true;}
+      }
+      if(changed)(c.form||c).layoutController?.edit(c,'LayoutPadding');
+    } else {
+      paint(c,isInputBackground(c)?c.input:body,'padding',winui3CssThickness(values.Padding),true);
+      paint(c,isInputBackground(c)?c.input:body,'box-sizing','border-box');
+    }
   }
   if(own(values,'CornerRadius')) {
     const radius=values.CornerRadius.map(value=>value+'px').join(' ');
@@ -143,6 +175,7 @@ function apply(c,state) {
       resetWinUI3ControlPaint(child);apply(child,state);notifyControlPaint(child.node);
     }
   }
+  for(const [portal,source] of state.portals)if(n===source||n.contains(source))updatePortal(source,portal);
 }
 
 export function refreshWinUI3ControlValue(c) {
@@ -172,13 +205,17 @@ export function refreshWinUI3Control(c) {
   apply(c,subscribe(c));
 }
 export function disposeWinUI3Control(c) {
+  const state=bindings.get(c)?.state,hadRequested=c.node.hasAttribute('data-winui-requested-theme');
   unsubscribe(c);resetWinUI3ControlPaint(c);
-  c.winui3Header?.remove();c.winui3Header=null;c.winui3Focus?.remove();c.winui3Focus=null;c.winui3Values=null;
+  c.winui3Header?.remove();c.winui3Header=null;c.winui3Focus?.remove();c.winui3Focus=null;c.winui3Border?.remove();c.winui3Border=null;c.winui3Values=null;
   writeThemeAttributes(c.node,{'data-winui-control':null,'data-winui-requested-theme':null,
     'data-winui-effective-theme':null,'data-winui-style':null,'data-winui-indeterminate':null,'data-winui-has-header':null,
-    'data-winui-system-focus':null,'data-winui-custom-focus':null});
-  if(c.surface)c.surface.background=c.props.BackColor;
-  if(c.input&&c.type==='CheckBox')writeThemeAttributes(c.input,{role:null,'aria-checked':null,'aria-pressed':null});
+    'data-winui-system-focus':null,'data-winui-custom-focus':null,'data-winui-state-paint':null,'data-winui-focused-state':null});
+  if(c.surface){c.surface.setPresentationBackground(null);c.surface.background=c.props.BackColor;}
+  if(c.input&&c.type==='CheckBox')writeThemeAttributes(c.input,{role:null,'aria-checked':null,'aria-pressed':null,'aria-label':c.props.Caption||c.model.name});
+  if(hadRequested&&state)for(const child of [...state.controls])if(!child.disposed&&c.node.contains(child.node)) {
+    resetWinUI3ControlPaint(child);apply(child,state);notifyControlPaint(child.node);
+  }
 }
 
 /** Diagnostic counts expose listener ownership without retaining documents. */
@@ -186,5 +223,22 @@ export function winui3PresentationDiagnostics(document) {
   const state=documents.get(document);return Object.freeze({controls:state?.controls.size??0,themeListeners:state?1:0});
 }
 export function winui3ControlBackground(c,fallback) {
-  const color=c.winui3Values?.Background;return color===undefined?fallback:winui3CssColor(color);
+  const brush=c.winui3Values?.Background;
+  if(brush!==undefined&&c.surface) {
+    c.surface.setPresentationBackground(brush);
+    paint(c,c.content||c.node,'background','transparent');
+  }
+  return fallback;
+}
+function updatePortal(source,portal) {
+  const theme=source.closest('[data-winui-effective-theme]')?.getAttribute('data-winui-effective-theme');
+  writeThemeAttributes(portal,{'data-winui-effective-theme':theme??null});
+}
+/** Portals inherit the XAML RequestedTheme branch of their invoking control.
+ * Application-theme binding still owns the surrounding VB application policy. */
+export function bindWinUI3Portal(source,portal) {
+  const state=documents.get(source.ownerDocument);
+  if(!state||!source.closest('[data-winui-effective-theme]'))return ()=>{};
+  state.portals.set(portal,source);updatePortal(source,portal);
+  return ()=>{state.portals.delete(portal);writeThemeAttributes(portal,{'data-winui-effective-theme':null});};
 }
