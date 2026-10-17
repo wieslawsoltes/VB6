@@ -1,12 +1,13 @@
 import {compileModule} from '../compiler-core.js';
 import {parseExpression as parseSharedExpression} from '../expression.js';
 import {parsePascalModule, PascalParser} from './parser.js';
-import {PascalError} from './lexer.js';
-import {PascalWorkspace, PASCAL_TYPES, isOrdinal, isString, isNumeric, isAggregate, numericType, sameType, assignmentCompatible} from './semantics.js';
+import {PascalError, tokenizePascal, PASCAL_KEYWORDS} from './lexer.js';
+import {PascalWorkspace, PASCAL_TYPES, isOrdinal, isString, isNumeric, isAggregate, numericType, sameType, assignmentCompatible, foreignType} from './semantics.js';
+import {builtinType} from '../type-catalog.js';
 import {getPascalHelper, getPascalRuntimeSource} from './runtime-library.js';
 
 export {parsePascalModule};
-export {tokenizePascal, PascalError, PASCAL_KEYWORDS} from './lexer.js';
+export {tokenizePascal, PascalError, PASCAL_KEYWORDS};
 
 const key = value => String(value).toLowerCase();
 const identifier = name => `[${String(name).replaceAll(']', '')}]`;
@@ -96,7 +97,8 @@ export class PascalLowerer {
       const symbol = this.memberSymbol(node, context); if (symbol) return symbol.kind === 'procedure' ? symbol.returnType || PASCAL_TYPES.variant : symbol.type;
       const type = this.typeOf(node.object, context), field = type.fields?.get(key(node.name));
       if (type.kind === 'record' && !field) this.fail(`Record '${type.name}' has no field '${node.name}'`, node, 'TP_UNKNOWN_FIELD');
-      return field?.type || PASCAL_TYPES.variant;
+      const member = type.catalogName ? builtinType(type.catalogName)?.members.find(value => key(value.name) === key(node.name)) : null;
+      return field?.type || (member ? foreignType(member.type) : PASCAL_TYPES.variant);
     }
     if (node.kind === 'index') {
       const type = this.typeOf(node.object, context);
@@ -128,8 +130,8 @@ export class PascalLowerer {
       if (['succ', 'pred', 'abs', 'sqr'].includes(name) && node.args.length) return this.typeOf(node.args[0], context);
       if (name === 'random' && node.args.length) return PASCAL_TYPES.integer;
       if (name && INTRINSIC_TYPES[name]) return PASCAL_TYPES[INTRINSIC_TYPES[name]];
-      if (node.callee.kind === 'member' && this.typeOf(node.callee.object, context).kind !== 'record') return PASCAL_TYPES.variant;
-      if (symbol?.kind === 'external') return PASCAL_TYPES.variant;
+      if (node.callee.kind === 'member' && this.typeOf(node.callee.object, context).kind !== 'record') return this.typeOf(node.callee, context);
+      if (symbol?.kind === 'external') return symbol.type;
       this.fail(`Unknown Pascal function '${name || node.callee.name || '<expression>'}'`, node, 'TP_UNKNOWN_ROUTINE');
     }
     if (node.kind === 'formatted') return this.typeOf(node.value, context);
@@ -137,7 +139,9 @@ export class PascalLowerer {
   }
   ordinal(node, context) {const type = this.typeOf(node, context), value = this.expression(node, context); return ['char', 'boolean'].includes(type.kind) || type.kind === 'subrange' && ['char', 'boolean'].includes(type.base.kind) ? this.callHelper('ord', [value]) : value;}
   range(value, type, context, node) {
+    if (type.foreign) return value;
     if (type.kind === 'string') return this.callHelper('shortString', [value, number(type.capacity)]);
+    if (type.kind === 'real' && type.name === 'Real') return this.callHelper('real48', [value]);
     if (type.kind === 'ordinal' || type.kind === 'subrange' && isNumeric(type.base)) {
       if (type.kind === 'subrange' && this.flag('rangeChecks', node)) {const temporary = this.temporary(context, PASCAL_TYPES.longint, node, 'range'); this.emit(context, `${temporary} = ${value}`, node, true); this.emit(context, `If ${temporary} < ${number(type.low)} Or ${temporary} > ${number(type.high)} Then Err.Raise 201, "Turbo Pascal", "Subrange check failed"`, node, true); value = temporary;}
       return this.callHelper('ordinal', [value, number(type.bits), bool(type.signed), bool(this.flag('rangeChecks', node))]);

@@ -1,5 +1,6 @@
 import {PascalError} from './lexer.js';
 import {parsePascalModule} from './parser.js';
+import {builtinType, BUILTIN_SYMBOLS, CONSTANT_SYMBOLS} from '../type-catalog.js';
 
 const key = value => String(value).toLowerCase();
 export const PASCAL_TYPES = Object.freeze({
@@ -20,6 +21,14 @@ export const isOrdinal = type => ORDINAL_KINDS.has(type?.kind);
 export const isString = type => ['char', 'string'].includes(type?.kind);
 export const isNumeric = type => ['ordinal', 'subrange', 'real'].includes(type?.kind);
 export const isAggregate = type => ['array', 'record'].includes(type?.kind);
+export function foreignType(name = 'Variant') {
+  const normalized = key(name), primitive = {long: 'longint', integer: 'integer', byte: 'byte', boolean: 'boolean', single: 'single', double: 'double', string: 'string', variant: 'variant'}[normalized];
+  if (primitive) return {...PASCAL_TYPES[primitive], foreign: true};
+  if (/constants$|enum$|^vb/i.test(name) && !builtinType(name)) return {...PASCAL_TYPES.longint, foreign: true};
+  return {kind: 'object', name, vb: 'Object', catalogName: name, foreign: true};
+}
+const basicIntrinsics = new Map(BUILTIN_SYMBOLS.map(symbol => [key(symbol.name), symbol]));
+const basicConstants = new Map(CONSTANT_SYMBOLS.map(symbol => [key(symbol.name), symbol]));
 export function numericType(left, right) {
   if (left?.kind === 'real' || right?.kind === 'real') return PASCAL_TYPES.real;
   if (left?.bits === 32 || right?.bits === 32 || left?.kind === 'variant' || right?.kind === 'variant') return PASCAL_TYPES.longint;
@@ -61,9 +70,11 @@ export class PascalScope {
     for (const binder of this.owner.imports) {binder.ensure(); const symbol = binder.scope.symbols.get(key(name)); if (symbol?.public) imported.push(binder.resolveSymbol(symbol));}
     if (imported.length > 1) this.owner.fail(`Ambiguous imported identifier '${name}'`, node, 'TP_AMBIGUOUS');
     if (imported.length) return imported[0];
-    if (this.owner.controls.has(key(name))) return {kind: 'control', name, vbName: name, owner: this.owner, scope: this, type: PASCAL_TYPES.object};
-    if (this.owner.externalValues.has(key(name))) return {kind: 'external', name, vbName: name, owner: this.owner, scope: this, type: PASCAL_TYPES.variant};
-    if (key(name) === 'self' && this.owner.input.form) return {kind: 'control', name, vbName: 'Me', owner: this.owner, scope: this, type: PASCAL_TYPES.object};
+    if (this.owner.controls.has(key(name))) return {kind: 'control', name, vbName: name, owner: this.owner, scope: this, type: foreignType(this.owner.controlTypes.get(key(name)) || 'Control')};
+    if (this.owner.externalValues.has(key(name))) return {kind: 'external', name, vbName: name, owner: this.owner, scope: this, type: this.owner.externalTypes.get(key(name)) || PASCAL_TYPES.variant};
+    if (key(name) === 'self' && this.owner.input.form) return {kind: 'control', name, vbName: 'Me', owner: this.owner, scope: this, type: foreignType(this.owner.input.form.type || 'Form')};
+    const constant = basicConstants.get(key(name)); if (constant) return {kind: 'constant', name: constant.name, value: constant.value, type: foreignType(constant.type), builtIn: true};
+    const intrinsic = basicIntrinsics.get(key(name)); if (intrinsic && !this.owner.pascalIntrinsics.has(key(name))) return {kind: 'external', name: intrinsic.name, vbName: intrinsic.name, type: foreignType(intrinsic.type), owner: this.owner, scope: this};
     if (required) this.owner.fail(`Unknown identifier '${name}'`, node, 'TP_UNKNOWN_IDENTIFIER');
     return null;
   }
@@ -87,9 +98,13 @@ export class PascalBinder {
   constructor(ast, input, workspace = new PascalWorkspace()) {
     this.ast = ast; this.input = input || {name: ast.name, code: ast.source}; this.name = this.input.name || ast.name; this.workspace = workspace;
     this.scope = new PascalScope(this); this.imports = []; this.procedures = []; this.recordTypes = []; this.enumTypes = []; this.typeId = 0; this.ready = false; this.preparing = false;
-    this.controls = new Set(); this.externalValues = new Set(['me', 'app', 'screen', 'clipboard', 'forms', 'printer', 'debug']);
-    const controls = node => {if (!node) return; if (node.name) this.controls.add(key(node.name)); for (const child of node.controls || []) controls(child);}; controls(input?.form);
-    for (const module of workspace.project?.modules || []) if (module.form) this.controls.add(key(module.name));
+    this.controls = new Set(); this.controlTypes = new Map(); this.externalValues = new Set(['me', 'app', 'screen', 'clipboard', 'forms', 'printer', 'debug']); this.externalTypes = new Map();
+    this.pascalIntrinsics = new Set('abs arctan chr concat copy cos delete dispose eof eoln exp frac get high include exclude inc dec insert int ioresult length ln low new odd ord paramcount paramstr pi pos pred put random randomize read readln reset rewrite round seek sin sizeof sqr sqrt str succ trunc upcase val write writeln'.split(' '));
+    const controls = node => {if (!node) return; if (node.name) {this.controls.add(key(node.name)); this.controlTypes.set(key(node.name), node.type || 'Control');} for (const child of [...(node.controls || []), ...(node.menus || [])]) controls(child);}; controls(input?.form);
+    for (const module of workspace.project?.modules || []) if (module.form) {this.controls.add(key(module.name)); this.controlTypes.set(key(module.name), module.form.type || 'Form');}
+    for (const [name, type] of Object.entries({me: input?.form?.type || 'Form', app: 'App', screen: 'Screen', clipboard: 'Clipboard', forms: 'Forms', printer: 'Printer', debug: 'Debug'})) this.externalTypes.set(name, foreignType(type));
+    if (input?.form) for (const member of builtinType(input.form.type || 'Form')?.members || []) {this.externalValues.add(key(member.name)); this.externalTypes.set(key(member.name), foreignType(member.type));}
+    if (input?.form) for (const property of [...Object.keys(input.form.properties || {}), ...'Caption Name Tag Left Top Width Height ClientWidth ClientHeight Visible Enabled BackColor ForeColor Font MousePointer MouseIcon WindowState BorderStyle ScaleMode ScaleWidth ScaleHeight ScaleLeft ScaleTop CurrentX CurrentY AutoRedraw DrawMode DrawStyle DrawWidth FillColor FillStyle ClipControls KeyPreview ControlBox MaxButton MinButton ShowInTaskbar Picture Icon hWnd Controls ActiveControl Parent Move Show Hide Refresh Cls Print PSet Line Circle Point PaintPicture SetFocus PopupMenu'.split(' ')]) this.externalValues.add(key(property));
     for (const [name, type] of Object.entries(PASCAL_TYPES)) this.scope.define({kind: 'type', name, type, builtIn: true, public: false});
     for (const [name, value, type] of [['MaxInt', 32767, PASCAL_TYPES.integer], ['MaxLongInt', 2147483647, PASCAL_TYPES.longint], ['Pi', Math.PI, PASCAL_TYPES.real]]) this.scope.define({kind: 'constant', name, value, type, vbName: name, builtIn: true, public: false});
   }
