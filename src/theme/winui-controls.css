@@ -213,7 +213,7 @@
   width:var(--winui-ComboArrowWidth,var(--detail-combo-arrow-width,17px));min-width:var(--winui-ComboArrowWidth,var(--detail-combo-arrow-width,17px));
   border:var(--winui-ComboArrowBorder,0);border-radius:var(--winui-ComboArrowRadius,var(--detail-combo-arrow-radius,0));
   background:var(--winui-ComboArrowBackground,var(--detail-combo-fill,var(--vb-face)));
-  color:var(--winui-ComboGlyph,var(--vb-text));box-shadow:var(--winui-ComboArrowShadow,var(--app-control-shadow,var(--vb-bevel-raised)));
+  color:var(--winui-ComboGlyph,inherit);box-shadow:var(--winui-ComboArrowShadow,var(--app-control-shadow,var(--vb-bevel-raised)));
  }
  .vb-classic-combo:not(.simple)>.vb-combo-arrow:active:not(:disabled) {box-shadow:var(--winui-ComboArrowShadow,var(--app-pressed-shadow,var(--vb-bevel-pressed)));}
  .vb-classic-combo:not(.simple)>.vb-combo-arrow:disabled {color:var(--winui-ComboGlyphDisabled,var(--vb-gray));}
