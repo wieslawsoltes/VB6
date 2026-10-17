@@ -291,6 +291,15 @@ theme dictionaries. A ThemeResource font family or weight preserves all theme
 branches just like a directly authored font property; family aliases and exact
 numeric weights are validated when assigned to an implemented text target.
 
+Automatic Hug sizing and text baselines use the resolved font family, DIP size
+and numeric weight for the existing measured Label, CommandButton, TextBox,
+CheckBox and OptionButton models. Supported button/text-field box padding and
+border thickness are measured together, including nonuniform insets and the
+ToggleButton bridge. Constrained wrapping retains the live resource snapshot.
+Paint-only changes reuse the measured size, and none of these resolved values
+overwrite authored properties. Rich-text runs and other unmeasured control
+families retain their existing authored-size fallback.
+
 ### Brush geometry
 
 SolidColorBrush supports Color and scalar Opacity. Alpha is combined in XAML
