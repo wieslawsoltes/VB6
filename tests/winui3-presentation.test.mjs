@@ -102,6 +102,12 @@ test('unsupported gradient geometry and executable brush payloads fail before re
     const brush=gradient();change(brush);assert.throws(()=>validateWinUI3Brush(brush));
   }
   assert.throws(()=>validateWinUI3Brush(gradient(),{foreground:true}),/Background and BorderBrush/);
+  assert.throws(()=>validateWinUI3Appearance({version:1,sourceType:'Slider',properties:{Background:gradient()}},'Slider'),/Slider track brushes/);
+});
+test('composite foreground states are valid on native check boxes and stay excluded from radio buttons',()=>{
+  const metadata={version:1,sourceType:'CheckBox',states:{Checked:{Foreground:'#FF123456'},IndeterminateDisabled:{Foreground:'#FF654321'}}};
+  validateWinUI3Appearance(metadata,'CheckBox');
+  assert.throws(()=>validateWinUI3Appearance({...metadata,sourceType:'RadioButton'},'OptionButton'),/ToggleButton or CheckBox/);
 });
 test('state resources stay scoped by theme and explicit native color edits release every matching state',()=>{
   const value=appearance();value.states={PointerOver:{Background:{key:'Hover',values:{Light:'#80402010',Dark:'#80001020'}},Foreground:'#FF000000'},

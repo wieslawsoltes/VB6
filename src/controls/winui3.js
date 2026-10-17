@@ -8,6 +8,7 @@ const documents=new WeakMap(),bindings=new WeakMap();
 const own=(object,key)=>Object.hasOwn(object,key);
 const isInputBackground=c=>c.input&&!['Slider','CheckBox','OptionButton','UpDown'].includes(c.type);
 const isLayoutContainer=c=>c.anchoring&&['Form','MDIForm','PictureBox','Frame'].includes(c.type);
+const usesTrackBrushes=c=>['Slider','ProgressBar'].includes(c.type);
 const stateEvents=['pointerover','pointerout','pointerdown','pointerup','pointercancel','focusin','focusout','keydown','keyup','change','input','click'];
 
 function themeFor(c,state) {
@@ -117,6 +118,7 @@ function apply(c,state) {
   const theme=themeFor(c,state),values=winui3ThemeValues(appearance,theme),states=winui3StateValues(appearance,theme);
   const reduceMotion=state.environment.snapshot.reducedMotion||n.closest('[data-vb-reduce-motion]')?.getAttribute('data-vb-reduce-motion')==='true';
   writeThemeAttributes(n,{'data-winui-effective-theme':theme,'data-winui-state-paint':Object.keys(states).length?'true':null,
+    'data-winui-composite-state':Object.keys(states).some(name=>/^(Checked|Indeterminate)/.test(name))?'true':null,
     'data-winui-focused-state':states.Focused?'true':null,'data-winui-reduce-motion':String(!!reduceMotion)});
   c.winui3Values=values;c.winui3States=states;
   if(isLayoutContainer(c)&&setWinUI3LayoutValues(c.props,values))
@@ -129,7 +131,12 @@ function apply(c,state) {
     paint(c,body,'border-color','transparent',true);paint(c,body,'box-shadow','none',true);
     if(!own(values,'Background'))paint(c,body,'background','transparent');
   }
-  if(statePaint(c,isInputBackground(c)?c.input:body,'Background','background',values.Background,states)) {
+  if(usesTrackBrushes(c)) {
+    // Native Slider/ProgressBar template bindings color the track and value,
+    // not a rectangle behind the entire authored control bounds.
+    statePaint(c,c.type==='Slider'?c.input:c.track,'Background',c.type==='Slider'?'--winui-range-track':'--winui-ProgressTrack',values.Background,states);
+    statePaint(c,c.type==='Slider'?c.input:c.fill,'Foreground',c.type==='Slider'?'--winui-range-value':'background',values.Foreground,states);
+  } else if(statePaint(c,isInputBackground(c)?c.input:body,'Background','background',values.Background,states)) {
     // One paint plane: a translucent field must not be composited a second time
     // against an identically colored host.
     if(isInputBackground(c))paint(c,n,'background','transparent');
@@ -140,7 +147,7 @@ function apply(c,state) {
     }
   }
   else if(c.surface)c.surface.setPresentationBackground(null);
-  if(statePaint(c,n,'Foreground','color',values.Foreground,states)&&c.input)
+  if(!usesTrackBrushes(c)&&statePaint(c,n,'Foreground','color',values.Foreground,states)&&c.input)
     paint(c,c.input,'color','var(--winui3-active-Foreground, var(--winui3-Normal-Foreground))',true);
   const borderHost=isInputBackground(c)?c.input:body;
   borderPaint(c,borderHost,values,states);
@@ -233,7 +240,7 @@ export function disposeWinUI3Control(c) {
     (c.form||c).layoutController?.edit(c,'WinUI3');
   writeThemeAttributes(c.node,{'data-winui-control':null,'data-winui-requested-theme':null,
     'data-winui-effective-theme':null,'data-winui-style':null,'data-winui-indeterminate':null,'data-winui-has-header':null,
-    'data-winui-system-focus':null,'data-winui-custom-focus':null,'data-winui-state-paint':null,'data-winui-focused-state':null,
+    'data-winui-system-focus':null,'data-winui-custom-focus':null,'data-winui-state-paint':null,'data-winui-composite-state':null,'data-winui-focused-state':null,
     'data-winui-reduce-motion':null});
   if(c.surface&&!c.surface.disposed){c.surface.setPresentationBackground(null);c.surface.background=c.props.BackColor;}
   if(c.input&&c.type==='CheckBox')writeThemeAttributes(c.input,{role:null,'aria-checked':null,'aria-pressed':null,'aria-label':c.props.Caption||c.model.name});
@@ -248,7 +255,7 @@ export function winui3PresentationDiagnostics(document) {
   const state=documents.get(document);return Object.freeze({controls:state?.controls.size??0,themeListeners:state?1:0});
 }
 export function winui3ControlBackground(c,fallback) {
-  if(c.surface&&(c.winui3Values?.Background!==undefined||Object.values(c.winui3States??{}).some(values=>own(values,'Background')))) {
+  if(c.surface&&!usesTrackBrushes(c)&&(c.winui3Values?.Background!==undefined||Object.values(c.winui3States??{}).some(values=>own(values,'Background')))) {
     refreshSurfaceBackground(c);
     if(isInputBackground(c))paint(c,c.input,'background','transparent');
     paint(c,c.content||c.node,'background','transparent');
@@ -256,7 +263,7 @@ export function winui3ControlBackground(c,fallback) {
   return fallback;
 }
 function refreshSurfaceBackground(c) {
-  if(!c.surface||c.surface.disposed||!c.props.WinUI3)return;
+  if(!c.surface||c.surface.disposed||!c.props.WinUI3||usesTrackBrushes(c))return;
   const {container,canvas,gpuCanvas}=c.surface;
   // Mnemonic/caption refreshes can replace the host's children. Keep the same
   // surface and retained command stream attached to its original control.

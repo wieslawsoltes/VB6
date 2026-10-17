@@ -87,6 +87,7 @@ function valueFor(key,value,type) {
   if(!propertyNames.has(key))fail('Unsupported WinUI presentation property: '+key+'.');
   if(brushes.has(key)) {
     validateWinUI3Brush(value,{foreground:key==='Foreground'});
+    if(type==='Slider'&&typeof value!=='string')fail('Slider track brushes currently require solid colors.');
   } else if(thicknesses.has(key)) {
     if(!Array.isArray(value) || value.length!==4 || value.some(v=>typeof v!=='number'||!Number.isFinite(v)||v<(key==='FocusVisualMargin'?-20000:0)||v>20000))
       fail(key+' requires four finite DIP values in range.');
@@ -135,7 +136,7 @@ export function validateWinUI3Appearance(value,type) {
   }
   for(const [state,entries] of Object.entries(record(value.states??{},'WinUI states'))) {
     if(!states.has(state))fail('Unsupported WinUI visual state: '+state+'.');
-    if(/^(Checked|Indeterminate)/.test(state)&&value.sourceType!=='ToggleButton')fail('Checked and indeterminate template states require a ToggleButton.');
+    if(/^(Checked|Indeterminate)/.test(state)&&!['ToggleButton','CheckBox'].includes(value.sourceType))fail('Checked and indeterminate template states require a ToggleButton or CheckBox.');
     for(const [key,item] of Object.entries(record(entries,'WinUI state values'))) {
       if(!brushes.has(key))fail('Unsupported WinUI state target: '+key+'.');
       if(item&&typeof item==='object'&&own(item,'values'))resourceFor(key,item,type);
