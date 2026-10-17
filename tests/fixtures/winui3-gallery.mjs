@@ -16,21 +16,25 @@ export const WINUI3_GALLERY_XAML=`<Page xmlns="http://schemas.microsoft.com/winf
           <SolidColorBrush x:Key="PageBrush" Color="#FF202020"/>
           <SolidColorBrush x:Key="PanelBrush" Color="#C0406080"/>
           <SolidColorBrush x:Key="InkBrush" Color="#FFE8EDF5"/>
+          <FontFamily x:Key="DocumentFont">Courier New</FontFamily><x:Double x:Key="DocumentSize">20</x:Double><FontWeight x:Key="DocumentWeight">Bold</FontWeight>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
           <SolidColorBrush x:Key="PageBrush" Color="#FFF3F3F3"/>
           <SolidColorBrush x:Key="PanelBrush" Color="#80402010"/>
           <SolidColorBrush x:Key="InkBrush" Color="#FF102040"/>
+          <FontFamily x:Key="DocumentFont">Arial</FontFamily><x:Double x:Key="DocumentSize">14</x:Double><FontWeight x:Key="DocumentWeight">Normal</FontWeight>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="PageBrush" Color="#FF202020"/>
           <SolidColorBrush x:Key="PanelBrush" Color="#C0406080"/>
           <SolidColorBrush x:Key="InkBrush" Color="#FFE8EDF5"/>
+          <FontFamily x:Key="DocumentFont">Courier New</FontFamily><x:Double x:Key="DocumentSize">20</x:Double><FontWeight x:Key="DocumentWeight">Bold</FontWeight>
         </ResourceDictionary>
         <ResourceDictionary x:Key="HighContrast">
           <SolidColorBrush x:Key="PageBrush" Color="#FF000000"/>
           <SolidColorBrush x:Key="PanelBrush" Color="#8000FF00"/>
           <SolidColorBrush x:Key="InkBrush" Color="#FFFFFF00"/>
+          <FontFamily x:Key="DocumentFont">Arial</FontFamily><x:Double x:Key="DocumentSize">18</x:Double><FontWeight x:Key="DocumentWeight">SemiBold</FontWeight>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
       <LinearGradientBrush x:Key="PreviewGradient" StartPoint="0,0" EndPoint="0,1">
@@ -41,14 +45,17 @@ export const WINUI3_GALLERY_XAML=`<Page xmlns="http://schemas.microsoft.com/winf
   </Page.Resources>
   <Canvas x:Name="Layout" Width="920" Height="700" Background="{ThemeResource PageBrush}">
     <!-- Preserve the resources, vocabulary, comments and handlers through Inspector edits. -->
-    <TextBlock x:Name="Heading" Canvas.Left="24" Canvas.Top="20" Width="850" Height="32" FontSize="24" Text="WinUI 3 imported XAML" Foreground="{ThemeResource InkBrush}"/>
+    <TextBlock x:Name="Heading" Canvas.Left="24" Canvas.Top="20" Width="850" Height="32" FontSize="24" FontWeight="500" Text="WinUI 3 imported XAML" Foreground="{ThemeResource InkBrush}"/>
     <TextBox x:Name="LiveText" Canvas.Left="24" Canvas.Top="72" Width="330" Height="32" Text="Ready" FontFamily="Courier New" FontSize="16" Padding="6,4,6,4" CornerRadius="4" Background="{ThemeResource PanelBrush}" Foreground="{ThemeResource InkBrush}" TextChanged="LiveText_Change"/>
     <Canvas x:Name="MovingScope" Canvas.Left="380" Canvas.Top="72" Width="240" Height="32">
       <TextBox x:Name="PaintSample" Canvas.Left="0" Canvas.Top="0" Width="240" Height="32" Text="Live alpha brush" Background="{ThemeResource PanelBrush}" Foreground="{ThemeResource InkBrush}"/>
     </Canvas>
     <TextBlock x:Name="TextStatus" Canvas.Left="640" Canvas.Top="76" Width="240" Height="24" Text="0:Ready" Tag="0"/>
     <Canvas x:Name="ShadowScope" Canvas.Left="24" Canvas.Top="134" Width="300" Height="110">
-      <Canvas.Resources><SolidColorBrush x:Key="PanelBrush" Color="#802060A0"/></Canvas.Resources>
+      <Canvas.Resources>
+        <SolidColorBrush x:Key="PanelBrush" Color="#802060A0"/>
+        <SolidColorBrush x:Key="TextControlForeground" Color="#FF5123A8"/>
+      </Canvas.Resources>
       <TextBlock x:Name="ScopeHeading" Canvas.Left="12" Canvas.Top="4" Width="275" Height="22" Text="Local resource shadows Page" Foreground="#FF0000FF"/>
       <TextBox x:Name="ShadowText" Canvas.Left="12" Canvas.Top="34" Width="260" Height="32" Text="Local brush" Background="{ThemeResource PanelBrush}"/>
     </Canvas>
@@ -84,7 +91,7 @@ export const WINUI3_GALLERY_XAML=`<Page xmlns="http://schemas.microsoft.com/winf
     </Canvas>
     <TextBlock x:Name="ActionStatus" Canvas.Left="340" Canvas.Top="562" Width="520" Height="28" Text="No action"/>
     <Button x:Name="ReleaseColor" Canvas.Left="24" Canvas.Top="598" Width="230" Height="32" Content="Use explicit VB color" Click="ReleaseColor_Click"/>
-    <RichEditBox x:Name="RichDocument" Canvas.Left="380" Canvas.Top="606" Width="240" Height="42" Background="{ThemeResource PanelBrush}"/>
+    <RichEditBox x:Name="RichDocument" Canvas.Left="380" Canvas.Top="606" Width="240" Height="42" Background="{ThemeResource PanelBrush}" Foreground="{ThemeResource InkBrush}" FontFamily="{ThemeResource DocumentFont}" FontSize="{ThemeResource DocumentSize}" FontWeight="{ThemeResource DocumentWeight}"/>
     <TextBlock Canvas.Left="24" Canvas.Top="660" Width="840" Height="26" Text="Source-backed browser compatibility. Native Windows pixel parity is a separate acceptance target." TextWrapping="Wrap"/>
   </Canvas>
 </Page>`;

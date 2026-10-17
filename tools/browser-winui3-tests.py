@@ -250,6 +250,26 @@ class WinUI3Acceptance(unittest.TestCase):
         self.assert_identity()
         self.done()
 
+    def test_native_normal_foreground_uses_requested_theme_and_scoped_resources(self):
+        # A control's native normal-state Foreground must use the same resource
+        # scope as its PointerOver/Focused states. Legacy host-level OLE colors
+        # produce unreadable black-on-dark or white-on-light nested inputs.
+        for theme in ('fluent', 'fluent-dark', 'fluent'):
+            self.theme(theme)
+            self.page.mouse.move(1400, 1000)
+            for name, expected in (('DarkText', '#ffffffff'),
+                                   ('ScopeChoices', '#ffffffff'),
+                                   ('LightText', '#000000e4')):
+                field = self.field(name)
+                self.expect_color(field, 'color', expected)
+                field.hover()
+                self.expect_color(field, 'color', expected)
+                self.page.mouse.move(1400, 1000)
+                self.expect_color(field, 'color', expected)
+            self.expect_color(self.field('ShadowText'), 'color', '#5123a8')
+        self.assert_identity()
+        self.done()
+
     def test_child_textblock_keeps_explicit_foreground_when_parent_changes_state(self):
         self.page.mouse.move(1400, 1000)
         self.set_control('ShadowScope', {'WinUI3': {
@@ -275,6 +295,7 @@ class WinUI3Acceptance(unittest.TestCase):
         self.page.mouse.move(1400, 1000)
         self.page.evaluate('''async () => {
             const surface=winuiControls.StateButton.ensureSurface();
+            window.retainedButtonCanvas=surface.canvas;
             surface.add('rect',[7,7,13,13],255,true);
             await surface.flush();
         }''')
@@ -305,6 +326,66 @@ class WinUI3Acceptance(unittest.TestCase):
         assert_painted_state((120, 120, 120))
         self.theme('fluent-dark')
         assert_painted_state((120, 120, 120))
+        self.set_control('StateButton', {'Enabled': -1, 'Caption': 'Retained caption'})
+        assert_painted_state((190, 34, 102))
+        self.assertTrue(self.page.evaluate('''() => {
+            const c=winuiControls.StateButton;
+            return c.surface.canvas===retainedButtonCanvas&&retainedButtonCanvas.parentElement===c.node;
+        }'''))
+        expect(button).to_have_text('Retained caption')
+        # The caption must remain visible above the backing canvas. A DOM text
+        # assertion alone would miss an opaque canvas covering every glyph.
+        pixels = Image.open(io.BytesIO(button.screenshot())).convert('RGB')
+        center = pixels.crop((24, 6, pixels.width - 24, pixels.height - 6))
+        channels = center.tobytes()
+        white_glyphs = sum(r > 200 and g > 150 and b > 200
+                           for r, g, b in zip(channels[0::3], channels[1::3], channels[2::3]))
+        self.assertGreater(white_glyphs, 30, 'Caption glyphs paint above retained background')
+
+        text, rich = self.field('PaintSample'), self.control('RichDocument').get_by_role('textbox')
+        text.fill('Surface input')
+        rich.fill('Surface document')
+        self.field('LiveText').focus()
+        self.page.mouse.move(1400, 1000)
+        self.theme('fluent')
+        self.page.evaluate('''async () => {
+            for(const name of ['PaintSample','RichDocument']) {
+                const surface=winuiControls[name].ensureSurface();
+                surface.add('rect',[7,7,13,13],255,true);await surface.flush();
+            }
+        }''')
+
+        def assert_field_paint(name, rgba, blended):
+            self.page.wait_for_function('''([name,rgba])=>{
+                const p=winuiControls[name].surface.readPixels(215,15,1,1).data;
+                return rgba.every((value,index)=>Math.abs(p[index]-value)<=1);
+            }''', arg=[name, list(rgba)])
+            pixels = Image.open(io.BytesIO(self.control(name).screenshot())).convert('RGB')
+            for actual, expected in zip(pixels.getpixel((pixels.width - 12, pixels.height // 2)), blended):
+                self.assertAlmostEqual(actual, expected, delta=2)
+            self.assertEqual(self.page.evaluate('''name=>
+                [...winuiControls[name].surface.readPixels(10,10,1,1).data]''', name), [255, 0, 0, 255])
+
+        for theme, rgba, blended in (
+                ('fluent', (64, 32, 16, 128), (153, 137, 129)),
+                ('fluent-dark', (64, 96, 128, 192), (56, 80, 104))):
+            self.theme(theme)
+            for name in ('PaintSample', 'RichDocument'):
+                assert_field_paint(name, rgba, blended)
+        self.theme('fluent')
+        text.focus()
+        text.hover()
+        self.page.mouse.down()
+        try:
+            expect(text).to_be_focused()
+            self.assertTrue(self.control('PaintSample').evaluate('e=>e.matches(":active")'))
+            assert_field_paint('PaintSample', (255, 255, 255, 255), (255, 255, 255))
+            self.theme('fluent-dark')
+            assert_field_paint('PaintSample', (30, 30, 30, 179), (31, 31, 31))
+        finally:
+            self.page.mouse.up()
+        expect(text).to_have_value('Surface input')
+        expect(rich).to_have_text('Surface document')
         self.assert_identity()
         self.done()
 
@@ -312,12 +393,22 @@ class WinUI3Acceptance(unittest.TestCase):
         editor = self.control('RichDocument').get_by_role('textbox', name='RichDocument', exact=True)
         retained = editor.element_handle()
         editor.fill('Retained rich draft')
+        self.page.evaluate('''() => {
+            const c=winuiControls.RichDocument;c.SelStart=0;c.SelLength=8;
+            c.SelColor=255;c.SelFontName='Tahoma';c.SelFontSize=12;c.SelBold=0;
+            c.SelStart=10;c.SelLength=5;
+        }''')
         self.field('LiveText').focus()
         self.page.mouse.move(1400, 1000)
-        for theme, brush, blended in (
-                ('fluent', LIGHT_BRUSH, (153, 137, 129)),
-                ('fluent-dark', DARK_BRUSH, (56, 80, 104)),
-                ('fluent', LIGHT_BRUSH, (153, 137, 129))):
+        capture = '''() => {
+            const c=winuiControls.RichDocument;
+            return JSON.stringify({state:c.rich.capture(),rtf:c.TextRTF,undo:c.rich.undoStack,redo:c.rich.redoStack});
+        }'''
+        history = self.page.evaluate(capture)
+        for theme, brush, blended, ink, family, size, weight in (
+                ('fluent', LIGHT_BRUSH, (153, 137, 129), 'rgb(16, 32, 64)', 'Arial', '14px', '400'),
+                ('fluent-dark', DARK_BRUSH, (56, 80, 104), 'rgb(232, 237, 245)', 'Courier New', '20px', '700'),
+                ('fluent', LIGHT_BRUSH, (153, 137, 129), 'rgb(16, 32, 64)', 'Arial', '14px', '400')):
             self.theme(theme)
             self.expect_color(editor, 'background-color', brush)
             pixels = Image.open(io.BytesIO(editor.screenshot())).convert('RGB')
@@ -326,6 +417,26 @@ class WinUI3Acceptance(unittest.TestCase):
             expect(editor).to_have_text('Retained rich draft')
             self.assertEqual(self.page.evaluate('winuiControls.RichDocument.get("Text")'), 'Retained rich draft')
             self.assertTrue(retained.evaluate('e=>e===winuiControls.RichDocument.input'))
+            # Inspect the elements that paint the actual glyphs. Input color
+            # alone cannot detect inline run styles stuck on an earlier theme.
+            runs = editor.evaluate('''e=>{
+                const walker=document.createTreeWalker(e,NodeFilter.SHOW_TEXT),runs=[];
+                while(walker.nextNode())if(walker.currentNode.textContent) {
+                    const s=getComputedStyle(walker.currentNode.parentElement);
+                    runs.push({text:walker.currentNode.textContent,color:s.color,fontFamily:s.fontFamily,
+                        fontSize:s.fontSize,fontWeight:s.fontWeight});
+                }
+                return runs;
+            }''')
+            explicit = next(run for run in runs if run['text'] == 'Retained')
+            inherited = next(run for run in runs if run['text'] == ' rich draft')
+            self.assertEqual(explicit['color'], 'rgb(255, 0, 0)')
+            self.assertIn('Tahoma', explicit['fontFamily'])
+            self.assertEqual((explicit['fontSize'], explicit['fontWeight']), ('16px', '400'))
+            self.assertEqual(inherited['color'], ink)
+            self.assertIn(family, inherited['fontFamily'])
+            self.assertEqual((inherited['fontSize'], inherited['fontWeight']), (size, weight))
+            self.assertEqual(self.page.evaluate(capture), history, 'Theme changes preserve rich document, selection, RTF and undo history')
         self.assert_identity()
         self.done()
 
@@ -386,6 +497,7 @@ class WinUI3Acceptance(unittest.TestCase):
         expect(switch).to_be_checked()
         expect(self.control('Notifications').locator('.vb-winui-switch-header')).to_have_text('Notifications')
         self.assertIn('Enabled', self.control('Notifications').inner_text())
+        self.expect_color(self.control('Notifications'), 'color', '#000000e4')
         switch.press('Space')
         expect(switch).not_to_be_checked()
         expect(switch).to_have_attribute('aria-checked', 'false')
@@ -396,10 +508,12 @@ class WinUI3Acceptance(unittest.TestCase):
         expect(self.control('ToggleStatus')).to_have_text('2:1')
         self.set_control('Notifications', {'Enabled': 0})
         expect(switch).to_be_disabled()
+        self.expect_color(self.control('Notifications'), 'color', '#0000005c')
         switch.evaluate('e=>e.click()')
         self.idle()
         expect(self.control('ToggleStatus')).to_have_text('2:1')
         self.set_control('Notifications', {'Enabled': -1})
+        self.expect_color(self.control('Notifications'), 'color', '#000000e4')
 
         toggle = self.field('Pin')
         expect(toggle).to_have_attribute('role', 'button')
@@ -518,6 +632,26 @@ class WinUI3Acceptance(unittest.TestCase):
             self.page.mouse.up()
         self.set_control('StateButton', {'Enabled': 0})
         expect(state).to_have_css('background-color', 'rgb(120, 120, 120)')
+        self.page.mouse.move(1400, 1000)
+        for name, source_type in (('Gain', 'Slider'), ('Progress', 'ProgressBar')):
+            self.set_control(name, {'WinUI3': {
+                'version': 1, 'sourceType': source_type,
+                'properties': {'Background': '#FF123456', 'Foreground': '#FFCC3300'}}})
+        # Native Slider/ProgressBar brushes target their track and value parts.
+        # A correctly colored root rectangle or text foreground would not
+        # produce these independent visible track/value pixels.
+        slider_pixels = Image.open(io.BytesIO(self.control('Gain').screenshot())).convert('RGB')
+        for position, expected in (((60, 16), (204, 51, 0)), ((270, 16), (18, 52, 86)),
+                                   ((300, 2), (243, 243, 243))):
+            for actual, channel in zip(slider_pixels.getpixel(position), expected):
+                self.assertAlmostEqual(actual, channel, delta=2)
+        track = self.control('Progress').locator('.vb-progress')
+        self.assertEqual(track.evaluate('e=>getComputedStyle(e,"::before").backgroundColor'), 'rgb(18, 52, 86)')
+        expect(self.control('Progress').locator('.vb-progress-fill')).to_have_css('background-color', 'rgb(204, 51, 0)')
+        progress_pixels = Image.open(io.BytesIO(self.control('Progress').screenshot())).convert('RGB')
+        for position, expected in (((50, 10), (204, 51, 0)), ((280, 2), (243, 243, 243))):
+            for actual, channel in zip(progress_pixels.getpixel(position), expected):
+                self.assertAlmostEqual(actual, channel, delta=2)
         self.theme('fluent-dark')
         self.page.screenshot(path=str(REPORT / 'dark-imported-gallery.png'))
         self.done()
@@ -604,6 +738,29 @@ class WinUI3Acceptance(unittest.TestCase):
         expect(editor).to_have_value(source)
         ide.evaluate('vb6Studio.command("redo")')
         expect(editor).to_have_value(edited)
+        ide.evaluate('''() => {
+            const heading=vb6Studio.activeModule.form.controls.find(c=>c.name==='Heading');
+            vb6Studio.designer.select([heading.id]);
+        }''')
+        heading = ide.locator('.designer-scroll [data-control="Heading"]')
+        expect(heading).to_have_css('font-weight', '500')
+        if ide.locator('select[data-property="FontBold"]').count() == 0:
+            ide.get_by_role('button', name='Expand Font', exact=True).click()
+        font_bold = ide.locator('select[data-property="FontBold"]')
+        expect(font_bold).to_have_value('0')
+        # Choosing the same VB Boolean takes ownership of a native medium
+        # weight that also lowered to False. The source must retain that edit.
+        font_bold.select_option('0')
+        expect(heading).to_have_css('font-weight', '400')
+        font_edited = editor.input_value()
+        self.assertNotEqual(font_edited, edited)
+        ide.evaluate('vb6Studio.command("undo")')
+        expect(editor).to_have_value(edited)
+        expect(heading).to_have_css('font-weight', '500')
+        ide.evaluate('vb6Studio.command("redo")')
+        expect(editor).to_have_value(font_edited)
+        expect(heading).to_have_css('font-weight', '400')
+        edited = font_edited
         saved = ide.evaluate('JSON.stringify(vb6Studio.project)')
         ide.evaluate('value=>vb6Studio.loadProject(JSON.parse(value))', saved)
         ide.evaluate('vb6Studio.xaml.open() && true')
