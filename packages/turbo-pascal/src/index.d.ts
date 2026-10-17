@@ -1,8 +1,8 @@
 export type SourceLanguage = 'vb6' | 'pascal';
 export interface SourceLocation {start:number; end:number; line:number; column:number; endLine:number; endColumn:number}
-export interface Diagnostic {severity:'error'|'warning'|'info'; message:string; source?:string; code?:string; number?:number; line:number; column:number}
+export interface Diagnostic {severity:'error'|'warning'|'info'; message:string; source?:string; code?:string; number?:number; line:number; column?:number}
 export interface PascalToken extends SourceLocation {type:string; value?:string|number; lower?:string; raw:string}
-export interface PascalTokens {tokens:PascalToken[]; comments:PascalToken[]; directives:PascalToken[]; diagnostics:Diagnostic[]}
+export interface PascalTokens extends Array<PascalToken> {readonly comments:PascalToken[]; readonly directives:PascalToken[]; readonly diagnostics:Diagnostic[]}
 export interface SourceModule {id?:string; name:string; kind?:'module'|'form'|'class'; language?:SourceLanguage; code:string; form?:FormModel; [key:string]:unknown}
 export interface FormModel {name:string; type:string; properties:Record<string,unknown>; controls:Record<string,unknown>[]; menus?:Record<string,unknown>[]; [key:string]:unknown}
 export interface SourceProject {schema:number; id?:string; name:string; language?:SourceLanguage; startup:string; modules:SourceModule[]; settings?:Record<string,unknown>; [key:string]:unknown}
