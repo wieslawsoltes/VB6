@@ -51,13 +51,13 @@ for(const [name,resources,usage,pattern] of [
  ['incompatible base',style('S',setter('Width',20),'TextBox')+style('D','','Button','BasedOn="{StaticResource S}"'),'<Button Style="{StaticResource D}"/>',/assignable/],
  ['style cycle',style('A','','Button','BasedOn="{StaticResource B}"')+style('B','','Button','BasedOn="{StaticResource A}"'),'<Button Style="{StaticResource A}"/>',/Cyclic/],
  ['duplicate setter',style('S',setter('Width',1)+setter('Width',2)),'<Button Style="{StaticResource S}"/>',/Duplicate/],
- ['unsupported setter',style('S',setter('Opacity',0.2)),'<Button Style="{StaticResource S}"/>',/lowering/],
+ ['unsupported setter',style('S',setter('RenderTransform','matrix')),'<Button Style="{StaticResource S}"/>',/lowering/],
  ['event setter',style('S',setter('Click','B_Click')),'<Button x:Name="B" Style="{StaticResource S}"/>',/setter|event/i],
  ['missing key','','<Button Width="{StaticResource Missing}"/>',/Unknown static resource/],
  ['invalid scalar','<x:String x:Key="W">oops</x:String>','<Button Width="{StaticResource W}"/>',/finite|length|number/i],
  ['theme value','<x:Double x:Key="W">20</x:Double>','<Button Width="{ThemeResource W}"/>',/ThemeResource/],
  ['external nested dictionary','<ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="https:\/\/example.invalid\/theme.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary>','<Button/>',/External/],
- ['translucent brush','<SolidColorBrush x:Key="B" Color="#123456" Opacity="0.7"/>','<Button Background="{StaticResource B}"/>',/opacity/],
+ ['transformed brush','<SolidColorBrush x:Key="B" Color="#123456" Transform="matrix"/>','<Button Background="{StaticResource B}"/>',/transforms/],
 ])test('diagnostic: '+name,()=>bad(styles(resources)+usage,pattern));
 
 test('static styles cannot alias a foreign namespace control by local type name',()=>{
@@ -82,10 +82,14 @@ test('explicit Auto is allowed only under an automatic layout parent',()=>{
 for(const [name,body,pattern] of [
  ['layout disabled','<Grid><Button Margin="1"/></Grid>',/Enable|automatic/],
  ['negative margin','<Grid><Button Margin="-1"/></Grid>',/Negative/],
- ['button padding','<Grid><Button Padding="2"/></Grid>',/Padding/],
- ['wrong stack alignment','<StackPanel><Button VerticalAlignment="Center"/></StackPanel>',/cross axis/],
+ ['negative button padding','<Grid><Button Padding="-2"/></Grid>',/Padding/],
+ ['unimplemented alignment parent','<Border><Button VerticalAlignment="Center"/></Border>',/cross axis/],
  ['negative width','<Canvas><Button Width="-5"/></Canvas>',/nonnegative/],
 ])test('layout diagnostics: '+name,()=>bad(body,pattern,name==='layout disabled'?{}:{anchoring:true}));
+test('WinUI scalar opacity, translucent brushes and button padding retain presentation data',()=>{
+ const f=good(styles('<SolidColorBrush x:Key="Brush" Color="#123456" Opacity="0.7"/>'+style('S',setter('Opacity',0.2)))+'<Button x:Name="B" Background="{StaticResource Brush}" Style="{StaticResource S}" Padding="2"/>');
+ assert.equal(button(f).BackColor,0x563412);assert.equal(button(f).WinUI3.properties.Background,'#B3123456');assert.equal(button(f).WinUI3.properties.Opacity,0.2);assert.deepEqual(button(f).WinUI3.properties.Padding,[2,2,2,2]);
+});
 test('list strings and simple containers preserve text and selected index',()=>{
  const f=good('<ListBox x:Name="B" SelectionMode="Extended"><x:String>First</x:String><ListBoxItem Content="Second" IsSelected="True"/></ListBox>');assert.deepEqual(button(f).List,['First','Second']);assert.equal(button(f).ListIndex,1);assert.equal(button(f).MultiSelect,2);
 });

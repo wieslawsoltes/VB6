@@ -211,6 +211,13 @@ export function patchWinUISource(text,before,after,compiled) {
         used.add(source.name);
       } else {overrides[key]=y;overridesChanged=true;}
     }
+    // Direct model clients may intentionally keep an explicit presentation
+    // record while editing its native fallback. A rewritten XAML scalar also
+    // recomputes that record, so retain the exact caller-owned record as an
+    // explicit override instead of regenerating the entire authored document.
+    if(b.properties.WinUI3&&same(a.properties.WinUI3,b.properties.WinUI3)&&['BackColor','ForeColor','FontBold','FontName','FontSize','LayoutPaddingLeft','LayoutPaddingTop','LayoutPaddingRight','LayoutPaddingBottom'].some(key=>!same(a.properties[key],b.properties[key]))) {
+      overrides.WinUI3=b.properties.WinUI3;overridesChanged=true;
+    }
     if(overridesChanged)plan.setAttribute(element,VB,'Designer.Properties','{}'+JSON.stringify(overrides));
   }
   return plan.finish();
