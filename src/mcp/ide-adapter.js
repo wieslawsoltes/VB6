@@ -5,7 +5,8 @@ import {installAgentTools} from './agent-tools.js';
 import {AgentPermissions} from './agent-permissions.js';
 import {McpError, checkAbort, isRecord, awaitAbort, validateArguments} from './protocol.js';
 import {clone} from '../core/core.js';
-import {normalizeProject, findModule, createForm, newId, projectStats} from '../project/model.js';
+import {normalizeProject, findModule, createForm, createModule, newId, projectStats} from '../project/model.js';
+import {moduleLanguage,moduleSourcePath} from '../project/language.js';
 import {compileProject} from '../language/compiler.js';
 import {exportApplication} from '../exporter/exporter.js';
 
@@ -38,7 +39,7 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
     assertEnabled() { if (!enabled) throw new McpError(-32001, 'MCP sharing is disabled. Enable it in Tools → MCP Agent Access.'); },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     dispose() { sharingLifetime.abort(); authorityLifetime.abort(); permissions.dispose(); enabled = false; clearTimeout(changeTimer); listeners.clear(); for (const off of unlisten) off(); for (const [name, original] of originals) ide[name] = original; },
-    snapshot() { return {revision, eventSequence, name: ide.project.name, id: ide.project.id, startup: ide.project.startup, runState: ide.runState, dirty: !!ide.dirty, ...projectStats(ide.project), documents: ide.project.modules.map(m => ({id: m.id, name: m.name, kind: m.kind, lines: m.code.split('\n').length, uri: moduleURI(m.name)}))}; },
+    snapshot() { return {revision, eventSequence, name: ide.project.name, language:moduleLanguage(null,ide.project), id: ide.project.id, startup: ide.project.startup, runState: ide.runState, dirty: !!ide.dirty, ...projectStats(ide.project), documents: ide.project.modules.map(m => ({id: m.id, name: m.name, kind: m.kind, language:moduleLanguage(m,ide.project), sourcePath:moduleSourcePath(m,ide.project), lines: m.code.split('\n').length, uri: moduleURI(m.name)}))}; },
     async resources() {
       return [{uri: 'vb6://project', name: 'Project workspace', mimeType: 'application/json'}, {uri: 'vb6://diagnostics', name: 'Compiler diagnostics', mimeType: 'application/json'}, {uri: 'vb6://output', name: 'Runtime output', mimeType: 'application/json'}, {uri: 'vb6://debug', name: 'Debugger snapshot', mimeType: 'application/json'}, ...ide.project.modules.flatMap(m => [{uri: moduleURI(m.name), name: m.name + ' source', mimeType: 'text/plain'}, ...(m.form ? [{uri: moduleURI(m.name, 'form'), name: m.name + ' designer', mimeType: 'application/json'}] : [])])];
     },
@@ -113,14 +114,14 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   tool('vb6.project.get', 'Read project identity, module inventory, runtime state, and current edit revision.', {}, [], () => adapter.snapshot());
   tool('vb6.module.read', 'Read source lines from one module. Line numbers are one-based; at most 1000 lines per call.', {module: string, startLine: {type: 'integer', minimum: 1}, count: {type: 'integer', minimum: 1, maximum: 1000}}, ['module'], args => {
     const module = requireModule(args.module), lines = module.code.split('\n'), start = args.startLine || 1, count = args.count || 1000;
-    return {revision, module: module.name, startLine: start, totalLines: lines.length, code: lines.slice(start - 1, start - 1 + count).join('\n'), hasMore: start - 1 + count < lines.length};
+    return {revision, module: module.name, language:moduleLanguage(module,ide.project), sourcePath:moduleSourcePath(module,ide.project), startLine: start, totalLines: lines.length, code: lines.slice(start - 1, start - 1 + count).join('\n'), hasMore: start - 1 + count < lines.length};
   });
   tool('vb6.module.write', 'Replace a module source atomically with undo. Requires current expectedRevision and local approval.', {module: string, code: {type: 'string', maxLength: 5000000}, expectedRevision: revisionSchema}, ['module','code','expectedRevision'], async (args, ctx) => {
     requireModule(args.module); await consent('vb6.module.write', args, ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision); const next = clone(ide.project); findModule(next, args.module).code = args.code; return commit(next, 'MCP: edit ' + args.module);
   }, {write: true, destructive: true});
-  tool('vb6.module.add', 'Add a form, standard module, or class module with undo and local approval.', {name: string, kind: {type: 'string', enum: ['module','class','form']}, code: {type: 'string', maxLength: 5000000}, expectedRevision: revisionSchema}, ['name','kind','expectedRevision'], async (args, ctx) => {
+  tool('vb6.module.add', 'Add a form, standard module, or class module with undo and local approval.', {name: string, kind: {type: 'string', enum: ['module','class','form']}, language: {type:'string',enum:['vb6','pascal']}, code: {type: 'string', maxLength: 5000000}, expectedRevision: revisionSchema}, ['name','kind','expectedRevision'], async (args, ctx) => {
     if (!/^[A-Za-z_]\w*$/.test(args.name)) throw new McpError(-32602, 'Invalid VB6 module name.');
-    await consent('vb6.module.add', args, ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision); const next = clone(ide.project), module = args.kind === 'form' ? createForm(args.name) : {id: newId(), name: args.name, kind: args.kind, code: 'Option Explicit\n'};
+    await consent('vb6.module.add', args, ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision); const next = clone(ide.project), module = createModule(args.name,args.kind,{language:args.language??moduleLanguage(null,next)});
     if (args.code !== undefined) module.code = args.code; next.modules.push(module); return commit(next, 'MCP: add ' + args.name);
   }, {write: true});
   tool('vb6.module.remove', 'Remove a module with undo and local approval. The final module cannot be removed.', {module: string, expectedRevision: revisionSchema}, ['module','expectedRevision'], async (args, ctx) => {

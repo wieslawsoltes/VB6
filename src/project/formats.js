@@ -1,3 +1,4 @@
+import {tokenizePascal} from '../language/pascal/lexer.js';
 import {formWithSavedTabs} from '../controls/tab-model.js';
 import {isWebBrowser} from '../controls/webbrowser-contract.js';
 import {layoutSidecarPath,encodeLayoutSidecar,stripLayoutDesignerProperties} from '../layout/project-sidecar.js';
@@ -50,7 +51,7 @@ export function serializeFRM(module,strict=false){
     const belongs=c=>{const parent=c.parent||null;if(parent!==(node===form?null:node.name))return false;const old=[...form.controls,...form.menus].find(p=>p.id===c.nativeParentId);return !old||old.name!==parent||old===node;};for(const c of form.controls.filter(belongs))write(c,depth+1);for(const c of form.menus.filter(belongs))write(c,depth+1);lines.push(indent+'End');
   };write(form,0);lines.push(serializeNativeCode(module,['Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = False'],strict));return lines.join('\r\n')+'\r\n';
 }
-export function parseCodeModule(text,fileName){if(/\.(pas|pp)$/i.test(fileName)){const name=String(text).match(/^\s*(?:unit|program)\s+([A-Za-z_]\w*)\s*[;(]/im)?.[1]||fileName.split(/[\\/]/).at(-1).replace(/\.(pas|pp)$/i,'');return {id:newId(),name,kind:'module',language:'pascal',code:String(text).replace(/\r\n?/g,'\n'),sourcePath:cleanProjectPath(fileName)};}const name=text.match(/^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"/im)?.[1]||fileName.split(/[\\/]/).at(-1).replace(/\.(bas|cls|dsr)$/i,''),kind=/\.cls$/i.test(fileName)?'class':'module';let code=text.replace(/\r\n?/g,'\n'),nativeClassHeader;
+export function parseCodeModule(text,fileName){if(/\.(pas|pp)$/i.test(fileName)){const tokens=tokenizePascal(String(text),{tolerant:true}),name=['unit','program'].includes(tokens[0]?.lower)&&tokens[1]?.type==='id'?tokens[1].value:fileName.split(/[\\/]/).at(-1).replace(/\.(pas|pp)$/i,'');return {id:newId(),name,kind:'module',language:'pascal',code:String(text).replace(/\r\n?/g,'\n'),sourcePath:cleanProjectPath(fileName)};}const name=text.match(/^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"/im)?.[1]||fileName.split(/[\\/]/).at(-1).replace(/\.(bas|cls|dsr)$/i,''),kind=/\.cls$/i.test(fileName)?'class':'module';let code=text.replace(/\r\n?/g,'\n'),nativeClassHeader;
   if(kind==='class'){const wrapper=code.match(/^VERSION[^\n]*\nBEGIN[\s\S]*?^END\s*\n/im);if(wrapper){nativeClassHeader=wrapper[0].trim();code=code.replace(wrapper[0],'');}}
   return {id:newId(),name,kind,...splitAttributes(code.split('\n')),sourcePath:cleanProjectPath(fileName),...(nativeClassHeader?{nativeClassHeader}:{})};
 }

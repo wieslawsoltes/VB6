@@ -3,10 +3,21 @@ import {tokenizePascal} from '../language/pascal/lexer.js';
 
 export const PASCAL_KEYWORDS=Object.freeze('absolute and array asm assembler begin case const constructor destructor div do downto else end external far file for forward function goto if implementation in inherited inline interface interrupt label mod near nil not object of or packed procedure program record repeat set shl shr string then to type unit until uses var virtual while with xor'.split(' '));
 export const PASCAL_BUILTINS=Object.freeze('Abs Addr Append ArcTan Assign BlockRead BlockWrite ChDir Chr Close ClrScr Concat Copy Cos Dec Delete Dispose EOF EOLn Erase Exclude Exit Exp FilePos FileSize FillChar Flush Frac GetDir Halt Hi High Inc Include Insert Int IOResult Length Ln Lo Low MaxAvail MemAvail Move New Odd Ord ParamCount ParamStr Pi Pos Pred Random Randomize Read ReadLn Rename Reset Rewrite Round RunError Seek SeekEof SeekEoln SetTextBuf Sin SizeOf Sqr Sqrt Str Succ Swap Trunc UpCase Val Write WriteLn'.split(' '));
+export const PASCAL_SNIPPETS=Object.freeze([
+  {label:'procedure',text:'procedure ${1:Name};\nbegin\n\t$0\nend;'},
+  {label:'function',text:'function ${1:Name}: ${2:Integer};\nbegin\n\t${1:Name} := ${3:0};\n\t$0\nend;'},
+  {label:'for',text:'for ${1:i} := ${2:0} to ${3:10} do\nbegin\n\t$0\nend;'},
+  {label:'if',text:'if ${1:condition} then\nbegin\n\t$0\nend;'},
+  {label:'case',text:'case ${1:expression} of\n\t${2:value}: ${3:statement};\nelse\n\t$0\nend;'},
+  {label:'while',text:'while ${1:condition} do\nbegin\n\t$0\nend;'},
+  {label:'repeat',text:'repeat\n\t$0\nuntil ${1:condition};'},
+]);
 const keywords=new Set(PASCAL_KEYWORDS),lower=token=>String(token?.value??'').toLowerCase();
-const lexical=source=>tokenizePascal(String(source),{tolerant:true});
-export function pascalMasked(source){
-  source=String(source);const chars=source.split(''),tokens=lexical(source);
+let lastSource=null,lastTokens=null;
+export function pascalTokens(source){source=String(source);if(source===lastSource)return lastTokens;const tokens=tokenizePascal(source,{tolerant:true});lastSource=source;lastTokens=tokens;return tokens;}
+const lexical=pascalTokens;
+export function pascalMasked(source,tokens=lexical(source)){
+  source=String(source);const chars=source.split('');
   for(const t of [...tokens.filter(t=>t.type==='string'),...(tokens.comments||[]),...(tokens.directives||[])])for(let i=t.start;i<t.end;i++)if(chars[i]!=='\n'&&chars[i]!=='\r')chars[i]=' ';
   return chars.join('');
 }
@@ -27,10 +38,10 @@ export function pascalHighlightSpans(source){
   return spans.sort((a,b)=>a.start-b.start||b.end-a.end).filter((span,i,array)=>!i||span.start>=array[i-1].end);
 }
 export function highlightPascalLine(line,selectionStart=-1,selectionEnd=-1,executionStart=-1,executionEnd=-1,spans=null,offset=0){
-  spans=spans||pascalHighlightSpans(line);const parts=[],cuts=new Set([0,line.length]);
-  for(const span of spans)if(span.end>offset&&span.start<offset+line.length){cuts.add(Math.max(0,span.start-offset));cuts.add(Math.min(line.length,span.end-offset));}
+  spans=spans||pascalHighlightSpans(line);const parts=[],cuts=new Set([0,line.length]);let low=0,high=spans.length;while(low<high){const mid=(low+high)>>>1;if(spans[mid].end<=offset)low=mid+1;else high=mid;}
+  for(let i=low;i<spans.length&&spans[i].start<offset+line.length;i++){const span=spans[i];cuts.add(Math.max(0,span.start-offset));cuts.add(Math.min(line.length,span.end-offset));}
   for(const point of [selectionStart,selectionEnd,executionStart,executionEnd])if(point>0&&point<line.length)cuts.add(point);
-  const positions=[...cuts].sort((a,b)=>a-b);let j=0;
+  const positions=[...cuts].sort((a,b)=>a-b);let j=low;
   for(let i=0;i<positions.length-1;i++){
     const start=positions[i],end=positions[i+1];while(j<spans.length&&spans[j].end<=offset+start)j++;
     const classes=[],span=spans[j];if(span&&span.start<=offset+start&&span.end>offset+start)classes.push('syn-'+span.kind);
@@ -129,11 +140,35 @@ export function scanPascalDeclarations(module){
   }
   for(const control of module.form?.controls||[])symbols.push({name:control.name,type:control.type,kind:'control',scope:'public',moduleId:module.id,line:1,owner:null,array:control.properties?.Index!==undefined,controlArray:control.properties?.Index!==undefined,signature:control.name+': '+control.type});
   for(const menu of module.form?.menus||[])symbols.push({name:menu.name,type:'Menu',kind:'control',scope:'public',moduleId:module.id,line:1,owner:null});
-  const masked=pascalMasked(source),maskedLines=masked.split('\n'),statements=[];let offset=0;for(const [index,line]of source.split('\n').entries()){statements.push({text:line,clean:maskedLines[index],line:index+1,endLine:index+1,start:offset,end:offset+line.length});offset+=line.length+1;}
+  const masked=pascalMasked(source,tokens),maskedLines=masked.split('\n'),statements=[];let offset=0;for(const [index,line]of source.split('\n').entries()){statements.push({text:line,clean:maskedLines[index],line:index+1,endLine:index+1,start:offset,end:offset+line.length});offset+=line.length+1;}
   return {moduleId:module.id,name:module.name,language:'pascal',symbols,procedures:procedures.sort((a,b)=>a.offset-b.offset),records,withBlocks:[],selectBlocks:[],labels:[],interfaces:[],defaults:{},conditionalError:null,masked,statements,privateModule:false,predeclared:!!module.form,bodyStart};
 }
 export function pascalProcedureEdit(module,{name,parameters='',returnType=null,tabWidth=4}={}){
   const source=String(module.code||''),index=scanPascalDeclarations(module),eol=source.includes('\r\n')?'\r\n':'\n',start=index.bodyStart,indent=' '.repeat(Math.max(1,Math.min(32,tabWidth)));
   const header=(returnType?'function ':'procedure ')+name+(parameters?'('+parameters+')':'')+(returnType?': '+returnType:'')+';',prefix=start===0?'':source.slice(0,start).endsWith(eol+eol)?'':source.slice(0,start).endsWith(eol)?eol:eol+eol;
   return {name,start,end:start,text:prefix+header+eol+'begin'+eol+indent+eol+'end;'+eol+eol,caret:start+prefix.length+header.length+eol.length+'begin'.length+eol.length+indent.length};
+}
+export function pascalCallContext(source,offset,{outer=false}={}){
+  const masked=pascalMasked(source),stack=[];
+  for(let i=0;i<offset;i++){
+    if(masked[i]==='('||masked[i]==='['){const expression=masked.slice(0,i).match(/([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*$/)?.[1]||'';stack.push({name:expression.replace(/\s+/g,''),start:i+1,argumentStart:i+1,last:i+1,comma:0,args:[]});}
+    else if(masked[i]===')'||masked[i]===']')stack.pop();
+    else if(masked[i]===','&&stack.length){const item=stack.at(-1);item.args.push(source.slice(item.last,i));item.comma++;item.last=i+1;}
+  }
+  const calls=stack.filter(item=>item.name&&!keywords.has(item.name.toLowerCase())),context=outer?calls[0]:calls.at(-1);
+  return context?{...context,named:null,args:[...context.args,source.slice(context.last,offset)]}:null;
+}
+export function pascalWordAt(source,offset){
+  source=String(source);offset=Math.max(0,Math.min(source.length,offset));const tokens=lexical(source);let low=0,high=tokens.length;
+  while(low<high){const mid=(low+high)>>>1;if(tokens[mid].start<offset)low=mid+1;else high=mid;}
+  let at=tokens[low]?.start===offset?low:low-1,token=tokens[at];if(!token||token.type!=='id'||token.end<offset)return {text:'',start:offset,end:offset};
+  const end=token.end;while(at>=2&&lower(tokens[at-1])==='.'&&tokens[at-2].type==='id')at-=2;
+  const start=tokens[at].start;return {text:source.slice(start,end).replace(/\s*\.\s*/g,'.'),start,end};
+}
+export function pascalFoldingRanges(source,{maxRanges=10000}={}){
+  const tokens=lexical(source),stack=[],ranges=[];
+  for(const token of tokens){const word=lower(token);if(['begin','record','object','case','repeat','asm'].includes(word))stack.push(token);else if(['end','until'].includes(word)&&stack.length){const start=stack.pop();if(token.line>start.line)ranges.push({startLine:start.line-1,endLine:token.line-1,kind:'region'});}}
+  for(const comment of tokens.comments||[])if(comment.endLine>comment.line)ranges.push({startLine:comment.line-1,endLine:comment.endLine-1,kind:'comment'});
+  for(const procedure of scanPascalDeclarations({code:source}).procedures)if(procedure.end>procedure.line)ranges.push({startLine:procedure.line-1,endLine:procedure.end-1,kind:'region'});
+  const seen=new Set();return ranges.sort((a,b)=>a.startLine-b.startLine||b.endLine-a.endLine).filter(item=>{if(seen.has(item.startLine))return false;seen.add(item.startLine);return true;}).slice(0,maxRanges);
 }

@@ -5,6 +5,8 @@ import {normalizeTypeLibrary,referenceSnapshot} from './reference-metadata.js';
 import {typeCompletionContext,typeCandidates} from './type-completion.js';
 import {parseExpression} from '../language/expression.js';
 import {KEYWORDS} from './language-service.js';
+import {moduleLanguage} from '../project/language.js';
+import {PASCAL_KEYWORDS,PASCAL_BUILTINS,pascalMasked,pascalCallContext,pascalWordAt} from './pascal-service.js';
 import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt,completionKey,completionMatches,mapParameterType} from './source-context.js';
 import {scanDeclarations,parameterSymbol} from './declaration-index.js';
 import {PRIMITIVE_TYPES,CONSTANT_SYMBOLS,BUILTIN_SYMBOLS,GLOBAL_OBJECTS,TYPE_CATALOG,ENUM_TYPES,builtinType,member,runtimeType,builtinGroup} from './type-catalog.js';
@@ -69,17 +71,19 @@ export function callContext(text,offset,{outer=false}={}) {
 export class EditorIntelligence {
   constructor(){this.cache=new Map();this.scanCount=0;this.expressionCache=new Map();this.libraries=new Map();this.libraryRevision=0;}
   index(module,project=null){
+    const language=moduleLanguage(module,project);
     const condition=project?.settings?.conditionalConstants||module.conditionalConstants||{},conditionalKey=JSON.stringify(condition);
     const formKey=JSON.stringify([module.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),module.form?.menus,module.attributes]);
     const cached=this.cache.get(module.id);
-    if(cached&&cached.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey&&cached.conditionalKey===conditionalKey)return cached.index;
-    const index=scanDeclarations({...module,conditionalConstants:condition});this.scanCount++;
-    this.cache.set(module.id,{code:module.code,name:module.name,kind:module.kind,formKey,conditionalKey,index});return index;
+    if(cached&&cached.language===language&&cached.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey&&cached.conditionalKey===conditionalKey)return cached.index;
+    const index=scanDeclarations({...module,language,conditionalConstants:condition});this.scanCount++;
+    this.cache.set(module.id,{code:module.code,name:module.name,kind:module.kind,language,formKey,conditionalKey,index});return index;
   }
   prune(project){const ids=new Set(project.modules.map(m=>m.id));for(const id of this.cache.keys())if(!ids.has(id))this.cache.delete(id);}
   scope(project,module,line,offset=null){
-    this.prune(project);const idx=this.index(module,project),proc=idx.procedures.find(p=>offset===null?line>=p.line&&line<=p.end:offset>=p.offset&&offset<=p.endOffset);
+    this.prune(project);const idx=this.index(module,project),proc=idx.procedures.findLast(p=>offset===null?line>=p.line&&line<=p.end:offset>=p.offset&&offset<=p.endOffset);
     let local=idx.symbols.filter(s=>s.ownerId&&s.ownerId===proc?.id);
+    if(idx.language==='pascal'){const seen=new Set();let parent=proc?.ownerId;while(parent&&!seen.has(parent)){seen.add(parent);local.push(...idx.symbols.filter(s=>s.ownerId===parent));parent=idx.procedures.find(p=>p.id===parent)?.ownerId;}}
     if(local.some(s=>s.implicitRedim)){
       const shared=new Set();
       for(const other of project.modules){
@@ -217,7 +221,7 @@ export class EditorIntelligence {
     return this.declared(project,module,visit(ast));
   }
   parameterInfo(project,module,line,text,offset,options={}){
-    const context=callContext(text,offset,options);if(!context)return null;
+    const pascal=moduleLanguage(module,project)==='pascal',context=pascal?pascalCallContext(text,offset,options):callContext(text,offset,options);if(!context)return null;
     let symbol=this.resolve(project,module,line,context.name,{offset:text===module.code?offset:null});
     if(symbol?.array&&(!symbol.params||symbol.kind==='property'&&!symbol.params.length)){symbol={...symbol,kind:'array',params:Array.from({length:Math.min(60,symbol.rank||1)},(_,i)=>'Index'+(i+1)+' As Long'),parameters:undefined};}
     if(symbol&&(!symbol.params||symbol.kind==='property'&&!symbol.params.length)){const type=this.type(project,module,symbol.type),name=type?.defaultMember||type?.members?.find(m=>m.defaultMember)?.name;symbol=name?find(this.objectMembers(project,module,symbol),name):null;}
@@ -234,10 +238,10 @@ export class EditorIntelligence {
     let active=next;
     if(context.named){active=parameters.findIndex(p=>eq(p.name,context.named));}
     else if(active>=parameters.length){active=parameters.at(-1)?.paramArray?parameters.length-1:-1;}
-    return {...symbol,parameters,displayParams:symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
+    return {...symbol,parameters,displayParams:pascal?parameters.map(p=>(p.byRef?'var ':'')+p.name+': '+p.type):symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
   }
-  definition(project,module,line,text,offset,expression=wordAt(text,offset).text){
-    if(statementBefore(text,offset).state!=='code')return null;
+  definition(project,module,line,text,offset,expression=null){
+    if(moduleLanguage(module,project)==='pascal'){const word=pascalWordAt(text,offset);if(!word.text)return null;expression??=word.text;}else{if(statementBefore(text,offset).state!=='code')return null;expression??=wordAt(text,offset).text;}
     const scope=this.scope(project,module,line,text===module.code?offset:null);
     const label=scope.idx.labels.find(l=>l.ownerId===scope.proc?.id&&eq(l.name,expression));
     return label||this.resolve(project,module,line,expression,{offset:text===module.code?offset:undefined});
@@ -264,6 +268,7 @@ export class EditorIntelligence {
     return info?.parameters[info.active]?.type||null;
   }
   completions(project,module,line,text,offset,{constants=false,unfiltered=false,contextual=false}={}){
+    if(moduleLanguage(module,project)==='pascal')return this.pascalCompletions(project,module,line,text,offset,{constants,unfiltered,contextual});
     const span=completionSpan(text,offset),st=statementBefore(text,offset),empty={...span,items:[],context:'none'};
     if(st.state!=='code'||/^\s*(?:Attribute\b|Rem\b|#)/i.test(st.masked))return empty;
     const before=text.slice(0,span.start),memberAccess=/\.\s*$/.test(before),left=memberAccess?expressionBefore(before,before.trimEnd().length-1):null;
@@ -298,5 +303,19 @@ export class EditorIntelligence {
       }
     }
     return {...span,items:filter(items),context};
+  }
+  pascalCompletions(project,module,line,text,offset,{constants=false,unfiltered=false,contextual=false}={}){
+    const prefix=text.slice(0,offset).match(/[A-Za-z_]\w*$/)?.[0]||'',start=offset-prefix.length,span={start,end:offset+(text.slice(offset).match(/^\w*/)?.[0].length||0),prefix},masked=pascalMasked(text),empty={...span,items:[],context:'none'};
+    if(prefix&&masked.slice(start,offset)!==prefix||!prefix&&offset>0&&/\S/.test(text[offset-1])&&masked[offset-1]===' ')return empty;
+    const scope=this.scope(project,module,line,text===module.code?offset:null),before=masked.slice(0,start),access=before.match(/([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\.\s*$/),items=[];let context='global';
+    if(access&&!constants){const symbol=this.resolve(project,module,line,access[1].replace(/\s+/g,''),{offset});items.push(...this.objectMembers(project,module,symbol));context='members';}
+    else if(!contextual||constants){
+      items.push(...scope.symbols.filter(s=>!constants||s.kind==='constant'));
+      for(const other of project.modules){if(!constants)items.push({name:other.name,kind:'module',type:other.name,moduleId:other.id,line:1});if(other.id!==module.id)items.push(...this.index(other,project).symbols.filter(s=>!s.owner&&s.scope!=='private'&&(!constants||s.kind==='constant')));}
+      if(!constants){if(module.form)items.push(...this.members(project,module,module.form.type||'Form'));items.push(...PASCAL_KEYWORDS.map(name=>({name,kind:'keyword'})),...PASCAL_BUILTINS.map(name=>({name,kind:'function'})),...BUILTIN_SYMBOLS,...GLOBAL_OBJECTS,{name:'Me',type:module.name,kind:'object'});}
+      else items.push(...CONSTANT_SYMBOLS);
+    }
+    const unique=new Map();for(const item of items){const key=symbolKey(item.name);if(visible(item)&&!unique.has(key)&&(unfiltered||completionMatches(item.name,prefix)))unique.set(key,item);}
+    return {...span,items:[...unique.values()].sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase())),context};
   }
 }

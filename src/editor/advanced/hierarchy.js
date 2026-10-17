@@ -67,7 +67,7 @@ export class SourceHierarchy {
     return entry;
   }
   prepareCall(p) {
-    const target=this.server.target(p);if(target.document.languageId!=='vb6')return [];
+    const target=this.server.target(p);if(target.document.languageId==='xaml')return [];
     let entry=this.procedure(target.symbol);
     if(!entry)entry=[...this.workspace().procedures.values()].find(e=>e.module.id===target.module?.id&&e.symbol.offset<=target.offset&&target.offset<=e.symbol.endOffset);
     return entry?[this.callItem(entry)]:[];
@@ -86,7 +86,7 @@ export class SourceHierarchy {
         if(!symbols.masked.slice(token.start,token.end).trim())continue;
         let lo=0,hi=procedures.length;
         while(lo<hi){const mid=(lo+hi)>>>1;if(procedures[mid].symbol.offset<=token.start)lo=mid+1;else hi=mid;}
-        const from=procedures[lo-1];if(!from||token.start>=from.symbol.endOffset)continue;
+        let from=procedures[lo-1];while(from&&token.start>=from.symbol.endOffset)from=from.symbol.ownerId?index.procedures.get(module.id+'|'+from.symbol.ownerId):null;if(!from)continue;
         if(token.start<from.declarationEnd)continue;
         const symbol=server.intelligence.definition(project,module,token.line+1,document.text,token.start+Math.min(1,token.end-token.start)),to=this.procedure(symbol,index);
         if(!to)continue;
@@ -117,7 +117,7 @@ export class SourceHierarchy {
     return type?.moduleId?index.types.get(type.moduleId)||null:null;
   }
   prepareType(p) {
-    const {document,module,symbol}=this.server.target(p);if(document.languageId!=='vb6')return [];
+    const {document,module,symbol}=this.server.target(p);if(document.languageId==='xaml')return [];
     const entry=this.typeEntry(symbol,module)||(!symbol?this.workspace().types.get(module?.id):null);
     return entry?[this.typeItem(entry)]:[];
   }
@@ -129,13 +129,13 @@ export class SourceHierarchy {
     return (direction==='super'?this.bases(entry,index):[...index.types.values()].filter(other=>this.bases(other,index).includes(entry))).map(e=>this.typeItem(e));
   }
   typeDefinition(p) {
-    const {document,module,symbol}=this.server.target(p);if(document.languageId!=='vb6'||!symbol)return [];
+    const {document,module,symbol}=this.server.target(p);if(document.languageId==='xaml'||!symbol)return [];
     const name=['class','type','enum'].includes(symbol.kind)?symbol.name:symbol.type,type=this.server.intelligence.type(this.server.project,module,name);
     if(!type)return [];const target=this.workspace().modules.get(type.moduleId);if(!target)return [];
     return [{uri:target.uri,range:type.kind==='class'||type.kind==='module'?target.document.range(0,0):this.symbolRange(target.document,type)}];
   }
   implementation(p) {
-    const {document,module,symbol}=this.server.target(p);if(document.languageId!=='vb6'||!symbol)return [];
+    const {document,module,symbol}=this.server.target(p);if(document.languageId==='xaml'||!symbol)return [];
     const index=this.workspace(),interfaceEntry=callable(symbol)?index.types.get(symbol.moduleId):this.typeEntry(symbol,module,index);
     if(!interfaceEntry)return [];
     const implementations=[...index.types.values()].filter(e=>this.bases(e,index).includes(interfaceEntry)),result=[];

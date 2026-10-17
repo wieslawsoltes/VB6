@@ -2,6 +2,7 @@ import {guardLinkedEditingCancellation} from './monaco-compat.js';
 import {fromRange} from './protocol-converters.js';
 import {el} from '../../core/core.js';
 import {modal} from '../../ide/ui.js';
+import {PASCAL_SNIPPETS} from '../pascal-service.js';
 
 export const EDITOR_SNIPPETS=Object.freeze([
   {label:'Sub procedure',text:'Private Sub ${1:Name}()\n\t$0\nEnd Sub'},
@@ -17,9 +18,9 @@ export const EDITOR_SNIPPETS=Object.freeze([
 
 export async function chooseSnippet(surface) {
   if(surface.readOnly())return;
-  const select=el('select',{'aria-label':'Code snippet',size:EDITOR_SNIPPETS.length},...EDITOR_SNIPPETS.map((s,i)=>el('option',{value:String(i)},s.label)));select.value='0';
+  const pascal=surface.record.language==='pascal',snippets=pascal?PASCAL_SNIPPETS:EDITOR_SNIPPETS,select=el('select',{'aria-label':'Code snippet',size:snippets.length},...snippets.map((s,i)=>el('option',{value:String(i)},s.label)));select.value='0';
   const version=surface.record.model.getVersionId();
-  if(await modal('Insert VB6 Snippet',{content:select})&&!surface.disposed&&surface.record.model.getVersionId()===version)surface.insertSnippet(EDITOR_SNIPPETS[Number(select.value)].text);
+  if(await modal(pascal?'Insert Pascal Snippet':'Insert VB6 Snippet',{content:select})&&!surface.disposed&&surface.record.model.getVersionId()===version)surface.insertSnippet(snippets[Number(select.value)].text);
 }
 
 /** Inline Peek uses Monaco's public view-zone and editor APIs. The location list
