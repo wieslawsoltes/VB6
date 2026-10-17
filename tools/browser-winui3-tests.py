@@ -342,8 +342,26 @@ class WinUI3Acceptance(unittest.TestCase):
         self.assertTrue(retained.evaluate('e=>e===document.querySelector(".vb-combo-popup")'))
         self.assertNotEqual(popup.evaluate('e=>getComputedStyle(e).backgroundColor'), dark)
         expect(self.control('LightText')).to_have_attribute('data-winui-effective-theme', 'Light')
-        self.page.evaluate('vb6Application.forms[0].removeControl(winuiControls.ScopeChoices)')
+        choices.locator('input').press('Escape')
         expect(popup).to_have_count(0)
+        # VB preserves authored controls for the lifetime of their form. Use
+        # its public dynamic-control API to exercise real removal with an open
+        # popup, instead of bypassing that design-time lifetime contract.
+        self.page.evaluate('''() => {
+            const form=vb6Application.forms[0];
+            const combo=form.Controls.Add('VB.ComboBox','TemporaryChoices',winuiControls.DarkScope);
+            for(const [key,value] of Object.entries({Left:0,Top:0,Width:3000,Height:480,Visible:-1,
+                WinUI3:structuredClone(winuiControls.ScopeChoices.WinUI3)}))combo.set(key,value);
+            combo.AddItem('First');combo.AddItem('Second');
+        }''')
+        self.idle()
+        self.control('TemporaryChoices').locator('.vb-combo-arrow').click()
+        temporary = self.page.get_by_role('listbox', name='TemporaryChoices items', exact=True)
+        expect(temporary).to_be_visible()
+        expect(temporary).to_have_attribute('data-winui-effective-theme', 'Light')
+        self.page.evaluate('vb6Application.forms[0].Controls.Remove("TemporaryChoices")')
+        expect(temporary).to_have_count(0)
+        expect(self.control('TemporaryChoices')).to_have_count(0)
         self.theme('fluent-dark')
         expect(self.control('DarkText')).to_have_attribute('data-winui-effective-theme', 'Dark')
         self.done()
