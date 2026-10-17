@@ -40,6 +40,8 @@ These guides describe the implemented system, not complete native VB6 parity.
 ## Language, runtime and project files
 
 - [Language frontend](LANGUAGE-FRONTEND.md): scanning, declarations and diagnostics.
+- [Turbo Pascal 7.0](TURBO-PASCAL.md): optional language, shared forms/editor/MCP,
+  JavaScript SDK, typed runtime, native AOT qualification, and compatibility limits.
 - [Procedure-local storage](LANGUAGE-LOCAL-STORAGE.md): skipped declarations, local scope,
   per-invocation initialization, Static lifetime and metadata-only declaration plans.
 - [Circular record dependencies](LANGUAGE-RECORD-RECURSION.md): declaration-cycle diagnostics,

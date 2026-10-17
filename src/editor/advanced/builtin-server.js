@@ -10,29 +10,36 @@ import {tokenize} from '../../language/lexer.js';
 import {ProjectDiagnosticCache} from '../../language/diagnostics.js';
 import {XamlLanguageService} from '../../../packages/xaml-compiler/src/index.js';
 import {createVb6XamlSchema} from '../../xaml/forms.js';
+import {PASCAL_KEYWORDS,PASCAL_SNIPPETS,pascalTokens,pascalFoldingRanges,pascalWordAt} from '../pascal-service.js';
 
 export const BUILTIN_TOKEN_LEGEND = Object.freeze({tokenTypes:['namespace','type','class','enum','parameter','variable','property','enumMember','event','function','method','keyword','modifier','comment','string','number','operator'],tokenModifiers:['declaration','readonly','defaultLibrary']});
 const keywords=new Set(KEYWORDS.map(s=>s.toLowerCase()));
 const key=s=>String(s||'').replace(/^\[|\]$/g,'').replace(/[$%&!#@]$/,'').toLowerCase();
-const kind=s=>({module:2,class:5,type:23,enum:10,constant:14,parameter:13,variable:13,field:8,control:8,event:24,sub:12,function:12,property:7,'property get':7,'property let':7,'property set':7,label:20}[s.kind]||13);
-const identity=s=>s?.moduleId&&s.name ? [s.moduleId,s.ownerId||'',s.parentType||'',key(s.name)].join('|'):null;
-const completionKind=s=>({module:9,class:7,type:22,enum:13,constant:21,parameter:6,variable:6,field:5,control:6,event:23,sub:3,function:3,property:10,'property get':10,'property let':10,'property set':10,keyword:14}[s.kind]||6);
+const kind=s=>({module:2,class:5,type:23,alias:23,pointer:23,array:23,enum:10,constant:14,parameter:13,variable:13,field:8,control:8,event:24,sub:12,function:12,property:7,'property get':7,'property let':7,'property set':7,label:20}[s.kind]||13);
+const identity=s=>s?.bindingIdentity||(s?.moduleId&&s.name ? [s.moduleId,s.ownerId||'',s.parentType||'',key(s.bindingName||s.name)].join('|'):null);
+const completionKind=s=>({module:9,class:7,type:22,alias:22,pointer:22,array:22,enum:13,constant:21,parameter:6,variable:6,field:5,control:6,event:23,sub:3,function:3,property:10,'property get':10,'property let':10,'property set':10,keyword:14}[s.kind]||6);
 const yieldTask=()=>new Promise(resolve=>setTimeout(resolve,0));
 const checkCancelled=signal=>{if(signal?.aborted)throw new RpcError(RPC_CANCELLED,'Request cancelled.');};
 const safeTokenize=line=>{try{return tokenize(line);}catch{return [];}};
+const pascalKeywords=new Set(PASCAL_KEYWORDS),pascalDocumentTokens=new WeakMap();
+function tokensAtLine(document,line){
+  if(document.languageId!=='pascal')return safeTokenize(document.text.slice(document.lineStarts[line],document.lineEnds[line]));
+  let cached=pascalDocumentTokens.get(document);if(!cached||cached.text!==document.text){const lines=new Map();for(const token of pascalTokens(document.text)){if(token.type==='eof')continue;const row=token.line-1,base=document.lineStarts[row]||0,list=lines.get(row)||[];list.push({...token,type:token.type==='symbol'?'op':token.type==='charCode'?'number':token.type,start:token.start-base,end:token.end-base});lines.set(row,list);}cached={text:document.text,lines};pascalDocumentTokens.set(document,cached);}return cached.lines.get(line)||[];
+}
 const plainDescription=s=>s?.description||s?.signature||`${s?.name||''}${s?.params?'('+s.params.join(', ')+')':''}${s?.type?' As '+s.type:''}`;
 const tokenKind=s=>({module:'namespace',class:'class',type:'type',enum:'enum',parameter:'parameter',variable:'variable',field:'property',control:'variable',constant:s.parentType?'enumMember':'variable',event:'event',sub:'function',function:'function',property:'property','property get':'property','property let':'property','property set':'property'}[s.kind]||'variable');
 
 function symbolRange(document,symbol) {
+  if(document.languageId==='pascal'&&Number.isInteger(symbol.nameStart)&&Number.isInteger(symbol.nameEnd))return document.range(symbol.nameStart,symbol.nameEnd);
   const line=Math.max(0,Math.min(document.lineStarts.length-1,(symbol.line||1)-1));
   const base=document.lineStarts[line],raw=document.text.slice(base,document.lineEnds[line]);
-  const match=safeTokenize(raw).find(t=>t.type==='id'&&key(t.value)===key(symbol.name));
+  const match=tokensAtLine(document,line).find(t=>t.type==='id'&&key(t.value)===key(symbol.name));
   const start=base+(match?.start||0),end=base+(match?.end||0);
   return document.range(start,end);
 }
 function tokenAt(document,position) {
   const offset=document.offsetAt(position),base=document.lineStarts[position.line]??document.text.length;
-  return safeTokenize(document.text.slice(base,document.lineEnds[position.line])).find(t=>t.type==='id'&&base+t.start<=offset&&offset<=base+t.end);
+  return tokensAtLine(document,position.line).find(t=>t.type==='id'&&base+t.start<=offset&&offset<=base+t.end);
 }
 
 /** In-process/worker/stdio LSP server over the existing compiler services.
@@ -98,12 +105,12 @@ export class BuiltinLanguageServer {
   module(document) {const id=this.uriModules.get(document.uri);return this.project.modules.find(m=>m.id===id);}
   setProject({project,documents=[]}={}) {
     if(!project||!Array.isArray(project.modules)||project.modules.length>2048)throw new RpcError(-32602,'Invalid project metadata.');
-    this.moduleUris=new Map(documents.filter(d=>d.languageId==='vb6').map(d=>[d.moduleId,d.uri]));this.uriModules=new Map(documents.map(d=>[d.uri,d.moduleId]));
+    this.moduleUris=new Map(documents.filter(d=>d.languageId==='vb6'||d.languageId==='pascal').map(d=>[d.moduleId,d.uri]));this.uriModules=new Map(documents.map(d=>[d.uri,d.moduleId]));
     this.project={...project,modules:project.modules.map(m=>({...m,code:this.documents.get(this.moduleUris.get(m.id))?.text??String(m.code||'')}))};
     this.revision++;this.intelligence.prune(this.project);this.tokenCache.clear();this.occurrenceCache.clear();this.referenceCache.clear();this.scheduleDiagnostics();
   }
   open({uri,languageId,text,version}) {
-    if(!['vb6','xaml'].includes(languageId)||this.documents.has(uri)||this.documents.size>=4096||text?.length>16*1024*1024)throw new RpcError(-32602,'Invalid or oversized document.');
+    if(!['vb6','pascal','xaml'].includes(languageId)||this.documents.has(uri)||this.documents.size>=4096||text?.length>16*1024*1024)throw new RpcError(-32602,'Invalid or oversized document.');
     const document=new LspTextDocument(uri,languageId,text,version);this.documents.set(uri,document);this.updateDocument(document);
   }
   change({uri,version},changes) {
@@ -115,15 +122,15 @@ export class BuiltinLanguageServer {
     if(document.languageId==='xaml')this.xaml.openDocument(document.uri,document.text,document.version);
     else {
       let id=this.uriModules.get(document.uri);
-      if(!id){id=document.uri;this.uriModules.set(document.uri,id);this.moduleUris.set(id,document.uri);this.project={...this.project,modules:[...this.project.modules,{id,name:decodeURIComponent(document.uri.split('/').pop()||'Module').replace(/\.[^.]*$/,''),kind:'module',code:document.text}]};}
-      else this.project={...this.project,modules:this.project.modules.map(m=>m.id===id?{...m,code:document.text}:m)};
+      if(!id){id=document.uri;this.uriModules.set(document.uri,id);this.moduleUris.set(id,document.uri);this.project={...this.project,modules:[...this.project.modules,{id,name:decodeURIComponent(document.uri.split('/').pop()||'Module').replace(/\.[^.]*$/,''),kind:'module',language:document.languageId,code:document.text}]};}
+      else this.project={...this.project,modules:this.project.modules.map(m=>m.id===id?{...m,language:document.languageId,code:document.text}:m)};
     }
     this.revision++;this.tokenCache.delete(document.uri);this.occurrenceCache.delete(document.uri);this.referenceCache.clear();this.scheduleDiagnostics();
   }
   close(uri) {this.documents.delete(uri);this.xaml.closeDocument(uri);this.tokenCache.delete(uri);this.occurrenceCache.delete(uri);this.referenceCache.clear();this.diagnostics.delete(uri);this.diagnosticEngine.forget(uri);this.revision++;if(!this.peer.closed)this.peer.notify('textDocument/publishDiagnostics',{uri,diagnostics:[]});}
   target(p) {
     const document=this.document(p.textDocument.uri),module=this.module(document),offset=document.offsetAt(p.position);
-    return {document,module,offset,symbol:document.languageId==='vb6'&&module?this.intelligence.definition(this.project,module,p.position.line+1,document.text,offset):null};
+    return {document,module,offset,symbol:document.languageId!=='xaml'&&module?this.intelligence.definition(this.project,module,p.position.line+1,document.text,offset):null};
   }
   completion(p) {
     const document=this.document(p.textDocument.uri);
@@ -132,7 +139,8 @@ export class BuiltinLanguageServer {
     const result=this.intelligence.completions(this.project,module,p.position.line+1,document.text,offset);
     const items=result.items.slice(0,2000).map(s=>({label:s.name,kind:completionKind(s),detail:plainDescription(s),documentation:s.description?{kind:'plaintext',value:s.description}:undefined,
       textEdit:{range:document.range(result.start,result.end),newText:s.insertText||s.name}}));
-    if(result.context!=='members')for(const [label,body]of [['sub','Private Sub ${1:Name}()\n\t$0\nEnd Sub'],['function','Private Function ${1:Name}() As ${2:Variant}\n\t$0\nEnd Function'],['for','For ${1:i} = ${2:0} To ${3:10}\n\t$0\nNext ${1:i}'],['if','If ${1:condition} Then\n\t$0\nEnd If'],['select','Select Case ${1:expression}\n\tCase ${2:value}\n\t\t$0\nEnd Select']]) {
+    if(document.languageId==='pascal'&&result.context!=='members')for(const {label,text:body}of PASCAL_SNIPPETS){if(!result.prefix||label.startsWith(result.prefix.toLowerCase()))items.push({label,kind:15,detail:'Turbo Pascal snippet',insertTextFormat:2,textEdit:{range:document.range(result.start,result.end),newText:body}});}
+    if(document.languageId!=='pascal'&&result.context!=='members')for(const [label,body]of [['sub','Private Sub ${1:Name}()\n\t$0\nEnd Sub'],['function','Private Function ${1:Name}() As ${2:Variant}\n\t$0\nEnd Function'],['for','For ${1:i} = ${2:0} To ${3:10}\n\t$0\nNext ${1:i}'],['if','If ${1:condition} Then\n\t$0\nEnd If'],['select','Select Case ${1:expression}\n\tCase ${2:value}\n\t\t$0\nEnd Select']]) {
       if(!result.prefix||label.startsWith(result.prefix.toLowerCase()))items.push({label,kind:15,detail:'VB6 snippet',insertTextFormat:2,textEdit:{range:document.range(result.start,result.end),newText:body}});
     }
     return {isIncomplete:result.items.length>2000,items};
@@ -141,14 +149,14 @@ export class BuiltinLanguageServer {
     const {document,symbol}=this.target(p);
     if(document.languageId==='xaml')return this.xaml.hover(document.uri,p.position);
     if(!symbol)return null;
-    const at=document.offsetAt(p.position),word=wordAt(document.text,at);
+    const at=document.offsetAt(p.position),word=document.languageId==='pascal'?pascalWordAt(document.text,at):wordAt(document.text,at);
     return {contents:{kind:'plaintext',value:plainDescription(symbol)},range:document.range(word.start,word.end)};
   }
   signatureHelp(p) {
-    const {document,module,offset}=this.target(p);if(!module||document.languageId!=='vb6')return null;
+    const {document,module,offset}=this.target(p);if(!module||document.languageId==='xaml')return null;
     const info=this.intelligence.parameterInfo(this.project,module,p.position.line+1,document.text,offset);if(!info)return null;
     const params=info.displayParams||info.params;
-    return {signatures:[{label:info.name+'('+params.join(', ')+')'+(info.type&&info.type!=='Void'?' As '+info.type:''),parameters:params.map(label=>({label})),documentation:info.description?{kind:'plaintext',value:info.description}:undefined}],activeSignature:0,activeParameter:Math.max(0,info.active)};
+    return {signatures:[{label:info.name+'('+params.join(document.languageId==='pascal'?'; ':', ')+')'+(info.type&&info.type!=='Void'?(document.languageId==='pascal'?': ':' As ')+info.type:''),parameters:params.map(label=>({label})),documentation:info.description?{kind:'plaintext',value:info.description}:undefined}],activeSignature:0,activeParameter:Math.max(0,info.active)};
   }
   definition(p) {
     const {document,symbol}=this.target(p);if(document.languageId==='xaml')return this.xaml.definition(document.uri,p.position).map(r=>({uri:r.uri,range:r.range}));
@@ -163,7 +171,7 @@ export class BuiltinLanguageServer {
     for(const module of project.modules){
       const uri=uris.get(module.id),doc=documents.get(uri);if(!doc)continue;
       const occurrences=await this.occurrences(doc,signal);
-      for(const {line,start,end}of occurrences.get(key(symbol.name))||[]) {
+      for(const {line,start,end}of occurrences.get(key(symbol.bindingName||symbol.name))||[]) {
         checkCancelled(signal);
         const hit=this.intelligence.definition(project,module,line+1,doc.text,start+Math.min(1,end-start));
         if(identity(hit)!==target)continue;
@@ -180,7 +188,7 @@ export class BuiltinLanguageServer {
     for(let line=0;line<document.lineStarts.length;line++) {
       if(line%128===0){checkCancelled(signal);await yieldTask();}
       const base=document.lineStarts[line];
-      for(const token of safeTokenize(document.text.slice(base,document.lineEnds[line])))if(token.type==='id') {
+      for(const token of tokensAtLine(document,line))if(token.type==='id') {
         const name=key(token.value);let list=values.get(name);if(!list)values.set(name,list=[]);
         list.push({line,start:base+token.start,end:base+token.end});
       }
@@ -189,10 +197,10 @@ export class BuiltinLanguageServer {
     return values;
   }
   inlayHints(p) {
-    const document=this.document(p.textDocument.uri);if(document.languageId!=='vb6')return [];
+    const document=this.document(p.textDocument.uri);if(document.languageId==='xaml')return [];
     const module=this.module(document),hints=[],seen=new Set();
     for(let line=Math.max(0,p.range.start.line);line<=Math.min(document.lineStarts.length-1,p.range.end.line);line++) {
-      const base=document.lineStarts[line],tokens=safeTokenize(document.text.slice(base,document.lineEnds[line]));
+      const base=document.lineStarts[line],tokens=tokensAtLine(document,line);
       for(let i=1;i<tokens.length;i++) {
         const token=tokens[i],previous=tokens[i-1];
         if(token.type==='eof'||!(['(',','].includes(previous.value)||previous.type==='id'&&previous.end<token.start))continue;
@@ -205,7 +213,7 @@ export class BuiltinLanguageServer {
     return hints;
   }
   codeLenses(p) {
-    const document=this.document(p.textDocument.uri);if(document.languageId!=='vb6')return [];
+    const document=this.document(p.textDocument.uri);if(document.languageId==='xaml')return [];
     return this.intelligence.index(this.module(document),this.project).procedures.map(symbol=>({range:symbolRange(document,symbol),data:{uri:document.uri,version:document.version,revision:this.revision,position:symbolRange(document,symbol).start}}));
   }
   async resolveCodeLens(lens,context) {
@@ -226,7 +234,7 @@ export class BuiltinLanguageServer {
   workspaceSymbols(query='') {
     const needle=query.toLowerCase(),result=[];
     for(const [uri,doc]of this.documents) {
-      if(doc.languageId!=='vb6'&&doc.languageId!=='xaml')continue;
+      if(!['vb6','pascal','xaml'].includes(doc.languageId))continue;
       const visit=(symbols,parent)=>{for(const symbol of symbols){if(symbol.name.toLowerCase().includes(needle))result.push({name:symbol.name,kind:symbol.kind,containerName:parent||'',location:{uri,range:symbol.selectionRange}});if(result.length>=2000)return;if(symbol.children)visit(symbol.children,symbol.name);}};
       visit(this.symbols(uri),'');if(result.length>=2000)break;
     }
@@ -238,7 +246,7 @@ export class BuiltinLanguageServer {
       const native=this.nativeName(document,p.position);if(native)return {range:document.range(native.attribute.valueStart,native.attribute.valueEnd),placeholder:native.attribute.value};
       const refs=this.xaml.references(document.uri,p.position);return refs.length?{range:refs.find(r=>r.start<=document.offsetAt(p.position)&&document.offsetAt(p.position)<=r.end)?.range||refs[0].range,placeholder:refs[0].name}:null;
     }
-    if(!identity(symbol)||['control','module','class','label'].includes(symbol.kind)||symbol.implicitRedim)return null;
+    if(!identity(symbol)||['control','module','class','label'].includes(symbol.kind)||symbol.implicitRedim||symbol.implicit)return null;
     if(!symbol.owner&&module?.form&&new RegExp('^(?:Form|MDIForm|UserControl|'+(module.form.controls||[]).map(c=>c.name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|')+')_','i').test(symbol.name))return null;
     const token=tokenAt(document,p.position);if(!token)return null;
     const base=document.lineStarts[p.position.line];return {range:document.range(base+token.start,base+token.end),placeholder:token.value};
@@ -264,12 +272,13 @@ export class BuiltinLanguageServer {
       }else edits=this.xaml.rename(document.uri,p.position,p.newName).edits.map(e=>({range:e.range,newText:e.text}));
       return {documentChanges:[{textDocument:{uri:document.uri,version:document.version},edits}]};
     }
-    if(!/^[\p{L}_][\p{L}\p{N}_]*$/u.test(p.newName)||keywords.has(p.newName.toLowerCase()))throw new RpcError(-32602,'Enter a non-keyword VB6 identifier.');
+    if(!/^[\p{L}_][\p{L}\p{N}_]*$/u.test(p.newName)||(document.languageId==='pascal'?pascalKeywords:keywords).has(p.newName.toLowerCase()))throw new RpcError(-32602,'Enter a non-keyword source identifier.');
     const {symbol}=this.target(p),id=identity(symbol),refs=await this.references({...p,context:{includeDeclaration:true}},context),changes=new Map();
     for(const reference of refs) {
       const doc=this.document(reference.uri),module=this.module(doc),line=reference.range.start.line+1,offset=doc.offsetAt(reference.range.start);
       const collision=this.intelligence.resolve(this.project,module,line,p.newName,{offset});
       if(collision&&identity(collision)!==id)throw new RpcError(-32602,'The new name would shadow an existing symbol: '+p.newName);
+      if(doc.languageId==='pascal'&&symbol.parentType){const hit=this.intelligence.definition(this.project,module,line,doc.text,offset),owner=this.project.modules.find(m=>m.id===hit?.moduleId)||module,component=hit?.parentType&&this.intelligence.type(this.project,owner,hit.parentType)?.members?.find(member=>key(member.name)===key(p.newName));if(component&&identity(this.intelligence.declared(this.project,owner,component))!==id)throw new RpcError(-32602,'The new name would shadow an object component: '+p.newName);}
       let edits=changes.get(reference.uri);if(!edits)changes.set(reference.uri,edits=[]);
       const previous=doc.text.slice(offset,doc.offsetAt(reference.range.end)),suffix=previous.match(/[$%&!#@]$/)?.[0]||'';
       edits.push({range:reference.range,newText:p.newName+suffix});
@@ -284,7 +293,7 @@ export class BuiltinLanguageServer {
       // reindent arbitrary fragments without their xml:space/namespace context.
       return p.range&&!(document.offsetAt(p.range.start)===0&&document.offsetAt(p.range.end)===document.text.length)?[]:edits;
     }
-    const formatted=formatCode(document.text.replace(/\r\n?|\n/g,'\n'),options.tabSize).split('\n'),edits=[];
+    const formatted=formatCode(document.text.replace(/\r\n?|\n/g,'\n'),options.tabSize,document.languageId).split('\n'),edits=[];
     for(let line=0;line<document.lineStarts.length;line++) {
       const start=document.lineStarts[line],end=document.lineEnds[line],range=document.range(start,end);
       if(p.range&&(start<document.offsetAt(p.range.start)||end>document.offsetAt(p.range.end)))continue;
@@ -296,7 +305,7 @@ export class BuiltinLanguageServer {
   folding(p) {
     const document=this.document(p.textDocument.uri);if(document.languageId==='xaml')return this.xaml.foldingRanges(document.uri);
     this.foldingCache??=new WeakMap();let cached=this.foldingCache.get(document);
-    if(!cached||cached.version!==document.version){cached={version:document.version,ranges:vb6FoldingRanges(document.text)};this.foldingCache.set(document,cached);}
+    if(!cached||cached.version!==document.version){cached={version:document.version,ranges:document.languageId==='pascal'?pascalFoldingRanges(document.text):vb6FoldingRanges(document.text)};this.foldingCache.set(document,cached);}
     return cached.ranges;
   }
 
@@ -331,10 +340,10 @@ export class BuiltinLanguageServer {
         for(let line=0;line<document.lineStarts.length;line++) {
           if(line%128===0){checkCancelled(signal);await yieldTask();}
           const base=document.lineStarts[line],raw=document.text.slice(base,document.lineEnds[line]);
-          for(const token of safeTokenize(raw)) {
+          for(const token of tokensAtLine(document,line)) {
             if(token.type==='eof')continue;let type,modifiers=0;
             if(token.type==='string'||token.type==='date')type='string';else if(token.type==='number')type='number';else if(token.type==='op')type='operator';
-            else if(keywords.has(token.value.toLowerCase())&&!token.raw.startsWith('['))type='keyword';
+            else if((document.languageId==='pascal'?pascalKeywords:keywords).has(String(token.value).toLowerCase())&&!token.raw.startsWith('['))type='keyword';
             else {const symbol=this.intelligence.definition(project,module,line+1,document.text,base+token.start+Math.min(1,token.end-token.start));if(symbol){type=tokenKind(symbol);if(symbol.kind==='constant')modifiers|=2;if(!symbol.moduleId)modifiers|=4;if(symbol.moduleId===module.id&&symbol.line===line+1&&symbolRange(document,symbol).start.character===token.start)modifiers|=1;}}
             if(type)tokens.push({line,character:token.start,length:token.end-token.start,type,modifiers});
           }
@@ -349,7 +358,7 @@ export class BuiltinLanguageServer {
     return {resultId:cacheKey,data};
   }
   codeActions(p) {
-    const document=this.document(p.textDocument.uri);if(document.languageId!=='vb6')return [];
+    const document=this.document(p.textDocument.uri);if(document.languageId==='xaml')return [];
     const module=this.module(document),index=this.intelligence.index(module,this.project);
     const start=p.range?document.offsetAt(p.range.start,true):0,end=p.range?document.offsetAt(p.range.end,true):start;
     return sourceCodeActions(module,index,start,end,{only:p.context?.only,tabWidth:this.project.settings.tabWidth||4}).map(action=>({

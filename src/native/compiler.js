@@ -49,6 +49,7 @@ import {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameter
 import {nativeControlArrayMethods} from './control-arrays.js';
 import {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers} from './storage.js';
 import {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers} from './arrays.js';
+import {emitNativeRecordArrayHelpers} from './record-arrays.js';
 import {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers} from './errors.js';
 
 import {key,lit,mem,INT_TYPES,BOOL_CONDITIONS,CONSTANTS} from './compiler-constants.js';
@@ -97,7 +98,7 @@ class NativeCompiler {
     emitNativeRecordStringHelpers(this);emitNativeMathHelpers(this);
     emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);emitNativeDateHelpers(this);emitNativeDateIntervalHelpers(this);
     emitNativeStorageHelpers(this);emitNativeStringLibraryHelpers(this);emitNativeStringStatements(this);
-    emitNativeArrayHelpers(this);
+    emitNativeArrayHelpers(this);emitNativeRecordArrayHelpers(this);
     this.emitNativeGridEditHelpers();this.emitNativePictureHelpers();this.emitNativeImageListHelpers();this.emitNativeDialogHelpers();this.emitNativeControlTextHelpers();this.emitNativeRichTextHelpers();this.emitNativeRangeHelpers();this.emitNativeFileHelpers();this.emitNativeFontHelpers();this.emitNativeInputHelpers();emitNativeCheckBoxHelpers(this);this.emitNativeTabHelpers();this.emitNativeTabTextHelpers();this.emitNativeColorHelpers();this.emitNativeDrawingHelpers();
     // int-to-string(value, buffer), including INT_MIN without signed negation overflow.
     const positive = x.unique(), digits = x.unique(), copy = x.unique(), done = x.unique();

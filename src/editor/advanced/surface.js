@@ -12,7 +12,7 @@ export class AdvancedSurface {
   constructor(runtime,record,legacy) {
     this.runtime=runtime;this.record=record;this.legacy=legacy;this.monaco=runtime.monaco;this.root=legacy.root;this.xaml=record.language==='xaml';this.disposables=[];this.restore=[];this.views=[];
     const doc=this.root.ownerDocument;
-    this.host=doc.createElement('div');this.host.className='advanced-editor-surface';this.host.setAttribute('aria-label',this.xaml?'Advanced XAML editor':'Advanced Visual Basic editor');
+    this.host=doc.createElement('div');this.host.className='advanced-editor-surface';this.host.setAttribute('aria-label',this.xaml?'Advanced XAML editor':record.language==='pascal'?'Advanced Turbo Pascal editor':'Advanced Visual Basic editor');
     if(this.xaml)this.root.insertBefore(this.host,legacy.note);else this.root.append(this.host);
     this.root.classList.add('advanced-editor-active');
     const selection=this.xaml?{start:legacy.input.selectionStart,end:legacy.input.selectionEnd}:legacy.selectionBounds();
@@ -33,7 +33,7 @@ export class AdvancedSurface {
       glyphMargin:!this.xaml,lineNumbers:'on',folding:true,showFoldingControls:'mouseover',bracketPairColorization:{enabled:true},guides:{bracketPairs:true,indentation:true,highlightActiveIndentation:true},
       linkedEditing:true,selectionHighlight:true,occurrencesHighlight:'singleFile',multiCursorModifier:'alt',smoothScrolling:false,scrollBeyondLastLine:false,
       quickSuggestions:{other:true,comments:false,strings:this.xaml},suggest:{showWords:false},wordBasedSuggestions:'off',parameterHints:{enabled:true},
-      accessibilitySupport:'auto',ariaLabel:this.xaml?'XAML source (advanced)':'Visual Basic source (advanced)',contextmenu:true,mouseWheelZoom:true,renderControlCharacters:true,editContext:false,
+      accessibilitySupport:'auto',ariaLabel:this.xaml?'XAML source (advanced)':this.record.language==='pascal'?'Turbo Pascal source (advanced)':'Visual Basic source (advanced)',contextmenu:true,mouseWheelZoom:true,renderControlCharacters:true,editContext:false,
       unicodeHighlight:{ambiguousCharacters:true,invisibleCharacters:true},padding:{top:5,bottom:5},largeFileOptimizations:true});
     const view=this.view,state={view,pane,disposables:[],decorations:view.createDecorationsCollection()};this.views.push(state);
     guardLinkedEditingCancellation(view,error=>this.runtime.report(error));
@@ -77,7 +77,7 @@ export class AdvancedSurface {
     action('editor.action.goToTypeDefinition','Go to Type Definition',[],()=>navigateLanguageLocation(this,'textDocument/typeDefinition',{title:'Type definition'}));
     action('editor.action.goToImplementation','Go to Implementation',[],()=>navigateLanguageLocation(this,'textDocument/implementation',{title:'Implementation'}));
     action('editor.action.revealDeclaration','Go to Declaration',[],()=>navigateLanguageLocation(this,'textDocument/declaration',{title:'Declaration'}));
-    if(!this.xaml)action('vb6.insertSnippet','Insert VB6 Snippet…',[M.chord(M.CtrlCmd|K.KeyK,M.CtrlCmd|K.KeyX)],()=>chooseSnippet(this));
+    if(!this.xaml)action('vb6.insertSnippet',this.record.language==='pascal'?'Insert Pascal Snippet…':'Insert VB6 Snippet…',[M.chord(M.CtrlCmd|K.KeyK,M.CtrlCmd|K.KeyX)],()=>chooseSnippet(this));
     action('vb6.toggleSplit','Toggle Split Editor',[],()=>this.setSplit(this.views.length===1));
     action('vb6.workspaceSymbols','Go to Project Symbol…',[M.CtrlCmd|K.KeyT],()=>this.runtime.navigationTools.open('symbols',this));
     action('vb6.callHierarchy','View Call Hierarchy',[M.CtrlCmd|M.Alt|K.KeyH],()=>this.runtime.navigationTools.open('call',this));

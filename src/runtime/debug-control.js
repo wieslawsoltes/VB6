@@ -52,7 +52,7 @@ export class RuntimeDebugger {
     const bp=frame.pinnedSource===undefined?vm.breakpoints.get(lower(ins.source)+':'+ins.line):null;
     let reason=null,details={};
     if(visible&&lineChanged&&bp&&bp.enabled!==false){
-      try{if(!bp.condition||truth(vm.debugInspector.node(vm.debugInspector.parse(bp.condition),frame,{count:0},0)))reason='breakpoint';}
+      try{if(!bp.condition||truth(vm.debugInspector.node(vm.debugInspector.parse(bp.condition,frame),frame,{count:0},0)))reason='breakpoint';}
       catch(error){reason='breakpoint-condition';details.conditionError=error.message;}
     }
     if(visible&&vm.stepMode&&(vm.stepMode.mode==='into'||vm.stepMode.mode==='over'&&frame.depth<=vm.stepMode.depth||vm.stepMode.mode==='out'&&frame.depth<vm.stepMode.depth))reason ||= 'step';
@@ -70,7 +70,7 @@ export class RuntimeDebugger {
         let values=vm.watchpointValues.get(watch.id);if(!values)vm.watchpointValues.set(watch.id,values=new WeakMap());
         try{
           const context=watch.module&&!watch.procedure?vm.makeFrame(scope.instance):scope;
-          const value=vm.debugInspector.node(watch.node,context,{count:0},0),prior=values.get(owner);
+          const value=vm.debugInspector.node(vm.debugInspector.parse(watch.expression,context),context,{count:0},0),prior=values.get(owner);
           if(watch.mode==='true'?truth(value)&&(visible||!prior||!vm.sameWatchValue(prior.value,value)):prior!==undefined&&!vm.sameWatchValue(prior.value,value)){reason ||= 'watch:'+watch.expression;details.watch={id:watch.id,expression:watch.expression,frameIndex:vm.stack.indexOf(scope)};}
           values.set(owner,{value:vm.watchSnapshot(value)});
         }catch{/* Out of scope, uninitialized and effectful expressions are not executed. */}

@@ -27,14 +27,27 @@ export function emitNativeFileHelpers(c){
   x.label(P+'error');
   for(const [code,error]of [[2,53],[3,76],[4,67],[5,70],[6,52],[8,7],[14,7],[32,70],[33,70],[80,58],[112,61],[123,52],[206,52]])x.compare(code).branch('e','error:'+error);
   x.jump('error:75');
+  x.label(P+'validate-path').enter().api('oleaut32.dll','SysStringLen',[arg(8)]).test().branch('e','error:52').compare(32767).branch('g','error:52').mov('ebx','eax')
+    .api(K,'lstrlenW',[arg(8)]).cmp('eax','ebx').branch('ne','error:52').value(arg(8)).leave(4);
+  x.label(P+'path-length').enter(36).push(arg(8)).call(P+'validate-path').push(addr(-36)).push(0).push(arg(8)).invoke(K,'GetFileAttributesExW').test().branch('e',P+'last-error');
+  x.mov('eax',m(-36)).and('eax',16).branch('ne','error:75').cmp(m(-8),0).branch('ne','error:6').mov('eax',m(-4)).test().branch('s','error:6').leave(4);
+  x.label(P+'delete-path').enter().push(arg(8)).call(P+'validate-path').push().invoke(K,'DeleteFileW').test().branch('e',P+'last-error').value(0).leave(4);
+  for(const [name,api]of [['rename-path','MoveFileW'],['copy-path','CopyFileW']]){
+    x.label(P+name).enter().push(arg(8)).call(P+'validate-path').push(arg(12)).call(P+'validate-path');
+    if(name==='copy-path')x.push(0);
+    x.push(arg(12)).push(arg(8)).invoke(K,api).test().branch('e',P+'last-error').value(0).leave(8);
+  }
   const openFail=x.unique(),valid=x.unique(),scan=x.unique(),next=x.unique(),truncate=x.unique(),publish=x.unique(),duplicate=x.unique(),closed=x.unique();
   x.label(P+'open').enter(56).push(arg(12)).call(P+'entry').mov('esi','eax').cmp(at('esi'),0).branch('ne','error:55');
   x.api('oleaut32.dll','SysStringLen',[arg(8)]).test().branch('e','error:52').compare(32767).branch('g','error:52').mov('ebx','eax')
     .api(K,'lstrlenW',[arg(8)]).cmp('eax','ebx').branch('ne','error:52');
   // OPEN_ALWAYS prevents truncation before duplicate-file identity is checked.
   // FILE_APPEND_DATA makes each append write target the actual EOF atomically.
-  const input=x.unique(),create=x.unique();
-  x.value(arg(16)).compare(3).branch('e',input).compare(2).branch('ne',valid).mov('ebx',4).jump(closed).label(valid).mov('ebx',0x40000000).label(closed).mov('ecx',4).jump(create);
+  const input=x.unique(),create=x.unique(),binary=x.unique(),binaryWrite=x.unique(),binaryReadWrite=x.unique();
+  x.value(arg(16)).and('eax',255).mov(m(-56),'eax').compare(4).branch('ae',binary).compare(3).branch('e',input).compare(2).branch('ne',valid).mov('ebx',4).jump(closed).label(valid).mov('ebx',0x40000000).label(closed).mov('ecx',4).jump(create);
+  x.label(binary).compare(5).branch('a','error:54').value(arg(16)).shift('shr','eax',8).compare(1).branch('ne',binaryWrite).mov('ebx',0x80000000).mov('ecx',3).jump(create);
+  x.label(binaryWrite).compare(2).branch('ne',binaryReadWrite).mov('ebx',0x40000000).mov('ecx',4).jump(create);
+  x.label(binaryReadWrite).compare(3).branch('ne','error:54').mov('ebx',0xc0000000).mov('ecx',4).jump(create);
   x.label(input).mov('ebx',0x80000000).mov('ecx',3).label(create);
   x.push(0).push(128).pushOperand('ecx').push(0).push(arg(20)).pushOperand('ebx').push(arg(8)).invoke(K,'CreateFileW').compare(-1).branch('e',P+'last-error').mov('edi','eax');
   x.push(addr(-52)).pushOperand('edi').invoke(K,'GetFileInformationByHandle');
@@ -44,12 +57,14 @@ export function emitNativeFileHelpers(c){
   for(const [source,target]of [[-24,20],[-8,24],[-4,28]])x.mov('eax',m(source)).cmp('eax',at('edx',target)).branch('ne',next);
   x.jump(duplicate).label(next).inc('ebx').jump(scan);
   const append=x.unique();
-  x.label(truncate).cmp(m(16),3).branch('e',publish).cmp(m(16),2).branch('e',append).pushOperand('edi').invoke(K,'SetEndOfFile').test().branch('e',openFail).jump(publish);
+  x.label(truncate).cmp(m(-56),3).branch('ae',publish).cmp(m(-56),2).branch('e',append).pushOperand('edi').invoke(K,'SetEndOfFile').test().branch('e',openFail).jump(publish);
   x.label(append).push(2).push(0).push(0).push(0).pushOperand('edi').invoke(K,'SetFilePointerEx').test().branch('e',openFail);
-  x.label(publish).mov(at('esi'),'edi').value(arg(16)).mov(at('esi',4),'eax').mov(at('esi',8),2).inc(at('esi',12)).mov(at('esi',16),0);
-  const accessWritten=x.unique();x.cmp(m(16),3).branch('ne',accessWritten).mov(at('esi',8),1).label(accessWritten);
+  x.label(publish).mov(at('esi'),'edi').mov('eax',m(-56)).mov(at('esi',4),'eax').mov(at('esi',8),2).inc(at('esi',12)).mov(at('esi',16),0);
+  const accessWritten=x.unique(),binaryAccess=x.unique();x.cmp(m(-56),4).branch('ae',binaryAccess).cmp(m(-56),3).branch('ne',accessWritten).mov(at('esi',8),1).jump(accessWritten);
+  x.label(binaryAccess).value(arg(16)).shift('shr','eax',8).mov(at('esi',8),'eax').label(accessWritten);
   for(const [source,target]of [[-24,20],[-8,24],[-4,28]])x.mov('eax',m(source)).mov(at('esi',target),'eax');
-  x.value(arg(24)).mov(at('esi',52),'eax').value(0).leave(20);
+  x.value(arg(24)).mov(at('esi',52),'eax').mov(at('esi',48),1).mov(at('esi',56),0);
+  const recordLengthWritten=x.unique();x.cmp(m(-56),5).branch('ne',recordLengthWritten).mov(at('esi',48),'eax').mov(at('esi',52),512).label(recordLengthWritten).value(0).leave(20);
   x.label(duplicate).pushOperand('edi').invoke(K,'CloseHandle').jump('error:55');
   x.label(openFail).api(K,'GetLastError').mov('ebx','eax').pushOperand('edi').invoke(K,'CloseHandle').mov('eax','ebx').jump(P+'error');
   const done=x.unique();
