@@ -136,10 +136,16 @@ export class VimAdapter {
     if(this.getOption('readOnly')&&!this._adopting)return;
     return this.operation(()=>{
       text=String(text);const start=this.indexFromPos(from);let end=this.indexFromPos(to);if(start>end)throw new RangeError('Vim edit range is reversed.');
+      const replaceInput=!this._adopting&&this.state.overwrite&&origin==='+input'&&text&&!text.includes('\n'),replayReplace=replaceInput&&!this._applyingOverwrite&&Vim.getVimGlobalState_().macroModeState.isPlaying;
+      const beforeReplace=replayReplace&&this._selections.length===1&&this._selections[0].anchor===start&&this._selections[0].head===start?this._selections.map(copySelection):null;
       // Upstream repeat stores Replace input as text and computes its range in
       // UTF-16 units. Consume the same number of whole source code points.
-      if(!this._adopting&&this.state.overwrite&&Vim.getVimGlobalState_().macroModeState.isPlaying&&text&&!text.includes('\n')&&end>start){end=start;for(const character of text){if(this._text[end]==='\n')break;end=nextCodePoint(this._text,end);}}
-      const removed=this._text.slice(start,end);if(removed===text)return;
+      if(replayReplace&&end>start){end=start;for(const character of text){if(this._text[end]==='\n')break;end=nextCodePoint(this._text,end);}}
+      // Typing/restoring the existing character still advances Replace and is
+      // an edit-driven cursor movement for dot/macro recording, even when no
+      // canonical text edit is necessary. Restoration keeps its delete origin
+      // so the original source is never mistaken for new inserted text.
+      const removed=this._text.slice(start,end),restoreOverwrite=!this._adopting&&this.state.overwrite&&origin==='+delete'&&text;if(removed===text&&!replaceInput&&!restoreOverwrite)return;
       const change={from:this.posFromIndex(start),to:this.posFromIndex(end),text:text.split('\n'),removed:removed.split('\n'),origin},transform={start,end,text};
       this._text=this._text.slice(0,start)+text+this._text.slice(end);this._lines=null;this._starts=null;this.revision++;
       for(const marker of this._markers)marker.update(transform);
@@ -151,6 +157,10 @@ export class VimAdapter {
       // newline precedes Insert) and native auto-pairs (the caret is inside the
       // inserted pair). Macro replay must retain its recording suppression.
       this.curOp.changeEvents.push({change,listeners:[...eventMaps.get(this)?.get('change')||[]],playing:Vim.getVimGlobalState_().macroModeState.isPlaying});
+      // Replay writes directly through replaceRange rather than the interactive
+      // overwrite helper. Retain the same bounded restoration record so a
+      // recorded Backspace restores the source instead of deleting a character.
+      if(beforeReplace)this._replaceStack.push({before:beforeReplace,after:this._selections.map(copySelection),replaced:[removed],text,revision:this.revision});
     });
   }
   replaceSelection(text,collapse='end',origin='+input'){return this.replaceSelections([text],collapse,origin);}
@@ -333,10 +343,10 @@ export class VimAdapter {
       finally{for(const range of [...saved,...result]){range.anchor.clear();range.head.clear();}this.virtualSelection=null;this.inVirtualSelectionMode=false;}
     });
   }
-  overWriteSelection(text){this.operation(()=>{
+  overWriteSelection(text){const previous=this._applyingOverwrite;this._applyingOverwrite=true;try{return this.operation(()=>{
     const before=this._selections.map(copySelection),selections=this._selections.map(s=>{let end=Math.max(s.anchor,s.head);if(s.anchor===s.head)for(const character of String(text)){if(this._text[end]==='\n'||character==='\n')break;end=nextCodePoint(this._text,end);}return {anchor:this.posFromIndex(Math.min(s.anchor,s.head)),head:this.posFromIndex(end)};});
     const replaced=selections.map(s=>this.getRange(s.anchor,s.head));this.setSelections(selections);this.replaceSelections(selections.map(()=>text));this._replaceStack.push({before,after:this._selections.map(copySelection),replaced,text:String(text),revision:this.revision});
-  });}
+  });}finally{this._applyingOverwrite=previous;}}
   backspaceOverwrite(){
     const last=this._replaceStack.at(-1);
     if(!last||last.revision!==this.revision||!sameSelections(last.after,this._selections)){this.moveH(-1);return;}
@@ -396,7 +406,7 @@ VimAdapter.commands={
   indentAuto:cm=>{for(const line of cm.selectedLines())cm.indentLine(line);},
   indentMore:cm=>cm.indentMore(),indentLess:cm=>cm.indentLess(),
   insertTab:cm=>cm.replaceSelections(cm._selections.map(s=>cm.getOption('indentWithTabs')?'\t':' '.repeat(cm.getOption('tabSize')-visualColumn(cm.getLine(cm.posFromIndex(s.head).line),cm.posFromIndex(s.head).ch,cm.getOption('tabSize'))%cm.getOption('tabSize')))),
-  delCharBefore:cm=>deleteInput(cm,true),delCharAfter:cm=>deleteInput(cm,false),delWordBefore:cm=>deleteInput(cm,true,true),delWordAfter:cm=>deleteInput(cm,false,true),
+  delCharBefore:cm=>cm.state.overwrite?cm.backspaceOverwrite():deleteInput(cm,true),delCharAfter:cm=>deleteInput(cm,false),delWordBefore:cm=>deleteInput(cm,true,true),delWordAfter:cm=>deleteInput(cm,false,true),
   goCharLeft:cm=>cm.moveH(-1),goCharRight:cm=>cm.moveH(1),cursorCharLeft:cm=>cm.moveH(-1),
   goLineLeft:cm=>cm.setCursor(cm.getCursor().line,0),goLineRight:cm=>cm.setCursor(cm.getCursor().line,cm.getLine(cm.getCursor().line).length),
   goLineUp:cm=>cm.setCursor(cm.findPosV(cm.getCursor(),-1,'line')),goLineDown:cm=>cm.setCursor(cm.findPosV(cm.getCursor(),1,'line')),

@@ -153,6 +153,14 @@ isolated('replace mode, character replacement, case operators and numeric change
 isolated('replace backspace restores successive overwritten characters without retaining whole documents',()=>{
   const e=editor('A😀BCD');e.keys('R','xyz','<BS>','<BS>');assert.equal(e.text,'x😀BCD');assert.ok(e.session.adapter._replaceStack.every(change=>!('beforeText'in change)&&!('afterText'in change)));e.keys('<BS>','<Esc>');assert.equal(e.text,'A😀BCD');e.dispose();
 });
+isolated('Replace dot and macro replay restore overwritten text when the recorded insertion contains Backspace',()=>{
+  for(const [source,expected]of [['abcd wxyz','XZcd XZyz'],['A😀B 😀😀C','XZB XZC'],['ab w','XZ XZ'],['ab\nw','XZ\nXZ']]){const e=editor(source);e.keys('R','XY','<BS>','Z','<Esc>','w');const before=e.text;e.keys('.');assert.equal(e.text,expected);e.keys('u');assert.equal(e.text,before);e.dispose();}
+  const macro=editor('abcd wxyz');macro.keys('qa','R','XY','<BS>','<BS>','Z','<Esc>','w','q','@a');assert.equal(macro.text,'Zbcd Zxyz');macro.dispose();
+});
+isolated('Replace records typing equal to the original character for repeat and Backspace without a redundant host edit',()=>{
+  const e=editor('abc wxyz');e.keys('R','a');assert.equal(e.applications.length,0);e.keys('<Esc>','w','.');assert.equal(e.text,'abc axyz');e.dispose();
+  const correction=editor('abcd wxyz');correction.keys('R','ab','<BS>','Z','<Esc>','w','.');assert.equal(correction.text,'aZcd aZyz');correction.dispose();
+});
 isolated('Ex ranges, substitution flags, global commands, sort and undo share canonical edits',()=>{
   const e=editor('cat dog\ncat cat\nzebra\napple');e.ex('%s/cat/fox/g');assert.equal(e.text,'fox dog\nfox fox\nzebra\napple');e.ex('g/fox/d');assert.equal(e.text,'zebra\napple');e.ex('sort');assert.equal(e.text,'apple\nzebra');e.keys('u');assert.equal(e.text,'zebra\napple');e.dispose();
 });
