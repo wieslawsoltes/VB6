@@ -4,11 +4,12 @@ const lower=value=>String(value||'').replace(/^\[|\]$/g,'').replace(/[$%&!#@]$/,
 const check=signal=>{if(signal?.aborted)throw new RpcError(RPC_CANCELLED,'Request cancelled.');};
 const yieldTask=()=>new Promise(resolve=>setTimeout(resolve,0));
 const procedureKey=symbol=>symbol?.moduleId+'|'+symbol?.id;
+const objectKey=(moduleId,name)=>moduleId+'|object:'+lower(name);
 const callable=symbol=>['sub','function','property','property get','property let','property set'].includes(symbol?.kind);
 
 /** Source-backed hierarchy over the same conditional-compilation and binding
  * index as completion/rename. This describes statically resolved source calls
- * and VB6 Implements relationships, not dynamic dispatch or class inheritance. */
+ * VB6 Implements relationships, and Pascal value-object inheritance. */
 export class SourceHierarchy {
   constructor(server,symbolRange) {this.server=server;this.symbolRange=symbolRange;}
   handlers() {
@@ -33,10 +34,11 @@ export class SourceHierarchy {
       for(const symbol of symbols.procedures) {
         if(!callable(symbol)||symbol.external)continue;
         const declaration=symbols.statements.find(statement=>statement.start===symbol.offset);
-        index.procedures.set(procedureKey(symbol),{...entry,symbol,declarationEnd:declaration?.end??document.lineEnds[symbol.line-1]});
+        index.procedures.set(procedureKey(symbol),{...entry,symbol,declarationEnd:symbol.headerEnd??declaration?.end??document.lineEnds[symbol.line-1]});
         if(index.procedures.size>20000)throw new RpcError(-32602,'More than 20,000 procedures; narrow the hierarchy workspace.');
       }
       if(module.kind==='class'||module.form)index.types.set(module.id,entry);
+      for(const record of symbols.records)if(record.isPascalObject){const typeKey=objectKey(module.id,record.name);index.types.set(typeKey,{...entry,record,typeKey});}
     }
     this.index=index;return index;
   }
@@ -55,7 +57,10 @@ export class SourceHierarchy {
       data:{kind:'call',key:procedureKey(symbol),revision:this.server.revision,version:document.version}};
   }
   typeItem(entry) {
-    const {module,document,uri,symbols}=entry;
+    const {module,document,uri,symbols,record}=entry;
+    if(record)return {name:record.name,kind:23,detail:'Turbo Pascal object'+(record.ancestor?' · '+record.ancestor:''),uri,
+      range:document.range(record.offset,record.endOffset),selectionRange:this.symbolRange(document,record),
+      data:{kind:'type',key:entry.typeKey,revision:this.server.revision,version:document.version}};
     return {name:module.name,kind:5,detail:'VB6 class'+(symbols.interfaces.length?' · Implements '+symbols.interfaces.join(', '):''),uri,
       range:document.range(0,document.text.length),selectionRange:document.range(0,0),
       data:{kind:'type',key:module.id,revision:this.server.revision,version:document.version}};
@@ -75,7 +80,7 @@ export class SourceHierarchy {
   async graph(signal) {
     const index=this.workspace();if(index.graph)return index.graph;
     const server=this.server,project=server.project,graph={incoming:new Map(),outgoing:new Map()};let count=0,scanned=0;
-    const names=new Set([...index.procedures.values()].map(e=>lower(e.symbol.name)));
+    const names=new Set([...index.procedures.values()].map(e=>lower(e.symbol.bindingName||e.symbol.name)));
     for(const entry of index.modules.values()) {
       const {module,document,symbols}=entry,procedures=[...index.procedures.values()].filter(e=>e.module.id===module.id).sort((a,b)=>a.symbol.offset-b.symbol.offset);
       const occurrences=await server.occurrences(document,signal);
@@ -114,7 +119,7 @@ export class SourceHierarchy {
     const name=symbol.kind==='class'||symbol.kind==='module'?symbol.name:symbol.type;
     if(!name)return null;
     const type=this.server.intelligence.type(this.server.project,module,name);
-    return type?.moduleId?index.types.get(type.moduleId)||null:null;
+    return type?.moduleId?index.types.get(type.isPascalObject?objectKey(type.moduleId,type.name):type.moduleId)||null:null;
   }
   prepareType(p) {
     const {document,module,symbol}=this.server.target(p);if(document.languageId==='xaml')return [];
@@ -122,6 +127,7 @@ export class SourceHierarchy {
     return entry?[this.typeItem(entry)]:[];
   }
   bases(entry,index=this.workspace()) {
+    if(entry.record){const ancestor=entry.record.ancestor&&this.typeEntry({type:entry.record.ancestor},entry.module,index);return ancestor?[ancestor]:[];}
     return [...new Set(entry.symbols.interfaces.map(name=>this.server.intelligence.type(this.server.project,entry.module,name)?.moduleId))].map(id=>index.types.get(id)).filter(Boolean);
   }
   types({item},direction) {
@@ -136,7 +142,15 @@ export class SourceHierarchy {
   }
   implementation(p) {
     const {document,module,symbol}=this.server.target(p);if(document.languageId==='xaml'||!symbol)return [];
-    const index=this.workspace(),interfaceEntry=callable(symbol)?index.types.get(symbol.moduleId):this.typeEntry(symbol,module,index);
+    const index=this.workspace(),owner=this.server.project.modules.find(m=>m.id===symbol.moduleId)||module;
+    if(document.languageId==='pascal'&&callable(symbol)&&symbol.parentType){
+      const type=this.typeEntry({type:symbol.parentType},owner,index);if(!type)return [];
+      const family=[type],seen=new Set(family);
+      if(symbol.virtual)for(let i=0;i<family.length;i++)for(const entry of index.types.values())if(entry.record&&!seen.has(entry)&&this.bases(entry,index).includes(family[i])){seen.add(entry);family.push(entry);}
+      const result=[];for(const entry of family){const member=entry.record.members.find(member=>lower(member.name)===lower(symbol.bindingName||symbol.name)),implementation=member?.implementation;if(implementation)result.push({uri:entry.uri,range:this.symbolRange(entry.document,implementation)});}
+      return result;
+    }
+    const interfaceEntry=callable(symbol)?index.types.get(symbol.moduleId):this.typeEntry(symbol,module,index);
     if(!interfaceEntry)return [];
     const implementations=[...index.types.values()].filter(e=>this.bases(e,index).includes(interfaceEntry)),result=[];
     for(const entry of implementations) {

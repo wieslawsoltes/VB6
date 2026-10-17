@@ -102,6 +102,12 @@ test('Pascal LSP binds method implementations and safely renames an entire virtu
   assert.match(signatures.signatures[0].label,/Read\(Offset: Integer\): Integer/);
   const symbols=await client.request('textDocument/documentSymbol',{textDocument:{uri}}),child=symbols.find(symbol=>symbol.name==='TChild');
   assert.deepEqual(child.children.map(symbol=>symbol.name),['Position','Items','Read','Move']);
+  const hierarchy=await client.request('textDocument/prepareTypeHierarchy',at(code.indexOf('TChild =')+1));assert.equal(hierarchy[0].name,'TChild');
+  const bases=await client.request('typeHierarchy/supertypes',{item:hierarchy[0]});assert.equal(bases[0].name,'TBase');
+  const descendants=await client.request('typeHierarchy/subtypes',{item:bases[0]});assert.equal(descendants[0].name,'TChild');
+  const implementations=await client.request('textDocument/implementation',at(code.indexOf('function Read')+'function '.length+1));assert.deepEqual(implementations.map(item=>item.range.start.line),[18,19]);
+  const callHierarchy=await client.request('textDocument/prepareCallHierarchy',at(code.indexOf('procedure Check')+'procedure '.length+1));
+  const outgoing=await client.request('callHierarchy/outgoingCalls',{item:callHierarchy[0]});assert.ok(outgoing.some(edge=>edge.to.name==='TChild.Read'));
   const renamed=await client.request('textDocument/rename',{...at(call),newName:'Measure'}),edits=renamed.documentChanges[0].edits;
   assert.equal(edits.length,9);
   let updated=code;const offsetAt=p=>code.split('\n').slice(0,p.line).reduce((sum,line)=>sum+line.length+1,0)+p.character;
