@@ -42,6 +42,7 @@ export function sameType(left, right) {
   if (right.kind === 'subrange') return sameType(left, right.base);
   if (left.kind !== right.kind) return false;
   if (left.kind === 'array' || left.kind === 'record' || left.kind === 'enum') return !!left.identity && left.identity === right.identity;
+  if (left.kind === 'pointer') return left.target && right.target ? sameType(left.target, right.target) : left.identity === right.identity;
   if (left.kind === 'set') return sameType(left.base, right.base);
   return left.name === right.name && (left.kind !== 'string' || left.capacity === right.capacity);
 }
@@ -53,6 +54,7 @@ export function assignmentCompatible(target, value) {
   if (target.kind === 'char' && value.kind === 'string') return value.literalLength === 1;
   if (target.kind === 'set' && value.kind === 'set') return !value.base || !target.base || sameType(target.base, value.base);
   if (target.kind === 'array' && value.kind === 'array' && target.open) return sameType(target.element, value.element);
+  if (target.kind === 'pointer' && value.kind === 'nil' || target.kind === 'object' && value.kind === 'nil') return true;
   return target.kind === 'object' && value.kind === 'object';
 }
 
@@ -93,12 +95,24 @@ export class PascalWorkspace {
     if (!input) for (const value of this.inputs.values()) {const ast = parsePascalModule(value); if (key(ast.name) === normalized) {input = value; break;}}
     return input ? this.add(input, parsePascalModule(input)) : null;
   }
+  preparePointers() {
+    for (const name of this.inputs.keys()) this.get(name)?.ensure();
+    const canonical = new Map();
+    for (const binder of [...new Set(this.binders.values())].sort((a, b) => key(a.name).localeCompare(key(b.name)))) for (const pointer of binder.pointerTypes) {
+      if (!pointer.target) pointer.target = binder.resolveType({kind: 'namedType', name: pointer.targetName, loc: pointer.node.loc}, pointer.targetScope);
+      if (pointer.target.kind === 'file') binder.fail('Pointers to files require an addressable file descriptor', pointer.node, 'TP_POINTER_TARGET');
+      const identity = pointer.target.identity || key(pointer.target.name);
+      if (!canonical.has(identity)) canonical.set(identity, pointer);
+      pointer.canonical = canonical.get(identity);
+    }
+    this.pointers = canonical;
+  }
 }
 
 export class PascalBinder {
   constructor(ast, input, workspace = new PascalWorkspace()) {
     this.ast = ast; this.input = input || {name: ast.name, code: ast.source}; this.name = this.input.name || ast.name; this.workspace = workspace;
-    this.scope = new PascalScope(this); this.imports = []; this.procedures = []; this.recordTypes = []; this.enumTypes = []; this.typeId = 0; this.ready = false; this.preparing = false;
+    this.scope = new PascalScope(this); this.imports = []; this.procedures = []; this.recordTypes = []; this.enumTypes = []; this.pointerTypes = []; this.typeId = 0; this.ready = false; this.preparing = false;
     this.controls = new Set(); this.controlTypes = new Map(); this.externalValues = new Set(['me', 'app', 'screen', 'clipboard', 'forms', 'printer', 'debug']); this.externalTypes = new Map();
     this.pascalIntrinsics = new Set('abs arctan chr concat copy cos delete dispose eof eoln exp frac get high include exclude inc dec insert int ioresult length ln low new odd ord paramcount paramstr pi pos pred put random randomize read readln reset rewrite round seek sin sizeof sqr sqrt str succ trunc upcase val write writeln'.split(' '));
     const controls = node => {if (!node) return; if (node.name) {this.controls.add(key(node.name)); this.controlTypes.set(key(node.name), node.type || 'Control');} for (const child of [...(node.controls || []), ...(node.menus || [])]) controls(child);}; controls(input?.form);
@@ -209,6 +223,10 @@ export class PascalBinder {
       this.recordTypes.push(type); return type;
     }
     if (node.kind === 'setType') {const base = this.resolveType(node.base, scope); if (!isOrdinal(base) || base.low < 0 || base.high > 255) this.fail('Set element type must be ordinal with bounds within 0..255', node, 'TP_SET_BASE'); return {kind: 'set', name: suggestedName || 'Set', vb: 'String', base, identity};}
+    if (node.kind === 'pointerType') {
+      const type = {kind: 'pointer', name: suggestedName || `Pointer${this.typeId++}`, vb: 'Long', targetName: node.target, targetScope: scope, target: null, identity, owner: this, node, public: publicType};
+      this.pointerTypes.push(type); return type;
+    }
     if (node.kind === 'untyped') this.fail('Untyped var parameters require a byte-addressable storage ABI', node, 'TP_UNSUPPORTED_UNTYPED_PARAMETER');
     const labels = {pointerType: 'Typed pointers', fileType: 'Typed and untyped files', objectType: 'Object types', procedureType: 'Procedural variables'};
     this.fail(`${labels[node.kind] || node.kind} require backend storage support`, node, 'TP_UNSUPPORTED_TYPE');

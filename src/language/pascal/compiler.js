@@ -5,6 +5,7 @@ import {PascalError, tokenizePascal, PASCAL_KEYWORDS} from './lexer.js';
 import {PascalWorkspace, PASCAL_TYPES, isOrdinal, isString, isNumeric, isAggregate, numericType, sameType, assignmentCompatible, foreignType} from './semantics.js';
 import {builtinType} from '../type-catalog.js';
 import {getPascalHelper, getPascalRuntimeSource} from './runtime-library.js';
+import {pascalPointerStorage, generatePascalPointerHeaps} from './pointer-lowering.js';
 
 export {parsePascalModule};
 export {tokenizePascal, PascalError, PASCAL_KEYWORDS};
@@ -33,6 +34,7 @@ export class PascalLowerer {
     this.input = input?.kind === 'pascalModule' ? {...options.input, name: options.input?.name || input.sourceName || input.name, code: input.source} : typeof input === 'string' ? {name: this.ast.name, code: input} : input;
     this.options = options; this.workspace = options.workspace || new PascalWorkspace(options.project);
     this.binder = this.workspace.add(this.input, this.ast); this.binder.ensure();
+    this.workspace.preparePointers();
     this.writer = new SourceWriter(); this.helpers = new Set(); this.tempId = 0; this.labels = 0;
     this.flags = {completeBoolean: false, rangeChecks: false, overflowChecks: false};
     this.directiveFlags = [];
@@ -86,7 +88,7 @@ export class PascalLowerer {
     if (!node) return PASCAL_TYPES.variant;
     if (node.kind === 'group') return this.typeOf(node.expression, context);
     if (node.kind === 'number' || node.kind === 'string' || node.kind === 'boolean') return this.binder.constant(node, context.scope).type;
-    if (node.kind === 'nil') return PASCAL_TYPES.object;
+    if (node.kind === 'nil') return {kind: 'nil', name: 'nil', vb: 'Long'};
     if (node.kind === 'identifier') {
       const symbol = this.resolve(node, context, false);
       if (symbol) return symbol.kind === 'procedure' ? symbol.returnType || PASCAL_TYPES.variant : symbol.type;
@@ -107,6 +109,7 @@ export class PascalLowerer {
       if (node.indices.length > type.dimensions.length && !type.open) this.fail('Too many array indices', node, 'TP_INDEX_COUNT');
       return type.open || node.indices.length === type.dimensions.length ? type.element : {...type, dimensions: type.dimensions.slice(node.indices.length)};
     }
+    if (node.kind === 'dereference') {const type = this.typeOf(node.object, context); if (type.kind !== 'pointer') this.fail('Dereference requires a typed pointer', node, 'TP_POINTER_TYPE'); return type.target;}
     if (node.kind === 'unary') {if (node.operator === '@') this.fail('Routine and storage addresses require procedural-pointer lowering', node, 'TP_UNSUPPORTED_POINTER'); return this.typeOf(node.operand, context);}
     if (node.kind === 'binary') {
       const left = this.typeOf(node.left, context), right = this.typeOf(node.right, context);
@@ -152,7 +155,7 @@ export class PascalLowerer {
   expression(node, context, {lvalue = false, forceCall = false} = {}) {
     if (node.kind === 'group') return `(${this.expression(node.expression, context, {lvalue, forceCall})})`;
     if (['number', 'string', 'boolean'].includes(node.kind)) {const constant = this.binder.constant(node, context.scope); return this.literal(constant.value, constant.type);}
-    if (node.kind === 'nil') return 'Nothing';
+    if (node.kind === 'nil') return '0&';
     if (node.kind === 'identifier') {
       const symbol = this.resolve(node, context, false);
       if (!symbol && Object.hasOwn(INTRINSIC_TYPES, key(node.name))) return this.expression({...node, kind: 'call', callee: node, args: []}, context);
@@ -178,6 +181,10 @@ export class PascalLowerer {
       const source = this.expression(object, context, {lvalue: true}), baseType = this.typeOf(object, context);
       if (baseType.open) {if (indices.length !== 1) this.fail('Open array indexing requires one ordinal index', node, 'TP_INDEX_COUNT'); indices[0] = `(${indices[0]} + LBound(${source}))`;}
       return `${source}(${indices.join(', ')})`;
+    }
+    if (node.kind === 'dereference') {
+      const type = this.typeOf(node.object, context); this.typeOf(node, context); const storage = pascalPointerStorage(type, this.binder);
+      return `${storage.heap}(${storage.validate}(${this.expression(node.object, context)}))${storage.wrapper}`;
     }
     if (node.kind === 'set') {
       let expression = '""';
@@ -213,6 +220,7 @@ export class PascalLowerer {
     if (['=', '<>', '<', '>', '<=', '>='].includes(op)) {
       if (!assignmentCompatible(leftType, rightType) && !assignmentCompatible(rightType, leftType) || isAggregate(leftType)) this.fail('Comparison operands have incompatible types', node, 'TP_OPERATOR_TYPE');
       if (leftType.kind === 'boolean' && rightType.kind === 'boolean' && !['=', '<>'].includes(op)) return `(${this.callHelper('ord', [left])} ${op} ${this.callHelper('ord', [right])})`;
+      if (leftType.kind === 'pointer' || rightType.kind === 'pointer') {if (!['=', '<>'].includes(op)) this.fail('Pointer values support only equality comparisons', node, 'TP_POINTER_OPERATOR');}
       return `(${left} ${op} ${right})`;
     }
     if (op === '+' && isString(leftType) && isString(rightType)) return `(${left} & ${right})`;
@@ -257,6 +265,7 @@ export class PascalLowerer {
   }
   sizeOf(type, node) {
     if (type.kind === 'ordinal') return type.bits / 8;
+    if (type.kind === 'pointer') return 4;
     if (['char', 'boolean', 'enum'].includes(type.kind)) return 1;
     if (type.kind === 'subrange') return type.low >= 0 && type.high <= 255 ? 1 : type.low >= -32768 && type.high <= 32767 ? 2 : 4;
     if (type.kind === 'real') return {Real: 6, Single: 4, Double: 8, Extended: 10}[type.name];
@@ -282,6 +291,7 @@ export class PascalLowerer {
     if (node.kind === 'identifier') {const symbol = this.resolve(node, context); if (!['variable', 'parameter', 'result', 'withField', 'control', 'external'].includes(symbol.kind)) this.fail(`Cannot assign to '${node.name}'`, node, 'TP_ASSIGNMENT'); if (symbol.kind === 'parameter' && symbol.param.constant) this.fail(`Cannot modify const parameter '${node.name}'`, node, 'TP_ASSIGNMENT'); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); return symbol;}
     if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (symbol && !['variable', 'parameter'].includes(symbol.kind)) this.fail('Exported member is not assignable', node, 'TP_ASSIGNMENT'); if (!symbol) this.assignable(node.object, context); return symbol;}
     if (node.kind === 'index') {this.assignable(node.object, context); this.typeOf(node, context); return null;}
+    if (node.kind === 'dereference') {this.typeOf(node, context); return null;}
     this.fail('Variable reference required', node, 'TP_ASSIGNMENT');
   }
   assign(target, value, context, node, {allowControl = false} = {}) {
@@ -289,7 +299,7 @@ export class PascalLowerer {
     const targetType = this.typeOf(target, context), valueType = this.typeOf(value, context);
     if (!assignmentCompatible(targetType, valueType)) this.fail(`Cannot assign ${valueType.name || valueType.kind} to ${targetType.name || targetType.kind}`, node, 'TP_ASSIGNMENT_TYPE');
     if (target.kind === 'index' && isString(this.typeOf(target.object, context))) {const objectType = this.typeOf(target.object, context); this.emit(context, `Call ${this.helper('stringSet')}(${this.expression(target.object, context, {lvalue: true})}, ${this.ordinal(target.indices[0], context)}, ${this.expression(value, context)}, ${number(objectType.capacity)})`, node); return;}
-    const destination = this.expression(target, context, {lvalue: true}), source = this.expression(value, context, {lvalue: isAggregate(valueType)});
+    const destination = this.expression(target, context, {lvalue: true}), source = value.kind === 'nil' && targetType.kind === 'object' ? 'Nothing' : this.expression(value, context, {lvalue: isAggregate(valueType)});
     if (targetType.kind === 'array') this.copyArray(destination, source, targetType, context, node);
     else this.emit(context, `${targetType.kind === 'object' ? 'Set ' : ''}${destination} = ${this.range(source, targetType, context, node)}`, node);
   }
@@ -325,6 +335,7 @@ export class PascalLowerer {
     if (node.kind === 'identifier') return this.expression(node, context, {lvalue: true});
     if (node.kind === 'member') return `${this.freezeReference(node.object, context)}.${identifier(node.name)}`;
     if (node.kind === 'index') {const source = this.freezeReference(node.object, context), indices = node.indices.map(index => {const temporary = this.temporary(context, PASCAL_TYPES.longint, index, 'reference'); this.emit(context, `${temporary} = ${this.ordinal(index, context)}`, index, true); return temporary;}); return `${source}(${indices.join(', ')})`;}
+    if (node.kind === 'dereference') {const type = this.typeOf(node.object, context), storage = pascalPointerStorage(type, this.binder), temporary = this.temporary(context, PASCAL_TYPES.longint, node, 'pointer'); this.emit(context, `${temporary} = ${storage.validate}(${this.expression(node.object, context)})`, node, true); return `${storage.heap}(${temporary})${storage.wrapper}`;}
     this.fail('Stable variable reference required', node);
   }
   loop(node, context) {
@@ -368,6 +379,12 @@ export class PascalLowerer {
   callStatement(expression, context, node) {
     const call = expression.kind === 'call' ? expression : {...expression, kind: 'call', callee: expression, args: []}, name = call.callee.kind === 'identifier' ? key(call.callee.name) : null, symbol = name ? this.resolve(call.callee, context, false) : this.memberSymbol(call.callee, context);
     if (!symbol && name) {
+      if (name === 'new' || name === 'dispose') {
+        this.count(call, 1); const pointer = call.args[0], type = this.typeOf(pointer, context); if (type.kind !== 'pointer') this.fail('New/Dispose require a typed pointer', pointer, 'TP_POINTER_TYPE'); const storage = pascalPointerStorage(type, this.binder);
+        if (name === 'new') {this.assignable(pointer, context); this.emit(context, `${this.expression(pointer, context, {lvalue: true})} = ${storage.allocate}()`, node);}
+        else this.emit(context, `Call ${storage.dispose}(${this.expression(pointer, context)})`, node);
+        return;
+      }
       if (name === 'write' || name === 'writeln') {
         const values = call.args.map(arg => {
           const value = arg.kind === 'formatted' ? arg.value : arg, type = this.typeOf(value, context);
@@ -435,6 +452,7 @@ export class PascalLowerer {
       for (const field of type.fields.values()) root.writer.emit(this.declaration(field.name, field.type), field.node, true);
       root.writer.emit('End Type', type.node, true);
     }
+    for (const heap of generatePascalPointerHeaps(this.binder, type => this.storageType(type), (name, type) => this.declaration(name, type))) root.writer.emit(heap.source, heap.node, true);
     const initial = this.context(), moduleValues = [...this.binder.scope.symbols.values()].filter(symbol => !symbol.builtIn);
     for (const symbol of moduleValues) {
       if (symbol.kind === 'constant' || symbol.kind === 'enumMember') root.writer.emit(`${symbol.public && !this.input.form ? 'Public' : 'Private'} Const ${identifier(symbol.name)} As ${this.storageType(symbol.type)} = ${this.literal(symbol.value, symbol.type)}`, symbol.node, true);

@@ -103,6 +103,27 @@ begin A[-2] := 1; A[-1] := 2; A[0] := 3; Change(A); Copy(A); Writeln(A[-2], ':',
   assert.deepEqual(output, ['0:2:6', '7:99', '7:2:3']);
 });
 
+test('typed pointers support forward records, heap growth, linked lists and var aliases', async () => {
+  const {output} = await execute(`program Heap;
+type PNode = ^Node; Node = record Value: Integer; Next: PNode end;
+var Head,Item,NextItem: PNode; I,Total: Integer;
+procedure AddOne(var Value: Integer); begin Inc(Value) end;
+begin Head := nil; for I := 1 to 40 do begin New(Item); Item^.Value := I; Item^.Next := Head; Head := Item end;
+Total:=0; while Head <> nil do begin AddOne(Head^.Value); Total:=Total+Head^.Value; NextItem:=Head^.Next; Dispose(Head); Head:=NextItem end; Writeln(Total); end.`);
+  assert.deepEqual(output, ['860']);
+});
+
+test('pointer aliases across units share storage and pointers to arrays preserve bounds', async () => {
+  const unit = {name: 'HeapTypes', kind: 'module', code: 'unit HeapTypes; interface type Values=array[2..3] of Integer; PValues=^Values; procedure Create(var P:PValues); implementation procedure Create(var P:PValues); begin New(P); P^[2]:=7; P^[3]:=9 end; end.'};
+  const {output} = await execute('program Heap; uses HeapTypes; var P:PValues; begin Create(P); Writeln(P^[2],\':\',P^[3]); Dispose(P) end.', [unit]); assert.deepEqual(output, ['7:9']);
+});
+
+test('nil and disposed pointer accesses produce deterministic Pascal runtime errors', async () => {
+  for (const source of ['program NilPointer; type PInt=^Integer; var P:PInt; begin P:=nil; Writeln(P^) end.', 'program StalePointer; type PInt=^Integer; var P:PInt; begin New(P); Dispose(P); Writeln(P^) end.']) {
+    const compiled = compileProject(project(source)); assert.deepEqual(compiled.diagnostics, []); await assert.rejects(new VirtualMachine(compiled).start(), error => error.number === 204);
+  }
+});
+
 test('enumerations, subranges, sets and membership maintain ordinal type identity', async () => {
   const {output} = await execute(`program Sets;
 type Color = (Red,Green,Blue); Colors = set of Color; Small = 1..5;
@@ -182,7 +203,7 @@ test('declaration and operator diagnostics point to original Pascal source', () 
   invalid('program Bad; begin Writeln(3.5 div 2) end.', /integer operands/);
   invalid('program Bad; var X: Integer; begin for X := 1 to 2 do Inc(X) end.', /control variable/);
   invalid('program Bad; var X: Integer; begin case X of 1..3: X := 2; 3: X := 4 end end.', /overlapping/);
-  invalid('program Bad; type P = ^Integer; begin end.', /Typed pointers/);
+  invalid('program Bad; var N:Integer; begin Writeln(N^) end.', /typed pointer/);
   invalid('program Bad; begin asm mov ax, bx end end.', /Inline 8086 assembly/);
   invalid('program Bad; var __PascalOrdinal: Integer; begin end.', /reserved/);
 });

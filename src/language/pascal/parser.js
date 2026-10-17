@@ -130,11 +130,11 @@ export class PascalParser {
     if (this.is('procedure') || this.is('function')) {const kind = this.take().lower, params = this.parameters(), returnType = kind === 'function' && this.match(':') ? this.type() : null; return this.finish('procedureType', start, {procedureKind: kind, params, returnType});}
     if (this.match('object')) {
       let parent = null; if (this.match('(')) {parent = this.qualifiedName(); this.expect(')');}
-      const members = [];
+      const members = []; let visibility = 'public';
       while (!this.is('end') && this.peek().type !== 'eof') {
-        if (this.match('private') || this.match('public')) continue;
-        if (['procedure', 'function', 'constructor', 'destructor'].includes(this.peek().lower)) {members.push(this.procedure(this.take(), true)); continue;}
-        const fieldStart = this.peek(), names = this.identifiers(); this.expect(':'); const type = this.type(); members.push(this.finish('field', fieldStart, {names, type})); if (!this.match(';')) break;
+        if (this.is('private') || this.is('public')) {visibility = this.take().lower; continue;}
+        if (['procedure', 'function', 'constructor', 'destructor'].includes(this.peek().lower)) {members.push({...this.procedure(this.take(), true), visibility}); continue;}
+        const fieldStart = this.peek(), names = this.identifiers(); this.expect(':'); const type = this.type(); members.push(this.finish('field', fieldStart, {names, type, visibility})); if (!this.match(';')) break;
       }
       this.expect('end'); return this.finish('objectType', start, {parent, members});
     }
@@ -202,7 +202,7 @@ export class PascalParser {
     if (['id', 'number'].includes(start.type) && this.peek(1).lower === ':') {this.take(); this.take(); return this.finish('label', start, {label: String(start.value), statement: this.statement()});}
     const expression = this.expression();
     if (this.match(':=')) return this.finish('assignment', start, {target: expression, value: this.expression()});
-    if (!['identifier', 'call', 'member'].includes(expression.kind)) this.fail('Expected assignment or procedure call', start);
+    if (!['identifier', 'call', 'member', 'inherited'].includes(expression.kind)) this.fail('Expected assignment or procedure call', start);
     return this.finish('callStatement', start, {expression});
   }
   assembly() {const start = this.expect('asm'), tokens = []; while (!this.is('end') && this.peek().type !== 'eof') tokens.push(this.take()); this.expect('end'); return this.finish('assembly', start, {tokens});}
@@ -232,6 +232,7 @@ export class PascalParser {
       return this.finish('set', start, {elements});
     }
     if (start.type === 'id') {
+      if (start.lower === 'inherited') {const name = this.peek().type === 'id' && !['end', 'else', 'until'].includes(this.peek().lower) ? this.take().value : null; return this.finish('inherited', start, {name});}
       if (start.lower === 'nil') return this.finish('nil', start);
       if (['true', 'false'].includes(start.lower)) return this.finish('boolean', start, {value: start.lower === 'true'});
       if (['begin', 'end', 'then', 'else', 'do', 'of', 'until', 'to', 'downto'].includes(start.lower)) this.fail(`Expected expression, found '${start.raw}'`, start);
