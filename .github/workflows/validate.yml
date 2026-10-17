@@ -656,6 +656,14 @@ jobs:
       - name: Execute real HWND, input, font, file and GDI control assertions
         shell: pwsh
         run: ./tools/test-win32-controls.ps1
+      - name: Execute Pascal objects, pointer heaps and files at O0 and O2
+        run: node tools/test-pascal-native.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pascal-win32-native
+          path: reports/pascal-native
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -758,6 +766,9 @@ jobs:
           tests/macos-distribution-cli.test.mjs
       - name: Execute sanitized helper oracle and genuine Apple Silicon export
         run: node tools/test-macos-aot.mjs
+      - name: Execute Pascal native applications on Apple Silicon
+        if: runner.os == 'macOS'
+        run: node tools/test-pascal-native.mjs
       - name: Verify trusted local distribution with actual Apple tools
         if: runner.os == 'macOS'
         run: node tools/test-macos-distribution.mjs
@@ -790,6 +801,7 @@ jobs:
             reports/macos-aot-distribution
             reports/macos-theme-reference
             reports/macos-theme-browser
+            reports/pascal-native
             artifacts/macos-aot
           retention-days: 14
       - uses: actions/upload-artifact@v4
@@ -921,12 +933,15 @@ jobs:
         run: node tools/test-linux-aot.mjs
       - name: Rebuild current native sources and execute generated code
         run: node tools/test-linux-aot.mjs --rebuild
+      - name: Execute Pascal objects, pointer heaps and files at O0 and O2
+        run: node tools/test-pascal-native.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: linux-aot-native
           path: |
             reports/linux-aot
+            reports/pascal-native
             artifacts/linux-aot
           if-no-files-found: error
           retention-days: 7
