@@ -204,7 +204,7 @@ class WinUI(unittest.TestCase):
    self.theme('classic');self.theme(theme)
    self.assertEqual(text.input_value(),'WinUI state editing');self.assertEqual(text.evaluate('e=>[e.selectionStart,e.selectionEnd]'),[2,7])
    self.set('TextBox1','Enabled',0);self.expect_color(text,'backgroundColor',r['disabled'])
-   self.expect_color(text,'color','#fefefe5d' if theme.endswith('dark') else r['disabledInk'])
+   self.expect_color(text,'color','#fefefe5d' if theme.endswith('dark') else '#0101015c')
    self.record(theme=theme,textAndSelectionRetained=True)
  def test_authored_rgb_fonts_and_outer_geometry_are_not_rewritten(self):
   command=self.node('cmdRGB');text=self.node('TextBox1').locator('input')

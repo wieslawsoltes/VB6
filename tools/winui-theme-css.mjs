@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import {WINUI_RESOURCES, WINUI_METRICS, xamlColorToCss} from '../src/theme/winui-resources.js';
 import {winui3Resource} from '../src/theme/winui3-resources.js';
+import {winui3CssBrush} from '../src/theme/winui3-compat.js';
 const ref = name => `var(--winui-${name})`;
 export const WINUI_ALIASES = Object.freeze({
   ButtonBackground:'ControlFillColorDefault', ButtonBackgroundPointerOver:'ControlFillColorSecondary',
@@ -70,8 +71,8 @@ function resources(theme) {
     RangeThumbBorderWidth:'5px', RangeThumbBorderColor:ref('RangeThumbBorder'),
     ButtonBorder:`1px solid ${ref('ControlStrokeColorDefault')}`,
     // Absolute 3-DIP border ramp; the light resource reverses its Y axis.
-    ButtonElevation:`linear-gradient(to ${dark?'bottom':'top'}, ${ref('ControlStrokeColorSecondary')} 1px, ${ref('ControlStrokeColorDefault')} 3px)`,
-    AccentButtonElevation:`linear-gradient(to top, ${ref('ControlStrokeColorOnAccentSecondary')} 1px, ${ref('ControlStrokeColorOnAccentDefault')} 3px)`,
+    ButtonElevation:winui3CssBrush({kind:'LinearGradientBrush',...winui3Resource('ButtonBorderBrush',dark?'dark':'light').value}),
+    AccentButtonElevation:winui3CssBrush({kind:'LinearGradientBrush',...winui3Resource('AccentButtonBorderBrush',dark?'dark':'light').value}),
     ButtonFlatElevation:`linear-gradient(${ref('ControlStrokeColorDefault')}, ${ref('ControlStrokeColorDefault')})`,
     TextControlShadow:`inset 0 -1px ${ref('ControlStrongStrokeColorDefault')}, inset 0 0 0 1px ${ref('ControlStrokeColorDefault')}`,
     TextControlFocusShadow:`inset 0 -2px var(--vb-selection), inset 0 0 0 1px ${ref('ControlStrokeColorDefault')}`,
