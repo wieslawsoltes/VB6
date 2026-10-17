@@ -220,6 +220,17 @@ class BrowserHarness:
                 self.assertEqual(self.text(), original)
         self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
 
+        # Definition navigation can move the host independently of the Vim
+        # operation, just like closing a split. Exercise the real key binding
+        # and language service so the outer operation cannot restore its source
+        # cursor over the declaration selected by the editor.
+        self.buffer(SOURCE)
+        self.page.evaluate('offset=>windowTest.choose(0,offset)', SOURCE.index('    total = 10') + 4)
+        self.type('gd')
+        self.page.wait_for_function('advanced=>advanced?as.view.getPosition().lineNumber===2:vb6Studio.editor.cursor().line===2', arg=advanced)
+        self.assertEqual(self.text(), SOURCE)
+        self.assertEqual(self.page.evaluate('vb6Studio.history.undoStack.length'), 0)
+
     def ex(self, command, page=None):
         page = page or self.page
         page.keyboard.type(':')
