@@ -249,6 +249,9 @@ jobs:
         run: python tools/ci/run.py "$SUITE"
         env:
           SUITE: ${{ matrix.suite }}
+      - name: Pascal forms, editing, MCP and debugging in offline classic editor
+        run: python tools/browser-pascal-tests.py --origin file
+        if: "!cancelled() && matrix.suite == 'integration-authoring'"
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
