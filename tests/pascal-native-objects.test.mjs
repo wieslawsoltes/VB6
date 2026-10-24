@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {compileProject} from '../src/language/compiler.js';
 import {compileMacOSAOT,DirectLowering} from '../packages/macos-native/src/aot-compiler.js';
+import {compileMacOS,MacOSLowering} from '../packages/macos-native/src/compiler.js';
 import {compileLinuxAOT} from '../packages/linux-native/src/compiler.js';
 import {macOSOptions} from '../packages/macos-native/src/target.js';
 import {pascalNativeVerificationProject} from './pascal-integration-fixtures.mjs';
@@ -15,10 +16,10 @@ procedure TBase.Add(N:Integer); begin X:=X+N end;
 var Child:TChild;
 procedure Touch(var Value:TBase); begin Value.X:=Value.X+2 end;
 begin Child.X:=3; Child.Y:=11; Child.Add(4); Touch(Child) end.`);
-function lowerMutated(change,input=aliases()) {
+function lowerMutated(change,input=aliases(),Lowering=DirectLowering) {
   const program=compileProject(input);assert.equal(program.valid,true,JSON.stringify(program.diagnostics));
   change(program);
-  return new DirectLowering(program,macOSOptions({name:input.name})).emit();
+  return new Lowering(program,macOSOptions({name:input.name})).emit();
 }
 
 test('both native targets retain qualified Pascal object identity and checked virtual metadata',()=>{
@@ -40,6 +41,16 @@ test('both native targets retain qualified Pascal object identity and checked vi
     assert.ok(derived.records[0].pascalObject.virtualMethods.includes('nativederived.__pascalmethod_6_tchild_read'));
     assert.ok(!JSON.stringify(result.metadata).includes('"op":'),'metadata contains contracts, not executable instructions');
   }
+});
+
+test('C++ source build kits retain Pascal ancestry, parameter identity and virtual receiver guards',()=>{
+  const source=compileMacOS(pascalNativeVerificationProject()).files['main.cpp'];
+  assert.match(source,/m\.language="pascal"/);
+  assert.match(source,/rt\.pascalObjects\["nativederived\.tchild"\]=PascalObjectType\{"nativederived\.tchild","nativeobjects\.tbase",/);
+  assert.match(source,/m\.records\["nativederived\.tchild"\]/);
+  assert.match(source,/Parameter\{"__PascalSelf","nativeobjects\.tbase",true/);
+  assert.match(source,/p\.pascalDispatch=PascalDispatch\{"__pascalself","nativeobjects\.tbase","__pascaltypeid",/);
+  assert.match(source,/"nativederived","__pascalmethod_6_tchild_read","nativederived\.tchild"\}/);
 });
 
 test('Pascal object metadata describes exact fixed array bounds and nested nominal fields',()=>{
@@ -79,6 +90,9 @@ End Sub`}]};
   assert.deepEqual(module.records.map(record=>record.name),['First','Second']);
   assert.ok(module.records.every(record=>!record.pascalObject));
   assert.ok(module.procedures.every(procedure=>!procedure.pascalDispatch));
+  const source=compileMacOS(input).files['main.cpp'];
+  assert.ok(!source.includes('rt.pascalObjects['));
+  assert.ok(!source.includes('p.pascalDispatch='));
 });
 
 for(const [name,change] of [
@@ -87,7 +101,7 @@ for(const [name,change] of [
   ['different inherited field name',module=>{module.types.TChild[1].name='Other';}],
   ['cyclic self ancestor',module=>{const child=module.pascal.objectTypes.find(object=>object.name==='TChild');child.parent={module:module.name,name:child.name,identity:child.identity};}],
 ])test('native lowering rejects '+name+' before serializing a Pascal ancestor contract',()=>{
-  assert.throws(()=>lowerMutated(program=>change(program.modules.get('mainunit'))),/Invalid Pascal object ancestry metadata/);
+  for(const Lowering of [DirectLowering,MacOSLowering])assert.throws(()=>lowerMutated(program=>change(program.modules.get('mainunit')),aliases(),Lowering),/Invalid Pascal object ancestry metadata/);
 });
 
 for(const [name,change] of [
@@ -95,5 +109,5 @@ for(const [name,change] of [
   ['undeclared implementation',dispatch=>{dispatch.branches[0].targetProcedure='Authored';}],
   ['duplicate runtime tag',dispatch=>{dispatch.branches.push({...dispatch.branches[0]});}],
 ])test('native lowering rejects '+name+' in generated virtual dispatch metadata',()=>{
-  assert.throws(()=>lowerMutated(program=>change(program.modules.get('nativeobjects').pascal.objectDispatchers[0]),pascalNativeVerificationProject()),/Invalid Pascal virtual dispatch branch metadata/);
+  for(const Lowering of [DirectLowering,MacOSLowering])assert.throws(()=>lowerMutated(program=>change(program.modules.get('nativeobjects').pascal.objectDispatchers[0]),pascalNativeVerificationProject(),Lowering),/Invalid Pascal virtual dispatch branch metadata/);
 });

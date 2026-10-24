@@ -12,7 +12,6 @@ import {macOSOptions,MacOSCompileError} from './target.js';
 import {macOSControlReport,resolveMacOSDeclaration} from './catalog.js';
 import {AOTFunction,emitAOTFunctions} from './aot-emitter.js';
 import {AOT_ABI} from './aot-abi.js';
-import {pascalObjectReferenceCompatible,pascalObjectDispatchBranches} from '../../../src/language/pascal/object-compatibility.js';
 const lower=v=>String(v).toLowerCase();
 export function aotScalar(input){
   let type,value,variant=false;
@@ -40,44 +39,6 @@ export class DirectLowering extends MacOSLowering {
   n(value){value=String(value);if(!this.nameIds.has(value)){this.nameIds.set(value,this.names.length);this.names.push(value);}return this.nameIds.get(value);}
   literalId(value){const item=aotScalar(value),key=JSON.stringify(item);if(!this.literalIds.has(key)){this.literalIds.set(key,this.literals.length);this.literals.push(item);}return this.literalIds.get(key);}
   literal(value){return this.f.call('literal',this.literalId(value));}
-  nativeType(raw,module=this.module){
-    const name=lower(raw),at=name.indexOf('.');
-    const object=(owner,type)=>owner?.language==='pascal'&&owner.pascal?.objectTypes?.find(value=>lower(value.name)===type);
-    if(at>0){const value=object(this.program.modules.get(name.slice(0,at)),name.slice(at+1));return value?lower(value.identity):raw;}
-    const local=object(module,name);if(local)return lower(local.identity);
-    if(Object.keys(module.types).some(type=>lower(type)===name))return raw;
-    const owners=[...this.program.modules.values()].filter(owner=>Object.keys(owner.types).some(type=>lower(type)===name));
-    const value=owners.length===1&&object(owners[0],name);return value?lower(value.identity):raw;
-  }
-  pascalObjectMetadata(name,fields){
-    const module=this.module,object=module.language==='pascal'&&module.pascal?.objectTypes?.find(value=>lower(value.name)===lower(name));
-    if(!object)return null;
-    const identity=lower(object.identity),parent=object.parent?lower(object.parent.identity):'';
-    if(identity!==lower(module.name)+'.'+lower(name)||!Number.isInteger(object.typeId)||object.typeId<1||object.typeId>2147483647||
-      parent&&!pascalObjectReferenceCompatible(this.program.modules,identity,parent))this.fail('Invalid Pascal object ancestry metadata','MACA231');
-    const bound=node=>{
-      const scalar=!node?module.optionBase:this.constant(node)||signedLiteralScalar(node)||(node.kind==='literal'?literalScalar(node):null);
-      const value=typeof scalar==='number'?scalar:Number(scalar?.nativeValue??scalar?.value);
-      if(!Number.isInteger(value)||value<-2147483648||value>2147483647)this.fail('Invalid Pascal object array bound metadata','MACA231');
-      return value;
-    };
-    const fieldType=field=>{const raw=lower(field.storageType||field.type);return raw.includes('.')?raw:Object.keys(module.types).some(type=>lower(type)===raw)?lower(module.name)+'.'+raw:raw;};
-    return {name:object.name,identity,parent,typeId:object.typeId,hasVmt:!!object.hasVmt,
-      fields:fields.map(field=>({name:lower(field.name),type:fieldType(field),fixedLength:Number(field.fixedLength)||0,bounds:field.bounds?.map(pair=>pair.map(bound))??null})),
-      virtualMethods:(object.methods||[]).filter(method=>method.virtual&&lower(method.module)===lower(module.name)&&lower(method.declaringType)===lower(name)).map(method=>lower(method.module)+'.'+lower(method.vbName))};
-  }
-  pascalDispatchMetadata(proc){
-    const module=this.module,dispatch=module.language==='pascal'&&module.pascal?.objectDispatchers?.find(value=>lower(value.name)===lower(proc.name));
-    if(!dispatch)return null;
-    if(!dispatch.branches?.length)this.fail('Invalid Pascal virtual dispatcher metadata','MACA231');
-    const tags=new Set();
-    for(const branch of dispatch.branches){
-      if(tags.has(branch.typeId)||!pascalObjectDispatchBranches(this.program.modules,module.name,proc.name,dispatch.receiver.parameter,branch.targetModule,branch.targetProcedure,branch.viewType))this.fail('Invalid Pascal virtual dispatch branch metadata','MACA231');
-      tags.add(branch.typeId);
-    }
-    return {receiver:{parameter:lower(dispatch.receiver.parameter),identity:lower(dispatch.receiver.identity),vmtField:lower(dispatch.receiver.vmtField)},
-      branches:dispatch.branches.map(branch=>({typeId:branch.typeId,runtimeType:lower(branch.runtimeType),targetModule:lower(branch.targetModule),targetProcedure:lower(branch.targetProcedure),viewType:lower(branch.viewType)}))};
-  }
   expression(node){
     if(++this.depth>256)this.fail('AOT expression nesting exceeds 256 levels','MACA201');
     try{return this.expressionInner(node);}finally{--this.depth;}

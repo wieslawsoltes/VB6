@@ -11,6 +11,7 @@ import {BUILTIN_SIGNATURES} from '../../../src/runtime/signatures.js';
 import {MACOS_TARGET,MacOSCompileError,macOSOptions,macOSInfoPlist} from './target.js';
 import {resolveMacOSDeclaration,macOSControlReport} from './catalog.js';
 import {macOSAppearanceReport} from './macos26-appearance.js';
+import {pascalObjectReferenceCompatible,pascalObjectDispatchBranches} from '../../../src/language/pascal/object-compatibility.js';
 
 const lower=value=>String(value).toLowerCase();
 const q=value=>JSON.stringify(String(value)).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
@@ -44,6 +45,45 @@ const statementOps=new Set(['dim','assign','expr','print','assert','branch','jum
 export class MacOSLowering {
   constructor(program,options){this.program=program;this.options=options;this.module=null;this.procedure=null;this.instruction=null;this.external=[];this.sourceMap=[];this.procedures=0;this.instructions=0;this.usedOps=new Set();this.usedBuiltins=new Set();}
   fail(message,code='MAC100'){throw new MacOSCompileError(message,this.module?.name,this.instruction?.line||this.procedure?.line||1,code);}
+  // C++ build kits and direct AOT share the same nominal object contracts.
+  nativeType(raw,module=this.module){
+    const name=lower(raw),at=name.indexOf('.');
+    const object=(owner,type)=>owner?.language==='pascal'&&owner.pascal?.objectTypes?.find(value=>lower(value.name)===type);
+    if(at>0){const value=object(this.program.modules.get(name.slice(0,at)),name.slice(at+1));return value?lower(value.identity):raw;}
+    const local=object(module,name);if(local)return lower(local.identity);
+    if(Object.keys(module.types).some(type=>lower(type)===name))return raw;
+    const owners=[...this.program.modules.values()].filter(owner=>Object.keys(owner.types).some(type=>lower(type)===name));
+    const value=owners.length===1&&object(owners[0],name);return value?lower(value.identity):raw;
+  }
+  pascalObjectMetadata(name,fields){
+    const module=this.module,object=module.language==='pascal'&&module.pascal?.objectTypes?.find(value=>lower(value.name)===lower(name));
+    if(!object)return null;
+    const identity=lower(object.identity),parent=object.parent?lower(object.parent.identity):'';
+    if(identity!==lower(module.name)+'.'+lower(name)||!Number.isInteger(object.typeId)||object.typeId<1||object.typeId>2147483647||
+      parent&&!pascalObjectReferenceCompatible(this.program.modules,identity,parent))this.fail('Invalid Pascal object ancestry metadata','MACA231');
+    const bound=node=>{
+      const scalar=!node?module.optionBase:this.constant(node)||signedLiteralScalar(node)||(node.kind==='literal'?literalScalar(node):null);
+      const value=typeof scalar==='number'?scalar:Number(scalar?.nativeValue??scalar?.value);
+      if(!Number.isInteger(value)||value<-2147483648||value>2147483647)this.fail('Invalid Pascal object array bound metadata','MACA231');
+      return value;
+    };
+    const fieldType=field=>{const raw=lower(field.storageType||field.type);return raw.includes('.')?raw:Object.keys(module.types).some(type=>lower(type)===raw)?lower(module.name)+'.'+raw:raw;};
+    return {name:object.name,identity,parent,typeId:object.typeId,hasVmt:!!object.hasVmt,
+      fields:fields.map(field=>({name:lower(field.name),type:fieldType(field),fixedLength:Number(field.fixedLength)||0,bounds:field.bounds?.map(pair=>pair.map(bound))??null})),
+      virtualMethods:(object.methods||[]).filter(method=>method.virtual&&lower(method.module)===lower(module.name)&&lower(method.declaringType)===lower(name)).map(method=>lower(method.module)+'.'+lower(method.vbName))};
+  }
+  pascalDispatchMetadata(proc){
+    const module=this.module,dispatch=module.language==='pascal'&&module.pascal?.objectDispatchers?.find(value=>lower(value.name)===lower(proc.name));
+    if(!dispatch)return null;
+    if(!dispatch.branches?.length)this.fail('Invalid Pascal virtual dispatcher metadata','MACA231');
+    const tags=new Set();
+    for(const branch of dispatch.branches){
+      if(tags.has(branch.typeId)||!pascalObjectDispatchBranches(this.program.modules,module.name,proc.name,dispatch.receiver.parameter,branch.targetModule,branch.targetProcedure,branch.viewType))this.fail('Invalid Pascal virtual dispatch branch metadata','MACA231');
+      tags.add(branch.typeId);
+    }
+    return {receiver:{parameter:lower(dispatch.receiver.parameter),identity:lower(dispatch.receiver.identity),vmtField:lower(dispatch.receiver.vmtField)},
+      branches:dispatch.branches.map(branch=>({typeId:branch.typeId,runtimeType:lower(branch.runtimeType),targetModule:lower(branch.targetModule),targetProcedure:lower(branch.targetProcedure),viewType:lower(branch.viewType)}))};
+  }
   constant(node){
     if(node.kind==='id'){
       const name=lower(node.name),p=this.procedure,m=this.module;
@@ -139,7 +179,7 @@ export class MacOSLowering {
   }
   bounds(decl){return `Bounds{${(decl.bounds||[]).map(pair=>`{static_cast<int32_t>(coerce(scalar(f.runtime,${pair[0]?this.expression(pair[0]):`Value::integer(${this.module.optionBase})`}),"long").integral()),static_cast<int32_t>(coerce(scalar(f.runtime,${this.expression(pair[1])}),"long").integral())}`).join(',')}}`;}
   declaration(decl,global=false,isStatic=false){
-    const name=q(decl.name),type=q(decl.storageType||decl.type),kind=decl.bounds===null||decl.bounds===undefined?0:decl.bounds.length?2:1;
+    const name=q(decl.name),type=q(this.nativeType(decl.storageType||decl.type)),kind=decl.bounds===null||decl.bounds===undefined?0:decl.bounds.length?2:1;
     const args=`${name},${type},${this.bounds(decl)},${kind},${Number(decl.fixedLength)||0},${bool(decl.constant)},${global?`${bool(decl.autoNew)},${bool(decl.withEvents)}`:`${bool(isStatic)},${bool(decl.autoNew)}`}`;
     let out=`f.${global?'global':'declare'}(${args});`;
     if(decl.constant){const scalar=(this.procedure||this.module).constantScalars.get(lower(decl.name));if(!scalar)this.fail('Missing bound constant '+decl.name);out+=`f.initial(${name},${cppScalar(scalar)});`;}
@@ -164,7 +204,7 @@ export class MacOSLowering {
       case 'forNext':return `if(f.forNext(${q(ins.id)})){${go(ins.target)}}`;
       case 'eachInit':return `f.closeEach(${q(ins.id)});auto iterable=${e(ins.expr)};auto borrow=borrowArrayValue(iterable,true);auto variable=${r(ins.variable||parseExpression(ins.name))};if(!f.eachStart(${q(ins.id)},variable,iterable,${ins.target})){${go(ins.target)}}`;
       case 'eachNext':return `if(f.eachNext(${q(ins.id)})){${go(ins.target)}}`;
-      case 'redim':return ins.decls.map(d=>`{auto reference=f.ref(${q(d.name)});auto bounds=${this.bounds(d)};f.redim(reference,bounds,${bool(ins.preserve)},${q(d.explicitType?d.storageType||d.type:'')});}`).join('');
+      case 'redim':return ins.decls.map(d=>`{auto reference=f.ref(${q(d.name)});auto bounds=${this.bounds(d)};f.redim(reference,bounds,${bool(ins.preserve)},${q(d.explicitType?this.nativeType(d.storageType||d.type):'')});}`).join('');
       case 'erase':return ins.exprs.map(node=>`${e(node)}.asArray()->erase();`).join('');
       case 'withPush':return this.canReference(ins.expr)?`f.closeWith(${q(ins.id)});auto reference=${r(ins.expr)};auto value=reference.get();f.pushWith(${q(ins.id)},value,${ins.target},std::move(reference));`:`f.closeWith(${q(ins.id)});f.pushWith(${q(ins.id)},${e(ins.expr)},${ins.target});`;
       case 'withPop':return `f.closeWith(${q(ins.id)});`;
@@ -195,17 +235,24 @@ export class MacOSLowering {
   }
   procedureCode(procedure,id){
     this.procedure=procedure;this.instruction=null;this.procedures++;
-    if(procedure.external){const adapter=resolveMacOSDeclaration(procedure,this.module.name);this.external.push({...adapter,procedure:procedure.name,source:this.module.name});return `static Value p${id}(Frame&f){auto result=f.runtime.host->api(f.runtime,${q(adapter.id)},f.arguments);return ${procedure.kind==='sub'?'Value{}':`coerce(result,${q(procedure.storageReturnType||procedure.returnType)})`};}\n`;}
+    if(procedure.external){const adapter=resolveMacOSDeclaration(procedure,this.module.name);this.external.push({...adapter,procedure:procedure.name,source:this.module.name});return `static Value p${id}(Frame&f){auto result=f.runtime.host->api(f.runtime,${q(adapter.id)},f.arguments);return ${procedure.kind==='sub'?'Value{}':`coerce(result,${q(this.nativeType(procedure.storageReturnType||procedure.returnType))})`};}\n`;}
     const code=procedure.code;this.instructions+=code.length;
     const locals=(procedure.redimDeclarations||[]).map(d=>this.declaration(d,false,false)).join('\n')+code.filter(ins=>ins.op==='dim').flatMap(ins=>ins.decls.map(d=>this.declaration(d,false,ins.static))).join('\n');
     const instructions=code.map((ins,i)=>{this.sourceMap.push({function:`p${id}`,instruction:i,module:this.module.name,procedure:procedure.name,line:ins.line,sequencePoint:ins.sequencePoint});return `L${i}:{f.mark(${i},${i+1},${ins.line||procedure.line});${this.instructionCode(ins,i)}}`;});
     return `static Value p${id}(Frame&f){\n${locals}\ndispatch:\ntry {\nswitch(f.pc){${code.map((_,i)=>`case ${i}:goto L${i};`).join('')}default:goto L${code.length};}\n${instructions.join('\n')}\nL${code.length}:return f.result();\n}catch(const Error&e){if(!f.handle(e))throw;}\ngoto dispatch;\n}\n`;
   }
   recordCode(name,fields){
-    return `m.records[${q(lower(name))}]=[](Frame&f){(void)f;auto record=std::make_shared<Record>();record->name=${q(name)};${fields.map(field=>{
-      const type=field.storageType||field.type;const init=field.bounds?.length?`Value::array(std::make_shared<Array>(${q(type)},${this.bounds(field)},false,f.runtime.maxArrayElements,${field.fixedLength||0},[prototype=f.runtime.defaultValue(${q(type)},&f)]{return prototype.copy();}))`:`f.runtime.defaultValue(${q(type)},&f)`;
+    const object=this.pascalObjectMetadata(name,fields),identity=object?.identity||name;
+    const contract=object?`rt.pascalObjects[${q(object.identity)}]=PascalObjectType{${q(object.identity)},${q(object.parent)},${object.typeId},${bool(object.hasVmt)},{${object.fields.map(field=>`PascalObjectField{${q(field.name)},${q(field.type)},${field.fixedLength},${bool(field.bounds!==null)},Bounds{${(field.bounds||[]).map(([low,high])=>`{${low},${high}}`).join(',')}}}`).join(',')}},{${object.virtualMethods.map(q).join(',')}}};\n`:'';
+    return contract+`m.records[${q(lower(identity))}]=[](Frame&f){(void)f;auto record=std::make_shared<Record>();record->name=${q(identity)};${fields.map(field=>{
+      const type=this.nativeType(field.storageType||field.type);const init=field.bounds?.length?`Value::array(std::make_shared<Array>(${q(type)},${this.bounds(field)},false,f.runtime.maxArrayElements,${field.fixedLength||0},[prototype=f.runtime.defaultValue(${q(type)},&f)]{return prototype.copy();}))`:`f.runtime.defaultValue(${q(type)},&f)`;
       return `record->order.push_back(${q(lower(field.name))});record->fields[${q(lower(field.name))}]=std::make_shared<Cell>(${init},${q(type)},${field.fixedLength||0},false,${bool(!!field.bounds?.length)});`;
     }).join('')}return Value::record(record);};`;
+  }
+  pascalDispatchCode(proc){
+    const contract=this.pascalDispatchMetadata(proc);if(!contract)return '';
+    const receiver=contract.receiver;
+    return `p.pascalDispatch=PascalDispatch{${q(receiver.parameter)},${q(receiver.identity)},${q(receiver.vmtField)},{${contract.branches.map(branch=>`PascalDispatchBranch{${branch.typeId},${q(branch.runtimeType)},${q(branch.targetModule)},${q(branch.targetProcedure)},${q(branch.viewType)}}`).join(',')}}};`;
   }
   spec(control){
     const properties=Object.entries(control.properties||{}).filter(([name])=>lower(name)!=='name').sort(([a],[b])=>a.localeCompare(b));
@@ -217,11 +264,11 @@ export class MacOSLowering {
     for(const module of this.program.modules.values()){
       this.module=module;this.procedure=null;this.instruction=null;
       const registrations=[];
-      for(const [key,proc]of module.procedures){functions.push(this.procedureCode(proc,id));registrations.push(`{Procedure p;p.name=${q(proc.name)};p.scope=${q(proc.scope)};p.returnType=${q(proc.storageReturnType||proc.returnType)};p.accessor=${q(proc.accessor||'')};p.isFunction=${bool(proc.kind==='function'||proc.accessor==='get')};p.returnArray=${bool(proc.returnArray)};p.isStatic=${bool(proc.static)};p.external=${bool(proc.external)};p.code=&p${id++};p.parameters={${proc.params.map(param=>{
-        const initial=proc.defaultScalars.get(lower(param.name));return `Parameter{${q(param.name)},${q(param.storageType||param.type)},${bool(param.byRef)},${bool(param.optional)},${bool(param.paramArray)},${bool(param.bounds!==null&&param.bounds!==undefined)},${initial?`[](Frame&)->Value{return ${cppScalar(initial)};}`:'{}'}}`;
-      }).join(',')}};m.procedures[${q(key)}]=std::move(p);}`);}
+      for(const [key,proc]of module.procedures){functions.push(this.procedureCode(proc,id));registrations.push(`{Procedure p;p.name=${q(proc.name)};p.scope=${q(proc.scope)};p.returnType=${q(this.nativeType(proc.storageReturnType||proc.returnType))};p.accessor=${q(proc.accessor||'')};p.isFunction=${bool(proc.kind==='function'||proc.accessor==='get')};p.returnArray=${bool(proc.returnArray)};p.isStatic=${bool(proc.static)};p.external=${bool(proc.external)};p.code=&p${id++};p.parameters={${proc.params.map(param=>{
+        const initial=proc.defaultScalars.get(lower(param.name));return `Parameter{${q(param.name)},${q(this.nativeType(param.storageType||param.type))},${bool(param.byRef)},${bool(param.optional)},${bool(param.paramArray)},${bool(param.bounds!==null&&param.bounds!==undefined)},${initial?`[](Frame&)->Value{return ${cppScalar(initial)};}`:'{}'}}`;
+      }).join(',')}};${this.pascalDispatchCode(proc)}m.procedures[${q(key)}]=std::move(p);}`);}
       this.procedure=null;this.instruction=null;
-      initialize.push(`{Module m;m.name=${q(module.name)};m.kind=${q(module.kind)};m.defaultMember=${q(module.defaultMember||'')};m.optionExplicit=${bool(module.optionExplicit)};m.optionBase=${module.optionBase};m.textCompare=${bool(module.optionCompare==='text')};m.defaultTypes={${Object.entries(module.defaultTypes).map(([k,v])=>`{${q(k)},${q(v)}}`).join(',')}};m.interfaces={${module.interfaces.map(i=>q(i.name)).join(',')}};m.interfaceBindings={${Object.entries(module.interfaceBindings||{}).map(([name,contract])=>`{${q(name)},InterfaceContract{${q(contract.defaultMember||'')},{${Object.entries(contract.members).map(([key,member])=>`{${q(key)},InterfaceMember{${q(member.procedure)},{${member.signature.params.map(p=>q(lower(p.name))).join(',')}}}}`).join(',')}}}}`).join(',')}};m.publicFields={${module.declarations.filter(d=>d.scope!=='private').map(d=>q(lower(d.name))).join(',')}};\n${Object.entries(module.types).map(([name,fields])=>this.recordCode(name,fields)).join('\n')}\nm.initialize=[](Frame&f){(void)f;${module.declarations.map(d=>this.declaration(d,true)).join('\n')}};\n${registrations.join('\n')}\n${module.form?`m.form=${this.spec({...module.form,name:module.name})};m.controls={${module.form.controls.map(c=>this.spec(c)).join(',')}};m.menus={${(module.form.menus||[]).map(c=>this.spec({...c,type:'Menu'})).join(',')}};`:''}\nrt.modules[${q(lower(module.name))}]=std::move(m);}`);
+      initialize.push(`{Module m;m.name=${q(module.name)};m.kind=${q(module.kind)};m.language=${q(module.language||'vb6')};m.defaultMember=${q(module.defaultMember||'')};m.optionExplicit=${bool(module.optionExplicit)};m.optionBase=${module.optionBase};m.textCompare=${bool(module.optionCompare==='text')};m.defaultTypes={${Object.entries(module.defaultTypes).map(([k,v])=>`{${q(k)},${q(v)}}`).join(',')}};m.interfaces={${module.interfaces.map(i=>q(i.name)).join(',')}};m.interfaceBindings={${Object.entries(module.interfaceBindings||{}).map(([name,contract])=>`{${q(name)},InterfaceContract{${q(contract.defaultMember||'')},{${Object.entries(contract.members).map(([key,member])=>`{${q(key)},InterfaceMember{${q(member.procedure)},{${member.signature.params.map(p=>q(lower(p.name))).join(',')}}}}`).join(',')}}}}`).join(',')}};m.publicFields={${module.declarations.filter(d=>d.scope!=='private').map(d=>q(lower(d.name))).join(',')}};\n${Object.entries(module.types).map(([name,fields])=>this.recordCode(name,fields)).join('\n')}\nm.initialize=[](Frame&f){(void)f;${module.declarations.map(d=>this.declaration(d,true)).join('\n')}};\n${registrations.join('\n')}\n${module.form?`m.form=${this.spec({...module.form,name:module.name})};m.controls={${module.form.controls.map(c=>this.spec(c)).join(',')}};m.menus={${(module.form.menus||[]).map(c=>this.spec({...c,type:'Menu'})).join(',')}};`:''}\nrt.modules[${q(lower(module.name))}]=std::move(m);}`);
     }
     return `// Generated VB6 native procedures. No project text is executed as C++ code.\n#include "vb6.hpp"\n#include "library.hpp"\n#include "array-ownership.hpp"\n#include <iostream>\nusing namespace vb6;\n${functions.join('\n')}\nvoid initializeProgram(Runtime&rt){rt.name=${q(this.options.name)};rt.startup=${q(this.program.startup)};rt.maxArrayElements=${this.options.maxArrayElements};rt.maxCallDepth=${this.options.maxCallDepth};\n${initialize.join('\n')}\n}\n#ifndef VB6_NATIVE_NO_MAIN\nint main(int argc,char**argv){try{Runtime rt(makeNativeHost());if(argc>0)rt.executablePath=std::filesystem::absolute(argv[0]);for(int i=1;i<argc;++i)rt.commandLine.emplace_back(argv[i]);initializeProgram(rt);rt.run();return 0;}catch(const vb6::Error&e){std::cerr<<"VB6 error "<<e.number<<": "<<e.what()<<"\\n";return 1;}catch(const std::exception&e){std::cerr<<"Native runtime failure: "<<e.what()<<"\\n";return 2;}}\n#endif\n`;
   }
