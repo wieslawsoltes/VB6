@@ -10,6 +10,7 @@ import {linuxTarget} from '../packages/linux-native/src/target.js';
 import {verifyLinuxAOTExecutionSysroot} from '../tools/build-linux-aot-template.mjs';
 import {validateLinuxRuntimeRefreshProof} from '../tools/verify-linux-runtime-refresh.mjs';
 import {pascalNativeExpectedResult} from './pascal-integration-fixtures.mjs';
+import {nativeRecordIdentityCases} from './native-record-identity-fixtures.mjs';
 const cases=['language-O0','language-O1','language-O2','language-O3','abi-platform-O0','abi-platform-O1','abi-platform-O2','abi-platform-O3','resource-path-O2','program-roots-O2','abrupt-End-O2','form-lifetime-O2','large-O2','gtk-controls-O2','richtext-O2','compiled-printers-O3','compiled-instance-O3'];
 function fixture(architecture,executionMode,toolkit='gtk3'){
   const target=linuxTarget(architecture,toolkit),manifest={architecture:target.architecture,toolkit,sha256:'a'.repeat(64)};
@@ -76,18 +77,22 @@ test('Cross GTK qualification requires initialized target image-loader and MIME 
 
 function refreshFixture(architecture='x64',toolkit='gtk3') {
   const target=linuxTarget(architecture,toolkit),{proof,manifest}=fixture(architecture,'native',toolkit);
+  manifest.abi=5;
   manifest.provenance={buildPlatform:'linux',buildArchitecture:target.architecture,targetArchitecture:target.architecture,crossCompiled:false,toolkit};
   const checks=[0,2].map(optimization=>({optimization,executableSHA256:'b'.repeat(64),bytes:4096,result:pascalNativeExpectedResult,executed:true}));
   for(const name of ['uninitialized-virtual-receiver','incompatible-virtual-tag','vb-records-remain-nominal',
     'invalid-ancestor-prefix','invalid-ancestor-identity','invalid-dispatch-tag','vb-module-cannot-authorize-pascal-views'])
     checks.push({name,optimization:2,executableSHA256:'c'.repeat(64),bytes:4096,executed:true,rejected:true});
-  const pascal={valid:true,platform:'linux',architecture:target.option,toolkit,hostArchitecture:target.option,executionMode:'native',runtimeSHA256:manifest.sha256,checks};
+  const recordIdentityChecks=nativeRecordIdentityCases().flatMap(fixture=>[0,2].map(optimization=>({
+    name:fixture.name,optimization,executed:true,result:'passed',executableSHA256:'d'.repeat(64),bytes:4096,output:fixture.expectedOutput.slice()
+  })));
+  const pascal={valid:true,platform:'linux',architecture:target.option,toolkit,hostArchitecture:target.option,executionMode:'native',runtimeSHA256:manifest.sha256,checks,recordIdentityChecks};
   return {proof,manifest,pascal};
 }
 test('Runtime refresh requires native execution of all four architecture/toolkit variants and every Pascal case',()=>{
   for(const architecture of ['x64','arm64'])for(const toolkit of ['gtk3','gtk4']) {
     const {proof,manifest,pascal}=refreshFixture(architecture,toolkit),verified=validateLinuxRuntimeRefreshProof(proof,pascal,manifest,{architecture,toolkit});
-    assert.deepEqual(verified,{architecture:linuxTarget(architecture).architecture,toolkit,executionMode:'native',runtimeSHA256:manifest.sha256,pascalChecks:9});
+    assert.deepEqual(verified,{architecture:linuxTarget(architecture).architecture,toolkit,executionMode:'native',runtimeSHA256:manifest.sha256,pascalChecks:9,recordIdentityChecks:12});
   }
 });
 test('Runtime refresh rejects proofs and artifact paths for another toolkit or architecture',()=>{

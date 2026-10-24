@@ -1,5 +1,6 @@
 /** Exact-runtime execution contract shared by native SDK refresh workflows. */
 import {pascalNativeExpectedResult} from '../tests/pascal-integration-fixtures.mjs';
+import {nativeRecordIdentityCases} from '../tests/native-record-identity-fixtures.mjs';
 
 export const pascalNativeNegativeCases=Object.freeze([
   'uninitialized-virtual-receiver','incompatible-virtual-tag','vb-records-remain-nominal',
@@ -30,6 +31,22 @@ export function validatePascalNativeExecutionProof(pascal,manifest,{platform,arc
     if(negative.length!==1||negative[0].optimization!==2||negative[0].rejected!==true)
       throw new Error('Runtime refresh lacks the Pascal guard: '+name);
   }
+  let recordIdentityChecks;
+  if(manifest.abi>=5) {
+    const fixtures=nativeRecordIdentityCases(),records=pascal.recordIdentityChecks;
+    if(!Array.isArray(records)||records.length!==fixtures.length*2)
+      throw new Error('Runtime refresh requires complete native record identity execution proof for ABI 5.');
+    for(const fixture of fixtures)for(const optimization of [0,2]) {
+      const matches=records.filter(check=>check?.name===fixture.name&&check.optimization===optimization);
+      const check=matches[0],output=check?.output;
+      if(matches.length!==1||check.executed!==true||check.result!=='passed'||!hash(check.executableSHA256)||
+          !Number.isSafeInteger(check.bytes)||check.bytes<1||!Array.isArray(output)||
+          output.length!==fixture.expectedOutput.length||output.some((line,index)=>line!==fixture.expectedOutput[index]))
+        throw new Error('Runtime refresh lacks native record identity proof: '+fixture.name+' O'+optimization+'.');
+    }
+    recordIdentityChecks=records.length;
+  }
   return {platform,architecture,...(toolkit?{toolkit}:{}),executionMode:'native',
-    runtimeSHA256:manifest.sha256,pascalChecks:checks.length};
+    runtimeSHA256:manifest.sha256,pascalChecks:checks.length,
+    ...(recordIdentityChecks===undefined?{}:{recordIdentityChecks})};
 }

@@ -18,7 +18,8 @@ export function validateLinuxRuntimeRefreshProof(proof,pascal,manifest,expected=
     throw new Error('Linux runtime refresh requires a native build and execution on the matching Linux architecture and toolkit.');
   linuxAOTExecutionVerification(proof,manifest);
   const verified=validatePascalNativeExecutionProof(pascal,manifest,{platform:'linux',architecture:target.option,toolkit});
-  return {architecture:target.architecture,toolkit,executionMode:'native',runtimeSHA256:manifest.sha256,pascalChecks:verified.pascalChecks};
+  return {architecture:target.architecture,toolkit,executionMode:'native',runtimeSHA256:manifest.sha256,pascalChecks:verified.pascalChecks,
+    ...(verified.recordIdentityChecks===undefined?{}:{recordIdentityChecks:verified.recordIdentityChecks})};
 }
 
 export async function verifyLinuxRuntimeRefresh(directory,reportFile,pascalReportFile,expected={}) {
