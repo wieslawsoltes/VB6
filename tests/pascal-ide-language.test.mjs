@@ -5,7 +5,7 @@ import {moduleLanguage,sourceExtension} from '../src/project/language.js';
 import {createPascalExample} from '../src/project/pascal-example.js';
 import {sourceFiles,importFiles} from '../src/project/formats.js';
 import {mergedProject} from '../src/project/import-merge.js';
-import {scanPascalDeclarations,pascalProcedureEdit,pascalParameters,pascalHighlightSpans,renamePascalSymbol,formatPascalCode} from '../src/editor/pascal-service.js';
+import {scanPascalDeclarations,pascalProcedureEdit,pascalParameters,pascalHighlightSpans,renamePascalSymbol,formatPascalCode,pascalCallContext} from '../src/editor/pascal-service.js';
 
 test('legacy projects retain the default VB language while Pascal factories and mixed overrides are explicit',()=>{
   const legacy=newProject();assert.equal(legacy.language,undefined);assert.equal(legacy.modules[0].language,undefined);assert.equal(moduleLanguage(legacy.modules[0],legacy),'vb6');
@@ -52,4 +52,19 @@ test('shared form event signatures preserve Pascal var semantics and insert befo
 test('Pascal formatting is idempotent and keeps comment/string contents intact',()=>{
   const code="unit Demo;\ninterface\nimplementation\nprocedure Run;\nbegin\nif True then\nbegin\nWriteLn('End Sub', '{still a string}');\nend;\n(* Text\n     remains untouched. *)\nend;\nend.\n";
   const formatted=formatPascalCode(code,2);assert.equal(formatPascalCode(formatted,2),formatted);assert.match(formatted,/  WriteLn\('End Sub', '\{still a string\}'\);/);assert.match(formatted,/\(\* Text\n     remains untouched\. \*\)/);assert.doesNotMatch(formatted,/Option Explicit/);
+});
+
+test('Pascal call contexts distinguish incomplete and multiline declarations from invocation arguments',()=>{
+  for(const header of [
+    'procedure Run(var Value: Integer; ',
+    'function Run\n  (\n    Value: Integer; ',
+    'constructor TItem.Init {note} (Initial: Integer; ',
+    'destructor TItem.Done(Flag: Boolean; ',
+    'procedure TItem.\n  Move\n  (var X: Integer; ',
+    'type TCallback = procedure(Value: Integer; ',
+    'program Console(Input, ',
+  ])assert.equal(pascalCallContext(header,header.length),null,header);
+  const call="procedure Run(var Value: Integer); begin Run(Next('), ('), ";
+  const context=pascalCallContext(call,call.length);assert.equal(context.name,'Run');assert.equal(context.comma,1);assert.deepEqual(context.args,["Next('), (')",' ']);
+  const indexed='Items(.Index + 1';assert.equal(pascalCallContext(indexed,indexed.length).name,'Items');
 });

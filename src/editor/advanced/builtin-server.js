@@ -207,7 +207,8 @@ export class BuiltinLanguageServer {
         const info=this.intelligence.parameterInfo(this.project,module,line+1,document.text,base+token.start);
         const parameter=info?.parameters?.[info.active];
         if(!parameter||info.context.named||key(token.value)===key(parameter.name)||seen.has(base+token.start))continue;
-        seen.add(base+token.start);hints.push({position:document.positionAt(base+token.start),label:parameter.name+':',kind:2,paddingRight:true,tooltip:{kind:'plaintext',value:parameter.signature||parameter.name+' As '+parameter.type}});
+        const signature=document.languageId==='pascal'?info.displayParams[info.active]:parameter.signature||parameter.name+' As '+parameter.type;
+        seen.add(base+token.start);hints.push({position:document.positionAt(base+token.start),label:parameter.name+':',kind:2,paddingRight:true,tooltip:{kind:'plaintext',value:signature}});
       }
     }
     return hints;

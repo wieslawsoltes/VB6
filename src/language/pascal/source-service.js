@@ -89,11 +89,20 @@ export function pascalProcedureEdit(module,{name,parameters='',returnType=null,t
   return {name,start,end:start,text:prefix+header+eol+'begin'+eol+indent+eol+'end;'+eol+eol,caret:start+prefix.length+header.length+eol.length+'begin'.length+eol.length+indent.length};
 }
 export function pascalCallContext(source,offset,{outer=false}={}){
-  const masked=pascalMasked(source),stack=[];
-  for(let i=0;i<offset;i++){
-    if(masked[i]==='('||masked[i]==='['){const expression=pascalExpressionBefore(source,i).text;stack.push({name:expression,start:i+1,argumentStart:i+1,last:i+1,comma:0,args:[]});}
-    else if(masked[i]===')'||masked[i]===']')stack.pop();
-    else if(masked[i]===','&&stack.length){const item=stack.at(-1);item.args.push(source.slice(item.last,i));item.comma++;item.last=i+1;}
+  const tokens=lexical(source),stack=[];
+  for(let i=0;i<tokens.length&&tokens[i].start<offset;i++){
+    const token=tokens[i];if(token.type!=='symbol')continue;
+    if(token.value==='('||token.value==='['){
+      const first=expressionStart(tokens,i-1),previous=lower(tokens[first-1]);
+      // Routine/program headers declare parameters. Token boundaries also keep
+      // qualified method names, intervening comments and multiline headers out
+      // of signature help while the declaration is still being typed.
+      const declaration=['procedure','function','constructor','destructor','program'].includes(previous);
+      const name=!declaration&&first<i?source.slice(tokens[first].start,tokens[i-1].end):'';
+      stack.push({name,start:token.end,argumentStart:token.end,last:token.end,comma:0,args:[]});
+    }
+    else if(token.value===')'||token.value===']')stack.pop();
+    else if(token.value===','&&stack.length){const item=stack.at(-1);item.args.push(source.slice(item.last,token.start));item.comma++;item.last=token.end;}
   }
   const calls=stack.filter(item=>item.name&&!keywords.has(item.name.toLowerCase())),context=outer?calls[0]:calls.at(-1);
   return context?{...context,named:null,args:[...context.args,source.slice(context.last,offset)]}:null;
