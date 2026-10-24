@@ -520,6 +520,7 @@ html[data-ide-theme="fluent"] :where(.classic-menu:not(.runtime-popup), .classic
   --winui-AccentButtonBackgroundPointerOver: color-mix(in srgb, var(--vb-selection) 90%, transparent);
   --winui-AccentButtonBackgroundPressed: color-mix(in srgb, var(--vb-selection) 80%, transparent);
   --winui-TextControlForegroundDisabled: #0101015c;
+  --winui-ComboDropDownBackground: #f9f9f9;
   --winui-ControlRadius: 4px;
   --winui-OverlayRadius: 8px;
   --winui-BodySize: 14px;
@@ -1320,6 +1321,7 @@ html[data-ide-theme="fluent-dark"] :where(.classic-menu:not(.runtime-popup), .cl
   --winui-AccentButtonBackgroundPointerOver: color-mix(in srgb, var(--vb-selection) 90%, transparent);
   --winui-AccentButtonBackgroundPressed: color-mix(in srgb, var(--vb-selection) 80%, transparent);
   --winui-TextControlForegroundDisabled: #fefefe5d;
+  --winui-ComboDropDownBackground: #2c2c2c;
   --winui-ControlRadius: 4px;
   --winui-OverlayRadius: 8px;
   --winui-BodySize: 14px;
@@ -2103,6 +2105,7 @@ html[data-ide-theme="macos26"] :where(.classic-menu:not(.runtime-popup), .classi
   --winui-AccentButtonBackgroundPointerOver: initial;
   --winui-AccentButtonBackgroundPressed: initial;
   --winui-TextControlForegroundDisabled: initial;
+  --winui-ComboDropDownBackground: initial;
   --winui-ControlRadius: initial;
   --winui-OverlayRadius: initial;
   --winui-BodySize: initial;
@@ -2903,6 +2906,7 @@ html[data-ide-theme="macos26-dark"] :where(.classic-menu:not(.runtime-popup), .c
   --winui-AccentButtonBackgroundPointerOver: initial;
   --winui-AccentButtonBackgroundPressed: initial;
   --winui-TextControlForegroundDisabled: initial;
+  --winui-ComboDropDownBackground: initial;
   --winui-ControlRadius: initial;
   --winui-OverlayRadius: initial;
   --winui-BodySize: initial;
@@ -3686,6 +3690,7 @@ html[data-ide-theme="x11"] :where(.classic-menu:not(.runtime-popup), .classic-to
   --winui-AccentButtonBackgroundPointerOver: initial;
   --winui-AccentButtonBackgroundPressed: initial;
   --winui-TextControlForegroundDisabled: initial;
+  --winui-ComboDropDownBackground: initial;
   --winui-ControlRadius: initial;
   --winui-OverlayRadius: initial;
   --winui-BodySize: initial;
@@ -4486,6 +4491,7 @@ html[data-ide-theme="x11-dark"] :where(.classic-menu:not(.runtime-popup), .class
   --winui-AccentButtonBackgroundPointerOver: initial;
   --winui-AccentButtonBackgroundPressed: initial;
   --winui-TextControlForegroundDisabled: initial;
+  --winui-ComboDropDownBackground: initial;
   --winui-ControlRadius: initial;
   --winui-OverlayRadius: initial;
   --winui-BodySize: initial;
