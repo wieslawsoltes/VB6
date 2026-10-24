@@ -8,7 +8,12 @@ import {GraphicsSurface} from '../src/graphics/surface.js';
 export async function runWinUI3GraphicsTests(){
   let assertions=0;const cases=[];
   const assert=(condition,message)=>{assertions++;if(!condition)throw new Error(message);};
-  const equal=(a,b,message)=>assert(a.length===b.length&&a.every((value,index)=>value===b[index]),message);
+  const equal=(a,b,message)=>{
+    const index=a.findIndex((value,i)=>value!==b[i]);
+    const detail=index<0?`length ${a.length}, expected ${b.length}`:
+      `pixel ${Math.floor(index/4)} ${'RGBA'[index%4]}: actual ${a[index]}, expected ${b[index]} (channel ${index})`;
+    assert(a.length===b.length&&index<0,`${message}; ${detail}`);
+  };
   const test=async(name,run)=>{
     const node=document.createElement('div');node.style.cssText='position:relative;width:20px;height:12px';document.body.append(node);
     const surface=new GraphicsSurface(node,{backend:'canvas2d',background:0xffffff});
@@ -21,9 +26,16 @@ export async function runWinUI3GraphicsTests(){
     s.setPresentationBackground('#80102030');c.fillStyle='#10203080';c.fillRect(0,0,20,12);
     equal(actual(s),[...c.getImageData(0,0,20,12).data],'solid ARGB conversion or alpha');
     assert(s.readPixels(0,0,1,1).data[3]===128,'transparent background must not cover opaque BackColor');
-    const image=new Image();image.src=s.toDataURL();await image.decode();
-    const png=document.createElement('canvas');png.width=20;png.height=12;png.getContext('2d').drawImage(image,0,0);
-    equal(pixels(png),actual(s),'PNG includes the retained presentation background');
+    const decode=async url=>{
+      const image=new Image();image.src=url;await image.decode();
+      const png=document.createElement('canvas');png.width=20;png.height=12;png.getContext('2d').drawImage(image,0,0);
+      return pixels(png);
+    };
+    // Compare the same export/decode stage. A browser's translucent PNG decode
+    // and canvas round-trip can change RGB readback even for literal commands.
+    // The raw backing pixels remain independently and exactly checked above.
+    const [exported,literal]=await Promise.all([decode(s.toDataURL()),decode(c.canvas.toDataURL())]);
+    equal(exported,literal,'PNG includes the retained presentation background');
     await s.flush();assert(!s.renderError,'display retains valid alpha background');
   });
   await test('native absolute three-DIP ramp reflects around the entire control height',async(s,c)=>{
