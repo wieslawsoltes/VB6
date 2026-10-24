@@ -56,6 +56,7 @@ class BrowserWindows(unittest.TestCase):
 
     def setUp(self):
         self.context = self.browser.new_context(viewport={'width': 1440, 'height': 1000})
+        self.addCleanup(self.context.close)
         self.context.set_default_timeout(6000)
         self.errors = []
         self.trace = []
@@ -65,16 +66,20 @@ class BrowserWindows(unittest.TestCase):
 
     def boot_page(self, page):
         if os.environ.get('VB6_TEST_TRANSPORT') == 'memory':
-            page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text())
+            page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text(), timeout=60000)
         else:
-            page.goto(self.url)
-        page.wait_for_function('typeof vb6Studio === "object"')
+            page.goto(self.url, wait_until='commit')
+        self.wait_for_ide(page)
+
+    def wait_for_ide(self, page):
+        # Parsing the standalone IDE can exceed the action deadline in WebKit.
+        # Wait for the real IDE API; keep every later action/assertion at 6s.
+        page.wait_for_function('typeof vb6Studio === "object" && typeof vb6Studio.command === "function"', timeout=60000)
 
     def tearDown(self):
         if self.trace:
             (REPORT / (self._testMethodName + '.json')).write_text(json.dumps(self.trace, indent=2))
         errors = self.errors[:]
-        self.context.close()
         self.assertEqual(errors, [], 'Uncaught page errors')
 
     def closing_action(self, popup, action):
@@ -460,8 +465,8 @@ class BrowserWindows(unittest.TestCase):
         self.code()
         popup = self.document()
         self.js('vb6Studio.persist()')
-        self.page.reload()
-        self.page.wait_for_function('typeof vb6Studio === "object"')
+        self.page.reload(wait_until='commit')
+        self.wait_for_ide(self.page)
         self.count(0)
         self.assertTrue(popup.is_closed())
         self.assertEqual(self.js('vb6Studio.browserWindows.pending.size'), 1)
@@ -543,8 +548,8 @@ class BrowserWindows(unittest.TestCase):
 
     @unittest.skipIf(os.environ.get('VB6_TEST_TRANSPORT') == 'memory', 'Needs real navigation; exercised in HTTP CI')
     def test_standalone_file_without_network(self):
-        self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri())
-        self.page.wait_for_function('typeof vb6Studio === "object"')
+        self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri(), wait_until='commit')
+        self.wait_for_ide(self.page)
         requests = []
         self.context.on('request', lambda req: requests.append(req.url) if req.url.startswith(('http:', 'https:')) else None)
         popup = self.tool()
@@ -779,8 +784,8 @@ class BrowserWindows(unittest.TestCase):
         self.document()
         self.window_mode('mdi')
         self.js('vb6Studio.persist()')
-        self.page.reload()
-        self.page.wait_for_function('typeof vb6Studio === "object"')
+        self.page.reload(wait_until='commit')
+        self.wait_for_ide(self.page)
         self.count(0)
         self.assertEqual(self.js('vb6Studio.appearance.windowMode'), 'mdi')
         self.assertEqual(self.js('vb6Studio.browserWindows.pending.size'), 1)
