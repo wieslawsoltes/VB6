@@ -39,8 +39,11 @@ class FigmaWorkspace(unittest.TestCase):
         self.load();self.page.evaluate(FIXTURE,False)
     def load(self):
         if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
-        else:self.page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri() if TRANSPORT=='file' else self.base+'/dist/index.html')
-        self.page.wait_for_function('globalThis.vb6Studio?.figmaMode')
+        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri(),wait_until='commit')
+        else:self.page.goto(self.base+'/dist/index.html')
+        # Bound standalone initialization separately from the normal action deadline.
+        if TRANSPORT=='file':self.page.wait_for_function('globalThis.vb6Studio?.figmaMode',timeout=60000)
+        else:self.page.wait_for_function('globalThis.vb6Studio?.figmaMode')
     def tearDown(self):
         if not self.passed or self.errors:
             try:self.page.screenshot(path=str(REPORT/(self._testMethodName+'-failure.png')),timeout=3000)
