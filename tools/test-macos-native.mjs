@@ -13,6 +13,7 @@ import {conformanceProject} from '../packages/macos-native/tests/conformance.mjs
 import {programLifetimeProject,formLifetimeProject,abruptLifetimeProject} from '../packages/macos-native/tests/program-lifetime.mjs';
 import {richTextProject} from '../packages/macos-native/tests/richtext.mjs';
 import {verifyPascalSourceKitExecution} from './test-pascal-source-kit.mjs';
+import {verifyNativeRecordIdentityExecution} from './test-native-record-identity.mjs';
 const root=path.resolve(import.meta.dirname,'..');buildMacOSPackage(root);
 const {compileMacOS,createMacOSBuildKit,MacOSCompilerClient,verifyMacOSAppArchive}=await import('../packages/macos-native/dist/index.js');
 const sdk=path.join(root,'packages/macos-native'),native=path.join(sdk,'native');
@@ -41,6 +42,7 @@ try {
   const runtime=(await fs.readdir(native)).filter(n=>n.endsWith('.cpp')).sort().map(n=>path.join(native,n));
   const objects=await compileRuntime(compiler,flags,[...runtime,path.join(sdk,'tests/portable-host.cpp')]);
   report.checks.push(...await verifyPascalSourceKitExecution({compileMacOS,compiler,flags,objects,work,run}));
+  report.checks.push(...await verifyNativeRecordIdentityExecution({compileMacOS,compiler,flags,objects,work,run}));
   const records=path.join(work,'recordsets-core');
   await run(compiler,[...flags,path.join(sdk,'tests/recordsets.cpp'),...objects,'-o',records]);
   assert.match(await run(records,[]),/NATIVE_RECORDSETS_CORE_OK/);report.checks.push('sanitized-recordset-grid-core');

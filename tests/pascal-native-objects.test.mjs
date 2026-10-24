@@ -68,7 +68,9 @@ begin Child.Values[-2]:='abc'; Child.Pair.X:=7 end.`);
   assert.equal(base.fields[1].type,'string');
   assert.equal(base.fields[2].type,'mainunit.tpair');
   assert.deepEqual(child.fields.slice(0,base.fields.length),base.fields);
-  assert.equal(records.find(record=>record.name==='TPair').pascalObject,undefined);
+  const pair=records.find(record=>record.name==='mainunit.tpair');
+  assert.equal(pair.displayName,'TPair');
+  assert.equal(pair.pascalObject,undefined);
 });
 
 test('VB records and authored generated-looking procedure names do not opt into Pascal compatibility',()=>{
@@ -87,7 +89,7 @@ Public Sub Main()
 End Sub`}]};
   const module=compileMacOSAOT(input).metadata.modules[0];
   assert.equal(module.language,'vb6');
-  assert.deepEqual(module.records.map(record=>record.name),['First','Second']);
+  assert.deepEqual(module.records.map(record=>[record.name,record.displayName]),[['mainmodule.first','First'],['mainmodule.second','Second']]);
   assert.ok(module.records.every(record=>!record.pascalObject));
   assert.ok(module.procedures.every(procedure=>!procedure.pascalDispatch));
   const source=compileMacOS(input).files['main.cpp'];

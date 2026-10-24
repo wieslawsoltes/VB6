@@ -9,6 +9,7 @@ import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {linuxToolkit} from '../packages/linux-native/src/target.js';
 import {pascalNativeVerificationProject,pascalNativeExpectedResult} from '../tests/pascal-integration-fixtures.mjs';
+import {nativeRecordIdentityCases} from '../tests/native-record-identity-fixtures.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -134,7 +135,7 @@ export async function testPascalNative({runtimeDirectory,rebuild=false,toolkit}=
       compile=(project,optimization)=>compileMacOSAOT(project,{optimization});
       link=linkMacOSAOT;unpack=unpackMacOSAOTArchive;entry=name=>name+'.app/Contents/MacOS/'+name;
     }
-    if(runtime)report.runtimeSHA256=runtime.manifest.sha256;
+    if(runtime){report.runtimeSHA256=runtime.manifest.sha256;report.recordIdentityChecks=[];}
     const build=async(project,optimization,work,mutate)=>{
       await fs.mkdir(work);
       if(process.platform==='win32') {
@@ -168,6 +169,20 @@ export async function testPascalNative({runtimeDirectory,rebuild=false,toolkit}=
       assert.match(result.stderr+result.stdout,guard.error,guard.name);
       await assert.rejects(()=>fs.access(path.join(work,'pascal-native-result.txt')),error=>error.code==='ENOENT','Invalid native contracts must not execute the project harness');
       report.checks.push({name:guard.name,optimization:2,executableSHA256:digest(bytes),bytes:bytes.length,executed:true,rejected:true});
+    }
+    // These exercise the shared C++ runtime's nominal record metadata and
+    // display-name ABI. Win32 retains its existing primary interop proof;
+    // its separate backend does not support all typed-array result fixtures.
+    if(runtime)for(const optimization of [0,2])for(const fixture of nativeRecordIdentityCases()) {
+      const work=path.join(directory,'record-'+fixture.name+'-O'+optimization);
+      const {executable,bytes}=await build(fixture.project,optimization,work);
+      const result=run(executable,work);
+      assert.equal(result.status,0,fixture.name+' O'+optimization+': '+result.stderr+result.stdout);
+      assert.equal(result.stderr,'',fixture.name+' O'+optimization+' native diagnostics');
+      const output=result.stdout.replace(/\r\n/g,'\n').replace(/\n$/,'').split('\n');
+      assert.deepEqual(output,fixture.expectedOutput,fixture.name+' O'+optimization+' native output');
+      report.recordIdentityChecks.push({name:fixture.name,optimization,executed:true,
+        executableSHA256:digest(bytes),bytes:bytes.length,result:'passed',output});
     }
     report.valid=true;return report;
   }catch(error){report.valid=false;report.error=error.stack;throw error;}
