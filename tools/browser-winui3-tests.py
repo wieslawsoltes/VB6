@@ -195,17 +195,21 @@ class WinUI3Acceptance(unittest.TestCase):
                 const read=name=>{
                     const c=winuiControls[name],n=c.node,r=n.getBoundingClientRect(),s=getComputedStyle(n);
                     const text=[...n.childNodes].find(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim());
-                    let glyphs=[],visibleGlyphs=[];
+                    let glyphs=[],visibleGlyphs=[],missingGlyphs=[];
                     if(text){const range=document.createRange();range.selectNode(text);
                         const rect=g=>({x:g.x-r.x,y:g.y-r.y,width:g.width,height:g.height});
                         glyphs=[...range.getClientRects()].map(rect);
-                        // pre-wrap intentionally hangs spaces at the end of a
-                        // line. Test visible characters for clipping, keeping
-                        // the complete line ranges for width/line-count checks.
+                        // pre-wrap hangs trailing spaces. WebKit also returns
+                        // a zero-width caret at the previous line's end for the
+                        // next character; its bounding-box union spans both
+                        // lines. Inspect positive-area glyph fragments, keeping
+                        // complete line ranges for width/line-count checks.
                         for(let i=0;i<text.textContent.length;i++)if(/\S/u.test(text.textContent[i])){
                             range.setStart(text,i);range.setEnd(text,i+1);
-                            visibleGlyphs.push(rect(range.getBoundingClientRect()));}}
-                    return {x:r.x,y:r.y,width:r.width,height:r.height,glyphs,visibleGlyphs,
+                            const fragments=[...range.getClientRects()].filter(g=>g.width>0&&g.height>0);
+                            if(!fragments.length)missingGlyphs.push(i);
+                            visibleGlyphs.push(...fragments.map(rect));}}
+                    return {x:r.x,y:r.y,width:r.width,height:r.height,glyphs,visibleGlyphs,missingGlyphs,
                         fontFamily:s.fontFamily,fontSize:s.fontSize,fontWeight:s.fontWeight,
                         padding:['Left','Top','Right','Bottom'].map(side=>parseFloat(s['padding'+side])),
                         border:['Left','Top','Right','Bottom'].map(side=>parseFloat(s['border'+side+'Width'])),
@@ -238,6 +242,7 @@ class WinUI3Acceptance(unittest.TestCase):
             self.assertAlmostEqual(wrapped['width'], inner['width'], delta=0.05)
             self.assertAlmostEqual(wrapped['y'] - hug['y'], hug['height'] + 8, delta=0.05)
             self.assertAlmostEqual(fixed['y'] - wrapped['y'], wrapped['height'] + 8, delta=0.05)
+            self.assertEqual(wrapped['missingGlyphs'], [], 'Every visible character has a measured glyph fragment')
             for glyph in wrapped['visibleGlyphs']:
                 self.assertGreaterEqual(glyph['x'], -0.1)
                 self.assertLessEqual(glyph['x'] + glyph['width'], wrapped['width'] + 0.15)
@@ -941,7 +946,14 @@ class WinUI3Acceptance(unittest.TestCase):
             dialog = ide.get_by_role('dialog', name='Options', exact=True)
             dialog.get_by_role('tab', name='General', exact=True).click()
             choice = dialog.get_by_label('Error Trapping', exact=True)
+            # Programmatic focus after a mouse click can retain mouse modality.
+            # Enter the select with the keyboard before checking its focus ring.
             choice.focus()
+            ide.keyboard.press('Shift+Tab')
+            expect(choice).not_to_be_focused()
+            ide.keyboard.press('Tab')
+            expect(choice).to_be_focused()
+            self.assertTrue(choice.evaluate('e=>e.matches(":focus-visible")'))
             self.expect_color(choice, 'background-color', '#ffffff0f' if theme.endswith('-dark') else '#ffffffb3')
             expect(choice).to_have_css('outline-style', 'solid')
             expect(choice).to_have_css('outline-width', '2px')
