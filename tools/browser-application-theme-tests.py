@@ -116,7 +116,8 @@ class ApplicationThemes(MacOSCompositeChecks, MacOS26CompatibilityChecks, X11App
   self.page.locator('[data-control="ComboBox1"] .vb-combo-arrow').click();popup=self.page.locator('.vb-combo-popup:not(.simple-list)')
   for theme in THEMES:
    self.theme(theme);self.assertEqual(popup.get_attribute('data-vb-theme'),theme)
-   self.assertEqual(self.css('.vb-combo-popup:not(.simple-list)','backgroundColor'),self.rgb(self.palettes[theme]['colors']['window']))
+   background={'fluent':'#f9f9f9','fluent-dark':'#2c2c2c'}.get(theme,self.palettes[theme]['colors']['window'])
+   expect(popup).to_have_css('background-color',self.rgb(background))
   popup.get_by_text('Beta',exact=True).click();self.assertEqual(self.page.locator('[data-control="ComboBox1"] input').input_value(),'Beta')
   self.record('menus and lists stay live across all platform themes and commit selection')
  def test_dialog_palette_icons_focus_and_button_results(self):
