@@ -50,8 +50,10 @@ export const TUI_WORKSPACE_CSS = `
 [data-tui-shell] .mdi-desktop{background-image:var(--tui-desktop-pattern)!important;background-repeat:repeat!important;}
 [data-tui-shell] .statusbar {height:var(--dos-line)!important;min-height:var(--dos-line)!important;padding:0 var(--dos-cell-width)!important;border:0!important;gap:calc(2*var(--dos-cell-width))!important;}
 [data-tui-shell] .statusbar>*{height:var(--dos-line)!important;padding:0!important;line-height:var(--dos-line)!important;border:0!important;}
-[data-tui-shell] .dos-function-bar{height:var(--dos-line)!important;min-height:var(--dos-line)!important;flex-wrap:nowrap!important;overflow-x:auto!important;padding:0!important;}
-[data-tui-shell] .dos-function-bar button{flex:1 0 auto!important;height:var(--dos-line)!important;min-height:var(--dos-line)!important;min-width:calc(12*var(--dos-cell-width))!important;padding:0!important;border:0!important;}
+[data-tui-shell] .dos-function-bar{height:var(--dos-line)!important;min-height:var(--dos-line)!important;flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none!important;padding:0!important;}
+[data-tui-shell] .dos-function-bar::-webkit-scrollbar{display:none!important;}
+[data-tui-shell] .dos-function-bar button{flex:1 0 0!important;height:var(--dos-line)!important;min-height:var(--dos-line)!important;min-width:calc(14*var(--dos-cell-width))!important;padding:0!important;border:0!important;}
+[data-tui-shell] .browser-window-root>.dos-function-bar{flex:0 0 var(--dos-line)!important;}
 [data-tui-shell] .dos-function-bar kbd {margin:0!important;padding:0!important;}
 [data-tui-shell] :is(.debug-tabs,.dialog-tabs){gap:var(--dos-cell-width)!important;border:0!important;padding:0!important;}
 [data-tui-shell] :is(.debug-tabs,.dialog-tabs)>button{height:var(--dos-line)!important;min-height:var(--dos-line)!important;border:0!important;padding:0 var(--dos-cell-width)!important;}

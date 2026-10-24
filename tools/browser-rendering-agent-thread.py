@@ -8,7 +8,7 @@ Software-driver CI is functional qualification, not a physical-GPU claim.
 import argparse, functools, http.server, io, json, math, os, shutil, subprocess, threading, traceback
 from pathlib import Path
 from PIL import Image, ImageChops
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from rendering_launch import rendering_launch_flags
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,18 +77,48 @@ def settle(page):
 
 def capture(page, label):
     # Establish stability independently, never search for a matching reference.
+    # A screenshot transport timeout can occur after fonts/GPU readiness. Retry
+    # that command once on the SAME page, not an assertion, test or renderer.
+    # See https://playwright.dev/python/docs/api/class-page#page-screenshot
+    import hashlib
     previous, stable = None, 0
-    for _ in range(12):
-        settle(page)
-        check(page.evaluate('renderer.backend') == backend, 'Unexpected backend fallback')
-        image = page.screenshot(caret='initial')
-        if image == previous: stable += 1
-        else: stable = 1
-        if stable == 3:
-            (OUT / (label + '.png')).write_bytes(image)
-            return image
-        previous = image
-    raise AssertionError('Capture did not stabilize: ' + label)
+    samples, capture_errors = [], []
+    accepted = False
+    image_path = OUT / (label + '.png')
+    report_path = OUT / (label + '-capture.json')
+    image_path.unlink(missing_ok=True)
+
+    def report():
+        report_path.write_text(json.dumps({'backend': backend, 'samples': samples,
+            'stableCaptures': stable, 'captureErrors': capture_errors,
+            'accepted': accepted}, indent=2) + '\n')
+
+    try:
+        for attempt in range(12):
+            # Readiness and backend failures are outside the recoverable call.
+            settle(page)
+            check(page.evaluate('renderer.backend') == backend, 'Unexpected backend fallback')
+            try:
+                image = page.screenshot(caret='initial')
+            except PlaywrightTimeoutError as error:
+                capture_errors.append({'attempt': attempt, 'error': str(error)})
+                previous, stable = None, 0
+                report()  # Preserve the timeout before any recovery attempt.
+                if len(capture_errors) > 1:
+                    raise
+                continue
+            check(page.evaluate('renderer.backend') == backend, 'Unexpected backend fallback')
+            stable = stable + 1 if image == previous else 1
+            samples.append({'attempt': attempt, 'sha256': hashlib.sha256(image).hexdigest(),
+                            'consecutive': stable})
+            if stable == 3:
+                image_path.write_bytes(image)
+                accepted = True
+                return image
+            previous = image
+        raise AssertionError('Capture did not stabilize: ' + label)
+    finally:
+        report()
 
 def marker_parity(page, label, dpr):
     rect = page.locator('details.agent-tool > summary').first.bounding_box()

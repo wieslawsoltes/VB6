@@ -74,6 +74,7 @@ class NativeProjects(unittest.TestCase):
 
     def setUp(self):
         self.context = self.browser.new_context(viewport={'width': 1400, 'height': 1000}, accept_downloads=True)
+        # unittest runs cleanups even when setUp fails and tearDown is skipped.
         self.addCleanup(self.context.close)
         self.context.set_default_timeout(6000)
         self.page = self.context.new_page(); self.errors = []
@@ -85,7 +86,8 @@ class NativeProjects(unittest.TestCase):
             self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri() if self.mode == 'file' else self.http_url, wait_until='commit')
         # Parsing the standalone IDE can exceed the action deadline in WebKit.
         # Wait for the real authoring API; keep every later action/assertion at 6s.
-        self.page.wait_for_function('typeof vb6Studio === "object" && typeof vb6Studio.importProjectEntries === "function"', timeout=60000)
+        self.page.wait_for_function('typeof vb6Studio === "object" && vb6Studio.root?.isConnected && typeof vb6Studio.importProjectEntries === "function"',
+                                    polling=100, timeout=60000)
 
     def tearDown(self):
         if self.errors: (REPORT / f'{self.engine}-{self._testMethodName}-errors.json').write_text(json.dumps(self.errors, indent=2))

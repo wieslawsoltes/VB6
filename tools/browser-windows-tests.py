@@ -77,7 +77,7 @@ class BrowserWindows(unittest.TestCase):
     def wait_for_ide(self, page):
         # WebKit can keep a large inline file document in "loading" after the
         # application is usable. Require the actual IDE API and rendered shell.
-        page.wait_for_function('typeof vb6Studio === "object" && !!document.querySelector(".ide-shell")',
+        page.wait_for_function('typeof vb6Studio === "object" && vb6Studio.root?.isConnected && typeof vb6Studio.browserWindows?.detach === "function" && !!document.querySelector(".ide-shell")',
                                polling=100, timeout=IDE_STARTUP_TIMEOUT_MS)
 
     def tearDown(self):

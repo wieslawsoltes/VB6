@@ -30,14 +30,32 @@ export function paintControl(b,s,profile='turbo') {
     border:tuiAttribute(profile,'border').foreground,button:tuiAttribute(profile,'button').background};
   const line=(x,y,text,width=w-x,selected=false,mnemonics=false)=>b.text(x,y,text,{width:Math.max(0,width),foreground:selected?selection.foreground:fg,background:selected?selection.background:bg,hotkey:a.hotkey,mnemonics});
   function paintRows(){
-    for(const row of s.rows){
+    // Sticky table/column headers paint above scrolled body rows, matching the
+    // canonical DOM stacking order rather than the document traversal order.
+    for(const row of [...s.rows.filter(row=>row.kind!=='header'),...s.rows.filter(row=>row.kind==='header')]){
       if(![row.x,row.y,row.width,row.height??1].every(Number.isSafeInteger)||row.width<=0)continue;
       const height=Math.max(1,row.height||1);if(row.y>=h||row.y+height<=0)continue;
-      const ink=s.disabled||row.disabled?disabled.foreground:row.selected?selection.foreground:fg,paper=!s.disabled&&row.selected?selection.background:bg;
+      const unavailable=s.disabled||row.disabled;
+      const attribute=unavailable?disabled:row.selected?selection:row.kind==='button'?tuiAttribute(profile,row.pressed?'selected':row.focused?'focusedButton':'button'):row.kind==='header'?tuiAttribute(profile,'menu'):a;
+      const ink=attribute.foreground,paper=attribute.background;
       b.pushClip(row.x,row.y,row.width,height);
-      try{b.fill(row.x,row.y,row.width,height,' ',ink,paper);b.text(row.x,row.y,row.text,{width:row.width,foreground:ink,background:paper});}
-      finally{b.popClip();}
-      if(row.separator&&row.x>0)b.fill(row.x-1,Math.max(0,row.y),1,Math.max(0,Math.min(h,row.y+height)-Math.max(0,row.y)),'│',p.border,bg);
+      let clipped=false;
+      try{
+        if(row.clip){
+          const {x,y,width,height}=row.clip;
+          if(![x,y,width,height].every(Number.isSafeInteger)||width<0||height<0)continue;
+          b.pushClip(x,y,width,height);clipped=true;
+        }
+        b.fill(row.x,row.y,row.width,height,' ',ink,paper);
+        const width=Math.max(0,row.width-(row.separator?1:0)),text=String(row.text??'');let length=0;
+        // Alignment needs at most one visible row of scalar measurement; an
+        // enormous cell value must not allocate an equally enormous array.
+        for(const glyph of text){if(length>=width)break;length++;}
+        const offset=Math.max(0,row.alignment==='right'?width-length:row.alignment==='center'?Math.floor((width-length)/2):0);
+        b.text(row.x+offset,row.y,text,{width:width-offset,foreground:ink,background:paper});
+        if(row.separator)b.fill(row.x+row.width-1,row.y,1,height,'│',unavailable?ink:p.border,paper);
+      }
+      finally{if(clipped)b.popClip();b.popClip();}
     }
   }
   b.fill(0,0,w,h,' ',fg,bg);const middle=Math.floor((h-1)/2);
@@ -59,7 +77,11 @@ export function paintControl(b,s,profile='turbo') {
       for(const glyph of value.text){if(scalarHot.has(index++))hot.add(offset);offset+=glyph.length;}
       for(const cell of layout.cells){b.put(cell.x,cell.y,cell.glyph,hot.has(cell.sourceStart)?a.hotkey:fg,bg);}break;
     }
-    case 'CheckBox':case 'OptionButton':line(0,middle,(s.type==='OptionButton'?`(${s.checked?'•':' '}) `:`[${s.indeterminate?'▒':s.checked?'X':' '}] `)+s.caption,w,false,s.mnemonics!==false);break;
+    case 'CheckBox':case 'OptionButton': {
+      const attribute=s.disabled?disabled:s.focused?selection:a;
+      b.fill(0,0,w,h,' ',attribute.foreground,attribute.background);
+      b.text(0,middle,(s.type==='OptionButton'?`(${s.checked?'•':' '}) `:`[${s.indeterminate?'▒':s.checked?'X':' '}] `)+(s.caption??''),{width:w,...attribute,mnemonics:s.mnemonics!==false});break;
+    }
     case 'TextBox':case 'RichTextBox': {paintText(b,s,p);break;}
     case 'ComboBox': {
       if(s.rows?.length)paintRows();
@@ -75,8 +97,10 @@ export function paintControl(b,s,profile='turbo') {
     case 'HScrollBar':case 'VScrollBar':case 'Slider':case 'ProgressBar': {
       const vertical=s.type==='VScrollBar'||s.vertical,extent=vertical?h:w,ratio=Math.max(0,Math.min(1,(s.value-s.min)/(s.max-s.min||1)));
       if(s.type==='ProgressBar'){const filled=Math.round(extent*ratio),ink=s.disabled?fg:tuiAttribute(profile,'selected').background;for(let n=0;n<extent;n++)b.put(vertical?Math.floor(w/2):n,vertical?h-1-n:middle,n<filled?'█':'░',n<filled?(ink===bg?fg:ink):fg,bg);break;}
-      for(let n=0;n<extent;n++)b.put(vertical?Math.floor(w/2):n,vertical?n:middle,n===0?(vertical?'▲':'◄'):n===extent-1?(vertical?'▼':'►'):'░',fg,bg);
-      const n=extent<3?0:1+Math.round((extent-3)*(s.reverse?1-ratio:ratio));b.put(vertical?Math.floor(w/2):n,vertical?n:middle,'█',s.disabled?fg:a.hotkey===bg?fg:a.hotkey,bg);break;
+      const attribute=s.disabled?disabled:s.focused?selection:a,ink=attribute.foreground,paper=attribute.background;
+      b.fill(0,0,w,h,' ',ink,paper);
+      for(let n=0;n<extent;n++)b.put(vertical?Math.floor(w/2):n,vertical?n:middle,n===0?(vertical?'▲':'◄'):n===extent-1?(vertical?'▼':'►'):'░',ink,paper);
+      const n=extent<3?0:1+Math.round((extent-3)*(s.reverse?1-ratio:ratio));b.put(vertical?Math.floor(w/2):n,vertical?n:middle,'█',attribute.hotkey===paper?ink:attribute.hotkey,paper);break;
     }
     case 'UpDown':if(!s.rows?.length){line(0,0,'▲');if(h>1)line(0,h-1,'▼');break;}
       // Native stepper button rectangles also cover horizontal orientation.
