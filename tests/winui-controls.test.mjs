@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {THEMES} from '../src/theme/theme.js';
 import {WINUI_RESOURCES,xamlColorToCss} from '../src/theme/winui-resources.js';
-import {winui3Resource,WINUI3_REFERENCE} from '../src/theme/winui3-resources.js';
+import {winui3Resource,winui3ResourceDefinition,WINUI3_REFERENCE} from '../src/theme/winui3-resources.js';
 import {WINUI_TOKEN_NAMES,WINUI_ALIASES,winuiThemeTokens} from '../tools/winui-theme-css.mjs';
 
 const tokens=theme=>Object.fromEntries([...winuiThemeTokens(theme).matchAll(/--winui-([\w-]+): ([^;]+);/g)].map(([,key,value])=>[key,value]));
@@ -54,6 +54,22 @@ test('TextBox disabled text keeps the source-specific low color bits in both sch
   assert.equal(value,expected);assert.equal(value,nativeColor('TextControlForegroundDisabled',scheme));
   assert.notEqual(value,WINUI_RESOURCES[scheme].TextFillColorDisabled,'Control override is distinct from common disabled text');
  }
+});
+
+test('ComboBox popup uses the pinned Acrylic fallback without accepting native material composition',()=>{
+ for(const [id,scheme,color,line] of [['fluent','light','#f9f9f9',96],['fluent-dark','dark','#2c2c2c',44]]) {
+  const alias=winui3ResourceDefinition('ComboBoxDropDownBackground',scheme);
+  assert.equal(alias.type,'StaticResource');
+  assert.equal(alias.value,'AcrylicInAppFillColorDefaultBrush');
+  assert.equal(alias.source,'src/controls/dev/ComboBox/ComboBox_themeresources.xaml');
+  const material=winui3ResourceDefinition(alias.value,scheme);
+  assert.equal(material.type,'AcrylicBrush');assert.equal(material.value,null);
+  assert.equal(material.source,'src/controls/dev/Materials/Acrylic/AcrylicBrush_themeresources.xaml');
+  assert.equal(material.line,line);
+  assert.equal(tokens(THEMES[id]).ComboDropDownBackground,color);
+  assert.throws(()=>winui3Resource('ComboBoxDropDownBackground',scheme),{code:'WINUI3_UNSUPPORTED_RESOURCE'});
+ }
+ assert.equal(WINUI_ALIASES.MenuBackground,'SolidBackgroundFillColorQuarternary','Generic menu surfaces remain independent');
 });
 
 test('native progress and slider metrics fit within unchanged authored control slots',()=>{
