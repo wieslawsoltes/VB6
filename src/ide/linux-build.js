@@ -1,12 +1,12 @@
 import {el} from '../core/core.js';
 import {modal} from './ui.js';
-import {compileLinuxAOT, exportLinuxApplication, verifyLinuxAOTArchive, exportLinuxDistribution, packageLinuxApplication, linuxDistributionOptions, LINUX_DISTRIBUTION_FORMATS} from '../../packages/linux-native/src/index.js';
+import {compileLinuxAOT, exportLinuxApplication, verifyLinuxAOTArchive, exportLinuxDistribution, packageLinuxApplication, linuxDistributionOptions, LINUX_DISTRIBUTION_FORMATS, LINUX_TOOLKITS, LINUX_NATIVE_DISTRIBUTION_FORMATS} from '../../packages/linux-native/src/index.js';
 
 /** The same project snapshot and native compiler serve the IDE, CLI and MCP. */
 export function installLinuxExport(ide, api) {
   if (ide.linuxExportInstalled) return;
   ide.linuxExportInstalled = true;
-  if (api) Object.assign(api, {compileLinuxAOT, exportLinuxApplication, verifyLinuxAOTArchive, exportLinuxDistribution, packageLinuxApplication, linuxDistributionOptions, LINUX_DISTRIBUTION_FORMATS});
+  if (api) Object.assign(api, {compileLinuxAOT, exportLinuxApplication, verifyLinuxAOTArchive, exportLinuxDistribution, packageLinuxApplication, linuxDistributionOptions, LINUX_DISTRIBUTION_FORMATS, LINUX_TOOLKITS, LINUX_NATIVE_DISTRIBUTION_FORMATS});
   const menu = ide.menu.bind(ide), command = ide.command.bind(ide);
   let opened = false;
   ide.menu = name => {
@@ -34,6 +34,8 @@ export function installLinuxExport(ide, api) {
       ...[0, 1, 2, 3].map(level => el('option', {value: String(level), selected: level === 2}, 'O' + level)));
     const architecture = el('select', {'aria-label': 'Linux architecture'},
       el('option', {value: 'x64'}, 'x86-64'), el('option', {value: 'arm64'}, 'ARM64'));
+    const toolkit = el('select', {'aria-label': 'Linux GTK toolkit'},
+      ...Object.entries(LINUX_TOOLKITS).map(([value, item]) => el('option', {value}, item.label)));
     const format = el('select', {'aria-label': 'Linux package format'},
       ...Object.entries(LINUX_DISTRIBUTION_FORMATS).map(([value, item]) => el('option', {value}, item.label)));
     const packageName = el('input', {value: linuxDistributionOptions({summary: 'Application'}, ide.project.name).packageName, maxlength: 64, 'aria-label': 'Linux package name'});
@@ -43,8 +45,8 @@ export function installLinuxExport(ide, api) {
     const output = el('pre', {role: 'status', 'aria-live': 'polite', tabindex: -1,
       style: {whiteSpace: 'pre-wrap', maxHeight: '180px', overflow: 'auto', margin: '8px 0'}});
     const downloads = el('div', {'data-linux-download': '', style: {overflowWrap: 'anywhere', marginBottom: '10px'}});
-    const fields = [name, optimization, architecture, format, packageName, version, maintainer, license];
-    const selected = () => ({name: name.value, optimization: Number(optimization.value), architecture: architecture.value});
+    const fields = [name, optimization, architecture, toolkit, format, packageName, version, maintainer, license];
+    const selected = () => ({name: name.value, optimization: Number(optimization.value), architecture: architecture.value, toolkit: toolkit.value});
     const distribution = () => ({format: format.value, ...(['deb', 'rpm'].includes(format.value)
       ? {packageName: packageName.value, version: version.value, maintainer: maintainer.value, license: license.value} : {})});
     const field = (caption, input) => el('label', {style: {display: 'grid', gridTemplateColumns: '145px minmax(0,1fr)', gap: '8px', marginBottom: '8px'}},
@@ -59,13 +61,14 @@ export function installLinuxExport(ide, api) {
     const updateFormat = () => {
       packageFields.hidden = !['deb', 'rpm'].includes(format.value);
       instructions.textContent = packageFields.hidden
-        ? 'Extract the complete archive on Linux and run the application in bin. Keep Resources beside bin. The target system needs GTK 3.24 and the system libraries listed in the archive.'
-        : 'Install the package using your Linux package manager. It installs the application, a desktop launcher, and declares its GTK 3.24 and CUPS dependencies. Review the package name, version, publisher, and application license before distributing.';
+        ? 'Extract the complete archive on Linux and run the application in bin. Keep Resources beside bin. The target system needs '+LINUX_TOOLKITS[toolkit.value].label+' and the system libraries listed in the archive.'
+        : 'Install the package using your Linux package manager. It installs the application, a desktop launcher, and declares its '+LINUX_TOOLKITS[toolkit.value].label+' and CUPS dependencies. Review the package name, version, publisher, and application license before distributing.';
     };
     updateFormat();
     const content = el('div', {},
       el('p', {}, 'Export a native Linux executable with GTK controls. Compilation and packaging work here, including in the offline standalone IDE.'),
-      field('Application name', name), field('Architecture', architecture), field('Optimization', optimization), field('Package format', format), packageFields, instructions,
+      field('Application name', name), field('Architecture', architecture), field('GTK toolkit', toolkit), field('Optimization', optimization), field('Package format', format), packageFields, instructions,
+      el('p', {}, 'AppImage and Flatpak are available through the Linux command-line packager, which bundles native libraries or creates a Flatpak sandbox. Save the project and use --format appimage or --format flatpak with npm run build:linux.'),
       output, downloads);
 
     function preflight() {
@@ -73,7 +76,7 @@ export function installLinuxExport(ide, api) {
         const result = compileLinuxAOT(ide.project, selected());
         linuxDistributionOptions(distribution(), name.value);
         output.textContent = result.report.modules + ' modules, ' + result.report.procedures + ' native procedures, '
-          + result.report.codeBytes + ' bytes of project code.\nTarget: Linux ' + (result.options.architecture === 'arm64' ? 'ARM64' : 'x86-64') + ' / GTK 3.24. Optimization: O' + result.options.optimization + '.';
+          + result.report.codeBytes + ' bytes of project code.\nTarget: Linux ' + (result.options.architecture === 'arm64' ? 'ARM64' : 'x86-64') + ' / ' + LINUX_TOOLKITS[result.options.toolkit].label + '. Optimization: O' + result.options.optimization + '.';
       } catch (error) {output.textContent = diagnostics(error);}
     }
     for (const input of fields) input.addEventListener('change', () => {clearDownload(); updateFormat(); preflight();});

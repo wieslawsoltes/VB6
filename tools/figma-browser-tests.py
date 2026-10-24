@@ -10,6 +10,9 @@ ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 TRANSPORT=os.environ.get('VB6_TEST_TRANSPORT','http')
 REPORT=ROOT/'reports'/'figma-workspace'/ENGINE/TRANSPORT
+# Native AOT payloads make initial IDE parsing separate from the 8000 ms
+# interaction deadline; readiness still requires the installed workspace API.
+IDE_STARTUP_TIMEOUT_MS=60000
 FIXTURE=r'''enabled=>{const A=VB6StudioAPI,p=A.newProject('FigmaFixture'),m=p.modules[0];p.settings.anchoring=enabled;p.settings.renderer='canvas2d';p.settings.snapToGrid=false;p.settings.showGrid=false;
 Object.assign(m.form.properties,{ClientWidth:9000,ClientHeight:6000,Width:9120,Height:6450});m.code='Option Explicit\nPrivate Sub Command1_Click()\n    Command1.Caption = "Clicked"\nEnd Sub\n';
 const frame=A.createControl('Frame','Frame1',450,450);frame.id='frame';Object.assign(frame.properties,{Caption:'Content',Width:6600,Height:3300});
@@ -39,11 +42,10 @@ class FigmaWorkspace(unittest.TestCase):
         self.load();self.page.evaluate(FIXTURE,False)
     def load(self):
         if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
-        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri(),wait_until='commit')
-        else:self.page.goto(self.base+'/dist/index.html')
-        # Bound standalone initialization separately from the normal action deadline.
-        if TRANSPORT=='file':self.page.wait_for_function('globalThis.vb6Studio?.figmaMode',timeout=60000)
-        else:self.page.wait_for_function('globalThis.vb6Studio?.figmaMode')
+        # WebKit can leave a standalone document's load event pending after
+        # the IDE is usable. Keep the real origin and await its actual API.
+        else:self.page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri() if TRANSPORT=='file' else self.base+'/dist/index.html',wait_until='commit')
+        self.page.wait_for_function('globalThis.vb6Studio?.figmaMode',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
     def tearDown(self):
         if not self.passed or self.errors:
             try:self.page.screenshot(path=str(REPORT/(self._testMethodName+'-failure.png')),timeout=3000)
@@ -144,8 +146,8 @@ class FigmaWorkspace(unittest.TestCase):
         self.page.get_by_role('button',name='Toggle Design sidebar',exact=True).click();self.assertTrue(self.page.locator('.figma-design-inspector').is_visible());self.assertFalse(self.page.locator('.figma-layer-tree').is_visible());self.page.screenshot(path=str(REPORT/'figma-narrow.png'),timeout=10000);self.done()
     @unittest.skipIf(TRANSPORT=='memory','Opaque-origin memory transport does not support persistence testing')
     def test_13_preferences_and_independent_dock_profiles_survive_reload(self):
-        before=self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())');self.enable();self.page.evaluate('vb6Studio.persist()');self.page.reload();self.page.wait_for_function('vb6Studio?.figmaMode?.enabled');self.assertEqual(self.page.get_by_label('Position units',exact=True).input_value(),'px')
-        self.page.evaluate('vb6Studio.figmaMode.configure({mode:"classic"});vb6Studio.persist()');self.page.reload();self.page.wait_for_function('vb6Studio?.figmaMode');self.assertFalse(self.page.evaluate('vb6Studio.figmaMode.enabled'));self.assertEqual(before,self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())'));self.done()
+        before=self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())');self.enable();self.page.evaluate('vb6Studio.persist()');self.page.reload(wait_until='commit');self.page.wait_for_function('globalThis.vb6Studio?.figmaMode?.enabled',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS);self.assertEqual(self.page.get_by_label('Position units',exact=True).input_value(),'px')
+        self.page.evaluate('vb6Studio.figmaMode.configure({mode:"classic"});vb6Studio.persist()');self.page.reload(wait_until='commit');self.page.wait_for_function('globalThis.vb6Studio?.figmaMode',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS);self.assertFalse(self.page.evaluate('vb6Studio.figmaMode.enabled'));self.assertEqual(before,self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())'));self.done()
     def test_14_runtime_still_executes_vb6_and_exports_no_workspace_chrome(self):
         self.enable();html=self.page.evaluate('VB6StudioAPI.exportApplication(vb6Studio.project,{persist:false})');self.assertNotIn('figma-canvas-toolbar',html);self.assertNotIn('figma-workspace-options',html)
         runtime=self.context.new_page();runtime.on('pageerror',lambda e:self.errors.append(str(e)));runtime.set_content(html);runtime.get_by_role('button',name='Save',exact=True).click();runtime.get_by_role('button',name='Clicked',exact=True).wait_for();runtime.close();self.done()

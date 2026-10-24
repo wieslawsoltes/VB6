@@ -41,7 +41,7 @@ test('Linux target validates names, architecture, toolkit and allocation limits'
   assert.equal(linuxOptions({name:'日'.repeat(85)}).name,'日'.repeat(85));
   assert.equal(linuxOptions({name:'LinuxApp',arch:'x64'}).arch,'x86_64');
   assert.equal(linuxOptions({architecture:'arm64'}).architecture,'arm64');
-  for(const options of [{arch:'riscv64'},{toolkit:'gtk4'},{optimization:4},{maxCallDepth:0},{maxArrayElements:2**32}])assert.throws(()=>linuxOptions(options),LinuxCompileError);
+  for(const options of [{arch:'riscv64'},{toolkit:'gtk5'},{optimization:4},{maxCallDepth:0},{maxArrayElements:2**32}])assert.throws(()=>linuxOptions(options),LinuxCompileError);
 });
 test('Linux catalog rejects unavailable controls and Declares before export',()=>{
   const code='Declare Sub Unsupported Lib "kernel32" Alias "VirtualAlloc" (ByVal n As Long)\nSub Main()\nEnd Sub';

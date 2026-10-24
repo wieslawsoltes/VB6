@@ -17,9 +17,9 @@ ENGINE = os.environ.get('VB6_BROWSER', 'chromium')
 ORIGIN = 'http://127.0.0.1:8080'
 fixtures = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', '''
 import {linuxBrowserProject} from './tests/linux-browser-fixture.mjs';
-console.log(JSON.stringify(Object.fromEntries(['x64','arm64'].map(architecture=>[architecture,linuxBrowserProject(architecture)]))));
+console.log(JSON.stringify(Object.fromEntries(['gtk3','gtk4'].map(toolkit=>[toolkit,Object.fromEntries(['x64','arm64'].map(architecture=>[architecture,linuxBrowserProject(architecture,toolkit)]))]))));
 '''], cwd=ROOT))
-fixture = fixtures['x64']
+fixture = fixtures['gtk3']['x64']
 checks, errors, outputs = [], [], []
 
 def check(name, condition):
@@ -28,18 +28,18 @@ def check(name, condition):
     checks.append(name)
     print('PASS', name, flush=True)
 
-def verify(file, architecture='x64', format='zip'):
+def verify(file, architecture='x64', format='zip', toolkit='gtk3'):
     subprocess.run(['node', '--input-type=module', '-e', '''
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {exportLinuxDistribution,verifyLinuxAOTArchive} from './packages/linux-native/src/index.js';
 import {linuxBrowserProject} from './tests/linux-browser-fixture.mjs';
 const actual = fs.readFileSync(process.argv[1]);
-const architecture=process.argv[2],format=process.argv[3];
-const expected = await exportLinuxDistribution(linuxBrowserProject(architecture),{architecture},{format});
+const architecture=process.argv[2],format=process.argv[3],toolkit=process.argv[4];
+const expected = await exportLinuxDistribution(linuxBrowserProject(architecture,toolkit),{architecture,toolkit},{format});
 assert.deepEqual(new Uint8Array(actual),expected.bytes);
-if(format==='zip')await verifyLinuxAOTArchive(actual,{name:'LinuxBrowser',architecture});
-''', str(file), architecture, format], cwd=ROOT, check=True, timeout=90)
+if(format==='zip')await verifyLinuxAOTArchive(actual,{name:'LinuxBrowser',architecture,toolkit});
+''', str(file), architecture, format, toolkit], cwd=ROOT, check=True, timeout=90)
     if format != 'zip':
         check(file.name + ': exact offline package bytes', True)
         return
@@ -108,7 +108,7 @@ with sync_playwright() as pw:
             downloaded.save_as(file)
             check(origin + ': application archive filename', downloaded.suggested_filename == 'LinuxBrowser-linux-x64.zip')
             verify(file)
-            outputs.append({'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest()})
+            outputs.append({'file': file.name, 'architecture': 'x64', 'toolkit': 'gtk3', 'format': 'zip', 'sha256': hashlib.sha256(file.read_bytes()).hexdigest()})
             check(origin + ': export preserves project and uses no network', page.evaluate('JSON.stringify(vb6Studio.project)') == before and not requests)
             page.screenshot(path=str(OUT/(ENGINE+'-'+origin+'.png')))
 
@@ -120,37 +120,39 @@ with sync_playwright() as pw:
             check(origin + ': invalid name has diagnostics and no stale download', len(downloads) == count and page.locator('[data-linux-download] a').count() == 0)
             close_dialog()
 
-            for architecture in ('x64', 'arm64'):
-                page.evaluate('project => vb6Studio.loadProject(VB6StudioAPI.normalizeProject(project))', fixtures[architecture])
-                open_dialog()
-                page.get_by_label('Linux architecture', exact=True).select_option(architecture)
-                for format in ('zip', 'tar.gz', 'deb', 'rpm'):
-                    if architecture == 'x64' and format == 'zip':
-                        continue
-                    page.get_by_label('Linux package format', exact=True).select_option(format)
-                    page.evaluate('delete vb6Studio.lastLinuxBuild')
-                    count = len(downloads)
-                    page.get_by_role('button', name='Export Linux Application', exact=True).click()
-                    page.wait_for_function('vb6Studio.lastLinuxBuild?.compiled === true || vb6Studio.lastLinuxBuild?.success === false', timeout=90000)
-                    state = page.evaluate('vb6Studio.lastLinuxBuild')
-                    check(origin + ': ' + architecture + ' ' + format + ' native export', state.get('compiled') is True and state.get('codegen') == ('arm64-aot' if architecture == 'arm64' else 'x86_64-aot') and state.get('distribution', {}).get('format') == format)
-                    if len(downloads) > count:
-                        downloaded = downloads[-1]
-                    else:
-                        with page.expect_download(timeout=30000) as item:
-                            page.locator('[data-linux-download] a').click()
-                        downloaded = item.value
-                    file = OUT / (ENGINE + '-' + origin + '-' + architecture + '.' + format)
-                    downloaded.save_as(file)
-                    expected = ('LinuxBrowser-linux-' + architecture + '.' + format) if format in ('zip', 'tar.gz') else (
-                        'linuxbrowser_1.0.0-1_' + ('arm64' if architecture == 'arm64' else 'amd64') + '.deb' if format == 'deb' else
-                        'linuxbrowser-1.0.0-1.' + ('aarch64' if architecture == 'arm64' else 'x86_64') + '.rpm')
-                    check(origin + ': ' + architecture + ' ' + format + ' filename', downloaded.suggested_filename == expected)
-                    verify(file, architecture, format)
-                    outputs.append({'file': file.name, 'architecture': architecture, 'format': format, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest()})
-                close_dialog()
+            for toolkit in ('gtk3', 'gtk4'):
+                for architecture in ('x64', 'arm64'):
+                    page.evaluate('project => vb6Studio.loadProject(VB6StudioAPI.normalizeProject(project))', fixtures[toolkit][architecture])
+                    open_dialog()
+                    page.get_by_label('Linux architecture', exact=True).select_option(architecture)
+                    page.get_by_label('Linux GTK toolkit', exact=True).select_option(toolkit)
+                    for format in ('zip', 'tar.gz', 'deb', 'rpm'):
+                        if toolkit == 'gtk3' and architecture == 'x64' and format == 'zip':
+                            continue
+                        page.get_by_label('Linux package format', exact=True).select_option(format)
+                        page.evaluate('delete vb6Studio.lastLinuxBuild')
+                        count = len(downloads)
+                        page.get_by_role('button', name='Export Linux Application', exact=True).click()
+                        page.wait_for_function('vb6Studio.lastLinuxBuild?.compiled === true || vb6Studio.lastLinuxBuild?.success === false', timeout=90000)
+                        state = page.evaluate('vb6Studio.lastLinuxBuild')
+                        check(origin + ': ' + toolkit + ' ' + architecture + ' ' + format + ' native export', state.get('compiled') is True and state.get('toolkit') == toolkit and state.get('codegen') == ('arm64-aot' if architecture == 'arm64' else 'x86_64-aot') and state.get('distribution', {}).get('format') == format)
+                        if len(downloads) > count:
+                            downloaded = downloads[-1]
+                        else:
+                            with page.expect_download(timeout=30000) as item:
+                                page.locator('[data-linux-download] a').click()
+                            downloaded = item.value
+                        file = OUT / (ENGINE + '-' + origin + '-' + architecture + ('-gtk4' if toolkit == 'gtk4' else '') + '.' + format)
+                        downloaded.save_as(file)
+                        expected = ('LinuxBrowser-linux-' + architecture + ('-gtk4' if toolkit == 'gtk4' else '') + '.' + format) if format in ('zip', 'tar.gz') else (
+                            'linuxbrowser_1.0.0-1_' + ('arm64' if architecture == 'arm64' else 'amd64') + '.deb' if format == 'deb' else
+                            'linuxbrowser-1.0.0-1.' + ('aarch64' if architecture == 'arm64' else 'x86_64') + '.rpm')
+                        check(origin + ': ' + toolkit + ' ' + architecture + ' ' + format + ' filename', downloaded.suggested_filename == expected)
+                        verify(file, architecture, format, toolkit)
+                        outputs.append({'file': file.name, 'architecture': architecture, 'toolkit': toolkit, 'format': format, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest()})
+                    close_dialog()
             page.evaluate('project => vb6Studio.loadProject(VB6StudioAPI.normalizeProject(project))', fixture)
-            check(origin + ': all architecture and package exports remain offline', not requests)
+            check(origin + ': all toolkit, architecture and package exports remain offline', not requests)
 
             # Delay an actual digest, keeping the real algorithm and output intact.
             # This makes close and stale-revision races reproducible in every engine.

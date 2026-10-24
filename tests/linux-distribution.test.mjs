@@ -5,6 +5,10 @@ import {gunzipSync} from 'node:zlib';
 import {md5Bytes,gzipStore,utf8} from '../packages/linux-native/src/distribution-archive.js';
 import {exportLinuxApplication} from '../packages/linux-native/src/aot-export.js';
 import {packageLinuxApplication,exportLinuxDistribution,linuxDistributionOptions} from '../packages/linux-native/src/distribution.js';
+import {compileLinuxAOT} from '../packages/linux-native/src/compiler.js';
+import {linkLinuxAOT} from '../packages/linux-native/src/aot-export.js';
+import {createLinuxAOTRuntimeManifest} from '../packages/linux-native/src/elf.js';
+import {linuxELFFixture} from './linux-aot-elf-fixture.mjs';
 const hash=(algorithm,bytes)=>createHash(algorithm).update(bytes).digest('hex');
 const project={schema:1,name:'Distribution App',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code:'Public Sub Main()\nDebug.Print "LINUX_DISTRIBUTION_OK"\nEnd Sub'}]};
 let application;
@@ -85,6 +89,20 @@ test('RPM declares every required libgcc symbol version for its target architect
     assert.deepEqual(capabilities,expected.map(version=>'libgcc_s.so.1(GCC_'+version+')(64bit)'));
     for(const capability of capabilities){const index=names.indexOf(capability);assert.equal(flags[index],0);assert.equal(versions[index],'');}
   }
+});
+for(const architecture of ['x64','arm64'])test('GTK4 '+architecture+' package dependencies match the sealed ELF toolkit',async()=>{
+  // This fixture checks package metadata structurally. Native qualification
+  // independently executes exports linked to each real shipped GTK runtime.
+  const bytes=linuxELFFixture(architecture,'gtk4'),manifest=await createLinuxAOTRuntimeManifest(bytes,{fixture:true});
+  const app=await linkLinuxAOT(compileLinuxAOT(project,{architecture,toolkit:'gtk4'}),{bytes,manifest});
+  const deb=await packageLinuxApplication(app,{format:'deb'});
+  const control=gunzipSync(arEntries(deb.bytes).get('control.tar.gz')).toString();
+  assert.ok(control.includes('libgtk-4-1 (>= 4.14)'));assert.ok(!control.includes('libgtk-3-0'));
+  const {main}=rpmParts((await packageLinuxApplication(app,{format:'rpm'})).bytes);
+  const names=main.tags.get(1049),versions=main.tags.get(1050),index=names.indexOf('gtk4');
+  assert.ok(index>=0);assert.equal(versions[index],'4.14');assert.ok(!names.includes('gtk3'));
+  assert.ok(names.includes('libgtk-4.so.1()(64bit)'));assert.ok(!names.includes('libgtk-3.so.0()(64bit)'));
+  assert.equal((await packageLinuxApplication(app,{format:'tar.gz'})).filename,`Distribution App-linux-${architecture}-gtk4.tar.gz`);
 });
 test('distribution packaging rejects damaged seals, cancelled work and invalid metadata before compiling',async()=>{
   const app=await exported(),bytes=app.bytes.slice();bytes[0]^=1;

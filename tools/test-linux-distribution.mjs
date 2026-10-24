@@ -19,11 +19,11 @@ Public Sub Main()
     Debug.Assert value = "LINUX_PACKAGE_RESOURCE_OK"
     Debug.Print "LINUX_DISTRIBUTION_OK"
 End Sub`}]};
-export async function testLinuxDistribution({architecture=process.arch,sysroot,reportDirectory=path.join(root,'reports/linux-distribution-'+architecture)}={}) {
+export async function testLinuxDistribution({architecture=process.arch,toolkit='gtk3',sysroot,reportDirectory=path.join(root,'reports/linux-distribution-'+architecture+'-'+toolkit)}={}) {
   assert.equal(process.platform,'linux','Distribution qualification requires Linux package tools.');
   assert.ok(['x64','arm64'].includes(architecture));
   const work=await fs.mkdtemp(path.join(os.tmpdir(),'vb6-linux-distribution-')),checks=[];
-  const report={platform:process.platform,architecture,hostArchitecture:process.arch,executionMode:process.arch===architecture?'native':'qemu-user',passed:false,checks};
+  const report={platform:process.platform,architecture,toolkit,hostArchitecture:process.arch,executionMode:process.arch===architecture?'native':'qemu-user',passed:false,checks};
   const run=(tool,args,options={})=>execFileSync(tool,args,{cwd:work,encoding:'utf8',timeout:60000,maxBuffer:256*1024*1024,env:{...process.env,LC_ALL:'C'},...options});
   const execute=filename=>{
     if(architecture===process.arch)return run(filename,[]);
@@ -32,7 +32,7 @@ export async function testLinuxDistribution({architecture=process.arch,sysroot,r
   };
   try {
     const resources={'Resources/data.txt':'LINUX_PACKAGE_RESOURCE_OK\n'};
-    const app=await exportLinuxApplication(project,{architecture},{resources});
+    const app=await exportLinuxApplication(project,{architecture,toolkit},{resources});
     const packageName='vb6-distribution-'+architecture;
     for(const format of ['zip','tar.gz','deb','rpm']){
       const exported=await packageLinuxApplication(app,{format,packageName,version:'2.3.4',release:'5',maintainer:'Package Fixture <fixture@example.invalid>',license:'MIT'});
@@ -46,7 +46,7 @@ export async function testLinuxDistribution({architecture=process.arch,sysroot,r
         run('tar',['-xzf',file,'-C',directory]);executable=path.join(directory,app.options.name,'bin',app.options.name);
       }else {
         if(format==='deb'){
-          const fields=run('dpkg-deb',['--field',file]);assert.match(fields,/Package: vb6-distribution-/);assert.ok(fields.includes('Architecture: '+(architecture==='arm64'?'arm64':'amd64')));assert.match(fields,/libcups2t64/);
+          const fields=run('dpkg-deb',['--field',file]);assert.match(fields,/Package: vb6-distribution-/);assert.ok(fields.includes('Architecture: '+(architecture==='arm64'?'arm64':'amd64')));assert.match(fields,/libcups2t64/);assert.ok(fields.includes(toolkit==='gtk4'?'libgtk-4-1 (>= 4.14)':'libgtk-3-0t64 (>= 3.24)'));
           run('dpkg-deb',['--extract',file,directory]);const control=path.join(work,'deb-control');run('dpkg-deb',['--control',file,control]);
           run('md5sum',['--check',path.join(control,'md5sums')],{cwd:directory});
         }else {
@@ -55,7 +55,7 @@ export async function testLinuxDistribution({architecture=process.arch,sysroot,r
           for(const label of ['Header SHA256 digest: OK','Header SHA1 digest: OK','Payload SHA256 digest: OK','MD5 digest: OK'])assert.ok(digest.includes(label),label);
           assert.equal(run('rpm',['--dbpath',dbpath,'--query','--package','--queryformat','%{ARCH}',file]),architecture==='arm64'?'aarch64':'x86_64');
           const requires=run('rpm',['--dbpath',dbpath,'--query','--package','--requires',file]);
-          assert.match(requires,/GLIBCXX_3\.4\.32/);assert.match(requires,/CXXABI_1\.3\.13/);assert.match(requires,/gtk3 >= 3\.24/);
+          assert.match(requires,/GLIBCXX_3\.4\.32/);assert.match(requires,/CXXABI_1\.3\.13/);assert.ok(requires.includes(toolkit==='gtk4'?'gtk4 >= 4.14':'gtk3 >= 3.24'));
           for(const version of architecture==='arm64'?['3.0','4.2.0','4.5.0']:['3.0','4.2.0'])assert.ok(requires.includes('libgcc_s.so.1(GCC_'+version+')(64bit)'),'RPM omits its required GCC_'+version+' capability');
           const scripts=run('rpm',['--dbpath',dbpath,'--query','--package','--scripts',file]);assert.equal(scripts,'');
           const payload=run('rpm2cpio',[file],{encoding:null});run('cpio',['-idm','--quiet','--no-absolute-filenames'],{cwd:directory,input:payload});
@@ -81,7 +81,7 @@ export async function testLinuxDistribution({architecture=process.arch,sysroot,r
       console.log('PASS '+architecture+' '+format+': independently extracted executable and resources run successfully');
     }
     const unicodeName='Zażółć '+ '漢'.repeat(60)+' $(literal)',resourcePath='Resources/'+ 'r'.repeat(160)+'/'+ 'é'.repeat(80)+'.txt';
-    const unicode=await exportLinuxApplication({...project,name:unicodeName},{architecture,name:unicodeName},{resources:{...resources,[resourcePath]:'Long Unicode resource'}});
+    const unicode=await exportLinuxApplication({...project,name:unicodeName},{architecture,toolkit,name:unicodeName},{resources:{...resources,[resourcePath]:'Long Unicode resource'}});
     for(const format of ['tar.gz','deb','rpm']){
       const exported=await packageLinuxApplication(unicode,{format,packageName:'unicode-fixture'}),file=path.join(work,exported.filename),directory=path.join(work,'unicode-'+format.replace('.','-'));
       await fs.writeFile(file,exported.bytes);await fs.mkdir(directory);
@@ -98,6 +98,6 @@ export async function testLinuxDistribution({architecture=process.arch,sysroot,r
   finally {await fs.mkdir(reportDirectory,{recursive:true});await fs.writeFile(path.join(reportDirectory,'validation.json'),JSON.stringify(report,null,2)+'\n');await fs.rm(work,{recursive:true,force:true});}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  const options={};for(let index=2;index<process.argv.length;index+=2){const flag=process.argv[index];if(!['--architecture','--sysroot','--report'].includes(flag)||!process.argv[index+1])throw new Error('Expected --architecture x64|arm64, --sysroot PATH, or --report PATH');options[flag==='--report'?'reportDirectory':flag.slice(2)]=process.argv[index+1];}
+  const options={};for(let index=2;index<process.argv.length;index+=2){const flag=process.argv[index];if(!['--architecture','--toolkit','--sysroot','--report'].includes(flag)||!process.argv[index+1])throw new Error('Expected --architecture x64|arm64, --toolkit gtk3|gtk4, --sysroot PATH, or --report PATH');options[flag==='--report'?'reportDirectory':flag.slice(2)]=process.argv[index+1];}
   await testLinuxDistribution(options);
 }

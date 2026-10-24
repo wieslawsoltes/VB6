@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {constants} from 'node:fs';
 import {exportLinuxApplication,exportLinuxDistribution,importFiles,unpackLinuxAOTArchive} from '../dist/index.js';
+import {packageLinuxApplicationNative,linuxNativeDistributionOptions,LINUX_NATIVE_DISTRIBUTION_FORMATS} from './native-distribution.mjs';
+export {packageLinuxApplicationNative,linuxNativeDistributionOptions,LINUX_NATIVE_DISTRIBUTION_FORMATS};
 
 async function readRegularFile(filename,limit) {
   const handle=await fs.open(filename,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
@@ -49,11 +51,16 @@ async function outputDirectory(out) {
   if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Output must be a regular directory, not a link.');
   return fs.realpath(directory);
 }
-export async function exportLinuxProject(project,{compiler={},distribution={},out=path.resolve('out'),signal,resources}={}) {
+export async function exportLinuxProject(project,{compiler={},distribution={},out=path.resolve('out'),signal,resources,toolchain={}}={}) {
   signal?.throwIfAborted();
-  const result=await exportLinuxDistribution(project,compiler,distribution,{signal,resources}),directory=await outputDirectory(out);
+  const native=Object.hasOwn(LINUX_NATIVE_DISTRIBUTION_FORMATS,distribution?.format??'');
+  if(!native&&Object.keys(toolchain).length)throw new Error('Native packaging toolchain options require appimage or flatpak format');
+  if(!native&&['appId','runtime','runtimeVersion','runtimeRepository','branch','flatpakPermissions'].some(key=>Object.hasOwn(distribution,key)))throw new Error('Flatpak package options require flatpak format');
+  const normalized=native?linuxNativeDistributionOptions(distribution,compiler.name??project?.name??'Application'):distribution;
+  const result=native?await packageLinuxApplicationNative(await exportLinuxApplication(project,compiler,{signal,resources}),normalized,{signal,toolchain}):await exportLinuxDistribution(project,compiler,distribution,{signal,resources});
+  const directory=await outputDirectory(out);
   signal?.throwIfAborted();
-  const destination=path.join(directory,result.filename),file=await fs.open(destination,'wx',0o644);let complete=false;
+  const destination=path.join(directory,result.filename),file=await fs.open(destination,'wx',normalized.format==='appimage'?0o755:0o644);let complete=false;
   try {await file.writeFile(result.bytes);await file.sync();signal?.throwIfAborted();complete=true;}
   finally {await file.close();if(!complete)await fs.unlink(destination);}
   return {...result.report,archive:destination};

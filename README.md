@@ -181,18 +181,24 @@ See [Direct Win32/AOT contract, examples and SDK](docs/WIN32-AOT.md), [Windows t
 
 ### Native Linux GTK export
 
-**File → Make Project (Linux GTK AOT)…** produces native Linux **x86-64 or ARM64 ELF applications**, packaged as ZIP, tar.gz, Debian, or RPM, directly in the IDE and entirely offline. The shared VB6 native compiler emits project machine code; applications use GTK 3.24 controls, native RichTextBox/RTF formatting, CUPS printing, the portable native VB6 runtime, and system libraries. They run without Node.js, a browser, Wine, or a VB interpreter.
+**File → Make Project (Linux GTK AOT)…** produces native Linux **x86-64 or ARM64 ELF applications** with **GTK 3.24 or GTK 4.14**, packaged as ZIP, tar.gz, Debian, or RPM directly in the offline IDE. The Linux Node/CLI packager also builds real **AppImage and Flatpak** distributions from the same sealed AOT application. The shared VB6 compiler emits project machine code; native GTK controls, rich documents, common dialogs, CUPS printing, and the portable VB6 runtime run without Node.js, a browser, Wine, or a VB interpreter.
 
 ```sh
 npm run build:linux-package
 npm run build:linux -- examples/calculator.vb6web --out NativeOutput
 # Build an ARM64 Debian package with a desktop launcher:
 npm run build:linux -- examples/calculator.vb6web --out NativeOutput --architecture arm64 --format deb --package-name my-calculator --version 1.0.0
+# On Linux with the native packaging tools, build a GTK4 AppImage:
+npm run build:linux -- examples/calculator.vb6web --out NativeOutput --toolkit gtk4 --format appimage --package-name my-calculator --version 1.0.0
+# Or produce a Flatpak bundle for the declared GNOME platform:
+npm run build:linux -- examples/calculator.vb6web --out NativeOutput --format flatpak --app-id org.example.Calculator
 # Or write a fresh application directory with bin/NAME and Resources/:
 npm run build:linux -- examples/calculator.vb6web --out NativeApplications --extract
 ```
 
-Both runtimes target Ubuntu 24.04-compatible Linux with GTK 3.24, CUPS, and glibc 2.39 or newer. O0–O3 optimization, resources, deterministic packages, standalone SDK APIs, and the `linux` MCP build target share the same exporter. Native CI qualifies both architectures, including RTF interchange, printer submission, previous-instance lifetime, and execution of browser-generated packages. See [Linux AOT architecture, usage and validation](docs/LINUX-AOT.md) and the [reusable Linux package](packages/linux-native/README.md).
+All four architecture/toolkit payloads target Ubuntu 24.04-compatible native libraries, including glibc 2.39, CUPS, and the selected GTK version. GTK3 remains the default. Applications are fully AOT compiled and dynamically link native libraries; AppImage bundles the non-glibc dependency graph, while Flatpak uses its declared platform runtime. The IDE and `linux` MCP build API retain the four portable/offline formats and advertise the native Linux CLI route for AppImage/Flatpak.
+
+Native CI qualifies both architectures and toolkits, actual X11 and Wayland behavior, rich-document preservation, printer submission, packaged previous-instance identity, and execution of exact browser downloads. Source provenance gates require all four runtime payloads to match the current native sources. See [Linux AOT architecture and APIs](docs/LINUX-AOT.md), [the reusable Linux package](packages/linux-native/README.md), [GTK controls and displays](docs/LINUX-GTK.md), [RichTextBox documents](docs/LINUX-RTF.md), and [AppImage/Flatpak packaging](docs/LINUX-DISTRIBUTION.md).
 
 ### Reusable Win32 browser compatibility
 
