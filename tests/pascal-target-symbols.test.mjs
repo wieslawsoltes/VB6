@@ -64,6 +64,7 @@ test('macOS false platform constants stay undefined for Pascal without changing 
 
 test('macOS source kit uses the same Pascal target symbol contract as AOT',()=>{
   const project=conditionalProject('macos','arm64'),before=structuredClone(project),compiled=compileMacOS(project);
-  assert.match(compiled.files['main.cpp'],/VB_TARGET_OK/);
+  const literal='Text{'+[...'VB_TARGET_OK'].map(character=>'char16_t(0x'+character.charCodeAt(0).toString(16)+')').join(',')+'}';
+  assert.ok(compiled.files['main.cpp'].includes(literal));
   assert.equal(compiled.report.architecture,'arm64');assert.deepEqual(project,before);
 });
