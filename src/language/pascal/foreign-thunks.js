@@ -32,7 +32,7 @@ export function deferredForeignValue(lowerer, node, context, {ordinal = false, n
     }
   };
   visit(node);
-  const name = '__PascalForeignArgument_' + lowerer.tempId++;
+  const name = (lowerer.foreignThunkPrefix || '__PascalForeignArgument_') + lowerer.tempId++;
   const captures = [...symbols].map((symbol, index) => ({symbol, name: '__PascalCaptured_' + index}));
   const capturedWith = [...withObjects].map((object, index) => ({object, name: '__PascalWith_' + index}));
   const type = nothing ? PASCAL_TYPES.object : ordinal ? PASCAL_TYPES.longint : lowerer.typeOf(node, context);

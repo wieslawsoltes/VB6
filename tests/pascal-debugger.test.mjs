@@ -133,3 +133,26 @@ test('Pascal design-mode Immediate prepares without running program startup', as
   assert.equal(await vm.immediate('? Counter div 2'), 4);
   assert.equal(await vm.immediate('? Name'), 'Ready');
 });
+
+test('Pascal Immediate and explicit evaluation retain typed foreign calls without leaking or reusing argument thunks', async t => {
+  const code=`program DebugPascal;
+procedure Worker;
+var Local:Integer;
+begin
+  Local:=5;
+  Helper.Record(Helper.Bump(Local));
+  Writeln('pause');
+end;
+begin Worker end.`;
+  const source=project(code);source.modules.push({name:'Helper',kind:'module',language:'vb6',code:'Public Recorded As Integer\nPublic Function Bump(ByRef Value As Integer) As Integer\nValue=Value+1\nBump=Value\nEnd Function\nPublic Sub Record(ByVal Value As Integer)\nRecorded=Value\nEnd Sub\nPublic Function Fail() As Integer\nErr.Raise 5, "Helper", "expected failure"\nEnd Function'});
+  const vm=new VirtualMachine(compileProject(source),{}, {debuggerEnabled:true});assert.deepEqual(vm.program.diagnostics,[]);
+  vm.setBreakpoint('DebugPascal',7);const stopped=new Promise(resolve=>{const off=vm.on('pause',event=>{off();resolve(event);});});const running=vm.start();
+  t.after(async()=>{vm.stop();await running;});await Promise.race([stopped,running.then(()=>{throw vm.lastError||new Error('No Pascal breakpoint');})]);
+  const frame=vm.currentFrame,procedures=[...frame.module.procedures.keys()];assert.ok(procedures.some(name=>name.startsWith('__pascalforeignargument_')));
+  assert.equal(await vm.evaluateWatch('Local'),6);
+  await assert.rejects(vm.evaluateWatch('Helper.Bump(Local)'),/disabled|not permitted/i);assert.equal(await vm.evaluateWatch('Local'),6);
+  await vm.immediate('Helper.Record(Helper.Bump(Local))');assert.equal(await vm.evaluateWatch('Local'),7);assert.equal(await vm.evaluateWatch('Helper.Recorded'),7);
+  assert.deepEqual([...frame.module.procedures.keys()],procedures);
+  assert.equal(await vm.evaluateExplicit('Helper.Bump(Local)'),8);assert.equal(await vm.evaluateWatch('Local'),8);
+  await assert.rejects(vm.immediate('Helper.Record(Helper.Fail())'),/expected failure/);assert.deepEqual([...frame.module.procedures.keys()],procedures);assert.equal(vm.currentFrame,frame);
+});

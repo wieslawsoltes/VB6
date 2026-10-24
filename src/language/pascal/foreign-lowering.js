@@ -73,7 +73,9 @@ export function foreignArguments(lowerer, symbol, args, context, node) {
     }
     if (param.type.kind === 'array') lowerer.fail(`Visual Basic array parameter '${param.name}' requires an array variable`, arg, 'TP_VAR_PARAMETER_TYPE');
     if (!assignmentCompatible(param.type, actual)) lowerer.fail(`Visual Basic argument '${param.name}' has incompatible type`, arg, 'TP_ARGUMENT_TYPE');
-    return deferredForeignValue(lowerer, arg, context, {nothing: arg.kind === 'nil' && ['object', 'variant'].includes(param.type.kind)});
+    const nothing = arg.kind === 'nil' && ['object', 'variant'].includes(param.type.kind);
+    if (context.pure) return nothing ? 'Nothing' : lowerer.expression(arg, context);
+    return deferredForeignValue(lowerer, arg, context, {nothing});
   });
 }
 
@@ -86,13 +88,12 @@ function readable(lowerer, symbol, node) {
 export function foreignCall(lowerer, original, args, context, node, {statement = false} = {}) {
   const symbol = readable(lowerer, original, node);
   if (symbol.kind !== 'procedure') lowerer.fail(`Visual Basic member '${symbol.name}' is not callable`, node, 'TP_FOREIGN_CALL');
-  if (context.pure) lowerer.fail('Visual Basic routines and properties cannot be executed while inspecting a value', node, 'TP_DEBUG_EXPRESSION');
   if (!statement && !symbol.returnType) lowerer.fail(`Visual Basic Sub '${symbol.name}' does not return a value`, node, 'TP_FOREIGN_RESULT');
   // Receiver identity is fixed before arguments can call back and replace it.
   const receiver = foreignAccess(lowerer, symbol, context, {freeze: true});
   const argumentsSource = foreignArguments(lowerer, symbol, args, context, node);
   const call = symbol.accessor === 'get' && !symbol.params.length ? receiver : `${receiver}(${argumentsSource.join(', ')})`;
-  if (statement) return call;
+  if (statement || context.pure) return call;
   const result = lowerer.temporary(context, symbol.returnType.kind === 'array' ? PASCAL_TYPES.variant : symbol.returnType, node, 'foreignResult');
   lowerer.emit(context, `${symbol.returnType.kind === 'object' ? 'Set ' : ''}${result} = ${call}`, node, true);
   return result;

@@ -133,12 +133,13 @@ export function lowerPascalDebugAssignment(expression, source, frame, project) {
  */
 export function compilePascalImmediate(source, frame, project) {
   const {lowerer, context} = contextFor(frame, project, false), parser = new PascalParser({name: frame.module.name, code: source});
+  lowerer.foreignThunkPrefix = '__PascalImmediateForeignArgument_';
   while (parser.peek().type !== 'eof') {
     if (parser.match(';')) continue;
     lowerer.statement(parser.statement(), context);
     if (parser.peek().type !== 'eof' && !parser.match(';')) parser.fail("Expected ';' between Immediate statements");
   }
-  const module = compileModule({name: frame.module.name, code: `Private Sub __PascalImmediate()\n${context.writer.source}\nEnd Sub\n${getPascalRuntimeSource([...lowerer.helpers])}`});
+  const module = compileModule({name: frame.module.name, code: `Private Sub __PascalImmediate()\n${context.writer.source}\nEnd Sub\n${(lowerer.foreignThunks || []).map(thunk => thunk.source).join('\n')}\n${getPascalRuntimeSource([...lowerer.helpers])}`});
   return {procedure: module.procedures.get('__pascalimmediate'), helpers: [...module.procedures].filter(([name]) => name !== '__pascalimmediate')};
 }
 
