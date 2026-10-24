@@ -4,6 +4,7 @@ import {prepareMacOSResources} from './resources.js';
 import {compileProject} from '../../../src/language/compiler.js';
 import {normalizeProject} from '../../../src/project/model.js';
 import {defaultIdentifierType} from '../../../src/language/default-types.js';
+import {RecordTypeIndex} from '../../../src/language/record-resolution.js';
 import {parseExpression} from '../../../src/language/expression.js';
 import {literalScalar,signedLiteralScalar,VBScalar,NOTHING,MISSING} from '../../../src/runtime/values.js';
 import {dateToSerial} from '../../../src/runtime/calendar.js';
@@ -44,17 +45,13 @@ function cppScalar(input){
 function wrapped(body){return `([&](){${body}}())`;}
 const statementOps=new Set(['dim','assign','expr','print','assert','branch','jump','computedJump','raiseError','temp','case','forInit','forNext','eachInit','eachNext','redim','erase','withPush','withPop','withUnwind','onError','resume','gosub','gosubReturn','return','stop','end','lineNumber','form','fileOpen','fileRecord','fileSeek','fileLock','fileCopy','fileRename','fileClose','filePrint','fileInput','graphics','raiseEvent','stringAlign','stringMid']);
 export class MacOSLowering {
-  constructor(program,options){this.program=program;this.options=options;this.module=null;this.procedure=null;this.instruction=null;this.external=[];this.sourceMap=[];this.procedures=0;this.instructions=0;this.usedOps=new Set();this.usedBuiltins=new Set();}
+  constructor(program,options){this.program=program;this.options=options;this.recordTypes=new RecordTypeIndex(program.modules);this.module=null;this.procedure=null;this.instruction=null;this.external=[];this.sourceMap=[];this.procedures=0;this.instructions=0;this.usedOps=new Set();this.usedBuiltins=new Set();}
   fail(message,code='MAC100'){throw new MacOSCompileError(message,this.module?.name,this.instruction?.line||this.procedure?.line||1,code);}
-  // C++ build kits and direct AOT share the same nominal object contracts.
+  // Resolve storage identities once per lowering pass, with the same owner,
+  // visibility and shadowing rules as the shared binder and VM. Display names
+  // travel separately so TypeName retains the authored declaration spelling.
   nativeType(raw,module=this.module){
-    const name=lower(raw),at=name.indexOf('.');
-    const object=(owner,type)=>owner?.language==='pascal'&&owner.pascal?.objectTypes?.find(value=>lower(value.name)===type);
-    if(at>0){const value=object(this.program.modules.get(name.slice(0,at)),name.slice(at+1));return value?lower(value.identity):raw;}
-    const local=object(module,name);if(local)return lower(local.identity);
-    if(Object.keys(module.types).some(type=>lower(type)===name))return raw;
-    const owners=[...this.program.modules.values()].filter(owner=>Object.keys(owner.types).some(type=>lower(type)===name));
-    const value=owners.length===1&&object(owners[0],name);return value?lower(value.identity):raw;
+    return this.recordTypes.resolve(raw,module)?.identity||raw;
   }
   pascalObjectMetadata(name,fields){
     const module=this.module,object=module.language==='pascal'&&module.pascal?.objectTypes?.find(value=>lower(value.name)===lower(name));
@@ -68,7 +65,7 @@ export class MacOSLowering {
       if(!Number.isInteger(value)||value<-2147483648||value>2147483647)this.fail('Invalid Pascal object array bound metadata','MACA231');
       return value;
     };
-    const fieldType=field=>{const raw=lower(field.storageType||field.type);return raw.includes('.')?raw:Object.keys(module.types).some(type=>lower(type)===raw)?lower(module.name)+'.'+raw:raw;};
+    const fieldType=field=>lower(this.nativeType(field.storageType||field.type,module));
     return {name:object.name,identity,parent,typeId:object.typeId,hasVmt:!!object.hasVmt,
       fields:fields.map(field=>({name:lower(field.name),type:fieldType(field),fixedLength:Number(field.fixedLength)||0,bounds:field.bounds?.map(pair=>pair.map(bound))??null})),
       virtualMethods:(object.methods||[]).filter(method=>method.virtual&&lower(method.module)===lower(module.name)&&lower(method.declaringType)===lower(name)).map(method=>lower(method.module)+'.'+lower(method.vbName))};
@@ -181,7 +178,7 @@ export class MacOSLowering {
   bounds(decl){return `Bounds{${(decl.bounds||[]).map(pair=>`{static_cast<int32_t>(coerce(scalar(f.runtime,${pair[0]?this.expression(pair[0]):`Value::integer(${this.module.optionBase})`}),"long").integral()),static_cast<int32_t>(coerce(scalar(f.runtime,${this.expression(pair[1])}),"long").integral())}`).join(',')}}`;}
   declaration(decl,global=false,isStatic=false){
     const name=q(decl.name),type=q(this.nativeType(decl.storageType||decl.type)),kind=decl.bounds===null||decl.bounds===undefined?0:decl.bounds.length?2:1;
-    const args=`${name},${type},${this.bounds(decl)},${kind},${Number(decl.fixedLength)||0},${bool(decl.constant)},${global?`${bool(decl.autoNew)},${bool(decl.withEvents)}`:`${bool(isStatic)},${bool(decl.autoNew)}`}`;
+    const args=`${name},${type},${this.bounds(decl)},${kind},${Number(decl.fixedLength)||0},${bool(decl.constant)},${global?`${bool(decl.autoNew)},${bool(decl.withEvents)}`:`${bool(isStatic)},${bool(decl.autoNew)}`},${q(decl.storageType||decl.type)}`;
     let out=`f.${global?'global':'declare'}(${args});`;
     if(decl.constant){const scalar=(this.procedure||this.module).constantScalars.get(lower(decl.name));if(!scalar)this.fail('Missing bound constant '+decl.name);out+=`f.initial(${name},${cppScalar(scalar)});`;}
     return out;
@@ -205,7 +202,7 @@ export class MacOSLowering {
       case 'forNext':return `if(f.forNext(${q(ins.id)})){${go(ins.target)}}`;
       case 'eachInit':return `f.closeEach(${q(ins.id)});auto iterable=${e(ins.expr)};auto borrow=borrowArrayValue(iterable,true);auto variable=${r(ins.variable||parseExpression(ins.name))};if(!f.eachStart(${q(ins.id)},variable,iterable,${ins.target})){${go(ins.target)}}`;
       case 'eachNext':return `if(f.eachNext(${q(ins.id)})){${go(ins.target)}}`;
-      case 'redim':return ins.decls.map(d=>`{auto reference=f.ref(${q(d.name)});auto bounds=${this.bounds(d)};f.redim(reference,bounds,${bool(ins.preserve)},${q(d.explicitType?this.nativeType(d.storageType||d.type):'')});}`).join('');
+      case 'redim':return ins.decls.map(d=>`{auto reference=f.ref(${q(d.name)});auto bounds=${this.bounds(d)};f.redim(reference,bounds,${bool(ins.preserve)},${q(d.explicitType?this.nativeType(d.storageType||d.type):'')},${q(d.explicitType?d.storageType||d.type:'')});}`).join('');
       case 'erase':return ins.exprs.map(node=>`${e(node)}.asArray()->erase();`).join('');
       case 'withPush':return this.canReference(ins.expr)?`f.closeWith(${q(ins.id)});auto reference=${r(ins.expr)};auto value=reference.get();f.pushWith(${q(ins.id)},value,${ins.target},std::move(reference));`:`f.closeWith(${q(ins.id)});f.pushWith(${q(ins.id)},${e(ins.expr)},${ins.target});`;
       case 'withPop':return `f.closeWith(${q(ins.id)});`;
@@ -243,11 +240,12 @@ export class MacOSLowering {
     return `static Value p${id}(Frame&f){\n${locals}\ndispatch:\ntry {\nswitch(f.pc){${code.map((_,i)=>`case ${i}:goto L${i};`).join('')}default:goto L${code.length};}\n${instructions.join('\n')}\nL${code.length}:return f.result();\n}catch(const Error&e){if(!f.handle(e))throw;}\ngoto dispatch;\n}\n`;
   }
   recordCode(name,fields){
-    const object=this.pascalObjectMetadata(name,fields),identity=object?.identity||name;
+    const object=this.pascalObjectMetadata(name,fields),identity=this.nativeType(name);
     const contract=object?`rt.pascalObjects[${q(object.identity)}]=PascalObjectType{${q(object.identity)},${q(object.parent)},${object.typeId},${bool(object.hasVmt)},{${object.fields.map(field=>`PascalObjectField{${q(field.name)},${q(field.type)},${field.fixedLength},${bool(field.bounds!==null)},Bounds{${(field.bounds||[]).map(([low,high])=>`{${low},${high}}`).join(',')}}}`).join(',')}},{${object.virtualMethods.map(q).join(',')}}};\n`:'';
-    return contract+`m.records[${q(lower(identity))}]=[](Frame&f){(void)f;auto record=std::make_shared<Record>();record->name=${q(identity)};${fields.map(field=>{
-      const type=this.nativeType(field.storageType||field.type);const init=field.bounds?.length?`Value::array(std::make_shared<Array>(${q(type)},${this.bounds(field)},false,f.runtime.maxArrayElements,${field.fixedLength||0},[prototype=f.runtime.defaultValue(${q(type)},&f)]{return prototype.copy();}))`:`f.runtime.defaultValue(${q(type)},&f)`;
-      return `record->order.push_back(${q(lower(field.name))});record->fields[${q(lower(field.name))}]=std::make_shared<Cell>(${init},${q(type)},${field.fixedLength||0},false,${bool(!!field.bounds?.length)});`;
+    return contract+`m.records[${q(lower(identity))}]=[](Frame&f){(void)f;auto record=std::make_shared<Record>();record->name=${q(identity)};record->displayName=${q(name)};${fields.map(field=>{
+      const raw=field.storageType||field.type,type=this.nativeType(raw),array=field.bounds!==null&&field.bounds!==undefined;
+      const init=array?`f.makeArray(${q(type)},${this.bounds(field)},${bool(!field.bounds.length)},${field.fixedLength||0},${q(raw)})`:`f.runtime.defaultValue(${q(type)},&f)`;
+      return `record->order.push_back(${q(lower(field.name))});record->fields[${q(lower(field.name))}]=std::make_shared<Cell>(${init},${q(type)},${field.fixedLength||0},false,${bool(array)});`;
     }).join('')}return Value::record(record);};`;
   }
   pascalDispatchCode(proc){
@@ -265,7 +263,7 @@ export class MacOSLowering {
     for(const module of this.program.modules.values()){
       this.module=module;this.procedure=null;this.instruction=null;
       const registrations=[];
-      for(const [key,proc]of module.procedures){functions.push(this.procedureCode(proc,id));registrations.push(`{Procedure p;p.name=${q(proc.name)};p.scope=${q(proc.scope)};p.returnType=${q(this.nativeType(proc.storageReturnType||proc.returnType))};p.accessor=${q(proc.accessor||'')};p.isFunction=${bool(proc.kind==='function'||proc.accessor==='get')};p.returnArray=${bool(proc.returnArray)};p.isStatic=${bool(proc.static)};p.external=${bool(proc.external)};p.code=&p${id++};p.parameters={${proc.params.map(param=>{
+      for(const [key,proc]of module.procedures){functions.push(this.procedureCode(proc,id));registrations.push(`{Procedure p;p.name=${q(proc.name)};p.scope=${q(proc.scope)};p.returnType=${q(this.nativeType(proc.storageReturnType||proc.returnType))};p.returnDisplayType=${q(proc.storageReturnType||proc.returnType)};p.accessor=${q(proc.accessor||'')};p.isFunction=${bool(proc.kind==='function'||proc.accessor==='get')};p.returnArray=${bool(proc.returnArray)};p.isStatic=${bool(proc.static)};p.external=${bool(proc.external)};p.code=&p${id++};p.parameters={${proc.params.map(param=>{
         const initial=proc.defaultScalars.get(lower(param.name));return `Parameter{${q(param.name)},${q(this.nativeType(param.storageType||param.type))},${bool(param.byRef)},${bool(param.optional)},${bool(param.paramArray)},${bool(param.bounds!==null&&param.bounds!==undefined)},${initial?`[](Frame&)->Value{return ${cppScalar(initial)};}`:'{}'}}`;
       }).join(',')}};${this.pascalDispatchCode(proc)}m.procedures[${q(key)}]=std::move(p);}`);}
       this.procedure=null;this.instruction=null;

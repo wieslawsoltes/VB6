@@ -89,7 +89,7 @@ export class DirectLowering extends MacOSLowering {
   bounds(decl){const out=this.f.call('bounds');for(const pair of decl.bounds||[])this.f.call('bound_push',out,this.f.call('coerce',pair[0]?this.expression(pair[0]):this.literal(this.module.optionBase),this.n('long')),this.f.call('coerce',this.expression(pair[1]),this.n('long')));return out;}
   declaration(decl,global=false,isStatic=false){
     const kind=decl.bounds===null||decl.bounds===undefined?0:decl.bounds.length?2:1;
-    this.f.call('declare',this.n(decl.name),this.n(this.nativeType(decl.storageType||decl.type)),this.bounds(decl),kind,(decl.constant?1:0)|(isStatic?2:0)|(decl.autoNew?4:0)|(global?8:0)|(decl.withEvents?16:0),Number(decl.fixedLength)||0);
+    this.f.call('declare',this.n(decl.name),this.n(this.nativeType(decl.storageType||decl.type)),this.bounds(decl),kind,(decl.constant?1:0)|(isStatic?2:0)|(decl.autoNew?4:0)|(global?8:0)|(decl.withEvents?16:0),Number(decl.fixedLength)||0,this.n(decl.storageType||decl.type));
     if(decl.constant){const value=(this.procedure||this.module).constantScalars.get(lower(decl.name));if(!value)this.fail('Missing bound constant '+decl.name);this.f.call('initial',this.n(decl.name),this.literal(value));}
   }
   instructionCode(ins,index){
@@ -120,7 +120,7 @@ export class DirectLowering extends MacOSLowering {
       case 'forNext':f.branch(f.call('for_next',n(ins.id)),go(ins.target));break;
       case 'eachInit':{f.call('each_close',n(ins.id));const iterable=e(ins.expr),hold=f.call('retain',iterable,1),variable=r(ins.variable||parseExpression(ins.name)),out=f.call('each_start',n(ins.id),variable,iterable,ins.target);f.call('release',hold);f.branch(out,go(ins.target),true);break;}
       case 'eachNext':f.branch(f.call('each_next',n(ins.id)),go(ins.target));break;
-      case 'redim':for(const d of ins.decls)f.call('redim',f.call('ref',n(d.name)),this.bounds(d),ins.preserve?1:0,n(d.explicitType?this.nativeType(d.storageType||d.type):''));break;
+      case 'redim':for(const d of ins.decls)f.call('redim',f.call('ref',n(d.name)),this.bounds(d),ins.preserve?1:0,n(d.explicitType?this.nativeType(d.storageType||d.type):''),n(d.explicitType?d.storageType||d.type:''));break;
       case 'erase':for(const node of ins.exprs)f.call('erase',e(node));break;
       case 'withPush':{f.call('with_pop',n(ins.id),0);const ref=this.canReference(ins.expr),source=ref?r(ins.expr):e(ins.expr);f.call('with_push',n(ins.id),source,ins.target,ref?1:0);break;}
       case 'withPop':f.call('with_pop',n(ins.id),0);break;
@@ -156,7 +156,7 @@ export class DirectLowering extends MacOSLowering {
   }
   emitProcedure(proc){
     this.procedure=proc;this.instruction=null;this.procedures++;const f=this.startFunction();
-    if(proc.external){const adapter=(this.platform.resolveDeclaration||resolveMacOSDeclaration)(proc,this.module.name);this.external.push({...adapter,procedure:proc.name,source:this.module.name});f.call('api',this.n(adapter.id),proc.kind==='sub'?0:this.n(proc.storageReturnType||proc.returnType));f.end();this.finishFunction();return f.id;}
+    if(proc.external){const adapter=(this.platform.resolveDeclaration||resolveMacOSDeclaration)(proc,this.module.name);this.external.push({...adapter,procedure:proc.name,source:this.module.name});f.call('api',this.n(adapter.id),proc.kind==='sub'?0:this.n(this.nativeType(proc.storageReturnType||proc.returnType)));f.end();this.finishFunction();return f.id;}
     for(const d of proc.redimDeclarations||[]){f.reset();this.declaration(d,false,false);}
     for(const ins of proc.code)if(ins.op==='dim')for(const d of ins.decls){f.reset();this.declaration(d,false,ins.static);}
     this.instructions+=proc.code.length;
@@ -175,14 +175,14 @@ export class DirectLowering extends MacOSLowering {
       for(const [name,contract]of Object.entries(module.interfaceBindings||{}))m.interfaceBindings[name]={defaultMember:contract.defaultMember||'',members:Object.fromEntries(Object.entries(contract.members).map(([key,member])=>[key,{procedure:member.procedure,parameters:member.signature.params.map(p=>lower(p.name))}]))};
       for(const [key,proc]of module.procedures){
         const dispatch=this.pascalDispatchMetadata(proc);
-        m.procedures.push({key,name:proc.name,scope:proc.scope,returnType:this.nativeType(proc.storageReturnType||proc.returnType),returnArray:!!proc.returnArray,accessor:proc.accessor||'',isFunction:proc.kind==='function'||proc.accessor==='get',isStatic:!!proc.static,external:!!proc.external,entry:this.emitProcedure(proc),parameters:proc.params.map(p=>({name:p.name,type:this.nativeType(p.storageType||p.type),byRef:!!p.byRef,optional:!!p.optional,paramArray:!!p.paramArray,array:p.bounds!==null&&p.bounds!==undefined,...(proc.defaultScalars.has(lower(p.name))?{initial:this.literalId(proc.defaultScalars.get(lower(p.name)))}:{})})),...(dispatch?{pascalDispatch:dispatch}:{})});
+        m.procedures.push({key,name:proc.name,scope:proc.scope,returnType:this.nativeType(proc.storageReturnType||proc.returnType),returnDisplayType:proc.storageReturnType||proc.returnType,returnArray:!!proc.returnArray,accessor:proc.accessor||'',isFunction:proc.kind==='function'||proc.accessor==='get',isStatic:!!proc.static,external:!!proc.external,entry:this.emitProcedure(proc),parameters:proc.params.map(p=>({name:p.name,type:this.nativeType(p.storageType||p.type),byRef:!!p.byRef,optional:!!p.optional,paramArray:!!p.paramArray,array:p.bounds!==null&&p.bounds!==undefined,...(proc.defaultScalars.has(lower(p.name))?{initial:this.literalId(proc.defaultScalars.get(lower(p.name)))}:{})})),...(dispatch?{pascalDispatch:dispatch}:{})});
       }
       this.procedure=null;this.instruction=null;
       m.initialize=this.startFunction().id;for(const d of module.declarations){this.f.reset();this.declaration(d,true);}this.f.end();this.finishFunction();
       for(const [name,fields]of Object.entries(module.types)){
-        const object=this.pascalObjectMetadata(name,fields),type=object?.identity||name;
-        const f=this.startFunction();m.records.push({name:type,entry:f.id,...(object?{pascalObject:object}:{})});const record=f.call('record',this.n(type));
-        for(const field of fields)f.call('record_field',record,this.n(field.name),this.n(this.nativeType(field.storageType||field.type)),this.bounds(field),Number(field.fixedLength)||0);
+        const object=this.pascalObjectMetadata(name,fields),type=this.nativeType(name);
+        const f=this.startFunction();m.records.push({name:type,displayName:name,entry:f.id,...(object?{pascalObject:object}:{})});const record=f.call('record',this.n(type),this.n(name));
+        for(const field of fields){const raw=field.storageType||field.type,kind=field.bounds===null||field.bounds===undefined?0:field.bounds.length?2:1;f.call('record_field',record,this.n(field.name),this.n(this.nativeType(raw)),this.bounds(field),Number(field.fixedLength)||0,kind,this.n(raw));}
         f.call('finish',record);f.end();this.finishFunction();
       }
       if(module.form){m.form=this.spec({...module.form,name:module.name});m.controls=module.form.controls.map(c=>this.spec(c));m.menus=(module.form.menus||[]).map(c=>this.spec({...c,type:'Menu'}));}

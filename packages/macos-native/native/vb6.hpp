@@ -110,10 +110,12 @@ struct Cell {
 };
 Ref cellRef(CellPtr cell);
 struct Array : std::enable_shared_from_this<Array> {
-  std::string elementType; Bounds bounds; bool dynamic=true, allocated=false; size_t fixedLength=0;
+  // elementType is the canonical storage identity; displayElementType retains
+  // the declaration spelling through Variant copies and whole-array aliases.
+  std::string elementType,displayElementType; Bounds bounds; bool dynamic=true, allocated=false; size_t fixedLength=0;
   size_t borrowedElements=0;
   std::vector<Value> values; std::function<Value()> initializer;
-  Array(std::string type, Bounds bounds, bool dynamic, size_t maxElements, size_t fixedLength=0,std::function<Value()> initializer={});
+  Array(std::string type, Bounds bounds, bool dynamic, size_t maxElements, size_t fixedLength=0,std::function<Value()> initializer={},std::string displayElementType="");
   size_t offset(const std::vector<Value>& indices) const;
   Ref at(const std::vector<Value>& indices);
   std::shared_ptr<Array> resized(Bounds bounds,bool preserve,size_t maxElements) const;
@@ -121,7 +123,7 @@ struct Array : std::enable_shared_from_this<Array> {
   void erase();
 };
 struct Record {
-  std::string name; std::map<std::string,CellPtr> fields; std::vector<std::string> order;
+  std::string name,displayName; std::map<std::string,CellPtr> fields; std::vector<std::string> order;
   std::shared_ptr<Record> copy() const;
   Ref member(const std::string& name) const;
 };
@@ -165,7 +167,7 @@ struct PascalDispatch {
   std::string parameter,receiverType,vmtField; std::vector<PascalDispatchBranch> branches;
 };
 struct Procedure {
-  std::string name,returnType="variant",scope="public",accessor;
+  std::string name,returnType="variant",scope="public",accessor,returnDisplayType;
   bool isFunction=false,isStatic=false,external=false,returnArray=false;
   std::vector<Parameter> parameters;
   std::function<Value(Frame&)> code;
@@ -227,16 +229,18 @@ struct Frame {
   std::map<std::string,ForState> fors; std::map<std::string,EachState> each;
   std::vector<int> gosubs;
   int pc=0,site=0,next=0,line=0,labelLine=0,errorSite=0,errorNext=0,errorHandler=-1;
-  bool handlerActive=false,errorResumeNext=false;
-  Frame(Runtime&,std::shared_ptr<Instance>,Procedure* =nullptr,Args={});
+  bool handlerActive=false,errorResumeNext=false,counted=true;
+  // Record initialization scopes do not consume the authored call-depth limit.
+  Frame(Runtime&,std::shared_ptr<Instance>,Procedure* =nullptr,Args={},bool counted=true);
   ~Frame(); Frame(const Frame&)=delete; Frame& operator=(const Frame&)=delete;
   Value get(const std::string& name); Ref ref(const std::string& name);
   Value call(const std::string& name,Args args={});
   Value create(const std::string& type);
   Value callback(const std::string& module,const std::string& procedure);
-  void declare(const std::string& name,const std::string& type,Bounds bounds={},int arrayKind=0,size_t fixedLength=0,bool constant=false,bool isStatic=false,bool autoNew=false);
+  Value makeArray(const std::string& type,Bounds bounds,bool dynamic,size_t fixedLength=0,const std::string& displayType="");
+  void declare(const std::string& name,const std::string& type,Bounds bounds={},int arrayKind=0,size_t fixedLength=0,bool constant=false,bool isStatic=false,bool autoNew=false,const std::string& displayType="");
   void initial(const std::string& name,Value value);
-  void global(const std::string& name,const std::string& type,Bounds bounds={},int arrayKind=0,size_t fixedLength=0,bool constant=false,bool autoNew=false,bool withEvents=false);
+  void global(const std::string& name,const std::string& type,Bounds bounds={},int arrayKind=0,size_t fixedLength=0,bool constant=false,bool autoNew=false,bool withEvents=false,const std::string& displayType="");
   Ref propertyRef(const std::string&,Args);
   Value result(); Value with(const std::string& id="") const;
   void closeWith(const std::string& id); void unwindWith(size_t count);
@@ -246,7 +250,7 @@ struct Frame {
   bool forNext(const std::string& id);
   bool eachStart(const std::string& id,Ref variable,Value iterable,int end); bool eachNext(const std::string& id);
   void closeEach(const std::string& id);
-  void redim(Ref reference,Bounds bounds,bool preserve,const std::string& explicitType="");
+  void redim(Ref reference,Bounds bounds,bool preserve,const std::string& explicitType="",const std::string& displayType="");
   void mark(int site,int next,int line);
   bool handle(const Error&); void onError(const std::string& mode,int target);
   void resume(const std::string& mode,int target=-1);
