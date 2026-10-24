@@ -140,6 +140,7 @@ export class PascalWorkspace {
 export class PascalBinder {
   constructor(ast, input, workspace = new PascalWorkspace()) {
     this.ast = ast; this.input = input || {name: ast.name, code: ast.source}; this.name = this.input.name || ast.name; this.workspace = workspace;
+    if (this.input.kind === 'class') this.fail('Pascal source does not support VB class modules; declare TP7 object types inside a Pascal unit, or use a Visual Basic class module', ast, 'TP_CLASS_MODULE');
     this.scope = new PascalScope(this); this.imports = []; this.procedures = []; this.recordTypes = []; this.enumTypes = []; this.pointerTypes = []; this.typeId = 0; this.ready = false; this.preparing = false;
     this.controls = new Set(); this.controlTypes = new Map(); this.externalValues = new Set(['me', 'app', 'screen', 'clipboard', 'forms', 'printer', 'debug']); this.externalTypes = new Map();
     this.pascalIntrinsics = new Set('abs append arctan assign blockread blockwrite chr close concat copy cos delete dispose eof eoln erase exp filepos filesize flush frac get high include exclude inc dec insert int ioresult length ln low new odd ord paramcount paramstr pi pos pred put random randomize read readln rename reset rewrite round seek sin sizeof sqr sqrt str succ trunc upcase val write writeln'.split(' '));

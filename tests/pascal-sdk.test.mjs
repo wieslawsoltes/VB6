@@ -49,4 +49,8 @@ test('packaged diagnostics preserve original Pascal source and reject unsupporte
   assert.equal(program.valid,false);assert.ok(program.diagnostics.some(d=>d.source==='Bad'&&d.line===2));
   const wide=api.compilePascalSource('program Wide; var N: Extended; begin N := 1 end.',{name:'Wide'});
   assert.equal(wide.valid,false);assert.match(wide.diagnostics.map(d=>d.message).join('\n'),/Extended|precision|80/);
+  const classInput={name:'PascalClass',kind:'class',language:'pascal',code:'unit PascalClass; interface implementation end.'};
+  assert.throws(()=>api.compilePascalModule(classInput),error=>error.code==='TP_CLASS_MODULE'&&error.source==='PascalClass'&&/TP7 object types.*Visual Basic class module/.test(error.message));
+  const classProject=api.compileProject({name:'Boundary',language:'pascal',startup:'Sub Main',modules:[classInput]});
+  assert.equal(classProject.valid,false);assert.ok(classProject.diagnostics.some(error=>error.source==='PascalClass'&&/does not support VB class modules/.test(error.message)));
 });

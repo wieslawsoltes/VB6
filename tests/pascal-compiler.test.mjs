@@ -330,3 +330,13 @@ test('compiler source maps preserve authored text and expose debugger expression
   const expression = lowerPascalExpression('A[1] + 2', {module}); assert.equal(expression.kind, 'call'); assert.equal(expression.callee.name, '__PascalIntAdd');
   const lowered = lowerPascalModule({name: 'Debug', code}); assert.equal(lowered.sourceMap.length, lowered.generatedSource.split('\n').length);
 });
+
+
+test('Pascal compiler rejects class-module metadata with a source diagnostic and retains TP7 object declarations',()=>{
+  const input={name:'PascalClass',kind:'class',language:'pascal',code:'unit PascalClass; interface var Value:LongInt; implementation end.'};
+  assert.throws(()=>compilePascalModule(input),error=>error.code==='TP_CLASS_MODULE'&&error.source==='PascalClass'&&/TP7 object types.*Visual Basic class module/.test(error.message));
+  const ast=parsePascalModule(input);assert.throws(()=>lowerPascalModule(ast,{input}),error=>error.code==='TP_CLASS_MODULE');
+  const compiled=compileProject({name:'ClassBoundary',language:'pascal',startup:'Sub Main',modules:[input]});
+  assert.equal(compiled.valid,false);assert.ok(compiled.diagnostics.some(error=>error.source==='PascalClass'&&/does not support VB class modules/.test(error.message)));
+  assert.doesNotThrow(()=>compilePascalModule({name:'Values',kind:'module',language:'pascal',code:'unit Values; interface type Counter=object Value:LongInt end; implementation end.'}));
+});
