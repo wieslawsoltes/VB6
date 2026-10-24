@@ -63,6 +63,11 @@ function resources(theme) {
     // TextBox deliberately uses 01 (Light) and FE (Default), rather than the
     // common 00/FF text resource. Read the pinned control dictionary verbatim.
     TextControlForegroundDisabled:xamlColorToCss(winui3Resource('TextControlForegroundDisabled',dark?'dark':'light').value),
+    // ComboBoxDropDownBackground uses AcrylicInAppFillColorDefaultBrush. Its
+    // native FallbackColor is F9F9F9 (Light) / 2C2C2C (Default), independently
+    // of MenuBackground. Pinned AcrylicBrush_themeresources.xaml lines 96/44;
+    // this opaque presentation does not execute native Acrylic composition.
+    ComboDropDownBackground:dark?'#2c2c2c':'#f9f9f9',
     ControlRadius:`${WINUI_METRICS.controlRadius}px`, OverlayRadius:`${WINUI_METRICS.overlayRadius}px`,
     BodySize:`${WINUI_METRICS.bodySize}px`, BodyLineHeight:`${WINUI_METRICS.bodyLineHeight}px`,
     ControlHeight:`${WINUI_METRICS.controlHeight}px`, CheckSize:`${WINUI_METRICS.checkSize}px`,
