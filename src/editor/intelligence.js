@@ -1,6 +1,6 @@
 import {layoutMembers,layoutType,layoutConstantSymbols} from '../layout/intelligence.js';
 import {layoutEnabled} from '../layout/contract.js';
-import {displayParameter} from './signature-syntax.js';
+import {displayParameter,displayPascalParameter} from './signature-syntax.js';
 import {normalizeTypeLibrary,referenceSnapshot} from './reference-metadata.js';
 import {typeCompletionContext,typeCandidates} from './type-completion.js';
 import {parseExpression} from '../language/expression.js';
@@ -25,6 +25,14 @@ function coalesce(items) {
     const params=s.accessor==='get'?s.params:s.params.slice(0,-1);
     return {...s,kind:'property',accessors:items.filter(m=>eq(m.name,s.name)&&m.accessor),params,parameters:s.parameters?.slice(0,params.length)||params.map(p=>parameterSymbol(p)).filter(Boolean)};
   });
+}
+
+// VB class/form fields and routines require an instance. Public types and enum
+// members remain project declarations, matching the Pascal foreign binder.
+function pascalForeignGlobals(module,index) {
+  return coalesce(index.symbols.filter(s=>!s.owner&&s.scope!=='private'&&s.kind!=='event'&&
+    (!s.parentType||s.kind==='constant')&&((module.kind||'module')==='module'||
+      ['type','enum'].includes(s.kind)||s.kind==='constant'&&s.parentType)));
 }
 
 /** Nested and statement-form call contexts; named/omitted arguments retain
@@ -190,8 +198,8 @@ export class EditorIntelligence {
     return this.members(project,module,declared.type||declared.name).filter(s=>s.kind!=='event');
   }
   root(project,module,line,name,offset=null,options={}){
-    const {symbols}=this.scope(project,module,line,offset);
-    if(moduleLanguage(module,project)==='pascal'&&(options.withBlock||!options.withoutImplicitWith)){
+    const {symbols}=this.scope(project,module,line,offset),pascal=moduleLanguage(module,project)==='pascal';
+    if(pascal&&(options.withBlock||!options.withoutImplicitWith)){
       const object=this.withObject(project,module,line,offset,options.withBlock,(options.depth||0)+1),component=find(this.objectMembers(project,module,object),name);if(component)return component;
     }
     if(eq(name,'Me'))return module.kind==='module'?null:{name:'Me',type:module.name,kind:'object',moduleId:module.id};
@@ -199,7 +207,13 @@ export class EditorIntelligence {
     if(eq(name,'Self')&&module.form)return {name:'Self',type:module.name,kind:'object',moduleId:module.id};
     const target=project.modules.find(m=>eq(m.name,name));
     if(target){const index=this.index(target,project);return {name:target.name,type:target.name,moduleId:target.id,kind:target.kind==='class'&&!index.predeclared?'class':'module',line:1};}
-    for(const other of project.modules){if(other.kind!=='module'||other.id===module.id)continue;result=find(coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant')&&s.scope!=='private')),name);if(result)return result;}
+    for(const other of project.modules){
+      if(other.id===module.id)continue;
+      if(pascal&&moduleLanguage(other,project)==='vb6')result=find(pascalForeignGlobals(other,this.index(other,project)),name);
+      else if(other.kind==='module')result=find(coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant')&&s.scope!=='private')),name);
+      else continue;
+      if(result)return result;
+    }
     if(module.form){result=find(builtinType(module.form.type||'Form')?.members||[],name);if(result)return result;}
     result=find(GLOBAL_OBJECTS,name)||find(BUILTIN_SYMBOLS,name)||find([...CONSTANT_SYMBOLS,...(layoutEnabled(project)?layoutConstantSymbols:[])],name)||find(this.referenceGlobals(project),name);if(result)return result;
     if(eq(name,'Forms'))return {name:'Forms',type:'Forms',kind:'object'};
@@ -281,7 +295,7 @@ export class EditorIntelligence {
     let active=next;
     if(context.named){active=parameters.findIndex(p=>eq(p.name,context.named));}
     else if(active>=parameters.length){active=parameters.at(-1)?.paramArray?parameters.length-1:-1;}
-    return {...symbol,parameters,displayParams:pascal?parameters.map(p=>(p.byRef?'var ':'')+p.name+': '+p.type):symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
+    return {...symbol,parameters,displayParams:pascal?parameters.map(displayPascalParameter):symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
   }
   definition(project,module,line,text,offset,expression=null){
     if(moduleLanguage(module,project)==='pascal'){const word=pascalWordAt(text,offset);if(!word.text)return null;expression??=word.text;}else{if(statementBefore(text,offset).state!=='code')return null;expression??=wordAt(text,offset).text;}
@@ -356,7 +370,14 @@ export class EditorIntelligence {
     else if(!contextual||constants){
       items.push(...scope.symbols.filter(s=>!constants||s.kind==='constant'));
       const withObject=this.withObject(project,module,line,text===module.code?offset:null);if(withObject)items.unshift(...this.objectMembers(project,module,withObject).filter(s=>!constants||s.kind==='constant'));
-      for(const other of project.modules){if(!constants)items.push({name:other.name,kind:'module',type:other.name,moduleId:other.id,line:1});if(other.id!==module.id)items.push(...this.index(other,project).symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant')&&s.scope!=='private'&&(!constants||s.kind==='constant')));}
+      for(const other of project.modules){
+        const index=this.index(other,project);
+        if(!constants)items.push({name:other.name,kind:other.kind==='class'&&!index.predeclared?'class':'module',type:other.name,moduleId:other.id,line:1});
+        if(other.id!==module.id){
+          const exported=moduleLanguage(other,project)==='vb6'?pascalForeignGlobals(other,index):index.symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant')&&s.scope!=='private');
+          items.push(...exported.filter(s=>!constants||s.kind==='constant'));
+        }
+      }
       if(!constants){if(module.form)items.push(...this.members(project,module,module.form.type||'Form'));items.push(...PASCAL_KEYWORDS.map(name=>({name,kind:'keyword'})),...PASCAL_BUILTINS.map(name=>({name,kind:'function'})),...BUILTIN_SYMBOLS,...GLOBAL_OBJECTS,{name:'Me',type:module.name,kind:'object'});}
       else items.push(...CONSTANT_SYMBOLS);
     }
