@@ -12,13 +12,14 @@ import {compressedLinuxRuntimeArchive,encodeLinuxAOTRuntimePayload} from '../too
 import {readZip} from '../src/project/zip.js';
 const project={schema:1,name:'LinuxPackage',startup:'Sub Main',modules:[{name:'MainModule',kind:'module',code:'Public Sub Main()\nDebug.Print "LINUX_PACKAGE_NATIVE"\nEnd Sub'}]};
 
-test('Linux payload matches native source and actual execution provenance',()=>{
-  const manifest=linuxAOTRuntimeInfo();
-  assert.equal(checkLinuxAOTRuntimeProvenance().sha256,manifest.sha256);
+for(const architecture of ['x64','arm64'])test('Linux '+architecture+' payload matches native source and actual execution provenance',()=>{
+  const manifest=linuxAOTRuntimeInfo({architecture});
+  assert.equal(checkLinuxAOTRuntimeProvenance(undefined,{architecture}).sha256,manifest.sha256);
   for(const [name,value]of Object.entries(readLinuxAOTSourceProvenance()))assert.equal(manifest.provenance[name],value);
-  assert.equal(manifest.verification.x64ExecutionVerified,true);
+  assert.equal(manifest.verification[architecture+'ExecutionVerified'],true);
   assert.equal(manifest.verification.gtkExecutionVerified,true);
   assert.equal(manifest.verification.gtkNativeSignalsVerified,true);
+  for(const feature of ['richTextVerified','printerServicesVerified','previousInstanceVerified'])assert.equal(manifest.verification[feature],true,feature);
   assert.deepEqual(manifest.verification.optimizationLevelsVerified,[0,1,2,3]);
 });
 test('Linux Node APIs export exclusive archives and application directories',async t=>{
@@ -69,6 +70,19 @@ test('Linux CLI defaults to a native ELF ZIP and extracts a complete application
   assert.equal(extracted.optimization,3);assert.ok((await fs.stat(extracted.executable)).size>4096);
   assert.throws(()=>execFileSync(process.execPath,[cli,source,'--out',directory,'--optimization','4'],{encoding:'utf8',stdio:'pipe'}),/optimization must/);
 });
+for(const architecture of ['x64','arm64'])test('Linux CLI '+architecture+' exports every package format with explicit metadata',async t=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'linux-cli-formats-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+  const source=path.join(directory,'project.vb6web');await fs.writeFile(source,JSON.stringify(project));
+  const cli=path.resolve('packages/linux-native/bin/vb6-linux.mjs');
+  for(const format of ['zip','tar.gz','deb','rpm']){
+    const result=JSON.parse(execFileSync(process.execPath,[cli,source,'--out',directory,'--architecture',architecture,'--format',format,'--package-name','linux-sdk-fixture','--version','2.4.0','--maintainer','SDK Fixture <sdk@example.invalid>','--license','MIT'],{encoding:'utf8'}));
+    assert.equal(result.architecture,architecture==='arm64'?'arm64':'x86_64');assert.equal(result.codegen,architecture==='arm64'?'arm64-aot':'x86_64-aot');
+    assert.equal(result.distribution.format,format);assert.equal(result.distribution.version,'2.4.0');assert.ok((await fs.stat(result.archive)).size>4096);
+  }
+  assert.throws(()=>execFileSync(process.execPath,[cli,source,'--out',directory,'--architecture','ia64'],{encoding:'utf8',stdio:'pipe'}),/architecture must/);
+  assert.throws(()=>execFileSync(process.execPath,[cli,source,'--out',directory,'--extract','--format','rpm'],{encoding:'utf8',stdio:'pipe'}),/cannot be combined/);
+  assert.throws(()=>execFileSync(process.execPath,[cli,source,'--out',directory,'--format','deb','--version','1\nBad: yes'],{encoding:'utf8',stdio:'pipe'}),/Invalid Linux package version/);
+});
 test('independently packed Linux SDK imports and exports without network access',async t=>{
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'linux-isolated-sdk-'));
   t.after(()=>fs.rm(directory,{recursive:true,force:true}));
@@ -82,6 +96,8 @@ test('independently packed Linux SDK imports and exports without network access'
     const result=await api.exportLinuxApplication(project),output=await node.exportLinuxExecutable(project,{out:path.join(directory,'applications')});
     assert.equal(result.report.compiled,true);assert.equal(result.report.format,'ELF64');
     assert.deepEqual(new Uint8Array(await fs.readFile(output.executable)),result.executable);
+    const arm=await api.exportLinuxDistribution(project,{architecture:'arm64'},{format:'deb',packageName:'isolated-arm'});
+    assert.equal(arm.report.codegen,'arm64-aot');assert.match(arm.filename,/_arm64\.deb$/);assert.equal(arm.report.runtimeProvenanceVerified,true);
   }finally {globalThis.fetch=previous;}
 });
 test('Linux runtime compression is lossless and embedding requires exact native evidence',async()=>{

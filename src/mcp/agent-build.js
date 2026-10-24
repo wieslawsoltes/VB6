@@ -6,7 +6,7 @@ import {validateWorkspace} from '../project/native-project.js';
 import {writeZip} from '../project/zip.js';
 import {toBase64} from '../project/frx.js';
 import {compileWin32, NativeCompileError} from '../native/compiler.js';
-import {exportLinuxApplication, LinuxCompileError} from '../../packages/linux-native/src/index.js';
+import {exportLinuxDistribution, linuxDistributionOptions, LinuxCompileError} from '../../packages/linux-native/src/index.js';
 import {exportApplication} from '../exporter/exporter.js';
 import {McpError, checkAbort, randomToken} from './protocol.js';
 import {S, N, E, REV} from './agent-schema.js';
@@ -29,28 +29,35 @@ export function installBuildTools(ide, adapter, {add, output, consent, commit, c
   adapter.dispose = () => { for (const id of artifacts.keys()) remove(id); observers.clear(); dispose(); };
   const find = (id, ctx) => { purge(); const item = artifacts.get(id); if (!item || item.owner !== owner(ctx)) throw new McpError(-32602, 'Build artifact not found or expired.'); return item; };
   const metadata = item => ({artifactId: item.id, manifestUri: 'vb6://build/' + item.id, name: item.name, mimeType: item.mimeType, size: item.bytes.length, sha256: item.sha256, sourceRevision: item.sourceRevision, expiresAt: item.expiresAt});
-  add('build.targets', 'Describe build/export targets. Building returns inert bytes; desktop packaging and the licensed classic compiler require their local CLI.', {}, [], () => output({
+  add('build.targets', 'Describe build/export targets. Building returns inert bytes; Electron desktop packaging and the licensed classic compiler require their local CLI.', {}, [], () => output({
     targets: [{id: 'project', format: 'JSON', extension: '.vb6web'}, {id: 'html', format: 'standalone application HTML', extension: '.html'},
       {id: 'sources', format: 'native source/project group ZIP', extension: '.zip'}, {id: 'win32', format: 'freestanding x86 PE32', extension: '.exe', graphics: 'native controls/GDI', compatibility: 'Existing native compiler subset; unsupported constructs return diagnostics.'},
-      {id: 'linux', format: 'native x86-64 ELF application ZIP', extension: '-linux-x64.zip', graphics: 'GTK 3.24/Cairo', compatibility: 'Direct native AOT using the shared VB6 runtime; requires Linux x86-64 with the archive-listed system libraries.'}],
+      {id: 'linux', format: 'native ELF application', extension: '-linux-x64.zip', architectures: ['x64','arm64'], packageFormats: ['zip','tar.gz','deb','rpm'], graphics: 'GTK 3.24/Cairo', compatibility: 'Direct native AOT using the shared VB6 runtime; requires Linux with the matching architecture and archive-listed system libraries.'}],
     localOnly: ['Electron/WebGPU desktop packaging: npm run build:windows', 'Licensed Microsoft VB6 compiler: npm run build:classic'],
     maxArtifactBytes: maxBytes, maxRetainedArtifacts: 8, ttlMs, chunkBytes: 262144
   }));
-  add('build.create', 'Build an immutable project, HTML, source ZIP, Win32 EXE or Linux GTK AOT application ZIP. Requires the snapshot revision; does not execute project code. Read its exact bytes in chunks with build.read.', {target: E(['project','html','sources','win32','linux']), expectedRevision: REV}, ['target','expectedRevision'], async (args, ctx) => {
+  add('build.create', 'Build an immutable project, HTML, source ZIP, Win32 EXE or Linux GTK AOT application. Linux supports x64/arm64 and ZIP, tar.gz, DEB or RPM packages, fully offline. Requires the snapshot revision; does not execute project code. Read its exact bytes in chunks with build.read.', {
+    target: E(['project','html','sources','win32','linux']), expectedRevision: REV,
+    architecture: E(['x64','arm64']), format: E(['zip','tar.gz','deb','rpm']), optimization: N(0,3),
+    package: {type:'object', additionalProperties:false, properties:{packageName:S,version:S,release:S,maintainer:S,summary:S,description:S,license:S,homepage:S,categories:{type:'array',items:S,minItems:1,maxItems:16}}}
+  }, ['target','expectedRevision'], async (args, ctx) => {
     checkRevision(args.expectedRevision); checkAbort(ctx.signal); purge(); ctx.reportProgress?.(0.2,1,'Preparing build snapshot');
+    if(args.target!=='linux'&&['architecture','format','optimization','package'].some(key=>Object.hasOwn(args,key)))throw new McpError(-32602,'Linux build options require the linux target.');
     const epoch = adapter.authorityEpoch, sourceRevision = adapter.revision, project = clone(ide.project);
-    let data, report, mimeType, extension;
+    let data, report, mimeType, extension, filename;
     if (args.target === 'win32') {
       try { const result = compileWin32(project); data = result.bytes; report = result.report; }
       catch (error) { if (!(error instanceof NativeCompileError)) throw error; return output({valid: false, sourceRevision, diagnostics: [{severity: 'error', message: error.message, module: error.module, line: error.line}]}); }
       extension = '.exe'; mimeType = 'application/vnd.microsoft.portable-executable';
     } else if (args.target === 'linux') {
-      try {const result = await exportLinuxApplication(project, {}, {signal: ctx.signal}); data = result.bytes; report = result.report;}
+      let distribution;
+      try {distribution=linuxDistributionOptions({...args.package,format:args.format},project.name);}
+      catch(error){throw new McpError(-32602,error.message);}
+      try {const result = await exportLinuxDistribution(project, {architecture:args.architecture,optimization:args.optimization}, distribution, {signal:ctx.signal}); data = result.bytes; report = result.report; mimeType = result.mimeType; filename = result.filename;}
       catch (error) {
         if (!(error instanceof LinuxCompileError)) throw error;
         return output({valid: false, sourceRevision, diagnostics: error.diagnostics || [{severity: 'error', message: error.message, module: error.module, line: error.line}]});
       }
-      extension = '-linux-x64.zip'; mimeType = 'application/zip';
     } else if (args.target === 'sources') { data = writeZip(sourceFiles(project)); extension = '.zip'; mimeType = 'application/zip'; }
     else if (args.target === 'html') { data = exportApplication(project); extension = '.html'; mimeType = 'text/html'; }
     else { data = JSON.stringify(project, null, 2); extension = '.vb6web'; mimeType = 'application/json'; }
@@ -62,7 +69,7 @@ export function installBuildTools(ide, adapter, {add, output, consent, commit, c
     if (epoch !== adapter.authorityEpoch) throw new McpError(-32602, 'Project changed during build.');
     purge();
     while (artifacts.size >= 8 || [...artifacts.values()].reduce((n, item) => n + item.bytes.length, 0) + bytes.length > maxBytes) remove(artifacts.keys().next().value);
-    const id = randomToken(24), item = {id, bytes, owner: owner(ctx), epoch, sourceRevision, mimeType, name: project.name + extension,
+    const id = randomToken(24), item = {id, bytes, owner: owner(ctx), epoch, sourceRevision, mimeType, name: filename || project.name + extension,
       authority: adapter.authoritySignal, expiresAt: Date.now() + ttlMs, sha256: [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')};
     item.revoke = () => remove(id); item.timer = setTimeout(item.revoke, ttlMs); item.timer.unref?.(); artifacts.set(id, item); item.authority.addEventListener('abort', item.revoke, {once: true}); notify();
     ctx.onTaskDiscard?.(() => remove(id));

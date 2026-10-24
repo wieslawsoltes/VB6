@@ -173,8 +173,11 @@ text. Offset units are bytes, not JS string positions. Large downloads do not
 require a giant JSON-RPC result or execute project code.
 
 Use `{"target":"linux","expectedRevision":42}` for a native Linux x86-64 GTK
-application ZIP. The same direct AOT compiler and bundled SDK serve the IDE,
-package API and MCP. The artifact includes the executable with Unix permissions,
+application ZIP. Select ARM64 and a distribution package with
+`{"target":"linux","architecture":"arm64","format":"deb","package":{"packageName":"my-application","version":"1.0.0"},"expectedRevision":42}`.
+The Linux target supports `x64`/`arm64` and `zip`/`tar.gz`/`deb`/`rpm`;
+`build.targets` advertises these choices. The same direct AOT compiler and bundled
+SDK serve the IDE, package API and MCP. The artifact includes Unix permissions,
 resources, build report and integrity manifest. Export requires no external
 compiler or bridge and does not execute the application. See [Linux AOT](LINUX-AOT.md)
 for the destination's GTK/glibc requirements and native compatibility contracts.

@@ -1,9 +1,10 @@
 /** Shared by browser export and native execution; its bytes are reproducible. */
-export function linuxBrowserProject() {
+export function linuxBrowserProject(architecture='x64') {
+  if(!['x64','arm64'].includes(architecture))throw new Error('Unknown Linux fixture architecture');
   return {schema: 1, id: 'linux-browser-project', name: 'LinuxBrowser', startup: 'Sub Main', modules: [{
     id: 'linux-browser-main', name: 'MainModule', kind: 'module', code: `Option Explicit
 Public Sub Main()
-#If Linux And (Win32 = 0) And (Mac = 0) And (ARM64 = 0) Then
+#If Linux And (Win32 = 0) And (Mac = 0) And ${architecture==='arm64'?'ARM64 And (X86_64 = 0)':'X86_64 And (ARM64 = 0)'} Then
     Dim values(1 To 3) As Long
     Dim i As Long, total As Long
     For i = 1 To 3

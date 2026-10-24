@@ -79,7 +79,7 @@ jobs:
       - name: Install the native Linux runtime dependency for Node tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0t64
+          sudo apt-get install -y libgtk-3-0t64 libcups2t64
       - name: Build checked products
         run: npm run build
       - name: Initialize installed .NET SDK before parallel conformance tests
@@ -902,9 +902,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   linux:
-    name: Linux ELF AOT and GTK native execution
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    name: Linux ELF AOT and GTK native execution (${{ matrix.architecture }})
+    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x64, arm64]
+    env:
+      ARCHITECTURE: ${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -915,31 +921,40 @@ jobs:
       - name: Install native SDK and headless GTK display
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang g++ pkg-config libgtk-3-dev xvfb xauth
+          sudo apt-get install -y clang g++ pkg-config libgtk-3-dev libcups2-dev xvfb xauth dpkg-dev rpm cpio desktop-file-utils
+      - name: Rebuild current native sources and execute generated code
+        run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --rebuild --report reports/linux-aot/rebuilt
       - name: Build verified offline Linux SDK
         run: node tools/build-linux-native.mjs
       - name: Validate compiler, ELF, archive and package contracts
         run: npm run test:linux
       - name: Execute the shipped native runtime and GTK controls
-        run: node tools/test-linux-aot.mjs
-      - name: Rebuild current native sources and execute generated code
-        run: node tools/test-linux-aot.mjs --rebuild
+        run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --report reports/linux-aot/shipped
+      - name: Independently extract native packages and execute installed application paths
+        run: node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --report reports/linux-distribution
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linux-aot-native
+          name: linux-aot-native-${{ matrix.architecture }}
           path: |
             reports/linux-aot
+            reports/linux-distribution
             artifacts/linux-aot
           if-no-files-found: error
           retention-days: 7
   linux-browser-native:
-    name: Execute browser-generated Linux ELFs
+    name: Execute browser-generated Linux ELFs (${{ matrix.architecture }})
     needs:
       - authoring-exports
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x64, arm64]
+    env:
+      ARCHITECTURE: ${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -950,18 +965,18 @@ jobs:
       - name: Install the exported application's system GTK dependency
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0t64
+          sudo apt-get install -y libgtk-3-0t64 libcups2t64 rpm cpio dpkg-dev desktop-file-utils
       - uses: actions/download-artifact@v4
         with:
           pattern: linux-direct-browser-*
           path: browser-linux-input
           merge-multiple: true
       - name: Verify and execute each real browser download
-        run: node tools/test-linux-browser-artifacts.mjs browser-linux-input
+        run: node tools/test-linux-browser-artifacts.mjs browser-linux-input --architecture "$ARCHITECTURE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linux-aot-browser-native-execution
+          name: linux-aot-browser-native-execution-${{ matrix.architecture }}
           path: reports/linux-aot-browser-native
           if-no-files-found: error
           retention-days: 7

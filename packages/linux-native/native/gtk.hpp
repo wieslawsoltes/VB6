@@ -18,6 +18,7 @@ struct GtkControl;
 struct GtkForm;
 struct GtkItems;
 struct GtkItem;
+struct GtkRichText;
 
 struct GtkPicture final : Object {
   GdkPixbuf* pixels = nullptr;
@@ -108,6 +109,7 @@ struct GtkControl final : Object {
   std::optional<RecordsetGridEdit> pendingEdit;
   uint64_t boundSelection = 0;
   std::vector<GtkDrawing> drawings;
+  std::shared_ptr<GtkRichText> richText;
   double currentX = 0, currentY = 0;
   GdkRectangle initialRect{0, 0, 0, 0};
   int initialParentWidth = 0, initialParentHeight = 0;

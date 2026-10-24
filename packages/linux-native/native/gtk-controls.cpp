@@ -1,5 +1,7 @@
 // GTK widgets and the VB control property/method boundary. MIT.
 #include "gtk.hpp"
+#include "gtk-richtext.hpp"
+#include "gtk-services.hpp"
 #include <fstream>
 
 namespace vb6 {
@@ -89,8 +91,10 @@ void GtkControl::editSelect(size_t start,size_t length) {
   int first=charOffset(text,start),last=charOffset(text,start+length);
   if(GTK_IS_ENTRY(edit))gtk_editable_select_region(GTK_EDITABLE(edit),first,last);
   else {auto* buffer=gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit));GtkTextIter a,b;gtk_text_buffer_get_iter_at_offset(buffer,&a,first);gtk_text_buffer_get_iter_at_offset(buffer,&b,last);gtk_text_buffer_select_range(buffer,&b,&a);}
+  if(richText)gtkRichSelectionChanged(*this);
 }
 void GtkControl::editSetText(const Text& text,bool fire) {
+  if(richText){gtkRichSetPlain(*this,text,true,fire);return;}
   auto prior=editText();auto value=text;auto limit=number("maxlength",0);if(limit>0&&value.size()>size_t(limit))value.resize(size_t(limit));
   auto utf8=toUTF8(value);auto* edit=editor();
   {GtkEventSuppression guard(*this);if(GTK_IS_ENTRY(edit))gtk_entry_set_text(GTK_ENTRY(edit),utf8.c_str());else if(GTK_IS_TEXT_VIEW(edit))gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit)),utf8.c_str(),int(utf8.size()));}
@@ -169,10 +173,11 @@ void GtkControl::initialize() {
   if(!view)view=widget;g_object_ref_sink(view);markWidget(view,self());if(widget!=view)markWidget(widget,self());watchDestruction(view,self());
   handle=host->handles.add(self(),type=="Form"||type=="MDIForm"?HandleKind::Window:HandleKind::Control);
   gtk_widget_set_name(widget,("vb6-"+spec.name).c_str());
+  if(type=="RichTextBox")gtkRichInitialize(*this);
   if(GTK_IS_BUTTON(widget))gtkSignal(widget,GTK_IS_TOGGLE_BUTTON(widget)?"toggled":"clicked",G_CALLBACK(+[](GtkButton*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed(GTK_IS_TOGGLE_BUTTON(c.widget)?"value":"click");});}),self());
   if(auto* edit=editor()) {
     if(GTK_IS_ENTRY(edit))gtkSignal(edit,"changed",G_CALLBACK(+[](GtkEditable*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("text");});}),self());
-    else gtkSignal(gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit)),"changed",G_CALLBACK(+[](GtkTextBuffer*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("text");});}),self());
+    else if(type!="RichTextBox")gtkSignal(gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit)),"changed",G_CALLBACK(+[](GtkTextBuffer*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("text");});}),self());
   }
   if(GTK_IS_COMBO_BOX(widget))gtkSignal(widget,"changed",G_CALLBACK(+[](GtkComboBox*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("listindex");});}),self());
   if(GTK_IS_RANGE(widget)||GTK_IS_SPIN_BUTTON(widget))gtkSignal(widget,"value-changed",G_CALLBACK(+[](GtkWidget*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("value");});}),self());
@@ -186,9 +191,11 @@ void GtkControl::initialize() {
   if(type=="MSChart")resizeGrid(size_t(number("rowcount",5)),size_t(number("columncount",1)));
   if(content||type=="Image"||type=="Line"||type=="Shape"||type=="MSChart")gtkSignal(widget,"draw",G_CALLBACK(+[](GtkWidget*,cairo_t* cr,gpointer data)->gboolean {gtkEvent(data,[&](GtkControl& c){gtkDraw(c,cr);});return FALSE;}),self());
   gtkConnectInput(*this);
+  gtkConnectMousePointer(*this);
   auto initial=property("list");if(initial.type==Type::Array)for(auto& value:initial.asArray()->values)list.push_back(value.string());itemData.resize(list.size());
   if(type=="DriveListBox"||type=="DirListBox"||type=="FileListBox")reloadFiles();
   refresh();applyFrame();applyFont();
+  if(type=="RichTextBox"&&properties.count("textrtf")){GtkEventSuppression guard(*this);gtkRichSet(*this,"textrtf",property("textrtf"));}
 }
 void GtkControl::refresh() {
   if(disposed)return;GtkEventSuppression guard(*this);
@@ -221,9 +228,7 @@ void GtkControl::refresh() {
   if(properties.count("forecolor")){auto color=gtkColor(number("forecolor"));gtk_widget_override_color(widget,GTK_STATE_FLAG_NORMAL,&color);}
   if(properties.count("backcolor")){auto color=gtkColor(number("backcolor"));gtk_widget_override_background_color(widget,GTK_STATE_FLAG_NORMAL,&color);}
   if(GTK_IS_COMBO_BOX(widget)||GTK_IS_TREE_VIEW(widget))reloadList();
-  auto pointer=int(number("mousepointer"));auto* window=gtk_widget_get_window(view);if(window){const char* cursor=pointer==2?"crosshair":pointer==3?"text":pointer==9?"move":pointer==11?"wait":pointer==10?"not-allowed":pointer==15?"pointer":"default";GdkCursor* value=nullptr;
-    if(pointer==99){auto image=property("mouseicon",Value::object(nullptr));auto picture=image.type==Type::Object?std::dynamic_pointer_cast<GtkPicture>(std::get<ObjectPtr>(image.payload)):nullptr;if(picture&&picture->pixels)value=gdk_cursor_new_from_pixbuf(gdk_window_get_display(window),picture->pixels,picture->hotspotX,picture->hotspotY);}
-    if(!value)value=gdk_cursor_new_from_name(gdk_window_get_display(window),cursor);gdk_window_set_cursor(window,value);if(value)g_object_unref(value);}
+  gtkApplyMousePointer(*this);
   gtk_widget_queue_draw(view);
 }
 void GtkControl::dispose() {
@@ -234,6 +239,7 @@ void GtkControl::dispose() {
   // Containers can destroy their descendants independently of VB Unload (for
   // example Tabs.Remove). Invalidate borrowed widget pointers before GTK's
   // recursive destruction, then release exactly the reference owned by us.
+  gtkRichDispose(*this);
   auto* owned=std::exchange(view,nullptr);widget=content=menu=nullptr;
   if(owned){if(!gtk_widget_in_destruction(owned))gtk_widget_destroy(owned);g_object_unref(owned);}
   if(model){g_object_unref(model);model=nullptr;}if(css){g_object_unref(css);css=nullptr;}
@@ -270,6 +276,7 @@ void GtkControl::changed(const std::string& name) {
 }
 Value GtkControl::get(Runtime& rt,const std::string& raw) {
   if(disposed||hostLife.expired())fail(91,"Control has been unloaded");auto name=lower(raw.empty()?defaultMember():raw);
+  if(gtkRichProperty(name))return gtkRichGet(*this,name);
   if(name=="handle"||name=="hwnd")return Value::integer(handle);
   if(name=="font")return gtkFont(self());
   if(name=="container"||name=="parent"){auto object=owner.lock();if(!object)fail(91);return spec.parent.empty()?Value::object(object):object->get(rt,spec.parent);}
@@ -309,11 +316,12 @@ Value GtkControl::get(Runtime& rt,const std::string& raw) {
 }
 void GtkControl::set(Runtime& rt,const std::string& raw,Value value,bool) {
   if(disposed||hostLife.expired())fail(91);auto name=lower(raw.empty()?defaultMember():raw);
+  if(gtkRichProperty(name)){gtkRichSet(*this,name,std::move(value));return;}
   if(name=="value"&&GTK_IS_CALENDAR(widget))value=parseDate(value);
   if(name=="name"||name=="index"||name=="hwnd"||name=="handle"||name=="listcount")fail(383);
   if(name=="datasource"&&isGrid(*this)){bindRecordset(std::move(value));return;}
   if(name=="font"){auto font=value.asObject();for(auto& field:std::map<std::string,std::string>{{"name","fontname"},{"size","fontsize"},{"bold","fontbold"},{"italic","fontitalic"},{"underline","fontunderline"},{"strikethrough","fontstrikethru"}})set(rt,field.second,font->get(rt,field.first));return;}
-  if(name=="selstart"||name=="sellength"||name=="seltext") {auto selection=editSelection();if(name=="seltext"){auto text=editText(),insert=value.string();text.replace(selection.first,selection.second,insert);editSetText(text);editSelect(selection.first+insert.size(),0);}else{auto n=value.integral();if(n<0)fail(380);editSelect(name=="selstart"?size_t(n):selection.first,name=="sellength"?size_t(n):0);}return;}
+  if(name=="selstart"||name=="sellength"||name=="seltext") {auto selection=editSelection();if(name=="seltext"){if(richText){gtkRichSetPlain(*this,value.string(),false);return;}auto text=editText(),insert=value.string();text.replace(selection.first,selection.second,insert);editSetText(text);editSelect(selection.first+insert.size(),0);}else{auto n=value.integral();if(n<0)fail(380);editSelect(name=="selstart"?size_t(n):selection.first,name=="sellength"?size_t(n):0);}return;}
   if(name=="text"&&editor()){editSetText(value.string());return;}
   if(name=="text"&&isGrid(*this)){writeCell(size_t(number("row")),size_t(number("col")),value);return;}
   if(name=="listindex"){auto n=value.integral();if(n< -1||n>=int64_t(list.size()))fail(380);auto prior=number("listindex",-1);properties[name]=Value::integer(n);selected.clear();if(n>=0)selected.insert(size_t(n));reloadList();if(editor()&&n>=0)editSetText(list[size_t(n)]);if(prior!=n)event("click");return;}
@@ -359,6 +367,7 @@ Ref GtkControl::reference(Runtime& rt,const std::string& raw,Args args) {
 }
 Value GtkControl::invoke(Runtime& rt,const std::string& raw,Args args) {
   if(disposed||hostLife.expired())fail(91);bool put=raw.rfind("let:",0)==0||raw.rfind("set:",0)==0;auto name=lower(put?raw.substr(4):raw);if(name.empty())name=defaultMember();
+  if(spec.type=="RichTextBox"&&gtkRichMethod(name))return gtkRichCall(*this,name,std::move(args),put);
   if(!put&&(name=="nodes"||name=="listitems"||name=="columnheaders"||name=="buttons"||name=="panels"||name=="listimages"||(name=="tabs"&&spec.type!="SSTab")))return args.empty()?Value::object(items(name)):items(name)->invoke(rt,"item",std::move(args));
   if(name=="list"||name=="itemdata"||name=="selected") {if(args.size()!=(put?2:1))fail(450);auto n=args[0].value.integral();range(n,list.size());auto i=size_t(n);if(put){if(name=="list")list[i]=args[1].value.string();else if(name=="itemdata")itemData[i]=int32_t(coerce(args[1].value,"long").integral());else if(args[1].value.truth()){if(!flag("multiselect"))selected.clear();selected.insert(i);}else selected.erase(i);reloadList();return {};}return name=="list"?Value::string(list[i]):name=="itemdata"?Value::integer(itemData[i]):Value::boolean(selected.count(i));}
   if(name=="textmatrix"||name=="textarray") {auto count=name=="textmatrix"?2u:1u;if(args.size()!=count+(put?1u:0u))fail(450);auto columns=grid.empty()?0:grid[0].size();if(!columns)fail(381);auto row=name=="textmatrix"?args[0].value.integral():args[0].value.integral()/int64_t(columns),col=name=="textmatrix"?args[1].value.integral():args[0].value.integral()%int64_t(columns);range(row,grid.size());range(col,columns);if(put){writeCell(size_t(row),size_t(col),args[count].value);return {};}return Value::string(grid[size_t(row)][size_t(col)]);}

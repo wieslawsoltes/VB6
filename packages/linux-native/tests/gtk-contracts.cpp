@@ -22,6 +22,24 @@ std::shared_ptr<GtkControl> control(const std::shared_ptr<Instance>& form,const 
   auto c=std::dynamic_pointer_cast<GtkControl>(found->second);require(bool(c),"Invalid native control type");return c;
 }
 Parameter param(const std::string& name,const std::string& type,bool byRef=true){Parameter value;value.name=name;value.type=type;value.byRef=byRef;return value;}
+void checkNativeTree(GtkControl& tree,const std::vector<std::shared_ptr<GtkItem>>& expected){
+  auto* model=gtk_tree_view_get_model(GTK_TREE_VIEW(tree.widget));
+  require(model&&model==tree.model&&GTK_IS_TREE_STORE(model),"TreeView is not displaying its native GtkTreeStore");
+  require(gtk_tree_model_iter_n_children(model,nullptr)==(expected.empty()?0:1),"Native tree has an unexpected root count");
+  require(tree.treePaths.size()==expected.size(),"Native tree path identities differ from the node collection");
+  if(expected.empty())return;
+  GtkTreeIter iter;require(gtk_tree_model_get_iter_first(model,&iter),"Native tree root is missing");
+  for(size_t depth=0;depth<expected.size();++depth){
+    guint64 identity=0;gchar* text=nullptr;
+    gtk_tree_model_get(model,&iter,0,&text,gtk_tree_model_get_n_columns(model)-1,&identity,-1);
+    const bool matches=text&&toUTF8(expected[depth]->properties.at("text").string())==text;g_free(text);
+    require(matches&&identity==expected[depth]->identity,"Native tree row lost its text or node identity");
+    GtkTreeIter sibling=iter;require(!gtk_tree_model_iter_next(model,&sibling),"Native boundary tree has an unexpected sibling");
+    const bool child=depth+1<expected.size();
+    require(gtk_tree_model_iter_n_children(model,&iter)==(child?1:0),"Native tree has the wrong depth or child count");
+    if(child){GtkTreeIter next;require(gtk_tree_model_iter_children(model,&next,&iter),"Native tree descendant is missing");iter=next;}
+  }
+}
 }
 int main() {
   try {
@@ -121,11 +139,24 @@ int main() {
     require(removedEditor->disposed&&!removedEditor->view&&!removedEditor->widget&&!host.control(removedHandle),"Removing a tab left its nested editor alive");
     require(!host.apiTimers.count({removedHandle,int32_t(removedTimer.integral())}),"Destroying a native child retained its API timer");
     expectError(91,[&]{removedEditor->get(runtime,"text");});expectError(91,[&]{removedEditor->set(runtime,"text",Value::string(u"stale"));});
-    auto nodes=control(instance,"CTreeView")->items("nodes");
-    for(int depth=0;depth<=1024;++depth)nodes->invoke(runtime,"add",{Arg(depth?Value::integer(depth):Value::missing()),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"node"))});
+    auto tree=control(instance,"CTreeView");auto nodes=tree->items("nodes");
+    for(int depth=0;depth<2;++depth)nodes->invoke(runtime,"add",{Arg(depth?Value::integer(depth):Value::missing()),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"node"))});
+    checkNativeTree(*tree,nodes->values);
+    // Seed only the intermediate fixture data in linear time. Rebuilding every
+    // progressively deeper GtkTreeStore and every row's full GtkTreePath makes
+    // setup cubic under QEMU. Public Add still creates the ordinary nodes and
+    // the exact depth-limit node, publishing the complete real native model.
+    for(int depth=2;depth<1024;++depth){
+      auto ancestor=std::make_shared<GtkItem>();ancestor->owner=tree;ancestor->collection=nodes;ancestor->kind="nodes";
+      ancestor->identity=nodes->nextIdentity++;ancestor->properties=nodes->values.front()->properties;
+      ancestor->parent=nodes->values.back();nodes->values.back()->children.push_back(ancestor);nodes->values.push_back(std::move(ancestor));
+    }
+    nodes->invoke(runtime,"add",{Arg(Value::integer(1024)),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"boundary node"))});
+    require(nodes->values.size()==1025,"Public TreeView Add did not accept the exact supported depth");checkNativeTree(*tree,nodes->values);
+    auto* boundaryModel=tree->model;
     for(int attempt=0;attempt<3;++attempt)expectError(7,[&]{nodes->invoke(runtime,"add",{Arg(Value::integer(1025)),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"too deep"))});});
-    require(nodes->values.size()==1025&&nodes->values.back()->children.empty(),"Rejected TreeView Add mutated the node collection");
-    nodes->invoke(runtime,"remove",{Arg(Value::integer(1))});require(nodes->values.empty(),"Removing a deep tree retained descendants");
+    require(nodes->values.size()==1025&&nodes->values.back()->children.empty()&&tree->model==boundaryModel,"Rejected TreeView Add mutated the node collection or native model");checkNativeTree(*tree,nodes->values);
+    nodes->invoke(runtime,"remove",{Arg(Value::integer(1))});require(nodes->values.empty(),"Removing a deep tree retained descendants");checkNativeTree(*tree,nodes->values);
     gboolean cancelled=FALSE;g_signal_emit_by_name(form->window,"delete-event",nullptr,&cancelled);host.check();require(cancelled&&instance->loaded&&queryCount==1&&unloadCount==0,"QueryUnload cancellation destroyed the GTK form");
     auto modalInstance=runtime.instance(modal.name);runtime.load(modalInstance);host.formCall(modalInstance,"show",{Arg(Value::integer(1)),Arg(Value::object(instance))});require(!modalInstance->loaded&&modalTicks==1&&instance->loaded,"Modal nested loop failed to unwind after timer unload");
     auto moduleInstance=runtime.instance(callbacks.name);auto callback=Value::object(std::make_shared<NativeCallback>(moduleInstance,"ontimer"));

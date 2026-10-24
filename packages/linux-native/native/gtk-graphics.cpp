@@ -1,5 +1,10 @@
 // Cairo/Pango/GdkPixbuf rendering and native GTK printing. MIT.
 #include "gtk.hpp"
+#include "gtk-printers.hpp"
+#include <gtk/gtkunixprint.h>
+#include <cups/cups.h>
+#include <cups/pwg.h>
+#include <cstdlib>
 
 namespace vb6 {
 namespace {
@@ -30,26 +35,223 @@ struct GtkFontObject final:Object {
   Value get(Runtime&,const std::string& raw)override{auto name=lower(raw.empty()?"name":raw);if(name=="weight"){auto c=owner.lock();return Value::integer((c?c->flag("fontbold"):properties["bold"].truth())?700:400,Type::Integer);}auto found=properties.find(name);if(found==properties.end())fail(438);auto c=owner.lock();auto result=c?c->property(name=="strikethrough"?"fontstrikethru":"font"+name,found->second):found->second;return name=="size"?coerce(result,"currency"):result;}
   void set(Runtime& rt,const std::string& raw,Value value,bool)override{auto name=lower(raw.empty()?"name":raw);if(name=="weight"){auto n=value.integral();if(n<0||n>1000)fail(380);name="bold";value=Value::boolean(n>=600);}if(!properties.count(name))fail(438);value=coerce(value,name=="name"?"string":name=="size"?"currency":name=="charset"?"integer":"boolean");if(name=="size"&&(value.number()<=0||value.number()>3072))fail(380);if(auto c=owner.lock())c->set(rt,name=="strikethrough"?"fontstrikethru":"font"+name,value);properties[name]=value;}
 };
+const std::map<int,const char*> printerPaperSizes={
+  {1,"na_letter_8.5x11in"},{3,"na_ledger_11x17in"},{4,"na_ledger_11x17in"},
+  {5,"na_legal_8.5x14in"},{6,"na_invoice_5.5x8.5in"},{7,"na_executive_7.25x10.5in"},
+  {8,"iso_a3_297x420mm"},{9,"iso_a4_210x297mm"},{11,"iso_a5_148x210mm"},
+  {12,"jis_b4_257x364mm"},{13,"jis_b5_182x257mm"},{17,"na_ledger_11x17in"},
+  {19,"na_number-9_3.875x8.875in"},{20,"na_number-10_4.125x9.5in"},
+  {27,"iso_dl_110x220mm"},{28,"iso_c5_162x229mm"},{29,"iso_c3_324x458mm"},
+  {30,"iso_c4_229x324mm"},{31,"iso_c6_114x162mm"},{32,"iso_c6c5_114x229mm"},
+  {37,"na_monarch_3.875x7.5in"}
+};
+int printerInteger(const std::string& value,int fallback,int minimum,int maximum){
+  if(value.empty())return fallback;char* end=nullptr;auto number=std::strtol(value.c_str(),&end,10);
+  return end==value.c_str()||number<minimum||number>maximum?fallback:int(number);
+}
+GtkPaperSize* printerPaper(const std::string& raw){
+  auto name=raw.substr(0,raw.find(','));auto* media=pwgMediaForPWG(name.c_str());
+  if(!media)media=pwgMediaForPPD(name.c_str());if(!media)media=pwgMediaForLegacy(name.c_str());
+  if(!media)return nullptr;
+  return gtk_paper_size_new_custom(media->pwg,media->pwg,media->width/100.0,media->length/100.0,GTK_UNIT_MM);
+}
 struct GtkPrinterObject final:Object {
-  GtkHost* host;Module module;std::shared_ptr<Instance> context;std::shared_ptr<GtkControl> canvas;
-  GtkPrintSettings* settings=nullptr;GtkPageSetup* setup=nullptr;std::vector<std::vector<GtkDrawing>> pages;
-  explicit GtkPrinterObject(GtkHost& value):host(&value){
-    module.name="GtkPrinter";context=std::make_shared<Instance>(*host->runtime,module);ControlSpec spec;spec.name="Printer";spec.type="PictureBox";spec.properties={{"backcolor",Value::integer(0xffffff)},{"forecolor",Value::integer(0)},{"fontsize",Value::real(10)}};canvas=std::make_shared<GtkControl>(*host,context,spec);canvas->initialize();settings=gtk_print_settings_new();setup=gtk_page_setup_new();size();
+  GtkHost* host;std::weak_ptr<int> life;GtkPrinterDestination destination;
+  Module module;std::shared_ptr<Instance> context;std::shared_ptr<GtkControl> canvas;
+  GtkPrintSettings* settings=nullptr;GtkPageSetup* setup=nullptr;
+  std::vector<std::vector<GtkDrawing>> pages;
+  bool trackDefault=false,printing=false;int paperCode=0,quality=-3;
+  explicit GtkPrinterObject(GtkHost& value,GtkPrinterDestination selected={},bool followDefault=false)
+    :host(&value),life(value.life),destination(gtkPrinterDetails(std::move(selected))),trackDefault(followDefault){
+    settings=gtk_print_settings_new();setup=gtk_page_setup_new();defaults();
   }
-  ~GtkPrinterObject()override{canvas->dispose();g_object_unref(settings);g_object_unref(setup);}
-  void size(){double width=gtk_page_setup_get_paper_width(setup,GTK_UNIT_POINTS)/0.75,height=gtk_page_setup_get_paper_height(setup,GTK_UNIT_POINTS)/0.75;gtk_widget_set_size_request(canvas->view,int(width),int(height));}
-  std::string className()const override{return "Printer";}
-  Value get(Runtime& rt,const std::string& raw)override{auto name=lower(raw);if(name=="devicename"){auto* printer=gtk_print_settings_get_printer(settings);return Value::string(fromUTF8(printer?printer:"Default"));}if(name=="drivername")return Value::string(u"GTK Print Backend");if(name=="port")return Value::string(u"CUPS");if(name=="width"||name=="height")return Value::real((name=="width"?gtk_page_setup_get_paper_width(setup,GTK_UNIT_POINTS):gtk_page_setup_get_paper_height(setup,GTK_UNIT_POINTS))*20);if(name=="orientation")return Value::integer(gtk_page_setup_get_orientation(setup)==GTK_PAGE_ORIENTATION_LANDSCAPE?2:1,Type::Integer);if(name=="copies")return Value::integer(gtk_print_settings_get_n_copies(settings),Type::Integer);if(name=="page")return Value::integer(pages.size()+1);if(name=="twipsperpixelx"||name=="twipsperpixely")return Value::integer(15);return canvas->get(rt,raw);}
-  void set(Runtime& rt,const std::string& raw,Value value,bool objectSet)override{auto name=lower(raw);if(name=="orientation"){auto n=value.integral();if(n!=1&&n!=2)fail(380);gtk_page_setup_set_orientation(setup,n==1?GTK_PAGE_ORIENTATION_PORTRAIT:GTK_PAGE_ORIENTATION_LANDSCAPE);size();return;}if(name=="copies"){auto n=value.integral();if(n<1||n>32767)fail(380);gtk_print_settings_set_n_copies(settings,int(n));return;}if(name=="devicename"){gtk_print_settings_set_printer(settings,toUTF8(value.string()).c_str());return;}canvas->set(rt,raw,value,objectSet);}
-  Value invoke(Runtime& rt,const std::string& raw,Args args)override{
-    auto name=lower(raw);if(name=="newpage"){if(pages.size()>=1000)fail(7);pages.push_back(std::move(canvas->drawings));canvas->drawings.clear();canvas->currentX=canvas->currentY=0;return {};}
-    if(name=="killdoc"){pages.clear();canvas->drawings.clear();canvas->currentX=canvas->currentY=0;return {};}
-    if(name=="enddoc"){
-      if(pages.empty()&&canvas->drawings.empty())return {};pages.push_back(std::move(canvas->drawings));canvas->drawings.clear();auto* operation=gtk_print_operation_new();gtk_print_operation_set_print_settings(operation,settings);gtk_print_operation_set_default_page_setup(operation,setup);gtk_print_operation_set_unit(operation,GTK_UNIT_POINTS);gtk_print_operation_set_n_pages(operation,int(pages.size()));gtk_print_operation_set_job_name(operation,host->runtime->name.c_str());
-      g_signal_connect(operation,"draw-page",G_CALLBACK(+[](GtkPrintOperation*,GtkPrintContext* context,gint page,gpointer data){auto* printer=static_cast<GtkPrinterObject*>(data);printer->host->event([&]{if(page<0||size_t(page)>=printer->pages.size())fail(5);auto* cr=gtk_print_context_get_cairo_context(context);cairo_scale(cr,0.75,0.75);drawCommands(cr,printer->pages[size_t(page)]);});}),this);
-      GError* error=nullptr;auto result=gtk_print_operation_run(operation,GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,host->activeWindow(),&error);if(result==GTK_PRINT_OPERATION_RESULT_APPLY){g_object_unref(settings);settings=gtk_print_operation_get_print_settings(operation);g_object_ref(settings);}g_object_unref(operation);pages.clear();canvas->currentX=canvas->currentY=0;host->check();if(error){auto message=std::string(error->message);g_error_free(error);fail(482,message);}return {};
+  ~GtkPrinterObject()override{if(canvas)canvas->dispose();g_object_unref(settings);g_object_unref(setup);}
+  void check()const{if(life.expired())fail(91,"Native application has shut down");}
+  bool active()const{return !pages.empty()||(canvas&&!canvas->drawings.empty());}
+  void editable()const{check();if(printing)fail(482,"A print job is being submitted");}
+  void identifyPaper(){
+    auto* paper=gtk_page_setup_get_paper_size(setup);double width=gtk_paper_size_get_width(paper,GTK_UNIT_MM),height=gtk_paper_size_get_height(paper,GTK_UNIT_MM);paperCode=0;
+    for(auto& entry:printerPaperSizes){auto* media=pwgMediaForPWG(entry.second);if(media&&std::abs(width-media->width/100.0)<0.2&&std::abs(height-media->length/100.0)<0.2){paperCode=entry.first;break;}}
+  }
+  void defaults(){
+    gtk_print_settings_set_printer(settings,destination.queue.empty()?nullptr:destination.queue.c_str());
+    gtk_print_settings_set_n_copies(settings,printerInteger(destination.option("copies"),1,1,32767));
+    auto orientation=printerInteger(destination.option("orientation-requested"),3,3,6);
+    auto nativeOrientation=orientation==4||orientation==5?GTK_PAGE_ORIENTATION_LANDSCAPE:GTK_PAGE_ORIENTATION_PORTRAIT;
+    gtk_print_settings_set_orientation(settings,nativeOrientation);gtk_page_setup_set_orientation(setup,nativeOrientation);
+    auto sides=destination.option("sides","one-sided");
+    gtk_print_settings_set_duplex(settings,sides=="two-sided-long-edge"?GTK_PRINT_DUPLEX_VERTICAL:sides=="two-sided-short-edge"?GTK_PRINT_DUPLEX_HORIZONTAL:GTK_PRINT_DUPLEX_SIMPLEX);
+    auto color=destination.option("print-color-mode",destination.option("ColorModel","color"));
+    gtk_print_settings_set_use_color(settings,color!="monochrome"&&color!="Gray"&&color!="Black");
+    gtk_print_settings_set_collate(settings,destination.option("multiple-document-handling")=="separate-documents-collated-copies");
+    gtk_print_settings_set_scale(settings,100);
+    auto resolution=printerInteger(destination.option("printer-resolution"),0,1,9600);
+    if(resolution){gtk_print_settings_set_resolution(settings,resolution);quality=resolution;}
+    else{auto q=printerInteger(destination.option("print-quality"),4,3,5);gtk_print_settings_set_quality(settings,q==3?GTK_PRINT_QUALITY_DRAFT:q==5?GTK_PRINT_QUALITY_HIGH:GTK_PRINT_QUALITY_NORMAL);quality=q==3?-1:q==5?-4:-3;}
+    if(auto* paper=printerPaper(destination.option("media"))){gtk_page_setup_set_paper_size(setup,paper);gtk_print_settings_set_paper_size(settings,paper);gtk_paper_size_free(paper);}
+    identifyPaper();size();
+  }
+  void refreshDefault(){
+    check();if(!trackDefault||active()||printing)return;
+    auto printers=gtkPrinterDestinations();GtkPrinterDestination current;
+    for(auto& printer:printers)if(printer.isDefault){current=std::move(printer);break;}
+    if(current.name!=destination.name){destination=gtkPrinterDetails(std::move(current));g_object_unref(settings);g_object_unref(setup);settings=gtk_print_settings_new();setup=gtk_page_setup_new();defaults();}
+  }
+  void size(){
+    if(!canvas)return;
+    const double width=gtk_page_setup_get_page_width(setup,GTK_UNIT_POINTS)/0.75,height=gtk_page_setup_get_page_height(setup,GTK_UNIT_POINTS)/0.75;
+    gtk_widget_set_size_request(canvas->view,int(std::ceil(width)),int(std::ceil(height)));
+    GtkAllocation allocation{0,0,int(std::ceil(width)),int(std::ceil(height))};gtk_widget_size_allocate(canvas->view,&allocation);
+    canvas->properties["width"]=Value::real(width*15);canvas->properties["height"]=Value::real(height*15);
+  }
+  std::shared_ptr<GtkControl> drawing(){
+    editable();refreshDefault();
+    if(!canvas){
+      host->ensureApplication();module.name="GtkPrinter";context=std::make_shared<Instance>(*host->runtime,module);
+      ControlSpec spec;spec.name="Printer";spec.type="PictureBox";
+      spec.properties={{"backcolor",Value::integer(0xffffff)},{"forecolor",Value::integer(0)},{"fontsize",Value::real(10)}};
+      canvas=std::make_shared<GtkControl>(*host,context,spec);canvas->initialize();size();
     }
-    return canvas->invoke(rt,raw,std::move(args));
+    return canvas;
+  }
+  void select(const std::shared_ptr<GtkPrinterObject>& selected){
+    editable();if(!selected)fail(13,"Set Printer requires an element of the Printers collection");
+    selected->check();if(selected->host!=host)fail(13,"Printer belongs to a different application");
+    if(selected.get()==this)return;if(active())fail(482,"Finish or cancel the current document before changing printers");
+    auto verified=gtkFindPrinterDestination(selected->destination.name);
+    auto* newSettings=gtk_print_settings_copy(selected->settings);auto* newSetup=gtk_page_setup_copy(selected->setup);
+    destination=std::move(verified);g_object_unref(settings);g_object_unref(setup);settings=newSettings;setup=newSetup;
+    gtk_print_settings_set_printer(settings,destination.queue.c_str());quality=selected->quality;paperCode=selected->paperCode;trackDefault=false;size();
+  }
+  std::string className()const override{return "Printer";}
+  Value get(Runtime& rt,const std::string& raw)override{
+    check();refreshDefault();auto name=lower(raw);
+    if(name=="devicename")return Value::string(fromUTF8(destination.name));
+    if(name=="drivername")return Value::string(fromUTF8(destination.name.empty()?"":destination.option("printer-make-and-model","CUPS")));
+    if(name=="port")return Value::string(fromUTF8(destination.option("device-uri",destination.option("printer-uri-supported"))));
+    if(name=="width"||name=="height")return Value::real((name=="width"?gtk_page_setup_get_paper_width(setup,GTK_UNIT_POINTS):gtk_page_setup_get_paper_height(setup,GTK_UNIT_POINTS))*20);
+    if(name=="orientation"){auto orientation=gtk_page_setup_get_orientation(setup);return Value::integer(orientation==GTK_PAGE_ORIENTATION_LANDSCAPE||orientation==GTK_PAGE_ORIENTATION_REVERSE_LANDSCAPE?2:1,Type::Integer);}
+    if(name=="copies")return Value::integer(gtk_print_settings_get_n_copies(settings),Type::Integer);
+    if(name=="duplex"){auto duplex=gtk_print_settings_get_duplex(settings);return Value::integer(duplex==GTK_PRINT_DUPLEX_VERTICAL?2:duplex==GTK_PRINT_DUPLEX_HORIZONTAL?3:1,Type::Integer);}
+    if(name=="colormode")return Value::integer(gtk_print_settings_get_use_color(settings)?2:1,Type::Integer);
+    if(name=="collate")return Value::boolean(gtk_print_settings_get_collate(settings));
+    if(name=="printquality")return Value::integer(quality,Type::Integer);
+    if(name=="papersize")return Value::integer(paperCode,Type::Integer);
+    if(name=="zoom")return Value::integer(bankers(gtk_print_settings_get_scale(settings)),Type::Integer);
+    if(name=="trackdefault")return Value::boolean(trackDefault);
+    if(name=="page")return Value::integer(pages.size()+1);
+    if(name=="twipsperpixelx"||name=="twipsperpixely")return Value::integer(15,Type::Integer);
+    return drawing()->get(rt,raw);
+  }
+  void set(Runtime& rt,const std::string& raw,Value value,bool objectSet)override{
+    editable();auto name=lower(raw);
+    if(name=="devicename"){
+      if(active())fail(482,"Finish or cancel the current document before changing printers");
+      auto selected=std::make_shared<GtkPrinterObject>(*host,gtkFindPrinterDestination(toUTF8(value.string())));select(selected);return;
+    }
+    if(name=="trackdefault"){trackDefault=value.truth();refreshDefault();return;}
+    if(name=="orientation"){
+      auto n=value.integral();if(n!=1&&n!=2)fail(380);
+      if(active())fail(482,"Change page orientation before starting the document");
+      auto orientation=n==1?GTK_PAGE_ORIENTATION_PORTRAIT:GTK_PAGE_ORIENTATION_LANDSCAPE;
+      gtk_page_setup_set_orientation(setup,orientation);gtk_print_settings_set_orientation(settings,orientation);size();return;
+    }
+    if(name=="copies"){auto n=value.integral();if(n<1||n>32767)fail(380);gtk_print_settings_set_n_copies(settings,int(n));return;}
+    if(name=="duplex"){auto n=value.integral();if(n<1||n>3)fail(380);gtk_print_settings_set_duplex(settings,n==2?GTK_PRINT_DUPLEX_VERTICAL:n==3?GTK_PRINT_DUPLEX_HORIZONTAL:GTK_PRINT_DUPLEX_SIMPLEX);return;}
+    if(name=="colormode"){auto n=value.integral();if(n!=1&&n!=2)fail(380);gtk_print_settings_set_use_color(settings,n==2);return;}
+    if(name=="collate"){gtk_print_settings_set_collate(settings,value.truth());return;}
+    if(name=="zoom"){auto n=value.integral();if(n<1||n>400)fail(380);gtk_print_settings_set_scale(settings,double(n));return;}
+    if(name=="printquality"){
+      auto n=value.integral();if(n==0||n < -4||n>9600)fail(380);
+      if(n>0)gtk_print_settings_set_resolution(settings,int(n));
+      else{gtk_print_settings_unset(settings,GTK_PRINT_SETTINGS_RESOLUTION);gtk_print_settings_unset(settings,GTK_PRINT_SETTINGS_RESOLUTION_X);gtk_print_settings_unset(settings,GTK_PRINT_SETTINGS_RESOLUTION_Y);gtk_print_settings_set_quality(settings,n==-1?GTK_PRINT_QUALITY_DRAFT:n==-2?GTK_PRINT_QUALITY_LOW:n==-4?GTK_PRINT_QUALITY_HIGH:GTK_PRINT_QUALITY_NORMAL);}
+      quality=int(n);return;
+    }
+    if(name=="papersize"){
+      auto number=value.integral();if(number<1||number>118)fail(380,"Unsupported paper size");
+      auto found=printerPaperSizes.find(int(number));if(found==printerPaperSizes.end())fail(380,"Unsupported paper size");
+      if(active())fail(482,"Change paper size before starting the document");
+      auto* paper=printerPaper(found->second);if(!paper)fail(380,"Unsupported paper size");
+      gtk_page_setup_set_paper_size(setup,paper);gtk_print_settings_set_paper_size(settings,paper);gtk_paper_size_free(paper);paperCode=found->first;size();return;
+    }
+    if(name=="drivername"||name=="port"||name=="width"||name=="height"||name=="page")fail(383,"Printer property is read-only");
+    drawing()->set(rt,raw,value,objectSet);
+  }
+  Value invoke(Runtime& rt,const std::string& raw,Args args)override{
+    editable();auto name=lower(raw);
+    if(name=="__selectprinter"){
+      if(args.size()!=1)fail(450);if(args[0].value.type!=Type::Object)fail(13,"Set Printer requires a Printer object");
+      select(std::dynamic_pointer_cast<GtkPrinterObject>(std::get<ObjectPtr>(args[0].value.payload)));return {};
+    }
+    if(name=="newpage"){
+      if(!args.empty())fail(450);if(pages.size()>=1000)fail(7);auto surface=drawing();pages.push_back(std::move(surface->drawings));surface->drawings.clear();surface->currentX=surface->currentY=0;return {};
+    }
+    if(name=="killdoc"){if(!args.empty())fail(450);pages.clear();if(canvas){canvas->drawings.clear();canvas->currentX=canvas->currentY=0;}return {};}
+    if(name=="enddoc"){
+      if(!args.empty())fail(450);if(!active())return {};
+      destination=gtkFindPrinterDestination(destination.name);auto surface=drawing();
+      GError* error=nullptr;char* directory=g_dir_make_tmp("vb6-print-XXXXXX",&error);
+      if(!directory){auto message=std::string(error?error->message:"Cannot create a private print spool directory");if(error)g_error_free(error);fail(482,message);}
+      struct Spool{char* directory;std::string filename;~Spool(){std::error_code ignored;std::filesystem::remove(filename,ignored);std::filesystem::remove(directory,ignored);g_free(directory);}} spool{directory,std::string(directory)+"/document.pdf"};
+      struct Submitting{bool& value;explicit Submitting(bool& flag):value(flag){value=true;}~Submitting(){value=false;}} submitting{printing};
+      struct PrintState{GtkPrinterObject* printer;std::vector<std::vector<GtkDrawing>> pages;};
+      PrintState state{this,pages};state.pages.push_back(surface->drawings);
+      auto* operation=gtk_print_operation_new();gtk_print_operation_set_allow_async(operation,FALSE);
+      auto* exportSettings=gtk_print_settings_copy(settings);gtk_print_settings_set_n_copies(exportSettings,1);gtk_print_settings_set_collate(exportSettings,FALSE);gtk_print_settings_set_printer(exportSettings,nullptr);
+      gtk_print_operation_set_print_settings(operation,exportSettings);g_object_unref(exportSettings);
+      gtk_print_operation_set_default_page_setup(operation,setup);gtk_print_operation_set_export_filename(operation,spool.filename.c_str());
+      gtk_print_operation_set_unit(operation,GTK_UNIT_POINTS);gtk_print_operation_set_n_pages(operation,int(state.pages.size()));
+      gtk_print_operation_set_job_name(operation,host->runtime->name.c_str());
+      g_signal_connect(operation,"draw-page",G_CALLBACK(+[](GtkPrintOperation* operation,GtkPrintContext* context,gint page,gpointer data){
+        auto* state=static_cast<PrintState*>(data);state->printer->host->event([&]{
+          if(page<0||size_t(page)>=state->pages.size())fail(5);auto* cr=gtk_print_context_get_cairo_context(context);
+          cairo_scale(cr,0.75,0.75);drawCommands(cr,state->pages[size_t(page)]);
+        });if(state->printer->host->pending)gtk_print_operation_cancel(operation);
+      }),&state);
+      auto result=gtk_print_operation_run(operation,GTK_PRINT_OPERATION_ACTION_EXPORT,host->activeWindow(),&error);
+      const auto renderError=std::string(error?error->message:"");if(error)g_error_free(error);
+      g_object_unref(operation);host->check();
+      if(!renderError.empty())fail(482,renderError);
+      if(result!=GTK_PRINT_OPERATION_RESULT_APPLY)fail(482,"GTK could not render the print document");
+      std::map<std::string,std::string> options;
+      for(auto& entry:destination.options)if(entry.first.rfind("printer-",0)!=0&&entry.first!="device-uri")options[entry.first]=entry.second;
+      options["document-format"]="application/pdf";options["copies"]=std::to_string(gtk_print_settings_get_n_copies(settings));
+      const auto duplex=gtk_print_settings_get_duplex(settings);
+      options["sides"]=duplex==GTK_PRINT_DUPLEX_VERTICAL?"two-sided-long-edge":duplex==GTK_PRINT_DUPLEX_HORIZONTAL?"two-sided-short-edge":"one-sided";
+      options["print-color-mode"]=gtk_print_settings_get_use_color(settings)?"color":"monochrome";
+      options["multiple-document-handling"]=gtk_print_settings_get_collate(settings)?"separate-documents-collated-copies":"separate-documents-uncollated-copies";
+      options["orientation-requested"]=gtk_page_setup_get_orientation(setup)==GTK_PAGE_ORIENTATION_LANDSCAPE?"4":"3";
+      if(quality>0)options["printer-resolution"]=std::to_string(quality)+"dpi";
+      else options["print-quality"]=quality==-4?"5":quality==-3?"4":"3";
+      auto* paper=gtk_page_setup_get_paper_size(setup);
+      if(auto* media=pwgMediaForSize(int(std::round(gtk_paper_size_get_width(paper,GTK_UNIT_MM)*100)),int(std::round(gtk_paper_size_get_height(paper,GTK_UNIT_MM)*100))))options["media"]=media->pwg;
+      gtkSubmitPrintFile(destination,spool.filename,host->runtime->name,options);
+      pages.clear();surface->drawings.clear();surface->currentX=surface->currentY=0;return {};
+    }
+    static const std::set<std::string> properties={"devicename","drivername","port","width","height","orientation","copies","duplex","colormode","collate","printquality","papersize","zoom","trackdefault","page","twipsperpixelx","twipsperpixely"};
+    if(args.empty()&&properties.count(name))return get(rt,raw);
+    return drawing()->invoke(rt,raw,std::move(args));
+  }
+};
+struct GtkPrintersObject final:Object {
+  GtkHost* host;std::weak_ptr<int> life;
+  explicit GtkPrintersObject(GtkHost& value):host(&value),life(value.life){}
+  void check()const{if(life.expired())fail(91,"Native application has shut down");}
+  std::string className()const override{return "Printers";}
+  Value get(Runtime&,const std::string& name)override{check();if(lower(name)=="count")return Value::integer(gtkPrinterDestinations().size());fail(438);}
+  Value invoke(Runtime& rt,const std::string& raw,Args args)override{
+    check();auto name=lower(raw);
+    if(name.empty()||name=="item"){
+      if(args.size()!=1)fail(450);auto printers=gtkPrinterDestinations();auto n=args[0].value.integral();
+      if(n<0||size_t(n)>=printers.size())fail(9);
+      return Value::object(std::make_shared<GtkPrinterObject>(*host,std::move(printers[size_t(n)])));
+    }
+    if(args.empty())return get(rt,raw);fail(438);
+  }
+  std::vector<Value> enumerate(Runtime&)override{
+    check();std::vector<Value> result;
+    for(auto& printer:gtkPrinterDestinations())result.push_back(Value::object(std::make_shared<GtkPrinterObject>(*host,std::move(printer))));
+    return result;
   }
 };
 }
@@ -63,8 +265,49 @@ Value gtkLoadPicture(GtkHost& host,const std::vector<uint8_t>& data) {
 }
 Value gtkFont(std::weak_ptr<GtkControl> owner){return Value::object(std::make_shared<GtkFontObject>(owner));}
 Value gtkPrinter(GtkHost& host,const std::string& name) {
-  host.ensureApplication();if(name!="printer")fail(453,"GTK native Printers enumeration is unavailable; use the system print dialog");
-  auto found=host.systemObjects.find(name);if(found!=host.systemObjects.end())return Value::object(found->second);auto printer=std::make_shared<GtkPrinterObject>(host);host.systemObjects[name]=printer;return Value::object(printer);
+  if(host.closing)fail(91,"Native application has shut down");
+  if(name=="printers")return Value::object(std::make_shared<GtkPrintersObject>(host));
+  if(name!="printer")fail(438);
+  auto found=host.systemObjects.find(name);if(found!=host.systemObjects.end())return Value::object(found->second);
+  GtkPrinterDestination selected;for(auto& printer:gtkPrinterDestinations())if(printer.isDefault){selected=std::move(printer);break;}
+  auto printer=std::make_shared<GtkPrinterObject>(host,std::move(selected),true);host.systemObjects[name]=printer;return Value::object(printer);
+}
+void gtkSetPrinter(GtkHost& host,Value printer){gtkPrinter(host,"printer").asObject()->invoke(*host.runtime,"__selectprinter",{Arg(std::move(printer))});}
+void gtkShowPrinterDialog(GtkHost& host,GtkControl& control){
+  auto printer=std::dynamic_pointer_cast<GtkPrinterObject>(gtkPrinter(host,"printer").asObject());
+  auto editable=[&]{printer->editable();if(printer->active())fail(482,"Finish or cancel the current document before changing printer settings");};
+  editable();printer->refreshDefault();
+  auto title=toUTF8(control.property("dialogtitle",Value::string(u"Printer")).string());
+  auto* widget=gtk_print_unix_dialog_new(title.c_str(),host.activeWindow());g_object_ref_sink(widget);
+  struct DialogGuard{GtkWidget* value;~DialogGuard(){gtk_widget_destroy(value);g_object_unref(value);}} guard{widget};
+  auto* dialog=GTK_PRINT_UNIX_DIALOG(widget);
+  gtk_print_unix_dialog_set_manual_capabilities(dialog,GtkPrintCapabilities(GTK_PRINT_CAPABILITY_COPIES|GTK_PRINT_CAPABILITY_COLLATE|GTK_PRINT_CAPABILITY_SCALE));
+  gtk_print_unix_dialog_set_embed_page_setup(dialog,TRUE);
+  // Give the dialog copies: cancelling must not mutate the selected Printer.
+  auto* initialSettings=gtk_print_settings_copy(printer->settings);auto* initialSetup=gtk_page_setup_copy(printer->setup);
+  gtk_print_unix_dialog_set_settings(dialog,initialSettings);gtk_print_unix_dialog_set_page_setup(dialog,initialSetup);
+  g_object_unref(initialSettings);g_object_unref(initialSetup);
+  if(host.runDialog(widget)!=GTK_RESPONSE_OK){if(control.flag("cancelerror"))fail(32755,"Dialog cancelled");return;}
+  editable();
+  auto* selected=gtk_print_unix_dialog_get_selected_printer(dialog);
+  if(!selected||gtk_printer_is_virtual(selected))fail(484,"Select an installed CUPS printer");
+  auto destination=gtkFindPrinterDestination(gtk_printer_get_name(selected));
+  auto* settings=gtk_print_unix_dialog_get_settings(dialog);
+  auto* setup=gtk_page_setup_copy(gtk_print_unix_dialog_get_page_setup(dialog));
+  struct SettingsGuard{GtkPrintSettings* settings;GtkPageSetup* setup;~SettingsGuard(){if(settings)g_object_unref(settings);if(setup)g_object_unref(setup);}} selectedSettings{settings,setup};
+  const auto copies=gtk_print_settings_get_n_copies(settings);const auto scale=gtk_print_settings_get_scale(settings);
+  if(copies<1||copies>32767||!std::isfinite(scale)||scale<=0||scale>400)fail(380,"Printer settings are outside the supported range");
+  gtk_print_settings_set_printer(settings,destination.queue.c_str());
+  gtk_print_settings_set_orientation(settings,gtk_page_setup_get_orientation(setup));
+  gtk_print_settings_set_paper_size(settings,gtk_page_setup_get_paper_size(setup));
+  const auto resolution=gtk_print_settings_get_resolution(settings);const auto quality=gtk_print_settings_get_quality(settings);
+  // GtkPrintUnixDialog only chooses settings. No GtkPrintJob is created here.
+  printer->destination=std::move(destination);g_object_unref(printer->settings);g_object_unref(printer->setup);
+  printer->settings=settings;printer->setup=setup;selectedSettings.settings=nullptr;selectedSettings.setup=nullptr;
+  printer->quality=resolution>0?resolution:quality==GTK_PRINT_QUALITY_DRAFT?-1:quality==GTK_PRINT_QUALITY_LOW?-2:quality==GTK_PRINT_QUALITY_HIGH?-4:-3;
+  printer->trackDefault=false;printer->identifyPaper();printer->size();
+  control.properties["copies"]=Value::integer(copies,Type::Integer);
+  control.properties["orientation"]=printer->get(*host.runtime,"orientation");
 }
 GtkDrawing gtkDrawing(GtkControl& control,std::string kind) {
   GtkDrawing command;command.kind=std::move(kind);command.color=int32_t(control.number("forecolor"));command.width=std::max(1.0,control.number("drawwidth",1));command.style=int(control.number("drawstyle"));command.fontName=control.property("fontname",Value::string(u"Sans")).string();command.fontSize=control.number("fontsize",8.25);command.bold=control.flag("fontbold");command.italic=control.flag("fontitalic");command.underline=control.flag("fontunderline");command.strikeout=control.flag("fontstrikethru");return command;
@@ -95,7 +338,7 @@ void gtkDraw(GtkControl& control,cairo_t* cr) {
 std::shared_ptr<GtkControl> gtkDrawingControl(GtkHost& host,Value receiver) {
   auto object=receiver.asObject();if(auto control=std::dynamic_pointer_cast<GtkControl>(object))return control;
   if(auto form=std::dynamic_pointer_cast<Instance>(object)){host.runtime->load(form);return host.form(form)->surface;}
-  if(auto printer=std::dynamic_pointer_cast<GtkPrinterObject>(object))return printer->canvas;fail(438,"Object is not a GTK drawing surface");
+  if(auto printer=std::dynamic_pointer_cast<GtkPrinterObject>(object))return printer->drawing();fail(438,"Object is not a GTK drawing surface");
 }
 void GtkHost::graphics(Frame&,Value receiver,const std::string& kind,std::vector<Value> coords,Value paint,bool fill) {
   auto target=gtkDrawingControl(*this,receiver);auto command=gtkDrawing(*target,kind);if(paint.type!=Type::Missing)command.color=int32_t(coerce(paint,"long").integral());command.fill=fill;

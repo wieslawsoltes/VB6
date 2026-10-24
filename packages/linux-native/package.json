@@ -2,7 +2,7 @@
   "name": "@vb6-studio/linux-native",
   "version": "0.1.0-alpha.1",
   "type": "module",
-  "description": "Offline VB6 Linux x86_64 ELF AOT export with native GTK3 controls",
+  "description": "Offline VB6 Linux x86_64 and ARM64 ELF AOT export with native GTK3 controls and DEB/RPM packaging",
   "license": "MIT",
   "engines": {
     "node": ">=22"

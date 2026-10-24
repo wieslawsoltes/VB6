@@ -10,15 +10,25 @@
 #include <iostream>
 #include <limits>
 
-#if !defined(__linux__) || !defined(__x86_64__)
-#error This runtime template must be built for Linux x86_64
+#if !defined(__linux__) || (!defined(__x86_64__) && !defined(__aarch64__))
+#error This runtime template must be built for Linux x86_64 or AArch64
 #endif
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error This runtime template requires the little-endian Linux LP64 ABI
+#endif
+static_assert(sizeof(void*) == 8 && sizeof(long) == 8, "The Linux runtime requires LP64");
 
 namespace {
 constexpr Elf64_Word CodeTag = 0x01000000;
 constexpr Elf64_Word MetadataTag = 0x02000000;
 constexpr uint64_t MaximumCodeBytes = 64 * 1024 * 1024;
 constexpr uint64_t MaximumMetadataBytes = 8 * 1024 * 1024;
+#if defined(__aarch64__)
+// 64 KiB mappings also satisfy 4/16 KiB Linux page alignment requirements.
+constexpr uint64_t MappingAlignment = 65536;
+#else
+constexpr uint64_t MappingAlignment = 4096;
+#endif
 struct ProjectImage {
   uintptr_t base = 0;
   const Elf64_Phdr* headers = nullptr;
@@ -83,8 +93,10 @@ int main(int argc, char** argv) {
         metadataSegment.p_filesz != metadataSegment.p_memsz ||
         codeSegment.p_filesz == 0 || codeSegment.p_filesz > MaximumCodeBytes ||
         metadataSegment.p_filesz < prefix + 16 ||
-        metadataSegment.p_filesz > MaximumMetadataBytes + prefix + 16 + 4096 ||
-        codeSegment.p_vaddr % 4096 || metadataSegment.p_vaddr % 4096)
+        metadataSegment.p_filesz > MaximumMetadataBytes + prefix + 16 + MappingAlignment ||
+        codeSegment.p_align < MappingAlignment || metadataSegment.p_align < MappingAlignment ||
+        codeSegment.p_vaddr % MappingAlignment || metadataSegment.p_vaddr % MappingAlignment ||
+        codeSegment.p_offset % MappingAlignment || metadataSegment.p_offset % MappingAlignment)
       throw std::runtime_error("Invalid AOT project segment protections or sizes");
     const auto codeAddress = mappedAddress(image, codeSegment);
     const auto metadataAddress = mappedAddress(image, metadataSegment);
@@ -100,7 +112,11 @@ int main(int argc, char** argv) {
     const auto metadataSize = word(8), codeSize = word(12);
     if (!metadataSize || metadataSize > MaximumMetadataBytes ||
         metadataSize > metadataSegment.p_filesz - prefix - 16 ||
-        !codeSize || codeSize > codeSegment.p_filesz)
+        !codeSize || codeSize > codeSegment.p_filesz
+#if defined(__aarch64__)
+        || codeSize % 4
+#endif
+        )
       throw std::runtime_error("Invalid AOT project payload sizes");
     const std::string metadata(reinterpret_cast<const char*>(p + 16), metadataSize);
     const auto root = vb6::aot::JsonReader(metadata).parse();
