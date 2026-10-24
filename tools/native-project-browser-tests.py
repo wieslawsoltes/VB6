@@ -74,19 +74,22 @@ class NativeProjects(unittest.TestCase):
 
     def setUp(self):
         self.context = self.browser.new_context(viewport={'width': 1400, 'height': 1000}, accept_downloads=True)
+        self.addCleanup(self.context.close)
         self.context.set_default_timeout(6000)
         self.page = self.context.new_page(); self.errors = []
         self.page.on('pageerror', lambda error: self.errors.append(str(error)))
         self.mode = 'memory' if os.environ.get('VB6_TEST_TRANSPORT') == 'memory' else 'file' if self._testMethodName.endswith('_file') else 'http'
         if self.mode == 'memory':
-            self.page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text())
+            self.page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text(), timeout=60000)
         else:
-            self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri() if self.mode == 'file' else self.http_url)
-        self.page.wait_for_function('typeof vb6Studio === "object" && typeof vb6Studio.importProjectEntries === "function"')
+            self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri() if self.mode == 'file' else self.http_url, wait_until='commit')
+        # Parsing the standalone IDE can exceed the action deadline in WebKit.
+        # Wait for the real authoring API; keep every later action/assertion at 6s.
+        self.page.wait_for_function('typeof vb6Studio === "object" && typeof vb6Studio.importProjectEntries === "function"', timeout=60000)
 
     def tearDown(self):
         if self.errors: (REPORT / f'{self.engine}-{self._testMethodName}-errors.json').write_text(json.dumps(self.errors, indent=2))
-        errors = self.errors[:]; self.context.close()
+        errors = self.errors[:]
         self.assertEqual(errors, [], 'Uncaught browser errors')
 
     def js(self, code, arg=None): return self.page.evaluate(code, arg)

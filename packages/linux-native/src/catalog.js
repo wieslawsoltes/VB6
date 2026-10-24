@@ -1,4 +1,4 @@
-import {LinuxCompileError} from './target.js';
+import {LinuxCompileError,linuxToolkit} from './target.js';
 /** Explicit GTK implementations and compatibility adapters. This is not a DLL
  * loader: unimplemented controls and foreign signatures fail before exporting. */
 export const LINUX_CONTROLS=Object.freeze({
@@ -12,6 +12,9 @@ export const LINUX_CONTROLS=Object.freeze({
   TreeView:'GtkTreeView',ListView:'GtkTreeView',MSFlexGrid:'GtkTreeView',MSHFlexGrid:'GtkTreeView',DataGrid:'GtkTreeView',
   TabStrip:'GtkNotebook',SSTab:'GtkNotebook',Toolbar:'GtkToolbar',StatusBar:'GtkBox/GtkButton',
   ImageList:'GdkPixbuf',Timer:'GLib timeout',CommonDialog:'GtkFileChooserDialog',MSChart:'GtkDrawingArea/Cairo'
+});
+export const LINUX_GTK4_CONTROLS=Object.freeze({...LINUX_CONTROLS,
+  Menu:'GMenu/GtkPopoverMenuBar',OptionButton:'GtkCheckButton',Toolbar:'GtkBox/GtkButton'
 });
 const signatures={
   kernel32:{GetTickCount:0,Sleep:1,GetCurrentProcessId:0,GetCurrentThreadId:0,
@@ -37,12 +40,13 @@ export function resolveLinuxDeclaration(procedure,module=''){
   if(forbidden)throw new LinuxCompileError(`Declare parameter ${forbidden.name} requires a native scalar, String, Any buffer, or UDT contract`,module,procedure.line,'LIN212');
   return Object.freeze({library,name,wide,id:`${library}.${name}${wide?'W':''}`});
 }
-export function linuxControlReport(project){
+export function linuxControlReport(project,toolkit='gtk3'){
+  const definition=linuxToolkit(toolkit),catalog=toolkit==='gtk4'?LINUX_GTK4_CONTROLS:LINUX_CONTROLS;
   const used=new Set();
   for(const module of project.modules)if(module.form){
     for(const control of [module.form,...(module.form.controls||[]),...(module.form.menus||[]).map(m=>({...m,type:'Menu'}))]){
-      const type=control.type||'Form';if(!Object.hasOwn(LINUX_CONTROLS,type))throw new LinuxCompileError(`Control ${control.name||module.name} (${type}) has no GTK3 implementation`,module.name,1,'LIN220');used.add(type);
+      const type=control.type||'Form';if(!Object.hasOwn(catalog,type))throw new LinuxCompileError(`Control ${control.name||module.name} (${type}) has no ${definition.controls} implementation`,module.name,1,'LIN220');used.add(type);
     }
   }
-  return [...used].sort().map(type=>({type,native:LINUX_CONTROLS[type]}));
+  return [...used].sort().map(type=>({type,native:catalog[type]}));
 }

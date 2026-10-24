@@ -2,7 +2,7 @@
   "name": "@vb6-studio/linux-native",
   "version": "0.1.0-alpha.1",
   "type": "module",
-  "description": "Offline VB6 Linux x86_64 ELF AOT export with native GTK3 controls",
+  "description": "Offline VB6 Linux x86_64 and ARM64 ELF AOT export with native GTK3 controls and DEB/RPM packaging",
   "license": "MIT",
   "engines": {
     "node": ">=22"
@@ -17,6 +17,14 @@
   "files": [
     "dist",
     "src/node.mjs",
+    "src/native-distribution.mjs",
+    "src/native-distribution-tools.mjs",
+    "src/distribution-targets.js",
+    "src/appimage-dependencies.mjs",
+    "src/appimage-gtk-data.mjs",
+    "src/appimage-runtime.mjs",
+    "src/appimage-runtime-notices.mjs",
+    "src/appimage-runtime-payload.mjs",
     "bin",
     "README.md",
     "LICENSE"
