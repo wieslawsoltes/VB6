@@ -38,7 +38,9 @@ Controls, event signatures, mutable event parameters, properties, menus, resourc
 
 ## Project and source files
 
-`project.language` defines the default and `module.language` supplies an explicit override. Supported canonical values are `vb6` and `pascal`. Language is independent of form/module kind, designer theme, renderer, and export target. Changing a project's default preserves existing module languages; it does not translate their text.
+`project.language` defines the default and `module.language` supplies an explicit override. Supported canonical values are `vb6` and `pascal`. Pascal programs and units use `kind: "module"`; Pascal form units use `kind: "form"`. Designer theme, renderer, and export target are independent of source language. Changing a project's default preserves existing module languages; it does not translate their text.
+
+VB class-module identity (`kind: "class"`) requires Visual Basic source. In a Pascal project, **Project → Add Visual Basic Class Module** creates an explicitly `vb6` class that Pascal can consume through typed factories and public members. Declare Turbo Pascal 7 value `object` types, methods, constructors, and destructors inside Pascal units. A Pascal class-module combination is rejected during project creation/import and compilation; existing source is never silently reinterpreted as another language or module kind. Legacy projects with no language metadata continue to use Visual Basic.
 
 Pascal files use `.pas` or `.pp` and UTF-8. Source ZIPs preserve each module's source filename and folders, include a form companion named `<source filename>.form.json` (for example `Form1.pas.form.json` or `forms/Main.pp.form.json`), and retain project metadata and assets in a `.vb6web` manifest. Import overlays the editable source files onto that manifest. Pascal form source and designer state therefore survive source export/import without converting either to VB syntax. A normal `.vb6web` save also retains language metadata.
 
@@ -132,7 +134,7 @@ MCP keeps the existing tool names and optimistic revision checks:
 |---|---|
 | `vb6.project.new` | Supply `language: "pascal"` |
 | `vb6.project.details` | Read the project language and `supportedLanguages` |
-| `vb6.module.add` | Inherit the default or supply an explicit source language |
+| `vb6.module.add` | Forms and standard modules inherit the default or accept an explicit language. Use `kind: "module"` for Pascal units/objects; class modules in a Pascal project require `language: "vb6"`. |
 | `vb6.module.read` / `vb6.module.metadata` | Read language/source path or update validated metadata |
 | `vb6.procedure.event` | Generate Pascal handlers with the shared control event contract |
 | `vb6.code.transform` | Format or rename using the module's source language |

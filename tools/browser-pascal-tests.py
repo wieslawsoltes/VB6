@@ -154,7 +154,13 @@ def project_designer(page):
     check(page.evaluate('vb6Studio.editor.sourceLanguage') == 'pascal')
     no_errors(page)
     page.screenshot(path=str(REPORT / 'pascal-designer-event.png'), animations='disabled')
-    return {'language': 'pascal', 'control': control, 'event': control + '_Click'}
+    page.locator('.menubar [data-menu="Project"]').click()
+    page.get_by_role('menuitem', name='Add Visual Basic Class Module', exact=True).click()
+    page.wait_for_function('vb6Studio.activeModule.kind==="class"')
+    check(page.evaluate('vb6Studio.activeModule.language') == 'vb6')
+    check(page.evaluate('vb6Studio.activeModule.code.startsWith("Option Explicit")'))
+    no_errors(page)
+    return {'language': 'pascal', 'control': control, 'event': control + '_Click', 'classLanguage': 'vb6'}
 
 
 def forms_and_roundtrip(page):

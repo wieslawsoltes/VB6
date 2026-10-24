@@ -6,7 +6,7 @@ import {AgentPermissions} from './agent-permissions.js';
 import {McpError, checkAbort, isRecord, awaitAbort, validateArguments} from './protocol.js';
 import {clone} from '../core/core.js';
 import {normalizeProject, findModule, createForm, createModule, newId, projectStats} from '../project/model.js';
-import {moduleLanguage,moduleSourcePath} from '../project/language.js';
+import {moduleLanguage,moduleSourcePath,validateModuleLanguage} from '../project/language.js';
 import {compileProject} from '../language/compiler.js';
 import {exportApplication} from '../exporter/exporter.js';
 
@@ -119,9 +119,10 @@ export function createIdeAdapter(ide, {approve = async () => false, onActivity =
   tool('vb6.module.write', 'Replace a module source atomically with undo. Requires current expectedRevision and local approval.', {module: string, code: {type: 'string', maxLength: 5000000}, expectedRevision: revisionSchema}, ['module','code','expectedRevision'], async (args, ctx) => {
     requireModule(args.module); await consent('vb6.module.write', args, ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision); const next = clone(ide.project); findModule(next, args.module).code = args.code; return commit(next, 'MCP: edit ' + args.module);
   }, {write: true, destructive: true});
-  tool('vb6.module.add', 'Add a form, standard module, or class module with undo and local approval.', {name: string, kind: {type: 'string', enum: ['module','class','form']}, language: {type:'string',enum:['vb6','pascal']}, code: {type: 'string', maxLength: 5000000}, expectedRevision: revisionSchema}, ['name','kind','expectedRevision'], async (args, ctx) => {
+  tool('vb6.module.add', 'Add a form, standard module, or Visual Basic class module with undo and local approval. Pascal units and object declarations use kind module; class requires language vb6 in a Pascal project.', {name: string, kind: {type: 'string', enum: ['module','class','form']}, language: {type:'string',enum:['vb6','pascal']}, code: {type: 'string', maxLength: 5000000}, expectedRevision: revisionSchema}, ['name','kind','expectedRevision'], async (args, ctx) => {
     if (!/^[A-Za-z_]\w*$/.test(args.name)) throw new McpError(-32602, 'Invalid VB6 module name.');
-    await consent('vb6.module.add', args, ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision); const next = clone(ide.project), module = createModule(args.name,args.kind,{language:args.language??moduleLanguage(null,next)});
+    let language;try{language=validateModuleLanguage(args.kind,args.language??moduleLanguage(null,ide.project));}catch(error){throw new McpError(-32602,error.message);}
+    await consent('vb6.module.add', args, ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision); const next = clone(ide.project), module = createModule(args.name,args.kind,{language});
     if (args.code !== undefined) module.code = args.code; next.modules.push(module); return commit(next, 'MCP: add ' + args.name);
   }, {write: true});
   tool('vb6.module.remove', 'Remove a module with undo and local approval. The final module cannot be removed.', {module: string, expectedRevision: revisionSchema}, ['module','expectedRevision'], async (args, ctx) => {

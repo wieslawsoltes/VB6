@@ -6,7 +6,7 @@ import {normalizeDataSources} from '../data/common.js';
 import { clone, lower, safeName } from '../core/core.js';
 import {normalizeResources} from './res.js';
 import { VBError } from '../language/lexer.js';
-import {normalizeLanguage,createModuleSource} from './language.js';
+import {normalizeLanguage,validateModuleLanguage,createModuleSource} from './language.js';
 export const PROJECT_SCHEMA=1;
 let sequence=0;
 export const newId=()=>`id_${Date.now().toString(36)}_${(++sequence).toString(36)}`;
@@ -22,7 +22,7 @@ export function defaultControlProperties(type,name=type+'1',left=300,top=300){re
 export function defaultFormProperties(name='Form1',caption=name){return {Name:name,Caption:caption,ClientWidth:9000,ClientHeight:6000,Width:9120,Height:6450,Left:300,Top:300,StartUpPosition:2,BorderStyle:2,BackColor:-2147483633,ForeColor:-2147483640,FontName:'MS Sans Serif',FontSize:8.25,FontBold:0,FontItalic:0,ScaleMode:1,KeyPreview:0,Visible:-1,Enabled:-1};}
 export function createControl(type,name=null,left=300,top=300){return {id:newId(),name:name||type+'1',type,parent:null,properties:clone(defaultControlProperties(type,name||type+'1',left,top))};}
 export function createForm(name='Form1',caption=name,options={}){const language=normalizeLanguage(options.language);return {id:newId(),name,kind:'form',...(options.language!==undefined?{language}:{}),code:createModuleSource('form',name,language,options),form:{id:newId(),name,type:'Form',properties:defaultFormProperties(name,caption),controls:[],menus:[]}};}
-export function createModule(name='Module1',kind='module',options={}){if(kind==='form')return createForm(name,options.caption??name,options);if(!['module','class'].includes(kind))throw new VBError('Unsupported module kind: '+kind,1002);const language=normalizeLanguage(options.language);return {id:newId(),name,kind,...(options.language!==undefined?{language}:{}),code:createModuleSource(kind,name,language,options)};}
+export function createModule(name='Module1',kind='module',options={}){if(kind==='form')return createForm(name,options.caption??name,options);if(!['module','class'].includes(kind))throw new VBError('Unsupported module kind: '+kind,1002);const language=validateModuleLanguage(kind,options.language);return {id:newId(),name,kind,...(options.language!==undefined?{language}:{}),code:createModuleSource(kind,name,language,options)};}
 export function newProject(name='Project1',options={}){const language=normalizeLanguage(options.language),form=createForm('Form1','Form1',options);return {schema:PROJECT_SCHEMA,id:newId(),name,...(options.language!==undefined?{language}:{}),description:'',startup:form.name,modules:[form],settings:{anchoring:false,snapToGrid:true,gridSize:120,showGrid:true,renderer:'auto',tabWidth:4,requireVariableDeclaration:true},references:[],assets:{},vfs:{files:{},directories:['/']},appSettings:{}};}
 function validateForm(form,moduleName){
   if(!form||typeof form!=='object'||Array.isArray(form))throw new VBError('Invalid form model: '+moduleName,1002);
@@ -62,6 +62,7 @@ export function normalizeProject(value){
     if(!m.id||ids.has(m.id))m.id=newId();ids.add(m.id);m.kind ||= 'module';if(!['form','module','class'].includes(m.kind))throw new VBError('Unsupported module kind: '+m.kind,1002);
     m.code=String(m.code||'');if(m.code.length>5000000)throw new VBError('Module exceeds 5,000,000-character source limit',7);
     if(m.language!==undefined)m.language=normalizeLanguage(m.language);
+    validateModuleLanguage(m.kind,m.language??project.language);
     if(m.kind==='form'&&!m.form)throw new VBError('Form module is missing its form model: '+m.name,1002);if(m.form)validateForm(m.form,m.name);
   }
   if(!Number.isInteger(Number(project.settings.tabWidth))||Number(project.settings.tabWidth)<1||Number(project.settings.tabWidth)>32)project.settings.tabWidth=4;else project.settings.tabWidth=Number(project.settings.tabWidth);

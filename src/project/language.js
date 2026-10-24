@@ -11,10 +11,15 @@ export function normalizeLanguage(value){
   return id;
 }
 export function moduleLanguage(module,project=null){return normalizeLanguage(module?.language??project?.language);}
+export function validateModuleLanguage(kind,language){
+  const id=normalizeLanguage(language);
+  if(kind==='class'&&id==='pascal')throw new RangeError('Pascal class modules are not supported. Declare Turbo Pascal object types inside a Pascal unit, or use an explicit Visual Basic class module (language: vb6).');
+  return id;
+}
 export function languageDescriptor(language){const id=normalizeLanguage(language);return PROJECT_LANGUAGES.find(item=>item.id===id);}
 export function sourceExtension(module,project=null){return moduleLanguage(module,project)==='pascal'?'.pas':module?.kind==='form'?'.frm':module?.kind==='class'?'.cls':'.bas';}
 export function moduleSourcePath(module,project=null){return module.sourcePath||module.name+sourceExtension(module,project);}
 export function createModuleSource(kind,name,language='vb6',{requireVariableDeclaration=true}={}){
-  if(normalizeLanguage(language)==='pascal')return `unit ${name};\n\ninterface\n\nimplementation\n\n${kind==='form'?'procedure Form_Load;\nbegin\n\nend;\n\n':''}end.\n`;
+  if(validateModuleLanguage(kind,language)==='pascal')return `unit ${name};\n\ninterface\n\nimplementation\n\n${kind==='form'?'procedure Form_Load;\nbegin\n\nend;\n\n':''}end.\n`;
   return (requireVariableDeclaration?'Option Explicit\n\n':'')+(kind==='form'?'Private Sub Form_Load()\n    \nEnd Sub\n':'');
 }
