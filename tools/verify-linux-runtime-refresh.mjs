@@ -11,15 +11,18 @@ const negativeCases=['uninitialized-virtual-receiver','incompatible-virtual-tag'
   'invalid-ancestor-prefix','invalid-ancestor-identity','invalid-dispatch-tag','vb-module-cannot-authorize-pascal-views'];
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 
-export function validateLinuxRuntimeRefreshProof(proof,pascal,manifest) {
-  const target=linuxTarget(manifest.architecture),provenance=manifest.provenance;
-  if(proof?.executionMode!=='native'||proof?.hostArchitecture!==target.option||
+export function validateLinuxRuntimeRefreshProof(proof,pascal,manifest,expected={}) {
+  const toolkit=manifest.toolkit??'gtk3',target=linuxTarget(manifest.architecture,toolkit),provenance=manifest.provenance;
+  if(expected.architecture!==undefined&&linuxTarget(expected.architecture,toolkit).architecture!==target.architecture||
+      expected.toolkit!==undefined&&expected.toolkit!==toolkit)
+    throw new Error('Linux runtime refresh variant does not match the requested architecture and toolkit.');
+  if(proof?.executionMode!=='native'||proof?.hostArchitecture!==target.option||proof.toolkit!==toolkit||
       provenance?.buildPlatform!=='linux'||provenance?.buildArchitecture!==target.architecture||
-      provenance?.targetArchitecture!==target.architecture||provenance?.crossCompiled!==false)
-    throw new Error('Linux runtime refresh requires a native build and execution on the matching Linux architecture.');
+      provenance?.targetArchitecture!==target.architecture||provenance?.crossCompiled!==false||provenance?.toolkit!==toolkit)
+    throw new Error('Linux runtime refresh requires a native build and execution on the matching Linux architecture and toolkit.');
   linuxAOTExecutionVerification(proof,manifest);
   const checks=pascal?.checks;
-  if(pascal?.valid!==true||pascal.error||pascal.platform!=='linux'||pascal.architecture!==target.option||
+  if(pascal?.valid!==true||pascal.error||pascal.platform!=='linux'||pascal.architecture!==target.option||pascal.toolkit!==toolkit||
       pascal.hostArchitecture!==target.option||pascal.executionMode!=='native'||pascal.runtimeSHA256!==manifest.sha256||
       !Array.isArray(checks)||checks.length!==2+negativeCases.length||
       !checks.every(check=>check?.executed===true&&hash(check.executableSHA256)))
@@ -35,10 +38,10 @@ export function validateLinuxRuntimeRefreshProof(proof,pascal,manifest) {
     if(negative.length!==1||negative[0].optimization!==2||negative[0].rejected!==true)
       throw new Error('Linux runtime refresh lacks the Pascal guard: '+name);
   }
-  return {architecture:target.architecture,executionMode:'native',runtimeSHA256:manifest.sha256,pascalChecks:checks.length};
+  return {architecture:target.architecture,toolkit,executionMode:'native',runtimeSHA256:manifest.sha256,pascalChecks:checks.length};
 }
 
-export async function verifyLinuxRuntimeRefresh(directory,reportFile,pascalReportFile) {
+export async function verifyLinuxRuntimeRefresh(directory,reportFile,pascalReportFile,expected={}) {
   const manifest=JSON.parse(await fs.readFile(path.join(directory,'runtime.json'),'utf8'));
   const target=linuxTarget(manifest.architecture);
   const bytes=new Uint8Array(await fs.readFile(path.join(directory,'runtime-'+target.architecture)));
@@ -46,12 +49,18 @@ export async function verifyLinuxRuntimeRefresh(directory,reportFile,pascalRepor
   for(const [name,value]of Object.entries(readLinuxAOTSourceProvenance()))
     if(manifest.provenance?.[name]!==value)throw new Error('Linux runtime refresh source mismatch: '+name);
   const proof=JSON.parse(await fs.readFile(reportFile,'utf8')),pascal=JSON.parse(await fs.readFile(pascalReportFile,'utf8'));
-  return validateLinuxRuntimeRefreshProof(proof,pascal,manifest);
+  return validateLinuxRuntimeRefreshProof(proof,pascal,manifest,expected);
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
-    if(process.argv.length!==5)throw new Error('Usage: node tools/verify-linux-runtime-refresh.mjs RUNTIME_DIRECTORY LINUX_VALIDATION_JSON PASCAL_VALIDATION_JSON');
-    console.log(JSON.stringify(await verifyLinuxRuntimeRefresh(...process.argv.slice(2).map(value=>path.resolve(value)))));
+    const args=process.argv.slice(2),expected={},usage='Usage: node tools/verify-linux-runtime-refresh.mjs RUNTIME_DIRECTORY LINUX_VALIDATION_JSON PASCAL_VALIDATION_JSON [--architecture x64|arm64] [--toolkit gtk3|gtk4]';
+    if(args.length<3||args.length%2!==1||args.slice(0,3).some(value=>value.startsWith('--')))throw new Error(usage);
+    for(let index=3;index<args.length;index+=2){
+      const name=args[index].slice(2),value=args[index+1];
+      if(!['--architecture','--toolkit'].includes(args[index])||expected[name]!==undefined||!value||value.startsWith('--'))throw new Error(usage);
+      expected[name]=value;
+    }
+    console.log(JSON.stringify(await verifyLinuxRuntimeRefresh(...args.slice(0,3).map(value=>path.resolve(value)),expected)));
   }catch(error){console.error(error.message);process.exitCode=1;}
 }

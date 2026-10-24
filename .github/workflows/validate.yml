@@ -957,6 +957,8 @@ jobs:
         run: node tools/test-pascal-native.mjs
       - name: Execute the shipped GTK4 runtime and controls
         run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --report reports/linux-aot/gtk4-shipped
+      - name: Execute Pascal objects, pointer heaps and files with GTK4 at O0 and O2
+        run: node tools/test-pascal-native.mjs --toolkit gtk4
       - name: Independently extract native packages and execute installed application paths
         run: node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --report reports/linux-distribution
       - name: Independently extract GTK4 packages and execute installed application paths

@@ -17,9 +17,12 @@ jobs:
       fail-fast: false
       matrix:
         architecture: [x64, arm64]
+        toolkit: [gtk3, gtk4]
     env:
       ARCHITECTURE: ${{ matrix.architecture }}
-      RUNTIME_DIRECTORY: ${{ matrix.architecture == 'arm64' && 'artifacts/linux-aot/runtime-arm64' || 'artifacts/linux-aot/runtime' }}
+      TOOLKIT: ${{ matrix.toolkit }}
+      RUNTIME_DIRECTORY: artifacts/linux-aot/runtime${{ matrix.toolkit == 'gtk4' && '-gtk4' || '' }}${{ matrix.architecture == 'arm64' && '-arm64' || '' }}
+      PASCAL_REPORT: reports/pascal-native/linux-${{ matrix.architecture }}${{ matrix.toolkit == 'gtk4' && '-gtk4' || '' }}.json
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,7 +38,7 @@ jobs:
           (cd "$RUNNER_TEMP/linux-runtime-source" && sha256sum source.tar.gz > SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-runtime-source-${{ matrix.architecture }}-${{ github.sha }}
+          name: linux-runtime-source-${{ matrix.architecture }}-${{ matrix.toolkit }}-${{ github.sha }}
           path: ${{ runner.temp }}/linux-runtime-source
           retention-days: 14
           if-no-files-found: error
@@ -47,17 +50,17 @@ jobs:
       - name: Install native SDK and headless GTK display
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang g++ pkg-config libgtk-3-dev libcups2-dev xvfb xauth
+          sudo apt-get install -y clang g++ pkg-config libgtk-3-dev libgtk-4-dev libcups2-dev iso-codes fonts-dejavu-extra openbox weston xvfb xauth
       - name: Rebuild and qualify the exact native runtime
-        run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --rebuild --report reports/linux-aot/rebuilt
+        run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --toolkit "$TOOLKIT" --rebuild --report reports/linux-aot/rebuilt
       - name: Execute emitted Pascal programs against the rebuilt runtime
-        run: node tools/test-pascal-native.mjs --runtime "$RUNTIME_DIRECTORY"
+        run: node tools/test-pascal-native.mjs --runtime "$RUNTIME_DIRECTORY" --toolkit "$TOOLKIT"
       - name: Require native hardware, full acceptance and exact-runtime Pascal proof
-        run: node tools/verify-linux-runtime-refresh.mjs "$RUNTIME_DIRECTORY" reports/linux-aot/rebuilt/validation.json "reports/pascal-native/linux-$ARCHITECTURE.json"
+        run: node tools/verify-linux-runtime-refresh.mjs "$RUNTIME_DIRECTORY" reports/linux-aot/rebuilt/validation.json "$PASCAL_REPORT" --architecture "$ARCHITECTURE" --toolkit "$TOOLKIT"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: verified-linux-runtime-${{ matrix.architecture }}
+          name: verified-linux-runtime-${{ matrix.architecture }}-${{ matrix.toolkit }}
           path: |
             ${{ env.RUNTIME_DIRECTORY }}
             reports/linux-aot/rebuilt
@@ -81,24 +84,24 @@ jobs:
           node-version: 22
       - uses: actions/download-artifact@v4
         with:
-          name: verified-linux-runtime-x64
-          path: native-input/x64
-      - uses: actions/download-artifact@v4
-        with:
-          name: verified-linux-runtime-arm64
-          path: native-input/arm64
-      - name: Verify both native proofs and create offline payloads
+          pattern: verified-linux-runtime-*
+          path: native-input
+      - name: Verify all four native proofs and create offline payloads
         shell: bash
         run: |
           set -euo pipefail
           for architecture in x64 arm64; do
-            input="native-input/$architecture"
-            runtime="$input/artifacts/linux-aot/runtime"
-            if [ "$architecture" = arm64 ]; then runtime="$runtime-arm64"; fi
-            proof="$input/reports/linux-aot/rebuilt/validation.json"
-            pascal="$input/reports/pascal-native/linux-$architecture.json"
-            node tools/verify-linux-runtime-refresh.mjs "$runtime" "$proof" "$pascal"
-            node tools/embed-linux-aot-runtime.mjs "$runtime" "$proof"
+            for toolkit in gtk3 gtk4; do
+              input="native-input/verified-linux-runtime-$architecture-$toolkit"
+              runtime="$input/artifacts/linux-aot/runtime"
+              suffix=""
+              if [ "$toolkit" = gtk4 ]; then runtime="$runtime-gtk4"; suffix="-gtk4"; fi
+              if [ "$architecture" = arm64 ]; then runtime="$runtime-arm64"; fi
+              proof="$input/reports/linux-aot/rebuilt/validation.json"
+              pascal="$input/reports/pascal-native/linux-$architecture$suffix.json"
+              node tools/verify-linux-runtime-refresh.mjs "$runtime" "$proof" "$pascal" --architecture "$architecture" --toolkit "$toolkit"
+              node tools/embed-linux-aot-runtime.mjs "$runtime" "$proof"
+            done
           done
       - name: Commit only generated runtimes with a branch-head lease
         uses: actions/github-script@v7
@@ -111,7 +114,7 @@ jobs:
             const ref = 'heads/' + branch;
             const head = (await github.rest.git.getRef({owner, repo, ref})).data.object.sha;
             if (head !== context.sha) throw new Error('Branch advanced; regenerate from its new head');
-            const files = ['packages/linux-native/src/aot-runtime-payload.js', 'packages/linux-native/src/aot-runtime-arm64-payload.js'];
+            const files = ['aot-runtime-payload.js', 'aot-runtime-arm64-payload.js', 'aot-runtime-gtk4-payload.js', 'aot-runtime-gtk4-arm64-payload.js'].map(name => 'packages/linux-native/src/' + name);
             const parent = (await github.rest.git.getCommit({owner, repo, commit_sha: head})).data;
             const entries = await Promise.all(files.map(async file => {
               const content = fs.readFileSync(file);
@@ -121,7 +124,7 @@ jobs:
             }));
             const tree = (await github.rest.git.createTree({owner, repo, base_tree:parent.tree.sha, tree:entries})).data;
             if (tree.sha === parent.tree.sha) {core.info('Verified runtimes already current'); return;}
-            const commit = (await github.rest.git.createCommit({owner, repo, message:'build(linux): embed natively verified x64 and ARM64 runtimes', tree:tree.sha, parents:[head]})).data;
+            const commit = (await github.rest.git.createCommit({owner, repo, message:'build(linux): embed natively verified x64 and ARM64 GTK3 and GTK4 runtimes', tree:tree.sha, parents:[head]})).data;
             if ((await github.rest.git.getRef({owner, repo, ref})).data.object.sha !== head) throw new Error('Branch advanced while preparing runtime commit');
             await github.rest.git.updateRef({owner, repo, ref, sha:commit.sha, force:false});
             core.notice('Runtimes committed as ' + commit.sha + '; exact-head validation is still required before merge.');

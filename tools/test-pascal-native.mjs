@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
+import {linuxToolkit} from '../packages/linux-native/src/target.js';
 import {pascalNativeVerificationProject,pascalNativeExpectedResult} from '../tests/pascal-integration-fixtures.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
@@ -74,39 +75,42 @@ async function extract(files,root,executableName) {
   return path.join(root,...executableName.split('/'));
 }
 
-export async function testPascalNative({runtimeDirectory,rebuild=false}={}) {
+export async function testPascalNative({runtimeDirectory,rebuild=false,toolkit}={}) {
   if(runtimeDirectory&&rebuild)throw new Error('--runtime and --rebuild are mutually exclusive.');
   if((runtimeDirectory||rebuild)&&process.platform!=='linux')throw new Error('Explicit runtime input and rebuilding are supported only for native Linux qualification.');
+  if(process.platform==='linux')toolkit=linuxToolkit(toolkit).id;
+  else if(toolkit!==undefined)throw new Error('Toolkit selection is supported only for native Linux qualification.');
   if(!(process.platform==='win32'||process.platform==='darwin'&&process.arch==='arm64'||process.platform==='linux'&&['x64','arm64'].includes(process.arch)))
     throw new Error('Pascal native qualification needs Windows, Apple Silicon macOS, or native x64/ARM64 Linux.');
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'vb6-pascal-native-'));
   const reportDirectory=path.join(root,'reports/pascal-native');await fs.mkdir(reportDirectory,{recursive:true});
-  const report={platform:process.platform,architecture:process.arch,hostArchitecture:process.arch,executionMode:'native',source:'Turbo Pascal 7.0',checks:[]};
+  const report={platform:process.platform,architecture:process.arch,hostArchitecture:process.arch,executionMode:'native',...(toolkit?{toolkit}:{}),source:'Turbo Pascal 7.0',checks:[]};
   try {
     let runtime,compile,link,unpack,entry;
     if(process.platform==='linux') {
       const {linuxTarget}=await import('../packages/linux-native/src/target.js');
       const {verifyLinuxAOTRuntime}=await import('../packages/linux-native/src/elf.js');
       const {readLinuxAOTSourceProvenance,checkLinuxAOTRuntimeProvenance}=await import('./linux-aot-provenance.mjs');
-      const target=linuxTarget(process.arch);
+      const target=linuxTarget(process.arch,toolkit);
       if(rebuild) {
         const {buildLinuxAOTTemplate}=await import('./build-linux-aot-template.mjs');
-        runtime=await buildLinuxAOTTemplate({architecture:target.option,out:path.join(directory,'runtime'),log:text=>process.stderr.write(text)});
+        runtime=await buildLinuxAOTTemplate({architecture:target.option,toolkit,out:path.join(directory,'runtime'),log:text=>process.stderr.write(text)});
       }else if(runtimeDirectory) {
         runtime={bytes:new Uint8Array(await fs.readFile(path.join(runtimeDirectory,'runtime-'+target.architecture))),
           manifest:JSON.parse(await fs.readFile(path.join(runtimeDirectory,'runtime.json'),'utf8'))};
       }else {
-        checkLinuxAOTRuntimeProvenance(root,{architecture:target.option});
+        checkLinuxAOTRuntimeProvenance(root,{architecture:target.option,toolkit});
         const {loadLinuxAOTRuntime}=await import('../packages/linux-native/src/aot-runtime.js');
-        runtime=await loadLinuxAOTRuntime({architecture:target.option});
+        runtime=await loadLinuxAOTRuntime({architecture:target.option,toolkit});
       }
       await verifyLinuxAOTRuntime(runtime.bytes,runtime.manifest);
       assert.equal(runtime.manifest.architecture,target.architecture,'Pascal execution requires the native host architecture');
+      assert.equal(runtime.manifest.toolkit??'gtk3',toolkit,'Pascal execution requires the requested native toolkit');
       for(const [name,value]of Object.entries(readLinuxAOTSourceProvenance(root)))
         assert.equal(runtime.manifest.provenance?.[name],value,'Pascal runtime source mismatch: '+name);
       const {compileLinuxAOT}=await import('../packages/linux-native/src/compiler.js');
       const {linkLinuxAOT,unpackLinuxAOTArchive}=await import('../packages/linux-native/src/aot-export.js');
-      compile=(project,optimization)=>compileLinuxAOT(project,{architecture:target.option,optimization});
+      compile=(project,optimization)=>compileLinuxAOT(project,{architecture:target.option,toolkit,optimization});
       link=linkLinuxAOT;unpack=unpackLinuxAOTArchive;entry=name=>name+'/bin/'+name;
     }else if(process.platform==='darwin') {
       const {checkAOTRuntimeProvenance}=await import('./macos-aot-provenance.mjs');checkAOTRuntimeProvenance(root);
@@ -154,7 +158,7 @@ export async function testPascalNative({runtimeDirectory,rebuild=false}={}) {
     report.valid=true;return report;
   }catch(error){report.valid=false;report.error=error.stack;throw error;}
   finally {
-    await fs.writeFile(path.join(reportDirectory,process.platform+'-'+process.arch+'.json'),JSON.stringify(report,null,2)+'\n');
+    await fs.writeFile(path.join(reportDirectory,process.platform+'-'+process.arch+(toolkit==='gtk4'?'-gtk4':'')+'.json'),JSON.stringify(report,null,2)+'\n');
     await fs.rm(directory,{recursive:true,force:true});
   }
 }
@@ -166,7 +170,8 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
       const argument=process.argv[index];
       if(argument==='--rebuild'&&!options.rebuild)options.rebuild=true;
       else if(argument==='--runtime'&&!options.runtimeDirectory&&process.argv[index+1]&&!process.argv[index+1].startsWith('--'))options.runtimeDirectory=path.resolve(process.argv[++index]);
-      else throw new Error('Usage: node tools/test-pascal-native.mjs [--rebuild | --runtime DIRECTORY]');
+      else if(argument==='--toolkit'&&!options.toolkit&&process.argv[index+1]&&!process.argv[index+1].startsWith('--'))options.toolkit=process.argv[++index];
+      else throw new Error('Usage: node tools/test-pascal-native.mjs [--rebuild | --runtime DIRECTORY] [--toolkit gtk3|gtk4]');
     }
     console.log(JSON.stringify(await testPascalNative(options),null,2));
   }catch(error){console.error(error.stack||error.message);process.exitCode=1;}
