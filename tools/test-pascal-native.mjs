@@ -56,7 +56,9 @@ End Sub`}]};
       for(const literal of literals)literal.value=String(child.typeId);
     }},
     {name:'vb-records-remain-nominal',project:nominal,status:1,error:/VB6 error 13:/,mutate(metadata){
-      metadata.modules[0].procedures.find(procedure=>procedure.name==='Accept').parameters[0].type='Second';
+      const module=metadata.modules[0],record=module.records.find(record=>record.name.toLowerCase()===module.name.toLowerCase()+'.second');
+      assert.ok(record,'Missing canonical nominal record metadata');
+      module.procedures.find(procedure=>procedure.name==='Accept').parameters[0].type=record.name;
     }},
     malformed('invalid-ancestor-prefix',metadata=>{derived(metadata).fields[1].name='unrelated';}),
     malformed('invalid-ancestor-identity',metadata=>{derived(metadata).parent='nativeobjects.missing';}),
@@ -77,7 +79,8 @@ async function extract(files,root,executableName) {
 
 export async function testPascalNative({runtimeDirectory,rebuild=false,toolkit}={}) {
   if(runtimeDirectory&&rebuild)throw new Error('--runtime and --rebuild are mutually exclusive.');
-  if((runtimeDirectory||rebuild)&&process.platform!=='linux')throw new Error('Explicit runtime input and rebuilding are supported only for native Linux qualification.');
+  if(rebuild&&process.platform!=='linux')throw new Error('Rebuilding is supported only for native Linux qualification.');
+  if(runtimeDirectory&&!['linux','darwin'].includes(process.platform))throw new Error('Explicit runtime input requires native Linux or Apple Silicon macOS.');
   if(process.platform==='linux')toolkit=linuxToolkit(toolkit).id;
   else if(toolkit!==undefined)throw new Error('Toolkit selection is supported only for native Linux qualification.');
   if(!(process.platform==='win32'||process.platform==='darwin'&&process.arch==='arm64'||process.platform==='linux'&&['x64','arm64'].includes(process.arch)))
@@ -113,8 +116,19 @@ export async function testPascalNative({runtimeDirectory,rebuild=false,toolkit}=
       compile=(project,optimization)=>compileLinuxAOT(project,{architecture:target.option,toolkit,optimization});
       link=linkLinuxAOT;unpack=unpackLinuxAOTArchive;entry=name=>name+'/bin/'+name;
     }else if(process.platform==='darwin') {
-      const {checkAOTRuntimeProvenance}=await import('./macos-aot-provenance.mjs');checkAOTRuntimeProvenance(root);
-      const {loadMacOSAOTRuntime}=await import('../packages/macos-native/src/aot-runtime.js');runtime=await loadMacOSAOTRuntime();
+      const {checkAOTRuntimeProvenance,readAOTSourceProvenance}=await import('./macos-aot-provenance.mjs');
+      const {verifyAOTRuntime}=await import('../packages/macos-native/src/aot-image.js');
+      if(runtimeDirectory) {
+        runtime={bytes:new Uint8Array(await fs.readFile(path.join(runtimeDirectory,'runtime-arm64'))),
+          manifest:JSON.parse(await fs.readFile(path.join(runtimeDirectory,'runtime.json'),'utf8'))};
+      }else {
+        checkAOTRuntimeProvenance(root);
+        const {loadMacOSAOTRuntime}=await import('../packages/macos-native/src/aot-runtime.js');runtime=await loadMacOSAOTRuntime();
+      }
+      await verifyAOTRuntime(runtime.bytes,runtime.manifest);
+      assert.equal(runtime.manifest.architecture,'arm64','Pascal execution requires native Apple Silicon');
+      for(const [name,value]of Object.entries(readAOTSourceProvenance(root)))
+        assert.equal(runtime.manifest.provenance?.[name],value,'Pascal runtime source mismatch: '+name);
       const {compileMacOSAOT}=await import('../packages/macos-native/src/aot-compiler.js');
       const {linkMacOSAOT,unpackMacOSAOTArchive}=await import('../packages/macos-native/src/aot-export.js');
       compile=(project,optimization)=>compileMacOSAOT(project,{optimization});
