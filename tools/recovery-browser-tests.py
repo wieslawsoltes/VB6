@@ -8,6 +8,9 @@ from playwright.sync_api import sync_playwright
 ROOT=Path(__file__).resolve().parents[1]
 REPORT=ROOT/'reports/recovery'; REPORT.mkdir(exist_ok=True,parents=True)
 HTML=(ROOT/'dist/VB6-Studio-Web.html').read_text()
+# Parsing the standalone IDE and its native payloads has a separate bound from
+# the 4500 ms default interaction deadline.
+IDE_STARTUP_TIMEOUT_MS=60000
 results=[]; metrics={}
 def check(value,message='Assertion failed'):
     if not value: raise AssertionError(message)
@@ -15,7 +18,16 @@ def boot(browser):
     p=browser.new_page(viewport={'width':1440,'height':960})
     p.set_default_timeout(4500); p._errors=[]
     p.on('pageerror',lambda e:p._errors.append(str(e)))
-    p.set_content(HTML);p.wait_for_function('typeof vb6Studio!=="undefined" && !!vb6Studio.ideTools')
+    try:
+        p.set_content(HTML,wait_until='domcontentloaded',timeout=IDE_STARTUP_TIMEOUT_MS)
+        p.wait_for_function('typeof vb6Studio!=="undefined" && !!vb6Studio.ideTools && !!document.querySelector(".ide-shell")',
+                            polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
+    except Exception:
+        # The caller receives the page only after boot succeeds. Release failed
+        # pages here so later cases do not inherit their browser resource use.
+        try:p.close()
+        except Exception:pass
+        raise
     return p
 def command(p,name):p.evaluate('(id)=>{vb6Studio.command(id);}',name)
 def case(browser,name,fn):
