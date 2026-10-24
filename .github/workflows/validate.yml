@@ -360,7 +360,7 @@ jobs:
           npm run build
           npm ci --prefix packages/advanced-editor --ignore-scripts --no-audit --no-fund
           node tools/build-advanced-editor.mjs
-          node --test tests/advanced-editor*.test.mjs
+          node --test tests/advanced-editor*.test.mjs tests/input-modes-monaco-layout.test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -373,7 +373,7 @@ jobs:
   advanced-editor:
     name: Advanced editor (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
