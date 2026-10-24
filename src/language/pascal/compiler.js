@@ -5,6 +5,7 @@ import {PascalError, tokenizePascal, PASCAL_KEYWORDS} from './lexer.js';
 import {PascalWorkspace, PASCAL_TYPES, isOrdinal, isString, isNumeric, isAggregate, numericType, sameType, assignmentCompatible, foreignType} from './semantics.js';
 import {builtinType} from '../type-catalog.js';
 import {pascalControlArrayIndex} from './form-bindings.js';
+import {foreignMemberSymbol, foreignAccess, foreignExpression, foreignCall, foreignAssignable, foreignAssignment} from './foreign-lowering.js';
 import {getPascalHelper, getPascalRuntimeSource} from './runtime-library.js';
 import {pascalPointerStorage, generatePascalPointerHeaps} from './pointer-lowering.js';
 import {PascalFileLowerer} from './file-lowering.js';
@@ -88,18 +89,24 @@ export class PascalLowerer {
   }
   memberSymbol(node, context) {
     const objectMember = objectMemberSymbol(this, node, context); if (objectMember) return objectMember;
-    if (node.kind !== 'member' || node.object.kind !== 'identifier') return null;
-    const binder = this.workspace.get(node.object.name);
-    if (!binder) return null;
+    if (node.kind !== 'member') return null;
+    const binder = node.object.kind === 'identifier' ? this.workspace.get(node.object.name) : null;
+    if (!binder) return foreignMemberSymbol(this, node, context);
     if (binder !== this.binder && !this.binder.imports.includes(binder)) this.fail(`Unit '${node.object.name}' is not in the uses clause`, node, 'TP_UNIT_ACCESS');
     binder.ensure(); const symbol = binder.scope.symbols.get(key(node.name));
+    if (!symbol && binder.input.form) {
+      const member = this.workspace.foreign.formMember(binder.input.form, node.name, (message, location, code) => this.fail(message, location, code), node);
+      if (member) return {...member, foreignReceiver: node.object, foreignReceiverType: {...foreignType(binder.input.form.type || 'Form'), name: binder.name, vb: binder.name}};
+    }
     if (!symbol || binder !== this.binder && !symbol.public) this.fail(`Unit member '${node.object.name}.${node.name}' is not exported`, node, 'TP_PRIVATE_MEMBER');
     return binder.resolveSymbol(symbol);
   }
   controlArrayIndex(node, context) {
     if (node.kind !== 'call') return null;
-    const type = node.callee.kind === 'identifier' ? this.resolve(node.callee, context, false)?.type : this.typeOf(node.callee, context);
-    return pascalControlArrayIndex(node, type);
+    const symbol = node.callee.kind === 'identifier' ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context);
+    if (symbol?.kind === 'procedure' || symbol?.kind === 'foreignProperty') return null;
+    const type = symbol?.type || (node.callee.kind === 'identifier' ? null : this.typeOf(node.callee, context));
+    return pascalControlArrayIndex(node, type) || (type?.kind === 'array' && type.foreign ? {...node, kind: 'index', object: node.callee, indices: node.args} : null);
   }
   typeOf(node, context) {
     if (!node) return PASCAL_TYPES.variant;
@@ -118,15 +125,19 @@ export class PascalLowerer {
       const type = this.typeOf(node.object, context), field = type.fields?.get(key(node.name));
       if (type.kind === 'record' && !field) this.fail(`Record '${type.name}' has no field '${node.name}'`, node, 'TP_UNKNOWN_FIELD');
       const member = type.catalogName ? builtinType(type.catalogName)?.members.find(value => key(value.name) === key(node.name)) : null;
-      return field?.type || (member ? foreignType(member.type) : PASCAL_TYPES.variant);
+      if (field) return field.type;
+      if (member) return foreignType(member.type);
+      if (type.kind !== 'variant' && !(type.kind === 'object' && key(type.name) === 'object')) this.fail(`Type '${type.name || type.kind}' has no member '${node.name}'`, node, 'TP_UNKNOWN_MEMBER');
+      return PASCAL_TYPES.variant;
     }
     if (node.kind === 'index') {
       const type = this.typeOf(node.object, context);
       if (isString(type)) {if (node.indices.length !== 1) this.fail('String indexing requires one ordinal index', node); return PASCAL_TYPES.char;}
       if (type.kind !== 'array') this.fail('Only arrays and strings can be indexed', node, 'TP_INDEX_TYPE');
       if (type.controlArray && (node.indices.length !== 1 || !isOrdinal(this.typeOf(node.indices[0], context)))) this.fail('Control arrays require exactly one ordinal index', node, 'TP_INDEX_TYPE');
-      if (node.indices.length > type.dimensions.length && !type.open) this.fail('Too many array indices', node, 'TP_INDEX_COUNT');
-      return type.open || node.indices.length === type.dimensions.length ? type.element : {...type, dimensions: type.dimensions.slice(node.indices.length)};
+      if (!node.indices.length) this.fail('Array indexing requires at least one ordinal index', node, 'TP_INDEX_COUNT');
+      if (node.indices.length > type.dimensions.length && !type.open && !type.dynamic) this.fail('Too many array indices', node, 'TP_INDEX_COUNT');
+      return type.open || type.dynamic || node.indices.length === type.dimensions.length ? type.element : {...type, dimensions: type.dimensions.slice(node.indices.length)};
     }
     if (node.kind === 'dereference') {const type = this.typeOf(node.object, context); if (type.kind !== 'pointer') this.fail('Dereference requires a typed pointer', node, 'TP_POINTER_TYPE'); return type.target;}
     if (node.kind === 'unary') {if (node.operator === '@') this.fail('Routine and storage addresses require procedural-pointer lowering', node, 'TP_UNSUPPORTED_POINTER'); if (['+','-'].includes(node.operator) && numericLiteral(node.operand)) return this.binder.constant(node, context.scope).type; const operand = this.typeOf(node.operand, context); return isBoolean(operand) ? PASCAL_TYPES.boolean : isNumeric(operand) ? numericType(operand, operand) : operand;}
@@ -151,6 +162,7 @@ export class PascalLowerer {
       if (symbol?.kind === 'type') return symbol.type;
       if (symbol?.kind === 'result') return symbol.procedure.returnType;
       if (symbol?.kind === 'procedure') return symbol.returnType || PASCAL_TYPES.variant;
+      if (symbol?.kind === 'foreignProperty') return symbol.type;
       if (['succ', 'pred', 'abs'].includes(name) && node.args.length) return this.typeOf(node.args[0], context);
       if (name === 'sqr' && node.args.length) {const type = this.typeOf(node.args[0], context); return numericType(type, type);}
       if (name === 'random' && node.args.length) return PASCAL_TYPES.integer;
@@ -190,6 +202,7 @@ export class PascalLowerer {
       const symbol = this.resolve(node, context, false);
       if (!symbol && Object.hasOwn(INTRINSIC_TYPES, key(node.name))) return this.expression({...node, kind: 'call', callee: node, args: []}, context);
       if (!symbol) this.fail(`Unknown identifier '${node.name}'`, node, 'TP_UNKNOWN_IDENTIFIER');
+      if (symbol.foreign) return foreignExpression(this, symbol, context, node, {lvalue});
       if (symbol.kind === 'type') this.fail('Type identifier cannot be used as a value', node);
       if (symbol.kind === 'withField') return symbol.access;
       if (symbol.kind === 'procedure' && !lvalue || symbol.kind === 'result' && forceCall) return this.routineCall(symbol.kind === 'result' ? symbol.procedure : symbol, [], context, node);
@@ -198,6 +211,7 @@ export class PascalLowerer {
     }
     if (node.kind === 'member') {
       const symbol = this.memberSymbol(node, context);
+      if (symbol?.foreign) return foreignExpression(this, symbol, context, node, {lvalue});
       if (symbol) return symbol.kind === 'procedure' && !lvalue ? this.routineCall(symbol, [], context, node) : symbol.kind === 'constant' || symbol.kind === 'enumMember' ? this.literal(symbol.value, symbol.type) : this.access(symbol, context);
       this.typeOf(node, context);
       return `${this.expression(node.object, context, {lvalue: true})}.${identifier(node.name)}`;
@@ -269,6 +283,7 @@ export class PascalLowerer {
     const indexed = this.controlArrayIndex(node, context); if (indexed) return this.expression(indexed, context);
     const name = node.callee.kind === 'identifier' ? key(node.callee.name) : null;
     const symbol = name ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context);
+    if (symbol?.foreign) return foreignCall(this, symbol, node.args, context, node);
     if (symbol?.kind === 'type') {this.count(node, 1); if (symbol.type.name === 'Extended') this.fail('Extended requires 80-bit floating point storage; supported real types are Real48, Single and Double', node, 'TP_UNSUPPORTED_REAL80'); const value = this.expression(node.args[0], context); if (symbol.type.kind === 'char') return this.callHelper('chr', [value]); if (symbol.type.kind === 'boolean') return `(${value} <> 0&)`; if (isNumeric(symbol.type)) return this.range(symbol.type.kind === 'real' ? `CDbl(${value})` : `Fix(${value})`, symbol.type, context, node); this.fail('This type cast requires storage reinterpretation', node, 'TP_UNSUPPORTED_CAST');}
     if (symbol?.kind === 'procedure' || symbol?.kind === 'result') return this.routineCall(symbol.kind === 'result' ? symbol.procedure : symbol, node.args, context, node);
     if (!symbol && name) {
@@ -283,7 +298,7 @@ export class PascalLowerer {
       if (name === 'concat') return `(${node.args.map(arg => this.expression(arg, context)).join(' & ') || '""'})`;
       if (name === 'low' || name === 'high') {
         this.count(node, 1); const type = this.typeOf(node.args[0], context); let value = type[name];
-        if (type.kind === 'array') {if (type.controlArray) return `${this.expression(node.args[0], context, {lvalue: true})}.${name === 'low' ? 'LBound' : 'UBound'}`; if (type.open) {const source = this.expression(node.args[0], context, {lvalue: true}); return name === 'low' ? '0&' : `(UBound(${source}) - LBound(${source}))`;} value = type.dimensions[0][name];}
+        if (type.kind === 'array') {if (type.controlArray) return `${this.expression(node.args[0], context, {lvalue: true})}.${name === 'low' ? 'LBound' : 'UBound'}`; if (type.dynamic) return `${name === 'low' ? 'LBound' : 'UBound'}(${this.expression(node.args[0], context, {lvalue: true})})`; if (type.open) {const source = this.expression(node.args[0], context, {lvalue: true}); return name === 'low' ? '0&' : `(UBound(${source}) - LBound(${source}))`;} value = type.dimensions[0][name];}
         if (type.kind === 'string') value = name === 'low' ? 0 : type.capacity;
         if (value === undefined) this.fail('Low/High require an ordinal type, string, or array', node); return number(value);
       }
@@ -310,6 +325,7 @@ export class PascalLowerer {
     this.fail('SizeOf requires a statically sized Turbo Pascal type', node, 'TP_SIZEOF');
   }
   routineCall(symbol, args, context, node) {
+    if (symbol.foreign) return foreignCall(this, symbol, args, context, node);
     const objectCall = objectRoutineCall(this, symbol, args, context, node); if (objectCall !== null) return objectCall;
     return `${this.access(symbol, context)}(${this.routineArguments(symbol, args, context, node).join(', ')})`;
   }
@@ -343,8 +359,9 @@ export class PascalLowerer {
   assignable(node, context) {
     const indexed = this.controlArrayIndex(node, context); if (indexed) return this.assignable(indexed, context);
     if (node.kind === 'group') return this.assignable(node.expression, context);
-    if (node.kind === 'identifier') {const symbol = this.resolve(node, context); if (!['variable', 'parameter', 'result', 'withField', 'control', 'external'].includes(symbol.kind)) this.fail(`Cannot assign to '${node.name}'`, node, 'TP_ASSIGNMENT'); if (symbol.kind === 'parameter' && symbol.param.constant) this.fail(`Cannot modify const parameter '${node.name}'`, node, 'TP_ASSIGNMENT'); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); return symbol;}
-    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (symbol && !['variable', 'parameter'].includes(symbol.kind)) this.fail('Exported member is not assignable', node, 'TP_ASSIGNMENT'); if (!symbol) this.assignable(node.object, context); return symbol;}
+    if (node.kind === 'call') {const symbol = node.callee.kind === 'identifier' ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context); if (symbol?.foreign) return foreignAssignable(this, symbol, node);}
+    if (node.kind === 'identifier') {const symbol = this.resolve(node, context); if (symbol.foreign) return foreignAssignable(this, symbol, node); if (!['variable', 'parameter', 'result', 'withField', 'control', 'external'].includes(symbol.kind)) this.fail(`Cannot assign to '${node.name}'`, node, 'TP_ASSIGNMENT'); if (symbol.kind === 'parameter' && symbol.param.constant) this.fail(`Cannot modify const parameter '${node.name}'`, node, 'TP_ASSIGNMENT'); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); return symbol;}
+    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (symbol?.foreign) return foreignAssignable(this, symbol, node); if (symbol && !['variable', 'parameter'].includes(symbol.kind)) this.fail('Exported member is not assignable', node, 'TP_ASSIGNMENT'); if (!symbol) this.assignable(node.object, context); return symbol;}
     if (node.kind === 'index') {this.assignable(node.object, context); this.typeOf(node, context); return null;}
     if (node.kind === 'dereference') {this.typeOf(node, context); return null;}
     this.fail('Variable reference required', node, 'TP_ASSIGNMENT');
@@ -354,6 +371,7 @@ export class PascalLowerer {
     const targetType = this.typeOf(target, context), valueType = this.typeOf(value, context);
     if (targetType.kind === 'file') this.fail('File variables cannot be copied by assignment', node, 'TP_FILE_ASSIGNMENT');
     if (!assignmentCompatible(targetType, valueType)) this.fail(`Cannot assign ${valueType.name || valueType.kind} to ${targetType.name || targetType.kind}`, node, 'TP_ASSIGNMENT_TYPE');
+    if (foreignAssignment(this, target, value, context, node)) return;
     if (lowerObjectAssignment(this, target, value, context, node)) return;
     if (target.kind === 'index' && isString(this.typeOf(target.object, context))) {const objectType = this.typeOf(target.object, context); this.emit(context, `Call ${this.helper('stringSet')}(${this.expression(target.object, context, {lvalue: true})}, ${this.ordinal(target.indices[0], context)}, ${this.expression(value, context)}, ${number(objectType.capacity)})`, node); return;}
     const destination = this.expression(target, context, {lvalue: true}), source = value.kind === 'nil' && targetType.kind === 'object' ? 'Nothing' : this.expression(value, context, {lvalue: isAggregate(valueType)});
@@ -392,7 +410,7 @@ export class PascalLowerer {
     const indexed = this.controlArrayIndex(node, context); if (indexed) return this.freezeReference(indexed, context);
     if (node.kind === 'group') return this.freezeReference(node.expression, context);
     if (node.kind === 'identifier') return this.expression(node, context, {lvalue: true});
-    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); return symbol ? this.access(symbol, context) : `${this.freezeReference(node.object, context)}.${identifier(node.name)}`;}
+    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (symbol?.foreign) return foreignAccess(this, symbol, context, {freeze: true}); return symbol ? this.access(symbol, context) : `${this.freezeReference(node.object, context)}.${identifier(node.name)}`;}
     if (node.kind === 'index') {
       const levels = []; let object = node;
       while (object.kind === 'index' && this.typeOf(object.object, context).kind === 'array') {levels.unshift(object); object = object.object;}
@@ -506,6 +524,7 @@ export class PascalLowerer {
       if (name === 'read' || name === 'readln') {const namedFile = call.args.length && this.typeOf(call.args[0], context).kind === 'file'; this.files.read(call, context, node, name === 'readln', !namedFile); return;}
       if (['clrscr', 'gotoxy', 'textcolor', 'textbackground', 'window', 'delay', 'sound', 'nosound'].includes(name)) this.fail(`Crt.${call.callee.name} requires a terminal host adapter`, node, 'TP_UNSUPPORTED_CRT');
     }
+    if (symbol?.foreign) {this.emit(context, `Call ${foreignCall(this, symbol, call.args, context, node, {statement: true})}`, node); return;}
     const compiled = this.call(call, context); this.emit(context, `Call ${compiled}`, node);
   }
   emitVariable(symbol, context, modifier = 'Dim') {

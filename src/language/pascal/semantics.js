@@ -1,5 +1,6 @@
 import {PascalError} from './lexer.js';
 import {pascalFormControlTypes} from './form-bindings.js';
+import {PascalForeignBindings} from './foreign-binding.js';
 import {parsePascalModule} from './parser.js';
 import {resolveObjectType, prepareObjectMethods, validateObjectMethodLocals, validateObjectMethodSignature, objectReferenceCompatible} from './object-lowering.js';
 import {builtinType, BUILTIN_SYMBOLS, CONSTANT_SYMBOLS} from '../type-catalog.js';
@@ -27,6 +28,7 @@ export const isAggregate = type => ['array', 'record'].includes(type?.kind);
 export function foreignType(name = 'Variant') {
   const normalized = key(name), primitive = {long: 'longint', integer: 'integer', byte: 'byte', boolean: 'boolean', single: 'single', double: 'double', string: 'string', variant: 'variant'}[normalized];
   if (primitive) return {...PASCAL_TYPES[primitive], foreign: true};
+  if (normalized === 'currency' || normalized === 'date') return {kind: 'real', name: normalized === 'currency' ? 'Currency' : 'Date', vb: normalized === 'currency' ? 'Currency' : 'Date', foreign: true};
   if (builtinType(name)?.kind === 'enum' || /constants$|enum$|^vb/i.test(name) && !builtinType(name)) return {...PASCAL_TYPES.longint, foreign: true};
   return {kind: 'object', name, vb: 'Object', catalogName: name, foreign: true};
 }
@@ -74,7 +76,11 @@ export function assignmentCompatible(target, value) {
   if (target.kind === 'set' && value.kind === 'set') return !value.base || !target.base || sameType(target.base, value.base) || isNumeric(target.base) && isNumeric(value.base);
   if (target.kind === 'array' && value.kind === 'array' && target.open) return sameType(target.element, value.element);
   if (target.kind === 'pointer' && value.kind === 'nil' || target.kind === 'object' && value.kind === 'nil') return true;
-  return target.kind === 'object' && value.kind === 'object';
+  if (target.kind === 'object' && value.kind === 'object') {
+    if (target.foreignModule && value.foreignModule) return key(target.name) === key(value.name) || value.foreignModule.interfaces.some(contract => key(contract.name) === key(target.name));
+    return true;
+  }
+  return false;
 }
 
 export class PascalScope {
@@ -95,6 +101,7 @@ export class PascalScope {
     if (this.owner.controls.has(key(name))) return {kind: 'control', name, vbName: name, owner: this.owner, scope: this, type: this.owner.controlTypes.get(key(name)) || foreignType('Control')};
     if (this.owner.externalValues.has(key(name))) return {kind: 'external', name, vbName: name, owner: this.owner, scope: this, type: this.owner.externalTypes.get(key(name)) || PASCAL_TYPES.variant, ...(key(name) === 'filemode' ? {ioGlobal: 'fileMode'} : {})};
     if (key(name) === 'self' && this.owner.input.form) return {kind: 'control', name, vbName: 'Me', owner: this.owner, scope: this, type: foreignType(this.owner.input.form.type || 'Form')};
+    const foreign = this.owner.workspace.foreign.resolve(name, (message, location, code) => this.owner.fail(message, location, code), node); if (foreign) return foreign;
     const constant = basicConstants.get(key(name)); if (constant) return {kind: 'constant', name: constant.name, value: constant.value, type: foreignType(constant.type), builtIn: true};
     const intrinsic = basicIntrinsics.get(key(name)); if (intrinsic && !this.owner.pascalIntrinsics.has(key(name))) return {kind: 'external', name: intrinsic.name, vbName: intrinsic.name, type: foreignType(intrinsic.type), owner: this.owner, scope: this};
     if (required) this.owner.fail(`Unknown identifier '${name}'`, node, 'TP_UNKNOWN_IDENTIFIER');
@@ -108,6 +115,7 @@ export class PascalWorkspace {
     for (const input of project?.modules || []) if (/^(?:pascal|turbo[- ]?pascal|tp7|tp)$/i.test(input.language || input.sourceLanguage || project.language || ''))
       this.inputs.set(key(input.name), {...input, conditionalConstants: project.settings?.conditionalConstants || {}});
   }
+  get foreign() {return this.foreignBindings ||= new PascalForeignBindings(this.project, foreignType);}
   add(input, ast) {const binder = new PascalBinder(ast, input, this); this.binders.set(key(input.name || ast.name), binder); this.binders.set(key(ast.name), binder); return binder;}
   get(name) {
     const normalized = key(name); if (this.binders.has(normalized)) return this.binders.get(normalized);
@@ -137,7 +145,7 @@ export class PascalBinder {
     this.pascalIntrinsics = new Set('abs append arctan assign blockread blockwrite chr close concat copy cos delete dispose eof eoln erase exp filepos filesize flush frac get high include exclude inc dec insert int ioresult length ln low new odd ord paramcount paramstr pi pos pred put random randomize read readln rename reset rewrite round seek sin sizeof sqr sqrt str succ trunc upcase val write writeln'.split(' '));
     this.controlTypes = pascalFormControlTypes(input?.form, foreignType, message => this.fail(message, ast, 'TP_FORM_DECLARATION'));
     this.controls = new Set(this.controlTypes.keys());
-    for (const module of workspace.project?.modules || []) if (module.form) {this.controls.add(key(module.name)); this.controlTypes.set(key(module.name), foreignType(module.form.type || 'Form'));}
+    for (const module of workspace.project?.modules || []) if (module.form) {this.controls.add(key(module.name)); this.controlTypes.set(key(module.name), workspace.foreign.types.get(key(module.name)) || foreignType(module.form.type || 'Form'));}
     for (const [name, type] of Object.entries({me: input?.form?.type || 'Form', app: 'App', screen: 'Screen', clipboard: 'Clipboard', forms: 'Forms', printer: 'Printer', debug: 'Debug'})) this.externalTypes.set(name, foreignType(type));
     this.externalValues.add('filemode'); this.externalTypes.set('filemode', PASCAL_TYPES.byte);
     if (input?.form) for (const member of builtinType(input.form.type || 'Form')?.members || []) {this.externalValues.add(key(member.name)); this.externalTypes.set(key(member.name), foreignType(member.type));}
@@ -224,6 +232,8 @@ export class PascalBinder {
     if (node.kind === 'namedType') {
       if (key(node.name) === 'extended') this.fail('Extended requires 80-bit floating point storage; shared backend currently supports Real48, Single and Double', node, 'TP_UNSUPPORTED_REAL80');
       if (key(node.name) === 'comp') this.fail('Comp requires exact signed 64-bit integer arithmetic and storage', node, 'TP_UNSUPPORTED_COMP');
+      const foreign = node.name.includes('.') ? this.workspace.foreign.publicType(node.name, (message, location, code) => this.fail(message, location, code), node) : null;
+      if (foreign) return foreign;
       const parts = node.name.split('.');
       if (parts.length > 1) {const binder = this.workspace.get(parts[0]); if (!binder || binder !== this && !this.imports.includes(binder)) this.fail(`Unit '${parts[0]}' is not in the uses clause`, node); binder.ensure(); const symbol = binder.scope.symbols.get(key(parts.slice(1).join('.'))); if (!symbol || symbol.kind !== 'type' || binder !== this && !symbol.public) this.fail(`Unknown exported type '${node.name}'`, node); return binder.resolveSymbol(symbol).type;}
       const symbol = scope.resolve(node.name, true, node); if (symbol.kind !== 'type') this.fail(`'${node.name}' is not a type`, node); return symbol.type;
@@ -284,7 +294,13 @@ export class PascalBinder {
     if (node.kind === 'string') return {value: node.value, type: node.value.length === 1 ? PASCAL_TYPES.char : {...PASCAL_TYPES.string, literalLength: node.value.length}};
     if (node.kind === 'boolean') return {value: node.value, type: PASCAL_TYPES.boolean};
     if (node.kind === 'identifier') {const symbol = scope.resolve(node.name, true, node); if (!['constant', 'enumMember'].includes(symbol.kind)) this.fail('Constant expression required', node, 'TP_CONSTANT'); return {value: symbol.value, type: symbol.type};}
-    if (node.kind === 'member' && node.object.kind === 'identifier') {const binder = this.workspace.get(node.object.name); binder?.ensure(); const symbol = binder?.scope.symbols.get(key(node.name)); if (!symbol?.public || !['constant', 'enumMember'].includes(symbol.kind)) this.fail('Exported constant expression required', node, 'TP_CONSTANT'); return binder.constant({kind: 'identifier', name: symbol.name, loc: node.loc}, binder.scope);}
+    if (node.kind === 'member') {
+      const binder = node.object.kind === 'identifier' ? this.workspace.get(node.object.name) : null;
+      if (binder) {binder.ensure(); const symbol = binder.scope.symbols.get(key(node.name)); if (!symbol?.public || !['constant', 'enumMember'].includes(symbol.kind)) this.fail('Exported constant expression required', node, 'TP_CONSTANT'); return binder.constant({kind: 'identifier', name: symbol.name, loc: node.loc}, binder.scope);}
+      const resolve = expression => {if (expression.kind === 'identifier') return scope.resolve(expression.name, false, expression); if (expression.kind !== 'member') return null; const parent = resolve(expression.object); return parent?.type ? this.workspace.foreign.member(parent.type, expression.name, (message, location, code) => this.fail(message, location, code), expression) : null;};
+      const symbol = resolve(node); if (symbol?.kind === 'constant') return {value: symbol.value, type: symbol.type};
+      this.fail('Exported constant expression required', node, 'TP_CONSTANT');
+    }
     if (node.kind === 'unary') {
       let literal = node.operand; while (literal.kind === 'group') literal = literal.expression;
       if (node.operator === '-' && literal.kind === 'number' && !literal.raw.startsWith('$') && literal.value === 2147483648) return {value: -2147483648, type: PASCAL_TYPES.longint};
