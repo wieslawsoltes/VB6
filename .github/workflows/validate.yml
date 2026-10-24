@@ -134,6 +134,8 @@ jobs:
       - name: Type-check standalone Intelligent UI declarations
         run: npm exec --yes --package=typescript@5.8.3 -- tsc --noEmit --strict --lib ES2023,DOM --module NodeNext --moduleResolution
           NodeNext packages/intelligent-ui/src/index.d.ts
+      - name: Type-check and execute an independently installed Pascal SDK consumer
+        run: npm exec --yes --package=typescript@5.8.3 -- node tools/test-pascal-types.mjs
       - name: Independently installed COM and Automation packages
         run: node tools/test-com-ole-packages.mjs
       - name: Independently extracted layout package and labelled solver benchmarks
@@ -398,6 +400,12 @@ jobs:
           path: dist
       - name: Actual Monaco and Figma integration on both origins
         run: python tools/ci/run.py advanced-editor
+      - name: Pascal forms, editing, MCP and debugging in Monaco over HTTP
+        run: python tools/browser-pascal-tests.py --advanced --origin http
+        if: '!cancelled()'
+      - name: Pascal forms, editing, MCP and debugging in offline Monaco
+        run: python tools/browser-pascal-tests.py --advanced --origin file
+        if: '!cancelled()'
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
@@ -406,6 +414,7 @@ jobs:
           name: advanced-editor-${{ matrix.browser }}
           path: |-
             reports/advanced-editor
+            reports/pascal
             reports/ci
           if-no-files-found: error
           retention-days: 7

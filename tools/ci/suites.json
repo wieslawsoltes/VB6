@@ -31,6 +31,7 @@
     "browser-layout-tests.py",
     "auto-layout-browser-tests.py",
     "browser-diagnostics-navigation-tests.py",
+    "browser-pascal-tests.py",
     "browser-sample-exports.py",
     "browser-exporter-tests.py"
   ],

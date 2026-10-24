@@ -21,6 +21,7 @@
     "tools/browser-macos-export-tests.py",
     "tools/browser-migration-tests.py",
     "tools/browser-native-caption-tests.py",
+    "tools/browser-pascal-tests.py",
     "tools/browser-rendering-agent-thread.py",
     "tools/browser-rendering-recovery.py",
     "tools/browser-rendering-resources.py",
