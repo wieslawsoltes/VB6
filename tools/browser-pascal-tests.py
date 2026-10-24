@@ -92,9 +92,9 @@ def focus_code(page, line=1, column=1):
 def studio(browser, errors, requests):
     context = browser.new_context(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
     context.set_default_timeout(20000)
+    context.on('page', lambda page: page.on('pageerror', lambda error: errors.append(str(error))))
+    context.on('request', lambda request: requests.append(request.url))
     page = context.new_page()
-    page.on('pageerror', lambda error: errors.append(str(error)))
-    page.on('request', lambda request: requests.append(request.url))
     page.goto(url(ARTIFACT))
     page.wait_for_function('globalThis.vb6Studio?.mcp&&globalThis.VB6StudioAPI')
     page.evaluate('async()=>{await vb6Studio.setRenderingPolicy({backend:"html"});}')
@@ -339,11 +339,15 @@ def source_debugger(page):
     check(pause['reason'] == 'breakpoint', pause)
     check(inspect(page, 'Counter')['value'] == '5')
     check(inspect(page, 'Values[1] + Counter')['value'] == '9')
+    page.wait_for_function('''vb6Studio.watchValues.some(v=>
+      v.expression==='Values[1] + Counter'&&v.value==='9')''')
     focus_code(page, 8)
     page.keyboard.press('F8')
     page.wait_for_function('''()=>vb6Studio.runState==='paused'&&pascalPauses.length===2&&
       pascalPauses[1].source==='DebugPascal'&&pascalPauses[1].line===9''')
     check(inspect(page, 'Counter')['value'] == '6')
+    page.wait_for_function('''vb6Studio.watchValues.some(v=>
+      v.expression==='Values[1] + Counter'&&v.value==='10')''')
     check(page.evaluate('vb6Studio.editor.execution.line') == 9)
     page.screenshot(path=str(REPORT / 'pascal-source-debugger.png'), animations='disabled')
     command(page, 'immediate')
@@ -351,13 +355,15 @@ def source_debugger(page):
     field.fill('Counter := Counter + 2')
     field.press('Enter')
     page.wait_for_function('vb6Studio.locals.some(v=>v.name.toLowerCase()==="counter"&&v.value==="8")')
+    page.wait_for_function('''vb6Studio.watchValues.some(v=>
+      v.expression==='Values[1] + Counter'&&v.value==='12')''')
     check(inspect(page, 'Counter div 3')['value'] == '2')
     check(inspect(page, '2 in [1..3]')['value'].lower() == 'true')
     command(page, 'run')
     page.wait_for_function('vb6Studio.output.includes("8")')
     check(page.evaluate('pascalPauses.length') == 2)
     return {'breakpointLine': 8, 'steppedLine': 9, 'conditionalBreakpoint': True,
-            'typedImmediate': True, 'output': '8'}
+            'watchValues': ['9', '10', '12'], 'typedImmediate': True, 'output': '8'}
 
 
 def monaco_language(page):
