@@ -227,6 +227,10 @@ export function refreshWinUI3ControlValue(c) {
       'aria-valuenow':indeterminate?null:Number(p.Value)||0});
   }
   refreshSurfaceBackground(c);
+  // Enabling a control or replacing caption children can change hit testing
+  // after this refresh, without dispatching another pointer event. Reconcile
+  // once on the existing coalesced frame, when CSS has settled its pseudo state.
+  if(c.surface)bindings.get(c)?.state.paintChanged();
 }
 export function refreshWinUI3Control(c) {
   if(!c.props.WinUI3) {
@@ -264,6 +268,7 @@ export function winui3ControlBackground(c,fallback) {
     refreshSurfaceBackground(c);
     if(isInputBackground(c))paint(c,c.input,'background','transparent');
     paint(c,c.content||c.node,'background','transparent');
+    bindings.get(c)?.state.paintChanged();
   }
   return fallback;
 }
