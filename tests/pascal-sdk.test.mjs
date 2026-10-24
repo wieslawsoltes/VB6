@@ -16,6 +16,9 @@ test('isolated Pascal SDK contains every declared artifact and resolves no check
   const manifest=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
   for(const item of ['package.json',...manifest.files])await fs.cp(path.join(root,item),path.join(temp,item),{recursive:true});
   const api=await import(pathToFileURL(path.join(temp,'dist/index.js')).href);
+  assert.deepEqual(Object.keys(api).sort(),['PASCAL_DIALECT','PASCAL_KEYWORDS','PASCAL_VERSION','PascalError','compileModule','compilePascalModule','compilePascalSource','compileProject','createPascalProject','lowerPascalModule','parsePascalModule','tokenizePascal'].sort());
+  assert.equal(manifest.exports['./browser'].types,'./src/browser.d.ts');
+  assert.ok(manifest.sideEffects.includes('./dist/browser.js'),'Bundlers must preserve the browser global installation');
   assert.equal(api.PASCAL_DIALECT,'Turbo Pascal 7.0');assert.equal(api.PASCAL_VERSION,manifest.version);
   const source=`program Main; uses Arithmetic; begin WriteLn(Twice(21)) end.`;
   const unit={name:'Arithmetic',code:'unit Arithmetic; interface function Twice(N: Integer): Integer; implementation function Twice(N: Integer): Integer; begin Twice := N * 2 end; end.'};
@@ -29,11 +32,12 @@ test('isolated Pascal SDK contains every declared artifact and resolves no check
 });
 
 test('browser compiler executes without DOM, network or dynamic source evaluation',async()=>{
-  const context=vm.createContext({TextEncoder,TextDecoder,structuredClone},{codeGeneration:{strings:false,wasm:false}});
+  const context=vm.createContext({TextEncoder,TextDecoder},{codeGeneration:{strings:false,wasm:false}});
   new vm.Script(await fs.readFile(path.join(root,'dist/browser.js'),'utf8'),{filename:'turbo-pascal.js'}).runInContext(context,{timeout:5000});
   const api=context.TurboPascal,source='program Browser; var I: Integer; begin I := 7 div 2; WriteLn(I) end.';
-  assert.equal(api.compilePascalSource(source,{name:'Browser'}).valid,true);
-  for(const forbidden of ['document','window','fetch','require'])assert.equal(context[forbidden],undefined);
+  const project={schema:1,name:'Browser',startup:'Sub Main',language:'pascal',modules:[{name:'Browser',code:source}],settings:{}};
+  assert.equal(api.compileProject(project).valid,true);
+  for(const forbidden of ['document','window','fetch','require','structuredClone'])assert.equal(context[forbidden],undefined);
   assert.equal(api.parsePascalModule({name:'Browser',code:source}).kind,'pascalModule');
   const token=api.tokenizePascal('begin\r\n  X := 1\r\nend.').find(t=>t.value==='X');
   assert.equal(token.line,2);assert.equal(token.column,3);

@@ -33,6 +33,13 @@ if (!program.valid) {
 
 In a browser, load `dist/browser.js` and call `globalThis.TurboPascal.compilePascalSource`. The bundle works in workers and isolated JavaScript contexts without DOM or network access. The repository build also writes `dist/turbo-pascal.js`.
 
+For an installed TypeScript consumer, import the ESM API from `@vb6/turbo-pascal`.
+The side-effect import `@vb6/turbo-pascal/browser` installs and declares
+`globalThis.TurboPascal`; bundlers retain that global installation. The scanner
+returns a token array with `comments`, `directives`, and `diagnostics` properties.
+Project creation/normalization uses the standard `structuredClone` API, while
+`compileProject` accepts an existing project model without requiring that API.
+
 ## API
 
 | Export | Purpose |
@@ -84,3 +91,7 @@ Default `Read`/`ReadLn` requires the VM host's `inputBox` line-input adapter; th
 ## Verification
 
 `tests/pascal-sdk.test.mjs` imports only the packaged files from an isolated directory, runs the browser bundle without DOM/network/eval capabilities, and verifies source diagnostics, unit linking, forms, and mixed-language output. The compiler, debugger, IDE, file, object, CLI, and native suites are documented in [the language guide](../../docs/TURBO-PASCAL.md).
+
+`npm exec --yes --package=typescript@5.8.3 -- node tools/test-pascal-types.mjs`
+type-checks an independently installed consumer in strict NodeNext and Bundler
+resolution modes, then executes the compiled consumer against the shipped API.

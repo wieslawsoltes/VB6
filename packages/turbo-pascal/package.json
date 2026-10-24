@@ -7,11 +7,11 @@
   "types": "./src/index.d.ts",
   "exports": {
     ".": {"types": "./src/index.d.ts", "import": "./dist/index.js"},
-    "./browser": "./dist/browser.js",
+    "./browser": {"types": "./src/browser.d.ts", "default": "./dist/browser.js"},
     "./package.json": "./package.json"
   },
-  "files": ["dist", "src/index.d.ts", "README.md", "LICENSE"],
-  "sideEffects": false,
+  "files": ["dist", "src/index.d.ts", "src/browser.d.ts", "README.md", "LICENSE"],
+  "sideEffects": ["./dist/browser.js"],
   "engines": {"node": ">=22"},
   "license": "MIT"
 }
