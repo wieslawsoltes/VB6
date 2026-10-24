@@ -159,8 +159,9 @@ export function paintChrome(buffer,state,profile='turbo') {
         buffer.frame(x,y,width,height,{foreground:fg,background:paper,title:item.text,double:profile==='commander'});continue;
       }
       if(item.kind==='function'){
-        buffer.text(x,cy,item.key,{...base,foreground:base.hotkey,width});
-        buffer.text(x+item.key.length+1,cy,item.text,{...base,width:Math.max(0,width-item.key.length-1)});continue;
+        buffer.fill(x,cy,width,1,' ',ink,paper);
+        buffer.text(x,cy,item.key,{foreground:item.disabled?ink:a.hotkey,background:paper,width});
+        buffer.text(x+item.key.length+1,cy,item.text,{foreground:ink,background:paper,width:Math.max(0,width-item.key.length-1)});continue;
       }
       const text=String(item.text??'');
       if(item.kind==='field'&&item.check){buffer.text(x,y,(item.radio?'(':'[')+(item.checked?'X':' ')+(item.radio?')':']'),{foreground:ink,background:paper,width});continue;}

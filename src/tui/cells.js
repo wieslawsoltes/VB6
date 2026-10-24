@@ -13,6 +13,7 @@ export const DOS_SETTINGS_KEY = 'vb6-studio-web.dos-workspace.v1';
 export function normalizeDOSSettings(value = {}) {
   return {mode:value?.mode === 'dos' ? 'dos' : 'classic',profile:Object.hasOwn(TUI_PROFILES,value?.profile) ? value.profile : 'turbo',cellWidth:[8,9,10,12].includes(value?.cellWidth) ? value.cellWidth : 8,cellHeight:[14,16,18,20,24].includes(value?.cellHeight) ? value.cellHeight : 16,
     ...(['authored','readable'].includes(value?.formLayout)?{formLayout:value.formLayout}:{}),
+    ...(['project','cells'].includes(value?.designerGrid)?{designerGrid:value.designerGrid}:{}),
     ...(['blocks','braille','native'].includes(value?.graphics)?{graphics:value.graphics}:{}),
     ...(['cells','native'].includes(value?.editing)?{editing:value.editing}:{})};
 }

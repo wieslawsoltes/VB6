@@ -14,6 +14,10 @@ from dos_boundary_checks import run_boundary_checks
 from dos_extended_checks import run_extended_checks
 from dos_fidelity_checks import run_fidelity_checks
 from dos_precision_checks import run_precision_checks
+from dos_shell_checks import run_shell_checks
+from dos_collection_checks import run_collection_checks
+from dos_text_focus_checks import run_text_focus_checks
+from dos_designer_grid_checks import run_designer_grid_checks
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = os.environ.get('VB6_BROWSER', 'chromium')
@@ -163,6 +167,10 @@ try:
     results['errors'] = errors
     assert not errors, errors
     results['runtime_checks'] = run_runtime_checks(browser, ROOT, REPORT, page.evaluate('vb6Studio.project'))
+    results['shell'] = run_shell_checks(browser, ROOT, REPORT)
+    results['collection_checks'] = run_collection_checks(browser, ROOT, REPORT, page.evaluate('vb6Studio.project'))
+    results['text_focus'] = run_text_focus_checks(browser, ROOT, REPORT, page.evaluate('vb6Studio.project'))
+    results['designer_grid'] = run_designer_grid_checks(browser, ROOT, REPORT)
     results['extended_checks'] = run_extended_checks(browser, ROOT, REPORT, page.evaluate('vb6Studio.project'))
     results['boundary_checks'] = run_boundary_checks(browser, ROOT, REPORT, page.evaluate('vb6Studio.project'))
     results['fidelity_matrix'] = run_fidelity_checks(browser, ROOT, REPORT)

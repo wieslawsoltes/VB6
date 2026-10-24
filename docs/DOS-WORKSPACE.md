@@ -35,6 +35,11 @@ remains in use; palette and lifetime follow the owning host. The retained HTML/G
 scene treats cell-painted regions as native islands rather than painting over
 TUI output. This contract does not certify every GPU/backend/device combination.
 
+Node-scoped collection-metric and designer-grid providers in `src/rendering`
+let a presentation request visual row/column spacing from the existing widgets
+and designer. Providers have independent, reversible leases; callbacks update
+the original materialized geometry without storing presentation data in a project.
+
 ## Character buffers and allocation
 
 `CellBuffer` stores Unicode scalar glyphs, packed EGA16 foreground/background and
@@ -94,6 +99,18 @@ display** retains original hit rectangles. Switching modes restores owned CSS.
 IDE DOS mode defaults to readable display; an embedded ApplicationHost defaults
 to authored geometry unless `formLayout: 'readable'` is explicitly selected.
 
+**Tools > DOS Workspace Options > Designer grid** selects **Project grid**
+(the default) or **Character cells**. Character-cell dimensions map through the
+readable-form scale into the shared designer coordinate system. Pointer drawing,
+movement and resizing, free auto-layout gestures and keyboard movement use the
+horizontal and vertical cell pitch. Authored project twips, constraints and undo
+history remain canonical; Ctrl/Command+arrow retains the one-pixel fine step.
+
+The existing Show Grid option controls visibility. Empty designer backgrounds
+use logical cell markers so sparse grid dots survive cell projection; pictures
+and authored drawing retain the ordinary graphics path. Changing presentation
+or disposing DOS mode restores the project grid.
+
 ## Control and workspace coverage
 
 All 40 built-in toolbox controls have explicit paint capabilities, plus Form/MDIForm.
@@ -104,6 +121,13 @@ Form, Frame, PictureBox and tab containers retain their original ownership and
 child structure while chrome, tabs and materialized graphics receive cell paint.
 Image and MSChart support raster projection. WebBrowser, OLE and unknown OCXs
 remain explicit native interactive surfaces, not empty substitute controls.
+
+TreeView, ListView, MSFlexGrid, MSHFlexGrid and DataGrid use the presentation's
+row/header pitch in both their native layout and cell painter. Logical scroll
+positions, virtual extents, header placement and keyboard reveal follow that
+same geometry. Metric changes retain an active grid editor and its native input
+identity. Authored row-height properties remain unchanged; releasing the
+presentation restores the original layout metrics and owned styles.
 
 Intrinsic Shape supports six shape kinds, eight fill patterns and dashed/dotted
 perimeters; cell aspect is considered for circles/squares. Range orientation,
@@ -122,6 +146,32 @@ Native theme-preview examples intentionally preserve the appearance being previe
 The shell is still laid out by HTML. It is not a single hardware character-grid
 window manager, and arbitrary hosted content is not globally quantized.
 
+### Function keys and pane navigation
+
+The bottom command strip presents F1 through F10. Holding Shift, Ctrl or the
+platform Meta modifier shows the corresponding existing IDE shortcuts: definition
+and position navigation, bookmarks, debug stepping, watches, code/form views and
+document commands. Shift+F2 runs Go to Definition; Ctrl+Shift+F2 runs Last Position
+when navigation history is available. Unassigned modified
+keys remain empty. The original source editor, menu and debugger continue to own
+those keyboard bindings. Strip clicks call the same `ide.command` dispatcher and
+recheck live menu availability before acting. Disabled commands and keyboard focus
+use the active palette's own cell attributes.
+
+F6 moves to the next visible docked pane or document; Shift+F6 moves backward.
+Each pane remembers its last native focus target, preserving the original source
+selection and input element. Hidden/inert panes, minimized documents, disabled
+fields and removed targets are skipped. Dialogs and open pickers retain their
+keyboard ownership. Ctrl+F6 and Ctrl+Shift+F6 keep the existing MDI document cycle.
+The View menu also exposes the two pane commands.
+
+The function strip is one keyboard tab stop. Left/Right, Home and End navigate
+available commands, Enter/Space activate the focused button, and Escape returns
+to the previously focused pane. Detached IDE windows receive their own strip and
+modifier state. Blur clears held modifiers; switching presentations or closing
+an owning window removes its strip and listeners. No polling loop, separate
+editor buffer, authored project metadata or undo entry is introduced.
+
 ## Text, rich text and the optional advanced editor
 
 TextBox and editable ComboBox project native UTF-16 selections, supplementary
@@ -129,6 +179,8 @@ characters, tabs, CRLF, wrapping, scrolling, alignment and a block caret. Passwo
 snapshots contain masked glyphs. Original input, clipboard, IME, undo and VB6 events
 remain authoritative. Complex shaping, bidirectional text and composition expose
 the original editor rather than guessing a visually incorrect scalar order.
+Empty and trailing-empty aligned lines keep a visible insertion caret; selecting
+a newline extends the selection without moving the line's aligned text.
 
 RichTextBox projects actual DOM run geometry and selection through
 `src/tui/rich-text.js`; it does not parse or edit a second RTF document. EGA color
@@ -269,6 +321,11 @@ readable captions, staged Options, portals, dates/colors/selects, rich text, own
 allocations, lifetime restoration and actual downloads. Advanced tests exercise
 real Monaco input, folds, split views, independent carets, shared history,
 configuration leases, screen projection and composition lifecycle.
+Additional shared-designer checks exercise rectangular cell drawing, drag/resize,
+keyboard nudges, auto-layout free gestures, readable scaling, zoom and canonical
+undo. Shell checks compare actual key dispatch with command-strip activation,
+including detached windows; collection and text checks retain native inputs while
+verifying VB6 events and restoration to Classic mode.
 
 `VB6_ORIGIN=memory` and `VB6_TEST_TRANSPORT=memory` explicitly identify offline
 qualification, not HTTP/file persistence, secure-origin or platform evidence.
