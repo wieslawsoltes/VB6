@@ -543,8 +543,9 @@ class BrowserWindows(unittest.TestCase):
 
     @unittest.skipIf(os.environ.get('VB6_TEST_TRANSPORT') == 'memory', 'Needs real navigation; exercised in HTTP CI')
     def test_standalone_file_without_network(self):
-        self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri())
-        self.page.wait_for_function('typeof vb6Studio === "object"')
+        # Standalone WebKit documents can expose the IDE before their load event.
+        self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri(), wait_until='commit')
+        self.page.wait_for_function('typeof vb6Studio === "object"', timeout=60000)
         requests = []
         self.context.on('request', lambda req: requests.append(req.url) if req.url.startswith(('http:', 'https:')) else None)
         popup = self.tool()
