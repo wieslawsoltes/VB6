@@ -75,7 +75,8 @@ def open_fixture(browser, name):
 
 def open_ide(browser):
     page = new_page(browser)
-    page.set_content(IDE_HTML)
+    # Give the standalone bundle its own parsing deadline; actions stay at 4s.
+    page.set_content(IDE_HTML, timeout=15000)
     page.wait_for_function('typeof vb6Studio !== "undefined"')
     healthy(page)
     return page
@@ -451,7 +452,7 @@ def mobile_tests(browser):
     case('390px touch viewport: scaled standalone form and working touch events',runtime)
 
     def ide():
-        page=new_page(browser,(390,844),True);page.set_content(IDE_HTML);page.wait_for_function('typeof vb6Studio !== "undefined"')
+        page=new_page(browser,(390,844),True);page.set_content(IDE_HTML,timeout=15000);page.wait_for_function('typeof vb6Studio !== "undefined"')
         width=page.evaluate('document.documentElement.scrollWidth');check(width<=390,str(width))
         page.locator('[data-command="properties"]').first.tap();page.wait_for_timeout(100)
         page.screenshot(path=str(SHOTS/'mobile-ide.png'));healthy(page);page.close()
