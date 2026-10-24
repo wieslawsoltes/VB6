@@ -9,6 +9,7 @@ import {createPascalProject,compileProject,parsePascalModule} from '../packages/
 export const PASCAL_CLI_USAGE=`Usage: node tools/compile-pascal.mjs main.pas [unit.pas ...] [options]
        node tools/compile-pascal.mjs project.vb6web [options]
   --target check|run|ir|html|win32|macos|linux   Default: check
+  --architecture x64|arm64   Linux only; default: x64
   --out FILE          Required for artifact targets; creates a new file
   --name NAME         Override the project/application name
   --help              Display help
@@ -28,7 +29,7 @@ export function parsePascalOptions(args) {
     if(arg==='--help'){result.help=true;continue;}
     if(arg==='--'){result.inputs.push(...args.slice(index+1));break;}
     if(!arg.startsWith('-')){result.inputs.push(arg);continue;}
-    if(!['--target','--out','--name'].includes(arg))throw new Error('Unknown option: '+arg);
+    if(!['--target','--out','--name','--architecture'].includes(arg))throw new Error('Unknown option: '+arg);
     if(seen.has(arg))throw new Error('Repeated option: '+arg);
     seen.add(arg);
     if(!args[index+1]||args[index+1].startsWith('--'))throw new Error('Missing value for '+arg);
@@ -37,6 +38,10 @@ export function parsePascalOptions(args) {
   if(result.help)return result;
   if(!result.inputs.length)throw new Error('A Pascal source or .vb6web project is required.');
   if(!['check','run','ir','html','win32','macos','linux'].includes(result.target))throw new Error('Unknown Pascal target: '+result.target);
+  if(result.architecture!==undefined) {
+    if(result.target!=='linux')throw new Error('--architecture is only supported for the linux target');
+    if(!['x64','arm64'].includes(result.architecture))throw new Error('Linux architecture must be x64 or arm64');
+  }
   if(!['check','run'].includes(result.target)&&!result.out)throw new Error('--out is required for '+result.target);
   if(['check','run'].includes(result.target)&&result.out)throw new Error('--out is not used by '+result.target);
   return result;
@@ -100,14 +105,21 @@ export function createPascalLineInput(input=process.stdin) {
 export async function compilePascalCLI(options,{print=(text,newline=true)=>process.stdout.write(String(text)+(newline?'\n':'')),input=process.stdin,inputBox=null}={}) {
   if(options.help){print(PASCAL_CLI_USAGE);return {valid:true};}
   const project=await readPascalProject(options.inputs,options);
-  const program=compileProject(project);
-  if(!program.valid)return {valid:false,diagnostics:program.diagnostics};
+  // Each application exporter compiles with its own platform constants. A
+  // generic preflight would incorrectly reject target-conditional declarations.
+  const program=['check','run','ir'].includes(options.target)?compileProject(project):null;
+  if(program&&!program.valid)return {valid:false,diagnostics:program.diagnostics};
   if(options.target==='check')return {valid:true,language:'pascal',modules:program.modules.size,diagnostics:[]};
   if(options.target==='run') {
     if([...program.modules.values()].some(module=>module.form))throw new Error('The run target provides console I/O; use the HTML or native target to run forms.');
     const {VirtualMachine}=await import('../src/runtime/vm.js');
+    const {VirtualFileSystem}=await import('../src/runtime/filesystem.js');
     const lines=inputBox?null:createPascalLineInput(input);
-    try {const vm=new VirtualMachine(program,{print,inputBox:inputBox||lines.inputBox});await vm.start();return {valid:true,executed:true};}
+    try {
+      const vm=new VirtualMachine(program,{print,inputBox:inputBox||lines.inputBox,
+        fs:new VirtualFileSystem(project.vfs||{}),settings:structuredClone(project.appSettings||{})});
+      await vm.start();return {valid:true,executed:true};
+    }
     finally{lines?.close();}
   }
   let bytes,report;
@@ -127,7 +139,7 @@ export async function compilePascalCLI(options,{print=(text,newline=true)=>proce
     }
     case 'linux':{
       const {exportLinuxApplication}=await import('../packages/linux-native/src/aot-export.js');
-      const result=await exportLinuxApplication(project);bytes=result.bytes;report=result.report;break;
+      const result=await exportLinuxApplication(project,{architecture:options.architecture??'x64'});bytes=result.bytes;report=result.report;break;
     }
     default:throw new Error('Unknown Pascal target: '+options.target);
   }

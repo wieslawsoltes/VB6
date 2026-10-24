@@ -9,6 +9,9 @@ import {Readable} from 'node:stream';
 import {parsePascalOptions,readPascalProject,compilePascalCLI,createPascalLineInput} from '../tools/compile-pascal.mjs';
 import {compileProject,createPascalProject} from '../packages/turbo-pascal/src/index.js';
 import {VirtualMachine} from '../src/runtime/vm.js';
+import {encodeStringTable} from '../src/project/res.js';
+import {readZip} from '../src/project/zip.js';
+import {inspectLinuxELF} from '../packages/linux-native/src/elf.js';
 
 const cli=fileURLToPath(new URL('../tools/compile-pascal.mjs',import.meta.url));
 async function temporary(action) {const directory=await fs.mkdtemp(path.join(os.tmpdir(),'pascal-cli-'));try{return await action(directory);}finally{await fs.rm(directory,{recursive:true,force:true});}}
@@ -32,6 +35,11 @@ test('Pascal CLI validates missing, repeated, unknown and incompatible options',
     [['main.pas','--target','check','--out','x'],/--out is not used/],
     [['main.pas','--target','run','--out','x'],/--out is not used/],
     [['main.pas','--name',''],/Missing value/],
+    [['main.pas','--architecture'],/Missing value/],
+    [['main.pas','--target','linux','--architecture','x86','--out','x'],/must be x64 or arm64/],
+    [['main.pas','--target','macos','--architecture','arm64','--out','x'],/only supported for the linux target/],
+    [['main.pas','--architecture','x64'],/only supported for the linux target/],
+    [['main.pas','--target','linux','--architecture','x64','--architecture','arm64','--out','x'],/Repeated option/],
   ]) assert.throws(()=>parsePascalOptions(args),message,JSON.stringify(args));
   assert.deepEqual(parsePascalOptions(['--target','check','--','--main.pas']).inputs,['--main.pas']);
   const help=invoke(['--help']); assert.equal(help.status,0,help.stderr);assert.match(help.stdout,/Usage:/);assert.match(help.stdout,/standard input/);assert.doesNotMatch(help.stdout,/"valid"/);
@@ -105,4 +113,45 @@ test('project loading rejects malformed projects, duplicate units, extra program
   await fs.writeFile(project,'{broken');await assert.rejects(readPascalProject([project]),SyntaxError);
   await fs.writeFile(extra,new Uint8Array([255,254,128]));await assert.rejects(readPascalProject([extra]),/encoded data|encoding/i);
   await assert.rejects(readPascalProject([directory]),/Expected.*input/);
+}));
+
+test('run loads project resources, files and settings into an isolated runtime snapshot',()=>temporary(async directory=>{
+  const project=createPascalProject(`program Stored;
+var F:Text; S:String;
+begin
+  Assign(F,'/input.txt'); Reset(F); ReadLn(F,S); Close(F);
+  WriteLn(S,':',LoadResString(1),':',GetSetting('Stored','Section','Key','missing'));
+  SaveSetting('Stored','Section','Key','changed');
+  Rewrite(F); WriteLn(F,'changed'); Close(F);
+  WriteLn(GetSetting('Stored','Section','Key'))
+end.`,{name:'Stored'});
+  project.vfs={files:{'/input.txt':'from-project\r\n'},directories:['/']};
+  project.appSettings={'Stored/Section/Key':'original'};
+  const strings=Array(16).fill('');strings[1]='resource';
+  project.resources={entries:[{type:6,name:1,language:0,data:Buffer.from(encodeStringTable(strings)).toString('base64')}]};
+  const filename=path.join(directory,'stored.vb6web'),snapshot=JSON.stringify(project);
+  await fs.writeFile(filename,snapshot);
+  for(let attempt=0;attempt<2;attempt++) {
+    const result=invoke([filename,'--target','run']);
+    assert.equal(result.status,0,result.stderr);
+    assert.equal(result.stdout,'from-project:resource:original\nchanged\n');
+  }
+  assert.equal(await fs.readFile(filename,'utf8'),snapshot);
+}));
+
+for(const [architecture,machine,reported] of [[undefined,62,'x86_64'],['arm64',183,'arm64']])
+test('Linux artifact CLI emits the requested '+(architecture||'default x64')+' ELF architecture',()=>temporary(async directory=>{
+  const file=path.join(directory,'native.pas'),output=path.join(directory,'native.zip');
+  await fs.writeFile(file,`program NativeProgram;
+{$IFDEF LINUX} procedure TargetOnly; begin WriteLn(42) end; {$ENDIF}
+begin TargetOnly end.`);
+  const args=[file,'--target','linux','--out',output];if(architecture)args.push('--architecture',architecture);
+  const result=invoke(args);assert.equal(result.status,0,result.stderr);
+  const summary=JSON.parse(result.stdout);assert.equal(summary.report.architecture,reported);assert.equal(summary.report.machine,machine);
+  assert.equal(summary.report.integrityVerified,true);assert.equal(summary.report.runtimeProvenanceVerified,true);
+  const archive=await readZip(await fs.readFile(output)),bytes=archive.get('NativeProgram/bin/NativeProgram');
+  assert.ok(bytes,'Verified ZIP contains the application executable');
+  assert.equal(new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getUint16(18,true),machine);
+  const layout=inspectLinuxELF(bytes,{requireProject:true,architecture:architecture||'x64'});
+  assert.ok(layout.codeSize>0);assert.equal(layout.metadataJSON.name,'NativeProgram');
 }));
