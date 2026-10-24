@@ -46,6 +46,29 @@ Visual Basic and Pascal modules can coexist. Use the shared `compileProject` API
 
 The Microsoft VB6 executable/compiler export route rejects Pascal source with `CLASSIC_LANGUAGE`. Use the browser runtime or the independent AOT exporters for Pascal projects.
 
+## Mixed Visual Basic projects
+
+Pascal binds the public declarations of Visual Basic standard modules and classes through the existing VB parser and constant binder. Standard-module members can be qualified (`Helper.Answer`) or unqualified when unambiguous. Class variables retain their declared type, including factory return values, public fields, methods, and `Property Get`/`Let`/`Set` accessors. Private declarations, missing members, incompatible arguments, read-only writes, and write-only reads produce source diagnostics.
+
+```pascal
+program Main;
+var Counter: CounterClass;
+begin
+  Counter := Factory.MakeCounter;
+  Counter.Value := Helper.Answer;
+  Counter.Entry(2) := 12;
+  WriteLn(Counter.Entry(2));
+end.
+```
+
+The example assumes VB modules declaring the named class, factory, and helper. Their `Optional` defaults, `ParamArray`, and `ByRef` signatures remain authoritative. VB enums and record/array fields retain bound constant values, dimensions, and nominal record identity. Different modules' same-named records are distinct types. Foreign receivers and argument values evaluate in source order; an array-element borrow remains held while later arguments execute, including through generated argument procedures.
+
+A qualified form instance exposes its shared form methods, properties, controls, menus, and sparse control arrays. For example, `Form1.Caption := 'Ready'`, `Form1.Show`, and `Form1.Buttons[7].Caption := 'Run'` use the existing form host. Control arrays also accept `Buttons(7)`, and `Low`/`High` report the host's current bounds after dynamic loading. A Pascal form unit must appear in the caller's `uses` clause; explicit unit visibility still protects its private declarations.
+
+`WithEvents` subscription declarations remain in VB class/form modules. A VB event sink can invoke an authored Pascal procedure with `var` parameters; the shared call and event ABI preserves synchronous callbacks and mutable event arguments. Pascal does not introduce a new `WithEvents` declaration syntax.
+
+Pascal short strings and characters have bounded storage. A mutable VB `ByRef` argument cannot directly alias those values or aggregates containing them: a VB write could otherwise bypass Pascal's capacity rules. The compiler diagnoses that case. Use explicit VB String storage for the call, then assign its result to a Pascal string to apply the declared bound. Value arguments, VB-owned strings, and VB-owned string arrays retain their normal contracts. Native exports also retain the existing backend limits, including Win32's unsupported typed-array return ABI and class-array fields.
+
 ## Architecture and reuse
 
 ```mermaid
@@ -81,9 +104,9 @@ This arrangement reuses existing optimization, form creation, event routing, sto
 | Typed pointers | Checked handles, `nil`, `New`/`Dispose`, pointer dereferencing, linked records, reusable/growing heaps, constructor/destructor allocation forms |
 | Conditional compilation | `DEFINE`, `UNDEF`, `IFDEF`, `IFNDEF`, `IFOPT`, `ELSE`, `ENDIF` |
 | Semantic switches | `B` Boolean evaluation, `R` range checks, `Q` overflow checks, `I` I/O checking; `D`/`L`/`Y` debug switches retained as metadata |
-| Host integration | Shared form/control properties and events, browser runtime adapters, Pascal-safe editor and debugger operations |
+| Host integration | Shared form/control properties and events, typed VB module/class/property calls, browser runtime adapters, Pascal-safe editor and debugger operations |
 
-Conditional symbols are case-insensitive. Project `settings.conditionalConstants` defines a symbol by its presence, including a numeric value of zero. Native exporters separately define their active platform and architecture symbols and undefine inactive target symbols; those target definitions also reach imported Pascal units. Visual Basic modules retain the same numeric target constants for `#If` expressions.
+Conditional symbols are case-insensitive. Project `settings.conditionalConstants` defines a symbol by its presence, including a numeric value of zero. Native exporters separately define their active platform and architecture symbols and undefine inactive target symbols; those target definitions also reach imported Pascal units. Linux defines exactly one of `GTK3` and `GTK4` for its selected toolkit. Win32 selects `WIN32`, `X86`, `I386`, and `IA32`; inactive platforms and architectures remain undefined. Visual Basic modules retain the same numeric target constants for `#If` expressions.
 
 Integer and Word intermediates retain their different signed ranges. Overflow checking uses Pascal error 215; range checks use 201. The debugger's pure helpers implement the same signed/unsigned distinction. Unsupported semantic compiler switches produce errors instead of being silently ignored.
 
@@ -130,9 +153,10 @@ node tools/compile-pascal.mjs app.pas --target win32 --out app.exe
 node tools/compile-pascal.mjs app.pas --target macos --out app-macos.zip
 node tools/compile-pascal.mjs app.pas --target linux --out app-linux.zip
 node tools/compile-pascal.mjs app.pas --target linux --architecture arm64 --out app-linux-arm64.zip
+node tools/compile-pascal.mjs app.pas --target linux --architecture arm64 --toolkit gtk4 --out app-linux-arm64-gtk4.zip
 ```
 
-The CLI also accepts a `.vb6web` project. Consult `--help` for explicit unit input. Output artifacts use exclusive creation so an existing output file is not replaced. Source is validated as UTF-8, diagnostics go to stderr, and run-mode stdout contains application output. Linux exports default to x64; `--architecture x64|arm64` selects the ELF architecture and is valid only with `--target linux`. Native exporters perform compilation with their own target symbols before checking the artifact. Run mode initializes the shared virtual filesystem, resources, and application settings from the project snapshot. Runtime writes stay in that session; running a project does not rewrite the input file or implicitly expose host files.
+The CLI also accepts a `.vb6web` project. Consult `--help` for explicit unit input. Output artifacts use exclusive creation so an existing output file is not replaced. Source is validated as UTF-8, diagnostics go to stderr, and run-mode stdout contains application output. Linux exports default to x64 and GTK3. `--architecture x64|arm64` selects the ELF architecture, and `--toolkit gtk3|gtk4` selects the GTK runtime; both options are valid only with `--target linux`. Source loading reads module headers without compiling target-dependent bodies. Each native exporter performs authoritative compilation with its own target symbols before checking the artifact. Run mode initializes the shared virtual filesystem, resources, and application settings from the project snapshot. Runtime writes stay in that session; running a project does not rewrite the input file or implicitly expose host files.
 
 ## Remaining compatibility boundaries
 

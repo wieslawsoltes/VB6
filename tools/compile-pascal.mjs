@@ -4,12 +4,13 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
 import {VBError} from '../src/language/lexer.js';
-import {createPascalProject,compileProject,parsePascalModule} from '../packages/turbo-pascal/src/index.js';
+import {createPascalProject,compileProject,tokenizePascal} from '../packages/turbo-pascal/src/index.js';
 
 export const PASCAL_CLI_USAGE=`Usage: node tools/compile-pascal.mjs main.pas [unit.pas ...] [options]
        node tools/compile-pascal.mjs project.vb6web [options]
   --target check|run|ir|html|win32|macos|linux   Default: check
   --architecture x64|arm64   Linux only; default: x64
+  --toolkit gtk3|gtk4  Linux only; default: gtk3
   --out FILE          Required for artifact targets; creates a new file
   --name NAME         Override the project/application name
   --help              Display help
@@ -29,7 +30,7 @@ export function parsePascalOptions(args) {
     if(arg==='--help'){result.help=true;continue;}
     if(arg==='--'){result.inputs.push(...args.slice(index+1));break;}
     if(!arg.startsWith('-')){result.inputs.push(arg);continue;}
-    if(!['--target','--out','--name','--architecture'].includes(arg))throw new Error('Unknown option: '+arg);
+    if(!['--target','--out','--name','--architecture','--toolkit'].includes(arg))throw new Error('Unknown option: '+arg);
     if(seen.has(arg))throw new Error('Repeated option: '+arg);
     seen.add(arg);
     if(!args[index+1]||args[index+1].startsWith('--'))throw new Error('Missing value for '+arg);
@@ -41,6 +42,10 @@ export function parsePascalOptions(args) {
   if(result.architecture!==undefined) {
     if(result.target!=='linux')throw new Error('--architecture is only supported for the linux target');
     if(!['x64','arm64'].includes(result.architecture))throw new Error('Linux architecture must be x64 or arm64');
+  }
+  if(result.toolkit!==undefined) {
+    if(result.target!=='linux')throw new Error('--toolkit is only supported for the linux target');
+    if(!['gtk3','gtk4'].includes(result.toolkit))throw new Error('Linux toolkit must be gtk3 or gtk4');
   }
   if(!['check','run'].includes(result.target)&&!result.out)throw new Error('--out is required for '+result.target);
   if(['check','run'].includes(result.target)&&result.out)throw new Error('--out is not used by '+result.target);
@@ -68,11 +73,16 @@ export async function readPascalProject(inputs,{name}={}) {
   const modules=[],names=new Set();
   for(const file of inputs) {
     const code=await readSource(file),fallback=path.basename(file).replace(/\.[^.]+$/,'');
-    const ast=parsePascalModule({name:fallback,code});
-    if(modules.length&&ast.moduleKind!=='unit')throw new Error('Additional Pascal source files must declare units: '+file);
-    if(names.has(ast.name.toLowerCase()))throw new Error('Duplicate Pascal program or unit name: '+ast.name);
-    names.add(ast.name.toLowerCase());
-    modules.push({name:ast.name||fallback,code,sourcePath:path.basename(file),language:'pascal'});
+    // Loading establishes source identities only. Parsing an entire module
+    // here would select default conditional branches before a native exporter
+    // has installed its platform/architecture/toolkit symbols.
+    const tokens=tokenizePascal(code,{sourceName:fallback,tolerant:true});
+    const header=['unit','program'].includes(tokens[0]?.lower)?tokens[0].lower:'fragment';
+    const sourceName=header!=='fragment'&&tokens[1]?.type==='id'?tokens[1].value:fallback;
+    if(modules.length&&header!=='unit')throw new Error('Additional Pascal source files must declare units: '+file);
+    if(names.has(sourceName.toLowerCase()))throw new Error('Duplicate Pascal program or unit name: '+sourceName);
+    names.add(sourceName.toLowerCase());
+    modules.push({name:sourceName,code,sourcePath:path.basename(file),language:'pascal'});
   }
   const [main,...units]=modules;
   return createPascalProject(main.code,{name:name||main.name,moduleName:main.name,units});
@@ -139,7 +149,7 @@ export async function compilePascalCLI(options,{print=(text,newline=true)=>proce
     }
     case 'linux':{
       const {exportLinuxApplication}=await import('../packages/linux-native/src/aot-export.js');
-      const result=await exportLinuxApplication(project,{architecture:options.architecture??'x64'});bytes=result.bytes;report=result.report;break;
+      const result=await exportLinuxApplication(project,{architecture:options.architecture??'x64',toolkit:options.toolkit??'gtk3'});bytes=result.bytes;report=result.report;break;
     }
     default:throw new Error('Unknown Pascal target: '+options.target);
   }

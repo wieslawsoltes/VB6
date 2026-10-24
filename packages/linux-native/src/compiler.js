@@ -50,7 +50,7 @@ export function compileLinuxAOT(input,options={}){
   try{
     const project=normalizeProject(input),normalized=linuxOptions({name:project.name,...options}),target=linuxTarget(normalized.architecture,normalized.toolkit),arm64=normalized.architecture==='arm64',resources=prepareMacOSResources(project);
     setTargetConditionalConstants(project,{
-      VBWEB:0,Win16:0,Win32:0,Win64:0,Mac:0,MacOS:0,ARM64:arm64?-1:0,AARCH64:arm64?-1:0,Linux:-1,Unix:-1,X86_64:arm64?0:-1,AMD64:arm64?0:-1,GTK:-1,GTK3:normalized.toolkit==='gtk3'?-1:0,GTK4:normalized.toolkit==='gtk4'?-1:0});
+      VBWEB:0,Win16:0,Win32:0,Win64:0,Mac:0,MacOS:0,ARM64:arm64?-1:0,AARCH64:arm64?-1:0,Linux:-1,Unix:-1,X86_64:arm64?0:-1,AMD64:arm64?0:-1,X86:0,I386:0,IA32:0,GTK:-1,GTK3:normalized.toolkit==='gtk3'?-1:0,GTK4:normalized.toolkit==='gtk4'?-1:0});
     const program=compileProject(project);
     if(!program.valid){const error=new LinuxCompileError('VB6 frontend rejected the Linux project');error.diagnostics=program.diagnostics;throw error;}
     const controls=linuxControlReport(project,normalized.toolkit),lowering=new LinuxDirectLowering(program,normalized,{

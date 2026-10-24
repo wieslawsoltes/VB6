@@ -71,6 +71,18 @@ end.`}]
 
 Supply units explicitly. The compiler does not search a filesystem or fetch unresolved names. Form/control definitions use the existing VB6 Studio model. A Pascal form module is a unit containing handlers such as `procedure RunButton_Click;` and `procedure Editor_KeyPress(var KeyAscii: Integer);`.
 
+Mixed projects use declared VB signatures and types. Public module members, classes and factory results, properties, nominal records, arrays, `Optional`, `ParamArray`, and `ByRef` arguments are bound before lowering. For example:
+
+```js
+const mixed = compilePascalSource('program Main; begin WriteLn(Helper.Answer()) end.', {
+  name: 'Main',
+  units: [{name: 'Helper', language: 'vb6', code:
+    'Public Function Answer() As Integer\nAnswer = 42\nEnd Function'}]
+});
+```
+
+Qualified forms expose the shared form/control/menu contract, including sparse control arrays. A Pascal form unit requires a `uses` entry. VB `WithEvents` declarations can call Pascal handlers with mutable `var` arguments through the existing event ABI; Pascal does not add `WithEvents` syntax. VB-owned strings remain unbounded. Direct mutable aliases of Pascal short strings/characters, including aggregate fields, diagnose because VB writes cannot enforce Pascal capacity rules; call through VB String storage and assign back explicitly. See the [mixed-project contract](../../docs/TURBO-PASCAL.md#mixed-visual-basic-projects) for visibility, argument ordering, and native limits.
+
 Diagnostics retain Pascal source coordinates. Compiled Pascal modules expose `language`, original `source`, `generatedSource`, and Pascal/source-map metadata. Generated procedures use the reserved `__Pascal` prefix. Consumers should execute the shared instructions and display original-source diagnostics.
 
 ## Execution and export
@@ -84,7 +96,11 @@ node tools/compile-pascal.mjs app.pas --target check
 node tools/compile-pascal.mjs app.pas --target run
 node tools/compile-pascal.mjs app.pas --target ir --out app.ir.json
 node tools/compile-pascal.mjs app.pas --target win32 --out app.exe
+node tools/compile-pascal.mjs app.pas --target linux --out app-linux.zip
+node tools/compile-pascal.mjs app.pas --target linux --architecture arm64 --toolkit gtk4 --out app-linux-arm64-gtk4.zip
 ```
+
+Linux defaults to x64/GTK3; `--architecture x64|arm64` and `--toolkit gtk3|gtk4` select an explicit Linux artifact. The CLI accepts mixed `.vb6web` projects, and native exporters compile target-dependent bodies with their own symbols. Run mode seeds virtual files, resources, and application settings from the project snapshot without rewriting its source file.
 
 Default `Read`/`ReadLn` requires the VM host's `inputBox` line-input adapter; the CLI supplies UTF-8 stdin. `Write`/`WriteLn` uses the shared print host. Named files use the shared filesystem. Browser and native GUI hosts keep their existing dialogs and file access model.
 

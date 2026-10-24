@@ -36,6 +36,11 @@ test('Pascal CLI validates missing, repeated, unknown and incompatible options',
     [['main.pas','--target','run','--out','x'],/--out is not used/],
     [['main.pas','--name',''],/Missing value/],
     [['main.pas','--architecture'],/Missing value/],
+    [['main.pas','--toolkit'],/Missing value/],
+    [['main.pas','--target','linux','--toolkit','gtk2','--out','x'],/must be gtk3 or gtk4/],
+    [['main.pas','--target','macos','--toolkit','gtk4','--out','x'],/only supported for the linux target/],
+    [['main.pas','--toolkit','gtk3'],/only supported for the linux target/],
+    [['main.pas','--target','linux','--toolkit','gtk3','--toolkit','gtk4','--out','x'],/Repeated option/],
     [['main.pas','--target','linux','--architecture','x86','--out','x'],/must be x64 or arm64/],
     [['main.pas','--target','macos','--architecture','arm64','--out','x'],/only supported for the linux target/],
     [['main.pas','--architecture','x64'],/only supported for the linux target/],
@@ -139,19 +144,31 @@ end.`,{name:'Stored'});
   assert.equal(await fs.readFile(filename,'utf8'),snapshot);
 }));
 
-for(const [architecture,machine,reported] of [[undefined,62,'x86_64'],['arm64',183,'arm64']])
-test('Linux artifact CLI emits the requested '+(architecture||'default x64')+' ELF architecture',()=>temporary(async directory=>{
+for(const [architecture,machine,reported,toolkit] of [[undefined,62,'x86_64',undefined],['arm64',183,'arm64',undefined],[undefined,62,'x86_64','gtk4'],['arm64',183,'arm64','gtk4']])
+test('Linux artifact CLI emits the requested '+(architecture||'default x64')+' '+(toolkit||'default GTK3')+' ELF architecture',()=>temporary(async directory=>{
   const file=path.join(directory,'native.pas'),output=path.join(directory,'native.zip');
   await fs.writeFile(file,`program NativeProgram;
-{$IFDEF LINUX} procedure TargetOnly; begin WriteLn(42) end; {$ENDIF}
-begin TargetOnly end.`);
-  const args=[file,'--target','linux','--out',output];if(architecture)args.push('--architecture',architecture);
+{$IFDEF LINUX}
+{$IFDEF ${(toolkit||'gtk3').toUpperCase()}}
+begin WriteLn(42) end.
+{$ELSE} Invalid toolkit branch !!! {$ENDIF}
+{$ELSE} Invalid default branch !!! {$ENDIF}`);
+  const args=[file,'--target','linux','--out',output];if(architecture)args.push('--architecture',architecture);if(toolkit)args.push('--toolkit',toolkit);
   const result=invoke(args);assert.equal(result.status,0,result.stderr);
-  const summary=JSON.parse(result.stdout);assert.equal(summary.report.architecture,reported);assert.equal(summary.report.machine,machine);
+  const summary=JSON.parse(result.stdout);assert.equal(summary.report.architecture,reported);assert.equal(summary.report.machine,machine);assert.equal(summary.report.toolkit,toolkit||'gtk3');
   assert.equal(summary.report.integrityVerified,true);assert.equal(summary.report.runtimeProvenanceVerified,true);
   const archive=await readZip(await fs.readFile(output)),bytes=archive.get('NativeProgram/bin/NativeProgram');
   assert.ok(bytes,'Verified ZIP contains the application executable');
   assert.equal(new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getUint16(18,true),machine);
-  const layout=inspectLinuxELF(bytes,{requireProject:true,architecture:architecture||'x64'});
-  assert.ok(layout.codeSize>0);assert.equal(layout.metadataJSON.name,'NativeProgram');
+  const layout=inspectLinuxELF(bytes,{requireProject:true,architecture:architecture||'x64',toolkit:toolkit||'gtk3'});
+  assert.ok(layout.codeSize>0);assert.equal(layout.metadataJSON.name,'NativeProgram');assert.equal(layout.toolkit,toolkit||'gtk3');
+}));
+
+test('Win32 CLI compiles a target-only Pascal body using its authoritative IA32 symbols',()=>temporary(async directory=>{
+  const file=path.join(directory,'windows.pas'),output=path.join(directory,'windows.exe');
+  await fs.writeFile(file,'program WindowsOnly; {$IFDEF WIN32} {$IFDEF IA32} begin WriteLn(42) end. {$ELSE} Invalid architecture !!! {$ENDIF} {$ELSE} Invalid default target !!! {$ENDIF}');
+  const result=invoke([file,'--target','win32','--out',output]);assert.equal(result.status,0,result.stderr);
+  const summary=JSON.parse(result.stdout);assert.equal(summary.report.architecture,'x86');
+  const bytes=await fs.readFile(output);assert.equal(bytes.toString('ascii',0,2),'MZ');
+  const offset=bytes.readUInt32LE(0x3c);assert.equal(bytes.toString('ascii',offset,offset+2),'PE');assert.equal(bytes.readUInt16LE(offset+4),0x14c);
 }));
