@@ -59,6 +59,17 @@ reference TextBox-specific Light `#5C010101` and Dark `#5DFEFEFE` values,
 not the common `#5C000000`/`#5DFFFFFF` resources.
 Text, selection and control identity are retained across theme changes.
 
+**ComboBox dropdowns.** The pinned
+[ComboBox resource dictionary](https://github.com/microsoft/microsoft-ui-xaml/blob/ba3a8d59e6de4e2b86ca4f61c78bc26ccf129afd/src/controls/dev/ComboBox/ComboBox_themeresources.xaml)
+maps `ComboBoxDropDownBackground` to `AcrylicInAppFillColorDefaultBrush`.
+The browser uses that material's opaque fallback: Light `#F9F9F9` and Dark
+`#2C2C2C`, from lines 96 and 44 of the pinned
+[Acrylic dictionary](https://github.com/microsoft/microsoft-ui-xaml/blob/ba3a8d59e6de4e2b86ca4f61c78bc26ccf129afd/src/controls/dev/Materials/Acrylic/AcrylicBrush_themeresources.xaml).
+This dedicated dropdown token is independent of generic menu backgrounds.
+It does not execute native Acrylic composition; requesting the native material
+through the XAML resource resolver still produces an unsupported-resource
+diagnostic. Other theme families retain their existing Window-color fallback.
+
 **Check and radio controls.** The glyph box is 20 by 20 CSS pixels. Check glyphs
 are 12 by 12; indeterminate marks are 12 by 2. Checked radio glyph insets change
 from three to two to four pixels for normal, hover and pressed states. Checked,
