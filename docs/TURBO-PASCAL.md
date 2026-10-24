@@ -8,7 +8,7 @@ The source target is Borland's final Turbo Pascal language release. This impleme
 
 Open **File → New Project**, select **Standard EXE**, choose **Turbo Pascal 7.0** under **Programming language**, and open the project. Add forms and controls using the existing designer. Double-click a control or select an event to create its Pascal handler.
 
-The **Pascal Forms** example is also available in New Project. Its text box, greeting button, label, and `var KeyAscii` handler demonstrate the shared component model. The editable source project is [pascal-forms.vb6web](../examples/pascal-forms.vb6web).
+The **Turbo Pascal Forms** example is also available in New Project. Its text box, greeting button, label, and `var KeyAscii` handler demonstrate the shared component model. The editable source project is [pascal-forms.vb6web](../examples/pascal-forms.vb6web).
 
 ```pascal
 unit Form1;
@@ -40,7 +40,7 @@ Controls, event signatures, mutable event parameters, properties, menus, resourc
 
 `project.language` defines the default and `module.language` supplies an explicit override. Supported canonical values are `vb6` and `pascal`. Language is independent of form/module kind, designer theme, renderer, and export target. Changing a project's default preserves existing module languages; it does not translate their text.
 
-Pascal files use `.pas` or `.pp` and UTF-8. Source ZIPs include Pascal text, `.pas.form.json` form companions, and a `.vb6web` manifest retaining project metadata and assets. Import overlays the editable source files onto that manifest. Pascal form source and designer state therefore survive source export/import without converting either to VB syntax. A normal `.vb6web` save also retains language metadata.
+Pascal files use `.pas` or `.pp` and UTF-8. Source ZIPs preserve each module's source filename and folders, include a form companion named `<source filename>.form.json` (for example `Form1.pas.form.json` or `forms/Main.pp.form.json`), and retain project metadata and assets in a `.vb6web` manifest. Import overlays the editable source files onto that manifest. Pascal form source and designer state therefore survive source export/import without converting either to VB syntax. A normal `.vb6web` save also retains language metadata.
 
 Visual Basic and Pascal modules can coexist. Use the shared `compileProject` API for project-wide dispatch. Pascal unit interfaces and private implementation sections determine Pascal visibility. Unit initialization follows dependencies, executes once, and runs before Main or form initialization. Interface cycles diagnose; implementation-only cycles are handled by initialization guards.
 
@@ -56,7 +56,7 @@ flowchart TD
   L --> C
   C --> B["Browser VM and debugger"]
   C --> W["Win32 PE32 backend"]
-  C --> N["macOS ARM64 and Linux x64 AOT"]
+  C --> N["macOS ARM64 and Linux x64/ARM64 AOT"]
 ```
 
 The Pascal frontend lowers to the existing instruction representation through compiler-generated VB procedures. Portable helpers implement Pascal-specific arithmetic, sets, strings, files, and heap operations using those same instructions. Exported native applications execute machine code through the established native value and host ABI; they do not parse Pascal or run a JavaScript compiler at application startup.
@@ -83,6 +83,8 @@ This arrangement reuses existing optimization, form creation, event routing, sto
 | Semantic switches | `B` Boolean evaluation, `R` range checks, `Q` overflow checks, `I` I/O checking; `D`/`L`/`Y` debug switches retained as metadata |
 | Host integration | Shared form/control properties and events, browser runtime adapters, Pascal-safe editor and debugger operations |
 
+Conditional symbols are case-insensitive. Project `settings.conditionalConstants` defines a symbol by its presence, including a numeric value of zero. Native exporters separately define their active platform and architecture symbols and undefine inactive target symbols; those target definitions also reach imported Pascal units. Visual Basic modules retain the same numeric target constants for `#If` expressions.
+
 Integer and Word intermediates retain their different signed ranges. Overflow checking uses Pascal error 215; range checks use 201. The debugger's pure helpers implement the same signed/unsigned distinction. Unsupported semantic compiler switches produce errors instead of being silently ignored.
 
 ## Files and console input
@@ -97,7 +99,7 @@ Default `Read`/`ReadLn` uses a buffered line-input adapter. Browser and native G
 
 ## Editing, debugging, and MCP
 
-The classic editor and optional advanced editor use Pascal highlighting, completion, signatures, declaration ranges, source navigation, folding, rename edits, and worker diagnostics. Structured member resolution understands records/objects, arrays, pointers, `Self`, `inherited`, and `with`. Virtual-family rename edits include declarations, implementations, and bound references while preserving comments and strings. The advanced editor exposes these capabilities through its existing LSP transport and Monaco provider infrastructure.
+The classic editor and optional advanced editor use Pascal highlighting, completion, signatures, declaration ranges, source navigation, folding, rename edits, and worker diagnostics. Structured member resolution understands records/objects, arrays, pointers, `Self`, `inherited`, and `with`. The advanced editor and LSP use bound references for rename, including virtual-family declarations and implementations. The classic editor's source rename and MCP `vb6.code.transform` rename are lexical: they replace matching identifier tokens and, when enabled, event-handler prefixes in the selected module. They preserve comments and strings but do not disambiguate same-spelled declarations in different scopes. The advanced editor exposes its semantic capabilities through the existing LSP transport and Monaco provider infrastructure.
 
 Conditional breakpoints, watches, Quick Watch, selected-frame inspection, typed variable edits, and Immediate accept Pascal expressions. Examples include `Values[-2]`, `Counter div 5`, `2 in [1..3]`, and `Name[1] := 'J'`. Automatic inspection uses a closed set of synchronous pure helpers and cannot call authored routines or effectful functions. Explicit Immediate execution reuses typed statement lowering and the existing instruction/time budget, cancellation, error-state restoration, and compatible live-edit checks. It can execute a compound statement such as `begin Inc(Counter); Values[1] := Counter end`.
 
@@ -127,9 +129,10 @@ node tools/compile-pascal.mjs app.pas --target html --out app.html
 node tools/compile-pascal.mjs app.pas --target win32 --out app.exe
 node tools/compile-pascal.mjs app.pas --target macos --out app-macos.zip
 node tools/compile-pascal.mjs app.pas --target linux --out app-linux.zip
+node tools/compile-pascal.mjs app.pas --target linux --architecture arm64 --out app-linux-arm64.zip
 ```
 
-The CLI also accepts a `.vb6web` project. Consult `--help` for explicit unit input. Output artifacts use exclusive creation so an existing output file is not replaced. Source is validated as UTF-8, diagnostics go to stderr, and run-mode stdout contains application output. Native output uses the current platform SDKs and their existing artifact/target checks.
+The CLI also accepts a `.vb6web` project. Consult `--help` for explicit unit input. Output artifacts use exclusive creation so an existing output file is not replaced. Source is validated as UTF-8, diagnostics go to stderr, and run-mode stdout contains application output. Linux exports default to x64; `--architecture x64|arm64` selects the ELF architecture and is valid only with `--target linux`. Native exporters perform compilation with their own target symbols before checking the artifact. Run mode initializes the shared virtual filesystem, resources, and application settings from the project snapshot. Runtime writes stay in that session; running a project does not rewrite the input file or implicitly expose host files.
 
 ## Remaining compatibility boundaries
 
@@ -155,6 +158,7 @@ Focused commands:
 
 ```sh
 node --test tests/pascal-*.test.mjs
+node tools/test-pascal-types.mjs
 node --test tests/win32-record-arrays.test.mjs tests/win32-file-records.test.mjs
 python tools/browser-pascal-tests.py
 node tools/test-pascal-native.mjs
@@ -162,7 +166,7 @@ node tools/test-pascal-native.mjs
 
 The native qualification program is authored Pascal with a small VB harness that writes observable results. It exercises unit initialization, numeric loops/calls, a private cross-unit virtual override, ancestor aliasing, an 80-node growing record heap, Text output/input, and a typed record file. Windows, Apple Silicon macOS, and Linux jobs execute the emitted applications at O0/O2 and compare results and exact file bytes. Code-generation tests and the bounded x86 ABI interpreter are additional evidence, not substitutes for those OS executions.
 
-The normal repository test suite protects Visual Basic behavior and shared APIs. Browser tests exercise project language selection, event editing and execution, MCP operations, source round-tripping, and Pascal debugger expressions. Package tests import isolated copied artifacts and run the browser compiler without DOM, network, or dynamic code evaluation.
+The normal repository test suite protects Visual Basic behavior and shared APIs. Browser tests exercise project language selection, event editing and execution, MCP operations, source round-tripping, and Pascal debugger expressions. Package tests import isolated copied artifacts, validate strict TypeScript consumers in NodeNext and Bundler resolution modes, and run the browser compiler without DOM, network, dynamic code evaluation, or `structuredClone`. Project creation and normalization use the standard `structuredClone` API; direct compilation of an existing project model does not require it.
 
 Primary language references:
 

@@ -1,3 +1,4 @@
+import {setTargetConditionalConstants} from '../../../src/language/pascal/target-symbols.js';
 import {prepareMacOSResources} from './resources.js';
 import {macOSAppearanceReport} from './macos26-appearance.js';
 /** Bound VB6 IR -> actual ARM64 procedures using the existing native value ABI.
@@ -196,7 +197,7 @@ export function compileMacOSAOT(input,options={}){
   const project=normalizeProject(input),normalized=macOSOptions({name:project.name,...options});
   const appearance=macOSAppearanceReport(project,normalized);
   const resources=prepareMacOSResources(project);
-  project.settings={...project.settings,conditionalConstants:{...project.settings.conditionalConstants,VBWEB:0,Win32:0,Win64:0,Mac:-1,MacOS:-1,ARM64:-1}};
+  setTargetConditionalConstants(project,{VBWEB:0,Win32:0,Win64:0,Mac:-1,MacOS:-1,ARM64:-1});
   const program=compileProject(project);if(!program.valid){const error=new MacOSCompileError('VB6 frontend rejected the project');error.diagnostics=program.diagnostics;throw error;}
   const controls=macOSControlReport(project),lowering=new DirectLowering(program,normalized),emitted=lowering.emit();
   const report={target:'macos-arm64',architecture:'arm64',format:'Mach-O',artifact:'native-object-code',compiled:false,codegen:'arm64-aot',runtime:'vb6-native',abi:AOT_ABI,modules:program.modules.size,procedures:lowering.procedures,instructions:lowering.instructions,codeBytes:emitted.section.length,optimization:emitted.section.optimization,metadataBytes:new TextEncoder().encode(JSON.stringify(emitted.metadata)).length,operations:[...lowering.usedOps].sort(),controls,imports:lowering.external,resources:resources.report,appearance,diagnostics:appearance.diagnostics};

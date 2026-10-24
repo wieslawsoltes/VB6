@@ -5,11 +5,16 @@ const DEFAULT_SWITCHES = Object.freeze({A: true, B: false, D: true, E: true, F: 
 
 /** Filter lexical tokens rather than rewriting Pascal source. Inactive branches
  * keep original offsets, and their lexical errors cannot poison active code. */
-export function preprocessPascalTokens(tokens, {sourceName = null, defines = [], conditionalConstants = {}} = {}) {
+export function preprocessPascalTokens(tokens, {sourceName = null, defines = [], conditionalConstants = {}, targetSymbols = {}} = {}) {
   const symbols = new Set(['VER70', 'JAVASCRIPT']);
   if (Array.isArray(defines) || defines instanceof Set) for (const name of defines) symbols.add(normalize(name));
   else for (const [name, enabled] of Object.entries(defines || {})) if (enabled !== false && enabled !== null) symbols.add(normalize(name));
   for (const name of Object.keys(conditionalConstants || {})) symbols.add(normalize(name));
+  for (const [name, enabled] of Object.entries(targetSymbols || {})) {
+    if (enabled === true) symbols.add(normalize(name));
+    else if (enabled === false) symbols.delete(normalize(name));
+    else throw new TypeError('Pascal target symbols require Boolean values: ' + name);
+  }
   const switches = {...DEFAULT_SWITCHES}, stack = [], output = [], retainedDirectives = [], activeRanges = [];
   let active = true, position = 0, directiveIndex = 0;
   const fail = (message, directive) => {throw new PascalError(message, directive, sourceName, 'TP_CONDITIONAL');};

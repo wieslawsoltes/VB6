@@ -1,6 +1,7 @@
 /** Shared VB6 parser/binder and helper graph, with Linux-only target semantics. */
 import {normalizeProject} from '../../../src/project/model.js';
 import {compileProject} from '../../../src/language/compiler.js';
+import {setTargetConditionalConstants} from '../../../src/language/pascal/target-symbols.js';
 import {DirectLowering} from '../../macos-native/src/aot-compiler.js';
 import {prepareMacOSResources} from '../../macos-native/src/resources.js';
 import {AOT_ABI} from '../../macos-native/src/aot-abi.js';
@@ -48,8 +49,8 @@ export class LinuxDirectLowering extends DirectLowering {
 export function compileLinuxAOT(input,options={}){
   try{
     const project=normalizeProject(input),normalized=linuxOptions({name:project.name,...options}),target=linuxTarget(normalized.architecture),arm64=normalized.architecture==='arm64',resources=prepareMacOSResources(project);
-    project.settings={...project.settings,conditionalConstants:{...project.settings.conditionalConstants,
-      VBWEB:0,Win16:0,Win32:0,Win64:0,Mac:0,MacOS:0,ARM64:arm64?-1:0,AARCH64:arm64?-1:0,Linux:-1,Unix:-1,X86_64:arm64?0:-1,AMD64:arm64?0:-1,GTK:-1,GTK3:-1}};
+    setTargetConditionalConstants(project,{
+      VBWEB:0,Win16:0,Win32:0,Win64:0,Mac:0,MacOS:0,ARM64:arm64?-1:0,AARCH64:arm64?-1:0,Linux:-1,Unix:-1,X86_64:arm64?0:-1,AMD64:arm64?0:-1,GTK:-1,GTK3:-1});
     const program=compileProject(project);
     if(!program.valid){const error=new LinuxCompileError('VB6 frontend rejected the Linux project');error.diagnostics=program.diagnostics;throw error;}
     const controls=linuxControlReport(project),lowering=new LinuxDirectLowering(program,normalized,{

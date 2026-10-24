@@ -104,7 +104,8 @@ export class PascalScope {
 export class PascalWorkspace {
   constructor(project = null) {
     this.project = project; this.inputs = new Map(); this.binders = new Map();
-    for (const input of project?.modules || []) if (/^(?:pascal|turbo[- ]?pascal|tp7|tp)$/i.test(input.language || input.sourceLanguage || project.language || '')) this.inputs.set(key(input.name), input);
+    for (const input of project?.modules || []) if (/^(?:pascal|turbo[- ]?pascal|tp7|tp)$/i.test(input.language || input.sourceLanguage || project.language || ''))
+      this.inputs.set(key(input.name), {...input, conditionalConstants: project.settings?.conditionalConstants || {}});
   }
   add(input, ast) {const binder = new PascalBinder(ast, input, this); this.binders.set(key(input.name || ast.name), binder); this.binders.set(key(ast.name), binder); return binder;}
   get(name) {

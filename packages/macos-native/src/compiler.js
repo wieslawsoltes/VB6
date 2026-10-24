@@ -1,3 +1,4 @@
+import {setTargetConditionalConstants} from '../../../src/language/pascal/target-symbols.js';
 import {prepareMacOSResources} from './resources.js';
 /** Shared VB6 IR -> C++17 native procedure lowering. No VM/bytecode interpreter. */
 import {compileProject} from '../../../src/language/compiler.js';
@@ -277,7 +278,7 @@ export function compileMacOS(input,options={}){
   const project=normalizeProject(input);const normalized=macOSOptions({name:project.name,...options});
   const appearance=macOSAppearanceReport(project,normalized);
   const resources=prepareMacOSResources(project);
-  project.settings={...project.settings,conditionalConstants:{...project.settings.conditionalConstants,VBWEB:0,Win32:0,Win64:0,Mac:-1,MacOS:-1,ARM64:-1}};
+  setTargetConditionalConstants(project,{VBWEB:0,Win32:0,Win64:0,Mac:-1,MacOS:-1,ARM64:-1});
   const program=compileProject(project);if(!program.valid){const error=new MacOSCompileError('VB6 frontend rejected the project');error.diagnostics=program.diagnostics;throw error;}
   const controls=macOSControlReport(project);
   const lowering=new MacOSLowering(program,normalized),source=lowering.emit();

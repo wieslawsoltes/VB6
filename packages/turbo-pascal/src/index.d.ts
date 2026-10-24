@@ -8,7 +8,7 @@ export interface PascalTokens extends Array<PascalToken> {
   readonly directives:PascalToken[];
   readonly diagnostics:Diagnostic[];
 }
-export interface SourceModule {id?:string; name:string; kind?:'module'|'form'|'class'; language?:SourceLanguage; code:string; form?:FormModel|null; conditionalConstants?:Record<string,unknown>; [key:string]:unknown}
+export interface SourceModule {id?:string; name:string; kind?:'module'|'form'|'class'; language?:SourceLanguage; code:string; form?:FormModel|null; conditionalConstants?:Record<string,unknown>; pascalTargetSymbols?:Record<string,boolean>; [key:string]:unknown}
 export interface FormModel {name:string; type:string; properties:Record<string,unknown>; controls:Record<string,unknown>[]; menus?:Record<string,unknown>[]; [key:string]:unknown}
 export interface ProjectSettings {conditionalConstants?:Record<string,unknown>; [key:string]:unknown}
 export interface SourceProject {schema:number; id?:string; name:string; language?:SourceLanguage; startup:string; modules:SourceModule[]; settings?:ProjectSettings; [key:string]:unknown}
@@ -70,7 +70,7 @@ export interface CompiledPascalModule extends CompiledModule {
 export interface CompiledProject {name:string; startup:string; modules:Map<string,CompiledModule>; diagnostics:Diagnostic[]; valid:boolean; settings:ProjectSettings; sourceProject:SourceProject}
 export interface PascalOptions {name?:string; moduleName?:string; units?:SourceModule[]; settings?:ProjectSettings; form?:FormModel|null; retainSyntax?:boolean}
 export interface TokenizeOptions {sourceName?:string|null; tolerant?:boolean; maxTokens?:number}
-export interface ParseOptions extends TokenizeOptions {maxDepth?:number; defines?:string[]|Set<string>|Record<string,unknown>; conditionalConstants?:Record<string,unknown>}
+export interface ParseOptions extends TokenizeOptions {maxDepth?:number; defines?:string[]|Set<string>|Record<string,unknown>; conditionalConstants?:Record<string,unknown>; targetSymbols?:Record<string,boolean>}
 export interface CompileOptions extends ParseOptions {name?:string; project?:SourceProject; input?:SourceModule; retainSyntax?:boolean; [key:string]:unknown}
 export declare const PASCAL_VERSION:string;
 export declare const PASCAL_DIALECT:'Turbo Pascal 7.0';

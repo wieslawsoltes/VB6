@@ -11,7 +11,7 @@ export class PascalParser {
     this.source = String(this.input.code ?? this.input.source ?? '');
     this.name = this.input.name || options.sourceName || 'PascalModule';
     const scanned = tokenizePascal(this.source, {...options, sourceName: this.name, tolerant: true});
-    this.tokens = preprocessPascalTokens(scanned, {...options, conditionalConstants: this.input.conditionalConstants || options.conditionalConstants || {}, sourceName: this.name});
+    this.tokens = preprocessPascalTokens(scanned, {...options, conditionalConstants: this.input.conditionalConstants || options.conditionalConstants || {}, targetSymbols: this.input.pascalTargetSymbols || options.targetSymbols || {}, sourceName: this.name});
     if (this.tokens.diagnostics.length && !options.tolerant) {const diagnostic = this.tokens.diagnostics[0]; throw new PascalError(diagnostic.message, diagnostic, this.name, diagnostic.code);}
     this.index = 0; this.depth = 0; this.maxDepth = options.maxDepth || 128;
   }
