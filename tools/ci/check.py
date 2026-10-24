@@ -85,11 +85,11 @@ def audit(root=ROOT):
                  and 'if' not in step]
     if len(discovery) != 1:
         raise ValueError('Complete unconditional Node discovery required in the Node job')
-    if not any('sudo apt-get install -y libgtk-3-0t64' in step.get('run', '').splitlines()
+    if not any('sudo apt-get install -y libgtk-3-0t64 libcups2t64' in step.get('run', '').splitlines()
                and 'if' not in step for step in node_steps[:discovery[0]]):
         raise ValueError('Node shards must install the Linux GTK runtime before executing tests')
     linux_node_tests = sorted(p.name for p in (root / 'tests').glob('linux-*.test.mjs') if p.is_file())
-    if not {'linux-aot.test.mjs', 'linux-aot-native.test.mjs', 'linux-package.test.mjs'} <= set(linux_node_tests):
+    if not {'linux-aot.test.mjs', 'linux-aot-arm64.test.mjs', 'linux-aot-native.test.mjs', 'linux-aot-printer.test.mjs', 'linux-package.test.mjs', 'linux-distribution.test.mjs'} <= set(linux_node_tests):
         raise ValueError('Linux compiler, native execution and package tests must remain discoverable')
     npm = json.loads((root / 'package.json').read_text())['scripts']
     if npm.get('test:linux') != 'node --test tests/linux-*.test.mjs':
@@ -110,18 +110,27 @@ def audit(root=ROOT):
         raise ValueError('Missing native AOT platform')
     if jobs['macos-browser-native']['needs'] != ['authoring-exports']:
         raise ValueError('Native execution must depend on browser exports')
-    if jobs.get('linux', {}).get('runs-on') != 'ubuntu-24.04':
-        raise ValueError('Linux GTK AOT must execute on the declared native platform')
+    for owner in ('linux', 'linux-browser-native'):
+        job = jobs.get(owner, {})
+        if job.get('runs-on') != "${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}" or set(job.get('strategy', {}).get('matrix', {}).get('architecture', [])) != {'x64', 'arm64'}:
+            raise ValueError('Linux GTK AOT must execute on both declared native architectures')
+        if job.get('env', {}).get('ARCHITECTURE') != '${{ matrix.architecture }}':
+            raise ValueError('Linux commands must receive the selected native architecture')
     linux_commands = {step.get('run', '').strip() for step in jobs['linux']['steps'] if 'if' not in step}
-    if not {'npm run test:linux', 'node tools/test-linux-aot.mjs',
-            'node tools/test-linux-aot.mjs --rebuild'} <= linux_commands:
-        raise ValueError('Linux must run package tests and directly qualify both shipped and rebuilt runtimes')
+    if not {'npm run test:linux', 'node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --report reports/linux-aot/shipped',
+            'node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --rebuild --report reports/linux-aot/rebuilt',
+            'node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --report reports/linux-distribution'} <= linux_commands:
+        raise ValueError('Linux must execute shipped and rebuilt runtimes and independently validate native packages')
+    if not any('libcups2-dev' in step.get('run', '') and 'if' not in step for step in jobs['linux']['steps']):
+        raise ValueError('Linux printer qualification requires the CUPS development dependency')
     if jobs.get('linux-browser-native', {}).get('needs') != ['authoring-exports']:
         raise ValueError('Linux native execution must consume actual browser exports')
     if jobs['linux-browser-native'].get('if') != '${{ !cancelled() }}':
         raise ValueError('Linux browser artifacts must be verified even after an unrelated export-suite failure')
     if not any(step.get('with', {}).get('pattern') == 'linux-direct-browser-*' for step in jobs['linux-browser-native']['steps']):
         raise ValueError('Linux execution must use this run\'s browser archives')
+    if not any(step.get('run') == 'node tools/test-linux-browser-artifacts.mjs browser-linux-input --architecture "$ARCHITECTURE"' and 'if' not in step for step in jobs['linux-browser-native']['steps']):
+        raise ValueError('Both native machines must execute their actual browser packages')
     if jobs['advanced-editor']['needs'] != ['advanced-build']:
         raise ValueError('All engines must consume the shared actual editor build')
     suites = json.loads((root / 'tools/ci/suites.json').read_text())

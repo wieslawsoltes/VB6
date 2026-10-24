@@ -5,21 +5,23 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import {exportLinuxApplication,exportLinuxAOT,loadLinuxAOTRuntime,linuxAOTRuntimeInfo,verifyLinuxAOTRuntime} from '../packages/linux-native/src/index.js';
+import {exportLinuxApplication,exportLinuxAOT,loadLinuxAOTRuntime,verifyLinuxAOTRuntime} from '../packages/linux-native/src/index.js';
 import {setResourceString} from '../src/project/res.js';
 const execute=promisify(execFile);
-const nativeHost=process.platform==='linux'&&process.arch==='x64';
+const architecture=process.arch==='arm64'?'arm64':'x64',runtimeArchitecture=architecture==='arm64'?'arm64':'x86_64';
+const nativeHost=process.platform==='linux'&&['x64','arm64'].includes(process.arch);
 const glibc=nativeHost?String(process.report?.getReport().header.glibcVersionRuntime||'0.0').split('.').map(Number):[0,0];
 const supportedHost=nativeHost&&(glibc[0]>2||glibc[0]===2&&glibc[1]>=39);
 const runtimeDirectory=process.env.VB6_LINUX_AOT_RUNTIME_DIR;
-const rebuiltRuntime=runtimeDirectory?{bytes:new Uint8Array(await readFile(path.join(runtimeDirectory,'runtime-x86_64'))),manifest:JSON.parse(await readFile(path.join(runtimeDirectory,'runtime.json'),'utf8'))}:null;
-test('embedded Linux runtime bytes and symbol manifest are isolated for each caller',{skip:!linuxAOTRuntimeInfo()?'Embedded runtime is being rebuilt':false},async()=>{
-  const first=await loadLinuxAOTRuntime();await verifyLinuxAOTRuntime(first.bytes,first.manifest);first.bytes[0]^=1;first.manifest.helpers.vb6_aot_clear++;
-  const second=await loadLinuxAOTRuntime();await verifyLinuxAOTRuntime(second.bytes,second.manifest);assert.equal(second.bytes[0],0x7f);
-  const controller=new AbortController();controller.abort();await assert.rejects(()=>loadLinuxAOTRuntime({signal:controller.signal}),{name:'AbortError'});
+const rebuiltRuntime=runtimeDirectory?{bytes:new Uint8Array(await readFile(path.join(runtimeDirectory,'runtime-'+runtimeArchitecture))),manifest:JSON.parse(await readFile(path.join(runtimeDirectory,'runtime.json'),'utf8'))}:null;
+for(const target of ['x64','arm64'])test('embedded Linux '+target+' runtime bytes and symbol manifest are isolated for each caller',async()=>{
+  const first=await loadLinuxAOTRuntime({architecture:target});await verifyLinuxAOTRuntime(first.bytes,first.manifest);first.bytes[0]^=1;first.manifest.helpers.vb6_aot_clear++;
+  const second=await loadLinuxAOTRuntime({architecture:target});await verifyLinuxAOTRuntime(second.bytes,second.manifest);assert.equal(second.bytes[0],0x7f);
+  assert.equal(second.manifest.architecture,target==='arm64'?'arm64':'x86_64');
+  const controller=new AbortController();controller.abort();await assert.rejects(()=>loadLinuxAOTRuntime({architecture:target,signal:controller.signal}),{name:'AbortError'});
 });
-test('JS-emitted x86_64 ELF executes ABI stack arguments, nested calls, errors and resources',{
-  skip:!supportedHost?'Requires Linux x86_64 with glibc 2.39 or newer':!rebuiltRuntime&&!linuxAOTRuntimeInfo()?'Embedded runtime is being rebuilt':false,timeout:60000
+test('JS-emitted '+runtimeArchitecture+' ELF executes ABI stack arguments, nested calls, errors and resources',{
+  skip:!supportedHost?'Requires Linux x64/arm64 with glibc 2.39 or newer':false,timeout:60000
 },async()=>{
   const project={schema:1,name:'LinuxNativeABI',startup:'Sub Main',resources:setResourceString(null,101,'Zażółć\0🙂'),modules:[{name:'MainModule',kind:'module',code:`Option Explicit
 Private Function Add(ByVal a As Long, ByRef b As Long) As Long
@@ -65,7 +67,7 @@ handled:
   Debug.Assert Err.Number = 11
   Resume afterError
 End Sub`}]};
-  const exported=rebuiltRuntime?await exportLinuxAOT(project,rebuiltRuntime,{optimization:3}):await exportLinuxApplication(project,{optimization:3}),directory=await mkdtemp(path.join(os.tmpdir(),'vb6-linux-aot-test-'));
+  const exported=rebuiltRuntime?await exportLinuxAOT(project,rebuiltRuntime,{architecture,optimization:3}):await exportLinuxApplication(project,{architecture,optimization:3}),directory=await mkdtemp(path.join(os.tmpdir(),'vb6-linux-aot-test-'));
   try{
     for(const [name,bytes]of Object.entries(exported.files)){const file=path.join(directory,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,bytes,{flag:'wx'});}
     const executable=path.join(directory,project.name,'bin',project.name);await chmod(executable,0o755);

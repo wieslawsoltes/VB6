@@ -1,5 +1,6 @@
 // GTK application, window lifetime, native events and modal ownership. MIT.
 #include "gtk.hpp"
+#include "gtk-services.hpp"
 
 namespace vb6 {
 namespace {
@@ -89,7 +90,7 @@ std::vector<std::shared_ptr<GtkControl>> gtkFormControls(const std::shared_ptr<I
   }
   return result;
 }
-void GtkHost::attach(Runtime& rt) { runtime = &rt; thread = std::this_thread::get_id(); }
+void GtkHost::attach(Runtime& rt) { runtime = &rt; thread = std::this_thread::get_id(); gtkRegisterApplication(*this); }
 GtkHost::~GtkHost() { shutdown(); }
 void GtkHost::ensureApplication() {
   if (std::this_thread::get_id() != thread) fail(5,"GTK must run on the native application's main thread");

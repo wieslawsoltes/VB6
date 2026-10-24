@@ -103,6 +103,7 @@
     "build:linux-package": "node tools/build-linux-native.mjs",
     "test:linux": "node --test tests/linux-*.test.mjs",
     "test:linux:native": "node tools/test-linux-aot.mjs",
+    "test:linux:distribution": "node tools/test-linux-distribution.mjs",
     "test:linux:browser": "python tools/browser-linux-aot-tests.py",
     "build:macos-package": "node tools/build-macos-native.mjs",
     "macos:bridge": "node tools/serve-macos.mjs",
