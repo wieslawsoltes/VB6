@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {runTool} from '../packages/macos-native/src/build-driver.mjs';
 import {readLinuxAOTSources} from './linux-aot-provenance.mjs';
 import {createLinuxAOTRuntimeManifest,verifyLinuxAOTRuntime} from '../packages/linux-native/src/elf.js';
-import {linuxTarget} from '../packages/linux-native/src/target.js';
+import {linuxTarget,linuxToolkit} from '../packages/linux-native/src/target.js';
 const root=path.resolve(import.meta.dirname,'..');
 const hash=value=>createHash('sha256').update(value).digest('hex');
 export async function linuxNativeTool(name) {
@@ -34,8 +34,8 @@ export function parsePkgConfigFlags(value) {
   return result;
 }
 /** Extracted .deb sysroots need the same caches that package postinst creates. */
-export async function verifyLinuxAOTExecutionSysroot(sysroot,{architecture='arm64'}={}) {
-  const target=linuxTarget(architecture),directory=await fs.realpath(path.resolve(sysroot));
+export async function verifyLinuxAOTExecutionSysroot(sysroot,{architecture='arm64',toolkit='gtk3'}={}) {
+  const target=linuxTarget(architecture,toolkit),directory=await fs.realpath(path.resolve(sysroot));
   const prefix='usr/lib/'+target.triple+'/gdk-pixbuf-2.0',cachePath=prefix+'/2.10.0/loaders.cache';
   const prerequisites='Initialize target GTK image loaders before cross execution: install target libgdk-pixbuf-2.0-0 and librsvg2-common, run the target '+prefix+'/gdk-pixbuf-query-loaders under QEMU with -L SYSROOT and redirect its output to SYSROOT/'+cachePath+', then run update-mime-database SYSROOT/usr/share/mime. Native package installation normally creates these caches.';
   let cache,mime;
@@ -52,35 +52,35 @@ export async function verifyLinuxAOTExecutionSysroot(sysroot,{architecture='arm6
     if(bytes.length<20||view.getUint32(0,true)!==0x464c457f||bytes[4]!==2||bytes[5]!==1||view.getUint16(18,true)!==target.machine)
       throw new Error('Cross-sysroot '+format.toUpperCase()+' image loader has the wrong ELF architecture. '+prerequisites);
   }
-  const gtkModulePath=path.join(directory,'usr/lib',target.triple,'gtk-3.0');
+  const gtkModulePath=path.join(directory,'usr/lib',target.triple,toolkit==='gtk4'?'gtk-4.0':'gtk-3.0');
   let backend;
-  try{backend=await fs.readFile(path.join(gtkModulePath,'3.0.0/printbackends/libprintbackend-cups.so'));}
-  catch(error){if(error.code==='ENOENT')throw new Error('Missing cross-sysroot GTK CUPS print backend. Install the target GTK3 CUPS print backend and its native dependencies before qualification.');throw error;}
+  try{backend=await fs.readFile(path.join(gtkModulePath,toolkit==='gtk4'?'4.0.0/printbackends/libprintbackend-cups.so':'3.0.0/printbackends/libprintbackend-cups.so'));}
+  catch(error){if(error.code==='ENOENT')throw new Error('Missing cross-sysroot GTK CUPS print backend. Install the selected target GTK CUPS print backend and its native dependencies before qualification.');throw error;}
   const backendView=new DataView(backend.buffer,backend.byteOffset,backend.byteLength);
   if(backend.length<20||backendView.getUint32(0,true)!==0x464c457f||backend[4]!==2||backend[5]!==1||backendView.getUint16(18,true)!==target.machine)
     throw new Error('Cross-sysroot GTK CUPS print backend has the wrong ELF architecture.');
   return {imageLoaders:['ico','svg'],gdkPixbufCacheSha256:hash(cache),mimeCacheSha256:hash(mime),gtkModulePath,gtkPrintBackendSha256:hash(backend)};
 }
-export async function buildLinuxAOTTemplate({architecture='x64',out,cache=path.join(root,'.native-build/linux-aot'),jobs=3,compiler,sysroot,log=()=>{},signal}={}) {
-  const target=linuxTarget(architecture),cross=process.arch!==target.option;
+export async function buildLinuxAOTTemplate({architecture='x64',toolkit='gtk3',out,cache=path.join(root,'.native-build/linux-aot'),jobs=3,compiler,sysroot,log=()=>{},signal}={}) {
+  const target=linuxTarget(architecture,toolkit),gtk=linuxToolkit(toolkit),cross=process.arch!==target.option;
   if(process.platform!=='linux'||!['x64','arm64'].includes(process.arch))throw new Error('The Linux SDK runtime must be built on Linux x64 or ARM64.');
   if(cross&&!sysroot)throw new Error('Cross compilation requires an explicit target GTK/CUPS sysroot.');
   if(sysroot){sysroot=await fs.realpath(path.resolve(sysroot));if(!(await fs.stat(sysroot)).isDirectory())throw new Error('The Linux cross sysroot must be a directory.');}
   compiler??=cross?target.triple+'-g++':'clang++';
-  out??=path.join(root,'artifacts/linux-aot',target.option==='x64'?'runtime':'runtime-arm64');
+  out??=path.join(root,'artifacts/linux-aot','runtime'+(toolkit==='gtk4'?'-gtk4':'')+(target.option==='arm64'?'-arm64':''));
   if(!Number.isInteger(jobs)||jobs<1||jobs>16)throw new Error('jobs must be 1..16');
   const snapshot=readLinuxAOTSources(root),work=await fs.mkdtemp(path.join(os.tmpdir(),'vb6-linux-runtime-'));
   try {
     const invoke=(executable,args)=>runTool(executable,args,{cwd:work,timeout:600000,log,signal});
     const cxx=await linuxNativeTool(compiler),pkg=await linuxNativeTool('pkg-config'),env=await linuxNativeTool('env');
     const pkgConfig=args=>sysroot?invoke(env,['PKG_CONFIG_PATH=','PKG_CONFIG_SYSROOT_DIR='+sysroot,'PKG_CONFIG_LIBDIR='+[path.join(sysroot,'usr/lib',target.triple,'pkgconfig'),path.join(sysroot,'usr/lib/pkgconfig'),path.join(sysroot,'usr/share/pkgconfig')].join(path.delimiter),pkg,...args]):invoke(pkg,args);
-    const compilerVersion=await invoke(cxx,['--version']),compilerTriple=(await invoke(cxx,['-dumpmachine'])).trim(),gtkVersion=await pkgConfig(['--modversion','gtk+-3.0']);
+    const compilerVersion=await invoke(cxx,['--version']),compilerTriple=(await invoke(cxx,['-dumpmachine'])).trim(),gtkVersion=await pkgConfig(['--modversion',gtk.pkgConfig]);
     if(!(target.option==='arm64'?/^aarch64.*linux/:/^x86_64.*linux/).test(compilerTriple))throw new Error('Native C++ compiler does not target '+target.architecture+': '+compilerTriple);
-    await pkgConfig(['--atleast-version=3.24','gtk+-3.0']);
+    await pkgConfig(['--atleast-version='+gtk.minimumGTK,gtk.pkgConfig]);
     // GtkPrintUnixDialog is in libgtk-3; only its public header directory is
     // additional. Keep portable object flags stable to reuse the shared SDK.
-    const portableCflags=parsePkgConfigFlags(await pkgConfig(['--cflags','gtk+-3.0']));
-    const cflags=parsePkgConfigFlags(await pkgConfig(['--cflags','gtk+-unix-print-3.0'])),libraries=[...parsePkgConfigFlags(await pkgConfig(['--libs','gtk+-unix-print-3.0'])),'-lcups'];
+    const portableCflags=parsePkgConfigFlags(await pkgConfig(['--cflags',gtk.pkgConfig]));
+    const cflags=parsePkgConfigFlags(await pkgConfig(['--cflags',gtk.printPkgConfig,...(toolkit==='gtk4'?['x11']:[])])),libraries=[...parsePkgConfigFlags(await pkgConfig(['--libs',gtk.printPkgConfig,...(toolkit==='gtk4'?['x11']:[])])),'-lcups'];
     const targetFlags=[...(sysroot?['--sysroot='+sysroot]:[]),...(target.option==='arm64'?['-march=armv8-a']:[])];
     let sysrootPackagesSha256;
     if(sysroot){try{sysrootPackagesSha256=hash(await fs.readFile(path.join(sysroot,'.vb6-sysroot-packages.txt')));}catch(error){if(error.code!=='ENOENT')throw error;}}
@@ -106,14 +106,14 @@ export async function buildLinuxAOTTemplate({architecture='x64',out,cache=path.j
     }
     await Promise.all(Array.from({length:Math.min(jobs,sources.length)},worker));if(errors.length)throw errors[0];
     const filename='runtime-'+target.architecture,executable=path.join(work,filename);
-    const linkOptions=[...targetFlags,'-pie','-Wl,-z,relro,-z,now,-z,noexecstack','-Wl,--build-id=none','-Wl,-z,max-page-size='+target.pageBytes+',-z,common-page-size='+target.pageBytes];
+    const linkOptions=[...targetFlags,'-pie','-Wl,--as-needed','-Wl,-z,relro,-z,now,-z,noexecstack','-Wl,--build-id=none','-Wl,-z,max-page-size='+target.pageBytes+',-z,common-page-size='+target.pageBytes];
     await invoke(cxx,[...linkOptions,...objects,...libraries,'-ldl','-pthread','-o',executable]);
     await invoke(await linuxNativeTool(cross?target.triple+'-strip':'strip'),['--strip-debug',executable]);
     const bytes=new Uint8Array(await fs.readFile(executable));
     const readelf=await linuxNativeTool('readelf');
     const versionInfo=await invoke(readelf,['--version-info',executable]);
     const versions=prefix=>[...new Set([...versionInfo.matchAll(new RegExp('\\b'+prefix+'_[0-9.]+','g'))].map(match=>match[0]))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-    const provenance={...snapshot.provenance,compilerVersion,compilerTriple,gtkVersion,buildPlatform:'linux',buildArchitecture:linuxTarget(process.arch).architecture,targetArchitecture:target.architecture,crossCompiled:cross,...(sysrootPackagesSha256?{sysrootPackagesSha256}:{}),runtimeOptimization:2,glibcVersions:versions('GLIBC'),glibcxxVersions:versions('GLIBCXX')};
+    const provenance={...snapshot.provenance,compilerVersion,compilerTriple,gtkVersion,toolkit,buildPlatform:'linux',buildArchitecture:linuxTarget(process.arch).architecture,targetArchitecture:target.architecture,crossCompiled:cross,...(sysrootPackagesSha256?{sysrootPackagesSha256}:{}),runtimeOptimization:2,glibcVersions:versions('GLIBC'),glibcxxVersions:versions('GLIBCXX')};
     const manifest=await createLinuxAOTRuntimeManifest(bytes,provenance);await verifyLinuxAOTRuntime(bytes,manifest);
     if(manifest.architecture!==target.architecture)throw new Error('Compiled runtime ELF machine does not match the requested architecture.');
     await fs.mkdir(out,{recursive:true});const info=await fs.lstat(out);if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Runtime output must be a regular directory.');
@@ -125,7 +125,7 @@ export async function buildLinuxAOTTemplate({architecture='x64',out,cache=path.j
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
     const args=process.argv.slice(2),options={log:value=>process.stderr.write(value)};
-    for(let index=0;index<args.length;index+=2){const name=args[index],value=args[index+1];if(!value||!['--architecture','--out','--cache','--jobs','--compiler','--sysroot'].includes(name))throw new Error('Usage: node tools/build-linux-aot-template.mjs [--architecture x64|arm64] [--out DIRECTORY] [--cache DIRECTORY] [--jobs 1..16] [--compiler PATH] [--sysroot DIRECTORY]');options[name.slice(2)]=name==='--jobs'?Number(value):value;}
+    for(let index=0;index<args.length;index+=2){const name=args[index],value=args[index+1];if(!value||!['--architecture','--toolkit','--out','--cache','--jobs','--compiler','--sysroot'].includes(name))throw new Error('Usage: node tools/build-linux-aot-template.mjs [--architecture x64|arm64] [--toolkit gtk3|gtk4] [--out DIRECTORY] [--cache DIRECTORY] [--jobs 1..16] [--compiler PATH] [--sysroot DIRECTORY]');options[name.slice(2)]=name==='--jobs'?Number(value):value;}
     console.log(JSON.stringify((await buildLinuxAOTTemplate(options)).manifest,null,2));
   }catch(error){console.error(error.message,error.output||'');process.exitCode=1;}
 }

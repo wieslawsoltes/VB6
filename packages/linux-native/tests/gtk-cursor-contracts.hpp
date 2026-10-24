@@ -6,6 +6,15 @@
 
 namespace vb6_cursor_contracts {
 inline void require(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
+#if GTK_MAJOR_VERSION >= 4
+inline GtkWidget* cursorRoot(const std::shared_ptr<vb6::GtkForm>& form){return form->window;}
+inline bool sameCursor(GtkWidget* widget,const char* name){auto* cursor=gtk_widget_get_cursor(widget);return cursor&&g_strcmp0(gdk_cursor_get_name(cursor),name)==0;}
+inline int checkEditorWindows(GtkWidget* widget,GtkWidget* editor,const char* cursor){
+  int count=0;if((widget==editor||gtk_widget_is_ancestor(widget,editor))&&gtk_widget_get_cursor(widget)){require(sameCursor(widget,cursor),"Screen cursor did not reach a native GTK4 editor widget");++count;}
+  for(auto* child=gtk_widget_get_first_child(widget);child;child=gtk_widget_get_next_sibling(child))count+=checkEditorWindows(child,editor,cursor);return count;
+}
+#else
+inline GdkWindow* cursorRoot(const std::shared_ptr<vb6::GtkForm>& form){return gtk_widget_get_window(form->window);}
 inline bool sameCursor(GdkWindow* window,const char* name){
   auto* actual=gdk_window_get_cursor(window);auto* expected=gdk_cursor_new_from_name(gdk_window_get_display(window),name);
   if(!actual||!expected){if(expected)g_object_unref(expected);return false;}
@@ -20,6 +29,7 @@ inline int checkEditorWindows(GdkWindow* window,GtkWidget* editor,const char* cu
   if(owner==editor){if(!sameCursor(window,cursor))throw std::runtime_error(std::string("Screen cursor did not reach a native editor window: expected ")+cursor);++count;}
   auto* children=gdk_window_get_children(window);for(auto* child=children;child;child=child->next)count+=checkEditorWindows(GDK_WINDOW(child->data),editor,cursor);g_list_free(children);return count;
 }
+#endif
 inline std::shared_ptr<vb6::Instance> form(vb6::Runtime& runtime,vb6::GtkHost& host,const std::string& name){
   vb6::Module module;module.name=name;module.kind="form";vb6::ControlSpec spec;spec.name=name;spec.type="Form";
   spec.properties={{"clientwidth",vb6::Value::integer(3600)},{"clientheight",vb6::Value::integer(1800)},{"mousepointer",vb6::Value::integer(2)}};module.form=spec;
@@ -36,13 +46,13 @@ inline void qualifyGtkScreenCursors(vb6::Runtime& runtime,vb6::GtkHost& host){
   for(int value:{-1,16,99}){bool rejected=false;try{screen->set(runtime,"MousePointer",Value::integer(value));}catch(const Error& error){if(error.number!=380)throw;rejected=true;}require(rejected&&screen->get(runtime,"MousePointer").integral()==11,"Invalid Screen.MousePointer changed the cursor state");}
   auto first=vb6_cursor_contracts::form(runtime,host,"CursorFirst");auto native=host.form(first);
   auto editor=std::dynamic_pointer_cast<GtkControl>(first->controls.at("editor"));
-  auto* window=gtk_widget_get_window(native->window);
+  auto* window=vb6_cursor_contracts::cursorRoot(native);
   require(sameCursor(window,"wait"),"A newly realized form did not inherit Screen.MousePointer");
   require(vb6_cursor_contracts::checkEditorWindows(window,editor->widget,"wait")>0,"Native GTK entry has no testable cursor window");
   std::cout<<"CURSOR_INITIAL_OK\n";
   require(native->surface->get(runtime,"MousePointer").integral()==2&&editor->get(runtime,"MousePointer").integral()==3,"Screen cursor changed individual control properties");
   auto later=vb6_cursor_contracts::form(runtime,host,"CursorLater");auto laterNative=host.form(later);
-  require(sameCursor(gtk_widget_get_window(laterNative->window),"wait"),"A later form lost the application cursor override");
+  require(sameCursor(vb6_cursor_contracts::cursorRoot(laterNative),"wait"),"A later form lost the application cursor override");
   editor->set(runtime,"MousePointer",Value::integer(2));host.pump();
   require(sameCursor(window,"wait")&&vb6_cursor_contracts::checkEditorWindows(window,editor->widget,"wait")>0,"Control refresh bypassed the application cursor override");
   std::cout<<"CURSOR_OVERRIDE_OK\n";

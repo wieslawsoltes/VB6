@@ -16,7 +16,7 @@ function fixture(architecture,executionMode){
   const proof={platform:'linux',arch:target.option,architecture:target.architecture,hostArchitecture:executionMode==='native'?target.option:'x64',executionMode,emulatorVersion:'qemu-aarch64 version 8.2',runtime:{sha256:manifest.sha256},optimizationLevelsVerified:[0,1,2,3]};
   for(const name of ['machineCodeExecutionVerified',target.option+'ExecutionVerified','gtkExecutionVerified','gtkNativeSignalsVerified','conformanceVerified','resourcesVerified','lifetimeVerified','codeMetadataGrowthVerified','richTextVerified','printerServicesVerified','previousInstanceVerified'])proof[name]=true;
   for(const name of cases)proof[name]={runtimeSha256:manifest.sha256,architecture:target.architecture,machine:target.machine,callingConvention:target.callingConvention,executableSha256:'b'.repeat(64)};
-  proof.nativeFixtures=Object.fromEntries(['gtkSignals','richText','printers','previousInstance'].map(name=>[name,{passed:true,...proof['language-O0']}]));
+  proof.nativeFixtures=Object.fromEntries(['gtkSignals','richText','displayBackends','printers','previousInstance'].map(name=>[name,{passed:true,...proof['language-O0']}]));
   proof.compiledServices={passed:true};
   if(architecture==='arm64'&&executionMode==='qemu-user'){
     proof.emulatedPageSizesVerified=[4096,16384,65536];
@@ -42,6 +42,12 @@ test('Execution proof preserves native x64 versus emulated ARM64 provenance',()=
 test('Embedding proof rejects wrong architecture, partial execution, missing cases and inconsistent hosts',()=>{
   for(const change of [p=>p.arch='x64',p=>p.architecture='x86_64',p=>p.runtime.sha256='c'.repeat(64),p=>p.optimizationLevelsVerified.pop(),p=>p.arm64ExecutionVerified=false,p=>p.machineCodeExecutionVerified=false,p=>p.gtkNativeSignalsVerified=false,p=>p.executionMode='native',p=>p.emulatorVersion='',p=>delete p['language-O3'],p=>p['gtk-controls-O2'].machine=62,p=>p['large-O2'].runtimeSha256='c'.repeat(64),p=>p.richTextVerified=false,p=>p.printerServicesVerified=false,p=>p.previousInstanceVerified=false,p=>delete p.nativeFixtures.richText,p=>p.nativeFixtures.printers.runtimeSha256='c'.repeat(64),p=>p.nativeFixtures.previousInstance.passed=false,p=>p.compiledServices.passed=false,p=>delete p['compiled-printers-O3'],p=>p.emulatedPageSizesVerified.pop(),p=>delete p.emulatedPageCases[16384],p=>p.emulatedPageCases[65536].executableSha256='c'.repeat(64),p=>p.error={message:'failed'}]){
     const {proof,manifest}=fixture('arm64','qemu-user');change(proof);assert.throws(()=>linuxAOTExecutionVerification(proof,manifest),/Embedding requires/);
+  }
+});
+test('Embedding requires display qualification against the exact runtime objects',()=>{
+  for(const change of [p=>delete p.nativeFixtures.displayBackends,p=>p.nativeFixtures.displayBackends.runtimeSha256='c'.repeat(64),p=>p.nativeFixtures.displayBackends.passed=false]){
+    const {proof,manifest}=fixture('x64','native');change(proof);
+    assert.throws(()=>linuxAOTExecutionVerification(proof,manifest),/X11 and Wayland display backends/);
   }
 });
 test('Cross GTK qualification requires initialized target image-loader and MIME caches',async()=>{

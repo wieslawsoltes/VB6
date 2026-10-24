@@ -124,7 +124,7 @@ export async function rpmArchive(entries,metadata,dependencies) {
   const requires=[['rpmlib(CompressedFileNames)',16777228,'3.0.4-1'],['rpmlib(PayloadFilesHavePrefix)',16777228,'4.0-1'],['rpmlib(FileDigests)',16777228,'4.6.0-1'],
     ...dependencies.map(name=>[name+'()(64bit)',0,'']),['libc.so.6(GLIBC_2.39)(64bit)',0,''],
     ['libstdc++.so.6(GLIBCXX_3.4.32)(64bit)',0,''],['libstdc++.so.6(CXXABI_1.3.13)(64bit)',0,''],
-    ...gccVersions.map(version=>['libgcc_s.so.1(GCC_'+version+')(64bit)',0,'']),['gtk3',12,'3.24']];
+    ...gccVersions.map(version=>['libgcc_s.so.1(GCC_'+version+')(64bit)',0,'']),[metadata.toolkit==='gtk4'?'gtk4':'gtk3',12,metadata.toolkit==='gtk4'?'4.14':'3.24']];
   const tags=[
     [100,8,['C']],[1000,6,metadata.packageName],[1001,6,metadata.version],[1002,6,metadata.release],
     [1004,9,[metadata.summary]],[1005,9,[metadata.description]],[1006,4,0],[1007,6,'reproducible.vb6-studio'],

@@ -37,7 +37,7 @@ export function writeLinuxAppZip(files,executable){
 }
 export async function linkLinuxAOT(compiled,runtime,{resources={}}={}){
   if(!compiled?.section||!['x86_64-aot','arm64-aot'].includes(compiled.report?.codegen))throw new TypeError('Expected Linux x86_64 or ARM64 AOT object code');
-  const target=linuxTarget(compiled.options.architecture??compiled.options.arch);
+  const target=linuxTarget(compiled.options.architecture??compiled.options.arch,compiled.options.toolkit);
   const templateLayout=await verifyLinuxAOTRuntime(runtime?.bytes,runtime?.manifest),linked=linkLinuxELF(compiled,runtime.bytes,templateLayout),o=compiled.options,root=o.name+'/',entry=root+'bin/'+o.name;
   const executable=linked.bytes,executableSha256=await sha256Bytes(executable),buildReport={...compiled.report,artifact:'native-executable',compiled:true,name:o.name,
     optimization:o.optimization,projectOptimization:compiled.report.optimization,runtimeOptimization:2,codeCapacity:linked.codeCapacity,metadataCapacity:linked.metadataCapacity,
@@ -56,23 +56,23 @@ export async function linkLinuxAOT(compiled,runtime,{resources={}}={}){
   }
   files[root+'Resources/vb6-build.json']=json(buildReport);files[root+'Resources/vb6-source-map.json']=json(compiled.sourceMap);
   files[root+'Resources/vb6-runtime-license.txt']=encoder.encode(LINUX_RUNTIME_LICENSE);
-  files[root+'README.txt']=encoder.encode(`${o.name}\n\nNative Linux ${target.architecture} executable with GTK 3.24 UI.\nRequires glibc ${target.minimumGlibc} or newer and GTK 3.24 system libraries (Ubuntu 24.04 or compatible).\nExtract the complete archive, then run the executable in bin/. Keep Resources/ beside bin/.\nThe ZIP preserves executable permissions. No JavaScript engine, VB interpreter, Node.js,\nnetwork service or per-application C/C++ compiler is required to run this application.\n\nThe manifest detects damaged or modified files. It is an integrity record, not a publisher signature.\n`);
+  files[root+'README.txt']=encoder.encode(`${o.name}\n\nNative Linux ${target.architecture} executable with GTK ${target.minimumGTK} UI.\nRequires glibc ${target.minimumGlibc} or newer and GTK ${target.minimumGTK} system libraries (Ubuntu 24.04 or compatible).\nExtract the complete archive, then run the executable in bin/. Keep Resources/ beside bin/.\nThe ZIP preserves executable permissions. No JavaScript engine, VB interpreter, Node.js,\nnetwork service or per-application C/C++ compiler is required to run this application.\n\nThe manifest detects damaged or modified files. It is an integrity record, not a publisher signature.\n`);
   const hashes=Object.create(null);for(const name of Object.keys(files).sort())hashes[name.slice(root.length)]=await sha256Bytes(files[name]);
   files[root+'manifest.json']=json({version:1,target:target.id,abi:compiled.metadata.abi,name:o.name,executable:'bin/'+o.name,
     runtime:{sha256:runtime.manifest.sha256,bytes:runtime.bytes.length,header:linked.templateHeader},files:hashes});
   if(Object.keys(files).length>LINUX_LIMITS.files)throw new Error('Too many Linux archive resources');
   const bytes=writeLinuxAppZip(files,entry),verification=await verifyLinuxAOTArchive(bytes,o);
-  return {bytes,executable,files,filename:linuxArtifactFilename(o.name,target.option),options:o,report:{...buildReport,...verification}};
+  return {bytes,executable,files,filename:linuxArtifactFilename(o.name,target.option,'.zip',o.toolkit),options:o,report:{...buildReport,...verification}};
 }
 export async function exportLinuxAOT(project,runtime,options={},packaging={}){return linkLinuxAOT(compileLinuxAOT(project,options),runtime,packaging);}
 export async function exportLinuxApplication(project,options={},packaging={}){
-  packaging.signal?.throwIfAborted();const compiled=compileLinuxAOT(project,options),runtime=await loadLinuxAOTRuntime({architecture:compiled.options.architecture,signal:packaging.signal});packaging.signal?.throwIfAborted();
+  packaging.signal?.throwIfAborted();const compiled=compileLinuxAOT(project,options),runtime=await loadLinuxAOTRuntime({architecture:compiled.options.architecture,toolkit:compiled.options.toolkit,signal:packaging.signal});packaging.signal?.throwIfAborted();
   const result=await linkLinuxAOT(compiled,runtime,packaging);packaging.signal?.throwIfAborted();return result;
 }
 function readJSON(bytes,limit){if(!bytes||bytes.length>limit)throw new Error('Missing or excessive Linux archive metadata');return JSON.parse(decoder.decode(bytes));}
 export async function verifyLinuxAOTArchive(input,options={}){
   const bytes=input instanceof Uint8Array?input:new Uint8Array(input);if(bytes.length<22||bytes.length>LINUX_LIMITS.archiveBytes)throw new Error('Invalid or excessive Linux application archive');
-  const o=linuxOptions(options),target=linuxTarget(o.architecture),root=o.name+'/',entry=root+'bin/'+o.name,manifestPath=root+'manifest.json',files=await readZip(bytes,{maxExpandedBytes:LINUX_LIMITS.expandedBytes,maxFiles:LINUX_LIMITS.files,filenameEncoding:'utf-8'}),modes=archiveModes(bytes);
+  const o=linuxOptions(options),target=linuxTarget(o.architecture,o.toolkit),root=o.name+'/',entry=root+'bin/'+o.name,manifestPath=root+'manifest.json',files=await readZip(bytes,{maxExpandedBytes:LINUX_LIMITS.expandedBytes,maxFiles:LINUX_LIMITS.files,filenameEncoding:'utf-8'}),modes=archiveModes(bytes);
   const manifest=readJSON(files.get(manifestPath),2*1024*1024);
   if(manifest.version!==1||manifest.target!==target.id||manifest.name!==o.name||manifest.executable!=='bin/'+o.name||!manifest.files||typeof manifest.files!=='object'||Array.isArray(manifest.files))throw new Error('Invalid Linux archive manifest');
   const names=Object.keys(manifest.files);
@@ -85,7 +85,8 @@ export async function verifyLinuxAOTArchive(input,options={}){
     if(modes.get(path)!==(path===entry?0o100755:0o100644))throw new Error('Linux archive does not preserve expected executable/file permissions');
   }
   if(modes.get(manifestPath)!==0o100644)throw new Error('Invalid Linux manifest permissions');
-  const executable=files.get(entry),layout=inspectLinuxELF(executable,{requireProject:true,architecture:o.architecture}),build=readJSON(files.get(root+'Resources/vb6-build.json'),2*1024*1024),executableSha256=await sha256Bytes(executable);
+  const executable=files.get(entry),layout=inspectLinuxELF(executable,{requireProject:true,architecture:o.architecture,toolkit:o.toolkit}),build=readJSON(files.get(root+'Resources/vb6-build.json'),2*1024*1024),executableSha256=await sha256Bytes(executable);
+  if(build.toolkit!==layout.toolkit)throw new Error('Linux archive report toolkit disagrees with executable bytes');
   if(build.compiled!==true||build.codegen!==target.codegen||build.target!==target.id||build.architecture!==target.architecture||['machine','callingConvention'].some(key=>build[key]!==undefined&&build[key]!==target[key])||build.name!==o.name||layout.metadataJSON.name!==o.name||build.abi!==layout.metadataJSON.abi||manifest.abi!==layout.metadataJSON.abi||build.codeBytes!==layout.codeSize||build.metadataBytes!==layout.metadataSize||build.executableBytes!==executable.length||build.executableSha256!==executableSha256||JSON.stringify(build.dependencies)!==JSON.stringify(layout.dependencies))throw new Error('Linux archive report disagrees with executable bytes');
   // Recover the immutable prelinked template by restoring only its original ELF
   // header. This independently verifies provenance instead of trusting the label.
@@ -93,9 +94,9 @@ export async function verifyLinuxAOTArchive(input,options={}){
   if(!original||!Number.isSafeInteger(original.bytes)||original.bytes<64||original.bytes>LINUX_LIMITS.runtimeBytes||original.bytes>layout.code.offset||!Array.isArray(original.header)||original.header.length!==64||original.header.some(n=>!Number.isInteger(n)||n<0||n>255)||!/^[0-9a-f]{64}$/.test(original.sha256||''))throw new Error('Invalid Linux runtime provenance');
   const template=executable.slice(0,original.bytes);template.set(original.header);
   if(await sha256Bytes(template)!==original.sha256||build.runtimeSha256!==original.sha256||build.runtimeBytes!==original.bytes)throw new Error('Linux runtime provenance hash mismatch');
-  const templateLayout=inspectLinuxELF(template,{architecture:o.architecture});if(templateLayout.code)throw new Error('Invalid Linux runtime provenance image');
+  const templateLayout=inspectLinuxELF(template,{architecture:o.architecture,toolkit:o.toolkit});if(templateLayout.code)throw new Error('Invalid Linux runtime provenance image');
   for(const [name,address]of templateLayout.symbols)if(layout.symbols.get(name)!==address)throw new Error('Linux runtime helper layout changed after linking');
-  return {artifact:'native-executable',compiled:true,target:target.id,name:o.name,architecture:target.architecture,machine:target.machine,callingConvention:target.callingConvention,format:'ELF64',toolkit:'gtk3',codegen:target.codegen,
+  return {artifact:'native-executable',compiled:true,target:target.id,name:o.name,architecture:target.architecture,machine:target.machine,callingConvention:target.callingConvention,format:'ELF64',toolkit:o.toolkit,codegen:target.codegen,
     bytes:bytes.length,sha256:await sha256Bytes(bytes),executableBytes:executable.length,executableSha256,image:layout.image,integrityVerified:true,runtimeProvenanceVerified:true,signed:false};
 }
 export async function unpackLinuxAOTArchive(input,options={}){

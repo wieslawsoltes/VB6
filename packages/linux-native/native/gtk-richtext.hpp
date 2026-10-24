@@ -13,4 +13,5 @@ void gtkRichSet(GtkControl&, const std::string&, Value);
 bool gtkRichMethod(const std::string&) noexcept;
 Value gtkRichCall(GtkControl&, const std::string&, Args, bool put = false);
 GtkRtfDocument gtkRichSnapshot(GtkControl&);
+void gtkRichDraw(GtkControl&, cairo_t*);
 }

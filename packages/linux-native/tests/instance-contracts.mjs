@@ -40,10 +40,41 @@ export async function qualifyLinuxInstances(executable,{prefix=[]}={}){
 
     const alias=path.join(directory,'alias');await fs.symlink(executable,alias);
     const linked=await start(alias);assert.equal(await linked.command('get'),'PREVIOUS');await linked.stop();
-    const varied=await start(executable,[],{...environment,HOME:directory,TMPDIR:directory,XDG_RUNTIME_DIR:directory});
+    const varied=await start(executable,[],{...environment,HOME:directory,TMPDIR:directory,XDG_RUNTIME_DIR:directory,FLATPAK_ID:'org.example.Unrelated'});
     assert.equal(await varied.command('get'),'PREVIOUS');await varied.stop();
     const copy=path.join(directory,'different-application');await fs.copyFile(executable,copy);await fs.chmod(copy,0o755);
     const independent=await start(copy);assert.equal(await independent.command('get'),'FIRST');await independent.stop();await restart.stop();
+
+    // The same type-2 AppImage can be extracted or mounted at different paths
+    // for every launch. Exercise real processes from two complete AppDir
+    // layouts; only the outer image identity is simulated by its ELF header.
+    const image=path.join(directory,'application.AppImage'),imageAlias=path.join(directory,'image-alias');
+    const header=Buffer.alloc(64);header.set([0x7f,0x45,0x4c,0x46,2,1]);header.set([0x41,0x49,2],8);
+    await fs.writeFile(image,header);await fs.symlink(image,imageAlias);
+    const appDirectories=[];
+    for(const name of ['extract-first','extract-second']){
+      const appDir=path.join(directory,name),file=path.join(appDir,'usr/lib/application/bin/Application');
+      await fs.mkdir(path.dirname(file),{recursive:true});await fs.copyFile(executable,file);await fs.chmod(file,0o755);
+      appDirectories.push({appDir,file});
+    }
+    const imageFirst=await start(appDirectories[0].file,[],{...environment,APPDIR:appDirectories[0].appDir,APPIMAGE:image});
+    const imageSecond=await start(appDirectories[1].file,[],{...environment,APPDIR:appDirectories[1].appDir,APPIMAGE:imageAlias});
+    assert.equal(await imageFirst.command('get'),'FIRST');assert.equal(await imageSecond.command('get'),'PREVIOUS');
+    const unrelated=await start(copy,[],{...environment,APPDIR:appDirectories[0].appDir,APPIMAGE:image});
+    assert.equal(await unrelated.command('get'),'FIRST');await unrelated.stop();
+    const differentImage=path.join(directory,'different.AppImage');await fs.copyFile(image,differentImage);
+    const imageCopy=await start(appDirectories[1].file,[],{...environment,APPDIR:appDirectories[1].appDir,APPIMAGE:differentImage});
+    assert.equal(await imageCopy.command('get'),'FIRST');await imageCopy.stop();
+    const wrongDirectory=await start(appDirectories[1].file,[],{...environment,APPDIR:appDirectories[0].appDir,APPIMAGE:image});
+    assert.equal(await wrongDirectory.command('get'),'FIRST');await wrongDirectory.stop();
+    const invalidImage=path.join(directory,'invalid.AppImage');await fs.writeFile(invalidImage,'not an AppImage');
+    const invalid=await start(appDirectories[1].file,[],{...environment,APPDIR:appDirectories[1].appDir,APPIMAGE:invalidImage});
+    assert.equal(await invalid.command('get'),'FIRST');await invalid.stop();
+    await imageFirst.kill();
+    const imageThird=await start(appDirectories[0].file,[],{...environment,APPDIR:appDirectories[0].appDir,APPIMAGE:image});
+    assert.equal(await imageThird.command('get'),'PREVIOUS');await imageThird.stop();await imageSecond.stop();
+    const imageRestart=await start(appDirectories[1].file,[],{...environment,APPDIR:appDirectories[1].appDir,APPIMAGE:image});
+    assert.equal(await imageRestart.command('get'),'FIRST');await imageRestart.stop();
 
     const simultaneous=await Promise.all(Array.from({length:8},()=>start()));
     const classifications=await Promise.all(simultaneous.map(child=>child.command('get')));
@@ -57,7 +88,7 @@ export async function qualifyLinuxInstances(executable,{prefix=[]}={}){
     // registration descriptors. This also works across PID namespaces.
     assert.equal(await exec.line(),'EXEC_READY');
     const afterExec=await start();assert.equal(await afterExec.command('get'),'FIRST');await afterExec.stop();await exec.kill();
-    return {passed:true,concurrentProcesses:8,checks:['startup-before-access','stable-startup-snapshot','same-process-sharing','surviving-secondary','normal-exit','crash-restart','simultaneous-start','symlink-identity','environment-independent-identity','separate-application','close-on-exec']};
+    return {passed:true,concurrentProcesses:8,checks:['startup-before-access','stable-startup-snapshot','same-process-sharing','surviving-secondary','normal-exit','crash-restart','simultaneous-start','symlink-identity','environment-independent-identity','separate-application','appimage-extraction-identity','appimage-outer-symlink','appimage-separate-copy','appimage-context-validation','appimage-crash-restart','close-on-exec']};
   }finally{
     for(const child of processes)child.kill('SIGKILL');
     await fs.rm(directory,{recursive:true,force:true});

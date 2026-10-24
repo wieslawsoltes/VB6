@@ -18,6 +18,9 @@ RESULTS: list[dict] = []
 METRICS: dict = {}
 FIXTURES = json.loads(subprocess.check_output(['node', str(ROOT / 'tools/browser-fixtures.mjs')], text=True))
 IDE_HTML = (ROOT / 'dist/VB6-Studio-Web.html').read_text()
+# The standalone IDE includes all native AOT payloads. Its initial parse has a
+# separate budget; real UI interactions retain the short new_page deadline.
+IDE_STARTUP_TIMEOUT_MS = 60000
 RUNTIME_JS = (ROOT / 'dist/vb6-runtime.js').read_text()
 RUNTIME_CSS = (ROOT / 'dist/vb6-controls.css').read_text()
 
@@ -73,10 +76,11 @@ def open_fixture(browser, name):
     return page
 
 
-def open_ide(browser):
-    page = new_page(browser)
-    page.set_content(IDE_HTML)
-    page.wait_for_function('typeof vb6Studio !== "undefined"')
+def open_ide(browser, size=(1440, 960), touch=False):
+    page = new_page(browser, size, touch)
+    page.set_content(IDE_HTML, wait_until='domcontentloaded', timeout=IDE_STARTUP_TIMEOUT_MS)
+    page.wait_for_function('typeof vb6Studio === "object" && !!document.querySelector(".ide-shell")',
+                           polling=100, timeout=IDE_STARTUP_TIMEOUT_MS)
     healthy(page)
     return page
 
@@ -451,7 +455,7 @@ def mobile_tests(browser):
     case('390px touch viewport: scaled standalone form and working touch events',runtime)
 
     def ide():
-        page=new_page(browser,(390,844),True);page.set_content(IDE_HTML);page.wait_for_function('typeof vb6Studio !== "undefined"')
+        page=open_ide(browser,(390,844),True)
         width=page.evaluate('document.documentElement.scrollWidth');check(width<=390,str(width))
         page.locator('[data-command="properties"]').first.tap();page.wait_for_timeout(100)
         page.screenshot(path=str(SHOTS/'mobile-ide.png'));healthy(page);page.close()

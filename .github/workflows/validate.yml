@@ -79,7 +79,7 @@ jobs:
       - name: Install the native Linux runtime dependency for Node tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0t64 libcups2t64
+          sudo apt-get install -y libgtk-3-0t64 libgtk-4-1 libcups2t64
       - name: Build checked products
         run: npm run build
       - name: Initialize installed .NET SDK before parallel conformance tests
@@ -942,9 +942,11 @@ jobs:
       - name: Install native SDK and headless GTK display
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang g++ pkg-config libgtk-3-dev libcups2-dev xvfb xauth dpkg-dev rpm cpio desktop-file-utils
+          sudo apt-get install -y clang g++ pkg-config libgtk-3-dev libgtk-4-dev libcups2-dev iso-codes fonts-dejavu-extra openbox weston xvfb xauth dpkg-dev rpm cpio desktop-file-utils
       - name: Rebuild current native sources and execute generated code
         run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --rebuild --report reports/linux-aot/rebuilt
+      - name: Rebuild GTK4 native sources and execute generated code
+        run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --rebuild --report reports/linux-aot/gtk4-rebuilt
       - name: Build verified offline Linux SDK
         run: node tools/build-linux-native.mjs
       - name: Validate compiler, ELF, archive and package contracts
@@ -953,8 +955,12 @@ jobs:
         run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --report reports/linux-aot/shipped
       - name: Execute Pascal objects, pointer heaps and files at O0 and O2
         run: node tools/test-pascal-native.mjs
+      - name: Execute the shipped GTK4 runtime and controls
+        run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --report reports/linux-aot/gtk4-shipped
       - name: Independently extract native packages and execute installed application paths
         run: node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --report reports/linux-distribution
+      - name: Independently extract GTK4 packages and execute installed application paths
+        run: node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --report reports/linux-distribution/gtk4
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -989,7 +995,7 @@ jobs:
       - name: Install the exported application's system GTK dependency
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0t64 libcups2t64 rpm cpio dpkg-dev desktop-file-utils
+          sudo apt-get install -y libgtk-3-0t64 libgtk-4-1 libcups2t64 rpm cpio dpkg-dev desktop-file-utils
       - uses: actions/download-artifact@v4
         with:
           pattern: linux-direct-browser-*
@@ -1002,6 +1008,48 @@ jobs:
         with:
           name: linux-aot-browser-native-execution-${{ matrix.architecture }}
           path: reports/linux-aot-browser-native
+          if-no-files-found: error
+          retention-days: 7
+  linux-native-distribution:
+    name: Native AppImage and Flatpak (${{ matrix.architecture }}, ${{ matrix.toolkit }})
+    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x64, arm64]
+        toolkit: [gtk3, gtk4]
+    env:
+      ARCHITECTURE: ${{ matrix.architecture }}
+      TOOLKIT: ${{ matrix.toolkit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install native packaging and display dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0t64 libgtk-4-1 libgtk-3-bin libgtk-4-bin libcups2t64 librsvg2-common shared-mime-info fonts-dejavu-core iso-codes squashfs-tools binutils flatpak ostree gnupg desktop-file-utils xvfb xauth dbus-x11
+      - name: Install the declared Flatpak runtime in an isolated user installation
+        env:
+          FLATPAK_USER_DIR: ${{ runner.temp }}/vb6-flatpak
+        run: |
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install --noninteractive --assumeyes --no-related flathub org.gnome.Platform//50
+      - name: Build verified offline Linux SDK
+        run: node tools/build-linux-native.mjs
+      - name: Independently verify and execute AppImage and sandboxed Flatpak applications
+        env:
+          FLATPAK_USER_DIR: ${{ runner.temp }}/vb6-flatpak
+        run: dbus-run-session -- xvfb-run -a node tools/test-linux-native-distribution.mjs --architecture "$ARCHITECTURE" --toolkit "$TOOLKIT" --flatpak-user-dir "$RUNNER_TEMP/vb6-flatpak" --iso-mount-namespace privileged --report reports/linux-native-distribution
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-native-distribution-${{ matrix.architecture }}-${{ matrix.toolkit }}
+          path: reports/linux-native-distribution
           if-no-files-found: error
           retention-days: 7
   test:
@@ -1027,6 +1075,7 @@ jobs:
       - macos-browser-native
       - linux
       - linux-browser-native
+      - linux-native-distribution
       - compute-reference
       - compute-gpu
     if: always()
@@ -1041,4 +1090,4 @@ jobs:
         run: node tools/ci/gate.mjs
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
-          CI_EXPECTED: hygiene,node,packages,core-browser,browser,figma,authoring-exports,advanced-build,advanced-editor,rendering-qualification,win32-system-contracts,native-com-ole,native-compiler,migration,macos,macos-browser-native,linux,linux-browser-native,compute-reference,compute-gpu
+          CI_EXPECTED: hygiene,node,packages,core-browser,browser,figma,authoring-exports,advanced-build,advanced-editor,rendering-qualification,win32-system-contracts,native-com-ole,native-compiler,migration,macos,macos-browser-native,linux,linux-browser-native,linux-native-distribution,compute-reference,compute-gpu

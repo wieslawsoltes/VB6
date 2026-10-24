@@ -59,11 +59,11 @@ function installedEntries(files,application,metadata) {
   entries.push({path:'usr/share/doc/'+metadata.packageName+'/copyright',bytes:utf8(notice),mode:0o644});
   return completeEntries(entries);
 }
-function debianArchive(entries,metadata,architecture) {
+function debianArchive(entries,metadata,architecture,toolkit) {
   const size=entries.reduce((sum,entry)=>sum+(entry.bytes?.length||0),0);
   const fields=['Package: '+metadata.packageName,'Version: '+metadata.version+'-'+metadata.release,'Section: utils','Priority: optional','Architecture: '+(architecture==='arm64'?'arm64':'amd64'),
     'Maintainer: '+metadata.maintainer,'Installed-Size: '+Math.ceil(size/1024),
-    'Depends: libc6 (>= 2.39), libstdc++6 (>= 13.2), libgcc-s1, libgtk-3-0t64 (>= 3.24), libcups2t64',
+    'Depends: libc6 (>= 2.39), libstdc++6 (>= 13.2), libgcc-s1, '+(toolkit==='gtk4'?'libgtk-4-1 (>= 4.14)':'libgtk-3-0t64 (>= 3.24)')+', libcups2t64',
     ...(metadata.homepage?['Homepage: '+metadata.homepage]:[]),'Description: '+metadata.summary,
     ...metadata.description.split('\n').map(line=>' '+(line.trim()?line:'.'))];
   const sums=entries.filter(entry=>!entry.type).map(entry=>md5Bytes(entry.bytes)+'  '+entry.path).join('\n')+'\n';
@@ -78,16 +78,16 @@ export async function packageLinuxApplication(application,options={}, {signal}={
   const bytes=application.bytes.slice(),unpacked=await unpackLinuxAOTArchive(bytes,compiler);signal?.throwIfAborted();
   const prefix=compiler.name+'/',report=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(unpacked.files.get(prefix+'Resources/vb6-build.json')));
   const applicationSha256=await sha256Bytes(bytes),format=LINUX_DISTRIBUTION_FORMATS[metadata.format];
-  let packaged=bytes,entries,filename=linuxArtifactFilename(compiler.name,compiler.architecture,format.extension);
+  let packaged=bytes,entries,filename=linuxArtifactFilename(compiler.name,compiler.architecture,format.extension,compiler.toolkit);
   if(metadata.format==='tar.gz'){
     entries=completeEntries([...unpacked.files].map(([path,value])=>({path,bytes:value,mode:path===prefix+'bin/'+compiler.name?0o755:0o644})));
     packaged=gzipStore(tarArchive(entries));
   }else if(metadata.format==='deb'||metadata.format==='rpm'){
     entries=installedEntries(unpacked.files,compiler,metadata);
-    if(metadata.format==='deb')packaged=debianArchive(entries,metadata,compiler.architecture);
+    if(metadata.format==='deb')packaged=debianArchive(entries,metadata,compiler.architecture,compiler.toolkit);
     else {
       const shared=new Set(['usr','usr/bin','usr/lib','usr/share','usr/share/applications','usr/share/doc']);
-      packaged=await rpmArchive(entries.filter(entry=>!shared.has(entry.path)),{...metadata,architecture:compiler.architecture},report.dependencies);
+      packaged=await rpmArchive(entries.filter(entry=>!shared.has(entry.path)),{...metadata,architecture:compiler.architecture,toolkit:compiler.toolkit},report.dependencies);
     }
     const architecture=compiler.architecture==='arm64'?(metadata.format==='deb'?'arm64':'aarch64'):(metadata.format==='deb'?'amd64':'x86_64');
     filename=metadata.format==='deb'?metadata.packageName+'_'+metadata.version+'-'+metadata.release+'_'+architecture+'.deb':metadata.packageName+'-'+metadata.version+'-'+metadata.release+'.'+architecture+'.rpm';

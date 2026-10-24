@@ -48,17 +48,17 @@ export class LinuxDirectLowering extends DirectLowering {
 }
 export function compileLinuxAOT(input,options={}){
   try{
-    const project=normalizeProject(input),normalized=linuxOptions({name:project.name,...options}),target=linuxTarget(normalized.architecture),arm64=normalized.architecture==='arm64',resources=prepareMacOSResources(project);
+    const project=normalizeProject(input),normalized=linuxOptions({name:project.name,...options}),target=linuxTarget(normalized.architecture,normalized.toolkit),arm64=normalized.architecture==='arm64',resources=prepareMacOSResources(project);
     setTargetConditionalConstants(project,{
-      VBWEB:0,Win16:0,Win32:0,Win64:0,Mac:0,MacOS:0,ARM64:arm64?-1:0,AARCH64:arm64?-1:0,Linux:-1,Unix:-1,X86_64:arm64?0:-1,AMD64:arm64?0:-1,GTK:-1,GTK3:-1});
+      VBWEB:0,Win16:0,Win32:0,Win64:0,Mac:0,MacOS:0,ARM64:arm64?-1:0,AARCH64:arm64?-1:0,Linux:-1,Unix:-1,X86_64:arm64?0:-1,AMD64:arm64?0:-1,GTK:-1,GTK3:normalized.toolkit==='gtk3'?-1:0,GTK4:normalized.toolkit==='gtk4'?-1:0});
     const program=compileProject(project);
     if(!program.valid){const error=new LinuxCompileError('VB6 frontend rejected the Linux project');error.diagnostics=program.diagnostics;throw error;}
-    const controls=linuxControlReport(project),lowering=new LinuxDirectLowering(program,normalized,{
+    const controls=linuxControlReport(project,normalized.toolkit),lowering=new LinuxDirectLowering(program,normalized,{
       CompileError:LinuxCompileError,diagnosticPrefix:'LIN',resolveDeclaration:resolveLinuxDeclaration,
       emitFunctions:(functions,optimization)=>emitLinuxAOTFunctions(functions,optimization,normalized.architecture),
       validateCallback(node,lowering,owner,procedure){if(procedure.params.length!==4||procedure.params.some(p=>String(p.storageType||p.type).toLowerCase()!=='long'))lowering.fail('Linux AddressOf requires a SetTimer callback with four fixed ByVal As Long parameters','LIN230');}
     }),emitted=lowering.emit();
-    const report={target:target.id,architecture:target.architecture,format:'ELF64',machine:target.machine,callingConvention:target.callingConvention,toolkit:'gtk3',artifact:'native-object-code',
+    const report={target:target.id,architecture:target.architecture,format:'ELF64',machine:target.machine,callingConvention:target.callingConvention,toolkit:normalized.toolkit,artifact:'native-object-code',
       compiled:false,codegen:target.codegen,runtime:'vb6-native',abi:AOT_ABI,modules:program.modules.size,
       procedures:lowering.procedures,instructions:lowering.instructions,codeBytes:emitted.section.length,
       optimization:emitted.section.optimization,metadataBytes:new TextEncoder().encode(JSON.stringify(emitted.metadata)).length,
