@@ -98,7 +98,7 @@ class WorkflowAuditTests(unittest.TestCase):
         self.reject(lambda w:w['jobs']['node']['strategy']['matrix']['shard'].append(4))
     def test_extra_yaml_extension_workflow_rejected(self):
         (self.root/'.github/workflows/duplicate.yaml').write_text('name: Duplicate\non: push\njobs: {}\n')
-        with self.assertRaisesRegex(ValueError,'Only three'):
+        with self.assertRaisesRegex(ValueError,'Only the four maintained'):
             check.audit(self.root)
     def test_duplicate_yaml_keys_rejected(self):
         self.path.write_text(self.path.read_text()+'\nname: Invalid\n')

@@ -27,8 +27,8 @@ Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
 def audit(root=ROOT):
     folder = root / '.github/workflows'
     paths = sorted([*folder.glob('*.yml'), *folder.glob('*.yaml')])
-    if {p.name for p in paths} != {'validate.yml', 'pages.yml', 'macos-aot-runtime.yml'}:
-        raise ValueError('Only three maintained workflows are permitted')
+    if {p.name for p in paths} != {'validate.yml', 'pages.yml', 'macos-aot-runtime.yml', 'linux-aot-runtime.yml'}:
+        raise ValueError('Only the four maintained validation, deployment and runtime workflows are permitted')
     docs = {p.name: yaml.load(p.read_text(), Loader=Loader) for p in paths}
     ci = docs['validate.yml']; jobs = ci['jobs']; gate = jobs['test']; expected = set(jobs) - {'test'}
     gate_step = next(s for s in gate['steps'] if 'tools/ci/gate.mjs' in s.get('run', ''))
