@@ -360,8 +360,8 @@ export class PascalLowerer {
     const indexed = this.controlArrayIndex(node, context); if (indexed) return this.assignable(indexed, context);
     if (node.kind === 'group') return this.assignable(node.expression, context);
     if (node.kind === 'call') {const symbol = node.callee.kind === 'identifier' ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context); if (symbol?.foreign) return foreignAssignable(this, symbol, node);}
-    if (node.kind === 'identifier') {const symbol = this.resolve(node, context); if (symbol.foreign) return foreignAssignable(this, symbol, node); if (!['variable', 'parameter', 'result', 'withField', 'control', 'external'].includes(symbol.kind)) this.fail(`Cannot assign to '${node.name}'`, node, 'TP_ASSIGNMENT'); if (symbol.kind === 'parameter' && symbol.param.constant) this.fail(`Cannot modify const parameter '${node.name}'`, node, 'TP_ASSIGNMENT'); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); return symbol;}
-    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (symbol?.foreign) return foreignAssignable(this, symbol, node); if (symbol && !['variable', 'parameter'].includes(symbol.kind)) this.fail('Exported member is not assignable', node, 'TP_ASSIGNMENT'); if (!symbol) this.assignable(node.object, context); return symbol;}
+    if (node.kind === 'identifier') {const symbol = this.resolve(node, context); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); if (symbol.foreign) return foreignAssignable(this, symbol, node); if (!['variable', 'parameter', 'result', 'withField', 'control', 'external'].includes(symbol.kind)) this.fail(`Cannot assign to '${node.name}'`, node, 'TP_ASSIGNMENT'); if (symbol.kind === 'parameter' && symbol.param.constant) this.fail(`Cannot modify const parameter '${node.name}'`, node, 'TP_ASSIGNMENT'); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); return symbol;}
+    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); if (symbol?.foreign) return foreignAssignable(this, symbol, node); if (symbol && !['variable', 'parameter'].includes(symbol.kind)) this.fail('Exported member is not assignable', node, 'TP_ASSIGNMENT'); if (!symbol) this.assignable(node.object, context); return symbol;}
     if (node.kind === 'index') {this.assignable(node.object, context); this.typeOf(node, context); return null;}
     if (node.kind === 'dereference') {this.typeOf(node, context); return null;}
     this.fail('Variable reference required', node, 'TP_ASSIGNMENT');
@@ -572,6 +572,7 @@ export class PascalLowerer {
       if (this.binder.scope.symbols.has('main')) this.fail('Program block conflicts with an explicitly declared Main routine', this.ast.body, 'TP_MAIN_CONFLICT');
       const main = this.context(); main.writer.emit('Public Sub Main()', this.ast.body, true); this.statement(this.ast.body, main); main.writer.emit('End Sub', this.ast.body, true); root.writer.append(main.writer);
     }
+    for (const thunk of this.foreignThunks || []) root.writer.append(thunk);
     const helperSource = getPascalRuntimeSource(this.helpers);
     if (helperSource) root.writer.emit(helperSource, this.ast, true);
     const fileSource = this.files.source(); if (fileSource) root.writer.emit(fileSource, this.ast, true);

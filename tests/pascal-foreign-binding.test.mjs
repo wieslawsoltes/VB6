@@ -206,3 +206,69 @@ End Sub`);
 begin Helper.Fill(A); WriteLn(Helper.Values()[-2], ':', Low(Helper.Values()), ':', High(Helper.Values()), ':', A[0].Value) end.`, [helper]);
   assert.deepEqual(output, ['17:-2:-1:23']);
 });
+
+test('foreign ByRef element borrows survive later argument effects and release after the call, exactly like VB', async () => {
+  const helper = vb('Helper', `Public Values() As Long
+Public Sub Setup()
+ReDim Values(1)
+Values(0)=7
+End Sub
+Public Function Later() As Long
+On Error Resume Next
+Err.Clear
+ReDim Values(4)
+Later=Err.Number
+End Function
+Public Sub Accept(ByRef Value As Long, ByVal Status As Long)
+Debug.Print Status, UBound(Values), Value
+End Sub`);
+  const basic = project('', [helper]); basic.modules[0] = vb('Main', 'Public Sub Main()\nHelper.Setup\nHelper.Accept Helper.Values(0), Helper.Later()\nDebug.Print Helper.Later()\nEnd Sub');
+  const baseline = compileProject(basic); assert.deepEqual(baseline.diagnostics, []); const expected = [];
+  await new VirtualMachine(baseline, {print: value => expected.push(value)}).start(); assert.deepEqual(expected, ['10 1 7', '0']);
+  const result = await execute('program Main; begin Helper.Setup; Helper.Accept(Helper.Values[0], Helper.Later()); WriteLn(Helper.Later()) end.', [helper]);
+  assert.deepEqual(result.output, expected);
+});
+
+test('deferred foreign arguments retain nested Pascal captures and evaluate each value in source order', async () => {
+  const helper = vb('Helper', 'Public Sub PrintValues(ByVal First As Long, ByVal Second As Long)\nDebug.Print First, Second\nEnd Sub');
+  const {output} = await execute(`program Main;
+procedure Run;
+var N:LongInt;
+function Next:LongInt; begin Inc(N); Next:=N end;
+begin N:=1; Helper.PrintValues(Sqr(Next), Next); WriteLn(N) end;
+begin Run end.`, [helper]);
+  assert.deepEqual(output, ['4 3', '3']);
+});
+
+for (const name of ['VBCounter', 'CounterEnum']) test('declared VB class '+name+' retains object identity regardless of enum-like spelling', async () => {
+  const object = vb(name, 'Public Value As Long', 'class');
+  const factory = vb('Factory', `Public Function Make() As ${name}\nSet Make=New ${name}\nMake.Value=42\nEnd Function`);
+  const {output} = await execute(`program Main; var C:${name}; begin C:=Factory.Make(); WriteLn(C.Value) end.`, [object, factory]);
+  assert.deepEqual(output, ['42']);
+});
+
+test('foreign loop controls retain Pascal mutation guards for assignments and ByRef calls', () => {
+  const helper = vb('Helper', 'Public N As Integer\nPublic Sub Change(ByRef Value As Integer)\nValue=5\nEnd Sub');
+  invalid('program Main; begin for N:=1 to 3 do N:=5 end.', [helper], /For control variable/);
+  invalid('program Main; begin for N:=1 to 3 do Helper.Change(N) end.', [helper], /For control variable/);
+  invalid('program Main; begin for N:=1 to 3 do Helper.N:=5 end.', [helper], /For control variable/);
+  invalid('program Main; begin for N:=1 to 3 do Helper.Change(Helper.N) end.', [helper], /For control variable/);
+});
+
+test('foreign ByRef strings cannot bypass Pascal bounded string storage and explicit VB storage remains usable', async () => {
+  const helper = vb('Helper', `Public Text As String
+Public Sub Fill(ByRef Value As String)
+Value=String$(300,"x")
+End Sub
+Public Sub FillVariant(ByRef Value As Variant)
+Value=String$(300,"x")
+End Sub
+Public Sub FillArray(ByRef Value() As String)
+Value(0)=String$(300,"x")
+End Sub`);
+  for (const type of ['String', 'String[5]', 'Char']) invalid(`program Main; var S:${type}; begin Helper.Fill(S) end.`, [helper], /bounded Pascal string storage/);
+  invalid('program Main; var S:String; begin Helper.FillVariant(S) end.', [helper], /bounded Pascal string storage/);
+  invalid('program Main; var S:array[0..1] of String; begin Helper.FillArray(S) end.', [helper], /bounded Pascal string storage/);
+  const {output} = await execute('program Main; var S:String; begin Helper.Fill(Helper.Text); S:=Helper.Text; WriteLn(Length(Helper.Text),\':\',Length(S)) end.', [helper]);
+  assert.deepEqual(output, ['300:255']);
+});

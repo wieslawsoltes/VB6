@@ -1,4 +1,5 @@
 import {PASCAL_TYPES, sameType, assignmentCompatible} from './semantics.js';
+import {deferredForeignValue, deferredForeignReference} from './foreign-thunks.js';
 
 const key = value => String(value).toLowerCase();
 const identifier = name => '[' + String(name).replaceAll(']', '') + ']';
@@ -36,6 +37,16 @@ function storageReference(lowerer, node, context) {
   return false;
 }
 
+function boundedPascalStorage(type, seen = new Set()) {
+  if (!type || seen.has(type)) return false;
+  seen.add(type);
+  if (!type.foreign && ['string', 'char'].includes(type.kind)) return true;
+  if (type.kind === 'subrange') return boundedPascalStorage(type.base, seen);
+  if (type.kind === 'array') return boundedPascalStorage(type.element, seen);
+  if (type.kind === 'record') return [...type.fields.values()].some(field => boundedPascalStorage(field.type, seen));
+  return false;
+}
+
 function compatibleReference(formal, actual) {
   if (formal.kind === 'variant') return true;
   if (formal.kind === 'array') return actual.kind === 'array' && (sameType(formal.element, actual.element) || ['ordinal', 'boolean', 'real', 'string'].includes(formal.element.kind) && formal.element.foreign && actual.element.foreign && key(formal.element.vb) === key(actual.element.vb));
@@ -43,15 +54,6 @@ function compatibleReference(formal, actual) {
   return sameType(formal, actual);
 }
 
-function snapshotValue(lowerer, arg, type, context) {
-  const actual = lowerer.typeOf(arg, context);
-  const source = arg.kind === 'nil' && ['object', 'variant'].includes(type.kind) ? 'Nothing' : lowerer.expression(arg, context);
-  if (context.pure) return source;
-  const temporary = lowerer.temporary(context, type, arg, 'foreignArgument');
-  const object = actual.kind === 'object' || arg.kind === 'nil' && ['object', 'variant'].includes(type.kind);
-  lowerer.emit(context, `${object ? 'Set ' : ''}${temporary} = ${source}`, arg, true);
-  return temporary;
-}
 
 /** VB Optional/ParamArray and expression-valued ByRef arguments retain the
  * shared runtime ABI. Only genuine writable storage is emitted as an alias. */
@@ -65,12 +67,13 @@ export function foreignArguments(lowerer, symbol, args, context, node) {
     const actual = lowerer.typeOf(arg, context);
     if (param.byRef && storageReference(lowerer, arg, context)) {
       lowerer.assignable(arg, context);
+      if (boundedPascalStorage(actual)) lowerer.fail(`Visual Basic ByRef parameter '${param.name}' cannot alias bounded Pascal string storage; use a VB String variable and assign the result back explicitly`, arg, 'TP_FOREIGN_REFERENCE_LAYOUT');
       if (!compatibleReference(param.type, actual)) lowerer.fail(`Visual Basic ByRef parameter '${param.name}' requires ${param.type.name}`, arg, 'TP_VAR_PARAMETER_TYPE');
-      return context.pure ? lowerer.expression(arg, context, {lvalue: true}) : lowerer.freezeReference(arg, context);
+      return context.pure ? lowerer.expression(arg, context, {lvalue: true}) : deferredForeignReference(lowerer, arg, context);
     }
     if (param.type.kind === 'array') lowerer.fail(`Visual Basic array parameter '${param.name}' requires an array variable`, arg, 'TP_VAR_PARAMETER_TYPE');
     if (!assignmentCompatible(param.type, actual)) lowerer.fail(`Visual Basic argument '${param.name}' has incompatible type`, arg, 'TP_ARGUMENT_TYPE');
-    return snapshotValue(lowerer, arg, param.type, context);
+    return deferredForeignValue(lowerer, arg, context, {nothing: arg.kind === 'nil' && ['object', 'variant'].includes(param.type.kind)});
   });
 }
 
