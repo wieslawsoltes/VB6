@@ -52,6 +52,7 @@ export function pascalNativeVerificationProject() {
   return {schema:1,name:'PascalVerification',startup:'Sub Main',settings:{},modules:[
     {name:'NativeHarness',kind:'module',language:'vb6',code:`Option Explicit
 Public Sub Main()
+  If NativeInterop.Verify() <> 1 Then Err.Raise 5, "Pascal verification", "Typed Visual Basic interop failed"
   Dim Result As Long
   Result = PascalUnit.Compute()
   Dim ObjectResult As Long, PointerResult As Long, FileResult As Long
@@ -86,11 +87,86 @@ end;
 begin
   Seed := 12;
 end.
-`}, ...pascalNativeFeatureUnits()
+`}, ...pascalNativeFeatureUnits(), ...pascalNativeForeignModules()
   ]};
 }
 
 export const pascalNativeExpectedResult='42:17:3160:65579';
+
+/** The same required native fixture crosses the typed VB boundary in both
+ * directions, including a live ByRef element borrow during a later argument. */
+export function pascalNativeForeignModules(){return [
+  {name:'NativeBridgeCounter',kind:'class',language:'vb6',code:`Option Explicit
+Public Value As Long
+Private Stored As Long
+Private PeerValue As NativeBridgeCounter
+Public Sub Add(ByVal Amount As Long)
+  Value = Value + Amount
+End Sub
+Public Property Get Entry(ByVal Index As Long) As Long
+  Entry = Stored - Index
+End Property
+Public Property Let Entry(ByVal Index As Long, ByVal NextValue As Long)
+  Stored = NextValue + Index
+End Property
+Public Property Get Peer() As NativeBridgeCounter
+  Set Peer = PeerValue
+End Property
+Public Property Set Peer(ByVal NextValue As NativeBridgeCounter)
+  Set PeerValue = NextValue
+End Property
+`},
+  {name:'NativeBridge',kind:'module',language:'vb6',code:`Option Explicit
+Public Type InteropItem
+  Value As Long
+End Type
+Public Values() As Long
+Public Function MakeCounter() As NativeBridgeCounter
+  Set MakeCounter = New NativeBridgeCounter
+End Function
+Public Sub FillItems(ByRef Items() As InteropItem)
+  Items(0).Value = 23
+End Sub
+Public Sub SetupBorrow()
+  ReDim Values(1)
+  Values(0) = 7
+End Sub
+Public Function ResizeDuringArgument() As Long
+  On Error Resume Next
+  Err.Clear
+  ReDim Values(4)
+  ResizeDuringArgument = Err.Number
+End Function
+Public Function ReadBorrow(ByRef Value As Long, ByVal Status As Long) As Long
+  ReadBorrow = Status * 1000 + UBound(Values) * 100 + Value
+End Function
+`},
+  {name:'NativeInterop',kind:'module',language:'pascal',code:`unit NativeInterop;
+interface
+function Verify: Longint;
+implementation
+type TItems = array[0..0] of NativeBridge.InteropItem;
+function Verify: Longint;
+var First, Second: NativeBridgeCounter; Items: TItems;
+begin
+  Verify := 0;
+  First := NativeBridge.MakeCounter; Second := NativeBridge.MakeCounter;
+  First.Value := 3; First.Add(4);
+  if First.Value <> 7 then Exit;
+  First.Entry(2) := 12;
+  if First.Entry(3) <> 11 then Exit;
+  Second.Value := 9; First.Peer := Second;
+  if First.Peer.Value <> 9 then Exit;
+  First.Peer := nil;
+  NativeBridge.FillItems(Items);
+  if Items[0].Value <> 23 then Exit;
+  NativeBridge.SetupBorrow;
+  if NativeBridge.ReadBorrow(NativeBridge.Values[0], NativeBridge.ResizeDuringArgument()) <> 10107 then Exit;
+  if NativeBridge.ResizeDuringArgument() <> 0 then Exit;
+  Verify := 1
+end;
+end.`}
+];}
 
 /** Private descendant receivers deliberately cross a unit boundary when the
  * public ancestor's generated virtual thunk calls the override. */
