@@ -1,4 +1,5 @@
 import {PascalError} from './lexer.js';
+import {pascalFormControlTypes} from './form-bindings.js';
 import {parsePascalModule} from './parser.js';
 import {resolveObjectType, prepareObjectMethods, validateObjectMethodLocals, validateObjectMethodSignature, objectReferenceCompatible} from './object-lowering.js';
 import {builtinType, BUILTIN_SYMBOLS, CONSTANT_SYMBOLS} from '../type-catalog.js';
@@ -91,7 +92,7 @@ export class PascalScope {
     for (const binder of this.owner.imports) {binder.ensure(); const symbol = binder.scope.symbols.get(key(name)); if (symbol?.public) imported.push(binder.resolveSymbol(symbol));}
     if (imported.length > 1) this.owner.fail(`Ambiguous imported identifier '${name}'`, node, 'TP_AMBIGUOUS');
     if (imported.length) return imported[0];
-    if (this.owner.controls.has(key(name))) return {kind: 'control', name, vbName: name, owner: this.owner, scope: this, type: foreignType(this.owner.controlTypes.get(key(name)) || 'Control')};
+    if (this.owner.controls.has(key(name))) return {kind: 'control', name, vbName: name, owner: this.owner, scope: this, type: this.owner.controlTypes.get(key(name)) || foreignType('Control')};
     if (this.owner.externalValues.has(key(name))) return {kind: 'external', name, vbName: name, owner: this.owner, scope: this, type: this.owner.externalTypes.get(key(name)) || PASCAL_TYPES.variant, ...(key(name) === 'filemode' ? {ioGlobal: 'fileMode'} : {})};
     if (key(name) === 'self' && this.owner.input.form) return {kind: 'control', name, vbName: 'Me', owner: this.owner, scope: this, type: foreignType(this.owner.input.form.type || 'Form')};
     const constant = basicConstants.get(key(name)); if (constant) return {kind: 'constant', name: constant.name, value: constant.value, type: foreignType(constant.type), builtIn: true};
@@ -134,8 +135,9 @@ export class PascalBinder {
     this.scope = new PascalScope(this); this.imports = []; this.procedures = []; this.recordTypes = []; this.enumTypes = []; this.pointerTypes = []; this.typeId = 0; this.ready = false; this.preparing = false;
     this.controls = new Set(); this.controlTypes = new Map(); this.externalValues = new Set(['me', 'app', 'screen', 'clipboard', 'forms', 'printer', 'debug']); this.externalTypes = new Map();
     this.pascalIntrinsics = new Set('abs append arctan assign blockread blockwrite chr close concat copy cos delete dispose eof eoln erase exp filepos filesize flush frac get high include exclude inc dec insert int ioresult length ln low new odd ord paramcount paramstr pi pos pred put random randomize read readln rename reset rewrite round seek sin sizeof sqr sqrt str succ trunc upcase val write writeln'.split(' '));
-    const controls = node => {if (!node) return; if (node.name) {this.controls.add(key(node.name)); this.controlTypes.set(key(node.name), node.type || 'Control');} for (const child of [...(node.controls || []), ...(node.menus || [])]) controls(child);}; controls(input?.form);
-    for (const module of workspace.project?.modules || []) if (module.form) {this.controls.add(key(module.name)); this.controlTypes.set(key(module.name), module.form.type || 'Form');}
+    this.controlTypes = pascalFormControlTypes(input?.form, foreignType, message => this.fail(message, ast, 'TP_FORM_DECLARATION'));
+    this.controls = new Set(this.controlTypes.keys());
+    for (const module of workspace.project?.modules || []) if (module.form) {this.controls.add(key(module.name)); this.controlTypes.set(key(module.name), foreignType(module.form.type || 'Form'));}
     for (const [name, type] of Object.entries({me: input?.form?.type || 'Form', app: 'App', screen: 'Screen', clipboard: 'Clipboard', forms: 'Forms', printer: 'Printer', debug: 'Debug'})) this.externalTypes.set(name, foreignType(type));
     this.externalValues.add('filemode'); this.externalTypes.set('filemode', PASCAL_TYPES.byte);
     if (input?.form) for (const member of builtinType(input.form.type || 'Form')?.members || []) {this.externalValues.add(key(member.name)); this.externalTypes.set(key(member.name), foreignType(member.type));}
