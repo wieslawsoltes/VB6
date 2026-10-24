@@ -227,7 +227,7 @@
   border-right:var(--winui-ComboChevronEdge,var(--detail-combo-chevron-edge,3px solid transparent));border-bottom:var(--winui-ComboChevronEdge,var(--detail-combo-chevron-edge,0px solid transparent));
   transform:var(--winui-ComboChevronTransform,var(--detail-combo-chevron-transform,none));
  }
- .vb-combo-popup {background:var(--winui-MenuBackground,var(--vb-window));color:var(--winui-MenuForeground,var(--vb-window-text));border-color:var(--winui-MenuBorder,var(--app-border,var(--vb-dark)));}
+ .vb-combo-popup {background:var(--winui-ComboDropDownBackground,var(--vb-window));color:var(--winui-MenuForeground,var(--vb-window-text));border-color:var(--winui-MenuBorder,var(--app-border,var(--vb-dark)));}
  .vb-combo-option {padding:var(--winui-ComboItemPadding,0 2px);border-radius:var(--winui-ComboItemRadius,var(--detail-popup-item-radius,0));}
 
  /* Virtualized rows retain their measured height and authored typography.
