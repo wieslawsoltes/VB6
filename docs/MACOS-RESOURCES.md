@@ -118,7 +118,8 @@ The source-kit manifest lists actual resource file paths.
 
 ## Validation and SDK maintenance
 
-Helper ABI 4 identifies the resource-aware runtime. Normal builds reject an
+Helper ABI 5 retains the resource-aware runtime introduced in ABI 4 and adds
+separate native record identity and display metadata. Normal builds reject an
 outdated embedded SDK. The guarded runtime refresh requires native parser,
 AppKit picture/pixel, lifecycle, lexical-scope, large-project and O0–O3 execution
 proof before embedding the exact tested SDK bytes. Multi-resolution drawing,
