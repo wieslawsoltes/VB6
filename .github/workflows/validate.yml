@@ -265,6 +265,7 @@ jobs:
       matrix:
         # Each suite owns disjoint scripts; origins and engines stay exhaustive.
         suite:
+          - figma-workspace
           - figma-authoring
           - figma-services
         browser:
@@ -283,7 +284,7 @@ jobs:
           browser: ${{ matrix.browser }}
           profile: authoring
           mesa: ${{ matrix.browser == 'firefox' && matrix.suite == 'figma-authoring' }}
-      - name: Run the assigned authoring or services partition
+      - name: Run the assigned Figma partition
         run: python tools/ci/run.py "$SUITE"
         env:
           SUITE: ${{ matrix.suite }}
@@ -371,16 +372,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   advanced-editor:
-    name: Advanced editor (${{ matrix.browser }})
+    name: ${{ matrix.suite }} (${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        suite:
+          - advanced-editor-core
+          - advanced-editor-integration
         browser:
           - chromium
           - firefox
           - webkit
+        transport:
+          - http
+          - file
     needs:
       - advanced-build
     steps:
@@ -396,16 +403,18 @@ jobs:
         with:
           name: advanced-editor-assets
           path: dist
-      - name: Actual Monaco, Vim, TUI and Figma integration on both origins
+      - name: Run the owned advanced editor scripts on the selected origin
         env:
+          SUITE: ${{ matrix.suite }}
+          VB6_TEST_TRANSPORT: ${{ matrix.transport }}
           VB6_TEST_ADVANCED: '1'
-        run: python tools/ci/run.py advanced-editor
+        run: python tools/ci/run.py "$SUITE"
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: advanced-editor-${{ matrix.browser }}
+          name: ${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.transport }}
           path: |-
             reports/advanced-editor
             reports/input-modes
