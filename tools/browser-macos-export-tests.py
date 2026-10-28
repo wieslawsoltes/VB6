@@ -113,10 +113,11 @@ with sync_playwright() as pw:
                 return success();
               };
             }''', {**fixture,'token':TOKEN})
-            page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
+            page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text(), wait_until='domcontentloaded', timeout=60000)
         else:
-            page.goto(ORIGIN + '/')
-        page.wait_for_function('!!globalThis.vb6Studio?.macOSExportInstalled')
+            page.goto(ORIGIN + '/', wait_until='commit', timeout=60000)
+        # The installed export API is the startup oracle; feature actions keep 20 seconds.
+        page.wait_for_function('!!globalThis.vb6Studio?.macOSExportInstalled', timeout=60000)
         page.evaluate('p=>vb6Studio.loadProject(VB6StudioAPI.normalizeProject(p))', fixture['project'])
         before = page.evaluate('JSON.stringify(vb6Studio.project)')
         check('Win32, Microsoft runtime, VB.NET and macOS exports remain independent', page.evaluate('''['exportWin32','exportClassic','exportVbNet','exportMacOS'].every(id=>vb6Studio.menu('File').some(i=>i?.id===id&&i.enabled))'''))
