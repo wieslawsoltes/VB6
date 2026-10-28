@@ -207,8 +207,10 @@ with sync_playwright() as pw:
         page.evaluate('vb6Studio.runState="design"')
         if not MEMORY:
             local = browser.new_page(accept_downloads=True,viewport={'width':1440,'height':1050})
-            local.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri())
-            local.wait_for_function('!!globalThis.vb6Studio?.macOSExportInstalled')
+            # WebKit's load event can remain pending after the standalone API is usable.
+            # Bound document startup separately from the unchanged export interactions.
+            local.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri(), wait_until='commit', timeout=60000)
+            local.wait_for_function('!!globalThis.vb6Studio?.macOSExportInstalled', timeout=60000)
             local.evaluate('p=>vb6Studio.loadProject(VB6StudioAPI.normalizeProject(p))',fixture['project'])
             local.evaluate('void vb6Studio.command("exportMacOS")')
             with local.expect_download() as item:
