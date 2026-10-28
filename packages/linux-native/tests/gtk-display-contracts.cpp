@@ -15,7 +15,23 @@ using namespace vb6;
 namespace {
 void require(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 void rejected(const std::function<void()>& action){try{action();}catch(const Error& error){require(error.number==453,"Unexpected display-boundary error number");return;}throw std::runtime_error("Unsupported global display operation was silently accepted");}
-void until(GtkHost& host,const std::function<bool()>& ready){const auto deadline=g_get_monotonic_time()+15*G_TIME_SPAN_SECOND;while(!ready()){require(g_get_monotonic_time()<deadline,"Native display transition did not finish");host.pump();g_usleep(5000);}host.check();}
+void until(GtkHost& host,const char* phase,const std::function<bool()>& ready,const std::function<std::string()>& state){
+  const auto deadline=g_get_monotonic_time()+15*G_TIME_SPAN_SECOND;
+  while(!ready()){
+    try{require(g_get_monotonic_time()<deadline,"Native display transition did not finish");}
+    catch(...){
+      std::cerr<<"Native display timeout phase: "<<phase<<"\n";
+      // Observe state only after failure, and retain the original timeout even
+      // if a diagnostic getter is no longer available.
+      try{const auto detail=state();std::cerr<<"Native display last state: "<<detail<<"\n";}
+      catch(const std::exception& error){std::cerr<<"Native display state unavailable: "<<error.what()<<"\n";}
+      catch(...){std::cerr<<"Native display state unavailable: unknown diagnostic error\n";}
+      throw;
+    }
+    host.pump();g_usleep(5000);
+  }
+  host.check();
+}
 ControlSpec spec(const char* type,const char* name,int x,int y,int width,int height){ControlSpec value;value.type=type;value.name=name;value.properties={{"left",Value::integer(x*15)},{"top",Value::integer(y*15)},{"width",Value::integer(width*15)},{"height",Value::integer(height*15)}};return value;}
 std::shared_ptr<GtkControl> control(const std::shared_ptr<Instance>& owner,const char* name){auto value=std::dynamic_pointer_cast<GtkControl>(owner->controls.at(lower(name)));require(bool(value),"Display fixture control is missing");return value;}
 }
@@ -30,7 +46,10 @@ int main(int argc,char** argv){
     Procedure pulse;pulse.name="pulse_timer";pulse.code=[&](Frame& frame){if(++ticks==3)runtime.unload(frame.self);return Value{};};module.procedures[pulse.name]=pulse;
     runtime.modules["displayform"]=module;auto owner=runtime.instance("DisplayForm");runtime.load(owner);auto form=host.form(owner);host.formCall(owner,"show",{});
     require(wayland?GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(form->window)):gtkNativeX11Display(form->window),"Fixture used the wrong native display backend");
-    auto button=control(owner,"Button"),plain=control(owner,"Plain"),rich=control(owner,"Rich");until(host,[&]{return gtk_widget_get_mapped(form->window)&&gtk_widget_get_mapped(rich->widget);});
+    auto button=control(owner,"Button"),plain=control(owner,"Plain"),rich=control(owner,"Rich");
+    until(host,wayland?"Wayland widget mapping":"X11 widget mapping",[&]{return gtk_widget_get_mapped(form->window)&&gtk_widget_get_mapped(rich->widget);},[&]{
+      return "formMapped="+std::to_string(gtk_widget_get_mapped(form->window))+", richMapped="+std::to_string(gtk_widget_get_mapped(rich->widget))+", formVisible="+std::to_string(gtk_widget_get_visible(form->window))+", richVisible="+std::to_string(gtk_widget_get_visible(rich->widget));
+    });
     gtk_button_clicked(GTK_BUTTON(button->widget));host.check();require(clicks==1,"Native display did not dispatch the button signal");plain->set(runtime,"text",Value::string(u"Native Ω😀"));require(plain->editText()==u"Native Ω😀","Native display editor lost Unicode");
     const std::string red="89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082";
     rich->set(runtime,"textrtf",Value::string(fromUTF8("{\\rtf1\\ansi {\\b Native} \\u937?\\u-10179?\\u-8704?{\\pict\\pngblip\\picwgoal300\\pichgoal300 "+red+"}{\\trowd\\cellx1800\\cellx3600\\intbl Left\\cell Right\\cell\\row}}")));
@@ -50,11 +69,18 @@ int main(int argc,char** argv){
       host.formSet(owner,"width",Value::integer(9900));host.formSet(owner,"height",Value::integer(6600));
     }else{
 #if GTK_MAJOR_VERSION >= 4
-      until(host,[&]{return gdk_x11_screen_supports_net_wm_hint(gdk_x11_display_get_screen(gtk_widget_get_display(form->window)),"_NET_MOVERESIZE_WINDOW");});
+      until(host,"X11 EWMH capability",[&]{return gdk_x11_screen_supports_net_wm_hint(gdk_x11_display_get_screen(gtk_widget_get_display(form->window)),"_NET_MOVERESIZE_WINDOW");},[&]{
+        return "_NET_MOVERESIZE_WINDOW="+std::to_string(gdk_x11_screen_supports_net_wm_hint(gdk_x11_display_get_screen(gtk_widget_get_display(form->window)),"_NET_MOVERESIZE_WINDOW"))+", formMapped="+std::to_string(gtk_widget_get_mapped(form->window));
+      });
 #else
-      until(host,[&]{return gdk_x11_screen_supports_net_wm_hint(gdk_screen_get_default(),gdk_atom_intern_static_string("_NET_MOVERESIZE_WINDOW"));});
+      until(host,"X11 EWMH capability",[&]{return gdk_x11_screen_supports_net_wm_hint(gdk_screen_get_default(),gdk_atom_intern_static_string("_NET_MOVERESIZE_WINDOW"));},[&]{
+        return "_NET_MOVERESIZE_WINDOW="+std::to_string(gdk_x11_screen_supports_net_wm_hint(gdk_screen_get_default(),gdk_atom_intern_static_string("_NET_MOVERESIZE_WINDOW")))+", formMapped="+std::to_string(gtk_widget_get_mapped(form->window));
+      });
 #endif
-      host.formCall(owner,"move",{Arg(Value::integer(2100)),Arg(Value::integer(1800)),Arg(Value::integer(9600)),Arg(Value::integer(6300))});until(host,[&]{return host.formGet(owner,"left").integral()==2100&&host.formGet(owner,"top").integral()==1800;});
+      host.formCall(owner,"move",{Arg(Value::integer(2100)),Arg(Value::integer(1800)),Arg(Value::integer(9600)),Arg(Value::integer(6300))});
+      until(host,"X11 Form.Move position",[&]{return host.formGet(owner,"left").integral()==2100&&host.formGet(owner,"top").integral()==1800;},[&]{
+        return "leftTwips="+std::to_string(host.formGet(owner,"left").integral())+", topTwips="+std::to_string(host.formGet(owner,"top").integral())+", expectedLeftTwips=2100, expectedTopTwips=1800, formMapped="+std::to_string(gtk_widget_get_mapped(form->window));
+      });
       form->surface->set(runtime,"icon",Value::object(picture));host.pump();require(host.formGet(owner,"left").integral()==2100&&host.formGet(owner,"top").integral()==1800,"Updating the native icon moved the window");
 #if GTK_MAJOR_VERSION >= 4
       auto* surface=gtk_widget_get_window(form->window);auto* display=gdk_x11_display_get_xdisplay(gdk_surface_get_display(surface));Atom type=None;int format=0;unsigned long count=0,remaining=0;unsigned char* bytes=nullptr;
@@ -64,7 +90,11 @@ int main(int argc,char** argv){
 #endif
       host.formCall(owner,"zorder",{Arg(Value::integer(1))});host.formCall(owner,"zorder",{Arg(Value::integer(0))});host.pump();
     }
-    auto pulseControl=control(owner,"Pulse");pulseControl->set(runtime,"enabled",Value::boolean(true));until(host,[&]{return host.forms.empty();});require(ticks==3&&!owner->loaded&&plain->disposed&&rich->disposed&&!pulseControl->timer,"Native display timer/unload retained widgets or sources");
+    auto pulseControl=control(owner,"Pulse");pulseControl->set(runtime,"enabled",Value::boolean(true));
+    until(host,wayland?"Wayland timer/unload":"X11 timer/unload",[&]{return host.forms.empty();},[&]{
+      return "forms="+std::to_string(host.forms.size())+", ticks="+std::to_string(ticks)+", ownerLoaded="+std::to_string(owner->loaded)+", plainDisposed="+std::to_string(plain->disposed)+", richDisposed="+std::to_string(rich->disposed)+", timerSource="+std::to_string(pulseControl->timer);
+    });
+    require(ticks==3&&!owner->loaded&&plain->disposed&&rich->disposed&&!pulseControl->timer,"Native display timer/unload retained widgets or sources");
     std::cout<<(wayland?"LINUX_GTK_WAYLAND_OK":"LINUX_GTK_X11_WM_OK")<<"\n";
   }catch(const std::exception& error){std::cerr<<"GTK display contract failure: "<<error.what()<<"\n";return 1;}
 }

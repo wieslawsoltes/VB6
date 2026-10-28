@@ -16,13 +16,39 @@ test('direct AOT preserves structured designer collection properties recursively
       const spec=emitted.controls.find(c=>c.name===control.name);
       for(const [name,value]of Object.entries(control.properties||{}))if(Array.isArray(value)){
         const property=spec.properties.find(([key])=>key===name.toLowerCase());assert.ok(property,control.name+'.'+name);
-        const actual=compiled.metadata.literals[property[1]],expected=aotScalar(propertyValue(value));
+        // Native tab bootstrap materializes its public defaults. Other
+        // designer arrays retain the exact authored record serialization.
+        const records=name==='Tabs'&&['TabStrip','SSTab'].includes(control.type)
+          ?value.map(item=>({...item,Enabled:-1,Visible:-1,Picture:''})):value;
+        const actual=compiled.metadata.literals[property[1]],expected=aotScalar(propertyValue(records));
         assert.deepEqual(actual,expected,control.name+'.'+name);structuredArrays++;
       }
     }
   }
   assert.ok(structuredArrays>=4,'TreeView nodes, ListView columns/items and TabStrip tabs');
   assert.equal(JSON.stringify(project),before);assert.ok(compiled.section.length>0);
+});
+
+test('direct AOT tab bootstrap preserves authored flags, logical selection and source records',()=>{
+  const project=sample('controls'),control=project.modules.find(module=>module.form).form.controls.find(control=>control.type==='TabStrip');
+  Object.assign(control.properties,{MacOSControlStyle:'segmented',Tab:2,Tabs:[
+    {Key:'disabled',Caption:'Disabled',Enabled:0},
+    {Key:'hidden',Caption:'Hidden',Visible:0},
+    {Key:'selected',Caption:'Selected',Enabled:-1,Visible:-1,ToolTipText:'Settings'}
+  ]});
+  const before=structuredClone(project),compiled=compileMacOSAOT(project);
+  const spec=compiled.metadata.modules.find(module=>module.controls).controls.find(item=>item.name===control.name);
+  const literal=name=>compiled.metadata.literals[spec.properties.find(([key])=>key===name)[1]];
+  assert.deepEqual(literal('tab'),aotScalar(2));
+  assert.equal(literal('tabs').type,'array');
+  const records=literal('tabs').value.map(value=>{assert.equal(value.type,'string');return JSON.parse(value.value);});
+  assert.deepEqual(records,[
+    {Key:'disabled',Caption:'Disabled',Enabled:0,Visible:-1,Picture:''},
+    {Key:'hidden',Caption:'Hidden',Enabled:-1,Visible:0,Picture:''},
+    {Key:'selected',Caption:'Selected',Enabled:-1,Visible:-1,ToolTipText:'Settings',Picture:''}
+  ]);
+  assert.deepEqual(project,before);
+  assert.deepEqual(compiled.project.modules,before.modules);
 });
 
 test('nested designer arrays retain empty arrays, scalars and escaped JSON objects',()=>{

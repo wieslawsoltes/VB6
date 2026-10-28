@@ -55,6 +55,35 @@ const assignKeys = (items,prefix,budget) => {
 export function lowerMacOS26Collection({node,p,values,scopes,statics,constant,set,children}) {
   if(node.type.namespaceURI!==MACOS26_NS)return false;
   const key=propertyName(p.member),read=(props,name,fallback)=>props[name]?statics.convert(props[name].value,props[name].member,scopes):fallback;
+  if(node.type.name==='SegmentedControl') {
+    // Selection is carried by the real Toolbar.Buttons collection. Do not emit
+    // a second selected-index field which could diverge during VB6 execution.
+    if(['SelectionMode','SelectedIndex'].includes(key))return true;
+    if(key==='Segments') {
+      const budget=expansionBudget('SegmentedControl.Segments');
+      const mode=read(values,'SelectionMode','Single'),selectedIndex=read(values,'SelectedIndex',undefined),styles={Single:2,Multiple:1,Momentary:0};
+      if(!Object.hasOwn(styles,mode))throw new TypeError('Unsupported segmented selection mode.');
+      const items=collection(p.value,'SegmentedControl.Segments');
+      if(!items.length)throw new TypeError('SegmentedControl requires at least one Segment.');
+      if(selectedIndex!==undefined) {
+        if(!Number.isInteger(selectedIndex)||selectedIndex< -1||selectedIndex>=items.length)throw new TypeError('SelectedIndex is outside the segment collection.');
+        if(mode==='Multiple')throw new TypeError('Multiple selection uses Segment.IsSelected instead of SelectedIndex.');
+        if(mode==='Momentary'&&selectedIndex!==-1)throw new TypeError('Momentary segments cannot have persistent selection.');
+      }
+      const selected=[];
+      const buttons=items.map((item,index)=>{
+        expectType(item,'Segment');noExtra(item,['Key','Title','IsEnabled','Visibility','IsSelected','ToolTip']);const props=effectiveProperties(item);
+        const chosen=read(props,'IsSelected',selectedIndex===index);
+        if(selectedIndex!==undefined&&props.IsSelected&&chosen!==(selectedIndex===index))throw new TypeError('SelectedIndex conflicts with Segment.IsSelected.');
+        if(chosen)selected.push(index);
+        const button={Key:keyFor(item,props,statics,scopes),Caption:String(read(props,'Title','')),Style:styles[mode],Value:chosen?1:0,Enabled:read(props,'IsEnabled',true)?-1:0,Visible:read(props,'Visibility','Visible')==='Visible'?-1:0,ToolTipText:String(read(props,'ToolTip',''))};
+        budget.item(button);return button;
+      });
+      if(mode==='Single'&&selected.length>1)throw new TypeError('Single selection accepts at most one selected Segment.');
+      if(mode==='Momentary'&&selected.length)throw new TypeError('Momentary segments cannot have persistent selection.');
+      assignKeys(buttons,'segment',budget);set('Buttons',buttons,p);return true;
+    }
+  }
   if(node.type.name==='Table'&&key==='Columns') {
     const budget=expansionBudget('Table.Columns');
     const columns=collection(p.value,'Table.Columns').map(item=>{
@@ -102,14 +131,15 @@ export function lowerMacOS26Collection({node,p,values,scopes,statics,constant,se
   }
   if(node.type.name==='TabView'&&key==='Items') {
     const budget=expansionBudget('TabView.Items');
-    const items=collection(p.value,'TabView.Items');
+    const items=collection(p.value,'TabView.Items'),selected=[];
     if(!items.length)throw new TypeError('TabView requires at least one TabItem.');
     const field=(name,value,source)=>{budget.field(name,value);set(name,value,source);};
     field('Tabs',items.length,p);field('TabsPerRow',items.length);
     for(const [index,item] of items.entries()) {
       expectType(item,'TabItem');
       if(Object.keys(item.directives).length)throw new TypeError('TabItem pages do not accept x:Name or resource keys; name their content control instead.');
-      noExtra(item,['Title','IsEnabled','Visibility','Content']);const props=effectiveProperties(item);
+      noExtra(item,['Title','IsEnabled','IsSelected','Visibility','Content']);const props=effectiveProperties(item);
+      selected.push(props.IsSelected?statics.convert(props.IsSelected.value,props.IsSelected.member,scopes):undefined);
       field('TabCaption('+index+')',String(read(props,'Title','')),p);
       if(props.IsEnabled)field('TabEnabled('+index+')',statics.convert(props.IsEnabled.value,props.IsEnabled.member,scopes)?-1:0,p);
       if(props.Visibility)field('TabVisible('+index+')',statics.convert(props.Visibility.value,props.Visibility.member,scopes)==='Visible'?-1:0,p);
@@ -118,6 +148,16 @@ export function lowerMacOS26Collection({node,p,values,scopes,statics,constant,se
         children.push({child:props.Content.value,menu:false,tabPage:index});
       }
     }
+    const chosen=selected.map((value,index)=>value===true?index:-1).filter(index=>index>=0),declared=read(values,'SelectedIndex',undefined);
+    if(chosen.length>1)throw new TypeError('TabView accepts at most one selected TabItem.');
+    if(declared!==undefined) {
+      if(!Number.isInteger(declared)||declared<0||declared>=items.length)throw new TypeError('SelectedIndex is outside the tab collection.');
+      if(selected[declared]===false||chosen.length&&chosen[0]!==declared)throw new TypeError('SelectedIndex conflicts with TabItem.IsSelected.');
+    } else if(selected.some(value=>value!==undefined)) {
+      const index=chosen[0]??selected.findIndex(value=>value!==false);
+      if(index<0)throw new TypeError('TabView requires a selected page; every TabItem.IsSelected is False.');
+      field('Tab',index,p);
+    }
     return true;
   }
   return false;
@@ -125,6 +165,7 @@ export function lowerMacOS26Collection({node,p,values,scopes,statics,constant,se
 
 export function macOS26Event(node,name) {
   if(node.type.namespaceURI!==MACOS26_NS)return null;
+  if(['SelectionChanged','Click'].includes(name)&&node.type.name==='SegmentedControl')return 'ButtonClick';
   if(name==='SelectionChanged'&&node.type.name==='Outline')return 'NodeClick';
   if(name==='SelectionChanged'&&node.type.name==='Table')return 'ItemClick';
   if(name==='ColumnClick'&&node.type.name==='Table')return 'ColumnClick';

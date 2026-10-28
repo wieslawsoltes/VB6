@@ -55,6 +55,11 @@ async function x11Child(config) {
     const stdout=await nativeCase(config.executable,'--x11',{...config,env});
     assert.ok(!manager.closed,'The isolated Openbox window manager exited:\n'+manager.stderr);
     return {name:'x11-openbox',stdout};
+  }catch(error){
+    // Capture the manager's state before cleanup can terminate it. Rethrow the
+    // same fixture error so the original assertion and stack remain visible.
+    console.error('Openbox state before cleanup: '+JSON.stringify({closed:manager.closed,exitCode:manager.code,signal:manager.signal,spawnError:manager.error?.message??null})+'\nOpenbox stderr:\n'+(manager.stderr||'(empty)'));
+    throw error;
   }finally{await stop(manager);}
 }
 async function waylandChild({executable,prefix,emulated,home}) {

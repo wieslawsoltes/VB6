@@ -174,9 +174,10 @@ match, no browser errors/external requests occurred, and no adaptation gaps
 remain. Even that certificate is scoped to the captured view/control inventory,
 not every native framework, third-party OCX, or WindowServer surface.
 
-The native-comparison browser fixture explicitly records unresolved adaptations:
-its legacy search sample has no intrinsic NSSearchField; HTML date entry uses the browser's locale/picker;
-and native AppKit non-client dimensions differ from the preserved VB6 window
+The native-comparison browser fixture uses the real TextBox search appearance,
+including the shared magnifier, named clear button and retained editor. It
+explicitly records unresolved adaptations: HTML date entry uses the browser's
+locale/picker, and native AppKit non-client dimensions differ from the preserved VB6 window
 contract. Native glyph rasterization, segmented/tab geometry and full compositor
 materials also require further comparison rather than an unsupported 100%
 claim. `cacheDisplay(in:to:)` captures view drawing, not the WindowServer's final
@@ -348,7 +349,7 @@ optical interaction between overlapping glass elements.
 | Property | Values / behavior |
 | --- | --- |
 | `MacOSControlSize` | `mini`, `small`, `regular`, `large`, `extraLarge`; changes inner command padding/corners, preserving the authored outer rectangle. Large and extra-large commands use capsules. |
-| `MacOSControlStyle` | Command styles: `automatic`, `push`, `default`, `destructive`, `borderless`, `inline`, `circular`, `help`. CheckBox additionally accepts `switch`; TextBox accepts `search`. |
+| `MacOSControlStyle` | Command styles: `automatic`, `push`, `default`, `destructive`, `borderless`, `inline`, `circular`, `help`. CheckBox additionally accepts `switch`; TextBox accepts `search`; Toolbar, TabStrip and SSTab accept `segmented`. |
 | `MacOSMaterial` | `none`, `content`, `sidebar`, `titlebar`, `toolbar`, `menu`, `popover`, `sheet`, `hud` on supported containers. `content` is opaque. |
 | `MacOSBackgroundRole`, `MacOSForegroundRole` | Explicit semantic color names such as `windowBackgroundColor`, `controlAccentColor`, `labelColor`, `secondaryLabelColor`, and `separatorColor`. |
 | `PlaceholderText` | Placeholder for TextBox or editable ComboBox. |
@@ -360,14 +361,16 @@ padding used by the native-reference fixture. The other preferred sizes do not
 overwrite twip bounds or authored fonts. A circular command should be authored
 with a square rectangle when an actual circle is required. Destructive commands
 use a secondary red tint and ink so the default action retains greater visual
-prominence. A visual default style should be paired with `Default = True` (or
-`IsDefault="True"` in XAML) when Return should invoke it.
+prominence. The `default` appearance participates in the form's Return action,
+including when the legacy `Default` property remains false. A focused segmented
+button owns Return and Space, so activation does not also invoke that default.
 
 Search retains the original text input, IME state, selection and event path. Its
 magnifier is decorative; its named clear button and unmodified Escape clear the
 same value. Switching presentation does not create a second editable value.
-The switch retains the original checkbox input. The VB6 mixed value keeps
-checkbox accessibility semantics and paints a centered thumb. A moving progress
+The switch retains the original checkbox input and uses two-state values 0/1;
+an explicit switch rejects the VB6 mixed value before mutation. An ordinary
+checkbox retains its existing mixed-state behavior. A moving progress
 segment becomes stationary under reduced motion; it remains partially filled
 instead of suggesting completion.
 
@@ -375,6 +378,50 @@ Explicit RGB still uses the ordinary authored paint. A compatible default
 system-color pair can participate in a material or state brush. Assigning a new
 `BackColor` or `ForeColor` relinquishes the corresponding semantic role unless
 the same edit explicitly supplies the new role.
+
+### Segmented selections and tab pages
+
+Open **Examples → macOS 26 Preferences** for a complete authored form using
+search, switches, all three segmented modes, segmented tab pages, multiline
+editing, materials and a keyboard default action. It uses the public appearance
+properties and ordinary VB handlers, so the same example can be edited in the
+designer, exported to the browser or compiled for the native macOS backend.
+
+The segmented adapter follows Apple's [segmented-control guidance](https://developer.apple.com/design/human-interface-guidelines/segmented-controls)
+and [AppKit tracking modes](https://developer.apple.com/documentation/appkit/nssegmentedcontrol/switchtracking).
+It lays out equal-width, related choices using the actual VB `Toolbar.Buttons`
+collection. `Style = 2` provides exclusive selection, `Style = 1` independent
+toggles, and `Style = 0` momentary actions. These map to `selectOne`, `selectAny`
+and `momentary` in native AppKit. An explicit segmented toolbar accepts one
+tracking style throughout, `Value` 0/1, at most one selected exclusive member,
+and no persistent selection for momentary actions. Separators, placeholders,
+dropdowns and mixed tracking modes fail validation before changing the live
+collection or appearance. Normal toolbar groups remain separated by their
+existing non-grouped buttons.
+
+The browser updates public button values before emitting one `ButtonClick`.
+Programmatic group selection atomically clears its peers, including hidden
+members. Removing, inserting, hiding, disabling or renaming a button preserves
+unaffected collection objects and DOM buttons; keyboard focus repairs to an
+available member. Single selections use radio accessibility, multiple selections
+expose pressed state, and momentary buttons expose no persistent selected state.
+Left/Right follows text direction, Home/End selects the endpoints, and only the
+single-selection mode activates while navigating. Disabled and hidden members
+do not receive pointer or keyboard activation. Reduced motion introduces no
+selection animation, and forced colors keeps visible selection, borders and
+keyboard focus.
+
+`TabStrip` and `SSTab` retain their page ownership and existing `Click` arguments.
+An explicit segmented style presents one horizontal row at the top or bottom;
+it ignores the classic `TabsPerRow` wrapping property until `automatic` is
+restored. Vertical segmented orientation is rejected. `TabHeight`, `TabMaxWidth`,
+the outer VB rectangle and SSTab child coordinates remain authored values.
+Disabled/hidden tab metadata is retained, repaint preserves tab-button identity,
+and page selection keeps the existing editors and their values alive.
+
+The public search reference specimen now uses `MacOSControlStyle = "search"`.
+This removes the obsolete missing-search-affordance adaptation entry; it does
+not change comparison thresholds or claim that search glyph pixels are exact.
 
 ### XAML authoring
 

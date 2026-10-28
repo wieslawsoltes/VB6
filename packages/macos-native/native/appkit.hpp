@@ -34,13 +34,15 @@ struct MacControl:Object {
   // The authored container survives adding/removing an effect around it. The
   // widget remains the event, field-editor and child-container owner.
   NSView*appearanceContent=nil;NSTextField*appearancePlaceholder=nil;NSTextField*appearanceCaption=nil;
+  NSSegmentedControl*appearanceSegments=nil;std::vector<uint64_t>appearanceSegmentItems;
+  NSInteger appearanceTabType=NSTopTabsBezelBorder;bool appearanceTabsDrawBackground=true;
   std::string appliedMaterial="none";bool applyingAppearance=false;
   int32_t handle=0;bool initialized=false,disposed=false,eventActive=false,editSelectionPending=false;std::vector<Text>list;std::vector<int32_t>itemData;std::set<size_t>selected;
   std::map<std::string,std::shared_ptr<MacItems>>collections;std::vector<std::vector<Text>>grid;std::map<int,double>columnWidths,rowHeights;std::vector<GraphicCommand>graphics;
   std::shared_ptr<NativeRecordsetGrid> dataBinding;
   std::optional<RecordsetGridEdit> boundEdit;
   uint64_t boundSelection=0;bool boundColumnsReady=false;
-  std::map<uint64_t,id>outlineTokens;double currentX=0,currentY=0;size_t suspendLayout=0,eventSuppression=0;NSSize originalParentSize=NSZeroSize;NSRect originalFrame=NSZeroRect;
+  std::map<uint64_t,id>outlineTokens;double currentX=0,currentY=0;size_t suspendLayout=0,eventSuppression=0,editValidationSuppression=0;NSSize originalParentSize=NSZeroSize;NSRect originalFrame=NSZeroRect;
   MacControl(MacHost&h,std::shared_ptr<Instance>f,ControlSpec s):host(&h),owner(f),spec(std::move(s)){}
   std::string className()const override{return spec.type;}
   Value get(Runtime&,const std::string&)override;void set(Runtime&,const std::string&,Value,bool=false)override;Value invoke(Runtime&,const std::string&,Args)override;Ref reference(Runtime&,const std::string&,Args={})override;
