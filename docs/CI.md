@@ -23,11 +23,13 @@ The complete `tests/*.test.mjs` set uses Node's four-way `--test-shard` partitio
 with two test-file workers per job. Package/ABI checks and browser suites no longer
 share that deadline. `tools/ci/suites.json` assigns each browser entrypoint to a
 bounded group. Figma HTTP and standalone-file tests run in separate jobs in
-Chromium, Firefox and WebKit. Each Figma engine/origin is further split into two
-explicit, disjoint script owners: **figma-authoring** (five designer, editor and
+Chromium, Firefox and WebKit. Each Figma engine/origin is further split into three
+explicit, disjoint script owners: **figma-workspace** (the workspace suite's 22
+independent IDE fixtures), **figma-authoring** (four editor, navigation and
 presentation suites) and **figma-services** (three keyboard, Agent/MCP, Assets and
-state suites). They run on separate runners, not competing browser processes in
-one job. The combined `figma` CLI alias still runs all eight scripts locally.
+state suites). Each partition has its own runner and the same bounded 15-minute
+job deadline. The combined `figma` CLI alias still runs all eight scripts locally
+in their original order.
 Unique artifact names include partition, engine and origin. Only the Firefox
 partition containing the required-WebGL case installs Mesa/Xvfb dependencies.
 This trades additional runner setup for lower end-to-end latency; it does not
@@ -35,8 +37,14 @@ claim reduced billed compute time. Native Apple jobs still execute the archives
 exported by all three browsers.
 
 The optional Monaco distribution is built once from locked dependencies and
-passed to all three engine jobs, each testing both origins and the real shared
-model. Agent transcript and Code GPU qualification share the existing renderer
+passed to twelve jobs: three engines, two real origins and two disjoint script
+owners. **advanced-editor-core** runs the 31 Monaco acceptance cases;
+**advanced-editor-integration** runs the 25 Vim, four TUI and one Figma cases.
+Every engine still runs all 61 cases on each origin against the real shared model,
+with the optional editor enabled. Each partition retains the 20-minute job limit,
+and artifact names include partition, engine and origin. The combined
+`advanced-editor` CLI alias still runs all four scripts on both origins in their
+original order. Agent transcript and Code GPU qualification share the existing renderer
 API/display setup. Required backends, pixel assertions and native oracles remain
 unchanged. Software GPU execution is not physical-hardware qualification.
 
@@ -64,6 +72,26 @@ successor; a process timeout is not a pass. Per-suite timings appear in the job
 summary, alongside the original screenshots and reports. Matrix-specific
 artifact names avoid collisions.
 
+Ordinary script processes have a 480-second deadline. WebKit's native-project
+suite and its standalone-file Figma workspace suite have a 720-second process
+deadline because their repeated independent IDE boots can outlast the ordinary
+budget while cases continue passing. Other Figma origins and browsers retain
+480 seconds. Only the WebKit/file Monaco and Vim scripts receive a 900-second
+process deadline. Explicit caller limits take precedence, and `timeoutSeconds`
+in each timing record identifies the effective bound. Scheduling changes leave
+the scripts' interaction and startup deadlines intact.
+
+The advanced-editor partition sizing uses a conditional timing estimate. In
+[run 40769315828](https://github.com/wieslawsoltes/VB6/actions/runs/40769315828),
+the completed WebKit HTTP scripts took 290.020 seconds. Successful native-project
+cases in the same run had median file/HTTP intervals of 17.742/1.506 seconds.
+Applying that observed difference to each advanced IDE fixture projects about
+637 seconds for file Monaco, 528 for file Vim and 1,280 for all four file scripts
+before runner setup. The cancelled advanced-file run yielded startup errors and
+no completed file-script timing, so those projections are not measured advanced
+file throughput or validation. Separate script owners keep each projected batch
+within the existing job limit; the scoped process deadlines include headroom.
+
 ```sh
 python -m pip install -r tools/ci/requirements-checks.txt
 python tools/ci/check.py
@@ -74,10 +102,11 @@ node --test tests/ci-gate.test.mjs
 VB6_BROWSER=chromium VB6_TEST_TRANSPORT=http python tools/ci/run.py figma
 # Reproduce one exact CI partition:
 VB6_BROWSER=chromium VB6_TEST_TRANSPORT=http python tools/ci/run.py figma-services
+VB6_BROWSER=webkit VB6_TEST_TRANSPORT=file VB6_TEST_ADVANCED=1 python tools/ci/run.py advanced-editor-integration
 ```
 
 The audit rejects duplicate YAML keys, missing gate dependencies, cycles, missing
-suite owners, missing engines/origins/platforms, omitted Figma partitions, matrix exclusions,
+suite owners, missing engines/origins/platforms, omitted Figma or advanced editor partitions, matrix exclusions,
 duplicate matrix values, extra `.yaml` workflows and failure suppression. It also
 parses Bash blocks and requires the reference-admission/GPU-entrypoint tests to
 execute unconditionally in the audit job. The pinned, SHA-256-verified actionlint binary checks Actions
