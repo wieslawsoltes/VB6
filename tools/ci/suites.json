@@ -54,8 +54,10 @@
     "browser-designer-tests.py",
     "browser-exporter-offline-tests.py"
   ],
+  "figma-workspace": [
+    "figma-browser-tests.py"
+  ],
   "figma-authoring": [
-    "figma-browser-tests.py",
     "figma-presentation-browser-tests.py",
     "figma-retained-webgl-browser-tests.py",
     "figma-navigation-browser-tests.py",
