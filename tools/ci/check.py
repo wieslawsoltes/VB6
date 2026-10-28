@@ -101,6 +101,25 @@ def audit(root=ROOT):
         raise ValueError('All three disjoint Figma partitions required')
     if set(jobs['figma']['strategy']['matrix']['transport']) != {'http', 'file'}:
         raise ValueError('Both real Figma origins required')
+    advanced = jobs['advanced-editor']; advanced_matrix = advanced['strategy']['matrix']
+    if set(advanced_matrix.get('suite', [])) != {'advanced-editor-core', 'advanced-editor-integration'}:
+        raise ValueError('Both disjoint advanced editor partitions required')
+    if set(advanced_matrix.get('transport', [])) != {'http', 'file'}:
+        raise ValueError('Both real advanced editor origins required')
+    if advanced['timeout-minutes'] != 20:
+        raise ValueError('Advanced editor partitions retain the twenty-minute job limit')
+    if not any(step.get('run') == 'python tools/ci/run.py "$SUITE"' and 'if' not in step and
+               step.get('env', {}).get('SUITE') == '${{ matrix.suite }}' and
+               step.get('env', {}).get('VB6_TEST_TRANSPORT') == '${{ matrix.transport }}' and
+               step.get('env', {}).get('VB6_TEST_ADVANCED') == '1' for step in advanced['steps']):
+        raise ValueError('Every advanced partition must run its selected origin with real Monaco enabled')
+    if not any(step.get('uses') == 'actions/download-artifact@v4' and 'if' not in step and
+               step.get('with', {}).get('name') == 'advanced-editor-assets' for step in advanced['steps']):
+        raise ValueError('Advanced editor partitions must consume the actual optional editor build')
+    if not any(step.get('uses') == 'actions/upload-artifact@v4' and
+               step.get('with', {}).get('name') == '${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.transport }}'
+               for step in advanced['steps']):
+        raise ValueError('Advanced editor evidence must have distinct partition, engine and origin names')
     gpu = jobs['rendering-qualification']['strategy']['matrix']
     if set(gpu['backend']) != {'webgpu', 'webgl2'} or set(gpu['display']) != {'headed', 'headless'}:
         raise ValueError('Missing GPU/display combination')
@@ -155,7 +174,7 @@ def audit(root=ROOT):
     suites = json.loads((root / 'tools/ci/suites.json').read_text())
     owners = set(jobs['core-browser']['strategy']['matrix']['suite']) | set(jobs['browser']['strategy']['matrix']['suite'])
     owners |= set(jobs['figma']['strategy']['matrix']['suite'])
-    owners |= {'authoring-exports', 'advanced-editor', 'code-gpu'}
+    owners |= set(advanced_matrix['suite']) | {'authoring-exports', 'code-gpu'}
     if set(suites) != owners:
         raise ValueError('Unowned or missing suite group')
     for group, scripts in suites.items():
@@ -178,6 +197,9 @@ def audit(root=ROOT):
         raise ValueError('Dedicated Figma workspace acceptance partition required')
     if len(figma_scripts) != len(set(figma_scripts)):
         raise ValueError('Figma partitions may not duplicate any test entrypoint')
+    if suites.get('advanced-editor-core') != ['browser-advanced-editor-tests.py'] or suites.get('advanced-editor-integration') != [
+            'browser-input-modes-tests.py', 'browser-tui-advanced-tests.py', 'figma-advanced-editor-browser-tests.py']:
+        raise ValueError('Balanced advanced editor partitions must preserve all four independent suites')
     text = '\n'.join(p.read_text() for p in paths)
     pending = re.findall(r'npm run ([\w:-]+)', text); seen = set()
     while pending:
