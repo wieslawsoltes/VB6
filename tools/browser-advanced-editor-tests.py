@@ -7,9 +7,12 @@ Memory results are explicitly labelled and never reported as HTTP acceptance.
 import functools,http.server,json,os,shutil,threading,time,unittest
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+from ci.browser_partition import configured_shard, select_case_names
 ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 TRANSPORT=os.environ.get('VB6_TEST_TRANSPORT','http')
+# Offline parsing has its own bound; interactions retain the 15 s deadline.
+IDE_STARTUP_TIMEOUT_MS=60000
 REPORT=ROOT/'reports'/'advanced-editor'/ENGINE/TRANSPORT
 FIXTURE=r'''()=>{const A=VB6StudioAPI,p=A.newProject('EditorTest'),m=p.modules[0];p.id='editor-test';p.settings.xaml=true;p.settings.renderer='canvas2d';m.id='form';m.name='Form1';m.form.name='Form1';m.form.properties.Name='Form1';
 const button=A.createControl('CommandButton','Button1',300,300);button.id='button';button.properties.Caption='Original';m.form.controls=[button];
@@ -32,16 +35,25 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         (REPORT/'results.json').write_text(json.dumps({'browser':ENGINE,'transport':TRANSPORT,'results':cls.results},indent=2))
     def setUp(self):
         self.started=time.perf_counter();self.errors=[];self.errorStacks=[];self.requests=[];self.passed=False
-        self.context=self.browser.new_context(viewport={'width':1500,'height':1000});self.context.set_default_timeout(15000)
+        self.context=self.browser.new_context(viewport={'width':1500,'height':1000})
+        # unittest runs cleanups even when setUp fails before tearDown can run.
+        self.addCleanup(self.close_context)
+        self.context.set_default_timeout(15000)
         self.page=self.context.new_page();self.page.on('pageerror',lambda e:(self.errors.append(str(e)),self.errorStacks.append(e.stack)));self.page.on('request',lambda r:self.requests.append(r.url))
         if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text())
-        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri())
+        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit')
         else:self.page.goto(self.base+'/dist/index.html')
-        self.page.wait_for_function('globalThis.vb6Studio?.advancedEditor');self.page.evaluate(FIXTURE)
+        self.page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.advancedEditor && globalThis.VB6StudioAPI',
+                                    polling=100,timeout=IDE_STARTUP_TIMEOUT_MS if TRANSPORT=='file' else 15000)
+        self.page.evaluate(FIXTURE)
+    def close_context(self):
+        closed=False
+        try:self.context.close();closed=True
+        finally:
+            self.results.append({'name':self._testMethodName,'passed':self.passed and closed and not self.errors,'pageErrors':self.errors,'pageErrorStacks':self.errorStacks,'milliseconds':round((time.perf_counter()-self.started)*1000,2)})
+        self.assertEqual(self.errors,[], '\n'.join(self.errorStacks))
     def tearDown(self):
-        self.results.append({'name':self._testMethodName,'passed':self.passed and not self.errors,'pageErrors':self.errors,'pageErrorStacks':self.errorStacks,'milliseconds':round((time.perf_counter()-self.started)*1000,2)})
         if not self.passed:self.page.screenshot(path=str(REPORT/(self._testMethodName+'.png')))
-        self.context.close();self.assertEqual(self.errors,[], '\n'.join(self.errorStacks))
     def enable(self):
         self.assertTrue(self.page.evaluate('vb6Studio.advancedEditor.configure({enabled:true})'))
         self.page.evaluate('()=>{globalThis.r=vb6Studio.advancedEditor.runtime;globalThis.s=r.surfaces.get(vb6Studio.editor);s.focus();return true;}')
@@ -311,4 +323,8 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.assertLess(metrics['indexedLines'],30);self.assertLess(metrics['scannedCharacters'],1000)
         self.assertTrue(self.page.evaluate('s.record.model.getValue()===vb6Studio.activeModule.code'))
         self.done()
+def load_tests(loader,tests,pattern):
+    names=[name for name in AdvancedEditorAcceptance.__dict__ if name.startswith('test_')]
+    return unittest.TestSuite(AdvancedEditorAcceptance(name) for name in select_case_names(names,configured_shard('advanced-editor')))
+
 if __name__=='__main__':unittest.main(verbosity=2)
