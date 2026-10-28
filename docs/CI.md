@@ -1,12 +1,13 @@
 # Validation and deployment
 
-Three workflows own repository automation:
+Four workflows own repository automation:
 
 | Workflow | Responsibility |
 | --- | --- |
 | `validate.yml` | Read-only build, Node, browser, renderer, package and native-platform validation |
 | `pages.yml` | Publish successfully validated current main; do not repeat the test suite |
 | `macos-aot-runtime.yml` | Explicit runtime refresh restricted to `maint/macos-runtime-*`, with its existing narrow write permission and branch-head lease |
+| `linux-aot-runtime.yml` | Explicit x64/ARM64, GTK3/GTK4 runtime refresh restricted to `maint/linux-runtime-*`, with native execution proofs and a branch-head lease |
 
 ## One complete required check
 
@@ -35,9 +36,10 @@ claim reduced billed compute time. Native Apple jobs still execute the archives
 exported by all three browsers.
 
 The optional Monaco distribution is built once from locked dependencies and
-passed to all three engine jobs, each testing both origins and the real shared
-model. Agent transcript and Code GPU qualification share the existing renderer
-API/display setup. Required backends, pixel assertions and native oracles remain
+passed to the Chromium, Firefox and three WebKit jobs, which collectively test
+both origins and the real shared model. Agent transcript and Code GPU
+qualification share the existing renderer API/display setup. Required backends,
+pixel assertions and native oracles remain
 unchanged. Software GPU execution is not physical-hardware qualification.
 
 Duplicate full/focused Node runs, repeated Classic layout runs and separate
@@ -53,12 +55,33 @@ application files. Every checkout still performs the ordinary build that checks
 all reviewed fingerprints. CI cannot regenerate its own expected fingerprints.
 Browser binaries and system dependencies are installed for the exact profile.
 
+### Measured WebKit partitions
+
+Five measured slow WebKit workflow cells use three exhaustive, disjoint owners. Other
+engine/origin cells retain their full inventories. The 15-minute browser-job
+deadline, 480-second script deadline, interaction deadlines and all assertions
+remain unchanged.
+
+| WebKit cell | Ownership |
+| --- | --- |
+| Project authoring | Native cases keep each HTTP/file pair together; workspace review runs only on shard 1 |
+| Figma authoring, file | Sorted case inventories split across three shards; a script with no owned cases is not launched |
+| Figma services, file | The same exact case partition applies independently to the services scripts |
+| Advanced editor, both origins | Monaco/TUI/Figma cases partition across three shards; full Pascal HTTP acceptance belongs to shard 2 and full Pascal file acceptance to shard 3 |
+| Integration appearance | Whole scripts partition as described below; their internal case inventories remain intact |
+
+The audit permits only these explicit matrix replacements and requires all three
+owners, unique job/artifact names, unchanged required dependencies and exhaustive
+coverage. The runner rejects unsupported shard/engine/origin combinations. It
+clears the case-shard environment when launching a whole-script owner, and never
+accepts an empty case suite as successful coverage.
+
 ## Failure evidence and local commands
 
 `tools/ci/run.py` accepts fixed script basenames, engine and origin names, never
 arbitrary shell commands. It records per-suite logs and atomic
-`reports/ci/<group>-<browser>-<origin>/timings.json` before execution. Independent
-suites continue after failure, but the job remains failed. There are no automatic
+`reports/ci/<group>-<browser>-<origin>[-shard-N]/timings.json` before execution.
+Independent suites continue after failure, but the job remains failed. There are no automatic
 test retries. Cancellation stops the child process group and launches no
 successor; a process timeout is not a pass. Per-suite timings appear in the job
 summary, alongside the original screenshots and reports. Matrix-specific
@@ -74,10 +97,12 @@ node --test tests/ci-gate.test.mjs
 VB6_BROWSER=chromium VB6_TEST_TRANSPORT=http python tools/ci/run.py figma
 # Reproduce one exact CI partition:
 VB6_BROWSER=chromium VB6_TEST_TRANSPORT=http python tools/ci/run.py figma-services
+VB6_BROWSER=webkit VB6_TEST_TRANSPORT=http VB6_BROWSER_SHARD=2 python tools/ci/run.py integration-appearance
 ```
 
 The audit rejects duplicate YAML keys, missing gate dependencies, cycles, missing
-suite owners, missing engines/origins/platforms, omitted Figma partitions, matrix exclusions,
+suite owners, missing engines/origins/platforms, omitted Figma partitions,
+unapproved matrix exclusions, incomplete audited shard replacements,
 duplicate matrix values, extra `.yaml` workflows and failure suppression. It also
 parses Bash blocks and requires the reference-admission/GPU-entrypoint tests to
 execute unconditionally in the audit job. The pinned, SHA-256-verified actionlint binary checks Actions
@@ -126,9 +151,21 @@ theme, native caption, macOS reference and WinUI suites. It runs independently
 from the layout, diagnostics and export checks in `integration-authoring`, so
 those groups each receive the existing 15-minute job deadline. Both partitions
 run on Chromium, Firefox and WebKit with the same browser setup and transport.
+Chromium and Firefox run all five scripts in one job. WebKit uses three
+whole-script owners to avoid accumulating all five durations against one job
+deadline:
+
+| WebKit shard | Complete scripts |
+| --- | --- |
+| 1 | IDE theme and native captions |
+| 2 | Application theme |
+| 3 | macOS reference and WinUI |
+
 All five appearance scripts and every existing assertion retain coverage under
-the required `test` gate. The coverage audit rejects missing suite owners and
-duplicate entrypoints across browser partitions.
+the required `test` gate. The fixed assignment must exactly match `suites.json`:
+missing, extra, duplicate or empty ownership fails validation. Each child runs
+its original complete test inventory with no case-shard environment. The
+coverage audit also rejects duplicate entrypoints across browser partitions.
 
 ## Offline-origin qualification
 
