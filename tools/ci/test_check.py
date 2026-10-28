@@ -116,6 +116,29 @@ class WorkflowAuditTests(unittest.TestCase):
         for group in ('figma-workspace','figma-authoring','figma-services'):
             with self.subTest(group=group):
                 self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['suite'].remove(group))
+    def test_missing_advanced_partition_or_origin_rejected(self):
+        for axis,value in [('suite','advanced-editor-core'),('suite','advanced-editor-integration'),
+                           ('transport','http'),('transport','file')]:
+            with self.subTest(axis=axis,value=value):
+                self.reject(lambda w:w['jobs']['advanced-editor']['strategy']['matrix'][axis].remove(value))
+    def test_advanced_execution_cannot_drop_ownership_origin_or_monaco(self):
+        for name,value in [('SUITE','advanced-editor'),('VB6_TEST_TRANSPORT','http'),('VB6_TEST_ADVANCED','0')]:
+            with self.subTest(name=name):
+                self.reject(lambda w:[s['env'].update({name:value}) for s in w['jobs']['advanced-editor']['steps'] if 'tools/ci/run.py' in s.get('run','')])
+        self.reject(lambda w:[s.update({'run':'python tools/ci/run.py advanced-editor'}) for s in w['jobs']['advanced-editor']['steps'] if 'tools/ci/run.py' in s.get('run','')])
+        self.reject(lambda w:[s.update({'if':'false'}) for s in w['jobs']['advanced-editor']['steps'] if 'tools/ci/run.py' in s.get('run','')])
+    def test_advanced_build_evidence_and_job_bound_are_preserved(self):
+        self.reject(lambda w:w['jobs']['advanced-editor'].update({'needs':['hygiene']}))
+        self.reject(lambda w:[s['with'].update({'name':'unrelated-build'}) for s in w['jobs']['advanced-editor']['steps'] if s.get('uses')=='actions/download-artifact@v4'])
+        self.reject(lambda w:[s['with'].update({'name':'advanced-${{ matrix.browser }}'}) for s in w['jobs']['advanced-editor']['steps'] if s.get('uses')=='actions/upload-artifact@v4'])
+        self.reject(lambda w:w['jobs']['advanced-editor'].update({'timeout-minutes':30}))
+    def test_advanced_suites_cannot_rejoin_a_shared_deadline(self):
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';suites=json.loads(path.read_text())
+        suites['advanced-editor-core'].append(suites['advanced-editor-integration'].pop(0))
+        path.write_text(json.dumps(suites))
+        with self.assertRaisesRegex(ValueError,'Balanced advanced editor'):
+            check.audit(self.root)
     def test_figma_workspace_suite_cannot_rejoin_the_shared_authoring_deadline(self):
         # Keep the full script inventory and disjointness, but exchange owners.
         # The dedicated-workspace guard must reject this otherwise valid graph.
