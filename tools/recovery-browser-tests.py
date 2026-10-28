@@ -13,10 +13,20 @@ def check(value,message='Assertion failed'):
     if not value: raise AssertionError(message)
 def boot(browser):
     p=browser.new_page(viewport={'width':1440,'height':960})
-    p.set_default_timeout(4500); p._errors=[]
-    p.on('pageerror',lambda e:p._errors.append(str(e)))
-    p.set_content(HTML);p.wait_for_function('typeof vb6Studio!=="undefined" && !!vb6Studio.ideTools')
-    return p
+    try:
+        p.set_default_timeout(4500); p._errors=[]
+        p.on('pageerror',lambda e:p._errors.append(str(e)))
+        # Loading the standalone bytes is separate from the interaction budget.
+        # Observe mounted recovery tools even when unrelated load work remains.
+        p.set_content(HTML,wait_until='domcontentloaded',timeout=60000)
+        p.wait_for_function('globalThis.vb6Studio?.root?.isConnected && !!globalThis.vb6Studio?.ideTools',timeout=60000)
+        return p
+    except Exception:
+        # case() receives ownership only after boot returns. Release a failed
+        # startup here without replacing its initiating error with cleanup.
+        try:p.close()
+        except Exception:pass
+        raise
 def command(p,name):p.evaluate('(id)=>{vb6Studio.command(id);}',name)
 def case(browser,name,fn):
     p=None;t=time.perf_counter()
