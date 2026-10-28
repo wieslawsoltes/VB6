@@ -14,8 +14,13 @@ def case(name,fn):
 def page_for(browser,name=None):
     p=browser.new_page(viewport={'width':1440,'height':960});p.set_default_timeout(8000);p.errors=[];p.requests=[]
     p.on('pageerror',lambda e:p.errors.append(str(e)));p.on('request',lambda r:p.requests.append(r.url))
-    p.set_content((ROOT/('dist/examples/'+name+'.html' if name else 'dist/VB6-Studio-Web.html')).read_text())
-    p.wait_for_function('globalThis.vb6Application?.forms[0]' if name else 'globalThis.vb6Studio')
+    if name:
+        p.set_content((ROOT/('dist/examples/'+name+'.html')).read_text())
+        p.wait_for_function('globalThis.vb6Application?.forms[0]')
+    else:
+        # Full IDE parsing is separate from exported-app/action deadlines.
+        p.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text(),wait_until='domcontentloaded',timeout=60000)
+        p.wait_for_function('globalThis.vb6Studio',timeout=60000)
     return p
 def count(p): return p.evaluate('vb6Application.forms[0].controlMap.get("data1").Recordset.RecordCount')
 def ready(p,n): p.wait_for_function('(n)=>vb6Application.forms[0].controlMap.get("data1").Recordset.State===1 && vb6Application.forms[0].controlMap.get("data1").Recordset.RecordCount===n',arg=n)
