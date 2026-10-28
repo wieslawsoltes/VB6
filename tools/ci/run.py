@@ -26,9 +26,14 @@ SCRIPT_TIMEOUTS = {
     # Twenty-two independent standalone IDE boots exceed eight minutes on
     # WebKit while assertions keep passing. Other origins keep the base limit.
     ('webkit', 'figma-browser-tests.py', 'file'): 720,
+    # Successful file fixtures in other suites project these fresh-IDE cases
+    # beyond eight minutes. This is a scoped budget, not measured throughput.
+    ('webkit', 'browser-advanced-editor-tests.py', 'file'): 900,
+    ('webkit', 'browser-input-modes-tests.py', 'file'): 900,
 }
 # The combined name remains a local convenience; CI schedules each owner once.
 FIGMA_GROUPS = ('figma-workspace', 'figma-authoring', 'figma-services')
+ADVANCED_EDITOR_GROUPS = ('advanced-editor-core', 'advanced-editor-integration')
 
 
 def plan(group, engine, transport, root=ROOT):
@@ -37,7 +42,8 @@ def plan(group, engine, transport, root=ROOT):
     suites = json.loads((root / 'tools/ci/suites.json').read_text())
     if not isinstance(group, str) or not re.fullmatch(r'[a-z][a-z0-9-]*', group):
         raise ValueError('Unknown validation group')
-    groups = FIGMA_GROUPS if group == 'figma' else (group,)
+    groups = (FIGMA_GROUPS if group == 'figma' else
+              ADVANCED_EDITOR_GROUPS if group == 'advanced-editor' else (group,))
     if any(name not in suites for name in groups):
         raise ValueError('Unknown validation group')
     if any(not isinstance(suites[name], list) for name in groups):
