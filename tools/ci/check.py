@@ -5,8 +5,17 @@ from pathlib import Path
 import re
 import subprocess
 import yaml
+from browser_partition import BROWSER_SHARDS
 
 ROOT = Path(__file__).resolve().parents[2]
+# Only measured slow cells may replace one exhaustive matrix entry with three
+# disjoint case owners. Every other include/exclude remains forbidden.
+PARTITIONED_MATRICES = {
+    'browser': [{'suite': 'project-authoring', 'browser': 'webkit'}],
+    'figma': [{'suite': group, 'browser': 'webkit', 'transport': 'file'}
+              for group in ('figma-authoring', 'figma-services')],
+    'advanced-editor': [{'browser': 'webkit'}],
+}
 class Loader(yaml.SafeLoader):
     pass
 # YAML 1.1 must not treat the Actions `on` key as boolean True.
@@ -47,9 +56,27 @@ def audit(root=ROOT):
             raise ValueError('Unknown dependency: ' + name)
         # Matrix-axis checks alone do not notice an excluded engine/origin.
         matrix = job.get('strategy', {}).get('matrix', {})
-        if matrix.get('exclude') or matrix.get('include'):
+        if name in PARTITIONED_MATRICES:
+            excluded = PARTITIONED_MATRICES[name]
+            included = [{**cell, 'shard': shard} for cell in excluded for shard in BROWSER_SHARDS]
+            if matrix.get('exclude') != excluded or matrix.get('include') != included:
+                raise ValueError('Only the exact exhaustive browser case replacements are permitted: ' + name)
+            axes = {'browser'} | ({'suite'} if name in ('browser', 'figma') else set()) | ({'transport'} if name == 'figma' else set())
+            if set(matrix) != axes | {'include', 'exclude'}:
+                raise ValueError('Browser shards may not expand unrelated matrix cells: ' + name)
+            if "format(', shard {0}/3', matrix.shard)" not in job.get('name', ''):
+                raise ValueError('Browser partition job names must be unique: ' + name)
+            runners = [step for step in job['steps'] if step.get('run', '').startswith('python tools/ci/run.py ')]
+            if len(runners) != 1 or runners[0].get('if') is not None or runners[0].get('env', {}).get('VB6_BROWSER_SHARD') != '${{ matrix.shard }}':
+                raise ValueError('Every browser partition must reach unconditional suite execution: ' + name)
+            uploads = [step for step in job['steps'] if step.get('uses') == 'actions/upload-artifact@v4']
+            if len(uploads) != 1 or "format('-shard-{0}', matrix.shard)" not in uploads[0].get('with', {}).get('name', ''):
+                raise ValueError('Browser partition artifacts must be unique: ' + name)
+        elif matrix.get('exclude') or matrix.get('include'):
             raise ValueError('Validation matrices must be exhaustive Cartesian products: ' + name)
         for axis, values in matrix.items():
+            if axis in ('include', 'exclude'):
+                continue
             if not isinstance(values, list) or not values or len(set(values)) != len(values):
                 raise ValueError('Empty or duplicate matrix axis: ' + name + '/' + axis)
     def visit(name, ancestors):
@@ -97,6 +124,12 @@ def audit(root=ROOT):
     for owner in ('browser', 'figma', 'authoring-exports', 'advanced-editor'):
         if set(jobs[owner]['strategy']['matrix']['browser']) != {'chromium', 'firefox', 'webkit'}:
             raise ValueError('Missing engine: ' + owner)
+    for origin, shard in (('http', '2'), ('file', '3')):
+        command = 'python tools/browser-pascal-tests.py --advanced --origin ' + origin
+        steps = [step for step in jobs['advanced-editor']['steps'] if step.get('run') == command]
+        expected = "!cancelled() && (matrix.browser != 'webkit' || matrix.shard == '" + shard + "')"
+        if len(steps) != 1 or steps[0].get('if') != expected:
+            raise ValueError('Advanced Pascal origins must each retain one bounded WebKit owner: ' + origin)
     if set(jobs['figma']['strategy']['matrix']['suite']) != {'figma-authoring', 'figma-services'}:
         raise ValueError('Both disjoint Figma partitions required')
     if set(jobs['figma']['strategy']['matrix']['transport']) != {'http', 'file'}:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+import itertools
 import json
 from pathlib import Path
 import shutil
@@ -116,6 +117,60 @@ class WorkflowAuditTests(unittest.TestCase):
         self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['suite'].remove('figma-services'))
     def test_hidden_matrix_exclusion_rejected(self):
         self.reject(lambda w:w['jobs']['figma']['strategy']['matrix'].update({'exclude':[{'browser':'webkit','transport':'file'}]}))
+    def test_only_the_approved_slow_cells_expand_to_three_owners(self):
+        total = 0
+        for name, job in self.workflow['jobs'].items():
+            matrix = job.get('strategy', {}).get('matrix', {})
+            axes = {key: values for key, values in matrix.items() if key not in ('include', 'exclude')}
+            base = [dict(zip(axes, values)) for values in itertools.product(*axes.values())]
+            kept = [cell for cell in base if not any(all(cell.get(key) == value for key, value in excluded.items())
+                                                    for excluded in matrix.get('exclude', []))]
+            expanded = [*kept, *matrix.get('include', [])]
+            total += len(expanded)
+            if name in check.PARTITIONED_MATRICES:
+                for cell in base:
+                    owners = [entry for entry in expanded if all(entry.get(key) == value for key, value in cell.items())]
+                    if cell in check.PARTITIONED_MATRICES[name]:
+                        self.assertEqual([owner['shard'] for owner in owners], ['1', '2', '3'])
+                    else:
+                        self.assertEqual(owners, [cell])
+        self.assertEqual(total, 82)
+    def test_missing_browser_partition_is_rejected(self):
+        for owner in check.PARTITIONED_MATRICES:
+            with self.subTest(owner=owner):
+                self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['include'].pop())
+    def test_duplicate_browser_partition_is_rejected(self):
+        for owner in check.PARTITIONED_MATRICES:
+            with self.subTest(owner=owner):
+                self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['include'].append(
+                    copy.deepcopy(w['jobs'][owner]['strategy']['matrix']['include'][0])))
+    def test_unreplaced_baseline_browser_cell_is_rejected(self):
+        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix'].pop('exclude'))
+    def test_unrelated_browser_partition_or_axis_is_rejected(self):
+        self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['include'][0].update(browser='firefox'))
+        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix'].update(shard=['1', '2', '3']))
+        self.reject(lambda w:w['jobs']['advanced-editor']['strategy']['matrix'].update(duplicate=['first', 'second']))
+    def test_browser_partition_environment_and_execution_are_required(self):
+        for owner in check.PARTITIONED_MATRICES:
+            with self.subTest(owner=owner):
+                self.reject(lambda w:[step['env'].pop('VB6_BROWSER_SHARD') for step in w['jobs'][owner]['steps']
+                                      if step.get('run', '').startswith('python tools/ci/run.py ')])
+                self.reject(lambda w:[step.update({'if': 'false'}) for step in w['jobs'][owner]['steps']
+                                      if step.get('run', '').startswith('python tools/ci/run.py ')])
+    def test_browser_partition_job_and_artifact_names_cannot_collide(self):
+        for owner in check.PARTITIONED_MATRICES:
+            with self.subTest(owner=owner):
+                self.reject(lambda w:w['jobs'][owner].update(name='Repeated job'))
+                self.reject(lambda w:[step['with'].update(name='repeated-artifact') for step in w['jobs'][owner]['steps']
+                                      if step.get('uses') == 'actions/upload-artifact@v4'])
+    def test_advanced_pascal_origins_keep_separate_complete_owners(self):
+        for origin in ('http', 'file'):
+            with self.subTest(origin=origin):
+                self.reject(lambda w:[step.update({'if': "!cancelled() && (matrix.browser != 'webkit' || matrix.shard == '1')"})
+                                      for step in w['jobs']['advanced-editor']['steps']
+                                      if step.get('run') == 'python tools/browser-pascal-tests.py --advanced --origin ' + origin])
+                self.reject(lambda w:[step.update({'if': 'false'}) for step in w['jobs']['advanced-editor']['steps']
+                                      if step.get('run') == 'python tools/browser-pascal-tests.py --advanced --origin ' + origin])
     def test_duplicate_matrix_value_rejected(self):
         self.reject(lambda w:w['jobs']['node']['strategy']['matrix']['shard'].append(4))
     def test_extra_yaml_extension_workflow_rejected(self):

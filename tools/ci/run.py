@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from browser_partition import own_case_names, select_case_names, validate_browser_shard
 
 ROOT = Path(__file__).resolve().parents[2]
 ENGINES = ('chromium', 'firefox', 'webkit')
@@ -22,9 +23,10 @@ ENGINES = ('chromium', 'firefox', 'webkit')
 FIGMA_GROUPS = ('figma-authoring', 'figma-services')
 
 
-def plan(group, engine, transport, root=ROOT):
+def plan(group, engine, transport, root=ROOT, browser_shard=''):
     if engine not in ENGINES or transport not in ('http', 'file', 'memory'):
         raise ValueError('Unknown engine or transport')
+    browser_shard = validate_browser_shard(browser_shard, group, engine, transport)
     suites = json.loads((root / 'tools/ci/suites.json').read_text())
     if not isinstance(group, str) or not re.fullmatch(r'[a-z][a-z0-9-]*', group):
         raise ValueError('Unknown validation group')
@@ -36,6 +38,12 @@ def plan(group, engine, transport, root=ROOT):
     scripts = [script for name in groups for script in suites[name]]
     if not scripts or len(scripts) != len(set(scripts)):
         raise ValueError('Empty or duplicate suite list')
+    if browser_shard and group == 'project-authoring' and browser_shard != '1':
+        # The native case inventory is partitioned; independent workspace
+        # review runs exactly once, alongside the first partition.
+        scripts = [script for script in scripts if script == 'native-project-browser-tests.py']
+        if not scripts:
+            raise ValueError('Project shards require the native-project entrypoint')
     origins = ('http', 'file') if group in ('advanced-editor', 'code-gpu') else (transport,)
     result = []
     for origin in origins:
@@ -45,6 +53,14 @@ def plan(group, engine, transport, root=ROOT):
             path = root / 'tools' / script
             if not path.is_file() or path.is_symlink():
                 raise ValueError('Missing suite: ' + script)
+            partitioned = bool(browser_shard and (group in (*FIGMA_GROUPS, 'advanced-editor') or script == 'native-project-browser-tests.py'))
+            if partitioned:
+                names = own_case_names(path, 'case_' if script == 'native-project-browser-tests.py' else 'test_')
+                owned = select_case_names(names, browser_shard, allow_empty=True)
+                if not owned:
+                    # A one-case script belongs only to shard 1. Never launch
+                    # an empty unittest suite that could falsely report green.
+                    continue
             argv = [sys.executable, str(path)]
             if script == 'browser-compiler-runtime.py':
                 if origin == 'http':
@@ -57,7 +73,10 @@ def plan(group, engine, transport, root=ROOT):
                 argv += ['--browser', engine, '--origin', origin]
             if engine == 'firefox' and script == 'figma-retained-webgl-browser-tests.py':
                 argv = ['xvfb-run', '-a', '-s', '-screen 0 1920x1200x24', *argv]
-            result.append({'script': script, 'transport': origin, 'argv': argv})
+            result.append({'script': script, 'transport': origin, 'argv': argv,
+                           **({'browserShard': browser_shard, 'ownedCases': owned} if partitioned else {})})
+    if not result:
+        raise ValueError('A browser partition cannot be empty')
     return result
 
 
@@ -148,6 +167,7 @@ def run_batch(tasks, root, engine, report, timeout=480, cancelled=None, execute_
         write_report(path, result)
         print(f"::group::{task['script']} [{engine}/{task['transport']}]", flush=True)
         env = {**os.environ, 'VB6_BROWSER': engine, 'VB6_TEST_TRANSPORT': task['transport'],
+               'VB6_BROWSER_SHARD': task.get('browserShard', ''),
                'PYTHONUNBUFFERED': '1'}
         try:
             record.update(execute_fn(task, root, env, log, timeout, cancelled))
@@ -172,11 +192,13 @@ def main():
     args = parser.parse_args()
     engine = os.environ.get('VB6_BROWSER', 'chromium')
     transport = os.environ.get('VB6_TEST_TRANSPORT', 'http')
-    tasks = plan(args.group, engine, transport)
+    browser_shard = os.environ.get('VB6_BROWSER_SHARD', '')
+    tasks = plan(args.group, engine, transport, browser_shard=browser_shard)
     cancelled = threading.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda _signum, _frame: cancelled.set())
-    result = run_batch(tasks, ROOT, engine, ROOT / 'reports/ci' / f'{args.group}-{engine}-{transport}', cancelled=cancelled)
+    suffix = '-shard-' + browser_shard if browser_shard else ''
+    result = run_batch(tasks, ROOT, engine, ROOT / 'reports/ci' / f'{args.group}-{engine}-{transport}{suffix}', cancelled=cancelled)
     return 0 if result['passed'] else 1
 
 
