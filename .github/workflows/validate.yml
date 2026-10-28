@@ -219,7 +219,8 @@ jobs:
   browser:
     name: Browser (${{ matrix.suite }}, ${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Full mixed-origin project authoring and appearance suites stay exhaustive.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -259,7 +260,8 @@ jobs:
   figma:
     name: Figma (${{ matrix.suite }}, ${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # WebKit/file partitions repeatedly parse the complete standalone IDE.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -373,7 +375,8 @@ jobs:
   advanced-editor:
     name: Advanced editor (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Every editor case runs through both real origins in the same job.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
