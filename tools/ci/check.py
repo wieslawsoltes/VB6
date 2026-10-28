@@ -97,8 +97,8 @@ def audit(root=ROOT):
     for owner in ('browser', 'figma', 'authoring-exports', 'advanced-editor'):
         if set(jobs[owner]['strategy']['matrix']['browser']) != {'chromium', 'firefox', 'webkit'}:
             raise ValueError('Missing engine: ' + owner)
-    if set(jobs['figma']['strategy']['matrix']['suite']) != {'figma-authoring', 'figma-services'}:
-        raise ValueError('Both disjoint Figma partitions required')
+    if set(jobs['figma']['strategy']['matrix']['suite']) != {'figma-workspace', 'figma-authoring', 'figma-services'}:
+        raise ValueError('All three disjoint Figma partitions required')
     if set(jobs['figma']['strategy']['matrix']['transport']) != {'http', 'file'}:
         raise ValueError('Both real Figma origins required')
     gpu = jobs['rendering-qualification']['strategy']['matrix']
@@ -174,6 +174,8 @@ def audit(root=ROOT):
     if len(browser_scripts) != len(set(browser_scripts)):
         raise ValueError('Browser partitions may not duplicate any test entrypoint')
     figma_scripts = [script for group in jobs['figma']['strategy']['matrix']['suite'] for script in suites[group]]
+    if suites.get('figma-workspace') != ['figma-browser-tests.py']:
+        raise ValueError('Dedicated Figma workspace acceptance partition required')
     if len(figma_scripts) != len(set(figma_scripts)):
         raise ValueError('Figma partitions may not duplicate any test entrypoint')
     text = '\n'.join(p.read_text() for p in paths)
