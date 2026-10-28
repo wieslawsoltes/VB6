@@ -4,10 +4,13 @@ Extract only the nested helper so importing this test never starts browsers or
 executes acceptance cases. The fake page records actual screenshot options.
 """
 import ast
+import base64
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from PIL import Image
 from test_rendering_primitives import PrimitiveCaptureTests
 
 
@@ -312,6 +315,107 @@ class TranslucentCaptureTests(unittest.TestCase):
             self.run_case(creation_error=RuntimeError('page closed'))
         self.assert_legacy_absent()
         self.assertFalse(list(self.output.glob('translucent-capture-*')))
+
+
+class FailedCanvasDiagnosticTests(unittest.TestCase):
+    """A diagnostic repair must never qualify the screenshot that failed."""
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.output = Path(directory.name)
+        source = Path(__file__).with_name('figma-presentation-browser-tests.py').read_text()
+        original = next(node for node in ast.parse(source).body
+                        if isinstance(node, ast.ClassDef) and node.name == 'FigmaPresentation')
+        original.bases = [ast.Name(id='TestCase', ctx=ast.Load())]
+        original.body = [node for node in original.body if isinstance(node, ast.FunctionDef)
+                         and node.name in {'painted_theme', 'capture_failed_canvas_frame'}]
+        module = ast.fix_missing_locations(ast.Module(body=[original], type_ignores=[]))
+        namespace = {'REPORT': self.output, 'TestCase': unittest.TestCase,
+                     'json': json, 'base64': base64, 'io': io, 'Image': Image}
+        exec(compile(module, str(Path(__file__)), 'exec'), namespace)
+        self.case = namespace['FigmaPresentation']('runTest')
+        self.names = ['header', 'layers', 'canvas', 'design']
+        self.probes = {name: {'x': index, 'y': 0} for index, name in enumerate(self.names)}
+        self.expected = [(255, 255, 255), (255, 255, 255), (245, 245, 245), (255, 255, 255)]
+        self.wrong = [(21, 21, 21), (255, 255, 255), (245, 245, 245), (192, 192, 192)]
+
+    def png(self, colors):
+        image = Image.new('RGB', (4, 1))
+        image.putdata(colors)
+        output = io.BytesIO()
+        image.save(output, format='PNG')
+        return output.getvalue()
+
+    def page(self, *, diagnostic_error=False, backend='canvas2d'):
+        owner = self
+        events = []
+        wrong_png, expected_png = self.png(self.wrong), self.png(self.expected)
+        pixels = dict(zip(self.names, self.expected))
+
+        class Frame:
+            reads = 0
+
+            def evaluate(self, expression, probes):
+                self.reads += 1
+                events.append('original-buffer' if self.reads == 1 else 'redraw')
+                if self.reads == 1:
+                    return {'state': {}, 'beforeRedraw': dict(zip(owner.names, owner.wrong)),
+                            'originalBitmap': 'data:image/png;base64,' + base64.b64encode(wrong_png).decode()}
+                return {'sameScene': True, 'immediatePixels': pixels, 'independentPainter': pixels}
+
+            def dispose(self):
+                events.append('dispose')
+
+        class Page:
+            values = iter([self.probes, {'active': backend}, {}, {'active': backend}])
+
+            def evaluate(self, expression, argument=None):
+                return next(self.values)
+
+            def evaluate_handle(self, expression):
+                return Frame()
+
+            def screenshot(self, *, path, caret, timeout):
+                events.append('capture-' + caret)
+                if caret == 'initial':
+                    # Evidence must already be durable before the first
+                    # comparison screenshot or any diagnostic redraw.
+                    owner.assertEqual((owner.output / 'failed-canvas-before-redraw.png').read_bytes(), wrong_png)
+                    owner.assertTrue((owner.output / 'failed-canvas-diagnostic.json').is_file())
+                    if diagnostic_error:
+                        raise RuntimeError('diagnostic capture failed')
+                png = wrong_png if caret == 'hide' else expected_png
+                Path(path).write_bytes(png)
+                return png
+
+        self.events = events
+        return Page()
+
+    def test_correct_diagnostic_pixels_cannot_replace_failed_original(self):
+        self.case.page = self.page()
+        with self.assertRaisesRegex(AssertionError, 'Native DOM and retained paint'):
+            self.case.painted_theme('light', 'failed')
+        self.assertEqual((self.output / 'failed.png').read_bytes(), self.png(self.wrong))
+        report = json.loads((self.output / 'failed.json').read_text())
+        self.assertEqual(report['actual']['header'], [21, 21, 21])
+        diagnostic = json.loads((self.output / 'failed-canvas-diagnostic.json').read_text())
+        self.assertEqual(diagnostic['caretInitial']['header'], [255, 255, 255])
+        self.assertEqual(self.events, ['capture-hide', 'original-buffer', 'capture-initial',
+                                      'redraw', 'capture-initial', 'dispose'])
+
+    def test_diagnostic_error_preserves_original_failure_and_buffer(self):
+        self.case.page = self.page(diagnostic_error=True)
+        with self.assertRaisesRegex(AssertionError, 'Native DOM and retained paint'):
+            self.case.painted_theme('light', 'failed')
+        self.assertEqual((self.output / 'failed-canvas-before-redraw.png').read_bytes(), self.png(self.wrong))
+        self.assertEqual((self.output / 'failed-canvas-diagnostic-error.txt').read_text(), 'diagnostic capture failed')
+        self.assertEqual(self.events, ['capture-hide', 'original-buffer', 'capture-initial', 'dispose'])
+
+    def test_backend_fallback_fails_before_diagnostic_mutations(self):
+        self.case.page = self.page(backend='html')
+        with self.assertRaisesRegex(AssertionError, 'retain the qualified backend'):
+            self.case.painted_theme('light', 'failed')
+        self.assertEqual(self.events, ['capture-hide'])
 
 
 if __name__ == '__main__':
