@@ -18,8 +18,17 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 ENGINES = ('chromium', 'firefox', 'webkit')
+# This suite boots a fresh IDE for all 60 HTTP/file cases. WebKit's file parses
+# can exhaust the shared eight-minute budget while cases keep passing; action
+# deadlines remain in the suite and the browser job retains its outer limit.
+SCRIPT_TIMEOUTS = {
+    ('webkit', 'native-project-browser-tests.py', None): 720,
+    # Twenty-two independent standalone IDE boots exceed eight minutes on
+    # WebKit while assertions keep passing. Other origins keep the base limit.
+    ('webkit', 'figma-browser-tests.py', 'file'): 720,
+}
 # The combined name remains a local convenience; CI schedules each owner once.
-FIGMA_GROUPS = ('figma-authoring', 'figma-services')
+FIGMA_GROUPS = ('figma-workspace', 'figma-authoring', 'figma-services')
 
 
 def plan(group, engine, transport, root=ROOT):
@@ -129,7 +138,7 @@ def execute(task, root, env, log, timeout, cancelled):
             'seconds': round(time.monotonic() - start, 3)}
 
 
-def run_batch(tasks, root, engine, report, timeout=480, cancelled=None, execute_fn=execute):
+def run_batch(tasks, root, engine, report, timeout=None, cancelled=None, execute_fn=execute):
     if not tasks:
         raise ValueError('An empty batch cannot pass')
     cancelled = cancelled if cancelled is not None else threading.Event()
@@ -144,13 +153,16 @@ def run_batch(tasks, root, engine, report, timeout=480, cancelled=None, execute_
             write_report(path, result)
             continue
         log = report / f"{index + 1:02d}-{task['script']}-{task['transport']}.log"
-        record.update(status='running', log=log.name)
+        default_deadline = SCRIPT_TIMEOUTS.get((engine, task['script'], task['transport']),
+                           SCRIPT_TIMEOUTS.get((engine, task['script'], None), 480))
+        deadline = timeout if timeout is not None else default_deadline
+        record.update(status='running', log=log.name, timeoutSeconds=deadline)
         write_report(path, result)
         print(f"::group::{task['script']} [{engine}/{task['transport']}]", flush=True)
         env = {**os.environ, 'VB6_BROWSER': engine, 'VB6_TEST_TRANSPORT': task['transport'],
                'PYTHONUNBUFFERED': '1'}
         try:
-            record.update(execute_fn(task, root, env, log, timeout, cancelled))
+            record.update(execute_fn(task, root, env, log, deadline, cancelled))
         except Exception as failure:
             record.update(status='failed', error=str(failure))
         finally:
