@@ -68,8 +68,10 @@
     "figma-services-browser-tests.py",
     "figma-service-state-browser-tests.py"
   ],
-  "advanced-editor": [
-    "browser-advanced-editor-tests.py",
+  "advanced-editor-core": [
+    "browser-advanced-editor-tests.py"
+  ],
+  "advanced-editor-integration": [
     "browser-input-modes-tests.py",
     "browser-tui-advanced-tests.py",
     "figma-advanced-editor-browser-tests.py"
