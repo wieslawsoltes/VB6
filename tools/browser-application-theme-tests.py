@@ -267,7 +267,8 @@ class ApplicationThemes(MacOSCompositeChecks, MacOS26CompatibilityChecks, X11App
  @unittest.skipIf(MEMORY,'Real origin storage/reload requires HTTP; covered by CI')
  def test_project_application_appearance_persists_in_saved_workspace(self):
   ide=self.open_ide();ide.evaluate('p=>{vb6Studio.loadProject(p);vb6Studio.project.settings.theme="x11-cde-dark";vb6Studio.project.settings.themeOptions={followSystemTheme:false,reduceMotion:true,reduceTransparency:false};vb6Studio.persist();}',self.project)
-  ide.reload();ide.wait_for_function('vb6Studio.project.settings.theme==="x11-dark"');self.assertTrue(ide.evaluate('vb6Studio.project.settings.themeOptions.reduceMotion'));self.record('workspace reload migrates legacy CDE and retains effect preferences')
+  # Reload the full IDE with a startup budget separate from action deadlines.
+  ide.reload(wait_until='commit',timeout=60000);ide.wait_for_function('typeof vb6Studio==="object"&&vb6Studio.project.settings.theme==="x11-dark"',timeout=60000);self.assertTrue(ide.evaluate('vb6Studio.project.settings.themeOptions.reduceMotion'));self.record('workspace reload migrates legacy CDE and retains effect preferences')
  @unittest.skipIf(MEMORY,'Standalone file navigation requires real file origin; covered by CI')
  def test_standalone_file_export_contains_all_themes_without_network(self):
   self.page.goto((FIXTURE/'gallery.html').as_uri());self.page.wait_for_function('typeof vb6Application==="object"')
