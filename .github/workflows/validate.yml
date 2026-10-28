@@ -376,7 +376,7 @@ jobs:
     name: Advanced editor (${{ matrix.browser }})
     runs-on: ubuntu-latest
     # Every editor case runs through both real origins in the same job.
-    timeout-minutes: 25
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
