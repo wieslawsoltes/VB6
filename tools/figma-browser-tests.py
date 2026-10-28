@@ -4,8 +4,10 @@ HTTP and file are real-origin checks in CI. The explicitly labelled memory mode
 is a local fallback only; it does not claim storage, HTTP or file-URL coverage.
 """
 import functools, http.server, json, os, shutil, threading, time, unittest
+from contextlib import contextmanager
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+from ci.browser_partition import configured_shard, select_case_names
 ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 TRANSPORT=os.environ.get('VB6_TEST_TRANSPORT','http')
@@ -36,27 +38,42 @@ class FigmaWorkspace(unittest.TestCase):
     def tearDownClass(cls):
         cls.browser.close();cls.pw.stop();cls.server.shutdown();cls.server.server_close()
     def setUp(self):
-        self.start=time.perf_counter();self.errors=[];self.passed=False
-        self.context=self.browser.new_context(viewport={'width':1600,'height':1050},color_scheme='light')
-        # unittest runs cleanups even when setup fails before tearDown can run.
-        self.addCleanup(self.close_context)
-        self.context.set_default_timeout(8000)
-        self.page=self.context.new_page();self.page.on('pageerror',lambda e:self.errors.append(str(e)))
-        self.load();self.page.evaluate(FIXTURE,False)
+        self.start=time.perf_counter();self.errors=[];self.passed=False;self.phases={}
+        with self.phase('context'):
+            self.context=self.browser.new_context(viewport={'width':1600,'height':1050},color_scheme='light')
+            # unittest runs cleanups even when setup fails before tearDown can run.
+            self.addCleanup(self.close_context)
+            self.context.set_default_timeout(8000)
+            self.page=self.context.new_page();self.page.on('pageerror',lambda e:self.errors.append(str(e)))
+        self.load()
+        with self.phase('fixture'):self.page.evaluate(FIXTURE,False)
+    @contextmanager
+    def phase(self,name):
+        started=time.perf_counter()
+        try:yield
+        finally:self.phases[name]=round((time.perf_counter()-started)*1000,2)
     def load(self):
-        if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
-        # WebKit can leave a standalone document's load event pending after
-        # the IDE is usable. Keep the real origin and await its actual API.
-        else:self.page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri() if TRANSPORT=='file' else self.base+'/dist/index.html',wait_until='commit')
-        self.page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.figmaMode',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
+        with self.phase('navigation'):
+            if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
+            # WebKit can leave a standalone document's load event pending after
+            # the IDE is usable. Keep the real origin and await its actual API.
+            else:self.page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri() if TRANSPORT=='file' else self.base+'/dist/index.html',wait_until='commit')
+        with self.phase('readiness'):
+            self.page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.figmaMode',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
     def close_context(self):
-        self.context.close();self.assertEqual(self.errors,[])
+        closed=False
+        try:
+            with self.phase('cleanup'):self.context.close()
+            closed=True
+        finally:
+            self.results.append({'name':self._testMethodName,'passed':self.passed and closed and not self.errors,
+                'pageErrors':self.errors,'milliseconds':round((time.perf_counter()-self.start)*1000,2),'phaseMilliseconds':self.phases})
+            (REPORT/'results.json').write_text(json.dumps({'browser':ENGINE,'transport':TRANSPORT,'results':self.results},indent=2))
+        self.assertEqual(self.errors,[])
     def tearDown(self):
         if not self.passed or self.errors:
             try:self.page.screenshot(path=str(REPORT/(self._testMethodName+'-failure.png')),timeout=3000)
             except Exception:pass
-        self.results.append({'name':self._testMethodName,'passed':self.passed and not self.errors,'pageErrors':self.errors,'milliseconds':round((time.perf_counter()-self.start)*1000,2)})
-        (REPORT/'results.json').write_text(json.dumps({'browser':ENGINE,'transport':TRANSPORT,'results':self.results},indent=2))
     def done(self):self.passed=True
     def enable(self,layout=False):
         if layout:self.page.evaluate(FIXTURE,True)
@@ -198,5 +215,10 @@ class FigmaWorkspace(unittest.TestCase):
         self.enable();self.page.evaluate('vb6Studio.activeModule.form.controls[0].properties.MinimumWidth=2000;vb6Studio.activeModule.form.controls[0].properties.MaximumWidth=1000')
         before=self.snapshot();self.page.get_by_role('button',name='Enable auto layout and anchoring',exact=True).click();dialog=self.page.get_by_role('dialog',name='Figma workspace',exact=True);dialog.wait_for()
         self.assertEqual(self.snapshot(),before);dialog.get_by_role('button',name='OK',exact=True).click();self.done()
+
+def load_tests(loader,standard_tests,pattern):
+    names=[name for name in sorted(FigmaWorkspace.__dict__) if name.startswith('test_')]
+    names=select_case_names(names,configured_shard('figma-authoring'))
+    return unittest.TestSuite(FigmaWorkspace(name) for name in names)
 
 if __name__=='__main__':unittest.main(verbosity=2)

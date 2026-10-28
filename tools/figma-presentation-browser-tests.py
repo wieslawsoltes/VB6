@@ -10,6 +10,7 @@ import json
 import unittest
 from pathlib import Path
 from PIL import Image
+from ci.browser_partition import configured_shard, select_case_names
 
 spec=importlib.util.spec_from_file_location('figma_authoring',Path(__file__).with_name('figma-browser-tests.py'))
 base=importlib.util.module_from_spec(spec)
@@ -219,6 +220,8 @@ class FigmaPresentation(base.FigmaWorkspace):
 
 
 def load_tests(loader,standard_tests,pattern):
-    return unittest.TestSuite(FigmaPresentation(name) for name in sorted(FigmaPresentation.__dict__) if name.startswith('test_presentation_'))
+    names=[name for name in sorted(FigmaPresentation.__dict__) if name.startswith('test_presentation_')]
+    names=select_case_names(names,configured_shard('figma-authoring'))
+    return unittest.TestSuite(FigmaPresentation(name) for name in names)
 
 if __name__=='__main__':unittest.main(verbosity=2)
