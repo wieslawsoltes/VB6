@@ -113,7 +113,20 @@ class WorkflowAuditTests(unittest.TestCase):
     def test_missing_origin_rejected(self):self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['transport'].remove('file'))
     def test_missing_gpu_display_rejected(self):self.reject(lambda w:w['jobs']['rendering-qualification']['strategy']['matrix']['display'].remove('headed'))
     def test_missing_figma_partition_rejected(self):
-        self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['suite'].remove('figma-services'))
+        for group in ('figma-workspace','figma-authoring','figma-services'):
+            with self.subTest(group=group):
+                self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['suite'].remove(group))
+    def test_figma_workspace_suite_cannot_rejoin_the_shared_authoring_deadline(self):
+        # Keep the full script inventory and disjointness, but exchange owners.
+        # The dedicated-workspace guard must reject this otherwise valid graph.
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';suites=json.loads(path.read_text())
+        suites['figma-workspace']=['figma-editor-browser-tests.py']
+        scripts=suites['figma-authoring']
+        scripts[scripts.index('figma-editor-browser-tests.py')]='figma-browser-tests.py'
+        path.write_text(json.dumps(suites))
+        with self.assertRaisesRegex(ValueError,'Dedicated Figma workspace'):
+            check.audit(self.root)
     def test_hidden_matrix_exclusion_rejected(self):
         self.reject(lambda w:w['jobs']['figma']['strategy']['matrix'].update({'exclude':[{'browser':'webkit','transport':'file'}]}))
     def test_duplicate_matrix_value_rejected(self):
