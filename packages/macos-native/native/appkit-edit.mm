@@ -63,6 +63,14 @@ void nativeEditCapture(MacControl& c, NSText* source) {
     c.editSelectionPending = true;
   }
 }
+bool nativeEditValidate(MacControl& c, NSText* source) {
+  if(c.disposed||c.eventSuppression||c.editValidationSuppression)return true;
+  nativeEditCapture(c,source);
+  struct Validation {MacControl&control;explicit Validation(MacControl&value):control(value){++control.editValidationSuppression;}~Validation(){--control.editValidationSuppression;}} validation(c);
+  auto control=c.self();auto cancel=std::make_shared<Cell>(Value::boolean(false),"boolean");
+  c.host->event([control,cancel]{control->event("validate",{Arg(cellRef(cancel))});});
+  return !cancel->get().truth();
+}
 void nativeEditSetText(MacControl& c, const Text& value) {
   if (value.size() > size_t(INT32_MAX)) fail(7, "Native text exceeds VB Long indexing");
   const auto old = nativeEditText(c);

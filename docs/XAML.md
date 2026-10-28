@@ -200,16 +200,17 @@ types. Namespace prefixes carry no semantic identity of their own.
 | `Button` | `CommandButton` | `Title`/`Content`, `IsDefault`, `IsCancel`, `Action`/`Click` |
 | `Label` | `Label` | Text or `StringValue`, plain inline text and typography |
 | `TextField`, `SearchField`, `SecureField`, `TextEditor` | `TextBox` | Text/`StringValue`, placeholders, read-only/multiline/password behavior; search has a dedicated style |
-| `CheckBox`, `Switch`, `RadioButton` | `CheckBox`, `CheckBox`, `OptionButton` | Title, checked/`IsOn` state; switches accept on/off, radios preserve native Boolean representation |
+| `CheckBox`, `Switch`, `RadioButton` | `CheckBox`, `CheckBox`, `OptionButton` | Title, checked/`IsOn` state, `Action`/`Click`; switches accept on/off, radios preserve native Boolean representation |
 | `PopUpButton`, `ComboBox`, `List` | `ComboBox`, `ComboBox`, `ListBox` | Static strings or simple item containers, selection; popup is list-only, macOS combo is editable by default |
 | `Slider`, `ScrollBar`, `ProgressIndicator`, `Stepper` | `Slider`, `HScrollBar`/`VScrollBar`, `ProgressBar`, `UpDown` | Validated ranges, steps/orientation, wrapping and indeterminate progress |
 | `Table` | `ListView` | Static `TableColumn` and `TableRow` data with real column widths, alignment and subitems |
 | `Outline` | `TreeView` | Nested `OutlineNode` values flatten to native node keys/parents and expansion flags |
-| `TabView` | `SSTab` | `TabItem` captions, initial selection, enabled/visible pages and exact child `TabPage` ownership |
+| `TabView` | `SSTab` | `TabItem` captions, `IsSelected`/owner `SelectedIndex`, enabled/visible pages and exact child `TabPage` ownership |
+| `SegmentedControl` | `Toolbar` | Typed `Segment` items, single/multiple/momentary tracking, initial selection, item availability and native `ButtonClick` events |
 | `Box` | `Frame` | Independent title and one content control/container |
 | `Image`, `Separator`, `DatePicker` | `Image`, `Line`, `DTPicker` | Asset source plus `None`/`Fill` stretch, line geometry, validated ISO calendar date |
 
-`TableColumn`, `TableRow`, `OutlineNode`, `TabItem`, `ListItem` and `MenuItem` are
+`TableColumn`, `TableRow`, `OutlineNode`, `TabItem`, `Segment`, `ListItem` and `MenuItem` are
 typed data/container descriptions. They are not converted into blank controls.
 Table and outline events map to existing `ItemClick`, `ColumnClick` and
 `NodeClick` procedures. A tab page accepts one real control or layout container;
@@ -217,8 +218,74 @@ its descendants retain ordinary native container ownership. Collection keys are
 unique without case sensitivity, matching the native collection contract.
 Collection lowering counts escaped JSON incrementally, including repeated
 resource text and repeated parent keys, before retaining additional items.
-Oversized table, outline or tab data therefore stops at the same document budget
+Oversized table, outline, tab or segment data therefore stops at the same document budget
 without first constructing an oversized native collection.
+
+Tab selection may be authored using `TabView.SelectedIndex` or
+`TabItem.IsSelected="True"`. At most one page can be initially selected, and
+an explicit owner index must agree with explicit item flags. With no positive
+selection or owner index, the first page not explicitly marked
+`IsSelected="False"` is selected; an all-false page collection is rejected.
+The result is the existing `SSTab.Tab` value, preserving one selection state
+across designer, browser execution and native export.
+
+### Segmented controls
+
+`SegmentedControl` compiles to one real `Toolbar`, retaining its `Buttons`
+collection and ordinary VB6 event procedures. Every `Segment` provides `Key`
+(or `x:Key`), `Title` (also accepted as direct text), `IsEnabled`, `Visibility`,
+`IsSelected` and `ToolTip`. Omitted keys receive unique `segmentN` identities.
+The compiler requires at least one segment, rejects more than 10,000 items and
+accounts for repeated resource strings within the existing document budget.
+
+| `SelectionMode` | Persisted `Buttons(i).Style` | Selection behavior |
+| --- | --- | --- |
+| `Single` (default) | `2` | One radio group; at most one initial `IsSelected="True"` |
+| `Multiple` | `1` | Independent checked buttons; multiple selected segments allowed |
+| `Momentary` | `0` | Action buttons; no persistent initial selection |
+
+`SelectedIndex` is a zero-based authoring shorthand for single selection;
+`-1` leaves the group unselected. Multiple selection uses item `IsSelected`
+flags. A momentary control only accepts `SelectedIndex="-1"`. Contradictory
+item flags and indices are diagnosed. Selection is persisted solely in the
+actual `Buttons(i).Value` values (`0`/`1`), so there is no parallel selected-index
+field to become stale when VB6 code changes the collection.
+
+```xml
+<mac:SegmentedControl x:Name="ViewModes" Width="240" Height="30"
+                      SelectionMode="Single" SelectedIndex="1"
+                      Action="ViewModes_ButtonClick">
+  <mac:Segment Key="icons" Title="Icons" ToolTip="Show icons" />
+  <mac:Segment Key="list" Title="List" ToolTip="Show a list" />
+  <mac:Segment Key="columns" Title="Columns" IsEnabled="False" />
+</mac:SegmentedControl>
+```
+
+`Action` and `SelectionChanged` reference the existing `ViewModes_ButtonClick`
+procedure; its `Button` argument is the actual toolbar collection item.
+The appearance uses `MacOSControlStyle="segmented"`. The three tracking modes
+follow the public AppKit [segmented-control selection model](https://developer.apple.com/documentation/appkit/nssegmentedcontrol/switchtracking).
+Force Touch accelerator modes, segment menus and per-segment image/width APIs
+are not part of this authoring surface.
+
+### Editing typed collection values
+
+The designer synchronizer now patches collection data at its original item:
+table-column title/width/alignment, row text and typed `x:String` cells, outline
+text/expansion, tab-page caption/selection/enabled/visible state, and segment
+caption/availability/tooltip/tracking/selection. It preserves aliases,
+namespace-prefix spelling, quote delimiters, surrounding comments and owned
+tab content. Significant string whitespace uses `xml:space="preserve"` only on
+the edited text value. An edit to a resource-backed item becomes a local value;
+the shared resource declaration remains unchanged.
+
+Segment selection changes keep an authored `SelectedIndex` coherent with any
+explicit item flags. Switching to multiple selection removes the scalar index
+and materializes the selected item flags. Generated collection keys remain
+stable when data values change. Structural collection changes, unsupported
+native fields and pre-existing native overrides use the established native
+override or canonical-source fallback. Every accepted source edit recompiles
+and must reproduce the complete designer form model exactly.
 
 Alias members have canonical assignment identities: specifying both `Title`
 and `Content` on a button is a duplicate assignment, while a local `Content`
@@ -232,7 +299,7 @@ ordinary base-type checks.
 | Authoring property | Native scalar field | Values |
 | --- | --- | --- |
 | `ControlSize` or `mac:Appearance.ControlSize` | `MacOSControlSize` | `mini`, `small`, `regular`, `large`, `extraLarge` |
-| `ControlStyle` or `mac:Appearance.ControlStyle` | `MacOSControlStyle` | `automatic`; button `push`, `default`, `destructive`, `borderless`, `inline`, `circular`, `help`; checkbox `switch`; text field `search` |
+| `ControlStyle` or `mac:Appearance.ControlStyle` | `MacOSControlStyle` | `automatic`; button `push`, `default`, `destructive`, `borderless`, `inline`, `circular`, `help`; checkbox `switch`; text field `search`; toolbar/tab controls `segmented` |
 | `Material` or `mac:Appearance.Material` | `MacOSMaterial` | `none`, `content`, `sidebar`, `titlebar`, `toolbar`, `menu`, `popover`, `sheet`, `hud`, on supported containers/navigation controls |
 | `BackgroundRole`, `ForegroundRole`, or attached equivalents | `MacOSBackgroundRole`, `MacOSForegroundRole` | A known semantic color name |
 | `mac:Accessibility.Label`, `.Help`, `.Identifier` | `MacOSAccessibilityLabel`, `MacOSAccessibilityHelp`, `MacOSAccessibilityIdentifier` | Bounded text; direct `AccessibilityLabel`/`Help`/`Identifier` aliases also work |

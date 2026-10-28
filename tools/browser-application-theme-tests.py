@@ -194,7 +194,7 @@ class ApplicationThemes(MacOSCompositeChecks, MacOS26CompatibilityChecks, X11App
   # usable. Await its real API/shell, with a startup budget separate from actions.
   page.wait_for_function('typeof vb6Studio==="object"&&document.querySelector(".ide-shell")',polling=100,timeout=60000);return page
  def options(self,page):
-  page.evaluate('()=>{void vb6Studio.command("options");}');page.get_by_role('tab',name='General',exact=True).click()
+  page.evaluate('()=>{void vb6Studio.command("options");}');page.get_by_role('dialog',name='Options',exact=True).get_by_role('tab',name='General',exact=True).click()
  def test_options_cancel_commit_undo_and_independent_ide_palette(self):
   ide=self.open_ide();ide.evaluate('p=>vb6Studio.loadProject(p)',self.project)
   ide.evaluate('()=>{vb6Studio.appearance.theme="macos26-dark";vb6Studio.applyAppearance();window.originalControls=[...document.querySelectorAll(".designer-form .vb-control")];}')

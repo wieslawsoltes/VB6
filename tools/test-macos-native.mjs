@@ -8,6 +8,7 @@ import {createHash} from 'node:crypto';
 import {buildMacOSPackage} from './build-macos-native.mjs';
 import {runTool,writeBuildKit,buildNativeKit} from '../packages/macos-native/src/build-driver.mjs';
 import {macOSDataSampleProject} from './macos-data-sample-fixture.mjs';
+import {macOS26NativeSampleProject,MACOS26_NATIVE_SAMPLE_MARKER} from './macos26-native-sample.mjs';
 import {resourceFormProject} from '../packages/macos-native/tests/resources.mjs';
 import {conformanceProject} from '../packages/macos-native/tests/conformance.mjs';
 import {programLifetimeProject,formLifetimeProject,abruptLifetimeProject} from '../packages/macos-native/tests/program-lifetime.mjs';
@@ -18,7 +19,7 @@ const sdk=path.join(root,'packages/macos-native'),native=path.join(sdk,'native')
 const work=await fs.mkdtemp(path.join(os.tmpdir(),'vb6-native-test-'));
 let transcript='';
 const log=text=>{process.stderr.write(text);transcript+=text;if(transcript.length>16*1024*1024)transcript=transcript.slice(-16*1024*1024);};
-const report={platform:process.platform,arch:process.arch,macOSExecutionVerified:false,checks:[]};
+const report={platform:process.platform,arch:process.arch,macOSExecutionVerified:false,appearanceControlsVerified:false,segmentedControlsVerified:false,macOS26SampleVerified:false,checks:[]};
 const run=async(executable,args,options={})=>{console.log('RUN',path.basename(executable),args.slice(0,4).join(' '));return runTool(executable,args,{cwd:work,timeout:180000,...options});};
 const generatedPassed=output=>{
   for(const marker of ['NATIVE_RECORDSETS_OK','NATIVE_CONFORMANCE_OK','NATIVE_INTERFACES_OK','NATIVE_LIFETIMES_OK','NATIVE_ARRAYS_OK','NATIVE_SCOPES_OK','NATIVE_RESOURCES_OK'])assert.ok(output.includes(marker),'Missing native marker: '+marker);
@@ -98,7 +99,16 @@ try {
     const uiSources=(await fs.readdir(path.join(sdk,'tests'))).filter(name=>/^appkit(?:-[a-z-]+)?\.mm$/.test(name)).sort().map(name=>path.join(sdk,'tests',name));
     await run(compiler,['-std=c++17','-arch','arm64','-isysroot',sdkPath,'-mmacosx-version-min=11.0','-fobjc-arc','-I',native,...uiSources,path.join(cache,built.runtimeSha256,'libvb6-native.a'),'-framework','AppKit','-framework','Foundation','-framework','CoreGraphics','-framework','QuartzCore','-o',ui]);
     await run('/usr/bin/codesign',['--sign','-','--timestamp=none',ui]);
-    const uiOutput=await run(ui,[],{timeout:30000});assert.match(uiOutput,/APPKIT_RECORDSETS_OK/);assert.match(uiOutput,/APPKIT_CONFORMANCE_OK/);assert.match(uiOutput,/APPKIT_EDIT_SELECTION_LIST_OK/);assert.match(uiOutput,/APPKIT_RICH_SELECTION_OK/);assert.match(uiOutput,/APPKIT_PICTURES_OK/);assert.match(uiOutput,/APPKIT_APPEARANCE_OK/);report.checks.push('appkit-controls-events-api','appkit-live-edit-selection-lists','appkit-rich-selection-formatting','appkit-macos26-appearance');
+    const uiOutput=await run(ui,[],{timeout:30000});assert.match(uiOutput,/APPKIT_RECORDSETS_OK/);assert.match(uiOutput,/APPKIT_CONFORMANCE_OK/);assert.match(uiOutput,/APPKIT_EDIT_SELECTION_LIST_OK/);assert.match(uiOutput,/APPKIT_RICH_SELECTION_OK/);assert.match(uiOutput,/APPKIT_PICTURES_OK/);assert.match(uiOutput,/APPKIT_APPEARANCE_OK/);assert.match(uiOutput,/APPKIT_SEGMENTED_OK/);
+    report.appearanceControlsVerified=true;report.segmentedControlsVerified=true;report.checks.push('appkit-controls-events-api','appkit-live-edit-selection-lists','appkit-rich-selection-formatting','appkit-macos26-appearance','appkit-segmented-controls-persistent-pages');
+    const macOS26Dir=path.join(work,'macos26-sample-kit');
+    await writeBuildKit(macOS26Dir,createMacOSBuildKit(macOS26NativeSampleProject()).files);
+    const macOS26Built=await buildNativeKit(macOS26Dir,{out:path.join(work,'macos26-sample-out'),cache,jobs:3,log});
+    assert.equal(macOS26Built.architecture,'arm64');assert.equal(macOS26Built.signatureVerified,true);assert.equal(macOS26Built.cacheHit,true);
+    assert.equal(macOS26Built.runtimeSha256,built.runtimeSha256);
+    assert.ok((await run(macOS26Built.executable,[])).includes(MACOS26_NATIVE_SAMPLE_MARKER),'Missing '+MACOS26_NATIVE_SAMPLE_MARKER);
+    report.macOS26SampleVerified=true;report.macOS26Sample={executableSha256:macOS26Built.sha256,runtimeSha256:macOS26Built.runtimeSha256};
+    report.checks.push('signed-generated-macos26-sample-execution');
     const richKit=createMacOSBuildKit(richTextProject()),richDir=path.join(work,'rich-form-kit');
     await writeBuildKit(richDir,richKit.files);
     const richBuilt=await buildNativeKit(richDir,{out:path.join(work,'rich-form-out'),cache,jobs:3,log});

@@ -24,7 +24,7 @@ test('versioned optional package schema retains real base types and original sou
 });
 
 test('all registered visual aliases lower to implemented native controls',()=>{
-  const additional={TabView:'<mac:TabItem Title="First"><mac:Label Text="Page"/></mac:TabItem>'};
+  const additional={TabView:'<mac:TabItem Title="First"><mac:Label Text="Page"/></mac:TabItem>',SegmentedControl:'<mac:Segment Title="First"/>'};
   const body=Object.entries(MACOS26_CONTROLS).filter(([name])=>name!=='Window').map(([name])=>`<mac:${name} x:Name="${name}Control">${additional[name]??''}</mac:${name}>`).join('');
   const r=good('<mac:View>'+body+'</mac:View>',{settings:{anchoring:true}});
   for(const [name,definition] of Object.entries(MACOS26_CONTROLS))if(name!=='Window')assert.equal(r.form.controls.find(c=>c.name===name+'Control').type,definition.nativeType,name);
@@ -40,6 +40,13 @@ test('alias scalar values, native events and accessibility lower without generat
   assert.equal(props(r).Caption,'Apply');assert.equal(props(r).Default,-1);assert.equal(props(r).MacOSControlSize,'large');
   assert.equal(props(r).MacOSAccessibilityLabel,'Apply preferences');assert.equal(props(r,'Password').Text,'secret');
   assert.equal(props(r,'Password').PlaceholderText,'Password');assert.equal(props(r,'R').Value,-1);assert.equal(props(r,'P').MacOSIndeterminate,-1);
+});
+
+test('check, radio and switch Action aliases use their actual VB6 Click procedure',()=>{
+  const r=good('<mac:View><mac:CheckBox x:Name="B" Action="B_Click"/><mac:RadioButton x:Name="Radio" Action="Radio_Click"/><mac:Switch x:Name="Switch" Action="Switch_Click"/></mac:View>');
+  assert.deepEqual(r.form.controls.slice(1).map(c=>c.type),['CheckBox','OptionButton','CheckBox']);
+  bad('<mac:Switch x:Name="B" Action="B_Change"/>',/B_Click/);
+  bad('<mac:CheckBox Action="A" Click="B"/>',/assigned more than once/);
 });
 
 test('attached appearance/accessibility works on existing presentation and native controls',()=>{
@@ -108,6 +115,21 @@ test('TabView pages lower to native SSTab page ownership without phantom page co
   assert.equal(plan.bindings.get(r.form.controls.find(c=>c.name==='General').id).page,0);
   assert.equal(plan.bindings.get(r.form.controls.find(c=>c.name==='Advanced').id).page,1);
   assert.equal(r.form.controls.find(c=>c.name==='Detail').parent,'Advanced');
+});
+
+test('TabItem selection lowers to the sole native Tab value and respects explicit deselection',()=>{
+  const selected=good('<mac:TabView x:Name="B"><mac:TabItem Title="General"/><mac:TabItem Title="Advanced" IsSelected="True"/></mac:TabView>');
+  assert.equal(props(selected).Tab,1);assert.equal(selected.form.controls.length,1);
+  const firstEligible=good('<mac:TabView x:Name="B"><mac:TabItem Title="General" IsSelected="False"/><mac:TabItem Title="Advanced"/></mac:TabView>');
+  assert.equal(props(firstEligible).Tab,1);
+  const explicit=good(resources('<x:Boolean x:Key="Chosen">True</x:Boolean>')+'<mac:TabView x:Name="B" SelectedIndex="1"><mac:TabItem IsSelected="False"/><mac:TabItem IsSelected="{StaticResource Chosen}"/></mac:TabView>');
+  assert.equal(props(explicit).Tab,1);
+  for(const [body,message] of [
+    ['<mac:TabView><mac:TabItem IsSelected="True"/><mac:TabItem IsSelected="True"/></mac:TabView>',/at most one selected TabItem/],
+    ['<mac:TabView SelectedIndex="0"><mac:TabItem/><mac:TabItem IsSelected="True"/></mac:TabView>',/conflicts with TabItem.IsSelected/],
+    ['<mac:TabView SelectedIndex="0"><mac:TabItem IsSelected="False"/></mac:TabView>',/conflicts with TabItem.IsSelected/],
+    ['<mac:TabView><mac:TabItem IsSelected="False"/><mac:TabItem IsSelected="False"/></mac:TabView>',/requires a selected page/]
+  ])bad(body,message);
 });
 
 test('lists, popup menus, stepper, date and image use supported native properties',()=>{

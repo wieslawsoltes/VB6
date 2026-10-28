@@ -12,6 +12,7 @@ import {controlThemeColor,controlThemePaint} from '../theme/control-theme-color.
 import {resolveRuntimeParent,validateRuntimeContainer,runtimeRemovalPlan} from './container-lifecycle.js';
 import {controlParents,tabPagePlan} from './tab-model.js';
 import {buildTabs,refreshTabs,mountTabPages,getTabProperty,setTabProperty,setIndexedTab,bindTabChild,unbindTabChild} from './tabs.js';
+import {buildToolbar,refreshToolbar} from './toolbar.js';
 import {layoutDefaults,layoutKey,layoutProperty,setLayoutProperty} from '../layout/contract.js';
 import {FormLayout} from '../layout/runtime.js';
 import {bindMouseInput,bindKeyboardInput,ownsInputEvent,acceptsInput,inputScaleFactor} from './input.js';
@@ -29,7 +30,7 @@ import { GraphicsSurface } from '../graphics/surface.js';
 import { cssColor as oleColor, fontFamily, getTheme } from '../theme/theme.js';
 import { icon, controlIcon } from '../theme/icons.js';
 import { CONTROL_DEFAULTS, createControl, newId } from '../project/model.js';
-import { ControlCollection, TreeNodes, ListItems, ColumnHeaders, ToolbarButtons, StatusPanels, TabItems, ImageItems, ControlArray } from './collections.js';
+import { ControlCollection, TreeNodes, ListItems, ColumnHeaders, StatusPanels, TabItems, ImageItems, ControlArray } from './collections.js';
 
 export const NONVISUAL_TYPES=new Set(['Timer','ImageList','CommonDialog']);
 export const DEFAULT_EVENTS={Form:'Load',MDIForm:'Load',CommandButton:'Click',TextBox:'Change',RichTextBox:'Change',ListBox:'Click',ComboBox:'Click',Timer:'Timer',HScrollBar:'Change',VScrollBar:'Change',TreeView:'NodeClick',ListView:'ItemClick',ProgressBar:'MouseDown',Slider:'Change',Toolbar:'ButtonClick',TabStrip:'Click',SSTab:'Click',DTPicker:'Change',MonthView:'DateClick',MSFlexGrid:'Click',PictureBox:'Click'};
@@ -99,7 +100,7 @@ export class BrowserControl {
     if(key==='WinUI3'||key==='Value'&&this.props.WinUI3?.sourceType==='ToggleSwitch'){try{validateWinUI3Properties({...this.props,[key]:value},this.type);}catch(error){throw new VBError(error.message,380);}}
     if(key==='WinUI3')value=value==null?null:clone(value);
     if(this.props.WinUI3&&['BackColor','ForeColor','FontBold','FontName','FontSize'].includes(key)){clearWinUI3Overrides(this.props,{[key]:value});this.invalidate();}
-    if(MACOS26_PROPERTIES.includes(key)||['MultiLine','PasswordChar'].includes(key)||key==='Value'&&this.props.MacOSControlStyle==='switch'){try{validateMacOS26Properties({...this.props,[key]:value},this.type);}catch(error){throw new VBError(error.message,380);}}
+    if(MACOS26_PROPERTIES.includes(key)||['MultiLine','PasswordChar'].includes(key)||key==='Value'&&this.props.MacOSControlStyle==='switch'||key==='TabOrientation'&&this.props.MacOSControlStyle==='segmented'){try{validateMacOS26Properties({...this.props,...(this.type==='Toolbar'&&this.Buttons?{Buttons:this.Buttons.items}:{}),[key]:value},this.type);}catch(error){throw new VBError(error.message,380);}}
     if(key==='BackColor'||key==='ForeColor'){const role=key==='BackColor'?'MacOSBackgroundRole':'MacOSForegroundRole';if(this.props[role]){clearMacOS26ColorRoles(this.props,{[key]:value});this.invalidate();}}
     if(setTabProperty(this,key,value))return;
     if(graphicsProperty(this,key,value))return;
@@ -170,7 +171,7 @@ export class BrowserControl {
       case 'TreeView':this.buildTree();break;
       case 'ListView':this.buildListView();break;
       case 'StatusBar':addClass('vb-statusbar');this.Panels=new StatusPanels(()=>this.invalidate());for(const item of p.Panels||[]){const panel=this.Panels.Add(undefined,item.Key,item.Text,item.Style);for(const key of ['Width','Alignment','Enabled','Visible','AutoSize','ToolTipText','Picture'])if(item[key]!==undefined)panel[key]=clone(item[key]);}break;
-      case 'Toolbar':addClass('vb-toolbar');this.Buttons=new ToolbarButtons(()=>this.invalidate());for(const item of p.Buttons||[]){const button=this.Buttons.Add(undefined,item.Key,item.Caption,item.Style,item.Image);for(const key of ['Enabled','Visible','Value','ToolTipText','Tag'])if(item[key]!==undefined)button[key]=clone(item[key]);}break;
+      case 'Toolbar':buildToolbar(this);break;
       case 'TabStrip':case 'SSTab':buildTabs(this);break;
       case 'RichTextBox':this.input=el('div',{class:'vb-richtext',contenteditable:!this.design,'aria-label':this.model.name,role:'textbox',style:{width:'100%',height:'100%'}});n.append(this.input);this.rich=new RichTextController(this.input,{text:p.Text,rtf:p.TextRTF,defaults:{fontName:p.FontName,fontSize:Number(p.FontSize),bold:truth(p.FontBold),italic:truth(p.FontItalic),underline:truth(p.FontUnderline),color:oleColor(p.ForeColor)},readOnly:this.design||truth(p.Locked)||!truth(p.Enabled),maxLength:Number(p.MaxLength)||0,onChange:()=>{this.props.Text=this.rich.text;this.event('Change');},onSelection:()=>this.event('SelChange',[],true)});break;
       case 'MSFlexGrid':case 'MSHFlexGrid':case 'DataGrid':this.buildGrid();break;
@@ -194,7 +195,14 @@ export class BrowserControl {
       case 'CheckBox':case 'OptionButton':updateMnemonic(this.label,p.Caption);this.input.checked=truth(p.Value);this.input.indeterminate=Number(p.Value)===2;break;
       case 'ListBox':case 'FileListBox':case 'DirListBox':case 'DriveListBox':if(this.listRevision!==this.itemsRevision||this.lastListCount!==this.items.length){selectOptions(this.input,this.items,Number(p.ListIndex));this.listRevision=this.itemsRevision;this.lastListCount=this.items.length;}if(!p.MultiSelect)this.input.selectedIndex=Number(p.ListIndex);else for(const option of this.input.options)option.selected=this.selectedIndices.has(Number(option.value));break;
       case 'ComboBox':this.combo.refresh();this.input.style.backgroundColor=controlThemePaint(p.BackColor,'inputBackground',comboPaint(p.BackColor,p.ForeColor,p.Style));break;
-      case 'PictureBox':if(p.Picture||this.surface){const surface=this.ensureSurface();surface.background=p.BackColor;surface.setPicture(safeImage(p.Picture,this.assets));surface.invalidate();}break;
+      case 'PictureBox':{
+        // Preserve authored outer bounds and the existing child host. Clearing
+        // this override restores the local theme's ordinary PictureBox border.
+        const borderStyle=Number(p.BorderStyle)===0?'none':'';
+        if(n.style.borderStyle!==borderStyle)n.style.borderStyle=borderStyle;
+        if(p.Picture||this.surface){const surface=this.ensureSurface();surface.background=p.BackColor;surface.setPicture(safeImage(p.Picture,this.assets));surface.invalidate();}
+        break;
+      }
       case 'Image':{const source=safeImage(p.Picture,this.assets);if(source)this.image.src=source;else this.image.removeAttribute('src');this.image.hidden=!source;this.placeholder.hidden=!!source||!this.design;this.image.style.objectFit=truth(p.Stretch)?'fill':'none';break;}
       case 'Shape':this.shape.style.borderColor=oleColor(p.BorderColor||0);this.shape.style.borderRadius=[2,3].includes(Number(p.Shape))?'50%':[4,5].includes(Number(p.Shape))?'10px':'0';this.shape.style.background=Number(p.FillStyle)===1?'transparent':oleColor(p.FillColor);break;
       case 'Line':this.shape.style.background=oleColor(p.BorderColor);this.shape.style.height=Math.max(1,Number(p.BorderWidth)||1)+'px';break;
@@ -205,7 +213,7 @@ export class BrowserControl {
       case 'TreeView':this.refreshTree();break;
       case 'ListView':this.refreshListView();break;
       case 'StatusBar':n.replaceChildren(...(this.Panels.Count?this.Panels.items.filter(panel=>this.design||truth(panel.Visible)).map(panel=>el('div',{class:'vb-status-panel',text:panel.Text,title:panel.ToolTipText||'','aria-disabled':!truth(panel.Enabled),style:{flex:panel.AutoSize?'1':'0 0 '+Number(panel.Width)/15+'px',textAlign:['left','right','center'][Number(panel.Alignment)||0],opacity:truth(panel.Enabled)?'1':'.55'}})):[el('div',{class:'vb-status-panel',text:p.SimpleText||'Ready'})]));break;
-      case 'Toolbar':n.replaceChildren(...this.Buttons.items.filter(b=>b.Visible).map(button=>el('button',{text:button.Style===3?'│':stripMnemonic(button.Caption||button.Key),disabled:!button.Enabled,'aria-pressed':[1,2].includes(Number(button.Style))?truth(button.Value):null,title:button.ToolTipText||button.Caption,onclick:()=>this.event('ButtonClick',[button])})));if(this.design&&!this.Buttons.Count)n.append(el('button',{text:'New'}),el('button',{text:'Open'}),el('button',{text:'Save'}));break;
+      case 'Toolbar':refreshToolbar(this);break;
       case 'TabStrip':case 'SSTab':refreshTabs(this,value=>safeImage(value,this.assets));break;
       case 'RichTextBox':this.rich.readOnly=this.design||truth(p.Locked)||!truth(p.Enabled);this.input.contentEditable=String(!this.rich.readOnly);break;
       case 'MSFlexGrid':case 'MSHFlexGrid':case 'DataGrid':this.refreshGrid();break;

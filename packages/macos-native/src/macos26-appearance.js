@@ -9,7 +9,7 @@ const backgrounds = new Set(['Form','MDIForm','Label','TextBox','RichTextBox','C
 const foregrounds = new Set(['Form','MDIForm','CommandButton','CheckBox','OptionButton','Label','TextBox','RichTextBox','ComboBox','DriveListBox','Frame','PictureBox','ListBox','FileListBox','DirListBox','TreeView','ListView','MSFlexGrid','MSHFlexGrid','DataGrid','Toolbar','StatusBar','MSChart']);
 const nonvisual = new Set(['Timer','ImageList','CommonDialog','Menu','Data','Adodc']);
 const plainBackground = new Set(['automatic','push','default','destructive']);
-const nativeMaterials = new Set(['Form','MDIForm','PictureBox','Frame','Toolbar','StatusBar','ListBox','TreeView','ListView']);
+const nativeMaterials = new Set(['Form','MDIForm','PictureBox','Frame','Toolbar','StatusBar','ListBox','TreeView','ListView','TabStrip','SSTab']);
 const own = (value, key) => Object.hasOwn(value, key);
 
 function propertiesOf(properties, source, control) {
@@ -25,6 +25,10 @@ function propertiesOf(properties, source, control) {
     if (key === 'multiline') result.MultiLine = value;
     if (key === 'passwordchar') result.PasswordChar = value;
     if (key === 'value') result.Value = value;
+    if (key === 'buttons') result.Buttons = value;
+    if (key === 'tabs') result.Tabs = value;
+    if (key === 'taborientation') result.TabOrientation = value;
+    if (key === 'tabsperrow') result.TabsPerRow = value;
   }
   return result;
 }
@@ -58,10 +62,16 @@ export function macOSAppearanceReport(project, options) {
           fail(key,'The selected native widget/style has no independently colorable foreground.');
         if (key === 'MacOSMaterial' && !nativeMaterials.has(type))
           fail(key,'The native view cannot expose a material background while preserving its current navigation.');
+        if (key === 'MacOSMaterial' && ['TabStrip','SSTab'].includes(type) && properties.MacOSControlStyle !== 'segmented')
+          fail(key,'Native tab materials require MacOSControlStyle="segmented" to preserve navigation over a transparent page container.');
         active.push(key);
       }
       if (properties.MacOSControlStyle === 'switch' && ![0,1].includes(Number(properties.Value ?? 0)))
         fail('MacOSControlStyle','A native switch requires the binary CheckBox Value 0 or 1; mixed and fractional values are not supported.','MAC263');
+      if (properties.MacOSControlStyle === 'segmented' && ['TabStrip','SSTab'].includes(type)) {
+        if (![0,1].includes(Number(properties.TabOrientation??0)))
+          fail('MacOSControlStyle','Native segmented tabs support horizontal top or bottom placement.');
+      }
       if (!active.length) continue;
       const material = properties.MacOSMaterial || 'none';
       const entry = {source:module.name,control:name,type,properties:active,minimumVersion:properties.MacOSControlSize === 'extraLarge' ? '26.0' : '11.0'};
@@ -71,6 +81,11 @@ export function macOSAppearanceReport(project, options) {
       }
       if (properties.MacOSControlStyle === 'switch') {entry.widget = 'NSSwitch';entry.caption = 'adjacent native label';}
       if (properties.MacOSControlStyle === 'search') entry.widget = 'NSSearchField';
+      if (properties.MacOSControlStyle === 'segmented') {
+        entry.widget='NSSegmentedControl';
+        if (type==='Toolbar') entry.tracking=['momentary','multiple','single'][Number(properties.Buttons?.[0]?.Style??0)];
+        else entry.pages='retained NSTabViewItems in a borderless NSTabView';
+      }
       controls.push(entry);
     }
   }

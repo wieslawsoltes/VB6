@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from PIL import Image
+from stable_pixels import capture_stable_pixels
 from macos_theme_compare import compare_image, compare_directories, image_path, read_manifest, require_complete, require_exact, required_inventory
 
 
@@ -109,5 +110,100 @@ class ComparisonTests(unittest.TestCase):
         # A same-sized substitute of a missing mandatory state must not count as complete.
         native['captures'][-1]['name']='light-made-up-control';(self.native/'reference.json').write_text(json.dumps(native))
         self.assertFalse(self.run_comparison()['nativePixelParityCertified'])
+
+class StablePixelCaptureTests(unittest.TestCase):
+    def image(self, blue=48, mode='RGB', size=(4, 4), alpha=255):
+        return Image.new(mode, size, (16, 32, blue, alpha) if mode == 'RGBA' else (16, 32, blue))
+
+    def capture_sequence(self, images):
+        self.calls = 0
+        sequence = iter(images)
+        def capture():
+            self.calls += 1
+            return next(sequence)
+        return capture
+
+    def test_returns_second_identical_capture_without_using_more_frames(self):
+        first, second = self.image(), self.image()
+        capture = self.capture_sequence([first, second])
+        self.assertIs(capture_stable_pixels(capture), second)
+        self.assertEqual(self.calls, 2)
+
+    def test_discards_transient_frame_only_after_consecutive_exact_agreement(self):
+        settled = self.image(49)
+        capture = self.capture_sequence([self.image(), self.image(49), settled])
+        self.assertIs(capture_stable_pixels(capture), settled)
+        self.assertEqual(self.calls, 3)
+
+    def test_single_channel_single_level_oscillation_fails_at_budget(self):
+        capture = self.capture_sequence([self.image(48 + i % 2) for i in range(5)])
+        with self.assertRaisesRegex(AssertionError, 'did not stabilize in 5 captures'):
+            capture_stable_pixels(capture)
+        self.assertEqual(self.calls, 5)
+
+    def test_alpha_differences_are_not_ignored(self):
+        capture = self.capture_sequence([self.image(mode='RGBA', alpha=254 + i % 2) for i in range(3)])
+        with self.assertRaisesRegex(AssertionError, 'did not stabilize'):
+            capture_stable_pixels(capture, max_captures=3)
+        self.assertEqual(self.calls, 3)
+
+    def test_mutable_image_reuse_does_not_fake_stability(self):
+        image = self.image()
+        self.calls = 0
+        def capture():
+            self.calls += 1
+            image.putpixel((0, 0), (16, 32, 48 + self.calls % 2))
+            return image
+        with self.assertRaisesRegex(AssertionError, 'did not stabilize'):
+            capture_stable_pixels(capture, max_captures=3)
+        self.assertEqual(self.calls, 3)
+
+    def test_geometry_and_mode_changes_fail_without_resampling(self):
+        for second in [self.image(size=(5, 4)), self.image(mode='RGBA')]:
+            with self.subTest(size=second.size, mode=second.mode):
+                capture = self.capture_sequence([self.image(), second])
+                with self.assertRaisesRegex(AssertionError, 'geometry or mode changed'):
+                    capture_stable_pixels(capture)
+                self.assertEqual(self.calls, 2)
+
+    def test_budget_is_validated_before_capture(self):
+        for budget in [0, 1, -1, True, 2.0, '2', None]:
+            with self.subTest(budget=budget):
+                capture = self.capture_sequence([])
+                with self.assertRaises(ValueError):
+                    capture_stable_pixels(capture, max_captures=budget)
+                self.assertEqual(self.calls, 0)
+
+    def test_indexed_palette_modes_are_not_mistaken_for_identical_pixels(self):
+        capture = self.capture_sequence([Image.new('P', (4, 4))])
+        with self.assertRaisesRegex(ValueError, 'RGB or RGBA'):
+            capture_stable_pixels(capture)
+        self.assertEqual(self.calls, 1)
+
+    def test_original_capture_failure_is_preserved(self):
+        original = RuntimeError('screenshot failed')
+        def capture():
+            raise original
+        with self.assertRaises(RuntimeError) as failure:
+            capture_stable_pixels(capture)
+        self.assertIs(failure.exception, original)
+
+    def test_last_allowed_pair_can_stabilize(self):
+        final = self.image(51)
+        capture = self.capture_sequence([self.image(i) for i in [48, 49, 50, 51]] + [final])
+        self.assertIs(capture_stable_pixels(capture), final)
+        self.assertEqual(self.calls, 5)
+
+    def test_stable_wrong_pixels_still_fail_the_independent_exact_oracle(self):
+        capture = self.capture_sequence([self.image(49), self.image(49)])
+        actual = capture_stable_pixels(capture)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.image().save(root/'expected.png'); actual.save(root/'actual.png')
+            result = compare_image(root/'expected.png', root/'actual.png', (255, 255, 255), root/'diff.png')
+            self.assertFalse(result['equal'])
+            self.assertEqual(result['changedPixels'], 16)
+            self.assertEqual(result['maxChannelError'], 1)
+
 
 if __name__=='__main__':unittest.main()

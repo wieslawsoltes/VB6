@@ -225,7 +225,7 @@ Value MacHost::api(Runtime&rt,const std::string&raw,Args args){
     if(name=="ShowWindow"){
       bool formWindow=c->spec.type=="Form"||c->spec.type=="MDIForm",visible=formWindow?c->form()->window.visible:c->view&&!c->view.hidden;auto command=n(1);if(formWindow){formCall(c->owner.lock(),command==0?"hide":"show",{});if(command==2||command==6||command==7||command==11)formSet(c->owner.lock(),"windowstate",Value::integer(1,Type::Integer));else if(command==3)formSet(c->owner.lock(),"windowstate",Value::integer(2,Type::Integer));else if(command==1||command==9)formSet(c->owner.lock(),"windowstate",Value::integer(0,Type::Integer));}else c->set(rt,"visible",Value::boolean(command!=0));return result(visible);
     }
-    if(name=="SetFocus"){auto previous=api(rt,"user32.GetFocus",{});if(!c->view||![c->view.window makeFirstResponder:c->widget])return bad(rt,87);return previous;}
+    if(name=="SetFocus"){auto previous=api(rt,"user32.GetFocus",{});if(!c->view||![c->view.window makeFirstResponder:nativeFocusView(*c)])return bad(rt,87);return previous;}
     if(name=="SetActiveWindow"||name=="SetForegroundWindow"){if(!c->view.window)return bad(rt,1400);auto previous=api(rt,"user32.GetActiveWindow",{});[c->view.window makeKeyAndOrderFront:nil];if(name=="SetForegroundWindow")return result([NSRunningApplication.currentApplication activateWithOptions:NSApplicationActivateIgnoringOtherApps]);return previous;}
     if(name=="SetWindowText"){setWindowText(*this,c,readText(a(1),wide));return Value::integer(1);}
     if(name=="GetWindowTextLength")return Value::integer(textUnits(windowText(*this,c),wide));

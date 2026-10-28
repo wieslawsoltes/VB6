@@ -1,5 +1,6 @@
 import {parseXaml,applyTextEdits,escapeXml,XMLNS_NS,XAML_NS,PRESENTATION_NS,MACOS26_NS} from '../../packages/xaml-compiler/src/index.js';
 import {macos26ColorFallback} from '../theme/macos26-resources.js';
+import {patchMacOS26CollectionSource} from './macos26-source-edits.js';
 const VB='urn:vb6:forms';
 const attrKey=a=>a.namespaceURI+'#'+a.localName;
 const attrs=e=>new Map(e.attributes.filter(a=>a.namespaceURI!==XMLNS_NS).map(a=>[attrKey(a),a]));
@@ -141,7 +142,7 @@ const reverseValue=(value,encoding)=>{
 export function patchWinUISource(text,before,after,compiled) {
   const oldNodes=nodes(before),newNodes=nodes(after);
   if(oldNodes.length!==newNodes.length)return null;
-  const mappings=new Map(compiled.sourceMap.map(m=>[m.id,m])),byStart=new Map(compiled.syntax.elements.map(e=>[e.start,e])),plan=planner(text);
+  const mappings=new Map(compiled.sourceMap.map(m=>[m.id,m])),byStart=new Map(compiled.syntax.elements.map(e=>[e.start,e])),irByStart=new Map(compiled.compilation.nodes.map(n=>[n.source.start,n])),plan=planner(text);
   const state=n=>Object.fromEntries(Object.entries(n).filter(([key])=>!['name','properties','controls','menus'].includes(key)));
   for(let i=0;i<oldNodes.length;i++) {
     const a=oldNodes[i],b=newNodes[i],mapping=mappings.get(a.id);
@@ -157,7 +158,8 @@ export function patchWinUISource(text,before,after,compiled) {
       // Event-handler references are code identities, not arbitrary strings.
       for(const attr of element.attributes)if((!attr.namespaceURI||attr.namespaceURI===element.namespaceURI)&&new RegExp('^'+a.name+'_','i').test(attr.value)&&['Action','Click','TextChanged','PasswordChanged','DateChanged','SelectionChanged','ValueChanged','ColumnClick','GotFocus','LostFocus','KeyDown','KeyUp'].includes(attr.localName))plan.setAttribute(element,attr.namespaceURI,attr.localName,b.name+attr.value.slice(a.name.length));
     }
-    const properties=new Set([...Object.keys(a.properties),...Object.keys(b.properties)]),used=new Set(),handled=new Set();
+    const properties=new Set([...Object.keys(a.properties),...Object.keys(b.properties)]),used=new Set(),handled=patchMacOS26CollectionSource({before:a,after:b,mapping,irByStart,byStart,plan,overrides});
+    if(handled===null)return null;
     const replaceMapped=(source,value,theme=false)=>{
       const original=!source.fromStyle&&element.attributes.find(attr=>attr.start===source.start&&attr.end===source.end);
       const uri=original?original.namespaceURI:source.attached?source.namespaceURI??(source.name.startsWith('Designer.')?VB:PRESENTATION_NS):'';

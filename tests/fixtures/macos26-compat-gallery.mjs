@@ -20,6 +20,10 @@ export const MACOS26_COMPAT_XAML=`<mac:Window xmlns="http://schemas.microsoft.co
       <mac:Stepper x:Name="Counter" Width="100" Height="28" Minimum="0" Maximum="10" Value="2" Increment="2" Orientation="Horizontal"/>
       <mac:DatePicker x:Name="Meeting" Date="2026-10-16" Height="28"/>
       <mac:ProgressIndicator x:Name="Progress" Minimum="0" Maximum="100" Value="42" IsIndeterminate="True" Height="12" mac:Accessibility.Label="Import progress"/>
+      <mac:SegmentedControl x:Name="Sections" Height="28" SelectionMode="Single" SelectedIndex="0" SelectionChanged="Sections_ButtonClick" mac:Accessibility.Label="Settings section">
+        <mac:Segment Key="general" Title="General" ToolTip="General settings"/>
+        <mac:Segment Key="advanced" Title="Advanced" ToolTip="Advanced settings"/>
+      </mac:SegmentedControl>
       <mac:TabView x:Name="Pages" Height="84">
         <mac:TabItem Title="General"><mac:Label x:Name="GeneralPage" Text="General settings"/></mac:TabItem>
         <mac:TabItem Title="Advanced"><mac:Label x:Name="AdvancedPage" Text="Advanced settings"/></mac:TabItem>
@@ -54,6 +58,21 @@ export function macos26CompatibilityGallery() {
   add('TextBox','SemanticText',24,326,320,32,{Text:'Semantic colors',ForeColor:0x00332211,BackColor:0x00665544,MacOSForegroundRole:'secondaryLabelColor',MacOSBackgroundRole:'textBackgroundColor'});
   add('PictureBox','Sidebar',370,24,380,176,{MacOSMaterial:'sidebar',BackColor:-2147483633});
   add('ComboBox','Choices',370,326,280,30,{Style:2,List:['Light','Dark','System'],ListIndex:1,MacOSAccessibilityLabel:'Appearance'});
+  const segments = (style, selected=[]) => [
+    {Key:'first',Caption:'First',Style:style,Value:selected.includes(0)?1:0,ToolTipText:'First choice'},
+    {Key:'disabled',Caption:'Disabled',Style:style,Value:0,Enabled:0},
+    {Key:'hidden',Caption:'Hidden',Style:style,Value:0,Visible:0},
+    {Key:'last',Caption:'Last',Style:style,Value:selected.includes(3)?1:0,ToolTipText:'Last choice'}
+  ];
+  add('Toolbar','Segments',24,386,320,28,{MacOSControlStyle:'segmented',Buttons:segments(2,[0]),MacOSAccessibilityLabel:'Single choice'});
+  add('Toolbar','Toggles',24,428,320,28,{MacOSControlStyle:'segmented',Buttons:segments(1),MacOSAccessibilityLabel:'Multiple choices'});
+  add('Toolbar','Actions',24,470,320,28,{MacOSControlStyle:'segmented',Buttons:segments(0),MacOSAccessibilityLabel:'Related actions'});
+  add('Label','SegmentStatus',24,516,720,24,{Caption:'No segment action',Tag:'0'});
+  const pages=add('SSTab','SegmentPages',370,386,380,122,{MacOSControlStyle:'segmented',TabsPerRow:1,Tab:0,Tabs:[{Caption:'General'},{Caption:'Disabled',Enabled:0},{Caption:'Hidden',Visible:0},{Caption:'Advanced'}]});
+  for(const [name,page,value] of [['SegmentGeneral',0,'General text'],['SegmentAdvanced',3,'Advanced text']]) {
+    const child=add('TextBox',name,12,42,340,30,{Text:value,TabPage:page});child.parent=pages.name;child.nativeParentId=pages.id;
+  }
   module.code='Option Explicit\n\nPrivate Sub Search_Change()\n    SearchStatus.Tag = CStr(Val(SearchStatus.Tag) + 1)\n    SearchStatus.Caption = SearchStatus.Tag & ":" & Search.Text\nEnd Sub\n\nPrivate Sub Notifications_Click()\n    ToggleStatus.Caption = CStr(Notifications.Value)\nEnd Sub\n\nPrivate Sub Save_Click()\n    ActionStatus.Caption = "saved:" & Search.Text\nEnd Sub\n\nPrivate Sub Cancel_Click()\n    CancelStatus.Tag = CStr(Val(CancelStatus.Tag) + 1)\n    CancelStatus.Caption = "cancel " & CancelStatus.Tag\nEnd Sub\n';
+  for(const [name,kind] of [['Segments','single'],['Toggles','multiple'],['Actions','momentary']]) module.code+=`\nPrivate Sub ${name}_ButtonClick(ByVal Button As Object)\n    SegmentStatus.Tag = CStr(Val(SegmentStatus.Tag) + 1)\n    SegmentStatus.Caption = SegmentStatus.Tag & ":${kind}:" & Button.Key & ":" & CStr(Button.Value) & ":" & CStr(${name}.Buttons("first").Value) & ":" & CStr(${name}.Buttons("last").Value)\nEnd Sub\n`;
   return project;
 }

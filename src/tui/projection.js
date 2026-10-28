@@ -130,8 +130,9 @@ export function captureControl(node, columns, rows, metrics) {
     // text is painted instead. Focused selects always retain their native UI.
     for (const option of input.options) addRow(option, option.textContent || '', option.selected);
   } else {
-    const selectors = type === 'Toolbar' || type === 'Data' || type === 'Adodc' || type === 'UpDown'
-      ? 'button,.vb-data-label'
+    const selectors = type === 'Toolbar'
+      ? 'button,.vb-toolbar-separator,.vb-toolbar-placeholder,[data-toolbar-placeholder]'
+      : type === 'Data' || type === 'Adodc' || type === 'UpDown' ? 'button,.vb-data-label'
       : type === 'MonthView' ? '.vb-month-header>span,.vb-month-header>button,th,td'
       : type === 'ComboBox' ? '.vb-combo-option'
       : type === 'ListView' ? '.vb-lv-row>div,.vb-lv-header>div'
@@ -145,8 +146,11 @@ export function captureControl(node, columns, rows, metrics) {
           (element.getAttribute('aria-expanded') === null ? '├─' : element.getAttribute('aria-expanded') === 'true' ? '[-]' : '[+]') +
           (element.querySelector('.vb-tree-label')?.textContent || text);
       }
+      // Retained toolbar separators are empty, CSS-painted spans. Reuse the
+      // vertical cell separator without promoting them or blank slots to buttons.
+      const separator=element.matches('td,th,.vb-lv-row>div,.vb-lv-header>div')||type==='Toolbar'&&element.classList.contains('vb-toolbar-separator');
       addRow(element, text, row.classList.contains('selected') || row.classList.contains('active') ||
-        row.getAttribute('aria-selected') === 'true', element.matches('td,th,.vb-lv-row>div,.vb-lv-header>div'));
+        row.getAttribute('aria-selected') === 'true', separator);
     }
   }
   return state;

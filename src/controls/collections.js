@@ -222,12 +222,43 @@ export class ColumnHeaders extends ControlCollection {
 export class ButtonMenus extends ControlCollection {
   Add(index, key = '', text = '') {const item = {Key: key, Tag: ''}; properties(item, {Text: string(text), Enabled: -1, Visible: -1, Checked: 0}, () => {if (this.owns(item)) this.changed();}); return this.insert(item, index);}
 }
+const toolbarButtonState = new WeakMap();
 export class ToolbarButtons extends ControlCollection {
+  constructor(onChange, options = {}) {super(onChange); this.options = options;}
+  validate(items) {
+    try {this.options.validate?.(items);}
+    catch (error) {if (error instanceof VBError) throw error; fail(error.message);}
+  }
+  changeButton(item, key, value) {
+    const state = toolbarButtonState.get(item);
+    value = controlInteger(value, 0, key === 'Style' ? 5 : 1);
+    if (!this.owns(item)) {state[key] = value; return;}
+    const changes = new Map([[item, {...state, [key]: value}]]);
+    // VB grouped buttons are contiguous in collection order. Hidden buttons
+    // remain members of their group, so showing one cannot reveal two choices.
+    if (key === 'Value' && value === 1 && item.Style === 2) {
+      const at = item.Index - 1;
+      for (const direction of [-1, 1]) for (let i = at + direction; i >= 0 && i < this.Count && this.items[i].Style === 2; i += direction)
+        changes.set(this.items[i], {...toolbarButtonState.get(this.items[i]), Value: 0});
+    }
+    this.validate(this.items.map(button => changes.has(button) ? {...button, ...changes.get(button)} : button));
+    this.batch(() => {
+      for (const [button, next] of changes) {
+        const current = toolbarButtonState.get(button);
+        if (current.Style === next.Style && current.Value === next.Value) continue;
+        Object.assign(current, next); this.changed();
+      }
+    });
+  }
   Add(index, key = '', caption = '', style = 0, image) {
+    const at = this.insertion(index); this.checkKey(key);
     const item = {Key: key, Tag: ''}, changed = () => {if (this.owns(item)) this.changed();};
-    properties(item, {Caption: string(caption), Image: image, Enabled: -1, Visible: -1, Value: 0, ToolTipText: '', Description: '', MixedState: 0}, changed);
-    observable(item, 'Style', style, changed, value => controlInteger(value, 0, 5));
+    const state = {Style: controlInteger(style, 0, 5), Value: 0}; toolbarButtonState.set(item, state);
+    properties(item, {Caption: string(caption), Image: image, Enabled: -1, Visible: -1, ToolTipText: '', Description: '', MixedState: 0}, changed);
+    for (const name of ['Style', 'Value']) Object.defineProperty(item, name, {enumerable: true,
+      get: () => state[name], set: value => this.changeButton(item, name, value)});
     item.ButtonMenus = new ButtonMenus(changed);
+    this.validate([...this.items.slice(0, at), item, ...this.items.slice(at)]);
     return this.insert(item, index);
   }
 }

@@ -2,6 +2,7 @@
 #include "appkit.hpp"
 #include "appkit-pictures.hpp"
 #include "appkit-appearance.hpp"
+#include "appkit-collections.hpp"
 #include <spawn.h>
 #include <cstring>
 #include <cerrno>
@@ -119,7 +120,7 @@ std::shared_ptr<MacControl>MacHost::createControl(const std::shared_ptr<Instance
     auto found=object->controls.find(lower(result->spec.parent));if(found==object->controls.end())fail(5,"Native parent was not created: "+result->spec.parent);
     parent=std::dynamic_pointer_cast<MacControl>(found->second);if(!parent){auto array=std::dynamic_pointer_cast<MacControlArray>(found->second);if(array&&!array->elements.empty())parent=array->elements.begin()->second;}if(!parent)fail(424);
   }
-  if(result->view){NSView*container=parent->container();if(!container)fail(5,"Parent does not contain native views");[container addSubview:result->view];result->originalParentSize=container.bounds.size;result->originalFrame=result->view.frame;}
+  if(result->view){NSView*container=[parent->widget isKindOfClass:NSTabView.class]?nativeTabContainer(*parent,result->property("tabpage",parent->property("tab",Value::integer(0))).integral()):parent->container();if(!container)fail(5,"Parent does not contain native views");[container addSubview:result->view];result->originalParentSize=container.bounds.size;result->originalFrame=result->view.frame;}
   return result;
 }
 void MacHost::createForm(const std::shared_ptr<Instance>&object){
@@ -148,7 +149,7 @@ void MacHost::createForm(const std::shared_ptr<Instance>&object){
       }if(!progress)fail(5,"Native control hierarchy contains an unresolved parent");
     }
     rebuildMenus(result);
-    auto controls=formControls(object);std::stable_sort(controls.begin(),controls.end(),[](auto&a,auto&b){return a->number("tabindex",0)<b->number("tabindex",0);});NSView*first=nil,*previous=nil;for(auto&c:controls)if(c->view&&c->flag("tabstop",true)&&c->flag("enabled",true)){if(!first)first=c->widget;if(previous)previous.nextKeyView=c->widget;previous=c->widget;}if(previous)previous.nextKeyView=first;result->window.initialFirstResponder=first;
+    auto controls=formControls(object);std::stable_sort(controls.begin(),controls.end(),[](auto&a,auto&b){return a->number("tabindex",0)<b->number("tabindex",0);});NSView*first=nil,*previous=nil;for(auto&c:controls)if(c->view&&c->flag("tabstop",true)&&c->flag("enabled",true)){auto focus=nativeFocusView(*c);if(!first)first=focus;if(previous)previous.nextKeyView=focus;previous=focus;}if(previous)previous.nextKeyView=first;result->window.initialFirstResponder=first;
   }catch(...){auto found=forms.find(object.get());if(found!=forms.end()){found->second->window.delegate=nil;[found->second->window close];if(found->second->surface)found->second->surface->dispose();forms.erase(found);}for(auto&c:formControls(object))c->dispose();object->controls.clear();throw;}
 }
 Value MacHost::formGet(const std::shared_ptr<Instance>&object,const std::string&raw){
