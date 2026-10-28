@@ -32,15 +32,6 @@ class EditorProperties(base.FigmaWorkspace):
                       '--enable-gpu','--ignore-gpu-blocklist','--enable-features=Vulkan',
                       '--use-webgpu-adapter=swiftshader','--disable-vulkan-surface','--disable-gpu-rasterization'])
 
-    def setUp(self):
-        try:
-            super().setUp()
-        except Exception:
-            # unittest does not call tearDown when startup fails. Release the
-            # partial context without retrying or changing the failed verdict.
-            if getattr(self,'context',None):self.context.close()
-            raise
-
     def open_code(self):
         self.page.get_by_role('button', name='Code', exact=True).click()
         expect(self.page.get_by_role('region', name='Code inspector')).to_be_visible()

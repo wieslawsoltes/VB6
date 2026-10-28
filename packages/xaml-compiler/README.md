@@ -122,11 +122,24 @@ console.log(result.program.root.type.namespaceURI); // urn:vb6:macos26
 
 The schema covers window/container/grid/stack, button/label/text/password/search,
 checkbox/radio/switch, popup/combo/list, slider/scrollbar/progress/stepper,
-table/outline/tab, box/image/date and separator descriptions. `MACOS26_CONTROLS`
+table/outline/tab/segmented, box/image/date and separator descriptions. `MACOS26_CONTROLS`
 exports the audited presentation/native type mapping; typed table/outline/tab
 item descriptions are schema values, not placeholder controls. The VB6 adapter
 outside this package lowers supported values to its existing native model and
 diagnoses unsupported behavior. Another host must implement its own semantics.
+
+`SegmentedControl` has a typed `Segments` content collection of `Segment` values.
+`SelectionMode` supports `Single`, `Multiple` and `Momentary`; `SelectedIndex`
+is an optional scalar authoring convenience. Item fields include `Key`, `Title`,
+`IsSelected`, `IsEnabled`, `Visibility` and `ToolTip`; direct segment text sets
+its title. These are original collection objects in construction IR. The VB6
+adapter lowers them to real `Toolbar.Buttons` with existing group/check/push
+styles (`2`/`1`/`0`), selected `Value` flags and the `ButtonClick` event. It also
+validates mode/index/item consistency, unique keys and bounded expansion.
+The host remains responsible for implementing the actual tracking behavior.
+`TabItem.IsSelected` provides item-authored initial tab selection, with the VB6
+adapter checking conflicts against `TabView.SelectedIndex`. CheckBox, RadioButton
+and Switch also expose the `Action` alias for their ordinary `Click` event.
 
 `ControlSize`, `ControlStyle`, `Material`, foreground/background role fields and
 the `mac:Appearance`/`mac:Accessibility` attached properties carry typed metadata.
@@ -150,8 +163,16 @@ including styles and opaque brush chains. The standalone object writer continues
 to require an explicit host `resource` implementation for live theme values.
 Neither schema registration nor `createObjectHost()` renders an AppKit control.
 
+The repository's VB6 source synchronizer preserves typed collection-item edits,
+including table columns/cells, outline expansion, tab-page selection/availability and
+segment labels/tracking/selection. It edits the consuming item while retaining
+resource definitions, comments and namespace spelling, then recompiles the
+candidate to verify the entire native model. This adapter behavior is outside
+the standalone package; package consumers receive the original source spans.
+
 The implementation is informed by Apple's public
 [macOS 26 design session](https://developer.apple.com/videos/play/wwdc2025/310/)
+[segmented-control tracking model](https://developer.apple.com/documentation/appkit/nssegmentedcontrol/switchtracking)
 and [design-resource listing](https://www.figma.com/community/file/1543337041090580818/apple-design-resources-macos-26).
 No Apple code, SF Symbols payload or Figma assets are included in this package.
 

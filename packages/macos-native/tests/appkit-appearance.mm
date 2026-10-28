@@ -4,6 +4,7 @@
 #include <cassert>
 #include <iostream>
 using namespace vb6;
+void checkNativeSegmented(Runtime&,MacHost&,const std::shared_ptr<Instance>&);
 namespace {
 std::shared_ptr<MacControl> control(const std::shared_ptr<Instance>&form,const char*name) {
   auto result=std::dynamic_pointer_cast<MacControl>(form->controls.at(name));assert(result);return result;
@@ -91,6 +92,14 @@ void checkNativeAppearance(Runtime&rt,MacHost&host,const std::shared_ptr<Instanc
   assert([multiline->appearancePlaceholder hitTest:NSMakePoint(1,1)]==nil);
   stringProperty(rt,multiline,"text",u"Actual notes");assert(multiline->appearancePlaceholder.hidden);
   stringProperty(rt,multiline,"text",u"");assert(!multiline->appearancePlaceholder.hidden);
+  stringProperty(rt,multiline,"placeholdertext",u"Several lines of placeholder text wrap inside the real text container without becoming editable content.");
+  auto notes=(NSTextView*)multiline->widget;notes.textContainerInset=NSMakeSize(9,7);notes.alignment=NSTextAlignmentRight;
+  refreshNativePlaceholder(*multiline);auto placeholder=multiline->appearancePlaceholder;
+  assert(placeholder.maximumNumberOfLines==0&&placeholder.alignment==NSTextAlignmentRight&&placeholder.frame.size.height>placeholder.font.ascender-placeholder.font.descender);
+  assert(placeholder.frame.origin.x==notes.textContainerOrigin.x+notes.textContainer.lineFragmentPadding&&placeholder.frame.origin.y==notes.textContainerOrigin.y);
+  assert(multiline->get(rt,"text").string().empty()&&![placeholder isAccessibilityElement]);
+  [notes setMarkedText:@"composition" selectedRange:NSMakeRange(0,0) replacementRange:NSMakeRange(NSNotFound,0)];assert(placeholder.hidden&&notes.hasMarkedText);
+  [notes unmarkText];stringProperty(rt,multiline,"text",u"");assert(!placeholder.hidden);
   rejected(rt,multiline,"macoscontrolstyle",Value::string(u"search"),380);multiline->dispose();
 
   stringProperty(rt,edit,"macosbackgroundrole",u"textBackgroundColor");stringProperty(rt,edit,"macosforegroundrole",u"labelColor");
@@ -157,5 +166,6 @@ void checkNativeAppearance(Runtime&rt,MacHost&host,const std::shared_ptr<Instanc
   stringProperty(rt,surface,"macosmaterial",u"none");assert(window.contentView==surfaceContent&&surface->view==surfaceContent);
   assert(window.firstResponder==((NSTextField*)edit->widget).currentEditor&&edit->get(rt,"selstart").integral()==5&&edit->get(rt,"sellength").integral()==4);
   [window makeFirstResponder:nil];rejected(rt,control(form,"c21"),"macosmaterial",Value::string(u"sidebar"),438);
+  checkNativeSegmented(rt,host,form);
   host.check();std::cout<<"APPKIT_APPEARANCE_OK\n";
 }

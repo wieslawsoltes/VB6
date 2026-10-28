@@ -153,8 +153,9 @@ export class GraphicsSurface extends RetainedGraphics {
     value=Array.from(ctx.getImageData(0,0,1,1).data,v=>v/255);if(this.colorCache.size>=256)this.colorCache.delete(this.colorCache.keys().next().value);this.colorCache.set(key,value);return value;
   }
   canUseTriangles(){
-    if(this.picture||this.pictureTask||this.rasterBytes||this.grid&&!Number.isInteger(this.grid))return false;
-    const grid=this.grid?Math.ceil(this.width/this.grid)*Math.ceil(this.height/this.grid):0;
+    const gridY=this.gridY??this.grid;
+    if(this.picture||this.pictureTask||this.rasterBytes||this.grid&&(!Number.isInteger(this.grid)||!Number.isInteger(gridY)))return false;
+    const grid=this.grid?Math.ceil(this.width/this.grid)*Math.ceil(this.height/gridY):0;
     if(this.commands.length+grid>58000||this.rgba(this.background)[3]!==1)return false;
     const key=[this.commands.length,this.theme,this.replayEpoch,this.dpr].join(':');
     if(this.triangleCommands===this.commands&&this.triangleKey===key)return this.triangleEligible;
@@ -164,13 +165,14 @@ export class GraphicsSurface extends RetainedGraphics {
     return this.triangleEligible;
   }
   vertices(){
-    const key=[this.commands.length,this.width,this.height,this.grid,this.theme,this.replayEpoch].join(':');
+    const gridY=this.gridY??this.grid;
+    const key=[this.commands.length,this.width,this.height,this.grid,gridY,this.theme,this.replayEpoch].join(':');
     if(this.vertexData&&this.vertexCommands===this.commands&&this.vertexKey===key)return this.vertexData;
-    const grid=this.grid?Math.ceil(this.width/this.grid)*Math.ceil(this.height/this.grid):0;
+    const grid=this.grid?Math.ceil(this.width/this.grid)*Math.ceil(this.height/gridY):0;
     if(this.commands.length+grid>58000)throw new RangeError('Graphics triangle budget exceeded');
     const data=new Float32Array((this.commands.length+grid)*36);let offset=0;
     const rect=(x,y,w,h,c)=>{for(const [px,py] of [[x,y],[x+w,y],[x,y+h],[x+w,y],[x+w,y+h],[x,y+h]]){data[offset++]=px;data[offset++]=py;for(const v of c)data[offset++]=v;}};
-    if(this.grid){const c=this.rgba(8421504);for(let y=0;y<this.height;y+=this.grid)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
+    if(this.grid){const c=this.rgba(8421504);for(let y=0;y<this.height;y+=gridY)for(let x=0;x<this.width;x+=this.grid)rect(x,y,1,1,c);}
     for(const cmd of this.commands){if(!triangleCompatible(cmd))throw new Error('Primitive requires ordered raster presentation');const a=cmd.coords,c=this.rgba(cmd.color);if(cmd.kind==='pixel')rect(a[0],a[1],1,1,c);else rect(Math.min(a[0],a[2]),Math.min(a[1],a[3]),Math.abs(a[2]-a[0]),Math.abs(a[3]-a[1]),c);}
     this.vertexCommands=this.commands;this.vertexKey=key;return this.vertexData=data;
   }

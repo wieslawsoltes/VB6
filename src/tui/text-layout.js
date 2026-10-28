@@ -11,12 +11,23 @@ export function layoutText(text,{columns,rows,scrollColumn=0,scrollRow=0,tabSize
   const start=Math.min(clamp(selectionStart),clamp(selectionEnd)),end=Math.max(clamp(selectionStart),clamp(selectionEnd));
   const caretIndex=selectionDirection==='backward'?start:end,lines=new Map();
   let x=0,y=0,caret=null;
+  // Keep logical line extents separate from selection paint. A selected newline
+  // extends its highlight to the viewport edge, but must not change the line's
+  // alignment or move its glyphs. Empty lines also own an aligned caret.
+  const visibleLine=()=>{
+    if(y<scrollRow||y>=scrollRow+rows)return null;
+    let line=lines.get(y-scrollRow);
+    if(!line)lines.set(y-scrollRow,line={cells:[],length:0,newline:null});
+    return line;
+  };
   const cell=(glyph,from,to)=>{
     if(wrap&&x>=columns){x=0;y++;}
     if(!caret&&caretIndex>=from&&caretIndex<to)caret={x:x-scrollColumn,y:y-scrollRow};
-    if(y>=scrollRow&&y<scrollRow+rows&&x>=scrollColumn&&x<scrollColumn+columns){
-      let line=lines.get(y-scrollRow);if(!line)lines.set(y-scrollRow,line=[]);
-      line.push({x:x-scrollColumn,y:y-scrollRow,glyph:password?'•':glyph,sourceStart:from,sourceEnd:to,selected:focused&&from<end&&to>start});
+    const line=visibleLine();
+    if(line){
+      line.length=x+1;
+      if(x>=scrollColumn&&x<scrollColumn+columns)
+        line.cells.push({x:x-scrollColumn,y:y-scrollRow,glyph:password?'•':glyph,sourceStart:from,sourceEnd:to,selected:focused&&from<end&&to>start});
     }
     x++;
   };
@@ -25,10 +36,8 @@ export function layoutText(text,{columns,rows,scrollColumn=0,scrollRow=0,tabSize
     if(glyph==='\r'||glyph==='\n') {
       if(glyph==='\r'&&text[index]==='\n')index++;
       if(caretIndex>=from&&caretIndex<index)caret={x:x-scrollColumn,y:y-scrollRow};
-      if(focused&&from<end&&index>start&&y>=scrollRow&&y<scrollRow+rows) {
-        let line=lines.get(y-scrollRow);if(!line)lines.set(y-scrollRow,line=[]);
-        for(let n=Math.max(x,scrollColumn);n<scrollColumn+columns;n++)line.push({x:n-scrollColumn,y:y-scrollRow,glyph:' ',sourceStart:from,sourceEnd:index,selected:true});
-      }
+      const line=visibleLine();
+      if(line){line.length=x;if(focused&&from<end&&index>start)line.newline={from,to:index};}
       x=0;y++;
     } else if(glyph==='\t'&&!password) {
       const count=tabSize-(x%tabSize);for(let n=0;n<count;n++)cell(' ',from,index);
@@ -36,12 +45,19 @@ export function layoutText(text,{columns,rows,scrollColumn=0,scrollRow=0,tabSize
     if(y>=scrollRow+rows&&index>caretIndex)break;
   }
   if(caretIndex===text.length){if(wrap&&x>=columns){x=0;y++;}caret={x:x-scrollColumn,y:y-scrollRow};}
+  visibleLine();
   const cells=[];
   for(const [row,line]of lines){
-    const length=line.length?line.at(-1).x+1:0,shift=scrollColumn?0:alignment==='right'?Math.max(0,columns-length):alignment==='center'?Math.max(0,Math.floor((columns-length)/2)):0;
-    for(const item of line){item.x+=shift;cells.push(item);}
+    const shift=scrollColumn?0:alignment==='right'?Math.max(0,columns-line.length):alignment==='center'?Math.max(0,Math.floor((columns-line.length)/2)):0;
+    for(const item of line.cells){item.x+=shift;cells.push(item);}
+    if(line.newline)for(let n=Math.max(0,line.length+shift-scrollColumn);n<columns;n++)
+      cells.push({x:n,y:row,glyph:' ',sourceStart:line.newline.from,sourceEnd:line.newline.to,selected:true});
     if(caret?.y===row)caret.x+=shift;
   }
+  // An insertion point exactly on the trailing edge still needs visible block
+  // ink. Use the last cell without shifting text or changing native selection;
+  // positions genuinely outside the scrolled viewport remain hidden.
+  if(caret?.x===columns)caret.x=columns-1;
   if(!focused||start!==end||!caret||caret.x<0||caret.y<0||caret.x>=columns||caret.y>=rows)caret=null;
   return {cells,caret};
 }

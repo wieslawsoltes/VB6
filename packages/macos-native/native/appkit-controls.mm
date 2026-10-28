@@ -4,6 +4,7 @@
 #include "appkit-edit.hpp"
 #include "appkit-control-utils.hpp"
 #include "appkit-appearance.hpp"
+#include "appkit-collections.hpp"
 #include <cfloat>
 
 namespace vb6 {
@@ -72,6 +73,7 @@ void MacControl::applyFont(){
   if(traits)font=[NSFontManager.sharedFontManager convertFont:font toHaveTrait:traits];
   if([widget respondsToSelector:@selector(setFont:)])[(id)widget setFont:font];
   if(appearanceCaption)appearanceCaption.font=font;
+  if(appearanceSegments){appearanceSegments.font=font;layoutNativeAppearance(*this);}
   if([widget isKindOfClass:NSTableView.class]){auto table=(NSTableView*)widget;for(NSTableColumn*c in table.tableColumns)[(NSCell*)c.dataCell setFont:font];auto size=property("macoscontrolsize",Value::string(u"regular")).string();double preferred=size==u"mini"?16:size==u"small"?20:size==u"large"?32:size==u"extraLarge"?40:24;table.rowHeight=std::max(preferred,std::ceil(font.ascender-font.descender+5));}
   refreshNativePlaceholder(*this);
 }
@@ -99,7 +101,7 @@ void MacControl::initialize(){
     NSTextField*f=t=="Label"?[NSTextField new]:property("macoscontrolstyle",Value::string(u"automatic")).string()==u"search"?nativeSearchField():nativeTextField(!property("passwordchar",Value::string(u"")).string().empty());
     f.editable=t!="Label"&&!flag("locked");f.selectable=t!="Label";f.bezeled=t!="Label";f.drawsBackground=t!="Label"||flag("backstyle");f.delegate=delegate;f.target=delegate;f.action=@selector(action:);widget=f;view=f;
   }else if(t=="TextBox"||t=="RichTextBox"){
-    auto scroll=[NSScrollView new];auto editor=[[NSTextView alloc]initWithFrame:NSMakeRect(0,0,120,80)];editor.delegate=delegate;editor.richText=t=="RichTextBox";editor.importsGraphics=t=="RichTextBox";editor.editable=!flag("locked");editor.verticallyResizable=YES;editor.horizontallyResizable=(int(number("scrollbars",3))&1)!=0;
+    auto scroll=[NSScrollView new];auto editor=nativeAppearanceTextView(self());editor.delegate=delegate;editor.richText=t=="RichTextBox";editor.importsGraphics=t=="RichTextBox";editor.editable=!flag("locked");editor.verticallyResizable=YES;editor.horizontallyResizable=(int(number("scrollbars",3))&1)!=0;
     editor.autoresizingMask=NSViewWidthSizable;editor.textContainer.widthTracksTextView=YES;scroll.documentView=editor;scroll.hasVerticalScroller=(int(number("scrollbars",3))&2)!=0;scroll.hasHorizontalScroller=(int(number("scrollbars",3))&1)!=0;scroll.borderType=NSBezelBorder;widget=editor;view=scroll;
   }else if(t=="ComboBox"||t=="DriveListBox"){
     auto combo=nativeComboBox();combo.editable=number("style",0)!=2;combo.delegate=delegate;combo.target=delegate;combo.action=@selector(action:);widget=combo;view=combo;
@@ -126,10 +128,10 @@ void MacControl::initialize(){
   }else if(t=="DTPicker"||t=="MonthView"){
     auto picker=[NSDatePicker new];picker.datePickerStyle=t=="MonthView"?NSDatePickerStyleClockAndCalendar:NSDatePickerStyleTextFieldAndStepper;picker.datePickerElements=int(number("format",0))==2?NSHourMinuteSecondDatePickerElementFlag:NSYearMonthDayDatePickerElementFlag;picker.target=delegate;picker.action=@selector(action:);widget=picker;view=picker;
   }else if(t=="TabStrip"||t=="SSTab"){
-    auto tabs=[NSTabView new];tabs.delegate=delegate;widget=tabs;view=tabs;auto collection=items("tabs");int count=t=="SSTab"?int(number("tabs",3)):0;if(count<0||count>1000)fail(380);for(int i=0;i<count;i++)collection->invoke(*host->runtime,"add",{Arg(Value::missing()),Arg(Value::string(u"")),Arg(Value::string(u"Tab "+fromUTF8(std::to_string(i))))});
+    auto tabs=[NSTabView new];tabs.delegate=delegate;widget=tabs;view=tabs;initializeNativeItems(*this,"tabs");
   }else{
     auto canvas=[VB6Canvas new];canvas->model=self();widget=canvas;view=canvas;
-    if(t=="StatusBar")items("panels");if(t=="Toolbar")items("buttons");if(t=="MSChart")resizeGrid(size_t(number("rowcount",5)),size_t(number("columncount",1)));
+    if(t=="StatusBar")items("panels");if(t=="Toolbar")initializeNativeItems(*this,"buttons");if(t=="MSChart")resizeGrid(size_t(number("rowcount",5)),size_t(number("columncount",1)));
   }
   if(auto canvas=[view isKindOfClass:VB6Canvas.class]?(VB6Canvas*)view:nil)canvas->model=self();
   view.identifier=ns(fromUTF8(spec.name));view.toolTip=ns(property("tooltiptext",Value::string(u"")).string());
@@ -148,7 +150,7 @@ void MacControl::refresh(){
   else if(auto f=textField(*this)){
     NSString*desired=ns(spec.type=="Label"?caption:(f.currentEditor?nativeEditText(*this):property("text",Value::string(u"")).string()));if(![f.stringValue isEqualToString:desired])f.stringValue=desired;
     f.textColor=color(int64_t(number("forecolor",0)));f.backgroundColor=color(int64_t(number("backcolor",0xffffff)));f.alignment=number("alignment",0)==1?NSTextAlignmentRight:number("alignment",0)==2?NSTextAlignmentCenter:NSTextAlignmentLeft;f.editable=spec.type!="Label"&&!flag("locked");
-  }else if(auto e=textView(*this)){NSString*desired=e.hasMarkedText?e.string:ns(property("text",Value::string(u"")).string());if(![e.string isEqualToString:desired])e.string=desired;e.textColor=color(int64_t(number("forecolor",0)));e.backgroundColor=color(int64_t(number("backcolor",0xffffff)));e.editable=!flag("locked");}
+  }else if(auto e=textView(*this)){NSString*desired=e.hasMarkedText?e.string:ns(property("text",Value::string(u"")).string());if(![e.string isEqualToString:desired])e.string=desired;e.textColor=color(int64_t(number("forecolor",0)));e.backgroundColor=color(int64_t(number("backcolor",0xffffff)));e.editable=!flag("locked");if(spec.type=="TextBox")e.alignment=number("alignment",0)==1?NSTextAlignmentRight:number("alignment",0)==2?NSTextAlignmentCenter:NSTextAlignmentLeft;}
   if([widget isKindOfClass:NSSlider.class]||[widget isKindOfClass:NSStepper.class]||[widget isKindOfClass:NSProgressIndicator.class]){
     double minimum=number("min",0),maximum=number("max",100),value=number("value",minimum);if(minimum>maximum||value<minimum||value>maximum)fail(380,"Value is outside Min/Max");
     [(id)widget setMinValue:minimum];[(id)widget setMaxValue:maximum];[(id)widget setDoubleValue:value];

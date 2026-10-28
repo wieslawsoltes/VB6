@@ -126,7 +126,8 @@ export class RasterCache {
     const width=Math.max(1,Math.floor(surface.width*scale)),height=Math.max(1,Math.floor(surface.height*scale));
     if(width*height>GRAPHICS_LIMITS.displayPixels)throw new RangeError('Graphics surface exceeds retained pixel budget');
     if(!this.canvas){const item=canvas2D(this.document,width,height);this.canvas=item.canvas;this.context=item.context;}
-    const key=[surface.width,surface.height,width,height,surface.background,surface.theme,surface.grid,surface.replayEpoch||0].join('|');
+    const gridY=surface.gridY??surface.grid;
+    const key=[surface.width,surface.height,width,height,surface.background,surface.theme,surface.grid,gridY,surface.replayEpoch||0].join('|');
     const reset=key!==this.key||this.commands!==surface.commands||this.picture!==surface.picture||this.count>surface.commands.length;
     const ctx=this.context;
     if(reset){
@@ -137,13 +138,14 @@ export class RasterCache {
       if(surface.grid){
         // An 8192x8192 one-pixel grid is one repeating tile, not 67M calls.
         // Fractional phase is retained exactly by the bounded explicit path.
-        const count=Math.ceil(surface.width/surface.grid)*Math.ceil(surface.height/surface.grid);
-        if(Number.isInteger(surface.grid)&&surface.grid<=256){
-          if(this.gridSpacing!==surface.grid){const tile=canvas2D(this.document,surface.grid,surface.grid);tile.context.fillStyle='#808080';tile.context.fillRect(0,0,1,1);this.gridTile=tile.canvas;this.gridSpacing=surface.grid;}
+        const count=Math.ceil(surface.width/surface.grid)*Math.ceil(surface.height/gridY);
+        if(Number.isInteger(surface.grid)&&Number.isInteger(gridY)&&surface.grid<=256&&gridY<=256){
+          const spacing=surface.grid+':'+gridY;
+          if(this.gridSpacing!==spacing){const tile=canvas2D(this.document,surface.grid,gridY);tile.context.fillStyle='#808080';tile.context.fillRect(0,0,1,1);this.gridTile=tile.canvas;this.gridSpacing=spacing;}
           ctx.fillStyle=ctx.createPattern(this.gridTile,'repeat');ctx.fillRect(0,0,surface.width,surface.height);
         }else{
           if(count>1000000)throw new RangeError('Fractional grid exceeds draw-call quota');
-          ctx.fillStyle='#808080';for(let y=0;y<surface.height;y+=surface.grid)for(let x=0;x<surface.width;x+=surface.grid)ctx.fillRect(x,y,1,1);
+          ctx.fillStyle='#808080';for(let y=0;y<surface.height;y+=gridY)for(let x=0;x<surface.width;x+=surface.grid)ctx.fillRect(x,y,1,1);
         }
       }
       this.key=key;this.picture=surface.picture;this.commands=surface.commands;this.count=0;this.rebuilds++;this.revision++;

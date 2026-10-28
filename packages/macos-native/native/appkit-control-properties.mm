@@ -5,6 +5,7 @@
 #include "appkit-pictures.hpp"
 #include "appkit-richtext.hpp"
 #include "appkit-appearance.hpp"
+#include "appkit-collections.hpp"
 namespace vb6 {
 Value MacControl::get(Runtime&rt,const std::string&raw){
   if(disposed)fail(91,"Control has been unloaded");auto name=lower(raw.empty()?defaultMember():raw);
@@ -30,6 +31,8 @@ Value MacControl::get(Runtime&rt,const std::string&raw){
   if(name=="filename"&&spec.type=="FileListBox"){auto i=get(rt,"listindex").integral();return Value::string(i>=0&&size_t(i)<list.size()?list[size_t(i)]:Text());}
   if(name=="value"&&[widget isKindOfClass:NSDatePicker.class]){auto c=[[NSCalendar currentCalendar]components:NSCalendarUnitYear|NSCalendarUnitMonth|NSCalendarUnitDay|NSCalendarUnitHour|NSCalendarUnitMinute|NSCalendarUnitSecond fromDate:((NSDatePicker*)widget).dateValue];return civilDate({int(c.year),int(c.month),int(c.day),int(c.hour),int(c.minute),int(c.second)});}
   if(name=="nodes"||name=="listitems"||name=="columnheaders"||name=="panels"||name=="buttons"||name=="tabs"&&spec.type!="SSTab"||name=="listimages")return Value::object(items(name));
+  if(spec.type=="SSTab"&&name=="tabs")return Value::integer(items("tabs")->items.size(),Type::Integer);
+  if(spec.type=="SSTab"&&name=="caption")return nativeIndexedTab(*this,"tabcaption",property("tab",Value::integer(0)).integral());
   if(name=="selecteditem"){
     if(spec.type=="TreeView"){id token=[(NSOutlineView*)widget itemAtRow:((NSOutlineView*)widget).selectedRow];return Value::object([token isKindOfClass:VB6OutlineToken.class]?((VB6OutlineToken*)token)->item:nullptr);}
     if(spec.type=="ListView"){auto i=((NSTableView*)widget).selectedRow;auto collection=items("listitems");return Value::object(i>=0&&size_t(i)<collection->items.size()?collection->items[size_t(i)]:nullptr);}
@@ -69,9 +72,16 @@ void MacControl::set(Runtime&rt,const std::string&raw,Value value,bool){
   if(nativeRichProperty(name)){nativeRichSet(*this,name,std::move(value));return;}
   if(name=="selecteditem"){
     auto item=std::dynamic_pointer_cast<MacItem>(value.asObject());if(!item)fail(13);if(spec.type=="TreeView"){id token=outlineTokens[item->identity];if(!token){[(NSOutlineView*)widget reloadData];token=outlineTokens[item->identity];}if(!token)fail(380);NSInteger row=[(NSOutlineView*)widget rowForItem:token];if(row<0)fail(380);[(NSTableView*)widget selectRowIndexes:[NSIndexSet indexSetWithIndex:size_t(row)]byExtendingSelection:NO];}
-    else{auto collection=items(spec.type=="ListView"?"listitems":"tabs");auto it=std::find(collection->items.begin(),collection->items.end(),item);if(it==collection->items.end())fail(380);size_t i=size_t(it-collection->items.begin());if(spec.type=="ListView")[(NSTableView*)widget selectRowIndexes:[NSIndexSet indexSetWithIndex:i]byExtendingSelection:NO];else [(NSTabView*)widget selectTabViewItemAtIndex:i];}return;
+    else{auto collection=items(spec.type=="ListView"?"listitems":"tabs");auto it=std::find(collection->items.begin(),collection->items.end(),item);if(it==collection->items.end())fail(380);size_t i=size_t(it-collection->items.begin());if(spec.type=="ListView")[(NSTableView*)widget selectRowIndexes:[NSIndexSet indexSetWithIndex:i]byExtendingSelection:NO];else selectNativeTab(*this,int64_t(i));}return;
   }
-  if(name=="tab"&&spec.type=="SSTab"){auto i=value.integral();auto tabs=(NSTabView*)widget;if(i<0||i>=tabs.numberOfTabViewItems)fail(380);[tabs selectTabViewItemAtIndex:i];properties[name]=Value::integer(i,Type::Integer);return;}
+  if(name=="tab"&&(spec.type=="SSTab"||spec.type=="TabStrip")){selectNativeTab(*this,value.integral());return;}
+  if(spec.type=="SSTab"&&name=="tabs"){setNativeTabCount(*this,value.integral());return;}
+  if(spec.type=="SSTab"&&name=="caption"){nativeIndexedTab(*this,"tabcaption",property("tab",Value::integer(0)).integral(),&value);return;}
+  if(name=="taborientation"&&(spec.type=="SSTab"||spec.type=="TabStrip")) {
+    const auto n=value.floating();if(n<0||n>3||n!=std::trunc(n))fail(380,"Invalid native TabOrientation");
+    if(property("macoscontrolstyle",Value::string(u"automatic")).string()==u"segmented"&&n>1)fail(380,"Segmented tabs require top or bottom orientation");
+    properties[name]=Value::integer(int64_t(n),Type::Integer);applyNativeAppearance(*this);return;
+  }
   if(name=="text"&&!grid.empty()){auto r=size_t(number("row",0)),c=size_t(number("col",0));if(r>=grid.size()||c>=grid[r].size())fail(381);writeNativeRecordsetCell(*this,r,c,std::move(value));return;}
   if(name=="rows"||name=="cols"||name=="rowcount"||name=="columncount"){
     auto n=value.integral();if(n<0||n>100000)fail(380);auto rows=(name=="rows"||name=="rowcount")?size_t(n):grid.size(),cols=(name=="cols"||name=="columncount")?size_t(n):(grid.empty()?0:grid[0].size());resizeGrid(rows,cols);properties[name]=Value::integer(n);updateColumns();reloadList();return;

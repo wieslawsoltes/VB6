@@ -1007,15 +1007,24 @@ with sync_playwright() as playwright:
     case('fractional background-layer and checkbox edges preserve exact pixels, native keys and high contrast',background_and_checkbox_edges)
 
     def translucent_paint():
-        page = new_page(browser, dpr=1.5)
         backend = REQUIRED[0] if REQUIRED else 'canvas2d'
+        # Retire both legacy images and per-capture evidence before page setup:
+        # an early failure must not leave an accepted image from a prior run.
+        for label in ('html', backend):
+            capture = f'translucent-capture-{label}'
+            for name in (f'translucent-{label}.png', f'{capture}-{label}.png',
+                         f'{capture}-startup.png', f'{capture}-reference.json'):
+                (OUT/name).unlink(missing_ok=True)
+        page = new_page(browser, dpr=1.5)
         page.evaluate('''()=>{
           document.body.innerHTML='<style>body{margin:0;background:rgb(30,50,90)}.sample{position:absolute;width:90px;height:90px;top:20px}.alpha{left:20px;background:rgba(255,0,0,.5)}.border{left:140px;background:white;border:8px solid rgba(0,255,0,.5)}.gradient{left:280px;background:linear-gradient(90deg,rgba(255,0,0,.4),rgba(0,0,255,.8))}.shadow{left:420px;background:white;box-shadow:3px 3px rgba(0,0,0,.4)}</style><div class="sample alpha">Alpha</div><div class="sample border"></div><div class="sample gradient"></div><div class="sample shadow"></div>';
           window.r=new VB6Rendering.UIRenderer(document,{backend:'html'});
         }''')
-        page.evaluate('document.fonts.ready');before=page.screenshot()
+        before=stable_render_capture(page,'translucent-capture-html','html',renderer='r')
         page.evaluate('backend=>r.setOptions({backend,fallbacks:["html"]})',backend)
-        page.wait_for_timeout(150);after=page.screenshot();comparison=pixels(before,after)
+        page.wait_for_timeout(150)
+        after=stable_render_capture(page,f'translucent-capture-{backend}',backend,renderer='r')
+        comparison=pixels(before,after)
         (OUT/'translucent-html.png').write_bytes(before);(OUT/f'translucent-{backend}.png').write_bytes(after)
         check(page.evaluate('r.backend')==backend,'Alpha test silently fell back')
         check(comparison['changedPixels']==0,'CSS opacity applied twice: '+str(comparison))

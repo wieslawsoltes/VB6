@@ -2,6 +2,7 @@
 #include "appkit.hpp"
 #include "appkit-recordsets.hpp"
 #include "appkit-appearance.hpp"
+#include "appkit-collections.hpp"
 namespace vb6 {
 std::shared_ptr<MacItems>MacControl::items(const std::string&raw){auto name=lower(raw);auto found=collections.find(name);if(found!=collections.end())return found->second;auto collection=std::make_shared<MacItems>(name);collection->owner=self();collections[name]=collection;return collection;}
 static Text itemText(const MacItem&item,const std::string&name="text"){auto it=item.properties.find(name);return it==item.properties.end()?Text():it->second.string();}
@@ -18,15 +19,13 @@ void MacItems::changed(){
   auto c=owner.lock();if(!c||c->disposed)return;
   if(kind=="columnheaders")c->updateColumns();
   if(kind=="tabs"&&[c->widget isKindOfClass:NSTabView.class]){
-    auto tabs=(NSTabView*)c->widget;NSString*selected=tabs.selectedTabViewItem.identifier;NSMutableDictionary<NSString*,NSTabViewItem*>*old=[NSMutableDictionary dictionary];
-    for(NSTabViewItem*tab in tabs.tabViewItems.copy){if([tab.identifier isKindOfClass:NSString.class])old[tab.identifier]=tab;[tabs removeTabViewItem:tab];}
-    for(auto&item:items){NSString*key=[NSString stringWithFormat:@"%llu",static_cast<unsigned long long>(item->identity)];auto tab=old[key]?:[[NSTabViewItem alloc]initWithIdentifier:key];tab.label=ns(itemText(*item));if(!tab.view)tab.view=[VB6Canvas new];[tabs addTabViewItem:tab];}
-    if(selected){auto index=[tabs indexOfTabViewItemWithIdentifier:selected];if(index!=NSNotFound)[tabs selectTabViewItemAtIndex:index];}
+    reconcileNativeTabs(*c);
   }
   if(kind=="buttons"||kind=="panels"){
-    for(NSView*view in c->widget.subviews.copy)[view removeFromSuperview];double x=0;size_t i=0;
+    if(c->appearanceSegments){refreshNativeSegments(*c);return;}
+    for(NSView*view in c->widget.subviews.copy)if([view isKindOfClass:NSButton.class]&&((NSButton*)view).target==c->delegate&&((NSButton*)view).action==@selector(itemAction:))[view removeFromSuperview];double x=0;size_t i=0;
     for(auto&item:items){auto button=[NSButton new];button.title=ns(captionText(itemText(*item)));button.bordered=kind=="buttons";button.bezelStyle=NSBezelStyleRounded;button.target=c->delegate;button.action=@selector(itemAction:);button.tag=NSInteger(i++);button.enabled=itemFlag(*item,"enabled",true);button.hidden=!itemFlag(*item,"visible",true);button.state=itemFlag(*item,"value")?NSControlStateValueOn:NSControlStateValueOff;
-      if(item->properties.count("style")&&item->properties.at("style").integral()==2)[button setButtonType:NSButtonTypePushOnPushOff];
+      if(item->properties.count("style")&&(item->properties.at("style").integral()==1||item->properties.at("style").integral()==2))[button setButtonType:NSButtonTypePushOnPushOff];
       applyNativeItemAppearance(*c,button);
       double width=item->properties.count("width")?item->properties.at("width").floating()/15:kind=="panels"?std::max(80.0,c->widget.bounds.size.width/std::max(size_t(1),items.size())):std::max(28.0,double(button.intrinsicContentSize.width));
       button.frame=NSMakeRect(x,0,width,c->widget.bounds.size.height);button.autoresizingMask=NSViewHeightSizable;[c->widget addSubview:button];x+=width;
@@ -37,9 +36,10 @@ void MacItems::changed(){
 Value MacItems::invoke(Runtime&rt,const std::string&raw,Args args){
   auto name=lower(raw);auto c=owner.lock();if(!c||c->disposed)fail(91);
   if(name.empty()||name=="item"){if(args.size()!=1)fail(450);return Value::object(item(args[0].value));}
-  if(name=="clear"){if(!args.empty())fail(450);for(auto&item:items){item->owner.reset();item->children.clear();}items.clear();c->outlineTokens.clear();changed();return {};}
+  if(name=="clear"){if(!args.empty())fail(450);if(kind=="tabs")for(NSTabViewItem*page in ((NSTabView*)c->widget).tabViewItems)if(page.view.subviews.count)fail(380,"Move or remove controls before removing their tab page");for(auto&item:items){item->owner.reset();item->children.clear();}items.clear();c->outlineTokens.clear();changed();return {};}
   if(name=="remove"){
     if(args.size()!=1)fail(450);auto victim=item(args[0].value);std::set<MacItem*>remove;
+    if(kind=="tabs") {auto at=std::find(items.begin(),items.end(),victim);if(at!=items.end()&&[(NSTabView*)c->widget tabViewItemAtIndex:NSInteger(at-items.begin())].view.subviews.count)fail(380,"Move or remove controls before removing their tab page");}
     std::function<void(const std::shared_ptr<MacItem>&)>mark=[&](auto&n){remove.insert(n.get());for(auto&child:n->children)mark(child);};mark(victim);
     if(auto p=victim->parent.lock())p->children.erase(std::remove(p->children.begin(),p->children.end(),victim),p->children.end());
     for(auto&n:items)if(remove.count(n.get())){n->owner.reset();c->outlineTokens.erase(n->identity);}items.erase(std::remove_if(items.begin(),items.end(),[&](auto&n){return remove.count(n.get());}),items.end());changed();return {};
@@ -63,8 +63,12 @@ Value MacItems::invoke(Runtime&rt,const std::string&raw,Args args){
       if(kind=="listimages"){auto picture=argument(args,2);auto image=std::dynamic_pointer_cast<MacImage>(picture.asObject());if(!image)fail(13);value->properties["picture"]=picture;}
       if(kind=="columnheaders"){value->properties["width"]=argument(args,3,Value::integer(1440));value->properties["alignment"]=argument(args,4,Value::integer(0,Type::Integer));}
       if(kind=="buttons"||kind=="panels")value->properties["style"]=argument(args,3,Value::integer(0,Type::Integer));
+      if(kind=="buttons"){const auto style=value->properties["style"].floating();if(style<0||style>5||style!=std::trunc(style))fail(380,"Toolbar button Style must be an integer from 0 to 5");value->properties["style"]=Value::integer(int64_t(style),Type::Integer);}
+      if(kind=="buttons")value->properties["value"]=Value::integer(0,Type::Integer);
+      if(kind=="buttons"||kind=="tabs")value->properties["image"]=argument(args,kind=="buttons"?4:3,Value::integer(0));
       if(kind=="listitems"||kind=="listsubitems"){value->subitems=std::make_shared<MacItems>("listsubitems");value->subitems->owner=c;value->subitems->parent=value;}
     }
+    auto proposed=items;proposed.insert(proposed.begin()+at,value);validateNativeSegmentItems(*c,proposed);
     items.insert(items.begin()+at,value);changed();return Value::object(value);
   }
   if(args.empty())return get(rt,name);fail(438,"Unsupported native collection method "+kind+"."+raw);
@@ -93,8 +97,7 @@ void MacItem::set(Runtime&rt,const std::string&raw,Value value,bool){
   if(name=="expanded"&&kind=="nodes"){auto token=c->outlineTokens.find(identity);if(token==c->outlineTokens.end()){c->reloadList();token=c->outlineTokens.find(identity);}if(token!=c->outlineTokens.end()){if(value.truth())[(NSOutlineView*)c->widget expandItem:token->second];else [(NSOutlineView*)c->widget collapseItem:token->second];}properties[name]=value;return;}
   if(name=="key"){auto list=collection.lock();if(!list)fail(91);auto key=value.string();for(auto&item:list->items)if(item.get()!=this&&!key.empty()&&changeCase(itemText(*item,"key"),false)==changeCase(key,false))fail(35602);}
   const std::set<std::string>allowed={"text","key","tag","enabled","visible","checked","bold","forecolor","backcolor","width","alignment","image","selectedimage","smallicon","icon","picture","value","style","tooltiptext","autosize","bevel","minwidth"};
-  if(!allowed.count(name))fail(438,"Unsupported native item property "+raw);if(name=="text"||name=="key"||name=="tooltiptext")value=coerce(value,"string");properties[name]=value;
-  if(auto list=collection.lock())list->changed();
+  if(!allowed.count(name))fail(438,"Unsupported native item property "+raw);if(name=="text"||name=="key"||name=="tooltiptext")value=coerce(value,"string");setNativeItemProperty(*this,name,std::move(value));
 }
 Value MacItem::invoke(Runtime&rt,const std::string&raw,Args args){
   auto name=lower(raw);bool put=name.rfind("let:",0)==0||name.rfind("set:",0)==0;if(put)name=name.substr(4);
@@ -170,5 +173,5 @@ Value MacItem::invoke(Runtime&rt,const std::string&raw,Args args){
 -(void)outlineViewItemDidCollapse:(NSNotification*)note{auto c=model.lock();id token=note.userInfo[@"NSObject"];if(c&&[token isKindOfClass:VB6OutlineToken.class])c->host->event([c,token]{c->event("collapse",{vb6::Arg(vb6::Value::object(((VB6OutlineToken*)token)->item))});});}
 @end
 @implementation VB6ControlDelegate (Collections)
--(void)itemAction:(id)sender{if(auto c=model.lock())c->host->event([c,sender]{auto collection=c->items(c->spec.type=="Toolbar"?"buttons":"panels");NSInteger index=[sender tag];if(index<0||size_t(index)>=collection->items.size())return;auto item=collection->items[size_t(index)];if([sender isKindOfClass:NSButton.class])item->properties["value"]=vb6::Value::integer([(NSButton*)sender state]==NSControlStateValueOn?1:0,vb6::Type::Integer);c->event(c->spec.type=="Toolbar"?"buttonclick":"panelclick",{vb6::Arg(vb6::Value::object(item))});});}
+-(void)itemAction:(id)sender{if(auto c=model.lock())c->host->event([c,sender]{auto collection=c->items(c->spec.type=="Toolbar"?"buttons":"panels");NSInteger index=[sender tag];if(index<0||size_t(index)>=collection->items.size())return;auto item=collection->items[size_t(index)];if(c->spec.type=="Toolbar"){vb6::activateNativeToolbarItem(*c,item,[sender isKindOfClass:NSButton.class]&&[(NSButton*)sender state]==NSControlStateValueOn);return;}if([sender isKindOfClass:NSButton.class])item->properties["value"]=vb6::Value::integer([(NSButton*)sender state]==NSControlStateValueOn?1:0,vb6::Type::Integer);c->event("panelclick",{vb6::Arg(vb6::Value::object(item))});});}
 @end

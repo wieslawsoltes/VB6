@@ -14,6 +14,7 @@ import {MACOS_TARGET,MacOSCompileError,macOSOptions,macOSInfoPlist} from './targ
 import {resolveMacOSDeclaration,macOSControlReport} from './catalog.js';
 import {macOSAppearanceReport} from './macos26-appearance.js';
 import {pascalObjectReferenceCompatible,pascalObjectDispatchBranches} from '../../../src/language/pascal/object-compatibility.js';
+import {prepareMacOSCollections} from './native-collections.js';
 
 const lower=value=>String(value).toLowerCase();
 const q=value=>JSON.stringify(String(value)).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
@@ -278,6 +279,7 @@ export function compileMacOS(input,options={}){
   const resources=prepareMacOSResources(project);
   setTargetConditionalConstants(project,{VBWEB:0,Win16:0,Win32:0,Win64:0,Mac:-1,MacOS:-1,Linux:0,Unix:-1,GTK:0,GTK3:0,GTK4:0,ARM64:-1,AARCH64:-1,X86_64:0,AMD64:0,X86:0,I386:0,IA32:0});
   const program=compileProject(project);if(!program.valid){const error=new MacOSCompileError('VB6 frontend rejected the project');error.diagnostics=program.diagnostics;throw error;}
+  prepareMacOSCollections({modules:[...program.modules.values()]});
   const controls=macOSControlReport(project);
   const lowering=new MacOSLowering(program,normalized),source=lowering.emit();
   const report={target:MACOS_TARGET.id,architecture:'arm64',format:'Mach-O',artifact:'native-source-build-kit',compiler:'Apple Clang C++17',nativeRuntime:'vb6-native',modules:program.modules.size,procedures:lowering.procedures,instructions:lowering.instructions,operations:[...lowering.usedOps].sort(),controls,imports:lowering.external,optimization:normalized.optimization,minimumVersion:normalized.minimumVersion,sourceBytes:new TextEncoder().encode(source).length,resources:resources.report,appearance,diagnostics:appearance.diagnostics};

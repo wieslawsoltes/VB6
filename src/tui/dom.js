@@ -15,6 +15,8 @@ import {TuiControlRegistry} from './controls.js';
 import {applyTUIStyle, retainTUIStyle} from './styles.js';
 import {observeControlPaint} from '../rendering/invalidation.js';
 import {captureControl} from './projection.js';
+import {presentCollection} from './collection-style.js';
+import {paintDesignerGrid} from './designer-grid.js';
 export {captureControl};
 
 const SELECTOR = '.vb-control,.vb-form';
@@ -130,7 +132,7 @@ export class DOMTuiRenderer {
     const previousOwner = owners.get(node);
     if (previousOwner && previousOwner !== this) previousOwner.remove(node);
     const entry = {capability, canvas: null, painter: null, buffer: null, next: null, visible: false, pixels: 0, fallback: null,
-      host:null, hostMarker:null, projector:null, inputLease:null,
+      host:null, hostMarker:null, projector:null, inputLease:null, collectionLease:null,
       attributes: new Map(['data-tui-paint', 'data-tui-editing', 'data-tui-chrome', 'data-tui-cell-editor','data-tui-rich-editor'].map(key => [key, node.getAttribute(key)]))};
     owners.set(node, this); this.controls.set(node, entry);
     entry.unsubscribe = observeControlPaint(node, () => this.invalidate(node));
@@ -271,12 +273,20 @@ export class DOMTuiRenderer {
           const p = TUI_PROFILES[this.settings.profile];
           entry.buffer = new CellBuffer(columns, rows, p); entry.next = new CellBuffer(columns, rows, p);
         }
+        if(['TreeView','ListView','MSFlexGrid','MSHFlexGrid','DataGrid'].includes(type)){
+          if(entry.collectionLease)entry.collectionLease.update(metrics);
+          else entry.collectionLease=presentCollection(node,metrics);
+        }
         const state=captureControl(node,columns,rows,metrics);
         if(raster){
-          const source=graphics?.rasterize()||node.querySelector('img');
-          if(!source||source.tagName==='IMG'&&!source.naturalWidth){this.fallback(node,'image-pending');continue;}
-          entry.projector||=new TuiImageProjector(this.document);
-          entry.projector.paint(entry.next,source,{mode:this.settings.graphics==='braille'?'braille':'blocks',background:TUI_PROFILES[this.settings.profile].background,fit:source.tagName==='IMG'?this.view.getComputedStyle(source).objectFit:'fill',width,height});
+          if(paintDesignerGrid(entry.next,node,graphics,this.settings.profile)){
+            entry.projector?.dispose();entry.projector=null;
+          }else{
+            const source=graphics?.rasterize()||node.querySelector('img');
+            if(!source||source.tagName==='IMG'&&!source.naturalWidth){this.fallback(node,'image-pending');continue;}
+            entry.projector||=new TuiImageProjector(this.document);
+            entry.projector.paint(entry.next,source,{mode:this.settings.graphics==='braille'?'braille':'blocks',background:TUI_PROFILES[this.settings.profile].background,fit:source.tagName==='IMG'?this.view.getComputedStyle(source).objectFit:'fill',width,height});
+          }
           if(entry.capability==='container')host.setAttribute('data-tui-graphics','');
           else node.setAttribute('data-tui-paint','cells');
         }else{
@@ -308,6 +318,7 @@ export class DOMTuiRenderer {
     }
     entry.fallback = reason;
     this.surfacePixels -= entry.pixels; entry.pixels = 0;
+    entry.collectionLease?.dispose();entry.collectionLease=null;
     entry.painter?.dispose(); entry.canvas?.remove();entry.projector?.dispose();entry.projector=null;this.restoreInput(entry);if(entry.host)restoreAttribute(entry.host,'data-tui-graphics',entry.hostMarker);
     entry.canvas = null; entry.painter = null; entry.buffer = null; entry.next = null;
     for (const [key, value] of entry.attributes) restoreAttribute(node, key, value);
@@ -317,6 +328,7 @@ export class DOMTuiRenderer {
   remove(node) {
     const entry = this.controls.get(node); if (!entry) return;
     this.surfacePixels -= entry.pixels; entry.pixels = 0;
+    entry.collectionLease?.dispose();entry.collectionLease=null;
     entry.unsubscribe?.(); entry.painter?.dispose(); entry.canvas?.remove();entry.projector?.dispose();this.restoreInput(entry);
     if(entry.host)restoreAttribute(entry.host,'data-tui-graphics',entry.hostMarker);
     if (owners.get(node) === this) {

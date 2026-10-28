@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MACOS26_COLOR_ROLES,MACOS26_RESOURCES,MACOS26_REFERENCE,macos26ColorFallback,macos26Resource} from '../src/theme/macos26-resources.js';
-import {MACOS26_CONTROL_SIZES,MACOS26_PROPERTIES,validateMacOS26Properties,clearMacOS26ColorRoles,macos26ControlAttributes} from '../src/theme/macos26-compat.js';
+import {MACOS26_CONTROL_SIZES,MACOS26_PROPERTIES,macos26PropertyChoices,validateMacOS26Properties,validateMacOS26ToolbarButtons,clearMacOS26ColorRoles,macos26ControlAttributes} from '../src/theme/macos26-compat.js';
 import {newProject,createControl,normalizeProject} from '../src/project/model.js';
 import {designerPropertyValues,editDesignerProperties} from '../src/designer/property-model.js';
 import {ApplicationThemeController,copyApplicationTheme} from '../src/theme/application-appearance.js';
@@ -34,6 +34,8 @@ for(const size of MACOS26_CONTROL_SIZES)test('control size '+size+' leaves autho
 
 for(const [type,p] of [
   ['Label',{MacOSControlStyle:'default'}],['CommandButton',{MacOSControlStyle:'switch'}],
+  ['CommandButton',{MacOSControlStyle:'segmented'}],['TextBox',{MacOSControlStyle:'segmented'}],
+  ['SSTab',{MacOSControlStyle:'segmented',TabOrientation:2}],['TabStrip',{MacOSControlStyle:'segmented',TabOrientation:3}],
   ['CheckBox',{MacOSControlStyle:'switch',Value:2}],['CheckBox',{MacOSControlStyle:'switch',Value:0.5}],
   ['TextBox',{MacOSControlStyle:'search',MultiLine:-1}],['TextBox',{MacOSControlStyle:'search',PasswordChar:'*'}],
   ['Slider',{MacOSMaterial:'sidebar'}],['Label',{MacOSIndeterminate:-1}],
@@ -43,6 +45,47 @@ for(const [type,p] of [
   ['TextBox',{MacOSAccessibilityIdentifier:'x'.repeat(1025)}],['TextBox',{PlaceholderText:42}]
 ])test('reject incompatible or malformed appearance '+type+' '+JSON.stringify(p).slice(0,100),()=>{
   assert.throws(()=>validateMacOS26Properties(p,type),TypeError);
+});
+
+for (const type of ['Toolbar','TabStrip','SSTab']) test(type+' offers segmented authoring without modifying geometry',()=>{
+  const project=newProject(),form=project.modules[0].form,control=createControl(type,'Navigation');
+  form.controls.push(control);
+  const before=structuredClone(control),values=designerPropertyValues(control,form,null,{macos26:true});
+  assert.equal(values.MacOSControlStyle,'automatic');
+  assert.deepEqual(macos26PropertyChoices('MacOSControlStyle',type),['automatic','segmented']);
+  const next=editDesignerProperties(form,[control.id],{MacOSControlStyle:'segmented'});
+  assert.equal(next.controls[0].properties.MacOSControlStyle,'segmented');
+  for(const key of ['Left','Top','Width','Height','FontName','FontSize']) assert.equal(next.controls[0].properties[key],control.properties[key]);
+  assert.deepEqual(control,before);
+});
+
+for (const style of [0,1,2]) test('segmented Toolbar tracking mode '+style+' preserves portable records',()=>{
+  const buttons=[{Key:'first',Caption:'First',Style:style,Value:style===0?0:1},
+    {Key:'second',Caption:'Second',Style:style,Value:style===1?1:0,Visible:0,Enabled:0}];
+  const before=structuredClone(buttons),properties={MacOSControlStyle:'segmented',Buttons:buttons};
+  assert.equal(validateMacOS26ToolbarButtons(buttons),buttons);
+  assert.equal(validateMacOS26Properties(properties,'Toolbar'),properties);
+  assert.deepEqual(buttons,before);
+  const project=newProject(),control=createControl('Toolbar','Modes');
+  Object.assign(control.properties,properties);project.modules[0].form.controls.push(control);
+  assert.deepEqual(normalizeProject(project).modules[0].form.controls[0].properties.Buttons,buttons);
+});
+
+for(const buttons of [null,{},'buttons',[null],[[]],[{Style:3}],[{Style:4}],[{Style:5}],
+  [{Style:1.5}],[{Style:NaN}],[{Style:0},{Style:1}],[{Style:1,Value:-1}],
+  [{Style:2,Value:0.5}],[{Style:0,Value:1}],
+  [{Style:2,Value:1},{Style:2,Value:1,Visible:0}],new Array(32768).fill({Style:0})
+])test('segmented Toolbar rejects unrepresentable collection '+JSON.stringify(buttons).slice(0,90),()=>{
+  const before=structuredClone(buttons);
+  assert.throws(()=>validateMacOS26Properties({MacOSControlStyle:'segmented',Buttons:buttons},'Toolbar'),TypeError);
+  assert.deepEqual(buttons,before);
+});
+
+test('segmented validation permits incremental empty toolbars and leaves ordinary legacy styles available',()=>{
+  assert.deepEqual(validateMacOS26ToolbarButtons(),[]);
+  const properties={MacOSControlStyle:'automatic',Buttons:[{Style:3},{Style:5}]};
+  assert.equal(validateMacOS26Properties(properties,'Toolbar'),properties);
+  assert.throws(()=>validateMacOS26Properties({...properties,MacOSControlStyle:'segmented'},'Toolbar'),/Style/);
 });
 
 test('explicit OLE/RGB edits clear bindings even at the same numeric value',()=>{

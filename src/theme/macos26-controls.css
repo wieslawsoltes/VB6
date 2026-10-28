@@ -17,6 +17,17 @@
 .classic-tooltip.runtime-tooltip {font-family:var(--app-font,"MS Sans Serif",Tahoma,Arial,sans-serif);}
 
 @media(forced-colors:none) {
+ /* Enabled hints use secondary text, not the disabled-label fallback. Carry
+  * disabled container paint only to its own descendants; a nested application
+  * resets it before resolving its local palette. Match each field directly. */
+ [data-vb-theme] {--macos-placeholder-foreground:initial;}
+ .vb-control:is(.disabled,:disabled,[aria-disabled=true]) {
+  --macos-placeholder-foreground:var(--winui-TextControlPlaceholderForeground,var(--vb-gray));
+ }
+ .vb-control:not(:where(.disabled,:disabled,[aria-disabled=true]))>:is(.vb-text-input,.vb-combo-field,.vb-date-input):not(:disabled)::placeholder {
+  color:var(--macos-placeholder-foreground,var(--macos26-secondaryLabelColor,var(--winui-TextControlPlaceholderForeground,var(--vb-gray))));
+ }
+
  /* Body-mounted tooltips carry their opener's local palette. Opaque paint keeps
   * compact help text legible above both design canvases and runtime controls. */
  .classic-tooltip.runtime-tooltip {
@@ -103,8 +114,10 @@
 }
 
 /* Search uses a normal text input for browser-independent native editing/IME.
- * Helpers are non-authored child nodes; clear is a real, named button. */
-.vb-control[data-macos-control-style="search"]>.vb-text-input {
+ * Helpers are non-authored child nodes; clear is a real, named button. Match
+ * the Classic field reset's specificity so its padding cannot cover either
+ * search affordance. The local palette still supplies the non-Mac fallback. */
+.vb-control[data-type="TextBox"][data-macos-control-style="search"]>input.vb-text-input[type="text"] {
  padding:var(--macos26-SearchPadding,var(--winui-TextControlPadding,4px 5px));
  border-radius:var(--macos26-CapsuleRadius,var(--app-radius,0));
 }
@@ -123,6 +136,68 @@
 .vb-control>.macos26-search-clear:hover:not(:disabled) {background:var(--macos26-ButtonBackgroundPressed);color:var(--macos26-labelColor);}
 .vb-control>.macos26-search-clear:focus-visible {outline:2px solid var(--macos26-controlAccentColor);outline-offset:2px;}
 .vb-control>.macos26-search-clear:disabled {color:var(--macos26-disabledControlTextColor);}
+
+/* Segments remain the real Toolbar Buttons or tab buttons. The same measured
+ * selection/inactive roles are used by standalone strips and page containers;
+ * the new presentation does not move an SSTab's authored child coordinates. */
+.vb-toolbar>.vb-toolbar-separator {align-self:stretch;border-inline-start:1px solid var(--app-separator,var(--vb-shadow));margin:3px 2px;}
+.vb-toolbar>.vb-toolbar-placeholder {flex:none;width:24px;}
+.vb-toolbar>.vb-toolbar-button[hidden] {display:none!important;}
+.vb-toolbar>.vb-toolbar-button.active {box-shadow:var(--app-aux-pressed-shadow,inset 1px 1px var(--vb-shadow));}
+.vb-toolbar>.vb-toolbar-button:focus-visible {outline:2px solid var(--macos26-focusIndicatorColor,var(--vb-selection));outline-offset:1px;}
+.vb-toolbar[data-macos-control-style="segmented"] {
+ --command-fill:var(--detail-segment-fill,var(--vb-face));
+ display:flex;align-items:stretch;gap:0;padding:0;border:0;
+ border-radius:var(--macos-control-radius,var(--detail-strip-radius,var(--app-radius,0)));
+}
+.vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button,
+.vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button {
+ flex:1 1 0;min-width:0;min-height:0;height:100%;position:relative;
+ margin:0;padding:var(--macos-control-padding,2px 8px);font:inherit;
+ white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+ border:1px solid transparent;
+ border-radius:var(--macos-control-radius,var(--detail-tab-radius,var(--app-radius,0)))!important;
+ box-shadow:none;
+}
+.vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button {
+ --command-fill:transparent;--command-ink:var(--macos-control-foreground,inherit);
+}
+.vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header {
+ left:0;padding:0;border:0;gap:0;
+ border-radius:var(--macos-control-radius,var(--detail-strip-radius,var(--app-radius,0)));
+}
+.vb-tabs[data-macos-control-style="segmented"][data-tab-orientation="0"]>.vb-tab-header {top:0;}
+.vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button.vb-toolbar-divider::after,
+.vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button:not(.active):not(:has(+.active)):not(:last-child)::after {
+ content:"";position:absolute;inset-inline-end:0;top:5px;bottom:5px;width:1px;
+ background:var(--macos26-Hairline,var(--app-separator,var(--vb-shadow)));pointer-events:none;
+}
+@media(forced-colors:none) {
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button:hover:not(:disabled):not(.active) {--command-fill:var(--macos26-ToolbarHover,transparent);}
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button:active:not(:disabled):not(.active) {--command-fill:var(--macos26-ToolbarPressed,var(--vb-face));}
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button.active {
+  --command-fill:var(--detail-tab-active-fill,var(--vb-selection));--command-ink:var(--detail-tab-active-ink,var(--vb-selection-text));
+ }
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button:disabled {--command-ink:var(--macos26-disabledControlTextColor,var(--vb-gray));}
+ .vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header {background:var(--detail-segment-fill,var(--vb-face));}
+ .vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button:disabled {color:var(--macos26-disabledControlTextColor,var(--vb-gray));}
+ .vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button:focus-visible,
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button:focus-visible {
+  z-index:3;outline:2px solid var(--macos26-focusIndicatorColor,var(--vb-selection));outline-offset:1px;
+ }
+}
+@media(forced-colors:active) {
+ .vb-toolbar[data-macos-control-style="segmented"] {--command-fill:ButtonFace;}
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button {--command-fill:ButtonFace;--command-ink:ButtonText;}
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button.active {--command-fill:Highlight;--command-ink:HighlightText;forced-color-adjust:none;}
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button:disabled {--command-ink:GrayText;}
+ .vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button,
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button {border-color:ButtonText;}
+ .vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button.active {background:Highlight;color:HighlightText;forced-color-adjust:none;}
+ .vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button:disabled {color:GrayText;}
+ .vb-tabs[data-macos-control-style="segmented"]>.vb-tab-header>.vb-tab-button:focus-visible,
+ .vb-toolbar[data-macos-control-style="segmented"]>.vb-toolbar-button:focus-visible {outline:2px solid Highlight;outline-offset:2px;}
+}
 
 /* Materials are explicit on a container and inherited only as paint resources.
  * The renderer wraps only a compatible system-color pair in this material slot;

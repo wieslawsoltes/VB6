@@ -91,7 +91,11 @@ export class RetainedGraphics {
     this.pictureReady=task.promise.then(result=>{if(result.cancelled||this.disposed||this.pictureTask!==task)return false;this.pictureTask=null;this.picture=result.canvas||null;this.pictureError=result.error||null;this.replayEpoch++;this.invalidate();return !!this.picture;});
     this.invalidate();return this.pictureReady;
   }
-  setGrid(spacing=8){this.assertLive();spacing=finite(spacing,'grid spacing',8192);if(spacing!==0&&spacing<1)throw new RangeError('Grid spacing must be zero or at least one pixel');if(this.grid!==spacing){this.grid=spacing;this.invalidate();}return this;}
+  setGrid(spacing=8,rowSpacing=spacing){
+    this.assertLive();spacing=finite(spacing,'grid spacing',8192);rowSpacing=finite(rowSpacing,'grid row spacing',8192);
+    if(spacing!==0&&spacing<1||rowSpacing!==0&&rowSpacing<1||(spacing===0)!==(rowSpacing===0))throw new RangeError('Grid spacing must be zero on both axes or at least one pixel');
+    if(this.grid!==spacing||(this.gridY??this.grid)!==rowSpacing){this.grid=spacing;this.gridY=rowSpacing;this.invalidate();}return this;
+  }
   rasterize(){
     this.assertLive();dimensions(this.width,this.height,GRAPHICS_LIMITS.readPixels);this.logicalCache||=new RasterCache(this.container.ownerDocument);return this.gdiCanvas=this.logicalCache.render(this);
   }
