@@ -34,6 +34,8 @@ errors = []
 results = {}
 playwright = None
 try:
+    if ENGINE == 'webkit':
+        os.environ.setdefault('DEBUG', 'pw:browser')
     playwright = sync_playwright().start()
     p = playwright
     options = {'executable_path': os.environ['CHROMIUM_PATH']} if ENGINE == 'chromium' and os.environ.get('CHROMIUM_PATH') else {}
