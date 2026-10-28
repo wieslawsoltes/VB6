@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 import yaml
 import check
 
@@ -134,7 +135,20 @@ class WorkflowAuditTests(unittest.TestCase):
                         self.assertEqual([owner['shard'] for owner in owners], ['1', '2', '3'])
                     else:
                         self.assertEqual(owners, [cell])
-        self.assertEqual(total, 82)
+        self.assertEqual(total, 84)
+    def test_appearance_inventory_requires_exhaustive_unique_script_ownership(self):
+        path = self.root / 'tools/ci/suites.json'
+        suites = json.loads(path.read_text())
+        inventory = suites['integration-appearance']
+        original_read = Path.read_text
+        # The fixture's tools directory is shared read-only. Override only its
+        # inventory bytes, retaining real entrypoints and the full audit graph.
+        for names in [inventory[:-1], [*inventory, inventory[0]], [*inventory, 'test_rendering_pixels.py']]:
+            changed = json.dumps({**suites, 'integration-appearance': names})
+            def read(candidate, *args, **kwargs):
+                return changed if candidate == path else original_read(candidate, *args, **kwargs)
+            with self.subTest(inventory=names), patch.object(Path, 'read_text', read), self.assertRaises(ValueError):
+                check.audit(self.root)
     def test_missing_browser_partition_is_rejected(self):
         for owner in check.PARTITIONED_MATRICES:
             with self.subTest(owner=owner):
@@ -148,6 +162,7 @@ class WorkflowAuditTests(unittest.TestCase):
         self.reject(lambda w:w['jobs']['browser']['strategy']['matrix'].pop('exclude'))
     def test_unrelated_browser_partition_or_axis_is_rejected(self):
         self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['include'][0].update(browser='firefox'))
+        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix']['include'][-1].update(browser='firefox'))
         self.reject(lambda w:w['jobs']['browser']['strategy']['matrix'].update(shard=['1', '2', '3']))
         self.reject(lambda w:w['jobs']['advanced-editor']['strategy']['matrix'].update(duplicate=['first', 'second']))
     def test_browser_partition_environment_and_execution_are_required(self):

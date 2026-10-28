@@ -15,7 +15,7 @@ import subprocess
 import sys
 import threading
 import time
-from browser_partition import own_case_names, select_case_names, validate_browser_shard
+from browser_partition import appearance_script_names, own_case_names, select_case_names, validate_browser_shard
 
 ROOT = Path(__file__).resolve().parents[2]
 ENGINES = ('chromium', 'firefox', 'webkit')
@@ -38,6 +38,10 @@ def plan(group, engine, transport, root=ROOT, browser_shard=''):
     scripts = [script for name in groups for script in suites[name]]
     if not scripts or len(scripts) != len(set(scripts)):
         raise ValueError('Empty or duplicate suite list')
+    if group == 'integration-appearance':
+        # These are complete entrypoints, not case partitions. Leave task-level
+        # browserShard absent so run_batch clears it before launching each one.
+        scripts = appearance_script_names(scripts, browser_shard)
     if browser_shard and group == 'project-authoring' and browser_shard != '1':
         # The native case inventory is partitioned; independent workspace
         # review runs exactly once, alongside the first partition.

@@ -5,13 +5,14 @@ from pathlib import Path
 import re
 import subprocess
 import yaml
-from browser_partition import BROWSER_SHARDS
+from browser_partition import BROWSER_SHARDS, appearance_script_names
 
 ROOT = Path(__file__).resolve().parents[2]
 # Only measured slow cells may replace one exhaustive matrix entry with three
-# disjoint case owners. Every other include/exclude remains forbidden.
+# disjoint owners. Every other include/exclude remains forbidden.
 PARTITIONED_MATRICES = {
-    'browser': [{'suite': 'project-authoring', 'browser': 'webkit'}],
+    'browser': [{'suite': 'project-authoring', 'browser': 'webkit'},
+                {'suite': 'integration-appearance', 'browser': 'webkit'}],
     'figma': [{'suite': group, 'browser': 'webkit', 'transport': 'file'}
               for group in ('figma-authoring', 'figma-services')],
     'advanced-editor': [{'browser': 'webkit'}],
@@ -60,7 +61,7 @@ def audit(root=ROOT):
             excluded = PARTITIONED_MATRICES[name]
             included = [{**cell, 'shard': shard} for cell in excluded for shard in BROWSER_SHARDS]
             if matrix.get('exclude') != excluded or matrix.get('include') != included:
-                raise ValueError('Only the exact exhaustive browser case replacements are permitted: ' + name)
+                raise ValueError('Only the exact exhaustive browser replacements are permitted: ' + name)
             axes = {'browser'} | ({'suite'} if name in ('browser', 'figma') else set()) | ({'transport'} if name == 'figma' else set())
             if set(matrix) != axes | {'include', 'exclude'}:
                 raise ValueError('Browser shards may not expand unrelated matrix cells: ' + name)
@@ -186,6 +187,7 @@ def audit(root=ROOT):
     if jobs['advanced-editor']['needs'] != ['advanced-build']:
         raise ValueError('All engines must consume the shared actual editor build')
     suites = json.loads((root / 'tools/ci/suites.json').read_text())
+    appearance_script_names(suites.get('integration-appearance', []))
     owners = set(jobs['core-browser']['strategy']['matrix']['suite']) | set(jobs['browser']['strategy']['matrix']['suite'])
     owners |= set(jobs['figma']['strategy']['matrix']['suite'])
     owners |= {'authoring-exports', 'advanced-editor', 'code-gpu'}

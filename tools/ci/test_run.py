@@ -12,7 +12,7 @@ import types
 import unittest
 from unittest.mock import patch
 import run
-from browser_partition import own_case_names, project_test_names, select_case_names, validate_browser_shard
+from browser_partition import APPEARANCE_SCRIPT_SHARDS, own_case_names, project_test_names, select_case_names, validate_browser_shard
 
 class RunnerTests(unittest.TestCase):
     def task(self, code):
@@ -38,7 +38,7 @@ class RunnerTests(unittest.TestCase):
     def test_only_approved_webkit_cells_accept_browser_shards(self):
         approved = [('project-authoring', 'webkit', 'http'), ('figma-authoring', 'webkit', 'file'),
                     ('figma-services', 'webkit', 'file'), ('advanced-editor', 'webkit', 'http'),
-                    ('advanced-editor', 'webkit', 'file')]
+                    ('advanced-editor', 'webkit', 'file'), ('integration-appearance', 'webkit', 'http')]
         for cell in approved:
             for shard in ('1', '2', '3'):
                 self.assertEqual(validate_browser_shard(shard, *cell), shard)
@@ -47,8 +47,61 @@ class RunnerTests(unittest.TestCase):
         for cell in [('project-authoring', 'chromium', 'http'), ('project-authoring', 'webkit', 'file'),
                      ('project-authoring', 'webkit', 'memory'), ('figma-authoring', 'webkit', 'http'),
                      ('figma-services', 'firefox', 'file'), ('advanced-editor', 'chromium', 'http'),
+                     ('integration-appearance', 'chromium', 'http'), ('integration-appearance', 'firefox', 'http'),
+                     ('integration-appearance', 'webkit', 'file'), ('integration-appearance', 'webkit', 'memory'),
                      ('integration-authoring', 'webkit', 'http'), ('figma', 'webkit', 'file')]:
             with self.assertRaises(ValueError):run.plan(*cell, browser_shard='1')
+    def test_appearance_whole_script_shards_preserve_each_entrypoint_once(self):
+        inventory = json.loads((run.ROOT / 'tools/ci/suites.json').read_text())['integration-appearance']
+        whole = run.plan('integration-appearance', 'webkit', 'http')
+        parts = [run.plan('integration-appearance', 'webkit', 'http', browser_shard=shard) for shard in ('1', '2', '3')]
+        self.assertEqual([[task['script'] for task in part] for part in parts],
+                         [['browser-theme-tests.py', 'browser-native-caption-tests.py'],
+                          ['browser-application-theme-tests.py'],
+                          ['browser-macos-reference-tests.py', 'browser-winui-tests.py']])
+        flattened = [task for part in parts for task in part]
+        self.assertEqual(sorted(task['script'] for task in flattened), sorted(inventory))
+        self.assertEqual(len({task['script'] for task in flattened}), len(inventory))
+        self.assertEqual(sorted(flattened, key=lambda task: task['script']),
+                         sorted(whole, key=lambda task: task['script']))
+        self.assertTrue(all('browserShard' not in task and 'ownedCases' not in task for task in flattened))
+        for engine in run.ENGINES:
+            self.assertEqual([task['script'] for task in run.plan('integration-appearance', engine, 'http')], inventory)
+    def test_appearance_ownership_rejects_lost_extra_duplicate_and_empty_scripts(self):
+        inventory = json.loads((run.ROOT / 'tools/ci/suites.json').read_text())['integration-appearance']
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / 'tools/ci').mkdir(parents=True)
+            for name in [*inventory, 'additional.py']:
+                (root / 'tools' / name).write_text('')
+            for names in [inventory[:-1], [*inventory, 'additional.py'], [*inventory, inventory[0]], []]:
+                (root / 'tools/ci/suites.json').write_text(json.dumps({'integration-appearance': names}))
+                for shard in ('1', '2', '3'):
+                    with self.subTest(inventory=names, shard=shard), self.assertRaises(ValueError):
+                        run.plan('integration-appearance', 'webkit', 'http', root, browser_shard=shard)
+        mapping = dict(APPEARANCE_SCRIPT_SHARDS)
+        mutations = [{key: value for key, value in mapping.items() if key != '3'},
+                     {**mapping, '4': ('additional.py',)}, {**mapping, '2': ()},
+                     {**mapping, '3': mapping['3'][:-1]},
+                     {**mapping, '3': (*mapping['3'], mapping['1'][0])},
+                     {**mapping, '3': (mapping['3'][0], 'test_rendering_pixels.py')}]
+        for ownership in mutations:
+            with patch.dict(APPEARANCE_SCRIPT_SHARDS, ownership, clear=True):
+                for shard in ('1', '2', '3'):
+                    with self.subTest(ownership=ownership, shard=shard), self.assertRaises(ValueError):
+                        run.plan('integration-appearance', 'webkit', 'http', browser_shard=shard)
+    def test_appearance_whole_scripts_clear_case_shards_and_retain_process_deadline(self):
+        observed = []
+        def inspect(task, root, env, log, timeout, cancelled):
+            observed.append((task['script'], env['VB6_BROWSER'], env['VB6_TEST_TRANSPORT'], env['VB6_BROWSER_SHARD'], timeout))
+            return {'status': 'passed', 'exitCode': 0, 'error': None, 'seconds': 0}
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()), \
+             patch.dict(os.environ, {'VB6_BROWSER_SHARD': '2'}):
+            for shard in ('1', '2', '3'):
+                tasks = run.plan('integration-appearance', 'webkit', 'http', browser_shard=shard)
+                result = run.run_batch(tasks, Path(directory), 'webkit', Path(directory) / shard, execute_fn=inspect)
+                self.assertTrue(result['passed'])
+        inventory = json.loads((run.ROOT / 'tools/ci/suites.json').read_text())['integration-appearance']
+        self.assertEqual(sorted(observed), sorted((name, 'webkit', 'http', '', 480) for name in inventory))
     def test_native_project_shards_preserve_every_case_on_both_origins_once(self):
         cases = own_case_names(run.ROOT / 'tools/native-project-browser-tests.py', 'case_')
         complete = project_test_names(cases)

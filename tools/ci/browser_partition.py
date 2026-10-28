@@ -1,4 +1,4 @@
-"""Deterministic case ownership for measured, slow browser matrix cells."""
+"""Deterministic case and script ownership for measured, slow browser cells."""
 
 import ast
 import os
@@ -6,10 +6,18 @@ import os
 BROWSER_SHARDS = ('1', '2', '3')
 SHARDED_CELLS = {
     ('project-authoring', 'webkit', 'http'),
+    ('integration-appearance', 'webkit', 'http'),
     ('figma-authoring', 'webkit', 'file'),
     ('figma-services', 'webkit', 'file'),
     ('advanced-editor', 'webkit', 'http'),
     ('advanced-editor', 'webkit', 'file'),
+}
+# Keep every appearance entrypoint intact; the complete WebKit batch approached
+# the job deadline even though all five scripts passed their process deadlines.
+APPEARANCE_SCRIPT_SHARDS = {
+    '1': ('browser-theme-tests.py', 'browser-native-caption-tests.py'),
+    '2': ('browser-application-theme-tests.py',),
+    '3': ('browser-macos-reference-tests.py', 'browser-winui-tests.py'),
 }
 
 
@@ -27,6 +35,26 @@ def configured_shard(group):
     return validate_browser_shard(os.environ.get('VB6_BROWSER_SHARD', ''), group,
                                   os.environ.get('VB6_BROWSER', 'chromium'),
                                   os.environ.get('VB6_TEST_TRANSPORT', 'http'))
+
+
+def appearance_script_names(scripts, shard=''):
+    """Validate complete, unique ownership before selecting any whole scripts."""
+    if (not isinstance(scripts, (list, tuple)) or not scripts
+            or any(not isinstance(name, str) or not name for name in scripts)
+            or len(scripts) != len(set(scripts))):
+        raise ValueError('Expected a nonempty, unique appearance script inventory')
+    if shard not in ('', *BROWSER_SHARDS):
+        raise ValueError('Invalid appearance script shard')
+    if set(APPEARANCE_SCRIPT_SHARDS) != set(BROWSER_SHARDS):
+        raise ValueError('Appearance script ownership requires exactly three shards')
+    groups = [APPEARANCE_SCRIPT_SHARDS[index] for index in BROWSER_SHARDS]
+    if any(not isinstance(names, (list, tuple)) or not names for names in groups):
+        raise ValueError('Appearance script ownership cannot have empty shards')
+    owned = [name for names in groups for name in names]
+    if (any(not isinstance(name, str) or not name for name in owned)
+            or len(owned) != len(set(owned)) or set(owned) != set(scripts)):
+        raise ValueError('Appearance script ownership must be exhaustive and unique')
+    return list(APPEARANCE_SCRIPT_SHARDS[shard]) if shard else list(scripts)
 
 
 def select_case_names(case_names, shard='', count=3, allow_empty=False):

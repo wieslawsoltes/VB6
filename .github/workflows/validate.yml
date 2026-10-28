@@ -239,6 +239,8 @@ jobs:
         exclude:
           - suite: project-authoring
             browser: webkit
+          - suite: integration-appearance
+            browser: webkit
         include:
           - suite: project-authoring
             browser: webkit
@@ -247,6 +249,15 @@ jobs:
             browser: webkit
             shard: '2'
           - suite: project-authoring
+            browser: webkit
+            shard: '3'
+          - suite: integration-appearance
+            browser: webkit
+            shard: '1'
+          - suite: integration-appearance
+            browser: webkit
+            shard: '2'
+          - suite: integration-appearance
             browser: webkit
             shard: '3'
     steps:
