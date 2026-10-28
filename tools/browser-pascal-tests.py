@@ -91,14 +91,26 @@ def focus_code(page, line=1, column=1):
 
 def studio(browser, errors, requests):
     context = browser.new_context(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
-    context.set_default_timeout(20000)
-    context.on('page', lambda page: page.on('pageerror', lambda error: errors.append(str(error))))
-    context.on('request', lambda request: requests.append(request.url))
-    page = context.new_page()
-    page.goto(url(ARTIFACT))
-    page.wait_for_function('globalThis.vb6Studio?.mcp&&globalThis.VB6StudioAPI')
-    page.evaluate('async()=>{await vb6Studio.setRenderingPolicy({backend:"html"});}')
-    return page
+    try:
+        context.set_default_timeout(20000)
+        context.on('page', lambda page: page.on('pageerror', lambda error: errors.append(str(error))))
+        context.on('request', lambda request: requests.append(request.url))
+        page = context.new_page()
+        # Wait for the standalone app and its APIs instead of coupling IDE
+        # readiness to WebKit's load event. Retain the shorter action timeout
+        # for every acceptance assertion after startup.
+        page.goto(url(ARTIFACT), wait_until='commit', timeout=60000)
+        page.wait_for_function(
+            'globalThis.vb6Studio?.root?.isConnected&&globalThis.vb6Studio?.mcp&&globalThis.VB6StudioAPI',
+            timeout=60000)
+        page.evaluate('async()=>{await vb6Studio.setRenderingPolicy({backend:"html"});}')
+        return page
+    except Exception:
+        try:
+            context.close()
+        except Exception:
+            pass
+        raise
 
 
 def load_example(page):
