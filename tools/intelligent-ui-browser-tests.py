@@ -14,6 +14,8 @@ parser.add_argument('--browser', choices=['chromium', 'firefox', 'webkit'], defa
 args = parser.parse_args()
 REPORT = ROOT / 'reports/intelligent-ui' / args.browser
 REPORT.mkdir(parents=True, exist_ok=True)
+# Standalone parsing has its own bound; interactions retain the 12 s deadline.
+IDE_STARTUP_TIMEOUT_MS = 60000
 results, browser_events = [], []
 browser_identity = {}
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -36,11 +38,21 @@ def load(browser, mode):
     page.set_default_timeout(12000)
     page._errors = []
     page.on('pageerror', lambda e: page._errors.append(str(e)))
-    if mode == 'opaque': page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text(), wait_until='domcontentloaded')
-    elif mode == 'file': page.goto((ROOT / 'dist/VB6-Studio-Web.html').as_uri())
-    else: page.goto(base + ('/index.html' if mode == 'modules' else '/VB6-Studio-Web.html'))
-    page.wait_for_function('!!globalThis.vb6Studio?.intelligentUI')
-    return page
+    standalone = mode in ('standalone', 'file')
+    try:
+        if mode == 'opaque': page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text(), wait_until='domcontentloaded')
+        else:
+            url = (ROOT / 'dist/VB6-Studio-Web.html').as_uri() if mode == 'file' else base + ('/index.html' if mode == 'modules' else '/VB6-Studio-Web.html')
+            page.goto(url, **({'wait_until': 'commit'} if standalone else {}))
+        page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.intelligentUI',
+                               polling=100, timeout=IDE_STARTUP_TIMEOUT_MS if standalone else 12000)
+        return page
+    except Exception:
+        # The caller cannot own a page that never finished loading. Keep the
+        # startup error authoritative even if the browser also fails to close.
+        try: page.close()
+        except Exception: pass
+        raise
 
 def ide_cases(browser, mode):
     page = load(browser, mode)
