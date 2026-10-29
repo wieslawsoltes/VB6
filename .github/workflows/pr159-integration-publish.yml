@@ -1,0 +1,111 @@
+name: PR159 reviewed integration publication
+on:
+  push:
+    branches: [test/pr159-integration-recovery]
+permissions:
+  contents: read
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5d9b9c34b3ecf1083e1a3ab00f830ae1097d3ef6
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reproduce the locally reviewed merge and authored fingerprints
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Wiesław Šoltés'
+          git config user.email 'wieslawsoltes@users.noreply.github.com'
+          set +e
+          git merge --no-commit --no-ff 3b704daf7dd14722b369179a59f046e8c560094d
+          result=$?
+          set -e
+          test "$result" = 1
+          python - <<'PY'
+          from pathlib import Path
+          import base64,hashlib,re,subprocess,zlib
+          expected={'src/ide/main.js','tools/browser-advanced-editor-tests.py','tools/browser-winui-tests.py',
+            'tools/figma-presentation-browser-tests.py','tools/ide-artifacts.json','tools/intelligent-ui-browser-tests.py',
+            'tools/intelligent-ui-workbench-tests.py','tools/recovery-browser-tests.py'}
+          files=subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          assert set(files)==expected,files
+          for filename in files:
+            if filename=='tools/ide-artifacts.json':continue
+            p=Path(filename)
+            def resolve(match):
+              ours=match[1]
+              if filename=='src/ide/main.js':
+                assert ours.count('validateMacOS26Properties({...target.properties,[key]:value},target.type);')==1
+                assert ours.count('clearMacOS26ColorRoles(target.properties,{[key]:value});')==1
+                ours=ours.replace('validateMacOS26Properties({...target.properties,[key]:value},target.type);','validateMacOS26Properties({...target.properties,[key]:value},target.type);validateWinUI3Properties({...target.properties,[key]:value},target.type);')
+                ours=ours.replace('clearMacOS26ColorRoles(target.properties,{[key]:value});','clearMacOS26ColorRoles(target.properties,{[key]:value});clearWinUI3Overrides(target.properties,{[key]:value});')
+              return ours
+            text,count=re.subn(r'<<<<<<< HEAD\n(.*?)=======\n(.*?)>>>>>>>[^\n]*\n',resolve,p.read_text(),flags=re.S)
+            assert count==1,(filename,count)
+            p.write_text(text)
+          p=Path('tools/ci/browser_partition.py')
+          text=p.read_text().replace('# the job deadline even though all five scripts passed their process deadlines.','# the job deadline even though each script passed its process deadline.\n# WinUI3 joins the application-theme owner; both scripts keep their full cases.').replace("'2': ('browser-application-theme-tests.py',),","'2': ('browser-application-theme-tests.py', 'browser-winui3-tests.py'),")
+          p.write_text(text)
+          p=Path('tools/ci/test_run.py');p.write_text(p.read_text().replace("['browser-application-theme-tests.py'],","['browser-application-theme-tests.py', 'browser-winui3-tests.py'],"))
+          p=Path('docs/CI.md');p.write_text(p.read_text().replace('theme, native caption, macOS reference and WinUI suites.','theme, native caption, macOS reference, WinUI and WinUI3 XAML suites.').replace('those groups each receive the existing 15-minute job deadline. Both partitions','those groups each receive the inherited 25-minute job deadline. Both partitions').replace('all five scripts','all six scripts').replace('all five durations','all six durations').replace('| 2 | Application theme |','| 2 | Application theme and WinUI3 XAML |').replace('All five appearance scripts','All six appearance scripts'))
+          # These are the already reviewed local manifest bytes, NOT expectations
+          # computed from whatever the CI build happens to generate.
+          encoded='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'
+          # Guard the exact payload against transcription and transport errors.
+          encoded=encoded.replace('BxeiXqDaDX4','BxeiXqDX4').replace('DGWRJJjdJ','DGWRJjdJ')
+          manifest=zlib.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(manifest).hexdigest()=='8ac9cb3f7b3969e45b13693cbfb1f49cf5635e55f0429bd325fabdddac8ef6f7'
+          Path('tools/ide-artifacts.json').write_bytes(manifest)
+          PY
+          git add -u
+          test "$(git write-tree)" = d66ad191fe8a22eadb5bc28287f65072a9606102
+          git diff --cached --check
+      - name: Validate combined compiler, editor, rendering and coverage contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/integration
+          npm run build
+          python -m pip install -r tools/ci/requirements-checks.txt
+          python tools/ci/check.py > reports/integration/coverage.json
+          python -m unittest discover -s tools/ci -p 'test_*.py' 2>&1 | tee reports/integration/ci-fixtures.log
+          node --test --test-concurrency=4 tests/pascal-*.test.mjs tests/winui*.test.mjs tests/xaml-*.test.mjs > reports/integration/compiler.log
+          node --test --test-concurrency=4 tests/*browser-startup.test.mjs tests/figma-browser-reload.test.mjs tests/linux-packaging-process-group.test.mjs tests/rendering-*.test.mjs > reports/integration/rendering.log
+          npm run build
+          git diff --exit-code
+          test "$(git write-tree)" = d66ad191fe8a22eadb5bc28287f65072a9606102
+      - name: Publish only the reviewed merge to its staging branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This workflow does not update main or the PR. The connector performs
+          # the separately inspected, expected-SHA fast-forward after publication.
+          commit=$(git commit-tree d66ad191fe8a22eadb5bc28287f65072a9606102 -p 5d9b9c34b3ecf1083e1a3ab00f830ae1097d3ef6 -p 3b704daf7dd14722b369179a59f046e8c560094d <<'MESSAGE'
+          Merge main into Pascal compiler and preserve shared WinUI editing
+
+          Retain language-aware renaming, WinUI3 validation and live resource
+          override release. Preserve bounded startup and cleanup contracts,
+          qualify all six appearance entrypoints, and review regenerated output
+          fingerprints. Exact source tree verified against local qualification.
+          MESSAGE
+          )
+          printf '%s\n' "$commit" > reports/integration/published-commit.txt
+          git push origin "$commit:refs/heads/work/pr159-main-integration-20261029"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr159-reviewed-integration
+          path: reports/integration
+          if-no-files-found: warn
+          retention-days: 7
