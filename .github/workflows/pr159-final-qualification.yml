@@ -1,0 +1,162 @@
+name: PR159 final blocker qualification
+on:
+  push:
+    branches: [test/pr159-final-qualification]
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: qualifier
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 9d4965dc69223b05a088bbbdff6e58ace9bb6b27
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct only the two reviewed patches and verify each full Git tree
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, os, subprocess, zlib
+          from pathlib import Path
+          def git(*args, **kwargs):
+              return subprocess.check_output(['git', *args], **kwargs).decode().strip()
+          data=json.loads(Path('../qualifier/.github/pr159-final-patches.json').read_text())
+          base='9d4965dc69223b05a088bbbdff6e58ace9bb6b27'
+          assert data['base']==base and git('rev-parse','HEAD')==base
+          expected=[('core','6777c521fb6e4f59bc0c6cef904e46325d111d5a1b663a54be3584d0dbaa5118','4369319318966ead0ec341bc25bd4a2336dfa5c3','ceda9b284bf256d4aa4249e54a7f5b10d131eae9'),
+                    ('viewport','d6d83c1a170739146f967252cbb846f4835b5fb8e5b08d948a9a53f941388569','aa4adc5b2f5bc63eda127abe36321f4bba32c6bc','97f78836fae42dbef48387e002b65a812c4dda06')]
+          assert len(data['patches'])==len(expected)
+          env={**os.environ,'GIT_AUTHOR_NAME':'Wiesław Šoltés','GIT_COMMITTER_NAME':'Wiesław Šoltés',
+               'GIT_AUTHOR_EMAIL':'wieslawsoltes@users.noreply.github.com','GIT_COMMITTER_EMAIL':'wieslawsoltes@users.noreply.github.com',
+               'GIT_AUTHOR_DATE':'2026-10-29T19:20:38Z','GIT_COMMITTER_DATE':'2026-10-29T19:20:38Z'}
+          parent=base
+          for item,(name,digest,tree,commit) in zip(data['patches'],expected):
+              assert (item['name'],item['sha256'],item['tree'])==(name,digest,tree)
+              encoded=item['zlibBase64']
+              # Repair known duplicated transport substrings. The original
+              # reviewed patch digest and full Git tree remain authoritative.
+              for old,new in [('MfoTPvvIjIjTZLAd9','MfoTPvvIjTZLAd9'),
+                              ('GifloJ8gf6IvFwj8gf6IvFwjF6IvFwj+cktf1vNL','GifloJ8gf6IvFwj+cktf1vNL'),
+                              ('SmlNOYcx2TFF6J6J0SkVD','SmlNOYcx2TFF6J0SkVD')]:
+                  encoded=encoded.replace(old,new)
+              patch=zlib.decompress(base64.b64decode(encoded,validate=True))
+              assert hashlib.sha256(patch).hexdigest()==digest, name
+              subprocess.run(['git','apply','--index','--whitespace=error','-'],input=patch,check=True)
+              assert git('write-tree')==tree,name
+              actual=git('commit-tree',tree,'-p',parent,input=(item['message']+'\n').encode(),env=env)
+              assert actual==commit,(name,actual)
+              subprocess.run(['git','update-ref','HEAD',actual,parent],check=True)
+              parent=actual
+          Path('reports/final-qualification').mkdir(parents=True,exist_ok=True)
+          Path('reports/final-qualification/revision.json').write_text(json.dumps({'base':base,'head':parent,'tree':expected[-1][2]}))
+          subprocess.run(['git','diff','--exit-code'],check=True)
+          PY
+      - name: Build and validate exact reviewed products and regression contracts
+        run: |
+          set -euo pipefail
+          npm run build
+          python -m pip install -r tools/ci/requirements-checks.txt -r tools/ci/requirements-authoring.txt
+          python tools/ci/check.py > reports/final-qualification/coverage.json
+          python -m unittest discover -s tools/ci -p 'test_*.py' 2>&1 | tee reports/final-qualification/ci.log
+          node --test tests/intelligent-ui-*.test.mjs > reports/final-qualification/intelligent-ui.log
+          python -m playwright install --with-deps webkit
+      - name: Original real-origin WebKit workbench and host acceptance
+        env:
+          VB6_BROWSER: webkit
+          GITHUB_SHA: 97f78836fae42dbef48387e002b65a812c4dda06
+        run: |
+          set -euo pipefail
+          python tools/ci/run.py intelligent-ui
+          npm run build
+          git diff --exit-code
+          test "$(git rev-parse HEAD^{tree})" = aa4adc5b2f5bc63eda127abe36321f4bba32c6bc
+          git bundle create reports/final-qualification/candidate.bundle HEAD ^9d4965dc69223b05a088bbbdff6e58ace9bb6b27
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr159-final-qualification
+          path: source/reports
+          if-no-files-found: error
+          retention-days: 7
+  materialize:
+    needs: qualify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9d4965dc69223b05a088bbbdff6e58ace9bb6b27
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: pr159-final-qualification
+          path: evidence
+      - name: Materialize verified Git objects without changing any remote branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64, json, os, subprocess, urllib.request
+          from pathlib import Path
+          def git(*args):return subprocess.check_output(['git',*args]).decode().strip()
+          expected=[('ceda9b284bf256d4aa4249e54a7f5b10d131eae9','4369319318966ead0ec341bc25bd4a2336dfa5c3'),
+                    ('97f78836fae42dbef48387e002b65a812c4dda06','aa4adc5b2f5bc63eda127abe36321f4bba32c6bc')]
+          base='9d4965dc69223b05a088bbbdff6e58ace9bb6b27'
+          meta=json.loads(Path('evidence/final-qualification/revision.json').read_text())
+          assert meta=={'base':base,'head':expected[-1][0],'tree':expected[-1][1]}
+          bundle='evidence/final-qualification/candidate.bundle'
+          subprocess.run(['git','bundle','verify',bundle],check=True)
+          subprocess.run(['git','fetch',bundle,'HEAD'],check=True)
+          assert git('rev-parse','FETCH_HEAD')==expected[-1][0]
+          endpoint='https://api.github.com/repos/wieslawsoltes/VB6/git/'
+          def post(kind,payload):
+              request=urllib.request.Request(endpoint+kind,json.dumps(payload).encode(),method='POST',headers={
+                  'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json',
+                  'Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(request,timeout=60) as response:return json.load(response)
+          parent=base;published=[]
+          identity={'name':'Wiesław Šoltés','email':'wieslawsoltes@users.noreply.github.com','date':'2026-10-29T19:20:38Z'}
+          for commit,tree in expected:
+              assert git('rev-parse',commit+'^')==parent
+              assert git('rev-parse',commit+'^{tree}')==tree
+              paths=git('diff-tree','--no-commit-id','--name-only','-r',commit).splitlines()
+              entries=[]
+              for path in paths:
+                  data=subprocess.check_output(['git','show',commit+':'+path])
+                  mode,kind,sha=git('ls-tree',commit,'--',path).split('\t')[0].split()
+                  assert mode=='100644' and kind=='blob'
+                  blob=post('blobs',{'content':base64.b64encode(data).decode(),'encoding':'base64'})
+                  assert blob['sha']==sha,path
+                  entries.append({'path':path,'mode':mode,'type':kind,'sha':sha})
+              result=post('trees',{'base_tree':git('rev-parse',parent+'^{tree}'),'tree':entries})
+              assert result['sha']==tree
+              raw=subprocess.check_output(['git','cat-file','commit',commit]).split(b'\n\n',1)[1].decode()
+              result=post('commits',{'message':raw,'tree':tree,'parents':[parent],'author':identity,'committer':identity})
+              assert result['sha']==commit,(commit,result['sha'])
+              published.append({'sha':commit,'tree':tree,'parent':parent,'paths':paths});parent=commit
+          Path('publication').mkdir()
+          Path('publication/commits.json').write_text(json.dumps(published,indent=2)+'\n')
+          print(json.dumps(published,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr159-final-materialized-objects
+          path: publication
+          if-no-files-found: error
+          retention-days: 7
