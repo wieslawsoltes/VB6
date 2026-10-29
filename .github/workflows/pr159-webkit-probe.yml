@@ -1,0 +1,104 @@
+name: PR159 WebKit presentation experiment
+on:
+  push:
+    branches: [test/pr159-webkit-presentation-probe]
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: Probe (${{ matrix.variant }}, ${{ matrix.origin }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, isolated-state, readback-context, reset-bitmap]
+        origin: [http, file]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-browser
+        with:
+          browser: webkit
+          profile: authoring
+          mesa: 'false'
+      - name: Eight independent first-frame acceptance trials, retaining every failure
+        env:
+          VB6_BROWSER: webkit
+          VB6_TEST_TRANSPORT: ${{ matrix.origin }}
+          PROBE_VARIANT: ${{ matrix.variant }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/webkit-probe
+          git rev-parse HEAD HEAD^{tree} > reports/webkit-probe/revision.txt
+          cat > tools/pr159-webkit-probe.py <<'PY'
+          import importlib.util, json, os, unittest
+          from pathlib import Path
+          variant = os.environ['PROBE_VARIANT']
+          root = Path('reports/webkit-probe') / variant / os.environ['VB6_TEST_TRANSPORT']
+          root.mkdir(parents=True, exist_ok=True)
+          spec = importlib.util.spec_from_file_location('presentation_probe', Path(__file__).with_name('figma-presentation-browser-tests.py'))
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.REPORT = module.base.REPORT = root
+          PATCH = r'''variant => {
+            if (variant === 'baseline') return;
+            const renderer = vb6Studio.rendering, factory = renderer.factory;
+            renderer.factory = async (name, canvas, options) => {
+              if (name === 'canvas2d' && variant === 'readback-context')
+                canvas.getContext('2d', {alpha:true, willReadFrequently:true});
+              const driver = await factory(name, canvas, options);
+              if (name !== 'canvas2d') return driver;
+              const render = driver.render;
+              if (variant === 'reset-bitmap') {
+                driver.render = function(scene) { this.canvas.width = this.canvas.width; return render.call(this, scene); };
+              } else if (variant === 'isolated-state') {
+                // The same commands, order, colors and geometry. Only adjacent
+                // clip/fill-state reuse is disabled, before the first verdict.
+                const source = render.toString();
+                if (!source.includes('if (!same4(clip, c.clip))') || !source.includes('else if (!same4(color, c.color))'))
+                  throw new Error('Probe does not match the pinned painter');
+                const rgbaCSS = c => `rgba(${c[0]*255},${c[1]*255},${c[2]*255},${c[3]})`;
+                const physicalSize = (width,height,dpr=1,limit=16384,maxPixels=32*1024*1024) => {
+                  if (![width,height,dpr].every(Number.isFinite) || width<=0 || height<=0 || dpr<=0) throw new RangeError('Invalid rendering dimensions.');
+                  const w=Math.max(1,Math.round(width*dpr)),h=Math.max(1,Math.round(height*dpr));
+                  if(w>limit || h>limit || w*h>maxPixels) throw new RangeError('Rendering limit');
+                  return {width:w,height:h,scaleX:w/width,scaleY:h/height};
+                };
+                driver.render = eval('({' + source.replace('if (!same4(clip, c.clip))','if (true)').replace('else if (!same4(color, c.color))','else') + '}).render');
+              } else if (variant !== 'readback-context') throw new Error('Unknown probe variant');
+              return driver;
+            };
+          }'''
+          class Probe(module.FigmaPresentation):
+              trial = 0
+              def setUp(self):
+                  type(self).trial += 1
+                  directory = root / ('trial-%02d' % type(self).trial)
+                  directory.mkdir(parents=True, exist_ok=True)
+                  module.REPORT = module.base.REPORT = directory
+                  super().setUp()
+                  self.page.evaluate(PATCH, variant)
+          # These are independent trials, not pass-until-green retries. Any
+          # failing first-frame verdict fails this matrix cell permanently.
+          suite = unittest.TestSuite(Probe('test_presentation_composited_theme_pixels') for _ in range(8))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          summary = {'variant':variant,'origin':os.environ['VB6_TEST_TRANSPORT'],'trials':result.testsRun,
+                     'failures':[text for case,text in result.failures], 'errors':[text for case,text in result.errors],
+                     'passed':result.wasSuccessful(),'unmodifiedAcceptance':'test_presentation_composited_theme_pixels',
+                     'productSource':'727f2bdbfb5000daad02b11334988cf7733c322d'}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+          print(json.dumps(summary,indent=2))
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+          timeout 480s python tools/pr159-webkit-probe.py 2>&1 | tee reports/webkit-probe/transcript.log
+      - name: Preserve all trial evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr159-webkit-${{ matrix.variant }}-${{ matrix.origin }}
+          path: reports/webkit-probe
+          if-no-files-found: error
+          retention-days: 7
