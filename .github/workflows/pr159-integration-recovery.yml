@@ -1,0 +1,39 @@
+name: PR159 integration recovery
+on:
+  push:
+    branches: [test/pr159-integration-recovery]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export exact histories and merge diagnostics without changing branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/recovery
+          git branch recovery-pascal 5d9b9c34b3ecf1083e1a3ab00f830ae1097d3ef6
+          git branch recovery-main 3b704daf7dd14722b369179a59f046e8c560094d
+          git merge-base recovery-pascal recovery-main > reports/recovery/merge-base.txt
+          git log -12 --oneline recovery-main > reports/recovery/main-history.txt
+          git log -8 --oneline recovery-pascal > reports/recovery/pascal-history.txt
+          set +e
+          git merge-tree --write-tree recovery-pascal recovery-main > reports/recovery/merge-tree.txt
+          result=$?
+          set -e
+          test "$result" -le 1
+          git bundle create reports/recovery/vb6.bundle recovery-pascal recovery-main
+          git bundle verify reports/recovery/vb6.bundle
+          sha256sum reports/recovery/vb6.bundle > reports/recovery/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr159-integration-history
+          path: reports/recovery
+          if-no-files-found: error
+          retention-days: 7
