@@ -27,6 +27,7 @@ DEFAULT_PROCESS_TIMEOUT = 480
 # HTTP and file cases when either real transport is selected.
 PROCESS_TIMEOUTS = {
     ('webkit', 'file', 'figma-browser-tests.py'): 900,
+    ('webkit', 'file', 'figma-editor-browser-tests.py'): 900,
     ('webkit', 'file', 'figma-services-browser-tests.py'): 900,
     ('webkit', 'http', 'native-project-browser-tests.py'): 1200,
     ('webkit', 'file', 'native-project-browser-tests.py'): 1200,
