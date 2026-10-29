@@ -37,4 +37,3 @@ and retains the separate no-idle-repaint check. Failure diagnostics remain
 strictly post-verdict and cannot turn a failed frame into a successful result.
 
 Specification: [Canvas readback optimization](https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently).
-
