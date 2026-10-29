@@ -302,7 +302,7 @@ def load_tests(loader, standard, pattern):
             case.test_service_dock_profiles_reload_without_authority_or_eager_connection()
             self.assertTrue(case.passed)
             self.assertEqual(calls, [('reload', {'wait_until': 'commit', 'timeout': 60000}),
-                ('ready', 'vb6Studio?.figmaMode?.enabled', {'polling': 100, 'timeout': 60000})])
+                ('ready', 'globalThis.vb6Studio?.figmaMode?.enabled', {'polling': 100, 'timeout': 60000})])
 
     def test_actual_native_and_figma_inventories_match_independent_source_scan(self):
         # Discovery is dependency-free: browser APIs are never called. This
