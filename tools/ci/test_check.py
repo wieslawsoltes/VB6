@@ -131,7 +131,7 @@ class WorkflowAuditTests(unittest.TestCase):
         self.reject(lambda w:w['jobs']['advanced-editor'].update({'needs':['hygiene']}))
         self.reject(lambda w:[s['with'].update({'name':'unrelated-build'}) for s in w['jobs']['advanced-editor']['steps'] if s.get('uses')=='actions/download-artifact@v4'])
         self.reject(lambda w:[s['with'].update({'name':'advanced-${{ matrix.browser }}'}) for s in w['jobs']['advanced-editor']['steps'] if s.get('uses')=='actions/upload-artifact@v4'])
-        self.reject(lambda w:w['jobs']['advanced-editor'].update({'timeout-minutes':30}))
+        self.reject(lambda w:w['jobs']['advanced-editor'].update({'timeout-minutes':25}))
     def test_advanced_suites_cannot_rejoin_a_shared_deadline(self):
         tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
         path=tools/'ci/suites.json';suites=json.loads(path.read_text())

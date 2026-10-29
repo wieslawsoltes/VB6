@@ -22,17 +22,16 @@ import case_shard
 
 ROOT = Path(__file__).resolve().parents[2]
 ENGINES = ('chromium', 'firefox', 'webkit')
-# This suite boots a fresh IDE for all 60 HTTP/file cases. WebKit's file parses
-# can exhaust the shared eight-minute budget while cases keep passing; action
-# deadlines remain in the suite and the browser job retains its outer limit.
+# Keep the process bounds already qualified on current main. Splitting the
+# two slow suites into isolated workers does not relax their action deadlines.
+# Memory transport and all other engines retain the ordinary eight-minute bound.
 SCRIPT_TIMEOUTS = {
-    ('webkit', 'native-project-browser-tests.py', None): 720,
-    # Twenty-two independent standalone IDE boots exceed eight minutes on
-    # WebKit while assertions keep passing. Other origins keep the base limit.
-    ('webkit', 'figma-browser-tests.py', 'file'): 720,
-    # Successful file fixtures in other suites project these fresh-IDE cases
-    # beyond eight minutes. This is a scoped budget, not measured throughput.
-    ('webkit', 'browser-advanced-editor-tests.py', 'file'): 900,
+    ('webkit', 'native-project-browser-tests.py', 'http'): 1200,
+    ('webkit', 'native-project-browser-tests.py', 'file'): 1200,
+    ('webkit', 'figma-browser-tests.py', 'file'): 900,
+    ('webkit', 'figma-editor-browser-tests.py', 'file'): 900,
+    ('webkit', 'figma-services-browser-tests.py', 'file'): 900,
+    ('webkit', 'browser-advanced-editor-tests.py', 'file'): 1200,
     ('webkit', 'browser-input-modes-tests.py', 'file'): 900,
 }
 # The combined name remains a local convenience; CI schedules each owner once.

@@ -225,3 +225,27 @@ the flag can reject requests before service-worker fetch dispatch. This is not
 certification that WebKit's offline emulation works. The report records the
 transport distinction, worker response and negative control explicitly. All
 update, cache isolation, integrity, actual ZIP and network-only API checks remain.
+
+## Integration with the validated WinUI/XAML main branch
+
+The Vim branch incorporates main commit `3b704daf7dd14722b369179a59f046e8c560094d`
+(WinUI/XAML PR #157). The earlier timing discussion above describes the earlier
+candidate; current effective bounds preserve the already validated main-branch
+budgets: browser partitions 25 minutes, Figma partitions 30 minutes, and advanced
+editor partitions 30 minutes. The 92-job graph still uses independent application
+appearance, Figma workspace, and advanced-editor script owners. The strict gate
+and all three engines, both real origins, assertions, and pixel thresholds remain.
+
+The common runner preserves main's 1,200-second WebKit native-project and
+file-origin Monaco bounds, and 900-second WebKit/file Figma workspace, editor,
+and services bounds. The new file-origin Vim suite retains its 900-second bound.
+Each isolated case worker uses its owner's existing bound. Every other process,
+including memory-origin native-project execution, retains 480 seconds; explicit
+caller overrides still win. Regressions exercise the complete script/engine/origin
+cross-product and reject changes to the qualified job limits.
+
+Real-URL setup now combines main's navigation-commit readiness boundary with the
+Vim branch's guarded failed-setup cleanup and immediate error reporting. Memory
+setup retains DOMContentLoaded because set_content does not navigate. Startup is
+bounded at 60 seconds; interaction deadlines and actual IDE readiness predicates
+remain separate. No functional test body is removed to reconcile the branches.

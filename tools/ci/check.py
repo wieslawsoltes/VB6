@@ -106,8 +106,8 @@ def audit(root=ROOT):
         raise ValueError('Both disjoint advanced editor partitions required')
     if set(advanced_matrix.get('transport', [])) != {'http', 'file'}:
         raise ValueError('Both real advanced editor origins required')
-    if advanced['timeout-minutes'] != 20:
-        raise ValueError('Advanced editor partitions retain the twenty-minute job limit')
+    if advanced['timeout-minutes'] != 30:
+        raise ValueError('Advanced editor partitions retain the validated main-branch thirty-minute job limit')
     if not any(step.get('run') == 'python tools/ci/run.py "$SUITE"' and 'if' not in step and
                step.get('env', {}).get('SUITE') == '${{ matrix.suite }}' and
                step.get('env', {}).get('VB6_TEST_TRANSPORT') == '${{ matrix.transport }}' and
@@ -193,8 +193,8 @@ def audit(root=ROOT):
     # Keep it independent of IDE themes without changing any test deadline.
     if 'application-appearance' not in browser_groups or suites.get('application-appearance') != ['browser-application-theme-tests.py']:
         raise ValueError('Dedicated application appearance acceptance partition required')
-    if jobs['browser']['timeout-minutes'] != 15:
-        raise ValueError('Browser partitions retain the fifteen-minute job limit')
+    if jobs['browser']['timeout-minutes'] != 25:
+        raise ValueError('Browser partitions retain the validated main-branch twenty-five-minute job limit')
     browser_scripts = [script for group in browser_groups for script in suites[group]]
     if len(browser_scripts) != len(set(browser_scripts)):
         raise ValueError('Browser partitions may not duplicate any test entrypoint')

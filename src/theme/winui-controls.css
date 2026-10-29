@@ -168,7 +168,213 @@
  .vb-range::-moz-range-thumb {width:var(--winui-RangeThumbSize,var(--detail-range-thumb-size,var(--x11-range-width,revert)));height:var(--winui-RangeThumbSize,var(--detail-range-thumb-height,var(--x11-range-height,revert)));box-sizing:border-box;border:var(--winui-RangeThumbRing,var(--detail-range-thumb-border,var(--x11-range-border,revert)));border-radius:var(--winui-RangeThumbRadius,var(--detail-range-radius,var(--app-radius,revert)));box-shadow:var(--winui-RangeThumbShadow,var(--detail-range-thumb-shadow,var(--app-range-thumb-shadow,none)));}
  .vb-vrange::-moz-range-thumb {width:var(--winui-RangeThumbSize,var(--detail-range-thumb-height,var(--x11-range-height,revert)));height:var(--winui-RangeThumbSize,var(--detail-range-thumb-size,var(--x11-range-width,revert)));}
  .vb-vrange::-moz-range-track {width:var(--winui-RangeTrackHeight,var(--detail-range-track-height,var(--x11-range-track-size,revert)));height:100%;}
+
+ /* ComboBox is one surface. Its existing input keeps explicit RGB, editing,
+  * keyboard focus and IME; the arrow overlays the reserved trailing padding.
+  * Read-only ComboBoxes use button elevation, not a TextBox focus underline. */
+ .vb-classic-combo:not(.simple)>.vb-combo-field {
+  padding:var(--winui-ComboEditablePadding,3px 3px 3px 5px);
+  padding-right:var(--winui-ComboArrowWidth,var(--detail-combo-padding-right,3px));
+ }
+ .vb-classic-combo:not(.simple):hover>.vb-combo-field:not(:disabled) {--winui-control-background:var(--winui-ComboBackgroundPointerOver);}
+ .vb-classic-combo:not(.simple)>.vb-combo-field:not([readonly]):focus:not(:disabled) {--winui-control-background:var(--winui-TextControlBackgroundFocused);}
+ .vb-control.vb-classic-combo:not(.simple)>.vb-combo-field[readonly] {
+  --winui-control-background:var(--winui-ComboBackground);--winui-control-foreground:var(--winui-ComboForeground);
+  --winui-input-shadow:var(--winui-ComboShadow);
+  padding:var(--winui-ComboPadding,var(--detail-popup-button-padding,3px 3px 3px 5px));
+  border:var(--winui-ButtonBorder,0);border-color:var(--winui-SubtleFillColorTransparent,var(--detail-field-border,currentColor));
+  background-clip:var(--winui-ComboClip,border-box);
+ }
+ .vb-classic-combo:not(.simple):has(>.vb-combo-field[readonly]) {--winui-combo-elevation:var(--winui-ButtonElevation);}
+ .vb-classic-combo:not(.simple):has(>.vb-combo-field[readonly])::before {
+  content:var(--winui-BorderPainterContent,none);position:absolute;inset:0;z-index:1;
+  border-radius:var(--winui-ControlRadius,0);padding:1px;background:var(--winui-combo-elevation);pointer-events:none;
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;
+ }
+ .vb-control.vb-classic-combo:not(.simple):hover>.vb-combo-field[readonly]:not(:disabled) {--winui-control-background:var(--winui-ComboBackgroundPointerOver);}
+ .vb-classic-combo:not(.simple):has(>.vb-combo-field[readonly]):has(>.vb-combo-field:active:not(:disabled),>.vb-combo-arrow:active:not(:disabled)) {--winui-combo-elevation:var(--winui-ButtonFlatElevation);}
+ .vb-control.vb-classic-combo:not(.simple):has(>.vb-combo-field:active:not(:disabled),>.vb-combo-arrow:active:not(:disabled))>.vb-combo-field[readonly] {
+  --winui-control-background:var(--winui-ComboBackgroundPressed);--winui-control-foreground:var(--winui-ComboForegroundPressed);
+ }
+ .vb-control.vb-classic-combo:not(.simple)>.vb-combo-field[readonly]:focus-visible {
+  --winui-input-shadow:var(--winui-ComboFocusShadow);
+  outline:var(--winui-FocusOutline,var(--app-input-focus-outline,none));outline-offset:var(--winui-FocusOffset,-4px);
+ }
+ .vb-control.vb-classic-combo:not(.simple)>.vb-combo-field[readonly]:disabled {
+  --winui-control-background:var(--winui-ComboBackgroundDisabled);--winui-control-foreground:var(--winui-ComboForegroundDisabled);
+  --winui-input-shadow:var(--winui-ComboShadow);
+ }
+ .vb-classic-combo:not(.simple):has(>.vb-combo-field[readonly]:disabled) {--winui-combo-elevation:var(--winui-ButtonFlatElevation);}
+ .vb-classic-combo:not(.simple)>.vb-combo-arrow {
+  position:var(--winui-ComboArrowPosition,var(--detail-combo-arrow-position,static));
+  right:var(--winui-ComboArrowInset,var(--detail-combo-arrow-inset,auto));top:var(--winui-ComboArrowTop,var(--detail-combo-arrow-top,auto));
+  transform:var(--winui-ComboArrowTransform,var(--detail-combo-arrow-transform,none));
+  width:var(--winui-ComboArrowWidth,var(--detail-combo-arrow-width,17px));min-width:var(--winui-ComboArrowWidth,var(--detail-combo-arrow-width,17px));
+  border:var(--winui-ComboArrowBorder,0);border-radius:var(--winui-ComboArrowRadius,var(--detail-combo-arrow-radius,0));
+  background:var(--winui-ComboArrowBackground,var(--detail-combo-fill,var(--vb-face)));
+  color:var(--winui-ComboGlyph,inherit);box-shadow:var(--winui-ComboArrowShadow,var(--app-control-shadow,var(--vb-bevel-raised)));
+ }
+ .vb-classic-combo:not(.simple)>.vb-combo-arrow:active:not(:disabled) {box-shadow:var(--winui-ComboArrowShadow,var(--app-pressed-shadow,var(--vb-bevel-pressed)));}
+ .vb-classic-combo:not(.simple)>.vb-combo-arrow:disabled {color:var(--winui-ComboGlyphDisabled,var(--vb-gray));}
+ .vb-classic-combo:not(.simple):has(>.vb-combo-field[readonly])>.vb-combo-arrow {
+  background:var(--winui-ComboArrowBackground,var(--detail-popup-button-arrow-fill,var(--detail-combo-fill,var(--vb-face))));
+  right:var(--winui-ComboArrowInset,var(--detail-popup-button-arrow-right,var(--detail-combo-arrow-inset,auto)));
+ }
+ .vb-classic-combo:not(.simple)>.vb-combo-arrow i {
+  width:var(--winui-ComboChevronSize,var(--detail-combo-chevron-size,0px));height:var(--winui-ComboChevronSize,var(--detail-combo-chevron-size,0px));
+  border-top:var(--winui-ComboChevronZero,var(--detail-combo-chevron-zero,4px solid currentColor));border-left:var(--winui-ComboChevronZero,var(--detail-combo-chevron-zero,3px solid transparent));
+  border-right:var(--winui-ComboChevronEdge,var(--detail-combo-chevron-edge,3px solid transparent));border-bottom:var(--winui-ComboChevronEdge,var(--detail-combo-chevron-edge,0px solid transparent));
+  transform:var(--winui-ComboChevronTransform,var(--detail-combo-chevron-transform,none));
+ }
+ .vb-combo-popup {background:var(--winui-ComboDropDownBackground,var(--vb-window));color:var(--winui-MenuForeground,var(--vb-window-text));border-color:var(--winui-MenuBorder,var(--app-border,var(--vb-dark)));}
+ .vb-combo-option {padding:var(--winui-ComboItemPadding,0 2px);border-radius:var(--winui-ComboItemRadius,var(--detail-popup-item-radius,0));}
+
+ /* Virtualized rows retain their measured height and authored typography.
+  * Selection is a centered three-DIP pill, with distinct selected hover,
+  * pressed and disabled states; a tree paints the full row behind its label. */
+ :is(.vb-combo-option,.vb-lv-row,.vb-tree-row):not(.selected):hover {background:var(--winui-ItemBackgroundPointerOver,transparent);}
+ :is(.vb-combo-option,.vb-lv-row,.vb-tree-row):not(.selected):active {background:var(--winui-ItemBackgroundPressed,transparent);}
+ :is(.vb-combo-option,.vb-lv-row).selected {box-shadow:var(--winui-SelectionShadow,none);}
+ :is(.vb-combo-option,.vb-lv-row).selected:hover {background:var(--winui-ItemBackgroundSelectedPointerOver,var(--vb-selection));}
+ :is(.vb-combo-option,.vb-lv-row).selected:active {background:var(--winui-ItemBackgroundSelectedPressed,var(--vb-selection));}
+ .vb-combo-option:active {color:var(--winui-ItemForegroundPressed,inherit);}
+ .vb-combo-option.selected:active {color:var(--winui-ItemForegroundPressed,var(--vb-selection-text));}
+ .vb-listview:not(:focus-within) .vb-lv-row.selected,.vb-inactive .vb-listview .vb-lv-row.selected {
+  background:var(--winui-SelectionBackground,var(--detail-inactive-selection,var(--vb-selection)));
+  color:var(--winui-SelectionForeground,var(--detail-inactive-selection-ink,var(--vb-selection-text)));
+ }
+ .vb-listview:not(:focus-within) .vb-lv-row.selected:hover,.vb-inactive .vb-listview .vb-lv-row.selected:hover {background:var(--winui-ItemBackgroundSelectedPointerOver,var(--detail-inactive-selection,var(--vb-selection)));}
+ .vb-listview:not(:focus-within) .vb-lv-row.selected:active,.vb-inactive .vb-listview .vb-lv-row.selected:active {background:var(--winui-ItemBackgroundSelectedPressed,var(--detail-inactive-selection,var(--vb-selection)));}
+ .vb-tree-row.selected {background:var(--winui-SelectionBackground,var(--detail-tree-row-selection,transparent));color:var(--winui-SelectionForeground,var(--detail-tree-row-selection-ink,inherit));border-radius:var(--winui-SelectionRadius,0);}
+ .vb-tree:not(:focus-within) .vb-tree-row.selected,.vb-inactive .vb-tree .vb-tree-row.selected {
+  background:var(--winui-SelectionBackground,var(--detail-inactive-selection,transparent));color:var(--winui-SelectionForeground,var(--detail-inactive-selection-ink,inherit));
+ }
+ .vb-tree .vb-tree-row.selected:hover {background:var(--winui-ItemBackgroundSelectedPointerOver,var(--detail-tree-row-selection,transparent));}
+ .vb-tree .vb-tree-row.selected:active {background:var(--winui-ItemBackgroundSelectedPressed,var(--detail-tree-row-selection,transparent));}
+ .vb-tree .vb-tree-row.selected>.vb-tree-label {background:var(--winui-SubtleFillColorTransparent,var(--detail-tree-label-selection,var(--vb-selection)));color:var(--winui-SelectionForeground,var(--detail-tree-label-selection-ink,var(--vb-selection-text)));box-shadow:none;}
+ :is(.vb-combo-option,.vb-lv-row,.vb-tree-row).selected::before {
+  content:var(--winui-SelectionContent,none);position:absolute;inset-inline-start:0;top:50%;transform:translateY(-50%);
+  width:var(--winui-SelectionIndicatorWidth,3px);height:var(--winui-SelectionIndicatorHeight,16px);max-height:calc(100% - 4px);
+  border-radius:var(--winui-SelectionIndicatorRadius,1.5px);background:var(--winui-AccentButtonBackground);pointer-events:none;
+ }
+ .vb-listview.disabled>.vb-virtual-viewport>.vb-virtual-spacer>.vb-lv-row {background:var(--winui-ItemBackground,transparent);color:var(--winui-ItemForegroundDisabled,inherit);}
+ .vb-listview.disabled>.vb-virtual-viewport>.vb-virtual-spacer>.vb-lv-row.selected {background:var(--winui-SelectionBackground,var(--vb-selection));}
+ .vb-listview.disabled>.vb-virtual-viewport>.vb-virtual-spacer>.vb-lv-row.selected::before {background:var(--winui-AccentFillColorDisabled);}
+ .vb-tree.disabled>.vb-virtual-viewport>.vb-virtual-spacer>.vb-tree-row {background:var(--winui-TreeBackgroundSelectedDisabled,transparent);color:var(--winui-ItemForegroundDisabled,inherit);}
+ .vb-tree.disabled>.vb-virtual-viewport>.vb-virtual-spacer>.vb-tree-row>.vb-tree-label {color:var(--winui-ItemForegroundDisabled,inherit);}
+ .vb-tree.disabled>.vb-virtual-viewport>.vb-virtual-spacer>.vb-tree-row.selected::before {background:var(--winui-ItemForegroundDisabled);}
+ .vb-tree .vb-tree-toggle {font-size:var(--winui-TreeDisclosureFontSize,var(--detail-tree-toggle-size,inherit));border-color:var(--winui-TreeDisclosureBorder,var(--detail-tree-toggle-border,var(--app-border,var(--vb-shadow))));background:var(--winui-TreeDisclosureBackground,var(--detail-tree-toggle-fill,var(--vb-window)));}
+ .vb-tree-toggle::after {content:var(--winui-TreeDisclosureContent,var(--detail-tree-disclosure,none));border-right:var(--winui-TreeDisclosureEdge,1.5px solid var(--detail-tree-disclosure-ink));border-bottom:var(--winui-TreeDisclosureEdge,1.5px solid var(--detail-tree-disclosure-ink));}
+
+ /* Native TabView uses a raised selected surface, not accent-filled tabs.
+  * The existing tab renderer owns orientation, rows, offsets and page bounds. */
+ .vb-tabs>.vb-tab-header>.vb-tab-button {
+  border-color:var(--winui-TabBorder,var(--detail-tab-border,var(--vb-light) var(--vb-shadow) var(--vb-shadow) var(--vb-light)));
+  border-radius:var(--winui-TabRadius,var(--detail-tab-radius,var(--app-radius,0)))!important;
+  color:var(--winui-TabForeground,inherit);box-shadow:var(--winui-TabShadow,none);
+ }
+ .vb-tabs>.vb-tab-header>.vb-tab-button:not(.active) {background:var(--winui-TabBackground,var(--detail-tab-idle-fill,var(--vb-face)));}
+ .vb-tabs>.vb-tab-header>.vb-tab-button:not(.active):hover:not(:disabled) {background:var(--winui-TabBackgroundPointerOver,var(--detail-tab-idle-fill,var(--vb-face)));}
+ .vb-tabs>.vb-tab-header>.vb-tab-button:not(.active):active:not(:disabled) {background:var(--winui-TabBackgroundPressed,var(--detail-tab-idle-fill,var(--vb-face)));color:var(--winui-TabForegroundPressed,inherit);}
+ .vb-tabs>.vb-tab-header>.vb-tab-button.active {background:var(--winui-TabBackgroundSelected,var(--detail-tab-active-fill,var(--vb-face)));color:var(--winui-TabForegroundSelected,var(--detail-tab-active-ink,inherit));box-shadow:var(--winui-TabShadow,var(--app-tab-shadow,inset -1px -1px var(--vb-shadow),inset 1px 1px var(--vb-highlight)));}
+ .vb-tabs>.vb-tab-header>.vb-tab-button:disabled {color:var(--winui-TabForegroundDisabled,inherit);}
+ .vb-tabs>.vb-tab-header>.vb-tab-button:focus-visible {outline:var(--winui-FocusOutline,var(--app-focus-width,1px) var(--app-focus-style,dotted) var(--app-focus,var(--vb-text)));outline-offset:var(--winui-FocusOffset,-2px);}
+
+ /* All slider state colors are local to the existing native range. The live
+  * percentage must be resolved here, never at the inheriting palette root. */
+ .vb-range {
+  --winui-range-direction:var(--winui-RangeTrackDirection);--winui-range-track:var(--winui-RangeTrack);
+  --winui-range-value:var(--winui-RangeValueFill);--winui-range-thumb:var(--winui-RangeThumbFill);--winui-range-ring:var(--winui-RangeThumbRingRest);
+  --winui-range-border:var(--winui-range-ring) solid var(--winui-RangeThumbBorder);
+  --winui-range-paint:linear-gradient(var(--winui-range-direction),var(--winui-range-value) var(--vb-range-progress,0%),var(--winui-range-track) 0);
+ }
+ .vb-range:dir(rtl):not(.vb-vrange) {--winui-range-direction:to left;}
+ .vb-range.vb-vrange {--winui-range-direction:to top;}
+ .vb-range:hover:not(:disabled) {--winui-range-value:var(--winui-AccentButtonBackgroundPointerOver);--winui-range-thumb:var(--winui-AccentButtonBackgroundPointerOver);--winui-range-ring:var(--winui-RangeThumbRingPointerOver);}
+ .vb-range:active:not(:disabled) {--winui-range-value:var(--winui-AccentButtonBackgroundPressed);--winui-range-thumb:var(--winui-AccentButtonBackgroundPressed);--winui-range-ring:var(--winui-RangeThumbRingPressed);}
+ .vb-range:disabled {--winui-range-track:var(--winui-RangeTrackDisabled);--winui-range-value:var(--winui-AccentFillColorDisabled);--winui-range-thumb:var(--winui-AccentFillColorDisabled);--winui-range-ring:var(--winui-RangeThumbRingDisabled);}
+ .vb-range::-webkit-slider-runnable-track {background:var(--winui-range-paint,var(--range-track-paint,var(--app-range-track,var(--vb-face))));}
+ .vb-range::-moz-range-track {background:var(--winui-range-paint,var(--range-track-paint,var(--app-range-track,revert)));}
+ .vb-range::-webkit-slider-thumb {
+  background:var(--winui-range-thumb,var(--detail-range-thumb,var(--app-range-thumb,var(--vb-face))));
+  border:var(--winui-range-border,var(--detail-range-thumb-border,1px solid));
+  border-color:var(--winui-RangeThumbBorderColor,var(--detail-field-border,var(--vb-light) var(--vb-dark) var(--vb-dark) var(--vb-light)));box-sizing:border-box;
+  transition:var(--winui-RangeTransition,none);
+ }
+ .vb-range::-moz-range-thumb {
+  background:var(--winui-range-thumb,var(--detail-range-thumb,var(--app-range-thumb,revert)));
+  border:var(--winui-range-border,var(--detail-range-thumb-border,var(--x11-range-border,revert)));border-color:var(--winui-RangeThumbBorderColor,var(--detail-field-border,currentColor));
+  transition:var(--winui-RangeTransition,none);
+ }
+ .vb-range:focus-visible {outline:var(--winui-FocusOutline,var(--app-focus-width,1px) var(--app-focus-style,dotted) var(--app-focus,var(--vb-text)))!important;outline-offset:var(--winui-FocusOffset,-2px);}
+
+ /* A 1-DIP rail and a 3-DIP indicator sit in the authored ProgressBar bounds.
+  * Paused/error are WinUI state paint, and indeterminate never rewrites Value. */
+ .vb-progress {align-items:var(--winui-ProgressAlign,var(--detail-progress-align,stretch));background:var(--winui-ProgressHostBackground,var(--vb-face));}
+ .vb-progress::before {
+  content:var(--winui-ProgressTrackContent,var(--detail-progress-track-content,none));
+  height:var(--winui-ProgressTrackHeight,var(--detail-progress-height,8px));border-radius:var(--winui-ProgressTrackRadius,999px);
+  background:var(--winui-ProgressTrack,var(--detail-progress-track-fill,transparent));box-shadow:var(--winui-ProgressTrackShadow,var(--detail-progress-track-shadow,none));
+ }
+ .vb-progress-fill {
+  height:var(--winui-ProgressFillHeight,var(--detail-progress-height,100%));position:var(--winui-ProgressFillPosition,var(--detail-progress-fill-position,static));
+  background:var(--winui-progress-foreground,var(--winui-ProgressForeground,var(--detail-state-progress-fill,var(--app-progress-fill,repeating-linear-gradient(90deg,var(--vb-selection) 0px,var(--vb-selection) 8px,transparent 8px,transparent 10px)))));
+ }
+ .vb-control[data-winui-paused=true]>.vb-progress {--winui-progress-foreground:var(--winui-ProgressPaused);}
+ .vb-control[data-winui-error=true]>.vb-progress {--winui-progress-foreground:var(--winui-ProgressError);}
+ .vb-control[data-winui-indeterminate=true]>.vb-progress {overflow:hidden;}
+ .vb-control[data-winui-indeterminate=true]>.vb-progress>.vb-progress-fill {
+  width:var(--winui-ProgressIndeterminateWidth,var(--vb-progress-value,0%))!important;
+  animation:var(--winui-ProgressIndeterminateAnimation,none);transform:var(--winui-ProgressIndeterminateRest,none);
+ }
+ .vb-control:is([data-winui-paused=true],[data-winui-error=true])>.vb-progress>.vb-progress-fill {animation-play-state:paused;}
+
+ .vb-popup-menu.classic-menu .menu-shortcut {color:var(--winui-MenuShortcutForeground,inherit);margin-left:var(--winui-MenuShortcutGap,20px);font-size:var(--winui-MenuShortcutSize,inherit);}
+ .vb-popup-menu.classic-menu [aria-disabled=true] .menu-shortcut {color:var(--winui-TextFillColorDisabled,inherit);}
+ .vb-popup-menu.classic-menu .menu-separator {height:var(--winui-MenuSeparatorHeight,2px);border-top:var(--winui-ComboArrowBorder,1px solid var(--vb-shadow));border-bottom:var(--winui-ComboArrowBorder,var(--detail-menu-separator,1px solid var(--vb-light)));background:var(--winui-MenuSeparator,transparent);margin:var(--winui-MenuSeparatorMargin,3px 2px);}
 }
-/* Effects reset independently at application/IDE boundaries. No animation loop. */
-[data-vb-reduce-motion=true] {--winui-Duration:0s;}
-@media(prefers-reduced-motion:reduce) {html,[data-vb-theme] {--winui-Duration:0s;}}
+/* ToggleSwitch retains the CheckBox input and its VB event/value path. Only
+ * this explicit source control receives a switch template. No outer bounds or
+ * label font are changed; switch chrome disappears at a non-Fluent boundary. */
+.vb-check[data-winui-control="ToggleSwitch"] {gap:var(--winui-SwitchGap,var(--winui-CheckGap,var(--detail-check-gap,5px)));}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox] {
+ --winui-switch-knob:var(--winui-SwitchOffKnob);--winui-switch-width:var(--winui-SwitchKnobSize);--winui-switch-height:var(--winui-SwitchKnobSize);
+ --winui-switch-inset:var(--winui-SwitchKnobInset);--winui-switch-travel:0px;
+ width:var(--winui-SwitchWidth,var(--winui-CheckSize,var(--detail-check-size,13px)));height:var(--winui-SwitchHeight,var(--winui-CheckSize,var(--detail-check-size,13px)));
+ border-radius:var(--winui-SwitchRadius,var(--winui-CheckRadius,var(--detail-check-radius,var(--app-radius,0))));
+ transition:var(--winui-SwitchTransition,none);
+}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]::before {
+ content:var(--winui-SwitchPseudoContent,none);position:absolute;pointer-events:none;top:50%;inset-inline-start:var(--winui-switch-inset,0px);
+ width:var(--winui-switch-width,12px);height:var(--winui-switch-height,12px);border-radius:var(--winui-SwitchKnobRadius,7px);
+ background:var(--winui-switch-knob);transform:translate(var(--winui-switch-travel,0px),-50%);transition:var(--winui-SwitchKnobTransition,none);
+}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:is(:checked,:indeterminate)::after {content:var(--winui-SwitchHidden,"");}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:checked {--winui-switch-knob:var(--winui-SwitchOnKnob);--winui-switch-travel:var(--winui-SwitchTravel);}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:indeterminate {--winui-switch-travel:var(--winui-SwitchMixedTravel);}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:hover:not(:disabled) {--winui-switch-width:var(--winui-SwitchKnobHoverSize);--winui-switch-height:var(--winui-SwitchKnobHoverSize);--winui-switch-inset:var(--winui-SwitchKnobHoverInset);}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:active:not(:disabled) {--winui-switch-width:var(--winui-SwitchKnobPressedWidth);--winui-switch-height:var(--winui-SwitchKnobPressedHeight);--winui-switch-inset:var(--winui-SwitchKnobPressedInset);}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:checked:active:not(:disabled) {--winui-switch-inset:calc(var(--winui-SwitchKnobPressedInset) - 3px);}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:dir(rtl):checked {--winui-switch-travel:calc(-1 * var(--winui-SwitchTravel));}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:dir(rtl):indeterminate {--winui-switch-travel:calc(-1 * var(--winui-SwitchMixedTravel));}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:disabled {--winui-switch-knob:var(--winui-SwitchOffKnobDisabled);}
+.vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:is(:checked,:indeterminate):disabled {--winui-switch-knob:var(--winui-SwitchOnKnobDisabled);}
+@media(forced-colors:none) {
+ .vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:not(:checked):not(:indeterminate) {
+  --winui-check-fill:var(--winui-SwitchOffBackground);--winui-check-stroke:var(--winui-SwitchOffBorder);
+  border-width:var(--winui-SwitchOffBorderWidth,var(--detail-check-border-width,var(--app-check-width,1px)));
+ }
+ .vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:not(:checked):not(:indeterminate):hover:not(:disabled) {--winui-check-fill:var(--winui-SwitchOffBackgroundPointerOver);}
+ .vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:not(:checked):not(:indeterminate):active:not(:disabled) {--winui-check-fill:var(--winui-SwitchOffBackgroundPressed);}
+ .vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:not(:checked):not(:indeterminate):disabled {--winui-check-fill:var(--winui-SwitchOffBackgroundDisabled);--winui-check-stroke:var(--winui-SwitchOffBorderDisabled);}
+}
+@media(forced-colors:active) {
+ .vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]::before {background:ButtonText;}
+ .vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:is(:checked,:indeterminate)::before {background:HighlightText;}
+ .vb-check[data-winui-control="ToggleSwitch"]>input[type=checkbox]:disabled::before {background:GrayText;}
+}
+@keyframes winui-progress {from {transform:translateX(-100%);}to {transform:translateX(333.3333%);}}
+/* Motion preferences reset independently at application/IDE boundaries. */
+[data-vb-reduce-motion=true] {--winui-Duration:0s;--winui-CheckTransition:none;--winui-ProgressIndeterminateAnimation:none;}
+@media(prefers-reduced-motion:reduce) {html,[data-vb-theme] {--winui-Duration:0s;--winui-CheckTransition:none;--winui-ProgressIndeterminateAnimation:none;}}

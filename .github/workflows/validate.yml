@@ -219,7 +219,8 @@ jobs:
   browser:
     name: Browser (${{ matrix.suite }}, ${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Full mixed-origin project authoring and appearance suites stay exhaustive.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -260,7 +261,8 @@ jobs:
   figma:
     name: Figma (${{ matrix.suite }}, ${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Keep the validated main-branch bound while running disjoint script owners.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -375,7 +377,8 @@ jobs:
   advanced-editor:
     name: ${{ matrix.suite }} (${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Each disjoint editor partition keeps the validated main-branch job bound.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

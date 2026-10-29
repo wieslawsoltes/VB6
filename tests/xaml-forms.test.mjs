@@ -36,7 +36,7 @@ test('WinUI literals lower to native twips/flags and conventional event handlers
   assert.equal(r.success,true,JSON.stringify(r.diagnostics));const b=r.form.controls.find(c=>c.name==='Button1');assert.equal(b.type,'CommandButton');assert.equal(b.properties.Left,150);assert.equal(b.properties.Width,1200);assert.equal(b.properties.FontSize,12);assert.equal(b.properties.Enabled,0);assert.equal(b.properties.Caption,'Hello');
 });
 test('dynamic behavior and arbitrary handlers block conversion instead of falling back',()=>{
-  for(const body of ['<TextBox Text="{Binding Name}"/>','<Button Click="Arbitrary"/>','<Button Opacity="0.5"/>','<Grid/>','<Button Width="Auto"/>']){const r=compileFormXaml(wrap(body),{schema});assert.equal(r.success,false,body);assert.equal(r.form,null);assert.ok(r.diagnostics.some(d=>d.severity==='error'));}
+  for(const body of ['<TextBox Text="{Binding Name}"/>','<Button Click="Arbitrary"/>','<Button Opacity="2"/>','<Grid/>','<Button Width="Auto"/>']){const r=compileFormXaml(wrap(body),{schema});assert.equal(r.success,false,body);assert.equal(r.form,null);assert.ok(r.diagnostics.some(d=>d.severity==='error'));}
 });
 test('Grid lowering is opt-in and keeps grid tracks in twips/fractions',()=>{
   const r=compileFormXaml(wrap('<Grid x:Name="Grid1"><Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions><Button Content="OK" Grid.Column="1"/></Grid>'),{schema,settings:{anchoring:true}});assert.equal(r.success,true,JSON.stringify(r.diagnostics));const grid=r.form.controls.find(c=>c.name==='Grid1');assert.equal(grid.properties.LayoutMode,5);assert.equal(grid.properties.LayoutGridColumns,'1500 2fr');
@@ -74,9 +74,11 @@ test('HTML export rejects drafts and never includes authoring text or compiler c
   const bad=prepareXamlEdit(good,m.id,'<broken>',{schema}).project;assert.throws(()=>exporter.html(bad),/XAML/);
 });
 
-test('VB6 lowering rejects brush opacity rather than discarding it',()=>{
+test('WinUI lowering retains brush opacity beside the native OLE fallback',()=>{
   const result=compileFormXaml(wrap('<Page.Resources><SolidColorBrush x:Key="Tint" Color="#ff0000" Opacity="0.5" /></Page.Resources><Button Background="{StaticResource Tint}" />'),{schema});
-  assert.equal(result.success,false);assert.match(result.diagnostics.map(d=>d.message).join('\n'),/opacity/);
+  assert.equal(result.success,true,JSON.stringify(result.diagnostics));
+  assert.equal(result.form.controls[0].properties.BackColor,0x0000FF);
+  assert.equal(result.form.controls[0].properties.WinUI3.properties.Background,'#80FF0000');
 });
 test('VB6 lowering applies implicit style setters',()=>{
   const result=compileFormXaml(wrap('<Page.Resources><Style TargetType="Button"><Setter Property="Width" Value="120" /></Style></Page.Resources><Button />'),{schema});

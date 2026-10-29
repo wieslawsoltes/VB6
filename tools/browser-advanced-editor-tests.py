@@ -50,8 +50,8 @@ class AdvancedEditorAcceptance(unittest.TestCase):
             # Parsing the standalone artifact and starting the IDE have a separate
             # bounded deadline; all subsequent interactions retain their 15s limit.
             if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text(),wait_until='domcontentloaded',timeout=IDE_STARTUP_TIMEOUT_MS)
-            elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='domcontentloaded',timeout=IDE_STARTUP_TIMEOUT_MS)
-            else:self.page.goto(self.base+'/dist/index.html',wait_until='domcontentloaded',timeout=IDE_STARTUP_TIMEOUT_MS)
+            elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
+            else:self.page.goto(self.base+'/dist/index.html',wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
             self.page.wait_for_function('globalThis.vb6Studio?.advancedEditor',timeout=IDE_STARTUP_TIMEOUT_MS);self.page.evaluate(FIXTURE)
         except Exception:
             # unittest does not call tearDown after a failed setUp.

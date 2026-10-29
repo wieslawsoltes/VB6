@@ -19,7 +19,9 @@ def boot(fallback=False):
     p.on('pageerror',lambda e:p._errors.append(str(e)))
     p.on('request',lambda r:p._requests.append(r.url) if r.url.startswith(('http:','https:')) else None)
     if fallback:p.evaluate('window.Worker=undefined')
-    p.set_content(HTML);p.wait_for_function('!!globalThis.vb6Studio?.captureWindowLayout');return p
+    # Full IDE parsing is separate from the seven-second action deadline.
+    p.set_content(HTML,wait_until='domcontentloaded',timeout=60000)
+    p.wait_for_function('!!globalThis.vb6Studio?.captureWindowLayout',timeout=60000);return p
 
 def case(name,fn,fallback=False):
     p=None;start=time.perf_counter()

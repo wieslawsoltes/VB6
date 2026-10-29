@@ -40,8 +40,8 @@ def load(browser, mode):
     page.on('pageerror', lambda e: page._errors.append(str(e)))
     try:
         if mode == 'opaque': page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text(), wait_until='domcontentloaded', timeout=IDE_STARTUP_TIMEOUT_MS)
-        elif mode == 'file': page.goto((ROOT / 'dist/VB6-Studio-Web.html').as_uri(), wait_until='domcontentloaded', timeout=IDE_STARTUP_TIMEOUT_MS)
-        else: page.goto(base + ('/index.html' if mode == 'modules' else '/VB6-Studio-Web.html'), wait_until='domcontentloaded', timeout=IDE_STARTUP_TIMEOUT_MS)
+        elif mode == 'file': page.goto((ROOT / 'dist/VB6-Studio-Web.html').as_uri(), wait_until='commit', timeout=IDE_STARTUP_TIMEOUT_MS)
+        else: page.goto(base + ('/index.html' if mode == 'modules' else '/VB6-Studio-Web.html'), wait_until='commit', timeout=IDE_STARTUP_TIMEOUT_MS)
         page.wait_for_function('!!globalThis.vb6Studio?.intelligentUI', timeout=IDE_STARTUP_TIMEOUT_MS)
     except Exception:
         # The caller only owns successfully loaded pages; release failed startup.

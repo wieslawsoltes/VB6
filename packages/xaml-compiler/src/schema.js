@@ -53,6 +53,7 @@ const enumeration = (...values) => ({type: 'Enum', values});
 const collection = itemType => ({type: 'Object', collection: true, itemType});
 const event = (...parameters) => ({type: 'String', kind: 'event', parameters});
 const attached = (type, extra = {}) => ({type, attached: true, ...extra});
+export const WINUI_CONTROLS_NS = 'using:Microsoft.UI.Xaml.Controls';
 export function createWinUISchema() {
   const schema = new XamlSchemaContext(), add = (name, base, members = {}, contentProperty = null, extras = {}) => schema.registerType(PRESENTATION_NS, name, {base, members, contentProperty, ...extras});
   add('DependencyObject', null);
@@ -68,6 +69,7 @@ export function createWinUISchema() {
   schema.registerType(PRESENTATION_NS, 'FrameworkElement', {...framework, runtimeNameProperty: 'Name'});
   add('Control', 'FrameworkElement', {
     Background: 'Brush', Foreground: 'Brush', BorderBrush: 'Brush', BorderThickness: 'Thickness', Padding: 'Thickness', CornerRadius: 'CornerRadius', FontFamily: 'String', FontSize: 'Double', FontWeight: 'FontWeight', FontStyle: enumeration('Normal', 'Italic', 'Oblique'), FontStretch: 'String', CharacterSpacing: 'Int32',
+    BackgroundSizing:enumeration('InnerBorderEdge','OuterBorderEdge'),UseSystemFocusVisuals:'Boolean',FocusVisualMargin:'Thickness',
     IsEnabled: 'Boolean', IsTabStop: 'Boolean', TabIndex: 'Int32', Template: 'Object', HorizontalContentAlignment: enumeration('Left', 'Center', 'Right', 'Stretch'), VerticalContentAlignment: enumeration('Top', 'Center', 'Bottom', 'Stretch')
   });
   add('ContentControl', 'Control', {Content: 'Object', ContentTemplate: 'Object', ContentTemplateSelector: 'Object'}, 'Content');
@@ -88,8 +90,9 @@ export function createWinUISchema() {
   add('Button', 'ButtonBase', {Flyout: 'Object'}); add('RepeatButton', 'ButtonBase', {Delay: 'Int32', Interval: 'Int32'});
   add('ToggleButton', 'ButtonBase', {IsChecked: {type: 'Boolean', nullable: true}, IsThreeState: 'Boolean', Checked: event('sender', 'e'), Unchecked: event('sender', 'e'), Indeterminate: event('sender', 'e')});
   add('CheckBox', 'ToggleButton'); add('RadioButton', 'ToggleButton', {GroupName: 'String'});
+  add('ToggleSwitch', 'Control', {Header:'Object',IsOn:'Boolean',OnContent:'Object',OffContent:'Object',Toggled:event('sender','e')});
   add('HyperlinkButton', 'ButtonBase', {NavigateUri: 'String'});
-  add('TextBlock', 'FrameworkElement', {Text: 'String', Foreground: 'Brush', FontFamily: 'String', FontSize: 'Double', FontWeight: 'FontWeight', FontStyle: enumeration('Normal', 'Italic', 'Oblique'), TextWrapping: enumeration('NoWrap', 'Wrap', 'WrapWholeWords'), TextTrimming: enumeration('None', 'CharacterEllipsis', 'WordEllipsis', 'Clip'), TextAlignment: enumeration('Left', 'Center', 'Right', 'Justify', 'DetectFromContent'), Inlines: collection('Inline'), IsTextSelectionEnabled: 'Boolean', MaxLines: 'Int32', LineHeight: 'Double'}, 'Inlines');
+  add('TextBlock', 'FrameworkElement', {Text: 'String', Foreground: 'Brush', FontFamily: 'String', FontSize: 'Double', FontWeight: 'FontWeight', FontStyle: enumeration('Normal', 'Italic', 'Oblique'), TextWrapping: enumeration('NoWrap', 'Wrap', 'WrapWholeWords'), TextTrimming: enumeration('None', 'CharacterEllipsis', 'WordEllipsis', 'Clip'), TextAlignment: enumeration('Left', 'Center', 'Right', 'Justify', 'DetectFromContent'), Inlines: collection('Inline'), IsTextSelectionEnabled: 'Boolean', MaxLines: 'Int32', LineHeight: 'Double',LineStackingStrategy:enumeration('MaxHeight','BlockLineHeight','BaselineToBaseline'),TextLineBounds:enumeration('Full','TrimToCapHeight','TrimToBaseline','Tight'),OpticalMarginAlignment:enumeration('None','TrimSideBearings')}, 'Inlines');
   add('TextBox', 'Control', {Text: 'String', Header: 'Object', PlaceholderText: 'String', AcceptsReturn: 'Boolean', IsReadOnly: 'Boolean', MaxLength: 'Int32', TextWrapping: enumeration('NoWrap', 'Wrap', 'WrapWholeWords'), TextAlignment: enumeration('Left', 'Center', 'Right', 'Justify', 'DetectFromContent'), SelectionStart: 'Int32', SelectionLength: 'Int32', TextChanged: event('sender', 'e'), SelectionChanged: event('sender', 'e'), BeforeTextChanging: event('sender', 'e')});
   add('PasswordBox', 'Control', {Password: 'String', PasswordChar: 'String', MaxLength: 'Int32', PlaceholderText: 'String', Header: 'Object', PasswordChanged: event('sender', 'e')});
   add('RichEditBox', 'Control', {Document: 'Object', Header: 'Object', IsReadOnly: 'Boolean', AcceptsReturn: 'Boolean', TextChanged: event('sender', 'e')});
@@ -114,6 +117,7 @@ export function createWinUISchema() {
   add('GradientBrush', 'Brush', {GradientStops: collection('GradientStop'), MappingMode: 'String', SpreadMethod: 'String'}, 'GradientStops');
   add('LinearGradientBrush', 'GradientBrush', {StartPoint: 'Point', EndPoint: 'Point'}); add('GradientStop', 'DependencyObject', {Color: 'Color', Offset: 'Double'});
   add('ResourceDictionary', 'DependencyObject', {Source: 'String', MergedDictionaries: collection('ResourceDictionary'), ThemeDictionaries: {type: 'Object', dictionary: true}, Items: {type: 'Object', dictionary: true}}, 'Items', {dictionary: true});
+  add('XamlControlsResources', 'ResourceDictionary', {}, 'Items', {dictionary:true});
   add('Style', 'DependencyObject', {TargetType: 'Type', BasedOn: 'Object', Setters: collection('Setter')}, 'Setters');
   add('Setter', 'DependencyObject', {Property: 'String', Value: 'Object', Target: 'String'});
   add('FrameworkTemplate', 'DependencyObject', {Content: 'Object'}, 'Content', {template: true}); add('ControlTemplate', 'FrameworkTemplate', {TargetType: 'Type'}, 'Content', {template: true}); add('DataTemplate', 'FrameworkTemplate', {}, 'Content', {template: true}); add('ItemsPanelTemplate', 'FrameworkTemplate', {}, 'Content', {template: true});
@@ -132,14 +136,21 @@ export function createWinUISchema() {
   add('ToolTipService', 'DependencyObject', {ToolTip: attached('Object'), Placement: attached('String'), IsEnabled: attached('Boolean')});
   add('AutomationProperties', 'DependencyObject', Object.fromEntries(['Name', 'AutomationId', 'HelpText', 'ItemType', 'ItemStatus', 'LabeledBy'].map(n => [n, attached('String')])));
   for (const name of ['String', 'Double', 'Int32', 'Boolean']) schema.registerType(XAML_NS, name, {primitive: name, contentProperty: '$value', members: {$value: name}});
-  for (const name of ['Thickness', 'CornerRadius', 'Color', 'GridLength', 'Point']) schema.registerType(PRESENTATION_NS, name, {primitive: name, contentProperty: '$value', members: {$value: name}});
+  for (const name of ['Thickness', 'CornerRadius', 'Color', 'GridLength', 'Point', 'FontFamily', 'FontWeight']) schema.registerType(PRESENTATION_NS, name, {primitive: name, contentProperty: '$value', members: {$value: name}});
+  // WinUI supports both presentation XML names and its public controls namespace.
+  // Register real schema aliases with base identity retained, never local-name
+  // matching that would accidentally lower a foreign Button to a native control.
+  for(const name of ['XamlControlsResources','Page','UserControl','Control','ContentControl','Canvas','Grid','StackPanel','RelativePanel','Border','Viewbox','Button','RepeatButton','ToggleButton','CheckBox','RadioButton','ToggleSwitch','HyperlinkButton','TextBlock','TextBox','PasswordBox','RichEditBox','ItemsControl','ListBox','ListBoxItem','ComboBox','ComboBoxItem','ListView','ListViewItem','GridView','TreeView','TreeViewNode','Slider','ProgressBar','ScrollViewer','Image']) {
+    const base=schema.getType(PRESENTATION_NS,name);
+    schema.registerType(WINUI_CONTROLS_NS,name,{base:{namespaceURI:PRESENTATION_NS,name},dictionary:!!base.dictionary});
+  }
   return schema;
 }
 export function convertValue(value, member = {type: 'String'}) {
   const type = member.type ?? 'String';
   if (value === null) { if (member.nullable || ['Object', 'String', 'Brush', 'ImageSource'].includes(type)) return null; throw new TypeError('Null is not valid for ' + type + '.'); }
   const text = String(value), trimmed = text.trim();
-  if (type === 'String' || type === 'Object' || type === 'Type' || type === 'Brush' || type === 'ImageSource' || type === 'Color' || type === 'FontWeight') return text;
+  if (type === 'String' || type === 'Object' || type === 'Type' || type === 'Brush' || type === 'ImageSource' || type === 'Color' || type === 'FontWeight' || type === 'FontFamily') return text;
   if (type === 'Json') return JSON.parse(text);
   if (type === 'Boolean') { if (/^true$/i.test(trimmed)) return true; if (/^false$/i.test(trimmed)) return false; throw new TypeError('Expected True or False.'); }
   if (type === 'Enum') { const found = member.values?.find(v => v.toLowerCase() === trimmed.toLowerCase()); if (found !== undefined) return found; throw new TypeError('Expected ' + member.values.join(', ') + '.'); }
