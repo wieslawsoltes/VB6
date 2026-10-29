@@ -192,11 +192,18 @@ class FigmaPresentation(base.FigmaWorkspace):
 
     def test_presentation_composited_theme_pixels(self):
         self.page.evaluate('vb6Studio.setRenderingPolicy({backend:"canvas2d",fallbacks:["html"],text:"native"})')
+        painter=self.page.evaluate_handle('vb6Studio.rendering.driver')
+        self.addCleanup(painter.dispose)
+        settings=painter.evaluate('p=>({requested:p.stats.readbackRequested,actual:p.context.getContextAttributes?.()??null})')
+        self.assertTrue(settings['requested'],'The retained layer must request its storage policy before drawing')
+        if settings['actual'] is not None:
+            self.assertTrue(settings['actual']['willReadFrequently'],'The browser must retain the requested context settings')
         self.enable(True);before=self.snapshot()
         for index,scheme in enumerate(['dark','light','dark','light']):
             self.page.evaluate('scheme=>vb6Studio.figmaMode.configure({mode:"figma",scheme,units:"px"})',scheme)
             self.painted_theme(scheme,'published-'+str(index)+'-'+scheme)
             self.assertEqual(self.snapshot(),before)
+            self.assertTrue(painter.evaluate('p=>p===vb6Studio.rendering.driver'),'Theme changes must retain the original painter')
         self.done()
     def test_presentation_system_idle_restore(self):
         self.page.evaluate('vb6Studio.setRenderingPolicy({backend:"canvas2d",fallbacks:["html"],text:"native"})')

@@ -140,7 +140,17 @@ export class UIRenderer {
         // This is a context-creation contract, not a GPU fence/readback or an
         // idle repaint loop. Low-level/benchmark painters keep their default.
         // https://registry.khronos.org/webgl/specs/latest/1.0/#2.2
-        painter = await this.factory(name, canvas, {...(name === 'webgl2' ? {preserveDrawingBuffer: true} : {}), onLost: reason => {
+        // The retained Canvas2D layer also needs reliable presentation between
+        // submissions. WebKit can retain stale composited tiles despite correct
+        // bitmap pixels; the readback-optimized context avoided this in repeated
+        // HTTP/file trials. Request it at creation, never through readback fences
+        // or repaint loops. GPU backends and standalone painters are unchanged.
+        // This standard hint may select a software bitmap; it is not a guarantee
+        // of CPU storage or an assertion that a frame has reached the display.
+        // https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently
+        const contextOptions = name === 'webgl2' ? {preserveDrawingBuffer: true}
+          : name === 'canvas2d' ? {willReadFrequently: true} : {};
+        painter = await this.factory(name, canvas, {...contextOptions, onLost: reason => {
           if (!this.disposed && this.generation === generation && this.driver === painter) this.fallback(reason);
         }});
         if (this.disposed || generation !== this.generation) { painter?.dispose(); canvas.remove(); return this.getStats(); }
