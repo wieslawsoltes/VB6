@@ -260,8 +260,8 @@ jobs:
   figma:
     name: Figma (${{ matrix.suite }}, ${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    # WebKit/file partitions repeatedly parse the complete standalone IDE.
-    timeout-minutes: 25
+    # The 43-case WebKit/file authoring partition takes about 25 minutes.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
