@@ -60,6 +60,16 @@ class FigmaWorkspace(unittest.TestCase):
             else:self.page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri() if TRANSPORT=='file' else self.base+'/dist/index.html',wait_until='commit')
         with self.phase('readiness'):
             self.page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.figmaMode',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
+    def reload_workspace(self,figma=False):
+        # Reload is a startup boundary just like the initial real-origin load.
+        # Do not replace it with goto/load(), which would bypass persistence, or
+        # reapply FIXTURE, which would hide a broken restored project/workspace.
+        with self.phase('reload-navigation'):
+            self.page.reload(wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
+        with self.phase('reload-readiness'):
+            predicate='globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.figmaMode'
+            if figma:predicate+='?.enabled'
+            self.page.wait_for_function(predicate,polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
     def close_context(self):
         closed=False
         try:
@@ -168,8 +178,8 @@ class FigmaWorkspace(unittest.TestCase):
         self.page.get_by_role('button',name='Toggle Design sidebar',exact=True).click();self.assertTrue(self.page.locator('.figma-design-inspector').is_visible());self.assertFalse(self.page.locator('.figma-layer-tree').is_visible());self.page.screenshot(path=str(REPORT/'figma-narrow.png'),timeout=10000);self.done()
     @unittest.skipIf(TRANSPORT=='memory','Opaque-origin memory transport does not support persistence testing')
     def test_13_preferences_and_independent_dock_profiles_survive_reload(self):
-        before=self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())');self.enable();self.page.evaluate('vb6Studio.persist()');self.page.reload(wait_until='commit');self.page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.figmaMode?.enabled',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS);self.assertEqual(self.page.get_by_label('Position units',exact=True).input_value(),'px')
-        self.page.evaluate('vb6Studio.figmaMode.configure({mode:"classic"});vb6Studio.persist()');self.page.reload(wait_until='commit');self.page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.figmaMode',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS);self.assertFalse(self.page.evaluate('vb6Studio.figmaMode.enabled'));self.assertEqual(before,self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())'));self.done()
+        before=self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())');self.enable();self.page.evaluate('vb6Studio.persist()');self.reload_workspace(figma=True);self.assertEqual(self.page.get_by_label('Position units',exact=True).input_value(),'px')
+        self.page.evaluate('vb6Studio.figmaMode.configure({mode:"classic"});vb6Studio.persist()');self.reload_workspace();self.assertFalse(self.page.evaluate('vb6Studio.figmaMode.enabled'));self.assertEqual(before,self.page.evaluate('JSON.stringify(vb6Studio.docking.snapshot())'));self.done()
     def test_14_runtime_still_executes_vb6_and_exports_no_workspace_chrome(self):
         self.enable();html=self.page.evaluate('VB6StudioAPI.exportApplication(vb6Studio.project,{persist:false})');self.assertNotIn('figma-canvas-toolbar',html);self.assertNotIn('figma-workspace-options',html)
         runtime=self.context.new_page();runtime.on('pageerror',lambda e:self.errors.append(str(e)));runtime.set_content(html);runtime.get_by_role('button',name='Save',exact=True).click();runtime.get_by_role('button',name='Clicked',exact=True).wait_for();runtime.close();self.done()
