@@ -231,6 +231,7 @@ jobs:
           - integration-controls
           - integration-authoring
           - integration-appearance
+          - application-appearance
           - tui-authoring
           - intelligent-ui
           - project-authoring

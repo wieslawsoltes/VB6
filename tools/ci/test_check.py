@@ -150,6 +150,21 @@ class WorkflowAuditTests(unittest.TestCase):
         path.write_text(json.dumps(suites))
         with self.assertRaisesRegex(ValueError,'Dedicated Figma workspace'):
             check.audit(self.root)
+    def test_missing_application_appearance_partition_rejected(self):
+        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix']['suite'].remove('application-appearance'))
+    def test_application_appearance_preserves_job_deadline(self):
+        self.reject(lambda w:w['jobs']['browser'].update({'timeout-minutes':30}))
+    def test_application_appearance_cannot_rejoin_ide_theme_deadline(self):
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';suites=json.loads(path.read_text())
+        # Exchange owners while retaining every entrypoint exactly once. A
+        # coverage-only audit cannot detect the lost deadline separation.
+        suites['application-appearance']=['browser-theme-tests.py']
+        scripts=suites['integration-appearance']
+        scripts[scripts.index('browser-theme-tests.py')]='browser-application-theme-tests.py'
+        path.write_text(json.dumps(suites))
+        with self.assertRaisesRegex(ValueError,'Dedicated application appearance'):
+            check.audit(self.root)
     def test_hidden_matrix_exclusion_rejected(self):
         self.reject(lambda w:w['jobs']['figma']['strategy']['matrix'].update({'exclude':[{'browser':'webkit','transport':'file'}]}))
     def test_duplicate_matrix_value_rejected(self):

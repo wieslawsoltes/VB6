@@ -189,6 +189,12 @@ def audit(root=ROOT):
     browser_groups = jobs['browser']['strategy']['matrix']['suite']
     if 'tui-authoring' not in browser_groups or suites.get('tui-authoring') != ['dos-browser-tests.py']:
         raise ValueError('Dedicated TUI acceptance partition required')
+    # The application-theme matrix takes most of a WebKit job by itself.
+    # Keep it independent of IDE themes without changing any test deadline.
+    if 'application-appearance' not in browser_groups or suites.get('application-appearance') != ['browser-application-theme-tests.py']:
+        raise ValueError('Dedicated application appearance acceptance partition required')
+    if jobs['browser']['timeout-minutes'] != 15:
+        raise ValueError('Browser partitions retain the fifteen-minute job limit')
     browser_scripts = [script for group in browser_groups for script in suites[group]]
     if len(browser_scripts) != len(set(browser_scripts)):
         raise ValueError('Browser partitions may not duplicate any test entrypoint')

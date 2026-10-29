@@ -36,7 +36,6 @@
   ],
   "integration-appearance": [
     "browser-theme-tests.py",
-    "browser-application-theme-tests.py",
     "browser-native-caption-tests.py",
     "browser-macos-reference-tests.py",
     "browser-winui-tests.py"
@@ -86,5 +85,8 @@
   ],
   "tui-authoring": [
     "dos-browser-tests.py"
+  ],
+  "application-appearance": [
+    "browser-application-theme-tests.py"
   ]
 }

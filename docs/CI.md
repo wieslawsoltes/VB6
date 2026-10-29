@@ -120,8 +120,8 @@ Validate #1474 completed all advanced-editor and rendering partitions, but the
 WebKit native-project process exhausted 720 seconds and WebKit/file Figma services
 exhausted 480 seconds while completed cases continued passing. Those two script
 invocations now use **two concurrent, isolated unittest workers inside their
-existing job**. The workflow remains 89 jobs; no job, process, assertion or pixel
-budget is increased. There are no retries and no newly skipped cases.
+existing job**. Case workers add no workflow jobs and increase no job, process,
+assertion or pixel budget. There are no retries and no newly skipped cases.
 
 `tools/ci/case_shard.py` discovers the original complete unittest inventory,
 including dynamic HTTP/file registration and each module's `load_tests` hook.
@@ -189,14 +189,28 @@ entrypoint ownership among browser partitions.
 
 ## Appearance acceptance ownership
 
-The `integration-appearance` browser partition owns the IDE theme, application
-theme, native caption, macOS reference and WinUI suites. It runs independently
-from the layout, diagnostics and export checks in `integration-authoring`, so
-those groups each receive the existing 15-minute job deadline. Both partitions
-run on Chromium, Firefox and WebKit with the same browser setup and transport.
-All five appearance scripts and every existing assertion retain coverage under
-the required `test` gate. The coverage audit rejects missing suite owners and
-duplicate entrypoints across browser partitions.
+The `integration-appearance` browser partition owns the IDE theme, native
+caption, macOS reference and WinUI suites. The separate
+`application-appearance` partition owns `browser-application-theme-tests.py`.
+Both run on Chromium, Firefox and WebKit with the original setup and bounded
+15-minute job deadline. This expands the workflow from 89 to **92 jobs**; no
+script deadline, browser version, assertion, or pixel threshold is relaxed.
+
+In Validate #1487, the WebKit IDE-theme and application-theme scripts completed
+successfully in 264.982 and 466.973 seconds. With native captions and macOS
+reference checks, those consumed 774.688 seconds before WinUI finished. The job
+was cancelled at its shared deadline. Separating the application-theme owner
+removes that cumulative bottleneck while every script still executes exactly
+once. The coverage audit rejects omission, duplicate ownership, recombination,
+and changes to the browser job deadline.
+
+The service-persistence reload readiness predicate reads
+`globalThis.vb6Studio?.figmaMode?.enabled`: navigation commit can precede execution
+of the inline IDE bundle. Optional chaining on the bare, undeclared identifier
+would throw instead of polling. A mandatory Node regression evaluates the exact
+browser predicate in an empty JavaScript context and through partial, disabled,
+and restored-enabled states. The 60-second startup bound, eight-second widget
+bound, and persisted-state assertions are unchanged.
 
 ## Offline-origin qualification
 
