@@ -30,6 +30,7 @@ class RunnerTests(unittest.TestCase):
     def test_process_deadlines_are_scoped_to_measured_standalone_suites(self):
         expected={
             ('webkit','file','figma-browser-tests.py'):900,
+            ('webkit','file','figma-editor-browser-tests.py'):900,
             ('webkit','file','figma-services-browser-tests.py'):900,
             ('webkit','http','native-project-browser-tests.py'):1200,
             ('webkit','file','native-project-browser-tests.py'):1200,
@@ -52,7 +53,8 @@ class RunnerTests(unittest.TestCase):
                     self.assertEqual([r['timeoutSeconds'] for r in result['cases']],deadlines)
     def test_explicit_short_deadline_is_preserved_for_standalone_suites(self):
         tasks=[{**self.task(''), 'script':script, 'transport':origin} for origin,script in [
-            ('file','figma-browser-tests.py'),('file','figma-services-browser-tests.py'),
+            ('file','figma-browser-tests.py'),('file','figma-editor-browser-tests.py'),
+            ('file','figma-services-browser-tests.py'),
             ('http','native-project-browser-tests.py'),('file','native-project-browser-tests.py'),
             ('file','browser-advanced-editor-tests.py')]]
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
