@@ -96,6 +96,7 @@ within the existing job limit; the scoped process deadlines include headroom.
 python -m pip install -r tools/ci/requirements-checks.txt
 python tools/ci/check.py
 python tools/ci/test_run.py
+python tools/ci/test_case_shard.py
 python tools/ci/test_check.py
 python tools/ci/test_tui_acceptance.py
 node --test tests/ci-gate.test.mjs
@@ -112,6 +113,44 @@ parses Bash blocks and requires the reference-admission/GPU-entrypoint tests to
 execute unconditionally in the audit job. The pinned, SHA-256-verified actionlint binary checks Actions
 syntax and expression types. Historical timings or results do not qualify a
 later source revision.
+
+## Bounded browser case workers
+
+Validate #1474 completed all advanced-editor and rendering partitions, but the
+WebKit native-project process exhausted 720 seconds and WebKit/file Figma services
+exhausted 480 seconds while completed cases continued passing. Those two script
+invocations now use **two concurrent, isolated unittest workers inside their
+existing job**. The workflow remains 89 jobs; no job, process, assertion or pixel
+budget is increased. There are no retries and no newly skipped cases.
+
+`tools/ci/case_shard.py` discovers the original complete unittest inventory,
+including dynamic HTTP/file registration and each module's `load_tests` hook.
+Sorted contiguous halves give native projects 30 cases per worker, each with
+15 HTTP and 15 file cases. Figma services retains all 21 cases, partitioned 10/11,
+including the existing engine/capability decorators. Each worker owns a browser,
+contexts, server and a separate `case-shard-<index>-of-2` report directory. All
+other scripts, Chromium/Firefox invocations, and the explicitly labelled local
+memory mode retain their ordinary scheduling.
+
+The parent admits success only when both workers exit successfully and their
+atomic evidence agrees on the source hash, execution identity, browser, origin
+and complete case inventory. Every assigned case must start and finish exactly
+once; missing, stale, duplicated or truncated evidence fails the owning script.
+Per-case skips remain explicit, and class-level setup skips cannot certify
+unexecuted cases. Failures retain separate logs and do not cancel the other
+partition; cancellation reaches both process groups and prevents successor
+scripts. Each worker retains the original process deadline. Source URLs, test
+methods, input fixtures, and assertions are not rewritten by the shard driver.
+
+The Figma service-persistence reload uses the same bounded 60-second startup
+readiness as its initial boot, still requiring the restored enabled workspace.
+Its eight-second widget-interaction deadline remains unchanged. The named Node
+regression `tests/ci-browser-case-shard.test.mjs` runs all 26 Python regressions
+through the existing mandatory test glob, rejecting a missing interpreter in CI
+and requiring completion without skips. These include independent inventory
+checks and real subprocess failure/cancellation regressions. Local
+memory-mode results are not HTTP/file-origin or WebKit qualification; that
+requires the normal complete CI run for the exact published revision.
 
 ## Publication boundary
 
