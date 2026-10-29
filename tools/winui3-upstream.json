@@ -1,0 +1,431 @@
+{
+  "format": 1,
+  "repository": "microsoft/microsoft-ui-xaml",
+  "tag": "winui3/release/2.5.1",
+  "commit": "ba3a8d59e6de4e2b86ca4f61c78bc26ccf129afd",
+  "tree": "6ee52632c3daf75e88a90ccab9e21cf0b3fc30a3",
+  "license": "LICENSES/WinUI.txt",
+  "scope": "Core generic.xaml scalar resources, production control *_themeresources.xaml and *_themeresources_any.xaml dictionaries, plus DLL density dictionaries. Alternative *_perf2026.xaml and legacy *_v2.5.xaml template variants are intentionally excluded.",
+  "sources": [
+    {
+      "path": "src/dxaml/xcp/dxaml/themes/generic.xaml",
+      "sha": "def26a6152487e366589660cd220509db6d4cf09",
+      "size": 2045878
+    },
+    {
+      "path": "src/controls/dev/AnnotatedScrollBar/AnnotatedScrollBar_themeresources.xaml",
+      "sha": "dd312445431351223d46afdf1006bd87de06ea0a",
+      "size": 7062
+    },
+    {
+      "path": "src/controls/dev/AutoSuggestBox/AutoSuggestBox_themeresources.xaml",
+      "sha": "7cd762ebf3f870d238c428a8ca551d3cd311ee4a",
+      "size": 26961
+    },
+    {
+      "path": "src/controls/dev/Breadcrumb/BreadcrumbBar_themeresources.xaml",
+      "sha": "af094a1594bb76d73034e91d8c6e9677d7c67e15",
+      "size": 10010
+    },
+    {
+      "path": "src/controls/dev/ColorPicker/ColorPicker_themeresources.xaml",
+      "sha": "ff69cb7eb766097830b201c4b0785041027fa499",
+      "size": 3882
+    },
+    {
+      "path": "src/controls/dev/ComboBox/ComboBox_themeresources.xaml",
+      "sha": "4578f4c9b2e32fc701ca803aba51c032f9c23ead",
+      "size": 76622
+    },
+    {
+      "path": "src/controls/dev/CommandBarFlyout/CommandBarFlyout_themeresources.xaml",
+      "sha": "e761a9f9a000dd93caaefdbde7d1b99c089f3519",
+      "size": 103760
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/AppBarButton_themeresources.xaml",
+      "sha": "60bcf2af4daf2ab40dd79709d3a0a7907f79b8c3",
+      "size": 33901
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/AppBarSeparator_themeresources.xaml",
+      "sha": "51801458b679a563d21471423f4ebb94f0b13ad0",
+      "size": 3510
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/AppBarToggleButton_themeresources.xaml",
+      "sha": "2c3e6c5ad5aa3d6c4cd6fe1e3c8c5688b8e31f18",
+      "size": 50717
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Button_themeresources.xaml",
+      "sha": "e63c32389e599c2277061d9ce29483516e6927a3",
+      "size": 32897
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/CalendarDatePicker_themeresources.xaml",
+      "sha": "37b0f815e83b11bbf3602486874015f505966373",
+      "size": 20874
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/CalendarView_themeresources.xaml",
+      "sha": "237f442197d73a203e59a2d6ba8c16f04f294a64",
+      "size": 106536
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/CheckBox_themeresources.xaml",
+      "sha": "71e21d32b764c8b7fc6fe7312e7a6847a0fb5c89",
+      "size": 60651
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/CommandBar_themeresources.xaml",
+      "sha": "f524c6d543ea735b7b4e833294891eec448b8b5f",
+      "size": 93840
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Common_themeresources.xaml",
+      "sha": "4442cd93a301ffbb86de5248c4a99dc94d583e32",
+      "size": 4496
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Common_themeresources_any.xaml",
+      "sha": "ca07acb962a7c018a174bf28dcd0e945b13ddb4d",
+      "size": 55806
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ContentDialog_themeresources.xaml",
+      "sha": "9cd8150fff8c216319e2d5515b538cfab5b397d5",
+      "size": 20018
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/CornerRadius_themeresources.xaml",
+      "sha": "e1d58260df35408c904d58b318de4204d134ab98",
+      "size": 2563
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/DatePicker_themeresources.xaml",
+      "sha": "8d19f3001019aa7f14ab05ea9a182d201420294b",
+      "size": 29202
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/DateTimePickerFlyout_themeresources.xaml",
+      "sha": "78caa8f6766e699493eaeadb72e5cf27bfe943e5",
+      "size": 23122
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Deprecated_themeresources.xaml",
+      "sha": "41220302b8cedb941eb3e0f1ce5a813de9a3b8bc",
+      "size": 23056
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Deprecated_themeresources_any.xaml",
+      "sha": "ae2f5b2c238724c06b203b0086664a841fb478d5",
+      "size": 17462
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/FlipViewItem_themeresources.xaml",
+      "sha": "1ba7d04940b1da14bdd6533ddc3a0fe42b61df73",
+      "size": 2212
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/FlipView_themeresources.xaml",
+      "sha": "c9aa9048d624eb962393451b2501e4f9c37c12fc",
+      "size": 30069
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/FlyoutPresenter_themeresources.xaml",
+      "sha": "621bf7d16825ae37cdd0b0ad05b7b5a49ddcd4c4",
+      "size": 4254
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/GridViewItem_themeresources.xaml",
+      "sha": "a4ca9accccc27d9f0e7fdcfbddc2a5b8e306360d",
+      "size": 19789
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/HyperlinkButton_themeresources.xaml",
+      "sha": "93b5efd391803a229e63e55c315e5675fef4362e",
+      "size": 10537
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Hyperlink_themeresources.xaml",
+      "sha": "9755333d16e487361eb56d335d2190d4ed234610",
+      "size": 1640
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/InkToolbar_themeresources.xaml",
+      "sha": "52bdbc1ee3686ba8cab8d5d6228169b421ac1707",
+      "size": 136622
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ListBox_themeresources.xaml",
+      "sha": "df9ca8dfe48b7cd4487b24b4f7954c7a74e683f8",
+      "size": 19366
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ListViewItem_themeresources.xaml",
+      "sha": "b292e8fa9aa1f6024d16b8a5eb452e4427d45bda",
+      "size": 63908
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/MediaTransportControls_themeresources.xaml",
+      "sha": "701793b0b20ef45b95bb90695cc8b43f1102486b",
+      "size": 30528
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/MenuFlyout_themeresources.xaml",
+      "sha": "6f9f3fd322583d2d537dc30c439e62accf1efbd4",
+      "size": 91737
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/PasswordBox_themeresources.xaml",
+      "sha": "ec52d3f52cdda9002a858000b359ac5752c8eb22",
+      "size": 17742
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Pivot_themeresources.xaml",
+      "sha": "f7d9c7673be13474e4884fd19f0d64605ee3b68b",
+      "size": 50517
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/RadioButton_themeresources.xaml",
+      "sha": "223a28385186f36a4629d354928e5fb705ab10b3",
+      "size": 38385
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/RepeatButton_themeresources.xaml",
+      "sha": "80add1b94686ed1e408ce05afde9d02249b5e229",
+      "size": 13178
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/RichEditBox_themeresources.xaml",
+      "sha": "2fe5d6ca4d5413639e1c415652f9b6833c1af6d9",
+      "size": 9698
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ScrollBar_themeresources.xaml",
+      "sha": "6aaa54e2b229039c3021a0a0b2f4d7a3deaec517",
+      "size": 74478
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ScrollViewer_themeresources.xaml",
+      "sha": "800d5040a5e73c28b75c5c5d2f4af40c7a48256b",
+      "size": 15370
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/Slider_themeresources.xaml",
+      "sha": "3804392c5c54081dcc64a1c533812f9b07a4155d",
+      "size": 41406
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/TextBlock_themeresources.xaml",
+      "sha": "08cbcf9cc6a9146b7d192f1f294b949dd2841cfd",
+      "size": 3527
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/TextBox_themeresources.xaml",
+      "sha": "6934b646465eb602218f2ebf950268ac689ea33c",
+      "size": 31255
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/TextControlsCommon_themeresources.xaml",
+      "sha": "61aef55c8eb6cac334a714173048acecef757307",
+      "size": 529
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/TimePicker_themeresources.xaml",
+      "sha": "2cfb8a7df11925a858a9c877c0886c2ccc3231bf",
+      "size": 29127
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ToggleButton_themeresources.xaml",
+      "sha": "868646a15b5a5062046b1edcc003f44288793b52",
+      "size": 34580
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ToggleSwitch_themeresources.xaml",
+      "sha": "50f290fbe053170d943f390d78bb4f8d6ba48140",
+      "size": 51348
+    },
+    {
+      "path": "src/controls/dev/CommonStyles/ToolTip_themeresources.xaml",
+      "sha": "281d1efcf02c33f81b32fd04e2c691da9173a323",
+      "size": 5732
+    },
+    {
+      "path": "src/controls/dev/DropDownButton/DropDownButton_themeresources.xaml",
+      "sha": "c1e68023c2f729b36e83b7fc6b91ed7e0d2e97fe",
+      "size": 1700
+    },
+    {
+      "path": "src/controls/dev/Expander/Expander_themeresources.xaml",
+      "sha": "270447141f6f1a39ad7c3e570f0ac8ed3ccb0a8e",
+      "size": 44695
+    },
+    {
+      "path": "src/controls/dev/ImageIcon/ImageIcon_themeresources.xaml",
+      "sha": "50aab881e57c7cb332fd5a91f9a905cfdf9efd16",
+      "size": 352
+    },
+    {
+      "path": "src/controls/dev/InfoBadge/InfoBadge_themeresources.xaml",
+      "sha": "b09b56572ac8a2159bf9ba2dda7f063ec5460c6a",
+      "size": 9405
+    },
+    {
+      "path": "src/controls/dev/InfoBar/InfoBar_themeresources.xaml",
+      "sha": "1056af57d0340a7e9aa2d5f9e2f2f177b841897c",
+      "size": 8460
+    },
+    {
+      "path": "src/controls/dev/InkToolBar/InkToolBar_themeresources.xaml",
+      "sha": "540de01f30087f181ce2111c8e7a0ca8e2de7d53",
+      "size": 18565
+    },
+    {
+      "path": "src/controls/dev/ItemContainer/ItemContainer_themeresources.xaml",
+      "sha": "b56c1a0b4abbe42b77c8cd74e47e42a2d7e8a2a6",
+      "size": 12363
+    },
+    {
+      "path": "src/controls/dev/ItemsView/ItemsView_themeresources.xaml",
+      "sha": "a9381d8d76a4bb401ace5fce98bb63723873d02f",
+      "size": 537
+    },
+    {
+      "path": "src/controls/dev/Materials/Acrylic/AcrylicBrush_themeresources.xaml",
+      "sha": "146524c5c0af889168770279d389b25af8dcf4e7",
+      "size": 25216
+    },
+    {
+      "path": "src/controls/dev/Materials/Reveal/RevealBrush_themeresources.xaml",
+      "sha": "11414ceeff713c55cde70e78678503c75b861eaa",
+      "size": 268892
+    },
+    {
+      "path": "src/controls/dev/MenuBar/MenuBar_themeresources.xaml",
+      "sha": "96cf1b1e788a327c5c00e07af0e3fc3cbf23e40b",
+      "size": 4279
+    },
+    {
+      "path": "src/controls/dev/NavigationView/NavigationBackButton_themeresources.xaml",
+      "sha": "93ee8933c7f216ecd23a42e6ae54c9baccc93915",
+      "size": 1076
+    },
+    {
+      "path": "src/controls/dev/NavigationView/NavigationView_themeresources.xaml",
+      "sha": "aa3ff11b2c3128dd198d7140417594cfa6fe5c74",
+      "size": 89221
+    },
+    {
+      "path": "src/controls/dev/NumberBox/NumberBox_themeresources.xaml",
+      "sha": "3b532d4b76b2ac9f2d06c8c0d473fa7d8f9a32b2",
+      "size": 2826
+    },
+    {
+      "path": "src/controls/dev/PagerControl/PagerControl_themeresources.xaml",
+      "sha": "33a364a33dd5ab24d2c2c3f5b7c1f660d40951cc",
+      "size": 10901
+    },
+    {
+      "path": "src/controls/dev/PersonPicture/PersonPicture_themeresources.xaml",
+      "sha": "228efb45b2e22ae1d482304ecf9b2a6af1496011",
+      "size": 3948
+    },
+    {
+      "path": "src/controls/dev/PipsPager/PipsPager_themeresources.xaml",
+      "sha": "0d93a289b39a22b7e859a2ecea964575826e52f7",
+      "size": 26490
+    },
+    {
+      "path": "src/controls/dev/ProgressBar/ProgressBar_themeresources.xaml",
+      "sha": "f2cf8b8edbc50ab21d0f2d5f460f30b92d662a36",
+      "size": 2576
+    },
+    {
+      "path": "src/controls/dev/ProgressRing/ProgressRing_themeresources.xaml",
+      "sha": "f3fa38ea83ea910200a6a539140a379b128bbf94",
+      "size": 1392
+    },
+    {
+      "path": "src/controls/dev/PullToRefresh/RefreshContainer/RefreshContainer_themeresources.xaml",
+      "sha": "ddb712d13fc2f2903d63fcec5c26468f841debe4",
+      "size": 1147
+    },
+    {
+      "path": "src/controls/dev/PullToRefresh/RefreshVisualizer/RefreshVisualizer_themeresources.xaml",
+      "sha": "d0911158cf863b43cf7ed5b3220e86bb050dda80",
+      "size": 1123
+    },
+    {
+      "path": "src/controls/dev/RadioButtons/RadioButtons_themeresources.xaml",
+      "sha": "efbc00b43e516636dcbe421bd5f5640a64c9260a",
+      "size": 1506
+    },
+    {
+      "path": "src/controls/dev/RadioMenuFlyoutItem/RadioMenuFlyoutItem_themeresources.xaml",
+      "sha": "078fadf4058d7c6b269b335350a075d6c079ab03",
+      "size": 15660
+    },
+    {
+      "path": "src/controls/dev/RatingControl/RatingControl_themeresources.xaml",
+      "sha": "0d9fccdf29a38836bd89fabbc222f6605d104b59",
+      "size": 5218
+    },
+    {
+      "path": "src/controls/dev/ScrollView/ScrollView_themeresources.xaml",
+      "sha": "558330c59bd7e1fa177e9ddaa585d1e7e2ab55de",
+      "size": 1837
+    },
+    {
+      "path": "src/controls/dev/SelectorBar/SelectorBar_themeresources.xaml",
+      "sha": "194182902a7df8b134b1eeeda17c0bf354464c44",
+      "size": 9435
+    },
+    {
+      "path": "src/controls/dev/SplitButton/SplitButton_themeresources.xaml",
+      "sha": "e9601d1f29cd59aa5fe7b7f0ebb49ef9c836ac19",
+      "size": 28009
+    },
+    {
+      "path": "src/controls/dev/SplitView/SplitView_themeresources.xaml",
+      "sha": "84cc5a983fc6af7f8ea8466887692095471b6c23",
+      "size": 65395
+    },
+    {
+      "path": "src/controls/dev/SwipeControl/SwipeControl_themeresources.xaml",
+      "sha": "59422a941fa9c5cb2790b280725c31e9c5d5a881",
+      "size": 5355
+    },
+    {
+      "path": "src/controls/dev/TabView/TabView_themeresources.xaml",
+      "sha": "e4db61f8793560b59fa8390ade0a59cc9addeb13",
+      "size": 27195
+    },
+    {
+      "path": "src/controls/dev/TeachingTip/TeachingTip_themeresources.xaml",
+      "sha": "50cc6d2d6cb7648df90e21faa0cc9e6aa816a9bd",
+      "size": 15600
+    },
+    {
+      "path": "src/controls/dev/TitleBar/TitleBar_themeresources.xaml",
+      "sha": "b22068a7909c99426a1f1811e227db4ad11baa1c",
+      "size": 20431
+    },
+    {
+      "path": "src/controls/dev/TreeView/TreeView_themeresources.xaml",
+      "sha": "8e7a107255310706dda5e4e5ca6edf99b6b14eb9",
+      "size": 13028
+    },
+    {
+      "path": "src/controls/dev/dll/DensityStyles/Compact.xaml",
+      "sha": "c97f4fd38bd3f443b59b947ef17d6ee481fb694b",
+      "size": 1456
+    },
+    {
+      "path": "src/controls/dev/dll/DensityStyles/CompactDatePickerTimePickerFlyout.xaml",
+      "sha": "633966575d7ec00b82dc656c903789b350916bb5",
+      "size": 1160
+    }
+  ]
+}

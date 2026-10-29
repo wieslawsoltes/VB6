@@ -5,8 +5,8 @@
 Open **Tools > Options > General > Layout Extensions** and check **Enable XAML
 form authoring (this project)**. Confirm with OK and save the project. The single
 gate is `settings.xaml === true`; omitted, false and string values are disabled.
-It is independent of `settings.anchoring`. Grid/StackPanel lowering additionally
-requires the anchoring/automatic-layout extension.
+It is independent of `settings.anchoring`. Grid/StackPanel and Border child-layout
+lowering additionally require the anchoring/automatic-layout extension.
 
 With a form active, choose **View > XAML Source**, or the form designer's **XAML
 Source** context-menu command. The source opens in an ordinary MDI document tool.
@@ -113,12 +113,15 @@ host object writer supports extensible construction and explicit resource,
 binding/event/template hooks; these contracts are not a WinUI UI implementation.
 The VB6 adapter supports selected forms/containers/basic controls, scalar text,
 geometry, flags, colors, typography, conventional native event method names,
-static resources/styles and selected Grid/StackPanel layout metadata.
+scoped static/live theme resources, supported styles and selected
+Grid/StackPanel/Border layout metadata. The
+[WinUI XAML compatibility guide](WINUI-XAML-COMPATIBILITY.md) includes a verified
+example, control/style/brush tables, resource semantics and runtime ownership.
 WinUI dimensions convert at the existing 96-DPI convention (15 twips per DIP),
 font size at 0.75 points per DIP; native attributes do not undergo that conversion.
 
 Unsupported members, dynamic bindings/x:Bind execution, control/data templates,
-animations, arbitrary live theme resources, deferred loading, arbitrary handler forwarding,
+animations, unsupported live resource targets, deferred loading, arbitrary handler forwarding,
 unsupported control APIs and unlowered layout behavior are **diagnostics**. They
 are not discarded or replaced with blank controls. No XBF/WinMD compatibility,
 MSBuild integration, C#/C++ binding generation, complete WinUI type inventory,
@@ -129,29 +132,38 @@ of Microsoft's C# compiler sources.
 ### Static styles and resources
 
 Explicit/implicit/inline styles, `BasedOn`, base-class target compatibility, local
-value precedence and explicit `Style="{x:Null}"` suppression are supported.
+value precedence and explicit `Style="{x:Null}"` suppression of authored implicit
+styles are supported. With XamlControlsResources, the supported native theme
+style defaults remain beneath explicit styles and x:Null.
 Setters are converted to the consuming member's type. Implicit matching uses the
 resolved namespace/type identity, not an XML prefix spelling. Merged dictionaries
 are recursive: local keys win over merged dictionaries; later merged dictionaries
-win over earlier ones. Resource/setter evaluation retains declaration scope, so a
+win over earlier ones; then one selected ThemeDictionary is searched. Default is
+used when a requested dictionary is absent, not to fill missing keys in an
+existing named dictionary. Resource/setter evaluation retains declaration scope, so a
 consumer's resource shadow does not silently change an outer style. Cyclic
 resources/styles, missing keys, invalid conversions, incompatible targets and
-unsupported behavioral setters produce errors. Opaque solid brushes are supported;
-opacity/transforms are not silently discarded. External dictionary I/O, arbitrary
-theme dictionaries, triggers and template execution are not added by this static
-adapter. The supported macOS semantic-color bridge below retains live paint roles
-through the same resource/style resolver.
+unsupported behavioral setters produce errors. The WinUI bridge preserves solid
+brush alpha/opacity, supported axial gradients and live ThemeResource branches,
+including a nested live color inside a StaticResource brush. Arbitrary external
+dictionary I/O, unsupported brush transforms, triggers and template execution
+remain diagnostics; only the pinned allowlisted dictionary sources are loaded
+without I/O. See the [catalog](WINUI-RESOURCE-CATALOG.md) and
+[resource contract](WINUI-XAML-COMPATIBILITY.md#resource-dictionaries-and-theme-selection).
+The supported macOS semantic-color bridge below retains live paint roles through
+the same resource/style resolver.
 
 ### Layout and item collections
 
 Grid defaults to one row/column, with children in cell zero rather than native
-auto-placement. StackPanel defaults retain main-axis natural sizing, cross-axis
+auto-placement. A WinUI Border arranges its single child in an inner cell with
+padding and border insets. StackPanel defaults retain main-axis natural sizing, cross-axis
 fill and no flex shrink. Explicit fixed dimensions and supported Auto sizing,
 margin/container-padding thickness, cross-axis/grid alignment, gaps, tracks and
 cell/span metadata lower through the existing opt-in layout engine. Resource-backed
 row/column definitions use the consuming GridLength converter, including star,
 auto and pixel values. Negative
-margins/padding, unsupported content padding and unrepresentable alignment are
+margins/padding and unrepresentable alignment are
 diagnostics. These mappings do not implement every WinUI measure/arrange rule.
 
 ListBox/ComboBox accept string items and simple text-only item containers, initial
@@ -330,8 +342,10 @@ style, and a local role overrides a styled paint. Equal-precedence paint and
 role declarations are rejected instead of depending on attribute order.
 Unknown theme keys, dynamic binding shadows, opacity/transforms, semantic colors
 used as dimensions, or unimplemented live shape paints are diagnostics.
-Arbitrary `ThemeDictionaries` and user-defined dynamic resource engines remain
-outside the static VB6 target.
+For a macOS-root document, arbitrary `ThemeDictionaries` and user-defined dynamic
+resource engines remain outside this semantic-color bridge. WinUI-root documents
+support the scoped theme dictionaries described in the
+[WinUI compatibility guide](WINUI-XAML-COMPATIBILITY.md).
 
 An explicit `BackColor`/`ForeColor` edit relinquishes its semantic role, including
 when the new numeric color equals the previous fallback. Source synchronization

@@ -26,8 +26,10 @@ def main():
                 page.set_content('<!doctype html><title>VB6 language validation</title>')
                 page.add_script_tag(content=(ROOT/'dist/vb6-runtime.js').read_text())
             else:
-                page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
-                page.wait_for_function('typeof vb6Studio !== "undefined"')
+                # Initial standalone parsing has its own budget; compiler and
+                # runtime interactions retain the six-second action deadline.
+                page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text(),wait_until='domcontentloaded',timeout=60000)
+                page.wait_for_function('typeof vb6Studio !== "undefined"',timeout=60000)
             for fixture in fixtures:
                 start=time.perf_counter()
                 try:

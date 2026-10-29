@@ -147,21 +147,21 @@ entrypoint ownership among browser partitions.
 ## Appearance acceptance ownership
 
 The `integration-appearance` browser partition owns the IDE theme, application
-theme, native caption, macOS reference and WinUI suites. It runs independently
+theme, native caption, macOS reference, WinUI and WinUI3 XAML suites. It runs independently
 from the layout, diagnostics and export checks in `integration-authoring`, so
-those groups each receive the existing 15-minute job deadline. Both partitions
+those groups each receive the inherited 25-minute job deadline. Both partitions
 run on Chromium, Firefox and WebKit with the same browser setup and transport.
-Chromium and Firefox run all five scripts in one job. WebKit uses three
-whole-script owners to avoid accumulating all five durations against one job
+Chromium and Firefox run all six scripts in one job. WebKit uses three
+whole-script owners to avoid accumulating all six durations against one job
 deadline:
 
 | WebKit shard | Complete scripts |
 | --- | --- |
 | 1 | IDE theme and native captions |
-| 2 | Application theme |
+| 2 | Application theme and WinUI3 XAML |
 | 3 | macOS reference and WinUI |
 
-All five appearance scripts and every existing assertion retain coverage under
+All six appearance scripts and every existing assertion retain coverage under
 the required `test` gate. The fixed assignment must exactly match `suites.json`:
 missing, extra, duplicate or empty ownership fails validation. Each child runs
 its original complete test inventory with no case-shard environment. The

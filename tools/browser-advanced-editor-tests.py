@@ -40,6 +40,8 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.addCleanup(self.close_context)
         self.context.set_default_timeout(15000)
         self.page=self.context.new_page();self.page.on('pageerror',lambda e:(self.errors.append(str(e)),self.errorStacks.append(e.stack)));self.page.on('request',lambda r:self.requests.append(r.url))
+        # WebKit's standalone load event can outlast the installed editor API.
+        # Bound startup separately while preserving the 15-second action deadline.
         if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text())
         elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit')
         else:self.page.goto(self.base+'/dist/index.html')

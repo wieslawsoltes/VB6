@@ -40,7 +40,8 @@
     "browser-application-theme-tests.py",
     "browser-native-caption-tests.py",
     "browser-macos-reference-tests.py",
-    "browser-winui-tests.py"
+    "browser-winui-tests.py",
+    "browser-winui3-tests.py"
   ],
   "intelligent-ui": [
     "intelligent-ui-browser-tests.py",

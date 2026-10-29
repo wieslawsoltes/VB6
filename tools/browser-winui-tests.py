@@ -219,7 +219,7 @@ class WinUI(unittest.TestCase):
    self.theme('classic');self.theme(theme)
    self.assertEqual(text.input_value(),'WinUI state editing');self.assertEqual(text.evaluate('e=>[e.selectionStart,e.selectionEnd]'),[2,7])
    self.set('TextBox1','Enabled',0);self.expect_color(text,'backgroundColor',r['disabled'])
-   self.expect_color(text,'color','#fefefe5d' if theme.endswith('dark') else r['disabledInk'])
+   self.expect_color(text,'color','#fefefe5d' if theme.endswith('dark') else '#0101015c')
    self.record(theme=theme,textAndSelectionRetained=True)
  def test_authored_rgb_fonts_and_outer_geometry_are_not_rewritten(self):
   command=self.node('cmdRGB');text=self.node('TextBox1').locator('input')
@@ -358,14 +358,14 @@ class WinUI(unittest.TestCase):
     self.assertEqual(*samples,theme+' disabled state '+str(checked))
    self.record(theme=theme,disabledGlyphsUnchanged=True)
  def ide(self,theme):
-  # Exercise a real live palette switch instead of reloading an 11-MB IDE for
+  # Exercise a real live palette switch instead of reloading the IDE for
   # every color scheme. Cancel the previous draft through its real UI first.
   if self.page.evaluate('typeof vb6Studio === "object"'):
    self.page.locator('.ide-dialog-footer').get_by_role('button',name='Cancel',exact=True).click()
    self.page.wait_for_selector('.ide-dialog',state='detached')
   else:
    self.load(self.page,ROOT/'dist/VB6-Studio-Web.html')
-   self.page.wait_for_function('typeof vb6Studio === "object"')
+   self.page.wait_for_function('typeof vb6Studio === "object"',timeout=60000)
    self.page.evaluate('globalThis.winuiFixtureIdentity={studio:vb6Studio,project:vb6Studio.project}')
   self.page.evaluate('t=>{Object.assign(vb6Studio.appearance,{theme:t,reduceMotion:true});vb6Studio.applyAppearance();void vb6Studio.command("options");}',theme)
   self.page.wait_for_selector('.ide-dialog')

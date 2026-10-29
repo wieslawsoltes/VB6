@@ -124,10 +124,12 @@
     "test:macos:theme:browser": "python tools/browser-macos-reference-tests.py",
     "test:macos:theme:comparison": "python tools/browser-macos-reference-tests.py --native-dir reports/macos-theme-reference",
     "test:macos:theme:exact": "python tools/browser-macos-reference-tests.py --native-dir reports/macos-theme-reference --require-exact",
-    "test:winui": "node --test tests/winui-theme.test.mjs",
+    "test:winui": "node --test tests/winui*.test.mjs",
     "test:winui:browser": "python tools/browser-winui-tests.py",
     "test:graphics": "node --test tests/graphics-*.test.mjs tests/language-graphics-statements.test.mjs tests/native-surface.test.mjs",
-    "test:graphics:browser": "python tools/browser-graphics-tests.py"
+    "test:graphics:browser": "python tools/browser-graphics-tests.py",
+    "test:winui:compat:browser": "python tools/browser-winui3-tests.py",
+    "import:winui": "node tools/import-winui3-resources.mjs"
   },
   "engines": {
     "node": ">=22"

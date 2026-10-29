@@ -221,7 +221,8 @@ jobs:
   browser:
     name: Browser (${{ matrix.suite }}, ${{ matrix.browser }}${{ matrix.shard && format(', shard {0}/3', matrix.shard) || '' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Full mixed-origin project authoring and appearance suites stay exhaustive.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -289,7 +290,8 @@ jobs:
   figma:
     name: Figma (${{ matrix.suite }}, ${{ matrix.browser }}, ${{ matrix.transport }}${{ matrix.shard && format(', shard {0}/3', matrix.shard) || '' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The 43-case WebKit/file authoring partition takes about 25 minutes.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -436,7 +438,8 @@ jobs:
   advanced-editor:
     name: Advanced editor (${{ matrix.browser }}${{ matrix.shard && format(', shard {0}/3', matrix.shard) || '' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Every editor case runs through both real origins in the same job.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

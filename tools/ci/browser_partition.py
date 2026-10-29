@@ -13,10 +13,11 @@ SHARDED_CELLS = {
     ('advanced-editor', 'webkit', 'file'),
 }
 # Keep every appearance entrypoint intact; the complete WebKit batch approached
-# the job deadline even though all five scripts passed their process deadlines.
+# the job deadline even though each script passed its process deadline.
+# WinUI3 joins the application-theme owner; both scripts keep their full cases.
 APPEARANCE_SCRIPT_SHARDS = {
     '1': ('browser-theme-tests.py', 'browser-native-caption-tests.py'),
-    '2': ('browser-application-theme-tests.py',),
+    '2': ('browser-application-theme-tests.py', 'browser-winui3-tests.py'),
     '3': ('browser-macos-reference-tests.py', 'browser-winui-tests.py'),
 }
 

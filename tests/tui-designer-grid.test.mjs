@@ -182,14 +182,18 @@ test('GPU grid vertices use rectangular pitch and invalidate when only the verti
 });
 
 test('retained Canvas grid tiles and cache keys use both axes without an area-sized point loop', () => {
-  const tiles = [], fills = [];
+  const tiles = [], fills = [], states = [];
   const document = {createElement() {
-    const context = {setTransform() {}, clearRect() {}, fillRect(...args) {fills.push(args);}, createPattern(canvas) {tiles.push([canvas.width, canvas.height]); return {};}};
+    const stack = []; states.push(stack);
+    const context = {fillStyle: '#000000', globalAlpha: 1, globalCompositeOperation: 'source-over',
+      save() {stack.push({fillStyle: this.fillStyle, globalAlpha: this.globalAlpha, globalCompositeOperation: this.globalCompositeOperation});},
+      restore() {const state = stack.pop(); if (state) Object.assign(this, state);},
+      setTransform() {}, clearRect() {}, fillRect(...args) {fills.push(args);}, createPattern(canvas) {tiles.push([canvas.width, canvas.height]); return {};}};
     return {width: 0, height: 0, getContext() {return context;}};
   }};
   const cache = new RasterCache(document), s = surface();
   cache.render(s); assert.deepEqual(tiles, [[8, 16]]); assert.equal(cache.rebuilds, 1);
   cache.render(s); assert.equal(cache.rebuilds, 1);
   s.setGrid(8, 24); cache.render(s); assert.deepEqual(tiles, [[8, 16], [8, 24]]); assert.equal(cache.rebuilds, 2);
-  assert.ok(fills.length < 10); cache.dispose();
+  assert.ok(fills.length < 10); assert.ok(states.every(stack => stack.length === 0)); cache.dispose();
 });

@@ -1,5 +1,6 @@
 import {XAML_NS,PRESENTATION_NS,XML_NS,XMLNS_NS,MC_NS,DESIGN_NS,SourceText,diagnostic,qualifiedName,isXmlName,validXmlChar,xmlSpace,decodeXml,escapeXml,parseXaml,parseMarkupExtension,walkElements,applyTextEdits} from './syntax.js';
-import {XamlSchemaContext,createWinUISchema,convertValue,safeMember} from './schema.js';
+import {XamlSchemaContext,createWinUISchema,convertValue,safeMember,WINUI_CONTROLS_NS} from './schema.js';
+export {WINUI_CONTROLS_NS};
 import {parseBindingPath,evaluateBindingPath,assignBindingPath,bindingDependencies} from './binding.js';
 import {compileXaml,emitXamlModule} from './compiler.js';
 import {instantiateXaml,createObjectHost} from './runtime.js';
