@@ -6,6 +6,8 @@ Independent suites continue after failure. Cancellation stops the child process
 """
 from __future__ import annotations
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,6 +17,8 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
+import case_shard
 
 ROOT = Path(__file__).resolve().parents[2]
 ENGINES = ('chromium', 'firefox', 'webkit')
@@ -72,7 +76,15 @@ def plan(group, engine, transport, root=ROOT):
                 argv += ['--browser', engine, '--origin', origin]
             if engine == 'firefox' and script == 'figma-retained-webgl-browser-tests.py':
                 argv = ['xvfb-run', '-a', '-s', '-screen 0 1920x1200x24', *argv]
-            result.append({'script': script, 'transport': origin, 'argv': argv})
+            task = {'script': script, 'transport': origin, 'argv': argv}
+            # Preserve the existing script/job budgets and all original test
+            # methods. Only these measured cumulative WebKit workloads need
+            # two isolated processes; every other invocation stays unchanged.
+            if engine == 'webkit' and origin != 'memory' and (
+                    script == 'native-project-browser-tests.py' or
+                    (script == 'figma-services-browser-tests.py' and origin == 'file')):
+                task['caseShards'] = 2
+            result.append(task)
     return result
 
 
@@ -144,6 +156,63 @@ def execute(task, root, env, log, timeout, cancelled):
             'seconds': round(time.monotonic() - start, 3)}
 
 
+def execute_case_shards(task, root, env, log, timeout, cancelled, execute_fn=execute):
+    """Bounded parallelism within one owned suite, with complete-case admission."""
+    count = task.get('caseShards')
+    if type(count) is not int or count != 2 or task['script'] not in case_shard.REPORT_BINDINGS:
+        raise ValueError('Only the two declared browser suites may use two case workers')
+    if task['argv'] != [sys.executable, str(root / 'tools' / task['script'])]:
+        raise ValueError('Case workers cannot discard original command-line arguments')
+    execution_id = uuid.uuid4().hex
+    start = time.monotonic()
+    source_sha = hashlib.sha256((root / 'tools' / task['script']).read_bytes()).hexdigest()
+    records = []
+    pool = ThreadPoolExecutor(max_workers=count, thread_name_prefix='vb6-browser-cases')
+
+    def worker(index):
+        evidence = log.with_name(f'{log.stem}-case-{index}-of-{count}.json')
+        child_log = evidence.with_suffix('.log')
+        child = {**task, 'argv': [sys.executable, str(root / 'tools/ci/case_shard.py'),
+                 '--script', task['script'], '--index', str(index), '--count', str(count),
+                 '--evidence', str(evidence), '--execution-id', execution_id]}
+        record = {'index': index, 'count': count, 'log': child_log.name,
+                  'evidence': evidence.name, 'timeoutSeconds': timeout}
+        if cancelled.is_set():
+            return {**record, 'status': 'cancelled', 'exitCode': None, 'seconds': 0}
+        try:
+            return {**record, **execute_fn(child, root, env, child_log, timeout, cancelled)}
+        except Exception as error:
+            return {**record, 'status': 'failed', 'exitCode': None, 'error': str(error)}
+
+    try:
+        futures = [pool.submit(worker, index) for index in range(1, count + 1)]
+        records = [future.result() for future in futures]
+    except BaseException:
+        cancelled.set()
+        raise
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    result = {'status': 'failed', 'exitCode': 1, 'error': None,
+              'seconds': round(time.monotonic() - start, 3), 'shards': records}
+    if cancelled.is_set() or any(record['status'] == 'cancelled' for record in records):
+        result['status'] = 'cancelled'
+    elif any(record['status'] == 'timed_out' for record in records):
+        result['status'] = 'timed_out'
+    elif all(record['status'] == 'passed' and record.get('exitCode') == 0 for record in records):
+        try:
+            evidence = [json.loads((log.parent / record['evidence']).read_text()) for record in records]
+            result['caseCoverage'] = case_shard.validate_evidence(
+                evidence, task['script'], count, execution_id, source_sha,
+                env['VB6_BROWSER'], env['VB6_TEST_TRANSPORT'])
+            result.update(status='passed', exitCode=0)
+        except Exception as error:
+            result['error'] = 'Case coverage admission failed: ' + str(error)
+    log.write_text(json.dumps(result, indent=2) + '\n')
+    if result['error']:
+        print(result['error'], flush=True)
+    return result
+
+
 def run_batch(tasks, root, engine, report, timeout=None, cancelled=None, execute_fn=execute):
     if not tasks:
         raise ValueError('An empty batch cannot pass')
@@ -168,7 +237,10 @@ def run_batch(tasks, root, engine, report, timeout=None, cancelled=None, execute
         env = {**os.environ, 'VB6_BROWSER': engine, 'VB6_TEST_TRANSPORT': task['transport'],
                'PYTHONUNBUFFERED': '1'}
         try:
-            record.update(execute_fn(task, root, env, log, deadline, cancelled))
+            if task.get('caseShards'):
+                record.update(execute_case_shards(task, root, env, log, deadline, cancelled, execute_fn))
+            else:
+                record.update(execute_fn(task, root, env, log, deadline, cancelled))
         except Exception as failure:
             record.update(status='failed', error=str(failure))
         finally:

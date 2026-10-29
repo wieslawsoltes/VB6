@@ -244,7 +244,11 @@ class ServicesAssets(base.FigmaWorkspace):
     @unittest.skipIf(base.TRANSPORT=='memory','Opaque memory origin does not qualify local preference persistence')
     def test_service_dock_profiles_reload_without_authority_or_eager_connection(self):
         self.enable();self.page.get_by_role('button',name='Agent',exact=True).click()
-        self.page.evaluate('vb6Studio.persist()');self.page.reload();self.page.wait_for_function('vb6Studio?.figmaMode?.enabled')
+        self.page.evaluate('vb6Studio.persist()')
+        # Reload is another standalone IDE boot, not an eight-second widget
+        # interaction. Keep the same real origin and require restored state.
+        self.page.reload(wait_until='commit',timeout=base.IDE_STARTUP_TIMEOUT_MS)
+        self.page.wait_for_function('vb6Studio?.figmaMode?.enabled',polling=100,timeout=base.IDE_STARTUP_TIMEOUT_MS)
         self.page.get_by_role('button',name='Agent',exact=True).click()
         expect(self.page.get_by_label('Agent task',exact=True)).to_be_visible()
         self.assertFalse(self.page.evaluate('vb6Studio.mcp.adapter.enabled'))
