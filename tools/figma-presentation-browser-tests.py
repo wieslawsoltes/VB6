@@ -50,8 +50,31 @@ class FigmaPresentation(base.FigmaWorkspace):
         (REPORT/(label+'.json')).write_text(json.dumps({'expected':expected,'actual':actual,'points':probes,'renderer':stats,'evidence':evidence},indent=2))
         self.assertEqual(stats['active'],backend,'The visual guard must retain the qualified backend')
         if actual!=expected:
-            self.capture_failed_webgl_frame(probes,label)
+            if backend=='canvas2d':self.capture_failed_canvas_frame(probes,label)
+            else:self.capture_failed_webgl_frame(probes,label)
         self.assertEqual(actual,expected,'Native DOM and retained paint must publish the same workspace scheme')
+    def capture_failed_canvas_frame(self,probes,label):
+        """Read the original Canvas2D backing store only after screenshot failure.
+        Never repaint, replace the canvas, or use readback to change the verdict.
+        """
+        try:
+            result=self.page.evaluate(r'''points=>{
+              const r=vb6Studio.rendering,p=r.driver,ctx=p?.context;
+              if(!ctx?.getImageData)return {unavailable:'The failed frame is not Canvas2D'};
+              const canvas=p.canvas,box=canvas.getBoundingClientRect(),scene=r.retained.scene,before=r.getStats();
+              const pixels=Object.fromEntries(Object.entries(points).map(([name,point])=>{
+                const x=Math.floor((point.x-box.x)*canvas.width/box.width),y=Math.floor((point.y-box.y)*canvas.height/box.height);
+                return [name,{x,y,rgba:[...ctx.getImageData(x,y,1,1).data]}];
+              }));
+              return {originalFrameOnly:true,currentCanvas:canvas===r.canvas,bufferSize:[canvas.width,canvas.height],
+                rect:[box.x,box.y,box.width,box.height],sceneSize:[scene.width,scene.height,scene.dpr],
+                contextLost:ctx.isContextLost?.()||false,rendererFrames:r.metrics.frames,painterFrames:p.stats.frames,
+                pixels,before,after:r.getStats()};
+            }''',probes)
+            (REPORT/(label+'-canvas-diagnostic.json')).write_text(json.dumps(result,indent=2))
+        except Exception as error:
+            (REPORT/(label+'-canvas-diagnostic-error.txt')).write_text(str(error))
+
     def capture_failed_webgl_frame(self,probes,label):
         """Post-failure diagnostics only. The original pixels/verdict are retained.
         Readback and diagnostic redraws must never qualify a failing screenshot.

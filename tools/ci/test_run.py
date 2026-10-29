@@ -27,6 +27,43 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(first+second,run.plan('figma',engine,origin))
                 self.assertEqual(len(first),5)
                 self.assertEqual(len(second),3)
+    def test_process_deadlines_are_scoped_to_measured_standalone_suites(self):
+        expected={
+            ('webkit','file','figma-browser-tests.py'):900,
+            ('webkit','file','figma-editor-browser-tests.py'):900,
+            ('webkit','file','figma-services-browser-tests.py'):900,
+            ('webkit','http','native-project-browser-tests.py'):1200,
+            ('webkit','file','native-project-browser-tests.py'):1200,
+            ('webkit','file','browser-advanced-editor-tests.py'):1200,
+        }
+        scripts=sorted({script for group in json.loads((run.ROOT/'tools/ci/suites.json').read_text()).values() for script in group})
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d)
+            for engine in run.ENGINES:
+                for origin in ('http','file','memory'):
+                    tasks=[{**self.task(''), 'script':script, 'transport':origin} for script in scripts]
+                    observed=[]
+                    def execute(task,root,env,log,timeout,cancelled):
+                        observed.append(timeout)
+                        return {'status':'passed','exitCode':0,'seconds':0}
+                    result=run.run_batch(tasks,root,engine,root/(engine+'-'+origin),execute_fn=execute)
+                    deadlines=[expected.get((engine,origin,script),480) for script in scripts]
+                    self.assertTrue(result['passed'])
+                    self.assertEqual(observed,deadlines,(engine,origin))
+                    self.assertEqual([r['timeoutSeconds'] for r in result['cases']],deadlines)
+    def test_explicit_short_deadline_is_preserved_for_standalone_suites(self):
+        tasks=[{**self.task(''), 'script':script, 'transport':origin} for origin,script in [
+            ('file','figma-browser-tests.py'),('file','figma-editor-browser-tests.py'),
+            ('file','figma-services-browser-tests.py'),
+            ('http','native-project-browser-tests.py'),('file','native-project-browser-tests.py'),
+            ('file','browser-advanced-editor-tests.py')]]
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d);observed=[]
+            def execute(task,root,env,log,timeout,cancelled):
+                observed.append(timeout)
+                return {'status':'passed','exitCode':0,'seconds':0}
+            result=run.run_batch(tasks,root,'webkit',root/'report',timeout=2,execute_fn=execute)
+            self.assertTrue(result['passed']);self.assertEqual(observed,[2]*len(tasks))
     def test_invalid_arguments_fail_closed(self):
         for args in [('unknown','chromium','http'),('../figma','chromium','http'),('figma','chrome','http'),('figma','webkit','https://remote')]:
             with self.assertRaises(ValueError):run.plan(*args)

@@ -59,6 +59,7 @@ class BrowserWindows(unittest.TestCase):
 
     def setUp(self):
         self.context = self.browser.new_context(viewport={'width': 1440, 'height': 1000})
+        self.addCleanup(self.context.close)
         self.context.set_default_timeout(6000)
         self.errors = []
         self.trace = []
@@ -77,14 +78,13 @@ class BrowserWindows(unittest.TestCase):
     def wait_for_ide(self, page):
         # WebKit can keep a large inline file document in "loading" after the
         # application is usable. Require the actual IDE API and rendered shell.
-        page.wait_for_function('typeof vb6Studio === "object" && vb6Studio.root?.isConnected && typeof vb6Studio.browserWindows?.detach === "function" && !!document.querySelector(".ide-shell")',
+        page.wait_for_function('typeof vb6Studio === "object" && vb6Studio.root?.isConnected && typeof vb6Studio.command === "function" && typeof vb6Studio.browserWindows?.detach === "function" && !!document.querySelector(".ide-shell")',
                                polling=100, timeout=IDE_STARTUP_TIMEOUT_MS)
 
     def tearDown(self):
         if self.trace:
             (REPORT / (self._testMethodName + '.json')).write_text(json.dumps(self.trace, indent=2))
         errors = self.errors[:]
-        self.context.close()
         self.assertEqual(errors, [], 'Uncaught page errors')
 
     def closing_action(self, popup, action):

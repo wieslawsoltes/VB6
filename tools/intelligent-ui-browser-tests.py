@@ -36,11 +36,17 @@ def load(browser, mode):
     page.set_default_timeout(12000)
     page._errors = []
     page.on('pageerror', lambda e: page._errors.append(str(e)))
-    if mode == 'opaque': page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text(), wait_until='domcontentloaded')
-    elif mode == 'file': page.goto((ROOT / 'dist/VB6-Studio-Web.html').as_uri())
-    else: page.goto(base + ('/index.html' if mode == 'modules' else '/VB6-Studio-Web.html'))
-    page.wait_for_function('!!globalThis.vb6Studio?.intelligentUI')
-    return page
+    try:
+        # WebKit can leave standalone load pending after the IDE is usable.
+        # Bound startup separately; subsequent actions retain the 12s deadline.
+        if mode == 'opaque': page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text(), wait_until='domcontentloaded', timeout=60000)
+        elif mode == 'file': page.goto((ROOT / 'dist/VB6-Studio-Web.html').as_uri(), wait_until='commit', timeout=60000)
+        else: page.goto(base + ('/index.html' if mode == 'modules' else '/VB6-Studio-Web.html'), wait_until='commit', timeout=60000)
+        page.wait_for_function('!!globalThis.vb6Studio?.intelligentUI', timeout=60000)
+        return page
+    except Exception:
+        page.close()
+        raise
 
 def ide_cases(browser, mode):
     page = load(browser, mode)

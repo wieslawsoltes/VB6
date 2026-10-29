@@ -18,9 +18,13 @@ def boot(runtime=False):
     p=BROWSER.new_page(viewport={'width':1440,'height':960});p.set_default_timeout(6500);p._errors=[];p._requests=[]
     p.on('pageerror',lambda e:p._errors.append(str(e)))
     p.on('request',lambda r:p._requests.append(r.url) if r.url.startswith(('http:','https:')) else None)
-    p.set_content(MDI if runtime else HTML)
-    if runtime:p.wait_for_function('!!globalThis.vb6Application?.vm && vb6Application.forms.filter(f=>f.shown).length===3')
-    else:p.wait_for_function('!!globalThis.vb6Studio?.openResourceEditor')
+    if runtime:
+        p.set_content(MDI)
+        p.wait_for_function('!!globalThis.vb6Application?.vm && vb6Application.forms.filter(f=>f.shown).length===3')
+    else:
+        # Full IDE parsing is separate from the runtime/action deadline.
+        p.set_content(HTML,wait_until='domcontentloaded',timeout=60000)
+        p.wait_for_function('!!globalThis.vb6Studio?.openResourceEditor',timeout=60000)
     return p
 
 def case(name,fn,runtime=False):

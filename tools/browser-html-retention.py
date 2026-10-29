@@ -38,10 +38,12 @@ def page_for(html=None,dpr=1):
     page=browser.new_page(viewport={'width':1280,'height':800},device_scale_factor=dpr)
     page.set_default_timeout(12000)
     page.on('pageerror',lambda error:ERRORS.append(str(error)))
-    page.set_content(html or '<!doctype html><meta charset="utf-8"><style>'+CSS+'</style><body></body>')
+    # Only full IDE documents need the separate startup budget; small fixtures keep 12 seconds.
+    startup = {'wait_until':'domcontentloaded','timeout':60000} if html is not None else {}
+    page.set_content(html or '<!doctype html><meta charset="utf-8"><style>'+CSS+'</style><body></body>', **startup)
     if html is None: page.add_script_tag(content=BUNDLE)
     else:
-        page.wait_for_function('window.vb6Studio')
+        page.wait_for_function('window.vb6Studio', timeout=60000)
         page.evaluate('async()=>{await vb6Studio.setRenderingPolicy?.({backend:"html"});}')
     return page
 

@@ -86,9 +86,10 @@ with sync_playwright() as pw:
                 return success();
               };
             }''', {'token':TOKEN,'binary':base64.b64encode(BINARY).decode(),'sha256':hashlib.sha256(BINARY).hexdigest()})
-            page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
-        else: page.goto(ORIGIN+'/')
-        page.wait_for_function('!!globalThis.vb6Studio?.classicExportInstalled')
+            page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text(), wait_until='domcontentloaded', timeout=60000)
+        else: page.goto(ORIGIN+'/', wait_until='commit', timeout=60000)
+        # The installed export API is the startup oracle; feature actions keep 20 seconds.
+        page.wait_for_function('!!globalThis.vb6Studio?.classicExportInstalled', timeout=60000)
         def save_archive(label, source_page=page):
             snapshot=source_page.evaluate('JSON.stringify(vb6Studio.project)')
             source_page.evaluate('void vb6Studio.command("exportClassic")')
@@ -186,8 +187,8 @@ with sync_playwright() as pw:
         if not MEMORY:
             local=browser.new_page(accept_downloads=True,viewport={'width':1440,'height':1050})
             local.on('pageerror',lambda error: errors.append(str(error)))
-            local.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri())
-            local.wait_for_function('!!globalThis.vb6Studio?.classicExportInstalled')
+            local.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri(), wait_until='commit', timeout=60000)
+            local.wait_for_function('!!globalThis.vb6Studio?.classicExportInstalled', timeout=60000)
             save_archive('file-starter',local)
             local.get_by_role('button',name='Cancel',exact=True).click()
             local.evaluate('vb6Studio.loadProject(VB6StudioAPI.newProject("FileArchive"))')

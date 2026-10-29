@@ -34,10 +34,12 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.started=time.perf_counter();self.errors=[];self.errorStacks=[];self.requests=[];self.passed=False
         self.context=self.browser.new_context(viewport={'width':1500,'height':1000});self.context.set_default_timeout(15000)
         self.page=self.context.new_page();self.page.on('pageerror',lambda e:(self.errors.append(str(e)),self.errorStacks.append(e.stack)));self.page.on('request',lambda r:self.requests.append(r.url))
+        # WebKit's standalone load event can outlast the installed editor API.
+        # Bound startup separately while preserving the 15-second action deadline.
         if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text())
-        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri())
-        else:self.page.goto(self.base+'/dist/index.html')
-        self.page.wait_for_function('globalThis.vb6Studio?.advancedEditor');self.page.evaluate(FIXTURE)
+        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit',timeout=60000)
+        else:self.page.goto(self.base+'/dist/index.html',wait_until='commit',timeout=60000)
+        self.page.wait_for_function('globalThis.vb6Studio?.advancedEditor',timeout=60000);self.page.evaluate(FIXTURE)
     def tearDown(self):
         self.results.append({'name':self._testMethodName,'passed':self.passed and not self.errors,'pageErrors':self.errors,'pageErrorStacks':self.errorStacks,'milliseconds':round((time.perf_counter()-self.started)*1000,2)})
         if not self.passed:self.page.screenshot(path=str(REPORT/(self._testMethodName+'.png')))
