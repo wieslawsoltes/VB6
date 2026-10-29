@@ -1,0 +1,53 @@
+name: PR159 WebKit context confirmation
+on:
+  push:
+    branches: [test/pr159-webkit-context-confirmation]
+permissions:
+  contents: read
+jobs:
+  confirm:
+    name: Confirm (${{ matrix.variant }}, ${{ matrix.origin }}, ${{ matrix.replica }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, readback-context]
+        origin: [http, file]
+        replica: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-browser
+        with:
+          browser: webkit
+          profile: authoring
+          mesa: 'false'
+      - name: Reuse the exact experiment, not a relaxed acceptance test
+        env:
+          VB6_BROWSER: webkit
+          VB6_TEST_TRANSPORT: ${{ matrix.origin }}
+          PROBE_VARIANT: ${{ matrix.variant }}
+          PROBE_REPLICA: ${{ matrix.replica }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/webkit-probe
+          git rev-parse HEAD HEAD^{tree} > reports/webkit-probe/revision.txt
+          printf '%s\n' "$PROBE_REPLICA" > reports/webkit-probe/replica.txt
+          python - <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+          workflow = Path('.github/workflows/pr159-webkit-probe.yml').read_text()
+          source = workflow.split("cat > tools/pr159-webkit-probe.py <<'PY'\n", 1)[1].split('\n          PY\n', 1)[0]
+          Path('tools/pr159-webkit-probe.py').write_text(dedent(source)+'\n')
+          PY
+          timeout 480s python tools/pr159-webkit-probe.py 2>&1 | tee reports/webkit-probe/transcript.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr159-confirm-${{ matrix.variant }}-${{ matrix.origin }}-${{ matrix.replica }}
+          path: reports/webkit-probe
+          if-no-files-found: error
+          retention-days: 7
