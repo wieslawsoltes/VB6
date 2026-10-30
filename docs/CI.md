@@ -27,7 +27,7 @@ Chromium, Firefox and WebKit. Each Figma engine/origin is further split into thr
 explicit, disjoint script owners: **figma-workspace** (the workspace suite's 22
 independent IDE fixtures), **figma-authoring** (four editor, navigation and
 presentation suites) and **figma-services** (three keyboard, Agent/MCP, Assets and
-state suites). Each partition has its own runner and the same bounded 15-minute
+state suites). Each partition has its own runner and the same bounded 30-minute
 job deadline. The combined `figma` CLI alias still runs all eight scripts locally
 in their original order.
 Unique artifact names include partition, engine and origin. Only the Firefox
@@ -41,7 +41,7 @@ passed to twelve jobs: three engines, two real origins and two disjoint script
 owners. **advanced-editor-core** runs the 31 Monaco acceptance cases;
 **advanced-editor-integration** runs the 25 Vim, four TUI and one Figma cases.
 Every engine still runs all 61 cases on each origin against the real shared model,
-with the optional editor enabled. Each partition retains the 20-minute job limit,
+with the optional editor enabled. Each partition retains the 30-minute job limit,
 and artifact names include partition, engine and origin. The combined
 `advanced-editor` CLI alias still runs all four scripts on both origins in their
 original order. Agent transcript and Code GPU qualification share the existing renderer
@@ -73,13 +73,12 @@ summary, alongside the original screenshots and reports. Matrix-specific
 artifact names avoid collisions.
 
 Ordinary script processes have a 480-second deadline. WebKit's native-project
-suite and its standalone-file Figma workspace suite have a 720-second process
-deadline because their repeated independent IDE boots can outlast the ordinary
-budget while cases continue passing. Other Figma origins and browsers retain
-480 seconds. Only the WebKit/file Monaco and Vim scripts receive a 900-second
-process deadline. Explicit caller limits take precedence, and `timeoutSeconds`
-in each timing record identifies the effective bound. Scheduling changes leave
-the scripts' interaction and startup deadlines intact.
+suite on HTTP/file and its standalone-file Monaco suite receive 1,200 seconds.
+WebKit/file Figma workspace, editor, services and Vim receive 900 seconds;
+WebKit application appearance receives 900 seconds on both real origins.
+Explicit caller limits take precedence, and `timeoutSeconds` in each timing
+record identifies the effective bound. Scheduling changes leave the scripts'
+interaction and startup deadlines intact.
 
 The advanced-editor partition sizing uses a conditional timing estimate. In
 [run 40769315828](https://github.com/wieslawsoltes/VB6/actions/runs/40769315828),
@@ -160,7 +159,32 @@ checks and real subprocess failure/cancellation regressions. Local
 memory-mode results are not HTTP/file-origin or WebKit qualification; that
 requires the normal complete CI run for the exact published revision.
 
+## Screenshot command recovery
+
+Agent-transcript captures require three consecutive identical images, independently
+of the expected reference, within the original twelve-attempt limit. A single
+Playwright screenshot-command timeout may be retried on the same page, with the
+same renderer, viewport and unmodified caret. That retry discards all pre-timeout
+stability and must obtain three fresh consecutive images. A second timeout,
+readiness failure, backend change or non-timeout browser error fails immediately.
+Pixel mismatches are never retried, references are never updated, and GPU
+requirements are unchanged. Per-capture JSON preserves timeouts, sample hashes
+and the acceptance result even on failure; a failed rerun removes old accepted
+images. These transport checks run through the required Node test discovery.
+
+The primitive presentation oracle uses the same reference-independent helper as
+whole-IDE rendering, with the existing 256x128 clip and the low-level painter’s
+actual name as its backend identity. Its three stable presentation captures must
+finish before any diagnostic framebuffer readback; recovery never replays the
+scene or uses readback to repair a screenshot. Both blank presentation with a
+correct framebuffer and incorrect readback with correct presentation still fail.
+
 ## Publication boundary
+
+A skipped Pages run after failed **Validate** is an intentional publication
+block, not a successful deployment. Fix and validate current `main`; the
+successful push validation triggers Pages automatically. Do not bypass the gate
+or redeploy an older successful revision to hide current failures.
 
 Pages accepts only successful **Validate** pushes to this repository's current
 `main`. It checks the event, repository and exact SHA, then rebuilds that source
@@ -240,7 +264,7 @@ The Vim branch incorporates main commit `3b704daf7dd14722b369179a59f046e8c560094
 (WinUI/XAML PR #157). The earlier timing discussion above describes the earlier
 candidate; current effective bounds preserve the already validated main-branch
 budgets: browser partitions 25 minutes, Figma partitions 30 minutes, and advanced
-editor partitions 30 minutes. The 92-job graph still uses independent application
+editor partitions 30 minutes. The integrated graph uses independent application
 appearance, Figma workspace, and advanced-editor script owners. The strict gate
 and all three engines, both real origins, assertions, and pixel thresholds remain.
 
@@ -274,3 +298,36 @@ record before cancelling. A shell redirection can expose an empty file before
 polling bound, process-group termination and descendant-liveness assertions remain
 unchanged. Deterministic tests cover absent, empty, partially written, malformed
 and unreadable PID markers.
+
+## Supported Apple Silicon runners
+
+Native AOT and execution of browser-exported applications run on both `macos-15`
+and `macos-26`, the supported standard Apple Silicon images. The portable helper
+oracle continues to run on Ubuntu. Every native execution, signature, archive,
+AppKit and macOS 26 appearance check remains required on its existing owner.
+The coverage audit requires both macOS platforms for both native job families.
+
+The retired `macos-14` jobs were removed after GitHub's scheduled image brownout
+cancelled both jobs before a runner or test step started. This does not change
+the compiler's deployment target or assert new macOS 14 compatibility evidence;
+macOS 14 is no longer qualified by hosted CI. GitHub retires that image on
+November 2, 2026. See the [runner retirement notice](https://github.com/actions/runner-images/issues/13518)
+and [official image/architecture table](https://github.com/actions/runner-images#available-images).
+
+## Complete core and appearance suite budgets
+
+Core boundaries have their own required `core-boundaries` job. The original
+recovery and finalization entrypoints remain together in `core-recovery`. All
+three scripts and their cases still run exactly once, with the existing
+15-minute job and per-script limits. This prevents the cumulative group budget
+from cancelling the last boundary cases after recovery and finalization passed.
+The audit rejects missing owners, exchanged ownership, duplicate entrypoints or
+longer job limits.
+
+The application-appearance matrix likewise has its own Chromium/Firefox/WebKit
+owner, separate from IDE themes. Its WebKit HTTP/file process budget is 900
+seconds, as qualified on PR #153 after 46 of 53 cases exhausted the old 480-second
+suite budget. Individual interaction deadlines and every pixel comparison stay
+unchanged; explicit caller timeouts still take precedence. Other browser suites
+keep their previous limits, and the aggregate `test` gate still requires every
+job to succeed.

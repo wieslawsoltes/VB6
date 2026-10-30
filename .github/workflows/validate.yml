@@ -194,6 +194,7 @@ jobs:
           - core-runtime
           - core-parity
           - core-recovery
+          - core-boundaries
     steps:
       - uses: actions/checkout@v4
         with:
@@ -746,7 +747,6 @@ jobs:
       matrix:
         os:
           - ubuntu-24.04
-          - macos-14
           - macos-15
           - macos-26
     runs-on: ${{ matrix.os }}
@@ -822,7 +822,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - macos-14
           - macos-15
           - macos-26
     runs-on: ${{ matrix.os }}

@@ -26,6 +26,32 @@ class WorkflowAuditTests(unittest.TestCase):
         result=check.audit(self.root)
         self.assertEqual(result['preservedEntrypoints'],90)
         self.assertEqual(result['linuxNodeTests'],sorted(p.name for p in (self.root/'tests').glob('linux-*.test.mjs')))
+    def test_retired_macos_runner_cannot_return(self):
+        for owner in ('macos', 'macos-browser-native'):
+            with self.subTest(owner=owner):
+                self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['os'].append('macos-14'))
+    def test_each_supported_macos_platform_is_required(self):
+        for owner in ('macos', 'macos-browser-native'):
+            for platform in ('macos-15', 'macos-26'):
+                with self.subTest(owner=owner, platform=platform):
+                    self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['os'].remove(platform))
+    def test_missing_application_appearance_partition_rejected(self):
+        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix']['suite'].remove('application-appearance'))
+    def test_application_appearance_preserves_job_deadline(self):
+        self.reject(lambda w:w['jobs']['browser'].update({'timeout-minutes':30}))
+    def test_missing_core_boundaries_partition_rejected(self):
+        self.reject(lambda w:w['jobs']['core-browser']['strategy']['matrix']['suite'].remove('core-boundaries'))
+    def test_core_partitions_preserve_job_deadline(self):
+        self.reject(lambda w:w['jobs']['core-browser'].update({'timeout-minutes':30}))
+    def test_complete_core_and_appearance_suite_ownership(self):
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';original=json.loads(path.read_text())
+        for left,right in [('core-boundaries','core-recovery'),('application-appearance','integration-appearance')]:
+            with self.subTest(left=left,right=right):
+                suites=copy.deepcopy(original)
+                suites[left][0],suites[right][0]=suites[right][0],suites[left][0]
+                path.write_text(json.dumps(suites))
+                with self.assertRaises(ValueError):check.audit(self.root)
     def test_node_native_runtime_platform_required(self):
         self.reject(lambda w:w['jobs']['node'].update({'runs-on':'ubuntu-latest'}))
     def test_node_native_runtime_dependency_required(self):
@@ -150,10 +176,6 @@ class WorkflowAuditTests(unittest.TestCase):
         path.write_text(json.dumps(suites))
         with self.assertRaisesRegex(ValueError,'Dedicated Figma workspace'):
             check.audit(self.root)
-    def test_missing_application_appearance_partition_rejected(self):
-        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix']['suite'].remove('application-appearance'))
-    def test_application_appearance_preserves_job_deadline(self):
-        self.reject(lambda w:w['jobs']['browser'].update({'timeout-minutes':30}))
     def test_application_appearance_cannot_rejoin_ide_theme_deadline(self):
         tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
         path=tools/'ci/suites.json';suites=json.loads(path.read_text())

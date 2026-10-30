@@ -12,8 +12,7 @@
   ],
   "core-recovery": [
     "recovery-browser-tests.py",
-    "browser-finalization-05.py",
-    "browser-boundaries-06.py"
+    "browser-finalization-05.py"
   ],
   "integration-controls": [
     "browser-html-retention.py",
@@ -86,6 +85,9 @@
   ],
   "tui-authoring": [
     "dos-browser-tests.py"
+  ],
+  "core-boundaries": [
+    "browser-boundaries-06.py"
   ],
   "application-appearance": [
     "browser-application-theme-tests.py"
