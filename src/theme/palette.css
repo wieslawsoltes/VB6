@@ -88,7 +88,7 @@
   --vb-sys-30: var(--vb-face);
   --vb-app-color-scheme: light;
 }
-:root, [data-vb-theme="standard"] {
+:root:not([data-vb-theme]), [data-vb-theme="standard"] {
   --vb-face: #d4d0c8;
   --vb-light: #ffffff;
   --vb-highlight: #e9e7e3;
