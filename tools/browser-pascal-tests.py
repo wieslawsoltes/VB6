@@ -224,6 +224,20 @@ def forms_and_roundtrip(page):
             'exportSHA256': hashlib.sha256(application.read_bytes()).hexdigest()}
 
 
+def number_lab_results(scope, n, fibonacci, triangular):
+    results = scope.locator('[data-control="ResultsList"]')
+    expected = [f'N = {n}', f'Fibonacci(N) = {fibonacci}', f'1 + ... + N = {triangular}']
+    # The VM yields between AddItem calls. Observe the entire result and final
+    # status before sending another input or saving; retain the action deadline.
+    for line in expected:
+        results.get_by_text(line, exact=True).wait_for()
+    # WebKit does not expose native select options through the host's innerText.
+    actual = results.locator('option').all_text_contents()
+    check(actual == expected, {'expected': expected, 'actual': actual})
+    scope.locator('[data-control="StatusLabel"]').filter(
+        has_text='Calculated by the NumberSeries Pascal unit.').wait_for()
+
+
 def number_lab(page):
     command(page, 'new')
     dialog = page.get_by_role('dialog', name='New Project', exact=True)
@@ -237,17 +251,15 @@ def number_lab(page):
     command(page, 'run')
     frame = page.frame_locator('.runtime-window iframe')
     field = frame.locator('[data-control="InputText"] input')
-    results = frame.locator('[data-control="ResultsList"]')
-    results.filter(has_text='Fibonacci(N) = 55').wait_for()
+    number_lab_results(frame, 10, 55, 55)
     field.fill('40'); field.press('Enter')
-    results.filter(has_text='Fibonacci(N) = 102334155').wait_for()
-    check('1 + ... + N = 820' in results.inner_text(), 'NumberSeries unit returned an incorrect triangular number')
+    number_lab_results(frame, 40, 102334155, 820)
     field.fill('41'); frame.locator('[data-control="CalculateButton"]').click()
     frame.locator('[data-control="StatusLabel"]').filter(has_text='Enter a whole number from 0 to 40.').wait_for()
     frame.locator('[data-control="SaveButton"]').click()
     frame.locator('[data-control="StatusLabel"]').filter(has_text='Calculate valid results before saving.').wait_for()
     field.fill('0'); field.press('Enter')
-    results.filter(has_text='Fibonacci(N) = 0').wait_for()
+    number_lab_results(frame, 0, 0, 0)
     frame.locator('[data-control="SaveButton"]').click()
     frame.locator('[data-control="StatusLabel"]').filter(has_text='Saved Pascal-Results.txt.').wait_for()
     page.screenshot(path=str(REPORT / 'pascal-number-lab.png'), animations='disabled')
@@ -268,7 +280,7 @@ def number_lab(page):
     pending.value.save_as(application)
     exported = page.context.new_page()
     exported.goto(url(application))
-    exported.locator('[data-control="ResultsList"]').filter(has_text='Fibonacci(N) = 55').wait_for()
+    number_lab_results(exported, 10, 55, 55)
     exported.locator('[data-control="SaveButton"]').click()
     exported.locator('[data-control="StatusLabel"]').filter(has_text='Saved Pascal-Results.txt.').wait_for()
     saved = exported.evaluate('vb6Application.fs.read("/Pascal-Results.txt")')
