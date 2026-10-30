@@ -79,6 +79,62 @@ class Themes(X11IdeChecks, unittest.TestCase):
     def direct_theme(self, theme, **preferences):
         self.page.evaluate('a=>{Object.assign(vb6Studio.appearance,a);vb6Studio.applyAppearance();}',{'theme':theme,**preferences})
         self.page.wait_for_timeout(130)
+    def test_standard_default_startup_and_options(self):
+        self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'standard')
+        self.assertEqual(self.page.locator('.designer-scroll').get_attribute('data-vb-theme'),'standard')
+        self.assertEqual(self.page.locator('html').evaluate('e=>getComputedStyle(e).getPropertyValue("--vb-face").trim()'),'#d4d0c8')
+        original=self.page.evaluate('JSON.stringify(vb6Studio.project)')
+        self.options()
+        for label in ('IDE theme','Application theme'):
+            self.assertEqual(self.page.get_by_label(label,exact=True).input_value(),'standard')
+        self.page.locator('.ide-dialog').get_by_role('button',name='Cancel',exact=True).click()
+        self.assertEqual(self.page.evaluate('JSON.stringify(vb6Studio.project)'),original)
+        self.record('Windows Standard initial IDE, application and Options defaults')
+
+    def test_initial_css_uses_standard_before_scripts(self):
+        context=self.browser.new_context(java_script_enabled=False)
+        try:
+            page=context.new_page()
+            if MEMORY: page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text())
+            else: page.goto(self.url)
+            self.assertEqual(page.evaluate('typeof vb6Studio'),'undefined')
+            self.assertEqual(page.locator('html').evaluate('e=>getComputedStyle(e).getPropertyValue("--vb-face").trim()'),'#d4d0c8')
+            self.record('Windows Standard CSS palette before JavaScript startup')
+        finally:
+            context.close()
+
+    @unittest.skipIf(MEMORY, 'Real storage/reload requires an origin; memory transport has an opaque origin')
+    def test_explicit_classic_choices_survive_reload(self):
+        self.options()
+        for label in ('IDE theme','Application theme'):
+            self.page.get_by_label(label,exact=True).select_option('classic')
+        self.page.locator('.ide-dialog').get_by_role('button',name='OK',exact=True).click()
+        self.assertEqual(self.page.evaluate('vb6Studio.project.settings.theme'),'classic')
+        self.assertEqual(self.page.evaluate('vb6Studio.appearance.theme'),'classic')
+        self.page.evaluate('vb6Studio.persist()')
+        self.page.reload()
+        self.page.wait_for_function('typeof vb6Studio==="object" && vb6Studio.appearance.theme==="classic" && vb6Studio.project.settings.theme==="classic"')
+        self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'classic')
+        self.assertEqual(self.page.locator('.designer-scroll').get_attribute('data-vb-theme'),'classic')
+        self.record('Explicit Windows Classic IDE and application choices survive reload')
+
+    @unittest.skipIf(MEMORY, 'Real saved workspace requires an origin; memory transport has an opaque origin')
+    def test_legacy_workspace_without_theme_uses_standard(self):
+        saved=self.page.evaluate("""()=>{vb6Studio.persist();return JSON.parse(localStorage.getItem('vb6-studio-web.workspace.v1'));}""")
+        saved['layout']['appearance'].pop('theme',None)
+        saved['project']['settings'].pop('theme',None)
+        page=self.context.new_page()
+        try:
+            page.add_init_script("localStorage.setItem('vb6-studio-web.workspace.v1',"+json.dumps(json.dumps(saved))+");")
+            page.goto(self.url)
+            page.wait_for_function('typeof vb6Studio==="object"')
+            self.assertEqual(page.locator('html').get_attribute('data-ide-theme'),'standard')
+            self.assertEqual(page.locator('.designer-scroll').get_attribute('data-vb-theme'),'standard')
+            self.assertEqual(page.evaluate('vb6Studio.project.id'),saved['project']['id'])
+            self.record('Legacy workspace without appearance selections restores with Standard defaults')
+        finally:
+            page.close()
+
     def test_tooltips_keep_application_and_ide_ownership(self):
         before=self.page.evaluate('JSON.stringify(vb6Studio.project)')
         control_id=self.page.evaluate('''()=>{
@@ -402,6 +458,8 @@ class Themes(X11IdeChecks, unittest.TestCase):
         # Only bundle startup gets a larger parsing budget. Real Options
         # interactions keep the suite's ordinary 8s limit.
         self.page.wait_for_function('typeof vb6Studio==="object"',polling=100,timeout=60000)
+        self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'standard')
+        self.assertEqual(self.page.locator('.designer-scroll').get_attribute('data-vb-theme'),'standard')
         self.set_theme('macos26-dark')
         self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'macos26-dark')
         self.record('standalone file:// Options')
