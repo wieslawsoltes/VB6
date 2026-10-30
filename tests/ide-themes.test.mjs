@@ -31,7 +31,7 @@ for(const id of ids) test(`theme ${id} has readable normal, selected, caption, s
  }
 });
 test('appearance validation preserves valid user choices and rejects malformed input',()=>{
- for(const value of [null,undefined,0,false,[],new Date()]) assert.equal(normalizeIdeAppearance(value).theme,'classic');
+ for(const value of [null,undefined,0,false,[],new Date()]) assert.equal(normalizeIdeAppearance(value).theme,'standard');
  for(const theme of ['__proto__','constructor','toString','fluent;url(x)',{},['fluent'],'FLUENT','']) assert.equal(ideThemeId(theme),'classic');
  for(const id of Object.keys(IDE_THEMES)){
   const input={theme:id,followSystemTheme:true,reduceTransparency:true,reduceMotion:true,editorFont:'Consolas',editorSize:16,codeColors:{keyword:'#123456',invalid:'#ffffff'}};
@@ -40,7 +40,7 @@ test('appearance validation preserves valid user choices and rejects malformed i
   assert.equal(input.codeColors.invalid,'#ffffff');
  }
  assert.equal(normalizeIdeAppearance({followSystemTheme:'true',reduceTransparency:1,reduceMotion:'yes'}).followSystemTheme,false);
- assert.equal(normalizeIdeAppearance().theme,'classic');assert.equal(normalizeIdeAppearance().followSystemTheme,false);
+ assert.equal(normalizeIdeAppearance().theme,'standard');assert.equal(normalizeIdeAppearance().followSystemTheme,false);
 });
 test('system appearance resolves all light/dark pairs without changing the saved choice',()=>{
  for(const theme of ids){

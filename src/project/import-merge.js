@@ -6,8 +6,9 @@ import {fromBase64,toBase64} from './binary-assets.js';
 import {equalBytes} from './native-text.js';
 import {rebaseProjectReference} from './references.js';
 import {normalizeResources,resourceKey,decodeStringTable,encodeStringTable} from './res.js';
+import {moduleLanguage,moduleSourcePath} from './language.js';
 
-const fileName=m=>cleanProjectPath(m.sourcePath||m.name+(m.kind==='form'?'.frm':m.kind==='class'?'.cls':'.bas'));
+const fileName=m=>cleanProjectPath(moduleSourcePath(m));
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const fail=message=>{throw new Error(message);};
 
@@ -68,6 +69,7 @@ export function mergedProject(current,incoming){
   const assets=new Map(Object.keys(next.assets).map(p=>[cleanProjectPath(p).toLowerCase(),p]));
   const reserved=new Set([next.nativeProject?.path||next.name+'.vbp',next.nativeWorkspace?.path,next.resources?.fileName].filter(Boolean).map(p=>cleanProjectPath(p).toLowerCase()));
   for(const m of other.modules){
+    m.language=moduleLanguage(m,other);
     const path=fileName(m),key=path.toLowerCase();
     if(names.has(m.name.toLowerCase()))fail('A module named '+m.name+' already exists.');
     if(paths.has(key)||assets.has(key)||reserved.has(key))fail('A source file already uses '+path);

@@ -21,7 +21,7 @@ class Socket extends EventTarget {
   close(){if(this.readyState===3)return;this.readyState=3;this.dispatchEvent(new Event('close'));}
 }
 function sockets(t){Socket.instances=[];Socket.respond=true;const original=globalThis.WebSocket;globalThis.WebSocket=Socket;t.after(()=>{Socket.instances.forEach(s=>s.close());globalThis.WebSocket=original;});}
-const external={vb6Endpoint:'ws://localhost/vb6',xamlEndpoint:'ws://localhost/xaml'};
+const external={vb6Endpoint:'ws://localhost/vb6',xamlEndpoint:'ws://localhost/xaml',pascalEndpoint:'ws://localhost/pascal'};
 
 test('already-cancelled startup cannot create workers or language connections',async()=>{
   const abort=new AbortController();abort.abort();let workers=0;
@@ -43,14 +43,18 @@ test('cancelling external initialization closes its socket before any model is c
 });
 test('runtime owns external pull diagnostics, raw code-action markers and disconnect cleanup',async t=>{
   sockets(t);const runtime=new AdvancedEditorRuntime({project:{id:'test'},status(){}},external,{monaco:monacoStub()});
-  runtime.sync=()=>{for(const language of ['vb6','xaml'])runtime.clients[language].open('vb6-editor://workspace/test/'+language,language,'a');};
+  runtime.sync=()=>{for(const language of ['vb6','xaml','pascal'])runtime.clients[language].open('vb6-editor://workspace/test/'+language,language,'a');};
   runtime.installHooks=()=>{};runtime.appearance=()=>{};t.after(()=>runtime.dispose());
   await runtime.initialize();
   await until(()=>[...runtime.diagnosticValues.values()].every(values=>values.size===1));
   assert.equal(runtime.diagnosticValues.get(runtime.clients.vb6).values().next().value[0].message,'External diagnostic');
+  assert.equal(runtime.diagnosticValues.get(runtime.clients.pascal).values().next().value[0].message,'External diagnostic');
+  assert.equal(Socket.instances.length,3);
   assert.ok(Socket.instances.every(s=>s.messages.some(m=>m.method==='textDocument/diagnostic')));
   runtime.clients.vb6.close('vb6-editor://workspace/test/vb6');assert.equal(runtime.diagnosticValues.get(runtime.clients.vb6).size,0);
-  Socket.instances[1].close();assert.equal(runtime.diagnosticValues.get(runtime.clients.xaml).size,0);
+  Socket.instances.find(socket=>socket.url===external.xamlEndpoint).close();
+  assert.equal(runtime.diagnosticValues.get(runtime.clients.xaml).size,0);
+  assert.equal(runtime.diagnosticValues.get(runtime.clients.pascal).size,1);
   runtime.dispose();assert.ok(Socket.instances.every(s=>s.readyState===3));assert.equal(runtime.sessions.size,0);
 });
 

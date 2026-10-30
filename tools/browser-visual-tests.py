@@ -32,6 +32,9 @@ def page_for(kind='ide',fixture=None,size=(1280,900),dpr=1,touch=False,theme='cl
         if kind=='ide':
             page.set_content(HTML);page.wait_for_function('!!window.vb6Studio');page.evaluate('theme=>{vb6Studio.appearance.theme=theme;vb6Studio.applyAppearance();}',theme)
             if fixture:page.evaluate('p=>vb6Studio.loadProject(p)',FIXTURES[fixture])
+            # These visual contracts deliberately start with a Classic application;
+            # initial/default palette behavior is covered by browser-theme-tests.
+            page.evaluate('()=>{const project=structuredClone(vb6Studio.project);project.settings.theme="classic";vb6Studio.loadProject(project);}')
         else:
             page.set_content('<!doctype html><html><head><style>'+CSS+'</style></head><body></body></html>');page.add_script_tag(content=JS)
             project=json.loads(json.dumps(FIXTURES[fixture or 'scroll']));project['settings']['theme']=theme
@@ -117,7 +120,19 @@ def test_panels():
 
 def test_new_project_tabs():
     with page_for() as p:
-        cmd(p,'new');d=p.get_by_role('dialog',name='New Project',exact=True);check(d.get_by_role('tab').count()==3);d.get_by_role('tab',name='Existing',exact=True).click();check(d.get_by_role('tabpanel').filter(visible=True).count()==1);d.get_by_role('tab',name='Recent',exact=True).click();check(d.get_by_role('tabpanel').filter(visible=True).count()==1);d.get_by_role('tab',name='New',exact=True).click();check(d.get_by_role('option').count()==23, 'Expected 17 original templates plus six Win32 services samples');check(d.get_by_role('option',name='Runtime Workbench',exact=True).count()==1);check(all(d.get_by_role('option',name=name,exact=True).count()==1 for name in ('SQLite Customers','REST Customers','Public REST Users','GraphQL and OData','Win32 API Workbench','Win32 Files and Paths','Win32 Unicode and Base64','Win32 Events and Semaphores','Win32 Registry Inspector','Win32 GUID Workbench','Win32 Window Properties')));screenshot(p,'new-project');d.get_by_role('option',name='Standard EXE',exact=True).dblclick();p.wait_for_function('vb6Studio.activeModule.form.controls.length===0');check(p.locator('.ide-modal-cover').count()==0)
+        cmd(p,'new');d=p.get_by_role('dialog',name='New Project',exact=True)
+        check(d.get_by_role('tab').count()==3)
+        for name in ['Existing','Recent','New']:
+            d.get_by_role('tab',name=name,exact=True).click()
+            check(d.get_by_role('tabpanel').filter(visible=True).count()==1)
+        templates=d.get_by_role('listbox',name='New project templates',exact=True)
+        check(templates.get_by_role('option').count()==28,'Expected Standard EXE and all 27 sample projects')
+        for name in ('Runtime Workbench','SQLite Customers','REST Customers','Public REST Users','GraphQL and OData','Win32 API Workbench','Win32 Files and Paths','Win32 Unicode and Base64','Win32 Events and Semaphores','Win32 Registry Inspector','Win32 GUID Workbench','Win32 Window Properties','Win32 Calendar and Counters','Win32 INI Sections and Messages','HTML5 WebBrowser','macOS 26 Preferences','Turbo Pascal Forms'):
+            check(templates.get_by_role('option',name=name,exact=True).count()==1,name+' template must appear once')
+        screenshot(p,'new-project')
+        templates.get_by_role('option',name='Standard EXE',exact=True).dblclick()
+        p.wait_for_function('vb6Studio.activeModule.form.controls.length===0')
+        check(p.locator('.ide-modal-cover').count()==0)
 
 def test_code_procedure():
     with page_for(fixture='editor') as p:

@@ -2,8 +2,8 @@
 
 Choose **Tools → Options → General → Appearance → IDE theme**, then **OK**.
 Selection previews the theme inside the dialog; **Cancel** does not change the
-running IDE. **Windows Classic remains the default**, including for older saved
-workspaces. No account, network request, additional font, or dependency is needed.
+running IDE. **Windows Standard (2000) is the default** when no theme has been selected.
+Explicit saved choices, including Windows Classic, are preserved. No account, network request, additional font, or dependency is needed.
 
 ## Choices
 

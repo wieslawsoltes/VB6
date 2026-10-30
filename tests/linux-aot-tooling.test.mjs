@@ -8,10 +8,13 @@ import {compressedLinuxRuntimeArchive} from '../tools/embed-linux-aot-runtime.mj
 import {linuxAOTExecutionVerification,linuxAOTRuntimePayloadFile} from '../tools/linux-aot-provenance.mjs';
 import {linuxTarget} from '../packages/linux-native/src/target.js';
 import {verifyLinuxAOTExecutionSysroot} from '../tools/build-linux-aot-template.mjs';
+import {validateLinuxRuntimeRefreshProof} from '../tools/verify-linux-runtime-refresh.mjs';
+import {pascalNativeExpectedResult} from './pascal-integration-fixtures.mjs';
+import {nativeRecordIdentityCases} from './native-record-identity-fixtures.mjs';
 const cases=['language-O0','language-O1','language-O2','language-O3','abi-platform-O0','abi-platform-O1','abi-platform-O2','abi-platform-O3','resource-path-O2','program-roots-O2','abrupt-End-O2','form-lifetime-O2','large-O2','gtk-controls-O2','richtext-O2','compiled-printers-O3','compiled-instance-O3'];
-function fixture(architecture,executionMode){
-  const target=linuxTarget(architecture),manifest={architecture:target.architecture,sha256:'a'.repeat(64)};
-  const proof={platform:'linux',arch:target.option,architecture:target.architecture,hostArchitecture:executionMode==='native'?target.option:'x64',executionMode,emulatorVersion:'qemu-aarch64 version 8.2',runtime:{sha256:manifest.sha256},optimizationLevelsVerified:[0,1,2,3]};
+function fixture(architecture,executionMode,toolkit='gtk3'){
+  const target=linuxTarget(architecture,toolkit),manifest={architecture:target.architecture,toolkit,sha256:'a'.repeat(64)};
+  const proof={platform:'linux',toolkit,arch:target.option,architecture:target.architecture,hostArchitecture:executionMode==='native'?target.option:'x64',executionMode,emulatorVersion:'qemu-aarch64 version 8.2',runtime:{sha256:manifest.sha256},optimizationLevelsVerified:[0,1,2,3]};
   for(const name of ['machineCodeExecutionVerified',target.option+'ExecutionVerified','gtkExecutionVerified','gtkNativeSignalsVerified','conformanceVerified','resourcesVerified','lifetimeVerified','codeMetadataGrowthVerified','richTextVerified','printerServicesVerified','previousInstanceVerified'])proof[name]=true;
   for(const name of cases)proof[name]={runtimeSha256:manifest.sha256,architecture:target.architecture,machine:target.machine,callingConvention:target.callingConvention,executableSha256:'b'.repeat(64)};
   proof.nativeFixtures=Object.fromEntries(['gtkSignals','richText','displayBackends','printers','previousInstance'].map(name=>[name,{passed:true,...proof['language-O0']}]));
@@ -28,6 +31,7 @@ test('Compressed runtime archives retain the exact architecture-specific filenam
     const files=await readZip(compressedLinuxRuntimeArchive(bytes,architecture));assert.equal(files.size,1);assert.deepEqual(files.get('runtime-'+linuxTarget(architecture).architecture),bytes);
   }
   assert.equal(linuxAOTRuntimePayloadFile(),'aot-runtime-payload.js');assert.equal(linuxAOTRuntimePayloadFile('arm64'),'aot-runtime-arm64-payload.js');
+  assert.equal(linuxAOTRuntimePayloadFile('x64','gtk4'),'aot-runtime-gtk4-payload.js');assert.equal(linuxAOTRuntimePayloadFile('arm64','gtk4'),'aot-runtime-gtk4-arm64-payload.js');
 });
 test('Execution proof preserves native x64 versus emulated ARM64 provenance',()=>{
   for(const [architecture,mode]of [['x64','native'],['arm64','native'],['arm64','qemu-user']]){
@@ -69,4 +73,68 @@ test('Cross GTK qualification requires initialized target image-loader and MIME 
     view.setUint16(18,62,true);await fs.writeFile(path.join(loaders,'libpixbufloader-svg.so'),module);
     await assert.rejects(()=>verifyLinuxAOTExecutionSysroot(directory),/SVG image loader has the wrong ELF architecture/);
   }finally{await fs.rm(directory,{recursive:true,force:true});}
+});
+
+function refreshFixture(architecture='x64',toolkit='gtk3') {
+  const target=linuxTarget(architecture,toolkit),{proof,manifest}=fixture(architecture,'native',toolkit);
+  manifest.abi=5;
+  manifest.provenance={buildPlatform:'linux',buildArchitecture:target.architecture,targetArchitecture:target.architecture,crossCompiled:false,toolkit};
+  const checks=[0,2].map(optimization=>({optimization,executableSHA256:'b'.repeat(64),bytes:4096,result:pascalNativeExpectedResult,executed:true}));
+  for(const name of ['uninitialized-virtual-receiver','incompatible-virtual-tag','vb-records-remain-nominal',
+    'invalid-ancestor-prefix','invalid-ancestor-identity','invalid-dispatch-tag','vb-module-cannot-authorize-pascal-views'])
+    checks.push({name,optimization:2,executableSHA256:'c'.repeat(64),bytes:4096,executed:true,rejected:true});
+  const recordIdentityChecks=nativeRecordIdentityCases().flatMap(fixture=>[0,2].map(optimization=>({
+    name:fixture.name,optimization,executed:true,result:'passed',executableSHA256:'d'.repeat(64),bytes:4096,output:fixture.expectedOutput.slice()
+  })));
+  const pascal={valid:true,platform:'linux',architecture:target.option,toolkit,hostArchitecture:target.option,executionMode:'native',runtimeSHA256:manifest.sha256,checks,recordIdentityChecks};
+  return {proof,manifest,pascal};
+}
+test('Runtime refresh requires native execution of all four architecture/toolkit variants and every Pascal case',()=>{
+  for(const architecture of ['x64','arm64'])for(const toolkit of ['gtk3','gtk4']) {
+    const {proof,manifest,pascal}=refreshFixture(architecture,toolkit),verified=validateLinuxRuntimeRefreshProof(proof,pascal,manifest,{architecture,toolkit});
+    assert.deepEqual(verified,{architecture:linuxTarget(architecture).architecture,toolkit,executionMode:'native',runtimeSHA256:manifest.sha256,pascalChecks:9,recordIdentityChecks:12});
+  }
+});
+test('Runtime refresh rejects proofs and artifact paths for another toolkit or architecture',()=>{
+  for(const architecture of ['x64','arm64'])for(const toolkit of ['gtk3','gtk4']) {
+    const input=refreshFixture(architecture,toolkit),oppositeToolkit=toolkit==='gtk3'?'gtk4':'gtk3';
+    const validate=(value,expected)=>validateLinuxRuntimeRefreshProof(value.proof,value.pascal,value.manifest,expected);
+    assert.throws(()=>validate(input,{architecture:architecture==='x64'?'arm64':'x64',toolkit}),/variant does not match/);
+    assert.throws(()=>validate(input,{architecture,toolkit:oppositeToolkit}),/variant does not match/);
+    for(const mutate of [x=>x.proof.toolkit=oppositeToolkit,x=>delete x.proof.toolkit,x=>x.manifest.provenance.toolkit=oppositeToolkit,x=>x.pascal.toolkit=oppositeToolkit,x=>delete x.pascal.toolkit]){
+      const value=refreshFixture(architecture,toolkit);mutate(value);
+      assert.throws(()=>validate(value),/native build and execution|Pascal proof/);
+    }
+  }
+});
+test('Runtime refresh rejects emulation, cross compilation and incomplete native SDK proof',()=>{
+  for(const mutate of [
+    x=>{x.proof.executionMode='qemu-user';x.proof.hostArchitecture='x64';},
+    x=>{x.proof.hostArchitecture='x64';},
+    x=>{x.manifest.provenance.crossCompiled=true;},
+    x=>{x.manifest.provenance.buildArchitecture='x86_64';},
+    x=>{x.manifest.provenance.targetArchitecture='x86_64';},
+    x=>{x.manifest.provenance.buildPlatform='darwin';},
+    x=>{x.proof.gtkNativeSignalsVerified=false;},
+    x=>{delete x.proof.nativeFixtures.displayBackends;},
+    x=>{delete x.proof['language-O3'];},
+    x=>{x.proof.runtime.sha256='d'.repeat(64);}
+  ]) {
+    const input=refreshFixture('arm64');mutate(input);
+    assert.throws(()=>validateLinuxRuntimeRefreshProof(input.proof,input.pascal,input.manifest),/native build and execution|Embedding requires/);
+  }
+});
+test('Runtime refresh rejects partial, duplicated and incorrect Pascal execution proof',()=>{
+  for(const mutate of [
+    x=>{x.valid=false;},x=>{x.error='failure';},x=>{x.platform='darwin';},
+    x=>{x.architecture='arm64';},x=>{x.hostArchitecture='arm64';},x=>{x.executionMode='qemu-user';},
+    x=>{x.runtimeSHA256='d'.repeat(64);},x=>{x.checks.pop();},x=>{x.checks.push({...x.checks[2]});},
+    x=>{x.checks[0].executed=false;},x=>{x.checks[0].executableSHA256='missing';},
+    x=>{x.checks[0].result='wrong output';},x=>{x.checks[1].optimization=0;},
+    x=>{x.checks[0].bytes=0;},x=>{x.checks[2].rejected=false;},x=>{x.checks[2].optimization=0;},
+    x=>{x.checks[2]={...x.checks[3]};}
+  ]) {
+    const {proof,manifest,pascal}=refreshFixture();mutate(pascal);
+    assert.throws(()=>validateLinuxRuntimeRefreshProof(proof,pascal,manifest),/Pascal proof|Pascal O|Pascal guard/);
+  }
 });

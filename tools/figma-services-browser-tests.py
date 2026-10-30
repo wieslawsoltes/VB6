@@ -4,6 +4,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 from playwright.sync_api import expect
+from ci.browser_partition import configured_shard, select_case_names
 spec=importlib.util.spec_from_file_location('figma_base',Path(__file__).with_name('figma-browser-tests.py'))
 base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
 base.REPORT=base.REPORT/'services-assets'
@@ -244,7 +245,7 @@ class ServicesAssets(base.FigmaWorkspace):
     @unittest.skipIf(base.TRANSPORT=='memory','Opaque memory origin does not qualify local preference persistence')
     def test_service_dock_profiles_reload_without_authority_or_eager_connection(self):
         self.enable();self.page.get_by_role('button',name='Agent',exact=True).click()
-        self.page.evaluate('vb6Studio.persist()');self.page.reload();self.page.wait_for_function('vb6Studio?.figmaMode?.enabled')
+        self.page.evaluate('vb6Studio.persist()');self.reload_workspace(figma=True)
         self.page.get_by_role('button',name='Agent',exact=True).click()
         expect(self.page.get_by_label('Agent task',exact=True)).to_be_visible()
         self.assertFalse(self.page.evaluate('vb6Studio.mcp.adapter.enabled'))
@@ -278,5 +279,7 @@ class ServicesAssets(base.FigmaWorkspace):
 
 
 def load_tests(loader,standard,pattern):
-    return unittest.TestSuite(ServicesAssets(name) for name in sorted(ServicesAssets.__dict__) if name.startswith('test_'))
+    names=[name for name in sorted(ServicesAssets.__dict__) if name.startswith('test_')]
+    names=select_case_names(names,configured_shard('figma-services'))
+    return unittest.TestSuite(ServicesAssets(name) for name in names)
 if __name__=='__main__':unittest.main(verbosity=2)

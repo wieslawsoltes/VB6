@@ -4,6 +4,8 @@ This release implements an independent HTML/CSS/JavaScript IDE, source runtime a
 
 ## Language/runtime
 
+The following matrix describes the Visual Basic path. Optional Turbo Pascal 7.0 has a separate [language, IDE, native-target, and compatibility contract](TURBO-PASCAL.md). Both languages share the component and host limitations described here.
+
 | Area | Implemented | Still incomplete or different |
 |---|---|---|
 | Compilation | Tokenizer, expression parser, instruction compiler, source lines, module/class/form procedures, declarations and diagnostics; conditional directives, project constants and module-scoped DefType letter ranges. | Complete VB6 grammar/binding/accessibility, every compile-time rule, native machine code/P-code, type libraries, full conditional-expression compatibility. Some errors are caught during execution rather than static binding. |

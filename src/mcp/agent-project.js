@@ -7,10 +7,12 @@ import {cleanProjectPath, fromBase64, toBase64} from '../project/frx.js';
 import {setResource, removeResource, resourceKey, setResourceString, readRES} from '../project/res.js';
 import {VirtualFileSystem} from '../runtime/filesystem.js';
 import {McpError, isRecord} from './protocol.js';
+import {moduleLanguage,normalizeLanguage,sourceExtension,moduleSourcePath} from '../project/language.js';
+import {pascalParameters,pascalProcedureEdit,scanPascalDeclarations} from '../editor/pascal-service.js';
 
 export const CONTROL_TYPES = Object.freeze([...new Set([...BASIC_CONTROL_TYPES, ...EXTENDED_CONTROL_TYPES])].filter(s => s !== 'Pointer'));
 export const fail = message => { throw new McpError(-32602, message); };
-export const identifier = value => { if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,254}$/.test(value)) fail('Expected a VB identifier (maximum 255 characters).'); return value; };
+export const identifier = value => { if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,254}$/.test(value)) fail('Expected a source identifier (maximum 255 characters).'); return value; };
 export const moduleOf = (project, name) => findModule(project, name) || fail('Unknown module: ' + name);
 export function formOf(project, name) { const m = moduleOf(project, name); if (!m.form) fail('Module has no designer: ' + name); return m.form; }
 export function nodeOf(form, id, menus = false) {
@@ -53,7 +55,7 @@ function renameModule(next, args) {
   m.name = args.name;
   if (m.form) { m.form.name = args.name; m.form.properties.Name = args.name; }
   if (lower(next.startup) === lower(old)) next.startup = args.name;
-  for (const n of next.modules) n.code = renameSymbol(n.code, old, args.name);
+  for (const n of next.modules) n.code = renameSymbol(n.code, old, args.name,{language:moduleLanguage(n,next)});
   return next;
 }
 function patchProperties(node, properties, remove = []) {
@@ -76,7 +78,7 @@ function editNode(next, args, menus) {
       if (nodes.some(n=>n.id!==node.id && lower(n.name)===lower(old))) fail('Rename a complete control array using form.update; individual array identity cannot be split silently.');
       node.name=args.name; node.properties.Name=args.name;
       for (const n of nodes) if (lower(n.parent||'')===lower(old)) n.parent=args.name;
-      const m=moduleOf(next,args.module); m.code=renameSymbol(m.code,old,args.name);
+      const m=moduleOf(next,args.module); m.code=renameSymbol(m.code,old,args.name,{language:moduleLanguage(m,next)});
     } else if (args.action === 'reparent') node.parent = args.parent ? nodeOf(form,args.parent,menus).name : null;
     else if (args.action === 'remove') {
       const removed = new Set([node.name]); let count;
@@ -105,7 +107,7 @@ function nativeMetadata(project, args, operation) {
     if(n.entries!==undefined){if(!Array.isArray(n.entries)||n.entries.length>1000)fail('Invalid native entries.');for(const e of n.entries){if(!isRecord(e)||!/^\w+$/.test(e.key))fail('Invalid native entry key.');singleLine(e.value,'native entry');if(['name','startup','form','module','class','reference','object','resfile32'].includes(e.key.toLowerCase()))fail('Use the corresponding structured field for '+e.key+'.');}}
   }
   if(args.references)for(const entry of args.references){if(!['Reference','Object'].includes(entry.kind))fail('Reference kind must be Reference or Object.');singleLine(entry.value,'reference');}
-  if(args.sourcePath!==undefined){const path=cleanProjectPath(args.sourcePath),m=moduleOf(project,args.module);if(project.modules.some(other=>other.id!==m.id&&lower(other.sourcePath||other.name+(other.kind==='form'?'.frm':other.kind==='class'?'.cls':'.bas'))===lower(path)))fail('Source path already belongs to another module.');if(!new RegExp('\\.'+(m.kind==='form'?'frm':m.kind==='class'?'cls':'bas')+'$','i').test(path))fail('Source extension must match the module kind.');}
+  if(args.sourcePath!==undefined){const path=cleanProjectPath(args.sourcePath),m={...moduleOf(project,args.module),...(args.language!==undefined?{language:args.language}:{})};if(project.modules.some(other=>other.id!==m.id&&lower(moduleSourcePath(other,project))===lower(path)))fail('Source path already belongs to another module.');if(!path.toLowerCase().endsWith(sourceExtension(m,project))&&!(moduleLanguage(m,project)==='pascal'&&/\.pp$/i.test(path)))fail('Source extension must match the module language and kind.');}
   if(operation==='module.metadata'&&args.attributes)for(const a of args.attributes){singleLine(a,'attribute');if(!/^Attribute\s+[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?\s*=/.test(a)||/^Attribute\s+VB_Name\s*=/i.test(a))fail('Use module.rename for identity; expected an Attribute declaration.');}
   if(args.nativeClassHeader!==undefined&&(!/^VERSION[^\n]*\nBEGIN[\s\S]*\nEND\s*$/i.test(args.nativeClassHeader.replace(/\r\n?/g,'\n'))||moduleOf(project,args.module).kind!=='class'))fail('A native class header must be a VERSION/BEGIN/END wrapper.');
 }
@@ -115,6 +117,7 @@ export function editProject(project, operation, args) {
   switch (operation) {
     case 'module.rename': return normalizeProject(renameModule(next,args));
     case 'project.update': {
+      if(args.language!==undefined){for(const module of next.modules)module.language=moduleLanguage(module,next);next.language=normalizeLanguage(args.language);}
       if (args.name !== undefined) next.name=identifier(args.name);
       if (args.description !== undefined) next.description=args.description;
       if (args.startup !== undefined) { if(args.startup!=='Sub Main') moduleOf(next,args.startup); next.startup=args.startup; }
@@ -125,20 +128,25 @@ export function editProject(project, operation, args) {
     case 'references.set': next.references=clone(args.references); break;
     case 'module.metadata': {
       const m=moduleOf(next,args.module);
-      for(const key of ['attributes','nativeClassHeader','sourcePath','sourceEncoding']) if(args[key]!==undefined) m[key]=clone(args[key]);
+      for(const key of ['attributes','nativeClassHeader','sourcePath','sourceEncoding','language']) if(args[key]!==undefined) m[key]=clone(args[key]);
       break;
     }
     case 'code.transform': {
       const modules=args.module?[moduleOf(next,args.module)]:next.modules;
       if (args.action==='rename') { identifier(args.from); identifier(args.to); }
-      for(const m of modules) m.code=args.action==='format'?formatCode(m.code,next.settings.tabWidth):renameSymbol(m.code,args.from,args.to);
+      for(const m of modules) m.code=args.action==='format'?formatCode(m.code,next.settings.tabWidth,moduleLanguage(m,next)):renameSymbol(m.code,args.from,args.to,{language:moduleLanguage(m,next)});
       break;
     }
-    case 'procedure.add': { const m=moduleOf(next,args.module); m.code=addProcedureSource(m,args).code; break; }
-    case 'procedure.attributes': { const m=moduleOf(next,args.module); m.attributes=updateProcedureAttributes(m,args.name,args.attributes); break; }
+    case 'procedure.add': { const m=moduleOf(next,args.module); m.code=addProcedureSource(m,{...args,language:moduleLanguage(m,next)}).code; break; }
+    case 'procedure.attributes': { const m=moduleOf(next,args.module); m.attributes=updateProcedureAttributes(m,args.name,args.attributes,next); break; }
     case 'procedure.event': {
       const m=moduleOf(next,args.module), form=formOf(next,args.module), node=nodeOf(form,args.id||'$form'); identifier(args.event);
       const object=node===form?(form.type==='MDIForm'?'MDIForm':'Form'):node.name, name=object+'_'+args.event;
+      if(moduleLanguage(m,next)==='pascal'){
+        if(scanPascalDeclarations(m).procedures.some(p=>lower(p.name)===lower(name)))fail('Event procedure already exists.');
+        const parameters=[...(node.properties.Index!==undefined?['Index As Integer']:[]),defaultEventSignature(node.type,args.event)].filter(Boolean).join(', '),edit=pascalProcedureEdit(m,{name,parameters:pascalParameters(parameters),tabWidth:next.settings.tabWidth});
+        m.code=m.code.slice(0,edit.start)+edit.text+m.code.slice(edit.end);break;
+      }
       if(new RegExp('(?:Sub|Function)\\s+'+name+'\\s*\\(','i').test(m.code)) fail('Event procedure already exists.');
       const parameters=[...(node.properties.Index!==undefined?['Index As Integer']:[]),defaultEventSignature(node.type,args.event)].filter(Boolean).join(', ');
       m.code=m.code.trimEnd()+'\n\nPrivate Sub '+name+'('+parameters+')\n    \nEnd Sub\n'; break;

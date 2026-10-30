@@ -4,11 +4,13 @@ Shares the real IDE fixture/lifecycle with figma-browser-tests.py. Reports are
 separate so the visual pass cannot overwrite the 22 authoring case results.
 """
 import importlib.util
+import base64
 import io
 import json
 import unittest
 from pathlib import Path
 from PIL import Image
+from ci.browser_partition import configured_shard, select_case_names
 
 spec=importlib.util.spec_from_file_location('figma_authoring',Path(__file__).with_name('figma-browser-tests.py'))
 base=importlib.util.module_from_spec(spec)
@@ -54,27 +56,75 @@ class FigmaPresentation(base.FigmaWorkspace):
             else:self.capture_failed_webgl_frame(probes,label)
         self.assertEqual(actual,expected,'Native DOM and retained paint must publish the same workspace scheme')
     def capture_failed_canvas_frame(self,probes,label):
-        """Read the original Canvas2D backing store only after screenshot failure.
-        Never repaint, replace the canvas, or use readback to change the verdict.
+        """Discriminate raster, screenshot and compositor faults after failure.
+        Keep the scene observed after failure and the buffer before mutations.
+        None of these captures or redraws can replace the original verdict.
         """
+        frame=None
+        report=REPORT/(label+'-canvas-diagnostic.json')
+        def save_bitmap(result,key,stage):
+            data=result.pop(key)
+            if not data.startswith('data:image/png;base64,'):
+                raise ValueError('Canvas diagnostic did not produce a PNG')
+            (REPORT/(label+'-canvas-'+stage+'.png')).write_bytes(base64.b64decode(data.split(',',1)[1],validate=True))
+        def screenshot(stage):
+            png=self.page.screenshot(path=str(REPORT/(label+'-diagnostic-'+stage+'.png')),caret='initial',timeout=10000)
+            image=Image.open(io.BytesIO(png)).convert('RGB')
+            return {name:image.getpixel((int(point['x']),int(point['y']))) for name,point in probes.items()}
         try:
-            result=self.page.evaluate(r'''points=>{
-              const r=vb6Studio.rendering,p=r.driver,ctx=p?.context;
-              if(!ctx?.getImageData)return {unavailable:'The failed frame is not Canvas2D'};
-              const canvas=p.canvas,box=canvas.getBoundingClientRect(),scene=r.retained.scene,before=r.getStats();
-              const pixels=Object.fromEntries(Object.entries(points).map(([name,point])=>{
-                const x=Math.floor((point.x-box.x)*canvas.width/box.width),y=Math.floor((point.y-box.y)*canvas.height/box.height);
-                return [name,{x,y,rgba:[...ctx.getImageData(x,y,1,1).data]}];
-              }));
-              return {originalFrameOnly:true,currentCanvas:canvas===r.canvas,bufferSize:[canvas.width,canvas.height],
-                rect:[box.x,box.y,box.width,box.height],sceneSize:[scene.width,scene.height,scene.dpr],
-                contextLost:ctx.isContextLost?.()||false,rendererFrames:r.metrics.frames,painterFrames:p.stats.frames,
-                pixels,before,after:r.getStats()};
+            # Keep the scene observed after the failed screenshot without
+            # storing test state in the app or reconstructing it after a redraw.
+            frame=self.page.evaluate_handle('''()=>{const renderer=vb6Studio.rendering;
+              return {renderer,painter:renderer.driver,scene:renderer.retained.scene};}''')
+            result=frame.evaluate(r'''({renderer:r,painter:p,scene},points)=>{
+              const ctx=p?.context;
+              if(!ctx||r.backend!=='canvas2d')return {unavailable:'The failed frame is not Canvas2D'};
+              const t=ctx.getTransform(),state={currentCanvas:p.canvas===r.canvas,
+                width:p.canvas.width,height:p.canvas.height,lost:ctx.isContextLost?.()??false,
+                transform:[t.a,t.b,t.c,t.d,t.e,t.f],alpha:ctx.globalAlpha,
+                composite:ctx.globalCompositeOperation,filter:ctx.filter,
+                smoothing:ctx.imageSmoothingEnabled,renderer:r.getStats()};
+              const pixels=Object.fromEntries(Object.entries(points).map(([name,point])=>[name,
+                [...ctx.getImageData(Math.floor(point.x*p.canvas.width/scene.width),
+                  Math.floor(point.y*p.canvas.height/scene.height),1,1).data]]));
+              return {state,beforeRedraw:pixels,originalBitmap:p.canvas.toDataURL('image/png')};
             }''',probes)
-            (REPORT/(label+'-canvas-diagnostic.json')).write_text(json.dumps(result,indent=2))
+            if 'unavailable' in result:
+                report.write_text(json.dumps(result,indent=2));return
+            save_bitmap(result,'originalBitmap','before-redraw')
+            report.write_text(json.dumps(result,indent=2))
+            # Comparison only: caret='initial' avoids screenshot-injected styles.
+            # Capture once; never poll pixels or retry a failing expected color.
+            result['caretInitial']=screenshot('caret-initial')
+            result['afterCaretInitial']=self.page.evaluate('vb6Studio.rendering.getStats()')
+            report.write_text(json.dumps(result,indent=2))
+            redraw=frame.evaluate(r'''({renderer:r,painter:p,scene},points)=>{
+              if(r.driver!==p||!p.context)return {unavailable:'The failed Canvas2D painter was replaced'};
+              const read=painter=>Object.fromEntries(Object.entries(points).map(([name,point])=>[name,
+                [...painter.context.getImageData(Math.floor(point.x*painter.canvas.width/scene.width),
+                  Math.floor(point.y*painter.canvas.height/scene.height),1,1).data]]));
+              const result={sameScene:r.retained.scene===scene};
+              r.renderNow({force:true});result.immediatePixels=read(p);
+              result.redrawnBitmap=p.canvas.toDataURL('image/png');
+              let separate;
+              try {separate=new p.constructor(document.createElement('canvas'));separate.render(scene);
+                result.independentPainter=read(separate);result.independentBitmap=separate.canvas.toDataURL('image/png');}
+              catch(error){result.independentFailure=String(error);}finally{separate?.dispose();}
+              return result;
+            }''',probes)
+            for key,stage in [('redrawnBitmap','after-redraw'),('independentBitmap','independent')]:
+                if key in redraw:save_bitmap(redraw,key,stage)
+            result['redraw']=redraw
+            report.write_text(json.dumps(result,indent=2))
+            result['afterRedraw']=screenshot('after-canvas-redraw')
+            report.write_text(json.dumps(result,indent=2))
         except Exception as error:
             (REPORT/(label+'-canvas-diagnostic-error.txt')).write_text(str(error))
-
+        finally:
+            if frame is not None:
+                try:frame.dispose()
+                except Exception as error:
+                    (REPORT/(label+'-canvas-diagnostic-cleanup-error.txt')).write_text(str(error))
     def capture_failed_webgl_frame(self,probes,label):
         """Post-failure diagnostics only. The original pixels/verdict are retained.
         Readback and diagnostic redraws must never qualify a failing screenshot.
@@ -142,11 +192,18 @@ class FigmaPresentation(base.FigmaWorkspace):
 
     def test_presentation_composited_theme_pixels(self):
         self.page.evaluate('vb6Studio.setRenderingPolicy({backend:"canvas2d",fallbacks:["html"],text:"native"})')
+        painter=self.page.evaluate_handle('vb6Studio.rendering.driver')
+        self.addCleanup(painter.dispose)
+        settings=painter.evaluate('p=>({requested:p.stats.readbackRequested,actual:p.context.getContextAttributes?.()??null})')
+        self.assertTrue(settings['requested'],'The retained layer must request its storage policy before drawing')
+        if settings['actual'] is not None:
+            self.assertTrue(settings['actual']['willReadFrequently'],'The browser must retain the requested context settings')
         self.enable(True);before=self.snapshot()
         for index,scheme in enumerate(['dark','light','dark','light']):
             self.page.evaluate('scheme=>vb6Studio.figmaMode.configure({mode:"figma",scheme,units:"px"})',scheme)
             self.painted_theme(scheme,'published-'+str(index)+'-'+scheme)
             self.assertEqual(self.snapshot(),before)
+            self.assertTrue(painter.evaluate('p=>p===vb6Studio.rendering.driver'),'Theme changes must retain the original painter')
         self.done()
     def test_presentation_system_idle_restore(self):
         self.page.evaluate('vb6Studio.setRenderingPolicy({backend:"canvas2d",fallbacks:["html"],text:"native"})')
@@ -170,6 +227,8 @@ class FigmaPresentation(base.FigmaWorkspace):
 
 
 def load_tests(loader,standard_tests,pattern):
-    return unittest.TestSuite(FigmaPresentation(name) for name in sorted(FigmaPresentation.__dict__) if name.startswith('test_presentation_'))
+    names=[name for name in sorted(FigmaPresentation.__dict__) if name.startswith('test_presentation_')]
+    names=select_case_names(names,configured_shard('figma-authoring'))
+    return unittest.TestSuite(FigmaPresentation(name) for name in names)
 
 if __name__=='__main__':unittest.main(verbosity=2)

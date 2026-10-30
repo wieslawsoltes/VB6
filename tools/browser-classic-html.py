@@ -89,7 +89,7 @@ with sync_playwright() as pw:
             # The container variant preserves real border metrics and uses an
             # equivalent border-box staircase. Compare to the same independent
             # pixel oracle, including corner ownership, not another CSS sample.
-            p=page(dpr,html='<div class="vb-form" style="left:16px;top:16px;width:40px;height:24px;min-width:0"></div>')
+            p=page(dpr,html='<div data-vb-theme="classic" class="vb-form" style="left:16px;top:16px;width:40px;height:24px;min-width:0"></div>')
             shot=p.locator('.vb-form').screenshot();(OUT/f'form-staircase-{dpr}.png').write_bytes(shot)
             check(pixels(shot,expected)==0,'Container staircase differs from the independent reference')
             return {'dpr':dpr,'containerChangedPixels':0,'normalChangedPixels':0,'pressedChangedPixels':0,'disabledChangedPixels':0}
@@ -167,7 +167,9 @@ with sync_playwright() as pw:
         check(normal['color']=='rgb(120, 140, 160)','Authored face color changed')
         for selector in ['#modern','#nested']:
             value=p.locator(selector).evaluate(state)
-            check(value['image']=='none' and value['shadow']!='none','Classic layers leaked into optional material chrome')
+            # Current WinUI and macOS 26 command resources are flat; neither
+            # may inherit the Classic filled-edge image from an outer scope.
+            check(value['image']=='none' and value['shadow']=='none','Flat material commands inherited Classic edge layers')
         c.hover();p.mouse.down();pressed=c.evaluate(state);p.mouse.up()
         check(pressed['box']==normal['box'] and pressed['image']!=normal['image'],'Pressed edges or outer geometry are incorrect')
         c.evaluate('n=>n.disabled=true');disabled=c.evaluate(state)
