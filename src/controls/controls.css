@@ -240,3 +240,18 @@
  * capability-selected appearance. The same native input and themed track/thumb
  * retain pointer, touch, keyboard, focus and disabled behavior. */
 .vb-range.vb-range-legacy-vertical {appearance:slider-vertical}
+
+/* Portable OLE documents keep their native DOM input in every renderer. */
+.vb-ole{display:flex;flex-direction:column;border:1px solid var(--vb-shadow);overflow:hidden;min-width:0;min-height:0}
+.vb-ole-heading{display:flex;align-items:center;gap:4px;min-height:20px;flex:none;padding:0 3px;background:var(--vb-face);color:var(--vb-text)}
+.vb-ole-caption{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.vb-ole-menu{font:inherit;line-height:16px;min-width:20px;padding:0 4px}
+.vb-ole-body{position:relative;flex:1;min-width:0;min-height:0;overflow:auto;display:flex;align-items:flex-start;gap:4px;flex-wrap:wrap}
+.vb-ole-empty-label{flex-basis:100%;text-align:center;padding-top:4px}.vb-ole-body>button{font:inherit;margin:2px}
+.vb-ole-text,.vb-ole-rich{box-sizing:border-box;border:0;margin:0;padding:4px;width:100%;height:100%;min-height:0;resize:none;background:transparent;color:inherit;font:inherit;outline:none;overflow:auto}
+.vb-ole-rich{white-space:pre-wrap}.vb-ole-active{outline:1px solid var(--vb-selection)}
+.vb-ole-image{display:block;max-width:none;flex:none}.vb-ole-body[data-size-mode="1"]>.vb-ole-image{width:100%;height:100%;object-fit:fill}
+.vb-ole-body[data-size-mode="3"]>.vb-ole-image{width:100%;height:100%;object-fit:contain}
+.vb-ole-body[data-size-mode="2"]>.vb-ole-image{max-width:100%;height:auto}
+.vb-ole-package{font-size:28px;margin:4px}.vb-ole-package-name{padding:6px;overflow-wrap:anywhere}
+.vb-ole-status{font-size:10px;line-height:14px;max-height:28px;overflow:hidden;flex:none;white-space:nowrap;text-overflow:ellipsis;padding:0 3px}
+.vb-ole-status:empty{display:none}

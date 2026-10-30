@@ -110,6 +110,7 @@ const controlExtra = {
   ListBox:[method('AddItem','Item As String, Optional Index As Integer'),method('RemoveItem','Index As Integer'),method('Clear'),member('List','String','Index As Integer'),member('Selected','Boolean','Index As Integer'),member('ItemData','Long','Index As Integer'),member('ListCount','Long'),member('ListIndex','Long')],
   TextBox:[member('SelStart','Long'),member('SelLength','Long'),member('SelText','String')],
   RichTextBox:[method('LoadFile','FileName As String, Optional FileType As Long'),method('SaveFile','FileName As String, Optional FileType As Long'),method('Find','String As String, Optional Start As Long, Optional End As Long, Optional Options As Long','Long')],
+  OLE:[member('Object','Object'),member('OLEType','Long'),member('Modified','Boolean'),member('AppIsRunning','Boolean'),method('CreateEmbed','Optional SourceDoc As String, Optional Class As String'),method('CreateLink','SourceDoc As String, Optional Class As String'),method('DoVerb','Optional Verb As Long'),method('Close'),method('Delete'),method('Update'),method('SaveToFile','FileNumber As Integer'),method('ReadFromFile','FileNumber As Integer'),method('SaveDocument','FileName As String'),method('ExportDocument'),method('InsertObjDlg')],
   CommonDialog:['ShowOpen','ShowSave','ShowColor','ShowFont'].map(name=>method(name)),
   TreeView:[member('Nodes','Nodes'),member('SelectedItem','Node')],
   ListView:[member('ListItems','ListItems'),member('ColumnHeaders','ColumnHeaders'),member('SelectedItem','ListItem'),method('FindItem','Text As String','ListItem')],
@@ -121,7 +122,7 @@ controlExtra.ComboBox=controlExtra.ListBox;
 controlExtra.RichTextBox.push(...controlExtra.TextBox);
 controlExtra.MSHFlexGrid=controlExtra.MSFlexGrid;
 const drawing=['Form','PictureBox'];
-for (const type of ['Form',...Object.keys(CONTROL_DEFAULTS).filter(name=>name!=='OLE')]) {
+for (const type of ['Form',...Object.keys(CONTROL_DEFAULTS)]) {
   const model = type==='Form'?createForm().form.properties:createControl(type).properties;
   const members = Object.entries(model).filter(([name])=>!['Items','Columns'].includes(name)).map(([name,value])=>member(name,propertyTypes[name.toLowerCase()]||(name==='Value'&&type==='CheckBox'?'CheckBoxConstants':booleanProps.has(name.toLowerCase())?'Boolean':geometryProps.has(name.toLowerCase())?'Single':typeof value==='number'?'Long':typeof value==='string'?'String':'Variant')));
   members.push(method('Move','Left As Single, Optional Top As Single, Optional Width As Single, Optional Height As Single'),method('SetFocus'),method('Refresh'),method('ZOrder','Optional Position As Long'));

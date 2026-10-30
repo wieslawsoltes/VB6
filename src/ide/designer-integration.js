@@ -1,3 +1,4 @@
+import {olePropertyPages} from './ole-property-pages.js';
 /** Shared IDE entry points for built-in control designer editors. Custom OCX
  * property pages continue through the trusted adapter registry unchanged. */
 import {clone, lower} from '../core/core.js';
@@ -66,12 +67,12 @@ export function installDesignerEditors(ide) {
     }
     return apply({[key]: value}) || one(key, value);
   };
-  ide.canEditDesignerSelection = selected => selected.length === 1 && selected[0].type === 'SSTab';
+  ide.canEditDesignerSelection = selected => selected.length === 1 && ['SSTab','OLE'].includes(selected[0].type);
   ide.showControlPropertyPages = () => {
     if (ide.designer.locked) return Promise.reject(new Error('Unlock controls before editing properties.'));
     if (ide.runState !== 'design') return Promise.reject(new Error('Stop execution before editing component properties.'));
     const selected = ide.designer.selected();
-    return ide.canEditDesignerSelection(selected) ? sstabPropertyPages(ide, selected[0]) : pages();
+    return ide.canEditDesignerSelection(selected) ? (selected[0].type==='OLE'?olePropertyPages:sstabPropertyPages)(ide, selected[0]) : pages();
   };
   ide.designerMenu = () => {
     const items = menu(), selected = ide.designer.selected();

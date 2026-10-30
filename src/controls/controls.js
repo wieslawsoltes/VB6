@@ -1,3 +1,4 @@
+import {OleControlController,getOleProperty,setOleProperty} from './ole-control.js';
 import {validateWinUI3Properties,clearWinUI3Overrides} from '../theme/winui3-compat.js';
 import {refreshWinUI3Control,refreshWinUI3ControlValue,resetWinUI3ControlPaint,disposeWinUI3Control,winui3ControlBackground} from './winui3.js';
 import {MACOS26_PROPERTIES,MACOS26_PROPERTY_DEFAULTS,validateMacOS26Properties,clearMacOS26ColorRoles} from '../theme/macos26-compat.js';
@@ -33,7 +34,7 @@ import { CONTROL_DEFAULTS, createControl, newId } from '../project/model.js';
 import { ControlCollection, TreeNodes, ListItems, ColumnHeaders, StatusPanels, TabItems, ImageItems, ControlArray } from './collections.js';
 
 export const NONVISUAL_TYPES=new Set(['Timer','ImageList','CommonDialog']);
-export const DEFAULT_EVENTS={Form:'Load',MDIForm:'Load',CommandButton:'Click',TextBox:'Change',RichTextBox:'Change',ListBox:'Click',ComboBox:'Click',Timer:'Timer',HScrollBar:'Change',VScrollBar:'Change',TreeView:'NodeClick',ListView:'ItemClick',ProgressBar:'MouseDown',Slider:'Change',Toolbar:'ButtonClick',TabStrip:'Click',SSTab:'Click',DTPicker:'Change',MonthView:'DateClick',MSFlexGrid:'Click',PictureBox:'Click'};
+export const DEFAULT_EVENTS={OLE:'Updated',Form:'Load',MDIForm:'Load',CommandButton:'Click',TextBox:'Change',RichTextBox:'Change',ListBox:'Click',ComboBox:'Click',Timer:'Timer',HScrollBar:'Change',VScrollBar:'Change',TreeView:'NodeClick',ListView:'ItemClick',ProgressBar:'MouseDown',Slider:'Change',Toolbar:'ButtonClick',TabStrip:'Click',SSTab:'Click',DTPicker:'Change',MonthView:'DateClick',MSFlexGrid:'Click',PictureBox:'Click'};
 export const CONTROL_EVENTS=['Click','DblClick','MouseDown','MouseMove','MouseUp','KeyDown','KeyPress','KeyUp','GotFocus','LostFocus'];
 const stripMnemonic=text=>String(text??'').replace(/&&/g,'\0').replace(/&/g,'').replace(/\0/g,'&');
 // Retain unchanged caption/option DOM; see docs/HTML-RENDERING-PERFORMANCE.md.
@@ -75,6 +76,7 @@ export class BrowserControl {
     }
   }
   get(key){
+    if(this.type==='OLE'){const value=getOleProperty(this,key);if(value!==undefined)return value;}
     if(key==='WinUI3')return this.props.WinUI3?clone(this.props.WinUI3):null;
     if(Object.hasOwn(MACOS26_PROPERTY_DEFAULTS,key))return this.props[key]??MACOS26_PROPERTY_DEFAULTS[key];
     const tabValue=getTabProperty(this,key);if(tabValue!==undefined)return tabValue;
@@ -97,6 +99,7 @@ export class BrowserControl {
   }
   set(key,value,fromDOM=false){
     if(this.disposed)return;
+    if(setOleProperty(this,key,value))return;
     if(key==='WinUI3'||key==='Value'&&this.props.WinUI3?.sourceType==='ToggleSwitch'){try{validateWinUI3Properties({...this.props,[key]:value},this.type);}catch(error){throw new VBError(error.message,380);}}
     if(key==='WinUI3')value=value==null?null:clone(value);
     if(this.props.WinUI3&&['BackColor','ForeColor','FontBold','FontName','FontSize'].includes(key)){clearWinUI3Overrides(this.props,{[key]:value});this.invalidate();}
@@ -152,6 +155,7 @@ export class BrowserControl {
   }
   build(){const n=this.node,p=this.props;const addClass=c=>n.classList.add(c);
     switch(this.type){
+      case 'OLE':this.oleController=new OleControlController(this);break;
       case 'CommandButton':addClass('vb-command');n.setAttribute('role','button');break;
       case 'Label':addClass('vb-label');break;
       case 'TextBox':this.input=el(p.MultiLine?'textarea':'input',{class:'vb-text-input',type:p.PasswordChar?'password':'text','aria-label':this.model.name});n.append(this.input);this.input.addEventListener('input',()=>this.set('Text',this.input.value,true));break;
@@ -188,6 +192,7 @@ export class BrowserControl {
     if(this.input){if(!['Slider','UpDown','CheckBox','OptionButton'].includes(this.type))this.input.style.backgroundColor=['TextBox','ComboBox','DTPicker'].includes(this.type)?controlThemeColor(p.BackColor,'inputBackground'):oleColor(p.BackColor);this.input.style.color=['TextBox','ComboBox','DTPicker'].includes(this.type)?controlThemeColor(p.ForeColor,'inputForeground'):oleColor(p.ForeColor);if(this.input.disabled!==disabled)this.input.disabled=disabled;if(this.input.tabIndex!==tabIndex)this.input.tabIndex=tabIndex;}
     if(['Frame','TextBox','PictureBox','CommandButton','Label','RichTextBox'].includes(this.type))n.style.background=Number(p.BackStyle)===0&&this.type==='Label'?'transparent':this.type==='CommandButton'?controlThemeColor(p.BackColor,'commandBackground'):this.type==='TextBox'?controlThemeColor(p.BackColor,'inputHostBackground'):oleColor(p.BackColor);
     switch(this.type){
+      case 'OLE':this.oleController.refresh();break;
       case 'CommandButton':{updateMnemonic(n,p.Caption);n.classList.toggle('default-button',!!p.Default||p.MacOSControlStyle==='default');const paint=commandPaint(p.BackColor,p.ForeColor);n.style.background=controlThemePaint(p.BackColor,'commandBackground',paint.background);n.style.color=controlThemePaint(p.ForeColor,'commandForeground',paint.color);break;}
       case 'Label':updateMnemonic(n,p.Caption);n.style.justifyContent=['flex-start','flex-end','center'][Number(p.Alignment)||0];n.style.textAlign=['left','right','center'][Number(p.Alignment)||0];break;
       case 'Frame':{updateMnemonic(this.legend,p.Caption);const paint=groupPaint(p.BackColor,p.ForeColor);n.style.background=paint.background;this.legend.style.background=paint.legendBackground;break;}
@@ -336,7 +341,7 @@ export class BrowserControl {
   async ShowOpen(){const result=await this.vm?.host.openFile?.(this.props);if(!result){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=result.name;if(result.bytes)this.vm.fs.writeBytes(result.name,result.bytes);else this.vm.fs.write(result.name,result.text);}
   async ShowSave(){const name=await this.vm?.host.inputBox?.('File name:',this.props.DialogTitle||'Save As',this.props.FileName||'Untitled.txt');if(!name){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=name;this.vm?.host.saveFile?.(name,this.vm.fs.exists(name)?this.vm.fs.readBytes(name):'');}
   async ShowColor(){const value=await this.vm?.host.inputBox?.('Color as #RRGGBB:','Color',oleColor(this.props.Color||0));if(/^#[0-9a-f]{6}$/i.test(value)){this.Color=parseInt(value.slice(1,3),16)+(parseInt(value.slice(3,5),16)<<8)+(parseInt(value.slice(5,7),16)<<16);}}
-  dispose(){disposeWinUI3Control(this);disposeMacOS26Control(this);this.releaseCollectionMetrics?.();this.releaseCollectionMetrics=null;this.releasePaintProperties?.();this.releasePaintProperties=null;unbindTabChild(this);this.vm?.win32?.unregisterControl(this.hWnd);this._unsubscribeData?.();this._unsubscribeData=null;this.gridEditor=null;this.disposed=true;cancelAnimationFrame(this.raf);clearInterval(this.timerId);this.surface?.dispose();this.rich?.dispose();this.scrollbar?.dispose();this.combo?.dispose();this.stepper?.dispose();this.node.remove();}
+  dispose(){disposeWinUI3Control(this);disposeMacOS26Control(this);this.releaseCollectionMetrics?.();this.releaseCollectionMetrics=null;this.releasePaintProperties?.();this.releasePaintProperties=null;unbindTabChild(this);this.vm?.win32?.unregisterControl(this.hWnd);this._unsubscribeData?.();this._unsubscribeData=null;this.gridEditor=null;this.disposed=true;cancelAnimationFrame(this.raf);clearInterval(this.timerId);this.surface?.dispose();this.rich?.dispose();this.oleController?.dispose();this.scrollbar?.dispose();this.combo?.dispose();this.stepper?.dispose();this.node.remove();}
   get collectionRowHeight(){return this._collectionRowHeight??(['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)?21:20);}
   setCollectionRowHeight(height){
     const previous=this.collectionRowHeight;
@@ -445,7 +450,7 @@ export class BrowserForm extends BrowserControl {
   }
   addControl(progId,name,container){
     const type=this.controlRegistry?.has(String(progId))?String(progId):Object.keys(CONTROL_DEFAULTS).find(t=>lower(t)===lower(String(progId).split('.').at(-1)));
-    if(!type||type==='OLE')throw new VBError('No browser control adapter for '+progId,429);
+    if(!type)throw new VBError('No browser control adapter for '+progId,429);
     if(!/^[A-Za-z_]\w*$/.test(String(name))||this.controlMap.has(lower(name)))throw new VBError('Control name must be a unique identifier',730);
     let parent=null;if(container){const value=typeof container==='string'?this.controlMap.get(lower(container)):container?.__vbInstance?container.formObject:container;
       if(!value)throw new VBError('Invalid control container',380);

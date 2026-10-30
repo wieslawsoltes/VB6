@@ -33,5 +33,6 @@ export function formatCode(code,tabWidth=4){
   }).join('\n');
 }
 export function defaultEventSignature(type,event){
+  if(type==='OLE'&&event==='Updated')return 'Code As Integer';
   if(type==='SSTab'&&event==='Click')return 'PreviousTab As Integer';
   if(isWebBrowser(type)){const signature=webBrowserEventSignature(event);if(signature!==undefined)return signature;}if(event==='KeyDown'||event==='KeyUp')return 'KeyCode As Integer, Shift As Integer';if(event==='KeyPress')return 'KeyAscii As Integer';if(['MouseDown','MouseMove','MouseUp'].includes(event))return 'Button As Integer, Shift As Integer, X As Single, Y As Single';if(event==='QueryUnload')return 'Cancel As Integer, UnloadMode As Integer';if(event==='Unload')return 'Cancel As Integer';if(event==='NodeClick')return 'ByVal Node As Object';if(event==='ItemClick')return 'ByVal Item As Object';if(event==='ButtonClick')return 'ByVal Button As Object';if(event==='DateClick')return 'ByVal DateClicked As Date';return '';}
