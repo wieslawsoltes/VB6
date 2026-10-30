@@ -46,6 +46,7 @@ test('releasing a scope removes external abort listeners',()=>{
 test('source replacement detaches blocked old event queue and discards its remaining effects',async()=>{
   let complete,calls=0,errors=0;const scope=new UIActionScope();
   const surface={generation:0,version:1,eventQueue:Promise.resolve(),actionScope:scope,
+    commit:UISurface.prototype.commit,
     source:{},options:{},client:{request:async()=>({actions:[{type:'copy',args:['first']},{type:'copy',args:['second']}]})},
     apply(){},error(){errors++;},flush(){},action(){calls++;return new Promise(resolve=>complete=resolve);}};
   const pending=UISurface.prototype.event.call(surface,'event',[]);
