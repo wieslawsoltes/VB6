@@ -52,7 +52,7 @@ report performs no additional GPU probes and sends no information to a server.
 
 A successful Canvas2D measurement does not make Canvas2D the active renderer.
 **Restore Default Backends** edits only the draft backend selectors; **OK** applies
-WebGPU → WebGL2 → Canvas2D → HTML / CSS and **Cancel** preserves the saved order.
+WebGPU → WebGL2 → HTML / CSS and **Cancel** preserves the saved order.
 Text, snapping and exported-application options are not changed by this button.
 An explicit GPU-only order still falls back to HTML safely; it is not silently
 replaced. Current-frame geometry and timing summaries are empty/zero in HTML
@@ -217,3 +217,21 @@ CI; software screenshots still do not qualify physical-hardware performance.
 References: [Chrome GPU troubleshooting](https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips),
 [WebGPU compatibility requests](https://developer.chrome.com/blog/new-in-webgpu-146),
 [WebGL context attributes](https://registry.khronos.org/webgl/specs/latest/1.0/#5.2).
+
+## Graphics acceleration disabled or software GPU
+
+The default backend order now falls back directly to **HTML / CSS** when neither
+GPU API is usable. The browser then paints the existing semantic DOM without an
+additional retained canvas scene. Existing explicit Canvas2D preferences are
+preserved; Canvas2D remains available as a preferred backend or custom fallback.
+
+In **Tools → Options → Rendering**, **Use HTML / CSS** stages the native-browser
+backend. **OK** applies it; **Cancel** leaves the saved settings unchanged.
+**Restore Default Backends** stages WebGPU → WebGL2 → HTML / CSS. The checkbox to
+copy preferences into exported applications remains separate from IDE settings.
+
+Known software renderer descriptions (SwiftShader, llvmpipe, softpipe, Microsoft
+Basic Render Driver) and the browser's fallback-adapter flag produce a targeted
+HTML recommendation. Unknown or privacy-masked descriptions do not prove that
+hardware acceleration is enabled or disabled. This policy avoids extra canvas
+work, but does not claim a universal measured speedup on every machine.
