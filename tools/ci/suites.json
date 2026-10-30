@@ -12,8 +12,7 @@
   ],
   "core-recovery": [
     "recovery-browser-tests.py",
-    "browser-finalization-05.py",
-    "browser-boundaries-06.py"
+    "browser-finalization-05.py"
   ],
   "integration-controls": [
     "browser-html-retention.py",
@@ -36,7 +35,6 @@
   ],
   "integration-appearance": [
     "browser-theme-tests.py",
-    "browser-application-theme-tests.py",
     "browser-native-caption-tests.py",
     "browser-macos-reference-tests.py",
     "browser-winui-tests.py",
@@ -55,8 +53,10 @@
     "browser-designer-tests.py",
     "browser-exporter-offline-tests.py"
   ],
+  "figma-workspace": [
+    "figma-browser-tests.py"
+  ],
   "figma-authoring": [
-    "figma-browser-tests.py",
     "figma-presentation-browser-tests.py",
     "figma-retained-webgl-browser-tests.py",
     "figma-navigation-browser-tests.py",
@@ -67,8 +67,11 @@
     "figma-services-browser-tests.py",
     "figma-service-state-browser-tests.py"
   ],
-  "advanced-editor": [
-    "browser-advanced-editor-tests.py",
+  "advanced-editor-core": [
+    "browser-advanced-editor-tests.py"
+  ],
+  "advanced-editor-integration": [
+    "browser-input-modes-tests.py",
     "browser-tui-advanced-tests.py",
     "figma-advanced-editor-browser-tests.py"
   ],
@@ -82,5 +85,11 @@
   ],
   "tui-authoring": [
     "dos-browser-tests.py"
+  ],
+  "core-boundaries": [
+    "browser-boundaries-06.py"
+  ],
+  "application-appearance": [
+    "browser-application-theme-tests.py"
   ]
 }

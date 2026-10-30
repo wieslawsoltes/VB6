@@ -6,6 +6,7 @@ import {CellBuffer,TUI_SURFACE_PIXEL_BUDGET} from '../src/tui/cells.js';
 import {serializeScreen,deserializeScreen,serializeANSI,serializeB800,composeCellLayers} from '../src/tui/screen.js';
 import {registerTextView,textViewFor} from '../src/rendering/text-view.js';
 import {paintTextView,TuiTextViews} from '../src/tui/text-view.js';
+import {TUI_APPEARANCE,tuiAttribute} from '../src/tui/appearance.js';
 import {parseCalendarDate,calendarISO,calendarMove} from '../src/tui/pickers.js';
 
 test('authored coordinate inverses account for independent scaling, client borders and scrolling',()=>{
@@ -51,6 +52,18 @@ test('bounded text view snapshots preserve selection and all native caret positi
  paintTextView(b,state,'turbo');assert.equal(b.toText().split('\n')[0][2],'A');assert.equal(b.colors[2]>>4,3);assert.equal(b.colors[15]>>4,14);
  assert.throws(()=>paintTextView(b,{...state,cellWidth:NaN},'turbo'),RangeError);
  assert.throws(()=>paintTextView(b,{...state,items:new Array(70001)},'turbo'),RangeError);
+});
+
+for(const profile of Object.keys(TUI_APPEARANCE))test(`${profile}: search cells preserve selection and caret priority`,()=>{
+ const b=new CellBuffer(4,1),search=tuiAttribute(profile,'search'),selected=tuiAttribute(profile,'selected'),editor=tuiAttribute(profile,'editor');
+ const state={cellWidth:8,cellHeight:16,items:[{x:0,y:0,text:'a',searchMatch:true,color:15},
+   {x:8,y:0,text:'b',searchMatch:true,selected:true},{x:16,y:0,text:'c',searchMatch:true}],focused:true,carets:[{x:16,y:0}]};
+ paintTextView(b,state,profile);assert.equal(b.toText(),'abc ');
+ assert.equal(b.colors[0],search.foreground|(search.background<<4));
+ assert.equal(b.colors[1],selected.foreground|(selected.background<<4));
+ assert.equal(b.colors[2],editor.background|(editor.foreground<<4));
+ paintTextView(b,{...state,focused:false,items:state.items.map(i=>({...i,searchMatch:false,selected:false}))},profile);
+ assert.equal(b.colors[0]>>4,editor.background);assert.equal(b.toText(),'abc ');
 });
 
 test('palette transitions retire old text-view allocation before the aggregate budget resets',()=>{

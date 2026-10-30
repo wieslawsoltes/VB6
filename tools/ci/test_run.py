@@ -13,28 +13,57 @@ class RunnerTests(unittest.TestCase):
     def task(self, code):
         return {'script':'fixture.py','transport':'http','argv':[sys.executable,'-u','-c',code]}
     def test_all_plans_are_finite_and_both_advanced_origins_are_owned(self):
-        for group in json.loads((run.ROOT/'tools/ci/suites.json').read_text()):
+        groups=json.loads((run.ROOT/'tools/ci/suites.json').read_text())
+        for group in [*groups,'advanced-editor']:
             for engine in run.ENGINES:
                 tasks=run.plan(group,engine,'http');self.assertTrue(0<len(tasks)<=16)
                 if group in ('advanced-editor','code-gpu'):
                     self.assertEqual({t['transport'] for t in tasks},{'http','file'})
-    def test_figma_partitions_are_disjoint_and_combined_alias_preserves_every_suite(self):
+    def test_advanced_partitions_are_disjoint_and_alias_preserves_both_origins(self):
+        expected=['browser-advanced-editor-tests.py','browser-input-modes-tests.py',
+                  'browser-tui-advanced-tests.py','figma-advanced-editor-browser-tests.py']
         for engine in run.ENGINES:
-            for origin in ('http', 'file'):
-                first=run.plan('figma-authoring',engine,origin)
-                second=run.plan('figma-services',engine,origin)
-                self.assertFalse({t['script'] for t in first}&{t['script'] for t in second})
-                self.assertEqual(first+second,run.plan('figma',engine,origin))
-                self.assertEqual(len(first),5)
-                self.assertEqual(len(second),3)
+            for origin in ('http','file','memory'):
+                parts=[run.plan(group,engine,origin) for group in
+                       ('advanced-editor-core','advanced-editor-integration')]
+                combined=[task for part in parts for task in part]
+                self.assertEqual([len(part) for part in parts],[1,3])
+                self.assertEqual([task['script'] for task in combined],expected)
+                self.assertEqual(len({task['script'] for task in combined}),4)
+                self.assertEqual({task['transport'] for task in combined},{origin})
+                for task in combined:
+                    self.assertEqual(task['argv'],[sys.executable,str(run.ROOT/'tools'/task['script'])])
+            both=[task for origin in ('http','file') for group in
+                  ('advanced-editor-core','advanced-editor-integration')
+                  for task in run.plan(group,engine,origin)]
+            for requested_origin in ('http','file','memory'):
+                self.assertEqual(run.plan('advanced-editor',engine,requested_origin),both)
+    def test_figma_partitions_are_disjoint_and_combined_alias_preserves_every_suite(self):
+        expected=['figma-browser-tests.py','figma-presentation-browser-tests.py',
+                  'figma-retained-webgl-browser-tests.py','figma-navigation-browser-tests.py',
+                  'figma-editor-browser-tests.py','figma-property-keyboard-browser-tests.py',
+                  'figma-services-browser-tests.py','figma-service-state-browser-tests.py']
+        for engine in run.ENGINES:
+            for origin in ('http', 'file', 'memory'):
+                parts=[run.plan(group,engine,origin) for group in
+                       ('figma-workspace','figma-authoring','figma-services')]
+                combined=[task for part in parts for task in part]
+                self.assertEqual([len(part) for part in parts],[1,4,3])
+                self.assertEqual([task['script'] for task in combined],expected)
+                self.assertEqual(len({task['script'] for task in combined}),8)
+                self.assertEqual({task['transport'] for task in combined},{origin})
+                self.assertEqual(combined,run.plan('figma',engine,origin))
     def test_process_deadlines_are_scoped_to_measured_standalone_suites(self):
         expected={
+            ('webkit','http','browser-application-theme-tests.py'):900,
+            ('webkit','file','browser-application-theme-tests.py'):900,
             ('webkit','file','figma-browser-tests.py'):900,
             ('webkit','file','figma-editor-browser-tests.py'):900,
             ('webkit','file','figma-services-browser-tests.py'):900,
             ('webkit','http','native-project-browser-tests.py'):1200,
             ('webkit','file','native-project-browser-tests.py'):1200,
             ('webkit','file','browser-advanced-editor-tests.py'):1200,
+            ('webkit','file','browser-input-modes-tests.py'):900,
         }
         scripts=sorted({script for group in json.loads((run.ROOT/'tools/ci/suites.json').read_text()).values() for script in group})
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
@@ -51,12 +80,14 @@ class RunnerTests(unittest.TestCase):
                     self.assertTrue(result['passed'])
                     self.assertEqual(observed,deadlines,(engine,origin))
                     self.assertEqual([r['timeoutSeconds'] for r in result['cases']],deadlines)
+
     def test_explicit_short_deadline_is_preserved_for_standalone_suites(self):
         tasks=[{**self.task(''), 'script':script, 'transport':origin} for origin,script in [
             ('file','figma-browser-tests.py'),('file','figma-editor-browser-tests.py'),
             ('file','figma-services-browser-tests.py'),
             ('http','native-project-browser-tests.py'),('file','native-project-browser-tests.py'),
-            ('file','browser-advanced-editor-tests.py')]]
+            ('file','browser-advanced-editor-tests.py'),
+            ('http','browser-application-theme-tests.py'),('file','browser-application-theme-tests.py')]]
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
             root=Path(d);observed=[]
             def execute(task,root,env,log,timeout,cancelled):
@@ -64,6 +95,7 @@ class RunnerTests(unittest.TestCase):
                 return {'status':'passed','exitCode':0,'seconds':0}
             result=run.run_batch(tasks,root,'webkit',root/'report',timeout=2,execute_fn=execute)
             self.assertTrue(result['passed']);self.assertEqual(observed,[2]*len(tasks))
+
     def test_invalid_arguments_fail_closed(self):
         for args in [('unknown','chromium','http'),('../figma','chromium','http'),('figma','chrome','http'),('figma','webkit','https://remote')]:
             with self.assertRaises(ValueError):run.plan(*args)
@@ -105,6 +137,73 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(result['cases'][0]['exitCode'],7)
             self.assertIn('primary failure',(root/'report'/result['cases'][0]['log']).read_text())
             self.assertEqual(json.loads((root/'report/timings.json').read_text()),result)
+    def test_native_project_deadline_is_scoped_and_explicit_limits_win(self):
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d)
+            scripts=['native-project-browser-tests.py','project-workspace-review-browser-tests.py','fixture.py']
+            tasks=[{**self.task(''), 'script':script} for script in scripts]
+            deadlines=[]
+            def record_deadline(task,root,env,log,timeout,cancelled):
+                deadlines.append((env['VB6_BROWSER'],task['script'],timeout))
+                return {'status':'passed','exitCode':0,'seconds':0}
+            for engine in run.ENGINES:
+                result=run.run_batch(tasks,root,engine,root/engine,execute_fn=record_deadline)
+                expected=[1200 if engine=='webkit' else 480,480,480]
+                self.assertTrue(result['passed'])
+                self.assertEqual([item['script'] for item in result['cases']],scripts)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],expected)
+                self.assertEqual(deadlines[-3:],[(engine,script,limit) for script,limit in zip(scripts,expected)])
+            for limit in (2,480):
+                result=run.run_batch(tasks,root,'webkit',root/str(limit),timeout=limit,execute_fn=record_deadline)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],[limit]*3)
+                self.assertEqual(deadlines[-3:],[('webkit',script,limit) for script in scripts])
+    def test_figma_workspace_deadline_is_scoped_to_webkit_file_and_explicit_limits_win(self):
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d)
+            scripts=['native-project-browser-tests.py','figma-browser-tests.py',
+                     'figma-editor-browser-tests.py','fixture.py']
+            deadlines=[]
+            def record_deadline(task,root,env,log,timeout,cancelled):
+                deadlines.append((env['VB6_BROWSER'],env['VB6_TEST_TRANSPORT'],task['script'],timeout))
+                return {'status':'passed','exitCode':0,'seconds':0}
+            for engine in run.ENGINES:
+                for origin in ('http','file','memory'):
+                    tasks=[{**self.task(''),'script':script,'transport':origin} for script in scripts]
+                    result=run.run_batch(tasks,root,engine,root/engine/origin,execute_fn=record_deadline)
+                    expected=[1200 if engine=='webkit' and origin!='memory' else 480,
+                              900 if engine=='webkit' and origin=='file' else 480,
+                              900 if engine=='webkit' and origin=='file' else 480,480]
+                    self.assertTrue(result['passed'])
+                    self.assertEqual([item['timeoutSeconds'] for item in result['cases']],expected)
+                    self.assertEqual(deadlines[-4:],[(engine,origin,script,limit) for script,limit in zip(scripts,expected)])
+            for limit in (2,480):
+                tasks=[{**self.task(''),'script':script,'transport':'file'} for script in scripts]
+                result=run.run_batch(tasks,root,'webkit',root/str(limit),timeout=limit,execute_fn=record_deadline)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],[limit]*4)
+                self.assertEqual(deadlines[-4:],[('webkit','file',script,limit) for script in scripts])
+    def test_advanced_deadlines_only_extend_webkit_file_monaco_and_vim(self):
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d)
+            scripts=['browser-advanced-editor-tests.py','browser-input-modes-tests.py',
+                     'browser-tui-advanced-tests.py','figma-advanced-editor-browser-tests.py']
+            deadlines=[]
+            def record_deadline(task,root,env,log,timeout,cancelled):
+                deadlines.append((env['VB6_BROWSER'],env['VB6_TEST_TRANSPORT'],task['script'],timeout))
+                return {'status':'passed','exitCode':0,'seconds':0}
+            for engine in run.ENGINES:
+                for origin in ('http','file','memory'):
+                    tasks=[{**self.task(''),'script':script,'transport':origin} for script in scripts]
+                    result=run.run_batch(tasks,root,engine,root/engine/origin,execute_fn=record_deadline)
+                    limit=900 if engine=='webkit' and origin=='file' else 480
+                    expected=[1200 if engine=='webkit' and origin=='file' else 480,limit,480,480]
+                    self.assertTrue(result['passed'])
+                    self.assertEqual([item['timeoutSeconds'] for item in result['cases']],expected)
+                    self.assertEqual(deadlines[-4:],[(engine,origin,script,bound) for script,bound in zip(scripts,expected)])
+            for limit in (2,480):
+                tasks=[{**self.task(''),'script':script,'transport':'file'} for script in scripts]
+                result=run.run_batch(tasks,root,'webkit',root/str(limit),timeout=limit,execute_fn=record_deadline)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],[limit]*4)
+                self.assertEqual(deadlines[-4:],[('webkit','file',script,limit) for script in scripts])
     def test_timeout_and_cancellation_never_pass(self):
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
             root=Path(d)

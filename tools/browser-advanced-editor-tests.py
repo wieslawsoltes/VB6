@@ -11,12 +11,23 @@ ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 TRANSPORT=os.environ.get('VB6_TEST_TRANSPORT','http')
 REPORT=ROOT/'reports'/'advanced-editor'/ENGINE/TRANSPORT
+IDE_STARTUP_TIMEOUT_MS=60000
 FIXTURE=r'''()=>{const A=VB6StudioAPI,p=A.newProject('EditorTest'),m=p.modules[0];p.id='editor-test';p.settings.xaml=true;p.settings.renderer='canvas2d';m.id='form';m.name='Form1';m.form.name='Form1';m.form.properties.Name='Form1';
 const button=A.createControl('CommandButton','Button1',300,300);button.id='button';button.properties.Caption='Original';m.form.controls=[button];
 m.code='Option Explicit\nPublic total As Long\nPrivate Sub Button1_Click()\n    total = Add(1, 2)\nEnd Sub\n';
 p.modules.push({id:'math',name:'Math',kind:'module',code:'Option Explicit\nPublic Function Add(ByVal left As Long, ByVal right As Long) As Long\n    Add = left + right\nEnd Function\n'});p.startup='Form1';vb6Studio.loadProject(p);vb6Studio.openDocument('form','code');return true;}'''
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self,*args):pass
+class AdvancedEditorTestResult(unittest.TextTestResult):
+    """Keep the failure cause even if a later case or CI cancellation stops the suite."""
+    def addError(self,test,error):
+        super().addError(test,error)
+        self.stream.writeln(self._exc_info_to_string(error,test));self.stream.flush()
+    def addFailure(self,test,error):
+        super().addFailure(test,error)
+        self.stream.writeln(self._exc_info_to_string(error,test));self.stream.flush()
+class AdvancedEditorTestRunner(unittest.TextTestRunner):
+    resultclass=AdvancedEditorTestResult
 class AdvancedEditorAcceptance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -32,14 +43,21 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         (REPORT/'results.json').write_text(json.dumps({'browser':ENGINE,'transport':TRANSPORT,'results':cls.results},indent=2))
     def setUp(self):
         self.started=time.perf_counter();self.errors=[];self.errorStacks=[];self.requests=[];self.passed=False
-        self.context=self.browser.new_context(viewport={'width':1500,'height':1000});self.context.set_default_timeout(15000)
-        self.page=self.context.new_page();self.page.on('pageerror',lambda e:(self.errors.append(str(e)),self.errorStacks.append(e.stack)));self.page.on('request',lambda r:self.requests.append(r.url))
-        # WebKit's standalone load event can outlast the installed editor API.
-        # Bound startup separately while preserving the 15-second action deadline.
-        if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text())
-        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit',timeout=60000)
-        else:self.page.goto(self.base+'/dist/index.html',wait_until='commit',timeout=60000)
-        self.page.wait_for_function('globalThis.vb6Studio?.advancedEditor',timeout=60000);self.page.evaluate(FIXTURE)
+        self.context=self.browser.new_context(viewport={'width':1500,'height':1000})
+        try:
+            self.context.set_default_timeout(15000)
+            self.page=self.context.new_page();self.page.on('pageerror',lambda e:(self.errors.append(str(e)),self.errorStacks.append(e.stack)));self.page.on('request',lambda r:self.requests.append(r.url))
+            # Parsing the standalone artifact and starting the IDE have a separate
+            # bounded deadline; all subsequent interactions retain their 15s limit.
+            if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text(),wait_until='domcontentloaded',timeout=IDE_STARTUP_TIMEOUT_MS)
+            elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
+            else:self.page.goto(self.base+'/dist/index.html',wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
+            self.page.wait_for_function('globalThis.vb6Studio?.advancedEditor',timeout=IDE_STARTUP_TIMEOUT_MS);self.page.evaluate(FIXTURE)
+        except Exception:
+            # unittest does not call tearDown after a failed setUp.
+            try:self.context.close()
+            except Exception:pass
+            raise
     def tearDown(self):
         self.results.append({'name':self._testMethodName,'passed':self.passed and not self.errors,'pageErrors':self.errors,'pageErrorStacks':self.errorStacks,'milliseconds':round((time.perf_counter()-self.started)*1000,2)})
         if not self.passed:self.page.screenshot(path=str(REPORT/(self._testMethodName+'.png')))
@@ -313,4 +331,4 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.assertLess(metrics['indexedLines'],30);self.assertLess(metrics['scannedCharacters'],1000)
         self.assertTrue(self.page.evaluate('s.record.model.getValue()===vb6Studio.activeModule.code'))
         self.done()
-if __name__=='__main__':unittest.main(verbosity=2)
+if __name__=='__main__':unittest.main(verbosity=2,testRunner=AdvancedEditorTestRunner)

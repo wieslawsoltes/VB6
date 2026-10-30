@@ -24,8 +24,34 @@ class WorkflowAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):check.audit(self.root)
     def test_complete_graph_passes(self):
         result=check.audit(self.root)
-        self.assertEqual(result['preservedEntrypoints'],89)
+        self.assertEqual(result['preservedEntrypoints'],90)
         self.assertEqual(result['linuxNodeTests'],sorted(p.name for p in (self.root/'tests').glob('linux-*.test.mjs')))
+    def test_retired_macos_runner_cannot_return(self):
+        for owner in ('macos', 'macos-browser-native'):
+            with self.subTest(owner=owner):
+                self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['os'].append('macos-14'))
+    def test_each_supported_macos_platform_is_required(self):
+        for owner in ('macos', 'macos-browser-native'):
+            for platform in ('macos-15', 'macos-26'):
+                with self.subTest(owner=owner, platform=platform):
+                    self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['os'].remove(platform))
+    def test_missing_application_appearance_partition_rejected(self):
+        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix']['suite'].remove('application-appearance'))
+    def test_application_appearance_preserves_job_deadline(self):
+        self.reject(lambda w:w['jobs']['browser'].update({'timeout-minutes':30}))
+    def test_missing_core_boundaries_partition_rejected(self):
+        self.reject(lambda w:w['jobs']['core-browser']['strategy']['matrix']['suite'].remove('core-boundaries'))
+    def test_core_partitions_preserve_job_deadline(self):
+        self.reject(lambda w:w['jobs']['core-browser'].update({'timeout-minutes':30}))
+    def test_complete_core_and_appearance_suite_ownership(self):
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';original=json.loads(path.read_text())
+        for left,right in [('core-boundaries','core-recovery'),('application-appearance','integration-appearance')]:
+            with self.subTest(left=left,right=right):
+                suites=copy.deepcopy(original)
+                suites[left][0],suites[right][0]=suites[right][0],suites[left][0]
+                path.write_text(json.dumps(suites))
+                with self.assertRaises(ValueError):check.audit(self.root)
     def test_node_native_runtime_platform_required(self):
         self.reject(lambda w:w['jobs']['node'].update({'runs-on':'ubuntu-latest'}))
     def test_node_native_runtime_dependency_required(self):
@@ -113,7 +139,54 @@ class WorkflowAuditTests(unittest.TestCase):
     def test_missing_origin_rejected(self):self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['transport'].remove('file'))
     def test_missing_gpu_display_rejected(self):self.reject(lambda w:w['jobs']['rendering-qualification']['strategy']['matrix']['display'].remove('headed'))
     def test_missing_figma_partition_rejected(self):
-        self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['suite'].remove('figma-services'))
+        for group in ('figma-workspace','figma-authoring','figma-services'):
+            with self.subTest(group=group):
+                self.reject(lambda w:w['jobs']['figma']['strategy']['matrix']['suite'].remove(group))
+    def test_missing_advanced_partition_or_origin_rejected(self):
+        for axis,value in [('suite','advanced-editor-core'),('suite','advanced-editor-integration'),
+                           ('transport','http'),('transport','file')]:
+            with self.subTest(axis=axis,value=value):
+                self.reject(lambda w:w['jobs']['advanced-editor']['strategy']['matrix'][axis].remove(value))
+    def test_advanced_execution_cannot_drop_ownership_origin_or_monaco(self):
+        for name,value in [('SUITE','advanced-editor'),('VB6_TEST_TRANSPORT','http'),('VB6_TEST_ADVANCED','0')]:
+            with self.subTest(name=name):
+                self.reject(lambda w:[s['env'].update({name:value}) for s in w['jobs']['advanced-editor']['steps'] if 'tools/ci/run.py' in s.get('run','')])
+        self.reject(lambda w:[s.update({'run':'python tools/ci/run.py advanced-editor'}) for s in w['jobs']['advanced-editor']['steps'] if 'tools/ci/run.py' in s.get('run','')])
+        self.reject(lambda w:[s.update({'if':'false'}) for s in w['jobs']['advanced-editor']['steps'] if 'tools/ci/run.py' in s.get('run','')])
+    def test_advanced_build_evidence_and_job_bound_are_preserved(self):
+        self.reject(lambda w:w['jobs']['advanced-editor'].update({'needs':['hygiene']}))
+        self.reject(lambda w:[s['with'].update({'name':'unrelated-build'}) for s in w['jobs']['advanced-editor']['steps'] if s.get('uses')=='actions/download-artifact@v4'])
+        self.reject(lambda w:[s['with'].update({'name':'advanced-${{ matrix.browser }}'}) for s in w['jobs']['advanced-editor']['steps'] if s.get('uses')=='actions/upload-artifact@v4'])
+        self.reject(lambda w:w['jobs']['advanced-editor'].update({'timeout-minutes':25}))
+    def test_advanced_suites_cannot_rejoin_a_shared_deadline(self):
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';suites=json.loads(path.read_text())
+        suites['advanced-editor-core'].append(suites['advanced-editor-integration'].pop(0))
+        path.write_text(json.dumps(suites))
+        with self.assertRaisesRegex(ValueError,'Balanced advanced editor'):
+            check.audit(self.root)
+    def test_figma_workspace_suite_cannot_rejoin_the_shared_authoring_deadline(self):
+        # Keep the full script inventory and disjointness, but exchange owners.
+        # The dedicated-workspace guard must reject this otherwise valid graph.
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';suites=json.loads(path.read_text())
+        suites['figma-workspace']=['figma-editor-browser-tests.py']
+        scripts=suites['figma-authoring']
+        scripts[scripts.index('figma-editor-browser-tests.py')]='figma-browser-tests.py'
+        path.write_text(json.dumps(suites))
+        with self.assertRaisesRegex(ValueError,'Dedicated Figma workspace'):
+            check.audit(self.root)
+    def test_application_appearance_cannot_rejoin_ide_theme_deadline(self):
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';suites=json.loads(path.read_text())
+        # Exchange owners while retaining every entrypoint exactly once. A
+        # coverage-only audit cannot detect the lost deadline separation.
+        suites['application-appearance']=['browser-theme-tests.py']
+        scripts=suites['integration-appearance']
+        scripts[scripts.index('browser-theme-tests.py')]='browser-application-theme-tests.py'
+        path.write_text(json.dumps(suites))
+        with self.assertRaisesRegex(ValueError,'Dedicated application appearance'):
+            check.audit(self.root)
     def test_hidden_matrix_exclusion_rejected(self):
         self.reject(lambda w:w['jobs']['figma']['strategy']['matrix'].update({'exclude':[{'browser':'webkit','transport':'file'}]}))
     def test_duplicate_matrix_value_rejected(self):
