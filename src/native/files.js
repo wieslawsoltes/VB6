@@ -13,7 +13,7 @@ const local=o=>at('ebp',o.offset),arg=argument=>({argument}),lit=value=>({kind:'
 export const NATIVE_FILE_SLOT_BYTES=64;
 export function useNativeFiles(c){if(!c.nativeFilesUsed){c.nativeFilesUsed=true;c.slot(P+'table');}}
 function save(c,name){const s=c.arrayWorkspace(4,name);c.x.mov(local(s),'eax');return s;}
-const fileTypes=Object.freeze({freefile:'integer',eof:'boolean',lof:'long',loc:'long',seek:'long',fileattr:'long',input:'string'});
+const fileTypes=Object.freeze({mkdir:'long',freefile:'integer',eof:'boolean',lof:'long',loc:'long',seek:'long',fileattr:'long',input:'string'});
 export function nativeFileType(c,node){
   const callee=node.kind==='call'?node.callee:node,name=key(callee.name).replace(/\$$/,'');
   return callee.kind==='id'&&Object.hasOwn(fileTypes,name)&&!c.variable(callee)&&!c.resolveProcedure(callee)?fileTypes[name]:null;
@@ -21,6 +21,11 @@ export function nativeFileType(c,node){
 export function nativeFileBuiltin(c,node,name){
   if(!Object.hasOwn(fileTypes,name)||c.resolveProcedure(node.callee))return false;
   useNativeFiles(c);const x=c.x;
+  if(name==='mkdir'){
+    const plan=planNativeArguments({name,params:[{name:'path'}]},node.args,m=>c.fail(m));
+    c.nativeDirectoryCreationUsed=true;
+    c.textExpression(plan.order[0].node);x.push().call(P+'mkdir');return true;
+  }
   const params=name==='freefile'?[{name:'rangenumber',optional:true}]:name==='input'?[{name:'number'},{name:'filenumber'}]:name==='fileattr'?[{name:'filenumber'},{name:'returntype',optional:true}]:[{name:'filenumber'}];
   const plan=planNativeArguments({name,params},node.args,m=>c.fail(m)),slots=[];
   for(const field of plan.order){c.numeric(field.omitted?lit(name==='freefile'?0:1):field.node);slots[field.index]=save(c,'file-argument');}

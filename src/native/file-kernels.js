@@ -25,8 +25,18 @@ export function emitNativeFileHelpers(c){
   // Errors are read before any cleanup API, then mapped after the cleanup.
   x.label(P+'last-error').api(K,'GetLastError');
   x.label(P+'error');
-  for(const [code,error]of [[2,53],[3,76],[4,67],[5,70],[6,52],[8,7],[14,7],[32,70],[33,70],[80,58],[112,61],[123,52],[206,52]])x.compare(code).branch('e','error:'+error);
+  for(const [code,error]of [[2,53],[3,76],[4,67],[5,70],[6,52],[8,7],[14,7],[32,70],[33,70],[80,58],[183,58],[112,61],[123,52],[206,52]])x.compare(code).branch('e','error:'+error);
   x.jump('error:75');
+  if(c.nativeDirectoryCreationUsed){
+    // A counted path must match the UTF-16 API's termination, just as for Open.
+    // Never create a prefix when a source String contains an embedded NUL.
+    const made=x.unique();
+    x.label(P+'mkdir').enter().api('oleaut32.dll','SysStringLen',[arg(8)])
+      .test().branch('e','error:52').compare(32767).branch('g','error:52').mov('ebx','eax')
+      .api(K,'lstrlenW',[arg(8)]).cmp('eax','ebx').branch('ne','error:52')
+      .api(K,'CreateDirectoryW',[arg(8),0]).test().branch('ne',made).jump(P+'last-error')
+      .label(made).value(0).leave(4);
+  }
   const openFail=x.unique(),valid=x.unique(),scan=x.unique(),next=x.unique(),truncate=x.unique(),publish=x.unique(),duplicate=x.unique(),closed=x.unique();
   x.label(P+'open').enter(56).push(arg(12)).call(P+'entry').mov('esi','eax').cmp(at('esi'),0).branch('ne','error:55');
   x.api('oleaut32.dll','SysStringLen',[arg(8)]).test().branch('e','error:52').compare(32767).branch('g','error:52').mov('ebx','eax')
