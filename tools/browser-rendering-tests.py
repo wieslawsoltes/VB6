@@ -450,6 +450,7 @@ with sync_playwright() as playwright:
           n.className='designer-scroll';n.dataset.vbTheme='classic';n.dataset.vbThemeFamily='classic';n.tabIndex=0;
           n.style.cssText='position:fixed;left:32px;top:32px;width:240px;height:180px;max-width:none;max-height:none;flex:none;overflow:scroll;padding:0;z-index:500000';
           const content=document.createElement('div');content.style.cssText='width:800px;height:600px';n.append(content);document.body.append(n);
+          n.completedScrolls=0;n.addEventListener('scrollend',()=>n.completedScrolls++);
         }""")
         dimensions = """()=>{const n=document.querySelector('#native-scrollbar-fixture'),r=n.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,cw:n.clientWidth,ch:n.clientHeight,sw:n.scrollWidth,sh:n.scrollHeight}}"""
         geometry = page.evaluate(dimensions)
@@ -459,12 +460,23 @@ with sync_playwright() as playwright:
         # Real browser wheel, native increment button and native thumb drag. No
         # JS scrollbar implementation, event swallowing or invisible hit regions.
         page.mouse.move(geometry['x']+70,geometry['y']+60);page.mouse.wheel(80,80)
-        page.wait_for_function("(()=>{const n=document.querySelector('#native-scrollbar-fixture');return n.scrollLeft>0&&n.scrollTop>0})()")
-        page.evaluate("document.querySelector('#native-scrollbar-fixture').scrollTo(0,0)")
+        # wheel() only dispatches input; a nonzero offset can be the FIRST frame
+        # of its animation. Both wheel and arrow scrolling must finish before
+        # resetting and sending the next action to the native scrollbar.
+        # https://playwright.dev/python/docs/api/class-mouse#mouse-wheel
+        page.wait_for_function("(()=>{const n=document.querySelector('#native-scrollbar-fixture');return n.completedScrolls>0&&n.scrollLeft>0&&n.scrollTop>0})()")
+        def reset_scrollport():
+            page.evaluate("""async()=>{
+              const n=document.querySelector('#native-scrollbar-fixture');
+              n.scrollTo({left:0,top:0,behavior:'instant'});
+              await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+              if(n.scrollLeft!==0||n.scrollTop!==0)throw Error('Native scrollport did not reset: '+n.scrollLeft+','+n.scrollTop);
+            }""")
+        reset_scrollport()
+        completed = page.evaluate("document.querySelector('#native-scrollbar-fixture').completedScrolls")
         page.mouse.click(geometry['x']+geometry['cw']-8,geometry['y']+geometry['h']-8)
-        page.wait_for_function("document.querySelector('#native-scrollbar-fixture').scrollLeft>0")
-        page.evaluate("document.querySelector('#native-scrollbar-fixture').scrollTo(0,0)")
-        page.wait_for_timeout(100)
+        page.wait_for_function("previous=>{const n=document.querySelector('#native-scrollbar-fixture');return n.completedScrolls>previous&&n.scrollLeft>0}", arg=completed)
+        reset_scrollport()
         page.mouse.move(geometry['x']+35,geometry['y']+geometry['h']-8);page.mouse.down()
         # Give the native scrollbar drag loop a display frame to acquire the
         # thumb before dispatching moves, as a physical press would.
