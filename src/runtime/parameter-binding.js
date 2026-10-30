@@ -1,4 +1,5 @@
-import {Cell,LazyCell,Ref,VBArray,SCALAR_TYPES,NOTHING,unbox,coerce,scalarType,storageScalar,readScalar,arrayTypeMatches,recordTypeMatches} from './values.js';
+import {Cell,LazyCell,Ref,VBArray,SCALAR_TYPES,NOTHING,unbox,coerce,scalarType,storageScalar,readScalar,arrayTypeMatches,recordTypeMatches,recordIdentity} from './values.js';
+import {pascalObjectReferenceCompatible} from '../language/pascal/object-compatibility.js';
 import {inheritReferenceOwners} from './array-lifetime.js';
 import {VBError} from '../language/errors.js';
 const lower=value=>String(value).toLowerCase();
@@ -42,7 +43,8 @@ export async function bindReferenceParameter(vm,param,ref,module) {
     return {cell:ref};
   }
   if(record){
-    if(lower(ref.type)==='variant'||!recordTypeMatches(await ref.get(),type,record.identity))throw new VBError('ByRef user-defined type mismatch',13);
+    const value=await ref.get();
+    if(lower(ref.type)==='variant'||!recordTypeMatches(value,type,record.identity)&&!pascalObjectReferenceCompatible(vm.program.modules,recordIdentity(value),record.identity))throw new VBError('ByRef user-defined type mismatch',13);
     return {cell:ref};
   }
   // Remaining named types are object types owned by their source/host adapter.

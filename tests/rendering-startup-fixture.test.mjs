@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import awaitInitialLayout from './fixtures/rendering-startup.mjs';
 
-function fixture({pending = false, dirty = false, fonts = Promise.resolve()} = {}) {
+function fixture({pending = false, dirty = false, fonts = Promise.resolve(), paintDelay = 1} = {}) {
   const calls = [], handles = new Map(); let id = 0;
   const schedule = (callback, delay) => {
     const key = id++;
@@ -20,7 +20,7 @@ function fixture({pending = false, dirty = false, fonts = Promise.resolve()} = {
         calls.push(['observe',node]);
         this.handle = schedule(() => {
           // Model the renderer observer's initial notification and its paint.
-          r.frame = schedule(() => { r.frame = null; if (!dirty) r.stylesDirty = false; },1);
+          r.frame = schedule(() => { r.frame = null; if (!dirty) r.stylesDirty = false; },paintDelay);
           r.stylesDirty = true; this.callback();
         },1);
       }
@@ -45,7 +45,19 @@ test('cache baseline waits for delayed registration and its initial invalidation
 test('perpetual dirty state fails rather than blessing a fresh baseline', async t => {
   const f=fixture({dirty:true});t.after(()=>f.cleanup());
   await assert.rejects(awaitInitialLayout(f.r,20),/did not settle/);
-  assert.equal(f.r.stylesDirty,true);assert.equal(f.handles.size,0);
+  assert.equal(f.r.stylesDirty,true);
+  // The barrier releases its own timer/task/frame, not the renderer's pending
+  // paint. Under load the deadline can win before that independent paint runs.
+  assert.deepEqual([...f.handles.keys()], f.r.frame == null ? [] : [f.r.frame]);
+});
+
+test('startup timeout releases barrier work without cancelling the renderer-owned frame', async t => {
+  const f=fixture({dirty:true,paintDelay:1000});t.after(()=>f.cleanup());
+  await assert.rejects(awaitInitialLayout(f.r,20),/did not settle/);
+  assert.notEqual(f.r.frame,null,'The simulated renderer still owns its scheduled paint');
+  assert.deepEqual([...f.handles.keys()],[f.r.frame]);
+  assert.equal(f.r.stylesDirty,true);
+  assert.ok(f.calls.some(call=>call[0]==='disconnect'),'The barrier observer is released');
 });
 
 test('a renderer disposed during deferred registration is rejected', async t => {

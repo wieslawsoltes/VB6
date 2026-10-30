@@ -1,9 +1,9 @@
 import {procedures} from './language-service.js';
 /** UTF-16 offsets, as used by textarea selections and the source compiler. */
-export function indexSource(text){
+export function indexSource(text,language='vb6'){
   const source=String(text),lines=source.split('\n'),starts=new Uint32Array(lines.length);let offset=0;
   for(let i=0;i<lines.length;i++){starts[i]=offset;offset+=lines[i].length+1;}
-  return {text:source,lines,starts,procedures:procedures(source)};
+  return {text:source,lines,starts,procedures:procedures(source,language),...(language!=='vb6'?{language}:{})};
 }
 export function positionAt(index,offset){
   const p=Math.max(0,Math.min(index.text.length,Number(offset)||0));let lo=0,hi=index.starts.length;

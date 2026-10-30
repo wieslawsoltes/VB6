@@ -5,13 +5,13 @@ import {PaintScene, parseColor, splitCSS} from '../src/rendering/scene.js';
 import {acquireDevice, deadline} from '../src/rendering/device.js';
 
 test('WebGPU is the default and HTML is an unconditional safety net', () => {
-  assert.deepEqual(renderingCandidates(), ['webgpu', 'webgl2', 'canvas2d', 'html']);
+  assert.deepEqual(renderingCandidates(), ['webgpu', 'webgl2', 'html']);
   for (const value of [undefined, null, [], false, 'webgpu', {backend: 'unknown'}]) assert.equal(normalizeRendering(value).backend, 'webgpu');
   assert.deepEqual(renderingCandidates({backend: 'webgpu', fallbacks: []}), ['webgpu', 'html']);
   assert.deepEqual(renderingCandidates({backend: 'html', fallbacks: BACKENDS}), ['html']);
   assert.deepEqual(renderingCandidates({backend: 'webgl2', fallbacks: ['webgl2', 'bad', 'canvas2d', 'canvas2d']}), ['webgl2', 'canvas2d', 'html']);
   assert.deepEqual(renderingCandidates({fallbacks: ['html', 'canvas2d']}), ['webgpu', 'html']);
-  const p = normalizeRendering(); p.fallbacks.length = 0; assert.equal(DEFAULT_RENDERING.fallbacks.length, 3);
+  const p = normalizeRendering(); p.fallbacks.length = 0; assert.equal(DEFAULT_RENDERING.fallbacks.length, 2);
 });
 test('storage denial and corrupt storage never prevent startup', () => {
   const denied = {getItem() { throw Error('denied'); }, setItem() { throw Error('quota'); }};

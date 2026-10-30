@@ -215,10 +215,10 @@ export function compileModule(input) {
   }
   return module;
 }
-export function compileProject(project,{retainSyntax=false}={}) {
+export function compileProject(project,{retainSyntax=false,moduleCompiler=compileModule}={}) {
   const modules=new Map(),diagnostics=[];
   try{validateLayout(project,false);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||380,source:error.source||project.name,line:1,column:1});}
-  for(const input of project.modules||[]){try{const module=compileModule({...input,retainSyntax,conditionalConstants:project.settings?.conditionalConstants||{}});const key=lower(module.name);if(modules.has(key))throw new VBError(`Duplicate module name: ${module.name}`,1002,module.name,1);modules.set(key,module);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||1002,source:error.source||input.name,line:error.line||1,column:error.column||1});}}
+  for(const input of project.modules||[]){try{const module=moduleCompiler({...input,retainSyntax,conditionalConstants:project.settings?.conditionalConstants||{}});const key=lower(module.name);if(modules.has(key))throw new VBError(`Duplicate module name: ${module.name}`,1002,module.name,1);modules.set(key,module);}catch(error){diagnostics.push({severity:'error',message:error.message,number:error.number||1002,source:error.source||input.name,line:error.line||1,column:error.column||1});}}
   diagnostics.push(...validateCompiledModules(modules,project.settings));
   return {name:project.name,startup:project.startup,modules,diagnostics,valid:!diagnostics.length,settings:project.settings||{},sourceProject:project};
 }

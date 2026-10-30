@@ -29,7 +29,7 @@ selectors define an ordered list. Duplicate entries and the preferred backend
 are removed; HTML/CSS is always the final safety net. The default chain is:
 
 ```
-WebGPU → WebGL2 → Canvas2D → HTML / CSS
+WebGPU → WebGL2 → HTML / CSS
 ```
 
 Switching backends applies without reloading or recreating the project, editor,

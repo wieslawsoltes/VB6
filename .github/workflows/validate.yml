@@ -134,6 +134,8 @@ jobs:
       - name: Type-check standalone Intelligent UI declarations
         run: npm exec --yes --package=typescript@5.8.3 -- tsc --noEmit --strict --lib ES2023,DOM --module NodeNext --moduleResolution
           NodeNext packages/intelligent-ui/src/index.d.ts
+      - name: Type-check and execute an independently installed Pascal SDK consumer
+        run: npm exec --yes --package=typescript@5.8.3 -- node tools/test-pascal-types.mjs
       - name: Independently installed COM and Automation packages
         run: node tools/test-com-ole-packages.mjs
       - name: Independently extracted layout package and labelled solver benchmarks
@@ -194,6 +196,7 @@ jobs:
           - core-runtime
           - core-parity
           - core-recovery
+          - core-boundaries
     steps:
       - uses: actions/checkout@v4
         with:
@@ -232,6 +235,7 @@ jobs:
           - integration-controls
           - integration-authoring
           - integration-appearance
+          - application-appearance
           - tui-authoring
           - intelligent-ui
           - project-authoring
@@ -248,6 +252,9 @@ jobs:
         run: python tools/ci/run.py "$SUITE"
         env:
           SUITE: ${{ matrix.suite }}
+      - name: Pascal forms, editing, MCP and debugging in offline classic editor
+        run: python tools/browser-pascal-tests.py --origin file
+        if: "!cancelled() && matrix.suite == 'integration-authoring'"
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
@@ -260,13 +267,14 @@ jobs:
   figma:
     name: Figma (${{ matrix.suite }}, ${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    # The 43-case WebKit/file authoring partition takes about 25 minutes.
+    # Keep the validated main-branch bound while running disjoint script owners.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         # Each suite owns disjoint scripts; origins and engines stay exhaustive.
         suite:
+          - figma-workspace
           - figma-authoring
           - figma-services
         browser:
@@ -285,7 +293,7 @@ jobs:
           browser: ${{ matrix.browser }}
           profile: authoring
           mesa: ${{ matrix.browser == 'firefox' && matrix.suite == 'figma-authoring' }}
-      - name: Run the assigned authoring or services partition
+      - name: Run the assigned Figma partition
         run: python tools/ci/run.py "$SUITE"
         env:
           SUITE: ${{ matrix.suite }}
@@ -362,7 +370,7 @@ jobs:
           npm run build
           npm ci --prefix packages/advanced-editor --ignore-scripts --no-audit --no-fund
           node tools/build-advanced-editor.mjs
-          node --test tests/advanced-editor*.test.mjs
+          node --test tests/advanced-editor*.test.mjs tests/input-modes-monaco-layout.test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -373,17 +381,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   advanced-editor:
-    name: Advanced editor (${{ matrix.browser }})
+    name: ${{ matrix.suite }} (${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    # Every editor case runs through both real origins in the same job.
+    # Each disjoint editor partition keeps the validated main-branch job bound.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        suite:
+          - advanced-editor-core
+          - advanced-editor-integration
         browser:
           - chromium
           - firefox
           - webkit
+        transport:
+          - http
+          - file
     needs:
       - advanced-build
     steps:
@@ -399,16 +413,27 @@ jobs:
         with:
           name: advanced-editor-assets
           path: dist
-      - name: Actual Monaco and Figma integration on both origins
-        run: python tools/ci/run.py advanced-editor
+      - name: Run the owned advanced editor scripts on the selected origin
+        env:
+          SUITE: ${{ matrix.suite }}
+          VB6_TEST_TRANSPORT: ${{ matrix.transport }}
+          VB6_TEST_ADVANCED: '1'
+        run: python tools/ci/run.py "$SUITE"
+      - name: Pascal forms, editing, MCP and debugging in Monaco
+        run: python tools/browser-pascal-tests.py --advanced --origin "$TRANSPORT"
+        env:
+          TRANSPORT: ${{ matrix.transport }}
+        if: "!cancelled() && matrix.suite == 'advanced-editor-integration'"
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: advanced-editor-${{ matrix.browser }}
+          name: ${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.transport }}
           path: |-
             reports/advanced-editor
+            reports/pascal
+            reports/input-modes
             reports/ci
           if-no-files-found: error
           retention-days: 7
@@ -659,6 +684,14 @@ jobs:
       - name: Execute real HWND, input, font, file and GDI control assertions
         shell: pwsh
         run: ./tools/test-win32-controls.ps1
+      - name: Execute Pascal objects, pointer heaps and files at O0 and O2
+        run: node tools/test-pascal-native.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pascal-win32-native
+          path: reports/pascal-native
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -733,7 +766,6 @@ jobs:
       matrix:
         os:
           - ubuntu-24.04
-          - macos-14
           - macos-15
           - macos-26
     runs-on: ${{ matrix.os }}
@@ -761,6 +793,9 @@ jobs:
           tests/macos-distribution-cli.test.mjs
       - name: Execute sanitized helper oracle and genuine Apple Silicon export
         run: node tools/test-macos-aot.mjs
+      - name: Execute Pascal native applications on Apple Silicon
+        if: runner.os == 'macOS'
+        run: node tools/test-pascal-native.mjs
       - name: Verify trusted local distribution with actual Apple tools
         if: runner.os == 'macOS'
         run: node tools/test-macos-distribution.mjs
@@ -793,6 +828,7 @@ jobs:
             reports/macos-aot-distribution
             reports/macos-theme-reference
             reports/macos-theme-browser
+            reports/pascal-native
             artifacts/macos-aot
           retention-days: 14
       - uses: actions/upload-artifact@v4
@@ -809,7 +845,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - macos-14
           - macos-15
           - macos-26
     runs-on: ${{ matrix.os }}
@@ -932,8 +967,12 @@ jobs:
         run: npm run test:linux
       - name: Execute the shipped native runtime and GTK controls
         run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --report reports/linux-aot/shipped
+      - name: Execute Pascal objects, pointer heaps and files at O0 and O2
+        run: node tools/test-pascal-native.mjs
       - name: Execute the shipped GTK4 runtime and controls
         run: node tools/test-linux-aot.mjs --architecture "$ARCHITECTURE" --toolkit gtk4 --report reports/linux-aot/gtk4-shipped
+      - name: Execute Pascal objects, pointer heaps and files with GTK4 at O0 and O2
+        run: node tools/test-pascal-native.mjs --toolkit gtk4
       - name: Independently extract native packages and execute installed application paths
         run: node tools/test-linux-distribution.mjs --architecture "$ARCHITECTURE" --report reports/linux-distribution
       - name: Independently extract GTK4 packages and execute installed application paths
@@ -944,6 +983,7 @@ jobs:
           name: linux-aot-native-${{ matrix.architecture }}
           path: |
             reports/linux-aot
+            reports/pascal-native
             reports/linux-distribution
             artifacts/linux-aot
           if-no-files-found: error

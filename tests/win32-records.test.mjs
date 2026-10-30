@@ -33,7 +33,7 @@ test('numeric Len and LenB use physical storage widths rather than padded stack 
 for(const [name,body,pattern]of [
  ['managed String','Private Type T\n text As String\nEnd Type\nDim v As T',/managed|String/],
  ['dynamic array field','Private Type T\n values() As Long\nEnd Type\nDim v As T',/fixed-size/],
- ['record array',point+'Dim values() As POINTAPI',/arrays of records/],
+ ['managed record array','Private Type T\n text As String\nEnd Type\nDim values() As T',/managed|String/],
  ['ByVal record',point+'Private Sub F(ByVal p As POINTAPI)\nEnd Sub',/ByRef|ByVal/],
  ['unknown external record','Private Declare Sub F Lib "x" (p As Missing)',/known ByRef/],
  ['external ByVal Any','Private Declare Sub F Lib "x" (ByVal p As Any)',/Declare/],

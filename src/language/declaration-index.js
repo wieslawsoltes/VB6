@@ -1,6 +1,8 @@
 import {preprocess} from '../language/conditional.js';
 import {addDefaultTypes,defaultIdentifierType} from '../language/default-types.js';
 import {IDENTIFIER,TYPE_NAME,sourceStatements,splitArguments,symbolKey,maskSource,conditionalStatementBodies} from './source-context.js';
+import {moduleLanguage} from '../project/language.js';
+import {scanPascalDeclarations} from './pascal/source-service.js';
 
 const variableName=new RegExp('^('+IDENTIFIER+')','i');
 export function parameterSymbol(text, defaults={}) {
@@ -24,7 +26,8 @@ function closingParen(text,open){
   for(let i=open;i<text.length;i++){const c=text[i];if(c==='[')bracket=true;else if(c===']')bracket=false;if(bracket)continue;if(c==='(')depth++;else if(c===')'&&!--depth)return i;}
   return -1;
 }
-export function scanDeclarations(module) {
+export function scanDeclarations(module,project=null) {
+  if(moduleLanguage(module,project)==='pascal')return scanPascalDeclarations(module);
   const original=String(module.code||'');let source=original,conditionalError=null;
   if (/^\s*#(?:If|Const)\b/im.test(source)) {
     try {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {acquireWebGLContext} from '../src/rendering/context.js';
-import {renderingAdvice, renderingEnvironment} from '../src/rendering/diagnostics.js';
+import {renderingAdvice, renderingEnvironment, softwareGraphicsAdapter} from '../src/rendering/diagnostics.js';
 import {acquireDevice} from '../src/rendering/device.js';
 import {UIRenderer} from '../src/rendering/renderer.js';
 
@@ -59,4 +59,15 @@ test('explicit retry rechecks saved policy even when an unchanged Options apply 
   const result={active:'webgpu'};r.policy=saved;
   r.setOptions=(policy,options)=>{assert.equal(policy,saved);assert.deepEqual(options,{force:true});return Promise.resolve(result);};
   assert.equal(await r.retry(),result);assert.equal(await r.ready,result);
+});
+
+test('software adapter evidence recommends native HTML without misclassifying unknown or hardware renderers', () => {
+  for (const description of ['Google SwiftShader', 'ANGLE (Vulkan SwiftShader Device)', 'llvmpipe (LLVM 20)', 'softpipe', 'Microsoft Basic Render Driver']) {
+    assert.equal(softwareGraphicsAdapter({description}), true);
+    assert.match(renderingAdvice({active:'webgl2', adapter:{description}}).join(' '), /Use HTML \/ CSS/);
+  }
+  for (const description of ['', 'WebKit WebGL', 'ANGLE (Intel UHD Graphics)', 'NVIDIA GeForce RTX', 'AMD Radeon']) assert.equal(softwareGraphicsAdapter({description}), false);
+  assert.equal(softwareGraphicsAdapter({isFallbackAdapter:true}), true);
+  assert.equal(softwareGraphicsAdapter({isFallbackAdapter:false}), false);
+  assert.equal(softwareGraphicsAdapter({description:{toString(){throw Error('coercion');}}}), false);
 });

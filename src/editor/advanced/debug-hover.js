@@ -29,7 +29,7 @@ export class DebugHoverProvider {
     const runtime=this.runtime,ide=runtime.ide,workbench=ide.debuggerWindows;
     if(this.disposed||runtime.disposed||ide.runState!=='paused'||ide.evaluating||ide.pendingEdits||!ide.runtimeFrame||!workbench)return null;
     const record=runtime.records.get(model.uri.toString());
-    if(record?.language!=='vb6'||record.model!==model||model.isDisposed())return null;
+    if(!['vb6','pascal'].includes(record?.language)||record.model!==model||model.isDisposed())return null;
     const module=ide.project.modules.find(m=>m.id===record.moduleId),frameIndex=workbench.frameIndex??((ide.stack?.length||0)-1),frame=ide.stack?.[frameIndex];
     if(!module||!frame||frame.retained||lower(frame.module)!==lower(module.name))return null;
     const editor=record.legacy;if(!editor?.intelligence)return null;
