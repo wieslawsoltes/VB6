@@ -4,6 +4,16 @@ export function nativeFileControlFixture(fixture,writeOnly=false){
   const {add,check,finish}=fixture(writeOnly?'AotControlWriteFiles':'AotControlSequentialFiles');
   add('Dim f As Integer, n As Long, before As Long, after As Long, s As String, value As String, emptyValue As Variant');
   if(!writeOnly){
+  add('MkDir "Orders"');
+  check('(GetFileAttributesW(StrPtr("Orders")) And 16)=16','MkDir creates a real native order directory in a fresh working folder');
+  add('On Error Resume Next\nErr.Clear\nMkDir "Orders"');
+  check('Err.Number=58','creating an existing directory reports the portable file-already-exists error');
+  add('Err.Clear\nMkDir "missing-parent/child"');
+  check('Err.Number=76','MkDir preserves missing-parent errors without inventing intermediate directories');
+  add('Err.Clear\nOn Error GoTo 0\nOpen "Orders/Order-1001.txt" For Output As #1\nPrint #1, "NORTHWIND TRADERS"\nClose #1');
+  check('FileEquals("Orders/Order-1001.txt","NORTHWIND TRADERS" & vbCrLf)','native order output is readable through independent Win32 file APIs');
+  add('n=DeleteFileW(StrPtr("Orders/Order-1001.txt"))');
+  check('n<>0 And RemoveDirectoryW(StrPtr("Orders"))<>0','order file and directory release their operating-system resources');
   check('FreeFile=1 And FreeFile(0)=1 And FreeFile(rangenumber:=1)=256 And VarType(FreeFile)=vbInteger','FreeFile scans separate low/high ranges without reserving a number');
   add('f=FreeFile\nOpen "text.txt" For Output As #f Len=512\nPrint #f, "alpha";\nPrint #f, " beta"\nClose #f');
   check('FileEquals("text.txt","alpha beta" & vbCrLf)','Output writes real ANSI file bytes and trailing semicolon preserves the current line');
@@ -87,6 +97,7 @@ Private Declare Function GetFileSize Lib "kernel32" (ByVal file As Long, ByVal h
 Private Declare Function ReadFile Lib "kernel32" (ByVal file As Long, ByVal bytes As Long, ByVal count As Long, actual As Long, ByVal overlap As Long) As Long
 Private Declare Function CloseHandle Lib "kernel32" (ByVal handle As Long) As Long
 Private Declare Function DeleteFileW Lib "kernel32" (ByVal name As Long) As Long
+Private Declare Function RemoveDirectoryW Lib "kernel32" (ByVal name As Long) As Long
 Private Declare Function GetFileAttributesW Lib "kernel32" (ByVal name As Long) As Long
 Private Declare Function WideCharToMultiByte Lib "kernel32" (ByVal cp As Long, ByVal flags As Long, ByVal chars As Long, ByVal count As Long, ByVal bytes As Long, ByVal capacity As Long, ByVal replacement As Long, ByVal used As Long) As Long
 Private Declare Function GetProcessHandleCount Lib "kernel32" (ByVal process As Long, count As Long) As Long
