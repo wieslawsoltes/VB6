@@ -461,6 +461,46 @@ def monaco_language(page):
             'workerSymbols': True, 'pascalTokens': True, 'vbDeclarationInlays': False}
 
 
+def vim_pascal(page):
+    source = ('unit Form1;\ninterface\nimplementation\nprocedure Form_Load;\n'
+              'var Value: Integer;\nbegin\n'
+              '  Value := ({ ignored ) } (* ignored ] *) 1 + 2);\nend;\nend.\n')
+    page.evaluate('''source=>{
+      const p=VB6StudioAPI.newProject('PascalVim',{language:'pascal'});
+      p.settings.renderer='canvas2d';p.modules[0].code=source;
+      delete p.modules[0].language;
+      vb6Studio.loadProject(p);vb6Studio.openDocument(p.modules[0].id,'code');
+      vb6Studio.editor.setViewMode('module');vb6Studio.history.reset();
+    }''', source)
+    enable_editor(page)
+    check(page.evaluate('vb6Studio.inputModes.configure({mode:"vim"})'))
+    host = 'vb6Studio.inputModes.records.get(vb6Studio.editor).host'
+    check(page.evaluate(host + '.language') == 'pascal')
+    opening, closing = source.index('('), source.rindex(')')
+    focus_code(page, source[:opening].count('\n') + 1, opening - source.rfind('\n', 0, opening))
+    page.keyboard.type('%')
+    page.wait_for_function(host + '.getSelections()[0].head===' + str(closing))
+    page.keyboard.type('%')
+    page.wait_for_function(host + '.getSelections()[0].head===' + str(opening))
+    check(page.evaluate('vb6Studio.history.undoStack.length') == 0)
+    digit = source.index('2);')
+    focus_code(page, source[:digit].count('\n') + 1, digit - source.rfind('\n', 0, digit))
+    page.keyboard.type('r3')
+    changed = source[:digit] + '3' + source[digit + 1:]
+    page.wait_for_function('source=>vb6Studio.activeModule.code===source', arg=changed)
+    check(page.evaluate('vb6Studio.history.undoStack.length') == 1)
+    no_errors(page)
+    page.keyboard.type('u')
+    page.wait_for_function('source=>vb6Studio.activeModule.code===source', arg=source)
+    check(page.evaluate('vb6Studio.editor.text') == source)
+    no_errors(page)
+    if args.advanced:
+        check(page.evaluate('''vb6Studio.advancedEditor.runtime.surfaces.get(vb6Studio.editor)
+          .record.model.getValue()===vb6Studio.activeModule.code'''))
+    return {'language': 'pascal', 'commentAwareMotions': True, 'nativeKeys': True,
+            'canonicalEditUndo': True, 'compiledBeforeAndAfterUndo': True}
+
+
 cases = [
     ('project language, shared designer and Pascal event generation', project_designer),
     ('form events, source round-trip and standalone HTML execution', forms_and_roundtrip),
@@ -468,6 +508,7 @@ cases = [
     ('source edits, control completion and real diagnostic worker invalidation', editing_and_diagnostics),
     ('MCP language, mixed modules, mutable events and revision guards', mcp_workflow),
     ('Pascal source breakpoints, stepping, watches and typed Immediate', source_debugger),
+    ('Pascal Vim comment-aware motions, canonical edits and undo', vim_pascal),
 ]
 if args.advanced:
     cases.append(('Monaco Pascal tokens, worker symbols and synchronized document', monaco_language))

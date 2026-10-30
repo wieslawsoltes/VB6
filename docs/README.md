@@ -83,6 +83,7 @@ These guides describe the implemented system, not complete native VB6 parity.
 - [Browser control compatibility](CONTROLS-COMPATIBILITY.md): collection ordering, selection identity, keyboard behavior and explicit native-control boundaries.
 
 - [Optional DOS / TUI workspace](DOS-WORKSPACE.md): shared VB6 cell presentation, palette settings, input ownership and visual-fidelity boundaries.
+- [Input modes and Vim](INPUT-MODES.md): optional modal editing across IDE/TUI presentations, shared undo, commands, and extensible mode registration.
 - [Optional Figma workspace](figma-workspace.md): real VB6 Assets/Layers/Design,
   reversible workspace profiles, canvas navigation, auto layout and anchoring.
 - [Figma paint publication](figma-presentation.md): retained-renderer transactions,

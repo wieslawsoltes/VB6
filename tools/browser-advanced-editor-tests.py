@@ -11,15 +11,24 @@ from ci.browser_partition import configured_shard, select_case_names
 ROOT=Path(__file__).resolve().parents[1]
 ENGINE=os.environ.get('VB6_BROWSER','chromium')
 TRANSPORT=os.environ.get('VB6_TEST_TRANSPORT','http')
-# Offline parsing has its own bound; interactions retain the 15 s deadline.
-IDE_STARTUP_TIMEOUT_MS=60000
 REPORT=ROOT/'reports'/'advanced-editor'/ENGINE/TRANSPORT
+IDE_STARTUP_TIMEOUT_MS=60000
 FIXTURE=r'''()=>{const A=VB6StudioAPI,p=A.newProject('EditorTest'),m=p.modules[0];p.id='editor-test';p.settings.xaml=true;p.settings.renderer='canvas2d';m.id='form';m.name='Form1';m.form.name='Form1';m.form.properties.Name='Form1';
 const button=A.createControl('CommandButton','Button1',300,300);button.id='button';button.properties.Caption='Original';m.form.controls=[button];
 m.code='Option Explicit\nPublic total As Long\nPrivate Sub Button1_Click()\n    total = Add(1, 2)\nEnd Sub\n';
 p.modules.push({id:'math',name:'Math',kind:'module',code:'Option Explicit\nPublic Function Add(ByVal left As Long, ByVal right As Long) As Long\n    Add = left + right\nEnd Function\n'});p.startup='Form1';vb6Studio.loadProject(p);vb6Studio.openDocument('form','code');return true;}'''
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self,*args):pass
+class AdvancedEditorTestResult(unittest.TextTestResult):
+    """Keep the failure cause even if a later case or CI cancellation stops the suite."""
+    def addError(self,test,error):
+        super().addError(test,error)
+        self.stream.writeln(self._exc_info_to_string(error,test));self.stream.flush()
+    def addFailure(self,test,error):
+        super().addFailure(test,error)
+        self.stream.writeln(self._exc_info_to_string(error,test));self.stream.flush()
+class AdvancedEditorTestRunner(unittest.TextTestRunner):
+    resultclass=AdvancedEditorTestResult
 class AdvancedEditorAcceptance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -40,13 +49,13 @@ class AdvancedEditorAcceptance(unittest.TestCase):
         self.addCleanup(self.close_context)
         self.context.set_default_timeout(15000)
         self.page=self.context.new_page();self.page.on('pageerror',lambda e:(self.errors.append(str(e)),self.errorStacks.append(e.stack)));self.page.on('request',lambda r:self.requests.append(r.url))
-        # WebKit's standalone load event can outlast the installed editor API.
-        # Bound startup separately while preserving the 15-second action deadline.
-        if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text())
-        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit')
-        else:self.page.goto(self.base+'/dist/index.html')
+        # Parsing and IDE startup have their own bound on every origin.
+        # Interactions retain the 15-second deadline after the editor is ready.
+        if TRANSPORT=='memory':self.page.set_content((ROOT/'dist/VB6-Studio-Web-Advanced.html').read_text(),wait_until='domcontentloaded',timeout=IDE_STARTUP_TIMEOUT_MS)
+        elif TRANSPORT=='file':self.page.goto((ROOT/'dist/VB6-Studio-Web-Advanced.html').as_uri(),wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
+        else:self.page.goto(self.base+'/dist/index.html',wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
         self.page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.advancedEditor && globalThis.VB6StudioAPI',
-                                    polling=100,timeout=IDE_STARTUP_TIMEOUT_MS if TRANSPORT=='file' else 15000)
+                                    polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
         self.page.evaluate(FIXTURE)
     def close_context(self):
         closed=False
@@ -329,4 +338,4 @@ def load_tests(loader,tests,pattern):
     names=[name for name in AdvancedEditorAcceptance.__dict__ if name.startswith('test_')]
     return unittest.TestSuite(AdvancedEditorAcceptance(name) for name in select_case_names(names,configured_shard('advanced-editor')))
 
-if __name__=='__main__':unittest.main(verbosity=2)
+if __name__=='__main__':unittest.main(verbosity=2,testRunner=AdvancedEditorTestRunner)

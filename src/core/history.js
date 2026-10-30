@@ -22,6 +22,7 @@ export class History extends Signal {
   #undo = [];
   #redo = [];
   #groups = [];
+  #coalescing = null;
   #replaying = false;
   #boundary = true;
   #revision = 0;
@@ -67,6 +68,7 @@ export class History extends Signal {
   #setStack(which, value) {
     this.#assertIdle(true);
     if (!Array.isArray(value)) throw new TypeError('A history stack must be an array.');
+    this.stopMerging();
     // Assignments intentionally do not trim: VBG restores undo and redo in two
     // consecutive assignments. The next record/trim applies the current budget.
     if (which === 'undo') this.#undo = value; else this.#redo = value;
@@ -76,7 +78,29 @@ export class History extends Signal {
     this.#boundary = true;
   }
   #changed() { this.emit('change'); }
-  stopMerging() { this.#assertIdle(); this.#boundary = true; }
+  stopMerging() { this.#assertIdle(); this.#boundary = true; this.#coalescing = null; }
+
+  /** Keep one live, keyed editing session undoable without opening a transaction.
+   * Entries commit immediately and emit normal change notifications. Timed merge
+   * hints are ignored only for this contiguous key and replay callback. Sparse
+   * patches retain their 256-item segments; groups roll over at the byte budget.
+   * Savepoints, replay, snapshots and unrelated edits close the session. The
+   * returned cleanup owns its token, so an old cleanup cannot close a later one. */
+  beginCoalescing(key, label) {
+    this.#assertIdle(true);
+    if (typeof key !== 'string' || !key) throw new TypeError('A coalescing key must be a non-empty string.');
+    if (label !== undefined && typeof label !== 'string') throw new TypeError('A coalescing label must be a string.');
+    this.stopMerging();
+    const scope = {key, label, entry: null, kind: null, apply: null};
+    this.#coalescing = scope;
+    const end = () => {
+      this.#assertIdle();
+      if (this.#coalescing !== scope) return false;
+      this.stopMerging(); return true;
+    };
+    Object.defineProperties(end, {active: {get: () => this.#coalescing === scope}, dispose: {value: end}});
+    return end;
+  }
 
   trim() {
     this.#assertIdle();
@@ -95,6 +119,14 @@ export class History extends Signal {
   }
 
   #append(entry, merge) {
+    if (this.#coalescing && !this.#groups.length) {
+      const scope = this.#coalescing;
+      const compatible = entry.key === scope.key && (entry.kind === 'value' || entry.kind === 'patch') &&
+        (!scope.kind || scope.kind === entry.kind && scope.apply === entry.apply) &&
+        (entry.kind !== 'value' || scope.after === undefined || scope.after === entry.before);
+      if (compatible) return this.#appendCoalescing(entry, scope);
+      this.stopMerging();
+    }
     const target = this.#groups.at(-1)?.entries ?? this.#undo;
     const last = target.at(-1);
     const coalesce = merge && !this.#boundary && !this.#redo.length && last?.kind === entry.kind &&
@@ -124,6 +156,43 @@ export class History extends Signal {
     this.trim();
     this.#changed();
     return true;
+  }
+
+  #appendCoalescing(entry, scope) {
+    let previous = this.#undo.at(-1) === scope.entry ? scope.entry : null;
+    let entries = previous ? previous.entries.slice() : [], bytes = previous?.bytes ?? 0;
+    const last = entries.at(-1);
+    // Copy-on-write preserves previously captured stacks and entry references.
+    // Value snapshots compact to their initial before and latest after strings;
+    // patch metadata remains isolated and complete within bounded segments.
+    if (last?.kind === 'value' && entry.kind === 'value' && last.after === entry.before) {
+      entries.pop(); bytes -= entryBytes(last);
+      const combined = {...last, after: entry.after, bytes: (last.before.length + entry.after.length) * 2};
+      if (combined.before !== combined.after) { entries.push(combined); bytes += combined.bytes; }
+    } else if (last?.kind === 'patch' && entry.kind === 'patch' && last.patches.length + entry.patches.length <= 256) {
+      const combined = {...last, patches: [...last.patches, ...entry.patches], bytes: entryBytes(last) + entryBytes(entry)};
+      entries[entries.length - 1] = combined; bytes += entryBytes(entry);
+    } else { entries.push(entry); bytes += entryBytes(entry); }
+
+    // A streaming insertion must not turn the legacy retain-newest exception
+    // into an unbounded accumulating group. Seal a full group and start a new
+    // segment; ordinary trimming then retains a contiguous suffix of history.
+    if (previous && entries.length && bytes > this.maxBytes) {
+      previous = null; entries = [entry]; bytes = entryBytes(entry);
+    }
+    scope.kind = entry.kind; scope.apply = entry.apply;
+    scope.label ??= entry.label;
+    if (entry.kind === 'value') scope.after = entry.after;
+    if (previous) this.#undo.pop();
+    if (!entries.length) {
+      this.#revision = previous.beforeRevision; scope.entry = null; this.#boundary = true;
+      this.#changed(); return true;
+    }
+    const group = {kind: 'group', key: scope.key, label: scope.label ?? entry.label, entries, bytes,
+      beforeRevision: previous?.beforeRevision ?? this.#revision, afterRevision: ++this.#sequence};
+    this.#revision = group.afterRevision; this.#boundary = false;
+    this.#undo.push(group); this.#redo = []; scope.entry = group;
+    this.trim(); this.#changed(); return true;
   }
 
   record(before, after, label = 'Edit') {
@@ -173,6 +242,7 @@ export class History extends Signal {
   }
   undo(current) {
     this.#assertIdle(true);
+    if (this.#coalescing) this.stopMerging();
     const entry = this.#undo.at(-1);
     if (!entry) return null;
     const value = this.#replay(entry, current, true);
@@ -183,6 +253,7 @@ export class History extends Signal {
   }
   redo(current) {
     this.#assertIdle(true);
+    if (this.#coalescing) this.stopMerging();
     const entry = this.#redo.at(-1);
     if (!entry) return null;
     const value = this.#replay(entry, current, false);
@@ -194,6 +265,7 @@ export class History extends Signal {
 
   beginTransaction(label = 'Edit') {
     this.#assertIdle();
+    this.stopMerging();
     this.#groups.push({kind: 'group', label, entries: []});
     this.#boundary = true;
     return this.#groups.length;
@@ -219,16 +291,19 @@ export class History extends Signal {
   }
   markClean() {
     this.#assertIdle(true);
+    this.stopMerging();
     this.#clean = this.#revision; this.#boundary = true; this.#changed();
   }
   capture() {
     this.#assertIdle(true);
+    if (this.#coalescing) this.stopMerging();
     return {undo: this.#undo.slice(), redo: this.#redo.slice(), revision: this.#revision, clean: this.#clean, sequence: this.#sequence};
   }
   restore(state) {
     this.#assertIdle(true);
     if (!state || !Array.isArray(state.undo) || !Array.isArray(state.redo) || !Number.isSafeInteger(state.revision) || !Number.isSafeInteger(state.sequence))
       throw new TypeError('Invalid history session.');
+    this.stopMerging();
     this.#undo = state.undo.slice(); this.#redo = state.redo.slice();
     this.#revision = state.revision; this.#clean = state.clean;
     this.#sequence = Math.max(this.#sequence, state.sequence); this.#boundary = true;
@@ -236,6 +311,7 @@ export class History extends Signal {
   }
   reset() {
     this.#assertIdle(true);
+    this.stopMerging();
     this.#undo = []; this.#redo = [];
     this.#revision = ++this.#sequence; this.#clean = this.#revision;
     this.#boundary = true; this.#changed();

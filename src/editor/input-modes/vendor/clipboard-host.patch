@@ -1,0 +1,33 @@
+--- a/vim.js
++++ b/vim.js
+@@ -358,7 +358,7 @@
+     return /\S/.test(ch);
+   }];
+   var validMarks = ['<', '>'];
+-  var validRegisters = ['-', '"', '.', ':', '_', '/', '+'];
++  var validRegisters = ['-', '"', '.', ':', '_', '/', '+', '*'];
+   var latinCharRegex = /^\w$/
+   var upperCaseChars = /^[A-Z]$/;
+   try { upperCaseChars = new RegExp("^[\\p{Lu}]$", "u"); }
+@@ -1512,8 +1512,8 @@
+       } else {
+         register.setText(text, linewise, blockwise);
+       }
+-      if (registerName === '+') {
+-        navigator.clipboard.writeText(text);
++      if (registerName === '+' || registerName === '*') {
++        CM.vimClipboardWrite(text, registerName);
+       }
+       // The unnamed register always has the same value as the last used
+       // register.
+@@ -3250,8 +3250,8 @@
+     paste: function(cm, actionArgs, vim) {
+       var register = vimGlobalState.registerController.getRegister(
+           actionArgs.registerName);
+-      if (actionArgs.registerName === '+') {
+-        navigator.clipboard.readText().then((value) => {
++      if (actionArgs.registerName === '+' || actionArgs.registerName === '*') {
++        CM.vimClipboardRead(cm, register, (value) => {
+           this.continuePaste(cm, actionArgs, vim, value, register);
+         })
+       } else {

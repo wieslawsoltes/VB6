@@ -53,6 +53,8 @@ The IDE includes a modeless Object Browser, project search and atomic replacemen
 
 Same-project profiles and automatic workspace restoration reopen supported modeless tools and restore their geometry without opening unrelated project documents.
 
+**Tools → Input Mode → Vim** enables optional modal editing in Classic, Figma, and DOS / TUI workspaces, including the built-in editor, optional Monaco editor, XAML, splits, and detached windows. **Default** preserves the existing editing mode. The status bar and **Tools → Options → Editor** also switch modes. Vim includes counts, motions, operators, text objects, Visual block editing, registers, macros, repeat, search, and Ex commands backed by the shared project history. See [Input modes and Vim](docs/INPUT-MODES.md) for commands, browser scope, and the registry API for adding modes.
+
 ### IntelliSense
 
 Classic List Members, List Constants, Complete Word, Quick Info and Parameter Info share typed resolution across source panes, Immediate, Watch and Evaluation fields. Nested `With`, arrays/default members, classes/UDTs/enums, runtime/data adapters and explicit portable reference metadata feed the same Object Browser. Automatic assistance never executes project code or opens a connection.

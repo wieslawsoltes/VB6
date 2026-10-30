@@ -88,11 +88,11 @@ for(const filename of ['intelligent-ui-browser-tests.py','intelligent-ui-workben
 
     const modules=find('modules','success'),opaque=find('opaque','success');
     assert.equal(modules.returned,true);assert.equal(opaque.returned,true);
-    assert.deepEqual(modules.calls.find(c=>c[0]==='goto'),['goto','http://127.0.0.1:4123/index.html',{}]);
+    assert.deepEqual(modules.calls.find(c=>c[0]==='goto'),['goto','http://127.0.0.1:4123/index.html',{wait_until:'commit',timeout:60000}]);
     assert.equal(opaque.calls.filter(c=>c[0]==='goto').length,0);
     assert.equal(opaque.calls.find(c=>c[0]==='content')[2].wait_until,'domcontentloaded');
     for(const item of [modules,opaque]){
-      assert.equal(item.calls.find(c=>c[0]==='ready')[2].timeout,12000);
+      assert.equal(item.calls.find(c=>c[0]==='ready')[2].timeout,60000);
       assert.equal(item.closed,0);
     }
 
