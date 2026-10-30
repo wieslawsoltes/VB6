@@ -2,11 +2,11 @@ import {iconPackTokens} from './icon-pack-css.mjs';
 /** Generates only palette declarations; no font assets are read or distributed. */
 import fs from 'node:fs';
 import {ICON_PALETTE} from '../src/theme/icon-art.js';
-import {THEMES,SYSTEM_ROLES} from '../src/theme/theme.js';
+import {THEMES,SYSTEM_ROLES,DEFAULT_THEME} from '../src/theme/theme.js';
 const kebab = key=>key.replace(/[A-Z]/g,m=>'-'+m.toLowerCase());
 let text='/* Generated palette declarations. See tools/theme-css.mjs. */\n';
 for(const theme of Object.values(THEMES)){
- text+=(theme.id==='classic'?':root, ':'')+`[data-vb-theme="${theme.id}"] {\n`;
+ text+=(theme.id===DEFAULT_THEME?':root, ':'')+`[data-vb-theme="${theme.id}"] {\n`;
  for(const [name,value] of Object.entries(theme.colors))text+=`  --vb-${kebab(name)}: ${value};\n`;
  // Declare the whole icon palette at every theme boundary (nested runtime themes
  // must reset it); never invert all descendants of a contrast-themed IDE.
