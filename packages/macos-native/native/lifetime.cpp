@@ -80,9 +80,18 @@ struct PendingBatch {
   PendingBatch& operator=(const PendingBatch&) = delete;
 };
 }
-std::shared_ptr<Instance> makeNativeInstance(Runtime& rt, Module& module) {
+std::shared_ptr<NativeLifetime> nativeLifetime(Runtime& rt) {
+  if (rt.ending || rt.finished) fail(5,"Native program has finished");
   if (!rt.lifetime) rt.lifetime = std::make_shared<NativeLifetime>(rt);
-  return std::shared_ptr<ManagedInstance>(new ManagedInstance(rt, module), ReleaseInstance{rt.lifetime});
+  return rt.lifetime;
+}
+Runtime& requireNativeRuntime(const std::shared_ptr<NativeLifetime>& life) {
+  if (!life || !life->runtime || life->runtime->ending || life->runtime->finished) fail(5,"Native program has finished");
+  return *life->runtime;
+}
+std::shared_ptr<Instance> makeNativeInstance(Runtime& rt, Module& module) {
+  auto life=nativeLifetime(rt);
+  return std::shared_ptr<ManagedInstance>(new ManagedInstance(rt, module), ReleaseInstance{std::move(life)});
 }
 void drainNativeFinalizers(Runtime& rt) {
   auto life = rt.lifetime;

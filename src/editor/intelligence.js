@@ -1,14 +1,18 @@
 import {layoutMembers,layoutType,layoutConstantSymbols} from '../layout/intelligence.js';
 import {layoutEnabled} from '../layout/contract.js';
-import {displayParameter} from './signature-syntax.js';
+import {displayParameter,displayPascalParameter} from './signature-syntax.js';
 import {normalizeTypeLibrary,referenceSnapshot} from './reference-metadata.js';
 import {typeCompletionContext,typeCandidates} from './type-completion.js';
 import {parseExpression} from '../language/expression.js';
+import {PascalParser} from '../language/pascal/parser.js';
 import {KEYWORDS} from './language-service.js';
-import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt,completionKey,completionMatches,mapParameterType} from './source-context.js';
+import {moduleLanguage} from '../project/language.js';
+import {PASCAL_KEYWORDS,PASCAL_BUILTINS,pascalMasked,pascalCallContext,pascalWordAt,pascalExpressionBefore} from './pascal-service.js';
+import {IDENTIFIER,TYPE_NAME,symbolKey,maskSource,splitArguments,statementBefore,expressionBefore,completionSpan,wordAt as visualBasicWordAt,completionKey,completionMatches,mapParameterType} from './source-context.js';
 import {scanDeclarations,parameterSymbol} from './declaration-index.js';
 import {PRIMITIVE_TYPES,CONSTANT_SYMBOLS,BUILTIN_SYMBOLS,GLOBAL_OBJECTS,TYPE_CATALOG,ENUM_TYPES,builtinType,member,runtimeType,builtinGroup} from './type-catalog.js';
-export {maskSource,splitArguments,wordAt,scanDeclarations};
+export {maskSource,splitArguments,scanDeclarations};
+export function wordAt(text,offset,language='vb6'){return language==='pascal'?pascalWordAt(text,offset):visualBasicWordAt(text,offset);}
 
 const eq=(a,b)=>symbolKey(a)===symbolKey(b);
 const visible=s=>!s.hidden&&!s.restricted;
@@ -21,6 +25,14 @@ function coalesce(items) {
     const params=s.accessor==='get'?s.params:s.params.slice(0,-1);
     return {...s,kind:'property',accessors:items.filter(m=>eq(m.name,s.name)&&m.accessor),params,parameters:s.parameters?.slice(0,params.length)||params.map(p=>parameterSymbol(p)).filter(Boolean)};
   });
+}
+
+// VB class/form fields and routines require an instance. Public types and enum
+// members remain project declarations, matching the Pascal foreign binder.
+function pascalForeignGlobals(module,index) {
+  return coalesce(index.symbols.filter(s=>!s.owner&&s.scope!=='private'&&s.kind!=='event'&&
+    (!s.parentType||s.kind==='constant')&&((module.kind||'module')==='module'||
+      ['type','enum'].includes(s.kind)||s.kind==='constant'&&s.parentType)));
 }
 
 /** Nested and statement-form call contexts; named/omitted arguments retain
@@ -69,17 +81,23 @@ export function callContext(text,offset,{outer=false}={}) {
 export class EditorIntelligence {
   constructor(){this.cache=new Map();this.scanCount=0;this.expressionCache=new Map();this.libraries=new Map();this.libraryRevision=0;}
   index(module,project=null){
+    const language=moduleLanguage(module,project);
     const condition=project?.settings?.conditionalConstants||module.conditionalConstants||{},conditionalKey=JSON.stringify(condition);
     const formKey=JSON.stringify([module.form?.controls?.map(c=>[c.name,c.type,c.properties?.Index]),module.form?.menus,module.attributes]);
     const cached=this.cache.get(module.id);
-    if(cached&&cached.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey&&cached.conditionalKey===conditionalKey)return cached.index;
-    const index=scanDeclarations({...module,conditionalConstants:condition});this.scanCount++;
-    this.cache.set(module.id,{code:module.code,name:module.name,kind:module.kind,formKey,conditionalKey,index});return index;
+    if(cached&&cached.language===language&&cached.code===module.code&&cached.name===module.name&&cached.kind===module.kind&&cached.formKey===formKey&&cached.conditionalKey===conditionalKey)return cached.index;
+    const index=scanDeclarations({...module,language,conditionalConstants:condition});this.scanCount++;
+    this.cache.set(module.id,{code:module.code,name:module.name,kind:module.kind,language,formKey,conditionalKey,index});return index;
   }
   prune(project){const ids=new Set(project.modules.map(m=>m.id));for(const id of this.cache.keys())if(!ids.has(id))this.cache.delete(id);}
   scope(project,module,line,offset=null){
-    this.prune(project);const idx=this.index(module,project),proc=idx.procedures.find(p=>offset===null?line>=p.line&&line<=p.end:offset>=p.offset&&offset<=p.endOffset);
+    this.prune(project);const idx=this.index(module,project),proc=idx.procedures.findLast(p=>offset===null?line>=p.line&&line<=p.end:offset>=p.offset&&offset<=p.endOffset);
     let local=idx.symbols.filter(s=>s.ownerId&&s.ownerId===proc?.id);
+    if(idx.language==='pascal'){
+      const seen=new Set();let parent=proc?.ownerId,method=proc?.parentType?proc:null;
+      while(parent&&!seen.has(parent)){seen.add(parent);local.push(...idx.symbols.filter(s=>s.ownerId===parent));const outer=idx.procedures.find(p=>p.id===parent);if(outer?.parentType)method=outer;parent=outer?.ownerId;}
+      if(method)local.push({name:'Self',kind:'parameter',type:method.parentType,moduleId:module.id,ownerId:method.id,implicit:true},...this.members(project,module,method.parentType));
+    }
     if(local.some(s=>s.implicitRedim)){
       const shared=new Set();
       for(const other of project.modules){
@@ -88,7 +106,7 @@ export class EditorIntelligence {
       }
       local=local.filter(s=>!s.implicitRedim||!shared.has(symbolKey(s.name)));
     }
-    const global=idx.symbols.filter(s=>!s.owner);
+    const global=idx.symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant'));
     return {idx,proc,symbols:[...local,...coalesce(global)]};
   }
   /** Explicit portable type-library descriptors. No registry lookup, fetching,
@@ -110,14 +128,23 @@ export class EditorIntelligence {
   type(project,module,type,seen=new Set()){
     if(seen.has(symbolKey(type))||seen.size>=32)return null;seen.add(symbolKey(type));
     type=String(type||'Variant').replace(/\s*\.\s*/g,'.').trim().replace(/\[([^\]]+)\]/g,'$1');
+    if(type.startsWith('^'))return {name:type,kind:'pointer',target:type.slice(1)};
     if(project.name&&type.toLowerCase().startsWith(project.name.toLowerCase()+'.'))type=type.slice(project.name.length+1);
     const target=eq(module.name,type)?module:project.modules.find(m=>eq(m.name,type));
-    if(target)return {name:target.name,type:target.name,kind:target.kind,moduleId:target.id,members:coalesce(this.index(target,project).symbols.filter(s=>!s.owner&&(target.id===module.id||s.scope!=='private'))).concat(target.form?[...(builtinType(target.form.type||'Form')?.members||[]),...layoutMembers(project,target.form.type||'Form')]:[])};
+    if(target)return {name:target.name,type:target.name,kind:target.kind,moduleId:target.id,members:coalesce(this.index(target,project).symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant')&&(target.id===module.id||s.scope!=='private'))).concat(target.form?[...(builtinType(target.form.type||'Form')?.members||[]),...layoutMembers(project,target.form.type||'Form')]:[])};
     const pieces=type.split('.'),qualifier=pieces.length>1?pieces.slice(0,-1).join('.'):null,recordName=pieces.at(-1);
     for(const m of [module,...project.modules.filter(m=>m.id!==module.id)]){
       if(qualifier&&!eq(m.name,qualifier))continue;
       const record=this.index(m,project).records.find(r=>eq(r.name,recordName)&&(m.id===module.id||r.scope!=='private'));
-      if(record)return record;
+      if(record){
+        if(record.language==='pascal'&&record.kind==='alias')return this.type(project,m,record.target,seen)||record;
+        if(record.isPascalObject&&record.ancestor){
+          const base=this.type(project,m,record.ancestor,seen),members=new Map((base?.members||[]).map(member=>[symbolKey(member.name),member]));
+          for(const member of record.members)members.set(symbolKey(member.name),member);
+          return {...record,members:[...members.values()]};
+        }
+        return record;
+      }
     }
     const references=this.referenceTypes(project),ref=references.find(t=>eq(t.name,type)||(t.aliases||[]).some(a=>eq(a,type)))||references.find(t=>eq(t.name.split('.').at(-1),type));
     const resolved=ref?.kind==='alias'?this.type(project,module,ref.target,seen):(ref?{...ref,members:coalesce(ref.members)}:null)||runtimeType(project,type)||builtinType(type)||layoutType(project,type);
@@ -127,18 +154,27 @@ export class EditorIntelligence {
     if(!symbol?.moduleId)return symbol;
     const owner=symbol.moduleId===module.id?module:project.modules.find(m=>m.id===symbol.moduleId);
     if(!owner)return symbol;
-    const qualify=type=>this.index(owner,project).records.some(r=>eq(r.name,type))?owner.name+'.'+type:type;
+    const qualify=type=>String(type).startsWith('^')?'^'+qualify(String(type).slice(1)):this.index(owner,project).records.some(r=>eq(r.name,type))?owner.name+'.'+type:type;
     const params=symbol.params?.map(p=>mapParameterType(p,qualify));
     const parameters=params?.map((text,i)=>{
       const value=symbol.parameters?.[i]||parameterSymbol(text,this.index(owner,project).defaults);
       return value?{...value,type:qualify(value.type),signature:text}:null;
     }).filter(Boolean);
-    return {...symbol,type:qualify(symbol.type),...(params?{params,parameters}:{})};
+    let bindingIdentity=symbol.bindingIdentity;
+    if(symbol.virtual&&symbol.parentType&&moduleLanguage(owner,project)==='pascal'){
+      let member=symbol,type=this.type(project,owner,symbol.parentType);const seen=new Set();
+      while(type?.ancestor&&!seen.has(type.moduleId+'|'+type.name)){
+        seen.add(type.moduleId+'|'+type.name);const declaring=project.modules.find(m=>m.id===type.moduleId)||owner,base=this.type(project,declaring,type.ancestor),inherited=base?.members?.find(candidate=>candidate.virtual&&eq(candidate.name,symbol.bindingName||symbol.name));
+        if(!inherited)break;member=inherited;type=base;
+      }
+      bindingIdentity=[member.moduleId,'',member.parentType||'',symbolKey(member.bindingName||member.name)].join('|');
+    }
+    return {...symbol,type:qualify(symbol.type),...(bindingIdentity?{bindingIdentity}:{}),...(params?{params,parameters}:{})};
   }
   referenceGlobals(project){
     return this.referenceTypes(project).filter(t=>visible(t)&&(t.kind==='enum'||t.kind==='module'||t.global)).flatMap(t=>t.members.filter(visible));
   }
-  members(project,module,type){return (this.type(project,module,type)?.members||[]).filter(visible);}
+  members(project,module,type){return (this.type(project,module,type)?.members||[]).filter(member=>visible(member)&&(!member.parentType||member.scope!=='private'||member.moduleId===module.id));}
   objectMembers(project,module,symbol){
     if(!symbol)return [];
     if(symbol.namespace){
@@ -161,13 +197,23 @@ export class EditorIntelligence {
     if(this.type(project,module,declared.type)?.kind==='enum'&&symbol.kind!=='enum')return [];
     return this.members(project,module,declared.type||declared.name).filter(s=>s.kind!=='event');
   }
-  root(project,module,line,name,offset=null){
-    const {symbols}=this.scope(project,module,line,offset);
+  root(project,module,line,name,offset=null,options={}){
+    const {symbols}=this.scope(project,module,line,offset),pascal=moduleLanguage(module,project)==='pascal';
+    if(pascal&&(options.withBlock||!options.withoutImplicitWith)){
+      const object=this.withObject(project,module,line,offset,options.withBlock,(options.depth||0)+1),component=find(this.objectMembers(project,module,object),name);if(component)return component;
+    }
     if(eq(name,'Me'))return module.kind==='module'?null:{name:'Me',type:module.name,kind:'object',moduleId:module.id};
     let result=find(symbols,name);if(result)return result;
+    if(eq(name,'Self')&&module.form)return {name:'Self',type:module.name,kind:'object',moduleId:module.id};
     const target=project.modules.find(m=>eq(m.name,name));
     if(target){const index=this.index(target,project);return {name:target.name,type:target.name,moduleId:target.id,kind:target.kind==='class'&&!index.predeclared?'class':'module',line:1};}
-    for(const other of project.modules){if(other.kind!=='module'||other.id===module.id)continue;result=find(coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&s.scope!=='private')),name);if(result)return result;}
+    for(const other of project.modules){
+      if(other.id===module.id)continue;
+      if(pascal&&moduleLanguage(other,project)==='vb6')result=find(pascalForeignGlobals(other,this.index(other,project)),name);
+      else if(other.kind==='module')result=find(coalesce(this.index(other,project).symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant')&&s.scope!=='private')),name);
+      else continue;
+      if(result)return result;
+    }
     if(module.form){result=find(builtinType(module.form.type||'Form')?.members||[],name);if(result)return result;}
     result=find(GLOBAL_OBJECTS,name)||find(BUILTIN_SYMBOLS,name)||find([...CONSTANT_SYMBOLS,...(layoutEnabled(project)?layoutConstantSymbols:[])],name)||find(this.referenceGlobals(project),name);if(result)return result;
     if(eq(name,'Forms'))return {name:'Forms',type:'Forms',kind:'object'};
@@ -186,13 +232,28 @@ export class EditorIntelligence {
   resolve(project,module,line,expression,options={}){
     expression=String(expression||'').trim().replace(/\s+_\s*\r?\n/g,' ');
     if(!expression||expression.length>4096||(options.depth||0)>64)return null;
-    let ast=this.expressionCache.get(expression);
-    if(!ast){try{ast=parseExpression(expression);}catch{return null;}if(this.expressionCache.size>=128)this.expressionCache.delete(this.expressionCache.keys().next().value);this.expressionCache.set(expression,ast);}
+    const pascal=moduleLanguage(module,project)==='pascal',cacheKey=(pascal?'pascal:':'vb6:')+expression;
+    let ast=this.expressionCache.get(cacheKey);
+    if(!ast){try{if(pascal){const parser=new PascalParser(expression);ast=parser.expression();if(parser.peek().type!=='eof')return null;}else ast=parseExpression(expression);}catch{return null;}if(this.expressionCache.size>=128)this.expressionCache.delete(this.expressionCache.keys().next().value);this.expressionCache.set(cacheKey,ast);}
     const visit=(node,depth=0)=>{
       if(depth>64)return null;
-      if(node.kind==='id')return this.root(project,module,line,node.name,options.offset??null);
+      if(node.kind==='id'||node.kind==='identifier')return this.root(project,module,line,node.name,options.offset??null,options);
       if(node.kind==='with')return options.withBlock?this.withObject(project,module,line,null,options.withBlock,(options.depth||0)+1):options.withoutImplicitWith?null:this.withObject(project,module,line,options.offset??null);
-      if(node.kind==='group')return visit(node.expr,depth+1);
+      if(node.kind==='group')return visit(node.expr||node.expression,depth+1);
+      if(node.kind==='inherited'){
+        let {proc,idx}=this.scope(project,module,line,options.offset??null);while(proc&&!proc.parentType)proc=idx.procedures.find(parent=>parent.id===proc.ownerId);
+        const ancestor=proc&&this.type(project,module,proc.parentType)?.ancestor;return ancestor?find(this.members(project,module,ancestor),node.name||proc.bindingName):null;
+      }
+      if(node.kind==='index'){
+        const target=visit(node.object,depth+1);if(!target)return null;
+        if(target.array||target.controlArray)return {...target,array:false,controlArray:false,kind:'value'};
+        const type=this.type(project,module,target.type),owner=project.modules.find(owner=>owner.id===type?.moduleId)||module;
+        return type?.kind==='array'?this.declared(project,module,{...target,type:type.target,moduleId:owner.id,kind:'value',array:false}):null;
+      }
+      if(node.kind==='dereference'){
+        const target=visit(node.object,depth+1),type=target&&this.type(project,module,target.type),owner=project.modules.find(owner=>owner.id===type?.moduleId)||module;
+        return type?.kind==='pointer'?this.declared(project,module,{...target,type:type.target,moduleId:owner.id,kind:'value'}):null;
+      }
       if(node.kind==='new'){const type=this.type(project,module,node.name);return type?{name:node.name,type:type.name,kind:'object',instance:true}:null;}
       if(node.kind==='member')return this.declared(project,module,find(this.objectMembers(project,module,visit(node.object,depth+1)),node.name))||null;
       if(node.kind==='call'){
@@ -217,7 +278,7 @@ export class EditorIntelligence {
     return this.declared(project,module,visit(ast));
   }
   parameterInfo(project,module,line,text,offset,options={}){
-    const context=callContext(text,offset,options);if(!context)return null;
+    const pascal=moduleLanguage(module,project)==='pascal',context=pascal?pascalCallContext(text,offset,options):callContext(text,offset,options);if(!context)return null;
     let symbol=this.resolve(project,module,line,context.name,{offset:text===module.code?offset:null});
     if(symbol?.array&&(!symbol.params||symbol.kind==='property'&&!symbol.params.length)){symbol={...symbol,kind:'array',params:Array.from({length:Math.min(60,symbol.rank||1)},(_,i)=>'Index'+(i+1)+' As Long'),parameters:undefined};}
     if(symbol&&(!symbol.params||symbol.kind==='property'&&!symbol.params.length)){const type=this.type(project,module,symbol.type),name=type?.defaultMember||type?.members?.find(m=>m.defaultMember)?.name;symbol=name?find(this.objectMembers(project,module,symbol),name):null;}
@@ -234,11 +295,12 @@ export class EditorIntelligence {
     let active=next;
     if(context.named){active=parameters.findIndex(p=>eq(p.name,context.named));}
     else if(active>=parameters.length){active=parameters.at(-1)?.paramArray?parameters.length-1:-1;}
-    return {...symbol,parameters,displayParams:symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
+    return {...symbol,parameters,displayParams:pascal?parameters.map(displayPascalParameter):symbol.params.map((p,i)=>displayParameter(p,parameters[i])),active,context};
   }
-  definition(project,module,line,text,offset,expression=wordAt(text,offset).text){
-    if(statementBefore(text,offset).state!=='code')return null;
+  definition(project,module,line,text,offset,expression=null){
+    if(moduleLanguage(module,project)==='pascal'){const word=pascalWordAt(text,offset);if(!word.text)return null;expression??=word.text;}else{if(statementBefore(text,offset).state!=='code')return null;expression??=wordAt(text,offset).text;}
     const scope=this.scope(project,module,line,text===module.code?offset:null);
+    if(scope.idx.language==='pascal'&&text===module.code){const declaration=[...scope.idx.symbols,...scope.idx.records.flatMap(record=>record.members)].find(symbol=>symbol.nameStart<=offset&&offset<=symbol.nameEnd);if(declaration)return this.declared(project,module,declaration);}
     const label=scope.idx.labels.find(l=>l.ownerId===scope.proc?.id&&eq(l.name,expression));
     return label||this.resolve(project,module,line,expression,{offset:text===module.code?offset:undefined});
   }
@@ -264,6 +326,7 @@ export class EditorIntelligence {
     return info?.parameters[info.active]?.type||null;
   }
   completions(project,module,line,text,offset,{constants=false,unfiltered=false,contextual=false}={}){
+    if(moduleLanguage(module,project)==='pascal')return this.pascalCompletions(project,module,line,text,offset,{constants,unfiltered,contextual});
     const span=completionSpan(text,offset),st=statementBefore(text,offset),empty={...span,items:[],context:'none'};
     if(st.state!=='code'||/^\s*(?:Attribute\b|Rem\b|#)/i.test(st.masked))return empty;
     const before=text.slice(0,span.start),memberAccess=/\.\s*$/.test(before),left=memberAccess?expressionBefore(before,before.trimEnd().length-1):null;
@@ -298,5 +361,27 @@ export class EditorIntelligence {
       }
     }
     return {...span,items:filter(items),context};
+  }
+  pascalCompletions(project,module,line,text,offset,{constants=false,unfiltered=false,contextual=false}={}){
+    const prefix=text.slice(0,offset).match(/[A-Za-z_]\w*$/)?.[0]||'',start=offset-prefix.length,span={start,end:offset+(text.slice(offset).match(/^\w*/)?.[0].length||0),prefix},masked=pascalMasked(text),empty={...span,items:[],context:'none'};
+    if(prefix&&masked.slice(start,offset)!==prefix||!prefix&&offset>0&&/\S/.test(text[offset-1])&&masked[offset-1]===' ')return empty;
+    const scope=this.scope(project,module,line,text===module.code?offset:null),before=masked.slice(0,start),dot=before.trimEnd().endsWith('.')?before.trimEnd().length-1:-1,access=dot>=0?pascalExpressionBefore(text,dot):null,items=[];let context='global';
+    if(access&&!constants){const symbol=this.resolve(project,module,line,access.text,{offset});items.push(...this.objectMembers(project,module,symbol));context='members';}
+    else if(!contextual||constants){
+      items.push(...scope.symbols.filter(s=>!constants||s.kind==='constant'));
+      const withObject=this.withObject(project,module,line,text===module.code?offset:null);if(withObject)items.unshift(...this.objectMembers(project,module,withObject).filter(s=>!constants||s.kind==='constant'));
+      for(const other of project.modules){
+        const index=this.index(other,project);
+        if(!constants)items.push({name:other.name,kind:other.kind==='class'&&!index.predeclared?'class':'module',type:other.name,moduleId:other.id,line:1});
+        if(other.id!==module.id){
+          const exported=moduleLanguage(other,project)==='vb6'?pascalForeignGlobals(other,index):index.symbols.filter(s=>!s.owner&&(!s.parentType||s.kind==='constant')&&s.scope!=='private');
+          items.push(...exported.filter(s=>!constants||s.kind==='constant'));
+        }
+      }
+      if(!constants){if(module.form)items.push(...this.members(project,module,module.form.type||'Form'));items.push(...PASCAL_KEYWORDS.map(name=>({name,kind:'keyword'})),...PASCAL_BUILTINS.map(name=>({name,kind:'function'})),...BUILTIN_SYMBOLS,...GLOBAL_OBJECTS,{name:'Me',type:module.name,kind:'object'});}
+      else items.push(...CONSTANT_SYMBOLS);
+    }
+    const unique=new Map();for(const item of items){const key=symbolKey(item.name);if(visible(item)&&!unique.has(key)&&(unfiltered||completionMatches(item.name,prefix)))unique.set(key,item);}
+    return {...span,items:[...unique.values()].sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase())),context};
   }
 }

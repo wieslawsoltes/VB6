@@ -14,9 +14,10 @@ export const LAYOUT_GENERATED_ARTIFACTS = Object.freeze(['dist/auto-layout.js', 
 export const WIN32_ARTIFACTS = Object.freeze(['dist/win32-browser.js','packages/win32-browser/dist/win32-browser.js']);
 export const RENDERING_ARTIFACTS = Object.freeze(['dist/vb6-rendering.js']);
 export const LINUX_ARTIFACTS = Object.freeze(['dist/vb6-linux.js']);
+export const PASCAL_ARTIFACTS = Object.freeze(['dist/turbo-pascal.js','packages/turbo-pascal/dist/index.js','packages/turbo-pascal/dist/browser.js']);
 export const INTELLIGENT_UI_ARTIFACTS = Object.freeze(['dist/intelligent-ui-sandbox.html','packages/intelligent-ui/dist/intelligent-ui-sandbox.html','dist/intelligent-ui.js','dist/intelligent-ui-worker.js','dist/intelligent-ui.css','dist/intelligent-ui-mcp.html','src/intelligent-ui/payload.js','packages/intelligent-ui/dist/intelligent-ui.js','packages/intelligent-ui/dist/intelligent-ui-worker.js','packages/intelligent-ui/dist/intelligent-ui.css','packages/intelligent-ui/dist/intelligent-ui-mcp.html']);
 export const GENERATED_ARTIFACTS = Object.freeze([
-  ...IDE_ARTIFACTS, ...INTELLIGENT_UI_ARTIFACTS, ...WIN32_ARTIFACTS, ...RENDERING_ARTIFACTS, ...LINUX_ARTIFACTS, ...LAYOUT_GENERATED_ARTIFACTS, 'dist/vb6-controls.css', 'dist/vb6-runtime.js', 'src/exporter/runtime-payload.js',
+  ...IDE_ARTIFACTS, ...INTELLIGENT_UI_ARTIFACTS, ...WIN32_ARTIFACTS, ...RENDERING_ARTIFACTS, ...LINUX_ARTIFACTS, ...PASCAL_ARTIFACTS, ...LAYOUT_GENERATED_ARTIFACTS, 'dist/vb6-controls.css', 'dist/vb6-runtime.js', 'src/exporter/runtime-payload.js',
   'dist/OCX-Source-Control-Lab.html',
   ...sampleIds.map(id => `dist/examples/${id}.html`)
 ]);

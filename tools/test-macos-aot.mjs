@@ -35,6 +35,10 @@ try{
   const objects=sources.map((_,i)=>path.join(work,i+'.o'));let next=0;const errors=[];
   async function worker(){while(!errors.length){const i=next++;if(i>=sources.length)return;try{await run(compiler,[...flags,'-c',sources[i],'-o',objects[i]]);}catch(error){errors.push(error);}}}
   await Promise.all(Array.from({length:3},worker));if(errors.length)throw errors[0];
+  const recordIdentity=path.join(work,'aot-record-identity');
+  await run(compiler,[...flags,path.join(sdk,'tests/aot-record-identity.cpp'),...objects,'-o',recordIdentity]);
+  assert.match(await run(recordIdentity,[]),/NATIVE_AOT_RECORD_IDENTITY_DEFAULTS_OK/);
+  report.checks.push('ASan/UBSan record identity, reflection metadata defaults and lazy dynamic record fields');
   const records=path.join(work,'recordsets-core');
   await run(compiler,[...flags,path.join(sdk,'tests/recordsets.cpp'),...objects,'-o',records]);
   assert.match(await run(records,[]),/NATIVE_RECORDSETS_CORE_OK/);report.recordsetCoreVerified=true;

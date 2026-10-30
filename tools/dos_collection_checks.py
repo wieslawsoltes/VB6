@@ -1,17 +1,120 @@
 """Canonical virtualized collections under independently owned DOS presenters."""
+from contextlib import contextmanager
 import json
+import traceback
 from playwright.sync_api import expect
 
 
-def run_collection_checks(browser, root, report, seed):
-    page = browser.new_page(viewport={'width': 1840, 'height': 1000})
+@contextmanager
+def _collection_case(browser, report):
+    """Keep the first failure even when a crashed page cannot report or close."""
+    page = None
     errors, passed = [], []
-    page.on('pageerror', lambda error: errors.append(str(error)))
+    progress = {'checkpoint': 'create page', 'passed': passed, 'errors': errors,
+                'crashed': False, 'page_closed': False, 'cleanup_errors': [], 'diagnostic_errors': []}
+    primary = None
+    cleanup_error = None
+
+    def describe(error):
+        return {'type': type(error).__name__, 'message': str(error),
+                'traceback': ''.join(traceback.format_exception(type(error), error, error.__traceback__))}
+
+    def save(name):
+        try:
+            (report / name).write_text(json.dumps(progress, indent=2))
+        except BaseException as error:
+            # Diagnostics, including crash callbacks, must never replace the failure.
+            progress['diagnostic_errors'].append({'operation': name, **describe(error)})
+
+    def checkpoint(name):
+        progress['checkpoint'] = name
+        save('collection-metrics-progress.json')
+
+    def failure(error):
+        if 'failure' not in progress:
+            progress['failure'] = {'checkpoint': progress['checkpoint'], **describe(error)}
+        # Persist the original traceback before any further browser protocol calls.
+        save('collection-metrics-failure.json')
+
+    def crashed(*_):
+        progress['crashed'] = True
+        progress.setdefault('crash_checkpoint', progress['checkpoint'])
+        save('collection-metrics-progress.json')
+
+    def capture():
+        try:
+            unavailable = page is None or progress['crashed'] or page.is_closed()
+        except BaseException as error:
+            progress['diagnostic_errors'].append({'operation': 'page availability', **describe(error)})
+            unavailable = True
+        if unavailable:
+            progress['diagnostics_skipped'] = 'page unavailable or crashed'
+            save('collection-metrics-failure.json')
+            return
+        for name, action in [
+            ('screenshot', lambda: page.screenshot(path=str(report / 'collection-metrics-failure.png'), full_page=True, timeout=5000)),
+            ('state', lambda: page.evaluate('''()=>({hosts:(window.hosts||[]).map(host=>({disposed:host.disposed,state:host.vm?.state,metrics:host.tuiPresentation?.metrics,
+              controls:host.forms[0]?.controls.map(c=>({type:c.type,pitch:c.collectionRowHeight,scroll:c.viewport?.scrollTop,scrollX:c.viewport?.scrollLeft,geometry:{node:c.node.getBoundingClientRect().toJSON(),offsetWidth:c.node.offsetWidth,offsetHeight:c.node.offsetHeight,clientLeft:c.node.clientLeft,clientTop:c.node.clientTop,first:c.node.querySelector('.vb-lv-row>div')?.getBoundingClientRect().toJSON(),header:c.node.querySelector('.vb-lv-header>div')?.getBoundingClientRect().toJSON()},paint:host.tuiPresentation?.controls.get(c.node)?.buffer?.toText(),html:c.node.outerHTML.slice(0,2400)}))}))})''')),
+        ]:
+            try:
+                value = action()
+                if name == 'state':
+                    progress['state'] = value
+            except BaseException as error:
+                progress['diagnostic_errors'].append({'operation': name, **describe(error)})
+            save('collection-metrics-failure.json')
+
     try:
+        checkpoint('create page')
+        page = browser.new_page(viewport={'width': 1840, 'height': 1000})
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.on('crash', crashed)
+        yield page, errors, passed, checkpoint
+    except BaseException as error:
+        primary = error
+        failure(error)
+        capture()
+        raise
+    finally:
+        if page is not None:
+            for name, action in [
+                ('dispose hosts', lambda: page.evaluate('()=>{for(const host of window.hosts||[])host.dispose();}')),
+                ('close page', page.close),
+            ]:
+                checkpoint(name)
+                try:
+                    action()
+                    if name == 'close page':
+                        progress['page_closed'] = True
+                except BaseException as error:
+                    progress['cleanup_errors'].append({'operation': name, **describe(error)})
+                    if primary is None and cleanup_error is None:
+                        cleanup_error = error
+                        failure(error)
+                        capture()
+                save('collection-metrics-progress.json')
+        if primary is not None or cleanup_error is not None:
+            save('collection-metrics-failure.json')
+        if primary is None:
+            if cleanup_error is not None:
+                raise cleanup_error
+            if progress['crashed'] or errors:
+                error = RuntimeError('Collection page crashed during ' + progress['crash_checkpoint']) if progress['crashed'] else AssertionError(errors)
+                failure(error)
+                raise error
+            checkpoint('complete')
+            (report / 'collection-metrics.json').write_text(json.dumps({'passed': passed, 'errors': errors}, indent=2))
+
+
+def run_collection_checks(browser, root, report, seed):
+    with _collection_case(browser, report) as (page, errors, passed, checkpoint):
+        checkpoint('load control styles')
         page.set_content('<!doctype html><html><head><style>' +
                          (root / 'dist/vb6-controls.css').read_text() +
                          '</style><style>html,body{margin:0;width:100%;height:100%}</style></head><body></body></html>')
+        checkpoint('load runtime')
         page.add_script_tag(content=(root / 'dist/vb6-runtime.js').read_text())
+        checkpoint('mount collection hosts')
         page.evaluate('''async seed=>{
           window.assertTUI=(value,message)=>{if(!value)throw Error(message);};
           window.collection=(host,type)=>host.forms[0].controls.find(c=>c.type===type);
@@ -45,11 +148,14 @@ def run_collection_checks(browser, root, report, seed):
           window.a=hosts[0];window.b=hosts[1];window.c=hosts[2];
           window.initialProjects=hosts.map(host=>JSON.stringify(host.project));
         }''', seed)
+        checkpoint('wait for collection presenters')
         page.wait_for_function('a.tuiPresentation.snapshot().length>=5&&b.tuiPresentation.snapshot().length>=5')
 
         def check(name, expression):
+            checkpoint(name)
             page.evaluate(expression)
             passed.append(name)
+            checkpoint(name + ': passed')
 
         check('canonical virtualized geometry shares each host cell pitch', '''()=>{
           for(const [host,pitch] of [[a,16],[b,18]])for(const control of host.forms[0].controls){
@@ -70,6 +176,7 @@ def run_collection_checks(browser, root, report, seed):
         }''')
 
         # Move into the virtual collection, then use its actual keyboard handler.
+        checkpoint('position virtual collections')
         page.evaluate('''()=>{
           const tree=collection(a,'TreeView'),list=collection(a,'ListView');
           tree._selectedNode=tree.treeRows[150].node;list._selectedItem=list.listRows[150];
@@ -77,11 +184,16 @@ def run_collection_checks(browser, root, report, seed):
           tree.paintTreeRows();list.paintListRows();
         }''')
         tree_view = page.locator('#collection-0 [data-type=TreeView] .vb-virtual-viewport')
+        checkpoint('focus tree')
         tree_view.focus()
+        checkpoint('navigate tree')
         tree_view.press('ArrowDown')
         list_view = page.locator('#collection-0 [data-type=ListView] .vb-virtual-viewport')
+        checkpoint('focus list')
         list_view.focus()
+        checkpoint('navigate list')
         list_view.press('ArrowDown')
+        checkpoint('wait for collection navigation')
         page.wait_for_function("collection(a,'TreeView')._selectedNode.Text==='Node 0151'&&collection(a,'ListView')._selectedItem.Text==='Item 0151'")
         check('native collection navigation and virtual row identities remain authoritative', '''()=>{
           a.tuiPresentation.flush();
@@ -99,12 +211,16 @@ def run_collection_checks(browser, root, report, seed):
           assertTUI(getComputedStyle(list.node.querySelector('.vb-lv-row>div:nth-child(3)')).textAlign==='center','canonical center alignment ignored');
         }''')
 
+        checkpoint('position grid')
         page.evaluate('''()=>{
           const grid=collection(a,'DataGrid');grid.props.Row=180;grid.props.Col=1;grid.ensureGridCellVisible();grid.paintGridRows();
         }''')
         grid_view = page.locator('#collection-0 [data-type=DataGrid] .vb-grid-scroll')
+        checkpoint('focus grid')
         grid_view.focus()
+        checkpoint('navigate grid')
         grid_view.press('ArrowDown')
+        checkpoint('wait for grid event')
         page.wait_for_function("collection(a,'DataGrid').Tag==='181'")
         check('grid keyboard reveal, sticky headers and VB6 events use the same cell geometry', '''()=>{
           const grid=collection(a,'DataGrid');a.tuiPresentation.flush();
@@ -126,9 +242,12 @@ def run_collection_checks(browser, root, report, seed):
         }''')
 
         editor_cell = page.locator('#collection-0 [data-type=DataGrid] td[data-row="181"][data-col="1"]')
+        checkpoint('start grid editor')
         editor_cell.dblclick()
         editor = page.locator('#collection-0 [data-type=DataGrid] td input')
+        checkpoint('expect grid editor')
         expect(editor).to_have_count(1)
+        checkpoint('fill grid editor')
         editor.fill('Edited through the original grid input')
         check('presentation switching retains the original active grid editor and staged text', '''()=>{
           const grid=collection(a,'DataGrid'),input=grid.gridEditor.input,value=input.value;
@@ -140,9 +259,12 @@ def run_collection_checks(browser, root, report, seed):
           assertTUI(grid.gridEditor.input===input&&input.value===value,'re-entering DOS replaced the editor');
           assertTUI(grid.collectionRowHeight===16,'active grid did not accept the DOS pitch');
         }''')
+        checkpoint('commit grid editor')
         editor.press('Enter')
+        checkpoint('wait for grid commit')
         page.wait_for_function("collection(a,'DataGrid').TextMatrix(181,1)==='Edited through the original grid input'&&!collection(a,'DataGrid').gridEditor")
         passed.append('original grid commit updates the canonical cell once after presentation changes')
+        checkpoint('original grid commit: passed')
 
         check('classic restoration retires row/style leases while preserving a live sibling', '''()=>{
           a.setPresentation({mode:'classic'});
@@ -156,15 +278,6 @@ def run_collection_checks(browser, root, report, seed):
           assertTUI(renderer.disposed,'runtime presenter not disposed');
           assertTUI(!document.querySelector('[data-tui-collection-style]'),'last collection stylesheet lease leaked');
         }''')
+        checkpoint('verify page errors')
         assert not errors, errors
-        (report / 'collection-metrics.json').write_text(json.dumps({'passed': passed, 'errors': errors}, indent=2))
-        return passed
-    except Exception:
-        page.screenshot(path=str(report / 'collection-metrics-failure.png'), full_page=True)
-        (report / 'collection-metrics-failure.json').write_text(json.dumps({'passed': passed, 'errors': errors,
-            'state': page.evaluate('''()=>({hosts:(window.hosts||[]).map(host=>({disposed:host.disposed,state:host.vm?.state,metrics:host.tuiPresentation?.metrics,
-              controls:host.forms[0]?.controls.map(c=>({type:c.type,pitch:c.collectionRowHeight,scroll:c.viewport?.scrollTop,scrollX:c.viewport?.scrollLeft,geometry:{node:c.node.getBoundingClientRect().toJSON(),offsetWidth:c.node.offsetWidth,offsetHeight:c.node.offsetHeight,clientLeft:c.node.clientLeft,clientTop:c.node.clientTop,first:c.node.querySelector('.vb-lv-row>div')?.getBoundingClientRect().toJSON(),header:c.node.querySelector('.vb-lv-header>div')?.getBoundingClientRect().toJSON()},paint:host.tuiPresentation?.controls.get(c.node)?.buffer?.toText(),html:c.node.outerHTML.slice(0,2400)}))}))})''')}, indent=2))
-        raise
-    finally:
-        page.evaluate('()=>{for(const host of window.hosts||[])host.dispose();}')
-        page.close()
+    return passed

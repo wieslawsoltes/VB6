@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from PIL import Image
 from playwright.sync_api import expect
+from ci.browser_partition import configured_shard, select_case_names
 spec = importlib.util.spec_from_file_location('figma_base', Path(__file__).with_name('figma-browser-tests.py'))
 base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
@@ -279,6 +280,7 @@ class EditorProperties(base.FigmaWorkspace):
 
 def load_tests(loader, standard_tests, pattern):
     names=['test_source_overlay_does_not_cover_highlighted_code'] if REQUIRED_GPU else [name for name in sorted(EditorProperties.__dict__) if name.startswith('test_')]
+    names=select_case_names(names,configured_shard('figma-authoring'))
     return unittest.TestSuite(EditorProperties(name) for name in names)
 
 if __name__ == '__main__':

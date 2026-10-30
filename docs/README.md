@@ -46,6 +46,8 @@ These guides describe the implemented system, not complete native VB6 parity.
 ## Language, runtime and project files
 
 - [Language frontend](LANGUAGE-FRONTEND.md): scanning, declarations and diagnostics.
+- [Turbo Pascal 7.0](TURBO-PASCAL.md): optional language, shared forms/editor/MCP,
+  JavaScript SDK, typed runtime, native AOT qualification, and compatibility limits.
 - [Procedure-local storage](LANGUAGE-LOCAL-STORAGE.md): skipped declarations, local scope,
   per-invocation initialization, Static lifetime and metadata-only declaration plans.
 - [Circular record dependencies](LANGUAGE-RECORD-RECURSION.md): declaration-cycle diagnostics,
@@ -81,6 +83,7 @@ These guides describe the implemented system, not complete native VB6 parity.
 - [Browser control compatibility](CONTROLS-COMPATIBILITY.md): collection ordering, selection identity, keyboard behavior and explicit native-control boundaries.
 
 - [Optional DOS / TUI workspace](DOS-WORKSPACE.md): shared VB6 cell presentation, palette settings, input ownership and visual-fidelity boundaries.
+- [Input modes and Vim](INPUT-MODES.md): optional modal editing across IDE/TUI presentations, shared undo, commands, and extensible mode registration.
 - [Optional Figma workspace](figma-workspace.md): real VB6 Assets/Layers/Design,
   reversible workspace profiles, canvas navigation, auto layout and anchoring.
 - [Figma paint publication](figma-presentation.md): retained-renderer transactions,
@@ -100,6 +103,8 @@ These guides describe the implemented system, not complete native VB6 parity.
   performance measurement and strict acceptance; [rendering source attribution](RENDERING-SOURCES.md).
 - [Rendering resource contracts](RENDERING-RESOURCES.md): atlas lifetime, partial uploads,
   rounded paint, text fidelity, suspension and exact browser qualification.
+- [Retained Canvas2D presentation](RENDERING-CANVAS-PRESENTATION.md): context storage policy,
+  composited-pixel correctness, standalone defaults and validation evidence.
 - [GPU startup and recovery](RENDERING-TROUBLESHOOTING.md): adapter/context failures,
   live diagnostics, saved-policy retry and environment limitations.
 - [IDE themes](IDE-THEMES.md), [application themes](APPLICATION-THEMES.md) and

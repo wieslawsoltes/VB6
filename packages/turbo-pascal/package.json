@@ -1,0 +1,17 @@
+{
+  "name": "@vb6/turbo-pascal",
+  "version": "0.1.0",
+  "description": "JavaScript Turbo Pascal frontend for shared VB6 Studio forms, runtime and native AOT backends",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {"types": "./src/index.d.ts", "import": "./dist/index.js"},
+    "./browser": {"types": "./src/browser.d.ts", "default": "./dist/browser.js"},
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "src/index.d.ts", "src/browser.d.ts", "README.md", "LICENSE"],
+  "sideEffects": ["./dist/browser.js"],
+  "engines": {"node": ">=22"},
+  "license": "MIT"
+}

@@ -67,5 +67,6 @@ class TUIAdvancedAcceptance(advanced.AdvancedEditorAcceptance):
         self.assertEqual(self.page.evaluate('tui.surfacePixels'),0);self.done()
 
 def load_tests(loader,tests,pattern):
-    return unittest.TestSuite(TUIAdvancedAcceptance(name) for name in loader.getTestCaseNames(TUIAdvancedAcceptance) if name.startswith('test_tui_'))
+    names=[name for name in TUIAdvancedAcceptance.__dict__ if name.startswith('test_tui_')]
+    return unittest.TestSuite(TUIAdvancedAcceptance(name) for name in advanced.select_case_names(names,advanced.configured_shard('advanced-editor')))
 if __name__=='__main__': unittest.main(verbosity=2)

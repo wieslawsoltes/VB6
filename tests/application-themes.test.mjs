@@ -16,13 +16,13 @@ class Root extends EventTarget{
 }
 function environment(){const view=new EventTarget(),media=new EventTarget(),queries=new Map();media.matches=false;queries.set('(prefers-color-scheme: dark)',media);view.matchMedia=query=>{if(!queries.has(query))queries.set(query,Object.assign(new EventTarget(),{matches:false}));return queries.get(query);};view.CustomEvent=CustomEvent;const doc={defaultView:view};doc.documentElement=new Root(doc);return {doc,view,media,root:new Root(doc)};}
 const ids=Object.keys(PLATFORM_THEMES);
-test('application themes share the immutable complete platform registry, with Classic as default',()=>{
+test('application themes share the immutable complete platform registry, with Windows Standard as default',()=>{
  assert.equal(Object.keys(THEMES).length,9);assert.deepEqual(Object.keys(CLASSIC_THEMES),['classic','standard','contrast']);
- assert.deepEqual(normalizeApplicationAppearance(),{theme:'classic',themeOptions:{followSystemTheme:false,reduceTransparency:false,reduceMotion:false}});
+ assert.deepEqual(normalizeApplicationAppearance(),{theme:'standard',themeOptions:{followSystemTheme:false,reduceTransparency:false,reduceMotion:false}});
  for(const id of ids){assert.equal(THEMES[id],PLATFORM_THEMES[id]);assert.ok(Object.isFrozen(THEMES[id].colors));assert.equal(themeId(id),id);}
 });
 test('application preference normalization rejects malformed identifiers and does not import IDE settings',()=>{
- for(const value of [null,undefined,0,false,[],new Date()])assert.equal(normalizeApplicationAppearance(value).theme,'classic');
+ for(const value of [null,undefined,0,false,[],new Date()])assert.equal(normalizeApplicationAppearance(value).theme,'standard');
  for(const theme of ['__proto__','constructor','toString','fluent;url(x)',{},['fluent'],{toString(){throw Error('coercion');}}])assert.equal(normalizeApplicationAppearance({theme}).theme,'classic');
  const input={theme:'macos26',followSystemTheme:true,reduceMotion:true,themeOptions:{followSystemTheme:'true',reduceTransparency:true,reduceMotion:1,unsafe:'x'}};
  assert.deepEqual(normalizeApplicationAppearance(input),{theme:'macos26',themeOptions:{followSystemTheme:false,reduceTransparency:true,reduceMotion:false}});assert.equal(input.themeOptions.unsafe,'x');

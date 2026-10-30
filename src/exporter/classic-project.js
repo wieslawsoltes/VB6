@@ -1,6 +1,7 @@
 import {classicProjectEncoding, inspectClassicSources} from './classic-sources.js';
 import {prepareClassicDesigner} from './classic-designer.js';
 import {normalizeProject} from '../project/model.js';
+import {moduleLanguage} from '../project/language.js';
 import {sourceFiles} from '../project/formats.js';
 import {bytesOf, decodeNativeText} from '../project/native-text.js';
 import {cleanProjectPath} from '../project/frx.js';
@@ -20,6 +21,7 @@ export function prepareClassicProject(input, options = {}) {
   const serialized = JSON.stringify(input);
   if (!serialized || new TextEncoder().encode(serialized).length > CLASSIC_LIMITS.projectBytes) fail('Classic project exceeds 20 MiB.');
   const project = normalizeProject(JSON.parse(serialized));
+  if(project.modules.some(module=>moduleLanguage(module,project)==='pascal'))fail('Turbo Pascal projects use the shared Win32, macOS, Linux or browser compiler. The Microsoft VB6 compiler accepts Visual Basic source only.', 'CLASSIC_LANGUAGE');
   const selected = normalizeClassicOptions(options, project.name);
   const encoding = classicProjectEncoding(project);
   if (project.nativeWorkspace) fail('Select or export a single native project before making an EXE; a project group can contain DLL/OCX build dependencies.');

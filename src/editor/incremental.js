@@ -1,4 +1,4 @@
-import {positionAt, textChange} from './projection.js';
+import {positionAt, textChange,indexSource} from './projection.js';
 import {procedures} from './language-service.js';
 
 /** Update line/procedure indices by reparsing only affected physical lines.
@@ -6,10 +6,13 @@ import {procedures} from './language-service.js';
  * Untouched line strings are shared. Work after the edit is an offset shift,
  * never a lexer/parser pass over the unchanged tail.
  */
-export function updateSourceIndex(index, next, hint=null) {
+export function updateSourceIndex(index, next, hint=null,language=index.language||'vb6') {
   next=String(next);
   const change=hint||textChange(index.text,next);
-  if(index.text===next)return {index,change,changedProcedures:false,scannedLines:0};
+  if(index.text===next&&(index.language||'vb6')===language)return {index,change,changedProcedures:false,scannedLines:0};
+  // Pascal's multiline comments and nested declarations can alter scopes far
+  // beyond the edited physical line. Rebuild their lexical index atomically.
+  if(language==='pascal'||index.language==='pascal'){const updated=indexSource(next,language);return {index:updated,change,changedProcedures:true,scannedLines:updated.lines.length};}
   const first=positionAt(index,change.start).line-1;
   const last=positionAt(index,change.oldEnd).line-1;
   const from=index.starts[first];

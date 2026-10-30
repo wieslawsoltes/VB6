@@ -138,8 +138,8 @@ class AgentCaptureTests(unittest.TestCase):
         self.assertEqual(self.report('stable')['stableCaptures'], 3)
 
     def test_timeout_recovery_discards_pre_timeout_stability(self):
-        page = self.page([b'frame', b'frame', ScreenshotTimeout('capture stalled'), b'frame'])
-        self.assertEqual(self.capture(page, 'recovered'), b'frame')
+        page = self.page([b'old', b'old', ScreenshotTimeout('capture stalled'), b'new'])
+        self.assertEqual(self.capture(page, 'recovered'), b'new')
         self.assertEqual(len(page.calls), 6)
         report = self.report('recovered')
         self.assertTrue(report['accepted'])

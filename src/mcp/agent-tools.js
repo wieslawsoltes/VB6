@@ -1,3 +1,4 @@
+import {PROJECT_LANGUAGES} from '../project/language.js';
 import {DEFAULT_TASK_TOOLS, TASK_EXTENSION} from './tasks.js';
 import {SKILLS_EXTENSION} from './skill-catalog.js';
 import {installDataTools} from './agent-data.js';
@@ -66,10 +67,10 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
     });
     checkAbort(ctx.signal);return output({...adapter.snapshot(),matched:ready()});
   });
-  add('project.details','Read project settings, references, native metadata and module identities without embedding all source and binary data.',{},[],()=>output({project:{...adapter.snapshot(),description:ide.project.description,settings:clone(ide.project.settings),references:clone(ide.project.references),nativeProject:clone(ide.project.nativeProject||null)}}));
-  mutate('project.update','Update project name, description, startup, settings and preserved native metadata. Validated and undoable.',{name:S,description:{type:'string',maxLength:10000},startup:S,settings:OBJ,nativeProject:OBJ});
-  add('project.new','Create a new project with one form. Replaces the workspace after approval; its previous project can be recovered through undo.',{name:S,expectedRevision:REV},['name','expectedRevision'],async(args,ctx)=>{
-    identifier(args.name);await consent('vb6.project.new',args,ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision);return replace(newProject(args.name),'MCP: new project');
+  add('project.details','Read project settings, references, native metadata and module identities without embedding all source and binary data.',{},[],()=>output({supportedLanguages:PROJECT_LANGUAGES,project:{...adapter.snapshot(),description:ide.project.description,settings:clone(ide.project.settings),references:clone(ide.project.references),nativeProject:clone(ide.project.nativeProject||null)}}));
+  mutate('project.update','Update project name, description, startup, settings and preserved native metadata. Validated and undoable.',{name:S,language:E(['vb6','pascal']),description:{type:'string',maxLength:10000},startup:S,settings:OBJ,nativeProject:OBJ});
+  add('project.new','Create a new project with one form. Replaces the workspace after approval; its previous project can be recovered through undo.',{name:S,language:E(['vb6','pascal']),expectedRevision:REV},['name','expectedRevision'],async(args,ctx)=>{
+    identifier(args.name);await consent('vb6.project.new',args,ctx); checkAbort(ctx.signal);checkRevision(args.expectedRevision);return replace(newProject(args.name,{language:args.language}),'MCP: new project');
   },{write:true,destructive:true});
   function replace(project,label) {const before=clone(ide.project),saved=ide.savedJSON;ide.loadProject(project);ide.savedJSON=saved;ide.record(before,label);changed();return adapter.snapshot();}
   const fileEntry=O({path:S,content:TEXT,encoding:E(['utf8','base64'])},['path','content']);
@@ -98,7 +99,7 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
   add('references.get','Read project reference and OCX declarations. This does not load native COM libraries.',{},[],()=>output({references:clone(ide.project.references)}));
   mutate('references.set','Replace preserved reference/OCX declarations, without downloading or executing native libraries.',{references:A(OBJ,1000)},['references']);
   mutate('module.rename','Rename a module/form and its source identifier references, preserving strings and comments. This is lexical, not whole-program semantic refactoring.',{module:S,name:S},['module','name']);
-  mutate('module.metadata','Edit module attributes, native path, class header and source encoding metadata.',{module:S,attributes:A(S),nativeClassHeader:S,sourcePath:S,sourceEncoding:E(['utf-8','windows-1252'])},['module']);
+  mutate('module.metadata','Edit module attributes, native path, class header and source encoding metadata.',{module:S,language:E(['vb6','pascal']),attributes:A(S),nativeClassHeader:S,sourcePath:S,sourceEncoding:E(['utf-8','windows-1252'])},['module']);
   add('code.edit','Apply disjoint source edits across modules atomically, with one undo transaction. All UTF-16 ranges refer to the original source. Paused-runtime edits remain staged.',{edits:A(O({module:S,start:N(0,5000000),end:N(0,5000000),text:TEXT,expectedText:TEXT},['module','start','end','text']),1000),expectedRevision:REV},['edits','expectedRevision'],async(args,ctx)=>{
     if(!['design','paused'].includes(ide.runState)) throw new McpError(-32000,'Pause or stop before editing code.');
     const next=sourceEdits(ide.project,args.edits);await consent('vb6.code.edit',args,ctx,{design:false}); checkAbort(ctx.signal);checkRevision(args.expectedRevision);
@@ -113,14 +114,14 @@ export function installAgentTools(ide, adapter, {tool, consent, commit, changed,
     const code=m.code.slice(offset,offset+(args.count??65536)),nextOffset=offset+code.length;
     return output({module:m.name,moduleId:m.id,offset,nextOffset,totalCodeUnits:m.code.length,code,hasMore:nextOffset<m.code.length,offsetEncoding:'utf-16'});
   });
-  add('code.symbols','Read declaration symbols and procedure signatures, with module scoping, literal filtering and pagination.',{module:S,query:S,offset:N(),limit:N(1,1000)},[],args=>output(page((args.module?[moduleOf(ide.project,args.module)]:ide.project.modules).flatMap(m=>scanDeclarations(m).symbols.map(s=>({...s,module:m.name}))).filter(s=>!args.query||s.name.toLowerCase().includes(args.query.toLowerCase())),args)));
+  add('code.symbols','Read declaration symbols and procedure signatures, with module scoping, literal filtering and pagination.',{module:S,query:S,offset:N(),limit:N(1,1000)},[],args=>output(page((args.module?[moduleOf(ide.project,args.module)]:ide.project.modules).flatMap(m=>scanDeclarations(m,ide.project).symbols.map(s=>({...s,module:m.name}))).filter(s=>!args.query||s.name.toLowerCase().includes(args.query.toLowerCase())),args)));
   add('code.complete','Return declaration-aware completion, quick info or parameter info at a UTF-16 source offset without changing editor selection.',{module:S,offset:N(0,5000000),kind:E(['completions','constants','resolve','parameters']),expression:S},['module','offset'],args=>{
     const m=moduleOf(ide.project,args.module);if(args.offset>m.code.length)fail('Offset outside module.');const line=m.code.slice(0,args.offset).split('\n').length;
     const result=args.kind==='resolve'?intelligence.resolve(ide.project,m,line,args.expression||''):args.kind==='parameters'?intelligence.parameterInfo(ide.project,m,line,m.code,args.offset):intelligence.completions(ide.project,m,line,m.code,args.offset,{constants:args.kind==='constants'});
     return output({result});
   });
   mutate('procedure.add','Add a Sub, Function or Property using the existing declaration generator.',{module:S,name:S,type:E(['Sub','Function','Property']),scope:E(['Public','Private']),staticLocals:B},['module','name']);
-  add('procedure.get','Read procedure declarations and native attributes.',{module:S,name:S},['module'],args=>{const m=moduleOf(ide.project,args.module);return output({procedures:scanDeclarations(m).procedures.filter(p=>!args.name||p.name.toLowerCase()===args.name.toLowerCase()).map(p=>({...p,attributes:readProcedureAttributes(m,p.name)}))});});
+  add('procedure.get','Read procedure declarations and native attributes.',{module:S,name:S},['module'],args=>{const m=moduleOf(ide.project,args.module);return output({procedures:scanDeclarations(m,ide.project).procedures.filter(p=>!args.name||p.name.toLowerCase()===args.name.toLowerCase()).map(p=>({...p,attributes:readProcedureAttributes(m,p.name)}))});});
   mutate('procedure.attributes','Update a procedure description, HelpID, member ID and flags.',{module:S,name:S,attributes:OBJ},['module','name','attributes']);
   mutate('procedure.event','Generate a typed event handler for a form or control. Control arrays include the Index argument.',{module:S,id:S,event:S},['module','event']);
   add('bookmarks.get','Read one module’s source bookmarks.',{module:S},['module'],args=>output({lines:clone(moduleOf(ide.project,args.module).bookmarks||[])}));

@@ -31,6 +31,8 @@ never substitute stale prebuilt bundles for the changed source.
 
 ## Maintained suite and fixture scope
 
+Turbo Pascal regression entry points are `tests/pascal-*.test.mjs`, `tools/browser-pascal-tests.py`, and `tools/test-pascal-native.mjs`. The last command executes emitted applications on Windows, Apple Silicon macOS, or Linux x64 at O0/O2 and checks virtual object dispatch, growing pointer heaps, Text I/O, and exact typed-file bytes. The shared Win32 record-array and file ABI tests execute emitted helpers against explicit API doubles; they do not replace native OS execution. See [the Pascal verification contract](TURBO-PASCAL.md#verification-and-references).
+
 The Node runner discovers `tests/*.test.mjs`. Suites are named for current
 subsystems rather than release or finalization milestones. Follow the maintained
 [test scope and fixture policy](../tests/README.md). After building, focused

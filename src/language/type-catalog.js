@@ -3,7 +3,7 @@ import {installDataTypeCatalog} from './data-type-catalog.js';
 import {BUILTIN_SIGNATURES} from '../runtime/signatures.js';
 import {VB_CONSTANTS} from '../runtime/constants.js';
 import {DATA_CONSTANTS} from '../data/common.js';
-import {CONTROL_DEFAULTS,createControl,createForm} from '../project/model.js';
+import {CONTROL_DEFAULTS,defaultControlProperties,defaultFormProperties} from '../project/model.js';
 import {splitArguments,symbolKey} from './source-context.js';
 
 /** Declarative editor metadata, never reflection over live runtime objects.
@@ -122,7 +122,7 @@ controlExtra.RichTextBox.push(...controlExtra.TextBox);
 controlExtra.MSHFlexGrid=controlExtra.MSFlexGrid;
 const drawing=['Form','PictureBox'];
 for (const type of ['Form',...Object.keys(CONTROL_DEFAULTS).filter(name=>name!=='OLE')]) {
-  const model = type==='Form'?createForm().form.properties:createControl(type).properties;
+  const model = type==='Form'?defaultFormProperties():defaultControlProperties(type);
   const members = Object.entries(model).filter(([name])=>!['Items','Columns'].includes(name)).map(([name,value])=>member(name,propertyTypes[name.toLowerCase()]||(name==='Value'&&type==='CheckBox'?'CheckBoxConstants':booleanProps.has(name.toLowerCase())?'Boolean':geometryProps.has(name.toLowerCase())?'Single':typeof value==='number'?'Long':typeof value==='string'?'String':'Variant')));
   members.push(method('Move','Left As Single, Optional Top As Single, Optional Width As Single, Optional Height As Single'),method('SetFocus'),method('Refresh'),method('ZOrder','Optional Position As Long'));
   if (drawing.includes(type)) members.push(method('Print','ParamArray OutputList() As Variant'),method('Cls'),method('PSet','X As Single, Y As Single, Optional Color As ColorConstants'),...props('Single','CurrentX CurrentY'));

@@ -18,10 +18,12 @@ export const CLASSIC_THEMES = Object.freeze({
   contrast:profile('contrast','High Contrast Black',{...classic,face:'#000000',light:'#ffffff',highlight:'#ffffff',shadow:'#c0c0c0',dark:'#ffffff',text:'#ffffff',inactive:'#000000',inactiveEnd:'#000000',inactiveText:'#ffffff',window:'#000000',windowText:'#ffffff',selection:'#800080',selectionText:'#ffffff',workspace:'#000000',desktop:'#000000',gray:'#00ff00',info:'#000000',infoText:'#ffffff',link:'#ffff00',keyword:'#00ffff',comment:'#00ff00',breakpoint:'#ff0000'})
 });
 export const THEMES = Object.freeze({...CLASSIC_THEMES,...PLATFORM_THEMES});
+/** Initial IDE and application palette. Explicit saved themes remain authoritative. */
+export const DEFAULT_THEME = 'standard';
 // Win32 GetSysColor indices. Reserved index 25 falls back to the button face.
 export const SYSTEM_ROLES = Object.freeze(['face','desktop','title','inactive','face','window','dark','text','windowText','titleText','face','face','workspace','selection','selectionText','face','shadow','gray','text','inactiveText','light','dark','highlight','infoText','info','face','link','titleEnd','inactiveEnd','selection','face']);
 export const SYSTEM_COLOR_NAMES = Object.freeze(['Scroll Bars','Desktop','Active Title Bar','Inactive Title Bar','Menu Bar','Window Background','Window Frame','Menu Text','Window Text','Title Bar Text','Active Border','Inactive Border','Application Workspace','Highlight','Highlight Text','Button Face','Button Shadow','Gray Text','Button Text','Inactive Caption Text','3D Highlight','3D Dark Shadow','3D Light','Info Text','Info Background']);
-export function themeId(id) { id=canonicalPlatformThemeId(id);return typeof id==='string' && Object.hasOwn(THEMES,id) ? id : 'classic'; }
+export function themeId(id = DEFAULT_THEME) { id=canonicalPlatformThemeId(id);return typeof id==='string' && Object.hasOwn(THEMES,id) ? id : 'classic'; }
 export function getTheme(element) {
   return THEMES[themeId(typeof element === 'string' ? element : element?.closest?.('[data-vb-theme]')?.dataset.vbTheme || element?.ownerDocument?.documentElement?.dataset.vbTheme)];
 }
@@ -61,7 +63,7 @@ export function fontFamily(name='MS Sans Serif') {
   // A quoted family cannot escape the declaration or turn into a URL.
   return '"'+String(name).replace(/["\\\n\r]/g,'')+'", Tahoma, Arial, sans-serif';
 }
-export const DEFAULT_APPEARANCE = Object.freeze({theme:'classic',windowMode:'hybrid',documentTabs:false,debugTabs:false,editorFont:'Courier New',editorSize:13,tooltips:true,procedureSeparators:true,autoIndent:true,autoListMembers:true,autoQuickInfo:true,autoDataTips:true,fullModule:true,margin:true,dragText:true,autoSyntaxCheck:true,requireVariableDeclaration:true,notifyStateLoss:false,largeToolbarIcons:false});
+export const DEFAULT_APPEARANCE = Object.freeze({theme:DEFAULT_THEME,windowMode:'hybrid',documentTabs:false,debugTabs:false,editorFont:'Courier New',editorSize:13,tooltips:true,procedureSeparators:true,autoIndent:true,autoListMembers:true,autoQuickInfo:true,autoDataTips:true,fullModule:true,margin:true,dragText:true,autoSyntaxCheck:true,requireVariableDeclaration:true,notifyStateLoss:false,largeToolbarIcons:false});
 export function normalizeAppearance(value={}) {
   return {...DEFAULT_APPEARANCE,windowMode:value.windowMode==='mdi'?'mdi':'hybrid',autoSyntaxCheck:value.autoSyntaxCheck!==false,requireVariableDeclaration:value.requireVariableDeclaration!==false,notifyStateLoss:value.notifyStateLoss===true,largeToolbarIcons:value.largeToolbarIcons===true,autoQuickInfo:value.autoQuickInfo!==false,autoDataTips:value.autoDataTips!==false,fullModule:value.fullModule!==false,margin:value.margin!==false,dragText:value.dragText!==false,codeColors:Object.fromEntries(Object.entries(value.codeColors||{}).filter(([key,color])=>['text','background','keyword','comment','selection','selectionText','breakpoint','execution'].includes(key)&&/^#[0-9a-f]{6}$/i.test(color))),theme:themeId(value.theme),documentTabs:value.documentTabs===true,debugTabs:value.debugTabs===true,editorFont:['Courier New','Consolas','monospace'].includes(value.editorFont)?value.editorFont:'Courier New',editorSize:[11,12,13,14,16,18,20].includes(Number(value.editorSize))?Number(value.editorSize):13,tooltips:value.tooltips!==false,procedureSeparators:value.procedureSeparators!==false,autoIndent:value.autoIndent!==false,autoListMembers:value.autoListMembers!==false};
 }
