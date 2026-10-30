@@ -38,7 +38,7 @@ function validateShape(project, options) {
     require(object(connection), 'Expected a data connection object', `project.dataSources.connections[${i}]`);
   }
   if (object(options)) {
-    for (const key of ['persist', 'nativeWindows', 'debuggerEnabled', 'breakOnEntry', 'immediateContext']) require(options[key] === undefined || typeof options[key] === 'boolean', 'Expected a boolean runtime option', 'options.' + key);
+    for (const key of ['persist', 'nativeWindows', 'debuggerEnabled', 'breakOnEntry', 'immediateContext', 'desktop']) require(options[key] === undefined || typeof options[key] === 'boolean', 'Expected a boolean runtime option', 'options.' + key);
     for (const key of ['breakpoints', 'watchpoints']) require(options[key] === undefined || Array.isArray(options[key]), 'Expected a debugger array', 'options.' + key);
     require(options.instructionLimit === undefined || Number.isSafeInteger(options.instructionLimit) && options.instructionLimit > 0, 'Expected a positive instruction limit', 'options.instructionLimit');
   }

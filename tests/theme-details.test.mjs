@@ -39,7 +39,8 @@ test('old explicit CDE icon pack identifiers map to the single X11 drawing',()=>
 });
 test('canonicalization does not coerce hostile or inherited identifiers',()=>{
  for(const value of [null,undefined,[],{},'constructor','__proto__','toString',{toString(){throw Error('coercion');}}]){
-  assert.equal(themeId(value),'classic');assert.equal(normalizeIdeAppearance({theme:value}).theme,'classic');
+  const expected=value===undefined?'standard':'classic';
+  assert.equal(themeId(value),expected);assert.equal(normalizeIdeAppearance({theme:value}).theme,expected);
  }
 });
 test('every appearance boundary explicitly resets the same complete detail token set',()=>{

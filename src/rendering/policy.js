@@ -1,6 +1,6 @@
 /** Serializable, dependency-free rendering policy. HTML is always the final safety net. */
 export const BACKENDS = Object.freeze(['webgpu', 'webgl2', 'canvas2d', 'html']);
-export const DEFAULT_RENDERING = Object.freeze({backend: 'webgpu', fallbacks: Object.freeze(['webgl2', 'canvas2d', 'html']), text: 'native', pixelSnap: true});
+export const DEFAULT_RENDERING = Object.freeze({backend: 'webgpu', fallbacks: Object.freeze(['webgl2', 'html']), text: 'native', pixelSnap: true});
 export const RENDERING_STORAGE_KEY = 'vb6-studio-web.rendering.v1';
 export function normalizeRendering(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) value = {};

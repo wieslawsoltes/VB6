@@ -71,7 +71,7 @@ See [Browser windows](docs/BROWSER-WINDOWS.md) for restoration, lifecycle, platf
 
 Windows Classic, Windows Standard (2000), and High Contrast Black remain available. IDE appearance is independent of the exported application's theme. System colors resolve through the theme; authored RGB colors are retained.
 
-**Tools → Options → General → Appearance → IDE theme** also offers **Fluent WinUI 3**, **macOS 26**, and **X11**, each in light and dark variants. Classic VB6 remains the default. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
+**Tools → Options → General → Appearance → IDE theme** also offers **Fluent WinUI 3**, **macOS 26**, and **X11**, each in light and dark variants. Windows Standard (2000) is the default for new sessions; explicit saved choices, including Windows Classic, remain unchanged. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
 
 WinUI XAML forms use a pinned Microsoft resource catalog with typed Light/Dark/HighContrast brushes, scoped resources, supported native styles and live control states. ToggleSwitch, ToggleButton and HyperlinkButton use real existing VB controls, and native property edits retain explicit ownership. See [WinUI XAML compatibility and example](docs/WINUI-XAML-COMPATIBILITY.md), [resource catalog and provenance](docs/WINUI-RESOURCE-CATALOG.md), and [WinUI rendering scope](docs/WINUI-PARITY.md) for supported APIs and explicit limits.
 
@@ -89,7 +89,7 @@ The reusable, dependency-free `@vb6/auto-layout` package includes ES module/brow
 
 ### Optional Turbo Pascal
 
-Choose **Turbo Pascal 7.0** in **File → New Project**, or open the **Pascal Forms** example. Pascal modules reuse the existing form designer, component catalog, source editor, debugger, MCP tools, browser exports, and independent Win32/macOS/Linux AOT backends. Existing projects remain Visual Basic by default, and modules can select their language explicitly.
+Choose **Turbo Pascal 7.0** in **File → New Project**, or open the **Turbo Pascal Forms** or **Turbo Pascal Number Lab** example. Number Lab is a complete two-unit application with input validation, Fibonacci and triangular calculations, shared form events, and text-file output. Pascal modules reuse the existing form designer, component catalog, source editor, debugger, MCP tools, browser exports, and independent Win32/macOS/Linux AOT backends. Existing projects remain Visual Basic by default, and modules can select their language explicitly.
 
 The JavaScript frontend includes typed Pascal parsing/lowering, units, arrays/records/sets, checked pointers, value objects and virtual methods, portable file codecs, source maps, and Pascal editor/debugger assistance. A standalone ESM/browser SDK and CLI are included. See [Turbo Pascal usage, compatibility boundaries, and native qualification](docs/TURBO-PASCAL.md) and the [compiler package](packages/turbo-pascal/README.md). Complete DOS/8086 behavior and Delphi compatibility are outside the current contract.
 

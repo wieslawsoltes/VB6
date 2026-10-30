@@ -7,7 +7,7 @@ export function startExportedApplication() {
   globalThis.vb6ApplicationStatus = status;
   const banner = document.getElementById('vb6-startup');
   const emit = (name, detail) => globalThis.dispatchEvent(new CustomEvent(name, {detail}));
-  let options, startupError, host, departed = false, closed = false, rejectDeparture;
+  let options, project, startupError, host, desktop, launching, restartState, departed = false, closed = false, rejectDeparture;
   const abort = new AbortController();
   const departure = new Promise((resolve, reject) => { rejectDeparture = reject; });
   const cancelled = () => Object.assign(new Error('Application startup was cancelled because the page was closed.'), {name: 'AbortError', code: 'EXPORT_STARTUP_CANCELLED'});
@@ -34,6 +34,7 @@ export function startExportedApplication() {
       departed = true;
       abort.abort();
       closeHost();
+      desktop?.dispose();
       if (status.phase === 'loading') rejectDeparture(cancelled());
       else status.phase = 'disposed';
     }
@@ -50,10 +51,48 @@ export function startExportedApplication() {
     // happen before ApplicationHost can establish its own message callbacks.
     if (options?.bridgeToken && globalThis.parent !== globalThis) globalThis.parent.postMessage({channel: 'vb6-runtime', token: options.bridgeToken, type: 'error', error: status.error}, '*');
     emit(departed ? 'vb6:cancelled' : 'vb6:error', status.error);
+    desktop?.setLoading(false);
   }
+  async function mount(sessionState) {
+    ensureActive();
+    startupError = null;
+    closed = false;
+    status.phase = 'loading'; status.error = null;
+    desktop?.setLoading(true);
+    if (banner) { banner.hidden = false; banner.setAttribute('role', 'status'); banner.textContent = 'Starting application…'; }
+    const next = await VB6Runtime.mountApplication(project, document.getElementById('app'), sessionState ? {...options, sessionState} : options);
+    if (!next || typeof next !== 'object') throw new Error('The application runtime did not return a host.');
+    host = next;
+    globalThis.vb6Application = host;
+    if (departed) { closeHost(); throw cancelled(); }
+    desktop?.bind(host);
+    // ApplicationHost may resolve with a failed VM. Never signal ready for it.
+    if (host.vm?.state === 'error') throw Object.assign(new Error(startupError?.message || 'Visual Basic startup failed'), startupError);
+    restartState = undefined;
+    status.phase = 'ready';
+    if (banner) banner.hidden = true;
+    emit('vb6:ready', {host});
+    return host;
+  }
+  globalThis.vb6RestartApplication = () => {
+    if (departed) return Promise.reject(cancelled());
+    if (launching || status.phase === 'loading') return globalThis.vb6ApplicationReady;
+    if (host && globalThis.VB6Runtime.canRelaunchApplication && !globalThis.VB6Runtime.canRelaunchApplication(host)) return Promise.resolve(host);
+    // Stop/dispose before capturing state: close any file handles, but retain
+    // all bytes/settings even when persistence was denied or disabled.
+    saveHost(); closeHost();
+    // Retain the last session across rejected mounts: there may be no new host
+    // to snapshot when the user retries, especially without browser storage.
+    if (host?.fs) restartState = {vfs: host.fs.snapshot(), settings: host.settings};
+    host = null;
+    launching = Promise.race([Promise.resolve().then(() => mount(restartState)), departure]);
+    globalThis.vb6ApplicationReady = launching;
+    launching.then(() => { launching = null; }, error => { launching = null; fail(error); });
+    return launching;
+  };
   const startup = Promise.resolve().then(async () => {
     ensureActive();
-    const project = JSON.parse(document.getElementById('vb6-project').textContent);
+    project = JSON.parse(document.getElementById('vb6-project').textContent);
     options = JSON.parse(document.getElementById('vb6-options').textContent);
     if (typeof globalThis.VB6Runtime?.mountApplication !== 'function') throw new Error('The application runtime could not be loaded. Check that all deployment files are present.');
     // Trusted deployment scripts can install actual callbacks, data/automation
@@ -72,21 +111,16 @@ export function startExportedApplication() {
     options.onMessage = message => {
       if (message.type === 'error') startupError = message.error;
       if (banner && ['ready', 'pause', 'interaction'].includes(message.type)) banner.hidden = true;
+      desktop?.message(message);
       emit('vb6:message', message);
       onMessage?.(message);
     };
     ensureActive();
-    host = await VB6Runtime.mountApplication(project, document.getElementById('app'), options);
-    if (!host || typeof host !== 'object') throw new Error('The application runtime did not return a host.');
-    globalThis.vb6Application = host;
-    if (departed) { closeHost(); throw cancelled(); }
-    // ApplicationHost reports VB errors through messages and may resolve with a
-    // failed VM. Keep the host inspectable, but never signal a successful launch.
-    if (host.vm?.state === 'error') throw Object.assign(new Error(startupError?.message || 'Visual Basic startup failed'), startupError);
-    status.phase = 'ready';
-    if (banner) banner.hidden = true;
-    emit('vb6:ready', {host});
-    return host;
+    if (options.desktop !== false && !options.bridgeToken && typeof VB6Runtime.createApplicationDesktop === 'function') {
+      desktop = VB6Runtime.createApplicationDesktop({document, container: document.getElementById('app'), project,
+        launch: () => globalThis.vb6RestartApplication(), persistent: options.persist !== false});
+    }
+    return mount();
   });
   const ready = Promise.race([startup, departure]);
   globalThis.vb6ApplicationReady = ready;

@@ -1,4 +1,4 @@
-import {normalizeRendering, renderingCandidates} from './policy.js';
+import {normalizeRendering, renderingCandidates, DEFAULT_RENDERING} from './policy.js';
 /** Side-effect-free diagnostics: never allocate probe contexts or request a GPU. */
 export function renderingEnvironment(view) {
   return {secureContext: typeof view?.isSecureContext === 'boolean' ? view.isSecureContext : null,
@@ -12,6 +12,10 @@ export function renderingEnvironment(view) {
 export function browserGraphicsDisabled(message) {
   return typeof message === 'string' && /\bGL_VENDOR\s*=\s*Disabled\s*(?:,|$)/i.test(message) &&
     /\bGL_RENDERER\s*=\s*Disabled\s*(?:,|$)/i.test(message);
+}
+export function softwareGraphicsAdapter(info) {
+  if (info?.isFallbackAdapter === true) return true;
+  return [info?.description, info?.vendor, info?.architecture].some(value => typeof value === 'string' && /(?:\bSwiftShader\b|\b(?:llvm|soft)pipe\b|Microsoft Basic Render Driver|\bSoftware Rasterizer\b)/i.test(value));
 }
 /** Evidence is labelled by source; a successful live GPU wins over older probes. */
 export function graphicsDiagnosis(status, measurement = null) {
@@ -30,7 +34,7 @@ export function renderingAdvice(status, environment = {}, measurement = null) {
   if (!status) return [];
   if (status.forcedColors) return ['Forced-colors accessibility mode intentionally uses HTML / CSS.'];
   const diagnosis = graphicsDiagnosis(status, measurement);
-  if (diagnosis.code === 'GPU_ACTIVE') return status.adapter?.isFallbackAdapter === true ? ['The browser reports a fallback adapter. This does not certify hardware acceleration.'] : [];
+  if (diagnosis.code === 'GPU_ACTIVE') return softwareGraphicsAdapter(status.adapter) ? ['The browser reports a software or fallback graphics adapter. Select Use HTML / CSS and press OK to avoid the additional canvas scene and repaint work. Adapter availability does not certify hardware acceleration.'] : [];
   const advice = [], attempts = status.attempts || [];
   const webgpuFailed = attempts.some(a => a.backend === 'webgpu');
   const webglFailed = attempts.some(a => a.backend === 'webgl2');
@@ -40,7 +44,7 @@ export function renderingAdvice(status, environment = {}, measurement = null) {
     // Give copyable addresses, not a nonfunctional Enable GPU button.
     // https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips
     advice.push('In Chrome, open chrome://settings/system (Edge: edge://settings/system), enable "Use graphics acceleration when available", save your work and relaunch the browser. If already enabled or managed, inspect chrome://gpu (Edge: edge://gpu) and browser policy for driver, blocklist or GPU-process failures.');
-    advice.push('This page cannot enable browser graphics or override a browser policy. Retry Renderer only rechecks availability; it cannot replace the required browser-side change. Canvas2D and HTML / CSS remain usable without WebGPU.');
+    advice.push('This page cannot enable browser graphics or override a browser policy. Retry Renderer only rechecks availability; it cannot replace the required browser-side change. HTML / CSS is the default when both GPU APIs are unavailable and avoids additional canvas scene and repaint work. Canvas2D remains available as an explicit choice.');
   } else if (status.requested === 'html') return [];
   else if (webgpuFailed) {
     if (environment.nativeHostDisabled) advice.push('The native host disabled WebGPU. Check its graphics configuration; the page cannot override it.');
@@ -55,7 +59,7 @@ export function renderingAdvice(status, environment = {}, measurement = null) {
   }
   if (status.policy && status.active === 'html' && webgpuFailed) {
     const candidates = renderingCandidates(status.policy);
-    const omitted = ['webgl2', 'canvas2d'].filter(name => !candidates.includes(name));
+    const omitted = DEFAULT_RENDERING.fallbacks.filter(name => name !== 'html' && !candidates.includes(name));
     if (omitted.length) advice.push('The saved backend order skips ' + omitted.join(' and ') + '. Restore Default Backends and press OK to enable the default fallback order; a successful local measurement does not change the active renderer.');
   }
   if (status.adapter?.isFallbackAdapter === true) advice.push('The browser reports a fallback adapter. This does not certify hardware acceleration.');

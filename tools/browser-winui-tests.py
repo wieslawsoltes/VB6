@@ -409,7 +409,7 @@ class WinUI(unittest.TestCase):
    check.evaluate('e=>e.disabled=true');self.expect_color(check,'backgroundColor',r['accentDisabled'])
    self.assertEqual(check.evaluate('e=>getComputedStyle(e,"::after").backgroundColor'),self.color(r['accentDisabledInk']))
    root=self.page.locator('.designer-scroll')
-   self.assertEqual(root.get_attribute('data-vb-theme'),'classic')
+   self.assertEqual(root.get_attribute('data-vb-theme'),'standard')
    self.assertEqual(root.evaluate('e=>getComputedStyle(e).getPropertyValue("--winui-CheckSize").trim()'),'')
    self.record(theme=theme,ideCheckSize=20,nestedClassicReset=True)
  def test_native_capture_samples_actual_png_at_fractional_display_scales(self):
