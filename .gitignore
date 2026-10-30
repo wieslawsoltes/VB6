@@ -90,3 +90,7 @@ packages/intelligent-ui/dist/
 # Optional advanced editor is rebuilt from pinned dependencies and source.
 /dist/advanced-editor/
 /dist/VB6-Studio-Web-Advanced.html
+
+# Standalone Pascal compiler is generated from the shared language pipeline.
+/dist/turbo-pascal.js
+/packages/turbo-pascal/dist/

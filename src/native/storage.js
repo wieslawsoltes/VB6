@@ -31,9 +31,9 @@ function boundValue(compiler, node, module, proc) {
 }
 
 export function storageLayout(compiler, decl, module, proc) {
-  if (!types.has(key(decl.type)) || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires Byte, Integer, Long, Boolean, Single, Double, Currency, Date, String or Variant: ' + decl.name, module);
+  if (!types.has(key(decl.type)) && !decl.nativeRecord || decl.autoNew || decl.withEvents) compiler.fail('Native storage requires a supported scalar or plain record: ' + decl.name, module);
   if (decl.fixedLength !== null && decl.fixedLength !== undefined && (!Number.isInteger(decl.fixedLength) || decl.fixedLength < 1 || decl.fixedLength > 65535)) compiler.fail('Invalid fixed String length: ' + decl.name, module);
-  const elementBytes = key(decl.type) === 'variant' ? 16 : key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency','date'].includes(key(decl.type)) ? 8 : 4;
+  const elementBytes = decl.nativeRecord?.size || (key(decl.type) === 'variant' ? 16 : key(decl.type) === 'byte' ? 1 : ['integer', 'boolean'].includes(key(decl.type)) ? 2 : ['double','currency','date'].includes(key(decl.type)) ? 8 : 4);
   decl.nativeElementBytes = elementBytes;
   let count = 1;
   if (decl.bounds !== null && decl.bounds !== undefined) {
@@ -100,8 +100,8 @@ export const nativeStorageMethods = {
     if(key(variable.type)==='variant'&&!variable.nativeArray){this.boxVariant(node);return;}
     if(this.type(node)==='variant'&&!variable.nativeArray&&!variable.nativeRecord){this.expression(node);this.unboxVariant(key(variable.type));return;}
     if(variable.recordFieldArray)this.fail('Native record array field requires indices');
-    if(variable.nativeRecord)return this.recordExpression(variable,node);
     if (variable.nativeArray && !variable.elementOf) this.fail('Whole-array values require array assignment or a ByRef array parameter');
+    if(variable.nativeRecord)return this.recordExpression(variable,node);
     if(key(variable.type)==='date')this.dateExpression(node);else if(key(variable.type)==='currency')this.currencyExpression(node);else if (key(variable.type) === 'string') {if(this.type(node)==='string')this.expression(node);else this.textExpression(node);} else if(['single','double'].includes(key(variable.type))){this.floatExpression(node,key(variable.type)==='single');}else if(key(variable.type)==='boolean')this.truth(node);else this.numeric(node);
   },
   rawStorageAddress(variable) {

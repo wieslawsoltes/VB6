@@ -10,6 +10,8 @@ from intelligent_ui_workbench_cases import run_workbench_cases
 from intelligent_ui_ordering_cases import run_surface_ordering_cases
 
 ROOT=Path(__file__).resolve().parents[1]
+# Full IDE parsing has a separate bound from the 12000 ms interaction deadline.
+IDE_STARTUP_TIMEOUT_MS=60000
 parser=argparse.ArgumentParser()
 parser.add_argument('--opaque',action='store_true')
 parser.add_argument('--browser',choices=['chromium','firefox','webkit'],default=os.environ.get('VB6_BROWSER','chromium'))
@@ -33,16 +35,16 @@ def load(browser,mode):
     page._errors=[]
     page.on('pageerror',lambda e:page._errors.append(str(e)))
     try:
-        # WebKit can leave standalone load pending after the IDE is usable.
-        # Bound startup separately; subsequent actions retain the 12s deadline.
-        if mode=='opaque':page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text(),wait_until='domcontentloaded',timeout=60000)
-        elif mode=='file':page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri(),wait_until='commit',timeout=60000)
-        else:page.goto(base+('/index.html' if mode=='modules' else '/VB6-Studio-Web.html'),wait_until='commit',timeout=60000)
-        page.wait_for_function('!!globalThis.vb6Studio?.intelligentUI',timeout=60000)
-        return page
+        if mode=='opaque':page.set_content((ROOT/'dist/VB6-Studio-Web.html').read_text(),wait_until='domcontentloaded',timeout=IDE_STARTUP_TIMEOUT_MS)
+        elif mode=='file':page.goto((ROOT/'dist/VB6-Studio-Web.html').as_uri(),wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
+        else:page.goto(base+('/index.html' if mode=='modules' else '/VB6-Studio-Web.html'),wait_until='commit',timeout=IDE_STARTUP_TIMEOUT_MS)
+        page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && globalThis.vb6Studio?.intelligentUI',polling=100,timeout=IDE_STARTUP_TIMEOUT_MS)
     except Exception:
-        page.close()
+        # The caller only owns successfully loaded pages; release failed startup.
+        try:page.close()
+        except Exception:pass
         raise
+    return page
 version=None
 try:
     with sync_playwright() as p:

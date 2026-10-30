@@ -4,6 +4,7 @@ import {clone, lower} from '../core/core.js';
 import {editDesignerProperties} from '../designer/property-model.js';
 import {controlParents, materializeTabPages} from '../controls/tab-model.js';
 import {renameSymbol} from '../editor/language-service.js';
+import {moduleLanguage} from '../project/language.js';
 import {sstabPropertyPages} from './designer-property-pages.js';
 import {alertDialog} from './ui.js';
 
@@ -61,7 +62,7 @@ export function installDesignerEditors(ide) {
       const next = renamedDesignerForm(ide.activeModule.form, selected[0].id, value), old = selected[0].name;
       if (JSON.stringify(next) === JSON.stringify(ide.activeModule.form)) return;
       const before = clone(ide.project); ide.activeModule.form = next;
-      for (const module of ide.project.modules) module.code = renameSymbol(module.code, old, value);
+      for (const module of ide.project.modules) module.code = renameSymbol(module.code, old, value,{language:moduleLanguage(module,ide.project)});
       ide.record(before, 'Rename ' + old); return;
     }
     return apply({[key]: value}) || one(key, value);

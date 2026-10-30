@@ -1,8 +1,9 @@
 import {KEYWORDS} from '../language-service.js';
+import {PASCAL_KEYWORDS} from '../pascal-service.js';
 
 export function registerAdvancedLanguages(monaco) {
   const items=[];
-  for(const [id,extensions]of [['vb6',['.bas','.cls','.frm','.ctl']],['xaml',['.xaml']]])if(!monaco.languages.getLanguages().some(l=>l.id===id))items.push(monaco.languages.register({id,extensions}));
+  for(const [id,extensions]of [['vb6',['.bas','.cls','.frm','.ctl']],['pascal',['.pas','.pp']],['xaml',['.xaml']]])if(!monaco.languages.getLanguages().some(l=>l.id===id))items.push(monaco.languages.register({id,extensions}));
   items.push(monaco.languages.setMonarchTokensProvider('vb6',{
     ignoreCase:true,keywords:KEYWORDS,defaultToken:'',
     tokenizer:{root:[
@@ -18,6 +19,18 @@ export function registerAdvancedLanguages(monaco) {
     wordPattern:/\[?[_a-zA-Z\u0080-\uffff][\w\u0080-\uffff]*\]?[$%&!#@]?/g,
     indentationRules:{increaseIndentPattern:/^\s*(?:(?:(?:Public|Private|Friend|Static)\s+)*(?:Sub|Function|Property\s+(?:Get|Let|Set)|Type|Enum)\b.*|(?:For|Do|While|With|Select Case)\b.*|If\b.*\bThen\s*)$/i,decreaseIndentPattern:/^\s*(?:End\s+(?:Sub|Function|Property|Type|Enum|If|Select|With)|Next|Loop|Wend|Else(?:If)?|Case)\b/i},
     folding:{markers:{start:/^\s*'\s*#region\b/i,end:/^\s*'\s*#endregion\b/i}},
+  }));
+  items.push(monaco.languages.setMonarchTokensProvider('pascal',{
+    ignoreCase:true,keywords:PASCAL_KEYWORDS,defaultToken:'',tokenizer:{
+      root:[[/\s+/,'white'],[/\/\/.*$/,'comment'],[/\{\$/,'keyword','@directive'],[/\{/,'comment','@braceComment'],[/\(\*/,'comment','@parenComment'],[/'/,'string.quote','@pascalString'],[/\$[\da-f]+|#(?:\$[\da-f]+|\d+)|\d+(?:\.(?!\.)\d*)?(?:e[+-]?\d+)?/i,'number'],[/[a-z_][\w]*/i,{cases:{'@keywords':'keyword','@default':'identifier'}}],[/[()[\]]/,'@brackets'],[/:=|<=|>=|<>|\.\.|[+*/=<>@^\-]/,'operator'],[/[;:,.]/,'delimiter']],
+      pascalString:[[/''/,'string.escape'],[/'/,'string.quote','@pop'],[/[^'\r\n]+/,'string'],[/$/,'invalid','@pop']],
+      braceComment:[[/\}/,'comment','@pop'],[/[^}]+/,'comment']],parenComment:[[/\*\)/,'comment','@pop'],[/[^*]+/,'comment'],[/\*/,'comment']],directive:[[/\}/,'keyword','@pop'],[/[^}]+/,'keyword']],
+    },
+  }));
+  items.push(monaco.languages.setLanguageConfiguration('pascal',{
+    comments:{lineComment:'//',blockComment:['{','}']},brackets:[['(',')'],['[',']']],autoClosingPairs:[{open:'(',close:')',notIn:['string','comment']},{open:'[',close:']',notIn:['string','comment']},{open:"'",close:"'",notIn:['string','comment']},{open:'{',close:'}',notIn:['string','comment']}],
+    wordPattern:/[A-Za-z_]\w*/g,indentationRules:{increaseIndentPattern:/\b(?:begin|record|object|repeat|asm)\s*$/i,decreaseIndentPattern:/^\s*(?:end|until|else)\b/i},
+    folding:{markers:{start:/^\s*\{\$region\b/i,end:/^\s*\{\$endregion\b/i}},
   }));
   items.push(monaco.languages.setMonarchTokensProvider('xaml',{
     tokenizer:{root:[[/<!--/,'comment','@comment'],[/<!\[CDATA\[/,'string','@cdata'],[/<\?/,'metatag','@processing'],[/<\/?[\w.:-]+/,'type','@tag'],[/&[\w#]+;/,'string.escape'],[/[^<&]+/,'']],

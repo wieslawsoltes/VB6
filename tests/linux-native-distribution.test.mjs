@@ -94,6 +94,44 @@ test('native packaging uses literal tool arguments and bounds subprocess output'
   await assert.rejects(pending,{name:'AbortError'});
   await assert.rejects(runPackagingTool('vb6-required-packager-that-is-not-installed',[]),/Required native packaging tool/);
 });
+// Opening a shell redirection creates the marker before printf writes its PID.
+// Wait for the newline-terminated record, not merely for the file to exist.
+// The original 200 x 10 ms readiness bound and cancellation assertions remain.
+async function waitForFixturePid(file,{readFile=fs.readFile,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))}={}) {
+  for(let attempt=0;attempt<200;attempt++){
+    try {
+      const record=await readFile(file,'utf8');
+      if(/^[1-9][0-9]*\n$/.test(record)){
+        const pid=Number(record);
+        if(Number.isSafeInteger(pid))return pid;
+      }
+    }catch(error){if(error.code!=='ENOENT')throw error;}
+    await pause(10);
+  }
+  return undefined;
+}
+test('native packaging fixture readiness waits through missing, empty and partial PID records',async()=>{
+  const records=[Object.assign(new Error('Not published'),{code:'ENOENT'}),'','4','417','417\n'];let reads=0;const pauses=[];
+  const pid=await waitForFixturePid('fixture.pid',{
+    readFile:async(file,encoding)=>{assert.equal(file,'fixture.pid');assert.equal(encoding,'utf8');const value=records[reads++];if(value instanceof Error)throw value;return value;},
+    pause:async ms=>{pauses.push(ms);}
+  });
+  assert.equal(pid,417);assert.equal(reads,5);assert.deepEqual(pauses,[10,10,10,10]);
+});
+test('native packaging fixture readiness remains bounded for malformed or incomplete PID records',async()=>{
+  const records=['','417','0\n','-1\n','1.5\n','Infinity\n','9007199254740992\n','12\n13\n'];let reads=0,pauses=0;
+  const pid=await waitForFixturePid('fixture.pid',{
+    readFile:async()=>records[reads++%records.length],
+    pause:async ms=>{assert.equal(ms,10);pauses++;}
+  });
+  assert.equal(pid,undefined);assert.equal(reads,200);assert.equal(pauses,200);
+});
+test('native packaging fixture readiness does not conceal filesystem failures',async()=>{
+  const failure=Object.assign(new Error('Permission denied'),{code:'EACCES'});
+  await assert.rejects(waitForFixturePid('fixture.pid',{
+    readFile:async()=>{throw failure;},pause:async()=>{assert.fail('No retry for a filesystem failure');}
+  }),error=>error===failure);
+});
 test('native packaging cancellation terminates owned descendants that ignore SIGTERM',async t=>{
   if(process.platform!=='linux'){t.skip('Linux process-group and /proc semantics');return;}
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'linux-package-cancellation-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
@@ -101,9 +139,7 @@ test('native packaging cancellation terminates owned descendants that ignore SIG
   const pending=runPackagingTool('/bin/sh',['-c','trap "" TERM; /bin/sleep 30 & child=$!; printf "%s\\n" "$child" > "$1"; wait','vb6-cancellation-fixture',pidFile],{signal:controller.signal,timeout:10000});
   const rejected=assert.rejects(pending,{name:'AbortError'});let child,problem;
   try {
-    for(let attempt=0;attempt<200;attempt++){
-      try {child=Number((await fs.readFile(pidFile,'utf8')).trim());break;}catch(error){if(error.code!=='ENOENT')throw error;await new Promise(resolve=>setTimeout(resolve,10));}
-    }
+    child=await waitForFixturePid(pidFile);
     assert.ok(Number.isInteger(child)&&child>0,'Owned descendant started');
   }catch(error){problem=error;}
   finally {controller.abort();await rejected;}
@@ -121,9 +157,7 @@ test('native packaging cancellation also terminates descendants after the leader
     'vb6-parent-fixture',pidFile],{signal:controller.signal,timeout:10000});
   const rejected=assert.rejects(pending,{name:'AbortError'});let child,problem;
   try {
-    for(let attempt=0;attempt<200;attempt++){
-      try {child=Number((await fs.readFile(pidFile,'utf8')).trim());break;}catch(error){if(error.code!=='ENOENT')throw error;await new Promise(resolve=>setTimeout(resolve,10));}
-    }
+    child=await waitForFixturePid(pidFile);
     assert.ok(Number.isInteger(child)&&child>0,'Redirected descendant started');
   }catch(error){problem=error;}
   finally {controller.abort();await rejected;}

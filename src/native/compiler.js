@@ -1,3 +1,4 @@
+import {setTargetConditionalConstants} from '../language/pascal/target-symbols.js';
 import {nativeAutomationMethods} from './automation.js';
 import {prepareNativeAutomation} from './automation-plan.js';
 import {emitNativeAutomation} from './automation-helpers.js';
@@ -49,6 +50,7 @@ import {REAL_TYPES,nativeNumericMethods,emitNativeNumericHelpers,nativeParameter
 import {nativeControlArrayMethods} from './control-arrays.js';
 import {MAX_NATIVE_STRING,storageLayout,nativeStorageMethods,emitNativeStorageHelpers} from './storage.js';
 import {nativeArrayLimit,nativeArrayMethods,emitNativeArrayHelpers} from './arrays.js';
+import {emitNativeRecordArrayHelpers} from './record-arrays.js';
 import {NATIVE_ERROR_FRAME_BYTES,nativeErrorMethods,emitNativeErrorHelpers} from './errors.js';
 
 import {key,lit,mem,INT_TYPES,BOOL_CONDITIONS,CONSTANTS} from './compiler-constants.js';
@@ -68,6 +70,7 @@ class NativeCompiler {
     // Native resource intrinsics retain their required resources at use sites.
     const targetType = project.nativeProject?.entries?.find(e => key(e.key) === 'type')?.value;
     if (targetType && key(targetType) !== 'exe') this.fail('Freestanding AOT currently requires a Standard EXE project');
+    setTargetConditionalConstants(this.project,{VBWEB:0,Win16:0,Win32:-1,Win64:0,Mac:0,MacOS:0,Linux:0,Unix:0,GTK:0,GTK3:0,GTK4:0,ARM64:0,AARCH64:0,X86_64:0,AMD64:0,X86:-1,I386:-1,IA32:-1});
     this.program = compileProject(this.project);
     if (!this.program.valid) { const error = new NativeCompileError('Project contains compile errors'); error.diagnostics = this.program.diagnostics; error.message = error.diagnostics.map(d => `${d.source}:${d.line}: ${d.message}`).join('\n'); throw error; }
     for(const module of this.program.modules.values())for(const proc of module.procedures.values())if(proc.returnArray)this.fail('Typed array procedure returns require the HTML or Electron runtime; native array-return ABI is not implemented', {module,proc});
@@ -97,7 +100,7 @@ class NativeCompiler {
     emitNativeRecordStringHelpers(this);emitNativeMathHelpers(this);
     emitNativeNumericHelpers(this);emitNativeCurrencyHelpers(this);emitNativeDateHelpers(this);emitNativeDateIntervalHelpers(this);
     emitNativeStorageHelpers(this);emitNativeStringLibraryHelpers(this);emitNativeStringStatements(this);
-    emitNativeArrayHelpers(this);
+    emitNativeArrayHelpers(this);emitNativeRecordArrayHelpers(this);
     this.emitNativeGridEditHelpers();this.emitNativePictureHelpers();this.emitNativeImageListHelpers();this.emitNativeDialogHelpers();this.emitNativeControlTextHelpers();this.emitNativeRichTextHelpers();this.emitNativeRangeHelpers();this.emitNativeFileHelpers();this.emitNativeFontHelpers();this.emitNativeInputHelpers();emitNativeCheckBoxHelpers(this);this.emitNativeTabHelpers();this.emitNativeTabTextHelpers();this.emitNativeColorHelpers();this.emitNativeDrawingHelpers();
     // int-to-string(value, buffer), including INT_MIN without signed negation overflow.
     const positive = x.unique(), digits = x.unique(), copy = x.unique(), done = x.unique();

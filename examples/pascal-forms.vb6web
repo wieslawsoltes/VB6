@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "id": "example_pascal-forms_1",
+  "name": "PascalWelcome",
+  "language": "pascal",
+  "description": "",
+  "startup": "Form1",
+  "modules": [
+    {
+      "id": "example_pascal-forms_2",
+      "name": "Form1",
+      "kind": "form",
+      "language": "pascal",
+      "code": "unit Form1;\n\ninterface\n\nimplementation\n\nprocedure Form_Load;\nbegin\n    GreetingLabel.Caption := 'A shared form designer, with Turbo Pascal source.';\nend;\n\nprocedure GreetButton_Click;\nbegin\n    GreetingLabel.Caption := 'Hello, ' + NameText.Text + '!';\nend;\n\nprocedure NameText_KeyPress(var KeyAscii: Integer);\nbegin\n    if KeyAscii = 13 then\n    begin\n        GreetButton_Click;\n        KeyAscii := 0;\n    end;\nend;\n\nend.\n",
+      "form": {
+        "id": "example_pascal-forms_3",
+        "name": "Form1",
+        "type": "Form",
+        "properties": {
+          "Name": "Form1",
+          "Caption": "Turbo Pascal — Forms",
+          "ClientWidth": 6000,
+          "ClientHeight": 3000,
+          "Width": 9120,
+          "Height": 6450,
+          "Left": 300,
+          "Top": 300,
+          "StartUpPosition": 2,
+          "BorderStyle": 2,
+          "BackColor": -2147483633,
+          "ForeColor": -2147483640,
+          "FontName": "MS Sans Serif",
+          "FontSize": 8.25,
+          "FontBold": 0,
+          "FontItalic": 0,
+          "ScaleMode": 1,
+          "KeyPreview": 0,
+          "Visible": -1,
+          "Enabled": -1
+        },
+        "controls": [
+          {
+            "id": "example_pascal-forms_4",
+            "name": "NameText",
+            "type": "TextBox",
+            "parent": null,
+            "properties": {
+              "Name": "NameText",
+              "Left": 300,
+              "Top": 360,
+              "Width": 3000,
+              "Height": 315,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483643,
+              "ToolTipText": "",
+              "Tag": "",
+              "Text": "Pascal",
+              "MultiLine": 0,
+              "ScrollBars": 0,
+              "MaxLength": 0,
+              "PasswordChar": "",
+              "Locked": 0,
+              "Alignment": 0
+            }
+          },
+          {
+            "id": "example_pascal-forms_5",
+            "name": "GreetButton",
+            "type": "CommandButton",
+            "parent": null,
+            "properties": {
+              "Name": "GreetButton",
+              "Left": 3540,
+              "Top": 360,
+              "Width": 1800,
+              "Height": 420,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": -1,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Say hello",
+              "Default": 0,
+              "Cancel": 0
+            }
+          },
+          {
+            "id": "example_pascal-forms_6",
+            "name": "GreetingLabel",
+            "type": "Label",
+            "parent": null,
+            "properties": {
+              "Name": "GreetingLabel",
+              "Left": 300,
+              "Top": 1140,
+              "Width": 5280,
+              "Height": 720,
+              "Visible": -1,
+              "Enabled": -1,
+              "TabIndex": 0,
+              "TabStop": 0,
+              "FontName": "MS Sans Serif",
+              "FontSize": 8.25,
+              "FontBold": 0,
+              "FontItalic": 0,
+              "ForeColor": -2147483640,
+              "BackColor": -2147483633,
+              "ToolTipText": "",
+              "Tag": "",
+              "Caption": "Enter your name and click Say hello.",
+              "BackStyle": 0,
+              "Alignment": 0
+            }
+          }
+        ],
+        "menus": []
+      }
+    }
+  ],
+  "settings": {
+    "anchoring": false,
+    "snapToGrid": true,
+    "gridSize": 120,
+    "showGrid": true,
+    "renderer": "auto",
+    "tabWidth": 4,
+    "requireVariableDeclaration": true
+  },
+  "references": [],
+  "assets": {},
+  "vfs": {
+    "files": {},
+    "directories": [
+      "/"
+    ]
+  },
+  "appSettings": {}
+}

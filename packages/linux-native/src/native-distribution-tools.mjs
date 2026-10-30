@@ -32,28 +32,73 @@ export async function writePackageFile(root,relative,bytes,mode=0o644) {
   try {await file.chmod(mode);await file.writeFile(bytes);}finally {await file.close();}
   return destination;
 }
+/** SIGKILL delivery is not a wait operation. Linux orphan descendants can
+ * outlive the leader's close event; zombies, however, cannot touch staging.
+ * Observe the owned group after its one final signal without signalling any
+ * potentially reused PID again. This is a bounded completion check, not a
+ * sandbox for programs which deliberately escape their process group.
+ */
+export async function waitForLinuxProcessGroupExit(group,{timeout=1000,
+  readDirectory=fs.readdir,readFile=fs.readFile,now=()=>performance.now(),
+  pause=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds))}={}) {
+  if(!Number.isSafeInteger(group)||group<=0)throw new TypeError('Invalid packaging process group');
+  if(!Number.isFinite(timeout)||timeout<=0)throw new TypeError('Invalid packaging termination deadline');
+  const deadline=now()+timeout;
+  for(;;){
+    const live=[];
+    for(const entry of await readDirectory('/proc')){
+      if(!/^[1-9][0-9]*$/.test(entry))continue;
+      let stat;
+      try {stat=await readFile('/proc/'+entry+'/stat','utf8');}
+      catch(error){if(error.code==='ENOENT'||error.code==='ESRCH')continue;throw error;}
+      // comm is parenthesized and may itself contain spaces, ')' or newlines.
+      // Fields after the LAST ')' are state, ppid, pgrp, session, ... .
+      const end=stat.lastIndexOf(')'),fields=stat.slice(end+1).trim().split(/\s+/);
+      if(!stat.startsWith(entry+' (')||end<entry.length+2||fields.length<4||
+          !/^[A-Za-z]$/.test(fields[0])||!/^\d+$/.test(fields[2]))throw new Error('Invalid Linux process status: '+entry);
+      if(Number(fields[2])===group&&!['Z','X','x'].includes(fields[0]))live.push(entry);
+      if(now()>deadline)throw new Error('Native packaging process-group observation timed out: '+group);
+    }
+    if(!live.length)return;
+    const remaining=deadline-now();
+    if(remaining<=0)throw new Error('Native packaging process group did not terminate: '+group+' (live PIDs: '+live.join(', ')+')');
+    await pause(Math.min(10,remaining));
+  }
+}
 export function runPackagingTool(command,args,{cwd,signal,env={},timeout=300000,maxOutput=4*1024*1024,successCodes=[0]}={}) {
   signal?.throwIfAborted();
   if(typeof command!=='string'||!command||command.includes('\0'))throw new Error('Invalid native packaging tool path');
   return new Promise((resolve,reject)=>{
     const ownGroup=process.platform!=='win32';
     const child=spawn(command,args,{cwd,env:{...process.env,...env,LC_ALL:'C',LANG:'C'},stdio:['ignore','pipe','pipe'],shell:false,detached:ownGroup});
-    let stdout=[],stderr=[],length=0,failure,timer,killTimer,settled=false,killSent=false,pendingClose;
+    let stdout=[],stderr=[],length=0,failure,timer,killTimer,settled=false,killSent=false,pendingClose,checkingExit=false;
     const terminate=kind=>{
       if(ownGroup&&child.pid){try{process.kill(-child.pid,kind);}catch(error){if(error.code!=='ESRCH')child.kill(kind);}}
       else child.kill(kind);
     };
     const stop=error=>{
+      if(settled)return;
       failure??=error;terminate('SIGTERM');
       if(!killTimer&&!killSent)killTimer=setTimeout(()=>{
         killSent=true;terminate('SIGKILL');
-        if(pendingClose)finish(pendingClose.error,pendingClose.value);
+        if(pendingClose)finishStopped(pendingClose.error,pendingClose.value);
       },2000);
     };
     const abort=()=>stop(signal.reason??new DOMException('Native packaging cancelled','AbortError'));
     const finish=(error,value)=>{
       if(settled)return;settled=true;clearTimeout(timer);clearTimeout(killTimer);signal?.removeEventListener('abort',abort);
       if(error)reject(error);else resolve(value);
+    };
+    const finishStopped=(error,value)=>{
+      if(settled||checkingExit)return;
+      if(failure&&killSent&&child.pid&&process.platform==='linux'){
+        checkingExit=true;
+        // Confirm ordinary cancellation has quiesced before its caller cleans
+        // staging. A failed observation remains an explicit failure and retains
+        // the initiating error instead of pretending termination was confirmed.
+        waitForLinuxProcessGroupExit(child.pid).then(()=>finish(error,value),cleanupError=>
+          finish(new AggregateError([error,cleanupError],'Native packaging termination could not be confirmed',{cause:error})));
+      }else finish(error,value);
     };
     signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
     timer=setTimeout(()=>stop(new Error('Native packaging tool timed out: '+path.basename(command))),timeout);timer.unref();
@@ -71,7 +116,7 @@ export function runPackagingTool(command,args,{cwd,signal,env={},timeout=300000,
         try {process.kill(-child.pid,0);pendingClose={error,value};return;}
         catch(probe){if(probe.code!=='ESRCH'){pendingClose={error,value};return;}}
       }
-      finish(error,value);
+      finishStopped(error,value);
     });
   });
 }

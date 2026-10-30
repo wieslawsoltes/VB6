@@ -1,6 +1,6 @@
 # VB6 Studio Web
 
-A browser-native classic Visual Basic development environment, source runtime and controls library. Built from HTML, CSS and JavaScript, with WebGPU drawing and Canvas2D fallback. Export edited projects as independent single HTML applications.
+A browser-native classic Visual Basic development environment, source runtime and controls library, with an optional Turbo Pascal 7.0 language frontend. Built from HTML, CSS and JavaScript, with WebGPU drawing and Canvas2D fallback. Export edited projects as independent single HTML applications.
 
 **Not a complete, native or pixel-identical Microsoft VB6 replacement.** See [Compatibility](docs/COMPATIBILITY.md) for supported behavior and limits, and [Testing](docs/TESTING.md) for validation evidence.
 
@@ -53,6 +53,8 @@ The IDE includes a modeless Object Browser, project search and atomic replacemen
 
 Same-project profiles and automatic workspace restoration reopen supported modeless tools and restore their geometry without opening unrelated project documents.
 
+**Tools → Input Mode → Vim** enables optional modal editing in Classic, Figma, and DOS / TUI workspaces, including the built-in editor, optional Monaco editor, XAML, splits, and detached windows. **Default** preserves the existing editing mode. The status bar and **Tools → Options → Editor** also switch modes. Vim includes counts, motions, operators, text objects, Visual block editing, registers, macros, repeat, search, and Ex commands backed by the shared project history. See [Input modes and Vim](docs/INPUT-MODES.md) for commands, browser scope, and the registry API for adding modes.
+
 ### IntelliSense
 
 Classic List Members, List Constants, Complete Word, Quick Info and Parameter Info share typed resolution across source panes, Immediate, Watch and Evaluation fields. Nested `With`, arrays/default members, classes/UDTs/enums, runtime/data adapters and explicit portable reference metadata feed the same Object Browser. Automatic assistance never executes project code or opens a connection.
@@ -69,7 +71,7 @@ See [Browser windows](docs/BROWSER-WINDOWS.md) for restoration, lifecycle, platf
 
 Windows Classic, Windows Standard (2000), and High Contrast Black remain available. IDE appearance is independent of the exported application's theme. System colors resolve through the theme; authored RGB colors are retained.
 
-**Tools → Options → General → Appearance → IDE theme** also offers **Fluent WinUI 3**, **macOS 26**, and **X11**, each in light and dark variants. Classic VB6 remains the default. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
+**Tools → Options → General → Appearance → IDE theme** also offers **Fluent WinUI 3**, **macOS 26**, and **X11**, each in light and dark variants. Windows Standard (2000) is the default for new sessions; explicit saved choices, including Windows Classic, remain unchanged. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
 
 WinUI XAML forms use a pinned Microsoft resource catalog with typed Light/Dark/HighContrast brushes, scoped resources, supported native styles and live control states. ToggleSwitch, ToggleButton and HyperlinkButton use real existing VB controls, and native property edits retain explicit ownership. See [WinUI XAML compatibility and example](docs/WINUI-XAML-COMPATIBILITY.md), [resource catalog and provenance](docs/WINUI-RESOURCE-CATALOG.md), and [WinUI rendering scope](docs/WINUI-PARITY.md) for supported APIs and explicit limits.
 
@@ -84,6 +86,12 @@ Enable **Tools → Options → General → Layout Extensions → Enable anchorin
 The reusable, dependency-free `@vb6/auto-layout` package includes ES module/browser builds and TypeScript declarations. See [the layout guide](docs/anchoring-layout.md) and [standalone package](packages/auto-layout/README.md) for semantics, export compatibility and validation.
 
 ## Language, runtime and debugging
+
+### Optional Turbo Pascal
+
+Choose **Turbo Pascal 7.0** in **File → New Project**, or open the **Pascal Forms** example. Pascal modules reuse the existing form designer, component catalog, source editor, debugger, MCP tools, browser exports, and independent Win32/macOS/Linux AOT backends. Existing projects remain Visual Basic by default, and modules can select their language explicitly.
+
+The JavaScript frontend includes typed Pascal parsing/lowering, units, arrays/records/sets, checked pointers, value objects and virtual methods, portable file codecs, source maps, and Pascal editor/debugger assistance. A standalone ESM/browser SDK and CLI are included. See [Turbo Pascal usage, compatibility boundaries, and native qualification](docs/TURBO-PASCAL.md) and the [compiler package](packages/turbo-pascal/README.md). Complete DOS/8086 behavior and Delphi compatibility are outside the current contract.
 
 ### Compiler and source runtime
 

@@ -26,4 +26,17 @@ def rendering_launch_flags(*, software_gpu: bool = False,
     flags.extend(shlex.split(environment.get('RENDERING_BROWSER_FLAGS', '')))
     if any(not isinstance(flag, str) or not flag or '\x00' in flag for flag in flags):
         raise ValueError('Invalid rendering browser flag')
+    feature_switch = '--enable-features='
+    feature_overrides = [flag for flag in flags if flag.startswith(feature_switch)]
+    if feature_overrides:
+        # Playwright 1.63 enables this capture mode before appending our flags.
+        # Chromium keeps only the last duplicate switch, so an explicit Vulkan
+        # feature list otherwise disables the fix for ForceRedraw capture stalls.
+        # https://chromium.googlesource.com/chromium/src/+/refs/tags/153.0.8010.12/content/common/features.cc#153
+        # https://chromium.googlesource.com/chromium/src/+/refs/tags/153.0.8010.12/base/command_line.cc#449
+        features = [] if environment.get('PLAYWRIGHT_LEGACY_SCREENSHOT') else ['CDPScreenshotNewSurface']
+        features.extend(feature for flag in feature_overrides
+                        for feature in flag[len(feature_switch):].split(',') if feature)
+        flags = [flag for flag in flags if not flag.startswith(feature_switch)]
+        flags.append(feature_switch + ','.join(dict.fromkeys(features)))
     return flags

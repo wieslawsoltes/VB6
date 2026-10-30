@@ -6,6 +6,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 from playwright.sync_api import expect
+from ci.browser_partition import configured_shard, select_case_names
 spec=importlib.util.spec_from_file_location('figma_editor_acceptance',Path(__file__).with_name('figma-editor-browser-tests.py'))
 base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
 REPORT=base.REPORT.parent/'keyboard-calculator'
@@ -57,6 +58,8 @@ class KeyboardCalculator(base.EditorProperties):
 
 
 def load_tests(loader,standard_tests,pattern):
-    return unittest.TestSuite(KeyboardCalculator(name) for name in sorted(KeyboardCalculator.__dict__) if name.startswith('test_'))
+    names=[name for name in sorted(KeyboardCalculator.__dict__) if name.startswith('test_')]
+    names=select_case_names(names,configured_shard('figma-services'))
+    return unittest.TestSuite(KeyboardCalculator(name) for name in names)
 
 if __name__=='__main__':unittest.main(verbosity=2)

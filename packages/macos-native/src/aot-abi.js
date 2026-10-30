@@ -1,4 +1,5 @@
 /** Native helper ABI version. Names, not ordinal exports, are linked. */
-// ABI 4 retains resource-aware picture values and lexical With/For Each scopes and nested aggregate ancestry.
-export const AOT_ABI=4;
+// ABI 5 separates nominal record storage from reflection names and carries
+// dynamic record-array field shape in the existing seven-word helper calls.
+export const AOT_ABI=5;
 export const AOT_HELPERS=Object.freeze(["clear", "step", "literal", "get", "ref", "self", "with", "create", "member", "member_ref", "property_ref", "object_ref", "index_ref", "args", "arg_value", "arg_ref", "values", "value_push", "refs", "ref_push", "call", "call_member", "call_value", "unary", "binary", "scalar", "coerce", "string_target", "mid_check", "is_type", "callback", "assign", "bounds", "bound_push", "declare", "initial", "print", "assert", "raise_error", "truth", "ordinal", "temp_set", "temp_get", "for_start", "for_next", "each_start", "each_next", "redim", "erase", "with_push", "with_pop", "on_error", "resume", "gosub", "gosub_return", "finish", "end", "line", "form", "control_array", "file_open", "file_close", "file_seek", "file_record", "file_lock", "file_move", "file_print", "file_input", "graphics", "raise_event", "string_align", "string_mid", "api", "record", "record_field", "retain", "release", "each_close", "exception"]);

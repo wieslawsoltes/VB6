@@ -48,6 +48,9 @@ test('retained document renderer requests preserved WebGL only and keeps the ord
   const result = await renderer.activate(['webgpu', 'webgl2', 'canvas2d', 'html'], 0, 1);
   assert.deepEqual(attempts.map(a => a.name), ['webgpu', 'webgl2', 'canvas2d']);
   assert.equal(attempts[1].options.preserveDrawingBuffer, true);
+  assert.equal(attempts[2].options.willReadFrequently, true);
+  assert.equal(Object.hasOwn(attempts[0].options, 'willReadFrequently'), false);
+  assert.equal(Object.hasOwn(attempts[1].options, 'willReadFrequently'), false);
   assert.equal(Object.hasOwn(attempts[0].options, 'preserveDrawingBuffer'), false);
   assert.equal(Object.hasOwn(attempts[2].options, 'preserveDrawingBuffer'), false);
   for (const a of attempts) { assert.equal(a.target, canvas); assert.equal(typeof a.options.onLost, 'function'); }

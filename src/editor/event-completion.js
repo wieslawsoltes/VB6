@@ -3,6 +3,8 @@ import {validParameterList} from './signature-syntax.js';
 import {CONTROL_EVENTS,DEFAULT_EVENTS,NONVISUAL_TYPES} from '../controls/controls.js';
 import {defaultEventSignature} from './language-service.js';
 import {IDENTIFIER,symbolKey,splitArguments} from './source-context.js';
+import {moduleLanguage} from '../project/language.js';
+import {pascalParameters,pascalProcedureEdit} from './pascal-service.js';
 
 const eq=(a,b)=>symbolKey(a)===symbolKey(b);
 const event=(type,name,extra=[])=>({name,kind:'event',type:'Void',params:[...extra,...splitArguments(defaultEventSignature(type,name)||'')]});
@@ -62,6 +64,7 @@ export function handlerEdit(project,module,service,object,key,controlRegistry=nu
   // Retain all argument modes/types; interface names and imported metadata are
   // validated before reaching here. Parameters cannot add source statements.
   if(!validParameterList(selected.params||[]))return null;
+  if(moduleLanguage(module,project)==='pascal')return pascalProcedureEdit(module,{name,parameters:pascalParameters(selected.params||[]),returnType:/^(Function|Property Get)$/.test(kind)?selected.type||'Variant':null,tabWidth:project.settings?.tabWidth||4});
   const eol=module.code.includes('\r\n')?'\r\n':'\n',indent=' '.repeat(project.settings?.tabWidth||4);
   const start=module.code.length,prefix=module.code.endsWith(eol)?eol:eol+eol;
   const header='Private '+kind+' '+name+'('+(selected.params||[]).join(', ')+')'+suffix;
