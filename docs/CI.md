@@ -183,3 +183,21 @@ the compiler's deployment target or assert new macOS 14 compatibility evidence;
 macOS 14 is no longer qualified by hosted CI. GitHub retires that image on
 November 2, 2026. See the [runner retirement notice](https://github.com/actions/runner-images/issues/13518)
 and [official image/architecture table](https://github.com/actions/runner-images#available-images).
+
+## Complete core and appearance suite budgets
+
+Core boundaries have their own required `core-boundaries` job. The original
+recovery and finalization entrypoints remain together in `core-recovery`. All
+three scripts and their cases still run exactly once, with the existing
+15-minute job and per-script limits. This prevents the cumulative group budget
+from cancelling the last boundary cases after recovery and finalization passed.
+The audit rejects missing owners, exchanged ownership, duplicate entrypoints or
+longer job limits.
+
+The application-appearance matrix likewise has its own Chromium/Firefox/WebKit
+owner, separate from IDE themes. Its WebKit HTTP/file process budget is 900
+seconds, as qualified on PR #153 after 46 of 53 cases exhausted the old 480-second
+suite budget. Individual interaction deadlines and every pixel comparison stay
+unchanged; explicit caller timeouts still take precedence. Other browser suites
+keep their previous limits, and the aggregate `test` gate still requires every
+job to succeed.

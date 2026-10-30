@@ -194,6 +194,7 @@ jobs:
           - core-runtime
           - core-parity
           - core-recovery
+          - core-boundaries
     steps:
       - uses: actions/checkout@v4
         with:
@@ -232,6 +233,7 @@ jobs:
           - integration-controls
           - integration-authoring
           - integration-appearance
+          - application-appearance
           - tui-authoring
           - intelligent-ui
           - project-authoring

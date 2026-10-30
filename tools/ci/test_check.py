@@ -35,6 +35,23 @@ class WorkflowAuditTests(unittest.TestCase):
             for platform in ('macos-15', 'macos-26'):
                 with self.subTest(owner=owner, platform=platform):
                     self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['os'].remove(platform))
+    def test_missing_application_appearance_partition_rejected(self):
+        self.reject(lambda w:w['jobs']['browser']['strategy']['matrix']['suite'].remove('application-appearance'))
+    def test_application_appearance_preserves_job_deadline(self):
+        self.reject(lambda w:w['jobs']['browser'].update({'timeout-minutes':30}))
+    def test_missing_core_boundaries_partition_rejected(self):
+        self.reject(lambda w:w['jobs']['core-browser']['strategy']['matrix']['suite'].remove('core-boundaries'))
+    def test_core_partitions_preserve_job_deadline(self):
+        self.reject(lambda w:w['jobs']['core-browser'].update({'timeout-minutes':30}))
+    def test_complete_core_and_appearance_suite_ownership(self):
+        tools=self.root/'tools';tools.unlink();shutil.copytree(check.ROOT/'tools',tools)
+        path=tools/'ci/suites.json';original=json.loads(path.read_text())
+        for left,right in [('core-boundaries','core-recovery'),('application-appearance','integration-appearance')]:
+            with self.subTest(left=left,right=right):
+                suites=copy.deepcopy(original)
+                suites[left][0],suites[right][0]=suites[right][0],suites[left][0]
+                path.write_text(json.dumps(suites))
+                with self.assertRaises(ValueError):check.audit(self.root)
     def test_node_native_runtime_platform_required(self):
         self.reject(lambda w:w['jobs']['node'].update({'runs-on':'ubuntu-latest'}))
     def test_node_native_runtime_dependency_required(self):

@@ -26,6 +26,8 @@ DEFAULT_PROCESS_TIMEOUT = 480
 # keep their existing short deadlines. The native-project script owns both
 # HTTP and file cases when either real transport is selected.
 PROCESS_TIMEOUTS = {
+    ('webkit', 'http', 'browser-application-theme-tests.py'): 900,
+    ('webkit', 'file', 'browser-application-theme-tests.py'): 900,
     ('webkit', 'file', 'figma-browser-tests.py'): 900,
     ('webkit', 'file', 'figma-editor-browser-tests.py'): 900,
     ('webkit', 'file', 'figma-services-browser-tests.py'): 900,
