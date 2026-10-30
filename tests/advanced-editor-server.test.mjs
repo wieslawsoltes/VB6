@@ -45,3 +45,42 @@ test('closed language clients clear documents and notify listeners on transport 
   client.peer.close(new Error('lost'));assert.equal(client.state,'closed');assert.equal(closed,1);
   client.dispose();assert.equal(client.documents.size,0);assert.equal(client.listeners.size,0);
 });
+
+test('Pascal LSP omits declaration hints and keeps call hints and signatures in Pascal syntax',async t=>{
+  const uri='file:///workspace/PascalHints.pas',source=`unit PascalHints;
+interface
+procedure Add(
+  var output: Integer;
+  amount: Integer
+);
+implementation
+var total: Integer;
+procedure Add(
+  var output: Integer;
+  amount: Integer
+);
+begin output := output + amount end;
+procedure Main;
+begin
+  total := 1;
+  Add(total, 2);
+end;
+end.
+`;
+  const {client}=await workspace(t),document=client.open(uri,'pascal',source);
+  for(const match of source.matchAll(/procedure Add\(/g)){
+    for(const parameter of ['var output','amount:']){
+      const offset=source.indexOf(parameter,match.index)+1;
+      assert.equal(await client.request('textDocument/signatureHelp',{textDocument:{uri},position:document.positionAt(offset)}),null);
+    }
+  }
+  const call=source.indexOf('Add(total, 2)'),callPosition=document.positionAt(call);
+  const signature=await client.request('textDocument/signatureHelp',{textDocument:{uri},position:document.positionAt(call+'Add(total, '.length)});
+  assert.equal(signature.signatures[0].label,'Add(var output: Integer; amount: Integer)');assert.equal(signature.activeParameter,1);
+  const hints=await client.request('textDocument/inlayHint',{textDocument:{uri},range:{start:{line:0,character:0},end:document.positionAt(source.length)}});
+  const argumentsHints=hints.filter(hint=>hint.position.line===callPosition.line);
+  assert.deepEqual(argumentsHints.map(hint=>hint.label),['output:','amount:']);
+  assert.deepEqual(argumentsHints.map(hint=>hint.tooltip.value),['var output: Integer','amount: Integer']);
+  assert.ok(hints.every(hint=>hint.position.line>=callPosition.line),'declaration parameters must not receive call inlays');
+  assert.doesNotMatch(JSON.stringify(hints),/\b(?:ByRef|ByVal)\b| As /);
+});

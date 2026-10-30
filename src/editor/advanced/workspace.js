@@ -8,13 +8,13 @@ export function prepareProjectEdits(project,plans,records,{schema,runState='desi
   const targets=plans.map(plan=>{
     const record=records.get(plan.uri),module=project.modules.find(m=>m.id===record?.moduleId);
     if(!record||!module)throw new Error('Workspace edit targets an unknown project document.');
-    const current=record.language==='vb6'?module.code:readXamlDocument(module,{schema}).text;
+    const current=record.language!=='xaml'?module.code:readXamlDocument(module,{schema}).text;
     if(current!==plan.before)throw new Error('The project changed before the workspace edit was applied.');
     if(record.language==='xaml'&&(runState!=='design'||isLocked(module.id)))throw new Error('XAML is read-only while running, paused or locked.');
     return {plan,record,module};
   });
-  let next=structuredClone(project);const direct=new Set(targets.filter(t=>t.record.language==='vb6').map(t=>t.module.id));
-  for(const {plan,record,module}of targets)if(record.language==='vb6')next.modules.find(m=>m.id===module.id).code=plan.after;
+  let next=structuredClone(project);const direct=new Set(targets.filter(t=>t.record.language!=='xaml').map(t=>t.module.id));
+  for(const {plan,record,module}of targets)if(record.language!=='xaml')next.modules.find(m=>m.id===module.id).code=plan.after;
   for(const {plan,record,module}of targets)if(record.language==='xaml'){
     const before=next,proposal=prepareXamlEdit(next,module.id,plan.after,{schema});
     if(proposal.conflict)throw new Error('Resolve the XAML designer conflict before applying language-server edits.');

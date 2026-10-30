@@ -17,7 +17,7 @@ export function normalizeAction(action){
 }
 export class UISurface {
   constructor(root,{workerSource='',onAction=()=>{throw new UIError('action_denied','The host has not enabled this action.');},onUpdate=()=>{},onError=()=>{},onDispose=()=>{},snapshot,catalog,responsive=true,factories={},allowResource,resolveReference,approveResource,subscribeReferences}={}){
-    this.root=root;this.doc=root.ownerDocument;this.options={workerSource,onAction,onUpdate,onError,onDispose,catalog,factories,allowResource,resolveReference,approveResource,subscribeReferences};this.client=new UIClient({workerSource,window:this.doc.defaultView,snapshot,catalog});this.version=0;this.generation=0;this.eventQueue=Promise.resolve();this.actionScope=new UIActionScope();this.referenceListeners=new Set();
+    this.root=root;this.doc=root.ownerDocument;this.options={workerSource,onAction,onUpdate,onError,onDispose,catalog,factories,allowResource,resolveReference,approveResource,subscribeReferences};this.client=new UIClient({workerSource,window:this.doc.defaultView,snapshot,catalog});this.version=0;this.generation=0;this.eventQueue=Promise.resolve();this.operationQueue=Promise.resolve();this.actionScope=new UIActionScope();this.referenceListeners=new Set();
     const make=(tag,cls,text)=>{const n=this.doc.createElement(tag);n.className=cls;if(text)n.textContent=text;return n;};
     this.toolbar=make('div','iui-surface-toolbar');this.status=make('span','iui-status');this.status.setAttribute('role','status');this.sourceButton=make('button','','Source');this.sourceButton.type='button';this.sourceButton.setAttribute('aria-expanded','false');this.sourceButton.onclick=()=>{this.source.hidden=!this.source.hidden;this.sourceButton.setAttribute('aria-expanded',String(!this.source.hidden));};this.fallbackButton=make('button','','Text fallback');this.fallbackButton.type='button';this.fallbackButton.setAttribute('aria-expanded','false');this.fallbackButton.onclick=()=>{this.fallback.hidden=!this.fallback.hidden;this.fallbackButton.setAttribute('aria-expanded',String(!this.fallback.hidden));};
     this.restartButton=make('button','','Restart view');this.restartButton.type='button';this.restartButton.onclick=()=>this.restart();this.toolbar.append(this.status,this.sourceButton,this.fallbackButton,this.restartButton);
@@ -78,12 +78,30 @@ export class UISurface {
   async flushResize(){
     if(this.disposed||!this.resizePending||this.inflight||this.pending||!this.version)return;
     const client=this.client,viewport=this.viewportSize;this.resizePending=false;
-    try{const result=await client.request('resize',{viewport});if(!this.disposed&&client===this.client){this.generation++;this.apply(result);}}
+    try{await this.commit('resize',()=>({viewport}));}
     catch(error){if(client===this.client)this.error(error);}
+  }
+  // Interpreter versions and incremental DOM deltas advance together. A Worker
+  // can finish a resize before its response reaches this thread; dispatching an
+  // input with the last displayed version in that interval loses the input.
+  // Serialize the complete request/apply boundary, but leave reviewed host
+  // actions outside it so an unanswered prompt cannot block source updates.
+  commit(method,payload){
+    const client=this.client;
+    const operation=(this.operationQueue||Promise.resolve()).then(async()=>{
+      if(this.disposed)throw new UIError('disposed','UI surface is disposed.');
+      if(client!==this.client)throw new UIError('stale_event','The UI client was restarted.');
+      const result=await client.request(method,payload());
+      if(this.disposed)throw new UIError('disposed','UI surface is disposed.');
+      if(client!==this.client)throw new UIError('stale_event','The UI client was restarted.');
+      this.apply(result);return result;
+    });
+    this.operationQueue=operation.catch(()=>{});
+    return operation;
   }
   async flush(){
     if(this.disposed||this.inflight||!this.pending)return;const job=this.pending;this.pending=null;this.inflight=true;
-    try{const client=this.client;const result=await client.request(job.method,job.method==='apply'?{document:job.value,options:job.options}:{source:job.value,options:job.options});if(this.disposed)throw new UIError('disposed','UI surface is disposed.');if(this.client!==client)throw new UIError('stale_event','The UI client was restarted.');this.generation++;this.apply(result);job.resolve(result);}
+    try{const result=await this.commit(job.method,()=>job.method==='apply'?{document:job.value,options:job.options}:{source:job.value,options:job.options});this.generation++;job.resolve(result);}
     catch(error){if(!this.disposed)this.error(error);job.reject(error);}
     finally{this.inflight=false;if(this.pending&&!this.disposed)void this.flush();else void this.flushResize();}
   }
@@ -91,14 +109,14 @@ export class UISurface {
   event(id,args){
     const generation=this.generation;
     const action=this.eventQueue.then(async()=>{
-      if(this.disposed||generation!==this.generation)throw new UIError('stale_event','UI changed before this interaction.');
-      if(this.pending||this.inflight)throw new UIError('stale_event','Wait for the current UI update before using this interaction.');
-      const client=this.client,result=await client.request('event',{id,args,version:this.version});
+      const client=this.client,result=await this.commit('event',()=>{
+        if(generation!==this.generation)throw new UIError('stale_event','UI changed before this interaction.');
+        if(this.pending||this.inflight)throw new UIError('stale_event','Wait for the current UI update before using this interaction.');
+        return {id,args,version:this.version};
+      });
       if(this.disposed||client!==this.client)return;
-      // The interpreter has committed this delta. Later update/resize deltas
-      // are relative to it, even when the source generation now forbids its
-      // host effects. Consume the FIFO render delta to keep both trees aligned.
-      this.apply(result);
+      // commit consumed this delta even if a source edit revoked its effects;
+      // later deltas still depend on the interpreter and DOM staying aligned.
       for(const action of result.actions){
         if(this.disposed||generation!==this.generation)return;
         await this.action(action);

@@ -13,8 +13,10 @@ import os
 from pathlib import Path
 import shutil
 import threading
+import time
 import unittest
 import zipfile
+from ci.browser_partition import configured_shard, project_test_names
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,21 +75,42 @@ class NativeProjects(unittest.TestCase):
         cls.browser.close(); cls.pw.stop(); cls.server.shutdown(); cls.server.server_close()
 
     def setUp(self):
-        self.context = self.browser.new_context(viewport={'width': 1400, 'height': 1000}, accept_downloads=True)
-        # unittest runs cleanups even when setUp fails and tearDown is skipped.
-        self.addCleanup(self.context.close)
-        self.context.set_default_timeout(6000)
-        self.page = self.context.new_page(); self.errors = []
-        self.page.on('pageerror', lambda error: self.errors.append(str(error)))
         self.mode = 'memory' if os.environ.get('VB6_TEST_TRANSPORT') == 'memory' else 'file' if self._testMethodName.endswith('_file') else 'http'
+        self.phase_timings = {}
+        self.addCleanup(self.write_phase_timings)
+        self.context = self.measure_phase('context', lambda: self.browser.new_context(viewport={'width': 1400, 'height': 1000}, accept_downloads=True))
+        # unittest runs cleanups even when setUp fails and tearDown is skipped.
+        self.addCleanup(lambda: self.measure_phase('cleanup', self.context.close))
+        self.context.set_default_timeout(6000)
+        self.page = self.measure_phase('page', self.context.new_page); self.errors = []
+        self.page.on('pageerror', lambda error: self.errors.append(str(error)))
         if self.mode == 'memory':
-            self.page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text(), timeout=60000)
+            self.measure_phase('navigation', lambda: self.page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text(), timeout=60000))
         else:
-            self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri() if self.mode == 'file' else self.http_url, wait_until='commit')
+            self.measure_phase('navigation', lambda: self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri() if self.mode == 'file' else self.http_url, wait_until='commit'))
         # Parsing the standalone IDE can exceed the action deadline in WebKit.
         # Wait for the real authoring API; keep every later action/assertion at 6s.
-        self.page.wait_for_function('typeof vb6Studio === "object" && vb6Studio.root?.isConnected && typeof vb6Studio.importProjectEntries === "function"',
-                                    polling=100, timeout=60000)
+        self.measure_phase('readiness', lambda: self.page.wait_for_function('typeof vb6Studio === "object" && vb6Studio.root?.isConnected && typeof vb6Studio.importProjectEntries === "function"',
+                                                                          polling=100, timeout=60000))
+
+    def measure_phase(self, name, operation):
+        started = time.perf_counter()
+        completed = False
+        try:
+            value = operation()
+            completed = True
+            return value
+        finally:
+            self.phase_timings[name] = {'milliseconds': round((time.perf_counter() - started) * 1000, 3), 'completed': completed}
+
+    def write_phase_timings(self):
+        shard = os.environ.get('VB6_BROWSER_SHARD', '')
+        directory = REPORT / (self.engine + ('-shard-' + shard if shard else ''))
+        directory.mkdir(parents=True, exist_ok=True)
+        record = {'test': self.id(), 'browser': self.engine, 'origin': self.mode,
+                  'shard': shard or None, 'phases': self.phase_timings}
+        (directory / (self._testMethodName + '.timings.json')).write_text(json.dumps(record, indent=2) + '\n')
+        print('NATIVE_PROJECT_TIMING ' + json.dumps(record), flush=True)
 
     def tearDown(self):
         if self.errors: (REPORT / f'{self.engine}-{self._testMethodName}-errors.json').write_text(json.dumps(self.errors, indent=2))
@@ -538,4 +561,13 @@ class NativeProjects(unittest.TestCase):
 for name in [n for n in vars(NativeProjects) if n.startswith('case_')]:
     for transport in (['memory'] if os.environ.get('VB6_TEST_TRANSPORT') == 'memory' else ['http', 'file']):
         setattr(NativeProjects, 'test_' + name[5:] + '_' + transport, getattr(NativeProjects, name))
+
+
+def load_tests(loader, tests, pattern):
+    transport = os.environ.get('VB6_TEST_TRANSPORT', 'http')
+    shard = configured_shard('project-authoring')
+    names = project_test_names([name for name in vars(NativeProjects) if name.startswith('case_')], transport, shard)
+    return unittest.TestSuite(NativeProjects(name) for name in names)
+
+
 if __name__ == '__main__': unittest.main(verbosity=2)

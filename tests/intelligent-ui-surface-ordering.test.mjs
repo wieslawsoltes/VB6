@@ -69,7 +69,8 @@ test('source replacement still discards effects from a committed old event',asyn
 for(const revoked of ['disposed','restarted'])test(revoked+' client results never reach the replacement renderer',async()=>{
   const f=fixture(),s=f.surface,event=s.event(f.event,[]);await turn();
   if(revoked==='disposed')s.disposed=true;else s.client={};
-  f.deliveries.shift()();await event;assert.equal(f.metric(),0);assert.equal(f.actions.length,0);
+  const rejected=assert.rejects(event,revoked==='disposed'?/disposed/:/restarted/);
+  f.deliveries.shift()();await rejected;assert.equal(f.metric(),0);assert.equal(f.actions.length,0);
 });
 
 test('a current committed event still dispatches its exact host effect',async()=>{
@@ -78,10 +79,69 @@ test('a current committed event still dispatches its exact host effect',async()=
   assert.deepEqual(JSON.parse(JSON.stringify(f.actions)),[{type:'copy',args:['current intent']}]);
 });
 
-test('an event overtaken by a committed resize rejects its stale version without losing the resize',async()=>{
+test('input arriving during a committed resize waits for its rendered version and executes exactly once',async()=>{
   const f=fixture(),s=f.surface;s.setViewport({width:375,height:768});clearTimeout(s.resizeTimer);
-  const resize=s.flushResize(),event=s.event(f.event,[]),rejected=assert.rejects(event,/changed/);await turn();
+  const resize=s.flushResize(),event=s.event(f.event,[]);await turn();
+  assert.deepEqual(f.requests,['resize'],'input must not use a version awaiting delivery');
+  assert.notEqual(s.version,f.runtime.version);
+  f.deliveries.shift()();await resize;await turn();
   assert.deepEqual(f.requests,['resize','event']);
+  f.deliveries.shift()();await event;
+  assert.equal(f.metric(),1);assert.equal(s.version,f.runtime.version);
+  assert.equal(s.generation,0,'a viewport change does not replace the authored source');
+});
+
+test('successive inputs wait for a resize and preserve their order without replay',async()=>{
+  const f=fixture(),s=f.surface;s.setViewport({width:375,height:768});clearTimeout(s.resizeTimer);
+  const resize=s.flushResize(),first=s.event(f.event,[]),second=s.event(f.event,[]);await turn();
+  assert.deepEqual(f.requests,['resize']);f.deliveries.shift()();await resize;await turn();
+  f.deliveries.shift()();await first;await turn();f.deliveries.shift()();await second;
+  assert.deepEqual(f.requests,['resize','event','event']);assert.equal(f.metric(),2);
+  assert.equal(s.version,f.runtime.version);
+});
+
+test('source replacement revokes input waiting behind resize before the old handler executes',async()=>{
+  const f=fixture('<button onClick={()=>GenUI.copy("old intent")}>Copy</button>'),s=f.surface;
+  s.setViewport({width:375,height:768});clearTimeout(s.resizeTimer);
+  const resize=s.flushResize(),event=s.event(f.event,[]),rejected=assert.rejects(event,/changed/);await turn();
+  const update=s.update('<text>Replacement</text>');
+  f.deliveries.shift()();await resize;await rejected;await turn();
+  assert.deepEqual(f.requests,['resize','update']);f.deliveries.shift()();await update;
+  assert.equal(f.actions.length,0);assert.ok([...f.nodes.values()].some(n=>n.text==='Replacement'));
+});
+
+test('a responsive handler removed by resize is rejected instead of retargeting the interaction',async()=>{
+  const f=fixture('{#if DIL.useBreakpoint("md")}<button onClick={()=>GenUI.copy("wide intent")}>Wide</button>{:else}<button onClick={()=>GenUI.copy("narrow intent")}>Narrow</button>{/if}'),s=f.surface;
+  s.setViewport({width:375,height:768});clearTimeout(s.resizeTimer);
+  const resize=s.flushResize(),event=s.event(f.event,[]),rejected=assert.rejects(event,/no longer available/);await turn();
   f.deliveries.shift()();await resize;await rejected;
-  assert.equal(f.metric(),0);assert.equal(s.version,f.runtime.version);
+  assert.equal(f.actions.length,0);assert.equal(s.version,f.runtime.version);
+  assert.ok([...f.nodes.values()].some(n=>n.text==='Narrow'));
+});
+
+test('a rejected operation does not poison subsequent valid interactions',async()=>{
+  const f=fixture(),s=f.surface;
+  await assert.rejects(s.event('missing handler',[]),/no longer available/);
+  const event=s.event(f.event,[]);await turn();f.deliveries.shift()();await event;
+  assert.deepEqual(f.requests,['event','event']);assert.equal(f.metric(),1);
+});
+
+for(const revoked of ['disposed','restarted'])test(revoked+' client also rejects input queued behind an undelivered resize',async()=>{
+  const f=fixture(),s=f.surface;s.setViewport({width:375,height:768});clearTimeout(s.resizeTimer);
+  const resize=s.flushResize(),event=s.event(f.event,[]);await turn();
+  if(revoked==='disposed')s.disposed=true;else s.client={};
+  const rejected=assert.rejects(event,revoked==='disposed'?/disposed/:/restarted/);
+  f.deliveries.shift()();await resize;await rejected;
+  assert.deepEqual(f.requests,['resize']);assert.equal(f.metric(),0);assert.equal(f.actions.length,0);
+});
+
+test('an unanswered host review does not hold the render operation queue',async()=>{
+  const f=fixture('<button onClick={()=>GenUI.copy("reviewed intent")}>Copy</button>'),s=f.surface;
+  let release;s.action=()=>new Promise(resolve=>release=resolve);
+  const event=s.event(f.event,[]);await turn();f.deliveries.shift()();await turn();
+  assert.equal(typeof release,'function');
+  const update=s.update('<text>Replacement while review is pending</text>');await turn();
+  f.deliveries.shift()();await update;
+  assert.ok([...f.nodes.values()].some(n=>n.text==='Replacement while review is pending'));
+  release();await event;assert.deepEqual(f.requests,['event','update']);
 });

@@ -12,6 +12,7 @@ export const ADVANCED_EDITOR_DEFAULTS = Object.freeze({
   codeLens: true,
   inlineValues: true,
   vb6Endpoint: '',
+  pascalEndpoint: '',
   xamlEndpoint: '',
 });
 
@@ -24,7 +25,7 @@ export function normalizeAdvancedEditorSettings(value = {}) {
   if (['none', 'boundary', 'selection', 'trailing', 'all'].includes(value.renderWhitespace)) {
     result.renderWhitespace = value.renderWhitespace;
   }
-  for (const key of ['vb6Endpoint', 'xamlEndpoint']) {
+  for (const key of ['vb6Endpoint', 'pascalEndpoint', 'xamlEndpoint']) {
     if (typeof value[key] === 'string') result[key] = value[key].trim();
   }
   return result;

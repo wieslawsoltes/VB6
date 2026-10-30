@@ -36,6 +36,10 @@ jobs:
         with:
           node-version: 22
       - run: node tools/test-macos-aot.mjs
+      - name: Execute Pascal programs against the rebuilt native runtime
+        run: node tools/test-pascal-native.mjs --runtime artifacts/macos-aot/runtime
+      - name: Require full SDK and exact-runtime Pascal acceptance
+        run: node tools/verify-macos-runtime-refresh.mjs artifacts/macos-aot/runtime reports/macos-aot/validation.json reports/pascal-native/darwin-arm64.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -43,6 +47,7 @@ jobs:
           path: |
             artifacts/macos-aot/runtime
             reports/macos-aot
+            reports/pascal-native
           retention-days: 14
   publish:
     needs: native
@@ -63,7 +68,9 @@ jobs:
           name: verified-native-runtime
           path: native-input
       - name: Verify exact native provenance and create offline payload
-        run: node tools/embed-macos-aot-runtime.mjs native-input/artifacts/macos-aot/runtime native-input/reports/macos-aot/validation.json
+        run: |
+          node tools/verify-macos-runtime-refresh.mjs native-input/artifacts/macos-aot/runtime native-input/reports/macos-aot/validation.json native-input/reports/pascal-native/darwin-arm64.json
+          node tools/embed-macos-aot-runtime.mjs native-input/artifacts/macos-aot/runtime native-input/reports/macos-aot/validation.json
       - name: Commit only the generated runtime with a branch-head lease
         uses: actions/github-script@v7
         with:

@@ -13,10 +13,11 @@ import {toRange,fromRange,fromPosition,fromDiagnostic} from './protocol-converte
 import {readXamlDocument} from '../../xaml/documents.js';
 import {el} from '../../core/core.js';
 import {modal} from '../../ide/ui.js';
+import {moduleLanguage,sourceExtension} from '../../project/language.js';
 
 let sequence=0;
-const extension=m=>m.form?'frm':m.kind==='class'?'cls':'bas';
-const uriFor=(project,module,language)=>'vb6-editor://workspace/'+encodeURIComponent(project.id)+'/'+encodeURIComponent(module.id)+'/'+encodeURIComponent(module.name)+'.'+(language==='xaml'?'xaml':extension(module));
+const extension=m=>sourceExtension(m).slice(1);
+const uriFor=(project,module,language)=>'vb6-editor://workspace/'+encodeURIComponent(project.id)+'/'+encodeURIComponent(module.id)+'/'+encodeURIComponent(module.name)+'.'+(language==='xaml'?'xaml':language==='pascal'?'pas':extension(module));
 
 export class AdvancedEditorRuntime {
   constructor(ide,settings,assets) {
@@ -27,10 +28,10 @@ export class AdvancedEditorRuntime {
   checkActive(){if(this.disposed)throw new Error('Advanced editor initialization cancelled.');}
   async initialize() {
     this.checkActive();const options={applyEdit:(edit,label)=>this.applyEdit(this.builtin,edit,label,true),onError:error=>this.report(error),showMessage:p=>this.message(p)};
-    if(!this.settings.vb6Endpoint||!this.settings.xamlEndpoint){
+    if(!this.settings.vb6Endpoint||!this.settings.xamlEndpoint||!this.settings.pascalEndpoint){
       this.builtin=new LanguageClient(messagePortTransport(this.assets.worker(),{terminate:true}),options);this.sessions.add(this.builtin);await this.builtin.initialize();this.checkActive();
     }
-    for(const language of ['vb6','xaml']) {
+    for(const language of ['vb6','pascal','xaml']) {
       const endpoint=this.settings[language+'Endpoint'];
       if(endpoint){const transport=await connectWebSocket(endpoint,{signal:this.abort.signal});
         if(this.disposed){transport.close();this.checkActive();}
@@ -40,9 +41,9 @@ export class AdvancedEditorRuntime {
     }
     this.disposables.push(registerAdvancedLanguages(this.monaco));
     this.disposables.push(this.monaco.editor.registerCommand(this.commandId,(_accessor,language,raw)=>this.executeCommand(this.clients[language],raw)));
-    const host={report:error=>this.report(error),command:(client,raw)=>({id:this.commandId,title:raw.title||raw.command,arguments:[this.clients.vb6===client?'vb6':'xaml',raw]}),
+    const host={report:error=>this.report(error),command:(client,raw)=>({id:this.commandId,title:raw.title||raw.command,arguments:[Object.keys(this.clients).find(language=>this.clients[language]===client)||'vb6',raw]}),
       applyEdit:(...args)=>this.applyEdit(...args),hasUri:uri=>this.records.has(uri),diagnostics:(client,uri)=>this.diagnosticValues.get(client)?.get(uri)||[]};
-    for(const language of ['vb6','xaml']) {
+    for(const language of ['vb6','pascal','xaml']) {
       const client=this.clients[language],install=()=>{this.providers.get(language)?.dispose();if(!this.disposed)this.providers.set(language,installLanguageProviders(this.monaco,language,client,host));};
       install();this.disposables.push({dispose:client.on('capabilities',install)});
     }
@@ -52,12 +53,12 @@ export class AdvancedEditorRuntime {
       // The local worker already pushes diagnostics; external pull-only servers
       // need an owned scheduler, including refresh and dynamic registration.
       if(client!==this.builtin)this.disposables.push(new PullDiagnostics(client,{onError:error=>this.report(error)}));
-      this.disposables.push({dispose:client.on('closed',()=>{this.diagnosticValues.get(client)?.clear();if(!this.disposed){this.report(new Error('Language server disconnected. Source remains editable; reapply Advanced Editor Options to reconnect.'));for(const language of ['vb6','xaml'])if(this.clients[language]===client)this.providers.get(language)?.dispose();}})});
+      this.disposables.push({dispose:client.on('closed',()=>{this.diagnosticValues.get(client)?.clear();if(!this.disposed){this.report(new Error('Language server disconnected. Source remains editable; reapply Advanced Editor Options to reconnect.'));for(const language of ['vb6','pascal','xaml'])if(this.clients[language]===client)this.providers.get(language)?.dispose();}})});
       this.disposables.push({dispose:client.on('window/logMessage',p=>this.report(p.message))});
     }
     this.inlineInspections=new InlineInspectionPool();this.disposables.push(this.inlineInspections);
     this.debugHover=new DebugHoverProvider(this);
-    this.disposables.push(this.debugHover,this.monaco.languages.registerHoverProvider('vb6',this.debugHover));
+    this.disposables.push(this.debugHover,this.monaco.languages.registerHoverProvider('vb6',this.debugHover),this.monaco.languages.registerHoverProvider('pascal',this.debugHover));
     this.navigationTools=new NavigationTools(this);
     this.sync();this.installHooks();this.appearance();return this;
   }
@@ -77,9 +78,9 @@ export class AdvancedEditorRuntime {
   metadata() {
     const p=this.ide.project;
     // No assets, gateway credentials, native handles, or runtime state are sent.
-    return {id:p.id,name:p.name,startup:p.startup,settings:{tabWidth:p.settings.tabWidth,conditionalConstants:p.settings.conditionalConstants,anchoring:p.settings.anchoring},
+    return {id:p.id,name:p.name,language:moduleLanguage(null,p),startup:p.startup,settings:{tabWidth:p.settings.tabWidth,conditionalConstants:p.settings.conditionalConstants,anchoring:p.settings.anchoring},
       references:(p.references||[]).map(r=>({name:r.name,guid:r.guid,major:r.major,minor:r.minor,metadata:r.metadata})),
-      modules:p.modules.map(m=>({id:m.id,name:m.name,kind:m.kind,attributes:m.attributes,code:m.code,
+      modules:p.modules.map(m=>({id:m.id,name:m.name,kind:m.kind,language:moduleLanguage(m,p),attributes:m.attributes,code:m.code,
         ...(m.form?{form:{id:m.form.id,name:m.form.name,type:m.form.type,properties:{Name:m.form.name},controls:(m.form.controls||[]).map(c=>({id:c.id,name:c.name,type:c.type,properties:{Index:c.properties?.Index}}))}}:{})}))};
   }
   scheduleSync(){if(this.disposed||this.scheduled||this.syncing)return;this.scheduled=true;queueMicrotask(()=>{this.scheduled=false;try{this.sync();}catch(error){this.report(error);}});}
@@ -88,7 +89,7 @@ export class AdvancedEditorRuntime {
     try {
       const p=this.ide.project,key=p.id+':'+this.ide.visualRevision,metadataChanged=this.metadataKey!==key;
       const targets=[];
-      for(const module of p.modules){targets.push({uri:uriFor(p,module,'vb6'),moduleId:module.id,language:'vb6',text:String(module.code||'')});
+      for(const module of p.modules){const language=moduleLanguage(module,p);targets.push({uri:uriFor(p,module,language),moduleId:module.id,language,text:String(module.code||'')});
         if(p.settings.xaml===true&&module.form){const uri=uriFor(p,module,'xaml'),old=this.records.get(uri);targets.push({uri,moduleId:module.id,language:'xaml',text:metadataChanged||!old?readXamlDocument(module,{schema:this.ide.xaml?.schema}).text:old.lastText});}
       }
       const active=new Set(targets.map(t=>t.uri));for(const record of [...this.records.values()])if(!active.has(record.uri))this.removeRecord(record);
@@ -130,7 +131,7 @@ export class AdvancedEditorRuntime {
   }
   attachSource(editor,module) {
     if(editor.disposed||!module)return;
-    const record=this.records.get(uriFor(this.ide.project,module,'vb6'));if(!record)return;
+    const record=this.records.get(uriFor(this.ide.project,module,moduleLanguage(module,this.ide.project)));if(!record)return;
     const old=this.surfaces.get(editor);if(old?.record===record)return;old?.dispose();
     if(editor.module!==module||editor.text!==record.lastText)editor.setDocument(module,this.ide.project);
     record.legacy=editor;this.surfaces.set(editor,new AdvancedSurface(this,record,editor));

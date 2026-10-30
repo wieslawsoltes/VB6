@@ -27,6 +27,8 @@ TRANSPORT = os.environ.get('VB6_TEST_TRANSPORT', 'http')
 if TRANSPORT not in {'http', 'file', 'memory'}:
  raise ValueError('VB6_TEST_TRANSPORT must be http, file, or memory')
 MEMORY = TRANSPORT == 'memory'
+# Standalone parsing has its own bound; interactions retain the 10 s deadline.
+IDE_STARTUP_TIMEOUT_MS = 60000
 REPORT = ROOT / 'reports' / 'winui' / ENGINE
 FIXTURE = ROOT / 'reports' / 'application-themes' / 'fixtures' / 'gallery.html'
 RESOURCE = {
@@ -68,18 +70,27 @@ class WinUI(unittest.TestCase):
   # The existing timeout still fails on a stuck scheduler.
   page.wait_for_function('()=>{const s=globalThis.vb6Studio?.syntaxDiagnostics;return !s||(!s.pending&&!s.busy&&!s.timer)}')
  def tearDown(self):
-  try:self.settle_document(self.page)
+  try:
+   if not self.page.is_closed():self.settle_document(self.page)
   finally:self.context.close()
   self.assertEqual(self.errors,[])
   self.assertEqual([u for u in self.requests if u.startswith(('http:','https:')) and not u.startswith(self.base)],[])
  def load(self,page,path):
-  # The standalone IDE includes the editor and compiler. Bound its startup
-  # separately; small runtime fixtures keep their existing load deadline.
-  is_ide=path==ROOT/'dist/VB6-Studio-Web.html'
-  if MEMORY:page.set_content(path.read_text(),**({'timeout':60000} if is_ide else {}))
-  else:
-   options={'wait_until':'commit','timeout':60000} if is_ide else {}
-   page.goto(path.as_uri() if TRANSPORT == 'file' else self.base+str(path.relative_to(ROOT)),**options)
+  standalone=path==ROOT/'dist/VB6-Studio-Web.html'
+  try:
+   if MEMORY:page.set_content(path.read_text())
+   else:
+    url=path.as_uri() if TRANSPORT=='file' else self.base+str(path.relative_to(ROOT))
+    page.goto(url,**({'wait_until':'commit'} if standalone else {}))
+   if standalone:
+    page.wait_for_function('globalThis.vb6Studio?.root?.isConnected && typeof globalThis.vb6Studio.applyAppearance === "function" && typeof globalThis.vb6Studio.command === "function"',
+                           polling=100,timeout=10000 if MEMORY else IDE_STARTUP_TIMEOUT_MS)
+  except Exception:
+   # A failed startup has no document to settle. Preserve its exception if
+   # closing the failed page also reports an error; teardown still owns context.
+   try:page.close()
+   except Exception:pass
+   raise
  def park_pointer(self):
   # Keep press/release and hit testing inside the viewport. Two distinct
   # interior movements send a real pointer transition even when already parked;

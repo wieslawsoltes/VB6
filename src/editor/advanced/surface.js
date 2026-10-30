@@ -12,7 +12,7 @@ export class AdvancedSurface {
   constructor(runtime,record,legacy) {
     this.runtime=runtime;this.record=record;this.legacy=legacy;this.monaco=runtime.monaco;this.root=legacy.root;this.xaml=record.language==='xaml';this.disposables=[];this.restore=[];this.views=[];
     const doc=this.root.ownerDocument;
-    this.host=doc.createElement('div');this.host.className='advanced-editor-surface';this.host.setAttribute('aria-label',this.xaml?'Advanced XAML editor':'Advanced Visual Basic editor');
+    this.host=doc.createElement('div');this.host.className='advanced-editor-surface';this.host.setAttribute('aria-label',this.xaml?'Advanced XAML editor':record.language==='pascal'?'Advanced Turbo Pascal editor':'Advanced Visual Basic editor');
     if(this.xaml)this.root.insertBefore(this.host,legacy.note);else this.root.append(this.host);
     this.root.classList.add('advanced-editor-active');
     const selection=this.xaml?{start:legacy.input.selectionStart,end:legacy.input.selectionEnd}:legacy.selectionBounds();
@@ -33,7 +33,7 @@ export class AdvancedSurface {
       glyphMargin:!this.xaml,lineNumbers:'on',folding:true,showFoldingControls:'mouseover',bracketPairColorization:{enabled:true},guides:{bracketPairs:true,indentation:true,highlightActiveIndentation:true},
       linkedEditing:true,selectionHighlight:true,occurrencesHighlight:'singleFile',multiCursorModifier:'alt',smoothScrolling:false,scrollBeyondLastLine:false,
       quickSuggestions:{other:true,comments:false,strings:this.xaml},suggest:{showWords:false},wordBasedSuggestions:'off',parameterHints:{enabled:true},
-      accessibilitySupport:'auto',ariaLabel:this.xaml?'XAML source (advanced)':'Visual Basic source (advanced)',contextmenu:true,mouseWheelZoom:true,renderControlCharacters:true,editContext:false,
+      accessibilitySupport:'auto',ariaLabel:this.xaml?'XAML source (advanced)':this.record.language==='pascal'?'Turbo Pascal source (advanced)':'Visual Basic source (advanced)',contextmenu:true,mouseWheelZoom:true,renderControlCharacters:true,editContext:false,
       unicodeHighlight:{ambiguousCharacters:true,invisibleCharacters:true},padding:{top:5,bottom:5},largeFileOptimizations:true});
     const view=this.view,state={view,pane,disposables:[],decorations:view.createDecorationsCollection()};this.views.push(state);
     guardLinkedEditingCancellation(view,error=>this.runtime.report(error));
@@ -77,7 +77,7 @@ export class AdvancedSurface {
     action('editor.action.goToTypeDefinition','Go to Type Definition',[],()=>navigateLanguageLocation(this,'textDocument/typeDefinition',{title:'Type definition'}));
     action('editor.action.goToImplementation','Go to Implementation',[],()=>navigateLanguageLocation(this,'textDocument/implementation',{title:'Implementation'}));
     action('editor.action.revealDeclaration','Go to Declaration',[],()=>navigateLanguageLocation(this,'textDocument/declaration',{title:'Declaration'}));
-    if(!this.xaml)action('vb6.insertSnippet','Insert VB6 Snippet…',[M.chord(M.CtrlCmd|K.KeyK,M.CtrlCmd|K.KeyX)],()=>chooseSnippet(this));
+    if(!this.xaml)action('vb6.insertSnippet',this.record.language==='pascal'?'Insert Pascal Snippet…':'Insert VB6 Snippet…',[M.chord(M.CtrlCmd|K.KeyK,M.CtrlCmd|K.KeyX)],()=>chooseSnippet(this));
     action('vb6.toggleSplit','Toggle Split Editor',[],()=>this.setSplit(this.views.length===1));
     action('vb6.workspaceSymbols','Go to Project Symbol…',[M.CtrlCmd|K.KeyT],()=>this.runtime.navigationTools.open('symbols',this));
     action('vb6.callHierarchy','View Call Hierarchy',[M.CtrlCmd|M.Alt|K.KeyH],()=>this.runtime.navigationTools.open('call',this));
@@ -180,17 +180,19 @@ export class AdvancedSurface {
   run(id){this.focus();const action=this.view?.getAction(id);return action?action.run():this.view?.trigger('vb6-ide',id,null);}
   insertSnippet(text){if(this.readOnly())return;this.focus();const contribution=this.view.getContribution('snippetController2');if(!contribution)throw new Error('The pinned editor snippet contribution is unavailable.');contribution.insert(String(text));}
   focus(){this.view?.focus();}
+  setSplitOrientation(value){this.splitOrientation=value==='vertical'?'vertical':'horizontal';this.host.style.flexDirection=this.splitOrientation==='vertical'?'row':'column';this.splitter?.setAttribute('aria-orientation',this.splitOrientation);if(this.splitter)this.splitter.style.cursor=this.splitOrientation==='vertical'?'col-resize':'row-resize';for(const {view}of this.views)view.layout();}
+  setSplitRatio(value){if(this.views.length!==2||!this.splitter)return false;this.splitRatio=Math.max(20,Math.min(80,Number(value)||50));this.splitter.setAttribute('aria-valuenow',String(Math.round(this.splitRatio)));this.views[0].pane.style.flex=this.splitRatio+' 1 0px';this.views[1].pane.style.flex=(100-this.splitRatio)+' 1 0px';for(const {view}of this.views)view.layout();return true;}
   setSplit(enabled=true){
     if(this.disposed||this.composing||!this.view)return false;
     if(enabled&&this.views.length===1){
       const before=this.view.saveViewState(),doc=this.host.ownerDocument;
       this.splitter=doc.createElement('div');this.splitter.className='advanced-editor-splitter';this.splitter.tabIndex=0;this.splitter.setAttribute('role','separator');this.splitter.setAttribute('aria-label','Resize split editor');this.splitter.setAttribute('aria-orientation','horizontal');this.splitter.setAttribute('aria-valuemin','20');this.splitter.setAttribute('aria-valuemax','80');this.host.append(this.splitter);
-      const resize=value=>{this.splitRatio=Math.max(20,Math.min(80,value));this.splitter.setAttribute('aria-valuenow',String(Math.round(this.splitRatio)));if(this.views.length===2){this.views[0].pane.style.flex=this.splitRatio+' 1 0px';this.views[1].pane.style.flex=(100-this.splitRatio)+' 1 0px';for(const {view}of this.views)view.layout();}};
-      this.splitter.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','Home','End'].includes(event.key)){event.preventDefault();event.stopPropagation();resize(event.key==='Home'?20:event.key==='End'?80:(this.splitRatio||50)+(event.key==='ArrowUp'?-5:5));}});
+      const resize=value=>this.setSplitRatio(value);
+      this.splitter.addEventListener('keydown',event=>{if((this.splitOrientation==='vertical'?['ArrowLeft','ArrowRight','Home','End']:['ArrowUp','ArrowDown','Home','End']).includes(event.key)){event.preventDefault();event.stopPropagation();resize(event.key==='Home'?20:event.key==='End'?80:(this.splitRatio||50)+(['ArrowUp','ArrowLeft'].includes(event.key)?-5:5));}});
       this.splitter.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();this.splitter.setPointerCapture(event.pointerId);this.splitter.focus();});
-      this.splitter.addEventListener('pointermove',event=>{if(!this.splitter.hasPointerCapture(event.pointerId))return;const rect=this.host.getBoundingClientRect();if(rect.height>0)resize(100*(event.clientY-rect.top)/rect.height);});
+      this.splitter.addEventListener('pointermove',event=>{if(!this.splitter.hasPointerCapture(event.pointerId))return;const rect=this.host.getBoundingClientRect();const vertical=this.splitOrientation==='vertical',size=vertical?rect.width:rect.height;if(size>0)resize(100*(vertical?event.clientX-rect.left:event.clientY-rect.top)/size);});
       this.splitter.addEventListener('pointerup',event=>{if(this.splitter.hasPointerCapture(event.pointerId))this.splitter.releasePointerCapture(event.pointerId);});
-      this.createView();this.view.restoreViewState(before);resize(this.splitRatio||50);this.updateReadOnly();this.decorate();this.focus();
+      this.createView();this.view.restoreViewState(before);resize(this.splitRatio||50);this.setSplitOrientation(this.splitOrientation);this.updateReadOnly();this.decorate();this.focus();
     }else if(!enabled&&this.views.length===2){
       this.peek?.dispose(false);const state=this.view.saveViewState(),removed=this.views.pop();for(const d of removed.disposables)d.dispose();removed.view.dispose();removed.pane.remove();this.splitter.remove();this.splitter=null;this.view=this.views[0].view;this.views[0].pane.style.flex='1 1 0px';this.view.restoreViewState(state);this.view.layout();this.focus();this.cursorChanged();
     }

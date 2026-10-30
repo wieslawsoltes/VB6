@@ -6,6 +6,7 @@ import {tokenize} from '../language/lexer.js';
 import {stripComment} from '../language/source-scanner.js';
 import {symbolKey} from '../language/source-context.js';
 import {literalScalar,signedLiteralScalar,unary,binary,scalarType,unbox} from '../runtime/values.js';
+import {moduleLanguage} from '../project/language.js';
 
 export const SOURCE_ACTION_KINDS=Object.freeze(['source.fixAll','source.addOptionExplicit','refactor.extract.constant','refactor.inline.constant']);
 const types={integer:'Integer',long:'Long',single:'Single',double:'Double',currency:'Currency',date:'Date',string:'String',boolean:'Boolean',byte:'Byte'};
@@ -143,6 +144,7 @@ export function sourceCodeActions(module,index,start=0,end=start,{only,tabWidth=
     const edits=[];for(const m of source.matchAll(/[ \t]+(?=\r?$)/gm))edits.push({start:m.index,end:m.index+m[0].length,text:''});
     if(edits.length)actions.push({title:'Remove trailing whitespace',kind:'source.fixAll',edits});
   }
+  if(index.language==='pascal'||moduleLanguage(module)==='pascal')return actions.map(action=>({...action,before:source}));
   if(includesActionKind('source.addOptionExplicit',only)&&!index.statements.some(s=>/^\s*Option\s+Explicit\b/i.test(s.clean))){
     const at=source.charCodeAt(0)===0xfeff?1:0;
     actions.push({title:'Add Option Explicit',kind:'source.addOptionExplicit',edits:[{start:at,end:at,text:'Option Explicit'+(source.includes('\r\n')?'\r\n':'\n')}]});

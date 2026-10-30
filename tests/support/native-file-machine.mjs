@@ -20,13 +20,41 @@ export function nativeFileMachine(t,{optimization=1,encoding='windows-1252',code
   const file=files.get(name)||add(name,[]),h=nextHandle++;handles.set(h,{file,position:0n,access});return h;
  });
  vm.hook('kernel32.dll','GetFileInformationByHandle',2,([h,out])=>{const {file}=handle(h);for(let i=0;i<52;i+=4)m.write(out+i,0);m.write(out+28,10);m.write(out+44,0);m.write(out+48,file.id);return 1;});
- vm.hook('kernel32.dll','SetEndOfFile',1,([h])=>{const f=handle(h);assert.equal(f.access,0x40000000);f.file.bytes=f.file.bytes.slice(0,Number(f.position));f.file.size=f.position;return 1;});
+ vm.hook('kernel32.dll','SetEndOfFile',1,([h])=>{const f=handle(h);assert.ok(f.access&0x40000000);const next=new Uint8Array(Number(f.position));next.set(f.file.bytes.subarray(0,next.length));f.file.bytes=next;f.file.size=f.position;return 1;});
  vm.hook('kernel32.dll','CloseHandle',1,([h])=>{handle(h);handles.delete(h);return 1;});
  vm.hook('kernel32.dll','ReadFile',5,([h,out,count,actual,overlap])=>{
-  const f=handle(h);assert.equal(overlap,0);assert.equal(f.access,0x80000000);assert.ok(count>=1&&count<=32767);
+  const f=handle(h);assert.equal(overlap,0);assert.ok(f.access&0x80000000);assert.ok(count>=1&&count<=32767);
   if(failures.has('read')){lastError=failures.get('read');failures.delete('read');return 0;}
   const bytes=f.file.bytes.slice(Number(f.position),Number(f.position)+Math.min(count,failures.get('partial')||count));
   for(let i=0;i<bytes.length;i++)m.write(out+i,bytes[i],8);m.write(actual,bytes.length);f.position+=BigInt(bytes.length);return 1;
+ });
+ vm.hook('kernel32.dll','WriteFile',5,([h,source,count,actual,overlap])=>{
+  const f=handle(h);assert.equal(overlap,0);assert.ok((f.access&0x40000000)||f.access===4);assert.ok(count>=1&&count<=32767);
+  if(failures.has('write')){lastError=failures.get('write');failures.delete('write');return 0;}
+  const length=Math.min(count,failures.get('partialWrite')||count),start=Number(f.access===4?f.file.size:f.position),end=start+length;
+  const bytes=new Uint8Array(Math.max(end,f.file.bytes.length));bytes.set(f.file.bytes);
+  for(let i=0;i<length;i++)bytes[start+i]=m.read(source+i,8);
+  f.file.bytes=bytes;f.file.size=BigInt(bytes.length);f.position=BigInt(end);m.write(actual,length);return 1;
+ });
+ vm.hook('kernel32.dll','GetFileAttributesExW',3,([path,level,out])=>{
+  assert.equal(level,0);const file=files.get(m.bstr(path));if(!file){lastError=2;return 0;}
+  for(let i=0;i<36;i+=4)m.write(out+i,0);m.write(out,32);m.write(out+28,Number(file.size>>32n));m.write(out+32,Number(file.size&0xffffffffn));return 1;
+ });
+ vm.hook('kernel32.dll','DeleteFileW',1,([path])=>{
+  const name=m.bstr(path),file=files.get(name);if(!file){lastError=2;return 0;}
+  if([...handles.values()].some(h=>h.file===file)){lastError=32;return 0;}
+  files.delete(name);return 1;
+ });
+ vm.hook('kernel32.dll','MoveFileW',2,([source,destination])=>{
+  const from=m.bstr(source),to=m.bstr(destination),file=files.get(from);
+  if(!file){lastError=2;return 0;}if(files.has(to)){lastError=80;return 0;}
+  if([...handles.values()].some(h=>h.file===file)){lastError=32;return 0;}
+  files.set(to,file);files.delete(from);return 1;
+ });
+ vm.hook('kernel32.dll','CopyFileW',3,([source,destination,failIfExists])=>{
+  const from=m.bstr(source),to=m.bstr(destination),file=files.get(from);
+  if(!file){lastError=2;return 0;}if(failIfExists&&files.has(to)){lastError=80;return 0;}
+  add(to,file.bytes);return 1;
  });
  vm.hook('kernel32.dll','GetFileSizeEx',2,([h,out])=>{const {file}=handle(h);m.write(out,Number(file.size&0xffffffffn));m.write(out+4,Number(file.size>>32n));return 1;});
  vm.hook('kernel32.dll','SetFilePointerEx',5,([h,low,high,out,method])=>{

@@ -68,12 +68,12 @@ Value get(Reader&r,FileSchema schema,Value current,const std::string&mode,size_t
       for(int i=0;i<rank;i++){auto count=r.sint(4),lo=r.sint(4);if(count<1||lo+count-1>INT32_MAX)fail(63,"Invalid array extent");bounds.emplace_back(int32_t(lo),int32_t(lo+count-1));}
     }
     if(bounds.empty())fail(9,"Dimension the array before Binary Get");
-    auto array=std::make_shared<Array>(previous->elementType,bounds,previous->dynamic,maxArrayElements,previous->fixedLength,previous->initializer);
+    auto array=std::make_shared<Array>(previous->elementType,bounds,previous->dynamic,maxArrayElements,previous->fixedLength,previous->initializer,previous->displayElementType);
     for(auto&v:array->values)v=get(r,{array->elementType,array->fixedLength,false},v,mode,maxArrayElements,inRecord,depth+1);
     return Value::array(array);
   }
   if(current.type==Type::Record){
-    auto previous=current.asRecord(),record=std::make_shared<Record>();record->name=previous->name;record->order=ordered(previous);
+    auto previous=current.asRecord(),record=std::make_shared<Record>();record->name=previous->name;record->displayName=previous->displayName;record->order=ordered(previous);
     for(auto&name:record->order){auto cell=previous->fields.at(name);auto value=get(r,{cell->type,cell->fixedLength,cell->value.type==Type::Array},cell->get(),mode,maxArrayElements,true,depth+1);record->fields[name]=std::make_shared<Cell>(value,cell->type,cell->fixedLength);}
     return Value::record(record);
   }

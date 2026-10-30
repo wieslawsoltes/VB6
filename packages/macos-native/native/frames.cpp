@@ -2,16 +2,60 @@
 #include "vb6.hpp"
 #include "lifetime.hpp"
 namespace vb6 {
-static CellPtr makeCell(Frame& frame,const std::string&type,Bounds bounds,int arrayKind,size_t fixed,bool constant,bool autoNew){
+bool Runtime::pascalObjectReferenceCompatible(const std::string& source,const std::string& target) const {
+  auto current=pascalObjects.find(lower(source));const auto destination=lower(target);
+  if(current==pascalObjects.end()||!pascalObjects.count(destination))return false;
+  std::set<std::string> visited;
+  while(current!=pascalObjects.end()&&visited.size()<128){
+    const auto& object=current->second;
+    if(!visited.insert(object.identity).second)return false;
+    if(object.identity==destination)return true;
+    const auto parent=pascalObjects.find(object.parent);
+    if(parent==pascalObjects.end()||object.fields.size()<parent->second.fields.size()||
+      !std::equal(parent->second.fields.begin(),parent->second.fields.end(),object.fields.begin()))return false;
+    current=parent;
+  }
+  return false;
+}
+static void checkPascalDispatch(Frame& frame){
+  if(!frame.procedure->pascalDispatch)return;
+  const auto& contract=*frame.procedure->pascalDispatch;
+  const auto receiver=frame.locals.find(contract.parameter);
+  if(receiver==frame.locals.end())fail(210,"Invalid Pascal virtual receiver");
+  const auto value=receiver->second.get();if(value.type!=Type::Record)fail(210,"Invalid Pascal virtual receiver");
+  const auto record=value.asRecord();const auto field=record->fields.find(contract.vmtField);
+  if(field==record->fields.end()||field->second->arrayStorage||lower(field->second->type)!="long")fail(210,"Invalid Pascal virtual receiver header");
+  const auto tag=field->second->get().integral();
+  for(const auto& branch:contract.branches)if(branch.typeId==tag){
+    // The backing value keeps its most-derived nominal identity through every
+    // ancestor var alias. A tag can select only a view present in that storage.
+    if(frame.runtime.pascalObjectReferenceCompatible(record->name,branch.runtimeType)&&
+      frame.runtime.pascalObjectReferenceCompatible(record->name,branch.viewType))return;
+    break;
+  }
+  fail(210,"Object not initialized or incompatible virtual receiver");
+}
+Value Frame::makeArray(const std::string&type,Bounds bounds,bool dynamic,size_t fixed,const std::string&displayType){
+  // Do not create a record prototype for an unallocated array. Capture only
+  // guarded runtime/module metadata, never a stack Frame or owning Instance
+  // (which would keep a class's own array fields alive in a reference cycle).
+  auto life=nativeLifetime(runtime);auto*owner=&module;
+  auto init=[life,owner,type,prototype=std::optional<Value>{}]()mutable{
+    if(!prototype){auto&rt=requireNativeRuntime(life);Frame context(rt,std::make_shared<Instance>(rt,*owner),nullptr,{},false);prototype=rt.defaultValue(type,&context);}
+    return prototype->copy();
+  };
+  return Value::array(std::make_shared<Array>(type,std::move(bounds),dynamic,runtime.maxArrayElements,fixed,std::move(init),displayType));
+}
+static CellPtr makeCell(Frame& frame,const std::string&type,Bounds bounds,int arrayKind,size_t fixed,bool constant,bool autoNew,const std::string&displayType=""){
   auto&rt=frame.runtime;Value initial;
-  if(arrayKind){auto prototype=rt.defaultValue(type,&frame);auto init=[prototype]{return prototype.copy();};initial=Value::array(std::make_shared<Array>(type,bounds,arrayKind==1,rt.maxArrayElements,fixed,init));}
+  if(arrayKind)initial=frame.makeArray(type,std::move(bounds),arrayKind==1,fixed,displayType);
   else initial=rt.defaultValue(type,&frame);
   auto cell=std::make_shared<Cell>(initial,type,fixed,constant,arrayKind!=0);
   if(autoNew)cell->lazy=[&rt,type]{return rt.create(type);};
   return cell;
 }
-Frame::Frame(Runtime&rt,std::shared_ptr<Instance> object,Procedure*proc,Args args):runtime(rt),self(std::move(object)),module(*self->module),procedure(proc){
-  if(runtime.depth>=runtime.maxCallDepth)fail(28);++runtime.depth;
+Frame::Frame(Runtime&rt,std::shared_ptr<Instance> object,Procedure*proc,Args args,bool count):runtime(rt),self(std::move(object)),module(*self->module),procedure(proc),counted(count){
+  if(counted){if(runtime.depth>=runtime.maxCallDepth)fail(28);++runtime.depth;}
   try{
     if(!proc)return;
     std::vector<std::optional<Arg>> bound(proc->parameters.size());Args extras;size_t position=0;bool named=false;
@@ -38,7 +82,10 @@ Frame::Frame(Runtime&rt,std::shared_ptr<Instance> object,Procedure*proc,Args arg
       if(p.array && (arg.value.type!=Type::Array||lower(arg.value.asArray()->elementType)!=lower(p.type)))fail(13,"Matching array argument required");
       if(p.byRef&&arg.reference&&arg.reference.direct){
         auto sourceType=lower(arg.reference.type),target=lower(p.type);
-        if(!p.array&&target!="variant"&&target!=sourceType&&!(arg.value.type==Type::Object&&(!std::get<ObjectPtr>(arg.value.payload)||std::get<ObjectPtr>(arg.value.payload)->supports(target))))fail(13,"ByRef argument type mismatch: "+p.name);
+        const bool pascalTarget=!p.array&&runtime.pascalObjects.count(target);
+        const bool pascalReference=pascalTarget&&arg.value.type==Type::Record&&sourceType==lower(arg.value.asRecord()->name)&&runtime.pascalObjectReferenceCompatible(sourceType,target);
+        if(pascalTarget&&!pascalReference)fail(13,"ByRef Pascal object type mismatch: "+p.name);
+        if(!p.array&&target!="variant"&&target!=sourceType&&!pascalReference&&!(arg.value.type==Type::Object&&(!std::get<ObjectPtr>(arg.value.payload)||std::get<ObjectPtr>(arg.value.payload)->supports(target))))fail(13,"ByRef argument type mismatch: "+p.name);
         if(p.array&&lower(arg.value.asArray()->elementType)!=target)fail(13,"ByRef array element type mismatch");
         if(!p.array&&arg.value.type==Type::Object&&target!="variant"&&target!="object"){
           // A ByRef interface formal aliases the caller's cell but reads through
@@ -54,20 +101,21 @@ Frame::Frame(Runtime&rt,std::shared_ptr<Instance> object,Procedure*proc,Args arg
         auto cell=std::make_shared<Cell>(value,p.type,0,false,p.array);locals[name]=cellRef(cell);
       }
     }
+    checkPascalDispatch(*this);
     // Function result storage is always per invocation, even in a Static
     // procedure. Typed array results start as unallocated dynamic arrays.
-    if(proc->isFunction)locals[lower(proc->name)]=cellRef(makeCell(*this,proc->returnType,{},proc->returnArray?1:0,0,false,false));
-  }catch(...){--runtime.depth;throw;}
+    if(proc->isFunction)locals[lower(proc->name)]=cellRef(makeCell(*this,proc->returnType,{},proc->returnArray?1:0,0,false,false,proc->returnDisplayType));
+  }catch(...){if(counted)--runtime.depth;throw;}
 }
-Frame::~Frame(){--runtime.depth;}
-void Frame::declare(const std::string&raw,const std::string&type,Bounds bounds,int arrayKind,size_t fixed,bool constant,bool isStatic,bool autoNew){
+Frame::~Frame(){if(counted)--runtime.depth;}
+void Frame::declare(const std::string&raw,const std::string&type,Bounds bounds,int arrayKind,size_t fixed,bool constant,bool isStatic,bool autoNew,const std::string&displayType){
   auto name=lower(raw);if(locals.count(name))return;
-  if((isStatic||(procedure&&procedure->isStatic))&&procedure){auto&store=self->statics[lower(procedure->name)+procedure->accessor];if(!store.count(name))store[name]=makeCell(*this,type,bounds,arrayKind,fixed,constant,autoNew);locals[name]=cellRef(store.at(name));}
-  else locals[name]=cellRef(makeCell(*this,type,bounds,arrayKind,fixed,constant,autoNew));
+  if((isStatic||(procedure&&procedure->isStatic))&&procedure){auto&store=self->statics[lower(procedure->name)+procedure->accessor];if(!store.count(name))store[name]=makeCell(*this,type,bounds,arrayKind,fixed,constant,autoNew,displayType);locals[name]=cellRef(store.at(name));}
+  else locals[name]=cellRef(makeCell(*this,type,bounds,arrayKind,fixed,constant,autoNew,displayType));
 }
-void Frame::global(const std::string&raw,const std::string&type,Bounds bounds,int arrayKind,size_t fixed,bool constant,bool autoNew,bool withEvents){
+void Frame::global(const std::string&raw,const std::string&type,Bounds bounds,int arrayKind,size_t fixed,bool constant,bool autoNew,bool withEvents,const std::string&displayType){
   auto name=lower(raw);if(self->fields.count(name))return;
-  auto cell=makeCell(*this,type,bounds,arrayKind,fixed,constant,autoNew);self->fields[name]=cell;
+  auto cell=makeCell(*this,type,bounds,arrayKind,fixed,constant,autoNew,displayType);self->fields[name]=cell;
   if(withEvents){std::weak_ptr<Instance> weak=self;auto*rt=&runtime;cell->changed=[weak,rt,name](Value v){if(auto instance=weak.lock())rt->bindEvents(instance,name,v);};}
 }
 void Frame::initial(const std::string&raw,Value value){
@@ -139,7 +187,7 @@ bool Frame::forStart(const std::string&id,Ref variable,Value start,Value end,Val
   start=scalar(runtime,start);end=scalar(runtime,end);step=scalar(runtime,step);variable.set(start);fors[id]={variable,end,step};return binary(step.number()>=0?"<=":">=",variable.get(),end,module.textCompare).truth();
 }
 bool Frame::forNext(const std::string&id){auto&state=fors.at(id);state.variable.set(binary("+",state.variable.get(),state.step,module.textCompare));return binary(state.step.number()>=0?"<=":">=",state.variable.get(),state.end,module.textCompare).truth();}
-void Frame::redim(Ref ref,Bounds bounds,bool preserve,const std::string&explicitType){
+void Frame::redim(Ref ref,Bounds bounds,bool preserve,const std::string&explicitType,const std::string&displayType){
   auto old=ref.get();
   const auto type=explicitType.empty()?(old.type==Type::Array?old.asArray()->elementType:ref.array?ref.type:"variant"):lower(explicitType);
   if(ref.array&&lower(type)!=lower(ref.type))fail(13,"ReDim cannot change declared array element type");
@@ -155,8 +203,7 @@ void Frame::redim(Ref ref,Bounds bounds,bool preserve,const std::string&explicit
     }
     if(ref.array||preserve)fail(13,"ReDim cannot change array element type with Preserve");
   }else if(old.type!=Type::Empty||lower(ref.type)!="variant")fail(13,"ReDim requires an array or an Empty Variant");
-  auto prototype=runtime.defaultValue(type,this);auto init=[prototype]{return prototype.copy();};
-  ref.set(Value::array(std::make_shared<Array>(type,std::move(bounds),true,runtime.maxArrayElements,0,init)));
+  ref.set(makeArray(type,std::move(bounds),true,0,displayType));
 }
 void Frame::mark(int current,int nextInstruction,int sourceLine){site=current;next=nextInstruction;line=sourceLine;reconcileScopes(current);drainNativeFinalizers(runtime);}
 bool Frame::handle(const Error& e){
