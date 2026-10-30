@@ -22,6 +22,7 @@ import {ClassicScrollbar} from './scrollbar.js';
 import {showMenu as openClassicMenu,closeMenu,menuIsOpen} from '../theme/menu.js';
 import {RichTextController,RICH_SELECTION_PROPERTIES} from './richtext.js';
 import {parseRTF} from './rtf.js';
+import {queueFileDownload} from '../runtime/file-downloads.js';
 import { el, lower, clone } from '../core/core.js';
 import { VBError } from '../language/lexer.js';
 import { NOTHING, Ref, Cell, truth, VBArray, vbString } from '../runtime/values.js';
@@ -334,7 +335,7 @@ export class BrowserControl {
   LoadFile(path,fileType=0){if(!this.vm)throw new VBError('Runtime not active',5);if(this.rich){if(![0,1].includes(Number(fileType)))throw new VBError('Invalid rich text file type',380);this.set(Number(fileType)===0?'TextRTF':'Text',this.vm.fs.read(path));}else this.set('Text',this.vm.fs.read(path));}
   SaveFile(path,fileType=0){if(!this.vm)throw new VBError('Runtime not active',5);if(this.rich&&![0,1].includes(Number(fileType)))throw new VBError('Invalid rich text file type',380);this.vm.fs.write(path,this.rich&&Number(fileType)===0?this.get('TextRTF'):this.get('Text'));}
   async ShowOpen(){const result=await this.vm?.host.openFile?.(this.props);if(!result){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=result.name;if(result.bytes)this.vm.fs.writeBytes(result.name,result.bytes);else this.vm.fs.write(result.name,result.text);}
-  async ShowSave(){const name=await this.vm?.host.inputBox?.('File name:',this.props.DialogTitle||'Save As',this.props.FileName||'Untitled.txt');if(!name){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=name;this.vm?.host.saveFile?.(name,this.vm.fs.exists(name)?this.vm.fs.readBytes(name):'');}
+  async ShowSave(){const previous=this.props.FileName,name=await this.vm?.host.inputBox?.('File name:',this.props.DialogTitle||'Save As',previous||'Untitled.txt');if(!name){if(this.props.CancelError)throw new VBError('Cancel was selected',32755);return;}this.props.FileName=name;queueFileDownload(this.vm,name,previous);}
   async ShowColor(){const value=await this.vm?.host.inputBox?.('Color as #RRGGBB:','Color',oleColor(this.props.Color||0));if(/^#[0-9a-f]{6}$/i.test(value)){this.Color=parseInt(value.slice(1,3),16)+(parseInt(value.slice(3,5),16)<<8)+(parseInt(value.slice(5,7),16)<<16);}}
   dispose(){disposeWinUI3Control(this);disposeMacOS26Control(this);this.releaseCollectionMetrics?.();this.releaseCollectionMetrics=null;this.releasePaintProperties?.();this.releasePaintProperties=null;unbindTabChild(this);this.vm?.win32?.unregisterControl(this.hWnd);this._unsubscribeData?.();this._unsubscribeData=null;this.gridEditor=null;this.disposed=true;cancelAnimationFrame(this.raf);clearInterval(this.timerId);this.surface?.dispose();this.rich?.dispose();this.scrollbar?.dispose();this.combo?.dispose();this.stepper?.dispose();this.node.remove();}
   get collectionRowHeight(){return this._collectionRowHeight??(['MSFlexGrid','MSHFlexGrid','DataGrid'].includes(this.type)?21:20);}

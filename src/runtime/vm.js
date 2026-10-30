@@ -560,8 +560,9 @@ export class VirtualMachine extends Signal {
     }
     for(const {decl,static:keep} of procedureLocalDeclarations(proc))await this.declare(decl,frame,frame.locals,keep||proc.static);
     this.stack.push(frame);this.currentFrame=frame;
-    try {await this.execute(frame);for(const write of copyBack)await write();return scalarReturn?frame.result.getScalar():frame.result.get();}
-    finally{closeWithScopes(frame);closeArrayEnumerations(frame);this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&!this.debugEvaluation&&frame.proc.code.some(isSequencePoint))this.stepMode=null;if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
+    let completed=false;
+    try {await this.execute(frame);for(const write of copyBack)await write();const result=scalarReturn?frame.result.getScalar():frame.result.get();completed=true;return result;}
+    finally{closeWithScopes(frame);closeArrayEnumerations(frame);this.stack.pop();this.currentFrame=this.stack.at(-1)||null;if(!this.stack.length&&!this.debugEvaluation&&frame.proc.code.some(isSequencePoint))this.stepMode=null;this.emit('procedureComplete',{frame,completed});if(!this.stack.length&&this.eventQueue.length)queueMicrotask(()=>this.processEvents());}
     }finally{leases.release();}
   }
   async checkpoint(ins,frame){

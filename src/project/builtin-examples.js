@@ -501,10 +501,10 @@ Private Sub rtbDocument_Change()
 End Sub
 Private Sub cmdSave_Click()
     On Error GoTo Failed
-    rtbDocument.SaveFile "/Document.rtf", rtfRTF
-    Dialog1.FileName = "/Document.rtf"
+    Dialog1.FileName = "Document.rtf"
     Dialog1.ShowSave
-    lblStatus.Caption = "Saved Document.rtf"
+    rtbDocument.SaveFile Dialog1.FileName, rtfRTF
+    lblStatus.Caption = "Saved " & Dialog1.FileName
     Exit Sub
 Failed:
     lblStatus.Caption = Err.Description
